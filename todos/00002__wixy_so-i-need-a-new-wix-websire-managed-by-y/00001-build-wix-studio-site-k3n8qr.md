@@ -85,6 +85,27 @@ natural oak, antique brass. Nav: Home, About, Treatments, Before&After, Reviews,
 Book Now, Contact (+ FAQ, Aftercare, Clinic Policies). Every page needs Contact.
 Photos+brief committed to joshcomley/wixy branch cmd/workspace-00002.
 
+## Progress log (latest)
+- 11 bookable services provisioned in Wix Bookings via API (idempotent script in
+  wixy repo tooling/).
+- Opening hours obtained from Google (headed browser): Mon-Thu 10-19, Fri 10-17,
+  Sat 11-16, Sun closed. TODO: apply to Bookings availability + set business
+  location (none set) so slots go live.
+- Google reviews (5.0, all 5-star) captured to docs/google-reviews.json; branded
+  demo reviews-demo.html built + served via cmd portal (9320). OPERATOR CLEARED
+  reviews to go on the actual (unlisted) site - no longer preview-only.
+- DONE: booking working hours applied via Calendar Events API (tooling/set_hours.py):
+  Mon/Tue/Thu 10-19, Fri 10-17, Sat 11-16, WED CLOSED (cancelled per Purdi -
+  she keeps Wed for phone enquiries), Sun closed. Business schedule
+  b77e2ef5-e931-4208-a6f1-3da3956ed8ef. Booking engine now has real availability.
+- DONE: public demo hosted at https://joshcomley.github.io/cottage-aesthetics-preview/
+  (repo joshcomley/cottage-aesthetics-preview, gh Pages) so Purdi can view without
+  CF Access. Note: the wix.to site preview is also public/shareable.
+- NEXT: rename staff resource "Business Owner" -> "Purdi"; set business location
+  (clinic address); then the PAGES/visual layout (Wix editor / Local Editor
+  `wix dev` — the one surface not doable via pure code). Design approved by
+  operator (loves the demo look).
+
 ## Treatments (from brief) — BOOKABLE = Book btn; PRESCRIPTION-ONLY = Enquire btn
 BOOKABLE: Consultation FREE 30m; Standard Microneedling 45m £30 (course of 5
 £120); Advanced Microneedling 45m £80; Skin Boosters: Jalupro Super Hydro £150
