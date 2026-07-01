@@ -66,11 +66,34 @@ a collaborator on that ONE repo so the fleet creds (GIT_ASKPASS bot-auth) can
 clone/push it. Org-level restriction was rejected (leaves personal joshcomley
 repos exposed). An org does NOT contain a user-bound OAuth token.
 
-## API key status
-WIX_API_KEY valid (auth OK) but QuerySites returns 0 sites -> key likely from a
-different Wix account than the one owning "Cottage Aesthetics" (or site
-unpublished). Awaiting dashboard URL (site ID) to diagnose. Secondary channel;
-git repo is primary.
+## API / provisioning capability (RESOLVED - big)
+- WIX_API_KEY (machine env, len 721) NOW WORKS for the correct account:
+  site-list returns "Cottage Aesthetics" [c721738f-...], Bookings API reachable
+  (user regenerated it under the right account). USE THIS as stable REST auth.
+- CLI token also works: `wix token` -> `Authorization: <token>` against
+  www.wixapis.com (expires, so prefer the API key).
+- => I can PROVISION Bookings services + CMS collections/data via REST in code.
+  Headers: Authorization=<WIX_API_KEY>, wix-site-id=c721738f-2644-49e8-8865-fc10865db30f
+- Wix Bookings app INSTALLED (0 services yet). Bookings Services v2 Create:
+  POST create-service; required type/name/onlineBooking/payment/defaultCapacity.
+
+## Brief absorbed (Cottage Aesthetics)
+Nurse-led medical aesthetics clinic, Hartlebury; founder Purdi (RN 15yr).
+Brand "The Cottage": calm, understated luxury, natural, Mediterranean-cottage.
+Palette: olive green, limewash/soft stone, anthracite, soft terracotta/ochre,
+natural oak, antique brass. Nav: Home, About, Treatments, Before&After, Reviews,
+Book Now, Contact (+ FAQ, Aftercare, Clinic Policies). Every page needs Contact.
+Photos+brief committed to joshcomley/wixy branch cmd/workspace-00002.
+
+## Treatments (from brief) — BOOKABLE = Book btn; PRESCRIPTION-ONLY = Enquire btn
+BOOKABLE: Consultation FREE 30m; Standard Microneedling 45m £30 (course of 5
+£120); Advanced Microneedling 45m £80; Skin Boosters: Jalupro Super Hydro £150
+45m, Profhilo £230 45m; Polynucleotides £150 (course of 3); Under Eye
+Polynucleotides £150; Dermal Fillers: Lip £140 1h, Chin £140 1h, Cheek £200 1h,
+Jawline £290 1.5h; Facial Rebalancing (price after consult - Enquire).
+PRESCRIPTION-ONLY (Enquire only, price/info >=2 clicks from home, NOT bookable):
+Botox Full Face £330 / Three Areas £220; Relfydess £280; Vitamin B12 single £45
+/ course of 5 £120.
 
 ## How to continue (once repo URL received)
 1. `git clone` the Wix-provisioned repo here.
