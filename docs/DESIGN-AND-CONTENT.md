@@ -75,6 +75,15 @@ social links.
 - Purdi · 07401 562462 · Cottageaestheticshartlebury@gmail.com
 - 8 Walton Cottage, Walton Road, Hartlebury, Kidderminster, DY10 4JA
 
+**Opening hours** (from the clinic's Google Business Profile, verified via headed browser):
+| Mon | Tue | Wed | Thu | Fri | Sat | Sun |
+|---|---|---|---|---|---|---|
+| 10:00–19:00 | 10:00–19:00 | 10:00–19:00 | 10:00–19:00 | 10:00–17:00 | 11:00–16:00 | Closed |
+
+**Reviews:** 5.0★ on Google (genuine 5-star reviews captured to
+`docs/google-reviews.json`). Demo section built (`reviews-demo.html`) — NOT to be
+published to the live site without Purdi's explicit permission.
+
 ## Treatment catalogue (source of truth)
 
 ### Bookable (show **Book** button) — provisioned in Wix Bookings
@@ -115,8 +124,9 @@ Clinic Policies (deposits, cancellations, late arrivals).
 
 ## Build status / open items
 - [x] Wix Bookings app installed; 11 bookable services provisioned via API.
-- [ ] Booking availability: set **opening hours** (NOT in brief — need from
-      Purdi) + confirm business **location** (currently none set on the site).
+- [x] Opening hours obtained from Google (see Contact). TODO: apply them to
+      Bookings availability + confirm business **location** (none set yet) so
+      appointment slots go live.
 - [ ] Rename default staff "Business Owner" → "Purdi".
 - [ ] Bookings categories (Consultation / Microneedling / Skin Boosters /
       Polynucleotides / Dermal Fillers) — group services.
