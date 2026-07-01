@@ -103,6 +103,42 @@ Photos+brief committed to joshcomley/wixy branch cmd/workspace-00002.
   provisioned are now REDUNDANT (shelve/remove; not wasted, right call pre-Faces).
   OPEN Q: what exactly does Purdi dislike about Faces (look vs flow vs emails)?
 
+## FULL PREVIEW SITE BUILT (all pages)
+Pages: index, about, treatments, gallery(Before&After), reviews, contact, faq,
+aftercare, policies. Shared header/footer/booking-modal/mobile-menu via site.js;
+shared design in site.css. Homepage H1 = "Cottage Aesthetics". Nav standardized
+to brief (Home/About/Treatments/Before&After/Reviews/Contact +Book Now).
+- Faces has a website builder + BRANDING (colours/logo). We use our bespoke site,
+  NOT Faces' builder. Purdi should set brand colour (olive #6E7357 / clay #B26E4A)
+  + logo in Faces branding so the embedded booking matches. (Operator can't be done
+  by us - no Faces login.)
+- DRAFT/needs Purdi input: FAQ answers, Aftercare (general only), Policies
+  (placeholder deposit/notice figures), social links (# placeholders), Before&After
+  images (need client photo-consent). Contact form is demo (no backend yet).
+- REMAINING: real headless build; wire contact form backend; real socials; B&A images.
+
+## Preview site build (GitHub Pages, joshcomley/cottage-aesthetics-preview)
+- Deploy via GitHub ACTIONS workflow (.github/workflows/deploy.yml) NOT legacy
+  Jekyll (which kept erroring). build_type=workflow. ~1-2 min per deploy.
+- Iterate via INSTANT local Playwright renders (scratchpad/preview.py etc.); push
+  to Pages only at milestones. Live URL lagged behind builds earlier -> always
+  verify via Actions run + raw.githubusercontent, not just the CDN'd Pages URL.
+- Pages/files: index.html (homepage), treatments.html, reviews.html, site.css
+  (shared design system), booking.js (Faces modal), images/.
+- HERO final: lounge.jpg edge-to-edge (hall.jpg had BAKED-IN black bars - never
+  use full-bleed), SOLID tinted strip rgba(18,12,9,.64), hard edges, no blur/fade,
+  no logo, nav text-shadow. Earthy palette (mocha/cream/clay + olive accent).
+- FACES BOOKING EMBED works: booking.js injects a modal iframe ->
+  facesconsent.com/bookings/purdi-hadley. Any .js-book element opens it. Verified
+  it loads (Faces shows its own cookie consent + reCAPTCHA, then the calendar).
+  Book buttons = .js-book; Enquire (prescription/facial rebalancing) -> #contact.
+- Treatments page done: categories + prescription-only behind <details> expanders
+  (pricing >=2 clicks per brief), Enquire not Book.
+- TODO next: about.html, contact.html (GDPR form/map/hours/parking/socials),
+  gallery.html (Before&After - needs consent+images), FAQ/Aftercare/Policies;
+  standardize nav to brief (Home/About/Treatments/Before&After/Reviews/Contact
+  +Book Now). Then the REAL headless build.
+
 ## Progress log (latest)
 - 11 bookable services provisioned in Wix Bookings via API (idempotent script in
   wixy repo tooling/).
