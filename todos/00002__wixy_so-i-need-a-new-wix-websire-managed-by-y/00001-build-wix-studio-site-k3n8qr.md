@@ -85,6 +85,24 @@ natural oak, antique brass. Nav: Home, About, Treatments, Before&After, Reviews,
 Book Now, Contact (+ FAQ, Aftercare, Clinic Policies). Every page needs Contact.
 Photos+brief committed to joshcomley/wixy branch cmd/workspace-00002.
 
+## MAJOR DIRECTION CHANGES (latest)
+- ARCHITECTURE: going FULLY HEADLESS (AI writes all HTML/CSS). Operator chose this
+  over hosted Studio (Studio = layout composed on canvas/editor; Headless = 100%
+  code). If Purdi later wants to self-edit visually, make a separate Studio version.
+- DESIGN: earthy/warm palette (mocha/cream/clay + olive-green accent), NO LOGO
+  (Purdi dislikes current logo; new logo TBD). Concept homepage + reviews page
+  deployed to gh Pages https://joshcomley.github.io/cottage-aesthetics-preview/
+  (source in scratchpad gh-pages-demo; index.html=homepage, reviews.html). Homepage
+  shows only 2 pull-quote review snippets; full set on reviews page.
+- BOOKINGS: Purdi already uses FACES (facesconsent.com/bookings/purdi-hadley) =
+  all-in-one aesthetic clinic mgmt incl. digital CONSENT FORMS + prescriptions +
+  client records + compliance. Wix Bookings CANNOT do consent/prescriber/medical
+  records -> for a nurse-led injectables clinic, KEEP FACES as booking+consent
+  engine; front it with our site. Faces booking page has NO X-Frame-Options/CSP
+  frame-ancestors => embeddable in an iframe. => the Wix Bookings services/hours I
+  provisioned are now REDUNDANT (shelve/remove; not wasted, right call pre-Faces).
+  OPEN Q: what exactly does Purdi dislike about Faces (look vs flow vs emails)?
+
 ## Progress log (latest)
 - 11 bookable services provisioned in Wix Bookings via API (idempotent script in
   wixy repo tooling/).
