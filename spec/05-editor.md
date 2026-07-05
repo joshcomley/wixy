@@ -1,0 +1,152 @@
+# 05 — Admin UI & the live visual editor
+
+The admin lives at `https://ca.cinnamons.uk/admin/` (Cloudflare-Access-gated, see 07).
+It is a **static-shell, API-hydrated** app: the shell paints in <100 ms, all data arrives
+via `/api/admin/*` fetches into skeletons (fleet instant-render rule). TypeScript strict
+(`strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`), **no framework** —
+small typed DOM helpers, esbuild-bundled into `server/static/admin/` at build time. All
+assets self-hosted (no CDN).
+
+## 1. Shell layout
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ Wixy · Cottage Aesthetics        [draft: 4 changes] [Publish]│  top bar
+├─────────┬────────────────────────────────────────────────────┤
+│ Pages   │                                                    │
+│ Edit    │                                                    │
+│ Theme   │              main panel                            │
+│ Media   │   (preview iframe / panel content)                 │
+│ Chat    │                                                    │
+│ History │                                                    │
+└─────────┴────────────────────────────────────────────────────┘
+```
+
+Top bar is always present: project name, draft-status chip (n changed keys + upstream
+commits not yet published, click → review drawer), **Publish** button, and a "Site ▸" link
+opening the live site. Navigation is client-side routing on `#/pages`, `#/edit/<page>`,
+`#/theme`, `#/media`, `#/chat`, `#/chat/<conv>`, `#/history`.
+
+## 2. Edit mode (the heart of the product)
+
+`#/edit/<page>` shows a device-width toolbar (Desktop 1280 / Tablet 820 / Mobile 390) and an
+**iframe** loading `/admin/preview/<page>.html` — the draft render (04 §4) with
+`editor.js` + `editor.css` injected by the preview renderer. Browsing inside the iframe
+stays in edit mode: the overlay rewrites internal link clicks to the preview equivalent and
+notifies the shell (URL hash + page dropdown follow along). External links are inert in
+edit mode (toast: "external link").
+
+### Overlay ↔ shell protocol
+
+`postMessage` on a fixed channel (`{wx: 1, type, …}`), both directions, origin-checked:
+
+- shell → overlay: `init {page, bindings, draftRev}`, `applyOps {ops}` (echo after server
+  accept), `setDevice`, `themeVars {css vars map}` (live theme preview), `select {key}`.
+- overlay → shell: `ready`, `op {file, path, value}` (an edit the user made),
+  `navigate {page}`, `selected {key, kind, rect}`, `mediaRequest {key}` (image binding
+  clicked — the shell opens the media dialog and answers with `applyOps`).
+
+The **shell owns state**: it PATCHes `/api/admin/draft` (optimistic, queued, coalesced at
+300 ms; 409 → refetch overlay + replay queue) and echoes accepted ops back down. The
+overlay does pure DOM work; a hard iframe reload always reconverges (server render is the
+same merge).
+
+### Selection & editing chrome (inside the iframe)
+
+- Hover on any bound element (`[data-wx], [data-wx-img], [data-wx-bg], [data-wx-href],
+  [data-wx-list]`): outline (2px, brand blue, 4px radius) + a floating chip naming the kind
+  ("Text", "Image", "Link", "List"). Bound elements get `cursor: pointer` in edit mode.
+- **Click a text binding** → inline popover anchored to the element:
+  - plain mode (headings/labels/prices — value has no markup): single input or autosizing
+    textarea; Enter commits, Esc cancels.
+  - rich-lite mode: contenteditable clone of the element styled as-is, mini-toolbar
+    **B / I / link / ↵** only (matching the 02 §5 allowlist), paste is plain-text-forced.
+  - live: keystrokes update the element immediately; commit emits the `op`.
+- **Click an image binding** (`data-wx-img`/`data-wx-bg`) → "Replace image" button + alt
+  input; Replace opens the shell's media dialog (§4). A dashed drop target also accepts a
+  direct file drop onto the element.
+- **Click a link binding** → popover with label (if the same element is also `data-wx`) +
+  href field with page-picker (internal pages listed) / raw URL / tel: / mailto:.
+- **Lists**: hovering an item shows an item toolbar (↑ ↓ ✚ duplicate, ✖ delete, ⠿ drag
+  handle); ✚ appends a blank-ish item cloned from the first item's shape (02 §6); delete
+  confirms. The whole-array op is emitted after each structural change.
+- **`data-wx-if`** elements render with 40% opacity + an eye toggle in edit mode when
+  falsy (hidden on the real site), so hidden sections stay reachable.
+- Editing chrome never mutates layout metrics (outlines are outline/box-shadow, popovers
+  are position:fixed in a top-layer container) — what you see is what publishes.
+
+### Page settings & pages panel
+
+`#/pages`: table of pages (from `/api/admin/state`) — nav label, title, in-nav toggle,
+nav order, last-modified; actions: Edit, Duplicate (POST `/api/admin/pages/duplicate`
+{from, slug, navLabel} — copies template + content under the new slug), Delete (typed-
+confirmation; takes effect at publish as a `git rm`). Per-page settings drawer edits
+`meta.*` (title, description, ogImage via media dialog, nav fields).
+Structural/layout work beyond this is explicitly the **AI chat lane's** job — the pages
+panel says so in an empty-state hint.
+
+## 3. Theme panel
+
+`#/theme`: token groups exactly mirroring `theme.json` (02 §4):
+
+- **Colors**: swatch grid; each opens a color input (native `<input type=color>` + hex
+  field + the site's current palette as presets). Every change live-applies to the edit
+  iframe via `themeVars` AND stores the op (`theme:colors.x`).
+- **Fonts**: three slots (Headings / Body / Script) with a curated dropdown (~24 Google
+  families with in-dropdown preview rendered via the fonts link) + custom-family input +
+  weights multi-select. Live-applies by swapping the preview iframe's fonts `<link>`.
+- **Effects**: shadow token as a raw string field (advanced).
+- A "Reset to published" per-token and per-panel action (discards those draft keys).
+
+## 4. Media panel & dialog
+
+`#/media`: grid of repo `images/*` + staged draft uploads (badge "draft"), with dimensions,
+file size, and **references** (which binding keys use it — from the reference scan
+endpoint). Upload button + drag-drop (multi-file). Unreferenced-media delete per 02 §9.
+The same component renders as a modal **dialog** when invoked from the editor (mediaRequest)
+— pick or upload, returns the image object `{src, alt}` with alt prompted (pre-filled from
+filename; empty alt allowed only after an explicit "decorative" checkbox — accessibility
+default-on).
+
+## 5. Publish & history
+
+- **Publish button** → review drawer: the draft diff grouped by page (old → new text
+  snippets, image thumbs before/after, theme token chips), upstream commits since the
+  published SHA (subject lines — this is where AI-lane merges surface), the `builder
+  validate` result, and a message field (pre-filled `"Content update via Wixy editor"`).
+  Confirm → POST `/api/admin/publish`; progress states stream (04 §5): `pulling → merging →
+  committing → building → verifying → swapping → done` with the new version number, or a
+  failure state with the full error log inline (draft intact, site untouched).
+- `#/history`: the publish ledger (04 §6) newest-first: version #, when, message, author
+  (editor/AI/mixed), SHA, changed-file summary. Actions per row: **View** (opens that
+  build read-only at `/admin/versions/<n>/…` — served from the archived build dir),
+  **Restore** (typed confirmation; POST `/api/admin/restore` — see 04 §6 semantics:
+  instant live swap + draft reset to that version, recorded as a new version).
+- Publishes are serialized server-side; the UI disables Publish while one runs (state from
+  `/api/admin/state`).
+
+## 6. Chat panel
+
+`#/chat` — the cmd-powered assistant, spec'd in [06-ai-chat.md](06-ai-chat.md). UI shape:
+conversation list (title, status dot: working/idle/done, last message time) + "New
+conversation"; `#/chat/<conv>` is a standard chat view (markdown rendering incl. fenced
+code, tool-activity collapsed as "⚙ n actions" rows, timestamps), a composer with
+Shift+Enter newline, and a status strip showing the agent's live state (typing/working
+indicator driven by the poll). A pinned banner explains the contract: *"Changes the
+assistant ships land in your draft preview — review them in Edit, then press Publish."*
+When the assistant's latest activity merged commits upstream, the panel surfaces a
+"Preview updated — review changes" chip linking to `#/edit/<likely page>`.
+
+## 7. Error & offline behavior
+
+Every fetch has a 10 s timeout + retry-with-backoff (3×); a persistent red toast appears
+when `/api/admin/state` fails (server down) with auto-retry. PATCH conflicts (409) resolve
+silently by refetch+replay; a genuinely lost edit is impossible (ops are queued until
+acked). The editor never blocks on the network for keystrokes (fully optimistic).
+
+## 8. Not in v1 (explicitly)
+
+Multi-user presence/locking (single operator + owner), undo/redo stack beyond per-key
+"reset to published" (git history covers it), arbitrary element re-arranging by drag
+(AI lane's job), in-editor CSS editing beyond theme tokens, A/B or scheduling, i18n.
+Do not build speculative hooks for these.
