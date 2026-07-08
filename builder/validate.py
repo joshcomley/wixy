@@ -35,7 +35,8 @@ _FONT_ROLES = ("serif", "sans", "script")
 def validate_site(source: SiteSource, project_root: Path) -> ValidationResult:
     result = ValidationResult()
     _validate_pages(source, result)
-    _validate_theme(source.theme, result)
+    if source.theme is not None:
+        _validate_theme(source.theme, result)
     _validate_collections(source, result)
     _validate_images(source, project_root, result)
     return result

@@ -25,7 +25,8 @@ from builder.validate import validate_site
 
 def _load_source(root: Path, project_path: Path) -> SiteSource:
     project = load_project_config(project_path)
-    theme = load_theme(root / "theme" / "theme.json")
+    theme_path = root / "theme" / "theme.json"
+    theme = load_theme(theme_path) if theme_path.exists() else None
     return load_site_source(root, project, theme)
 
 
