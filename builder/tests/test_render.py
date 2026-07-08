@@ -25,7 +25,7 @@ class TestNavActiveState:
     def test_current_page_link_marked_active(self, mini_site_source: SiteSource) -> None:
         html = render_page(mini_site_source, "index", mode="publish")
         soup = BeautifulSoup(html, "html5lib")
-        links = soup.select("nav a")
+        links = soup.select("nav.primary a")
         by_href = {a["href"]: a for a in links}
         assert by_href["/"]["class"] == ["active"]
         assert "class" not in by_href["/about.html"].attrs or by_href["/about.html"].get(
@@ -35,8 +35,20 @@ class TestNavActiveState:
     def test_other_page_marks_its_own_link_active(self, mini_site_source: SiteSource) -> None:
         html = render_page(mini_site_source, "about", mode="publish")
         soup = BeautifulSoup(html, "html5lib")
-        links = {a["href"]: a for a in soup.select("nav a")}
+        links = {a["href"]: a for a in soup.select("nav.primary a")}
         assert links["/about.html"]["class"] == ["active"]
+
+    def test_every_nav_container_gets_its_own_active_link(
+        self, mini_site_source: SiteSource
+    ) -> None:
+        """A page can render `@nav` more than once (e.g. desktop + mobile menu) — every
+        container's matching link must be marked, not just the first one found."""
+        html = render_page(mini_site_source, "about", mode="publish")
+        soup = BeautifulSoup(html, "html5lib")
+        for nav_class in ("primary", "mobile"):
+            links = {a["href"]: a for a in soup.select(f"nav.{nav_class} a")}
+            assert links["/about.html"]["class"] == ["active"], nav_class
+            assert links["/"].get("class") != ["active"], nav_class
 
 
 class TestHeadInjection:
