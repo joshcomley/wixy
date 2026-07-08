@@ -121,7 +121,7 @@ selections, campaign configs, destination URLs. Severity: BLOCK unless noted.
 
 Rules 1–3 also run (as FLAG, never rewrite — 03 §0) on her organic Studio posts.
 
-## 6. Site-copy actions (flagged for the owner via the CMS, post-build — not mid-migration)
+## 6. Site & social copy actions (flagged for the owner, post-build — not mid-migration)
 
 1. **Rename "Wrinkle Relaxing"** on the treatments page/home teaser: the current label
    fails CAP FAQ Q8 in promotional context. Compliant replacement pattern: a
@@ -132,6 +132,19 @@ Rules 1–3 also run (as FLAG, never rewrite — 03 §0) on her organic Studio p
 2. **Audit the facesconsent listing** to the same standard (Dr Bunny/Fresha precedent:
    the clinic is liable for its booking-platform listing): no POM names with prices
    bookable without consultation.
+3. **Existing social posts** (from the 2026-07-08 audit,
+   `research/existing-posts-audit.md`): her personal before/after Reel names Botox
+   directly in the caption — on a clinic account that is an implied POM ad under the
+   same rulings that caught hashtags; recommend editing the caption (the story works
+   without the word) or archiving. Handle sensitively — it is her genuine personal
+   story, which is exactly the voice we're building around; only the POM name has to
+   go, not the post's honesty.
+4. **Credential consistency**: the same clinic-day announcement calls the visiting
+   colleague "our prescriber" on Facebook and "our pharmacist" on Instagram — pick the
+   accurate title and use it everywhere (NMC 21.4 accuracy; also basic trust hygiene).
+5. **Consent microcopy on before/afters**: four audited B/A posts carry no visible
+   consent disclosure — going forward the Studio's locked consent badge (03 §2b)
+   makes this automatic.
 
 ## 7. Honest residual gaps (do not treat as settled)
 

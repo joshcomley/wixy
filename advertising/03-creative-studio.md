@@ -127,6 +127,13 @@ it reliably.)
   "look" is the template instantiated with her assets/words; her edited post is a fork
   of that document; **"Save as my template"** promotes any arrangement she likes back
   into her personal template family (which grows to fit her taste over time).
+- **The v1 template family is grounded in the audit of her real posts**
+  (`research/existing-posts-audit.md`): unify her two circulating visual families
+  around the cream/olive/clay "cottage" look (with one darker accent variant for
+  credential cards); replace her Unicode-bold headline hack with real rendered brand
+  typography (prettier AND screen-reader-safe); standardise before/after framing with
+  the locked consent badge; and template the formats she already loves — including her
+  "client text message" testimonial Reel.
 - **One compiler, one truth**: a single TypeScript WXL→HTML/CSS compiler renders (a) the
   live, editable canvas in the browser and (b) the final export — Playwright screenshots
   the same render route with editing chrome off. No drift between what she tweaked and
