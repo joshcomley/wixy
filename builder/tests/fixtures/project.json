@@ -1,0 +1,11 @@
+{
+  "slug": "fixture",
+  "name": "Fixture Site",
+  "repo": "https://example.com/fixture.git",
+  "defaultBranch": "main",
+  "cmdProject": "fixture-site",
+  "domain": "fixture.example.com",
+  "locale": "en-GB",
+  "indexable": false,
+  "media": { "maxLongSidePx": 2000, "jpegQuality": 85 }
+}

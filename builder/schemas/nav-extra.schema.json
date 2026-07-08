@@ -1,0 +1,11 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "navExtra item (spec/02-content-model.md §3)",
+  "type": "object",
+  "required": ["label", "href"],
+  "properties": {
+    "label": { "type": "string" },
+    "href": { "type": "string" }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,43 @@
+{
+  "meta": {
+    "title": "Home — Fixture",
+    "description": "A fixture home page for builder tests.",
+    "ogImage": { "src": "images/hero.jpg", "alt": "hero" },
+    "navLabel": "Home",
+    "inNav": true,
+    "navOrder": 10
+  },
+  "hero": {
+    "title": "Fixture Cottage",
+    "tag": "A calm fixture tagline.",
+    "bg": { "src": "images/hero.jpg", "alt": "" },
+    "ctaHref": "/about.html",
+    "ctaLabel": "Learn <strong>more</strong>",
+    "showBadge": true,
+    "badge": "New",
+    "hideExtra": false,
+    "extra": "Extra visible content"
+  },
+  "showcase": {
+    "items": [
+      {
+        "img": { "src": "images/icon.jpg", "alt": "Item one" },
+        "title": "Item One",
+        "body": "First item body.",
+        "book": true,
+        "bookHref": "/about.html#one",
+        "enquireHref": "/about.html#enquire",
+        "tags": [{ "label": "Popular" }, { "label": "New" }]
+      },
+      {
+        "img": { "src": "images/icon.jpg", "alt": "Item two" },
+        "title": "Item Two",
+        "body": "Second item body.",
+        "book": false,
+        "bookHref": "/about.html#two",
+        "enquireHref": "/about.html#enquire",
+        "tags": []
+      }
+    ]
+  }
+}

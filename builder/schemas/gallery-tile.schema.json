@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "gallery grid tile (spec/02-content-model.md §6)",
+  "type": "object",
+  "required": ["cat", "title", "img"],
+  "properties": {
+    "cat": { "type": "string" },
+    "title": { "type": "string" },
+    "img": {
+      "type": "object",
+      "required": ["src", "alt"],
+      "properties": { "src": { "type": "string" }, "alt": { "type": "string" } },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "treatment card (spec/02-content-model.md §3/§6)",
+  "type": "object",
+  "required": ["meta", "title", "price", "body", "course", "book"],
+  "properties": {
+    "meta": { "type": "string" },
+    "title": { "type": "string" },
+    "price": { "type": "string" },
+    "body": { "type": "string" },
+    "course": { "type": "string" },
+    "book": { "type": "boolean" }
+  },
+  "additionalProperties": false
+}

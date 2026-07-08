@@ -1,0 +1,16 @@
+{
+  "meta": {
+    "title": "About — Fixture",
+    "description": "A fixture about page for builder tests.",
+    "ogImage": { "src": "images/icon.jpg", "alt": "icon" },
+    "navLabel": "About",
+    "inNav": true,
+    "navOrder": 20
+  },
+  "intro": {
+    "title": "About the fixture",
+    "body": "This page exists to exercise a currently-false data-wx-if.",
+    "showNotice": false,
+    "notice": "You should not see this on the published site."
+  }
+}
