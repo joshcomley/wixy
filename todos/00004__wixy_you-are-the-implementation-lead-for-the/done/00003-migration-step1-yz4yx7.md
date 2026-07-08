@@ -29,4 +29,23 @@ on ubuntu-latest pinned Playwright, committed to builder/tests/parity/baseline/ 
 repo per spec, captured against CA fixtures). Parity green + validate green.
 
 ## Links
-PR: (fill in when opened)
+- wixy PR #13 (parity harness, milestone-3a) — merged
+- wixy PR #14 (capture-baseline.yml workflow, milestone-3c) — merged
+- wixy PR #15 (fetch-depth:0 checkout fix, milestone-3d) — merged
+- wixy PR #16 (short-SHA checkout fix, milestone-3e) — merged
+- wixy PR #17 (reduced-motion parity fix, milestone-3f) — merged; superseded as primary
+  cause by #18 (decisions/00005, decisions/00006)
+- wixy PR #18 (force-reveal parity fix, milestone-3g — the actual root cause of the
+  gallery screenshot flake) — merged
+- CA repo PR #1 (`milestone-3-migration-step1`) — merged
+
+## Outcome
+All 9 pages moved under `pages/` with partial markers; empty partial shims; parity
+harness landed with a baseline correctly captured on ubuntu-latest (after two real
+bugs found and fixed: `actions/checkout` can't resolve an abbreviated SHA, and the
+capture harness wasn't forcing `.reveal` sections visible, causing a large
+non-deterministic-looking screenshot diff on the gallery page specifically —
+decisions/00002 through 00006 record the full trail). `deploy.yml` rewritten to
+publish the wixy-built output; `ci.yml` added with the required `validate-build-parity`
+check; branch protection configured. CA PR #1 fully green (text/link/image/style/
+screenshots) and merged.

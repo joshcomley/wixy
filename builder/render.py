@@ -90,18 +90,22 @@ def _ensure_doctype(soup: BeautifulSoup) -> None:
 def _mark_nav_active(body: Tag, current_url: str) -> None:
     """Add `class="active"` to the rendered nav link matching the page being built
     (static, replaces the old client-side `data-page` comparison) — spec/03 §2.
+
+    A page can render `@nav` more than once (e.g. a desktop nav-links bar AND a
+    separate mobile-menu panel, each its own `data-wx-list="@nav"` container) — every
+    such container gets its matching link marked, not just the first found.
     """
-    nav_container = body.find(attrs={"data-wx-list": "@nav"})
-    if not isinstance(nav_container, Tag):
-        return
-    for link in nav_container.find_all(attrs={"data-wx-href": True}):
-        if not isinstance(link, Tag) or link.get("href") != current_url:
+    for nav_container in body.find_all(attrs={"data-wx-list": "@nav"}):
+        if not isinstance(nav_container, Tag):
             continue
-        classes = link.get("class") or []
-        if not isinstance(classes, list):
-            classes = [classes]
-        if "active" not in classes:
-            link["class"] = [*classes, "active"]
+        for link in nav_container.find_all(attrs={"data-wx-href": True}):
+            if not isinstance(link, Tag) or link.get("href") != current_url:
+                continue
+            classes = link.get("class") or []
+            if not isinstance(classes, list):
+                classes = [classes]
+            if "active" not in classes:
+                link["class"] = [*classes, "active"]
 
 
 def render_page(
