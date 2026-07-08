@@ -1,0 +1,1 @@
+Parity harness tooling: split pyproject.toml into core (builder+parity, incl. playwright/pillow) vs `server` extra; `python -m builder parity` subcommand instead of the spec-text's literal `python -m builder.parity`; `projects/ca.json` created in milestone 3, ahead of milestone 6

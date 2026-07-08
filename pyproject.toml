@@ -3,20 +3,28 @@ name = "wixy"
 version = "0.1.0"
 description = "Wixy — self-hosted CMS engine + visual editor + AI chat for ca.cinnamons.uk"
 requires-python = ">=3.14"
+# Core = exactly what `builder` (incl. its parity harness) needs. The site repo's CI
+# installs just this (04-server.md: "importable standalone (site-repo CI installs just
+# it)") — it runs `validate`/`build`/parity, never wixy_server, so fastapi/uvicorn/etc.
+# stay out of core (see the `server` extra below). Pillow is core (not server-only)
+# because the parity harness's screenshot pixel-diff needs it too (03 §5).
 dependencies = [
-  "fastapi>=0.115",
-  "uvicorn[standard]>=0.32",
-  "httpx>=0.27",
-  "pillow>=11.0",
   "beautifulsoup4>=4.12",
   "html5lib>=1.1",
   "nh3>=0.2",
+  "playwright>=1.49",
+  "pillow>=11.0",
+]
+
+[project.optional-dependencies]
+server = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "httpx>=0.27",
   "PyJWT>=2.9",
   "cryptography>=43.0",
   "anyio>=4.6",
 ]
-
-[project.optional-dependencies]
 dev = [
   "pytest>=8.3",
   "pytest-xdist>=3.6",

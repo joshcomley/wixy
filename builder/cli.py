@@ -12,6 +12,13 @@ from pathlib import Path
 from builder.build import build_site
 from builder.config import load_project_config
 from builder.render import SiteSource, load_site_source
+from builder.tests.parity.runner import (
+    DEFAULT_MOBILE_SLUGS,
+    default_baseline_dir,
+    rebaseline,
+    run_parity_check,
+    serve_directory,
+)
 from builder.theme import load_theme
 from builder.validate import validate_site
 
@@ -60,6 +67,42 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_parity(args: argparse.Namespace) -> int:
+    serve_root = Path(args.serve_root).resolve()
+    slugs = [s.strip() for s in args.slugs.split(",") if s.strip()]
+    baseline_root = Path(args.baseline).resolve() if args.baseline else default_baseline_dir()
+    mobile_slugs = (
+        tuple(s.strip() for s in args.mobile_slugs.split(",") if s.strip())
+        if args.mobile_slugs is not None
+        else DEFAULT_MOBILE_SLUGS
+    )
+
+    with serve_directory(serve_root) as base_url:
+        if args.rebaseline:
+            rebaseline(base_url, slugs, baseline_root, mobile_screenshot_slugs=mobile_slugs)
+            print(f"parity: rebaselined {len(slugs)} page(s) at {baseline_root}")
+            return 0
+        issues = run_parity_check(
+            base_url,
+            slugs,
+            baseline_root,
+            mobile_screenshot_slugs=mobile_slugs,
+            strict_screenshots=args.strict_screenshots,
+        )
+
+    hard = [i for i in issues if not i.advisory]
+    advisory = [i for i in issues if i.advisory]
+    for issue in hard:
+        print(f"[FAIL] {issue.page}/{issue.kind}: {issue.detail}")
+    for issue in advisory:
+        print(f"[advisory] {issue.page}/{issue.kind}: {issue.detail}")
+    if hard:
+        print(f"parity: {len(hard)} failure(s), {len(advisory)} advisory")
+        return 1
+    print(f"parity: OK ({len(advisory)} advisory)")
+    return 0
+
+
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--root", default=".", help="site repo checkout root (default: cwd)")
     parser.add_argument("--project", required=True, help="path to the project registry JSON")
@@ -84,6 +127,35 @@ def build_parser() -> argparse.ArgumentParser:
     p_serve.add_argument("--out", default="_build")
     p_serve.add_argument("--port", type=int, default=8000)
     p_serve.set_defaults(func=cmd_serve)
+
+    p_parity = sub.add_parser(
+        "parity", help="rendered-parity check against the committed baseline (03 §5)"
+    )
+    p_parity.add_argument(
+        "--serve-root",
+        required=True,
+        help="static directory to serve+probe (a builder "
+        "build output, or the raw pre-migration site for the one-time baseline capture)",
+    )
+    p_parity.add_argument("--slugs", required=True, help="comma-separated page slugs to probe")
+    p_parity.add_argument(
+        "--mobile-slugs",
+        default=None,
+        help="comma-separated slugs to also screenshot at "
+        "mobile width (default: index,treatments per 03 §5)",
+    )
+    p_parity.add_argument(
+        "--baseline", default=None, help="baseline dir (default: builder/tests/parity/baseline)"
+    )
+    p_parity.add_argument(
+        "--rebaseline", action="store_true", help="capture and overwrite the baseline"
+    )
+    p_parity.add_argument(
+        "--strict-screenshots",
+        action="store_true",
+        help="treat screenshot pixel-diffs as hard failures (the pinned CI platform only, 03 §5)",
+    )
+    p_parity.set_defaults(func=cmd_parity)
 
     return parser
 
