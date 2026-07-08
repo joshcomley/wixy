@@ -167,4 +167,12 @@ request-admin-action.request_admin_action`. Never hand-run elevated steps.
 - Future real-domain cutover (out of scope, documented for later): add
   `www.cottageaesthetics.co.uk` to the tunnel ingress + move/CNAME its DNS into
   Cloudflare, flip `indexable: true`, add 301s from ca.cinnamons.uk. Nothing in v1
-  precludes this.
+  precludes this. The old Wix site's complete indexable surface was enumerated live
+  (headed browser, 2026-07-08) — it is a near-empty landing-page template (homepage
+  `<title>` "Landing Page | Cottage Aesthetics"), so the 301 map is just:
+  `/home → /`, `/about → /about.html`, `/book-online → /treatments.html`,
+  `/contact → /contact.html`, `/cart-page → /` (Wix template cruft; no store),
+  `/english-privacy-policy → /policies.html`. Also at cutover: resubmit the sitemap in
+  Search Console, confirm the Google Business Profile website link resolves, then cancel
+  the Wix premium plan and revoke the (already-leaked, per
+  `docs/projects/01-cottage-aesthetics.md`) Wix API key — nothing in this stack uses Wix.
