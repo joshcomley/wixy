@@ -27,4 +27,6 @@ Branch off main, scaffold per spec, CI green, PR merged. Acceptance: `pytest`/`m
 stage), decisions/00001 committed.
 
 ## Links
-PR: (fill in when opened)
+PR: https://github.com/joshcomley/wixy/pull/8 (merged 2026-07-08) — all CI green
+(ruff, ruff format, mypy --strict, pytest -n4, tsc, vitest, esbuild, bundle-drift,
+playwright).
