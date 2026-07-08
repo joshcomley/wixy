@@ -164,7 +164,11 @@ def capture_site(
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
         try:
-            page = browser.new_page(viewport=VIEWPORT_SIZES["desktop"])
+            # reduced_motion="reduce" makes `matchMedia('(prefers-reduced-motion:
+            # reduce)')` true, which the gallery page's own JS already checks to skip
+            # its auto-nudge slider animation (03 §4) — without this, the capture can
+            # land mid-animation and produce a non-deterministic screenshot diff.
+            page = browser.new_page(viewport=VIEWPORT_SIZES["desktop"], reduced_motion="reduce")
             for slug in slugs:
                 url = f"{base_url}/{'' if slug == 'index' else slug + '.html'}"
                 probe = capture_page(page, url, base_url)
