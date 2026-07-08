@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "hours row (spec/02-content-model.md §6 @hours)",
+  "type": "object",
+  "required": ["day", "value", "closed"],
+  "properties": {
+    "day": { "type": "string" },
+    "value": { "type": "string" },
+    "closed": { "type": "boolean" }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,12 @@
+{
+  "colors": {
+    "cream": "#F1E8D9",
+    "coffee": "#3E312A"
+  },
+  "shadow": "0 18px 44px rgba(62,49,42,.14)",
+  "fonts": {
+    "serif": { "family": "Cormorant Garamond", "weights": ["400", "600"], "italics": true },
+    "sans": { "family": "Jost", "weights": ["300", "400"], "italics": false },
+    "script": { "family": "Pinyon Script", "weights": ["400"], "italics": false }
+  }
+}

@@ -24,4 +24,6 @@ canonical JSON rewrite). Fixture mini-site + goldens committed. Two builds of sa
 byte-identical. `builder validate --json` shape tested.
 
 ## Links
-PR: (fill in when opened)
+PR: (fill in when opened) — 140 tests passing, mypy --strict clean, ruff clean.
+decisions/00002 records the schema-validator + collection-shape interpretive calls made
+along the way (no new jsonschema dependency; gallery-tile/rx-item/footer-link shapes).
