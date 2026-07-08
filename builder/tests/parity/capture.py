@@ -137,9 +137,16 @@ def capture_page(
 
     links_raw = page.eval_on_selector_all(
         "a[href]",
-        "els => els.map(e => [e.textContent.trim(), e.getAttribute('href')])",
+        # `.href` (resolved) rather than `getAttribute('href')` (raw) — spec/03 §3.1's
+        # "don't chase byte equality": a root-relative "/about.html" and a plain
+        # relative "about.html" are the same destination for a site with no
+        # subdirectories, and only the resolved URL is what parity should care about.
+        "els => els.map(e => [e.textContent.trim(), e.href])",
     )
-    links = sorted((list(pair) for pair in links_raw), key=lambda p: (p[1], p[0]))
+    links = sorted(
+        ([pair[0], _strip_origin(str(pair[1]), base_url)] for pair in links_raw),
+        key=lambda p: (p[1], p[0]),
+    )
 
     images_raw = page.eval_on_selector_all(
         "img",
