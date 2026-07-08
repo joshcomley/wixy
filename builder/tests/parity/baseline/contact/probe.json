@@ -3,84 +3,112 @@
   "images": [],
   "links": [
     [
-      "Book Now",
-      "#"
-    ],
-    [
-      "Book Now",
-      "#"
-    ],
-    [
-      "Book Online",
-      "#"
-    ],
-    [
-      "Book online",
-      "#"
+      "About",
+      "/about.html"
     ],
     [
       "About",
-      "about.html"
+      "/about.html"
     ],
     [
       "About",
-      "about.html"
-    ],
-    [
-      "About",
-      "about.html"
+      "/about.html"
     ],
     [
       "Aftercare",
-      "aftercare.html"
+      "/aftercare.html"
     ],
     [
       "Contact",
-      "contact.html"
+      "/contact.html"
     ],
     [
       "Contact",
-      "contact.html"
+      "/contact.html"
     ],
     [
       "Contact",
-      "contact.html"
+      "/contact.html"
+    ],
+    [
+      "Book Now",
+      "/contact.html#"
+    ],
+    [
+      "Book Now",
+      "/contact.html#"
+    ],
+    [
+      "Book Online",
+      "/contact.html#"
+    ],
+    [
+      "Book online",
+      "/contact.html#"
     ],
     [
       "FAQ",
-      "faq.html"
+      "/faq.html"
     ],
     [
       "Before & After",
-      "gallery.html"
+      "/gallery.html"
     ],
     [
       "Before & After",
-      "gallery.html"
+      "/gallery.html"
     ],
     [
       "Before & After",
-      "gallery.html"
-    ],
-    [
-      "Facebook",
-      "https://www.facebook.com/profile.php?id=61572079150383"
-    ],
-    [
-      "Facebook",
-      "https://www.facebook.com/profile.php?id=61572079150383"
-    ],
-    [
-      "Instagram",
-      "https://www.instagram.com/cottageaesthetics"
-    ],
-    [
-      "Instagram",
-      "https://www.instagram.com/cottageaesthetics"
+      "/gallery.html"
     ],
     [
       "CottageAesthetics",
-      "index.html"
+      "/index.html"
+    ],
+    [
+      "Clinic Policies",
+      "/policies.html"
+    ],
+    [
+      "Reviews",
+      "/reviews.html"
+    ],
+    [
+      "Reviews",
+      "/reviews.html"
+    ],
+    [
+      "Reviews",
+      "/reviews.html"
+    ],
+    [
+      "Treatments",
+      "/treatments.html"
+    ],
+    [
+      "Treatments",
+      "/treatments.html"
+    ],
+    [
+      "Treatments",
+      "/treatments.html"
+    ],
+    [
+      "Facebook",
+      "https://www.facebook.com/profile.php?id=61572079150383"
+    ],
+    [
+      "Facebook",
+      "https://www.facebook.com/profile.php?id=61572079150383"
+    ],
+    [
+      "Instagram",
+      "https://www.instagram.com/cottageaesthetics"
+    ],
+    [
+      "Instagram",
+      "https://www.instagram.com/cottageaesthetics"
     ],
     [
       "Email us",
@@ -91,40 +119,12 @@
       "mailto:cottageaestheticshartlebury@gmail.com"
     ],
     [
-      "Clinic Policies",
-      "policies.html"
-    ],
-    [
-      "Reviews",
-      "reviews.html"
-    ],
-    [
-      "Reviews",
-      "reviews.html"
-    ],
-    [
-      "Reviews",
-      "reviews.html"
-    ],
-    [
       "07401 562 462",
       "tel:07401562462"
     ],
     [
       "07401 562 462",
       "tel:07401562462"
-    ],
-    [
-      "Treatments",
-      "treatments.html"
-    ],
-    [
-      "Treatments",
-      "treatments.html"
-    ],
-    [
-      "Treatments",
-      "treatments.html"
     ]
   ],
   "styles": {

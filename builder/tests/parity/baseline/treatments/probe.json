@@ -3,108 +3,160 @@
   "images": [],
   "links": [
     [
-      "Book Now",
-      "#"
-    ],
-    [
-      "Book Now",
-      "#"
-    ],
-    [
-      "Book Now",
-      "#"
-    ],
-    [
-      "Book Now",
-      "#"
-    ],
-    [
-      "Book Now",
-      "#"
-    ],
-    [
-      "Book Now",
-      "#"
-    ],
-    [
-      "Book Now",
-      "#"
-    ],
-    [
-      "Book Now",
-      "#"
-    ],
-    [
-      "Book Now",
-      "#"
-    ],
-    [
-      "Book Now",
-      "#"
-    ],
-    [
-      "Book Now",
-      "#"
-    ],
-    [
-      "Book Now",
-      "#"
-    ],
-    [
-      "Book Now",
-      "#"
-    ],
-    [
-      "Book Now",
-      "#"
-    ],
-    [
-      "Book online",
-      "#"
+      "About",
+      "/about.html"
     ],
     [
       "About",
-      "about.html"
+      "/about.html"
     ],
     [
       "About",
-      "about.html"
-    ],
-    [
-      "About",
-      "about.html"
+      "/about.html"
     ],
     [
       "Aftercare",
-      "aftercare.html"
+      "/aftercare.html"
     ],
     [
       "Contact",
-      "contact.html"
+      "/contact.html"
     ],
     [
       "Contact",
-      "contact.html"
+      "/contact.html"
     ],
     [
       "Contact",
-      "contact.html"
+      "/contact.html"
     ],
     [
       "FAQ",
-      "faq.html"
+      "/faq.html"
     ],
     [
       "Before & After",
-      "gallery.html"
+      "/gallery.html"
     ],
     [
       "Before & After",
-      "gallery.html"
+      "/gallery.html"
     ],
     [
       "Before & After",
-      "gallery.html"
+      "/gallery.html"
+    ],
+    [
+      "CottageAesthetics",
+      "/index.html"
+    ],
+    [
+      "Contact Purdi",
+      "/index.html#contact"
+    ],
+    [
+      "Enquire",
+      "/index.html#contact"
+    ],
+    [
+      "Enquire",
+      "/index.html#contact"
+    ],
+    [
+      "Enquire",
+      "/index.html#contact"
+    ],
+    [
+      "Enquire",
+      "/index.html#contact"
+    ],
+    [
+      "Clinic Policies",
+      "/policies.html"
+    ],
+    [
+      "Reviews",
+      "/reviews.html"
+    ],
+    [
+      "Reviews",
+      "/reviews.html"
+    ],
+    [
+      "Reviews",
+      "/reviews.html"
+    ],
+    [
+      "Treatments",
+      "/treatments.html"
+    ],
+    [
+      "Treatments",
+      "/treatments.html"
+    ],
+    [
+      "Treatments",
+      "/treatments.html"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book online",
+      "/treatments.html#"
     ],
     [
       "Facebook",
@@ -115,64 +167,12 @@
       "https://www.instagram.com/cottageaesthetics"
     ],
     [
-      "CottageAesthetics",
-      "index.html"
-    ],
-    [
-      "Contact Purdi",
-      "index.html#contact"
-    ],
-    [
-      "Enquire",
-      "index.html#contact"
-    ],
-    [
-      "Enquire",
-      "index.html#contact"
-    ],
-    [
-      "Enquire",
-      "index.html#contact"
-    ],
-    [
-      "Enquire",
-      "index.html#contact"
-    ],
-    [
       "Email us",
       "mailto:cottageaestheticshartlebury@gmail.com"
     ],
     [
-      "Clinic Policies",
-      "policies.html"
-    ],
-    [
-      "Reviews",
-      "reviews.html"
-    ],
-    [
-      "Reviews",
-      "reviews.html"
-    ],
-    [
-      "Reviews",
-      "reviews.html"
-    ],
-    [
       "07401 562 462",
       "tel:07401562462"
-    ],
-    [
-      "Treatments",
-      "treatments.html"
-    ],
-    [
-      "Treatments",
-      "treatments.html"
-    ],
-    [
-      "Treatments",
-      "treatments.html"
     ]
   ],
   "styles": {

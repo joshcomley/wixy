@@ -24,68 +24,100 @@
   ],
   "links": [
     [
-      "Book Now",
-      "#"
+      "About",
+      "/about.html"
+    ],
+    [
+      "About",
+      "/about.html"
+    ],
+    [
+      "About",
+      "/about.html"
     ],
     [
       "Book Now",
-      "#"
+      "/about.html#"
+    ],
+    [
+      "Book Now",
+      "/about.html#"
     ],
     [
       "Book a Free Consultation",
-      "#"
+      "/about.html#"
     ],
     [
       "Book online",
-      "#"
-    ],
-    [
-      "About",
-      "about.html"
-    ],
-    [
-      "About",
-      "about.html"
-    ],
-    [
-      "About",
-      "about.html"
+      "/about.html#"
     ],
     [
       "Aftercare",
-      "aftercare.html"
+      "/aftercare.html"
     ],
     [
       "Contact",
-      "contact.html"
+      "/contact.html"
     ],
     [
       "Contact",
-      "contact.html"
+      "/contact.html"
     ],
     [
       "Contact",
-      "contact.html"
+      "/contact.html"
     ],
     [
       "Contact Purdi",
-      "contact.html"
+      "/contact.html"
     ],
     [
       "FAQ",
-      "faq.html"
+      "/faq.html"
     ],
     [
       "Before & After",
-      "gallery.html"
+      "/gallery.html"
     ],
     [
       "Before & After",
-      "gallery.html"
+      "/gallery.html"
     ],
     [
       "Before & After",
-      "gallery.html"
+      "/gallery.html"
+    ],
+    [
+      "CottageAesthetics",
+      "/index.html"
+    ],
+    [
+      "Clinic Policies",
+      "/policies.html"
+    ],
+    [
+      "Reviews",
+      "/reviews.html"
+    ],
+    [
+      "Reviews",
+      "/reviews.html"
+    ],
+    [
+      "Reviews",
+      "/reviews.html"
+    ],
+    [
+      "Treatments",
+      "/treatments.html"
+    ],
+    [
+      "Treatments",
+      "/treatments.html"
+    ],
+    [
+      "Treatments",
+      "/treatments.html"
     ],
     [
       "Facebook",
@@ -96,44 +128,12 @@
       "https://www.instagram.com/cottageaesthetics"
     ],
     [
-      "CottageAesthetics",
-      "index.html"
-    ],
-    [
       "Email us",
       "mailto:cottageaestheticshartlebury@gmail.com"
     ],
     [
-      "Clinic Policies",
-      "policies.html"
-    ],
-    [
-      "Reviews",
-      "reviews.html"
-    ],
-    [
-      "Reviews",
-      "reviews.html"
-    ],
-    [
-      "Reviews",
-      "reviews.html"
-    ],
-    [
       "07401 562 462",
       "tel:07401562462"
-    ],
-    [
-      "Treatments",
-      "treatments.html"
-    ],
-    [
-      "Treatments",
-      "treatments.html"
-    ],
-    [
-      "Treatments",
-      "treatments.html"
     ]
   ],
   "styles": {
