@@ -35,6 +35,8 @@ jobs:
           repository: joshcomley/cottage-aesthetics-preview
           ref: ${{ inputs.ca_ref }}
           path: ca-site
+          fetch-depth: 0 # ca_ref may be an arbitrary historical SHA, not a branch/tag —
+          # actions/checkout can only resolve those with full history available.
 
       - uses: actions/setup-python@v5
         with:
