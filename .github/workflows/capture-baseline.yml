@@ -1,0 +1,68 @@
+name: Capture parity baseline (pinned platform)
+
+# spec/03-site-migration.md §5 point 1's platform policy: screenshot baselines are
+# captured AND compared on ONE pinned platform (this job, ubuntu-latest). Manually
+# triggered because it commits new baseline artifacts back to the repo — not something
+# that should run on every push.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ca_ref:
+        description: "cottage-aesthetics-preview git ref/SHA to capture against"
+        required: true
+      slugs:
+        description: "comma-separated page slugs"
+        required: true
+        default: "index,about,aftercare,contact,faq,gallery,policies,reviews,treatments"
+      mobile_slugs:
+        description: "comma-separated slugs to also screenshot at mobile width"
+        required: true
+        default: "index,treatments"
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout wixy
+        uses: actions/checkout@v4
+
+      - name: Checkout cottage-aesthetics-preview at the given ref
+        uses: actions/checkout@v4
+        with:
+          repository: joshcomley/cottage-aesthetics-preview
+          ref: ${{ inputs.ca_ref }}
+          path: ca-site
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install wixy builder
+        run: pip install -e .
+
+      - name: Install Playwright chromium
+        run: playwright install --with-deps chromium
+
+      - name: Capture baseline
+        run: >
+          python -m builder parity
+          --serve-root ca-site
+          --slugs ${{ inputs.slugs }}
+          --mobile-slugs ${{ inputs.mobile_slugs }}
+          --baseline builder/tests/parity/baseline
+          --rebaseline
+
+      - name: Commit the recaptured baseline
+        run: |
+          git config user.name "wixy-baseline-bot"
+          git config user.email "wixy@cinnamons.uk"
+          git add builder/tests/parity/baseline
+          git diff --cached --quiet && echo "no changes" && exit 0
+          git commit -m "chore(parity): recapture baseline on the pinned CI platform (ubuntu-latest)
+
+          Captured from cottage-aesthetics-preview@${{ inputs.ca_ref }} by this workflow
+          (spec/03-site-migration.md §5 point 1's platform policy)."
+          git push origin HEAD:${{ github.ref_name }}
