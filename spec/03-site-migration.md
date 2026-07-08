@@ -20,6 +20,11 @@ wixy repo.
   Google Fonts `<link>` per page; `font-family` names are hardcoded throughout the CSS.
 - `gallery.html` builds its before/after sliders + tiles from an inline JS array; the drag
   logic and lightbox are page-local JS.
+- `reviews.html` likewise builds ALL nine client-review cards from an inline JS array
+  (`const R=[{n:"Bev D.",t:"…"},…]` injected via `insertAdjacentHTML`) — same pattern,
+  same conversion required; unlike the gallery its script has NO behavior beyond
+  injection and is deleted after conversion. These are the most sensitive content class
+  on the site (client reviews — 00 §Sensitivities).
 - Pages carry stray inline `style="…"` attributes (e.g. contact address color, section
   backgrounds `style="background:var(--cream-2)"`).
 
@@ -32,7 +37,7 @@ cottage-aesthetics-preview/
   partials/
     header.html  footer.html  booking-modal.html
   content/
-    _global.json  home.json  about.json  treatments.html→treatments.json  … (one per page)
+    _global.json  index.json  about.json  treatments.json  … (one per page, keyed by slug)
   theme/
     theme.json
   images/                            # unchanged path (published as /images/*)
@@ -51,31 +56,50 @@ Published output (built by wixy) keeps **identical URLs**: `/`, `/<page>.html`,
 1. **Move pages under `pages/`**, add the two partial markers to each
    (`<!-- wx:partial header -->` after `<body …>`, `<!-- wx:partial footer -->` +
    `<!-- wx:partial booking-modal -->` before `</body>`), no other change. The builder at
-   this point can produce a byte-faithful passthrough build (partials still empty shims) —
-   this PR also lands the parity harness (§5) with its baseline captured from the
-   pre-migration site.
+   this point produces a **rendered-parity-faithful** passthrough build (partials still
+   empty shims). Do NOT chase byte equality — the mandated bs4+html5lib parse→serialize
+   normalizes entities/attribute quoting/void elements; the parity harness (§5) is the
+   gate. This PR also lands that harness with its baseline captured from the
+   pre-migration site, and switches `deploy.yml` to publish the BUILT output (see §3
+   step 5 — the old root-relative Pages deploy would 404 the moment pages move under
+   `pages/`).
 2. **Extract partials from `site.js`**: recreate the header/footer/modal DOM as
    `partials/*.html` (server-injected), annotate with `@global` bindings (brand, nav via
    `data-wx-list`, footer columns, phone/email/social, booking URL as
    `<body data-booking-url="…">` bound with `data-wx-href="@bookingUrl"`), and slim
    `site.js` to behavior only (scrolled class, menu toggle, modal open/close reading
-   `data-booking-url`, reveal observer). Nav active-state: builder adds `class="active"`
+   `data-booking-url`, reveal observer). The booking URL lands on
+   `<body data-wx-attr="data-booking-url:@bookingUrl">` (the attribute binding, 02 §2).
+   Nav active-state: builder adds `class="active"`
    to the nav item whose href matches the page being built (static, replaces the JS
    `data-page` comparison; `data-page` stays on `<body>` for CSS/JS hooks).
 3. **Annotate + extract, page by page** (order: index, about, treatments, gallery, faq,
    reviews, contact, aftercare, policies): add `data-wx-*` attributes, create
    `content/<page>.json` with today's exact copy (including `meta.title`/`description`
-   pulled from each page's head), convert the six collections (02 §6), convert the gallery
-   JS array into `data-wx-list` markup + JSON with the slider/lightbox JS reading the DOM.
-   Replace theme-fighting inline styles with classes while extracting (e.g. an `alt`
-   section-background class instead of `style="background:var(--cream-2)"`) — computed
-   styles must not change.
+   pulled from each page's head), convert the seven collections (02 §6): the gallery JS
+   arrays become `data-wx-list` markup + JSON (slider/drag/filter/lightbox JS reads the
+   builder-emitted DOM; use a generic static `aria-label` on slider inputs — no attribute
+   interpolation of item titles), the reviews JS array becomes `data-wx-list` markup +
+   `content/reviews.json` with the page script deleted, and the treatments page models
+   `sections[].cards` + a separate `rx.items` list with the two-anchor `book`-flag CTA
+   pattern (02 §3/§6). Replace theme-fighting inline styles with classes while extracting
+   (alternating section backgrounds via a class + `nth-of-type` rule instead of
+   `style="background:var(--cream-2)"`; the FAQ answer's inline underline style moves to
+   a `.fbody a` CSS rule so the rich-lite value sanitizes to itself) — computed styles
+   must not change. Also strip the hardcoded `url('images/lounge.jpg')` from `.hero` in
+   `site.css` once the hero carries `data-wx-bg` (otherwise replaced heroes still
+   download the old image).
 4. **Theme extraction**: move the `:root` block into `theme/theme.json` (02 §4); replace
    hardcoded `font-family` literals in `site.css` with the three font vars; pages get the
    `theme.css` link before `site.css`; the Google Fonts link becomes builder-generated.
-5. **Retire GitHub Pages**: delete `deploy.yml` + `.nojekyll`, add `ci.yml` (§7). Do this
-   LAST, only after ca.cinnamons.uk serves the parity-verified build (07). Note in the PR
-   description that the GH Pages URL will go stale intentionally.
+5. **GitHub Pages, two-phase**: in step 1 (`deploy.yml` currently publishes the repo ROOT
+   on every push — moving pages under `pages/` would 404 the live Pages site for the whole
+   migration window) rewrite `deploy.yml` to: install the wixy builder, `python -m builder
+   build`, publish the BUILT output as the Pages artifact. The Pages URL then serves the
+   real built site continuously through migration — standing parity evidence. At cutover
+   (work-plan #12), once ca.cinnamons.uk serves the parity-verified build, delete
+   `deploy.yml` + `.nojekyll`; note in that PR that the Pages URL goes stale
+   intentionally.
 
 Each step keeps `builder validate` green and parity green — the site repo is never in a
 state the builder can't build.
@@ -103,6 +127,12 @@ Lives in the wixy repo (`builder/tests/parity/`), runnable against any site-repo
    (color, background-color, font-family, font-size, font-weight) for a fixed selector
    sample list (~15 selectors/page covering hero/heading/body/buttons/footer), (e) a
    full-page screenshot at 1280×; and at 390× (mobile) for index + treatments.
+   **Platform policy**: screenshot baselines are captured AND compared on ONE pinned
+   platform — a CI job (ubuntu-latest, pinned Playwright version); commit the artifacts
+   that job produces. Screenshot assertions are CI-only; local Windows runs report pixel
+   diffs as advisory (font rasterization differs across OSes far beyond the 1% budget).
+   The text/link/image/computed-style probes are the cross-platform gate and run
+   everywhere.
 2. **Parity check** (every CI run thereafter): build the site with the current builder,
    serve the build, capture the same probes, and assert: text equal, link set equal, image
    set equal, computed-style sample equal (exact), screenshots within a 1% pixel-diff
@@ -141,8 +171,15 @@ This is the contract every AI-lane chat inherits. It MUST cover, concisely:
 
 ## 7. Site repo CI (`ci.yml`)
 
-On every PR + push to main: checkout site repo + checkout wixy repo @ main (public repos —
-plain `actions/checkout` with `repository:`), `pip install` wixy's builder package, run
+On every PR + push to main: checkout site repo + checkout wixy repo @ main. The site repo
+is public but **wixy is PRIVATE** (verified 2026-07-05), so the wixy checkout needs a
+credential: mint a **read-only deploy key** — generate an ed25519 keypair, add the public
+half to the wixy repo (`gh api repos/joshcomley/wixy/keys -f title=ca-ci -f key=… -F
+read_only=true`), store the private half as a CA-repo Actions secret
+(`gh secret set WIXY_DEPLOY_KEY -R joshcomley/cottage-aesthetics-preview`), and pass it to
+`actions/checkout` via `ssh-key:` for the `repository: joshcomley/wixy` step. (Fallback if
+deploy keys hit a snag: a fine-grained PAT with contents:read on joshcomley/wixy as secret
+`WIXY_READ_TOKEN` via `token:`.) Then `pip install` wixy's builder package and run
 `python -m builder validate` and `python -m builder build`, then the parity check headless.
 Required check for merging. This is what makes the AI lane safe: an agent physically cannot
 merge a change that breaks the build contract (and per fleet rules it must not bypass

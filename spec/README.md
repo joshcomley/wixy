@@ -3,9 +3,12 @@
 **Read every file below, in order, in full, before writing any code.** This spec was
 authored 2026-07-05 (session `c42ea1cb-a9d6-413d-bdcb-fc77fc49abba`, Fable 5) against
 verified on-disk/on-wire facts: the site repo's actual markup, cmd's actual API surface
-(file:line-checked), and this machine's actual deploy conventions. Where the spec cites an
-endpoint, payload, path or port, it was checked — trust it over memory, and re-verify
-against reality only when something errors.
+(file:line-checked), and this machine's actual deploy conventions — then put through an
+independent adversarial Fable review (2026-07-08) that re-verified those claims against
+the sources and whose 4 critical + 13 major findings are folded into this text. Where the
+spec cites an endpoint, payload, path or port, it was checked — trust it over memory (and
+over cmd's stale `docs/ai/contracts.md` new-chat section, see 06), and re-verify against
+reality only when something errors.
 
 | File | Contents |
 |---|---|

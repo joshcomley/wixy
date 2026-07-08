@@ -17,7 +17,7 @@ wixy/
   wixy_server/        # FastAPI app: routes, draft store, publisher, cmdchat, media
   admin-ui/           # TS strict → esbuild → wixy_server/static/admin/
   editor/             # TS strict overlay → esbuild → wixy_server/static/editor/
-  projects/cottage-aesthetics.json   # the project registry (01 §5)
+  projects/ca.json                   # the project registry (§1)
   spec/  docs/  todos/  decisions/  tooling/
 ```
 
@@ -74,6 +74,8 @@ checkout, which is runtime data — note this in the repo CLAUDE.md to preempt c
 - `GET /` + `GET /{page}.html` + assets → files from `live.json → buildDir`, resolved per
   request via one in-memory pointer (reloaded atomically after publish/restore; no server
   restart). 404 → styled `404.html` (builder emits one; migration adds a simple template).
+  No `live.json` yet (pre-bootstrap) → public routes return a plain 503, never a crash;
+  install/first-startup bootstraps version 0 (07 §1) so this state is transient.
 - Headers: HTML `Cache-Control: public, max-age=300`; css/js/images
   `public, max-age=86400` (+ ETag from file mtime/size). CF edge does the heavy caching;
   correctness comes from the 5-minute HTML TTL (an urgent fix is still fast) — publish
@@ -87,8 +89,12 @@ checkout, which is runtime data — note this in the repo CLAUDE.md to preempt c
 ## 4. Preview & editor injection
 
 - `GET /admin/preview/{page}.html` — renders the page **on the fly** from
-  `Storage repo working tree (main) ⊕ overlay` via the builder's render-one-page API,
-  then injects `<script src="/admin/static/editor/editor.js">` + editor CSS + a
+  `Storage repo working tree ⊕ overlay` via the builder's render-one-page API in
+  **preview mode** (falsy `data-wx-if` elements retained with `data-wx-hidden="1"`,
+  02 §2; publish mode removes them and is the byte-authoritative path). The working tree
+  sits at origin/main because the watcher fast-forwards it (§7). Templates resolve as
+  repo `pages/` ⊕ `draft/pages/` (page ops, 02 §8). The renderer then injects
+  `<script src="/admin/static/editor/editor.js">` + editor CSS + a
   `<script type="application/json" id="wx-bindings">` blob (the page's binding map:
   key → kind, list shapes, global keys) so the overlay never re-derives the contract.
 - `GET /admin/draft-media/{name}` serves staged uploads.
@@ -108,9 +114,10 @@ job persisted to `publishes.jsonl` on completion):
    `git merge --ff-only origin/main` on the Storage checkout (a non-ff state is a bug —
    abort with diagnostics, never force).
 2. **Materialize**: apply overlay ops onto `content/*.json` + `theme/theme.json`
-   (canonical rewrite per 02 §3); move referenced staged media into `images/`;
-   `builder validate` the tree (fail → abort, working tree reset hard to HEAD, overlay +
-   staged media untouched).
+   (canonical rewrite per 02 §3); apply page ops — `git add` staged templates from
+   `draft/pages/` into `pages/` (+ their content files), `git rm` deleted slugs; move
+   referenced staged media into `images/`; `builder validate` the tree (fail → abort,
+   working tree reset hard to HEAD, overlay + staging untouched).
 3. **Commit & push**: single commit `wixy: publish v<N> — <message>` (author
    `Wixy <wixy@cinnamons.uk>`); `git push origin main`. Push rejected (rare race with an
    AI merge) → fetch, `--ff-only` re-merge, re-materialize once, re-push; second failure
@@ -128,11 +135,16 @@ job persisted to `publishes.jsonl` on completion):
 
 Restore (`POST /api/admin/restore {version}`): loads that version's ledger entry; if its
 build dir was pruned, rebuild from its SHA first; flip pointer; set the overlay to
-`diff(current main content, that version's content)` so the draft equals what's now live
-(computed per-key: content/theme files only — template drift stays upstream and is
-surfaced in the drawer); append ledger entry `{action: "restore", of: version}`. Live
-site changes instantly; nothing is committed until the owner next publishes (which
-materializes the restored state as a normal commit).
+`diff(current main content, that version's content)` so the draft equals what's now live;
+append ledger entry `{action: "restore", of: version}`. Live site changes instantly;
+nothing is committed until the owner next publishes (which materializes the restored
+state as a normal commit). **Diff granularity** (binding-map-driven, never naive
+leaf-diffing): list-bound keys emit ONE whole-array op when unequal (02 §8's collection
+rule); scalar/meta/theme keys emit per-dotted-leaf ops; page-set differences between the
+versions map to overlay page ops (02 §8); template drift stays upstream and is surfaced
+in the publish drawer. Restored image refs that no longer exist on main are listed in the
+restore confirmation and will fail publish validate until re-uploaded — the drawer links
+them.
 
 ## 6. Version history
 
@@ -144,7 +156,9 @@ publish also tags `wixy-publish-v<N>` (annotated, pushed) so history survives St
 ## 7. Upstream watcher
 
 Every 60 s (and immediately before preview loads after >10 s staleness + before publish):
-`git fetch origin` on the Storage checkout; expose
+`git fetch origin` on the Storage checkout, **then fast-forward the working tree to
+origin/main** (taking the publish lock; skipped while a publish/materialize is in flight)
+— this is what makes AI-lane merges appear in the draft preview (02 §8, 06 §2); expose
 `{aheadOfPublished: [{sha, subject, author, when}…], fetchedAt}` in `/api/admin/state`
 (drives the draft chip + chat "preview updated" chip). Fetch failures degrade gracefully
 (stale badge after 5 min of failures; full error in logs).
@@ -179,6 +193,12 @@ event loop (git/build/Pillow work in a thread pool via `anyio.to_thread`).
   page/media names (strict slug regexes); upload limits (02 §9); no shell-outs with
   user-controlled strings (git via subprocess arg lists with `credential.helper=` +
   timeouts per fleet git rules).
+- `/internal/*` and `/healthz` answer **loopback probes only**: a request carrying
+  Cloudflare edge headers (`Cf-Ray`/`Cf-Connecting-Ip`) gets a 404 — the tunnel forwards
+  ALL paths of ca.cinnamons.uk and the Access app deliberately scopes only `/admin*`, so
+  without this guard Wixy would be the first fleet service exposing its internal surface
+  to the raw internet. Slots smoke + Devfleet health probes hit loopback directly and
+  carry no such headers. `/api/version` stays public by design (fleet deploy-awareness).
 - The embedded chat cannot publish (no publish tool exposed to it; 06 §2).
 
 ## 10. Observability

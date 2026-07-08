@@ -10,6 +10,9 @@ All cmd endpoints below are **localhost HTTP, unauthenticated** (cmd binds 127.0
 runs on the same hub VM). Ports: cmd portal **9320**, Cmd-Chats introspection **9321**.
 These calls MUST go through one `wixy_server/cmdchat.py` client module (timeouts 10 s,
 retries ×2 on connect errors, structured errors surfaced to the UI — never a silent hang).
+⚠ cmd's `docs/ai/contracts.md` new-chat section is STALE (pre-provisioner, dispatch-based);
+the routes here were verified against cmd's CODE (2026-07-05) — do not "correct" this spec
+against that document.
 
 ## 1. Conversation lifecycle
 
@@ -23,22 +26,27 @@ POST http://127.0.0.1:9320/api/project/cottage-aesthetics-preview/new-chat
 - The project name is the **site repo clone's directory name** under cmd's
   `Storage/clones/` — cmd derives projects from cwd paths and auto-clones by name; the
   `cottage-aesthetics-preview` clone already exists, so no registration step is needed.
-  The project name comes from the wixy project registry (`cmdProject` field, 01 §5), never
+  The project name comes from the wixy project registry (`cmdProject` field, 04 §1), never
   hardcoded.
 - Response is **202** `{"session_id", "pending_state": "queued", "workspace_id", …}` — the
   workspace (a fresh git worktree of the site repo) is provisioned in the background:
   `queued → workspace_creating → spawning_cli → ready`. Wixy stores
   `{conv_id, session_id, title, created_at}` in `Storage/projects/<slug>/chats.json` and
   shows the conversation immediately in "starting…" state.
-- Readiness: poll `GET http://127.0.0.1:9320/api/session/<session_id>` every 2 s (max
-  120 s) until the pending state clears; `workspace_failed` / `cli_failed` are terminal —
-  surface the reason in the panel with a Retry (= create a fresh conversation).
+- Readiness: `GET http://127.0.0.1:9320/api/session/<session_id>` **404s until the CLI
+  writes the chat's JSONL, and its 200 body carries NO pending-state field** — poll it
+  every 2 s (max 120 s) and treat the 404→200 transition as ready. For failure detail
+  before the timeout, subscribe to `ws://127.0.0.1:9320/ws/chat-pending` (hello frame
+  lists active pending chats; transition events carry `{session_id, state, message}`
+  including the terminal `workspace_failed`/`cli_failed`) and surface those in the panel
+  with a Retry (= create a fresh conversation). If the WS is unavailable, the 120 s
+  timeout is the terminal signal.
 - Do NOT pass `model`/`effort` — omit for the cmd account defaults, so conversations
   behave exactly like a hand-started cmd chat. Do not pass `workspace_anchor`/
   `workspace_id`: every conversation gets its own worktree (cmd's native model; parallel
   conversations can't trample each other's checkouts).
 
-### The preamble (first message prefix, maintained as `server/templates/chat_preamble.md`)
+### The preamble (first message prefix, maintained as `wixy_server/templates/chat_preamble.md`)
 
 Concise (< 1.5 KB), prepended once at creation, covering:
 
@@ -66,7 +74,9 @@ POST http://127.0.0.1:9320/api/session/<session_id>/send
 
 This is the exact route the cmd web UI uses (202-accepted; the reply lands in the
 transcript asynchronously). Include the idempotency key so a UI retry can't double-send.
-A send while the agent is mid-turn is fine (cmd serializes on the per-session registry).
+A send while the agent is mid-turn is fine (cmd serializes on the per-session registry),
+and a send while the chat is still provisioning is buffered by cmd (202 with
+`buffered: true` + the pending state) — show the bubble as "queued".
 On 5xx: surface "couldn't deliver — retry" on the message bubble (the composer keeps the
 text); do not blind-retry non-connect errors.
 
@@ -96,8 +106,11 @@ real UX gap shows.)
 
 UI mapping (05 §6): `text` → markdown bubbles; contiguous `tool_use`/`tool_result` runs →
 one collapsed "⚙ n actions" row (expandable, monospace); `thinking` hidden behind a
-"show reasoning" toggle default-off; `error` → red system row. Status dot from `/status`
-(`activity`/process liveness): working / idle / dead.
+"show reasoning" toggle default-off (the poll passes `include_tools=true` but NOT
+`include_thinking` — thinking is lazily fetched with `include_thinking=true` only when
+the toggle opens); `error` → red system row. Status dot from `/status`: prefer the
+`activity` field (store mtime) over process liveness — `process.kind: "none"` does NOT
+mean dead (dispatch/VS-Code chats run outside Cmd-Chats): working / idle / dead.
 
 ### Titles, list, resume
 
@@ -105,10 +118,16 @@ one collapsed "⚙ n actions" row (expandable, monospace); `thinking` hidden beh
 word-truncated; editable via rename in the list). The panel list shows status + last
 message time (from the poll cache). Conversations persist indefinitely; "resume" is just
 opening the panel again — the cmd session keeps its full context. If a conversation's
-session has **handed over** (long chats do), the send response / status exposes the
-successor chain tip: Wixy MUST follow `resolved_session_id` when present, update
-`chats.json`, and keep the conversation seamless (this is cmd's documented lineage
-behavior on both 9320 sends and 9321 introspection).
+session has **handed over** (long chats do), sends still reach the live tip (cmd proxies
+them through Cmd-Chats' lineage resolution), but replies land in the SUCCESSOR's
+transcript — polling the old id would freeze the conversation. Detection + follow: watch
+`GET 9321 /sessions/<id>/status` for `handover_state` (also suspect a handover when the
+transcript stalls after an accepted send), then call
+`GET http://127.0.0.1:9320/api/session/<id>/chain` (returns the root→leaf chat chain),
+adopt the LAST element as the live session id, update `chats.json`, and continue
+seamlessly. (Note: the 9320 send response and 9321 introspection do NOT return a
+`resolved_session_id` — that field exists only on Cmd-Chats' own 9321 send DTO. The
+chain endpoint is the reliable forward pointer.)
 
 ## 2. Draft/publish integration (closing the loop)
 
@@ -132,7 +151,7 @@ The agent ships to the site repo `main`; the owner's draft preview renders
 | cmd down (connect refused on 9320/9321) | Chat panel shows a single offline banner ("assistant offline — cmd isn't running") + auto-retry every 10 s; the rest of the admin is unaffected. |
 | new-chat 202 but provisioning fails (`workspace_failed`/`cli_failed`) | Conversation row shows the failure reason + Retry (new create). Log full response server-side. |
 | Send 502 / non-delivery | Bubble-level error + manual retry with the same idempotency key. |
-| Session handed over | Transparent: follow `resolved_session_id` (see above). |
+| Session handed over | Detect via 9321 `/status` `handover_state` (or transcript stall after an accepted send) → `GET /api/session/<id>/chain` → adopt the leaf id (see §1). |
 | Agent merged a broken change (can't happen via PR checks, but belt-and-braces) | Publish's `builder validate` + build gate fails → publish aborts, draft intact, error shown; fix via chat or revert PR. |
 | Transcript store temporarily missing (brand-new session) | Treat as "starting…" until first messages appear (bounded by the 120 s readiness timeout). |
 
