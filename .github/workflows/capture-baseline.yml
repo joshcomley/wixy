@@ -29,14 +29,23 @@ jobs:
       - name: Checkout wixy
         uses: actions/checkout@v4
 
-      - name: Checkout cottage-aesthetics-preview at the given ref
+      - name: Checkout cottage-aesthetics-preview (full history)
         uses: actions/checkout@v4
         with:
           repository: joshcomley/cottage-aesthetics-preview
-          ref: ${{ inputs.ca_ref }}
+          ref: main
           path: ca-site
-          fetch-depth: 0 # ca_ref may be an arbitrary historical SHA, not a branch/tag —
-          # actions/checkout can only resolve those with full history available.
+          fetch-depth: 0 # full history — ca_ref is resolved below by plain git,
+          # not by actions/checkout's own ref input.
+
+      - name: Resolve cottage-aesthetics-preview to the given ref
+        working-directory: ca-site
+        # actions/checkout's `ref:` input only auto-resolves branches, tags, or
+        # FULL 40-char SHAs — an abbreviated SHA (e.g. "31fa784") falls through
+        # to branch/tag lookup and fails with "could not be found" even with
+        # fetch-depth:0. Plain `git checkout` disambiguates any ref shape once
+        # the history is present, so do the ref switch ourselves.
+        run: git checkout ${{ inputs.ca_ref }}
 
       - uses: actions/setup-python@v5
         with:
