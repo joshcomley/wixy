@@ -75,6 +75,7 @@ class TestThemeFailures:
     def test_bad_hex_color_reported(
         self, mini_site_source: SiteSource, mini_site_root: Path
     ) -> None:
+        assert mini_site_source.theme is not None
         theme = dataclasses.replace(mini_site_source.theme, colors={"cream": "not-a-color"})
         source = dataclasses.replace(mini_site_source, theme=theme)
         result = validate_site(source, mini_site_root)
@@ -83,6 +84,7 @@ class TestThemeFailures:
     def test_bad_font_weight_reported(
         self, mini_site_source: SiteSource, mini_site_root: Path
     ) -> None:
+        assert mini_site_source.theme is not None
         fonts = dict(mini_site_source.theme.fonts)
         fonts["serif"] = FontSpec(family="X", weights=["abc"], italics=False)
         theme = dataclasses.replace(mini_site_source.theme, fonts=fonts)
@@ -93,6 +95,7 @@ class TestThemeFailures:
     def test_missing_font_role_reported(
         self, mini_site_source: SiteSource, mini_site_root: Path
     ) -> None:
+        assert mini_site_source.theme is not None
         fonts = dict(mini_site_source.theme.fonts)
         del fonts["script"]
         theme = dataclasses.replace(mini_site_source.theme, fonts=fonts)

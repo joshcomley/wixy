@@ -35,7 +35,8 @@ _FONT_ROLES = ("serif", "sans", "script")
 def validate_site(source: SiteSource, project_root: Path) -> ValidationResult:
     result = ValidationResult()
     _validate_pages(source, result)
-    _validate_theme(source.theme, result)
+    if source.theme is not None:
+        _validate_theme(source.theme, result)
     _validate_collections(source, result)
     _validate_images(source, project_root, result)
     return result
@@ -57,13 +58,15 @@ def _validate_pages(source: SiteSource, result: ValidationResult) -> None:
             if body is None:
                 result.add("no-body", "template has no <body>", file=file_label)
                 continue
-            meta = page_content.get("meta")
-            if not isinstance(meta, dict):
-                result.add(
-                    "missing-meta",
-                    "page content missing a 'meta' object",
-                    file=f"content/{slug}.json",
-                )
+            content_file = source.content_dir / f"{slug}.json"
+            if content_file.exists():
+                meta = page_content.get("meta")
+                if not isinstance(meta, dict):
+                    result.add(
+                        "missing-meta",
+                        "page content missing a 'meta' object",
+                        file=f"content/{slug}.json",
+                    )
             ctx = ResolveContext(page=page_content, glob=resolved_global_content(source))
             apply_bindings(body, ctx, mode="preview", file_label=file_label, sink=result)
         except BuildError as exc:

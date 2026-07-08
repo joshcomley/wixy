@@ -108,13 +108,19 @@ def apply_head(
     soup: BeautifulSoup,
     *,
     meta: JsonObject,
-    fonts_url: str,
+    fonts_url: str | None,
     page_url_path: str,
     domain: str,
     indexable: bool,
     file_label: str,
 ) -> None:
-    """Set title/description/OG tags/fonts link/robots meta from `meta` + theme + registry."""
+    """Set title/description/OG tags/fonts link/robots meta from `meta` + theme + registry.
+
+    `fonts_url` is `None` before migration step 4 creates `theme/theme.json` (03 §3.4) —
+    the page's existing (hand-authored) fonts link is left completely untouched then,
+    rather than being overwritten with a font-less URL that would visibly break fonts
+    and fail the parity check.
+    """
     head = soup.head
     if not isinstance(head, Tag):
         raise BuildError("template has no <head>", location=file_label)
@@ -144,12 +150,13 @@ def apply_head(
             f"https://{domain}/{og_image['src']}"
         )
 
-    fonts_link = _find_fonts_link(head)
-    if fonts_link is None:
-        fonts_link = soup.new_tag("link")
-        fonts_link["rel"] = "stylesheet"
-        head.append(fonts_link)
-    fonts_link["href"] = fonts_url
+    if fonts_url is not None:
+        fonts_link = _find_fonts_link(head)
+        if fonts_link is None:
+            fonts_link = soup.new_tag("link")
+            fonts_link["rel"] = "stylesheet"
+            head.append(fonts_link)
+        fonts_link["href"] = fonts_url
 
     robots_tag = head.find("meta", attrs={"name": "robots"})
     if indexable:

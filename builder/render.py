@@ -28,17 +28,31 @@ from builder.theme import Theme, generate_fonts_url
 
 @dataclass(frozen=True, slots=True)
 class SiteSource:
-    """Everything on disk the builder needs, pre-loaded once per build/serve session."""
+    """Everything on disk the builder needs, pre-loaded once per build/serve session.
+
+    `theme` is `None` before migration step 4 (spec/03 §3.4) creates `theme/theme.json`;
+    a page's content is `{}` before step 3 creates its `content/<slug>.json` (03 §3.3).
+    The builder must still produce a parity-faithful passthrough build in that
+    partially-migrated state (03 §3.1: "no other change" at step 1) — see decisions/00004.
+    `content_dir` (where each page's content file would live) lets `validate.py`
+    distinguish "not migrated yet" (file absent) from "migrated but malformed" (file
+    present but e.g. missing `meta`).
+    """
 
     project: ProjectConfig
     pages_dir: Path
     partials_dir: Path
-    theme: Theme
+    theme: Theme | None
     page_contents: dict[str, JsonObject]
     global_content: JsonObject
+    content_dir: Path
 
 
-def load_site_source(root: Path, project: ProjectConfig, theme: Theme) -> SiteSource:
+def _load_content_or_empty(path: Path) -> JsonObject:
+    return load_json_object(path) if path.exists() else {}
+
+
+def load_site_source(root: Path, project: ProjectConfig, theme: Theme | None) -> SiteSource:
     pages_dir = root / "pages"
     content_dir = root / "content"
     partials_dir = root / "partials"
@@ -46,9 +60,9 @@ def load_site_source(root: Path, project: ProjectConfig, theme: Theme) -> SiteSo
     page_contents: dict[str, JsonObject] = {}
     for page_path in sorted(pages_dir.glob("*.html")):
         slug = page_path.stem
-        page_contents[slug] = load_json_object(content_path(content_dir, slug))
+        page_contents[slug] = _load_content_or_empty(content_path(content_dir, slug))
 
-    global_content = load_json_object(content_path(content_dir, GLOBAL_CONTENT_NAME))
+    global_content = _load_content_or_empty(content_path(content_dir, GLOBAL_CONTENT_NAME))
 
     return SiteSource(
         project=project,
@@ -57,6 +71,7 @@ def load_site_source(root: Path, project: ProjectConfig, theme: Theme) -> SiteSo
         theme=theme,
         page_contents=page_contents,
         global_content=global_content,
+        content_dir=content_dir,
     )
 
 
@@ -116,14 +131,14 @@ def render_page(
     apply_bindings(body, ctx, mode=mode, file_label=file_label, sink=sink)
     _mark_nav_active(body, page_url(slug))
 
-    meta = page_content.get("meta")
-    if not isinstance(meta, dict):
-        raise BuildError("page content missing a 'meta' object", location=file_label)
+    meta_raw = page_content.get("meta")
+    meta: JsonObject = meta_raw if isinstance(meta_raw, dict) else {}
+    fonts_url = generate_fonts_url(source.theme) if source.theme is not None else None
 
     apply_head(
         soup,
         meta=meta,
-        fonts_url=generate_fonts_url(source.theme),
+        fonts_url=fonts_url,
         page_url_path=page_url(slug),
         domain=source.project.domain,
         indexable=source.project.indexable,

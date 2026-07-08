@@ -1,0 +1,1 @@
+Builder now tolerates the partially-migrated state (no content/*.json, no theme/theme.json) that migration step 1 deliberately leaves the site repo in — SiteSource.theme is Optional, missing content defaults to {}, fonts-link untouched when there's no theme

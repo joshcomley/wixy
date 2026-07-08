@@ -1,0 +1,11 @@
+{
+  "slug": "ca",
+  "name": "Cottage Aesthetics",
+  "repo": "https://github.com/joshcomley/cottage-aesthetics-preview.git",
+  "defaultBranch": "main",
+  "cmdProject": "cottage-aesthetics-preview",
+  "domain": "ca.cinnamons.uk",
+  "locale": "en-GB",
+  "indexable": false,
+  "media": { "maxLongSidePx": 2000, "jpegQuality": 85 }
+}

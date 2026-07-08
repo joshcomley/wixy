@@ -28,9 +28,10 @@ def build_site(root: Path, source: SiteSource, out_dir: Path) -> None:
         out_name = "index.html" if slug == "index" else f"{slug}.html"
         (out_dir / out_name).write_text(html, encoding="utf-8", newline="\n")
 
-    (out_dir / "theme.css").write_text(
-        generate_theme_css(source.theme), encoding="utf-8", newline="\n"
-    )
+    if source.theme is not None:
+        (out_dir / "theme.css").write_text(
+            generate_theme_css(source.theme), encoding="utf-8", newline="\n"
+        )
 
     _copy_if_exists(root / "site.css", out_dir / "site.css")
     _copy_if_exists(root / "site.js", out_dir / "site.js")
