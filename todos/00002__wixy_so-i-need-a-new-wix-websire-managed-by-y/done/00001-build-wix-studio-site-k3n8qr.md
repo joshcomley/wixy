@@ -179,3 +179,11 @@ Botox Full Face £330 / Three Areas £220; Relfydess £280; Vitamin B12 single �
 5. Commit to git; `wix publish` from CLI.
 6. SPEND GATE: price premium plan + custom domain, confirm exact $ with user
    before anything bills. Free tier for initial build.
+
+---
+
+**CLOSED AS SUPERSEDED (2026-07-08, workspace 00003):** the operator decided the site
+leaves Wix entirely — self-hosted at ca.cinnamons.uk via the Wixy CMS build (`spec/` on
+main, implementation running in workspace 00004). No Wix Studio/Velo/CLI work will happen.
+Wix bookings provisioning was abandoned in favour of Faces (facesconsent), which the site
+already uses. Wix plan cancellation + API-key revocation are cutover tasks in spec/07 §5.
