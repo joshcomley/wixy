@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../../../editor/src/index.ts"],
+  "sourcesContent": ["// Editor overlay entrypoint (injected into the preview iframe) \u2014 populated in milestone 7\n// (spec/05-editor.md: selection chrome, popovers, postMessage protocol).\nexport function main(): void {\n  // Intentionally empty until milestone 7 wires the overlay.\n}\n"],
+  "mappings": "mBAEO,SAASA,GAAa,CAE7B",
+  "names": ["main"]
+}

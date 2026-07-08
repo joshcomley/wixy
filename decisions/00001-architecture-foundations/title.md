@@ -1,0 +1,1 @@
+Ten foundational architecture decisions for Wixy v1 (git-as-DB, static atomic publish, `data-wx-*` templates, sparse draft overlay, cmd-powered AI lane, vanilla strict-TS admin, bs4+html5lib builder, generic project registry, CF Access auth)
