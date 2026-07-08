@@ -4,8 +4,8 @@ The admin lives at `https://ca.cinnamons.uk/admin/` (Cloudflare-Access-gated, se
 It is a **static-shell, API-hydrated** app: the shell paints in <100 ms, all data arrives
 via `/api/admin/*` fetches into skeletons (fleet instant-render rule). TypeScript strict
 (`strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`), **no framework** —
-small typed DOM helpers, esbuild-bundled into `server/static/admin/` at build time. All
-assets self-hosted (no CDN).
+small typed DOM helpers, esbuild-bundled into `wixy_server/static/admin/` at build time.
+All assets self-hosted (no CDN).
 
 ## 1. Shell layout
 
@@ -67,6 +67,9 @@ same merge).
   direct file drop onto the element.
 - **Click a link binding** → popover with label (if the same element is also `data-wx`) +
   href field with page-picker (internal pages listed) / raw URL / tel: / mailto:.
+- **Click an attribute binding** (`data-wx-attr`, e.g. the booking URL on `<body>` —
+  reachable via a "Site links" row in the page-settings drawer since `<body>` isn't
+  hover-targetable) → plain input per bound attribute key.
 - **Lists**: hovering an item shows an item toolbar (↑ ↓ ✚ duplicate, ✖ delete, ⠿ drag
   handle); ✚ appends a blank-ish item cloned from the first item's shape (02 §6); delete
   confirms. The whole-array op is emitted after each structural change.

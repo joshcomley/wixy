@@ -24,10 +24,11 @@ cost a few bytes, and let the editor overlay target the live DOM without a paral
 | `data-wx="<key>"` | element **innerHTML** is bound | string (rich-lite HTML, see §5) |
 | `data-wx-img="<key>"` | `<img>` `src` + `alt` bound | `{"src": "images/x.jpg", "alt": "…"}` |
 | `data-wx-href="<key>"` | element `href` bound | string (URL or path) |
-| `data-wx-bg="<key>"` | element CSS `background-image` bound (hero) | same image object as `data-wx-img` |
+| `data-wx-bg="<key>"` | element CSS `background-image` bound (hero) — builder writes an inline `style="background-image:url(…)"` on the element | same image object as `data-wx-img` |
+| `data-wx-attr="<attr>:<key>[,<attr2>:<key2>]"` | the listed attributes are bound (e.g. `data-booking-url`) | string per attr |
 | `data-wx-list="<key>"` | container is a **collection**; bound to an array | array of objects |
 | `data-wx-list-item` | marks the item template **inside** a list container | — |
-| `data-wx-if="<key>"` | element removed from output when value is falsy | boolean |
+| `data-wx-if="<key>"` | element removed from **published** output when the value is falsy; **preview mode retains it** with `data-wx-hidden="1"` (04 §4, so the editor can reach it). Truthiness = JS-falsy rules (`false`/`null`/`""`/`[]` are falsy). A leading `!` negates (`data-wx-if="!.book"`) | any |
 
 Key resolution:
 
@@ -50,9 +51,12 @@ Rules:
 
 ## 3. Content files
 
-One JSON file per page (`content/home.json`, `content/about.json`, …, matching
+One JSON file per page (`content/index.json`, `content/about.json`, …, matching
 `pages/<slug>.html`) plus `content/_global.json`. UTF-8, 2-space indent, keys sorted at
-write time (stable diffs — the publisher rewrites files canonically).
+write time (stable diffs — the publisher rewrites files canonically). **The home page's
+slug is `index`** everywhere the model threads (template `pages/index.html`, content
+`content/index.json`, overlay prefix `index:`, editor route `#/edit/index`); the value
+`home` survives only in `<body data-page="home">` as a CSS/JS hook.
 
 Every **page** file has a reserved `meta` object consumed by the builder head-injection
 (no annotation needed):
@@ -80,19 +84,26 @@ Every **page** file has a reserved `meta` object consumed by the builder head-in
         "title": "Microneedling",
         "price": "From £30",
         "body": "Stimulates natural collagen…",
-        "cta": {"label": "Book Now", "kind": "book"}
+        "course": "",
+        "book": true
       }
     ]
   }
 }
 ```
 
+Card CTA pattern (used on the home teasers and the treatments page): the item template
+carries **two sibling anchors** — the Book anchor gated `data-wx-if=".book"`, the Enquire
+anchor gated `data-wx-if="!.book"` — so one boolean drives which renders; optional lines
+(e.g. `.course`) pair `data-wx-if=".course"` with `data-wx=".course"` (empty string =
+hidden).
+
 `_global.json` reserved shapes (exact keys fixed by migration, but MUST include):
 
 ```json
 {
   "brand": {"line1": "Cottage", "line2": "Aesthetics"},
-  "nav": [{"label": "About", "href": "about.html"}],
+  "navExtra": [],
   "bookingUrl": "https://facesconsent.com/bookings/purdi-hadley",
   "phone": "07401 562 462",
   "phoneHref": "tel:07401562462",
@@ -104,12 +115,14 @@ Every **page** file has a reserved `meta` object consumed by the builder head-in
 }
 ```
 
-The **nav is data** (`@nav`): both the header partial and the mobile menu render it via
-`data-wx-list`. Adding a page = adding a nav item (content edit), not a template edit.
-Page discovery for the build is `pages/*.html` (nav membership/order comes from each page's
-`meta.inNav`/`meta.navOrder` — the builder generates `@nav` at build time from page metas
-and ALSO honours explicit extra items in `_global.json.navExtra` if present; the editor's
-"page settings" panel writes `meta.*`).
+The **nav is builder-generated, never stored**: `@nav` does not exist in `_global.json`.
+The builder derives it at resolve time — pages with `meta.inNav: true` ordered by
+`meta.navOrder`, followed by any explicit `_global.json.navExtra` items — and **injects it
+into the resolved content BEFORE validation**, so the header partial's and mobile menu's
+`data-wx-list="@nav"` bindings resolve like any other key. Nav editing therefore happens
+through the page-settings panel (`meta.*`) and the `navExtra` list, never as a direct
+list binding (the editor must not offer `@nav` item editing). Page discovery for the
+build is `pages/*.html`.
 
 ## 4. Theme
 
@@ -118,10 +131,10 @@ and ALSO honours explicit extra items in `_global.json.navExtra` if present; the
 ```json
 {
   "colors": {
-    "cream": "#F1E8D9", "cream2": "#EADFCB", "oat": "#E4D6BE",
-    "mocha": "#5E4635", "coffee": "#3E312A", "coffeeSoft": "#6B584C",
-    "clay": "#B26E4A", "clayDeep": "#9A5C3B",
-    "olive": "#6E7357", "oliveDeep": "#565b43",
+    "cream": "#F1E8D9", "cream-2": "#EADFCB", "oat": "#E4D6BE",
+    "mocha": "#5E4635", "coffee": "#3E312A", "coffee-soft": "#6B584C",
+    "clay": "#B26E4A", "clay-deep": "#9A5C3B",
+    "olive": "#6E7357", "olive-deep": "#565b43",
     "brass": "#A98A54", "line": "#d9c9ad"
   },
   "shadow": "0 18px 44px rgba(62,49,42,.14)",
@@ -133,11 +146,13 @@ and ALSO honours explicit extra items in `_global.json.navExtra` if present; the
 }
 ```
 
+Color keys ARE the CSS variable names minus the `--` prefix (kebab-case, digits included:
+`cream-2` → `--cream-2`, exactly what `site.css` consumes) — no name mapping exists.
 Builder emits **`theme.css`**:
 
 ```css
 :root{
-  --cream:#F1E8D9; /* … every color as --kebab-case … */
+  --cream:#F1E8D9; /* … every color key as --<key> … */
   --shadow:0 18px 44px rgba(62,49,42,.14);
   --font-serif:'Cormorant Garamond',serif;
   --font-sans:'Jost',system-ui,sans-serif;
@@ -146,6 +161,9 @@ Builder emits **`theme.css`**:
 ```
 
 and the Google Fonts `<link>` (single combined `css2?family=…` URL derived from `fonts`).
+The generated URL need not byte-match today's hand-written one (e.g. per-weight italic
+subsets may differ slightly) — the parity harness gates *rendering*, and tests must not
+assert the URL string.
 Migration (03) moves the `:root` block out of `site.css` into generated `theme.css`, and
 replaces every hardcoded `font-family:'Cormorant Garamond'…` in `site.css` with
 `var(--font-serif)` etc. Pages link `theme.css` **before** `site.css`.
@@ -158,8 +176,10 @@ setting CSS custom properties + swapping a fonts `<link>` in the iframe — no r
 ## 5. Rich-lite text
 
 `data-wx` values are a restricted HTML fragment. Allowlist (enforced server-side on every
-draft write with a proper sanitizer, not regex): `a[href,target,rel]`, `em`, `strong`, `br`,
-`span[class]`. Everything else is stripped; `href` must be http(s)/mailto/tel/relative.
+draft write with a proper sanitizer, not regex): `a[href,target,rel,class]`, `em`,
+`strong`, `br`, `span[class]`. Allowed `class` values on `a`/`span` come from a fixed
+allowlist — v1: `js-book` only (the FAQ answer's booking-modal trigger link is
+load-bearing). Everything else is stripped; `href` must be http(s)/mailto/tel/relative.
 Plain strings are valid values. The editor decides input mode per element: block-level
 bindings (`p`, list bodies) get the rich-lite mini-toolbar; heading/label/price bindings get
 a plain input (newlines and markup stripped).
@@ -170,20 +190,25 @@ A `data-wx-list` container's array is edited as a unit (the draft overlay stores
 array under the list key). The editor supports: add (clones the item template's default
 value shape — derived from the FIRST existing item with text fields blanked), remove,
 reorder (drag or ↑/↓), and per-field editing inside each item via the same binding kinds.
-The six load-bearing collections after migration:
+The seven load-bearing collections after migration:
 
 | Key | Where | Items |
 |---|---|---|
-| `treatments.cards` | home | 6 treatment teaser cards |
-| `sections[].cards` | treatments page (nested list: category sections → cards) | 11 bookable + prescription tables |
+| `treatments.cards` | index | 6 treatment teaser cards (per-card `book` flag + optional `course`, see §3) |
+| `sections[].cards` | treatments page (nested list: 5 category sections → 12 tcards: 11 Book + 1 Enquire via the `book` flag) | tcards |
+| `rx.items` | treatments page (its OWN list — the 3 prescription `<details class="rx">` accordions are structurally different from tcards and must NOT share the `sections[]` item template) | rx accordions |
 | `faq.items` | faq | 8 `<details>` Q&As |
-| `gallery.sliders` + `gallery.tiles` | gallery | before/after pairs `{cat, title, before, after}` |
-| `@hours` | contact + footer | 7 day rows |
-| `@nav`, `footer.*` | partials | nav/footer links |
+| `gallery.sliders` + `gallery.tiles` | gallery | sliders `{cat, title, sub, before, after}`; tiles `{cat, title, img, alt}` |
+| `reviews.items` | reviews | 9 review cards `{name, text}` (star row + "Google review" attribution are fixed template structure) |
+| `@hours` | index + contact | 7 day rows |
 
-The gallery page currently builds its sliders from a JS array — migration converts that to
-`data-wx-list` markup + content JSON (the page JS keeps only the drag/lightbox behavior,
-reading the DOM the builder emitted).
+Plus `footer.*` link columns in the footer partial (`@nav` is builder-generated — 02 §3 —
+and is not an editable list). The gallery AND reviews pages currently build their content
+from inline JS arrays — migration converts both to `data-wx-list` markup + content JSON
+(gallery JS keeps only drag/filter/lightbox behavior reading the builder-emitted DOM;
+the reviews page script is deleted outright — it has no behavior beyond injection).
+The treatments page's alternating section backgrounds move from inline `style` attributes
+to a class + CSS `nth-of-type` rule so all `sections[]` items share one template.
 
 ## 7. Pages
 
@@ -213,10 +238,14 @@ The visual editor never writes content files directly. It maintains a **sparse o
   "rev": 41,
   "baseSha": "31fa784…",
   "ops": {
-    "home:hero.title":        {"value": "Cottage Aesthetics", "ts": "…", "by": "editor"},
-    "home:treatments.cards":  {"value": [ …whole array… ], "ts": "…", "by": "editor"},
+    "index:hero.title":       {"value": "Cottage Aesthetics", "ts": "…", "by": "editor"},
+    "index:treatments.cards": {"value": [ …whole array… ], "ts": "…", "by": "editor"},
     "_global:phone":          {"value": "07401 562 462", "ts": "…", "by": "editor"},
     "theme:colors.clay":      {"value": "#B26E4A", "ts": "…", "by": "editor"}
+  },
+  "pages": {
+    "added":   [{"slug": "aftercare-tips", "fromSlug": "aftercare"}],
+    "deleted": []
   }
 }
 ```
@@ -228,6 +257,12 @@ The visual editor never writes content files directly. It maintains a **sparse o
   flow into the draft automatically on the next preview; keys you HAVE touched keep your
   draft value until published or discarded. Single-operator tool: last-writer-wins per key
   is the intended semantic, no CRDT.
+- **Page ops** (duplicate/delete, 05 §2) live in the overlay's `pages` block. A duplicated
+  page's TEMPLATE is staged at `Storage/…/draft/pages/<slug>.html` (its content file is an
+  overlay op `<slug>:*` seeded from the source page); preview resolves templates as
+  repo `pages/` ⊕ `draft/pages/`; publish `git add`s staged templates into `pages/` and
+  applies `deleted` as `git rm`; discard-draft removes the staging and tombstones; validate
+  treats staged pages as real pages (partial markers, meta, bindings all enforced).
 - Publishing materializes the overlay into the JSON files, commits, and empties the overlay
   (04 §5). Discard-draft empties it without committing. Individual keys can be discarded.
 - The overlay file is `Storage/projects/<slug>/draft/overlay.json`, written atomically
@@ -258,8 +293,9 @@ repos, and the AI agent (documented in the site repo CLAUDE.md):
 - rich-lite values sanitize to themselves (i.e. are already clean);
 - `theme.json` matches its schema (hex colors, known font weight strings);
 - every `pages/*.html` has the two partial markers + a `meta` block in content;
-- nav/hour/gallery arrays match their item schemas (fixed JSON Schemas in
-  `builder/schemas/*.json`).
+- collection arrays match their item schemas (fixed JSON Schemas in
+  `builder/schemas/*.json` — covering hours, gallery sliders incl. `sub`, gallery tiles,
+  reviews items, treatment cards incl. `book`/`course`, rx items, navExtra, footer links).
 
 Exit non-zero with a machine-readable error list (`--json`) — the admin UI surfaces these
 verbatim next to the Publish button; the AI agent runs it before shipping.

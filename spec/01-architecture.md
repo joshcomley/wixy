@@ -90,6 +90,8 @@ Two editing lanes, one merge point, one human gate:
 - Never author in `D:\Servers\` checkouts; engine work in cmd worktrees of wixy; site
   work in cmd worktrees of the site repo. `install.py` derives paths from `AIM_ROOT`.
 - All Claude inference via cmd (no Anthropic SDK/API anywhere, including the engine).
-- Tests parallel (`-n auto`); a failing test is yours to fix; red main blocks merges.
+- Tests parallel via pytest-xdist with a FIXED worker cap in `addopts` (`-n 4`; NEVER
+  `-n auto` — fleet ban after the 2026-07-07 hub incident; the suite runs on the hub VM
+  next to production cmd). A failing test is yours to fix; red main blocks merges.
 - UTF-8 everywhere explicitly (subprocess/open/PowerShell per global rules).
 - gh CLI through PowerShell full path; auto-merge each round; conventional commits.

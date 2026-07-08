@@ -2,9 +2,12 @@
 
 Quality bars are binding. New engine code is TypeScript-strict (UI) + typed Python
 (server/builder: full type hints, `ruff` + `ruff format` clean; add `mypy --strict` for
-`builder/` and `wixy_server/` and keep it green). Tests parallelize (`pytest-xdist -n auto`
-in `addopts`), isolate per-worker state (tmp dirs / per-test git repos), never hit the real
-network (except the explicitly-marked live smokes) and never hit real cmd/Cloudflare in CI.
+`builder/` and `wixy_server/` and keep it green). Tests parallelize via pytest-xdist with
+a **FIXED cap** in `addopts` (`-n 4`; NEVER `-n auto` — fleet ban after the 2026-07-07
+hub incident: this suite runs on the hub VM beside production cmd/Cmd-Chats; GitHub
+Actions may use a fixed higher N on its dedicated runner, still never `auto`), isolate
+per-worker state (tmp dirs / per-test git repos), never hit the real network (except the
+explicitly-marked live smokes) and never hit real cmd/Cloudflare in CI.
 
 ## 1. Unit / integration (pytest, wixy repo)
 
@@ -23,8 +26,10 @@ network (except the explicitly-marked live smokes) and never hit real cmd/Cloudf
   write (kill-during-write simulation leaves valid JSON), per-key + full discard.
 - merge semantics: repo content ⊕ overlay (upstream changes flow through untouched keys;
   touched keys keep draft values) — table-driven.
-- preview render: draft render equals builder output for the same merged content; editor
-  assets injected only on preview routes, never in builds.
+- preview render: draft render equals builder PUBLISH output for the same merged content
+  **after stripping `data-wx-hidden` elements** (preview mode retains falsy `data-wx-if`
+  elements, 02 §2 — publish mode is the byte-authoritative path); editor assets injected
+  only on preview routes, never in builds.
 - media: upload → EXIF strip + orient + resize ≤2000px + re-encode (Pillow-verified),
   MIME/size rejects, SVG reject, reference scan, publish-time move+commit.
 - publish pipeline on **temp git repos** (origin simulated with a bare repo): happy path
@@ -32,9 +37,10 @@ network (except the explicitly-marked live smokes) and never hit real cmd/Cloudf
   every failure leg (pull conflict, validate fail, build fail, push rejected → retry after
   fetch, crash between build and swap) leaves live serving + draft intact, lock serializes
   concurrent publishes, restore semantics (04 §6), prune policy.
-- chat integration against the **fake cmd server** (06 §4): create/pending/ready, send
-  idempotency, poll→SSE fan-out, handover `resolved_session_id` follow, all failure rows
-  in the 06 §3 table.
+- chat integration against the **fake cmd server** (06 §4): create/pending/ready
+  (incl. the 404-until-JSONL readiness window), send idempotency + buffered-while-pending,
+  poll→SSE fan-out, handover detection + chain-follow (06 §1), all failure rows in the
+  06 §3 table.
 - security middleware: `/admin` + `/api/admin` require a valid CF Access JWT (signature,
   `aud`, `iss`, expiry — test with a locally-minted JWKS), public routes don't; loopback
   bind asserted in config tests.
@@ -83,7 +89,9 @@ Spec'd in 03 §5 — the migration's safety net; stays in CI (site repo) forever
   spot-check; `/admin` bounces unauthenticated (302 to CF Access) and loads with the
   service token; a real text edit → publish → live change → restore; a real AI
   conversation asking for a trivial copy tweak end-to-end (agent ships → preview chip →
-  publish). Evidence (URLs, SHAs, version numbers) recorded in the PR description.
+  publish). When checking "publish → live change" through Cloudflare, bypass caches
+  (hard-reload / cache-buster query): HTML carries up to 300 s of edge/browser TTL
+  (04 §3). Evidence (URLs, SHAs, version numbers) recorded in the PR description.
 - Lighthouse (or equivalent) on the public home page: performance ≥ 90, a11y ≥ 90 —
   the static site already achieves this; the CMS must not regress it.
 
@@ -100,10 +108,11 @@ Spec'd in 03 §5 — the migration's safety net; stays in CI (site repo) forever
    the embedded chat cannot publish.
 5. Admin is unreachable without CF Access; public site is reachable without it; both
    verified from an external network path (not just localhost).
-6. Both repos' CI green; wixy pytest suite green under `-n auto`; zero `@ts-ignore`
-   without justification comments; `mypy --strict` green on `builder/` + `wixy_server/`.
+6. Both repos' CI green; wixy pytest suite green under the project's capped `-n <N>`
+   addopts (never `auto`); zero `@ts-ignore` without justification comments;
+   `mypy --strict` green on `builder/` + `wixy_server/`.
 7. Slots consumer + Devfleet child registered; `POST 127.0.0.1:9999/restart/Wixy`
    bounces it cleanly; a wixy-repo merge to main auto-deploys via the slot flow and the
    published site survives the swap (pinned build dirs live in Storage, not slots).
 8. Docs: engine `README.md` (run/dev/deploy), site repo `CLAUDE.md`, `decisions/` entries
-   for the architecture choices called out in 01 §7, todos updated per fleet conventions.
+   for the architecture choices called out in 01 §3, todos updated per fleet conventions.

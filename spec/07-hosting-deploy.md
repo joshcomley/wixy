@@ -31,7 +31,12 @@ venv/`slots.loom.yaml`). What follows is the Wixy-specific application of it.
   Slots\green,Storage}`, clone the wixy repo into both slots, build venvs, write
   `active.txt` = `blue`, seed `Storage\.env` from a template (operator fills secrets),
   print the Devfleet/Slots/Cloudflare follow-ups. Also clones the site repo into
-  `Storage\projects\ca\repo`.
+  `Storage\projects\ca\repo` and **bootstraps serving**: if `live.json` is absent, build
+  origin/main HEAD into `builds\<sha>\` and write `live.json` as version 0
+  (`source: "bootstrap"`, ledger entry appended) — the server also self-bootstraps this
+  way on first startup, so ca.cinnamons.uk serves the site at milestone #11, before the
+  first human publish (#12). With no live.json the public surface returns 503, never a
+  crash (04 §3).
 - **Frontend bundles are COMMITTED** (`wixy_server/static/{admin,editor}/*`): esbuild runs
   in dev + CI, never in slot build_steps (keeps deploys pip-only, no node on the deploy
   path). CI enforces no-drift: rebuild then `git diff --exit-code` on the bundle dirs.
@@ -138,6 +143,9 @@ request-admin-action.request_admin_action`. Never hand-run elevated steps.
    request to 9380 `/admin` (localhost) still 401s (middleware works independently).
 5. `https://ca.cinnamons.uk/api/admin/state` unauthenticated → 401/302; with service
    token → 200.
+5b. `https://ca.cinnamons.uk/healthz` and `…/internal/ready` from outside → **404**
+   (edge-header guard, 04 §9) while `curl 127.0.0.1:9380/healthz` on the box → 200;
+   `https://ca.cinnamons.uk/api/version` → 200 (public by design).
 6. Restart drill: `POST 127.0.0.1:9999/restart/Wixy` → site back within seconds, pointer
    intact, admin session unaffected (stateless JWT).
 7. Reboot survival: Devfleet child `restart = "always"` + tunnel watchdog cover it;
