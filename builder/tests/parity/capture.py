@@ -95,6 +95,33 @@ def _strip_origin(resolved_url: str, base_url: str) -> str:
     return resolved_url[len(base_url) :] if resolved_url.startswith(base_url) else resolved_url
 
 
+_FORCE_REVEAL_JS = """() => {
+  document.querySelectorAll('.reveal').forEach(el => {
+    el.style.transition = 'none';
+    el.classList.add('in');
+  });
+}"""
+
+
+def _force_reveal(page: Page) -> None:
+    """Make every `.reveal` section's scroll-triggered fade-in visible immediately.
+
+    `site.js`'s IntersectionObserver only flips an element to `.in` (opacity:1) once
+    it has actually intersected the viewport — but capture never scrolls, so anything
+    positioned beyond roughly one viewport height of the top never intersects and
+    stays at `opacity:0`. That's invisible-but-still-laid-out (unlike `display:none`),
+    so `innerText`/`getComputedStyle` probes are unaffected (opacity doesn't hide text
+    from either), but a screenshot captures the true blank pixels — and exactly how
+    many/which sections cross that intersection threshold is sensitive to tiny,
+    incidental page-height differences (font-swap timing etc.), making the blank
+    region's extent non-reproducible between two otherwise-identical captures. Forcing
+    every `.reveal` to its final visible state (with its transition disabled so the
+    0.8s fade doesn't get caught mid-animation) makes every capture show the same
+    fully-settled content a real visitor eventually sees, deterministically.
+    """
+    page.evaluate(_FORCE_REVEAL_JS)
+
+
 def capture_page(
     page: Page, url: str, base_url: str, *, selectors: Sequence[str] = COMMON_SELECTORS
 ) -> PageProbe:
@@ -104,6 +131,7 @@ def capture_page(
 
     page.goto(url, wait_until="networkidle")
     page.wait_for_timeout(300)  # let webfont swap / reveal animations settle
+    _force_reveal(page)
 
     text = _normalize_text(page.inner_text("body"))
 
@@ -142,6 +170,7 @@ def capture_screenshot(page: Page, url: str, *, viewport: Viewport) -> bytes:
     page.set_viewport_size(VIEWPORT_SIZES[viewport])
     page.goto(url, wait_until="networkidle")
     page.wait_for_timeout(300)
+    _force_reveal(page)
     screenshot: bytes = page.screenshot(full_page=True)
     return screenshot
 
