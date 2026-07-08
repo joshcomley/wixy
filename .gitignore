@@ -18,6 +18,20 @@ dist/
 build/
 .astro/
 
+# python
+__pycache__/
+*.pyc
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
+
+# playwright
+/e2e/test-results/
+/e2e/playwright-report/
+/e2e/blob-report/
+
 # editors / OS
 .DS_Store
 Thumbs.db
