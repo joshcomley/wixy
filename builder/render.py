@@ -34,6 +34,9 @@ class SiteSource:
     a page's content is `{}` before step 3 creates its `content/<slug>.json` (03 §3.3).
     The builder must still produce a parity-faithful passthrough build in that
     partially-migrated state (03 §3.1: "no other change" at step 1) — see decisions/00004.
+    `content_dir` (where each page's content file would live) lets `validate.py`
+    distinguish "not migrated yet" (file absent) from "migrated but malformed" (file
+    present but e.g. missing `meta`).
     """
 
     project: ProjectConfig
@@ -42,6 +45,7 @@ class SiteSource:
     theme: Theme | None
     page_contents: dict[str, JsonObject]
     global_content: JsonObject
+    content_dir: Path
 
 
 def _load_content_or_empty(path: Path) -> JsonObject:
@@ -67,6 +71,7 @@ def load_site_source(root: Path, project: ProjectConfig, theme: Theme | None) ->
         theme=theme,
         page_contents=page_contents,
         global_content=global_content,
+        content_dir=content_dir,
     )
 
 

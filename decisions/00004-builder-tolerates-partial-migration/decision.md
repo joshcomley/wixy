@@ -51,6 +51,16 @@ step 1.
 - New test file `test_partial_migration_state.py` locks in the whole passthrough
   behavior (load/render/build/validate all succeed against a step-1-shaped fixture; the
   original fonts link and title survive untouched).
+- **Follow-up, same root cause:** `validate_site`'s "every page has a `meta` block" check
+  (02 §10) also fired unconditionally, so `python -m builder validate` failed with 9
+  `missing-meta` errors against the real post-step-1 CA site — which would have failed
+  the site repo's own required CI check for the step-1 PR. Fixed by adding
+  `SiteSource.content_dir` so `_validate_pages` can tell "content file genuinely doesn't
+  exist yet" (skip the check) from "content file exists but lacks `meta`" (still an
+  error) — confirmed against the real repo: `python -m builder validate` went from 9
+  errors to `OK`, and `build` + `parity` (via the milestone-3a harness) both stayed green
+  throughout, matching 03 §3's "the site repo is never in a state the builder can't
+  build."
 
 ## What to watch for
 

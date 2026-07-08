@@ -100,3 +100,24 @@ class TestNoThemeNoContent:
         source = load_site_source(step1_site, step1_project, theme=None)
         result = validate_site(source, step1_site)
         assert not any(e.file == "theme/theme.json" for e in result.errors)
+
+    def test_validate_site_does_not_report_missing_meta_when_content_file_absent(
+        self, step1_site: Path, step1_project: ProjectConfig
+    ) -> None:
+        # content/index.json genuinely doesn't exist yet (pre migration step 3) --
+        # this must NOT be reported as a "missing-meta" defect (03's own migration
+        # notes: validate must stay green at every intermediate step).
+        source = load_site_source(step1_site, step1_project, theme=None)
+        result = validate_site(source, step1_site)
+        assert result.ok
+        assert not any(e.code == "missing-meta" for e in result.errors)
+
+    def test_validate_site_reports_missing_meta_once_content_file_exists_but_lacks_it(
+        self, step1_site: Path, step1_project: ProjectConfig
+    ) -> None:
+        content_dir = step1_site / "content"
+        content_dir.mkdir()
+        (content_dir / "index.json").write_text('{"hero": {}}', encoding="utf-8")
+        source = load_site_source(step1_site, step1_project, theme=None)
+        result = validate_site(source, step1_site)
+        assert any(e.code == "missing-meta" for e in result.errors)
