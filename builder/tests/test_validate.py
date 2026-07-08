@@ -128,6 +128,20 @@ class TestCollectionSchemaFailures:
         result = validate_site(source, mini_site_root)
         assert any(e.code == "schema" and e.key == "hours" for e in result.errors)
 
+    def test_rx_item_schema_violation(
+        self, mini_site_source: SiteSource, mini_site_root: Path
+    ) -> None:
+        treatments: JsonObject = {
+            "meta": {"title": "T", "description": "D", "inNav": False, "navOrder": 0},
+            "rx": {"items": [{"title": "Botox", "body": "Missing the price field"}]},
+        }
+        source = dataclasses.replace(
+            mini_site_source,
+            page_contents={**mini_site_source.page_contents, "treatments": treatments},
+        )
+        result = validate_site(source, mini_site_root)
+        assert any(e.code == "schema" and e.key == "rx.items" for e in result.errors)
+
     def test_sections_cards_special_case(
         self, mini_site_source: SiteSource, mini_site_root: Path
     ) -> None:
