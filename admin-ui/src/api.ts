@@ -15,18 +15,80 @@ export interface PageSummary {
   lastModified: string | null;
 }
 
+/** `PublishStage` mirrors `wixy_server.publisher.PublishStage` exactly (spec/04
+ * §5's `pulling -> merging -> committing -> building -> verifying -> swapping
+ * -> done`, plus `failed`). */
+export type PublishStage =
+  | "pulling"
+  | "merging"
+  | "committing"
+  | "building"
+  | "verifying"
+  | "swapping"
+  | "done"
+  | "failed";
+
+/** `wixy_server.routes_admin_api._publish_job_to_dict`'s exact shape — surfaced
+ * both on `GET /api/admin/state`'s `publishJob` field and every `GET
+ * /api/admin/publish/stream` SSE event. */
+export interface PublishJobData {
+  id: string;
+  stage: PublishStage;
+  log: string[];
+  version: number | null;
+  error: string | null;
+  isRunning: boolean;
+}
+
+export interface UpstreamCommit {
+  sha: string;
+  subject: string;
+  author: string;
+  when: string;
+}
+
 export interface StateResponse {
   project: { slug: string; name: string; domain: string };
   pages: PageSummary[];
   draft: { rev: number; opCount: number };
   live: { version: number; sha: string } | null;
   upstream: {
-    aheadOfPublished: Array<{ sha: string; subject: string; author: string; when: string }>;
+    aheadOfPublished: UpstreamCommit[];
     fetchedAt: string | null;
   };
-  publishJob: JsonValue | null;
+  publishJob: PublishJobData | null;
   chats: JsonValue[];
 }
+
+/** One changed overlay key (`GET /api/admin/publish/preview`'s per-entry
+ * shape) — `kind` is a binding kind (text/img/href/bg/attr/list/if) or the
+ * synthetic `"theme"` for a `theme.json` key (spec/05 §5's "theme token
+ * chips"; theme keys have no `data-wx-*` binding of their own). */
+export interface PublishDiffEntry {
+  key: string;
+  kind: string;
+  old: JsonValue;
+  new: JsonValue;
+}
+
+export interface ValidateError {
+  code: string;
+  message: string;
+  file?: string;
+  key?: string;
+}
+
+export interface PublishPreview {
+  /** Keyed by page slug, `"_global"`, or `"theme"` — same grouping the ledger's
+   * own `changed` summary uses. */
+  changes: Record<string, PublishDiffEntry[]>;
+  validate: { ok: boolean; errors: ValidateError[] };
+}
+
+export type PublishOutcome =
+  | { kind: "ok"; version: number; sha: string }
+  | { kind: "conflict"; message: string }
+  | { kind: "failed"; message: string };
 
 export interface ContentResponse {
   content: Record<string, JsonValue>;
@@ -124,6 +186,18 @@ async function parseJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
+/** Same detail-extraction as `parseJson`, for a response the caller handles as
+ * an expected (not thrown) outcome — `POST /publish`'s 409/502 both carry a
+ * real, specific `detail` message worth showing verbatim (spec/05 §5: "a
+ * failure state with the full error log inline"). */
+async function extractDetail(response: Response, fallback: string): Promise<string> {
+  const detail = await response
+    .json()
+    .then((body: unknown) => (isDetailBody(body) ? body.detail : null))
+    .catch(() => null);
+  return detail ?? fallback;
+}
+
 export interface AdminApi {
   getState(): Promise<StateResponse>;
   getContent(page: string): Promise<ContentResponse>;
@@ -133,6 +207,8 @@ export interface AdminApi {
   uploadMedia(file: File): Promise<MediaItem>;
   deleteMedia(name: string): Promise<{ deleted: boolean }>;
   getTheme(): Promise<ThemeData>;
+  getPublishPreview(): Promise<PublishPreview>;
+  publish(message: string, expectedRev: number): Promise<PublishOutcome>;
 }
 
 export function createApi(): AdminApi {
@@ -183,6 +259,24 @@ export function createApi(): AdminApi {
     async getTheme() {
       const body = await parseJson<{ theme: ThemeData }>(await fetchWithRetry("/api/admin/theme"));
       return body.theme;
+    },
+    async getPublishPreview() {
+      return parseJson<PublishPreview>(await fetchWithRetry("/api/admin/publish/preview"));
+    },
+    async publish(message, expectedRev) {
+      const response = await fetchWithRetry("/api/admin/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, expectedRev }),
+      });
+      if (response.status === 409) {
+        return { kind: "conflict", message: await extractDetail(response, "publish conflict") };
+      }
+      if (response.status === 502) {
+        return { kind: "failed", message: await extractDetail(response, "publish failed") };
+      }
+      const body = await parseJson<{ version: number; sha: string }>(response);
+      return { kind: "ok", version: body.version, sha: body.sha };
     },
   };
 }

@@ -46,12 +46,18 @@
 }
 
 .wx-draft-chip {
-  font-size: 12px;
+  font: 12px/1.4 system-ui, sans-serif;
   color: var(--wx-muted);
   background: var(--wx-canvas);
   border: 1px solid var(--wx-border);
   border-radius: 999px;
   padding: 4px 10px;
+  cursor: pointer;
+}
+
+.wx-draft-chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .wx-publish-button {
@@ -354,6 +360,126 @@
 .wx-og-image-empty {
   color: var(--wx-muted);
   font-size: 12px;
+}
+
+/* -- Publish review drawer (spec/05 §5) ------------------------------------------ */
+
+.wx-drawer-wide {
+  width: 480px;
+}
+
+.wx-diff-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wx-diff-empty {
+  color: var(--wx-muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.wx-diff-group h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  text-transform: capitalize;
+}
+
+.wx-diff-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--wx-border);
+}
+
+.wx-diff-key {
+  flex: none;
+  width: 120px;
+  color: var(--wx-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wx-diff-arrow {
+  flex: none;
+  color: var(--wx-muted);
+}
+
+.wx-diff-value {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
+.wx-diff-thumb {
+  flex: 1;
+  max-width: 64px;
+  max-height: 48px;
+  object-fit: cover;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+}
+
+.wx-diff-upstream,
+.wx-diff-validate {
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: var(--wx-radius);
+  background: var(--wx-canvas);
+  border: 1px solid var(--wx-border);
+}
+
+.wx-diff-validate {
+  border-color: var(--wx-danger);
+  color: var(--wx-danger);
+}
+
+.wx-diff-upstream h4,
+.wx-diff-validate h4 {
+  margin: 0 0 4px;
+  font-size: 12px;
+}
+
+.wx-diff-upstream ul,
+.wx-diff-validate ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.wx-publish-progress {
+  font-size: 13px;
+  color: var(--wx-muted);
+}
+
+.wx-publish-error {
+  font: 12px/1.4 ui-monospace, monospace;
+  color: var(--wx-danger);
+  background: var(--wx-canvas);
+  border: 1px solid var(--wx-danger);
+  border-radius: var(--wx-radius);
+  padding: 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 200px;
+  overflow: auto;
+}
+
+.wx-publish-confirm {
+  font: 600 13px/1 system-ui, sans-serif;
+  padding: 10px 14px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-brand-blue);
+  background: var(--wx-brand-blue);
+  color: #fff;
+  cursor: pointer;
+}
+
+.wx-publish-confirm:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 /* -- Media grid + dialog (spec/05 §4) -------------------------------------------- */

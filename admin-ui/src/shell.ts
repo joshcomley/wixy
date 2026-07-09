@@ -9,10 +9,16 @@ import { createApi, type AdminApi, type StateResponse } from "./api";
 import { mountEditView as mountEditViewReal, type EditView, type MountEditViewDeps } from "./editView";
 import { mountMediaPanel, type MediaPanel } from "./mediaPanel";
 import { OpQueue } from "./opQueue";
-import { mountPageSettingsDrawer, type PageSettingsDrawer } from "./pageSettingsDrawer";
+import { mountPageSettingsDrawer } from "./pageSettingsDrawer";
 import { renderPagesPanel } from "./pagesPanel";
+import { mountPublishDrawer } from "./publishDrawer";
 import { currentRoute, navigateTo, onRouteChange, type Route } from "./router";
 import { mountThemePanel, type ThemePanel } from "./themePanel";
+
+interface Drawer {
+  element: HTMLElement;
+  teardown(): void;
+}
 
 const STATE_RETRY_MS = 5000;
 const TRANSIENT_TOAST_MS = 4000;
@@ -52,14 +58,17 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   titleEl.textContent = "Wixy";
   const spacer = document.createElement("span");
   spacer.className = "wx-topbar-spacer";
-  const chipEl = document.createElement("span");
+  const chipEl = document.createElement("button");
+  chipEl.type = "button";
   chipEl.className = "wx-draft-chip";
+  chipEl.disabled = true;
+  chipEl.addEventListener("click", () => openPublishDrawer());
   const publishButton = document.createElement("button");
   publishButton.type = "button";
   publishButton.className = "wx-publish-button";
   publishButton.textContent = "Publish";
   publishButton.disabled = true;
-  publishButton.title = "Publishing arrives in milestone 9";
+  publishButton.addEventListener("click", () => openPublishDrawer());
   const siteLink = document.createElement("a");
   siteLink.className = "wx-site-link";
   siteLink.textContent = "Site ▸";
@@ -126,6 +135,14 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     chipEl.textContent = parts.join(" · ");
     siteLink.href = `https://${state.project.domain}`;
     siteLink.hidden = false;
+
+    // spec/05 §5: "Publishes are serialized server-side; the UI disables
+    // Publish while one runs" — also true for the chip, the drawer's other
+    // trigger.
+    const publishing = state.publishJob?.isRunning === true;
+    publishButton.disabled = publishing;
+    chipEl.disabled = publishing;
+    publishButton.title = publishing ? "A publish is already running…" : "";
   }
 
   // -- Toasts ---------------------------------------------------------------
@@ -151,24 +168,53 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   }
 
   // -- Drawer -----------------------------------------------------------------
+  // Both drawer kinds share this one slot (never shown together) — switching
+  // triggers (e.g. clicking Publish while page settings is open) closes
+  // whichever is open and opens the newly-requested one, rather than the
+  // single-drawer-era "any drawer open -> just close" toggle.
 
-  let activeDrawer: PageSettingsDrawer | null = null;
+  let activeDrawer: Drawer | null = null;
+  let activeDrawerKind: "pageSettings" | "publish" | null = null;
 
   function closeDrawer(): void {
     if (activeDrawer === null) return;
     activeDrawer.teardown();
     activeDrawer.element.remove();
     activeDrawer = null;
+    activeDrawerKind = null;
   }
 
   function toggleDrawer(page: string): void {
-    if (activeDrawer !== null) {
+    if (activeDrawerKind === "pageSettings") {
       closeDrawer();
       return;
     }
+    closeDrawer();
     if (opQueue === null) return;
     const drawer = mountPageSettingsDrawer(page, { api, opQueue, onClose: closeDrawer });
     activeDrawer = drawer;
+    activeDrawerKind = "pageSettings";
+    container.appendChild(drawer.element);
+  }
+
+  function openPublishDrawer(): void {
+    if (activeDrawerKind === "publish") {
+      closeDrawer();
+      return;
+    }
+    closeDrawer();
+    if (state === null) return;
+    const drawer = mountPublishDrawer({
+      api,
+      expectedRev: state.draft.rev,
+      upstream: state.upstream.aheadOfPublished,
+      onClose: closeDrawer,
+      onPublished: () => {
+        void refreshStateInBackground();
+      },
+    });
+    activeDrawer = drawer;
+    activeDrawerKind = "publish";
     container.appendChild(drawer.element);
   }
 

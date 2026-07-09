@@ -67,6 +67,8 @@ function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
       shadow: "0 18px 44px rgba(62,49,42,.14)",
       fonts: { serif: { family: "Cormorant Garamond", weights: ["400"], italics: true } },
     })),
+    getPublishPreview: vi.fn(async () => ({ changes: {}, validate: { ok: true, errors: [] } })),
+    publish: vi.fn(async () => ({ kind: "ok" as const, version: 1, sha: "a".repeat(40) })),
     ...overrides,
   } as AdminApi;
 }
@@ -306,5 +308,82 @@ describe("mountShell", () => {
     }
 
     expect(editView.applyOpsCalls).toEqual([[{ file: "index", path: "hero.title", value: "New" }]]);
+  });
+
+  it("clicking the Publish button opens the publish drawer", async () => {
+    const api = fakeApi();
+    const win = fakeWindow();
+    const container = document.createElement("div");
+
+    mountShell(container, { api, win });
+    await flushState(api);
+
+    container.querySelector<HTMLButtonElement>(".wx-publish-button")?.click();
+    await Promise.resolve();
+
+    expect(container.querySelector(".wx-drawer-wide")).not.toBeNull();
+    expect(api.getPublishPreview).toHaveBeenCalled();
+  });
+
+  it("clicking the draft-status chip also opens the publish drawer", async () => {
+    const api = fakeApi();
+    const win = fakeWindow();
+    const container = document.createElement("div");
+
+    mountShell(container, { api, win });
+    await flushState(api);
+
+    container.querySelector<HTMLButtonElement>(".wx-draft-chip")?.click();
+    await Promise.resolve();
+
+    expect(container.querySelector(".wx-drawer-wide")).not.toBeNull();
+  });
+
+  it("the Publish button and chip are disabled while a publish is already running", async () => {
+    const api = fakeApi({
+      getState: vi.fn(async () =>
+        fakeState({
+          publishJob: {
+            id: "job-1",
+            stage: "building",
+            log: [],
+            version: null,
+            error: null,
+            isRunning: true,
+          },
+        }),
+      ),
+    });
+    const win = fakeWindow();
+    const container = document.createElement("div");
+
+    mountShell(container, { api, win });
+    await flushState(api);
+
+    const publishButton = container.querySelector<HTMLButtonElement>(".wx-publish-button");
+    const chip = container.querySelector<HTMLButtonElement>(".wx-draft-chip");
+    expect(publishButton?.disabled).toBe(true);
+    expect(chip?.disabled).toBe(true);
+  });
+
+  it("opening the publish drawer while page settings is open switches to it", async () => {
+    const api = fakeApi();
+    const win = fakeWindow();
+    const container = document.createElement("div");
+
+    mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+    await flushState(api);
+    win.location.hash = "#/edit/index";
+    await Promise.resolve();
+
+    container.querySelector<HTMLButtonElement>(".wx-page-settings-trigger")?.click();
+    await Promise.resolve();
+    expect(container.querySelectorAll(".wx-drawer")).toHaveLength(1);
+    expect(container.querySelector(".wx-drawer-wide")).toBeNull();
+
+    container.querySelector<HTMLButtonElement>(".wx-publish-button")?.click();
+    await Promise.resolve();
+    expect(container.querySelectorAll(".wx-drawer")).toHaveLength(1);
+    expect(container.querySelector(".wx-drawer-wide")).not.toBeNull();
   });
 });

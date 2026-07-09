@@ -97,6 +97,7 @@ def _publish_job_to_dict(job: PublishJob) -> JsonObject:
         "log": list(job.log),
         "version": job.version,
         "error": job.error,
+        "isRunning": job.is_running,
     }
 
 
