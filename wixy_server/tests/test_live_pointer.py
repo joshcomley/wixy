@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from builder.content import write_json_canonical
-from wixy_server.live_pointer import LivePointer, load_live_pointer
+from wixy_server.live_pointer import LivePointer, load_live_pointer, save_live_pointer
 from wixy_server.storage import ProjectPaths, project_paths
 
 
@@ -50,3 +50,24 @@ class TestLoadLivePointer:
         paths.root.mkdir(parents=True)
         paths.live_json.write_text(json.dumps({"sha": "c" * 40, "version": True}), encoding="utf-8")
         assert load_live_pointer(paths) is None
+
+
+class TestSaveLivePointer:
+    def test_round_trips_through_load(self, paths: ProjectPaths) -> None:
+        sha = "d" * 40
+        save_live_pointer(paths, sha, 5)
+        pointer = load_live_pointer(paths)
+        assert pointer == LivePointer(sha=sha, version=5, build_dir=paths.build_dir(sha))
+
+    def test_overwrites_a_previous_pointer(self, paths: ProjectPaths) -> None:
+        save_live_pointer(paths, "e" * 40, 1)
+        save_live_pointer(paths, "f" * 40, 2)
+        pointer = load_live_pointer(paths)
+        assert pointer is not None
+        assert pointer.version == 2
+        assert pointer.sha == "f" * 40
+
+    def test_leaves_no_tmp_file_behind(self, paths: ProjectPaths) -> None:
+        save_live_pointer(paths, "a" * 40, 1)
+        leftovers = [p for p in paths.root.iterdir() if p.name != "live.json"]
+        assert leftovers == []

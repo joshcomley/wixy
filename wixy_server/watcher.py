@@ -1,13 +1,16 @@
 """Upstream watcher (spec/04-server.md §7): keeps the site-repo checkout fast-forwarded
 to `origin/<default_branch>` in the background, so request-serving code (the preview
-route; later the publisher) never pays a network `git fetch` inline — spec/04 §4's
-<150ms render budget depends on the checkout already being fresh by the time a preview
+route, the publisher) never pays a network `git fetch` inline — spec/04 §4's <150ms
+render budget depends on the checkout already being fresh by the time a preview
 request arrives, not on the request itself fetching.
 
-State exposure (`{aheadOfPublished, fetchedAt}` via `/api/admin/state`) and coordinating
-with the publish lock are later-slice concerns (that route and lock don't exist yet —
-M9/slice 4). This module owns exactly the fetch-loop mechanics spec/04 §7 describes;
-later work wires its result into more surface, it doesn't change this loop.
+Skips its tick entirely while a publish is in flight (`paths.publish_lock` exists,
+written/removed by `wixy_server.publisher.run_publish` for the pipeline's duration) —
+spec/04 §7: "fast-forward the working tree to origin/main... (taking the publish
+lock; skipped while a publish/materialize is in flight)". This closes
+decisions/00013's own flagged gap: a background fetch racing a publish's uncommitted
+materialize/commit work could otherwise fast-forward the working tree out from under
+it mid-pipeline.
 """
 
 from __future__ import annotations
@@ -44,7 +47,14 @@ def fetch_once(
     project: ProjectConfig, paths: ProjectPaths, status: WatcherStatus | None = None
 ) -> None:
     """One fetch-and-fast-forward attempt. Synchronous (git subprocess I/O) — callers
-    on the event loop must run it via `anyio.to_thread.run_sync`."""
+    on the event loop must run it via `anyio.to_thread.run_sync`.
+
+    A no-op while `paths.publish_lock` exists (spec/04 §7) — checked BEFORE calling
+    `ensure_checkout` at all, so this tick doesn't even attempt a fetch/merge while
+    the publisher owns the working tree; the next tick (after the lock is released)
+    picks up wherever the publish's own fetch/merge left the checkout."""
+    if paths.publish_lock.exists():
+        return
     try:
         ensure_checkout(project.repo, project.default_branch, paths.repo)
     except CheckoutError as exc:
