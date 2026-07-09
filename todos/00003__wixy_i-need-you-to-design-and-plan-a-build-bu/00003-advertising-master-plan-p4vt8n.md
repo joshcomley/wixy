@@ -32,8 +32,15 @@ State:
 - Two Sonnet 5 research agents running (2026-07-08 evening): local channel landscape
   (press/groups/registers/competitors/partnerships) + paid mechanics & UK regulatory
   (CAP/ASA POM ban, 18+ rules, Meta/Google policies, benchmarks, measurement).
-- NEXT: synthesize their verified findings into `advertising/01-channel-playbook.md` +
-  `advertising/02-regulatory-guardrails.md`, reconcile 00, ship PR.
+- DONE 2026-07-09: all three research lanes complete (paid/regulatory; FB-IG posts
+  audit incl. 20 screenshots; local landscape — that agent twice completed without
+  notifying, recovered via SendMessage + write-report-to-file). `01-channel-playbook.md`
+  + `02-regulatory-guardrails.md` written from verified findings; 00/03 reconciled.
+  Raw reports: `advertising/research/`.
+- KEY external findings for the operator: local Meta auction EMPTY (9/9 clinics zero
+  ads); live Wix site is a "Coming Soon" placeholder shell (blocks all paid spend until
+  cutover); "wrinkle relaxing" label + one Botox-naming Reel are compliance actions;
+  Save Face register gap; verified print rate cards (Wyre Forest Matters £70/½pg/mo).
 - LATER (phase B, after CMS build completes): write the Adverts-module build spec (same
   rigor as spec/ — verified Meta/Google API facts, Business Manager prerequisites) and
   commission it.
