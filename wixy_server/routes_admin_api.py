@@ -6,12 +6,16 @@ of scope until their milestone).
 
 from __future__ import annotations
 
+import json
+import uuid
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
 import anyio
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from builder.bindings_map import bindings_map_to_dict, extract_bindings_map
@@ -21,6 +25,7 @@ from builder.jsontypes import JsonObject, JsonValue
 from builder.render import SiteSource
 from builder.theme import theme_to_dict
 from wixy_server.checkout import CheckoutError, UpstreamCommit, commits_ahead, current_sha
+from wixy_server.ledger import read_ledger
 from wixy_server.live_pointer import load_live_pointer
 from wixy_server.media import (
     MediaNotFoundError,
@@ -43,6 +48,7 @@ from wixy_server.overlay import (
     load_overlay,
     save_overlay,
 )
+from wixy_server.publisher import PublishError, PublishJob, PublishResult, run_publish
 from wixy_server.site_source import build_site_source
 from wixy_server.storage import ProjectPaths
 from wixy_server.watcher import WatcherStatus
@@ -82,8 +88,21 @@ def _last_modified_for_page(overlay: Overlay, slug: str) -> str | None:
     return max(timestamps) if timestamps else None
 
 
+def _publish_job_to_dict(job: PublishJob) -> JsonObject:
+    return {
+        "id": job.id,
+        "stage": job.stage,
+        "log": list(job.log),
+        "version": job.version,
+        "error": job.error,
+    }
+
+
 def _build_state(
-    project: ProjectConfig, paths: ProjectPaths, watcher_status: WatcherStatus
+    project: ProjectConfig,
+    paths: ProjectPaths,
+    watcher_status: WatcherStatus,
+    publish_job: PublishJob | None,
 ) -> JsonObject:
     source = build_site_source(project, paths.repo)
     overlay = _load_overlay_for(paths)
@@ -123,7 +142,7 @@ def _build_state(
         "draft": {"rev": overlay.rev, "opCount": len(overlay.ops)},
         "live": live,
         "upstream": upstream,
-        "publishJob": None,  # milestone 9 — publish pipeline doesn't exist yet
+        "publishJob": _publish_job_to_dict(publish_job) if publish_job is not None else None,
         "chats": [],  # milestone 10 — AI chat doesn't exist yet
     }
 
@@ -133,8 +152,11 @@ async def get_state(request: Request) -> JsonObject:
     project: ProjectConfig = request.app.state.project
     paths: ProjectPaths = request.app.state.paths
     watcher_status: WatcherStatus = request.app.state.watcher_status
+    publish_job: PublishJob | None = request.app.state.publish_job
     try:
-        return await anyio.to_thread.run_sync(_build_state, project, paths, watcher_status)
+        return await anyio.to_thread.run_sync(
+            _build_state, project, paths, watcher_status, publish_job
+        )
     except CheckoutError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -377,3 +399,100 @@ async def delete_media(name: str, request: Request) -> dict[str, bool]:
     except MediaReferencedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"deleted": True}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/admin/publish, GET /api/admin/publish/stream, GET /api/admin/publishes
+# (milestone 9 slice 2 — restore is slice 3, not built here)
+# ---------------------------------------------------------------------------
+
+
+class PublishIn(BaseModel):
+    message: str
+    expectedRev: int
+
+
+_PUBLISH_STREAM_POLL_S = 0.25
+
+
+@router.post("/publish", response_model=None)
+async def start_publish(body: PublishIn, request: Request) -> JsonObject:
+    project: ProjectConfig = request.app.state.project
+    paths: ProjectPaths = request.app.state.paths
+    previous: PublishJob | None = request.app.state.publish_job
+    if previous is not None and previous.is_running:
+        raise HTTPException(
+            status_code=409, detail=f"a publish is already running (job {previous.id})"
+        )
+
+    job = PublishJob(id=uuid.uuid4().hex)
+    request.app.state.publish_job = job
+    now = datetime.now(UTC).isoformat()
+
+    def _run() -> PublishResult:
+        return run_publish(
+            project,
+            paths,
+            message=body.message,
+            expected_rev=body.expectedRev,
+            now=now,
+            job=job,
+        )
+
+    try:
+        result = await anyio.to_thread.run_sync(_run)
+    except RevConflictError as exc:
+        # `run_publish`'s own contract: this is raised before the job is considered
+        # to have started at all (job.stage/error untouched) — roll the app-wide
+        # slot back to whatever it was, or a stale "pulling"-forever job would
+        # permanently read `is_running=True` and 409-lock every future attempt.
+        request.app.state.publish_job = previous
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (PublishError, CheckoutError, BuildError) as exc:
+        # The pipeline ran and failed at some stage — `run_publish` has already
+        # recorded `job.stage="failed"`/`job.error` before re-raising, so the job
+        # object left on `app.state` already reflects this for the SSE stream /
+        # `GET state`; nothing to roll back here.
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"version": result.version, "sha": result.sha}
+
+
+@router.get("/publish/stream")
+async def publish_stream(request: Request) -> StreamingResponse:
+    app_state = request.app.state
+
+    async def _events() -> AsyncIterator[str]:
+        last_payload: str | None = None
+        while True:
+            job: PublishJob | None = app_state.publish_job
+            if job is None:
+                yield f"data: {json.dumps({'stage': None})}\n\n"
+                return
+            payload = json.dumps(_publish_job_to_dict(job))
+            if payload != last_payload:
+                yield f"data: {payload}\n\n"
+                last_payload = payload
+            if not job.is_running:
+                return
+            await anyio.sleep(_PUBLISH_STREAM_POLL_S)
+
+    return StreamingResponse(_events(), media_type="text/event-stream")
+
+
+@router.get("/publishes", response_model=None)
+async def get_publishes(request: Request, limit: int | None = None) -> JsonObject:
+    paths: ProjectPaths = request.app.state.paths
+    try:
+        entries = await anyio.to_thread.run_sync(read_ledger, paths)
+    except CheckoutError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    newest_first = list(reversed(entries))
+    if limit is not None:
+        newest_first = newest_first[:limit]
+    live_pointer = load_live_pointer(paths)
+    live_version = live_pointer.version if live_pointer is not None else None
+    return {
+        "publishes": [
+            {**entry.to_dict(), "live": entry.version == live_version} for entry in newest_first
+        ]
+    }

@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from wixy_server.app import create_app
+from wixy_server.publisher import PublishJob
 from wixy_server.storage import ProjectPaths, project_paths
 
 _INDEX_HTML = """<!DOCTYPE html>
@@ -150,6 +151,33 @@ def origin_repo_with_theme(tmp_path: Path) -> Path:
 def wixy_repo_root_themed(tmp_path: Path, origin_repo_with_theme: Path) -> Path:
     root = tmp_path / "wixy-repo-themed"
     _write_project_registry(root, origin_repo_with_theme)
+    return root
+
+
+@pytest.fixture
+def bare_origin_repo(tmp_path: Path) -> Path:
+    """A genuine bare repo (spec/08 §1), unlike `origin_repo` above — the publish
+    tests below actually PUSH into this origin, and a normal (non-bare) repo
+    refuses a push into its own currently-checked-out branch."""
+    bare_dir = tmp_path / "origin.git"
+    bare_dir.mkdir(parents=True)
+    _git(["init", "--bare", "--initial-branch=main"], bare_dir)
+
+    seed = tmp_path / "seed"
+    _git(["clone", str(bare_dir), str(seed)], tmp_path)
+    _git(["config", "user.email", "seed@example.com"], seed)
+    _git(["config", "user.name", "Seed"], seed)
+    _write_site_repo(seed)
+    _git(["add", "."], seed)
+    _git(["commit", "-m", "initial"], seed)
+    _git(["push", "origin", "main"], seed)
+    return bare_dir
+
+
+@pytest.fixture
+def wixy_repo_root_bare(tmp_path: Path, bare_origin_repo: Path) -> Path:
+    root = tmp_path / "wixy-repo-bare"
+    _write_project_registry(root, bare_origin_repo)
     return root
 
 
@@ -697,3 +725,196 @@ class TestDeleteMedia:
     # defense-in-depth against a raw/non-normalizing client — but it means this
     # class of input has to be tested directly against that function
     # (test_media.py), not through the HTTP layer, which can't reproduce it.
+
+
+def _current_rev(client: TestClient) -> int:
+    result: int = client.get("/api/admin/state").json()["draft"]["rev"]
+    return result
+
+
+class TestPostPublish:
+    def test_publishes_and_returns_the_new_version(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [{"file": "index", "path": "hero.title", "value": "Published Title"}],
+                },
+            )
+            response = client.post(
+                "/api/admin/publish",
+                json={"message": "test publish", "expectedRev": _current_rev(client)},
+            )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["version"] == 1
+        assert isinstance(body["sha"], str) and len(body["sha"]) == 40
+
+    def test_a_stale_expected_rev_is_409_and_does_not_stick_the_job(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            stale_response = client.post(
+                "/api/admin/publish",
+                json={"message": "test", "expectedRev": 99},
+            )
+            assert stale_response.status_code == 409
+            # A rev-conflict must not leave a permanently-"running" job stuck on
+            # app.state (run_publish's own contract: the job never "started" for
+            # this case) — a subsequent, correctly-revved publish must still go
+            # through rather than 409-locking forever.
+            good_response = client.post(
+                "/api/admin/publish",
+                json={"message": "test", "expectedRev": _current_rev(client)},
+            )
+        assert good_response.status_code == 200
+
+    def test_a_second_request_while_one_is_running_gets_409(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            app.state.publish_job = PublishJob(id="already-running", stage="building")
+            response = client.post(
+                "/api/admin/publish",
+                json={"message": "test", "expectedRev": 0},
+            )
+        assert response.status_code == 409
+        assert "already-running" in response.json()["detail"]
+
+    def test_a_pipeline_failure_is_502_with_the_error_in_the_body(
+        self, storage_root: Path, tmp_path: Path
+    ) -> None:
+        # A repo path that was never git-inited — `ensure_checkout` fails cleanly
+        # with `CheckoutError`, which `run_publish` wraps as `PublishError` (a
+        # real, reproducible pipeline failure without a multi-clone race setup).
+        broken_repo_root = tmp_path / "wixy-repo-broken"
+        _write_project_registry(broken_repo_root, tmp_path / "no-such-origin")
+        app = create_app(storage_root=storage_root, wixy_repo_root=broken_repo_root)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/publish",
+                json={"message": "test", "expectedRev": 0},
+            )
+        assert response.status_code == 502
+        assert "detail" in response.json()
+
+    def test_get_state_reflects_the_finished_job(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            client.post(
+                "/api/admin/publish",
+                json={"message": "test", "expectedRev": _current_rev(client)},
+            )
+            state = client.get("/api/admin/state").json()
+        assert state["publishJob"]["stage"] == "done"
+        assert state["publishJob"]["version"] == 1
+
+
+class TestPublishStream:
+    def test_with_no_job_emits_a_null_stage_event_and_closes(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/admin/publish/stream")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        assert 'data: {"stage": null}' in response.text
+
+    def test_with_a_finished_job_emits_its_terminal_state(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            app.state.publish_job = PublishJob(
+                id="job-1", stage="done", version=3, log=["published as version 3"]
+            )
+            response = client.get("/api/admin/publish/stream")
+        assert response.status_code == 200
+        assert '"stage": "done"' in response.text
+        assert '"version": 3' in response.text
+
+
+class TestGetPublishes:
+    def test_empty_when_nothing_ever_published(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/admin/publishes")
+        assert response.status_code == 200
+        assert response.json() == {"publishes": []}
+
+    def test_lists_newest_first_and_marks_the_live_one(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [{"file": "index", "path": "hero.title", "value": "V1"}],
+                },
+            )
+            client.post(
+                "/api/admin/publish",
+                json={"message": "first", "expectedRev": _current_rev(client)},
+            )
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [{"file": "index", "path": "hero.title", "value": "V2"}],
+                },
+            )
+            client.post(
+                "/api/admin/publish",
+                json={"message": "second", "expectedRev": _current_rev(client)},
+            )
+            response = client.get("/api/admin/publishes")
+        body = response.json()["publishes"]
+        assert [p["version"] for p in body] == [2, 1]
+        assert body[0]["live"] is True
+        assert body[1]["live"] is False
+        assert body[0]["message"] == "second"
+
+    def test_limit_caps_the_returned_count(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [{"file": "index", "path": "hero.title", "value": "V1"}],
+                },
+            )
+            client.post(
+                "/api/admin/publish",
+                json={"message": "first", "expectedRev": _current_rev(client)},
+            )
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [{"file": "index", "path": "hero.title", "value": "V2"}],
+                },
+            )
+            client.post(
+                "/api/admin/publish",
+                json={"message": "second", "expectedRev": _current_rev(client)},
+            )
+            response = client.get("/api/admin/publishes?limit=1")
+        body = response.json()["publishes"]
+        assert len(body) == 1
+        assert body[0]["version"] == 2

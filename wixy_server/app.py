@@ -20,6 +20,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from wixy_server.auth import JwksCache, build_admin_auth_middleware, jwks_url
+from wixy_server.publisher import PublishJob
 from wixy_server.registry import load_registry
 from wixy_server.routes_admin_api import router as admin_api_router
 from wixy_server.routes_internal import router as internal_router
@@ -64,6 +65,7 @@ def create_app(
     paths = project_paths(storage_root, project.slug)
     ensure_project_dirs(paths)
     watcher_status = WatcherStatus()
+    publish_job: PublishJob | None = None
 
     jwks = JwksCache(
         fetch=functools.partial(_fetch_jwks, settings.cf_access_team_domain),
@@ -99,6 +101,7 @@ def create_app(
     app.state.paths = paths
     app.state.settings = settings
     app.state.watcher_status = watcher_status
+    app.state.publish_job = publish_job
     app.state.wixy_repo_root = wixy_repo_root
 
     app.middleware("http")(admin_auth)
