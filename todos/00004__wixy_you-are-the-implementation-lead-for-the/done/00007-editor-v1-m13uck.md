@@ -44,10 +44,19 @@ precedent:
   `data-wx-if` eye toggle having no code that ever inserted one into a real
   page. Full decision log: decisions/00018 — includes the real-browser
   verification evidence (Playwright against a live dev server + the actual
-  public CA repo, zero console/page errors end-to-end). PR #29 (open, CI
+  public CA repo, zero console/page errors end-to-end). PR #29 merged.
+- Slice 4 [DONE]: `e2e/tests/concurrent-editing.spec.ts` — real E2E 8 (spec/08 §2)
+  replacing `smoke.spec.ts`'s placeholder, run against a real full-stack fixture
+  server (`e2e/fixture_server.py`, new: temp git repo from `builder/tests/
+  fixtures/mini-site`, a real published build so preview assets don't 503, a
+  real `wixy_server` on an ephemeral port). Two tabs edit different fields on
+  the same page; tab A's PATCH is deterministically delayed via Playwright
+  route interception so the rev-conflict/409/replay path is forced and proven,
+  not left to timing luck. `.github/workflows/ci.yml`'s `e2e` job gained Python
+  setup (it had none). Full rationale: decisions/00019. PR #30 (open, CI
   pending).
-- Slice 4 [not started]: full integration wiring, E2E 8 (concurrent editing) as a
-  real Playwright test, CI green (tsc/vitest/esbuild/bundle-drift), closing decision.
+
+**Milestone 7 (Editor v1) is now fully DONE — all 4 slices merged.**
 
 ## Relevant files
 - spec/05-editor.md §1-2 (shell layout, edit mode, overlay<->shell protocol, selection
