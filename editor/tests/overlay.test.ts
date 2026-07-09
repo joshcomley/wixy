@@ -3,7 +3,7 @@ import { initOverlay } from "../src/overlay";
 import type { OverlayToShellMessage, PageBindings } from "../src/protocol";
 
 interface FakeWindow {
-  location: { origin: string };
+  location: { origin: string; href: string };
   parent: { postMessage: (message: unknown, origin: string) => void };
   addEventListener: (type: string, listener: (event: Event) => void) => void;
   removeEventListener: (type: string, listener: (event: Event) => void) => void;
@@ -11,6 +11,7 @@ interface FakeWindow {
 
 interface Harness {
   win: Window;
+  fake: FakeWindow;
   sent: OverlayToShellMessage[];
   dispatchShellMessage: (data: unknown) => void;
   teardown: () => void;
@@ -20,7 +21,7 @@ function createHarness(): Omit<Harness, "teardown"> & { start: () => () => void 
   const listeners = new Map<string, Set<(event: Event) => void>>();
   const sent: OverlayToShellMessage[] = [];
   const fake: FakeWindow = {
-    location: { origin: "https://wixy.test" },
+    location: { origin: "https://wixy.test", href: "https://wixy.test/admin/preview/index.html" },
     parent: {
       postMessage: (message) => {
         sent.push(message as OverlayToShellMessage);
@@ -39,7 +40,7 @@ function createHarness(): Omit<Harness, "teardown"> & { start: () => () => void 
     const event = { origin: "https://wixy.test", data } as MessageEvent;
     listeners.get("message")?.forEach((l) => l(event));
   };
-  return { win, sent, dispatchShellMessage, start: () => initOverlay(win) };
+  return { win, fake, sent, dispatchShellMessage, start: () => initOverlay(win) };
 }
 
 /** Starts the overlay against the fake window and immediately delivers `init`. */
@@ -47,7 +48,13 @@ function initFor(page: string, bindings: PageBindings, draftRev = 0): Harness {
   const harness = createHarness();
   const teardown = harness.start();
   harness.dispatchShellMessage({ wx: 1, type: "init", page, bindings, draftRev });
-  return { win: harness.win, sent: harness.sent, dispatchShellMessage: harness.dispatchShellMessage, teardown };
+  return {
+    win: harness.win,
+    fake: harness.fake,
+    sent: harness.sent,
+    dispatchShellMessage: harness.dispatchShellMessage,
+    teardown,
+  };
 }
 
 describe("initOverlay", () => {
@@ -265,6 +272,110 @@ describe("initOverlay", () => {
         path: "hero.hideExtra",
         value: true,
       });
+      teardown();
+    });
+  });
+
+  describe("data-wx-if eye toggle auto-injection", () => {
+    it("inserts a toggle button into a hidden section that doesn't already have one", () => {
+      root.innerHTML = `<section data-wx-if="hero.showBadge" data-wx-hidden="1"><p>Badge</p></section>`;
+      const { teardown } = initFor("index", { page: "index", fields: [] });
+
+      const toggle = root.querySelector("section > .wx-if-eye-toggle");
+      expect(toggle).not.toBeNull();
+      teardown();
+    });
+
+    it("does not insert a second toggle when one is already present", () => {
+      root.innerHTML = `
+        <section data-wx-if="hero.showBadge" data-wx-hidden="1">
+          <button class="wx-if-eye-toggle" type="button">eye</button>
+        </section>`;
+      const { teardown } = initFor("index", { page: "index", fields: [] });
+
+      expect(root.querySelectorAll(".wx-if-eye-toggle")).toHaveLength(1);
+      teardown();
+    });
+
+    it("clicking an auto-injected toggle on an element that is ALSO a link binding only toggles visibility (no popover)", () => {
+      // The real fixture nests this CTA pattern (same element both if-bound and
+      // href-bound) inside a list item, where the if-key is item-scoped
+      // (builder/tests/fixtures/mini-site/pages/index.html's ".book"/".bookHref").
+      // A page-scope key exercises the identical event-conflict concern (does the
+      // toggle click ALSO open the link popover?) without needing that list
+      // context — item-scoped emission itself is covered by "data-wx-if eye
+      // toggle" > "clicking the eye toggle flips data-wx-hidden..." above.
+      root.innerHTML = `<a data-wx-if="hero.showBook" data-wx-href="hero.bookHref" data-wx-hidden="1">Book</a>`;
+      const { sent, teardown } = initFor("index", { page: "index", fields: [] });
+
+      root
+        .querySelector(".wx-if-eye-toggle")
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+      expect(root.querySelector("a")?.hasAttribute("data-wx-hidden")).toBe(false);
+      expect(sent.at(-1)).toEqual({
+        wx: 1,
+        type: "op",
+        file: "index",
+        path: "hero.showBook",
+        value: true,
+      });
+      expect(document.querySelector(".wx-popover")).toBeNull();
+      teardown();
+    });
+  });
+
+  describe("internal/external link navigation", () => {
+    it("intercepts a same-origin page link, notifies the shell, and rewrites the iframe to the preview equivalent", () => {
+      root.innerHTML = `<nav><a href="/about.html">About</a></nav>`;
+      const anchor = root.querySelector("a") as HTMLAnchorElement;
+      const { sent, fake, teardown } = initFor("index", { page: "index", fields: [] });
+
+      const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+      anchor.dispatchEvent(event);
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(sent.at(-1)).toEqual({ wx: 1, type: "navigate", page: "about" });
+      expect(fake.location.href).toBe("/admin/preview/about.html");
+      teardown();
+    });
+
+    it("treats the home link (/) as the index page", () => {
+      root.innerHTML = `<nav><a href="/">Home</a></nav>`;
+      const anchor = root.querySelector("a") as HTMLAnchorElement;
+      const { sent, teardown } = initFor("about", { page: "about", fields: [] });
+
+      anchor.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+      expect(sent.at(-1)).toEqual({ wx: 1, type: "navigate", page: "index" });
+      teardown();
+    });
+
+    it("treats a different-origin link as external: no navigation, a toast instead", () => {
+      root.innerHTML = `<a href="https://example.com/other">Elsewhere</a>`;
+      const anchor = root.querySelector("a") as HTMLAnchorElement;
+      const { sent, fake, teardown } = initFor("index", { page: "index", fields: [] });
+      const originalHref = fake.location.href;
+
+      const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+      anchor.dispatchEvent(event);
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(sent.some((m) => m.type === "navigate")).toBe(false);
+      expect(fake.location.href).toBe(originalHref);
+      expect(document.querySelector(".wx-toast")?.textContent).toBe("External link");
+      teardown();
+    });
+
+    it("does not intercept a data-wx-href BINDING (that's an editable field, routed to the link popover)", () => {
+      root.innerHTML = `<a data-wx-href="cta.href" href="/about.html">CTA</a>`;
+      const anchor = root.querySelector("a") as HTMLAnchorElement;
+      const { sent, teardown } = initFor("index", { page: "index", fields: [] });
+
+      anchor.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+      expect(sent.some((m) => m.type === "navigate")).toBe(false);
+      expect(document.querySelector(".wx-popover")).not.toBeNull();
       teardown();
     });
   });

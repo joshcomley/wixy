@@ -17,6 +17,7 @@ import {
 } from "./dom";
 import { applyListStructuralOp, type ListStructuralOp } from "./listOps";
 import { onShellMessage, sendToShell } from "./messaging";
+import { resolveInternalPageSlug, showToast } from "./navigation";
 import { directOpTarget, findOutermostList, isItemScopeKey } from "./opTargeting";
 import {
   buildImagePopover,
@@ -306,10 +307,38 @@ export function initOverlay(win: Window = window): () => void {
 
   function handleClick(event: Event): void {
     if (!(event.target instanceof Element)) return;
+    if (event.target.closest(".wx-if-eye-toggle") !== null) return; // owned by handleIfToggleClick
+
     const bound = closestBoundElement(event.target);
-    if (bound === null || bound.kind === "list") return;
+    if (bound !== null) {
+      if (bound.kind === "list") return;
+      event.preventDefault();
+      openPopoverFor(bound);
+      return;
+    }
+
+    handlePlainAnchorClick(event, event.target);
+  }
+
+  // -- Internal/external link interception ----------------------------------------------------------
+  //
+  // Only reached for anchors `closestBoundElement` didn't already claim — i.e. an
+  // anchor with no data-wx-href of its own (nav links, footer/header partial
+  // links, any plain content link outside the bindings system). A data-wx-href
+  // anchor is an EDITABLE binding (routed above into the link popover); this is
+  // for genuine browsing clicks (spec/05 §2).
+
+  function handlePlainAnchorClick(event: Event, target: Element): void {
+    const anchor = target.closest("a[href]");
+    if (anchor === null) return;
+    const slug = resolveInternalPageSlug(anchor, win);
     event.preventDefault();
-    openPopoverFor(bound);
+    if (slug === null) {
+      showToast("External link");
+      return;
+    }
+    sendToShell({ wx: 1, type: "navigate", page: slug }, win);
+    win.location.href = `/admin/preview/${slug}.html`;
   }
 
   // -- data-wx-if eye toggle ----------------------------------------------------------
@@ -327,6 +356,29 @@ export function initOverlay(win: Window = window): () => void {
     const wasFalsy = el.hasAttribute("data-wx-hidden");
     const newTruthy = wasFalsy; // click flips falsy -> truthy and vice versa
     commitEdit({ element: el, key: bareKey, kind: "if" }, negated ? !newTruthy : newTruthy);
+  }
+
+  /** Inserts the eye-toggle button as a CHILD of the bound element itself (not a
+   * document.body-mounted floater like the hover chip/item toolbar) so
+   * `handleIfToggleClick`'s `trigger.closest("[data-wx-if]")` lookup resolves
+   * regardless of hover state. Idempotent — safe to call on an element that
+   * already has one (e.g. a list item cloned via duplicate/add, which carries its
+   * source item's toggle along with the rest of its subtree). CSS shows the
+   * button only while the element actually carries `data-wx-hidden` (spec/05 §2:
+   * "40% opacity + an eye toggle... when falsy"), so it's inserted unconditionally
+   * up front — the element can be toggled hidden again later without a re-scan. */
+  function ensureIfToggle(el: Element): void {
+    if (el.querySelector(":scope > .wx-if-eye-toggle") !== null) return;
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "wx-if-eye-toggle";
+    toggle.setAttribute("aria-label", "Show hidden section");
+    toggle.textContent = "\u{1F441}\u{FE0F}"; // eye
+    el.insertBefore(toggle, el.firstChild);
+  }
+
+  function ensureIfToggles(): void {
+    document.querySelectorAll("[data-wx-if]").forEach(ensureIfToggle);
   }
 
   // -- List item structural toolbar ----------------------------------------------------------
@@ -451,6 +503,8 @@ export function initOverlay(win: Window = window): () => void {
         return;
     }
   }, win);
+
+  ensureIfToggles();
 
   document.addEventListener("mouseover", handlePointerOver);
   document.addEventListener("mouseout", handlePointerOut);
