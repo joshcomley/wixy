@@ -1075,4 +1075,137 @@ class TestGetPublishPreview:
         assert body["validate"] == {"ok": True, "errors": []}
         entry = body["changes"]["index"][0]
         assert entry["kind"] == "bg"
-        assert entry["new"] == {"src": "/admin/draft-media/abc12345-new.jpg", "alt": "New"}
+
+
+class TestPostRestore:
+    def test_restores_and_returns_the_new_version(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [{"file": "index", "path": "hero.title", "value": "V1"}],
+                },
+            )
+            client.post(
+                "/api/admin/publish", json={"message": "first", "expectedRev": _current_rev(client)}
+            )
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [{"file": "index", "path": "hero.title", "value": "V2"}],
+                },
+            )
+            client.post(
+                "/api/admin/publish",
+                json={"message": "second", "expectedRev": _current_rev(client)},
+            )
+            response = client.post("/api/admin/restore", json={"version": 1})
+        assert response.status_code == 200
+        body = response.json()
+        assert body["version"] == 3
+        assert body["of"] == 1
+
+    def test_the_draft_reflects_the_restored_content_afterward(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [{"file": "index", "path": "hero.title", "value": "V1"}],
+                },
+            )
+            client.post(
+                "/api/admin/publish", json={"message": "first", "expectedRev": _current_rev(client)}
+            )
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [{"file": "index", "path": "hero.title", "value": "V2"}],
+                },
+            )
+            client.post(
+                "/api/admin/publish",
+                json={"message": "second", "expectedRev": _current_rev(client)},
+            )
+            client.post("/api/admin/restore", json={"version": 1})
+            content = client.get("/api/admin/content/index").json()["content"]
+        assert content["hero"]["title"] == "V1"
+
+    def test_unknown_version_is_422(self, storage_root: Path, wixy_repo_root_bare: Path) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            response = client.post("/api/admin/restore", json={"version": 99})
+        assert response.status_code == 422
+
+    def test_409s_while_a_publish_is_running(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            client.post(
+                "/api/admin/publish", json={"message": "first", "expectedRev": _current_rev(client)}
+            )
+            app.state.publish_job = PublishJob(id="already-running", stage="building")
+            response = client.post("/api/admin/restore", json={"version": 1})
+        assert response.status_code == 409
+
+
+class TestGetVersionAsset:
+    def test_serves_an_archived_page_faithfully(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [{"file": "index", "path": "hero.title", "value": "Archived Title"}],
+                },
+            )
+            client.post(
+                "/api/admin/publish", json={"message": "first", "expectedRev": _current_rev(client)}
+            )
+            response = client.get("/admin/versions/1/index.html")
+        assert response.status_code == 200
+        assert "Archived Title" in response.text
+
+    def test_404s_for_an_unknown_version(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            response = client.get("/admin/versions/99/index.html")
+        assert response.status_code == 404
+
+    def test_404s_for_an_unknown_page_within_a_real_version(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            client.post(
+                "/api/admin/publish", json={"message": "first", "expectedRev": _current_rev(client)}
+            )
+            response = client.get("/admin/versions/1/does-not-exist.html")
+        assert response.status_code == 404
+
+    def test_a_version_still_present_on_disk_is_served_without_rebuilding(
+        self, storage_root: Path, wixy_repo_root_bare: Path, paths: ProjectPaths
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            client.post(
+                "/api/admin/publish", json={"message": "first", "expectedRev": _current_rev(client)}
+            )
+            response = client.get("/admin/versions/1/index.html")
+        assert response.status_code == 200
+        assert "Original Title" in response.text

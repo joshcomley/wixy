@@ -43,14 +43,27 @@ same way, backend-first:
   `publishDrawer.ts` (new) + `shell.ts`'s Publish button and draft-status chip
   both wired for real (removing the milestone-8 stub), switching drawers
   correctly if page-settings was already open. Full reasoning: decisions/00026.
-- Slice 3 [not started]: history panel + restore. Restore-diff computation is
-  binding-map-driven (whole-array for `kind:"list"` fields, per-leaf otherwise);
-  rebuilding a PRUNED build's dir for restore uses `git worktree add <sha>` (a
-  deliberate deviation from decisions/00010 decision 4's anticipated `git show`
-  per-file approach — log why when built). `GET /admin/versions/{n}/{page}.html`
-  needs a test that actually FETCHES the returned URL (decisions/00022's own
-  flagged bug-class warning), not just asserts the string/on-disk-file
-  separately.
+- Slice 3 [DONE]: history panel + restore. `wixy_server/restore.py` (new):
+  `run_restore` loads a ledger entry, ensures its build exists (rebuilding via
+  a scratch `git worktree add <sha>` if pruned — the deviation from
+  decisions/00010 decision 4's anticipated `git show` approach, logged in
+  decisions/00027), computes the diff via a simple recursive dict-walk
+  (recurse into dicts, atomic-compare everything else — satisfies "whole-array
+  for lists, per-leaf otherwise" with no bindings-map lookup needed at all),
+  sets the overlay, flips the live pointer instantly, appends a
+  `{action:"restore", of:N}` ledger entry. A page added since the restored
+  version is staged for deletion; a page deleted since is refused outright
+  (no template to resurrect from). `wixy_server/routes_versions.py` (new):
+  `GET /admin/versions/{n}/{path}` serves the WHOLE archived build dir
+  read-only (not just the page's HTML, so CSS/images render faithfully too) —
+  its own test actually FETCHES the served URL (decisions/00022's flagged bug
+  class), not just string/on-disk-existence assertions. `POST /api/admin/
+  restore` added to routes_admin_api.py. `admin-ui/src/historyPanel.ts` (new):
+  the `#/history` panel, ledger table + View link + a real typed-confirmation
+  ("type RESTORE") row for Restore. Full reasoning: decisions/00027 (a
+  box-level rare full-suite-scale test flakiness pattern, investigated,
+  unrelated to restore's own correctness) and decisions/00028 (the history
+  panel's UI decisions).
 - Slice 4 (scope decision needed when reached): page duplicate/delete routes +
   wiring the pages-panel's dead buttons — `_materialize`'s page-ops handling
   (this slice) already supports `pages_added`/`pages_deleted` generically, but
@@ -72,10 +85,14 @@ same way, backend-first:
 Every publish step's failure leaves live serving + draft intact (tested on temp git
 repos with simulated bare-repo origin) — DONE (slice 1). Kill-during-publish drill
 passes — slice 5. Restore diff granularity is binding-map-driven (whole-array for
-lists, per-leaf for scalars) — slice 3. E2E 5 (two publishes -> restore #1) and 6
-(AI-lane faked commit -> preview banner -> publish drawer lists it) passing — slice 5.
+lists, per-leaf for scalars) — DONE (slice 3). E2E 5 (two publishes -> restore #1)
+and 6 (AI-lane faked commit -> preview banner -> publish drawer lists it) passing
+— slice 5.
 
-Next: slice 3 (history panel + restore).
+Next: slice 4 (page duplicate/delete routes — resolve the open scope question
+first) or slice 5 (E2E + closing) — either order is defensible; slice 4 is smaller
+and its own scope question benefits from being resolved before the closing E2E
+pass locks in what milestone 9 covers.
 
 ## Links
 PR (slice 1): https://github.com/joshcomley/wixy/pull/35 (merged d0e0880; required a
@@ -83,4 +100,5 @@ follow-up fix commit 1e3cbf1 — `git tag -a` needs a committer identity too, no
 `git commit`; passed locally because this machine has a global git identity, failed
 on CI's clean runner, fixed by passing the same `-c user.name=/-c user.email=`
 override already used for `_commit`)
-PR (slice 2): (fill in once opened)
+PR (slice 2): https://github.com/joshcomley/wixy/pull/36 (merged b32e48d)
+PR (slice 3): (fill in once opened)

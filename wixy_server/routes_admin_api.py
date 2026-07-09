@@ -1,7 +1,7 @@
 """`/api/admin/*` — the M6 subset (`state`, `content/{page}`, `draft` PATCH+DELETE)
-plus milestone 8's media upload/delete. Publish/restore/pages-ops/chat are
-M9/M7/M10 — not built here (spec/04 §8's full table has more rows; those are out
-of scope until their milestone).
+plus milestone 8's media upload/delete and milestone 9's publish/restore.
+Pages-ops/chat are M7/M10 — not built here (spec/04 §8's full table has more
+rows; those are out of scope until their milestone).
 """
 
 from __future__ import annotations
@@ -51,6 +51,7 @@ from wixy_server.overlay import (
     save_overlay,
 )
 from wixy_server.publisher import PublishError, PublishJob, PublishResult, run_publish
+from wixy_server.restore import RestoreError, RestoreResult, run_restore
 from wixy_server.site_source import build_site_source
 from wixy_server.storage import ProjectPaths
 from wixy_server.watcher import WatcherStatus
@@ -604,3 +605,34 @@ async def get_publish_preview(request: Request) -> JsonObject:
         return await anyio.to_thread.run_sync(_build)
     except CheckoutError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# POST /api/admin/restore (milestone 9 slice 3)
+# ---------------------------------------------------------------------------
+
+
+class RestoreIn(BaseModel):
+    version: int
+
+
+@router.post("/restore", response_model=None)
+async def post_restore(body: RestoreIn, request: Request) -> JsonObject:
+    project: ProjectConfig = request.app.state.project
+    paths: ProjectPaths = request.app.state.paths
+    publish_job: PublishJob | None = request.app.state.publish_job
+    if publish_job is not None and publish_job.is_running:
+        raise HTTPException(status_code=409, detail="a publish is currently running")
+
+    now = datetime.now(UTC).isoformat()
+
+    def _run() -> RestoreResult:
+        return run_restore(project, paths, version=body.version, now=now)
+
+    try:
+        result = await anyio.to_thread.run_sync(_run)
+    except CheckoutError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except RestoreError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"version": result.version, "sha": result.sha, "of": result.of}
