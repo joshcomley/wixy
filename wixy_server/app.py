@@ -27,6 +27,7 @@ from wixy_server.routes_internal import router as internal_router
 from wixy_server.routes_preview import router as preview_router
 from wixy_server.routes_public import router as public_router
 from wixy_server.routes_version import router as version_router
+from wixy_server.routes_versions import router as versions_router
 from wixy_server.settings import load_settings
 from wixy_server.storage import ensure_project_dirs, project_paths
 from wixy_server.watcher import DEFAULT_INTERVAL_S, WatcherStatus, fetch_once, watch_upstream
@@ -112,6 +113,7 @@ def create_app(
     app.include_router(version_router)
     app.include_router(preview_router)
     app.include_router(admin_api_router)
+    app.include_router(versions_router)
 
     @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
     @app.get("/admin/", response_class=HTMLResponse, include_in_schema=False)
