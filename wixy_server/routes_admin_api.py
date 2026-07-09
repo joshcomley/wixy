@@ -1,23 +1,35 @@
-"""`/api/admin/*` — the M6 subset only: `state`, `content/{page}`, `draft` (PATCH +
-DELETE), `media` (list). Publish/restore/pages-ops/chat are M9/M7/M10 — not built here
-(spec/04 §8's full table has more rows; those are out of scope until their milestone).
+"""`/api/admin/*` — the M6 subset (`state`, `content/{page}`, `draft` PATCH+DELETE)
+plus milestone 8's media upload/delete. Publish/restore/pages-ops/chat are
+M9/M7/M10 — not built here (spec/04 §8's full table has more rows; those are out
+of scope until their milestone).
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from pathlib import Path
+from typing import Annotated, Any
 
 import anyio
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
 from builder.bindings_map import bindings_map_to_dict, extract_bindings_map
 from builder.config import ProjectConfig
 from builder.errors import BuildError
 from builder.jsontypes import JsonObject, JsonValue
+from builder.render import SiteSource
 from wixy_server.checkout import CheckoutError, UpstreamCommit, commits_ahead, current_sha
 from wixy_server.live_pointer import load_live_pointer
+from wixy_server.media import (
+    MediaNotFoundError,
+    MediaReferencedError,
+    MediaUploadError,
+    delete_draft_media,
+    image_dimensions,
+    process_upload,
+    scan_media_references,
+)
 from wixy_server.merged_content import merge_overlay
 from wixy_server.overlay import (
     DiscardOp,
@@ -228,32 +240,110 @@ async def delete_draft(request: Request) -> dict[str, int]:
 
 
 # ---------------------------------------------------------------------------
-# GET /api/admin/media (list only — upload/delete are milestone 8)
+# GET/POST /api/admin/media, DELETE /api/admin/media/{name} (milestone 8)
 # ---------------------------------------------------------------------------
 
 
-def _list_media(paths: ProjectPaths) -> list[JsonValue]:
+def _merged_source(project: ProjectConfig, paths: ProjectPaths) -> SiteSource:
+    source = build_site_source(project, paths.repo)
+    overlay = _load_overlay_for(paths)
+    return merge_overlay(source, overlay)
+
+
+def _media_item(path: Path, url: str, source: str, references: dict[str, list[str]]) -> JsonObject:
+    dims = image_dimensions(path)
+    return {
+        "name": path.name,
+        "url": url,
+        "source": source,
+        "sizeBytes": path.stat().st_size,
+        "width": dims[0] if dims is not None else None,
+        "height": dims[1] if dims is not None else None,
+        "references": [ref for ref in references.get(path.name, [])],
+    }
+
+
+def _list_media(project: ProjectConfig, paths: ProjectPaths) -> list[JsonValue]:
+    references = scan_media_references(_merged_source(project, paths))
     items: list[JsonValue] = []
     images_dir = paths.repo / "images"
     if images_dir.is_dir():
         for entry in sorted(images_dir.iterdir(), key=lambda p: p.name):
             if entry.is_file():
-                items.append({"name": entry.name, "url": f"/images/{entry.name}", "source": "repo"})
+                items.append(_media_item(entry, f"/images/{entry.name}", "repo", references))
     if paths.draft_media.is_dir():
         for entry in sorted(paths.draft_media.iterdir(), key=lambda p: p.name):
             if entry.is_file():
                 items.append(
-                    {
-                        "name": entry.name,
-                        "url": f"/admin/draft-media/{entry.name}",
-                        "source": "draft",
-                    }
+                    _media_item(entry, f"/admin/draft-media/{entry.name}", "draft", references)
                 )
     return items
 
 
 @router.get("/media", response_model=None)
 async def get_media(request: Request) -> JsonObject:
+    project: ProjectConfig = request.app.state.project
     paths: ProjectPaths = request.app.state.paths
-    items = await anyio.to_thread.run_sync(_list_media, paths)
+    try:
+        items = await anyio.to_thread.run_sync(_list_media, project, paths)
+    except CheckoutError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"media": items}
+
+
+def _save_upload(
+    project: ProjectConfig, paths: ProjectPaths, data: bytes, filename: str, content_type: str
+) -> JsonObject:
+    processed = process_upload(data, filename, content_type, project.media)
+    paths.draft_media.mkdir(parents=True, exist_ok=True)
+    (paths.draft_media / processed.filename).write_bytes(processed.content)
+    return {
+        "name": processed.filename,
+        "url": f"/admin/draft-media/{processed.filename}",
+        "source": "draft",
+        "sizeBytes": len(processed.content),
+        "width": processed.width,
+        "height": processed.height,
+        "references": [],  # a just-uploaded file can't be referenced by anything yet
+    }
+
+
+@router.post("/media", response_model=None)
+async def upload_media(request: Request, file: Annotated[UploadFile, File()]) -> JsonObject:
+    project: ProjectConfig = request.app.state.project
+    paths: ProjectPaths = request.app.state.paths
+    data = await file.read()
+    filename = file.filename or "upload"
+    content_type = file.content_type or ""
+
+    def _save() -> JsonObject:
+        return _save_upload(project, paths, data, filename, content_type)
+
+    try:
+        return await anyio.to_thread.run_sync(_save)
+    except MediaUploadError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _delete_media(project: ProjectConfig, paths: ProjectPaths, name: str) -> None:
+    references = scan_media_references(_merged_source(project, paths))
+    delete_draft_media(paths, name, references)
+
+
+@router.delete("/media/{name}", response_model=None)
+async def delete_media(name: str, request: Request) -> dict[str, bool]:
+    project: ProjectConfig = request.app.state.project
+    paths: ProjectPaths = request.app.state.paths
+
+    def _delete() -> None:
+        _delete_media(project, paths, name)
+
+    try:
+        await anyio.to_thread.run_sync(_delete)
+    except CheckoutError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except MediaNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except MediaReferencedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"deleted": True}

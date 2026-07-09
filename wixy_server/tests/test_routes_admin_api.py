@@ -1,13 +1,16 @@
-"""`/api/admin/state|content|draft|media(list)` tests (spec/04 §8, M6's subset only)."""
+"""`/api/admin/state|content|draft|media` tests (spec/04 §8's M6 subset + milestone
+8's media upload/delete, spec/02 §9)."""
 
 from __future__ import annotations
 
+import io
 import json
 import subprocess
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from wixy_server.app import create_app
 from wixy_server.storage import ProjectPaths, project_paths
@@ -360,14 +363,25 @@ class TestDeleteDraft:
         assert not (paths.draft_media / "staged.jpg").exists()
 
 
+def _find_media(items: list[dict[str, object]], name: str) -> dict[str, object]:
+    for item in items:
+        if item["name"] == name:
+            return item
+    raise AssertionError(f"no media item named {name!r} in {items!r}")
+
+
 class TestGetMedia:
     def test_lists_repo_images(self, storage_root: Path, wixy_repo_root: Path) -> None:
         app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
         with TestClient(app) as client:
             response = client.get("/api/admin/media")
         assert response.status_code == 200
-        items = response.json()["media"]
-        assert {"name": "hero.jpg", "url": "/images/hero.jpg", "source": "repo"} in items
+        item = _find_media(response.json()["media"], "hero.jpg")
+        assert item["url"] == "/images/hero.jpg"
+        assert item["source"] == "repo"
+        assert item["sizeBytes"] == len(b"fake-jpeg-bytes")
+        assert item["width"] is None  # the fixture's own bytes aren't a real image
+        assert item["references"] == []
 
     def test_lists_staged_draft_media_too(
         self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
@@ -377,9 +391,176 @@ class TestGetMedia:
         app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
         with TestClient(app) as client:
             response = client.get("/api/admin/media")
-        items = response.json()["media"]
-        assert {
-            "name": "abc12345-new.jpg",
-            "url": "/admin/draft-media/abc12345-new.jpg",
-            "source": "draft",
-        } in items
+        item = _find_media(response.json()["media"], "abc12345-new.jpg")
+        assert item["url"] == "/admin/draft-media/abc12345-new.jpg"
+        assert item["source"] == "draft"
+
+    def test_reports_real_dimensions_for_a_real_image(
+        self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
+    ) -> None:
+        paths.draft_media.mkdir(parents=True)
+        buf = io.BytesIO()
+        Image.new("RGB", (40, 30), "red").save(buf, format="JPEG")
+        (paths.draft_media / "real.jpg").write_bytes(buf.getvalue())
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/admin/media")
+        item = _find_media(response.json()["media"], "real.jpg")
+        assert (item["width"], item["height"]) == (40, 30)
+
+    def test_reports_references_for_an_image_used_by_content(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": 0,
+                    "ops": [
+                        {
+                            "file": "index",
+                            "path": "hero.bg",
+                            "value": {"src": "images/hero.jpg", "alt": "Hero"},
+                        }
+                    ],
+                },
+            )
+            response = client.get("/api/admin/media")
+        item = _find_media(response.json()["media"], "hero.jpg")
+        assert item["references"] == ["index:hero"]
+
+
+class TestUploadMedia:
+    def _jpeg_bytes(self, size: tuple[int, int] = (500, 300)) -> bytes:
+        buf = io.BytesIO()
+        Image.new("RGB", size, "blue").save(buf, format="JPEG")
+        return buf.getvalue()
+
+    def test_uploads_and_stages_a_processed_image(
+        self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/media",
+                files={"file": ("My Photo.jpg", self._jpeg_bytes(), "image/jpeg")},
+            )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["source"] == "draft"
+        assert body["name"].endswith("-my-photo.jpg")
+        assert body["url"] == f"/admin/draft-media/{body['name']}"
+        assert (paths.draft_media / body["name"]).is_file()
+
+    def test_resizes_to_the_project_configured_limit(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        # the wixy_repo_root fixture's projects/test.json sets maxLongSidePx=2000;
+        # upload something bigger.
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/media",
+                files={"file": ("big.jpg", self._jpeg_bytes((3000, 1500)), "image/jpeg")},
+            )
+        body = response.json()
+        assert max(body["width"], body["height"]) == 2000
+
+    def test_rejects_an_svg_upload(self, storage_root: Path, wixy_repo_root: Path) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/media",
+                files={"file": ("icon.svg", b"<svg></svg>", "image/svg+xml")},
+            )
+        assert response.status_code == 422
+
+    def test_rejects_an_oversized_upload(self, storage_root: Path, wixy_repo_root: Path) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/media",
+                files={
+                    "file": ("big.jpg", b"x" * (15 * 1024 * 1024 + 1), "image/jpeg"),
+                },
+            )
+        assert response.status_code == 422
+
+    def test_uploaded_media_then_appears_in_the_list(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            upload_response = client.post(
+                "/api/admin/media",
+                files={"file": ("new.jpg", self._jpeg_bytes(), "image/jpeg")},
+            )
+            list_response = client.get("/api/admin/media")
+        name = upload_response.json()["name"]
+        assert any(item["name"] == name for item in list_response.json()["media"])
+
+
+class TestDeleteMedia:
+    def test_deletes_an_unreferenced_staged_upload(
+        self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
+    ) -> None:
+        paths.draft_media.mkdir(parents=True)
+        (paths.draft_media / "unused.jpg").write_bytes(b"staged")
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.delete("/api/admin/media/unused.jpg")
+        assert response.status_code == 200
+        assert response.json() == {"deleted": True}
+        assert not (paths.draft_media / "unused.jpg").exists()
+
+    def test_404s_for_an_unknown_name(self, storage_root: Path, wixy_repo_root: Path) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.delete("/api/admin/media/does-not-exist.jpg")
+        assert response.status_code == 404
+
+    def test_404s_for_a_repo_image_deletion_is_out_of_scope_this_milestone(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        # decisions/00015 decision 3's exact reasoning applied to media: deleting
+        # an already-PUBLISHED repo image needs milestone 9's publish-time
+        # materialization contract, which doesn't exist yet — this route only
+        # ever looks in draft_media/, so a repo filename naturally 404s.
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.delete("/api/admin/media/hero.jpg")
+        assert response.status_code == 404
+
+    def test_409s_for_a_referenced_staged_upload(
+        self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
+    ) -> None:
+        paths.draft_media.mkdir(parents=True)
+        (paths.draft_media / "used.jpg").write_bytes(b"staged")
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": 0,
+                    "ops": [
+                        {
+                            "file": "index",
+                            "path": "hero.bg",
+                            "value": {"src": "/admin/draft-media/used.jpg", "alt": ""},
+                        }
+                    ],
+                },
+            )
+            response = client.delete("/api/admin/media/used.jpg")
+        assert response.status_code == 409
+        assert (paths.draft_media / "used.jpg").exists()
+
+    # A path-traversal segment like ".." never reaches this route at all via a
+    # normal HTTP client — httpx (this test file's own TestClient) normalizes it
+    # out of the URL before sending, same as a browser would; FastAPI's routing
+    # doesn't even match a request that would need it. That's not a green light
+    # to drop the server-side guard (media.py's own delete_draft_media) — it's
+    # defense-in-depth against a raw/non-normalizing client — but it means this
+    # class of input has to be tested directly against that function
+    # (test_media.py), not through the HTTP layer, which can't reproduce it.
