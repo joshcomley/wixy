@@ -174,9 +174,7 @@ def _source(page_contents: dict[str, JsonObject], global_content: JsonObject) ->
 
 class TestScanMediaReferences:
     def test_finds_a_direct_image_binding(self) -> None:
-        source = _source(
-            {"index": {"hero": {"bg": {"src": "images/hero.jpg", "alt": "Hero"}}}}, {}
-        )
+        source = _source({"index": {"hero": {"bg": {"src": "images/hero.jpg", "alt": "Hero"}}}}, {})
         refs = scan_media_references(source)
         assert refs == {"hero.jpg": ["index:hero"]}
 
