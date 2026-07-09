@@ -13,6 +13,23 @@ The FastAPI backbone everything else (editor, media, publish, chat) mounts onto.
 ## Context / current state
 Depends on 00002 (builder v1). This is the first wixy_server milestone.
 
+Given the real size of this milestone, it's being built as a PR train (matching
+how M4's CA migration was itself per-page PRs, not one) rather than a single PR —
+see decisions/00010 for the full reasoning. Slices, updated as they ship:
+- Slice 1 [IN PROGRESS]: settings/`.env` loading, Storage directory layout,
+  project registry wrapper, site checkout manager (clone/fetch/ff-only). No
+  FastAPI app yet. decisions/00010.
+- Slice 2 [not started]: draft overlay store (rev/409/atomic) + merged-content
+  service (spec/02 §8's merge rule).
+- Slice 3 [not started]: preview renderer (merged `SiteSource` + `render_page`
+  preview mode + editor asset injection) + first FastAPI app wiring.
+- Slice 4 [not started]: public serving (atomic live pointer, cache headers,
+  404), CF Access JWT middleware (dev bypass), `/api/admin/state|content|draft|
+  media(list)`, `/internal/ready|warmup`, `/healthz`, `/api/version`,
+  instant-render admin shell.
+
+Only mark this sidecar DONE once every slice has shipped and merged.
+
 ## Relevant files
 - spec/04-server.md (full — storage layout §2, public serving §3, preview §4, admin API
   index §8, security invariants §9)
