@@ -65,6 +65,11 @@ jobs:
     needs: [python, frontend]
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install wixy (server) — fixture_server.py imports it directly
+        run: pip install -e ".[server,dev]"
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
