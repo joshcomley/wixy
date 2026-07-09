@@ -1,0 +1,8 @@
+# Normalize every text file to LF on checkin, regardless of the checkout platform's
+# own line-ending convention. Without this, a Windows checkout's CRLF-normalized
+# `admin-ui/src/*.ts` / `editor/src/*.ts` gets embedded verbatim into esbuild's
+# sourcemap `sourcesContent`, so a local Windows build of an otherwise-unchanged
+# entry point produces a *.js.map that differs from CI's Ubuntu-built one byte for
+# byte — a false positive in the bundle-drift check (`git diff --exit-code --
+# wixy_server/static`) that has nothing to do with any real source change.
+* text=auto eol=lf
