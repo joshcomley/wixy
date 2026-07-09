@@ -35,6 +35,16 @@ _ABOUT_HTML = """<!DOCTYPE html>
 </body></html>
 """
 _PARTIAL_HTML = "<body></body>\n"
+_INDEX_HTML_WITH_IMAGE = """<!DOCTYPE html>
+<html><head><title>placeholder</title></head>
+<body>
+<!-- wx:partial header -->
+<h1 data-wx="hero.title">placeholder</h1>
+<div data-wx-bg="hero.bg" style="">bg</div>
+<!-- wx:partial footer -->
+<!-- wx:partial booking-modal -->
+</body></html>
+"""
 
 
 def _git(args: list[str], cwd: Path) -> None:
@@ -178,6 +188,45 @@ def bare_origin_repo(tmp_path: Path) -> Path:
 def wixy_repo_root_bare(tmp_path: Path, bare_origin_repo: Path) -> Path:
     root = tmp_path / "wixy-repo-bare"
     _write_project_registry(root, bare_origin_repo)
+    return root
+
+
+@pytest.fixture
+def wixy_repo_root_with_image_binding(tmp_path: Path) -> Path:
+    """A single-page repo with a real `data-wx-bg` binding — the base `origin_repo`
+    fixture has no image binding at all, needed for the publish-preview validate
+    tests below (a genuinely missing image, and a staged-but-unpublished one)."""
+    origin = tmp_path / "origin-img"
+    origin.mkdir()
+    _git(["init", "--initial-branch=main"], origin)
+    _git(["config", "user.email", "test@example.com"], origin)
+    _git(["config", "user.name", "Test"], origin)
+    (origin / "pages").mkdir(parents=True)
+    (origin / "partials").mkdir()
+    (origin / "content").mkdir()
+    (origin / "images").mkdir()
+    (origin / "pages" / "index.html").write_text(_INDEX_HTML_WITH_IMAGE, encoding="utf-8")
+    for name in ("header", "footer", "booking-modal"):
+        (origin / "partials" / f"{name}.html").write_text(_PARTIAL_HTML, encoding="utf-8")
+    (origin / "content" / "index.json").write_text(
+        json.dumps(
+            {
+                "meta": {"title": "Home", "navLabel": "Home", "inNav": True, "navOrder": 10},
+                "hero": {
+                    "title": "Original Title",
+                    "bg": {"src": "images/hero.jpg", "alt": "hero"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (origin / "content" / "_global.json").write_text("{}", encoding="utf-8")
+    (origin / "images" / "hero.jpg").write_bytes(b"fake-jpeg-bytes")
+    _git(["add", "."], origin)
+    _git(["commit", "-m", "initial"], origin)
+
+    root = tmp_path / "wixy-repo-img"
+    _write_project_registry(root, origin)
     return root
 
 
@@ -918,3 +967,112 @@ class TestGetPublishes:
         body = response.json()["publishes"]
         assert len(body) == 1
         assert body[0]["version"] == 2
+
+
+class TestGetPublishPreview:
+    def test_a_text_op_is_diffed_with_old_and_new_values(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [{"file": "index", "path": "hero.title", "value": "New Title"}],
+                },
+            )
+            response = client.get("/api/admin/publish/preview")
+        assert response.status_code == 200
+        body = response.json()
+        entries = body["changes"]["index"]
+        assert entries == [
+            {"key": "hero.title", "kind": "text", "old": "Original Title", "new": "New Title"}
+        ]
+        assert body["validate"] == {"ok": True, "errors": []}
+
+    def test_a_theme_op_is_diffed_with_kind_theme(
+        self, storage_root: Path, wixy_repo_root_themed: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_themed)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [{"file": "theme", "path": "colors.cream", "value": "#FFFFFF"}],
+                },
+            )
+            response = client.get("/api/admin/publish/preview")
+        body = response.json()
+        assert body["changes"]["theme"] == [
+            {"key": "colors.cream", "kind": "theme", "old": "#F1E8D9", "new": "#FFFFFF"}
+        ]
+
+    def test_no_draft_ops_is_an_empty_diff(self, storage_root: Path, wixy_repo_root: Path) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/admin/publish/preview")
+        assert response.status_code == 200
+        assert response.json() == {"changes": {}, "validate": {"ok": True, "errors": []}}
+
+    def test_a_genuinely_missing_image_is_a_validate_error(
+        self, storage_root: Path, wixy_repo_root_with_image_binding: Path
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root_with_image_binding
+        )
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [
+                        {
+                            "file": "index",
+                            "path": "hero.bg",
+                            "value": {"src": "images/does-not-exist.jpg", "alt": "x"},
+                        }
+                    ],
+                },
+            )
+            response = client.get("/api/admin/publish/preview")
+        body = response.json()
+        assert body["validate"]["ok"] is False
+        assert any(e["code"] == "missing-image" for e in body["validate"]["errors"])
+
+    def test_a_staged_unpublished_image_is_not_a_false_positive_validate_error(
+        self,
+        storage_root: Path,
+        wixy_repo_root_with_image_binding: Path,
+        paths: ProjectPaths,
+    ) -> None:
+        # The exact gap `_staged_image_keys` exists to close (decisions/00025):
+        # a draft upload that's staged but not yet published/copied into
+        # `images/` must NOT trip `validate_site`'s image-existence check just
+        # because it isn't sitting in `paths.repo/images/` yet.
+        paths.draft_media.mkdir(parents=True)
+        (paths.draft_media / "abc12345-new.jpg").write_bytes(b"staged")
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root_with_image_binding
+        )
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [
+                        {
+                            "file": "index",
+                            "path": "hero.bg",
+                            "value": {"src": "/admin/draft-media/abc12345-new.jpg", "alt": "New"},
+                        }
+                    ],
+                },
+            )
+            response = client.get("/api/admin/publish/preview")
+        body = response.json()
+        assert body["validate"] == {"ok": True, "errors": []}
+        entry = body["changes"]["index"][0]
+        assert entry["kind"] == "bg"
+        assert entry["new"] == {"src": "/admin/draft-media/abc12345-new.jpg", "alt": "New"}
