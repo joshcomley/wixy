@@ -28,6 +28,15 @@ _INDEX_HTML = """<!DOCTYPE html>
 _PARTIAL_HTML = "<body></body>\n"
 
 
+@pytest.fixture(autouse=True)
+def _dev_no_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """This file exercises the preview render pipeline, not CF Access auth — that's
+    `test_auth.py` (the verification logic) and `test_routes_auth_gate.py` (the
+    middleware wired into a real app)'s job. Bypass the gate here so these tests keep
+    testing exactly one thing each."""
+    monkeypatch.setenv("WIXY_DEV_NO_AUTH", "1")
+
+
 def _git(args: list[str], cwd: Path) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
 

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from wixy_server.checkout import CheckoutError, current_sha, ensure_checkout
+from wixy_server.checkout import CheckoutError, commits_ahead, current_sha, ensure_checkout
 
 
 def _git(args: list[str], cwd: Path) -> None:
@@ -72,3 +72,40 @@ class TestCurrentSha:
         sha = current_sha(dest)
         assert len(sha) == 40
         assert all(c in "0123456789abcdef" for c in sha)
+
+
+class TestCommitsAhead:
+    def test_empty_when_since_sha_is_head(self, origin_repo: Path, tmp_path: Path) -> None:
+        dest = tmp_path / "checkout"
+        ensure_checkout(str(origin_repo), "main", dest)
+        head = current_sha(dest)
+        assert commits_ahead(dest, head) == []
+
+    def test_lists_commits_made_since_a_given_sha_newest_first(
+        self, origin_repo: Path, tmp_path: Path
+    ) -> None:
+        dest = tmp_path / "checkout"
+        ensure_checkout(str(origin_repo), "main", dest)
+        base_sha = current_sha(dest)
+
+        (origin_repo / "A.md").write_text("a\n", encoding="utf-8")
+        _git(["add", "."], origin_repo)
+        _git(["commit", "-m", "add A"], origin_repo)
+        (origin_repo / "B.md").write_text("b\n", encoding="utf-8")
+        _git(["add", "."], origin_repo)
+        _git(["commit", "-m", "add B"], origin_repo)
+
+        ensure_checkout(str(origin_repo), "main", dest)
+        commits = commits_ahead(dest, base_sha)
+
+        assert [c.subject for c in commits] == ["add B", "add A"]
+        assert all(len(c.sha) == 40 for c in commits)
+        assert commits[0].author == "Test"
+
+    def test_invalid_since_sha_raises_checkout_error(
+        self, origin_repo: Path, tmp_path: Path
+    ) -> None:
+        dest = tmp_path / "checkout"
+        ensure_checkout(str(origin_repo), "main", dest)
+        with pytest.raises(CheckoutError):
+            commits_ahead(dest, "0" * 40)

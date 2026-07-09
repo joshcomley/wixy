@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,7 @@ import pytest
 from builder.config import MediaConfig, ProjectConfig
 from wixy_server.checkout import current_sha
 from wixy_server.storage import ProjectPaths, project_paths
-from wixy_server.watcher import fetch_once, watch_upstream
+from wixy_server.watcher import WatcherStatus, fetch_once, watch_upstream
 
 
 def _git(args: list[str], cwd: Path) -> None:
@@ -78,6 +79,37 @@ class TestFetchOnce:
         broken_project = _project(str(tmp_path / "does-not-exist"))
         fetch_once(broken_project, paths)  # must not raise
         assert not paths.repo.exists()
+
+    def test_records_fetched_at_on_success(
+        self, project: ProjectConfig, paths: ProjectPaths
+    ) -> None:
+        status = WatcherStatus()
+        before = datetime.now(UTC)
+        fetch_once(project, paths, status)
+        assert status.fetched_at is not None
+        assert status.fetched_at >= before
+        assert status.last_error is None
+
+    def test_records_last_error_on_failure_without_touching_fetched_at(
+        self, tmp_path: Path, paths: ProjectPaths
+    ) -> None:
+        broken_project = _project(str(tmp_path / "does-not-exist"))
+        status = WatcherStatus()
+        fetch_once(broken_project, paths, status)
+        assert status.fetched_at is None
+        assert status.last_error is not None
+
+    def test_a_later_success_clears_a_prior_error(
+        self, project: ProjectConfig, paths: ProjectPaths, tmp_path: Path
+    ) -> None:
+        broken_project = _project(str(tmp_path / "does-not-exist"))
+        status = WatcherStatus()
+        fetch_once(broken_project, paths, status)
+        assert status.last_error is not None
+
+        fetch_once(project, paths, status)
+        assert status.last_error is None
+        assert status.fetched_at is not None
 
 
 class TestWatchUpstream:

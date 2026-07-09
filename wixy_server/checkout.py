@@ -17,9 +17,11 @@ git-subprocess convention.
 from __future__ import annotations
 
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 _GIT_TIMEOUT_S = 60
+_LOG_FIELD_SEP = "\x1f"  # ASCII unit separator — never appears in a commit subject/author
 
 
 class CheckoutError(Exception):
@@ -74,3 +76,37 @@ def current_sha(checkout_dir: Path) -> str:
     if result.returncode != 0:
         raise CheckoutError(f"git rev-parse HEAD failed: {result.stderr.strip()}")
     return result.stdout.strip()
+
+
+@dataclass(frozen=True, slots=True)
+class UpstreamCommit:
+    """One commit reachable from HEAD but not yet published (spec/04 §7's
+    `aheadOfPublished` — what the AI lane has merged since the last publish)."""
+
+    sha: str
+    subject: str
+    author: str
+    when: str
+
+
+def commits_ahead(checkout_dir: Path, since_sha: str) -> list[UpstreamCommit]:
+    """Commits in `since_sha..HEAD`, newest first (git log's own default order).
+
+    `since_sha` is normally the published version's SHA (`live.json`); this function
+    has no opinion on what it means when there's no live pointer yet — the caller
+    decides that (spec/04 §8's `/api/admin/state`)."""
+    sep = _LOG_FIELD_SEP
+    result = _run_git(
+        ["log", f"{since_sha}..HEAD", f"--format=%H{sep}%s{sep}%an{sep}%aI"],
+        cwd=checkout_dir,
+    )
+    if result.returncode != 0:
+        raise CheckoutError(f"git log failed: {result.stderr.strip()}")
+
+    commits: list[UpstreamCommit] = []
+    for line in result.stdout.splitlines():
+        if not line:
+            continue
+        sha, subject, author, when = line.split(_LOG_FIELD_SEP)
+        commits.append(UpstreamCommit(sha=sha, subject=subject, author=author, when=when))
+    return commits

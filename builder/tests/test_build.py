@@ -58,6 +58,25 @@ class TestBuildSite:
         robots = (out / "robots.txt").read_text(encoding="utf-8")
         assert "Sitemap:" in robots
 
+    def test_writes_a_styled_404_page(
+        self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "_build"
+        build_site(mini_site_root, mini_site_source, out)
+        html = (out / "404.html").read_text(encoding="utf-8")
+        assert "Page not found" in html
+        assert 'href="theme.css"' in html  # mini_site_source has a theme
+        assert 'href="site.css"' in html
+
+    def test_404_page_omits_theme_link_when_no_theme(
+        self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
+    ) -> None:
+        source = dataclasses.replace(mini_site_source, theme=None)
+        out = tmp_path / "_build"
+        build_site(mini_site_root, source, out)
+        html = (out / "404.html").read_text(encoding="utf-8")
+        assert 'href="theme.css"' not in html
+
     def test_clears_stale_output_dir(
         self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
     ) -> None:

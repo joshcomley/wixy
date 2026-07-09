@@ -13,8 +13,8 @@ class TestParseEnvFile:
 
     def test_parses_key_value_pairs(self, tmp_path: Path) -> None:
         env_file = tmp_path / ".env"
-        env_file.write_text("WIXY_PORT=8123\nCF_ACCESS_AUD=abc123\n", encoding="utf-8")
-        assert parse_env_file(env_file) == {"WIXY_PORT": "8123", "CF_ACCESS_AUD": "abc123"}
+        env_file.write_text("WIXY_PORT=8123\nWIXY_CF_ACCESS_AUD=abc123\n", encoding="utf-8")
+        assert parse_env_file(env_file) == {"WIXY_PORT": "8123", "WIXY_CF_ACCESS_AUD": "abc123"}
 
     def test_ignores_blank_lines_and_comments(self, tmp_path: Path) -> None:
         env_file = tmp_path / ".env"
@@ -47,8 +47,8 @@ class TestLoadSettings:
             "WIXY_PORT",
             "WIXY_ENV",
             "WIXY_DEV_NO_AUTH",
-            "CF_ACCESS_TEAM_DOMAIN",
-            "CF_ACCESS_AUD",
+            "WIXY_CF_TEAM_DOMAIN",
+            "WIXY_CF_ACCESS_AUD",
         ):
             monkeypatch.delenv(key, raising=False)
         settings = load_settings(tmp_path)
@@ -60,9 +60,11 @@ class TestLoadSettings:
     def test_reads_values_from_env_file(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        for key in ("WIXY_PORT", "CF_ACCESS_AUD"):
+        for key in ("WIXY_PORT", "WIXY_CF_ACCESS_AUD"):
             monkeypatch.delenv(key, raising=False)
-        (tmp_path / ".env").write_text("WIXY_PORT=9001\nCF_ACCESS_AUD=my-aud\n", encoding="utf-8")
+        (tmp_path / ".env").write_text(
+            "WIXY_PORT=9001\nWIXY_CF_ACCESS_AUD=my-aud\n", encoding="utf-8"
+        )
         settings = load_settings(tmp_path)
         assert settings.port == 9001
         assert settings.cf_access_aud == "my-aud"
