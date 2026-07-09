@@ -60,6 +60,11 @@ function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
     patchDraft: vi.fn(async () => ({ kind: "ok" as const, rev: 1 })),
     discardDraft: vi.fn(async () => ({ rev: 0 })),
     getMedia: vi.fn(async () => []),
+    getTheme: vi.fn(async () => ({
+      colors: { cream: "#F1E8D9" },
+      shadow: "0 18px 44px rgba(62,49,42,.14)",
+      fonts: { serif: { family: "Cormorant Garamond", weights: ["400"], italics: true } },
+    })),
     ...overrides,
   } as AdminApi;
 }
@@ -87,6 +92,7 @@ function fakeMountEditView(): FakeEditViewHandle {
         element: document.createElement("div"),
         setPage: (p) => handle.setPageCalls.push(p),
         applyOps: (ops) => handle.applyOpsCalls.push(ops),
+        postMessage: () => {},
         teardown: () => {
           handle.teardownCount += 1;
         },
@@ -178,7 +184,7 @@ describe("mountShell", () => {
     expect(container.querySelector(".wx-pages-table")).not.toBeNull();
   });
 
-  it("a stub nav route (e.g. Theme) renders a coming-soon panel", async () => {
+  it("a stub nav route (e.g. Media) renders a coming-soon panel", async () => {
     const api = fakeApi();
     const win = fakeWindow();
     const container = document.createElement("div");
@@ -186,8 +192,43 @@ describe("mountShell", () => {
     mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
     await flushState(api);
 
-    win.location.hash = "#/theme";
+    win.location.hash = "#/media";
     expect(container.querySelector(".wx-coming-soon")?.textContent).toMatch(/later milestone/i);
+  });
+
+  it("#/theme mounts the real theme panel, reusing the injected mountEditView", async () => {
+    const api = fakeApi();
+    const win = fakeWindow();
+    const container = document.createElement("div");
+    const editView = fakeMountEditView();
+
+    mountShell(container, { api, win, mountEditView: editView.fn });
+    await flushState(api);
+
+    win.location.hash = "#/theme";
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(container.querySelector(".wx-theme-panel")).not.toBeNull();
+    expect(container.querySelector(".wx-coming-soon")).toBeNull();
+    expect(editView.mountedPages).toEqual(["index"]);
+  });
+
+  it("switching away from #/theme tears down its embedded preview iframe", async () => {
+    const api = fakeApi();
+    const win = fakeWindow();
+    const container = document.createElement("div");
+    const editView = fakeMountEditView();
+
+    mountShell(container, { api, win, mountEditView: editView.fn });
+    await flushState(api);
+
+    win.location.hash = "#/theme";
+    await Promise.resolve();
+    await Promise.resolve();
+    win.location.hash = "#/pages";
+
+    expect(editView.teardownCount).toBe(1);
   });
 
   it("shows a persistent error toast when the initial state fetch fails, and clears it on success", async () => {

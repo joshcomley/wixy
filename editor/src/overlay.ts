@@ -471,6 +471,25 @@ export function initOverlay(win: Window = window): () => void {
     }
   }
 
+  const _GOOGLE_FONTS_HREF_PREFIX = "https://fonts.googleapis.com/";
+
+  /** Mirrors `builder/templates.py`'s `_find_fonts_link`/`apply_head` exactly (find
+   * the `<link>` whose `href` starts with the Google Fonts prefix; create one if
+   * somehow absent) so the live-preview swap targets the SAME tag a real build
+   * would have written. */
+  function applyThemeFonts(url: string): void {
+    const head = document.head;
+    let link = Array.from(head.querySelectorAll("link")).find((candidate) =>
+      candidate.href.startsWith(_GOOGLE_FONTS_HREF_PREFIX),
+    );
+    if (link === undefined) {
+      link = document.createElement("link");
+      link.rel = "stylesheet";
+      head.appendChild(link);
+    }
+    link.href = url;
+  }
+
   function selectByKey(key: string): void {
     const selector = [
       `[data-wx="${key}"]`,
@@ -497,6 +516,9 @@ export function initOverlay(win: Window = window): () => void {
         return;
       case "themeVars":
         applyThemeVars(message.vars);
+        return;
+      case "themeFonts":
+        applyThemeFonts(message.url);
         return;
       case "select":
         selectByKey(message.key);

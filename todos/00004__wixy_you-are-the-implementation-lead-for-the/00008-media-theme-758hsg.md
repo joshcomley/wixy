@@ -23,22 +23,26 @@ Split into a slice PR train (matching M6/M7's own precedent — decisions/00010,
   image's deletion is explicitly deferred, same "needs milestone 9's publish-
   time materialization" reasoning as decisions/00015 decision 3's page-delete
   deferral). `pyproject.toml` gained `python-multipart` (server extra, needed
-  for FastAPI `UploadFile`). PR #31 (open, CI pending).
-- Slice 2 [not started]: theme panel (`admin-ui/`) — `#/theme` route: colors
-  (swatch grid + native color input + hex + site-palette presets), fonts
-  (Headings/Body/Script = theme.json's serif/sans/script roles — confirmed by
-  reading the real CA site.css's own usage, not assumed — curated ~24-family
-  dropdown + custom input + weights multi-select), effects (shadow raw
-  string), per-token + per-panel "reset to published" (via the EXISTING
-  DiscardOp overlay mechanism, no new backend needed). Live-apply: colors via
-  `themeVars` (already wired end-to-end since M7 slice 2 — overlay.ts already
-  handles this message), fonts via swapping the preview iframe's Google Fonts
-  `<link>`. OPEN DESIGN QUESTION to resolve when starting this slice: spec/05
-  §3 says theme changes "live-apply to THE edit iframe," but the shell's
-  router only ever mounts ONE main panel at a time (`#/theme` XOR
-  `#/edit/<page>`) — current lean is the theme panel embeds its OWN preview
-  iframe (reusing editView.ts's core), defaulting to the "index" page: log
-  this as a decision once actually built, don't guess further here.
+  for FastAPI `UploadFile`). PR #31 (merged).
+- Slice 2 [DONE]: theme panel (`admin-ui/src/themePanel.ts`, new) — `#/theme`
+  route: colors (always-expanded swatch rows: native color input + hex +
+  per-row presets strip of every other current color), fonts (Headings/Body/
+  Script = theme.json's serif/sans/script roles, curated 24-family dropdown
+  via `googleFontsCatalog.ts` + custom-family input + weights multi-select +
+  italics toggle, each font role committed as ONE whole-object SET op), effects
+  (shadow raw string), per-token + per-panel "reset to published" (via the
+  EXISTING DiscardOp overlay mechanism — no new backend endpoint beyond the
+  new `GET /api/admin/theme` read). Live-apply: colors + font CSS vars via the
+  existing `themeVars` message; fonts additionally via a NEW `themeFonts {url}`
+  message swapping the preview iframe's Google Fonts `<link>` (overlay finds it
+  the same way `builder/templates.py`'s `_find_fonts_link` does at build time).
+  The URL/CSS-var computation is a hand-ported TS mirror of `builder/theme.py`
+  (`googleFonts.ts`/`themeVars.ts`), cross-checked byte-for-byte against the
+  Python originals, so live preview never disagrees with what a real build
+  would emit. RESOLVED the open design question: the theme panel embeds its
+  OWN preview iframe, reusing `editView.ts`'s `mountEditView` WHOLESALE (same
+  device toolbar, same overlay chrome — no stripped-down variant), fixed to
+  the "index" page. Full reasoning: decisions/00021.
 - Slice 3 [not started]: media panel + dialog — `#/media` route (grid: repo +
   draft images, dimensions/size/references from slice 1's extended list
   endpoint, upload button + drag-drop, delete for unreferenced draft items).
@@ -73,10 +77,14 @@ Split into a slice PR train (matching M6/M7's own precedent — decisions/00010,
 ## How to continue + acceptance
 Pillow-verified EXIF strip + auto-orient + resize + re-encode; SVG reject; reference
 scan before delete — ALL DONE (slice 1). Theme live-applies via CSS custom properties
-+ font link swap, no rebuild — slice 2. E2E 2 (image replace incl. oversized
++ font link swap, no rebuild — DONE (slice 2). E2E 2 (image replace incl. oversized
 EXIF-rotated fixture) and 3 (theme change -> publish -> theme.css/fonts reflect)
 passing — slice 4 (E2E 2/4's publish-tail won't fully pass until M9, matching M7's own
 E2E 1/4 caveat).
 
+Next: slice 3 (media panel + dialog + the editor's `mediaRequest`/`applyOps`
+rewiring — full design already worked out above, re-read before starting).
+
 ## Links
 PR (slice 1): #31
+PR (slice 2): (fill in once opened)

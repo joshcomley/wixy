@@ -71,6 +71,47 @@ def _write_site_repo(repo_dir: Path) -> None:
     (repo_dir / "images" / "hero.jpg").write_bytes(b"fake-jpeg-bytes")
 
 
+def _write_theme(repo_dir: Path) -> None:
+    (repo_dir / "theme").mkdir(parents=True)
+    (repo_dir / "theme" / "theme.json").write_text(
+        json.dumps(
+            {
+                "colors": {"cream": "#F1E8D9", "coffee": "#3E312A"},
+                "shadow": "0 18px 44px rgba(62,49,42,.14)",
+                "fonts": {
+                    "serif": {
+                        "family": "Cormorant Garamond",
+                        "weights": ["400", "600"],
+                        "italics": True,
+                    },
+                    "sans": {"family": "Jost", "weights": ["300", "400"], "italics": False},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_project_registry(root: Path, repo: Path) -> None:
+    (root / "projects").mkdir(parents=True)
+    (root / "projects" / "test.json").write_text(
+        json.dumps(
+            {
+                "slug": "test",
+                "name": "Test",
+                "repo": str(repo),
+                "defaultBranch": "main",
+                "cmdProject": "test",
+                "domain": "test.example.invalid",
+                "locale": "en-GB",
+                "indexable": False,
+                "media": {"maxLongSidePx": 2000, "jpegQuality": 85},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 @pytest.fixture
 def origin_repo(tmp_path: Path) -> Path:
     origin = tmp_path / "origin"
@@ -87,23 +128,28 @@ def origin_repo(tmp_path: Path) -> Path:
 @pytest.fixture
 def wixy_repo_root(tmp_path: Path, origin_repo: Path) -> Path:
     root = tmp_path / "wixy-repo"
-    (root / "projects").mkdir(parents=True)
-    (root / "projects" / "test.json").write_text(
-        json.dumps(
-            {
-                "slug": "test",
-                "name": "Test",
-                "repo": str(origin_repo),
-                "defaultBranch": "main",
-                "cmdProject": "test",
-                "domain": "test.example.invalid",
-                "locale": "en-GB",
-                "indexable": False,
-                "media": {"maxLongSidePx": 2000, "jpegQuality": 85},
-            }
-        ),
-        encoding="utf-8",
-    )
+    _write_project_registry(root, origin_repo)
+    return root
+
+
+@pytest.fixture
+def origin_repo_with_theme(tmp_path: Path) -> Path:
+    origin = tmp_path / "origin-themed"
+    origin.mkdir()
+    _git(["init", "--initial-branch=main"], origin)
+    _git(["config", "user.email", "test@example.com"], origin)
+    _git(["config", "user.name", "Test"], origin)
+    _write_site_repo(origin)
+    _write_theme(origin)
+    _git(["add", "."], origin)
+    _git(["commit", "-m", "initial"], origin)
+    return origin
+
+
+@pytest.fixture
+def wixy_repo_root_themed(tmp_path: Path, origin_repo_with_theme: Path) -> Path:
+    root = tmp_path / "wixy-repo-themed"
+    _write_project_registry(root, origin_repo_with_theme)
     return root
 
 
@@ -253,6 +299,69 @@ class TestGetContent:
         app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
         with TestClient(app) as client:
             response = client.get("/api/admin/content/does-not-exist")
+        assert response.status_code == 404
+
+
+class TestGetTheme:
+    def test_returns_the_merged_theme(
+        self, storage_root: Path, wixy_repo_root_themed: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_themed)
+        with TestClient(app) as client:
+            response = client.get("/api/admin/theme")
+        assert response.status_code == 200
+        theme = response.json()["theme"]
+        assert theme["colors"]["cream"] == "#F1E8D9"
+        assert theme["shadow"].startswith("0 18px")
+        assert theme["fonts"]["serif"]["family"] == "Cormorant Garamond"
+        assert theme["fonts"]["serif"]["italics"] is True
+        assert theme["fonts"]["sans"]["weights"] == ["300", "400"]
+
+    def test_theme_reflects_a_drafted_overlay_op(
+        self, storage_root: Path, wixy_repo_root_themed: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_themed)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": 0,
+                    "ops": [{"file": "theme", "path": "colors.cream", "value": "#FFFFFF"}],
+                },
+            )
+            response = client.get("/api/admin/theme")
+        assert response.json()["theme"]["colors"]["cream"] == "#FFFFFF"
+        # An untouched key survives the merge unchanged.
+        assert response.json()["theme"]["colors"]["coffee"] == "#3E312A"
+
+    def test_a_discarded_op_reverts_to_the_checkout_value(
+        self, storage_root: Path, wixy_repo_root_themed: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_themed)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": 0,
+                    "ops": [{"file": "theme", "path": "colors.cream", "value": "#FFFFFF"}],
+                },
+            )
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": 1,
+                    "ops": [{"file": "theme", "path": "colors.cream", "discard": True}],
+                },
+            )
+            response = client.get("/api/admin/theme")
+        assert response.json()["theme"]["colors"]["cream"] == "#F1E8D9"
+
+    def test_missing_theme_is_404(self, storage_root: Path, wixy_repo_root: Path) -> None:
+        # `wixy_repo_root` (unlike `wixy_repo_root_themed`) points at a repo with no
+        # `theme/theme.json` — the pre-migration-step-4 state (decisions/00004).
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/admin/theme")
         assert response.status_code == 404
 
 

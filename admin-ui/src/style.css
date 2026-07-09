@@ -384,6 +384,173 @@
   display: block;
 }
 
+/* -- Theme panel ----------------------------------------------------------------- */
+
+.wx-theme-panel {
+  display: flex;
+  gap: 16px;
+  height: 100%;
+  min-height: 0;
+}
+
+.wx-theme-controls {
+  flex: none;
+  width: 360px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.wx-theme-preview {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+.wx-theme-preview .wx-edit-view {
+  flex: 1;
+}
+
+.wx-theme-section {
+  background: var(--wx-surface);
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wx-theme-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wx-theme-section-header h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.wx-theme-reset-all,
+.wx-theme-reset {
+  font: 600 11px/1 system-ui, sans-serif;
+  padding: 5px 8px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  color: var(--wx-muted);
+  cursor: pointer;
+}
+
+.wx-theme-reset-all:hover,
+.wx-theme-reset:hover {
+  background: var(--wx-canvas);
+}
+
+.wx-theme-color-row {
+  display: grid;
+  grid-template-columns: 64px 32px 84px 1fr auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.wx-theme-color-label {
+  font-size: 12px;
+  color: var(--wx-muted);
+}
+
+.wx-theme-color-row input[type="color"] {
+  width: 32px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--wx-border);
+  border-radius: 4px;
+  background: none;
+}
+
+.wx-theme-hex {
+  font: 13px/1.4 system-ui, sans-serif;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  padding: 5px 6px;
+  width: 84px;
+}
+
+.wx-theme-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.wx-theme-preset-swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--wx-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.wx-theme-font-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--wx-border);
+}
+
+.wx-theme-font-row:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.wx-theme-font-row h4 {
+  margin: 0;
+  font-size: 12px;
+  color: var(--wx-muted);
+}
+
+.wx-theme-font-picker,
+.wx-theme-font-family {
+  font: 13px/1.4 system-ui, sans-serif;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  padding: 6px 8px;
+}
+
+.wx-theme-weights {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wx-theme-weights label {
+  font-size: 12px;
+}
+
+.wx-theme-shadow-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wx-theme-shadow-row span {
+  font-size: 12px;
+  color: var(--wx-muted);
+  flex: none;
+}
+
+.wx-theme-shadow-input {
+  flex: 1;
+  font: 13px/1.4 system-ui, sans-serif;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  padding: 6px 8px;
+}
+
 /* -- Toasts --------------------------------------------------------------------- */
 
 .wx-toast-region {

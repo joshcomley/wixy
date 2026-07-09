@@ -11,6 +11,7 @@ import { OpQueue } from "./opQueue";
 import { mountPageSettingsDrawer, type PageSettingsDrawer } from "./pageSettingsDrawer";
 import { renderPagesPanel } from "./pagesPanel";
 import { currentRoute, navigateTo, onRouteChange, type Route } from "./router";
+import { mountThemePanel, type ThemePanel } from "./themePanel";
 
 const STATE_RETRY_MS = 5000;
 const TRANSIENT_TOAST_MS = 4000;
@@ -175,6 +176,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   let state: StateResponse | null = null;
   let opQueue: OpQueue | null = null;
   let activeEditView: EditView | null = null;
+  let activeThemePanel: ThemePanel | null = null;
   let activeRoute: Route | null = null;
   let activePanelTeardown: (() => void) | null = null;
   let stateRetryTimer: number | null = null;
@@ -236,8 +238,22 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       return;
     }
 
-    const labels: Record<Exclude<Route["kind"], "pages" | "edit">, string> = {
-      theme: "Theme",
+    if (route.kind === "theme") {
+      if (opQueue === null) {
+        main.textContent = "Loading…";
+        return;
+      }
+      const panel = mountThemePanel({ api, opQueue, mountEditView: createEditView, win });
+      activeThemePanel = panel;
+      main.appendChild(panel.element);
+      activePanelTeardown = () => {
+        panel.teardown();
+        activeThemePanel = null;
+      };
+      return;
+    }
+
+    const labels: Record<Exclude<Route["kind"], "pages" | "edit" | "theme">, string> = {
       media: "Media",
       chat: "Chat",
       history: "History",
@@ -274,6 +290,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
           fetchCurrentRev: async () => (await api.getState()).draft.rev,
           onAccepted: (ops) => {
             activeEditView?.applyOps(ops);
+            activeThemePanel?.onOpsAccepted(ops);
             void refreshStateInBackground();
           },
           onError: () => showTransientError("Couldn't save your last change — retrying…"),

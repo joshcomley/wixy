@@ -37,6 +37,18 @@ describe("createApi", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/admin/state", expect.anything());
   });
 
+  it("getTheme parses the theme response", async () => {
+    const theme = {
+      colors: { cream: "#F1E8D9" },
+      shadow: "0 18px 44px rgba(62,49,42,.14)",
+      fonts: { serif: { family: "Cormorant Garamond", weights: ["400"], italics: true } },
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse({ theme }));
+    const api = createApi();
+    await expect(api.getTheme()).resolves.toEqual(theme);
+    expect(fetchMock).toHaveBeenCalledWith("/api/admin/theme", expect.anything());
+  });
+
   it("getContent URL-encodes the page slug", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ content: {}, bindings: { page: "a b", fields: [] } }));
     const api = createApi();
