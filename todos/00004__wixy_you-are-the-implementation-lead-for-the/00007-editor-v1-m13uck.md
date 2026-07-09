@@ -44,8 +44,8 @@ precedent:
   `data-wx-if` eye toggle having no code that ever inserted one into a real
   page. Full decision log: decisions/00018 — includes the real-browser
   verification evidence (Playwright against a live dev server + the actual
-  public CA repo, zero console/page errors end-to-end). PR #(fill in when
-  opened) merged.
+  public CA repo, zero console/page errors end-to-end). PR #29 (open, CI
+  pending).
 - Slice 4 [not started]: full integration wiring, E2E 8 (concurrent editing) as a
   real Playwright test, CI green (tsc/vitest/esbuild/bundle-drift), closing decision.
 
