@@ -20,9 +20,19 @@ precedent:
   queue (`admin-ui/src/opQueue.ts`, PATCH coalesce @300ms, rev/409
   refetch+replay) — pure TS, vitest-tested, no DOM/iframe wiring yet. Also
   fixed a real cross-platform bundle-drift trap (`.gitattributes` added — see
-  decisions/00016). decisions/00016. PR #(fill in when opened) merged.
-- Slice 2 [not started]: editor overlay (`editor/` package) — selection chrome,
-  hover outlines, per-binding-kind popovers, postMessage sender/receiver.
+  decisions/00016). decisions/00016. PR #27 merged.
+- Slice 2 [DONE]: editor overlay (`editor/src/overlay.ts` + `dom.ts` +
+  `contentModel.ts` + `listOps.ts` + `opTargeting.ts` + `popovers.ts`) —
+  selection chrome, hover outlines, per-binding-kind popovers, `data-wx-if`
+  eye toggle, list item structural toolbar, postMessage sender/receiver, all
+  wired into `editor/src/index.ts`'s self-starting entrypoint. Key finding:
+  an item-scope edit must always re-emit the OUTERMOST enclosing list's whole
+  array, never a nested list's own path (decisions/00017 decision 2) — the
+  server's `dotted_get` never indexes into arrays at all. 85 tests. Manual
+  browser verification not yet possible (no real end-to-end page to load
+  until slice 3) — flagged in decisions/00017 decision 8, owed then.
+  PR #(fill in when opened) merged.
+- Slice 3 [not started]: admin shell (`admin-ui/` package) — layout, hash routing,
 - Slice 3 [not started]: admin shell (`admin-ui/` package) — layout, hash routing,
   pages panel (Edit action; Duplicate/Delete explicitly deferred — see
   decisions/00015, no E2E flow in scope needs them and they need new backend
