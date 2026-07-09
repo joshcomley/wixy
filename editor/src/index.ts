@@ -1,5 +1,9 @@
-// Editor overlay entrypoint (injected into the preview iframe) — populated in milestone 7
-// (spec/05-editor.md: selection chrome, popovers, postMessage protocol).
+// Editor overlay entrypoint — injected into the preview iframe by
+// `wixy_server.preview.render_preview_page` (spec/05-editor.md).
+import { initOverlay } from "./overlay";
+
 export function main(): void {
-  // Intentionally empty until milestone 7 wires the overlay.
+  initOverlay();
 }
+
+main();
