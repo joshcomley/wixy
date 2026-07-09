@@ -49,6 +49,69 @@ describe("createApi", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/admin/theme", expect.anything());
   });
 
+  it("getMedia parses the extended per-item shape (slice 1's dimensions/size/references)", async () => {
+    const item = {
+      name: "hero.jpg",
+      url: "/images/hero.jpg",
+      source: "repo",
+      sizeBytes: 2048,
+      width: 800,
+      height: 600,
+      references: ["hero.bg"],
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse({ media: [item] }));
+    const api = createApi();
+    await expect(api.getMedia()).resolves.toEqual([item]);
+  });
+
+  it("uploadMedia posts a multipart body and parses the created MediaItem", async () => {
+    const created = {
+      name: "a1b2c3d4-photo.jpg",
+      url: "/admin/draft-media/a1b2c3d4-photo.jpg",
+      source: "draft",
+      sizeBytes: 512,
+      width: 400,
+      height: 300,
+      references: [],
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(created));
+    const api = createApi();
+    const file = new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" });
+
+    await expect(api.uploadMedia(file)).resolves.toEqual(created);
+    const call = fetchMock.mock.calls[0];
+    expect(call?.[0]).toBe("/api/admin/media");
+    const init = call?.[1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect(init.body).toBeInstanceOf(FormData);
+    expect((init.body as FormData).get("file")).toBe(file);
+  });
+
+  it("uploadMedia surfaces the server's detail message on a 422", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ detail: "file exceeds the 15MB limit" }, 422));
+    const api = createApi();
+    const file = new File([new Uint8Array([1])], "big.jpg", { type: "image/jpeg" });
+    await expect(api.uploadMedia(file)).rejects.toThrow("file exceeds the 15MB limit");
+  });
+
+  it("deleteMedia URL-encodes the filename and parses the result", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ deleted: true }));
+    const api = createApi();
+    await expect(api.deleteMedia("a b.jpg")).resolves.toEqual({ deleted: true });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/media/a%20b.jpg",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("deleteMedia surfaces the server's detail message on a 409 (still referenced)", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ detail: "'hero.jpg' is still referenced by: hero.bg" }, 409),
+    );
+    const api = createApi();
+    await expect(api.deleteMedia("hero.jpg")).rejects.toThrow("still referenced by: hero.bg");
+  });
+
   it("getContent URL-encodes the page slug", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ content: {}, bindings: { page: "a b", fields: [] } }));
     const api = createApi();

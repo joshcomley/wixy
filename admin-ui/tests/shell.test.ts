@@ -60,6 +60,8 @@ function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
     patchDraft: vi.fn(async () => ({ kind: "ok" as const, rev: 1 })),
     discardDraft: vi.fn(async () => ({ rev: 0 })),
     getMedia: vi.fn(async () => []),
+    uploadMedia: vi.fn(),
+    deleteMedia: vi.fn(),
     getTheme: vi.fn(async () => ({
       colors: { cream: "#F1E8D9" },
       shadow: "0 18px 44px rgba(62,49,42,.14)",
@@ -184,7 +186,19 @@ describe("mountShell", () => {
     expect(container.querySelector(".wx-pages-table")).not.toBeNull();
   });
 
-  it("a stub nav route (e.g. Media) renders a coming-soon panel", async () => {
+  it("a stub nav route (e.g. History) renders a coming-soon panel", async () => {
+    const api = fakeApi();
+    const win = fakeWindow();
+    const container = document.createElement("div");
+
+    mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+    await flushState(api);
+
+    win.location.hash = "#/history";
+    expect(container.querySelector(".wx-coming-soon")?.textContent).toMatch(/later milestone/i);
+  });
+
+  it("#/media mounts the real media panel", async () => {
     const api = fakeApi();
     const win = fakeWindow();
     const container = document.createElement("div");
@@ -193,7 +207,11 @@ describe("mountShell", () => {
     await flushState(api);
 
     win.location.hash = "#/media";
-    expect(container.querySelector(".wx-coming-soon")?.textContent).toMatch(/later milestone/i);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(container.querySelector(".wx-media-panel")).not.toBeNull();
+    expect(container.querySelector(".wx-coming-soon")).toBeNull();
   });
 
   it("#/theme mounts the real theme panel, reusing the injected mountEditView", async () => {

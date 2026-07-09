@@ -34,6 +34,7 @@ function harness(overrides: HarnessOverrides = {}) {
   const sent: ShellToOverlayMessage[] = [];
   const loaded: string[] = [];
   const navigated: string[] = [];
+  const mediaRequests: string[] = [];
   const api = overrides.api ?? fakeApi();
   const opQueue = overrides.opQueue ?? fakeQueue();
   const core = createEditViewCore("about", {
@@ -42,8 +43,9 @@ function harness(overrides: HarnessOverrides = {}) {
     postToOverlay: (message) => sent.push(message),
     loadPage: (page) => loaded.push(page),
     onOverlayNavigated: (page) => navigated.push(page),
+    onMediaRequest: (key) => mediaRequests.push(key),
   });
-  return { core, sent, loaded, navigated, api, opQueue };
+  return { core, sent, loaded, navigated, mediaRequests, api, opQueue };
 }
 
 describe("createEditViewCore", () => {
@@ -72,10 +74,15 @@ describe("createEditViewCore", () => {
   it("ignores an unrecognized message", () => {
     const { core, sent, opQueue } = harness();
     core.handleMessage({ wx: 1, type: "selected", key: "x", kind: "text", rect: { x: 0, y: 0, width: 1, height: 1 } });
-    core.handleMessage({ wx: 1, type: "mediaRequest", key: "x" });
     core.handleMessage("not even an object");
     expect(sent).toEqual([]);
     expect(opQueue.enqueued).toEqual([]);
+  });
+
+  it("on mediaRequest, notifies onMediaRequest with the raw (possibly item-scoped) key", () => {
+    const { core, mediaRequests } = harness();
+    core.handleMessage({ wx: 1, type: "mediaRequest", key: ".img" });
+    expect(mediaRequests).toEqual([".img"]);
   });
 
   it("on navigate, updates currentPage and notifies onOverlayNavigated without calling loadPage", () => {

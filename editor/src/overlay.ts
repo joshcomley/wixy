@@ -26,7 +26,7 @@ import {
   buildRichLiteTextPopover,
   positionNear,
 } from "./popovers";
-import type { BindingField, JsonValue, PageBindings } from "./protocol";
+import type { BindingField, DraftOp, JsonValue, PageBindings } from "./protocol";
 
 // @nav is builder-computed and never generically list-editable (spec/02 §3;
 // decisions/00012 decision 8 flagged this for the editor to enforce).
@@ -47,6 +47,11 @@ export function initOverlay(win: Window = window): () => void {
   let closeActivePopover: (() => void) | null = null;
   let hoverChip: HTMLElement | null = null;
   let hoveredEl: Element | null = null;
+  // The binding a "Replace image" click sent `mediaRequest` for (milestone 8
+  // slice 3) — set right before asking the shell to open its media dialog,
+  // consumed by the matching `applyOps` batch the shell echoes back once the
+  // user picks/uploads or cancels (decisions/00022).
+  let pendingMediaTarget: DetectedBinding | null = null;
 
   function currentPage(): string {
     return state?.page ?? "";
@@ -182,7 +187,10 @@ export function initOverlay(win: Window = window): () => void {
     const el = target.element;
     const alt = target.kind === "img" ? (el.getAttribute("alt") ?? "") : "";
     const popover = buildImagePopover(alt, {
-      onReplace: () => sendToShell({ wx: 1, type: "mediaRequest", key: target.key }, win),
+      onReplace: () => {
+        pendingMediaTarget = target;
+        sendToShell({ wx: 1, type: "mediaRequest", key: target.key }, win);
+      },
       onCommitAlt: (newAlt) => {
         if (target.kind === "img") {
           commitEdit(target, { src: el.getAttribute("src") ?? "", alt: newAlt });
@@ -506,10 +514,36 @@ export function initOverlay(win: Window = window): () => void {
       case "init":
         state = { page: message.page, bindings: message.bindings, draftRev: message.draftRev };
         return;
-      case "applyOps":
-        // Echoed-back-after-server-accept (spec/05 §2) — the overlay already applied
-        // these optimistically at commit time; nothing further to reconcile in v1.
+      case "applyOps": {
+        // Normally just an echo-after-server-accept the overlay already applied
+        // optimistically at commit time (decisions/00017: nothing to reconcile).
+        // The ONE exception (milestone 8 slice 3): the shell also reuses this same
+        // message to deliver a pending "Replace image" request's answer — an op
+        // whose `path` equals the ORIGINAL mediaRequest key (verbatim, even when
+        // item-scoped, e.g. ".img" — the shell has no DOM access to resolve that
+        // itself), or an EMPTY batch for "cancelled, nothing picked" (decisions/00022).
+        // Matching only ever applies to an outstanding pendingMediaTarget, and only
+        // clears it on an actual match or an explicit empty-batch cancel signal —
+        // an unrelated non-empty batch (e.g. an in-flight edit that was already
+        // queued before the dialog opened) passes through untouched, leaving the
+        // real answer still awaited.
+        if (pendingMediaTarget !== null) {
+          if (message.ops.length === 0) {
+            pendingMediaTarget = null;
+            return;
+          }
+          const match = message.ops.find(
+            (op): op is Extract<DraftOp, { value: JsonValue }> =>
+              op.path === pendingMediaTarget?.key && "value" in op,
+          );
+          if (match !== undefined) {
+            const target = pendingMediaTarget;
+            pendingMediaTarget = null;
+            commitEdit(target, match.value);
+          }
+        }
         return;
+      }
       case "setDevice":
         // The shell resizes the iframe ELEMENT itself; there's nothing for the
         // overlay's own in-frame DOM to do in response (decisions/00017).
