@@ -12,7 +12,15 @@ const PYTHON = process.env.WIXY_E2E_PYTHON ?? "python3";
 
 export default defineConfig({
   testDir: "./tests",
-  fullyParallel: false, // one shared fixture server + draft overlay — tests must not race each other
+  // One shared fixture server + ONE draft overlay for every spec file — `fullyParallel:
+  // false` alone only serializes tests WITHIN a single file; different .spec.ts files
+  // still land on separate workers by default and race each other's PATCH /api/admin/
+  // draft calls against the same overlay rev (a real 409 found the moment a SECOND spec
+  // file existed alongside concurrent-editing.spec.ts — invisible before that with only
+  // one file to run). `workers: 1` is what actually guarantees global seriality; revisit
+  // if the suite ever grows enough to need per-file isolated fixture servers instead.
+  fullyParallel: false,
+  workers: 1,
   reporter: "list",
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,

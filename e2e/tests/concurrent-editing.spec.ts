@@ -4,28 +4,8 @@
 // decision 4) — E2E 1 and 4 need a real publish step to fully pass and aren't built
 // as Playwright tests yet.
 
-import { expect, test, type Page } from "@playwright/test";
-
-async function gotoEditAndWaitReady(page: Page, slug: string): Promise<void> {
-  const contentFetch = page.waitForResponse(
-    (res) => res.url().includes(`/api/admin/content/${slug}`) && res.request().method() === "GET",
-  );
-  await page.goto(`/admin#/edit/${slug}`);
-  await contentFetch;
-  // The content response is what triggers the shell's `init` postMessage to the
-  // overlay (editView.ts's requestInit) — a small buffer covers that last, very
-  // fast (same-document postMessage) hop before the overlay's `state` is set,
-  // which direct (non-item-scoped) op emission needs to target the right page.
-  await page.waitForTimeout(150);
-}
-
-async function editTextField(page: Page, key: string, newValue: string): Promise<void> {
-  const frame = page.frameLocator(".wx-preview-iframe");
-  await frame.locator(`[data-wx="${key}"]`).click();
-  const input = frame.locator(".wx-popover input, .wx-popover textarea").first();
-  await input.fill(newValue);
-  await input.press("Enter");
-}
+import { expect, test } from "@playwright/test";
+import { editTextField, gotoEditAndWaitReady, trackConsoleErrors } from "./helpers";
 
 test.describe("E2E 8: concurrent editing sanity", () => {
   test.beforeEach(async ({ request }) => {
@@ -38,23 +18,13 @@ test.describe("E2E 8: concurrent editing sanity", () => {
     const tabA = await context.newPage();
     const tabB = await context.newPage();
 
-    // spec/08 §2: "Console errors anywhere in E2E = failure" — a real JS exception
-    // or console.error() call from application code. "Failed to load resource: ...
-    // 409" is a BROWSER-level network diagnostic Chromium emits for ANY non-2xx
-    // response regardless of whether application code handles it correctly — and
-    // this flow deliberately, correctly provokes a 409 as the whole point of
-    // testing rev/replay. Filtering that one diagnostic category is what keeps this
-    // check meaningful (catching real regressions) instead of unsatisfiable by any
-    // test that exercises a request the app is SUPPOSED to reject.
-    const consoleErrors: string[] = [];
-    for (const page of [tabA, tabB]) {
-      page.on("console", (msg) => {
-        if (msg.type() === "error" && !msg.text().startsWith("Failed to load resource")) {
-          consoleErrors.push(msg.text());
-        }
-      });
-      page.on("pageerror", (err) => consoleErrors.push(String(err)));
-    }
+    // This flow deliberately, correctly provokes a 409 (the whole point of testing
+    // rev/replay) — trackConsoleErrors' "Failed to load resource" filter is what
+    // keeps the end-of-test assertion meaningful despite that expected non-2xx.
+    // Each call returns its OWN live-updating array (pushed into by that page's
+    // own listeners) — concat only at the assertion point, once both are settled.
+    const tabAConsoleErrors = trackConsoleErrors(tabA);
+    const tabBConsoleErrors = trackConsoleErrors(tabB);
 
     const patchResponses: { tab: string; status: number }[] = [];
     tabA.on("response", (res) => {
@@ -107,6 +77,6 @@ test.describe("E2E 8: concurrent editing sanity", () => {
     expect(patchResponses.some((r) => r.tab === "A" && r.status === 200)).toBe(true);
     expect(patchResponses.some((r) => r.tab === "B" && r.status === 200)).toBe(true);
 
-    expect(consoleErrors).toEqual([]);
+    expect([...tabAConsoleErrors, ...tabBConsoleErrors]).toEqual([]);
   });
 });
