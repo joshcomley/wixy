@@ -23,7 +23,7 @@ Split into a slice PR train (matching M6/M7's own precedent — decisions/00010,
   image's deletion is explicitly deferred, same "needs milestone 9's publish-
   time materialization" reasoning as decisions/00015 decision 3's page-delete
   deferral). `pyproject.toml` gained `python-multipart` (server extra, needed
-  for FastAPI `UploadFile`). PR #(fill in when opened).
+  for FastAPI `UploadFile`). PR #31 (open, CI pending).
 - Slice 2 [not started]: theme panel (`admin-ui/`) — `#/theme` route: colors
   (swatch grid + native color input + hex + site-palette presets), fonts
   (Headings/Body/Script = theme.json's serif/sans/script roles — confirmed by
@@ -79,4 +79,4 @@ passing — slice 4 (E2E 2/4's publish-tail won't fully pass until M9, matching 
 E2E 1/4 caveat).
 
 ## Links
-PR (slice 1): (fill in when opened)
+PR (slice 1): #31
