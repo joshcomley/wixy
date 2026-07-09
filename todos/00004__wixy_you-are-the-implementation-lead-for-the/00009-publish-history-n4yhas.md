@@ -71,4 +71,8 @@ lists, per-leaf for scalars) — slice 3. E2E 5 (two publishes -> restore #1) an
 Next: slice 2 (publish HTTP surface + admin-ui Publish button + review drawer).
 
 ## Links
-PR (slice 1): (fill in once opened)
+PR (slice 1): https://github.com/joshcomley/wixy/pull/35 (merged d0e0880; required a
+follow-up fix commit 1e3cbf1 — `git tag -a` needs a committer identity too, not just
+`git commit`; passed locally because this machine has a global git identity, failed
+on CI's clean runner, fixed by passing the same `-c user.name=/-c user.email=`
+override already used for `_commit`)
