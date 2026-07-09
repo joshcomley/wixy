@@ -13,6 +13,7 @@ from pathlib import Path
 
 from builder.content import load_json_object
 from builder.errors import BuildError
+from builder.jsontypes import JsonObject
 
 _GENERIC_FONT_FALLBACK: dict[str, str] = {
     "serif": "serif",
@@ -37,27 +38,37 @@ class Theme:
 
 def load_theme(path: Path) -> Theme:
     data = load_json_object(path)
+    return theme_from_dict(data, location=str(path))
 
+
+def theme_from_dict(data: JsonObject, *, location: str = "<theme>") -> Theme:
+    """Parse an already-loaded theme dict (spec/02 §4).
+
+    Split out from `load_theme` so the server's merged-content service (spec/04
+    §3-4, once the draft overlay lands) can apply overlay ops to a theme dict and
+    re-parse it without a round trip through a file — `theme_to_dict` is its
+    inverse.
+    """
     colors_raw = data.get("colors", {})
     if not isinstance(colors_raw, dict):
-        raise BuildError("theme.json 'colors' must be an object", location=str(path))
+        raise BuildError("theme.json 'colors' must be an object", location=location)
     colors: dict[str, str] = {}
     for key, val in colors_raw.items():
         if not isinstance(val, str):
-            raise BuildError(f"theme.json colors.{key} must be a string", location=str(path))
+            raise BuildError(f"theme.json colors.{key} must be a string", location=location)
         colors[key] = val
 
     shadow = data.get("shadow", "")
     if not isinstance(shadow, str):
-        raise BuildError("theme.json 'shadow' must be a string", location=str(path))
+        raise BuildError("theme.json 'shadow' must be a string", location=location)
 
     fonts_raw = data.get("fonts", {})
     if not isinstance(fonts_raw, dict):
-        raise BuildError("theme.json 'fonts' must be an object", location=str(path))
+        raise BuildError("theme.json 'fonts' must be an object", location=location)
     fonts: dict[str, FontSpec] = {}
     for role, spec_raw in fonts_raw.items():
         if not isinstance(spec_raw, dict):
-            raise BuildError(f"theme.json fonts.{role} must be an object", location=str(path))
+            raise BuildError(f"theme.json fonts.{role} must be an object", location=location)
         family = spec_raw.get("family")
         weights_raw = spec_raw.get("weights", [])
         italics = spec_raw.get("italics", False)
@@ -66,11 +77,27 @@ def load_theme(path: Path) -> Theme:
             or not isinstance(weights_raw, list)
             or not isinstance(italics, bool)
         ):
-            raise BuildError(f"theme.json fonts.{role} has an invalid shape", location=str(path))
+            raise BuildError(f"theme.json fonts.{role} has an invalid shape", location=location)
         weights = [w for w in weights_raw if isinstance(w, str)]
         fonts[role] = FontSpec(family=family, weights=weights, italics=italics)
 
     return Theme(colors=colors, shadow=shadow, fonts=fonts)
+
+
+def theme_to_dict(theme: Theme) -> JsonObject:
+    """The inverse of `theme_from_dict` — round-trips through `theme.json`'s own shape."""
+    return {
+        "colors": dict(theme.colors),
+        "shadow": theme.shadow,
+        "fonts": {
+            role: {
+                "family": spec.family,
+                "weights": list(spec.weights),
+                "italics": spec.italics,
+            }
+            for role, spec in theme.fonts.items()
+        },
+    }
 
 
 def generate_theme_css(theme: Theme) -> str:

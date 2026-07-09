@@ -7,7 +7,15 @@ from pathlib import Path
 import pytest
 
 from builder.errors import BuildError
-from builder.theme import FontSpec, Theme, generate_fonts_url, generate_theme_css, load_theme
+from builder.theme import (
+    FontSpec,
+    Theme,
+    generate_fonts_url,
+    generate_theme_css,
+    load_theme,
+    theme_from_dict,
+    theme_to_dict,
+)
 
 
 class TestLoadTheme:
@@ -32,6 +40,38 @@ class TestLoadTheme:
         )
         with pytest.raises(BuildError):
             load_theme(path)
+
+
+class TestThemeDictRoundTrip:
+    def test_to_dict_then_from_dict_is_the_identity(self, mini_site_root: Path) -> None:
+        original = load_theme(mini_site_root / "theme" / "theme.json")
+        round_tripped = theme_from_dict(theme_to_dict(original))
+        assert round_tripped == original
+
+    def test_to_dict_matches_theme_json_shape(self) -> None:
+        theme = Theme(
+            colors={"cream": "#F1E8D9"},
+            shadow="0 1px 2px black",
+            fonts={
+                "serif": FontSpec(family="Cormorant Garamond", weights=["400", "500"], italics=True)
+            },
+        )
+        data = theme_to_dict(theme)
+        assert data == {
+            "colors": {"cream": "#F1E8D9"},
+            "shadow": "0 1px 2px black",
+            "fonts": {
+                "serif": {
+                    "family": "Cormorant Garamond",
+                    "weights": ["400", "500"],
+                    "italics": True,
+                }
+            },
+        }
+
+    def test_from_dict_rejects_bad_shape_same_as_load_theme(self) -> None:
+        with pytest.raises(BuildError):
+            theme_from_dict({"colors": "nope", "shadow": "x", "fonts": {}})
 
 
 class TestThemeCss:
