@@ -125,6 +125,12 @@ export interface EditView {
    * or navigated to a different iframe document; the overlay ignores stale
    * echoes harmlessly in any case (decisions/00017: nothing to reconcile in v1). */
   applyOps(ops: DraftOp[]): void;
+  /** Send an arbitrary shell -> overlay message to this view's iframe — the
+   * general-purpose escape hatch `applyOps` is itself built on. The theme panel
+   * (milestone 8 slice 2) uses this to live-apply `themeVars`/`themeFonts` to its
+   * OWN embedded preview iframe; `editView.ts` stays free of theme-specific
+   * knowledge (decisions/00021) by only exposing the generic send. */
+  postMessage(message: ShellToOverlayMessage): void;
   teardown(): void;
 }
 
@@ -197,6 +203,7 @@ export function mountEditView(page: string, deps: MountEditViewDeps): EditView {
     element: root,
     setPage: (nextPage) => core.setPage(nextPage),
     applyOps: (ops) => postToOverlay({ wx: 1, type: "applyOps", ops }),
+    postMessage: (message) => postToOverlay(message),
     teardown(): void {
       win.removeEventListener("message", messageListener);
     },

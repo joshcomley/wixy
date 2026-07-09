@@ -493,6 +493,53 @@ describe("initOverlay", () => {
       teardown();
     });
 
+    describe("themeFonts", () => {
+      afterEach(() => {
+        document.head
+          .querySelectorAll("link")
+          .forEach((link) => link.href.includes("fonts.googleapis.com") && link.remove());
+      });
+
+      it("swaps an existing Google Fonts link's href", () => {
+        const existing = document.createElement("link");
+        existing.rel = "stylesheet";
+        existing.href = "https://fonts.googleapis.com/css2?family=Jost:wght@400";
+        document.head.appendChild(existing);
+
+        const harness = createHarness();
+        const teardown = harness.start();
+        harness.dispatchShellMessage({
+          wx: 1,
+          type: "themeFonts",
+          url: "https://fonts.googleapis.com/css2?family=Roboto:wght@400",
+        });
+
+        const links = Array.from(document.head.querySelectorAll("link")).filter((l) =>
+          l.href.includes("fonts.googleapis.com"),
+        );
+        expect(links).toHaveLength(1);
+        expect(links[0]?.href).toBe("https://fonts.googleapis.com/css2?family=Roboto:wght@400");
+        teardown();
+      });
+
+      it("creates a fonts link if none exists yet", () => {
+        const harness = createHarness();
+        const teardown = harness.start();
+        harness.dispatchShellMessage({
+          wx: 1,
+          type: "themeFonts",
+          url: "https://fonts.googleapis.com/css2?family=Roboto:wght@400",
+        });
+
+        const link = Array.from(document.head.querySelectorAll("link")).find((l) =>
+          l.href.includes("fonts.googleapis.com"),
+        );
+        expect(link?.href).toBe("https://fonts.googleapis.com/css2?family=Roboto:wght@400");
+        expect(link?.rel).toBe("stylesheet");
+        teardown();
+      });
+    });
+
     it("select scrolls the matching bound element into view", () => {
       root.innerHTML = `<h1 data-wx="hero.title">Title</h1>`;
       const h1 = root.querySelector("h1") as HTMLElement;

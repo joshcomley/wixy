@@ -19,6 +19,7 @@ from builder.config import ProjectConfig
 from builder.errors import BuildError
 from builder.jsontypes import JsonObject, JsonValue
 from builder.render import SiteSource
+from builder.theme import theme_to_dict
 from wixy_server.checkout import CheckoutError, UpstreamCommit, commits_ahead, current_sha
 from wixy_server.live_pointer import load_live_pointer
 from wixy_server.media import (
@@ -160,6 +161,35 @@ async def get_content(page: str, request: Request) -> JsonObject:
     paths: ProjectPaths = request.app.state.paths
     try:
         return await anyio.to_thread.run_sync(_build_content, project, paths, page)
+    except CheckoutError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except BuildError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# GET /api/admin/theme (milestone 8 slice 2)
+# ---------------------------------------------------------------------------
+
+
+def _build_theme(project: ProjectConfig, paths: ProjectPaths) -> JsonObject:
+    source = build_site_source(project, paths.repo)
+    overlay = _load_overlay_for(paths)
+    merged = merge_overlay(source, overlay)
+    if merged.theme is None:
+        # Pre-migration-step-4 checkouts have no theme/theme.json (decisions/00004) —
+        # same "missing resource -> 404" treatment as an unknown page slug above,
+        # not a crash (spec/04 §3's "never a crash" posture).
+        raise BuildError("project has no theme configured", location="theme")
+    return {"theme": theme_to_dict(merged.theme)}
+
+
+@router.get("/theme", response_model=None)
+async def get_theme(request: Request) -> JsonObject:
+    project: ProjectConfig = request.app.state.project
+    paths: ProjectPaths = request.app.state.paths
+    try:
+        return await anyio.to_thread.run_sync(_build_theme, project, paths)
     except CheckoutError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except BuildError as exc:

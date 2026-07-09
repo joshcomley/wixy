@@ -74,6 +74,17 @@ export interface ThemeVarsMessage {
   vars: Record<string, string>;
 }
 
+/** Swap the preview iframe's Google Fonts `<link>` `href` (spec/05 §3's "Fonts:
+ * … live-applies by swapping the preview iframe's fonts link tag") — a distinct
+ * message from `themeVars` because loading a new font FAMILY requires fetching a
+ * new stylesheet resource, not just re-assigning a CSS custom property; a family
+ * change still also sends `themeVars` for the `--font-*` variable itself. */
+export interface ThemeFontsMessage {
+  wx: 1;
+  type: "themeFonts";
+  url: string;
+}
+
 export interface SelectMessage {
   wx: 1;
   type: "select";
@@ -85,6 +96,7 @@ export type ShellToOverlayMessage =
   | ApplyOpsMessage
   | SetDeviceMessage
   | ThemeVarsMessage
+  | ThemeFontsMessage
   | SelectMessage;
 
 // ---------------------------------------------------------------------------
@@ -288,6 +300,10 @@ export function parseShellToOverlayMessage(data: unknown): ShellToOverlayMessage
       }
       return { wx: 1, type: "themeVars", vars: vars as Record<string, string> };
     }
+    case "themeFonts":
+      return typeof data["url"] === "string"
+        ? { wx: 1, type: "themeFonts", url: data["url"] }
+        : null;
     case "select":
       return typeof data["key"] === "string" ? { wx: 1, type: "select", key: data["key"] } : null;
     default:

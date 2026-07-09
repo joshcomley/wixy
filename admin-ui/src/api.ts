@@ -3,6 +3,7 @@
 // pages-panel column). spec/05 §7: "Every fetch has a 10s timeout + retry-with-
 // backoff (3x)."
 
+import type { FontSpec } from "./googleFonts";
 import type { DraftOp, JsonValue, PageBindings } from "./protocol";
 
 export interface PageSummary {
@@ -36,6 +37,14 @@ export interface MediaItem {
   name: string;
   url: string;
   source: "repo" | "draft";
+}
+
+/** `theme/theme.json`'s shape (spec/02 §4), as returned by `GET /api/admin/theme` —
+ * already draft-overlay-merged server-side, same as `ContentResponse.content`. */
+export interface ThemeData {
+  colors: Record<string, string>;
+  shadow: string;
+  fonts: Record<string, FontSpec>;
 }
 
 export type PatchResult = { kind: "ok"; rev: number } | { kind: "conflict" };
@@ -97,6 +106,7 @@ export interface AdminApi {
   patchDraft(expectedRev: number, ops: DraftOp[]): Promise<PatchResult>;
   discardDraft(): Promise<{ rev: number }>;
   getMedia(): Promise<MediaItem[]>;
+  getTheme(): Promise<ThemeData>;
 }
 
 export function createApi(): AdminApi {
@@ -127,6 +137,10 @@ export function createApi(): AdminApi {
     async getMedia() {
       const body = await parseJson<{ media: MediaItem[] }>(await fetchWithRetry("/api/admin/media"));
       return body.media;
+    },
+    async getTheme() {
+      const body = await parseJson<{ theme: ThemeData }>(await fetchWithRetry("/api/admin/theme"));
+      return body.theme;
     },
   };
 }
