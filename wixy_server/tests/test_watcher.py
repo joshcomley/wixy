@@ -60,6 +60,22 @@ class TestFetchOnce:
         assert (paths.repo / ".git").exists()
         assert (paths.repo / "README.md").exists()
 
+    def test_skips_entirely_while_the_publish_lock_is_held(
+        self, project: ProjectConfig, paths: ProjectPaths
+    ) -> None:
+        """spec/04 §7: a publish in flight owns the working tree — the watcher
+        must not fast-forward it out from under an uncommitted materialize
+        (decisions/00013's flagged gap, closed by milestone 9's publisher)."""
+        paths.locks_dir.mkdir(parents=True)
+        paths.publish_lock.write_text("locked", encoding="utf-8")
+
+        status = WatcherStatus()
+        fetch_once(project, paths, status)
+
+        assert not (paths.repo / ".git").exists()  # never even attempted the clone
+        assert status.fetched_at is None
+        assert status.last_error is None  # a skip is not a failure
+
     def test_fetches_when_present(
         self, project: ProjectConfig, paths: ProjectPaths, origin_repo: Path
     ) -> None:
