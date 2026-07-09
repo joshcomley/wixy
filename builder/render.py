@@ -108,14 +108,15 @@ def _mark_nav_active(body: Tag, current_url: str) -> None:
                 link["class"] = [*classes, "active"]
 
 
-def render_page(
-    source: SiteSource, slug: str, *, mode: Mode, sink: ValidationResult | None = None
-) -> str:
-    """Render one page to a full HTML document string."""
-    page_content = source.page_contents.get(slug)
-    if page_content is None:
-        raise BuildError(f"no content file for page '{slug}'", location=slug)
+def prepare_page_body(source: SiteSource, slug: str) -> tuple[BeautifulSoup, Tag, str]:
+    """Load a page's template, verify + inject its partials, return `(soup, body,
+    file_label)`.
 
+    Split out of `render_page` so `builder.bindings_map.extract_bindings_map` (which
+    walks the same template structurally, without applying any bindings) shares this
+    exact "load + inject partials" logic rather than a second, driftable copy of it
+    (decisions/00012). No behavior change to `render_page` itself.
+    """
     template_path = source.pages_dir / f"{slug}.html"
     if not template_path.exists():
         raise BuildError(f"no template for page '{slug}'", location=slug)
@@ -130,6 +131,19 @@ def render_page(
     body = soup.body
     if not isinstance(body, Tag):
         raise BuildError("template has no <body>", location=file_label)
+
+    return soup, body, file_label
+
+
+def render_page(
+    source: SiteSource, slug: str, *, mode: Mode, sink: ValidationResult | None = None
+) -> str:
+    """Render one page to a full HTML document string."""
+    page_content = source.page_contents.get(slug)
+    if page_content is None:
+        raise BuildError(f"no content file for page '{slug}'", location=slug)
+
+    soup, body, file_label = prepare_page_body(source, slug)
 
     ctx = ResolveContext(page=page_content, glob=resolved_global_content(source))
     apply_bindings(body, ctx, mode=mode, file_label=file_label, sink=sink)

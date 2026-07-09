@@ -22,8 +22,12 @@ see decisions/00010 for the full reasoning. Slices, updated as they ship:
 - Slice 2 [DONE]: draft overlay store (rev/409/atomic) + merged-content
   service (spec/02 §8's merge rule) + a small `builder/theme.py` refactor
   (`theme_from_dict`/`theme_to_dict`) the merge service needed. decisions/00011.
-- Slice 3 [not started]: preview renderer (merged `SiteSource` + `render_page`
-  preview mode + editor asset injection) + first FastAPI app wiring.
+- Slice 3 [DONE]: bindings-map v1 format (decisions/00012, provisional) +
+  preview renderer (`wixy_server/preview.py`: merged `SiteSource` + `render_page`
+  preview mode + editor asset injection) + first FastAPI app
+  (`wixy_server/app.py`, `GET /admin/preview/{page}.html`) + upstream watcher
+  (`wixy_server/watcher.py`, spec/04 §7, background fetch loop). decisions/00013.
+  PR #(fill in when opened) merged.
 - Slice 4 [not started]: public serving (atomic live pointer, cache headers,
   404), CF Access JWT middleware (dev bypass), `/api/admin/state|content|draft|
   media(list)`, `/internal/ready|warmup`, `/healthz`, `/api/version`,

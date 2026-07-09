@@ -260,15 +260,32 @@ def _apply_bg(
     el["style"] = f"{existing_str};{decl}" if existing_str else decl
 
 
-def _apply_attrs(
-    el: Tag, ctx: ResolveContext, spec: str, *, file_label: str, sink: ValidationResult | None
-) -> None:
+def parse_attr_spec(spec: str) -> list[tuple[str, str] | None]:
+    """Parse a `data-wx-attr` spec (`"attr:key[,attr2:key2]"`) into `(attr_name, key)`
+    pairs, one per comma-separated entry; a malformed entry (no `:`) yields `None` in
+    its slot so callers can report it against the right raw text. Shared by
+    `_apply_attrs` (below) and `builder.bindings_map`'s static extractor so the two
+    can't drift on what counts as a valid pair (spec/02 §2)."""
+    pairs: list[tuple[str, str] | None] = []
     for raw_pair in spec.split(","):
         pair = raw_pair.strip()
         if ":" not in pair:
-            _fail(sink, file_label, spec, f"malformed data-wx-attr entry '{pair}' (want attr:key)")
+            pairs.append(None)
             continue
         attr_name, key = (part.strip() for part in pair.split(":", 1))
+        pairs.append((attr_name, key))
+    return pairs
+
+
+def _apply_attrs(
+    el: Tag, ctx: ResolveContext, spec: str, *, file_label: str, sink: ValidationResult | None
+) -> None:
+    for raw_pair, parsed in zip(spec.split(","), parse_attr_spec(spec), strict=True):
+        if parsed is None:
+            pair = raw_pair.strip()
+            _fail(sink, file_label, spec, f"malformed data-wx-attr entry '{pair}' (want attr:key)")
+            continue
+        attr_name, key = parsed
         found, value = resolve_key(ctx, key)
         if not found or not isinstance(value, str):
             _fail(
