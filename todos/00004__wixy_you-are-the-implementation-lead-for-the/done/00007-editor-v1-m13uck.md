@@ -53,8 +53,8 @@ precedent:
   the same page; tab A's PATCH is deterministically delayed via Playwright
   route interception so the rev-conflict/409/replay path is forced and proven,
   not left to timing luck. `.github/workflows/ci.yml`'s `e2e` job gained Python
-  setup (it had none). Full rationale: decisions/00019. PR #(fill in when
-  opened).
+  setup (it had none). Full rationale: decisions/00019. PR #30 (open, CI
+  pending).
 
 **Milestone 7 (Editor v1) is now fully DONE — all 4 slices merged.**
 
