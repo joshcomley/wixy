@@ -1,0 +1,9 @@
+{
+  "name": "wixy-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@playwright/test": "^1.49.1"
+  }
+}

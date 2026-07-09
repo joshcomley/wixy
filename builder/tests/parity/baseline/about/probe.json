@@ -1,0 +1,212 @@
+{
+  "console_errors": [],
+  "images": [
+    [
+      "/images/exterior.jpg",
+      907,
+      1280
+    ],
+    [
+      "/images/lounge.jpg",
+      1280,
+      960
+    ],
+    [
+      "/images/purdi.jpg",
+      891,
+      1280
+    ],
+    [
+      "/images/room.jpg",
+      1280,
+      960
+    ]
+  ],
+  "links": [
+    [
+      "About",
+      "/about.html"
+    ],
+    [
+      "About",
+      "/about.html"
+    ],
+    [
+      "About",
+      "/about.html"
+    ],
+    [
+      "Book Now",
+      "/about.html#"
+    ],
+    [
+      "Book Now",
+      "/about.html#"
+    ],
+    [
+      "Book a Free Consultation",
+      "/about.html#"
+    ],
+    [
+      "Book online",
+      "/about.html#"
+    ],
+    [
+      "Aftercare",
+      "/aftercare.html"
+    ],
+    [
+      "Contact",
+      "/contact.html"
+    ],
+    [
+      "Contact",
+      "/contact.html"
+    ],
+    [
+      "Contact",
+      "/contact.html"
+    ],
+    [
+      "Contact Purdi",
+      "/contact.html"
+    ],
+    [
+      "FAQ",
+      "/faq.html"
+    ],
+    [
+      "Before & After",
+      "/gallery.html"
+    ],
+    [
+      "Before & After",
+      "/gallery.html"
+    ],
+    [
+      "Before & After",
+      "/gallery.html"
+    ],
+    [
+      "CottageAesthetics",
+      "/index.html"
+    ],
+    [
+      "Clinic Policies",
+      "/policies.html"
+    ],
+    [
+      "Reviews",
+      "/reviews.html"
+    ],
+    [
+      "Reviews",
+      "/reviews.html"
+    ],
+    [
+      "Reviews",
+      "/reviews.html"
+    ],
+    [
+      "Treatments",
+      "/treatments.html"
+    ],
+    [
+      "Treatments",
+      "/treatments.html"
+    ],
+    [
+      "Treatments",
+      "/treatments.html"
+    ],
+    [
+      "Facebook",
+      "https://www.facebook.com/profile.php?id=61572079150383"
+    ],
+    [
+      "Instagram",
+      "https://www.instagram.com/cottageaesthetics"
+    ],
+    [
+      "Email us",
+      "mailto:cottageaestheticshartlebury@gmail.com"
+    ],
+    [
+      "07401 562 462",
+      "tel:07401562462"
+    ]
+  ],
+  "styles": {
+    ".eyebrow": {
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(230, 185, 143)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "11.84px",
+      "font-weight": "400"
+    },
+    "a.btn-olive": {
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(86, 91, 67)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "13.12px",
+      "font-weight": "300"
+    },
+    "a.btn-primary": {
+      "background-color": "rgb(178, 110, 74)",
+      "color": "rgb(253, 247, 238)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "13.12px",
+      "font-weight": "300"
+    },
+    "body": {
+      "background-color": "rgb(241, 232, 217)",
+      "color": "rgb(62, 49, 42)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "16px",
+      "font-weight": "300"
+    },
+    "footer.site-footer": {
+      "background-color": "rgb(62, 49, 42)",
+      "color": "rgb(203, 184, 159)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "13.12px",
+      "font-weight": "300"
+    },
+    "h1": {
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(255, 255, 255)",
+      "font-family": "\"Cormorant Garamond\", serif",
+      "font-size": "38.4px",
+      "font-weight": "500"
+    },
+    "h2": {
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(94, 70, 53)",
+      "font-family": "\"Cormorant Garamond\", serif",
+      "font-size": "32px",
+      "font-weight": "500"
+    },
+    "header#hd": {
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(62, 49, 42)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "16px",
+      "font-weight": "300"
+    },
+    "nav.nav-links": {
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(62, 49, 42)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "16px",
+      "font-weight": "300"
+    },
+    "p": {
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(230, 185, 143)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "11.84px",
+      "font-weight": "400"
+    }
+  },
+  "text": "Cottage AESTHETICS ☰ ABOUT TREATMENTS BEFORE & AFTER REVIEWS CONTACT BOOK NOW ABOUT Meet Purdi Registered nurse, founder of Cottage Aesthetics — and the reason clients call it simply \"The Cottage.\" NURSE-LED CARE Hello, I'm Purdi I'm a registered nurse with over 15 years of NHS and private healthcare experience, and the founder of Cottage Aesthetics — which has proudly welcomed clients for the past 18 months. Throughout my career I've worked within Plastic Surgery, Dermatology and specialist reconstructive services, caring for patients undergoing life-changing procedures. Working alongside highly skilled surgeons gave me an exceptional understanding of skin health, wound healing, facial anatomy, and the importance of precision, symmetry and attention to detail. These environments taught me that every patient is unique — the very best outcomes come from understanding the individual in front of you, respecting their natural features and creating results that look balanced, refreshed and authentically them. Purdi MY PHILOSOPHY Everyone deserves high-quality care — without inflated prices Great care extends far beyond the treatment itself. Trust, honesty, safety and communication are at the heart of every positive journey. I believe you should fully understand your options, feel confident in your practitioner, and know you're receiving care based on knowledge, experience and evidence. Enhancing our appearance should never mean fitting into a mould where everyone leaves looking identical. My goal is simply to help you look and feel like the best version of yourself — never changing who you are, just enhancing what makes you uniquely you. That means longer appointments, honest consultations, individual treatment plans, premium products and genuinely natural-looking results. THE COTTAGE A calm retreat in the Worcestershire countryside Cottage Aesthetics sits in the peaceful village of Hartlebury, tucked away from the busy high street. Limewashed walls, olive trees, oak and antique brass — every detail is here so you relax from the moment you arrive. Complete privacy · easy free parking · longer, unhurried appointments · a warm, welcoming atmosphere. STANDARDS & SAFETY Care you can trust Registered with the Nursing & Midwifery Council (NMC) Comprehensive medical indemnity insurance Advanced training in every treatment offered Currently completing a Level 7 qualification in Aesthetic Medicine Ongoing continuing professional development Evidence-based, nurse-led medical care Come and meet me at The Cottage BOOK A FREE CONSULTATION CONTACT PURDI Cottage Aesthetics Nurse-led medical aesthetics Hartlebury, Worcestershire EXPLORE About Treatments Before & After Reviews VISIT Contact FAQ Aftercare Clinic Policies GET IN TOUCH 07401 562 462 Email us Instagram Facebook Book online © Cottage Aesthetics · Hartlebury, Worcestershire · Registered nurse-led clinic"
+}

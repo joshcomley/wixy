@@ -1,0 +1,13 @@
+{
+  "brand": {
+    "line1": "Fixture"
+  },
+  "phone": "01234 567890",
+  "bookingUrl": "https://example.com/book",
+  "footer": {
+    "legal": [
+      { "label": "Privacy", "href": "/policies.html" },
+      { "label": "Terms", "href": "/policies.html#terms" }
+    ]
+  }
+}

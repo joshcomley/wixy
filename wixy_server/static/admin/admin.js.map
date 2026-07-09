@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../../../admin-ui/src/index.ts"],
+  "sourcesContent": ["// Admin shell entrypoint \u2014 populated in milestone 7 (spec/05-editor.md).\nexport function main(): void {\n  // Intentionally empty until milestone 7 wires the shell/routing/panels.\n}\n"],
+  "mappings": "mBACO,SAASA,GAAa,CAE7B",
+  "names": ["main"]
+}

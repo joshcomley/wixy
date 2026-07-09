@@ -1,0 +1,65 @@
+[project]
+name = "wixy"
+version = "0.1.0"
+description = "Wixy — self-hosted CMS engine + visual editor + AI chat for ca.cinnamons.uk"
+requires-python = ">=3.14"
+# Core = exactly what `builder` (incl. its parity harness) needs. The site repo's CI
+# installs just this (04-server.md: "importable standalone (site-repo CI installs just
+# it)") — it runs `validate`/`build`/parity, never wixy_server, so fastapi/uvicorn/etc.
+# stay out of core (see the `server` extra below). Pillow is core (not server-only)
+# because the parity harness's screenshot pixel-diff needs it too (03 §5).
+dependencies = [
+  "beautifulsoup4>=4.12",
+  "html5lib>=1.1",
+  "nh3>=0.2",
+  "playwright>=1.49",
+  "pillow>=11.0",
+]
+
+[project.optional-dependencies]
+server = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "httpx>=0.27",
+  "PyJWT>=2.9",
+  "cryptography>=43.0",
+  "anyio>=4.6",
+]
+dev = [
+  "pytest>=8.3",
+  "pytest-xdist>=3.6",
+  "pytest-asyncio>=0.24",
+  "mypy>=1.13",
+  "ruff>=0.7",
+  "types-beautifulsoup4",
+  "types-Pillow",
+  "PyJWT[crypto]>=2.9",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["builder*", "wixy_server*"]
+
+[tool.pytest.ini_options]
+addopts = "-n 4"
+testpaths = ["builder/tests", "wixy_server/tests"]
+
+[tool.mypy]
+strict = true
+files = ["builder", "wixy_server"]
+
+[[tool.mypy.overrides]]
+module = ["html5lib.*", "nh3.*"]
+ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 100
+# tooling/ predates this build and is explicitly out of scope (spec/00-mission.md
+# non-goals: the live wixapis-based scripts "stay as-is").
+extend-exclude = ["tooling"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

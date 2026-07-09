@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>placeholder</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Old:wght@400">
+<link rel="stylesheet" href="site.css">
+</head>
+<body data-page="home" data-wx-attr="data-booking-url:@bookingUrl">
+<!-- wx:partial header -->
+<main>
+  <section class="hero" data-wx-bg="hero.bg">
+    <h1 data-wx="hero.title">Placeholder title</h1>
+    <p data-wx="hero.tag">placeholder tag</p>
+    <a href="#" data-wx-href="hero.ctaHref" data-wx="hero.ctaLabel">CTA</a>
+  </section>
+  <section data-wx-if="hero.showBadge">
+    <span data-wx="hero.badge">Badge</span>
+  </section>
+  <section data-wx-if="!hero.hideExtra">
+    <span data-wx="hero.extra">Extra</span>
+  </section>
+  <ul class="showcase" data-wx-list="showcase.items">
+    <li data-wx-list-item>
+      <img data-wx-img=".img" src="" alt="">
+      <h3 data-wx=".title">Item title</h3>
+      <p data-wx=".body">Item body</p>
+      <a data-wx-if=".book" data-wx-href=".bookHref">Book</a>
+      <a data-wx-if="!.book" data-wx-href=".enquireHref">Enquire</a>
+      <ul class="tags" data-wx-list=".tags">
+        <li data-wx-list-item data-wx=".label">tag</li>
+      </ul>
+    </li>
+  </ul>
+</main>
+<!-- wx:partial footer -->
+<!-- wx:partial booking-modal -->
+</body>
+</html>
