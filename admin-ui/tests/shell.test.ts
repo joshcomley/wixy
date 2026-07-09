@@ -69,6 +69,8 @@ function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
     })),
     getPublishPreview: vi.fn(async () => ({ changes: {}, validate: { ok: true, errors: [] } })),
     publish: vi.fn(async () => ({ kind: "ok" as const, version: 1, sha: "a".repeat(40) })),
+    getPublishes: vi.fn(async () => []),
+    restore: vi.fn(async () => ({ kind: "ok" as const, version: 1, sha: "a".repeat(40), of: 0 })),
     ...overrides,
   } as AdminApi;
 }
@@ -188,7 +190,19 @@ describe("mountShell", () => {
     expect(container.querySelector(".wx-pages-table")).not.toBeNull();
   });
 
-  it("a stub nav route (e.g. History) renders a coming-soon panel", async () => {
+  it("a stub nav route (e.g. Chat) renders a coming-soon panel", async () => {
+    const api = fakeApi();
+    const win = fakeWindow();
+    const container = document.createElement("div");
+
+    mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+    await flushState(api);
+
+    win.location.hash = "#/chat";
+    expect(container.querySelector(".wx-coming-soon")?.textContent).toMatch(/later milestone/i);
+  });
+
+  it("the History route renders the real history panel, not a stub", async () => {
     const api = fakeApi();
     const win = fakeWindow();
     const container = document.createElement("div");
@@ -197,7 +211,12 @@ describe("mountShell", () => {
     await flushState(api);
 
     win.location.hash = "#/history";
-    expect(container.querySelector(".wx-coming-soon")?.textContent).toMatch(/later milestone/i);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(container.querySelector(".wx-coming-soon")).toBeNull();
+    expect(container.querySelector(".wx-history-panel")).not.toBeNull();
+    expect(api.getPublishes).toHaveBeenCalled();
   });
 
   it("#/media mounts the real media panel", async () => {

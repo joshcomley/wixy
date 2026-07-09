@@ -7,6 +7,7 @@
 
 import { createApi, type AdminApi, type StateResponse } from "./api";
 import { mountEditView as mountEditViewReal, type EditView, type MountEditViewDeps } from "./editView";
+import { mountHistoryPanel } from "./historyPanel";
 import { mountMediaPanel, type MediaPanel } from "./mediaPanel";
 import { OpQueue } from "./opQueue";
 import { mountPageSettingsDrawer } from "./pageSettingsDrawer";
@@ -307,9 +308,20 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       return;
     }
 
-    const labels: Record<Exclude<Route["kind"], "pages" | "edit" | "theme" | "media">, string> = {
+    if (route.kind === "history") {
+      const panel = mountHistoryPanel({
+        api,
+        onRestored: () => {
+          void refreshStateInBackground();
+        },
+      });
+      main.appendChild(panel.element);
+      activePanelTeardown = () => panel.teardown();
+      return;
+    }
+
+    const labels: Record<Exclude<Route["kind"], "pages" | "edit" | "theme" | "media" | "history">, string> = {
       chat: "Chat",
-      history: "History",
     };
     main.appendChild(comingSoon(labels[route.kind]));
   }

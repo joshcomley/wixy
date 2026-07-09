@@ -797,6 +797,78 @@ div.wx-media-thumb {
   padding: 6px 8px;
 }
 
+/* -- History panel (spec/05 §5) --------------------------------------------------- */
+
+.wx-history-panel h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+
+.wx-history-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--wx-surface);
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  overflow: hidden;
+}
+
+.wx-history-table th,
+.wx-history-table td {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--wx-border);
+  font-size: 13px;
+}
+
+.wx-history-table th {
+  color: var(--wx-muted);
+  font-weight: 600;
+  background: var(--wx-canvas);
+}
+
+.wx-history-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.wx-history-live td {
+  font-weight: 600;
+}
+
+.wx-history-view,
+.wx-history-restore {
+  font: 600 12px/1 system-ui, sans-serif;
+  padding: 5px 10px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  cursor: pointer;
+  text-decoration: none;
+  color: var(--wx-ink);
+  margin-right: 6px;
+  display: inline-block;
+}
+
+.wx-history-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--wx-canvas);
+  font-size: 12px;
+}
+
+.wx-history-confirm input {
+  font: 13px/1.4 system-ui, sans-serif;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  padding: 4px 8px;
+}
+
+.wx-history-error {
+  color: var(--wx-danger);
+}
+
 /* -- Toasts --------------------------------------------------------------------- */
 
 .wx-toast-region {

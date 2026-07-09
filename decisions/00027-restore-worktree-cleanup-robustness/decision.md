@@ -68,16 +68,52 @@ theorized, then either fixed what evidence pointed at (here) or recorded the
 finding (there) rather than blocking on a fully conclusive root cause neither
 investigation could produce within a reasonable number of attempts.
 
+## Update — a second, different file hit the same pattern
+
+Immediately after the fix above, while doing the final pre-ship full-suite
+verification for M9 slice 3 as a whole, a DIFFERENT full-suite run produced:
+
+```
+ERROR wixy_server/tests/test_publisher.py::TestValidateFailure::test_working_tree_is_actually_clean_after_the_abort
+444 passed, 4972 warnings, 1 error in 52.88s
+```
+
+`test_publisher.py` is pre-existing M9-slice-1 code, untouched this session,
+testing a completely different git operation (`_reset_hard`/abort-cleanliness,
+no `git worktree` involved at all). Same investigation: isolated re-run of
+`test_publisher.py` alone — 19/19 passed; two more full-suite runs immediately
+after — 445/445 both times, error did not recur.
+
+This REFRAMES the original finding: it is NOT specific to `_worktree_at_sha` or
+to `restore.py` at all. Across this session's investigations (decisions/00025's
+Playwright-timing parity test, this entry's original `test_restore.py` worktree
+error, and now `test_publisher.py`'s hard-reset error), the common thread is
+purely "runs a real git/browser subprocess" + "only ever seen at full ~445-test
+suite scale, never in isolation or a single file" — a BOX-LEVEL resource-
+contention characteristic under this specific fleet node's peak combined
+parallel test load, not a defect isolated to any one file or mechanism.
+
 ## What to watch for
 
-- If a `test_restore.py` error recurs (in isolation this time, or reproducibly
-  rather than as a rare full-suite blip), that upgrades this from "hardened
-  defensively" to "still has a real bug" — re-open this investigation with the
-  ability to capture the actual traceback this time (redirect to a file
-  BEFORE running, not after noticing a failure).
-- The fix (`git worktree prune` on a failed `remove`) is unconditionally
-  correct regardless of whether it was THE cause — it closes a real "ignored
-  exit code could leave dangling metadata" gap on its own merits.
-- Unrelated to decisions/00025's parity-test flake in every way checked (a
-  different file, a different subsystem, no shared imports/fixtures/paths) —
-  do not conflate the two if either recurs.
+- Three independent files now (`test_parity.py`, `test_restore.py`,
+  `test_publisher.py`), three different underlying subprocess types
+  (Playwright browser automation, `git worktree`, `git reset --hard`/commit) —
+  each reproduced ONLY as a rare (~1-in-8 to 1-in-10) full-suite-scale blip,
+  NEVER in isolation. Treat a FOURTH such occurrence, in yet another
+  git/subprocess-heavy test, as confirming this general pattern rather than a
+  new, independent mystery each time — don't re-derive this from scratch.
+- Escalate from "known rare full-suite flakiness" to "investigate for real" if:
+  (a) the SAME specific test errors twice in a row, (b) any error reproduces
+  in isolation even once, or (c) the rate climbs noticeably above what's
+  documented here (roughly 1 error per ~8-10 full-suite runs across this
+  session's observations).
+- The `_worktree_at_sha` cleanup fix (`git worktree prune` on a failed
+  `remove`) remains unconditionally correct regardless of whether it was ever
+  THE cause of anything — it closes a real "ignored exit code could leave
+  dangling metadata" gap on its own merits and should not be reverted.
+- If this becomes disruptive (e.g. CI starts flaking), the right fix is
+  investigating this Windows box's git-subprocess/Playwright resource
+  contention under the project's fixed `-n 4` xdist cap directly (e.g.
+  whether antivirus scanning or disk I/O is the bottleneck) — NOT lowering the
+  worker cap (global fleet rule) and NOT adding retries/skips to individual
+  tests, which would hide the signal rather than address the shared cause.

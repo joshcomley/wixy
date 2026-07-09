@@ -90,6 +90,26 @@ export type PublishOutcome =
   | { kind: "conflict"; message: string }
   | { kind: "failed"; message: string };
 
+/** `GET /api/admin/publishes`'s per-entry shape (spec/04 §6, `wixy_server.
+ * ledger.LedgerEntry.to_dict()`) — a publish entry carries `message`/`source`/
+ * `changed`; a restore entry carries `action`/`of` instead (never both). */
+export interface PublishesEntry {
+  version: number;
+  sha: string;
+  when: string;
+  live: boolean;
+  message?: string;
+  source?: "editor" | "upstream" | "mixed";
+  changed?: Record<string, string[]>;
+  action?: "restore";
+  of?: number;
+}
+
+export type RestoreOutcome =
+  | { kind: "ok"; version: number; sha: string; of: number }
+  | { kind: "conflict"; message: string }
+  | { kind: "failed"; message: string };
+
 export interface ContentResponse {
   content: Record<string, JsonValue>;
   bindings: PageBindings;
@@ -209,6 +229,8 @@ export interface AdminApi {
   getTheme(): Promise<ThemeData>;
   getPublishPreview(): Promise<PublishPreview>;
   publish(message: string, expectedRev: number): Promise<PublishOutcome>;
+  getPublishes(limit?: number): Promise<PublishesEntry[]>;
+  restore(version: number): Promise<RestoreOutcome>;
 }
 
 export function createApi(): AdminApi {
@@ -277,6 +299,28 @@ export function createApi(): AdminApi {
       }
       const body = await parseJson<{ version: number; sha: string }>(response);
       return { kind: "ok", version: body.version, sha: body.sha };
+    },
+    async getPublishes(limit) {
+      const query = limit !== undefined ? `?limit=${limit}` : "";
+      const body = await parseJson<{ publishes: PublishesEntry[] }>(
+        await fetchWithRetry(`/api/admin/publishes${query}`),
+      );
+      return body.publishes;
+    },
+    async restore(version) {
+      const response = await fetchWithRetry("/api/admin/restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ version }),
+      });
+      if (response.status === 409) {
+        return { kind: "conflict", message: await extractDetail(response, "restore conflict") };
+      }
+      if (response.status === 422) {
+        return { kind: "failed", message: await extractDetail(response, "restore failed") };
+      }
+      const body = await parseJson<{ version: number; sha: string; of: number }>(response);
+      return { kind: "ok", version: body.version, sha: body.sha, of: body.of };
     },
   };
 }
