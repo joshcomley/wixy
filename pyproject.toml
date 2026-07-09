@@ -24,6 +24,7 @@ server = [
   "PyJWT>=2.9",
   "cryptography>=43.0",
   "anyio>=4.6",
+  "python-multipart>=0.0.12",
 ]
 dev = [
   "pytest>=8.3",
