@@ -47,6 +47,19 @@ def _inject_editor_assets(html: str, bindings: PageBindings) -> str:
         # otherwise) — this is a defensive invariant check, not an expected path.
         raise BuildError("rendered preview HTML is missing <head> or <body>")
 
+    # The page's OWN relative asset/link URLs (site.css, theme.css, site.js,
+    # images/*, same-directory page links like "about.html") are authored
+    # assuming the document is served at the site ROOT (builder/build.py's
+    # publish output IS the site root) — this route serves the identical HTML
+    # at /admin/preview/{page}.html instead, so an unqualified relative URL
+    # would otherwise resolve one level too deep (/admin/preview/site.css,
+    # a 404/503). A <base href="/"> re-anchors every relative reference back to
+    # the site root, first child of <head> so it's established before any
+    # relative URL in the rest of the document is parsed. The editor's own
+    # asset links (below) are already absolute and unaffected either way.
+    base_tag = soup.new_tag("base", attrs={"href": "/"})
+    head.insert(0, base_tag)
+
     css_link = soup.new_tag("link")
     css_link["rel"] = "stylesheet"
     css_link["href"] = EDITOR_STYLESHEET_PATH

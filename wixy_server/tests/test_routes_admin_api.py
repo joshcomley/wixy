@@ -149,6 +149,58 @@ class TestGetState:
         assert by_slug["index"]["title"] == "Home"
         assert by_slug["about"]["navOrder"] == 20
 
+    def test_pages_last_modified_is_null_with_no_draft_edits(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/admin/state")
+        by_slug = {p["slug"]: p["lastModified"] for p in response.json()["pages"]}
+        assert by_slug == {"index": None, "about": None}
+
+    def test_pages_last_modified_reflects_a_drafted_op_only_for_that_page(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": 0,
+                    "ops": [{"file": "index", "path": "hero.title", "value": "New"}],
+                },
+            )
+            response = client.get("/api/admin/state")
+        by_slug = {p["slug"]: p["lastModified"] for p in response.json()["pages"]}
+        assert by_slug["index"] is not None
+        assert by_slug["about"] is None
+
+    def test_pages_last_modified_is_the_newest_op_for_that_page(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": 0,
+                    "ops": [{"file": "index", "path": "hero.title", "value": "First"}],
+                },
+            )
+            first_state = client.get("/api/admin/state").json()
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": 1,
+                    "ops": [{"file": "index", "path": "hero.title", "value": "Second"}],
+                },
+            )
+            second_state = client.get("/api/admin/state").json()
+        first_ts = {p["slug"]: p["lastModified"] for p in first_state["pages"]}["index"]
+        second_ts = {p["slug"]: p["lastModified"] for p in second_state["pages"]}["index"]
+        assert first_ts is not None and second_ts is not None
+        assert second_ts >= first_ts
+
     def test_draft_op_count_reflects_a_patched_overlay(
         self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
     ) -> None:

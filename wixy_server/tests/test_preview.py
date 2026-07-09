@@ -104,6 +104,30 @@ class TestRenderPreviewPage:
         assert isinstance(link, Tag)
         assert link["rel"] == ["stylesheet"]
 
+    def test_base_href_re_anchors_relative_urls_to_the_site_root(
+        self, tmp_path: Path, project: ProjectConfig
+    ) -> None:
+        """The page's OWN relative asset/link URLs (site.css, images/x.jpg,
+        same-directory page links) are authored assuming the document is served
+        at the site root, not /admin/preview/{page}.html — without a <base
+        href="/">, they'd resolve one level too deep and 404/503."""
+        source = _write_source(
+            tmp_path,
+            project,
+            '<h1 data-wx="hero.title">x</h1>',
+            {"meta": {}, "hero": {"title": "X"}},
+        )
+        html = render_preview_page(source, "index")
+        soup = BeautifulSoup(html, "html5lib")
+        head = soup.head
+        assert isinstance(head, Tag)
+        base = head.find("base")
+        assert isinstance(base, Tag)
+        assert base["href"] == "/"
+        # Must be the FIRST element in <head> — established before any other
+        # relative URL in the document is parsed.
+        assert head.contents[0] is base
+
     def test_bindings_script_and_editor_script_appended_in_order(
         self, tmp_path: Path, project: ProjectConfig
     ) -> None:

@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <title>Wixy Admin</title>
 <meta name="robots" content="noindex">
+<link rel="stylesheet" href="/admin/static/admin/admin.css">
 <style>
   html, body { margin: 0; height: 100%; }
   body {
@@ -11,17 +12,22 @@
     background: #faf8f5;
     color: #2a2420;
   }
-  #wx-shell {
+  /* Pre-JS instant-render loading screen only (fleet instant-render rule: this
+     paints before any fetch/JS runs). Scoped to a child wrapper, not #wx-shell
+     itself, so it doesn't fight the real shell's own layout (admin-ui/src/
+     style.css's .wx-shell) once main() replaces this wrapper's contents. */
+  #wx-shell { min-height: 100vh; }
+  .wx-loading-wrap {
     display: flex;
     align-items: center;
     justify-content: center;
     min-height: 100vh;
   }
-  #wx-shell .wx-loading { opacity: .6; }
+  .wx-loading { opacity: .6; }
 </style>
 </head>
 <body>
-<div id="wx-shell"><p class="wx-loading">Loading Wixy Admin&hellip;</p></div>
+<div id="wx-shell"><div class="wx-loading-wrap"><p class="wx-loading">Loading Wixy Admin&hellip;</p></div></div>
 <script src="/admin/static/admin/admin.js"></script>
 </body>
 </html>

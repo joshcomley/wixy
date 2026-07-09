@@ -58,6 +58,17 @@ def _load_overlay_for(paths: ProjectPaths) -> Overlay:
 # ---------------------------------------------------------------------------
 
 
+def _last_modified_for_page(overlay: Overlay, slug: str) -> str | None:
+    """The newest draft-op timestamp touching this page (spec/05 §2's pages-panel
+    "last-modified" column) — `None` if the page has no draft edits. There's no
+    other last-modified signal until milestone 9's publish ledger exists; op
+    timestamps are `datetime.now(UTC).isoformat()` (routes_admin_api.patch_draft),
+    a consistently-offset ISO 8601 string, so plain max() sorts correctly."""
+    prefix = f"{slug}:"
+    timestamps = [op.ts for key, op in overlay.ops.items() if key.startswith(prefix)]
+    return max(timestamps) if timestamps else None
+
+
 def _build_state(
     project: ProjectConfig, paths: ProjectPaths, watcher_status: WatcherStatus
 ) -> JsonObject:
@@ -66,7 +77,11 @@ def _build_state(
     merged = merge_overlay(source, overlay)
 
     pages: list[JsonValue] = [
-        {"slug": slug, "meta": content.get("meta", {})}
+        {
+            "slug": slug,
+            "meta": content.get("meta", {}),
+            "lastModified": _last_modified_for_page(overlay, slug),
+        }
         for slug, content in sorted(merged.page_contents.items())
     ]
 

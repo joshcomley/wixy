@@ -1,0 +1,196 @@
+/* Editor overlay chrome (spec/05-editor.md §2). Injected into the preview iframe
+   alongside editor.js (wixy_server/preview.py's EDITOR_STYLESHEET_PATH). Editing
+   chrome never mutates layout metrics — everything here is outline/box-shadow/
+   position:fixed/absolute, never a change to flow layout of the underlying page. */
+
+:root {
+  --wx-brand-blue: #2563eb;
+  --wx-ink: #1e2430;
+  --wx-surface: #ffffff;
+  --wx-border: #d8dee8;
+  --wx-shadow: 0 4px 16px rgba(20, 24, 32, 0.18);
+  --wx-radius: 4px;
+}
+
+/* -- Hover chrome ---------------------------------------------------------- */
+
+.wx-hover-outline {
+  outline: 2px solid var(--wx-brand-blue) !important;
+  outline-offset: 1px;
+  border-radius: var(--wx-radius);
+  cursor: pointer !important;
+}
+
+.wx-hover-chip {
+  position: fixed;
+  z-index: 2147483645;
+  background: var(--wx-brand-blue);
+  color: #fff;
+  font: 600 11px/1.4 system-ui, -apple-system, sans-serif;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: var(--wx-radius);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* -- data-wx-if hidden sections --------------------------------------------- */
+
+[data-wx-if] {
+  position: relative;
+}
+
+[data-wx-if][data-wx-hidden] {
+  opacity: 0.4;
+}
+
+.wx-if-eye-toggle {
+  display: none;
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2147483644;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--wx-border);
+  border-radius: 999px;
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: var(--wx-shadow);
+}
+
+[data-wx-if][data-wx-hidden] .wx-if-eye-toggle {
+  display: flex;
+}
+
+/* -- Popovers ---------------------------------------------------------------
+   Positioning (position:fixed, coordinates, z-index) is set inline by
+   popovers.ts's baseContainer()/positionNear() — only visual chrome lives here. */
+
+.wx-popover {
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  border: 1px solid var(--wx-border);
+  border-radius: 6px;
+  box-shadow: var(--wx-shadow);
+  padding: 8px;
+  font: 14px/1.4 system-ui, -apple-system, sans-serif;
+  min-width: 220px;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wx-popover input,
+.wx-popover textarea {
+  font: inherit;
+  color: inherit;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  padding: 6px 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.wx-popover textarea {
+  min-height: 4.5em;
+  resize: vertical;
+}
+
+.wx-popover button {
+  font: 600 13px/1.4 system-ui, -apple-system, sans-serif;
+  color: var(--wx-ink);
+  background: #f2f4f7;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.wx-popover button:hover {
+  background: #e7eaf0;
+}
+
+.wx-popover-toolbar {
+  display: flex;
+  gap: 4px;
+}
+
+.wx-popover-toolbar button {
+  min-width: 28px;
+  padding: 4px 8px;
+}
+
+.wx-popover-href-row {
+  display: flex;
+  gap: 4px;
+}
+
+.wx-popover-href-row input {
+  flex: 1;
+}
+
+.wx-popover [contenteditable="true"] {
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  padding: 6px 8px;
+  min-height: 1.6em;
+  outline: none;
+}
+
+.wx-popover [contenteditable="true"]:focus {
+  border-color: var(--wx-brand-blue);
+}
+
+/* -- List item structural toolbar -------------------------------------------- */
+
+.wx-item-toolbar {
+  position: fixed;
+  z-index: 2147483644;
+  display: flex;
+  gap: 2px;
+  background: var(--wx-surface);
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  box-shadow: var(--wx-shadow);
+  padding: 2px;
+}
+
+.wx-item-toolbar button {
+  font: 13px/1 system-ui, -apple-system, sans-serif;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--wx-ink);
+}
+
+.wx-item-toolbar button:hover {
+  background: #e7eaf0;
+}
+
+/* -- External-link toast ------------------------------------------------------ */
+
+.wx-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 2147483646;
+  background: var(--wx-ink);
+  color: #fff;
+  font: 500 13px/1.4 system-ui, -apple-system, sans-serif;
+  padding: 8px 14px;
+  border-radius: var(--wx-radius);
+  box-shadow: var(--wx-shadow);
+}

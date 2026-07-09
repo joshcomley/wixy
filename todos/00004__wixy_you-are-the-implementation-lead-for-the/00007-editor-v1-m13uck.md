@@ -31,13 +31,21 @@ precedent:
   server's `dotted_get` never indexes into arrays at all. 85 tests. Manual
   browser verification not yet possible (no real end-to-end page to load
   until slice 3) — flagged in decisions/00017 decision 8, owed then.
-  PR #(fill in when opened) merged.
-- Slice 3 [not started]: admin shell (`admin-ui/` package) — layout, hash routing,
-- Slice 3 [not started]: admin shell (`admin-ui/` package) — layout, hash routing,
-  pages panel (Edit action; Duplicate/Delete explicitly deferred — see
-  decisions/00015, no E2E flow in scope needs them and they need new backend
-  page-ops surface M6 deliberately didn't build), edit-mode iframe host wired to
-  slices 1-2, page settings drawer (`meta.*`).
+  PR #28 merged.
+- Slice 3 [DONE]: admin shell (`admin-ui/` package) — hash router, top bar,
+  left nav, pages panel (Edit action; Duplicate/Delete explicitly deferred —
+  see decisions/00015), edit-mode iframe host wired to slices 1-2 (device
+  toolbar, the shell's own single `OpQueue`), page settings drawer (`meta.*`,
+  incl. a minimal existing-media ogImage picker). Also root-cause fixed three
+  real gaps browser verification finally surfaced: a missing `<base href="/">`
+  on the preview route (M6 bug — relative site asset/link URLs resolved one
+  directory too deep), missing internal/external link interception (spec/05
+  §2, fell through the slice boundaries entirely), and the M7-slice-2
+  `data-wx-if` eye toggle having no code that ever inserted one into a real
+  page. Full decision log: decisions/00018 — includes the real-browser
+  verification evidence (Playwright against a live dev server + the actual
+  public CA repo, zero console/page errors end-to-end). PR #29 (open, CI
+  pending).
 - Slice 4 [not started]: full integration wiring, E2E 8 (concurrent editing) as a
   real Playwright test, CI green (tsc/vitest/esbuild/bundle-drift), closing decision.
 
