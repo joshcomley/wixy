@@ -60,13 +60,26 @@ Split into a slice PR train (matching M6/M7's own precedent — decisions/00010,
   flow (not by any unit test): nothing served `GET /admin/draft-media/{name}`
   at all — fixed with a new `StaticFiles` mount in `app.py`. Full reasoning:
   decisions/00022.
-- Slice 4 (or folded into 3, decide when there): E2E 2 (image replace,
-  oversized + EXIF-rotated fixture) and E2E 3 (theme change, live vars/fonts
-  reflect) as real Playwright tests, matching M7 slice 4's pattern
-  (`e2e/fixture_server.py` already exists and is reusable) — E2E 2/3 don't
-  need milestone 9's publisher for their EDITING-side behavior (only their
-  publish-tail would, matching decisions/00015 decision 4's reasoning for
-  E2E 1/4), CI green, closing decision.
+- Slice 4 [DONE]: E2E 2 (`e2e/tests/image-replace.spec.ts`, new — upload a
+  checked-in fixture JPEG that's BOTH oversized (3000x2000) and EXIF-rotated
+  (orientation=6), generated via Pillow, `e2e/fixtures/oversized-exif-rotated
+  .jpg`) and E2E 3 (`e2e/tests/theme-change.spec.ts`, new — 2 tests: live
+  color+font change, and reset-to-published) as real Playwright tests, reusing
+  `e2e/fixture_server.py` as-is. `e2e/tests/helpers.ts` (new) extracted
+  `gotoEditAndWaitReady`/`editTextField`/`trackConsoleErrors` out of
+  `concurrent-editing.spec.ts` (which now imports them) plus a new
+  `waitForNextDraftPatchAccepted` — a THIRD spec file needing the identical
+  "wait for the real PATCH round-trip before checking server state" logic is
+  what justified extracting it, not a speculative abstraction. A REAL
+  Playwright config gap was found the moment a SECOND/THIRD spec file existed
+  alongside the original one: `fullyParallel: false` alone does NOT force
+  different .spec.ts files to run sequentially against the ONE shared fixture
+  server + draft overlay (only `workers: 1` does) — invisible before this
+  slice since there was only ever one file to run. Fixed in
+  `playwright.config.ts`. Full reasoning: decisions/00023.
+
+**Milestone 8 is 100% DONE — all 4 slices merged (wixy PRs #31, #32, #33,
+and slice 4's own PR).**
 
 ## Relevant files
 - spec/05-editor.md §3-4 (theme panel, media panel & dialog)
@@ -79,14 +92,16 @@ Pillow-verified EXIF strip + auto-orient + resize + re-encode; SVG reject; refer
 scan before delete — ALL DONE (slice 1). Theme live-applies via CSS custom properties
 + font link swap, no rebuild — DONE (slice 2). Media panel + dialog + mediaRequest/
 applyOps rewiring, incl. a real draft-media-serving fix found by browser testing —
-DONE (slice 3). E2E 2 (image replace incl. oversized EXIF-rotated fixture) and 3
-(theme change -> publish -> theme.css/fonts reflect) passing — slice 4 (E2E 2/4's
-publish-tail won't fully pass until M9, matching M7's own E2E 1/4 caveat).
+DONE (slice 3). E2E 2 (image replace incl. oversized EXIF-rotated fixture) and E2E 3
+(theme change, live vars/fonts) passing as real Playwright tests — DONE (slice 4;
+their publish-tail assertions — "committed to repo images/", "theme.css + fonts link
+reflect it" on the PUBLISHED site — correctly wait for milestone 9, matching M7's own
+E2E 1/4 caveat).
 
-Next: slice 4 (E2E 2/3 as real Playwright tests, reusing `e2e/fixture_server.py`
-as-is — no new fixture-server work needed), closing milestone 8.
+Milestone 8 fully closed. Next: milestone 9 (publish + history).
 
 ## Links
 PR (slice 1): #31
 PR (slice 2): #32
-PR (slice 3): (fill in once opened)
+PR (slice 3): #33
+PR (slice 4): (fill in once opened)
