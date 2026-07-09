@@ -16,11 +16,12 @@ Depends on 00002 (builder v1). This is the first wixy_server milestone.
 Given the real size of this milestone, it's being built as a PR train (matching
 how M4's CA migration was itself per-page PRs, not one) rather than a single PR —
 see decisions/00010 for the full reasoning. Slices, updated as they ship:
-- Slice 1 [IN PROGRESS]: settings/`.env` loading, Storage directory layout,
+- Slice 1 [DONE]: settings/`.env` loading, Storage directory layout,
   project registry wrapper, site checkout manager (clone/fetch/ff-only). No
-  FastAPI app yet. decisions/00010.
-- Slice 2 [not started]: draft overlay store (rev/409/atomic) + merged-content
-  service (spec/02 §8's merge rule).
+  FastAPI app yet. decisions/00010. PR #23 merged.
+- Slice 2 [DONE]: draft overlay store (rev/409/atomic) + merged-content
+  service (spec/02 §8's merge rule) + a small `builder/theme.py` refactor
+  (`theme_from_dict`/`theme_to_dict`) the merge service needed. decisions/00011.
 - Slice 3 [not started]: preview renderer (merged `SiteSource` + `render_page`
   preview mode + editor asset injection) + first FastAPI app wiring.
 - Slice 4 [not started]: public serving (atomic live pointer, cache headers,
