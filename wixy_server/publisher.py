@@ -414,7 +414,21 @@ def _stage_commit_push(repo: Path, message: str, branch: str) -> tuple[str, bool
 
 def _tag_and_push(repo: Path, version: int, message: str, sha: str) -> None:
     tag_name = f"wixy-publish-v{version}"
-    tag_result = run_git(["tag", "-a", tag_name, "-m", message, sha], cwd=repo)
+    tag_result = run_git(
+        [
+            "-c",
+            f"user.name={_COMMIT_USER_NAME}",
+            "-c",
+            f"user.email={_COMMIT_USER_EMAIL}",
+            "tag",
+            "-a",
+            tag_name,
+            "-m",
+            message,
+            sha,
+        ],
+        cwd=repo,
+    )
     if tag_result.returncode != 0:
         raise PublishError("committing", f"git tag failed: {tag_result.stderr.strip()}", [])
     push_result = run_git(["push", "origin", tag_name], cwd=repo)
