@@ -15,9 +15,12 @@ merged (wixy PRs #23-26).
 
 Split into a 4-slice PR train (decisions/00015 explains why), matching M6's own
 precedent:
-- Slice 1 [in progress]: shared overlay<->shell postMessage protocol types + the
-  shell-side op queue (PATCH coalesce @300ms, rev/409 refetch+replay) — pure TS,
-  vitest-tested, no DOM/iframe wiring yet.
+- Slice 1 [DONE]: shared overlay<->shell postMessage protocol types
+  (`admin-ui/src/protocol.ts` + `editor/src/protocol.ts`) + the shell-side op
+  queue (`admin-ui/src/opQueue.ts`, PATCH coalesce @300ms, rev/409
+  refetch+replay) — pure TS, vitest-tested, no DOM/iframe wiring yet. Also
+  fixed a real cross-platform bundle-drift trap (`.gitattributes` added — see
+  decisions/00016). decisions/00016. PR #(fill in when opened) merged.
 - Slice 2 [not started]: editor overlay (`editor/` package) — selection chrome,
   hover outlines, per-binding-kind popovers, postMessage sender/receiver.
 - Slice 3 [not started]: admin shell (`admin-ui/` package) — layout, hash routing,
