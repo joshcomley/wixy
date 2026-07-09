@@ -31,11 +31,18 @@ same way, backend-first:
   `paths.publish_lock` exists (closes decisions/00013's flagged watcher/lock
   gap). Tested against REAL git repos with a genuine BARE origin (spec/08 §1),
   including a real push-rejection race. Full reasoning: decisions/00024.
-- Slice 2 [not started]: publish HTTP surface (`POST /api/admin/publish`,
-  `GET /api/admin/publish/stream` SSE, `GET /api/admin/publishes`, a new
-  diff-preview endpoint) + admin-ui `publishDrawer.ts` + wiring the shell's
-  Publish button for real (removing `shell.ts`'s `disabled`/"Publishing arrives
-  in milestone 9" stub) + making the draft-status chip clickable (spec/05 §1).
+- Slice 2 [DONE]: publish HTTP surface — `POST /api/admin/publish` (awaits the
+  whole synchronous `run_publish` via `anyio.to_thread.run_sync` directly in
+  the handler; no fire-and-forget task, per decisions/00026 decision 1),
+  `GET /api/admin/publish/stream` (hand-rolled SSE, no new dependency, polls
+  the same in-process `PublishJob` on `app.state`), `GET /api/admin/publishes`
+  (ledger listing, newest-first, marks the live one), `GET /api/admin/publish/
+  preview` (the review drawer's binding-map-driven diff + `validate_site`
+  result against the overlay-merged in-memory content — closes a real
+  staged-image false-positive gap, decisions/00026 decision 3). Admin-ui
+  `publishDrawer.ts` (new) + `shell.ts`'s Publish button and draft-status chip
+  both wired for real (removing the milestone-8 stub), switching drawers
+  correctly if page-settings was already open. Full reasoning: decisions/00026.
 - Slice 3 [not started]: history panel + restore. Restore-diff computation is
   binding-map-driven (whole-array for `kind:"list"` fields, per-leaf otherwise);
   rebuilding a PRUNED build's dir for restore uses `git worktree add <sha>` (a
@@ -68,7 +75,12 @@ passes — slice 5. Restore diff granularity is binding-map-driven (whole-array 
 lists, per-leaf for scalars) — slice 3. E2E 5 (two publishes -> restore #1) and 6
 (AI-lane faked commit -> preview banner -> publish drawer lists it) passing — slice 5.
 
-Next: slice 2 (publish HTTP surface + admin-ui Publish button + review drawer).
+Next: slice 3 (history panel + restore).
 
 ## Links
-PR (slice 1): (fill in once opened)
+PR (slice 1): https://github.com/joshcomley/wixy/pull/35 (merged d0e0880; required a
+follow-up fix commit 1e3cbf1 — `git tag -a` needs a committer identity too, not just
+`git commit`; passed locally because this machine has a global git identity, failed
+on CI's clean runner, fixed by passing the same `-c user.name=/-c user.email=`
+override already used for `_commit`)
+PR (slice 2): (fill in once opened)
