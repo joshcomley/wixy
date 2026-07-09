@@ -101,4 +101,4 @@ follow-up fix commit 1e3cbf1 — `git tag -a` needs a committer identity too, no
 on CI's clean runner, fixed by passing the same `-c user.name=/-c user.email=`
 override already used for `_commit`)
 PR (slice 2): https://github.com/joshcomley/wixy/pull/36 (merged b32e48d)
-PR (slice 3): (fill in once opened)
+PR (slice 3): https://github.com/joshcomley/wixy/pull/37 (merged 2c48600)
