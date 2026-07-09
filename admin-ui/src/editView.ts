@@ -12,6 +12,7 @@
 // this testable at all, not just a style preference.
 
 import type { AdminApi } from "./api";
+import { openMediaDialog } from "./mediaDialog";
 import { parseOverlayToShellMessage, type DraftOp, type ShellToOverlayMessage } from "./protocol";
 
 export type Device = "desktop" | "tablet" | "mobile";
@@ -45,6 +46,11 @@ export interface EditViewCoreDeps {
    * pages-panel highlighting) WITHOUT calling `loadPage` again; the iframe
    * already navigated itself. */
   onOverlayNavigated: (page: string) => void;
+  /** The overlay wants to replace an image binding (spec/05 §2's "Replace image"
+   * button emits `mediaRequest {key}`) — `key` is the RAW binding key as-is
+   * (may be item-scoped, e.g. ".img"); this core never resolves it further, same
+   * "DOM-adjacent effects belong to the caller" boundary as `onOverlayNavigated`. */
+  onMediaRequest: (key: string) => void;
 }
 
 export interface EditViewCore {
@@ -100,9 +106,11 @@ export function createEditViewCore(initialPage: string, deps: EditViewCoreDeps):
           loadToken += 1;
           deps.onOverlayNavigated(message.page);
           return;
-        case "selected":
         case "mediaRequest":
-          return; // selected: no shell UI reacts to it yet; mediaRequest: milestone 8's media dialog
+          deps.onMediaRequest(message.key);
+          return;
+        case "selected":
+          return; // no shell UI reacts to it yet
       }
     },
     setPage(page: string): void {
@@ -188,6 +196,20 @@ export function mountEditView(page: string, deps: MountEditViewDeps): EditView {
       iframe.src = `/admin/preview/${nextPage}.html`;
     },
     onOverlayNavigated: deps.onOverlayNavigated,
+    onMediaRequest: (key) => {
+      openMediaDialog({ api: deps.api, win }, (value) => {
+        // A fresh object literal, not `value` passed straight through: TS only
+        // structurally matches a plain interface (`MediaPickValue`) against
+        // `JsonValue`'s indexed-object arm when the source is a literal, not a
+        // named type without its own index signature (same reasoning as
+        // themePanel.ts's `commitSpec`).
+        postToOverlay({
+          wx: 1,
+          type: "applyOps",
+          ops: value !== null ? [{ file: core.currentPage, path: key, value: { src: value.src, alt: value.alt } }] : [],
+        });
+      });
+    },
   });
 
   const messageListener = (event: MessageEvent): void => {

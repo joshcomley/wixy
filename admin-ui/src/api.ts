@@ -33,10 +33,18 @@ export interface ContentResponse {
   bindings: PageBindings;
 }
 
+/** `GET /api/admin/media`'s per-item shape (milestone 8 slice 1's extension —
+ * `wixy_server/routes_admin_api.py`'s `_media_item`): dimensions/size are always
+ * present for a real file on disk; `references` lists the content keys (outermost
+ * granularity, decisions/00020 decision 3) using this file, empty if unused. */
 export interface MediaItem {
   name: string;
   url: string;
   source: "repo" | "draft";
+  sizeBytes: number;
+  width: number | null;
+  height: number | null;
+  references: string[];
 }
 
 /** `theme/theme.json`'s shape (spec/02 §4), as returned by `GET /api/admin/theme` —
@@ -93,9 +101,25 @@ async function fetchWithRetry(input: string, init?: RequestInit): Promise<Respon
   throw lastError instanceof Error ? lastError : new ApiError("request failed");
 }
 
+function isDetailBody(value: unknown): value is { detail: string } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as Record<string, unknown>)["detail"] === "string"
+  );
+}
+
 async function parseJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    throw new ApiError(`request failed with status ${response.status}`, response.status);
+    // FastAPI's HTTPException bodies are `{"detail": "<message>"}` — surfacing it
+    // gives a real, specific error (e.g. DELETE /media's 409 "still referenced
+    // by: …") instead of a generic "request failed with status 409" for every
+    // endpoint alike.
+    const detail = await response
+      .json()
+      .then((body: unknown) => (isDetailBody(body) ? body.detail : null))
+      .catch(() => null);
+    throw new ApiError(detail ?? `request failed with status ${response.status}`, response.status);
   }
   return (await response.json()) as T;
 }
@@ -106,6 +130,8 @@ export interface AdminApi {
   patchDraft(expectedRev: number, ops: DraftOp[]): Promise<PatchResult>;
   discardDraft(): Promise<{ rev: number }>;
   getMedia(): Promise<MediaItem[]>;
+  uploadMedia(file: File): Promise<MediaItem>;
+  deleteMedia(name: string): Promise<{ deleted: boolean }>;
   getTheme(): Promise<ThemeData>;
 }
 
@@ -137,6 +163,22 @@ export function createApi(): AdminApi {
     async getMedia() {
       const body = await parseJson<{ media: MediaItem[] }>(await fetchWithRetry("/api/admin/media"));
       return body.media;
+    },
+    async uploadMedia(file) {
+      const formData = new FormData();
+      formData.append("file", file);
+      // fetchWithRetry re-sends the same FormData/File on a 5xx retry — safe
+      // here specifically because the upload hash is of CONTENT, not a random id
+      // (decisions/00020 decision 5): a retried identical upload resolves to the
+      // SAME staged filename rather than creating a duplicate.
+      const response = await fetchWithRetry("/api/admin/media", { method: "POST", body: formData });
+      return parseJson<MediaItem>(response);
+    },
+    async deleteMedia(name) {
+      const response = await fetchWithRetry(`/api/admin/media/${encodeURIComponent(name)}`, {
+        method: "DELETE",
+      });
+      return parseJson<{ deleted: boolean }>(response);
     },
     async getTheme() {
       const body = await parseJson<{ theme: ThemeData }>(await fetchWithRetry("/api/admin/theme"));

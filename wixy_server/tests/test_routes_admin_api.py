@@ -562,6 +562,30 @@ class TestUploadMedia:
         assert body["url"] == f"/admin/draft-media/{body['name']}"
         assert (paths.draft_media / body["name"]).is_file()
 
+    def test_the_returned_url_is_actually_servable(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        # A real gap found by driving a real browser through the upload/replace
+        # flow (decisions/00022): `body["url"]` was constructed and pointed at a
+        # real file on disk, but NOTHING served `/admin/draft-media/{name}` at
+        # all — this asserts the round trip, not just the URL string + on-disk
+        # file existing separately (which `test_uploads_and_stages_a_processed_
+        # image` above already covered and would NOT have caught this).
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            upload_response = client.post(
+                "/api/admin/media",
+                files={"file": ("photo.jpg", self._jpeg_bytes(), "image/jpeg")},
+            )
+            url = upload_response.json()["url"]
+            asset_response = client.get(url)
+        assert asset_response.status_code == 200
+        # A real, decodable JPEG of the uploaded size — not just "some bytes came
+        # back" — proves the served content is the actual processed upload.
+        served_image = Image.open(io.BytesIO(asset_response.content))
+        assert served_image.format == "JPEG"
+        assert served_image.size == (500, 300)
+
     def test_resizes_to_the_project_configured_limit(
         self, storage_root: Path, wixy_repo_root: Path
     ) -> None:

@@ -206,6 +206,116 @@ describe("initOverlay", () => {
       teardown();
     });
 
+    it("a matching applyOps batch after Replace updates the DOM and emits the op", () => {
+      root.innerHTML = `<img data-wx-img="hero.img" src="images/old.jpg" alt="old">`;
+      const img = root.querySelector("img") as HTMLElement;
+      const { sent, dispatchShellMessage, teardown } = initFor("index", { page: "index", fields: [] });
+
+      img.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      document.querySelector("button")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      dispatchShellMessage({
+        wx: 1,
+        type: "applyOps",
+        ops: [{ file: "index", path: "hero.img", value: { src: "images/new.jpg", alt: "new" } }],
+      });
+
+      expect(img.getAttribute("src")).toBe("images/new.jpg");
+      expect(img.getAttribute("alt")).toBe("new");
+      expect(sent.at(-1)).toEqual({
+        wx: 1,
+        type: "op",
+        file: "index",
+        path: "hero.img",
+        value: { src: "images/new.jpg", alt: "new" },
+      });
+      teardown();
+    });
+
+    it("an empty applyOps batch (cancelled) clears the pending target without committing anything", () => {
+      root.innerHTML = `<img data-wx-img="hero.img" src="images/old.jpg" alt="old">`;
+      const img = root.querySelector("img") as HTMLElement;
+      const { sent, dispatchShellMessage, teardown } = initFor("index", { page: "index", fields: [] });
+
+      img.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      document.querySelector("button")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      dispatchShellMessage({ wx: 1, type: "applyOps", ops: [] });
+
+      expect(img.getAttribute("src")).toBe("images/old.jpg");
+      expect(sent.filter((m) => m.type === "op")).toHaveLength(0);
+
+      // The target was cleared by the cancel — a LATER batch that happens to
+      // share the same path must not be misread as a second, stale answer.
+      dispatchShellMessage({
+        wx: 1,
+        type: "applyOps",
+        ops: [{ file: "index", path: "hero.img", value: { src: "images/late.jpg", alt: "late" } }],
+      });
+      expect(img.getAttribute("src")).toBe("images/old.jpg");
+      teardown();
+    });
+
+    it("an unrelated non-empty applyOps batch does not clear a pending target; a later matching one still applies", () => {
+      root.innerHTML = `<img data-wx-img="hero.img" src="images/old.jpg" alt="old">`;
+      const img = root.querySelector("img") as HTMLElement;
+      const { sent, dispatchShellMessage, teardown } = initFor("index", { page: "index", fields: [] });
+
+      img.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      document.querySelector("button")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      // An unrelated batch — e.g. an edit that was already queued before the
+      // dialog opened, whose acceptance echo arrives while it's still open.
+      dispatchShellMessage({
+        wx: 1,
+        type: "applyOps",
+        ops: [{ file: "index", path: "intro.body", value: "unrelated" }],
+      });
+      expect(img.getAttribute("src")).toBe("images/old.jpg");
+
+      dispatchShellMessage({
+        wx: 1,
+        type: "applyOps",
+        ops: [{ file: "index", path: "hero.img", value: { src: "images/new.jpg", alt: "new" } }],
+      });
+      expect(img.getAttribute("src")).toBe("images/new.jpg");
+      expect(sent.filter((m) => m.type === "op")).toHaveLength(1);
+      teardown();
+    });
+
+    it("picking an item-scoped image emits the WHOLE array, not a per-item path", () => {
+      root.innerHTML = `
+        <ul data-wx-list="showcase.items">
+          <li data-wx-list-item><img data-wx-img=".img" src="images/one.jpg" alt="One"></li>
+          <li data-wx-list-item><img data-wx-img=".img" src="images/two.jpg" alt="Two"></li>
+        </ul>`;
+      const firstImg = root.querySelectorAll("img")[0] as HTMLElement;
+      const bindings: PageBindings = {
+        page: "index",
+        fields: [{ key: "showcase.items", kind: "list", items: [{ key: ".img", kind: "img" }] }],
+      };
+      const { sent, dispatchShellMessage, teardown } = initFor("index", bindings);
+
+      firstImg.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      document.querySelector("button")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      dispatchShellMessage({
+        wx: 1,
+        type: "applyOps",
+        ops: [{ file: "index", path: ".img", value: { src: "images/picked.jpg", alt: "Picked" } }],
+      });
+
+      expect((firstImg as HTMLImageElement).getAttribute("src")).toBe("images/picked.jpg");
+      expect(sent.at(-1)).toEqual({
+        wx: 1,
+        type: "op",
+        file: "index",
+        path: "showcase.items",
+        value: [
+          { img: { src: "images/picked.jpg", alt: "Picked" } },
+          { img: { src: "images/two.jpg", alt: "Two" } },
+        ],
+      });
+      teardown();
+    });
+
     it("committing alt text updates the DOM and emits the whole {src, alt} op", () => {
       root.innerHTML = `<img data-wx-img="hero.img" src="images/hero.jpg" alt="old alt">`;
       const img = root.querySelector("img") as HTMLElement;

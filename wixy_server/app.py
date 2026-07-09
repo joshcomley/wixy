@@ -120,6 +120,17 @@ def create_app(
         return HTMLResponse(content=_ADMIN_SHELL_HTML)
 
     app.mount("/admin/static", StaticFiles(directory=_STATIC_DIR), name="admin-static")
+    # Serves whatever `_save_upload`/`_media_item` (routes_admin_api.py) construct as
+    # a staged upload's `url` (`/admin/draft-media/<hash8>-<slug>.<ext>`) — `paths.
+    # draft_media` already exists by now (`ensure_project_dirs` above), and staying
+    # per-project (not the fixed `_STATIC_DIR` `/admin/static` uses) is correct since
+    # each app instance serves exactly one project (spec/04 §1). Without this mount a
+    # freshly uploaded/staged image is correctly listed by `GET /api/admin/media` and
+    # correctly targeted by an `<img src>`, but 404s the moment anything actually
+    # fetches it — found by driving a real browser through the upload/replace flow,
+    # not by any of this milestone's existing unit tests (they mock the API and never
+    # fetch the constructed URL).
+    app.mount("/admin/draft-media", StaticFiles(directory=paths.draft_media), name="draft-media")
 
     app.include_router(public_router)
 

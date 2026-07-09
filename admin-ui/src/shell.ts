@@ -7,6 +7,7 @@
 
 import { createApi, type AdminApi, type StateResponse } from "./api";
 import { mountEditView as mountEditViewReal, type EditView, type MountEditViewDeps } from "./editView";
+import { mountMediaPanel, type MediaPanel } from "./mediaPanel";
 import { OpQueue } from "./opQueue";
 import { mountPageSettingsDrawer, type PageSettingsDrawer } from "./pageSettingsDrawer";
 import { renderPagesPanel } from "./pagesPanel";
@@ -253,8 +254,14 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       return;
     }
 
-    const labels: Record<Exclude<Route["kind"], "pages" | "edit" | "theme">, string> = {
-      media: "Media",
+    if (route.kind === "media") {
+      const panel = mountMediaPanel(api, win);
+      main.appendChild(panel.element);
+      activePanelTeardown = () => panel.teardown();
+      return;
+    }
+
+    const labels: Record<Exclude<Route["kind"], "pages" | "edit" | "theme" | "media">, string> = {
       chat: "Chat",
       history: "History",
     };

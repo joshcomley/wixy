@@ -60,6 +60,8 @@ function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
     patchDraft: vi.fn(),
     discardDraft: vi.fn(),
     getMedia: vi.fn(async (): Promise<MediaItem[]> => []),
+    uploadMedia: vi.fn(),
+    deleteMedia: vi.fn(),
     ...overrides,
   } as AdminApi;
 }
@@ -122,6 +124,46 @@ describe("mountPageSettingsDrawer", () => {
     await Promise.resolve();
 
     expect(drawer.element.querySelector(".wx-drawer-body")?.textContent).toMatch(/couldn't load/i);
+  });
+
+  it("Choose image opens the shared media dialog; picking commits ogImage and updates the preview", async () => {
+    const item: MediaItem = {
+      name: "hero.jpg",
+      url: "/images/hero.jpg",
+      source: "repo",
+      sizeBytes: 1024,
+      width: 800,
+      height: 600,
+      references: [],
+    };
+    const api = fakeApi({ getMedia: vi.fn(async (): Promise<MediaItem[]> => [item]) });
+    const opQueue = fakeQueue();
+    const drawer = mountPageSettingsDrawer("about", { api, opQueue, onClose: vi.fn() });
+    await (api.getContent as ReturnType<typeof vi.fn>).mock.results[0]?.value;
+    await Promise.resolve();
+
+    const chooseButton = Array.from(drawer.element.querySelectorAll("button")).find(
+      (button) => button.textContent === "Choose image",
+    );
+    chooseButton?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const dialog = document.querySelector(".wx-media-dialog-backdrop");
+    expect(dialog).not.toBeNull();
+    const thumb = dialog?.querySelector<HTMLButtonElement>(".wx-media-thumb");
+    thumb?.click();
+
+    const confirmButton = Array.from(dialog?.querySelectorAll("button") ?? []).find(
+      (button) => button.textContent === "Use this image",
+    );
+    confirmButton?.click();
+
+    expect(opQueue.enqueued).toEqual([
+      { file: "about", path: "meta.ogImage", value: { src: "/images/hero.jpg", alt: "Hero" } },
+    ]);
+    expect(drawer.element.querySelector(".wx-og-image-preview img")).not.toBeNull();
+    expect(document.querySelector(".wx-media-dialog-backdrop")).toBeNull();
   });
 
   it("teardown before content resolves prevents the late render", async () => {

@@ -1,14 +1,16 @@
 // The page settings drawer (spec/05-editor.md §2): "meta.* editing (title,
 // description, ogImage via media dialog, nav fields)."
 //
-// The ogImage picker here is a minimal pick-from-existing-repo-media list (using
-// the already-built, list-only `GET /api/admin/media`, milestone 6) — the REAL
-// upload-capable media dialog (drag-drop, references scan, staged-draft badge)
-// is explicitly milestone 8's job (spec/05 §4); this is a real, working stand-in
-// for "pick an existing image," not a placeholder.
+// The ogImage field opens the SHARED `mediaDialog.ts` component (spec/05 §4: "the
+// SAME component renders as a modal dialog when invoked from the editor") — this
+// replaces the milestone-7-era minimal inline pick-from-existing-repo-media list
+// (decisions/00018 decision 9 flagged that as a real-but-minimal stand-in meant to
+// be extended here, not permanent). The dialog's own alt-text step covers both
+// picking AND (re-)setting alt text, so there's no separate inline alt input here.
 
 import type { AdminApi } from "./api";
 import type { OpQueueLike } from "./editView";
+import { openMediaDialog } from "./mediaDialog";
 import type { JsonValue } from "./protocol";
 
 export interface PageSettingsDeps {
@@ -137,13 +139,13 @@ export function mountPageSettingsDrawer(page: string, deps: PageSettingsDeps): P
 
     const preview = document.createElement("div");
     preview.className = "wx-og-image-preview";
-    let currentSrc = meta.ogImage?.src ?? "";
+    let current = meta.ogImage;
     function renderPreview(): void {
       preview.innerHTML = "";
-      if (currentSrc !== "") {
+      if (current !== null) {
         const img = document.createElement("img");
-        img.src = currentSrc;
-        img.alt = "";
+        img.src = current.src;
+        img.alt = current.alt;
         preview.appendChild(img);
       } else {
         const empty = document.createElement("span");
@@ -155,54 +157,18 @@ export function mountPageSettingsDrawer(page: string, deps: PageSettingsDeps): P
     renderPreview();
     wrap.appendChild(preview);
 
-    const altInput = document.createElement("input");
-    altInput.type = "text";
-    altInput.placeholder = "Alt text";
-    altInput.value = meta.ogImage?.alt ?? "";
-    altInput.addEventListener("change", () => {
-      commit("ogImage", { src: currentSrc, alt: altInput.value });
-    });
-    wrap.appendChild(altInput);
-
-    let openPickerList: HTMLElement | null = null;
-
     const pickButton = document.createElement("button");
     pickButton.type = "button";
     pickButton.textContent = "Choose image";
     pickButton.addEventListener("click", () => {
-      if (openPickerList !== null) {
-        openPickerList.remove();
-        openPickerList = null;
-        return;
-      }
-      void openPicker();
+      openMediaDialog({ api: deps.api }, (value) => {
+        if (value === null) return;
+        current = value;
+        renderPreview();
+        commit("ogImage", { src: value.src, alt: value.alt });
+      });
     });
     wrap.appendChild(pickButton);
-
-    async function openPicker(): Promise<void> {
-      const items = await deps.api.getMedia();
-      const list = document.createElement("div");
-      list.className = "wx-media-picker";
-      for (const item of items) {
-        const option = document.createElement("button");
-        option.type = "button";
-        option.className = "wx-media-picker-item";
-        const thumb = document.createElement("img");
-        thumb.src = item.url;
-        thumb.alt = item.name;
-        option.appendChild(thumb);
-        option.addEventListener("click", () => {
-          currentSrc = item.url;
-          renderPreview();
-          commit("ogImage", { src: currentSrc, alt: altInput.value });
-          list.remove();
-          openPickerList = null;
-        });
-        list.appendChild(option);
-      }
-      wrap.appendChild(list);
-      openPickerList = list;
-    }
 
     return wrap;
   }
