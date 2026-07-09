@@ -50,7 +50,37 @@ def build_site(root: Path, source: SiteSource, out_dir: Path) -> None:
         )
         (out_dir / "sitemap.xml").write_text(sitemap, encoding="utf-8", newline="\n")
 
+    (out_dir / "404.html").write_text(_generate_404_html(source), encoding="utf-8", newline="\n")
+
     _self_check(source, out_dir)
+
+
+def _generate_404_html(source: SiteSource) -> str:
+    """A minimal, theme-aware 404 page (spec/04-server.md §3: "styled 404.html
+    (builder emits one...)"). Not content-file-driven — there's no per-project copy to
+    author here (no `content/404.json`), so unlike every other page this is a fixed,
+    builder-generated template, unaffected by draft/publish content, the same way
+    `robots.txt`/`sitemap.xml` are generated rather than templated."""
+    theme_link = '<link rel="stylesheet" href="theme.css">\n' if source.theme is not None else ""
+    return (
+        "<!DOCTYPE html>\n"
+        f'<html lang="{source.project.locale}">\n'
+        "<head>\n"
+        '<meta charset="utf-8">\n'
+        "<title>Page not found</title>\n"
+        '<meta name="robots" content="noindex">\n'
+        f"{theme_link}"
+        '<link rel="stylesheet" href="site.css">\n'
+        "</head>\n"
+        "<body>\n"
+        '<main style="text-align:center;padding:4rem 1rem;">\n'
+        "<h1>Page not found</h1>\n"
+        "<p>Sorry, we couldn&#8217;t find that page.</p>\n"
+        '<p><a href="/">Return home</a></p>\n'
+        "</main>\n"
+        "</body>\n"
+        "</html>\n"
+    )
 
 
 def _copy_if_exists(src: Path, dst: Path) -> None:

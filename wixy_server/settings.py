@@ -1,7 +1,9 @@
 """Runtime settings: `.env` + process environment (spec/04-server.md §2).
 
-`Storage/.env` carries `WIXY_PORT`, the CF Access team domain + AUD, and flags
-(`WIXY_DEV_NO_AUTH`, `WIXY_ENV`). Hand-rolled KEY=VALUE parsing rather than a
+`Storage/.env` carries `WIXY_PORT`, the CF Access team domain + AUD
+(`WIXY_CF_TEAM_DOMAIN`/`WIXY_CF_ACCESS_AUD` — the literal names spec/07-hosting-deploy.md
+§5's secrets inventory gives; the JWT middleware, spec/04 §9, consumes these two), and
+flags (`WIXY_DEV_NO_AUTH`, `WIXY_ENV`). Hand-rolled KEY=VALUE parsing rather than a
 `python-dotenv` dependency — the format used here is a small, fixed subset (no
 quoting/escaping/multiline needed for this project's values), consistent with this
 repo's existing preference for hand-rolled parsers over new dependencies (see
@@ -71,7 +73,7 @@ def load_settings(storage_root: Path) -> Settings:
         port=int(_get("WIXY_PORT", "8000")),
         env=env,
         dev_no_auth=dev_no_auth,
-        cf_access_team_domain=_get("CF_ACCESS_TEAM_DOMAIN"),
-        cf_access_aud=_get("CF_ACCESS_AUD"),
+        cf_access_team_domain=_get("WIXY_CF_TEAM_DOMAIN"),
+        cf_access_aud=_get("WIXY_CF_ACCESS_AUD"),
         storage_root=storage_root,
     )

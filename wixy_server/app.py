@@ -1,52 +1,37 @@
-"""The first Wixy FastAPI app (spec/04-server.md). Slice 3 of the M6 PR train
-(decisions/00010) wires exactly one route end-to-end: `GET /admin/preview/{page}.html`
-(spec/04 §4). See decisions/00013 for this slice's design choices — most notably that
-the site-repo checkout is kept fresh by a background watcher (`wixy_server.watcher`,
-spec/04 §7) rather than an inline fetch per request, so the <150ms render budget (§4)
-is never spent on a network round trip.
+"""The Wixy FastAPI app (spec/04-server.md). Milestone 6's final slice (slice 4 of the
+PR train, decisions/00010) wires: public serving (§3), CF Access JWT (§9), the
+`/api/admin/state|content|draft|media(list)` subset (§8), `/internal/*` + `/healthz`
+(§9-10), `/api/version` (§9/07 §1), and a minimal instant-render admin shell (§5). See
+decisions/00014 for this slice's design choices. Slice 3's preview route
+(`GET /admin/preview/{page}.html`) now lives in `wixy_server/routes_preview`.
 """
 
 from __future__ import annotations
 
+import functools
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import anyio
-from fastapi import FastAPI, HTTPException, Request
+import httpx
+from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
-from builder.config import ProjectConfig
-from builder.errors import BuildError
-from builder.render import load_site_source
-from builder.theme import Theme, load_theme
-from wixy_server.checkout import CheckoutError, current_sha
-from wixy_server.merged_content import merge_overlay
-from wixy_server.overlay import load_overlay
-from wixy_server.preview import render_preview_page
+from wixy_server.auth import JwksCache, build_admin_auth_middleware, jwks_url
 from wixy_server.registry import load_registry
+from wixy_server.routes_admin_api import router as admin_api_router
+from wixy_server.routes_internal import router as internal_router
+from wixy_server.routes_preview import router as preview_router
+from wixy_server.routes_public import router as public_router
+from wixy_server.routes_version import router as version_router
 from wixy_server.settings import load_settings
-from wixy_server.storage import ProjectPaths, ensure_project_dirs, project_paths
-from wixy_server.watcher import DEFAULT_INTERVAL_S, fetch_once, watch_upstream
+from wixy_server.storage import ensure_project_dirs, project_paths
+from wixy_server.watcher import DEFAULT_INTERVAL_S, WatcherStatus, fetch_once, watch_upstream
 
-
-def _load_theme_if_present(repo_root: Path) -> Theme | None:
-    theme_path = repo_root / "theme" / "theme.json"
-    return load_theme(theme_path) if theme_path.exists() else None
-
-
-def _build_preview_html(project: ProjectConfig, paths: ProjectPaths, slug: str) -> str:
-    """The full per-request preview pipeline — synchronous/blocking (filesystem +
-    git rev-parse + HTML parsing). Callers on the event loop must run this via
-    `anyio.to_thread.run_sync` (spec/04 §8: "no route blocks the event loop")."""
-    if not (paths.repo / ".git").exists():
-        raise CheckoutError("site repo checkout is not ready yet (initial clone pending)")
-    base_sha = current_sha(paths.repo)
-    overlay = load_overlay(paths.draft_overlay, default_base_sha=base_sha)
-    theme = _load_theme_if_present(paths.repo)
-    source = load_site_source(paths.repo, project, theme)
-    merged = merge_overlay(source, overlay)
-    return render_preview_page(merged, slug)
+_STATIC_DIR = Path(__file__).parent / "static"
+_ADMIN_SHELL_HTML = (_STATIC_DIR / "admin_shell.html").read_text(encoding="utf-8")
 
 
 def create_app(
@@ -78,18 +63,31 @@ def create_app(
     project = projects[0]
     paths = project_paths(storage_root, project.slug)
     ensure_project_dirs(paths)
+    watcher_status = WatcherStatus()
+
+    jwks = JwksCache(
+        fetch=functools.partial(_fetch_jwks, settings.cf_access_team_domain),
+    )
+    admin_auth = build_admin_auth_middleware(
+        dev_no_auth=settings.dev_no_auth,
+        jwks=jwks,
+        audience=settings.cf_access_aud,
+        team_domain=settings.cf_access_team_domain,
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # Best-effort initial bootstrap (fetch_once already swallows CheckoutError) —
         # spec/04 §3's "never crash" posture applies here too: a transient network
         # failure at startup shouldn't prevent the process from coming up; the
-        # background watcher keeps retrying, and the preview route reports 503 until
-        # the checkout exists.
-        await anyio.to_thread.run_sync(fetch_once, project, paths)
+        # background watcher keeps retrying, and request-serving routes report
+        # 503/CheckoutError until the checkout exists.
+        await anyio.to_thread.run_sync(fetch_once, project, paths, watcher_status)
 
         async def _run_watcher() -> None:
-            await watch_upstream(project, paths, interval_s=watcher_interval_s)
+            await watch_upstream(
+                project, paths, interval_s=watcher_interval_s, status=watcher_status
+            )
 
         async with anyio.create_task_group() as tg:
             tg.start_soon(_run_watcher)
@@ -100,19 +98,36 @@ def create_app(
     app.state.project = project
     app.state.paths = paths
     app.state.settings = settings
+    app.state.watcher_status = watcher_status
+    app.state.wixy_repo_root = wixy_repo_root
 
-    @app.get("/admin/preview/{page}.html", response_class=HTMLResponse)
-    async def get_preview_page(page: str, request: Request) -> HTMLResponse:
-        current_project: ProjectConfig = request.app.state.project
-        current_paths: ProjectPaths = request.app.state.paths
-        try:
-            html = await anyio.to_thread.run_sync(
-                _build_preview_html, current_project, current_paths, page
-            )
-        except CheckoutError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        except BuildError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return HTMLResponse(content=html, headers={"Cache-Control": "no-store"})
+    app.middleware("http")(admin_auth)
+
+    # Registration order matters: more specific routes/mounts first, the public
+    # catch-all (`GET /{path:path}`) last, or it would shadow everything above it.
+    app.include_router(internal_router)
+    app.include_router(version_router)
+    app.include_router(preview_router)
+    app.include_router(admin_api_router)
+
+    @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
+    @app.get("/admin/", response_class=HTMLResponse, include_in_schema=False)
+    async def get_admin_shell() -> HTMLResponse:
+        """Bare instant-render shell (spec/05 §1) — paints immediately, no server-side
+        data dependency; the real admin-ui panels are milestone 7's job. Routing is
+        entirely client-side hash fragments (`#/pages`, `#/edit/<page>`, …), so every
+        `/admin` sub-route the browser might deep-link to is this same document."""
+        return HTMLResponse(content=_ADMIN_SHELL_HTML)
+
+    app.mount("/admin/static", StaticFiles(directory=_STATIC_DIR), name="admin-static")
+
+    app.include_router(public_router)
 
     return app
+
+
+def _fetch_jwks(team_domain: str) -> dict[str, object]:
+    response = httpx.get(jwks_url(team_domain), timeout=10.0)
+    response.raise_for_status()
+    data: dict[str, object] = response.json()
+    return data

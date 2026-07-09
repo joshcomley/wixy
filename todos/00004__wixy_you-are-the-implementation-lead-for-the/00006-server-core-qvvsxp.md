@@ -27,13 +27,17 @@ see decisions/00010 for the full reasoning. Slices, updated as they ship:
   preview mode + editor asset injection) + first FastAPI app
   (`wixy_server/app.py`, `GET /admin/preview/{page}.html`) + upstream watcher
   (`wixy_server/watcher.py`, spec/04 §7, background fetch loop). decisions/00013.
+  PR #25 merged.
+- Slice 4 [DONE]: public serving (atomic live pointer, cache headers, 404 —
+  incl. a `builder/build.py` fix so a 404.html actually gets emitted), CF
+  Access JWT middleware (`wixy_server/auth.py`, dev bypass, real offline-tested
+  verification), `/api/admin/state|content|draft|media(list)`
+  (`wixy_server/routes_admin_api.py`), `/internal/ready|warmup`, `/healthz`
+  (`wixy_server/routes_internal.py`), `/api/version`
+  (`wixy_server/routes_version.py`), instant-render admin shell. decisions/00014.
   PR #(fill in when opened) merged.
-- Slice 4 [not started]: public serving (atomic live pointer, cache headers,
-  404), CF Access JWT middleware (dev bypass), `/api/admin/state|content|draft|
-  media(list)`, `/internal/ready|warmup`, `/healthz`, `/api/version`,
-  instant-render admin shell.
 
-Only mark this sidecar DONE once every slice has shipped and merged.
+**Milestone 6 COMPLETE — all 4 slices shipped and merged.**
 
 ## Relevant files
 - spec/04-server.md (full — storage layout §2, public serving §3, preview §4, admin API
