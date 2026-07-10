@@ -89,6 +89,88 @@ truncates wide object previews. Don't spend time debugging a "missing"
 property from a wide console.log object dump; reduce to a short string
 concatenation (or fewer keys) to get a trustworthy read.
 
+## CI-only bundle-drift failure: a Windows-only CRLF leak into the sourcemap
+
+PR #58's first push (`2903043`) failed CI's `frontend` job specifically on
+"bundle drift check (committed bundles must match a fresh build)"
+(`git diff --exit-code -- wixy_server/static`), even though every local
+check (typecheck, vitest, `npm run build` re-run, ruff, mypy, pytest) had
+been green immediately beforehand. Root-caused rather than dismissed as a
+flake, per house discipline:
+
+- The CI diff isolated to exactly one file, `admin.css.map` (not `admin.js.map`,
+  not `admin.css`/`admin.js` themselves) — pointing at something specific to
+  `style.css`'s sourcemap, not a general build nondeterminism.
+- Measured actual bytes: the working-tree `style.css` had 1528 CRLF / 0 bare
+  LF; `git show HEAD:admin-ui/src/style.css` (the committed blob) had 0 CRLF
+  / 1528 bare LF. Every OTHER file touched this slice (zoom.ts, fontScale.ts,
+  both test files, shell.ts, admin_shell.html) was LF-only in the working
+  tree, matching the committed blob — so this was specific to `style.css`,
+  not a general Windows/git issue on this box.
+- `.gitattributes` (`* text=auto eol=lf`) already documents this exact
+  failure class in its own comment: esbuild embeds `sourcesContent`
+  verbatim into a sourcemap, so a CRLF-tainted local source produces a
+  `*.map` differing byte-for-byte from CI's clean LF checkout, purely from
+  line-ending noise — nothing to do with any real content change.
+- Traced the actual introduction: this slice's `px_to_rem.py` one-off script
+  (see the font-scale section above) opened `style.css` with Python's
+  default Windows text-mode `open(path, "w")`, which translates `\n` →
+  `\r\n` on write. It read an LF file and wrote a CRLF one, entirely outside
+  git's own `eol=lf` normalization pipeline (which only fires on
+  checkout/checkin, not on an arbitrary script's raw file write in between).
+  Every subsequent local `npm run build` then baked CRLF-based
+  `sourcesContent`/`mappings` into `admin.css.map`, which got committed —
+  git's checkin-time LF normalization doesn't reach inside a JSON string's
+  *escaped* `\r\n` sequences, so the drift was permanent until rebuilt from
+  a genuinely-LF source.
+
+Fix: `git checkout -- admin-ui/src/style.css` did **not** restore LF on
+this box (`core.autocrlf=true` apparently still wins over the path's
+`eol=lf` attribute for this checkout direction here — a machine/git-version
+quirk, not investigated further since a working alternative existed).
+Wrote the git blob's exact bytes to disk directly in binary mode instead
+(bypassing Python's text-mode translation entirely), confirmed
+byte-identical to `HEAD` via `git diff --exit-code`, then reran
+`npm run build` and committed only the resulting `admin.css.map` change
+(`848c18b`). **Lesson for future slices**: any one-off Python script that
+rewrites a tracked text file on this box should open with
+`newline=""` (or write in binary mode) to avoid silently reintroducing
+CRLF — the built-in Edit/Write tools already do this correctly (verified:
+every other file this slice touched came out LF-only), only the raw
+`px_to_rem.py` script sidestepped it.
+
+## CI-only: git push/fetch hangs via the Bash tool, and a stalled e2e job
+
+Two unrelated infra flakes hit while shipping this slice's fix commit,
+both root-caused rather than worked around blind:
+
+1. `git push`/`git fetch`/`git ls-remote` invoked via the **Bash** tool
+   hung (2min timeout on push, 30s timeouts on two follow-up fetches),
+   even though the push had actually already succeeded server-side
+   (confirmed via a `GIT_TRACE=1` run redirected to a file, which
+   completed in ~1.5s real time and showed the true cause: after a
+   successful transfer, git's own credential-helper flow shells out to
+   `'C:\Program Files\GitHub CLI\gh.exe' auth git-credential store` to
+   cache the credential — an *internal* `gh.exe` invocation, not one this
+   session made directly. That nested call hangs under the Bash tool's
+   MSYS pty the same way a direct `gh` call does (the fleet's
+   already-documented "gh gives no output via Bash" issue), just one level
+   removed — so it's not only explicit `gh` commands that need the
+   PowerShell tool on this box, plain `git` network commands can trigger
+   the identical hang indirectly. Routing them through PowerShell instead
+   resolved it immediately (sub-second `fetch`/`ls-remote`).
+2. PR #58's `e2e` CI job stalled for 9+ minutes on the "install playwright
+   browsers" step — confirmed anomalous, not just slow, by diffing against
+   PR #57's same step on the same workflow (23 seconds there, via
+   `gh api repos/.../actions/jobs/<id>` step timestamps). Nothing in this
+   slice's diff touches `e2e/`, `package.json`, or anything
+   Playwright-related, so this was runner-side (a stalled download/apt
+   mirror), not a regression to chase in-repo. Cancelled
+   (`gh run cancel`) and re-ran just the failed job
+   (`gh run rerun --failed`) rather than waiting indefinitely or debugging
+   further — the standard, correct remedy for an isolated infra stall once
+   it's been shown to be genuinely anomalous rather than assumed so.
+
 ## Other small judgment calls (logged per house style, not asking back)
 
 - Bounds: zoom 50–200% step 10 (default 100), font-scale 80–150% step 10
