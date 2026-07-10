@@ -246,9 +246,22 @@ def _dev_no_auth(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class TestGetState:
-    def test_shape_with_no_draft_and_no_publish(
-        self, storage_root: Path, wixy_repo_root: Path
+    def test_shape_with_no_draft_and_auto_bootstrapped_live(
+        self, storage_root: Path, wixy_repo_root: Path, origin_repo: Path
     ) -> None:
+        """A fresh app with a real, buildable site repo self-bootstraps to a real
+        "version 0" live pointer at startup (spec/07 §1) — there's no reachable
+        production state where pages are known but `live` stays null forever (the
+        bootstrap runs synchronously in the app's own lifespan, before any request
+        can be served), so this asserts the bootstrapped shape rather than a null
+        one."""
+        head_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=origin_repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
         app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
         with TestClient(app) as client:
             response = client.get("/api/admin/state")
@@ -262,7 +275,7 @@ class TestGetState:
         slugs = {p["slug"] for p in body["pages"]}
         assert slugs == {"index", "about"}
         assert body["draft"] == {"rev": 0, "opCount": 0}
-        assert body["live"] is None
+        assert body["live"] == {"version": 0, "sha": head_sha}
         assert body["upstream"]["aheadOfPublished"] == []
         assert body["publishJob"] is None
         assert body["chats"] == []
@@ -893,14 +906,22 @@ class TestPublishStream:
 
 
 class TestGetPublishes:
-    def test_empty_when_nothing_ever_published(
+    def test_only_the_auto_bootstrap_entry_when_nothing_ever_published(
         self, storage_root: Path, wixy_repo_root: Path
     ) -> None:
+        """A real, buildable site repo self-bootstraps to a real "version 0" ledger
+        entry at startup (spec/07 §1) — see `TestGetState`'s own bootstrapped-live
+        test for the same reasoning."""
         app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
         with TestClient(app) as client:
             response = client.get("/api/admin/publishes")
         assert response.status_code == 200
-        assert response.json() == {"publishes": []}
+        body = response.json()["publishes"]
+        assert len(body) == 1
+        assert body[0]["version"] == 0
+        assert body[0]["source"] == "bootstrap"
+        assert body[0]["message"] == "bootstrap"
+        assert body[0]["live"] is True
 
     def test_lists_newest_first_and_marks_the_live_one(
         self, storage_root: Path, wixy_repo_root_bare: Path
@@ -931,10 +952,15 @@ class TestGetPublishes:
             )
             response = client.get("/api/admin/publishes")
         body = response.json()["publishes"]
-        assert [p["version"] for p in body] == [2, 1]
+        # [2, 1, 0]: the two real publishes, newest first, plus the auto-bootstrap
+        # "version 0" entry (spec/07 §1) trailing at the end — oldest, never live once
+        # a real publish exists.
+        assert [p["version"] for p in body] == [2, 1, 0]
         assert body[0]["live"] is True
         assert body[1]["live"] is False
+        assert body[2]["live"] is False
         assert body[0]["message"] == "second"
+        assert body[2]["source"] == "bootstrap"
 
     def test_limit_caps_the_returned_count(
         self, storage_root: Path, wixy_repo_root_bare: Path

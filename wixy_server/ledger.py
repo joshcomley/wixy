@@ -27,7 +27,7 @@ from typing import Literal
 from builder.jsontypes import JsonValue
 from wixy_server.storage import ProjectPaths
 
-PublishSource = Literal["editor", "upstream", "mixed"]
+PublishSource = Literal["editor", "upstream", "mixed", "bootstrap"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +61,8 @@ def _as_publish_source(value: JsonValue) -> PublishSource | None:
         return "upstream"
     if value == "mixed":
         return "mixed"
+    if value == "bootstrap":
+        return "bootstrap"
     return None
 
 

@@ -1,0 +1,70 @@
+# Wixy install — the ca.cinnamons.uk engine, port 9380 (spec/07-hosting-deploy.md §1).
+#
+# Read by Slots' executor (the FastAPI service at slots.cinnamons.uk) when the
+# consumer entry below is present in
+# `D:\Servers\Slots\Storage\config\consumers.json`:
+#
+#   {
+#     "name": "wixy",
+#     "install_root": "D:\\Servers\\Wixy",
+#     "base_url": "http://127.0.0.1:9380",
+#     "kind": "fastapi",
+#     "hmac_secret_id": null,
+#     "service_name": "Wixy",
+#     "repo_url": "https://x-access-token@github.com/joshcomley/wixy.git",
+#     "slots_yaml_path": "slots.wixy.yaml",
+#     "slots_branch": "main"
+#   }
+#
+# Bring-up: `install.py` creates the blue/green layout (Slots\blue + Slots\green
+# clones, active.txt, shared Storage\) — this is a from-scratch install, not a
+# single-clone migration (unlike cor/Hall's history).
+#
+# Hooks (`pre_validate` / `post_swap` / `post_restart`) and build-step runners live
+# as module-level callables in `deploy.py` at the slot root. Slots' executor spawns
+# each as a subprocess inside the active slot's tree, so `import deploy;
+# deploy.pre_validate(ctx)` resolves cleanly. cor's `slots.cor.yaml` is the model
+# this mirrors (see D:\Servers\Slots\Slots\green\docs\ai\onboarding.md).
+
+hooks_module: deploy
+
+install:
+  name: wixy
+  install_root: D:\Servers\Wixy
+  layout: blue_green
+  branch: main
+  poll_interval_secs: 30
+  services:
+    - name: Wixy
+      restart_strategy: nssm_restart
+      force_kill_host: true
+      port: 9380
+  build_steps:
+    - name: pip install (per-slot venv)
+      runner: deploy:_pip_install_venv
+      required_tools: [python, pip]
+    - name: TestClient subprocess validate
+      runner: deploy:_testclient_validate
+      required_tools: [python]
+  smoke:
+    url_prefix: http://localhost:9380
+    probes:
+      - name: healthz-200
+        path: /healthz
+        method: GET
+        expected_status: 200
+        timeout_secs: 10
+      - name: api-version-sha-match
+        path: /api/version
+        method: GET
+        expected_status: 200
+        sha_match_jsonpath: commit.sha_full
+        timeout_secs: 10
+  hooks:
+    pre_validate: pre_validate
+    post_swap: post_swap
+    post_restart: post_restart
+
+repo:
+  url: https://x-access-token@github.com/joshcomley/wixy.git
+  default_branch: main

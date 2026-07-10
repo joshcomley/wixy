@@ -49,6 +49,7 @@ class TestLoadSettings:
             "WIXY_DEV_NO_AUTH",
             "WIXY_CF_TEAM_DOMAIN",
             "WIXY_CF_ACCESS_AUD",
+            "WIXY_SLOT",
         ):
             monkeypatch.delenv(key, raising=False)
         settings = load_settings(tmp_path)
@@ -56,6 +57,20 @@ class TestLoadSettings:
         assert settings.env == "dev"
         assert settings.dev_no_auth is False
         assert settings.storage_root == tmp_path
+        assert settings.slot is None
+
+    def test_slot_reads_from_process_env_only(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # launcher.py-set deployment metadata (spec/07 §1) — never sourced from
+        # Storage/.env (a shared file both slots read, so it can't name which one
+        # is currently active).
+        (tmp_path / ".env").write_text("WIXY_SLOT=green\n", encoding="utf-8")
+        monkeypatch.delenv("WIXY_SLOT", raising=False)
+        assert load_settings(tmp_path).slot is None
+
+        monkeypatch.setenv("WIXY_SLOT", "blue")
+        assert load_settings(tmp_path).slot == "blue"
 
     def test_reads_values_from_env_file(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

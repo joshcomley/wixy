@@ -79,11 +79,24 @@ class TestApiVersion:
         assert body["commit"]["sha_full"] == engine_sha
         assert len(body["commit"]["sha_full"]) == 40
 
-    def test_slot_is_null_pre_slots_deployment(self, tmp_path: Path, wixy_repo_root: Path) -> None:
+    def test_slot_is_null_when_wixy_slot_env_var_is_unset(
+        self, tmp_path: Path, wixy_repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("WIXY_SLOT", raising=False)
         app = create_app(storage_root=tmp_path / "storage", wixy_repo_root=wixy_repo_root)
         with TestClient(app) as client:
             response = client.get("/api/version")
         assert response.json()["slot"] is None
+
+    def test_slot_reports_the_wixy_slot_env_var(
+        self, tmp_path: Path, wixy_repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Set by launcher.py from active.txt at process start (spec/07 §1).
+        monkeypatch.setenv("WIXY_SLOT", "green")
+        app = create_app(storage_root=tmp_path / "storage", wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/version")
+        assert response.json()["slot"] == "green"
 
     def test_version_is_null_before_any_publish(self, tmp_path: Path, wixy_repo_root: Path) -> None:
         app = create_app(storage_root=tmp_path / "storage", wixy_repo_root=wixy_repo_root)
