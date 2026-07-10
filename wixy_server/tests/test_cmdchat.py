@@ -127,9 +127,7 @@ async def test_wait_until_ready_never_ready_times_out() -> None:
     state = FakeCmdState()
     session = state.create_session("hi")  # never marked ready
     app = create_fake_cmd_app(state)
-    async with _make_client(
-        app, readiness_timeout_s=0.1, readiness_poll_interval_s=0.02
-    ) as client:
+    async with _make_client(app, readiness_timeout_s=0.1, readiness_poll_interval_s=0.02) as client:
         outcome = await client.wait_until_ready(session.session_id)
 
     assert isinstance(outcome, FailedOutcome)

@@ -183,7 +183,7 @@ def _pending_event_from_raw(raw: str | bytes) -> PendingEvent | None:
     client needs the initial pending-chat listing)."""
     try:
         data = json.loads(raw)
-    except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+    except json.JSONDecodeError, TypeError, UnicodeDecodeError:
         return None
     if not isinstance(data, dict):
         return None
@@ -319,8 +319,7 @@ class CmdChatClient:
         response = await self._request("GET", url)
         if response.status_code != 200:
             raise CmdChatError(
-                f"GET chain for {session_id} returned {response.status_code}: "
-                f"{response.text[:500]}"
+                f"GET chain for {session_id} returned {response.status_code}: {response.text[:500]}"
             )
         body = _json_object(response)
         chain_raw = body.get("chain")
@@ -405,11 +404,23 @@ class CmdChatClient:
                     _resolve(FailedOutcome(reason=event.state, message=event.message))
                     return
 
-        async with anyio.create_task_group() as tg:
-            tg.start_soon(_poll)
-            tg.start_soon(_watch)
-            await done.wait()
-            tg.cancel_scope.cancel()
+        try:
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(_poll)
+                tg.start_soon(_watch)
+                await done.wait()
+                tg.cancel_scope.cancel()
+        except BaseExceptionGroup as eg:
+            # `_poll`'s `CmdChatError` (cmd unreachable) is the only exception
+            # either child task can raise -- `_watch` only ever returns normally
+            # or is cancelled -- but anyio/asyncio task groups always wrap even a
+            # single child exception in a group, which would otherwise defeat a
+            # caller's `except CmdChatError` (see this method's own docstring).
+            # Unwrap when there's exactly one; an unexpected 2+ case is left
+            # wrapped rather than arbitrarily discarding one.
+            if len(eg.exceptions) == 1:
+                raise eg.exceptions[0] from None
+            raise
 
         assert outcome is not None  # `done` only ever sets after `_resolve` assigns it
         return outcome
