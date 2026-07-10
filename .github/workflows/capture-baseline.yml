@@ -57,10 +57,21 @@ jobs:
       - name: Install Playwright chromium
         run: playwright install --with-deps chromium
 
+      - name: Build cottage-aesthetics-preview
+        # --serve-root must be a BUILDER BUILD OUTPUT post-migration (builder/cli.py's
+        # own --serve-root help text: "a builder build output, or the raw pre-migration
+        # site for the one-time baseline capture" — ca-site has had pages/ + content/*.json
+        # since migration step 1, so serving it raw only ever worked for the original
+        # one-time pre-migration capture this workflow was first written for; every
+        # rebaseline since (post-migration, spec/03 §5 point 3's ongoing use) served the
+        # raw checkout, which has no root-level index.html, producing a directory-listing
+        # "baseline" that fails every real parity check — mirrors ci.yml's own build step.
+        run: python -m builder build --root ca-site --project projects/ca.json --out ca-build
+
       - name: Capture baseline
         run: >
           python -m builder parity
-          --serve-root ca-site
+          --serve-root ca-build
           --slugs ${{ inputs.slugs }}
           --mobile-slugs ${{ inputs.mobile_slugs }}
           --baseline builder/tests/parity/baseline
