@@ -11,6 +11,7 @@ from __future__ import annotations
 import functools
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
 import anyio
@@ -20,6 +21,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from wixy_server.auth import JwksCache, build_admin_auth_middleware, jwks_url
+from wixy_server.bootstrap import bootstrap_if_needed
 from wixy_server.chats import ChatRuntimeEntry
 from wixy_server.cmdchat import CmdChatClient
 from wixy_server.publisher import PublishJob
@@ -96,12 +98,20 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        # Best-effort initial bootstrap (fetch_once already swallows CheckoutError) —
+        # Best-effort initial fetch (fetch_once already swallows CheckoutError) —
         # spec/04 §3's "never crash" posture applies here too: a transient network
         # failure at startup shouldn't prevent the process from coming up; the
         # background watcher keeps retrying, and request-serving routes report
         # 503/CheckoutError until the checkout exists.
         await anyio.to_thread.run_sync(fetch_once, project, paths, watcher_status)
+        # The server's own "publish zero" (spec/07 §1: "the server also
+        # self-bootstraps this way on first startup") — a no-op once live.json
+        # exists (every startup after the first), and equally a no-op if the fetch
+        # just above never got a checkout on disk at all (bootstrap_if_needed does
+        # no git I/O of its own, see its own docstring).
+        await anyio.to_thread.run_sync(
+            bootstrap_if_needed, project, paths, datetime.now(UTC).isoformat()
+        )
 
         async def _run_watcher() -> None:
             await watch_upstream(

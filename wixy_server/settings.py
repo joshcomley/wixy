@@ -52,6 +52,7 @@ class Settings:
     cf_access_team_domain: str
     cf_access_aud: str
     storage_root: Path
+    slot: str | None
 
 
 def load_settings(storage_root: Path) -> Settings:
@@ -76,4 +77,10 @@ def load_settings(storage_root: Path) -> Settings:
         cf_access_team_domain=_get("WIXY_CF_TEAM_DOMAIN"),
         cf_access_aud=_get("WIXY_CF_ACCESS_AUD"),
         storage_root=storage_root,
+        # Deployment metadata, not an operator setting — process environment only,
+        # set by launcher.py at process start from active.txt (spec/07 §1), same
+        # precedent as WIXY_STORAGE_ROOT above. No `.env` fallback: `.env` lives
+        # inside a Storage tree shared by both slots, so it can't know which one is
+        # currently active.
+        slot=os.environ.get("WIXY_SLOT"),
     )

@@ -154,4 +154,4 @@ PR (slice 2): https://github.com/joshcomley/wixy/pull/41 (merged 62d8633)
 PR (slice 3): https://github.com/joshcomley/wixy/pull/42 (merged fa3dd0a)
 PR (slice 4): https://github.com/joshcomley/wixy/pull/43 (merged 48bda80, incl. a
 follow-up idempotency-key-reuse fix commit before merge)
-PR (slice 5): (fill in when opened)
+PR (slice 5): https://github.com/joshcomley/wixy/pull/44 (merged 156fc66)
