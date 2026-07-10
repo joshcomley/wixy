@@ -1,7 +1,8 @@
-"""`/api/admin/chat/conversations` create + list (spec/06-ai-chat.md §1) — milestone
-10 slice 2. `cmdchat.py`'s own transport/protocol behavior is covered by
+"""`/api/admin/chat/conversations` (spec/06-ai-chat.md §1) — milestone 10 slices
+2-3. `cmdchat.py`'s own transport/protocol behavior is covered by
 `test_cmdchat.py`; this file tests the ROUTE layer (title derivation, prompt
-construction, background readiness tracking, error mapping, `/state` wiring).
+construction, background readiness tracking, error mapping, `/state` wiring,
+send, rename, and the SSE stream's poll->fan-out + handover-follow).
 """
 
 from __future__ import annotations
@@ -9,17 +10,21 @@ from __future__ import annotations
 import json
 import subprocess
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import NoReturn
 
+import anyio
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from builder.jsontypes import JsonObject
 from wixy_server.app import create_app
+from wixy_server.chats import ChatConversation, ChatRuntimeEntry, add_chat, find_chat
 from wixy_server.cmdchat import CmdChatClient
+from wixy_server.routes_chat import StreamTiming, _stream_events
 from wixy_server.storage import project_paths
 from wixy_server.tests.fake_cmd import FakeCmdState, create_fake_cmd_app
 
@@ -124,6 +129,15 @@ def cmdchat_client(fake_cmd_state: FakeCmdState) -> CmdChatClient:
     )
 
 
+@pytest.fixture
+def fast_stream_timing() -> StreamTiming:
+    """Spec's own production numbers (1.2s poll / 10s offline retry / 15s
+    transcript-lag grace) would make every stream test take real minutes —
+    shrunk here by three orders of magnitude so the exact same code paths run
+    in milliseconds."""
+    return StreamTiming(poll_interval_s=0.02, offline_retry_s=0.05, transcript_grace_s=0.1)
+
+
 def _poll_until(
     predicate: Callable[[], bool], *, timeout_s: float = 3.0, interval_s: float = 0.02
 ) -> None:
@@ -137,6 +151,22 @@ def _poll_until(
             return
         time.sleep(interval_s)
     raise AssertionError(f"condition not met within {timeout_s}s")
+
+
+def _decode_sse_line(line: str) -> JsonObject:
+    data: JsonObject = json.loads(line[len("data: ") :])
+    return data
+
+
+def _message_payload(event: JsonObject) -> JsonObject:
+    """`event["message"]` narrowed from `JsonValue` to `JsonObject` — every
+    `type: "message"` event's own shape guarantees this is a dict (see
+    `routes_chat._message_event`); asserted, not just cast, so a genuine shape
+    regression fails loudly here rather than at some more confusing later
+    indexing site."""
+    message = event["message"]
+    assert isinstance(message, dict)
+    return message
 
 
 class TestCreateConversation:
@@ -372,3 +402,416 @@ class TestStateChatsField:
         assert state["chats"][0]["convId"] == created["convId"]
         assert state["chats"][0]["title"] == "hi"
         assert state["chats"][0]["status"] == "pending"
+
+
+def _create(client: TestClient, first_message: str | None = None) -> dict[str, object]:
+    body: dict[str, object] = {"firstMessage": first_message} if first_message else {}
+    response = client.post("/api/admin/chat/conversations", json=body)
+    assert response.status_code == 200
+    result: dict[str, object] = response.json()
+    return result
+
+
+class TestSendMessage:
+    def test_accepted_returns_buffered_flag(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        cmdchat_client: CmdChatClient,
+        fake_cmd_state: FakeCmdState,
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
+        )
+        with TestClient(app) as client:
+            conv = _create(client, "hi")
+            response = client.post(
+                f"/api/admin/chat/conversations/{conv['convId']}/messages",
+                json={"text": "do the thing", "idempotencyKey": "conv1:msg1"},
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["accepted"] is True
+        assert body["buffered"] is False
+
+    def test_reflects_cmd_buffered_state(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        cmdchat_client: CmdChatClient,
+        fake_cmd_state: FakeCmdState,
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
+        )
+        with TestClient(app) as client:
+            conv = _create(client, "hi")
+            session = next(iter(fake_cmd_state.sessions.values()))
+            session.send_buffered = True
+            response = client.post(
+                f"/api/admin/chat/conversations/{conv['convId']}/messages",
+                json={"text": "still starting", "idempotencyKey": "conv1:msg1"},
+            )
+
+        assert response.json()["buffered"] is True
+
+    def test_passes_idempotency_key_through_to_cmd(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        cmdchat_client: CmdChatClient,
+        fake_cmd_state: FakeCmdState,
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
+        )
+        with TestClient(app) as client:
+            conv = _create(client, "hi")
+            client.post(
+                f"/api/admin/chat/conversations/{conv['convId']}/messages",
+                json={"text": "hello", "idempotencyKey": "conv1:msg1"},
+            )
+            client.post(
+                f"/api/admin/chat/conversations/{conv['convId']}/messages",
+                json={"text": "hello", "idempotencyKey": "conv1:msg1"},
+            )
+
+        session = next(iter(fake_cmd_state.sessions.values()))
+        assert session.idempotency_seen["conv1:msg1"] == 2  # both attempts reached cmd unchanged
+
+    def test_unknown_conversation_404s(
+        self, storage_root: Path, wixy_repo_root: Path, cmdchat_client: CmdChatClient
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
+        )
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/chat/conversations/does-not-exist/messages",
+                json={"text": "hi", "idempotencyKey": "x:1"},
+            )
+
+        assert response.status_code == 404
+
+    def test_cmd_5xx_returns_502(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        cmdchat_client: CmdChatClient,
+        fake_cmd_state: FakeCmdState,
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
+        )
+        with TestClient(app) as client:
+            conv = _create(client, "hi")
+            session = next(iter(fake_cmd_state.sessions.values()))
+            session.send_status_code = 502
+            response = client.post(
+                f"/api/admin/chat/conversations/{conv['convId']}/messages",
+                json={"text": "hello", "idempotencyKey": "conv1:msg2"},
+            )
+
+        assert response.status_code == 502
+
+
+class TestRenameConversation:
+    def test_updates_title(
+        self, storage_root: Path, wixy_repo_root: Path, cmdchat_client: CmdChatClient
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
+        )
+        with TestClient(app) as client:
+            conv = _create(client, "original")
+            response = client.post(
+                f"/api/admin/chat/conversations/{conv['convId']}/rename",
+                json={"title": "renamed by owner"},
+            )
+            listed = client.get("/api/admin/chat/conversations").json()["conversations"]
+
+        assert response.status_code == 200
+        assert response.json()["title"] == "renamed by owner"
+        assert listed[0]["title"] == "renamed by owner"
+
+    def test_unknown_conversation_404s(
+        self, storage_root: Path, wixy_repo_root: Path, cmdchat_client: CmdChatClient
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
+        )
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/chat/conversations/does-not-exist/rename", json={"title": "x"}
+            )
+
+        assert response.status_code == 404
+
+
+def _fake_message(
+    index: int, *, role: str = "assistant", text: str = "hello", truncated: bool = False
+) -> JsonObject:
+    return {
+        "index": index,
+        "role": role,
+        "kind": "text",
+        "text": text,
+        "timestamp": "2026-07-10T00:00:00Z",
+        "tool_name": None,
+        "truncated": truncated,
+    }
+
+
+def _seed_conversation(chats_path: Path, session_id: str, conv_id: str = "conv-1") -> str:
+    add_chat(
+        chats_path,
+        ChatConversation(
+            conv_id=conv_id, session_id=session_id, title="hi", created_at="2026-07-10T00:00:00Z"
+        ),
+    )
+    return conv_id
+
+
+async def _collect_stream_events(
+    generator: AsyncGenerator[str], *, count: int | None = None, timeout_s: float = 5.0
+) -> list[JsonObject]:
+    """Drives `_stream_events` directly (see the module docstring above this
+    class for why: `TestClient`'s synchronous streaming can't observe an
+    infinite generator — its portal-thread transport drains the whole
+    response before returning control, so it hangs forever on anything that
+    doesn't terminate on its own). `count=None` collects until the generator
+    ends naturally (the failure/timeout case); otherwise stops after `count`
+    events. Always closes the generator afterward, cancelling whatever
+    `await anyio.sleep(...)` it's suspended at."""
+    events: list[JsonObject] = []
+    try:
+        with anyio.fail_after(timeout_s):
+            async for payload in generator:
+                events.append(_decode_sse_line(payload))
+                if count is not None and len(events) >= count:
+                    break
+    finally:
+        await generator.aclose()
+    return events
+
+
+class TestConversationStream:
+    """`TestClient` can't be used here (see `_collect_stream_events`'s own
+    docstring) — every test below except the plain-404 one drives
+    `routes_chat._stream_events` directly as an async generator, which is
+    both the only thing that actually works AND a more precisely-targeted
+    unit test than going through HTTP/ASGI plumbing that adds nothing to what
+    this function's own logic needs verified."""
+
+    def test_unknown_conversation_404s(
+        self, storage_root: Path, wixy_repo_root: Path, cmdchat_client: CmdChatClient
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
+        )
+        with TestClient(app) as client:
+            response = client.get("/api/admin/chat/conversations/does-not-exist/stream")
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_delivers_pre_existing_messages(
+        self,
+        tmp_path: Path,
+        cmdchat_client: CmdChatClient,
+        fake_cmd_state: FakeCmdState,
+        fast_stream_timing: StreamTiming,
+    ) -> None:
+        session = fake_cmd_state.create_session("hi")
+        session.ready = True
+        session.messages = [_fake_message(0, text="first"), _fake_message(1, text="second")]
+        chats_path = tmp_path / "chats.json"
+        conv_id = _seed_conversation(chats_path, session.session_id)
+        runtime: dict[str, ChatRuntimeEntry] = {}
+
+        gen = _stream_events(
+            cmdchat_client, chats_path, runtime, conv_id, session.session_id, fast_stream_timing
+        )
+        events = await _collect_stream_events(gen, count=2)
+
+        message_events = [e for e in events if e["type"] == "message"]
+        assert [_message_payload(e)["text"] for e in message_events] == ["first", "second"]
+
+    @pytest.mark.asyncio
+    async def test_delivers_messages_appended_after_connecting(
+        self,
+        tmp_path: Path,
+        cmdchat_client: CmdChatClient,
+        fake_cmd_state: FakeCmdState,
+        fast_stream_timing: StreamTiming,
+    ) -> None:
+        session = fake_cmd_state.create_session("hi")
+        session.ready = True
+        chats_path = tmp_path / "chats.json"
+        conv_id = _seed_conversation(chats_path, session.session_id)
+        runtime: dict[str, ChatRuntimeEntry] = {}
+
+        gen = _stream_events(
+            cmdchat_client, chats_path, runtime, conv_id, session.session_id, fast_stream_timing
+        )
+        try:
+            with anyio.fail_after(5.0):
+                # The first tick yields only a status event (no messages exist
+                # yet); consuming it positions the generator to see what's
+                # appended next.
+                first = _decode_sse_line(await anext(gen))
+                session.messages = [_fake_message(0, text="appended live")]
+                second = _decode_sse_line(await anext(gen))
+        finally:
+            await gen.aclose()
+
+        assert first["type"] == "status"
+        assert second["type"] == "message"
+        assert _message_payload(second)["text"] == "appended live"
+
+    @pytest.mark.asyncio
+    async def test_resends_a_message_whose_content_later_changes(
+        self,
+        tmp_path: Path,
+        cmdchat_client: CmdChatClient,
+        fake_cmd_state: FakeCmdState,
+        fast_stream_timing: StreamTiming,
+    ) -> None:
+        """A `truncated: true` preview later arriving in full (same index, new
+        content) must be re-sent — a bare "index > last seen" filter would miss
+        this (decisions/00033)."""
+        session = fake_cmd_state.create_session("hi")
+        session.ready = True
+        session.messages = [_fake_message(0, text="partial...", truncated=True)]
+        chats_path = tmp_path / "chats.json"
+        conv_id = _seed_conversation(chats_path, session.session_id)
+        runtime: dict[str, ChatRuntimeEntry] = {}
+
+        gen = _stream_events(
+            cmdchat_client, chats_path, runtime, conv_id, session.session_id, fast_stream_timing
+        )
+        try:
+            with anyio.fail_after(5.0):
+                # The first tick fetches messages ONCE and can yield more than
+                # one event from that single snapshot (the message, then the
+                # status event, since status also differs from the initial
+                # `None`) — both must be drained before mutating, or the
+                # mutation lands mid-tick and the second `anext()` just
+                # observes the FIRST tick's own trailing status event instead
+                # of a fresh fetch.
+                first_event = _decode_sse_line(await anext(gen))
+                second_event = _decode_sse_line(await anext(gen))
+                session.messages = [_fake_message(0, text="the full message", truncated=False)]
+                third_event = _decode_sse_line(await anext(gen))
+        finally:
+            await gen.aclose()
+
+        assert first_event["type"] == "message"
+        assert _message_payload(first_event)["text"] == "partial..."
+        assert _message_payload(first_event)["truncated"] is True
+        assert second_event["type"] == "status"
+        assert third_event["type"] == "message"
+        assert _message_payload(third_event)["index"] == 0
+        assert _message_payload(third_event)["text"] == "the full message"
+        assert _message_payload(third_event)["truncated"] is False
+
+    @pytest.mark.asyncio
+    async def test_waits_out_pending_then_delivers(
+        self,
+        tmp_path: Path,
+        cmdchat_client: CmdChatClient,
+        fake_cmd_state: FakeCmdState,
+        fast_stream_timing: StreamTiming,
+    ) -> None:
+        session = fake_cmd_state.create_session("hi")
+        chats_path = tmp_path / "chats.json"
+        conv_id = _seed_conversation(chats_path, session.session_id)
+        runtime: dict[str, ChatRuntimeEntry] = {conv_id: ChatRuntimeEntry(status="pending")}
+
+        async def _resolve_shortly() -> None:
+            await anyio.sleep(0.05)
+            runtime[conv_id] = ChatRuntimeEntry(status="ready")
+
+        gen = _stream_events(
+            cmdchat_client, chats_path, runtime, conv_id, session.session_id, fast_stream_timing
+        )
+        events: list[JsonObject] = []
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(_resolve_shortly)
+            events = await _collect_stream_events(gen, count=1, timeout_s=5.0)
+
+        assert events[0]["type"] == "status"
+
+    @pytest.mark.asyncio
+    async def test_reports_failure_and_closes_when_provisioning_failed(
+        self,
+        tmp_path: Path,
+        cmdchat_client: CmdChatClient,
+        fake_cmd_state: FakeCmdState,
+        fast_stream_timing: StreamTiming,
+    ) -> None:
+        session = fake_cmd_state.create_session("hi")  # never marked ready
+        chats_path = tmp_path / "chats.json"
+        conv_id = _seed_conversation(chats_path, session.session_id)
+        runtime: dict[str, ChatRuntimeEntry] = {
+            conv_id: ChatRuntimeEntry(
+                status="failed", failure_reason="timeout", failure_message="timed out"
+            )
+        }
+
+        gen = _stream_events(
+            cmdchat_client, chats_path, runtime, conv_id, session.session_id, fast_stream_timing
+        )
+        events = await _collect_stream_events(gen)  # no count: collect until it naturally ends
+
+        assert len(events) == 1
+        assert events[0]["type"] == "error"
+
+    @pytest.mark.asyncio
+    async def test_follows_handover_to_the_new_session(
+        self,
+        tmp_path: Path,
+        cmdchat_client: CmdChatClient,
+        fake_cmd_state: FakeCmdState,
+        fast_stream_timing: StreamTiming,
+    ) -> None:
+        old_session = fake_cmd_state.create_session("hi")
+        old_session.ready = True
+        old_session.status = {
+            "activity": None,
+            "process": {"kind": "cli"},
+            "handover_state": "handed_over",
+        }
+        old_session.chain = [old_session.session_id, "sess-successor"]
+        new_session = fake_cmd_state.create_session("(handover successor)")
+        auto_assigned_id = new_session.session_id
+        new_session.session_id = "sess-successor"  # force the id the chain names
+        del fake_cmd_state.sessions[auto_assigned_id]
+        fake_cmd_state.sessions["sess-successor"] = new_session
+        new_session.ready = True
+        new_session.messages = [_fake_message(0, text="continuing after handover")]
+
+        chats_path = tmp_path / "chats.json"
+        conv_id = _seed_conversation(chats_path, old_session.session_id)
+        runtime: dict[str, ChatRuntimeEntry] = {}
+
+        # The old session's handover-detecting tick adopts the new id and
+        # `continue`s WITHOUT yielding anything that iteration (see
+        # `_stream_events`); the new session's own first tick then yields
+        # exactly one message event + one status event (status differs from
+        # the reset `None` baseline exactly once) — 2 events total, not more,
+        # since nothing else changes after that.
+        gen = _stream_events(
+            cmdchat_client, chats_path, runtime, conv_id, old_session.session_id, fast_stream_timing
+        )
+        events = await _collect_stream_events(gen, count=2)
+
+        stored = find_chat(chats_path, conv_id)
+
+        message_events = [e for e in events if e["type"] == "message"]
+        assert any(
+            _message_payload(e)["text"] == "continuing after handover" for e in message_events
+        )
+        assert stored is not None
+        assert stored.session_id == "sess-successor"

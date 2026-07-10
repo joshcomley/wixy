@@ -17,6 +17,7 @@ from __future__ import annotations
 import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import NoReturn
 
 import anyio
@@ -31,6 +32,7 @@ from wixy_server.cmdchat import (
     ReadyOutcome,
     WsConnector,
 )
+from wixy_server.registry import load_registry
 from wixy_server.tests.fake_cmd import FakeCmdServer, FakeCmdState, create_fake_cmd_app
 
 
@@ -403,3 +405,45 @@ async def test_wait_until_ready_ignores_ws_events_for_other_sessions() -> None:
             assert outcome == ReadyOutcome()
     finally:
         server.stop()
+
+
+# ---------------------------------------------------------------------------
+# Live smoke test (spec/06 §4) — excluded from the default suite via
+# pyproject.toml's addopts ("-m 'not live_cmd'"); run explicitly during
+# milestone 13's live verification with a real local cmd instance running.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.live_cmd
+@pytest.mark.asyncio
+async def test_live_cmd_round_trip() -> None:
+    """spec/06 §4: "creates a real conversation against local cmd, sends
+    'reply with the word pong', and asserts a transcript reply arrives — the
+    end-to-end proof on the hub box." Uses whichever project this checkout's
+    own `projects/*.json` registry names (decisions/00013's "don't hardcode a
+    slug" precedent) rather than guessing a cmd project — a real, if
+    throwaway, workspace + subscription-bucket chat gets created; this is
+    exactly why it's excluded from the default suite. See decisions/00033."""
+    repo_root = Path(__file__).resolve().parents[2]
+    registry = load_registry(repo_root)
+    projects = registry.all()
+    assert projects, "no projects/*.json registered in this wixy checkout"
+    cmd_project = projects[0].cmd_project
+
+    async with CmdChatClient() as client:
+        result = await client.new_chat(cmd_project, "reply with the word pong")
+        outcome = await client.wait_until_ready(result.session_id)
+        assert isinstance(outcome, ReadyOutcome), f"session never became ready: {outcome}"
+
+        deadline = anyio.current_time() + 120.0
+        found = False
+        while anyio.current_time() < deadline:
+            messages = await client.get_messages(result.session_id)
+            if any(
+                m.role == "assistant" and m.text is not None and "pong" in m.text.lower()
+                for m in messages
+            ):
+                found = True
+                break
+            await anyio.sleep(2.0)
+        assert found, "no assistant reply containing 'pong' arrived within 120s"

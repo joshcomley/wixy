@@ -46,8 +46,15 @@ build-backend = "setuptools.build_meta"
 include = ["builder*", "wixy_server*"]
 
 [tool.pytest.ini_options]
-addopts = "-n 4"
+# "-m 'not live_cmd'" — spec/06-ai-chat.md §4: the @live_cmd smoke test needs a
+# real local cmd instance and is deliberately "skipped in CI, run during 07
+# verification," not part of the everyday suite. Run it explicitly later via
+# `pytest -o addopts="" -m live_cmd <path>`.
+addopts = "-n 4 -m 'not live_cmd'"
 testpaths = ["builder/tests", "wixy_server/tests"]
+markers = [
+  "live_cmd: needs a real local cmd instance on 127.0.0.1:9320/9321 (spec/06 §4); excluded by default addopts",
+]
 
 [tool.mypy]
 strict = true
