@@ -11,9 +11,11 @@ from wixy_server.chats import (
     ChatRuntimeEntry,
     add_chat,
     conversation_summary,
+    find_chat,
     load_chats,
     rename_chat,
     save_chats,
+    update_session_id,
 )
 
 
@@ -145,3 +147,56 @@ def test_conversation_summary_reflects_failure_detail() -> None:
     assert summary["status"] == "failed"
     assert summary["failureReason"] == "workspace_failed"
     assert summary["failureMessage"] == "disk full"
+
+
+def test_find_chat_returns_matching_conversation(tmp_path: Path) -> None:
+    path = tmp_path / "chats.json"
+    add_chat(path, _conv("c1"))
+    add_chat(path, _conv("c2", session_id="sess-2"))
+
+    found = find_chat(path, "c2")
+
+    assert found is not None
+    assert found.session_id == "sess-2"
+
+
+def test_find_chat_missing_returns_none(tmp_path: Path) -> None:
+    path = tmp_path / "chats.json"
+    add_chat(path, _conv("c1"))
+
+    assert find_chat(path, "does-not-exist") is None
+
+
+def test_update_session_id_updates_session_only(tmp_path: Path) -> None:
+    path = tmp_path / "chats.json"
+    add_chat(path, _conv("c1", session_id="sess-old", title="original"))
+
+    updated = update_session_id(path, "c1", "sess-new")
+
+    assert updated.session_id == "sess-new"
+    assert updated.title == "original"
+    assert updated.conv_id == "c1"
+    loaded = find_chat(path, "c1")
+    assert loaded is not None
+    assert loaded.session_id == "sess-new"
+
+
+def test_update_session_id_unknown_id_raises(tmp_path: Path) -> None:
+    path = tmp_path / "chats.json"
+    add_chat(path, _conv("c1"))
+
+    with pytest.raises(ChatNotFoundError):
+        update_session_id(path, "does-not-exist", "sess-new")
+
+
+def test_rename_and_update_session_id_are_independent(tmp_path: Path) -> None:
+    """Both go through the same shared `_update_conversation` helper — this
+    guards against a refactor accidentally cross-wiring the two fields."""
+    path = tmp_path / "chats.json"
+    add_chat(path, _conv("c1", session_id="sess-1", title="original"))
+
+    rename_chat(path, "c1", "renamed")
+    updated = update_session_id(path, "c1", "sess-2")
+
+    assert updated.title == "renamed"
+    assert updated.session_id == "sess-2"

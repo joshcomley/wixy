@@ -25,6 +25,7 @@ from wixy_server.cmdchat import CmdChatClient
 from wixy_server.publisher import PublishJob
 from wixy_server.registry import load_registry
 from wixy_server.routes_admin_api import router as admin_api_router
+from wixy_server.routes_chat import StreamTiming
 from wixy_server.routes_chat import router as chat_router
 from wixy_server.routes_internal import router as internal_router
 from wixy_server.routes_preview import DEFAULT_PREVIEW_STALENESS_THRESHOLD_S
@@ -47,6 +48,7 @@ def create_app(
     watcher_interval_s: float = DEFAULT_INTERVAL_S,
     preview_staleness_threshold_s: float = DEFAULT_PREVIEW_STALENESS_THRESHOLD_S,
     cmdchat_client: CmdChatClient | None = None,
+    chat_stream_timing: StreamTiming | None = None,
 ) -> FastAPI:
     """Build the Wixy FastAPI app for one project.
 
@@ -57,6 +59,9 @@ def create_app(
     for real; this function never guesses a default for either path. `cmdchat_client`
     defaults to a real `CmdChatClient()` (localhost cmd, spec/06 §1) — overridable so
     the E2E fixture server can point it at a fake cmd instead (milestone 10 slice 5).
+    `chat_stream_timing` defaults to spec/06 §1's own numbers (1.2s poll, 10s offline
+    retry, 15s transcript-lag grace) — overridable so tests don't have to wait out
+    real multi-second intervals to exercise the stream's timing-dependent branches.
     """
     settings = load_settings(storage_root)
     registry = load_registry(wixy_repo_root)
@@ -77,6 +82,7 @@ def create_app(
     publish_job: PublishJob | None = None
     chat_client = cmdchat_client if cmdchat_client is not None else CmdChatClient()
     chat_runtime: dict[str, ChatRuntimeEntry] = {}
+    stream_timing = chat_stream_timing if chat_stream_timing is not None else StreamTiming()
 
     jwks = JwksCache(
         fetch=functools.partial(_fetch_jwks, settings.cf_access_team_domain),
@@ -125,6 +131,7 @@ def create_app(
     app.state.wixy_repo_root = wixy_repo_root
     app.state.cmdchat_client = chat_client
     app.state.chat_runtime = chat_runtime
+    app.state.chat_stream_timing = stream_timing
 
     app.middleware("http")(admin_auth)
 

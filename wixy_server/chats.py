@@ -82,6 +82,16 @@ def load_chats(path: Path) -> list[ChatConversation]:
     return [c for c in (_conversation_from_dict(item) for item in raw) if c is not None]
 
 
+def find_chat(path: Path, conv_id: str) -> ChatConversation | None:
+    """`None` if no stored conversation has this id — every route that resolves
+    a `conv_id` path param to a session (send, stream, rename) needs this exact
+    lookup; centralized so it's not reimplemented three times."""
+    for conv in load_chats(path):
+        if conv.conv_id == conv_id:
+            return conv
+    return None
+
+
 def save_chats(path: Path, conversations: list[ChatConversation]) -> None:
     atomic_write_json(path, {"conversations": [_conversation_to_dict(c) for c in conversations]})
 
@@ -92,7 +102,14 @@ def add_chat(path: Path, conversation: ChatConversation) -> None:
     save_chats(path, conversations)
 
 
-def rename_chat(path: Path, conv_id: str, title: str) -> ChatConversation:
+def _update_conversation(
+    path: Path, conv_id: str, *, title: str | None = None, session_id: str | None = None
+) -> ChatConversation:
+    """Shared read-modify-write for a single-field update on one stored
+    conversation — used by both `rename_chat` (the owner renaming a
+    conversation, spec/06 §1) and `update_session_id` (handover-follow adopting
+    a new live session id, spec/06 §1: "adopt the LAST element as the live
+    session id, update chats.json")."""
     conversations = load_chats(path)
     updated: ChatConversation | None = None
     result: list[ChatConversation] = []
@@ -100,8 +117,8 @@ def rename_chat(path: Path, conv_id: str, title: str) -> ChatConversation:
         if conv.conv_id == conv_id:
             updated = ChatConversation(
                 conv_id=conv.conv_id,
-                session_id=conv.session_id,
-                title=title,
+                session_id=session_id if session_id is not None else conv.session_id,
+                title=title if title is not None else conv.title,
                 created_at=conv.created_at,
             )
             result.append(updated)
@@ -111,6 +128,14 @@ def rename_chat(path: Path, conv_id: str, title: str) -> ChatConversation:
         raise ChatNotFoundError(f"no conversation with id '{conv_id}'")
     save_chats(path, result)
     return updated
+
+
+def rename_chat(path: Path, conv_id: str, title: str) -> ChatConversation:
+    return _update_conversation(path, conv_id, title=title)
+
+
+def update_session_id(path: Path, conv_id: str, session_id: str) -> ChatConversation:
+    return _update_conversation(path, conv_id, session_id=session_id)
 
 
 ChatStatus = Literal["pending", "ready", "failed"]
