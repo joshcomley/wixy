@@ -17,6 +17,8 @@ import { mountPublishDrawer } from "./publishDrawer";
 import { currentRoute, navigateTo, onRouteChange, type Route } from "./router";
 import { mountThemePanel, type ThemePanel } from "./themePanel";
 import { initTheme, type ThemeController, type ThemeMode } from "./theme";
+import { initZoom, type ZoomController } from "./zoom";
+import { initFontScale, type FontScaleController } from "./fontScale";
 
 interface Drawer {
   element: HTMLElement;
@@ -86,6 +88,65 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   siteLink.rel = "noopener noreferrer";
   siteLink.hidden = true;
 
+  const zoomOutButton = document.createElement("button");
+  zoomOutButton.type = "button";
+  zoomOutButton.className = "wx-zoom-button";
+  zoomOutButton.textContent = "−";
+  zoomOutButton.title = "Zoom out (Ctrl+-)";
+  zoomOutButton.setAttribute("aria-label", "Zoom out");
+  const zoomLevelEl = document.createElement("span");
+  zoomLevelEl.className = "wx-zoom-level";
+  const zoomInButton = document.createElement("button");
+  zoomInButton.type = "button";
+  zoomInButton.className = "wx-zoom-button";
+  zoomInButton.textContent = "+";
+  zoomInButton.title = "Zoom in (Ctrl++)";
+  zoomInButton.setAttribute("aria-label", "Zoom in");
+  function renderZoom(): void {
+    zoomLevelEl.textContent = `${zoomController.getLevel()}%`;
+  }
+  // `onChange` (not just the click handlers below) drives the label so a
+  // Ctrl+Plus/Minus/0 keyboard shortcut — handled entirely inside zoom.ts's
+  // own listener — still refreshes it; relying only on click handlers left
+  // the label silently stale after a keyboard-triggered change.
+  const zoomController = initZoom(win, document, renderZoom);
+  zoomOutButton.addEventListener("click", () => zoomController.zoomOut());
+  zoomInButton.addEventListener("click", () => zoomController.zoomIn());
+  renderZoom();
+  const zoomGroup = document.createElement("div");
+  zoomGroup.className = "wx-zoom-controls";
+  zoomGroup.setAttribute("role", "group");
+  zoomGroup.setAttribute("aria-label", "Zoom");
+  zoomGroup.append(zoomOutButton, zoomLevelEl, zoomInButton);
+
+  const fontScaleDownButton = document.createElement("button");
+  fontScaleDownButton.type = "button";
+  fontScaleDownButton.className = "wx-font-scale-button";
+  fontScaleDownButton.textContent = "A−";
+  fontScaleDownButton.title = "Decrease font size (Ctrl+Shift+-)";
+  fontScaleDownButton.setAttribute("aria-label", "Decrease font size");
+  const fontScaleLevelEl = document.createElement("span");
+  fontScaleLevelEl.className = "wx-font-scale-level";
+  const fontScaleUpButton = document.createElement("button");
+  fontScaleUpButton.type = "button";
+  fontScaleUpButton.className = "wx-font-scale-button";
+  fontScaleUpButton.textContent = "A+";
+  fontScaleUpButton.title = "Increase font size (Ctrl+Shift++)";
+  fontScaleUpButton.setAttribute("aria-label", "Increase font size");
+  function renderFontScale(): void {
+    fontScaleLevelEl.textContent = `${fontScaleController.getLevel()}%`;
+  }
+  // Same onChange reasoning as zoomController above.
+  const fontScaleController = initFontScale(win, document, renderFontScale);
+  fontScaleDownButton.addEventListener("click", () => fontScaleController.decrease());
+  fontScaleUpButton.addEventListener("click", () => fontScaleController.increase());
+  renderFontScale();
+  const fontScaleGroup = document.createElement("div");
+  fontScaleGroup.className = "wx-font-scale-controls";
+  fontScaleGroup.setAttribute("role", "group");
+  fontScaleGroup.setAttribute("aria-label", "Font size");
+  fontScaleGroup.append(fontScaleDownButton, fontScaleLevelEl, fontScaleUpButton);
+
   const themeController = initTheme(win);
   const THEME_ICONS: Record<ThemeMode, string> = { light: "☀️", dark: "🌙", system: "💻" };
   const THEME_LABELS: Record<ThemeMode, string> = {
@@ -111,7 +172,16 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   });
   renderThemeToggle();
 
-  topbar.append(titleEl, spacer, chipEl, publishButton, siteLink, themeToggle);
+  topbar.append(
+    titleEl,
+    spacer,
+    chipEl,
+    publishButton,
+    siteLink,
+    zoomGroup,
+    fontScaleGroup,
+    themeToggle,
+  );
 
   const body = document.createElement("div");
   body.className = "wx-body";
@@ -446,6 +516,8 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       activePanelTeardown?.();
       closeDrawer();
       themeController.teardown();
+      zoomController.teardown();
+      fontScaleController.teardown();
     },
   };
 }

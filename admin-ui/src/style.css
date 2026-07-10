@@ -80,7 +80,7 @@
   display: flex;
   flex-direction: column;
   height: 100vh;
-  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 0.875rem/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
   color: var(--wx-ink);
   background: var(--wx-canvas);
 }
@@ -100,7 +100,7 @@
 
 .wx-topbar-title {
   font-weight: 700;
-  font-size: 15px;
+  font-size: 0.9375rem;
 }
 
 .wx-topbar-spacer {
@@ -108,7 +108,7 @@
 }
 
 .wx-draft-chip {
-  font: 12px/1.4 system-ui, sans-serif;
+  font: 0.75rem/1.4 system-ui, sans-serif;
   color: var(--wx-muted);
   background: var(--wx-canvas);
   border: 1px solid var(--wx-border);
@@ -123,7 +123,7 @@
 }
 
 .wx-publish-button {
-  font: 600 13px/1 system-ui, sans-serif;
+  font: 600 0.8125rem/1 system-ui, sans-serif;
   padding: 8px 14px;
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-brand-blue);
@@ -138,7 +138,7 @@
 }
 
 .wx-site-link {
-  font: 600 13px/1 system-ui, sans-serif;
+  font: 600 0.8125rem/1 system-ui, sans-serif;
   color: var(--wx-brand-blue-text);
   text-decoration: none;
 }
@@ -147,9 +147,52 @@
   text-decoration: underline;
 }
 
+.wx-zoom-controls,
+.wx-font-scale-controls {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+  padding: 2px;
+}
+
+.wx-zoom-button,
+.wx-font-scale-button {
+  flex: none;
+  font: 600 0.8125rem/1 system-ui, sans-serif;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--wx-ink);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wx-zoom-button:hover,
+.wx-font-scale-button:hover {
+  background: var(--wx-canvas);
+}
+
+.wx-zoom-level,
+.wx-font-scale-level {
+  flex: none;
+  font: 600 0.6875rem/1 system-ui, sans-serif;
+  color: var(--wx-muted);
+  min-width: 34px;
+  text-align: center;
+  user-select: none;
+}
+
 .wx-theme-toggle {
   flex: none;
-  font-size: 16px;
+  font-size: 1rem;
   line-height: 1;
   width: 30px;
   height: 30px;
@@ -187,7 +230,7 @@
 
 .wx-nav-item {
   text-align: left;
-  font: 500 13px/1.4 system-ui, sans-serif;
+  font: 500 0.8125rem/1.4 system-ui, sans-serif;
   color: var(--wx-ink);
   background: transparent;
   border: none;
@@ -220,7 +263,7 @@
 
 .wx-coming-soon {
   color: var(--wx-muted);
-  font-size: 14px;
+  font-size: 0.875rem;
   padding: 24px;
   text-align: center;
 }
@@ -229,12 +272,12 @@
 
 .wx-pages-panel h2 {
   margin: 0 0 4px;
-  font-size: 18px;
+  font-size: 1.125rem;
 }
 
 .wx-pages-hint {
   color: var(--wx-muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
   margin: 0 0 16px;
 }
 
@@ -252,7 +295,7 @@
   text-align: left;
   padding: 8px 12px;
   border-bottom: 1px solid var(--wx-border);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .wx-pages-table th {
@@ -266,7 +309,7 @@
 }
 
 .wx-pages-edit {
-  font: 600 12px/1 system-ui, sans-serif;
+  font: 600 0.75rem/1 system-ui, sans-serif;
   padding: 5px 10px;
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-border);
@@ -286,7 +329,7 @@
 
 .wx-pages-duplicate,
 .wx-pages-delete {
-  font: 600 12px/1 system-ui, sans-serif;
+  font: 600 0.75rem/1 system-ui, sans-serif;
   padding: 5px 10px;
   margin-left: 6px;
   border-radius: var(--wx-radius);
@@ -301,7 +344,7 @@
 
 .wx-pages-badge {
   display: inline-block;
-  font: 600 10px/1 system-ui, sans-serif;
+  font: 600 0.625rem/1 system-ui, sans-serif;
   padding: 2px 6px;
   border-radius: 999px;
   text-transform: uppercase;
@@ -323,12 +366,12 @@
   gap: 8px;
   padding: 10px 12px;
   background: var(--wx-canvas);
-  font-size: 12px;
+  font-size: 0.75rem;
   flex-wrap: wrap;
 }
 
 .wx-pages-inline-form input {
-  font: 13px/1.4 system-ui, sans-serif;
+  font: 0.8125rem/1.4 system-ui, sans-serif;
   border: 1px solid var(--wx-border);
   border-radius: var(--wx-radius);
   padding: 4px 8px;
@@ -353,7 +396,7 @@
 }
 
 .wx-page-settings-trigger {
-  font: 600 12px/1 system-ui, sans-serif;
+  font: 600 0.75rem/1 system-ui, sans-serif;
   padding: 6px 12px;
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-border);
@@ -376,7 +419,7 @@
 }
 
 .wx-device-toolbar button {
-  font: 600 12px/1 system-ui, sans-serif;
+  font: 600 0.75rem/1 system-ui, sans-serif;
   padding: 6px 12px;
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-border);
@@ -437,13 +480,13 @@
 
 .wx-drawer-header h3 {
   margin: 0;
-  font-size: 15px;
+  font-size: 0.9375rem;
 }
 
 .wx-drawer-close {
   border: none;
   background: transparent;
-  font-size: 18px;
+  font-size: 1.125rem;
   line-height: 1;
   cursor: pointer;
   color: var(--wx-muted);
@@ -461,13 +504,13 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--wx-muted);
 }
 
 .wx-field-row input,
 .wx-field-row textarea {
-  font: 14px/1.4 system-ui, sans-serif;
+  font: 0.875rem/1.4 system-ui, sans-serif;
   color: var(--wx-ink);
   border: 1px solid var(--wx-border);
   border-radius: var(--wx-radius);
@@ -500,7 +543,7 @@
 
 .wx-og-image-empty {
   color: var(--wx-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 /* -- Publish review drawer (spec/05 §5) ------------------------------------------ */
@@ -517,13 +560,13 @@
 
 .wx-diff-empty {
   color: var(--wx-muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
   margin: 0;
 }
 
 .wx-diff-group h4 {
   margin: 0 0 6px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   text-transform: capitalize;
 }
 
@@ -531,7 +574,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: 0.75rem;
   padding: 4px 0;
   border-bottom: 1px solid var(--wx-border);
 }
@@ -566,7 +609,7 @@
 
 .wx-diff-upstream,
 .wx-diff-validate {
-  font-size: 12px;
+  font-size: 0.75rem;
   padding: 8px 10px;
   border-radius: var(--wx-radius);
   background: var(--wx-canvas);
@@ -581,7 +624,7 @@
 .wx-diff-upstream h4,
 .wx-diff-validate h4 {
   margin: 0 0 4px;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .wx-diff-upstream ul,
@@ -591,12 +634,12 @@
 }
 
 .wx-publish-progress {
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--wx-muted);
 }
 
 .wx-publish-error {
-  font: 12px/1.4 ui-monospace, monospace;
+  font: 0.75rem/1.4 ui-monospace, monospace;
   color: var(--wx-danger);
   background: var(--wx-canvas);
   border: 1px solid var(--wx-danger);
@@ -609,7 +652,7 @@
 }
 
 .wx-publish-confirm {
-  font: 600 13px/1 system-ui, sans-serif;
+  font: 600 0.8125rem/1 system-ui, sans-serif;
   padding: 10px 14px;
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-brand-blue);
@@ -627,7 +670,7 @@
 
 .wx-media-panel h2 {
   margin: 0 0 4px;
-  font-size: 18px;
+  font-size: 1.125rem;
 }
 
 .wx-media-toolbar {
@@ -637,7 +680,7 @@
 }
 
 .wx-media-upload-button {
-  font: 600 13px/1 system-ui, sans-serif;
+  font: 600 0.8125rem/1 system-ui, sans-serif;
   padding: 8px 14px;
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-brand-blue);
@@ -658,7 +701,7 @@
 
 .wx-media-empty {
   color: var(--wx-muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
   grid-column: 1 / -1;
 }
 
@@ -698,7 +741,7 @@ div.wx-media-thumb {
   position: absolute;
   top: 4px;
   left: 4px;
-  font: 600 10px/1 system-ui, sans-serif;
+  font: 600 0.625rem/1 system-ui, sans-serif;
   padding: 2px 6px;
   border-radius: 999px;
   background: var(--wx-solid-dark);
@@ -709,12 +752,12 @@ div.wx-media-thumb {
   display: flex;
   justify-content: space-between;
   gap: 4px;
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--wx-muted);
 }
 
 .wx-media-delete {
-  font: 600 11px/1 system-ui, sans-serif;
+  font: 600 0.6875rem/1 system-ui, sans-serif;
   padding: 5px 8px;
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-border);
@@ -818,12 +861,12 @@ div.wx-media-thumb {
 
 .wx-theme-section-header h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 .wx-theme-reset-all,
 .wx-theme-reset {
-  font: 600 11px/1 system-ui, sans-serif;
+  font: 600 0.6875rem/1 system-ui, sans-serif;
   padding: 5px 8px;
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-border);
@@ -845,7 +888,7 @@ div.wx-media-thumb {
 }
 
 .wx-theme-color-label {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--wx-muted);
 }
 
@@ -859,7 +902,7 @@ div.wx-media-thumb {
 }
 
 .wx-theme-hex {
-  font: 13px/1.4 system-ui, sans-serif;
+  font: 0.8125rem/1.4 system-ui, sans-serif;
   border: 1px solid var(--wx-border);
   border-radius: var(--wx-radius);
   padding: 5px 6px;
@@ -896,13 +939,13 @@ div.wx-media-thumb {
 
 .wx-theme-font-row h4 {
   margin: 0;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--wx-muted);
 }
 
 .wx-theme-font-picker,
 .wx-theme-font-family {
-  font: 13px/1.4 system-ui, sans-serif;
+  font: 0.8125rem/1.4 system-ui, sans-serif;
   border: 1px solid var(--wx-border);
   border-radius: var(--wx-radius);
   padding: 6px 8px;
@@ -915,7 +958,7 @@ div.wx-media-thumb {
 }
 
 .wx-theme-weights label {
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .wx-theme-shadow-row {
@@ -925,14 +968,14 @@ div.wx-media-thumb {
 }
 
 .wx-theme-shadow-row span {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--wx-muted);
   flex: none;
 }
 
 .wx-theme-shadow-input {
   flex: 1;
-  font: 13px/1.4 system-ui, sans-serif;
+  font: 0.8125rem/1.4 system-ui, sans-serif;
   border: 1px solid var(--wx-border);
   border-radius: var(--wx-radius);
   padding: 6px 8px;
@@ -942,7 +985,7 @@ div.wx-media-thumb {
 
 .wx-history-panel h2 {
   margin: 0 0 12px;
-  font-size: 18px;
+  font-size: 1.125rem;
 }
 
 .wx-history-table {
@@ -959,7 +1002,7 @@ div.wx-media-thumb {
   text-align: left;
   padding: 8px 12px;
   border-bottom: 1px solid var(--wx-border);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .wx-history-table th {
@@ -978,7 +1021,7 @@ div.wx-media-thumb {
 
 .wx-history-view,
 .wx-history-restore {
-  font: 600 12px/1 system-ui, sans-serif;
+  font: 600 0.75rem/1 system-ui, sans-serif;
   padding: 5px 10px;
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-border);
@@ -996,11 +1039,11 @@ div.wx-media-thumb {
   gap: 8px;
   padding: 8px 12px;
   background: var(--wx-canvas);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .wx-history-confirm input {
-  font: 13px/1.4 system-ui, sans-serif;
+  font: 0.8125rem/1.4 system-ui, sans-serif;
   border: 1px solid var(--wx-border);
   border-radius: var(--wx-radius);
   padding: 4px 8px;
@@ -1025,7 +1068,7 @@ div.wx-media-thumb {
 }
 
 .wx-toast {
-  font: 500 13px/1.4 system-ui, sans-serif;
+  font: 500 0.8125rem/1.4 system-ui, sans-serif;
   padding: 8px 14px;
   border-radius: var(--wx-radius);
   box-shadow: var(--wx-shadow);
@@ -1041,7 +1084,7 @@ div.wx-media-thumb {
 
 .wx-chat-panel h2 {
   margin: 0 0 12px;
-  font-size: 18px;
+  font-size: 1.125rem;
 }
 
 .wx-chat-list-header {
@@ -1054,7 +1097,7 @@ div.wx-media-thumb {
 .wx-chat-new-button,
 .wx-chat-rename-button,
 .wx-chat-reasoning-toggle {
-  font: 600 12px/1 system-ui, sans-serif;
+  font: 600 0.75rem/1 system-ui, sans-serif;
   padding: 6px 12px;
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-border);
@@ -1076,7 +1119,7 @@ div.wx-media-thumb {
 
 .wx-chat-compose-input,
 .wx-chat-composer-input {
-  font: 14px/1.4 system-ui, sans-serif;
+  font: 0.875rem/1.4 system-ui, sans-serif;
   padding: 8px 10px;
   border: 1px solid var(--wx-border);
   border-radius: var(--wx-radius);
@@ -1090,7 +1133,7 @@ div.wx-media-thumb {
 }
 
 .wx-chat-compose-actions button {
-  font: 600 12px/1 system-ui, sans-serif;
+  font: 600 0.75rem/1 system-ui, sans-serif;
   padding: 6px 12px;
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-border);
@@ -1101,7 +1144,7 @@ div.wx-media-thumb {
 .wx-chat-compose-error,
 .wx-chat-composer-error {
   color: var(--wx-danger);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .wx-chat-empty {
@@ -1120,7 +1163,7 @@ div.wx-media-thumb {
 .wx-chat-list-row td {
   padding: 10px 12px;
   border-bottom: 1px solid var(--wx-border);
-  font-size: 13px;
+  font-size: 0.8125rem;
   vertical-align: middle;
 }
 
@@ -1176,7 +1219,7 @@ div.wx-media-thumb {
 .wx-chat-back-link {
   color: var(--wx-muted);
   text-decoration: none;
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .wx-chat-back-link:hover {
@@ -1185,12 +1228,12 @@ div.wx-media-thumb {
 
 .wx-chat-conversation-title {
   font-weight: 600;
-  font-size: 16px;
+  font-size: 1rem;
   flex: 1;
 }
 
 .wx-chat-banner {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--wx-muted);
   background: var(--wx-canvas);
   border: 1px solid var(--wx-border);
@@ -1200,7 +1243,7 @@ div.wx-media-thumb {
 }
 
 .wx-chat-offline-banner {
-  font: 600 13px/1.4 system-ui, sans-serif;
+  font: 600 0.8125rem/1.4 system-ui, sans-serif;
   color: #fff;
   background: var(--wx-danger);
   border-radius: var(--wx-radius);
@@ -1210,7 +1253,7 @@ div.wx-media-thumb {
 
 .wx-chat-preview-chip {
   display: inline-block;
-  font: 600 12px/1 system-ui, sans-serif;
+  font: 600 0.75rem/1 system-ui, sans-serif;
   color: var(--wx-brand-blue-text);
   background: var(--wx-brand-blue-tint);
   border: 1px solid var(--wx-brand-blue-text);
@@ -1222,7 +1265,7 @@ div.wx-media-thumb {
 }
 
 .wx-chat-status-strip {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--wx-muted);
   margin-bottom: 8px;
 }
@@ -1249,7 +1292,7 @@ div.wx-media-thumb {
   max-width: 80%;
   padding: 8px 12px;
   border-radius: var(--wx-radius);
-  font-size: 14px;
+  font-size: 0.875rem;
   line-height: 1.5;
 }
 
@@ -1276,7 +1319,7 @@ div.wx-media-thumb {
 .wx-chat-bubble-timestamp {
   display: block;
   margin-top: 4px;
-  font-size: 10px;
+  font-size: 0.625rem;
   opacity: 0.7;
 }
 
@@ -1285,7 +1328,7 @@ div.wx-media-thumb {
 }
 
 .wx-chat-tool-summary {
-  font: 600 12px/1 ui-monospace, monospace;
+  font: 600 0.75rem/1 ui-monospace, monospace;
   padding: 6px 10px;
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-border);
@@ -1297,7 +1340,7 @@ div.wx-media-thumb {
 .wx-chat-tool-details {
   margin: 6px 0 0;
   padding: 8px 10px;
-  font: 12px/1.5 ui-monospace, monospace;
+  font: 0.75rem/1.5 ui-monospace, monospace;
   background: var(--wx-solid-dark);
   color: var(--wx-solid-dark-text);
   border-radius: var(--wx-radius);
@@ -1308,7 +1351,7 @@ div.wx-media-thumb {
 
 .wx-chat-error-row {
   align-self: center;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--wx-danger);
   background: var(--wx-danger-tint);
   border: 1px solid var(--wx-danger);
@@ -1327,7 +1370,7 @@ div.wx-media-thumb {
 }
 
 .wx-chat-send-button {
-  font: 600 13px/1 system-ui, sans-serif;
+  font: 600 0.8125rem/1 system-ui, sans-serif;
   padding: 9px 16px;
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-brand-blue);

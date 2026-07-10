@@ -40,9 +40,15 @@ and mobile-breakpoint decisions.
 ## How to continue + acceptance
 Slice 1 (design system + dark/light/system + mobile) done, verified via Playwright
 screenshots against `e2e/fixture_server.py`'s real local server (light/dark/mobile
-all correct, `color-scheme` native-control fix confirmed). Slices 3-7 remain -
-continue in the same branch-per-slice, PR, wait-green, merge discipline as the rest
-of this project.
+all correct, `color-scheme` native-control fix confirmed) — PR #57 merged.
+Slice 3 (zoom + font-scale) done: required converting all ~70 `font-size`/`font:`
+declarations in style.css from px to rem so font-scale genuinely affects the whole
+admin UI, not just the new controls' own labels; real-browser verification caught a
+genuine bug (keyboard-driven changes updated state but not the visible topbar label)
+fixed via an `onChange` callback on both controllers — see decisions/00046 for full
+reasoning. Slices 4-7 remain - continue in the same branch-per-slice, PR, wait-green,
+merge discipline as the rest of this project.
 
 ## Links
-PR (slice 1): (fill in when opened)
+PR (slice 1): #57 (merged)
+PR (slice 3): (fill in when opened)
