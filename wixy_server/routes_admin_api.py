@@ -3,8 +3,10 @@ plus milestone 8's media upload/delete, milestone 9's publish/restore, and
 milestone 9 slice 4's page duplicate/delete (spec/09's own M7 line named this
 as part of "the pages panel," but decisions/00015 deferred it — building the
 routes needed the materialize-time semantics this milestone's publisher
-designed; decisions/00029 records the explicit scope call). Chat is M10 — not
-built here.
+designed; decisions/00029 records the explicit scope call). `GET state`'s
+`chats` field is milestone 10 slice 2's conversation-list snapshot (spec/04
+§8); the dedicated `/chat/*` routes (create/list, and slice 3's send/stream/
+rename) live in `wixy_server/routes_chat.py`, not here.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ from builder.jsontypes import JsonObject, JsonValue
 from builder.render import SiteSource
 from builder.theme import theme_to_dict
 from builder.validate import validate_site
+from wixy_server.chats import ChatConversation, ChatRuntimeEntry, conversation_summary, load_chats
 from wixy_server.checkout import CheckoutError, UpstreamCommit, commits_ahead, current_sha
 from wixy_server.ledger import read_ledger
 from wixy_server.live_pointer import load_live_pointer
@@ -116,11 +119,20 @@ def _publish_job_to_dict(job: PublishJob) -> JsonObject:
     }
 
 
+def _chats_snapshot(
+    paths: ProjectPaths, chat_runtime: dict[str, ChatRuntimeEntry]
+) -> list[JsonValue]:
+    conversations: list[ChatConversation] = load_chats(paths.chats_json)
+    newest_first = list(reversed(conversations))
+    return [conversation_summary(c, chat_runtime.get(c.conv_id)) for c in newest_first]
+
+
 def _build_state(
     project: ProjectConfig,
     paths: ProjectPaths,
     watcher_status: WatcherStatus,
     publish_job: PublishJob | None,
+    chat_runtime: dict[str, ChatRuntimeEntry],
 ) -> JsonObject:
     source = build_site_source(project, paths.repo)
     overlay = _load_overlay_for(paths)
@@ -167,7 +179,7 @@ def _build_state(
         "live": live,
         "upstream": upstream,
         "publishJob": _publish_job_to_dict(publish_job) if publish_job is not None else None,
-        "chats": [],  # milestone 10 — AI chat doesn't exist yet
+        "chats": _chats_snapshot(paths, chat_runtime),
     }
 
 
@@ -177,9 +189,10 @@ async def get_state(request: Request) -> JsonObject:
     paths: ProjectPaths = request.app.state.paths
     watcher_status: WatcherStatus = request.app.state.watcher_status
     publish_job: PublishJob | None = request.app.state.publish_job
+    chat_runtime: dict[str, ChatRuntimeEntry] = request.app.state.chat_runtime
     try:
         return await anyio.to_thread.run_sync(
-            _build_state, project, paths, watcher_status, publish_job
+            _build_state, project, paths, watcher_status, publish_job, chat_runtime
         )
     except CheckoutError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

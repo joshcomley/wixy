@@ -8,6 +8,8 @@ canonical-JSON-file contract.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 
 from builder.jsontypes import JsonObject, JsonValue
@@ -38,6 +40,28 @@ def write_json_canonical(path: Path, data: JsonValue) -> None:
     text = json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def atomic_write_json(path: Path, data: JsonValue) -> None:
+    """`write_json_canonical`, but tmp-file-in-the-same-dir + `os.replace` so a
+    concurrent reader never observes a partially-written file (spec/02 §8's own
+    "written atomically (tmp + rename) on every accepted PATCH" requirement,
+    factored out here since more than one runtime-state file needs the exact
+    same guarantee — `wixy_server.overlay`'s `overlay.json` and
+    `wixy_server.chats`'s `chats.json` alike). `write_json_canonical` itself
+    stays non-atomic for callers writing fresh, not-concurrently-read output
+    (e.g. a build dir) where the extra tmp-file dance buys nothing.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        write_json_canonical(tmp_path, data)
+        os.replace(tmp_path, path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 _MISSING = object()

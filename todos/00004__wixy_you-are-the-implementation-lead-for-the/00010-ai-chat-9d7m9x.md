@@ -34,9 +34,26 @@ sliced backend-first, matching M6-M9's own pattern:
   with `call_soon_threadsafe`). Added `websockets>=13.0` (server extra). No admin API
   routes or `chats.json` store yet — later slices consume this interface. Full
   reasoning: decisions/00031.
-- Slice 2 [PLANNED]: conversations store (`chats.json`, spec/04 §2) + create/pending/
-  ready flow (`POST`/`GET /api/admin/chat/conversations`) + wire the `chats` field in
-  `GET /api/admin/state` (currently a hardcoded `[]`).
+- Slice 2 [DONE]: `wixy_server/chats.py` (new) — durable `chats.json` identity
+  store (conv_id/session_id/title/created_at, spec/04 §2), atomic tmp+rename
+  writes via a new shared `builder.content.atomic_write_json` helper (factored
+  out of `overlay.save_overlay`, which now uses it too — behavior-preserving).
+  `ChatRuntimeEntry` (pending/ready/failed) lives in-memory on `app.state`, NOT
+  persisted — deliberate, see decisions/00032 decision 1 for the full tradeoff
+  reasoning (self-heals on next real interaction; not worth eager re-verification
+  at every startup). `wixy_server/routes_chat.py` (new): `POST`/`GET
+  /api/admin/chat/conversations` — create spawns a background readiness-tracking
+  task into the app's own long-lived task group (extends the existing watcher's
+  pattern, `app.state.background_tasks`, decisions/00032 decision 2); title
+  derivation (60-char word-truncate) + prompt construction (preamble alone, or
+  preamble + `\n\n---\n\n` + first message) per spec/06 §1's exact template.
+  `create_app` gained an injectable `cmdchat_client` param (mirrors
+  `watcher_interval_s`'s existing convention) — flagged for slice 5's E2E fixture.
+  `_build_state`'s `chats` field now wired to real conversation summaries
+  (was a hardcoded `[]`). 24 new tests (`test_chats.py`, `test_routes_chat.py`)
+  incl. a real bug found in the FIRST draft of one of THIS slice's own tests
+  (a vacuous assertion that didn't actually prove what its name claimed — see
+  decisions/00032's closing note). Full reasoning: decisions/00032.
 - Slice 3 [PLANNED]: send w/ idempotency (`POST .../messages`) + poll->SSE fan-out
   (`GET .../stream`) + rename + handover-follow (chain-endpoint adoption). Candidate
   point to also add the one `@pytest.mark.live_cmd` smoke test (spec/06 §4) against the
@@ -68,4 +85,5 @@ instructing it). E2E 7 (scripted fake replies, tool rows, status transitions, se
 on 502, offline banner) still PLANNED (slice 5).
 
 ## Links
-PR (slice 1): (fill in when opened)
+PR (slice 1): https://github.com/joshcomley/wixy/pull/40 (merged 19a6839)
+PR (slice 2): (fill in when opened)

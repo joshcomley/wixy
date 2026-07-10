@@ -20,9 +20,12 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from wixy_server.auth import JwksCache, build_admin_auth_middleware, jwks_url
+from wixy_server.chats import ChatRuntimeEntry
+from wixy_server.cmdchat import CmdChatClient
 from wixy_server.publisher import PublishJob
 from wixy_server.registry import load_registry
 from wixy_server.routes_admin_api import router as admin_api_router
+from wixy_server.routes_chat import router as chat_router
 from wixy_server.routes_internal import router as internal_router
 from wixy_server.routes_preview import DEFAULT_PREVIEW_STALENESS_THRESHOLD_S
 from wixy_server.routes_preview import router as preview_router
@@ -43,6 +46,7 @@ def create_app(
     wixy_repo_root: Path,
     watcher_interval_s: float = DEFAULT_INTERVAL_S,
     preview_staleness_threshold_s: float = DEFAULT_PREVIEW_STALENESS_THRESHOLD_S,
+    cmdchat_client: CmdChatClient | None = None,
 ) -> FastAPI:
     """Build the Wixy FastAPI app for one project.
 
@@ -50,7 +54,9 @@ def create_app(
     `tmp_path`-backed one; the real production default only exists from milestone 11's
     install onward. `wixy_repo_root` is the wixy repo checkout this process runs from
     (where `projects/*.json` lives, spec/04 §1) — milestone 11's launcher resolves this
-    for real; this function never guesses a default for either path.
+    for real; this function never guesses a default for either path. `cmdchat_client`
+    defaults to a real `CmdChatClient()` (localhost cmd, spec/06 §1) — overridable so
+    the E2E fixture server can point it at a fake cmd instead (milestone 10 slice 5).
     """
     settings = load_settings(storage_root)
     registry = load_registry(wixy_repo_root)
@@ -69,6 +75,8 @@ def create_app(
     ensure_project_dirs(paths)
     watcher_status = WatcherStatus()
     publish_job: PublishJob | None = None
+    chat_client = cmdchat_client if cmdchat_client is not None else CmdChatClient()
+    chat_runtime: dict[str, ChatRuntimeEntry] = {}
 
     jwks = JwksCache(
         fetch=functools.partial(_fetch_jwks, settings.cf_access_team_domain),
@@ -94,10 +102,18 @@ def create_app(
                 project, paths, interval_s=watcher_interval_s, status=watcher_status
             )
 
-        async with anyio.create_task_group() as tg:
-            tg.start_soon(_run_watcher)
-            yield
-            tg.cancel_scope.cancel()
+        try:
+            async with anyio.create_task_group() as tg:
+                # Exposed on `app.state` so route handlers (milestone 10's chat
+                # provisioning tracker, `routes_chat.py`) can spawn app-lifetime
+                # background work of their own — same task group the watcher
+                # itself runs in, cancelled together at shutdown below.
+                _app.state.background_tasks = tg
+                tg.start_soon(_run_watcher)
+                yield
+                tg.cancel_scope.cancel()
+        finally:
+            await chat_client.aclose()
 
     app = FastAPI(lifespan=lifespan)
     app.state.project = project
@@ -107,6 +123,8 @@ def create_app(
     app.state.preview_staleness_threshold_s = preview_staleness_threshold_s
     app.state.publish_job = publish_job
     app.state.wixy_repo_root = wixy_repo_root
+    app.state.cmdchat_client = chat_client
+    app.state.chat_runtime = chat_runtime
 
     app.middleware("http")(admin_auth)
 
@@ -116,6 +134,7 @@ def create_app(
     app.include_router(version_router)
     app.include_router(preview_router)
     app.include_router(admin_api_router)
+    app.include_router(chat_router)
     app.include_router(versions_router)
 
     @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)

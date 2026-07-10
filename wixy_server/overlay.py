@@ -15,12 +15,10 @@ project's general avoidance of hidden non-determinism in business logic.
 
 from __future__ import annotations
 
-import os
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from builder.content import load_json_object, write_json_canonical
+from builder.content import atomic_write_json, load_json_object
 from builder.jsontypes import JsonValue
 
 
@@ -118,18 +116,9 @@ def _overlay_to_dict(overlay: Overlay) -> dict[str, JsonValue]:
 
 
 def save_overlay(path: Path, overlay: Overlay) -> None:
-    """Write atomically: a tmp file in the same directory, then `os.replace` — spec/02
-    §8: "written atomically (tmp + rename) on every accepted PATCH."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    os.close(fd)
-    tmp_path = Path(tmp_name)
-    try:
-        write_json_canonical(tmp_path, _overlay_to_dict(overlay))
-        os.replace(tmp_path, path)
-    except BaseException:
-        tmp_path.unlink(missing_ok=True)
-        raise
+    """Write atomically (spec/02 §8: "written atomically (tmp + rename) on every
+    accepted PATCH") — see `builder.content.atomic_write_json`."""
+    atomic_write_json(path, _overlay_to_dict(overlay))
 
 
 @dataclass(frozen=True, slots=True)

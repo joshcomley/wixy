@@ -33,6 +33,7 @@ class FakeSession:
     session_id: str
     workspace_id: str | None
     prompt: str
+    cmd_project: str = ""
     ready: bool = False
     ready_after_polls: int = 0
     poll_count: int = 0
@@ -59,10 +60,12 @@ class FakeCmdState:
     next_session_n: int = 1
     new_chat_status_code: int = 202
 
-    def create_session(self, prompt: str) -> FakeSession:
+    def create_session(self, prompt: str, *, cmd_project: str = "") -> FakeSession:
         n = self.next_session_n
         self.next_session_n += 1
-        session = FakeSession(session_id=f"sess-{n}", workspace_id=f"ws-{n}", prompt=prompt)
+        session = FakeSession(
+            session_id=f"sess-{n}", workspace_id=f"ws-{n}", prompt=prompt, cmd_project=cmd_project
+        )
         self.sessions[session.session_id] = session
         return session
 
@@ -122,7 +125,7 @@ def create_fake_cmd_app(state: FakeCmdState | None = None) -> FastAPI:
             return Response(status_code=state.new_chat_status_code)
         body = await request.json()
         prompt = body.get("prompt", "") if isinstance(body, dict) else ""
-        session = state.create_session(prompt)
+        session = state.create_session(prompt, cmd_project=project)
         return JSONResponse(
             status_code=202,
             content={
