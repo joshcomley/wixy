@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { mountShell } from "../src/shell";
 import type { AdminApi, StateResponse } from "../src/api";
+import type { ChatPanel, ChatPanelDeps } from "../src/chatPanel";
 import type { EditView, MountEditViewDeps } from "../src/editView";
 import type { DraftOp } from "../src/protocol";
 
@@ -77,6 +78,24 @@ function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
     restore: vi.fn(async () => ({ kind: "ok" as const, version: 1, sha: "a".repeat(40), of: 0 })),
     duplicatePage: vi.fn(async () => ({ ok: true as const })),
     deletePage: vi.fn(async () => ({ ok: true as const })),
+    createConversation: vi.fn(async () => ({
+      convId: "c1",
+      title: "New conversation",
+      createdAt: "2026-07-10T00:00:00Z",
+      status: "pending" as const,
+      failureReason: null,
+      failureMessage: null,
+    })),
+    getConversations: vi.fn(async () => []),
+    sendMessage: vi.fn(async () => ({ accepted: true, buffered: false })),
+    renameConversation: vi.fn(async () => ({
+      convId: "c1",
+      title: "renamed",
+      createdAt: "2026-07-10T00:00:00Z",
+      status: "ready" as const,
+      failureReason: null,
+      failureMessage: null,
+    })),
     ...overrides,
   } as AdminApi;
 }
@@ -105,6 +124,33 @@ function fakeMountEditView(): FakeEditViewHandle {
         setPage: (p) => handle.setPageCalls.push(p),
         applyOps: (ops) => handle.applyOpsCalls.push(ops),
         postMessage: () => {},
+        teardown: () => {
+          handle.teardownCount += 1;
+        },
+      };
+    },
+  };
+  return handle;
+}
+
+interface FakeChatPanelHandle {
+  mountedConversations: Array<string | null>;
+  teardownCount: number;
+  fn: (conversation: string | null, deps: ChatPanelDeps) => ChatPanel;
+}
+
+/** Real `mountChatPanel` opens a genuine `EventSource` (spec/06 §1's live
+ * stream) the instant a conversation view mounts — jsdom doesn't implement
+ * it, so shell tests that need to mount `#/chat/<conv>` inject this instead,
+ * mirroring `fakeMountEditView`'s own reason for existing (a real iframe). */
+function fakeMountChatPanel(): FakeChatPanelHandle {
+  const handle: FakeChatPanelHandle = {
+    mountedConversations: [],
+    teardownCount: 0,
+    fn: (conversation) => {
+      handle.mountedConversations.push(conversation);
+      return {
+        element: document.createElement("div"),
         teardown: () => {
           handle.teardownCount += 1;
         },
@@ -196,7 +242,7 @@ describe("mountShell", () => {
     expect(container.querySelector(".wx-pages-table")).not.toBeNull();
   });
 
-  it("a stub nav route (e.g. Chat) renders a coming-soon panel", async () => {
+  it("#/chat mounts the real chat panel (list view), not a stub", async () => {
     const api = fakeApi();
     const win = fakeWindow();
     const container = document.createElement("div");
@@ -205,7 +251,53 @@ describe("mountShell", () => {
     await flushState(api);
 
     win.location.hash = "#/chat";
-    expect(container.querySelector(".wx-coming-soon")?.textContent).toMatch(/later milestone/i);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(container.querySelector(".wx-chat-list-view")).not.toBeNull();
+    expect(container.querySelector(".wx-coming-soon")).toBeNull();
+    expect(api.getConversations).toHaveBeenCalled();
+  });
+
+  it("#/chat/<conv> passes the conversation id through to the chat panel mount", async () => {
+    const api = fakeApi();
+    const win = fakeWindow();
+    const container = document.createElement("div");
+    const chatPanel = fakeMountChatPanel();
+
+    mountShell(container, {
+      api,
+      win,
+      mountEditView: fakeMountEditView().fn,
+      mountChatPanel: chatPanel.fn,
+    });
+    await flushState(api);
+
+    win.location.hash = "#/chat/c1";
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chatPanel.mountedConversations).toEqual(["c1"]);
+  });
+
+  it("navigating away from a conversation tears down the chat panel", async () => {
+    const api = fakeApi();
+    const win = fakeWindow();
+    const container = document.createElement("div");
+    const chatPanel = fakeMountChatPanel();
+
+    mountShell(container, {
+      api,
+      win,
+      mountEditView: fakeMountEditView().fn,
+      mountChatPanel: chatPanel.fn,
+    });
+    await flushState(api);
+
+    win.location.hash = "#/chat/c1";
+    win.location.hash = "#/pages";
+
+    expect(chatPanel.teardownCount).toBe(1);
   });
 
   it("the History route renders the real history panel, not a stub", async () => {

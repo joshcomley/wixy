@@ -6,6 +6,7 @@
 // owns state") — panels never construct their own.
 
 import { createApi, type AdminApi, type StateResponse } from "./api";
+import { mountChatPanel as mountChatPanelReal, type ChatPanel, type ChatPanelDeps } from "./chatPanel";
 import { mountEditView as mountEditViewReal, type EditView, type MountEditViewDeps } from "./editView";
 import { mountHistoryPanel } from "./historyPanel";
 import { mountMediaPanel, type MediaPanel } from "./mediaPanel";
@@ -25,11 +26,17 @@ const STATE_RETRY_MS = 5000;
 const TRANSIENT_TOAST_MS = 4000;
 
 type MountEditViewFn = (page: string, deps: MountEditViewDeps) => EditView;
+type MountChatPanelFn = (conversation: string | null, deps: ChatPanelDeps) => ChatPanel;
 
 export interface ShellDeps {
   api?: AdminApi;
   win?: Window;
   mountEditView?: MountEditViewFn;
+  /** Overridable for tests — the real implementation opens a genuine
+   * `EventSource` (spec/06 §1's live stream) the moment a conversation view
+   * mounts, which jsdom doesn't implement; mirrors `mountEditView`'s own
+   * injectable pattern (there for the same reason: a real iframe). */
+  mountChatPanel?: MountChatPanelFn;
 }
 
 export interface Shell {
@@ -48,6 +55,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   const api = deps.api ?? createApi();
   const win = deps.win ?? window;
   const createEditView = deps.mountEditView ?? mountEditViewReal;
+  const createChatPanel = deps.mountChatPanel ?? mountChatPanelReal;
 
   container.innerHTML = "";
   container.className = "wx-shell";
@@ -326,10 +334,12 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       return;
     }
 
-    const labels: Record<Exclude<Route["kind"], "pages" | "edit" | "theme" | "media" | "history">, string> = {
-      chat: "Chat",
-    };
-    main.appendChild(comingSoon(labels[route.kind]));
+    if (route.kind === "chat") {
+      const panel = createChatPanel(route.conversation, { api, win });
+      main.appendChild(panel.element);
+      activePanelTeardown = () => panel.teardown();
+      return;
+    }
   }
 
   function handleRoute(route: Route): void {

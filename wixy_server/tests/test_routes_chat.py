@@ -639,6 +639,58 @@ class TestConversationStream:
         assert [_message_payload(e)["text"] for e in message_events] == ["first", "second"]
 
     @pytest.mark.asyncio
+    async def test_hides_thinking_messages_by_default_but_includes_when_asked(
+        self,
+        tmp_path: Path,
+        cmdchat_client: CmdChatClient,
+        fake_cmd_state: FakeCmdState,
+        fast_stream_timing: StreamTiming,
+    ) -> None:
+        """spec/06 §1: "thinking hidden behind a 'show reasoning' toggle
+        default-off... lazily fetched with include_thinking=true only when the
+        toggle opens." """
+        session = fake_cmd_state.create_session("hi")
+        session.ready = True
+        session.messages = [
+            _fake_message(0, role="assistant", text="reasoning...", truncated=False)
+            | {"kind": "thinking"},
+            _fake_message(1, text="the actual reply"),
+        ]
+        chats_path = tmp_path / "chats.json"
+        conv_id = _seed_conversation(chats_path, session.session_id)
+
+        hidden_gen = _stream_events(
+            cmdchat_client,
+            chats_path,
+            {},
+            conv_id,
+            session.session_id,
+            fast_stream_timing,
+            include_thinking=False,
+        )
+        hidden_events = await _collect_stream_events(hidden_gen, count=1)
+        hidden_messages = [e for e in hidden_events if e["type"] == "message"]
+        assert [_message_payload(e)["index"] for e in hidden_messages] == [1]
+
+        shown_gen = _stream_events(
+            cmdchat_client,
+            chats_path,
+            {},
+            conv_id,
+            session.session_id,
+            fast_stream_timing,
+            include_thinking=True,
+        )
+        shown_events = await _collect_stream_events(shown_gen, count=2)
+        shown_messages = [e for e in shown_events if e["type"] == "message"]
+        shown_indices: list[int] = []
+        for shown_event in shown_messages:
+            index = _message_payload(shown_event)["index"]
+            assert isinstance(index, int)
+            shown_indices.append(index)
+        assert sorted(shown_indices) == [0, 1]
+
+    @pytest.mark.asyncio
     async def test_delivers_messages_appended_after_connecting(
         self,
         tmp_path: Path,

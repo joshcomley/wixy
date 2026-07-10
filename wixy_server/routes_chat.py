@@ -313,13 +313,24 @@ async def _stream_events(
     conv_id: str,
     session_id: str,
     timing: StreamTiming,
+    *,
+    include_thinking: bool = False,
 ) -> AsyncGenerator[str]:
     """Typed as the more specific `AsyncGenerator` (not just `AsyncIterator`)
     deliberately — `test_routes_chat.py` drives this directly and needs
     `.aclose()` (real `AsyncIterator`s don't guarantee it) to cleanly cancel
     whatever `await anyio.sleep(...)` it's suspended at between test
     assertions, since `TestClient` can't be used to observe an infinite SSE
-    generator (see that test file's own note)."""
+    generator (see that test file's own note).
+
+    `include_thinking` (spec/06 §1: "thinking hidden behind a 'show reasoning'
+    toggle default-off... lazily fetched with include_thinking=true only when
+    the toggle opens") — cmd's own `/messages` never includes `kind:
+    "thinking"` entries unless asked; there's no separate REST endpoint for
+    this in spec's own admin API index (04 §8), so the toggle reconnects this
+    SAME stream with the query param flipped (`conversation_stream` below)
+    rather than adding a new route.
+    """
     failed = await _wait_until_conversation_ready(runtime, conv_id)
     if failed is not None:
         detail = failed.failure_message or f"conversation failed to start ({failed.failure_reason})"
@@ -359,7 +370,9 @@ async def _stream_events(
                 continue
 
         try:
-            messages = await client.get_messages(current_session_id, limit=80)
+            messages = await client.get_messages(
+                current_session_id, limit=80, include_thinking=include_thinking
+            )
         except CmdChatError as exc:
             if anyio.current_time() - ready_since < timing.transcript_grace_s:
                 await anyio.sleep(timing.poll_interval_s)
@@ -387,7 +400,9 @@ async def _stream_events(
 
 
 @router.get("/conversations/{conv_id}/stream")
-async def conversation_stream(conv_id: str, request: Request) -> StreamingResponse:
+async def conversation_stream(
+    conv_id: str, request: Request, includeThinking: bool = False
+) -> StreamingResponse:
     paths: ProjectPaths = request.app.state.paths
     client: CmdChatClient = request.app.state.cmdchat_client
     runtime: dict[str, ChatRuntimeEntry] = request.app.state.chat_runtime
@@ -402,7 +417,13 @@ async def conversation_stream(conv_id: str, request: Request) -> StreamingRespon
 
     async def _events() -> AsyncIterator[str]:
         async for payload in _stream_events(
-            client, paths.chats_json, runtime, conv_id, conversation.session_id, timing
+            client,
+            paths.chats_json,
+            runtime,
+            conv_id,
+            conversation.session_id,
+            timing,
+            include_thinking=includeThinking,
         ):
             yield payload
 

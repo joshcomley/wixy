@@ -182,6 +182,11 @@ def create_fake_cmd_app(state: FakeCmdState | None = None) -> FastAPI:
         if session is None:
             return Response(status_code=404)
         messages = session.messages
+        if not include_thinking:
+            # Mirrors spec/06 §1: cmd never includes kind:"thinking" entries
+            # unless explicitly asked — the wixy stream's own "show reasoning"
+            # toggle relies on this filtering actually happening somewhere.
+            messages = [m for m in messages if m.get("kind") != "thinking"]
         if before is not None:
             messages = [
                 m for m in messages if isinstance((idx := m.get("index")), int) and idx < before
