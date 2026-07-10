@@ -1,97 +1,288 @@
 {
-  "console_errors": [
-    "Failed to load resource: the server responded with a status of 404 (File not found)",
-    "Failed to load resource: the server responded with a status of 404 (File not found)",
-    "Failed to load resource: the server responded with a status of 404 (File not found)",
-    "Failed to load resource: the server responded with a status of 404 (File not found)",
-    "Failed to load resource: the server responded with a status of 404 (File not found)",
-    "Failed to load resource: the server responded with a status of 404 (File not found)",
-    "Failed to load resource: the server responded with a status of 404 (File not found)",
-    "Failed to load resource: the server responded with a status of 404 (File not found)",
-    "Failed to load resource: the server responded with a status of 404 (File not found)",
-    "Failed to load resource: the server responded with a status of 404 (File not found)",
-    "Failed to load resource: the server responded with a status of 404 (File not found)",
-    "Failed to load resource: the server responded with a status of 404 (File not found)",
-    "Failed to load resource: the server responded with a status of 404 (File not found)",
-    "Failed to load resource: the server responded with a status of 404 (File not found)",
-    "Failed to load resource: the server responded with a status of 404 (File not found)",
-    "Failed to load resource: the server responded with a status of 404 (File not found)",
-    "Failed to load resource: the server responded with a status of 404 (File not found)"
+  "console_errors": [],
+  "images": [
+    [
+      "/images/exterior.jpg",
+      907,
+      1280
+    ],
+    [
+      "/images/hall.jpg",
+      588,
+      1280
+    ],
+    [
+      "/images/purdi.jpg",
+      891,
+      1280
+    ],
+    [
+      "/images/room.jpg",
+      1280,
+      960
+    ]
   ],
-  "images": [],
   "links": [
     [
-      ".git/",
-      "/.git/"
+      "Book Now",
+      "/#"
     ],
     [
-      ".github/",
-      "/.github/"
+      "Book Now",
+      "/#"
     ],
     [
-      ".mcp.json",
-      "/.mcp.json"
+      "Book Now",
+      "/#"
     ],
     [
-      "CLAUDE.md",
-      "/CLAUDE.md"
+      "Book Now",
+      "/#"
     ],
     [
-      "README.md",
-      "/README.md"
+      "Book Now",
+      "/#"
     ],
     [
-      "content/",
-      "/content/"
+      "Book Now",
+      "/#"
     ],
     [
-      "decisions/",
-      "/decisions/"
+      "Book Now",
+      "/#"
     ],
     [
-      "images/",
-      "/images/"
+      "Book Online",
+      "/#"
     ],
     [
-      "pages/",
-      "/pages/"
+      "Book a Free Consultation",
+      "/#"
     ],
     [
-      "partials/",
-      "/partials/"
+      "Book online",
+      "/#"
     ],
     [
-      "site.css",
-      "/site.css"
+      "Enquire",
+      "/#contact"
     ],
     [
-      "site.js",
-      "/site.js"
+      "About",
+      "/about.html"
     ],
     [
-      "theme/",
-      "/theme/"
+      "About",
+      "/about.html"
     ],
     [
-      "todos/",
-      "/todos/"
+      "About",
+      "/about.html"
+    ],
+    [
+      "Aftercare",
+      "/aftercare.html"
+    ],
+    [
+      "Contact",
+      "/contact.html"
+    ],
+    [
+      "Contact",
+      "/contact.html"
+    ],
+    [
+      "Contact",
+      "/contact.html"
+    ],
+    [
+      "FAQ",
+      "/faq.html"
+    ],
+    [
+      "Before & After",
+      "/gallery.html"
+    ],
+    [
+      "Before & After",
+      "/gallery.html"
+    ],
+    [
+      "Before & After",
+      "/gallery.html"
+    ],
+    [
+      "CottageAesthetics",
+      "/index.html"
+    ],
+    [
+      "Clinic Policies",
+      "/policies.html"
+    ],
+    [
+      "Read more reviews",
+      "/reviews.html"
+    ],
+    [
+      "Reviews",
+      "/reviews.html"
+    ],
+    [
+      "Reviews",
+      "/reviews.html"
+    ],
+    [
+      "Reviews",
+      "/reviews.html"
+    ],
+    [
+      "Treatments",
+      "/treatments.html"
+    ],
+    [
+      "Treatments",
+      "/treatments.html"
+    ],
+    [
+      "Treatments",
+      "/treatments.html"
+    ],
+    [
+      "View Treatments",
+      "/treatments.html"
+    ],
+    [
+      "View the full treatment menu",
+      "/treatments.html"
+    ],
+    [
+      "Facebook",
+      "https://www.facebook.com/profile.php?id=61572079150383"
+    ],
+    [
+      "Instagram",
+      "https://www.instagram.com/cottageaesthetics"
+    ],
+    [
+      "Email us",
+      "mailto:cottageaestheticshartlebury@gmail.com"
+    ],
+    [
+      "cottageaestheticshartlebury@gmail.com",
+      "mailto:cottageaestheticshartlebury@gmail.com"
+    ],
+    [
+      "07401 562 462",
+      "tel:07401562462"
+    ],
+    [
+      "07401 562 462",
+      "tel:07401562462"
+    ],
+    [
+      "Call Purdi",
+      "tel:07401562462"
     ]
   ],
   "styles": {
-    "body": {
+    ".eyebrow": {
       "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(0, 0, 0)",
-      "font-family": "\"Times New Roman\"",
-      "font-size": "16px",
+      "color": "rgb(243, 217, 184)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "11.84px",
       "font-weight": "400"
+    },
+    ".price": {
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(178, 110, 74)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "16px",
+      "font-weight": "300"
+    },
+    ".tag": {
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(243, 231, 214)",
+      "font-family": "\"Cormorant Garamond\", serif",
+      "font-size": "30.4px",
+      "font-weight": "300"
+    },
+    "a.btn-ghost": {
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(241, 232, 217)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "13.12px",
+      "font-weight": "300"
+    },
+    "a.btn-olive": {
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(86, 91, 67)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "13.12px",
+      "font-weight": "300"
+    },
+    "a.btn-primary": {
+      "background-color": "rgb(178, 110, 74)",
+      "color": "rgb(253, 247, 238)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "13.12px",
+      "font-weight": "300"
+    },
+    "body": {
+      "background-color": "rgb(241, 232, 217)",
+      "color": "rgb(62, 49, 42)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "16px",
+      "font-weight": "300"
+    },
+    "footer.site-footer": {
+      "background-color": "rgb(62, 49, 42)",
+      "color": "rgb(203, 184, 159)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "13.12px",
+      "font-weight": "300"
     },
     "h1": {
       "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(0, 0, 0)",
-      "font-family": "\"Times New Roman\"",
-      "font-size": "32px",
-      "font-weight": "700"
+      "color": "rgb(255, 255, 255)",
+      "font-family": "\"Cormorant Garamond\", serif",
+      "font-size": "96px",
+      "font-weight": "500"
+    },
+    "h2": {
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(94, 70, 53)",
+      "font-family": "\"Cormorant Garamond\", serif",
+      "font-size": "46.4px",
+      "font-weight": "500"
+    },
+    "h3": {
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(251, 244, 232)",
+      "font-family": "\"Cormorant Garamond\", serif",
+      "font-size": "22.4px",
+      "font-weight": "500"
+    },
+    "header#hd": {
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(62, 49, 42)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "16px",
+      "font-weight": "300"
+    },
+    "nav.nav-links": {
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(62, 49, 42)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "16px",
+      "font-weight": "300"
+    },
+    "p": {
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(243, 217, 184)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "11.84px",
+      "font-weight": "400"
     }
   },
-  "text": "Directory listing for / .git/ .github/ .mcp.json CLAUDE.md content/ decisions/ images/ pages/ partials/ README.md site.css site.js theme/ todos/"
+  "text": "Cottage AESTHETICS ABOUT TREATMENTS BEFORE & AFTER REVIEWS CONTACT BOOK NOW NURSE-LED MEDICAL AESTHETICS · HARTLEBURY Cottage Aesthetics Natural, considered aesthetics — in a calm countryside retreat where you're never rushed. VIEW TREATMENTS BOOK A FREE CONSULTATION SCROLL ❦ More like walking into a beautiful cottage than a busy clinic Cottage Aesthetics is a nurse-led medical aesthetics clinic in the peaceful village of Hartlebury. Created to feel different — warm, unhurried and genuinely personal — it pairs exceptional clinical standards with a calm, welcoming space our regulars simply call “The Cottage.” MEET YOUR PRACTITIONER Hello, I'm Purdi I'm a registered nurse with over 15 years of NHS and private healthcare experience, and the founder of Cottage Aesthetics. My background in plastic surgery, dermatology and reconstructive services taught me that every face is unique — and that the best results come from understanding the individual in front of me. I believe great care is about more than the treatment itself: trust, honesty and safety are at the heart of every appointment. My goal is simply to help you look and feel like the best version of yourself — never changing who you are, just enhancing what makes you you. Purdi THE COTTAGE PHILOSOPHY Care that never feels rushed Longer Appointments Time to talk, assess and treat properly — never a conveyor belt. Honest Consultations Clear, evidence-based advice. Only what's right for you. Natural Results Subtle, balanced enhancements that still look like you. Medical Safety Nurse-led care, premium products, ongoing professional training. ★★★★★ “The loveliest experience — she made me feel completely relaxed and at ease.” ELLA S. · GOOGLE REVIEW TREATMENTS Thoughtfully chosen, expertly delivered EVERY JOURNEY STARTS HERE Free Consultation Complimentary · 30 min A relaxed, no-pressure chat so you feel completely confident in your treatment and your practitioner. BOOK NOW SKIN HEALTH Microneedling From £30 Stimulates natural collagen to improve texture, soften fine lines and brighten the skin. Standard & advanced options. BOOK NOW HYDRATION & GLOW Skin Boosters From £150 Profhilo & Jalupro — deep hydration, firmness and a subtle “5-point facelift” glow from within. BOOK NOW REPAIR & REJUVENATE Polynucleotides From £150 Encourages the skin's natural repair — for face, under-eyes, neck, hands and décolletage. BOOK NOW BALANCE & DEFINITION Dermal Fillers From £140 Lips, cheeks, chin and jawline — restoring volume and harmony while keeping everything natural. BOOK NOW PRESCRIPTION · BY CONSULTATION Wrinkle Relaxing Enquire Anti-wrinkle & prescription treatments require a face-to-face prescriber consultation for suitability. ENQUIRE VIEW THE FULL TREATMENT MENU THE COTTAGE A private retreat, tucked away from the high street Limewashed walls, olive trees, oak and antique brass — every detail is designed so you relax the moment you arrive. A calm, Mediterranean-inspired space in the Worcestershire countryside. Complete privacy & a peaceful setting Easy, free parking right outside Longer appointments — never rushed A warm, welcoming atmosphere ★★★★★ “I felt truly listened to for the first time in my Botox journey — incredibly warm, welcoming and knowledgeable.” JENNIFER S. · 5.0 ON GOOGLE READ MORE REVIEWS VISIT THE COTTAGE Come and see us 8 Walton Cottage, Walton Road, Hartlebury, Kidderminster, DY10 4JA 07401 562 462 cottageaestheticshartlebury@gmail.com Monday 10:00 – 19:00 Tuesday 10:00 – 19:00 Wednesday By phone enquiry Thursday 10:00 – 19:00 Friday 10:00 – 17:00 Saturday 11:00 – 16:00 Sunday Closed Book your free consultation Every journey begins with a relaxed, no-obligation chat. Booking takes less than a minute. BOOK ONLINE CALL PURDI Cottage Aesthetics Nurse-led medical aesthetics Hartlebury, Worcestershire EXPLORE About Treatments Before & After Reviews VISIT Contact FAQ Aftercare Clinic Policies GET IN TOUCH 07401 562 462 Email us Instagram Facebook Book online © Cottage Aesthetics · Hartlebury, Worcestershire · Registered nurse-led clinic"
 }
