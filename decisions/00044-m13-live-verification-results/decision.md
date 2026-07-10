@@ -5,6 +5,39 @@ the live Cloudflare edge, using the CF Access service-token mechanism from
 decisions/00042), not against a local/dev stack. Evidence below; each drill left
 the live site in a correct end state, verified by re-fetching the public page.
 
+## Media upload + theme-tweak mechanisms (spec/00's remaining owner-experience
+bullets: "tap any image and replace it", "tweak the theme... with live preview")
+
+Media: uploaded a real oversized JPEG (2400×1600) via `POST /api/admin/media`
+against the live instance. Confirmed the Pillow pipeline actually ran: returned
+`2000×1333` — exactly `projects/ca.json`'s configured `maxLongSidePx: 2000`,
+re-encoded, downloaded the processed file back and verified its real dimensions
+independently (not just trusting the JSON response). Deleted it afterward
+(`DELETE /api/admin/media/{name}`, `200 {"deleted": true}`) since it was a test
+artifact, not a decided content addition — the live media library is unchanged.
+
+Theme: `PATCH /api/admin/draft` with `{file: "theme", path: "colors.clay", value:
+"#a8b89a"}` was accepted twice (rev incremented correctly both times) and
+cleanly discarded both times (`opCount` back to `0`). Deliberately did NOT
+publish an undecided cosmetic theme change to the live production site — this
+verifies the mechanism's write path, not a real design decision. Trying to
+observe the "live preview" server-side (re-fetching the preview page / a
+preview-scoped `theme.css`) doesn't work, and **this is correct, not a bug**:
+theme colors ship as root-level CSS custom properties in a generated
+`theme.css` (confirmed via the real public `/theme.css` — `--clay:#B26E4A` at
+the site root, matching the pre-migration `:root` token block design), and the
+"live preview" the owner sees while dragging a color picker is a client-side
+concern (the editor/theme panel applying CSS variable overrides directly in
+the browser DOM for instant feedback, per spec/05) — there is no
+"draft-aware" server render of `theme.css` to fetch, by design, since
+re-fetching a stylesheet on every slider tweak would defeat the point of an
+instant preview. Confirmed the live public `/theme.css` was never touched
+(still `#B26E4A` after every test). This is the same class of gap as the
+click-to-edit text bullet below: the write-side mechanism is proven live; the
+client-side instant-preview rendering itself needs a real browser session to
+observe, which this session didn't have (no OTP-mailbox access — see
+decisions/00042) — flagged honestly rather than claimed as tested.
+
 ## Restore drill (undo/redo)
 
 `POST /api/admin/restore {version: 0}` then `{version: 1}` against the live v1
