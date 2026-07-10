@@ -7,11 +7,13 @@ named in ``slots.wixy.yaml``. Wixy wires:
   * ``pre_validate`` — git fetch + reset --hard FETCH_HEAD into the inactive slot;
     raises DeployError (short-circuits, not a real failure) when origin/main hasn't
     moved, or when this exact sha was already attempted (retry-storm guard).
-  * build ``pip install`` — rebuilds ``<slot>/.venv`` FRESH from the pythoncore-3.14
-    interpreter, installs the pinned ``requirements.txt``, then the ``wixy`` package
-    itself ``--no-deps`` (spec/07 §1: "per-slot .venv... pinned requirements.txt" — a
-    rollback-safe per-slot isolation; no npm step, frontend bundles are COMMITTED so
-    deploys stay pip-only, spec/07 §1).
+  * build ``pip install`` — rebuilds ``<slot>/.venv`` from the pythoncore-3.14
+    interpreter (built OUT OF PLACE at ``.venv.new`` then swapped in atomically —
+    never an in-place rmtree of the live venv, see ``_atomic_swap_dir``), installs
+    the pinned ``requirements.txt``, then the ``wixy`` package itself ``--no-deps``
+    (spec/07 §1: "per-slot .venv... pinned requirements.txt" — a rollback-safe
+    per-slot isolation; no npm step, frontend bundles are COMMITTED so deploys stay
+    pip-only, spec/07 §1).
   * build ``TestClient validate`` — boots the slot's app in a subprocess (isolated
     throwaway Storage dir) and asserts /healthz is 200 OK.
   * ``post_swap`` — mirror launcher.py + deploy.py to the install root.
@@ -59,7 +61,23 @@ for _stream in (sys.stdout, sys.stderr):
 class DeployError(RuntimeError):
     """Local fallback so the build-step runners stay importable on a cold
     interpreter without slot_swap_deploy. ``_load_slot_swap()`` rebinds this to
-    the real ``slot_swap_deploy.DeployError`` for the --poll path."""
+    the real ``slot_swap_deploy.DeployError`` for the --poll path.
+
+    Reserved EXCLUSIVELY for the library's documented graceful-skip signal
+    (``pre_validate``'s "nothing to deploy" / already-attempted-sha cases) — the
+    executor (``hook_runner.run_build_step``/``make_hook_invoker``) special-cases
+    this exact exception type and treats it as a benign no-op, not a failure.
+    A build step or any OTHER hook raising this for a genuine error would have
+    that error silently swallowed as "nothing to deploy" — use BuildStepError
+    below for every real failure."""
+
+
+class BuildStepError(RuntimeError):
+    """A build step genuinely failed. Deliberately NOT DeployError — raising
+    DeployError from a build step gets the library's graceful-skip treatment
+    (silently treated as "nothing to deploy" rather than a loud failure), which
+    is correct ONLY for pre_validate's own no-op case, never for an actual
+    pip-install/validate failure."""
 
 
 # Bound lazily by _load_slot_swap(); only the --poll path uses them.
@@ -219,6 +237,23 @@ def _venv_python(slot: Path) -> Path:
     return slot / ".venv" / "Scripts" / "python.exe"
 
 
+def _atomic_swap_dir(new_dir: Path, live_dir: Path) -> None:
+    """Rename `new_dir` into `live_dir`'s place. NEVER rmtree's `live_dir` in
+    place — see `_pip_install_venv`'s own docstring for the exact failure this
+    avoids (a real, previously-hit fleet outage class). Renaming the OLD dir
+    aside first (never deleting it in this process) succeeds even with its own
+    interpreter's binary open inside it — Windows keeps an open file handle
+    valid via the underlying file object regardless of a path rename of its
+    containing directory; only an actual DELETE of the open file itself is
+    refused. If `live_dir` genuinely can't be renamed (held open in some other,
+    non-renameable way), this raises and `live_dir` is left completely
+    untouched — a clean failure, never a half-deleted venv."""
+    if live_dir.exists():
+        stale = live_dir.with_name(f"{live_dir.name}.old.{os.getpid()}.{int(time.time())}")
+        live_dir.rename(stale)
+    new_dir.rename(live_dir)
+
+
 def _run_or_raise(args: list[str], *, cwd: Path, timeout: float, label: str) -> None:
     result = subprocess.run(
         args,
@@ -231,7 +266,7 @@ def _run_or_raise(args: list[str], *, cwd: Path, timeout: float, label: str) -> 
         env=_augmented_env(),
     )
     if result.returncode != 0:
-        raise DeployError(f"{label} failed: {(result.stdout + result.stderr)[-800:]!r}")
+        raise BuildStepError(f"{label} failed: {(result.stdout + result.stderr)[-800:]!r}")
 
 
 def _pip_install_venv(slot: Path) -> None:
@@ -241,23 +276,42 @@ def _pip_install_venv(slot: Path) -> None:
     pinned ``requirements.txt`` first, then the ``wixy`` package itself ``--no-deps``
     (every runtime dependency is already pinned+installed by that point — this step
     is purely "make `import wixy_server` resolve," never a second, un-pinned
-    dependency resolution)."""
-    venv_dir = slot / ".venv"
-    if venv_dir.exists():
-        shutil.rmtree(venv_dir)
-    print(f"[wixy] creating venv at {venv_dir}", flush=True)
+    dependency resolution).
+
+    Builds OUT OF PLACE at ``<slot>/.venv.new`` and swaps it in atomically at the
+    end — NEVER ``rmtree``'s the live ``.venv`` directly. Found the hard way: the
+    build step's OWN interpreter is resolved by Slots' executor via
+    ``find_slot_python(slot)``, which prefers the slot's EXISTING venv when one is
+    already there (true for every real redeploy, since the venv only doesn't exist
+    on the very first build) — so an in-place ``rmtree(<slot>/.venv)`` tries to
+    delete the very ``python.exe`` currently interpreting this function, which
+    Windows refuses (``PermissionError: [WinError 5] Access is denied``). This is
+    the exact same failure class `D:\\Slots\\self`'s own ``run_pip_install`` docstring
+    documents as a real prior fleet outage (2026-05-25: an in-place rmtree of a
+    still-running slot's venv left an empty ``click/`` dir → import crash → dead
+    orchestrator) — confirmed via Slots' own ``executor_outcomes`` table after a
+    live deploy exit-looped on exactly this, not assumed from reading the docstring
+    first. Renaming the OLD `.venv` aside (never deleting it in THIS process) works
+    even with its own interpreter's binary open inside it — Windows keeps an open
+    handle valid via the file's underlying object even after its containing
+    directory is renamed."""
+    venv_new = slot / ".venv.new"
+    if venv_new.exists():
+        shutil.rmtree(venv_new)  # leftover from a prior failed attempt; nothing
+        # ever runs FROM .venv.new, so deleting it here is always safe.
+    print(f"[wixy] creating venv at {venv_new}", flush=True)
     _run_or_raise(
-        [_CANONICAL_PYTHON, "-m", "venv", str(venv_dir)],
+        [_CANONICAL_PYTHON, "-m", "venv", str(venv_new)],
         cwd=slot,
         timeout=VENV_CREATE_TIMEOUT_S,
         label="venv creation",
     )
 
-    venv_python = str(_venv_python(slot))
+    venv_new_python = str(venv_new / "Scripts" / "python.exe")
     req = slot / "requirements.txt"
     print(f"[wixy] pip install -r {req}", flush=True)
     _run_or_raise(
-        [venv_python, "-m", "pip", "install", "-r", str(req)],
+        [venv_new_python, "-m", "pip", "install", "-r", str(req)],
         cwd=slot,
         timeout=PIP_TIMEOUT_S,
         label="pip install -r requirements.txt",
@@ -265,11 +319,15 @@ def _pip_install_venv(slot: Path) -> None:
 
     print("[wixy] pip install --no-deps . (the wixy package itself)", flush=True)
     _run_or_raise(
-        [venv_python, "-m", "pip", "install", "--no-deps", "."],
+        [venv_new_python, "-m", "pip", "install", "--no-deps", "."],
         cwd=slot,
         timeout=PIP_TIMEOUT_S,
         label="pip install --no-deps .",
     )
+
+    venv_dir = slot / ".venv"
+    print(f"[wixy] swapping {venv_new.name} -> {venv_dir.name}", flush=True)
+    _atomic_swap_dir(venv_new, venv_dir)
     print(f"[wixy] venv ready for {slot.name}", flush=True)
 
 
@@ -308,7 +366,7 @@ def _testclient_validate(slot: Path) -> None:
     finally:
         shutil.rmtree(validate_storage, ignore_errors=True)
     if result.returncode != 0 or "OK" not in result.stdout:
-        raise DeployError(
+        raise BuildStepError(
             f"TestClient validate failed for {slot.name}: "
             f"stdout={result.stdout[:300]!r} stderr={result.stderr[:600]!r}"
         )
