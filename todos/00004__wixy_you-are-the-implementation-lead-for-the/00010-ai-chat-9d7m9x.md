@@ -86,4 +86,4 @@ on 502, offline banner) still PLANNED (slice 5).
 
 ## Links
 PR (slice 1): https://github.com/joshcomley/wixy/pull/40 (merged 19a6839)
-PR (slice 2): (fill in when opened)
+PR (slice 2): https://github.com/joshcomley/wixy/pull/41 (merged 62d8633)
