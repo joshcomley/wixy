@@ -96,13 +96,28 @@ Sliced into repo-code first, then live execution — mirrors this whole chain's 
   it), left running rather than killed since it wasn't causing harm and my own
   fixes resolved the underlying issue directly.
 
-  **Remaining**: Cloudflare provisioning (spec/07 §3) — elevated, shared tunnel
-  config affecting EVERY fleet subdomain, a new public-facing Access policy —
-  genuinely different risk category from the rest of this milestone, flagged for
-  explicit operator confirmation before execution rather than just running it.
-  Once that's done, spec/07 §4's remaining verification items (3-8) need a real
-  external check (public HTTPS reachability, CF Access wall, edge-header guard from
-  outside, robots.txt/indexable, reboot survival) — items 1-2 are now fully done.
+  **Remaining, BLOCKED**: Cloudflare provisioning (spec/07 §3). Operator confirmed
+  go-ahead via AskUserQuestion (2026-07-10). Tried both elevation channels in order
+  per the global CLAUDE.md: (1) admin gate — HEARTBEAT read 16h+ stale; did NOT
+  assume closed from that alone, submitted a real no-op probe through the inbox and
+  polled 30s — genuinely no result, confirmed closed, not just idle; (2) fallback
+  `request_admin_action` — submitted for real (`requestId 36ffaf8f`, full
+  request text in `C:\Users\josh\.claude\admin-requests\req-36ffaf8f-....json`),
+  the triple-model consensus classifier came back `verdict: "blocked", unanimous:
+  false` (`D:\Servers\Cmd-Admin\Storage\admin-audit.log`) — at least one model
+  voted BLOCKED, which rejects outright regardless of the other two. No per-model
+  reasoning available in the audit log, only the aggregate verdict. This is a
+  working safety gate declining a genuinely elevated, security-relevant op
+  (LocalSystem config edit + shared service restart + a new public auth policy) —
+  not routed around; reported back to the operator to decide how to proceed
+  (run it themselves, investigate the classifier's reasoning, or resubmit with
+  different framing). `tooling/provision_ca_cloudflare.py` itself is unchanged,
+  ready to run whenever an approval path opens.
+
+  Once Cloudflare is done, spec/07 §4's remaining verification items (3-8) need a
+  real external check (public HTTPS reachability, CF Access wall, edge-header
+  guard from outside, robots.txt/indexable, reboot survival) — items 1-2 (health,
+  slot-cycle proof) are fully done and verified above.
 
 ## Relevant files
 - spec/07-hosting-deploy.md (full — repo artifacts §1, registrations §2, Cloudflare §3,
