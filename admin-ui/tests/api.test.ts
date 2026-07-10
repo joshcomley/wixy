@@ -192,4 +192,121 @@ describe("createApi", () => {
     await expect(api.getContent("missing")).rejects.toBeInstanceOf(ApiError);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("createConversation posts the first message and parses the summary", async () => {
+    const summary = {
+      convId: "c1",
+      title: "hi",
+      createdAt: "2026-07-10T00:00:00Z",
+      status: "pending",
+      failureReason: null,
+      failureMessage: null,
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(summary));
+
+    const api = createApi();
+    await expect(api.createConversation("hi")).resolves.toEqual(summary);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/chat/conversations",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ firstMessage: "hi" }),
+      }),
+    );
+  });
+
+  it("createConversation with no first message sends an empty body", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        convId: "c1",
+        title: "New conversation",
+        createdAt: "2026-07-10T00:00:00Z",
+        status: "pending",
+        failureReason: null,
+        failureMessage: null,
+      }),
+    );
+
+    const api = createApi();
+    await api.createConversation();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/chat/conversations",
+      expect.objectContaining({ body: JSON.stringify({}) }),
+    );
+  });
+
+  it("getConversations unwraps the conversations array", async () => {
+    const conversations = [
+      {
+        convId: "c1",
+        title: "hi",
+        createdAt: "2026-07-10T00:00:00Z",
+        status: "ready",
+        failureReason: null,
+        failureMessage: null,
+      },
+    ];
+    fetchMock.mockResolvedValueOnce(jsonResponse({ conversations }));
+
+    const api = createApi();
+    await expect(api.getConversations()).resolves.toEqual(conversations);
+    expect(fetchMock).toHaveBeenCalledWith("/api/admin/chat/conversations", expect.anything());
+  });
+
+  it("sendMessage posts text + idempotencyKey and parses accepted/buffered", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ accepted: true, buffered: false }));
+
+    const api = createApi();
+    await expect(api.sendMessage("c1", "hello", "c1:msg1")).resolves.toEqual({
+      accepted: true,
+      buffered: false,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/chat/conversations/c1/messages",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ text: "hello", idempotencyKey: "c1:msg1" }),
+      }),
+    );
+  });
+
+  it("sendMessage throws an ApiError on a 502 (couldn't deliver)", async () => {
+    // A 5xx retries (fetchWithRetry) up to MAX_ATTEMPTS before giving up --
+    // mockResolvedValue (not ...Once) so every attempt sees the same 502,
+    // matching the existing "retries a network error" test's fake-timers
+    // pattern above.
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockResolvedValue(jsonResponse({ detail: "couldn't deliver: timeout" }, 502));
+      const api = createApi();
+      const result = api.sendMessage("c1", "hello", "c1:msg1");
+      const assertion = expect(result).rejects.toBeInstanceOf(ApiError);
+      await vi.runAllTimersAsync();
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("renameConversation posts the new title and parses the summary", async () => {
+    const summary = {
+      convId: "c1",
+      title: "renamed",
+      createdAt: "2026-07-10T00:00:00Z",
+      status: "ready",
+      failureReason: null,
+      failureMessage: null,
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(summary));
+
+    const api = createApi();
+    await expect(api.renameConversation("c1", "renamed")).resolves.toEqual(summary);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/chat/conversations/c1/rename",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ title: "renamed" }),
+      }),
+    );
+  });
 });

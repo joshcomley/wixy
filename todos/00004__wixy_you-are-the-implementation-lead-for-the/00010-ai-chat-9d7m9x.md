@@ -78,11 +78,33 @@ sliced backend-first, matching M6-M9's own pattern:
   the only thing that actually works; flagged for slice 5's E2E work, which
   won't hit this since a real browser's EventSource is unaffected). Full
   reasoning: decisions/00033.
-- Slice 4 [PLANNED]: chat panel UI (admin-ui) — conversation list, `#/chat/<conv>` view
-  (markdown, tool-activity rows, status dot, composer, offline banner, preview-updated
-  chip). The router already has the `chat` route scaffolded (`comingSoon` placeholder in
-  shell.ts) from an earlier milestone's spec/05 read — this slice replaces it for real.
-- Slice 5 [PLANNED]: E2E 7 (chat UX) + closing.
+- Slice 4 [DONE]: chat panel UI. `admin-ui/src/markdown.ts` (new) — hand-rolled
+  markdown-to-DOM renderer (no innerHTML ever, no new npm dependency — admin-ui
+  had zero runtime deps before this and still does; decisions/00034 decision 1).
+  `admin-ui/src/chatPanel.ts` (new) — `#/chat` list (status dot from provisioning
+  state only, not live working/idle — decisions/00034 decision 2) + `#/chat/<conv>`
+  detail view (markdown bubbles, collapsed "⚙ n actions" tool-run rows, live
+  status strip, offline banner, preview-updated chip linking to `#/pages` —
+  decisions/00034 decision 4, show-reasoning toggle). `api.ts` gained the chat
+  types/methods + `openConversationStream`. `shell.ts` wires it in for real,
+  `mountChatPanel` now injectable via `ShellDeps` (mirrors `mountEditView` —
+  jsdom can't do real `EventSource` either, decisions/00034 decision 5);
+  `comingSoon` removed (dead — every route kind now handled). One small backend
+  addition: `includeThinking` query param threaded through `_stream_events`
+  (decisions/00034 decision 3 — no dedicated endpoint exists, so the toggle
+  reconnects the same stream). 44 new frontend tests + 1 backend test. **Also
+  driven through a real headed browser** (temp site repo + real FakeCmdServer,
+  full create→ready→scripted-reply-with-tool-row→send→offline-banner flow, all
+  verified incl. screenshots) — found and fixed a bug in the VERIFICATION
+  SCRIPT itself (forgot to mark the fake session ready), and traced 2 console
+  503s to a pre-existing, already-understood, unrelated-to-chat cause (the
+  browser's implicit favicon request hitting routes_public.py's spec'd
+  "not yet published" 503 — e2e/fixture_server.py already documents publishing
+  an initial build specifically to avoid this). Full reasoning: decisions/00034.
+- Slice 5 [PLANNED]: E2E 7 (chat UX) + closing. The real-browser verification
+  script written for slice 4 already prototypes the exact fixture approach
+  (inject `cmdchat_client` pointed at a real `FakeCmdServer` into `create_app`)
+  — slice 5 formalizes this into `e2e/fixture_server.py` + a Playwright spec.
 
 Never call the Anthropic API directly — all inference via cmd's new-chat/send/messages
 endpoints per spec 06 (enforced in `cmdchat.py`: it only ever talks to localhost
@@ -101,17 +123,24 @@ cmd endpoints verified against cmd CODE not the stale docs/ai/contracts.md. Read
 `_stream_events`, chats.json updated via `update_session_id`). Embedded chat has NO
 publish tool (enforced by the preamble template, DONE slice 1 — never at the HTTP
 layer, since wixy has no way to constrain what the agent's cmd session does beyond
-instructing it). Send/rename/stream all DONE (slice 3). E2E 7 (scripted fake replies,
-tool rows, status transitions, send-retry on 502, offline banner) still PLANNED
-(slice 5) — needs slice 4's chat panel UI first. The `@pytest.mark.live_cmd` smoke
-test is WRITTEN (slice 3) but not yet RUN against real cmd — that's milestone 13's
-job, not this chain's; don't run it speculatively before then (decisions/00033).
+instructing it). Send/rename/stream all DONE (slice 3). Chat panel UI DONE (slice 4,
+incl. a real-browser verification pass — see decisions/00034). The
+`@pytest.mark.live_cmd` smoke test is WRITTEN (slice 3) but not yet RUN against real
+cmd — that's milestone 13's job, not this chain's; don't run it speculatively before
+then (decisions/00033).
 
-Next up: slice 4 (chat panel UI, admin-ui) — the router already has `#/chat`
-scaffolded with a `comingSoon` placeholder in `shell.ts` from an earlier milestone's
-spec/05 read; this slice replaces it for real.
+**Only E2E 7 (scripted fake replies, tool rows, status transitions, send-retry on
+502, offline banner) remains for milestone 10** — slice 5's job, and the LAST slice
+of this milestone. The real-browser script written for slice 4
+(`decisions/00034`) already validates the exact fixture approach (a real
+`FakeCmdServer` + `cmdchat_client` injected into `create_app`) — slice 5 just needs
+to formalize this into `e2e/fixture_server.py` (mirroring how `ai-lane.spec.ts`'s
+`/test/simulate-upstream-commit` fixture-only endpoint already works for E2E 6) and
+write the actual Playwright spec. After slice 5 merges, milestone 10 is CLOSED —
+move straight to milestone 11 (Install & deploy) per the standing instruction.
 
 ## Links
 PR (slice 1): https://github.com/joshcomley/wixy/pull/40 (merged 19a6839)
 PR (slice 2): https://github.com/joshcomley/wixy/pull/41 (merged 62d8633)
-PR (slice 3): (fill in when opened)
+PR (slice 3): https://github.com/joshcomley/wixy/pull/42 (merged fa3dd0a)
+PR (slice 4): (fill in when opened)

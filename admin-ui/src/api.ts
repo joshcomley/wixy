@@ -54,6 +54,18 @@ export interface UpstreamCommit {
   when: string;
 }
 
+/** `wixy_server.chats.conversation_summary`'s exact shape (spec/06 §1) — the
+ * shared wire type both `GET/POST /api/admin/chat/conversations` and
+ * `GET /api/admin/state`'s `chats` field return. */
+export interface ConversationSummary {
+  convId: string;
+  title: string;
+  createdAt: string;
+  status: "pending" | "ready" | "failed";
+  failureReason: string | null;
+  failureMessage: string | null;
+}
+
 export interface StateResponse {
   project: { slug: string; name: string; domain: string };
   pages: PageSummary[];
@@ -64,7 +76,7 @@ export interface StateResponse {
     fetchedAt: string | null;
   };
   publishJob: PublishJobData | null;
-  chats: JsonValue[];
+  chats: ConversationSummary[];
 }
 
 /** One changed overlay key (`GET /api/admin/publish/preview`'s per-entry
@@ -152,6 +164,47 @@ export interface ThemeData {
 }
 
 export type PatchResult = { kind: "ok"; rev: number } | { kind: "conflict" };
+
+/** `POST .../messages`'s response — `buffered: true` while the conversation
+ * is still provisioning (spec/06 §1: cmd buffers the send itself; the
+ * composer shows "queued"). */
+export interface SendMessageResult {
+  accepted: boolean;
+  buffered: boolean;
+}
+
+/** `GET .../stream`'s per-event `message` payload (spec/06 §1's decoded
+ * `/messages` shape, camelCased). */
+export interface ChatMessageData {
+  index: number;
+  role: string;
+  kind: string;
+  text: string | null;
+  timestamp: string;
+  toolName: string | null;
+  truncated: boolean;
+}
+
+/** `GET .../stream`'s per-event `status` payload — `processKind`/
+ * `handoverState` are surfaced for completeness even though the status dot
+ * (spec/06 §1) is driven primarily by `activity` freshness, not process
+ * liveness. */
+export interface ChatStatusData {
+  activity: string | null;
+  processKind: string | null;
+  handoverState: string | null;
+}
+
+/** `GET .../stream`'s SSE envelope (spec/06 §1: "server-sent message, status,
+ * error events") — a plain `data:` event carrying a `type` discriminator
+ * (matches `publishDrawer.ts`'s existing convention on this codebase's one
+ * other SSE endpoint; also sidesteps `EventSource`'s special-cased `error`
+ * event NAME, which would otherwise collide with the connection-level
+ * `onerror` callback). */
+export type ConversationStreamEvent =
+  | { type: "message"; message: ChatMessageData }
+  | { type: "status"; status: ChatStatusData }
+  | { type: "error"; detail: string };
 
 const TIMEOUT_MS = 10_000;
 const MAX_ATTEMPTS = 3;
@@ -247,6 +300,10 @@ export interface AdminApi {
   restore(version: number): Promise<RestoreOutcome>;
   duplicatePage(fromSlug: string, slug: string, navLabel: string, expectedRev: number): Promise<PageOpOutcome>;
   deletePage(slug: string, expectedRev: number): Promise<PageOpOutcome>;
+  createConversation(firstMessage?: string): Promise<ConversationSummary>;
+  getConversations(): Promise<ConversationSummary[]>;
+  sendMessage(convId: string, text: string, idempotencyKey: string): Promise<SendMessageResult>;
+  renameConversation(convId: string, title: string): Promise<ConversationSummary>;
 }
 
 export function createApi(): AdminApi {
@@ -360,5 +417,78 @@ export function createApi(): AdminApi {
       }
       return { ok: true };
     },
+    async createConversation(firstMessage) {
+      const response = await fetchWithRetry("/api/admin/chat/conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(firstMessage !== undefined ? { firstMessage } : {}),
+      });
+      return parseJson<ConversationSummary>(response);
+    },
+    async getConversations() {
+      const body = await parseJson<{ conversations: ConversationSummary[] }>(
+        await fetchWithRetry("/api/admin/chat/conversations"),
+      );
+      return body.conversations;
+    },
+    async sendMessage(convId, text, idempotencyKey) {
+      const response = await fetchWithRetry(
+        `/api/admin/chat/conversations/${encodeURIComponent(convId)}/messages`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, idempotencyKey }),
+        },
+      );
+      return parseJson<SendMessageResult>(response);
+    },
+    async renameConversation(convId, title) {
+      const response = await fetchWithRetry(
+        `/api/admin/chat/conversations/${encodeURIComponent(convId)}/rename`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title }),
+        },
+      );
+      return parseJson<ConversationSummary>(response);
+    },
   };
+}
+
+export interface ConversationStreamHandle {
+  close(): void;
+}
+
+/** Opens the SSE stream for one conversation (spec/06 §1's "Live updates").
+ * A free function, not part of `AdminApi` — mirrors `publishDrawer.ts`'s own
+ * `openStream` (there's exactly one active stream connection at a time, tied
+ * to whichever conversation panel is open, not a general API call). Trusts
+ * the event shape (same-origin, our own server) rather than runtime-validating
+ * it, matching `publishDrawer.ts`'s precedent — only a genuinely malformed/
+ * partial JSON parse is swallowed, never a wrong-shape object.
+ *
+ * `includeThinking` (spec/06 §1's "show reasoning" toggle, default off) has
+ * no dedicated endpoint (spec/04 §8's admin API index lists none) — toggling
+ * it means closing this connection and reopening with the flag set, which is
+ * the caller's (`chatPanel.ts`) job, not this function's. */
+export function openConversationStream(
+  convId: string,
+  onEvent: (event: ConversationStreamEvent) => void,
+  includeThinking = false,
+): ConversationStreamHandle {
+  const query = includeThinking ? "?includeThinking=true" : "";
+  const source = new EventSource(
+    `/api/admin/chat/conversations/${encodeURIComponent(convId)}/stream${query}`,
+  );
+  source.onmessage = (event: MessageEvent<string>) => {
+    try {
+      onEvent(JSON.parse(event.data) as ConversationStreamEvent);
+    } catch {
+      // A malformed/partial event is never fatal — the next tick carries
+      // current state again (routes_chat.py's own poll loop, like
+      // publish_stream, re-derives from scratch each tick).
+    }
+  };
+  return { close: () => source.close() };
 }
