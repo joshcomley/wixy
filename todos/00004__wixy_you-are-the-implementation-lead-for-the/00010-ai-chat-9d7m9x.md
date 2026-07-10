@@ -143,4 +143,5 @@ move straight to milestone 11 (Install & deploy) per the standing instruction.
 PR (slice 1): https://github.com/joshcomley/wixy/pull/40 (merged 19a6839)
 PR (slice 2): https://github.com/joshcomley/wixy/pull/41 (merged 62d8633)
 PR (slice 3): https://github.com/joshcomley/wixy/pull/42 (merged fa3dd0a)
-PR (slice 4): (fill in when opened)
+PR (slice 4): https://github.com/joshcomley/wixy/pull/43 (merged 48bda80, incl. a
+follow-up idempotency-key-reuse fix commit before merge)
