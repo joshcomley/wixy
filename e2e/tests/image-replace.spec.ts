@@ -2,17 +2,23 @@
 // (oversized, EXIF-rotated) → element updates → publish → file committed to repo
 // images/, served, resized, EXIF-free."
 //
-// Only the EDITING-side half is built here — the publish-tail half ("committed to
-// repo images/") needs milestone 9's publisher, matching decisions/00015 decision
-// 4's already-established E2E 1/4 caveat (repeated for M8 in decisions/00020/00021).
-// "Resized" and "EXIF-free" ARE asserted despite that: both happen at UPLOAD time
-// (wixy_server/media.py's process_upload, milestone 8 slice 1), not at publish time,
-// so they're already fully exercised without needing milestone 9 at all.
+// "Resized" and "EXIF-free" are asserted straight from the staged draft asset:
+// both happen at UPLOAD time (wixy_server/media.py's process_upload, milestone 8
+// slice 1), not at publish time, so they never needed milestone 9 to exist. The
+// publish-tail half ("committed to repo images/") WAS deferred pending milestone
+// 9's publisher (decisions/00015 decision 4, repeated for M8 in decisions/00020/
+// 00021) — extended here now that it exists (decisions/00030), closing
+// decisions/00023's own flagged "consider extending E2E 2/3" nice-to-have.
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
-import { gotoEditAndWaitReady, trackConsoleErrors } from "./helpers";
+import {
+  gotoEditAndWaitReady,
+  publishAndWait,
+  trackConsoleErrors,
+  waitForNextDraftPatchAccepted,
+} from "./helpers";
 
 const FIXTURE_PATH = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -44,8 +50,13 @@ test.describe("E2E 2: image replace", () => {
 
     const draftThumb = page.locator(".wx-media-item:has(.wx-media-badge) .wx-media-thumb").first();
     await draftThumb.click();
+    const bgPatch = waitForNextDraftPatchAccepted(page);
     await page.click('.wx-media-alt-step button:text("Use this image")');
     await page.waitForSelector(".wx-media-dialog-backdrop", { state: "detached" });
+    // The overlay op (hero.bg -> the draft-media URL) must actually reach the
+    // server, not just update the DOM optimistically — publish's materialize
+    // step only copies media referenced by a REAL overlay op into images/.
+    await bgPatch;
 
     // element updates (spec/08 §2's own wording) — the DOM background-image now
     // points at the freshly staged draft file.
@@ -76,6 +87,17 @@ test.describe("E2E 2: image replace", () => {
     expect(bytes[0]).toBe(0xff);
     expect(bytes[1]).toBe(0xd8);
     expect(bytes[2] === 0xff && bytes[3] === 0xe1).toBe(false);
+
+    // "publish → file committed to repo images/, served" (spec/08 §2's own
+    // wording) — the draft-media URL rewrites to the published images/<name>
+    // form (wixy_server/publisher.py's _rewrite_draft_media_refs).
+    const mediaName: string = uploaded.url.split("/").pop();
+    await publishAndWait(page);
+    const publishedResponse = await page.request.get(`/images/${mediaName}`);
+    expect(publishedResponse.status()).toBe(200);
+    expect(await publishedResponse.body()).toEqual(bytes);
+    const liveHtml = await page.request.get("/").then((r) => r.text());
+    expect(liveHtml).toContain(`images/${mediaName}`);
 
     expect(consoleErrors).toEqual([]);
   });

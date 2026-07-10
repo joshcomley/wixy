@@ -286,6 +286,15 @@ export function initOverlay(win: Window = window): () => void {
   }
 
   function handleItemToolbarHover(target: Element): void {
+    // The toolbar is mounted on `document.body` (positioned near the item, not
+    // nested inside it — see the class doc above) — hovering ITS OWN buttons must
+    // not be treated as "left every item and hovered nothing," or the toolbar
+    // would clear itself the instant the pointer enters it, making it permanently
+    // unclickable. Found via real-browser E2E verification (decisions/00030):
+    // jsdom's own test environment never renders real layout/hover geometry, so
+    // this was invisible to the existing unit suite (per this file's own opening
+    // comment) despite having shipped in milestone 7 (decisions/00017).
+    if (itemToolbar?.contains(target) === true) return;
     const item = target.closest("[data-wx-list-item]");
     if (item === null) {
       clearItemToolbar();
@@ -422,7 +431,16 @@ export function initOverlay(win: Window = window): () => void {
 
   function blankTextLikeFields(root: Element): void {
     root.querySelectorAll("[data-wx]").forEach((el) => {
-      (el as HTMLElement).innerHTML = "";
+      // A truly empty text element has no line box at all (0 height in a real
+      // browser — jsdom never renders real layout, so this was invisible to the
+      // unit suite, found only via real-browser E2E verification per
+      // decisions/00030) and becomes permanently unclickable, so a freshly
+      // added/duplicated item's title/body could never be filled in through the
+      // visual editor. A non-breaking space keeps a minimal, real click target
+      // alive without touching this file's own "editing chrome never mutates
+      // layout metrics" CSS rule (this is ordinary bound CONTENT, not chrome) —
+      // it's replaced the instant the user actually edits the field.
+      (el as HTMLElement).innerHTML = "&nbsp;";
     });
     root.querySelectorAll("[data-wx-href]").forEach((el) => el.setAttribute("href", ""));
     root.querySelectorAll("[data-wx-img]").forEach((el) => {

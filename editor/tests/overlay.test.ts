@@ -584,6 +584,12 @@ describe("initOverlay", () => {
         ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
       expect(root.querySelectorAll("[data-wx-list-item]")).toHaveLength(3);
+      // The SENT op value comes from applyListStructuralOp/blankStrings
+      // (listOps.ts -- pure data, blanks every string leaf to "") -- a separate
+      // mechanism from blankTextLikeFields's DOM-side non-breaking-space fix
+      // (this file, decisions/00030), which only keeps the CLONED ELEMENT
+      // clickable in the current session; the value the server actually
+      // stores stays "".
       const last = sent.at(-1);
       expect(last && "value" in last ? last.value : undefined).toEqual([
         { title: "One" },
@@ -591,6 +597,28 @@ describe("initOverlay", () => {
         { title: "" },
       ]);
       teardown();
+    });
+
+    it("add blanks the cloned element's own text with a non-breaking space, not an empty string", () => {
+      renderShowcase();
+      const firstItem = root.querySelectorAll("[data-wx-list-item]")[0] as HTMLElement;
+      initFor("index", showcaseBindings);
+
+      firstItem.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      document
+        .querySelector('[data-wx-toolbar-action="add"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      // A genuinely empty element has no line box in a real browser (0 height --
+      // jsdom doesn't render real layout, so this was invisible to the unit
+      // suite until found via E2E verification, decisions/00030) and becomes
+      // permanently unclickable, so a freshly added item's title could never be
+      // filled in through the visual editor. A non-breaking space keeps a
+      // minimal, real click target alive without touching this file's own
+      // "editing chrome never mutates layout metrics" CSS rule -- it's ordinary
+      // bound content, replaced the instant the user actually edits the field.
+      const newTitle = root.querySelectorAll('[data-wx=".title"]')[2] as HTMLElement;
+      expect(newTitle.textContent).toBe(" ");
     });
   });
 

@@ -1,0 +1,1 @@
+Milestone 9 slice 5: E2E 1/4/5/6, publish-tail extensions to E2E 2/3, a real kill-during-publish drill, five real bugs found and fixed along the way, and milestone 9's closing acceptance — closing milestone 9

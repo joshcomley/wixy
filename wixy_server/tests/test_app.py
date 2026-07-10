@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -159,6 +160,72 @@ class TestPreviewRoute:
         with TestClient(app) as client:
             response = client.get("/admin/preview/does-not-exist.html")
         assert response.status_code == 404
+
+    def test_fetches_upstream_when_watcher_status_is_stale(
+        self, storage_root: Path, wixy_repo_root: Path, origin_repo: Path
+    ) -> None:
+        """spec/04 §7: fetch origin "immediately before preview loads after >10s
+        staleness" — this route never actually implemented that half (only the
+        periodic 60s loop and the always-fetch-before-publish existed) until
+        milestone 9 slice 5's own E2E 6 needed an upstream commit to become
+        observable within a test's timeframe — decisions/00030."""
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            client.get("/admin/preview/index.html")  # the startup fetch already ran
+
+            # An "AI-lane" commit lands on origin/main after the checkout's last fetch.
+            (origin_repo / "content" / "index.json").write_text(
+                json.dumps(
+                    {
+                        "meta": {"title": "Home"},
+                        "hero": {
+                            "title": "Upstream Title",
+                            "showBanner": False,
+                            "banner": "Hidden banner",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            _git(["add", "."], origin_repo)
+            _git(["commit", "-m", "upstream change"], origin_repo)
+
+            app.state.watcher_status.fetched_at = datetime.now(UTC) - timedelta(seconds=11)
+            response = client.get("/admin/preview/index.html")
+
+        assert "Upstream Title" in response.text
+
+    def test_does_not_fetch_when_watcher_status_is_fresh(
+        self, storage_root: Path, wixy_repo_root: Path, origin_repo: Path
+    ) -> None:
+        """The staleness trigger is an on-demand TOP-UP for a slow periodic tick,
+        not a fetch-on-every-request policy — a fresh `fetched_at` (well within
+        the last 10s) must NOT trigger a second fetch, matching spec/04 §7's own
+        "immediately before preview loads AFTER >10s staleness" wording."""
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            client.get("/admin/preview/index.html")  # the startup fetch already ran
+
+            (origin_repo / "content" / "index.json").write_text(
+                json.dumps(
+                    {
+                        "meta": {"title": "Home"},
+                        "hero": {
+                            "title": "Upstream Title",
+                            "showBanner": False,
+                            "banner": "Hidden banner",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            _git(["add", "."], origin_repo)
+            _git(["commit", "-m", "upstream change"], origin_repo)
+
+            response = client.get("/admin/preview/index.html")
+
+        assert "Original Title" in response.text
+        assert "Upstream Title" not in response.text
 
     def test_draft_overlay_is_respected(self, storage_root: Path, wixy_repo_root: Path) -> None:
         """A PATCH'd overlay op must win over the repo's own content — the whole

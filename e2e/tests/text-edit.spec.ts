@@ -38,8 +38,14 @@ test.describe("E2E 1: text edit", () => {
     // "live DOM updates"
     await expect(frame.locator('[data-wx="hero.title"]')).toHaveText(newTitle);
 
-    // "draft chip shows 1 change"
-    await expect(page.locator(".wx-draft-chip")).toHaveText("1 change");
+    // "draft chip shows 1 change" — a substring match, not an exact one: the
+    // chip also reports upstream-ahead commits (decisions/00023 decision 5's
+    // "ONE shared fixture server" applies to more than just concurrency — a
+    // restore in an earlier file of the same suite run can legitimately leave
+    // `aheadOfPublished` non-empty, e.g. restore.spec.ts's own E2E 5 moves the
+    // live pointer BACKWARD relative to the checkout's HEAD on purpose, and
+    // E2E 6's own upstream commit only clears once ITS publish runs).
+    await expect(page.locator(".wx-draft-chip")).toContainText("1 change");
 
     const version = await publishAndWait(page);
 
