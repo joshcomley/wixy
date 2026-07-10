@@ -25,6 +25,7 @@ server = [
   "cryptography>=43.0",
   "anyio>=4.6",
   "python-multipart>=0.0.12",
+  "websockets>=13.0",
 ]
 dev = [
   "pytest>=8.3",
