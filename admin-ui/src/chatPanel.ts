@@ -392,6 +392,12 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
   let latestStatus: ChatStatusData | null = null;
   let statusStripTimer: number | null = null;
   let lastUpstreamCheckAt = 0;
+  /** Generated once per compose ATTEMPT, not once per `send()` call — spec/06
+   * §1: "Include the idempotency key so a UI retry can't double-send," §3:
+   * "manual retry with the same idempotency key." Cleared only after a
+   * successful send, so a failed attempt's retry click reuses this same key
+   * instead of minting a new one (which would defeat the whole point). */
+  let pendingIdempotencyKey: string | null = null;
 
   function renderThread(): void {
     thread.innerHTML = "";
@@ -480,11 +486,13 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
     sendButton.disabled = true;
     composerInput.disabled = true;
     composerError.hidden = true;
-    const idempotencyKey = `${convId}:${cryptoRandomId(win)}`;
+    pendingIdempotencyKey ??= `${convId}:${cryptoRandomId(win)}`;
+    const idempotencyKey = pendingIdempotencyKey;
     api
       .sendMessage(convId, text, idempotencyKey)
       .then(() => {
         if (cancelled) return;
+        pendingIdempotencyKey = null;
         composerInput.value = "";
         resetToIdleComposer();
       })

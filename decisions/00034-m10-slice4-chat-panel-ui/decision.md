@@ -136,6 +136,28 @@ but noisy" 503 for real E2E runs (a prior milestone's fix, not something new
 here). Confirmed unrelated to chat and not worth re-investigating — noted
 here so a future session doesn't re-chase it a second time.
 
+## A real bug found while planning slice 5, fixed before this PR merged
+
+While tracing through the composer's own `send()` logic to plan E2E 7's
+send-retry-on-502 flow, `pendingIdempotencyKey` was found to NOT exist —
+`send()` minted a brand new idempotency key on *every* call, including a
+manual retry click after a failed send. This directly violates spec/06 §1
+("Include the idempotency key so a UI retry can't double-send") and §3's
+failure table verbatim wording ("manual retry with the **same** idempotency
+key") — the whole point of the key is defeated if a retry gets a fresh one;
+cmd would treat it as a genuinely new, un-deduplicated send. Fixed by
+generating the key once per compose ATTEMPT (`pendingIdempotencyKey ??= ...`)
+and clearing it only after a successful send, so a failed attempt's retry
+reuses the same key while a genuinely new message (composed after success)
+gets a fresh one. Caught before this PR merged (not a follow-up commit to a
+landed main) — a new test
+(`chatPanel.test.ts`: "a retry after a failed send reuses the same
+idempotency key...") asserts this explicitly, using a fake `crypto.randomUUID`
+that returns a DIFFERENT value per call (the original fake always returned a
+fixed `"test-uuid"`, which couldn't have distinguished "reused" from
+"coincidentally identical" — a test-quality gap worth remembering: a
+constant-valued fake can hide exactly the bug it should catch).
+
 ## Files changed
 
 - `admin-ui/src/markdown.ts` (new) — the renderer.

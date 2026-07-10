@@ -383,6 +383,43 @@ describe("mountChatPanel — conversation view", () => {
     panel.teardown();
   });
 
+  it("a retry after a failed send reuses the same idempotency key; a new message after success gets a fresh one", async () => {
+    let uuidCounter = 0;
+    const win = fakeWindow({ crypto: { randomUUID: () => `uuid-${++uuidCounter}` } });
+    const sendMessage = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("couldn't deliver: timeout"))
+      .mockResolvedValueOnce({ accepted: true, buffered: false })
+      .mockResolvedValueOnce({ accepted: true, buffered: false });
+    const api = fakeApi({ sendMessage });
+    const stream = fakeStreamController();
+    const panel = mountChatPanel("c1", { api, win, openStream: stream.openStream });
+    await flush();
+
+    const textarea = panel.element.querySelector<HTMLTextAreaElement>(".wx-chat-composer-input");
+    const sendButton = panel.element.querySelector<HTMLButtonElement>(".wx-chat-send-button");
+
+    if (textarea) textarea.value = "first attempt";
+    sendButton?.click();
+    await flush();
+    expect(sendMessage).toHaveBeenNthCalledWith(1, "c1", "first attempt", "c1:uuid-1");
+
+    // Retrying the SAME failed message must reuse the SAME key (spec/06 3:
+    // "manual retry with the same idempotency key") -- not mint a new one.
+    if (textarea) textarea.value = "first attempt";
+    sendButton?.click();
+    await flush();
+    expect(sendMessage).toHaveBeenNthCalledWith(2, "c1", "first attempt", "c1:uuid-1");
+
+    // A genuinely new message composed after a SUCCESSFUL send gets a fresh key.
+    if (textarea) textarea.value = "second message";
+    sendButton?.click();
+    await flush();
+    expect(sendMessage).toHaveBeenNthCalledWith(3, "c1", "second message", "c1:uuid-2");
+
+    panel.teardown();
+  });
+
   it("rename prompts, calls the API, and updates the shown title", async () => {
     const renameConversation = vi.fn(async () => fakeConversation({ title: "new title" }));
     const api = fakeApi({ renameConversation });
