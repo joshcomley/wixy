@@ -41,10 +41,13 @@ sys.path.insert(0, str(WIXY_REPO_ROOT))
 
 from builder.build import build_site  # noqa: E402
 from builder.config import ProjectConfig  # noqa: E402
+from wixy_server.chats import find_chat  # noqa: E402
 from wixy_server.checkout import current_sha, ensure_checkout  # noqa: E402
+from wixy_server.cmdchat import CmdChatClient  # noqa: E402
 from wixy_server.registry import load_registry  # noqa: E402
 from wixy_server.site_source import build_site_source  # noqa: E402
 from wixy_server.storage import ProjectPaths, ensure_project_dirs, project_paths  # noqa: E402
+from wixy_server.tests.fake_cmd import FakeCmdServer, FakeCmdState  # noqa: E402
 from wixy_server.watcher import WatcherStatus, fetch_once  # noqa: E402
 
 
@@ -168,6 +171,23 @@ def main() -> None:
 
     from wixy_server.app import create_app
 
+    # E2E 7 (milestone 10, spec/08 §2/06): a real FakeCmdServer (the same
+    # ephemeral-port uvicorn double the Python unit suite uses,
+    # wixy_server/tests/fake_cmd.py) rather than a hand-rolled TS stub — one
+    # fake, one behavior contract, exercised from both test layers.
+    # `default_ready_after_polls=1` means every conversation the browser
+    # creates becomes ready almost immediately with zero per-session fixture
+    # wiring; a real cmd instance is never touched (fleet rule).
+    fake_cmd_state = FakeCmdState(default_ready_after_polls=1)
+    fake_cmd_server = FakeCmdServer(fake_cmd_state)
+    fake_cmd_port = fake_cmd_server.start()
+    cmdchat_client = CmdChatClient(
+        portal_base_url=f"http://127.0.0.1:{fake_cmd_port}",
+        chats_base_url=f"http://127.0.0.1:{fake_cmd_port}",
+        readiness_poll_interval_s=0.2,
+        readiness_timeout_s=10.0,
+    )
+
     app = create_app(
         storage_root=storage_root,
         wixy_repo_root=wixy_repo_root,
@@ -186,6 +206,7 @@ def main() -> None:
         # elevated CPU/disk-I/O from unrelated PIDs, same as those prior
         # incidents (decisions/00030).
         watcher_interval_s=3600.0,
+        cmdchat_client=cmdchat_client,
     )
 
     @app.post("/test/simulate-upstream-commit", include_in_schema=False)
@@ -205,6 +226,61 @@ def main() -> None:
         )
         await anyio.to_thread.run_sync(fetch_once, project, paths, watcher_status)
         return {"sha": sha}
+
+    def _find_fake_session(conv_id: str) -> object | None:
+        paths: ProjectPaths = app.state.paths
+        conversation = find_chat(paths.chats_json, conv_id)
+        if conversation is None:
+            return None
+        return fake_cmd_state.sessions.get(conversation.session_id)
+
+    @app.post("/test/chat/set-messages", include_in_schema=False)
+    async def _post_set_chat_messages(payload: dict[str, object]) -> dict[str, bool]:
+        """E2E 7: scripts a fake assistant reply (incl. tool-activity rows,
+        spec/06 §1's message `kind`s) into the conversation the browser
+        already created through the real admin UI — mirrors this file's own
+        `_simulate_upstream_commit` pattern (fixture-only, never imported by
+        product code)."""
+        conv_id = payload["convId"]
+        assert isinstance(conv_id, str)
+        messages = payload["messages"]
+        assert isinstance(messages, list)
+
+        def _apply() -> bool:
+            session = _find_fake_session(conv_id)
+            if session is None:
+                return False
+            session.messages = messages  # type: ignore[attr-defined]
+            return True
+
+        return {"ok": await anyio.to_thread.run_sync(_apply)}
+
+    @app.post("/test/chat/set-send-status", include_in_schema=False)
+    async def _post_set_send_status(payload: dict[str, object]) -> dict[str, bool]:
+        """E2E 7's send-retry-on-502 leg (spec/06 §3): the test sets a bad
+        status code, drives a send through the real UI, asserts the bubble
+        error, then calls this again with 202 before retrying."""
+        conv_id = payload["convId"]
+        assert isinstance(conv_id, str)
+        status_code = payload["statusCode"]
+        assert isinstance(status_code, int)
+
+        def _apply() -> bool:
+            session = _find_fake_session(conv_id)
+            if session is None:
+                return False
+            session.send_status_code = status_code  # type: ignore[attr-defined]
+            return True
+
+        return {"ok": await anyio.to_thread.run_sync(_apply)}
+
+    @app.post("/test/chat/stop-fake-cmd", include_in_schema=False)
+    async def _post_stop_fake_cmd() -> dict[str, bool]:
+        """E2E 7's offline-banner leg (spec/06 §3) — the LAST thing any chat
+        E2E test does (no other spec file touches chat/cmd, so a one-way stop
+        is safe for the shared, workers:1 fixture server)."""
+        await anyio.to_thread.run_sync(fake_cmd_server.stop)
+        return {"ok": True}
 
     uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
 

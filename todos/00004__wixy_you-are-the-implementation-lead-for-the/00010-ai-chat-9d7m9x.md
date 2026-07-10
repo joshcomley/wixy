@@ -101,10 +101,28 @@ sliced backend-first, matching M6-M9's own pattern:
   browser's implicit favicon request hitting routes_public.py's spec'd
   "not yet published" 503 — e2e/fixture_server.py already documents publishing
   an initial build specifically to avoid this). Full reasoning: decisions/00034.
-- Slice 5 [PLANNED]: E2E 7 (chat UX) + closing. The real-browser verification
-  script written for slice 4 already prototypes the exact fixture approach
-  (inject `cmdchat_client` pointed at a real `FakeCmdServer` into `create_app`)
-  — slice 5 formalizes this into `e2e/fixture_server.py` + a Playwright spec.
+- Slice 5 [DONE]: E2E 7 (`e2e/tests/chat-ux.spec.ts`, new). `fixture_server.py`
+  now starts a real `FakeCmdServer` (the SAME double the Python unit suite
+  uses, not a second hand-rolled TS fake) and injects it via `create_app
+  (cmdchat_client=...)`; `FakeCmdState` gained `default_ready_after_polls` so
+  E2E-created conversations become ready near-instantly with zero
+  per-conversation wiring. Three new fixture-only `/test/chat/*` endpoints
+  (set-messages, set-send-status, stop-fake-cmd) mirror E2E 6's own
+  `/test/simulate-upstream-commit` pattern. The spec covers every E2E 7 leg:
+  new conversation, status dot pending->ready (asserted via the create
+  RESPONSE body for "pending" + a separate later list-view wait for "ready" —
+  NOT by racing a UI round-trip against the fixture's own fast readiness,
+  which the first draft tried and found genuinely flaky, decisions/00035
+  decision 3), a scripted reply with a collapsed/expandable tool-action row,
+  send-retry on an injected 502 with an EXACT idempotency-key-reuse assertion
+  (the same key on both the failed and retried send — this is the assertion
+  that would have caught slice 4's idempotency-key bug had it existed first,
+  decisions/00035 decision 4), and the offline banner on fake-cmd stop. Full
+  local run: all 9 E2E specs green (E2E 1-8 + this new E2E 7), confirming the
+  shared `workers:1` fixture server's one-way fake-cmd-stop doesn't disturb
+  any other flow regardless of run order. Full reasoning: decisions/00035.
+
+**MILESTONE 10 IS CLOSED.** All 5 slices merged (PRs #40-44).
 
 Never call the Anthropic API directly — all inference via cmd's new-chat/send/messages
 endpoints per spec 06 (enforced in `cmdchat.py`: it only ever talks to localhost
@@ -116,28 +134,19 @@ endpoints per spec 06 (enforced in `cmdchat.py`: it only ever talks to localhost
   smoke, run during M13 verification not CI)
 
 ## How to continue + acceptance
-cmd endpoints verified against cmd CODE not the stale docs/ai/contracts.md. Readiness =
-404->200 transition poll (max 120s) + WS pending-state subscribe — DONE (slice 1,
-`cmdchat.wait_until_ready`). Handover-follow via /chain endpoint — DONE end-to-end
-(slice 1's `get_chain` client method + slice 3's route-level adoption in
-`_stream_events`, chats.json updated via `update_session_id`). Embedded chat has NO
-publish tool (enforced by the preamble template, DONE slice 1 — never at the HTTP
-layer, since wixy has no way to constrain what the agent's cmd session does beyond
-instructing it). Send/rename/stream all DONE (slice 3). Chat panel UI DONE (slice 4,
-incl. a real-browser verification pass — see decisions/00034). The
-`@pytest.mark.live_cmd` smoke test is WRITTEN (slice 3) but not yet RUN against real
-cmd — that's milestone 13's job, not this chain's; don't run it speculatively before
-then (decisions/00033).
+Every acceptance point spec/09's own M10 line named is DONE: cmdchat.py client +
+fake-cmd double (slice 1), conversations store + create/pending/ready (slice 2),
+send w/ idempotency + poll->SSE fan-out (slice 3), chat panel UI incl. markdown/
+tool rows/status dot/preview-updated chip/offline banner (slice 4), handover-follow
+(slice 3), E2E 7 (slice 5), preamble template (slice 1). The only intentionally
+deferred item is the `@pytest.mark.live_cmd` smoke test's actual EXECUTION against
+real cmd — written (slice 3), correctly scoped to milestone 13's live verification
+per spec's own wording, not run here (decisions/00033) — don't run it speculatively
+before then.
 
-**Only E2E 7 (scripted fake replies, tool rows, status transitions, send-retry on
-502, offline banner) remains for milestone 10** — slice 5's job, and the LAST slice
-of this milestone. The real-browser script written for slice 4
-(`decisions/00034`) already validates the exact fixture approach (a real
-`FakeCmdServer` + `cmdchat_client` injected into `create_app`) — slice 5 just needs
-to formalize this into `e2e/fixture_server.py` (mirroring how `ai-lane.spec.ts`'s
-`/test/simulate-upstream-commit` fixture-only endpoint already works for E2E 6) and
-write the actual Playwright spec. After slice 5 merges, milestone 10 is CLOSED —
-move straight to milestone 11 (Install & deploy) per the standing instruction.
+**Milestone 10 is fully closed.** Next: milestone 11 (Install & deploy) per spec/09's
+own table — read spec/07-hosting-deploy.md in full before starting (not yet read
+fresh by this chain, same discipline milestone 10 itself started with).
 
 ## Links
 PR (slice 1): https://github.com/joshcomley/wixy/pull/40 (merged 19a6839)
@@ -145,3 +154,4 @@ PR (slice 2): https://github.com/joshcomley/wixy/pull/41 (merged 62d8633)
 PR (slice 3): https://github.com/joshcomley/wixy/pull/42 (merged fa3dd0a)
 PR (slice 4): https://github.com/joshcomley/wixy/pull/43 (merged 48bda80, incl. a
 follow-up idempotency-key-reuse fix commit before merge)
+PR (slice 5): (fill in when opened)

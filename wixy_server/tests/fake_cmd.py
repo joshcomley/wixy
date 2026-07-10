@@ -59,12 +59,23 @@ class FakeCmdState:
     sessions: dict[str, FakeSession] = field(default_factory=dict)
     next_session_n: int = 1
     new_chat_status_code: int = 202
+    default_ready_after_polls: int = 0
+    """Applied to every newly-created session's own `ready_after_polls` —
+    unit tests default this to 0 (never auto-ready; the test sets `.ready`/
+    `.ready_after_polls` explicitly per session, per scenario), while a
+    fixture driving a real UI end-to-end (E2E 7) wants every session it never
+    otherwise configures to become ready quickly with zero per-session
+    wiring."""
 
     def create_session(self, prompt: str, *, cmd_project: str = "") -> FakeSession:
         n = self.next_session_n
         self.next_session_n += 1
         session = FakeSession(
-            session_id=f"sess-{n}", workspace_id=f"ws-{n}", prompt=prompt, cmd_project=cmd_project
+            session_id=f"sess-{n}",
+            workspace_id=f"ws-{n}",
+            prompt=prompt,
+            cmd_project=cmd_project,
+            ready_after_polls=self.default_ready_after_polls,
         )
         self.sessions[session.session_id] = session
         return session
