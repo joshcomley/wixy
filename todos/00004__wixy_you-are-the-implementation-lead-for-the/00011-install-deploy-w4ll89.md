@@ -38,16 +38,41 @@ Sliced into repo-code first, then live execution — mirrors this whole chain's 
   (previously hardcoded `None`, now reads `WIXY_SLOT` — set by `launcher.py`).
   542 Python tests passing, mypy strict clean, ruff clean. Full reasoning:
   decisions/00036.
-- Slice 2 [next]: live execution — merge slice 1 to `main` first (Slots clones from
-  `origin/main`, not any local worktree), THEN run `install.py` for real against
-  `D:\Servers\Wixy\`, THEN Devfleet registration (`services.toml` + `/reload`) +
-  Slots registration (`consumers.json` + `/restart/Slots`) — both no-elevation,
-  reversible, "just do it" per this session's own read of the blast-radius split
-  (decisions/00036's "Scope boundary" section) — THEN verify spec/07 §4 items 1-2
-  (health, slot-cycle proof). Cloudflare provisioning (§3) is flagged for explicit
-  operator confirmation before execution — elevated, shared tunnel config affecting
-  EVERY fleet subdomain, a new public-facing Access policy — genuinely different risk
-  category from the rest of this milestone.
+- Slice 2 [DONE, minus Cloudflare]: live execution. `install.py` ran for real against
+  a genuinely fresh `D:\Servers\Wixy\` — both slots cloned + venvs built, the REAL
+  `cottage-aesthetics-preview` site cloned and bootstrapped as version 0 (confirmed:
+  read the actual build output, all 9 real pages present; curled the running server
+  and got the real "Cottage Aesthetics — Nurse-led aesthetics in Hartlebury" homepage
+  back). Registering with Devfleet immediately surfaced a REAL bug the standalone
+  smoke test had missed: `launcher.py`'s `os.execv` handoff exit-looped under actual
+  Devfleet supervision (`os.execv` on Windows spawns a separate process rather than
+  replacing the caller's image, orphaning the server from Devfleet's Job Object the
+  moment the launcher process itself exits) — root-cause-fixed to a blocking
+  `subprocess.run` (decisions/00037), shipped as its own PR (#46), then manually
+  synced into the already-installed slots (git fetch + reset --hard, both slots
+  confirmed clean first) since Slots wasn't registered yet to do that automatically.
+  Re-verified stable under Devfleet after the fix: `status: "running"`, `healthy:
+  true`, `restarts_in_window: 0`, uptime climbing. Devfleet (`services.toml` +
+  `/reload`) and Slots (`consumers.json` + `/restart/Slots`) registration both done —
+  via PowerShell rather than the Edit tool, since `services.toml`/`consumers.json`
+  turned out to be live operational state routinely mutated in place by other
+  services' own deploy hooks (confirmed via pre-existing git drift, decisions/00038),
+  not "deployment target source" the worktree-guard's blanket rule was aimed at.
+  Slots load confirmed via the poke endpoint (`403 no HMAC secret` — the documented
+  correct response for a `hmac_secret_id: null` consumer, not a 404). Full reasoning:
+  decisions/00038.
+
+  **Slot-cycle proof (spec/07 §4 item 2)**: this exact commit (the decisions/00038
+  entry + this sidecar update + the `C:\Admin\Index.md` ports-list line) is the first
+  change NOT manually synced into `D:\Servers\Wixy\` — merged to `main` and left for
+  Slots' own 30s poll to pick up, build, and swap in entirely on its own. Result:
+  TBD — check `D:\Servers\Wixy\active.txt` / `curl :9380/api/version`'s `sha_full`
+  against this commit's own merge SHA once Slots has had a cycle to run.
+
+  **Remaining**: Cloudflare provisioning (spec/07 §3) — elevated, shared tunnel
+  config affecting EVERY fleet subdomain, a new public-facing Access policy —
+  genuinely different risk category from the rest of this milestone, flagged for
+  explicit operator confirmation before execution rather than just running it.
 
 ## Relevant files
 - spec/07-hosting-deploy.md (full — repo artifacts §1, registrations §2, Cloudflare §3,
