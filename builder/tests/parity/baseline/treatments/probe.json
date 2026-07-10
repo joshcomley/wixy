@@ -1,33 +1,265 @@
 {
-  "console_errors": [
-    "Failed to load resource: the server responded with a status of 404 (File not found)",
-    "Failed to load resource: the server responded with a status of 404 (File not found)",
-    "Failed to load resource: the server responded with a status of 404 (File not found)"
-  ],
+  "console_errors": [],
   "images": [],
-  "links": [],
+  "links": [
+    [
+      "About",
+      "/about.html"
+    ],
+    [
+      "About",
+      "/about.html"
+    ],
+    [
+      "About",
+      "/about.html"
+    ],
+    [
+      "Aftercare",
+      "/aftercare.html"
+    ],
+    [
+      "Contact",
+      "/contact.html"
+    ],
+    [
+      "Contact",
+      "/contact.html"
+    ],
+    [
+      "Contact",
+      "/contact.html"
+    ],
+    [
+      "FAQ",
+      "/faq.html"
+    ],
+    [
+      "Before & After",
+      "/gallery.html"
+    ],
+    [
+      "Before & After",
+      "/gallery.html"
+    ],
+    [
+      "Before & After",
+      "/gallery.html"
+    ],
+    [
+      "CottageAesthetics",
+      "/index.html"
+    ],
+    [
+      "Contact Purdi",
+      "/index.html#contact"
+    ],
+    [
+      "Enquire",
+      "/index.html#contact"
+    ],
+    [
+      "Enquire",
+      "/index.html#contact"
+    ],
+    [
+      "Enquire",
+      "/index.html#contact"
+    ],
+    [
+      "Enquire",
+      "/index.html#contact"
+    ],
+    [
+      "Clinic Policies",
+      "/policies.html"
+    ],
+    [
+      "Reviews",
+      "/reviews.html"
+    ],
+    [
+      "Reviews",
+      "/reviews.html"
+    ],
+    [
+      "Reviews",
+      "/reviews.html"
+    ],
+    [
+      "Treatments",
+      "/treatments.html"
+    ],
+    [
+      "Treatments",
+      "/treatments.html"
+    ],
+    [
+      "Treatments",
+      "/treatments.html"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book Now",
+      "/treatments.html#"
+    ],
+    [
+      "Book online",
+      "/treatments.html#"
+    ],
+    [
+      "Facebook",
+      "https://www.facebook.com/profile.php?id=61572079150383"
+    ],
+    [
+      "Instagram",
+      "https://www.instagram.com/cottageaesthetics"
+    ],
+    [
+      "Email us",
+      "mailto:cottageaestheticshartlebury@gmail.com"
+    ],
+    [
+      "07401 562 462",
+      "tel:07401562462"
+    ]
+  ],
   "styles": {
-    "body": {
+    ".eyebrow": {
       "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(0, 0, 0)",
-      "font-family": "\"Times New Roman\"",
-      "font-size": "16px",
+      "color": "rgb(230, 185, 143)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "11.84px",
       "font-weight": "400"
+    },
+    ".price": {
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(178, 110, 74)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "16px",
+      "font-weight": "300"
+    },
+    "a.btn-olive": {
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(86, 91, 67)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "13.12px",
+      "font-weight": "300"
+    },
+    "a.btn-primary": {
+      "background-color": "rgb(178, 110, 74)",
+      "color": "rgb(253, 247, 238)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "13.12px",
+      "font-weight": "300"
+    },
+    "body": {
+      "background-color": "rgb(241, 232, 217)",
+      "color": "rgb(62, 49, 42)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "16px",
+      "font-weight": "300"
+    },
+    "footer.site-footer": {
+      "background-color": "rgb(62, 49, 42)",
+      "color": "rgb(203, 184, 159)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "13.12px",
+      "font-weight": "300"
     },
     "h1": {
       "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(0, 0, 0)",
-      "font-family": "\"Times New Roman\"",
-      "font-size": "32px",
-      "font-weight": "700"
+      "color": "rgb(255, 255, 255)",
+      "font-family": "\"Cormorant Garamond\", serif",
+      "font-size": "62.4px",
+      "font-weight": "500"
+    },
+    "h2": {
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(94, 70, 53)",
+      "font-family": "\"Cormorant Garamond\", serif",
+      "font-size": "40px",
+      "font-weight": "500"
+    },
+    "h3": {
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(94, 70, 53)",
+      "font-family": "\"Cormorant Garamond\", serif",
+      "font-size": "24.8px",
+      "font-weight": "500"
+    },
+    "header#hd": {
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(62, 49, 42)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "16px",
+      "font-weight": "300"
+    },
+    "nav.nav-links": {
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(62, 49, 42)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "16px",
+      "font-weight": "300"
     },
     "p": {
       "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(0, 0, 0)",
-      "font-family": "\"Times New Roman\"",
-      "font-size": "16px",
+      "color": "rgb(230, 185, 143)",
+      "font-family": "Jost, system-ui, sans-serif",
+      "font-size": "11.84px",
       "font-weight": "400"
     }
   },
-  "text": "Error response Error code: 404 Message: File not found. Error code explanation: 404 - Nothing matches the given URI."
+  "text": "Cottage AESTHETICS ABOUT TREATMENTS BEFORE & AFTER REVIEWS CONTACT BOOK NOW TREATMENTS Considered, natural results Every treatment begins with an honest consultation. Prices are held deliberately fair — exceptional care shouldn't mean inflated costs. Start Here Every journey begins with a relaxed, no-obligation consultation. 30 MINUTES Free Consultation Complimentary A calm chat so you feel completely confident in both your chosen treatment and your practitioner before any decisions are made. BOOK NOW Microneedling Stimulating your skin's natural collagen for healthier, brighter, smoother skin. 45 MINUTES · INCL. CONSULTATION Standard Microneedling £30 per session £120 for a course of 5 Improves texture, reduces acne scarring and softens fine lines using pure Hyaluronic Acid serum. BOOK NOW 45 MINUTES · INCL. CONSULTATION Advanced Microneedling £80 Collagen induction combined with premium medical-grade skincare (Derma 2.0 / Newest), tailored to ageing, pigmentation, acne scarring and rejuvenation. BOOK NOW Skin Boosters Deep hydration and a subtle \"5-point facelift\" glow — quality from within. 45 MINUTES Jalupro Super Hydro £150 Deeply hydrates while improving elasticity, firmness and overall skin quality, with subtle lifting and rejuvenation. BOOK NOW 45 MINUTES Profhilo £230 A premium bio-remodelling treatment that intensely hydrates and firms for radiant, refreshed, natural-looking skin. BOOK NOW Polynucleotides Encouraging the skin's natural repair — collagen, hydration and tissue regeneration. 45 MINUTES Polynucleotides £150 Course of 3 recommended For face, neck, hands and décolletage — improving skin quality, hydration and firmness. Product: Newest. BOOK NOW 45 MINUTES Under-Eye Polynucleotides £150 Course of 3 recommended Designed for the delicate eye area — improving hydration, strengthening the skin and reducing crepey texture. Product: Plinest. BOOK NOW Dermal Fillers Restoring volume and enhancing natural features while keeping perfect facial balance. 1 HOUR Lip Enhancement £140 Restores hydration, improves symmetry and defines the lip border for beautifully balanced, natural lips. BOOK NOW 1 HOUR Chin Enhancement £140 Improves lower-facial balance and profile, adding projection and harmony between chin, lips and nose. BOOK NOW 1 HOUR Cheek Enhancement £200 Restores youthful volume, enhances cheekbone definition and gives subtle lift to the mid-face. BOOK NOW 1.5 HOURS Jawline Contouring £290 Sculpts and defines the jawline, enhancing facial proportions while keeping results natural. BOOK NOW BY CONSULTATION Facial Rebalancing & Rejuvenation Price after consultation A detailed facial assessment allowing multiple areas to be treated together, restoring balance, proportion and natural harmony. ENQUIRE Prescription Treatments Wrinkle-relaxing and wellbeing treatments — by prescriber consultation. Due to UK prescribing regulations, these treatments can't be booked online. Select a treatment to see details, then enquire — Purdi will arrange a face-to-face prescriber consultation to determine suitability. Botox® VIEW DETAILS Relfydess® VIEW DETAILS Vitamin B12 Complex Injections VIEW DETAILS Ready when you are BOOK NOW CONTACT PURDI Cottage Aesthetics Nurse-led medical aesthetics Hartlebury, Worcestershire EXPLORE About Treatments Before & After Reviews VISIT Contact FAQ Aftercare Clinic Policies GET IN TOUCH 07401 562 462 Email us Instagram Facebook Book online © Cottage Aesthetics · Hartlebury, Worcestershire · Registered nurse-led clinic"
 }
