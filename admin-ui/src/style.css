@@ -209,6 +209,30 @@
   background: var(--wx-canvas);
 }
 
+.wx-settings-toggle {
+  flex: none;
+  font-size: 1rem;
+  line-height: 1;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wx-settings-toggle:hover {
+  background: var(--wx-canvas);
+}
+
+.wx-settings-toggle-active {
+  background: var(--wx-brand-blue-tint);
+  border-color: var(--wx-brand-blue-text);
+}
+
 /* -- Body: nav + main --------------------------------------------------------- */
 
 .wx-body {
@@ -1053,6 +1077,229 @@ div.wx-media-thumb {
   color: var(--wx-danger);
 }
 
+/* -- Settings panel (Uxer's Settings-view + Keyboard-Shortcuts mandate) --------- */
+
+.wx-settings-panel h2 {
+  margin: 0 0 12px;
+  font-size: 1.125rem;
+}
+
+.wx-settings-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--wx-border);
+}
+
+.wx-settings-tab {
+  font: 600 0.8125rem/1 system-ui, sans-serif;
+  padding: 8px 12px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--wx-muted);
+  cursor: pointer;
+}
+
+.wx-settings-tab:hover {
+  color: var(--wx-ink);
+}
+
+.wx-settings-tab-active {
+  color: var(--wx-brand-blue-text);
+  border-bottom-color: var(--wx-brand-blue-text);
+}
+
+.wx-settings-general {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 560px;
+}
+
+.wx-settings-section {
+  background: var(--wx-surface);
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wx-settings-section h3 {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.wx-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wx-settings-row-label {
+  font: 500 0.8125rem/1.4 system-ui, sans-serif;
+  color: var(--wx-ink);
+}
+
+.wx-settings-button-group {
+  display: flex;
+  gap: 4px;
+}
+
+.wx-settings-button-group button {
+  font: 600 0.75rem/1 system-ui, sans-serif;
+  padding: 6px 12px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-canvas);
+  color: var(--wx-ink);
+  cursor: pointer;
+}
+
+.wx-settings-button-active {
+  background: var(--wx-brand-blue);
+  border-color: var(--wx-brand-blue);
+  color: #fff;
+}
+
+.wx-settings-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--wx-muted);
+}
+
+.wx-settings-stepper {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-canvas);
+  padding: 2px;
+}
+
+.wx-settings-stepper button {
+  font: 600 0.8125rem/1 system-ui, sans-serif;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--wx-ink);
+  cursor: pointer;
+}
+
+.wx-settings-stepper button:hover {
+  background: var(--wx-surface);
+}
+
+.wx-settings-stepper-value {
+  font: 600 0.75rem/1 system-ui, sans-serif;
+  color: var(--wx-muted);
+  min-width: 36px;
+  text-align: center;
+}
+
+.wx-settings-reset-all {
+  align-self: flex-start;
+  font: 600 0.75rem/1 system-ui, sans-serif;
+  padding: 8px 12px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-danger);
+  background: var(--wx-danger-tint);
+  color: var(--wx-danger);
+  cursor: pointer;
+}
+
+.wx-settings-shortcuts-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.wx-settings-shortcuts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.wx-settings-shortcut-category {
+  background: var(--wx-surface);
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  padding: 10px 14px;
+}
+
+.wx-settings-shortcut-category h4 {
+  margin: 0 0 6px;
+  font-size: 0.75rem;
+  color: var(--wx-muted);
+}
+
+.wx-settings-shortcut-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--wx-border);
+}
+
+.wx-settings-shortcut-category h4 + .wx-settings-shortcut-row {
+  border-top: none;
+}
+
+.wx-settings-shortcut-disabled {
+  opacity: 0.55;
+}
+
+.wx-settings-shortcut-label {
+  flex: 1;
+  min-width: 140px;
+  font: 500 0.8125rem/1.4 system-ui, sans-serif;
+}
+
+.wx-settings-shortcut-binding {
+  font: 0.75rem/1 ui-monospace, monospace;
+  color: var(--wx-muted);
+  background: var(--wx-canvas);
+  border: 1px solid var(--wx-border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  min-width: 100px;
+  text-align: center;
+}
+
+.wx-settings-shortcut-rebind,
+.wx-settings-shortcut-toggle {
+  font: 600 0.75rem/1 system-ui, sans-serif;
+  padding: 6px 10px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  cursor: pointer;
+}
+
+.wx-settings-shortcut-rebind:hover,
+.wx-settings-shortcut-toggle:hover {
+  background: var(--wx-canvas);
+}
+
+.wx-settings-shortcut-rebind:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.wx-settings-shortcut-error {
+  flex-basis: 100%;
+  font-size: 0.75rem;
+  color: var(--wx-danger);
+}
+
 /* -- Toasts --------------------------------------------------------------------- */
 
 .wx-toast-region {
@@ -1524,5 +1771,21 @@ div.wx-media-thumb {
 
   .wx-chat-bubble {
     max-width: 92%;
+  }
+
+  /* Settings rows (label + controls side by side on desktop) stack instead
+     of squeezing a button group next to its label. Rebind/Disable/theme-
+     mode buttons carry real text labels and sit in their own list rows
+     (same tier as the pages/history table row actions above), so they get
+     the same 44px touch target; the topbar-mirroring +/- steppers stay
+     compact, matching the topbar's own icon-only zoom/font-scale controls. */
+  .wx-settings-row {
+    flex-wrap: wrap;
+  }
+
+  .wx-settings-button-group button,
+  .wx-settings-shortcut-rebind,
+  .wx-settings-shortcut-toggle {
+    min-height: 44px;
   }
 }

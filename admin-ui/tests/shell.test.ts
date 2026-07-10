@@ -5,9 +5,27 @@ import type { ChatPanel, ChatPanelDeps } from "../src/chatPanel";
 import type { EditView, MountEditViewDeps } from "../src/editView";
 import type { DraftOp } from "../src/protocol";
 
-function fakeWindow(): Window {
-  const listeners = new Map<string, Set<() => void>>();
-  let hash = "";
+function fakeStorage(): Storage {
+  const store = new Map<string, string>();
+  return {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => void store.set(key, value),
+    removeItem: (key: string) => void store.delete(key),
+    clear: () => store.clear(),
+    key: () => null,
+    get length() {
+      return store.size;
+    },
+  } as Storage;
+}
+
+/** `storage` is an explicit param (rather than always fresh) so a test can
+ * share one across two separate `fakeWindow()` calls — simulating a fresh
+ * page load reusing the same browser's localStorage (see the last-active-
+ * route restore test below). */
+function fakeWindow(opts: { storage?: Storage; initialHash?: string } = {}): Window {
+  const listeners = new Map<string, Set<(e?: Event) => void>>();
+  let hash = opts.initialHash ?? "";
   const win = {
     location: {
       get hash() {
@@ -19,13 +37,19 @@ function fakeWindow(): Window {
       },
       origin: "https://wixy.test",
     },
-    addEventListener: (type: string, listener: () => void) => {
+    localStorage: opts.storage ?? fakeStorage(),
+    addEventListener: (type: string, listener: (e?: Event) => void) => {
       if (!listeners.has(type)) listeners.set(type, new Set());
       listeners.get(type)?.add(listener);
     },
-    removeEventListener: (type: string, listener: () => void) => {
+    removeEventListener: (type: string, listener: (e?: Event) => void) => {
       listeners.get(type)?.delete(listener);
     },
+    dispatchEvent: (event: Event) => {
+      listeners.get(event.type)?.forEach((l) => l(event));
+      return true;
+    },
+    confirm: () => true,
   };
   return win as unknown as Window;
 }
@@ -502,5 +526,79 @@ describe("mountShell", () => {
     await Promise.resolve();
     expect(container.querySelectorAll(".wx-drawer")).toHaveLength(1);
     expect(container.querySelector(".wx-drawer-wide")).not.toBeNull();
+  });
+
+  it("the settings toggle navigates to #/settings and mounts the real settings panel", async () => {
+    const api = fakeApi();
+    const win = fakeWindow();
+    const container = document.createElement("div");
+
+    mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+    await flushState(api);
+
+    container.querySelector<HTMLButtonElement>(".wx-settings-toggle")?.click();
+    await Promise.resolve();
+
+    expect(win.location.hash).toBe("#/settings");
+    expect(container.querySelector(".wx-settings-panel")).not.toBeNull();
+    expect(container.querySelector(".wx-coming-soon")).toBeNull();
+  });
+
+  it("#/settings/shortcuts mounts the Keyboard Shortcuts sub-page", async () => {
+    const api = fakeApi();
+    const win = fakeWindow();
+    const container = document.createElement("div");
+
+    mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+    await flushState(api);
+
+    win.location.hash = "#/settings/shortcuts";
+    await Promise.resolve();
+
+    expect(container.querySelector(".wx-settings-shortcuts")).not.toBeNull();
+  });
+
+  it("Ctrl+Plus zooms in through the full stack (shortcuts.ts -> zoomController -> topbar label)", async () => {
+    const api = fakeApi();
+    const win = fakeWindow();
+    const container = document.createElement("div");
+
+    mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+    await flushState(api);
+
+    win.dispatchEvent(new KeyboardEvent("keydown", { ctrlKey: true, code: "Equal" }));
+
+    expect(container.querySelector(".wx-zoom-level")?.textContent).toBe("110%");
+  });
+
+  it("restores the last-active route on a fresh mount when the hash is empty, and an explicit hash still wins", async () => {
+    const storage = fakeStorage();
+    const api = fakeApi();
+
+    const win1 = fakeWindow({ storage });
+    const container1 = document.createElement("div");
+    mountShell(container1, { api, win: win1, mountEditView: fakeMountEditView().fn });
+    await flushState(api);
+    win1.location.hash = "#/media";
+    await Promise.resolve();
+
+    // Fresh "reload": a new shell, same storage, no hash.
+    const win2 = fakeWindow({ storage });
+    const container2 = document.createElement("div");
+    mountShell(container2, { api, win: win2, mountEditView: fakeMountEditView().fn });
+    await flushState(api);
+
+    expect(win2.location.hash).toBe("#/media");
+    expect(container2.querySelector(".wx-media-panel")).not.toBeNull();
+
+    // A THIRD "reload" with an explicit deep-link hash must win over the
+    // persisted route (normal web navigation expectations).
+    const win3 = fakeWindow({ storage, initialHash: "#/history" });
+    const container3 = document.createElement("div");
+    mountShell(container3, { api, win: win3, mountEditView: fakeMountEditView().fn });
+    await flushState(api);
+
+    expect(win3.location.hash).toBe("#/history");
+    expect(container3.querySelector(".wx-history-panel")).not.toBeNull();
   });
 });

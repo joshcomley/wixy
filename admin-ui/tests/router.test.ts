@@ -31,6 +31,15 @@ describe("parseHash", () => {
     expect(parseHash("#/chat/abc123")).toEqual({ kind: "chat", conversation: "abc123" });
   });
 
+  it("parses #/settings and #/settings/shortcuts", () => {
+    expect(parseHash("#/settings")).toEqual({ kind: "settings", page: "general" });
+    expect(parseHash("#/settings/shortcuts")).toEqual({ kind: "settings", page: "shortcuts" });
+  });
+
+  it("falls back to general for an unrecognized settings sub-page", () => {
+    expect(parseHash("#/settings/nonsense")).toEqual({ kind: "settings", page: "general" });
+  });
+
   it("falls back to pages for an unrecognized route", () => {
     expect(parseHash("#/nonsense")).toEqual({ kind: "pages" });
   });
@@ -46,6 +55,8 @@ describe("routeToHash", () => {
       { kind: "chat", conversation: null },
       { kind: "chat", conversation: "abc123" },
       { kind: "history" },
+      { kind: "settings", page: "general" },
+      { kind: "settings", page: "shortcuts" },
     ];
     for (const route of routes) {
       expect(parseHash(routeToHash(route))).toEqual(route);
@@ -61,6 +72,11 @@ describe("sameRoute", () => {
   it("compares the page for edit routes", () => {
     expect(sameRoute({ kind: "edit", page: "about" }, { kind: "edit", page: "about" })).toBe(true);
     expect(sameRoute({ kind: "edit", page: "about" }, { kind: "edit", page: "index" })).toBe(false);
+  });
+
+  it("compares the page for settings routes", () => {
+    expect(sameRoute({ kind: "settings", page: "general" }, { kind: "settings", page: "general" })).toBe(true);
+    expect(sameRoute({ kind: "settings", page: "general" }, { kind: "settings", page: "shortcuts" })).toBe(false);
   });
 
   it("is false across different kinds", () => {

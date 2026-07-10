@@ -46,9 +46,21 @@ declarations in style.css from px to rem so font-scale genuinely affects the who
 admin UI, not just the new controls' own labels; real-browser verification caught a
 genuine bug (keyboard-driven changes updated state but not the visible topbar label)
 fixed via an `onChange` callback on both controllers — see decisions/00046 for full
-reasoning. Slices 4-7 remain - continue in the same branch-per-slice, PR, wait-green,
-merge discipline as the rest of this project.
+reasoning, incl. an unrelated CI-only CRLF sourcemap drift + gh/git-via-Bash hangs
+both root-caused and fixed there too — PR #58 merged.
+Slice 4 (Settings view + keyboard shortcuts + session persistence) done: centralized
+keyboard-shortcut matching into a new `shortcuts.ts` registry (rebindable/disableable,
+replacing slice 3's per-module hardcoded matching), upgraded theme/zoom/fontScale
+controllers from a single `onChange` to real multi-subscriber `subscribe()` (fixing a
+second latent instance of slice 3's staleness bug, this time in theme.ts's
+OS-preference listener), added `sessionState.ts` for last-active-route persistence,
+and a new `settingsPanel.ts` (General + Keyboard Shortcuts tabs) reachable via a new
+topbar gear icon. 27-check real-browser verification incl. the full rebind flow with
+genuine keypresses — see decisions/00047 for full reasoning.
+Slices 5-7 remain - continue in the same branch-per-slice, PR, wait-green, merge
+discipline as the rest of this project.
 
 ## Links
 PR (slice 1): #57 (merged)
-PR (slice 3): (fill in when opened)
+PR (slice 3): #58 (merged)
+PR (slice 4): (fill in when opened)

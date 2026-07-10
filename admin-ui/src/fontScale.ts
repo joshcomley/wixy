@@ -6,6 +6,10 @@
 // in localStorage so the level survives reloads; admin_shell.html's own
 // inline bootstrap script applies the persisted level synchronously before
 // first paint (no flash of the wrong size).
+//
+// A pure state controller — no keyboard handling of its own; see zoom.ts's
+// header for why (shortcuts.ts now owns matching, shell.ts registers
+// `increase`/`decrease` as commands there).
 
 export type FontScaleLevel = number; // a percentage, e.g. 100 = 100%
 
@@ -33,40 +37,22 @@ function applyFontScale(level: FontScaleLevel, doc: Document = document): void {
   doc.documentElement.style.fontSize = `${level}%`;
 }
 
-type FontScaleAction = "up" | "down";
-
-/** Matches on the physical key (`KeyboardEvent.code`), mirroring
- * zoom.ts's matchShortcut — see that file for why `.code` + shiftKey (not
- * `.key`) is what cleanly separates Ctrl+Shift+Plus from Ctrl+Plus. */
-function matchShortcut(e: KeyboardEvent): FontScaleAction | null {
-  if (!e.ctrlKey || e.metaKey || !e.shiftKey || e.altKey) return null;
-  if (e.code === "Equal" || e.code === "NumpadAdd") return "up";
-  if (e.code === "Minus" || e.code === "NumpadSubtract") return "down";
-  return null;
-}
-
 export interface FontScaleController {
   getLevel(): FontScaleLevel;
   setLevel(level: FontScaleLevel): void;
   increase(): void;
   decrease(): void;
   reset(): void;
-  teardown(): void;
+  /** See zoom.ts's ZoomController.subscribe for why this exists — same
+   * multi-renderer staleness reasoning applies here. */
+  subscribe(listener: (level: FontScaleLevel) => void): () => void;
 }
 
-/** Wires up font-scale for the lifetime of the shell: applies the persisted
- * level immediately and listens globally for Ctrl+Shift+Plus/Minus.
- * `onChange` fires after every level change regardless of source (button
- * click or keyboard shortcut) — see zoom.ts's `initZoom` for why a caller
- * rendering a percentage label needs this rather than only re-rendering
- * from its own click handlers. */
-export function initFontScale(
-  win: Window = window,
-  doc: Document = document,
-  onChange?: (level: FontScaleLevel) => void,
-): FontScaleController {
+export function initFontScale(win: Window = window, doc: Document = document): FontScaleController {
   let level = loadFontScale(win);
   applyFontScale(level, doc);
+
+  const listeners = new Set<(level: FontScaleLevel) => void>();
 
   function setLevel(next: FontScaleLevel): void {
     level = clamp(next);
@@ -76,17 +62,8 @@ export function initFontScale(
       // best-effort persistence only
     }
     applyFontScale(level, doc);
-    onChange?.(level);
+    listeners.forEach((l) => l(level));
   }
-
-  const onKeydown = (e: KeyboardEvent): void => {
-    const action = matchShortcut(e);
-    if (action === null) return;
-    e.preventDefault();
-    if (action === "up") setLevel(level + FONT_SCALE_STEP);
-    else setLevel(level - FONT_SCALE_STEP);
-  };
-  win.addEventListener("keydown", onKeydown);
 
   return {
     getLevel: () => level,
@@ -94,6 +71,9 @@ export function initFontScale(
     increase: () => setLevel(level + FONT_SCALE_STEP),
     decrease: () => setLevel(level - FONT_SCALE_STEP),
     reset: () => setLevel(FONT_SCALE_DEFAULT),
-    teardown: () => win.removeEventListener("keydown", onKeydown),
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
   };
 }

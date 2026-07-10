@@ -17,22 +17,12 @@ function fakeStorage(): Storage {
 
 function fakeWindow(opts: { storage?: Storage } = {}): Window {
   const storage = opts.storage ?? fakeStorage();
-  const target = new EventTarget();
-  return {
-    localStorage: storage,
-    addEventListener: target.addEventListener.bind(target),
-    removeEventListener: target.removeEventListener.bind(target),
-    dispatchEvent: target.dispatchEvent.bind(target),
-  } as unknown as Window;
+  return { localStorage: storage } as unknown as Window;
 }
 
 function fakeDocument(): Document {
   const html = document.createElement("html");
   return { documentElement: html } as unknown as Document;
-}
-
-function keydown(win: Window, init: KeyboardEventInit): void {
-  win.dispatchEvent(new KeyboardEvent("keydown", { cancelable: true, ...init }));
 }
 
 describe("loadZoomLevel", () => {
@@ -110,83 +100,40 @@ describe("initZoom", () => {
     expect(controller.getLevel()).toBe(ZOOM_DEFAULT);
   });
 
-  it("Ctrl+Equal zooms in and prevents the default (native) zoom", () => {
-    const win = fakeWindow();
+  it("subscribe fires with the new level on every change", () => {
     const doc = fakeDocument();
-    const controller = initZoom(win, doc);
-    const event = new KeyboardEvent("keydown", { cancelable: true, ctrlKey: true, code: "Equal" });
-    win.dispatchEvent(event);
-    expect(controller.getLevel()).toBe(ZOOM_DEFAULT + ZOOM_STEP);
-    expect(event.defaultPrevented).toBe(true);
-  });
-
-  it("Ctrl+Minus zooms out", () => {
-    const win = fakeWindow();
-    const doc = fakeDocument();
-    const controller = initZoom(win, doc);
-    keydown(win, { ctrlKey: true, code: "Minus" });
-    expect(controller.getLevel()).toBe(ZOOM_DEFAULT - ZOOM_STEP);
-  });
-
-  it("Ctrl+Digit0 resets to ZOOM_DEFAULT", () => {
-    const win = fakeWindow();
-    const doc = fakeDocument();
-    const controller = initZoom(win, doc);
-    controller.setLevel(170);
-    keydown(win, { ctrlKey: true, code: "Digit0" });
-    expect(controller.getLevel()).toBe(ZOOM_DEFAULT);
-  });
-
-  it("ignores Ctrl+Shift+Equal (that's fontScale's shortcut, not zoom's)", () => {
-    const win = fakeWindow();
-    const doc = fakeDocument();
-    const controller = initZoom(win, doc);
-    keydown(win, { ctrlKey: true, shiftKey: true, code: "Equal" });
-    expect(controller.getLevel()).toBe(ZOOM_DEFAULT);
-  });
-
-  it("ignores a plain Equal keydown with no modifier", () => {
-    const win = fakeWindow();
-    const doc = fakeDocument();
-    const controller = initZoom(win, doc);
-    keydown(win, { code: "Equal" });
-    expect(controller.getLevel()).toBe(ZOOM_DEFAULT);
-  });
-
-  it("teardown stops listening for shortcuts", () => {
-    const win = fakeWindow();
-    const doc = fakeDocument();
-    const controller = initZoom(win, doc);
-    controller.teardown();
-    keydown(win, { ctrlKey: true, code: "Equal" });
-    expect(controller.getLevel()).toBe(ZOOM_DEFAULT);
-  });
-
-  it("onChange fires with the new level on a button-driven call", () => {
-    const win = fakeWindow();
-    const doc = fakeDocument();
+    const controller = initZoom(fakeWindow(), doc);
     const levels: number[] = [];
-    const controller = initZoom(win, doc, (level) => levels.push(level));
+    controller.subscribe((level) => levels.push(level));
     controller.zoomIn();
-    expect(levels).toEqual([ZOOM_DEFAULT + ZOOM_STEP]);
+    controller.zoomIn();
+    controller.reset();
+    expect(levels).toEqual([ZOOM_DEFAULT + ZOOM_STEP, ZOOM_DEFAULT + 2 * ZOOM_STEP, ZOOM_DEFAULT]);
   });
 
-  it("onChange also fires for a keyboard-shortcut-driven change — this is the exact gap that left shell.ts's topbar percentage label stale after Ctrl+Plus/Minus/0, caught only by real-browser verification, not by asserting on controller state alone", () => {
-    const win = fakeWindow();
+  it("supports multiple independent subscribers — the topbar label and Settings > General both watch the same controller", () => {
     const doc = fakeDocument();
-    const levels: number[] = [];
-    initZoom(win, doc, (level) => levels.push(level));
-    keydown(win, { ctrlKey: true, code: "Equal" });
-    keydown(win, { ctrlKey: true, code: "Digit0" });
-    expect(levels).toEqual([ZOOM_DEFAULT + ZOOM_STEP, ZOOM_DEFAULT]);
+    const controller = initZoom(fakeWindow(), doc);
+    const a: number[] = [];
+    const b: number[] = [];
+    controller.subscribe((level) => a.push(level));
+    controller.subscribe((level) => b.push(level));
+    controller.zoomIn();
+    expect(a).toEqual([ZOOM_DEFAULT + ZOOM_STEP]);
+    expect(b).toEqual([ZOOM_DEFAULT + ZOOM_STEP]);
   });
 
-  it("onChange does not fire for an unmatched keydown", () => {
-    const win = fakeWindow();
+  it("unsubscribe stops further notifications to that listener only", () => {
     const doc = fakeDocument();
-    const levels: number[] = [];
-    initZoom(win, doc, (level) => levels.push(level));
-    keydown(win, { code: "Equal" }); // no Ctrl
-    expect(levels).toEqual([]);
+    const controller = initZoom(fakeWindow(), doc);
+    const a: number[] = [];
+    const b: number[] = [];
+    const unsubA = controller.subscribe((level) => a.push(level));
+    controller.subscribe((level) => b.push(level));
+    controller.zoomIn();
+    unsubA();
+    controller.zoomIn();
+    expect(a).toEqual([ZOOM_DEFAULT + ZOOM_STEP]);
+    expect(b).toEqual([ZOOM_DEFAULT + ZOOM_STEP, ZOOM_DEFAULT + 2 * ZOOM_STEP]);
   });
 });

@@ -43,6 +43,16 @@ export interface ThemeController {
   getMode(): ThemeMode;
   /** Sets and persists the mode, applying the resolved variant immediately. */
   setMode(mode: ThemeMode): void;
+  /** Fires after every mode change AND after a live OS-preference change
+   * while mode === "system" — the latter used to be silent (only
+   * `applyVariant` ran, no external notification), which is harmless for
+   * the topbar toggle today (its icon is keyed by mode, not resolved
+   * variant, so it never visibly went stale) but would bite the first
+   * renderer that also shows the *resolved* variant (Settings > General,
+   * slice 4). Fixed here on the same reasoning as zoom.ts/fontScale.ts's
+   * subscribe (see decisions/00046) rather than leaving an equivalent bug
+   * for the next surface to rediscover. */
+  subscribe(listener: (mode: ThemeMode, variant: ThemeVariant) => void): () => void;
   teardown(): void;
 }
 
@@ -53,9 +63,18 @@ export function initTheme(win: Window = window, doc: Document = document): Theme
   let mode = loadThemeMode(win);
   applyVariant(resolveVariant(mode, win), doc);
 
+  const listeners = new Set<(mode: ThemeMode, variant: ThemeVariant) => void>();
+  function notify(): void {
+    const variant = resolveVariant(mode, win);
+    listeners.forEach((l) => l(mode, variant));
+  }
+
   const media = win.matchMedia?.("(prefers-color-scheme: dark)");
   const onSystemChange = (): void => {
-    if (mode === "system") applyVariant(resolveVariant(mode, win), doc);
+    if (mode === "system") {
+      applyVariant(resolveVariant(mode, win), doc);
+      notify();
+    }
   };
   media?.addEventListener?.("change", onSystemChange);
 
@@ -69,6 +88,11 @@ export function initTheme(win: Window = window, doc: Document = document): Theme
         // best-effort persistence only
       }
       applyVariant(resolveVariant(next, win), doc);
+      notify();
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
     },
     teardown: () => media?.removeEventListener?.("change", onSystemChange),
   };
