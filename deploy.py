@@ -412,15 +412,26 @@ def _probe_health() -> bool:
     return False
 
 
-def post_restart(ctx: dict, svc: Service) -> None:
+def post_restart(ctx: dict) -> None:
+    """Single ``ctx`` argument — NOT ``(ctx, svc)``. Found via a real deploy:
+    Slots' executor (``slot_swap_deploy.hook_runner._BOOTSTRAP``) always invokes a
+    hook as ``fn(ctx)``; a ``svc`` parameter is only ever supplied by the
+    ``--poll`` CLI's in-process ``Deploy.run()`` path (unused in production —
+    Slots' executor is the only thing that actually runs this hook). cor's own
+    deploy.py, which this file was modeled on, carries the 2-arg signature too —
+    presumably only ever exercised via ``--poll`` there, never caught since cor's
+    executor-mode runs never happened to raise from inside this specific hook.
+    wixy has exactly one service (SERVICE_NAME), so the ``svc.name ==
+    SERVICE_NAME`` gate this used to have was always true anyway — dropped, not
+    replaced with a ctx-based equivalent."""
     global _HEALTH_PROBED_THIS_CYCLE
-    if svc.name == SERVICE_NAME and not _HEALTH_PROBED_THIS_CYCLE:
+    if not _HEALTH_PROBED_THIS_CYCLE:
         _HEALTH_PROBED_THIS_CYCLE = True
         if _probe_health():
-            print(f"[wixy] /healthz 200 OK after {svc.name} restart", flush=True)
+            print(f"[wixy] /healthz 200 OK after {SERVICE_NAME} restart", flush=True)
         else:
             print(
-                f"[wixy] WARNING: /healthz did not respond after {svc.name} "
+                f"[wixy] WARNING: /healthz did not respond after {SERVICE_NAME} "
                 f"restart; consider `python deploy.py --rollback`.",
                 flush=True,
             )
