@@ -1,187 +1,45 @@
 {
-  "console_errors": [],
-  "images": [],
-  "links": [
-    [
-      "About",
-      "/about.html"
-    ],
-    [
-      "About",
-      "/about.html"
-    ],
-    [
-      "About",
-      "/about.html"
-    ],
-    [
-      "Aftercare",
-      "/aftercare.html"
-    ],
-    [
-      "Book Now",
-      "/aftercare.html#"
-    ],
-    [
-      "Book Now",
-      "/aftercare.html#"
-    ],
-    [
-      "Book online",
-      "/aftercare.html#"
-    ],
-    [
-      "Contact",
-      "/contact.html"
-    ],
-    [
-      "Contact",
-      "/contact.html"
-    ],
-    [
-      "Contact",
-      "/contact.html"
-    ],
-    [
-      "Contact Purdi",
-      "/contact.html"
-    ],
-    [
-      "FAQ",
-      "/faq.html"
-    ],
-    [
-      "Before & After",
-      "/gallery.html"
-    ],
-    [
-      "Before & After",
-      "/gallery.html"
-    ],
-    [
-      "Before & After",
-      "/gallery.html"
-    ],
-    [
-      "CottageAesthetics",
-      "/index.html"
-    ],
-    [
-      "Clinic Policies",
-      "/policies.html"
-    ],
-    [
-      "Reviews",
-      "/reviews.html"
-    ],
-    [
-      "Reviews",
-      "/reviews.html"
-    ],
-    [
-      "Reviews",
-      "/reviews.html"
-    ],
-    [
-      "Treatments",
-      "/treatments.html"
-    ],
-    [
-      "Treatments",
-      "/treatments.html"
-    ],
-    [
-      "Treatments",
-      "/treatments.html"
-    ],
-    [
-      "Facebook",
-      "https://www.facebook.com/profile.php?id=61572079150383"
-    ],
-    [
-      "Instagram",
-      "https://www.instagram.com/cottageaesthetics"
-    ],
-    [
-      "Email us",
-      "mailto:cottageaestheticshartlebury@gmail.com"
-    ],
-    [
-      "07401 562 462",
-      "tel:07401562462"
-    ]
+  "console_errors": [
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)"
   ],
+  "images": [],
+  "links": [],
   "styles": {
-    ".eyebrow": {
-      "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(230, 185, 143)",
-      "font-family": "Jost, system-ui, sans-serif",
-      "font-size": "11.84px",
-      "font-weight": "400"
-    },
-    "a.btn-olive": {
-      "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(86, 91, 67)",
-      "font-family": "Jost, system-ui, sans-serif",
-      "font-size": "13.12px",
-      "font-weight": "300"
-    },
-    "a.btn-primary": {
-      "background-color": "rgb(178, 110, 74)",
-      "color": "rgb(253, 247, 238)",
-      "font-family": "Jost, system-ui, sans-serif",
-      "font-size": "13.12px",
-      "font-weight": "300"
-    },
     "body": {
-      "background-color": "rgb(241, 232, 217)",
-      "color": "rgb(62, 49, 42)",
-      "font-family": "Jost, system-ui, sans-serif",
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(0, 0, 0)",
+      "font-family": "\"Times New Roman\"",
       "font-size": "16px",
-      "font-weight": "300"
-    },
-    "footer.site-footer": {
-      "background-color": "rgb(62, 49, 42)",
-      "color": "rgb(203, 184, 159)",
-      "font-family": "Jost, system-ui, sans-serif",
-      "font-size": "13.12px",
-      "font-weight": "300"
+      "font-weight": "400"
     },
     "h1": {
       "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(255, 255, 255)",
-      "font-family": "\"Cormorant Garamond\", serif",
-      "font-size": "59.2px",
-      "font-weight": "500"
-    },
-    "h2": {
-      "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(94, 70, 53)",
-      "font-family": "\"Cormorant Garamond\", serif",
-      "font-size": "36.8px",
-      "font-weight": "500"
-    },
-    "header#hd": {
-      "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(62, 49, 42)",
-      "font-family": "Jost, system-ui, sans-serif",
-      "font-size": "16px",
-      "font-weight": "300"
-    },
-    "nav.nav-links": {
-      "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(62, 49, 42)",
-      "font-family": "Jost, system-ui, sans-serif",
-      "font-size": "16px",
-      "font-weight": "300"
+      "color": "rgb(0, 0, 0)",
+      "font-family": "\"Times New Roman\"",
+      "font-size": "32px",
+      "font-weight": "700"
     },
     "p": {
       "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(230, 185, 143)",
-      "font-family": "Jost, system-ui, sans-serif",
-      "font-size": "11.84px",
+      "color": "rgb(0, 0, 0)",
+      "font-family": "\"Times New Roman\"",
+      "font-size": "16px",
       "font-weight": "400"
     }
   },
-  "text": "Cottage AESTHETICS ABOUT TREATMENTS BEFORE & AFTER REVIEWS CONTACT BOOK NOW LOOKING AFTER YOUR RESULTS Aftercare Great results continue at home. You'll always receive personalised aftercare at your appointment — this is a general guide. General guidance only — Purdi to confirm the exact, treatment-specific aftercare wording before launch. Your personalised aftercare is always given in clinic. In the first 24 hours Avoid touching, rubbing or applying pressure to the treated area. Keep the area clean and avoid makeup where advised. Avoid strenuous exercise, saunas, steam rooms and very hot showers. Skip alcohol and stay well hydrated. Over the following days Protect the skin with a broad-spectrum SPF and avoid direct sun / sunbeds. Avoid facials, exfoliation or active skincare until advised it's safe. Some redness, swelling or tenderness can be normal and usually settles quickly. When to get in touch If you have any concerns at all after your treatment, please contact Purdi straight away — you're never left to wonder. Your safety and comfort always come first. Questions about your aftercare? CONTACT PURDI Cottage Aesthetics Nurse-led medical aesthetics Hartlebury, Worcestershire EXPLORE About Treatments Before & After Reviews VISIT Contact FAQ Aftercare Clinic Policies GET IN TOUCH 07401 562 462 Email us Instagram Facebook Book online © Cottage Aesthetics · Hartlebury, Worcestershire · Registered nurse-led clinic"
+  "text": "Error response Error code: 404 Message: File not found. Error code explanation: 404 - Nothing matches the given URI."
 }

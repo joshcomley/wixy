@@ -1,187 +1,37 @@
 {
-  "console_errors": [],
-  "images": [],
-  "links": [
-    [
-      "About",
-      "/about.html"
-    ],
-    [
-      "About",
-      "/about.html"
-    ],
-    [
-      "About",
-      "/about.html"
-    ],
-    [
-      "Aftercare",
-      "/aftercare.html"
-    ],
-    [
-      "Contact",
-      "/contact.html"
-    ],
-    [
-      "Contact",
-      "/contact.html"
-    ],
-    [
-      "Contact",
-      "/contact.html"
-    ],
-    [
-      "Contact Purdi",
-      "/contact.html"
-    ],
-    [
-      "FAQ",
-      "/faq.html"
-    ],
-    [
-      "Before & After",
-      "/gallery.html"
-    ],
-    [
-      "Before & After",
-      "/gallery.html"
-    ],
-    [
-      "Before & After",
-      "/gallery.html"
-    ],
-    [
-      "CottageAesthetics",
-      "/index.html"
-    ],
-    [
-      "Clinic Policies",
-      "/policies.html"
-    ],
-    [
-      "Book Now",
-      "/policies.html#"
-    ],
-    [
-      "Book Now",
-      "/policies.html#"
-    ],
-    [
-      "Book online",
-      "/policies.html#"
-    ],
-    [
-      "Reviews",
-      "/reviews.html"
-    ],
-    [
-      "Reviews",
-      "/reviews.html"
-    ],
-    [
-      "Reviews",
-      "/reviews.html"
-    ],
-    [
-      "Treatments",
-      "/treatments.html"
-    ],
-    [
-      "Treatments",
-      "/treatments.html"
-    ],
-    [
-      "Treatments",
-      "/treatments.html"
-    ],
-    [
-      "Facebook",
-      "https://www.facebook.com/profile.php?id=61572079150383"
-    ],
-    [
-      "Instagram",
-      "https://www.instagram.com/cottageaesthetics"
-    ],
-    [
-      "Email us",
-      "mailto:cottageaestheticshartlebury@gmail.com"
-    ],
-    [
-      "07401 562 462",
-      "tel:07401562462"
-    ]
+  "console_errors": [
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)"
   ],
+  "images": [],
+  "links": [],
   "styles": {
-    ".eyebrow": {
-      "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(230, 185, 143)",
-      "font-family": "Jost, system-ui, sans-serif",
-      "font-size": "11.84px",
-      "font-weight": "400"
-    },
-    "a.btn-olive": {
-      "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(86, 91, 67)",
-      "font-family": "Jost, system-ui, sans-serif",
-      "font-size": "13.12px",
-      "font-weight": "300"
-    },
-    "a.btn-primary": {
-      "background-color": "rgb(178, 110, 74)",
-      "color": "rgb(253, 247, 238)",
-      "font-family": "Jost, system-ui, sans-serif",
-      "font-size": "13.12px",
-      "font-weight": "300"
-    },
     "body": {
-      "background-color": "rgb(241, 232, 217)",
-      "color": "rgb(62, 49, 42)",
-      "font-family": "Jost, system-ui, sans-serif",
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(0, 0, 0)",
+      "font-family": "\"Times New Roman\"",
       "font-size": "16px",
-      "font-weight": "300"
-    },
-    "footer.site-footer": {
-      "background-color": "rgb(62, 49, 42)",
-      "color": "rgb(203, 184, 159)",
-      "font-family": "Jost, system-ui, sans-serif",
-      "font-size": "13.12px",
-      "font-weight": "300"
+      "font-weight": "400"
     },
     "h1": {
       "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(255, 255, 255)",
-      "font-family": "\"Cormorant Garamond\", serif",
-      "font-size": "59.2px",
-      "font-weight": "500"
-    },
-    "h2": {
-      "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(94, 70, 53)",
-      "font-family": "\"Cormorant Garamond\", serif",
-      "font-size": "36.8px",
-      "font-weight": "500"
-    },
-    "header#hd": {
-      "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(62, 49, 42)",
-      "font-family": "Jost, system-ui, sans-serif",
-      "font-size": "16px",
-      "font-weight": "300"
-    },
-    "nav.nav-links": {
-      "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(62, 49, 42)",
-      "font-family": "Jost, system-ui, sans-serif",
-      "font-size": "16px",
-      "font-weight": "300"
+      "color": "rgb(0, 0, 0)",
+      "font-family": "\"Times New Roman\"",
+      "font-size": "32px",
+      "font-weight": "700"
     },
     "p": {
       "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(230, 185, 143)",
-      "font-family": "Jost, system-ui, sans-serif",
-      "font-size": "11.84px",
+      "color": "rgb(0, 0, 0)",
+      "font-family": "\"Times New Roman\"",
+      "font-size": "16px",
       "font-weight": "400"
     }
   },
-  "text": "Cottage AESTHETICS ABOUT TREATMENTS BEFORE & AFTER REVIEWS CONTACT BOOK NOW THE DETAILS Clinic Policies A little clarity so your visit is relaxed and stress-free. Draft policy text — placeholder figures below (deposit amount, notice period). Purdi to set her actual terms before launch. Deposits A small deposit may be required to secure your appointment. This is deducted from the total cost of your treatment on the day. Cancellations & rescheduling Please give at least [48 hours'] notice if you need to cancel or rearrange, so the appointment can be offered to someone else. Cancellations with less notice may result in the deposit being retained. Late arrivals Appointments are never rushed, so timing matters. If you arrive late, your treatment may need to be shortened to protect the following client's appointment, or rearranged where necessary. Prescription treatments Prescription treatments (such as anti-wrinkle injections) require a face-to-face prescriber consultation to assess suitability and cannot be booked directly online. Your comfort & safety If you feel unwell, or have any concerns before your appointment, please get in touch — your wellbeing always comes first, and there's never any pressure to proceed. Any questions? CONTACT PURDI Cottage Aesthetics Nurse-led medical aesthetics Hartlebury, Worcestershire EXPLORE About Treatments Before & After Reviews VISIT Contact FAQ Aftercare Clinic Policies GET IN TOUCH 07401 562 462 Email us Instagram Facebook Book online © Cottage Aesthetics · Hartlebury, Worcestershire · Registered nurse-led clinic"
+  "text": "Error response Error code: 404 Message: File not found. Error code explanation: 404 - Nothing matches the given URI."
 }

@@ -1,221 +1,39 @@
 {
-  "console_errors": [],
-  "images": [
-    [
-      "/gallery.html",
-      0,
-      0
-    ],
-    [
-      "/images/ba-cheeks-after.jpg",
-      640,
-      320
-    ],
-    [
-      "/images/ba-cheeks-before.jpg",
-      640,
-      320
-    ],
-    [
-      "/images/ba-chin.jpg",
-      640,
-      640
-    ],
-    [
-      "/images/ba-lips-1-after.jpg",
-      640,
-      320
-    ],
-    [
-      "/images/ba-lips-1-before.jpg",
-      640,
-      320
-    ],
-    [
-      "/images/ba-lips-2-after.jpg",
-      448,
-      240
-    ],
-    [
-      "/images/ba-lips-2-before.jpg",
-      448,
-      240
-    ]
+  "console_errors": [
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)"
   ],
-  "links": [
-    [
-      "About",
-      "/about.html"
-    ],
-    [
-      "About",
-      "/about.html"
-    ],
-    [
-      "About",
-      "/about.html"
-    ],
-    [
-      "Aftercare",
-      "/aftercare.html"
-    ],
-    [
-      "Contact",
-      "/contact.html"
-    ],
-    [
-      "Contact",
-      "/contact.html"
-    ],
-    [
-      "Contact",
-      "/contact.html"
-    ],
-    [
-      "FAQ",
-      "/faq.html"
-    ],
-    [
-      "Before & After",
-      "/gallery.html"
-    ],
-    [
-      "Before & After",
-      "/gallery.html"
-    ],
-    [
-      "Before & After",
-      "/gallery.html"
-    ],
-    [
-      "Book Now",
-      "/gallery.html#"
-    ],
-    [
-      "Book Now",
-      "/gallery.html#"
-    ],
-    [
-      "Book a Free Consultation",
-      "/gallery.html#"
-    ],
-    [
-      "Book online",
-      "/gallery.html#"
-    ],
-    [
-      "CottageAesthetics",
-      "/index.html"
-    ],
-    [
-      "Clinic Policies",
-      "/policies.html"
-    ],
-    [
-      "Reviews",
-      "/reviews.html"
-    ],
-    [
-      "Reviews",
-      "/reviews.html"
-    ],
-    [
-      "Reviews",
-      "/reviews.html"
-    ],
-    [
-      "Treatments",
-      "/treatments.html"
-    ],
-    [
-      "Treatments",
-      "/treatments.html"
-    ],
-    [
-      "Treatments",
-      "/treatments.html"
-    ],
-    [
-      "Facebook",
-      "https://www.facebook.com/profile.php?id=61572079150383"
-    ],
-    [
-      "Instagram",
-      "https://www.instagram.com/cottageaesthetics"
-    ],
-    [
-      "Email us",
-      "mailto:cottageaestheticshartlebury@gmail.com"
-    ],
-    [
-      "07401 562 462",
-      "tel:07401562462"
-    ]
-  ],
+  "images": [],
+  "links": [],
   "styles": {
-    ".eyebrow": {
-      "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(178, 110, 74)",
-      "font-family": "Jost, sans-serif",
-      "font-size": "11.2px",
-      "font-weight": "400"
-    },
-    "a.btn-primary": {
-      "background-color": "rgb(178, 110, 74)",
-      "color": "rgb(253, 247, 238)",
-      "font-family": "Jost, system-ui, sans-serif",
-      "font-size": "13.12px",
-      "font-weight": "300"
-    },
     "body": {
-      "background-color": "rgb(241, 232, 217)",
-      "color": "rgb(62, 49, 42)",
-      "font-family": "Jost, system-ui, sans-serif",
+      "background-color": "rgba(0, 0, 0, 0)",
+      "color": "rgb(0, 0, 0)",
+      "font-family": "\"Times New Roman\"",
       "font-size": "16px",
-      "font-weight": "300"
-    },
-    "footer.site-footer": {
-      "background-color": "rgb(62, 49, 42)",
-      "color": "rgb(203, 184, 159)",
-      "font-family": "Jost, system-ui, sans-serif",
-      "font-size": "13.12px",
-      "font-weight": "300"
+      "font-weight": "400"
     },
     "h1": {
       "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(255, 255, 255)",
-      "font-family": "\"Cormorant Garamond\", serif",
-      "font-size": "59.2px",
-      "font-weight": "500"
-    },
-    "h2": {
-      "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(62, 49, 42)",
-      "font-family": "\"Cormorant Garamond\", serif",
-      "font-size": "38.4px",
-      "font-weight": "500"
-    },
-    "header#hd": {
-      "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(62, 49, 42)",
-      "font-family": "Jost, system-ui, sans-serif",
-      "font-size": "16px",
-      "font-weight": "300"
-    },
-    "nav.nav-links": {
-      "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(62, 49, 42)",
-      "font-family": "Jost, system-ui, sans-serif",
-      "font-size": "16px",
-      "font-weight": "300"
+      "color": "rgb(0, 0, 0)",
+      "font-family": "\"Times New Roman\"",
+      "font-size": "32px",
+      "font-weight": "700"
     },
     "p": {
       "background-color": "rgba(0, 0, 0, 0)",
-      "color": "rgb(224, 207, 181)",
-      "font-family": "Jost, system-ui, sans-serif",
+      "color": "rgb(0, 0, 0)",
+      "font-family": "\"Times New Roman\"",
       "font-size": "16px",
-      "font-weight": "300"
+      "font-weight": "400"
     }
   },
-  "text": "Cottage AESTHETICS ABOUT TREATMENTS BEFORE & AFTER REVIEWS CONTACT BOOK NOW Before & After Genuine, unretouched results — shared only with each client's full consent. Drag the slider to reveal the after. Every photo below is a real Cottage Aesthetics client, shared with their permission and shown exactly as taken — no filters, no retouching. More treatment galleries (microneedling, skin boosters, polynucleotides) are added as further consented photos come in. ALL LIPS CHEEKS CHIN & JAW DRAG TO COMPARE See the difference Pull the handle across each photo to reveal the result. BEFORE AFTER DRAG ← → Lip Enhancement DERMAL FILLER BEFORE AFTER DRAG ← → Lip Definition DERMAL FILLER BEFORE AFTER DRAG ← → Cheek & Lip Definition DERMAL FILLER MORE RESULTS Tap to view full size A closer look at further transformations, from more angles. CHIN & JAW FILLER Curious what's possible for you? BOOK A FREE CONSULTATION Cottage Aesthetics Nurse-led medical aesthetics Hartlebury, Worcestershire EXPLORE About Treatments Before & After Reviews VISIT Contact FAQ Aftercare Clinic Policies GET IN TOUCH 07401 562 462 Email us Instagram Facebook Book online © Cottage Aesthetics · Hartlebury, Worcestershire · Registered nurse-led clinic"
+  "text": "Error response Error code: 404 Message: File not found. Error code explanation: 404 - Nothing matches the given URI."
 }
