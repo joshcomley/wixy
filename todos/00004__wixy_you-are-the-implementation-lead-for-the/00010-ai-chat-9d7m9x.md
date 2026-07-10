@@ -68,4 +68,4 @@ instructing it). E2E 7 (scripted fake replies, tool rows, status transitions, se
 on 502, offline banner) still PLANNED (slice 5).
 
 ## Links
-PR (slice 1): (fill in when opened)
+PR (slice 1): https://github.com/joshcomley/wixy/pull/40 (merged 19a6839)
