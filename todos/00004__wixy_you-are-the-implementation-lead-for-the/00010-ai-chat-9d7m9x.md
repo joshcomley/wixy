@@ -114,4 +114,4 @@ spec/05 read; this slice replaces it for real.
 ## Links
 PR (slice 1): https://github.com/joshcomley/wixy/pull/40 (merged 19a6839)
 PR (slice 2): https://github.com/joshcomley/wixy/pull/41 (merged 62d8633)
-PR (slice 3): (fill in when opened)
+PR (slice 3): https://github.com/joshcomley/wixy/pull/42 (merged fa3dd0a)
