@@ -3,11 +3,18 @@
 // `/api/admin/state` (fleet instant-render rule: the shell chrome below paints
 // synchronously in `mountShell`; panel content/data arrives async into
 // skeletons). Owns the ONE OpQueue for the whole session (spec/05 §2: "the shell
-// owns state") — panels never construct their own.
+// owns state") — panels never construct their own. Also owns every Uxer
+// session-persisted view control (theme.ts, zoom.ts, fontScale.ts,
+// shortcuts.ts) for the shell's lifetime — keyboard shortcuts are matched
+// centrally by shortcuts.ts (shell.ts just registers commands wired to each
+// controller's methods), and every controller's `subscribe` drives both the
+// topbar chrome AND (when mounted) the Settings panel from the same source
+// of truth.
 
 import { createApi, type AdminApi, type StateResponse } from "./api";
 import { mountChatPanel as mountChatPanelReal, type ChatPanel, type ChatPanelDeps } from "./chatPanel";
 import { mountEditView as mountEditViewReal, type EditView, type MountEditViewDeps } from "./editView";
+import { initFontScale, type FontScaleController } from "./fontScale";
 import { mountHistoryPanel } from "./historyPanel";
 import { mountMediaPanel, type MediaPanel } from "./mediaPanel";
 import { OpQueue } from "./opQueue";
@@ -15,10 +22,12 @@ import { mountPageSettingsDrawer } from "./pageSettingsDrawer";
 import { renderPagesPanel } from "./pagesPanel";
 import { mountPublishDrawer } from "./publishDrawer";
 import { currentRoute, navigateTo, onRouteChange, type Route } from "./router";
+import { clearLastRoute, loadLastRoute, saveLastRoute } from "./sessionState";
+import { mountSettingsPanel } from "./settingsPanel";
+import { formatBinding, initShortcuts, type ShortcutCommand } from "./shortcuts";
 import { mountThemePanel, type ThemePanel } from "./themePanel";
-import { initTheme, type ThemeController, type ThemeMode } from "./theme";
-import { initZoom, type ZoomController } from "./zoom";
-import { initFontScale, type FontScaleController } from "./fontScale";
+import { initTheme, type ThemeMode } from "./theme";
+import { initZoom } from "./zoom";
 
 interface Drawer {
   element: HTMLElement;
@@ -88,11 +97,67 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   siteLink.rel = "noopener noreferrer";
   siteLink.hidden = true;
 
+  // -- View controllers ---------------------------------------------------
+  // Constructed before their topbar DOM/shortcut commands, since both close
+  // over these controllers' methods.
+
+  const zoomController = initZoom(win, document);
+  const fontScaleController = initFontScale(win, document);
+  const themeController = initTheme(win);
+
+  const SHORTCUT_COMMANDS: readonly ShortcutCommand[] = [
+    {
+      id: "zoom.in",
+      category: "Zoom",
+      label: "Zoom in",
+      defaultBinding: { ctrlKey: true, shiftKey: false, altKey: false, metaKey: false, code: "Equal" },
+      run: () => zoomController.zoomIn(),
+    },
+    {
+      id: "zoom.out",
+      category: "Zoom",
+      label: "Zoom out",
+      defaultBinding: { ctrlKey: true, shiftKey: false, altKey: false, metaKey: false, code: "Minus" },
+      run: () => zoomController.zoomOut(),
+    },
+    {
+      id: "zoom.reset",
+      category: "Zoom",
+      label: "Reset zoom to 100%",
+      defaultBinding: { ctrlKey: true, shiftKey: false, altKey: false, metaKey: false, code: "Digit0" },
+      run: () => zoomController.reset(),
+    },
+    {
+      id: "fontScale.increase",
+      category: "Font Size",
+      label: "Increase font size",
+      defaultBinding: { ctrlKey: true, shiftKey: true, altKey: false, metaKey: false, code: "Equal" },
+      run: () => fontScaleController.increase(),
+    },
+    {
+      id: "fontScale.decrease",
+      category: "Font Size",
+      label: "Decrease font size",
+      defaultBinding: { ctrlKey: true, shiftKey: true, altKey: false, metaKey: false, code: "Minus" },
+      run: () => fontScaleController.decrease(),
+    },
+  ];
+  const shortcutsController = initShortcuts(SHORTCUT_COMMANDS, win);
+
+  function resetAllSettings(): void {
+    themeController.setMode("system");
+    zoomController.reset();
+    fontScaleController.reset();
+    shortcutsController.resetAll();
+    clearLastRoute(win);
+  }
+
+  // -- Zoom controls --------------------------------------------------------
+
   const zoomOutButton = document.createElement("button");
   zoomOutButton.type = "button";
   zoomOutButton.className = "wx-zoom-button";
   zoomOutButton.textContent = "−";
-  zoomOutButton.title = "Zoom out (Ctrl+-)";
   zoomOutButton.setAttribute("aria-label", "Zoom out");
   const zoomLevelEl = document.createElement("span");
   zoomLevelEl.className = "wx-zoom-level";
@@ -100,30 +165,26 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   zoomInButton.type = "button";
   zoomInButton.className = "wx-zoom-button";
   zoomInButton.textContent = "+";
-  zoomInButton.title = "Zoom in (Ctrl++)";
   zoomInButton.setAttribute("aria-label", "Zoom in");
   function renderZoom(): void {
     zoomLevelEl.textContent = `${zoomController.getLevel()}%`;
   }
-  // `onChange` (not just the click handlers below) drives the label so a
-  // Ctrl+Plus/Minus/0 keyboard shortcut — handled entirely inside zoom.ts's
-  // own listener — still refreshes it; relying only on click handlers left
-  // the label silently stale after a keyboard-triggered change.
-  const zoomController = initZoom(win, document, renderZoom);
   zoomOutButton.addEventListener("click", () => zoomController.zoomOut());
   zoomInButton.addEventListener("click", () => zoomController.zoomIn());
   renderZoom();
+  zoomController.subscribe(renderZoom);
   const zoomGroup = document.createElement("div");
   zoomGroup.className = "wx-zoom-controls";
   zoomGroup.setAttribute("role", "group");
   zoomGroup.setAttribute("aria-label", "Zoom");
   zoomGroup.append(zoomOutButton, zoomLevelEl, zoomInButton);
 
+  // -- Font-scale controls ----------------------------------------------------
+
   const fontScaleDownButton = document.createElement("button");
   fontScaleDownButton.type = "button";
   fontScaleDownButton.className = "wx-font-scale-button";
   fontScaleDownButton.textContent = "A−";
-  fontScaleDownButton.title = "Decrease font size (Ctrl+Shift+-)";
   fontScaleDownButton.setAttribute("aria-label", "Decrease font size");
   const fontScaleLevelEl = document.createElement("span");
   fontScaleLevelEl.className = "wx-font-scale-level";
@@ -131,23 +192,42 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   fontScaleUpButton.type = "button";
   fontScaleUpButton.className = "wx-font-scale-button";
   fontScaleUpButton.textContent = "A+";
-  fontScaleUpButton.title = "Increase font size (Ctrl+Shift++)";
   fontScaleUpButton.setAttribute("aria-label", "Increase font size");
   function renderFontScale(): void {
     fontScaleLevelEl.textContent = `${fontScaleController.getLevel()}%`;
   }
-  // Same onChange reasoning as zoomController above.
-  const fontScaleController = initFontScale(win, document, renderFontScale);
   fontScaleDownButton.addEventListener("click", () => fontScaleController.decrease());
   fontScaleUpButton.addEventListener("click", () => fontScaleController.increase());
   renderFontScale();
+  fontScaleController.subscribe(renderFontScale);
   const fontScaleGroup = document.createElement("div");
   fontScaleGroup.className = "wx-font-scale-controls";
   fontScaleGroup.setAttribute("role", "group");
   fontScaleGroup.setAttribute("aria-label", "Font size");
   fontScaleGroup.append(fontScaleDownButton, fontScaleLevelEl, fontScaleUpButton);
 
-  const themeController = initTheme(win);
+  // -- Zoom/font-scale tooltips ------------------------------------------------
+  // Reflects each command's LIVE effective binding (which Settings > Keyboard
+  // Shortcuts may have rebound away from the default shown here at
+  // construction time) rather than a hardcoded "(Ctrl++)"-style string.
+
+  function refreshShortcutTooltips(): void {
+    const byId = new Map(shortcutsController.list().map((item) => [item.id, item]));
+    const tooltip = (id: string, label: string): string => {
+      const item = byId.get(id);
+      if (item === undefined || item.disabled) return label;
+      return `${label} (${formatBinding(item.binding)})`;
+    };
+    zoomInButton.title = tooltip("zoom.in", "Zoom in");
+    zoomOutButton.title = tooltip("zoom.out", "Zoom out");
+    fontScaleUpButton.title = tooltip("fontScale.increase", "Increase font size");
+    fontScaleDownButton.title = tooltip("fontScale.decrease", "Decrease font size");
+  }
+  refreshShortcutTooltips();
+  shortcutsController.subscribe(refreshShortcutTooltips);
+
+  // -- Theme toggle -------------------------------------------------------------
+
   const THEME_ICONS: Record<ThemeMode, string> = { light: "☀️", dark: "🌙", system: "💻" };
   const THEME_LABELS: Record<ThemeMode, string> = {
     light: "Light theme",
@@ -168,20 +248,21 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     const mode = themeController.getMode();
     const next = THEME_CYCLE[(THEME_CYCLE.indexOf(mode) + 1) % THEME_CYCLE.length] ?? "system";
     themeController.setMode(next);
-    renderThemeToggle();
   });
   renderThemeToggle();
+  themeController.subscribe(() => renderThemeToggle());
 
-  topbar.append(
-    titleEl,
-    spacer,
-    chipEl,
-    publishButton,
-    siteLink,
-    zoomGroup,
-    fontScaleGroup,
-    themeToggle,
-  );
+  // -- Settings toggle ------------------------------------------------------
+
+  const settingsToggle = document.createElement("button");
+  settingsToggle.type = "button";
+  settingsToggle.className = "wx-settings-toggle";
+  settingsToggle.textContent = "⚙️";
+  settingsToggle.title = "Settings";
+  settingsToggle.setAttribute("aria-label", "Settings");
+  settingsToggle.addEventListener("click", () => navigateTo({ kind: "settings", page: "general" }, win));
+
+  topbar.append(titleEl, spacer, chipEl, publishButton, siteLink, zoomGroup, fontScaleGroup, themeToggle, settingsToggle);
 
   const body = document.createElement("div");
   body.className = "wx-body";
@@ -227,6 +308,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       el.classList.toggle("wx-nav-active", el.dataset["routeKind"] === route.kind);
     });
     editNavItem.textContent = route.kind === "edit" ? `Edit: ${route.page}` : "Edit";
+    settingsToggle.classList.toggle("wx-settings-toggle-active", route.kind === "settings");
   }
 
   // -- Top bar ------------------------------------------------------------------
@@ -437,6 +519,22 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       activePanelTeardown = () => panel.teardown();
       return;
     }
+
+    if (route.kind === "settings") {
+      const panel = mountSettingsPanel({
+        win,
+        page: route.page,
+        themeController,
+        zoomController,
+        fontScaleController,
+        shortcutsController,
+        onNavigate: (page) => navigateTo({ kind: "settings", page }, win),
+        onResetAll: resetAllSettings,
+      });
+      main.appendChild(panel.element);
+      activePanelTeardown = () => panel.teardown();
+      return;
+    }
   }
 
   function handleRoute(route: Route): void {
@@ -444,6 +542,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       activeRoute?.kind === "edit" && route.kind === "edit" && activeEditView !== null;
     activeRoute = route;
     setActiveNavItem(route);
+    saveLastRoute(route, win);
     if (reuseEditView && route.kind === "edit" && activeEditView !== null) {
       closeDrawer();
       activeEditView.setPage(route.page);
@@ -506,6 +605,16 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     if (activeRoute?.kind === "pages") mountPanel(activeRoute);
   }
 
+  // Uxer session-persistence mandate (item 6, "last active view/module"): an
+  // explicit deep-link hash always wins (normal web navigation expectations);
+  // only an EMPTY hash (a bare "/admin" load) falls back to wherever the user
+  // last was, restored by updating the hash itself (not just calling
+  // handleRoute directly) so the address bar stays truthful too.
+  if (win.location.hash.replace(/^#/, "").length === 0) {
+    const lastRoute = loadLastRoute(win);
+    if (lastRoute !== null) navigateTo(lastRoute, win);
+  }
+
   const unsubscribeRoute = onRouteChange(handleRoute, win);
   void loadState();
 
@@ -516,8 +625,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       activePanelTeardown?.();
       closeDrawer();
       themeController.teardown();
-      zoomController.teardown();
-      fontScaleController.teardown();
+      shortcutsController.teardown();
     },
   };
 }

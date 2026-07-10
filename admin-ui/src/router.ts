@@ -1,8 +1,11 @@
 // Client-side hash routing (spec/05-editor.md §1): "#/pages", "#/edit/<page>",
-// "#/theme", "#/media", "#/chat", "#/chat/<conv>", "#/history". No History-API
-// routing — the whole admin is a single served document
-// (wixy_server.app.get_admin_shell: "every /admin sub-route the browser might
-// deep-link to is this same document").
+// "#/theme", "#/media", "#/chat", "#/chat/<conv>", "#/history",
+// "#/settings", "#/settings/shortcuts". No History-API routing — the whole
+// admin is a single served document (wixy_server.app.get_admin_shell:
+// "every /admin sub-route the browser might deep-link to is this same
+// document").
+
+export type SettingsPage = "general" | "shortcuts";
 
 export type Route =
   | { kind: "pages" }
@@ -10,9 +13,10 @@ export type Route =
   | { kind: "theme" }
   | { kind: "media" }
   | { kind: "chat"; conversation: string | null }
-  | { kind: "history" };
+  | { kind: "history" }
+  | { kind: "settings"; page: SettingsPage };
 
-const DEFAULT_ROUTE: Route = { kind: "pages" };
+export const DEFAULT_ROUTE: Route = { kind: "pages" };
 
 /** Parses `location.hash` (leading "#" included or not) into a `Route` — an
  * empty or unrecognized hash falls back to the pages panel (spec/05 §1 defines
@@ -37,6 +41,8 @@ export function parseHash(hash: string): Route {
       return { kind: "chat", conversation: second ?? null };
     case "history":
       return { kind: "history" };
+    case "settings":
+      return { kind: "settings", page: second === "shortcuts" ? "shortcuts" : "general" };
     default:
       return DEFAULT_ROUTE;
   }
@@ -56,6 +62,8 @@ export function routeToHash(route: Route): string {
       return route.conversation !== null ? `#/chat/${route.conversation}` : "#/chat";
     case "history":
       return "#/history";
+    case "settings":
+      return route.page === "shortcuts" ? "#/settings/shortcuts" : "#/settings";
   }
 }
 
@@ -66,6 +74,7 @@ export function sameRoute(a: Route, b: Route): boolean {
   if (a.kind !== b.kind) return false;
   if (a.kind === "edit" && b.kind === "edit") return a.page === b.page;
   if (a.kind === "chat" && b.kind === "chat") return a.conversation === b.conversation;
+  if (a.kind === "settings" && b.kind === "settings") return a.page === b.page;
   return true;
 }
 

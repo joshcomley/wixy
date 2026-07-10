@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initTheme, loadThemeMode, resolveVariant } from "../src/theme";
+import { initTheme, loadThemeMode, resolveVariant, type ThemeMode } from "../src/theme";
 
 function fakeStorage(): Storage {
   const store = new Map<string, string>();
@@ -147,5 +147,60 @@ describe("initTheme", () => {
     (mql as unknown as { matches: boolean }).matches = true;
     (mql as unknown as { _fire: () => void })._fire();
     expect(doc.documentElement.getAttribute("data-theme")).toBe("light");
+  });
+
+  it("subscribe fires with the new mode and resolved variant on setMode", () => {
+    const doc = fakeDocument();
+    const win = fakeWindow({ systemDark: false });
+    const controller = initTheme(win, doc);
+    const seen: Array<[string, string]> = [];
+    controller.subscribe((mode, variant) => seen.push([mode, variant]));
+
+    controller.setMode("dark");
+    expect(seen).toEqual([["dark", "dark"]]);
+  });
+
+  it("subscribe also fires on a live OS-preference change while mode is system — a renderer showing the resolved variant (not just mode) must not go stale", () => {
+    const doc = fakeDocument();
+    const win = fakeWindow({ systemDark: false });
+    const mql = win.matchMedia("(prefers-color-scheme: dark)");
+    const controller = initTheme(win, doc);
+    const seen: Array<[string, string]> = [];
+    controller.subscribe((mode, variant) => seen.push([mode, variant]));
+
+    (mql as unknown as { matches: boolean }).matches = true;
+    (mql as unknown as { _fire: () => void })._fire();
+    expect(seen).toEqual([["system", "dark"]]);
+  });
+
+  it("subscribe does not fire from an OS-preference change once an explicit mode is set", () => {
+    const doc = fakeDocument();
+    const win = fakeWindow({ systemDark: false });
+    const mql = win.matchMedia("(prefers-color-scheme: dark)");
+    const controller = initTheme(win, doc);
+    controller.setMode("light");
+    const seen: Array<[string, string]> = [];
+    controller.subscribe((mode, variant) => seen.push([mode, variant]));
+
+    (mql as unknown as { matches: boolean }).matches = true;
+    (mql as unknown as { _fire: () => void })._fire();
+    expect(seen).toEqual([]);
+  });
+
+  it("unsubscribe stops further notifications to that listener only", () => {
+    const doc = fakeDocument();
+    const win = fakeWindow();
+    const controller = initTheme(win, doc);
+    const a: ThemeMode[] = [];
+    const b: ThemeMode[] = [];
+    const unsubA = controller.subscribe((mode) => a.push(mode));
+    controller.subscribe((mode) => b.push(mode));
+
+    controller.setMode("dark");
+    unsubA();
+    controller.setMode("light");
+
+    expect(a).toEqual(["dark"]);
+    expect(b).toEqual(["dark", "light"]);
   });
 });
