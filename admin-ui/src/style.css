@@ -1,17 +1,79 @@
 /* Admin shell layout (spec/05-editor.md §1's ASCII diagram: top bar + left nav +
    main panel). admin_shell.html's own inline <style> covers the pre-JS instant
-   loading screen; this covers the real, JS-mounted UI. */
+   loading screen; this covers the real, JS-mounted UI.
+
+   Theme (Uxer dual-theme mandate): every color below is a custom property so
+   the whole shell repaints from the `[data-theme]` overrides alone — no
+   component rule below references a literal color that needs to change per
+   theme. `--wx-brand-blue`/`--wx-danger` are FILL colors (paired with white
+   text, verified AA in both modes); `*-text` variants are for the same hue
+   used as text/links directly on the canvas/surface (needs different
+   lightness for AA there); `*-tint` variants are pale chip/selected-state
+   backgrounds. `--wx-solid-dark` is an intentionally-always-dark chip
+   surface (toasts, code blocks) independent of theme — see `theme.ts` for
+   how `[data-theme]` gets applied (persisted mode + live OS-preference
+   tracking while "system" is selected); `admin_shell.html`'s inline
+   bootstrap script sets it synchronously before first paint. */
 
 :root {
+  color-scheme: light;
   --wx-brand-blue: #2563eb;
+  --wx-brand-blue-text: #2563eb;
+  --wx-brand-blue-tint: #eaf0fe;
   --wx-ink: #1e2430;
   --wx-muted: #667085;
-  --wx-surface: #ffffff;
-  --wx-canvas: #f7f8fa;
-  --wx-border: #e2e6ec;
-  --wx-danger: #dc2626;
+  --wx-surface: #f3f5f9;
+  --wx-canvas: #eaedf3;
+  --wx-border: #dde2ea;
+  --wx-danger: #b91c1c;
+  --wx-danger-tint: #fef2f2;
+  --wx-solid-dark: #1e2430;
+  --wx-solid-dark-text: #e2e6ec;
+  --wx-inline-code-bg: rgba(0, 0, 0, 0.08);
   --wx-radius: 6px;
   --wx-shadow: 0 8px 24px rgba(20, 24, 32, 0.14);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --wx-brand-blue: #3f6fcf;
+  --wx-brand-blue-text: #6fa0f5;
+  --wx-brand-blue-tint: #1e2a47;
+  --wx-ink: #e4e7ed;
+  --wx-muted: #9199aa;
+  --wx-surface: #1a1d26;
+  --wx-canvas: #14161d;
+  --wx-border: #2d3140;
+  --wx-danger: #f87171;
+  --wx-danger-tint: #3a1e1e;
+  --wx-solid-dark: #0d0f14;
+  --wx-solid-dark-text: #e2e6ec;
+  --wx-inline-code-bg: rgba(255, 255, 255, 0.12);
+  --wx-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* Belt-and-braces: if `theme.ts` hasn't run yet for any reason, honour the OS
+   preference directly rather than defaulting to (fixed) light — but an
+   explicit `[data-theme]` (set synchronously by admin_shell.html's bootstrap
+   script, then kept live by theme.ts) always wins over this media query. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) {
+    color-scheme: dark;
+    --wx-brand-blue: #3f6fcf;
+    --wx-brand-blue-text: #6fa0f5;
+    --wx-brand-blue-tint: #1e2a47;
+    --wx-ink: #e4e7ed;
+    --wx-muted: #9199aa;
+    --wx-surface: #1a1d26;
+    --wx-canvas: #14161d;
+    --wx-border: #2d3140;
+    --wx-danger: #f87171;
+    --wx-danger-tint: #3a1e1e;
+    --wx-solid-dark: #0d0f14;
+    --wx-solid-dark-text: #e2e6ec;
+    --wx-inline-code-bg: rgba(255, 255, 255, 0.12);
+    --wx-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
 }
 
 .wx-shell {
@@ -77,12 +139,31 @@
 
 .wx-site-link {
   font: 600 13px/1 system-ui, sans-serif;
-  color: var(--wx-brand-blue);
+  color: var(--wx-brand-blue-text);
   text-decoration: none;
 }
 
 .wx-site-link:hover {
   text-decoration: underline;
+}
+
+.wx-theme-toggle {
+  flex: none;
+  font-size: 16px;
+  line-height: 1;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wx-theme-toggle:hover {
+  background: var(--wx-canvas);
 }
 
 /* -- Body: nav + main --------------------------------------------------------- */
@@ -125,8 +206,8 @@
 }
 
 .wx-nav-item.wx-nav-active {
-  background: #eaf0fe;
-  color: var(--wx-brand-blue);
+  background: var(--wx-brand-blue-tint);
+  color: var(--wx-brand-blue-text);
   font-weight: 600;
 }
 
@@ -233,7 +314,7 @@
 }
 
 .wx-pages-badge-new {
-  color: var(--wx-brand-blue);
+  color: var(--wx-brand-blue-text);
 }
 
 .wx-pages-inline-form {
@@ -620,7 +701,7 @@ div.wx-media-thumb {
   font: 600 10px/1 system-ui, sans-serif;
   padding: 2px 6px;
   border-radius: 999px;
-  background: var(--wx-ink);
+  background: var(--wx-solid-dark);
   color: #fff;
 }
 
@@ -949,7 +1030,7 @@ div.wx-media-thumb {
   border-radius: var(--wx-radius);
   box-shadow: var(--wx-shadow);
   color: #fff;
-  background: var(--wx-ink);
+  background: var(--wx-solid-dark);
 }
 
 .wx-toast-error {
@@ -1048,7 +1129,7 @@ div.wx-media-thumb {
 }
 
 .wx-chat-list-title {
-  color: var(--wx-brand-blue);
+  color: var(--wx-brand-blue-text);
   text-decoration: none;
   font-weight: 600;
 }
@@ -1130,9 +1211,9 @@ div.wx-media-thumb {
 .wx-chat-preview-chip {
   display: inline-block;
   font: 600 12px/1 system-ui, sans-serif;
-  color: var(--wx-brand-blue);
-  background: #eff6ff;
-  border: 1px solid var(--wx-brand-blue);
+  color: var(--wx-brand-blue-text);
+  background: var(--wx-brand-blue-tint);
+  border: 1px solid var(--wx-brand-blue-text);
   border-radius: 999px;
   padding: 6px 12px;
   margin-bottom: 8px;
@@ -1147,7 +1228,7 @@ div.wx-media-thumb {
 }
 
 .wx-chat-status-working {
-  color: var(--wx-brand-blue);
+  color: var(--wx-brand-blue-text);
   font-weight: 600;
 }
 
@@ -1217,8 +1298,8 @@ div.wx-media-thumb {
   margin: 6px 0 0;
   padding: 8px 10px;
   font: 12px/1.5 ui-monospace, monospace;
-  background: var(--wx-ink);
-  color: #e2e6ec;
+  background: var(--wx-solid-dark);
+  color: var(--wx-solid-dark-text);
   border-radius: var(--wx-radius);
   white-space: pre-wrap;
   max-width: 100%;
@@ -1229,7 +1310,7 @@ div.wx-media-thumb {
   align-self: center;
   font-size: 12px;
   color: var(--wx-danger);
-  background: #fef2f2;
+  background: var(--wx-danger-tint);
   border: 1px solid var(--wx-danger);
   border-radius: var(--wx-radius);
   padding: 6px 10px;
@@ -1280,7 +1361,7 @@ div.wx-media-thumb {
 
 .wx-markdown code {
   font: 0.9em ui-monospace, monospace;
-  background: rgba(0, 0, 0, 0.08);
+  background: var(--wx-inline-code-bg);
   padding: 1px 4px;
   border-radius: 3px;
 }
@@ -1288,18 +1369,117 @@ div.wx-media-thumb {
 .wx-markdown-code {
   margin: 0.4em 0;
   padding: 8px 10px;
-  background: var(--wx-ink);
+  background: var(--wx-solid-dark);
   border-radius: var(--wx-radius);
   overflow-x: auto;
 }
 
 .wx-markdown-code code {
   background: none;
-  color: #e2e6ec;
+  color: var(--wx-solid-dark-text);
   padding: 0;
 }
 
 .wx-markdown a {
   color: inherit;
   text-decoration: underline;
+}
+
+/* -- Responsive (mobile/narrow viewport) ----------------------------------------
+   Everything above is desktop-first; this is the one breakpoint that reflows the
+   shell for phone-width viewports (the operator's own real use case). Touch
+   target sizing follows Uxer's targets convention (touch: 44px minimum). */
+
+@media (max-width: 720px) {
+  .wx-topbar {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 52px;
+    padding: 8px 12px;
+    row-gap: 6px;
+  }
+
+  .wx-topbar-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+
+  /* Body stacks: horizontal nav strip on top, main content below, instead of
+     the desktop side-by-side sidebar (which has no room on a phone). */
+  .wx-body {
+    flex-direction: column;
+  }
+
+  .wx-nav {
+    width: auto;
+    flex-direction: row;
+    overflow-x: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--wx-border);
+    padding: 6px 8px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .wx-nav-item {
+    flex: none;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    white-space: nowrap;
+  }
+
+  .wx-main {
+    padding: 12px;
+  }
+
+  .wx-drawer {
+    width: 100vw;
+    max-width: 100vw;
+  }
+
+  /* Theme panel's side-by-side controls+preview has no room to sit next to
+     each other below ~720px — stack instead, controls first. */
+  .wx-theme-panel {
+    flex-direction: column;
+  }
+
+  .wx-theme-controls {
+    width: auto;
+  }
+
+  .wx-theme-preview {
+    min-height: 320px;
+  }
+
+  /* Tables don't reflow to narrow viewports gracefully - let them scroll
+     horizontally within their own box rather than overflow the page or force
+     every other element to shrink to fit the widest column. */
+  .wx-pages-table,
+  .wx-history-table,
+  .wx-chat-list-table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  .wx-pages-edit,
+  .wx-pages-duplicate,
+  .wx-pages-delete,
+  .wx-history-view,
+  .wx-history-restore,
+  .wx-media-delete {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .wx-media-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  }
+
+  .wx-chat-bubble {
+    max-width: 92%;
+  }
 }
