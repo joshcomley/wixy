@@ -66,4 +66,4 @@ Verification checklist 07 §4 items 1-2 (status healthy, slot cycle proof) achie
 before cutover; items 3-8 fully verifiable only after M12/M13.
 
 ## Links
-PR (slice 1): (fill in when opened)
+PR (slice 1): https://github.com/joshcomley/wixy/pull/45 (merged b838f21)

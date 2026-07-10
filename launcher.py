@@ -2,11 +2,22 @@
 
 Devfleet's `services.toml` argv never changes (`pythoncore-3.14-64\\python.exe
 D:\\Servers\\Wixy\\launcher.py`, no subcommand) — this file reads `active.txt`, sets the
-env the app needs, then re-execs into the ACTIVE SLOT'S OWN venv interpreter running
-`python -m wixy_server`. The app itself never runs in THIS process's interpreter, so each
-slot's dependencies stay isolated (a blue install can't see green's freshly-`pip install`ed
-packages, and vice versa) and a swap takes effect on the very next restart with no code in
-this file needing to change.
+env the app needs, then runs the ACTIVE SLOT'S OWN venv interpreter as a CHILD process
+(`python -m wixy_server`), blocking until it exits and propagating its exit code. The app
+itself never runs in THIS process's interpreter, so each slot's dependencies stay isolated
+(a blue install can't see green's freshly-`pip install`ed packages, and vice versa) and a
+swap takes effect on the very next restart with no code in this file needing to change.
+
+**Deliberately a blocking child subprocess, NOT `os.execv`** — found via a real deploy,
+not assumed: `os.execv` on Windows does not replace the current process image the way
+POSIX `execve` does. It spawns a genuinely separate process and lets THIS process return/
+exit, which orphans the new process from Devfleet's own process-tracking (a Windows Job
+Object) — Devfleet observed launcher.py's own PID exit immediately (code 0) and killed the
+job, taking the execv'd uvicorn child down with it mid-startup, over and over
+(`restart_count_total` climbing with no actual uptime). A plain child `subprocess.run`
+keeps THIS process (the one Devfleet's job actually owns) alive for the server's entire
+lifetime, so the child is correctly supervised — killed cleanly on a Devfleet restart,
+staying up otherwise.
 
 Lives OUTSIDE the slots (`D:\\Servers\\Wixy\\launcher.py`) so flipping `active.txt` +
 restarting the Devfleet child is the only step a swap needs. Refreshed from the newly
@@ -17,6 +28,7 @@ blue/green pattern (`D:\\Servers\\Slots\\Slots\\green\\docs\\ai\\onboarding.md` 
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -67,7 +79,10 @@ def main() -> None:
 
     print(f"Wixy launcher: slot={slot} dir={slot_dir} python={venv_python}", flush=True)
     os.chdir(slot_dir)
-    os.execv(str(venv_python), [str(venv_python), "-m", "wixy_server"])
+    # Inherits this process's stdout/stderr (Devfleet captures those, not a pipe of
+    # our own) — no capture_output/PIPE here, or uvicorn's own logs would vanish.
+    result = subprocess.run([str(venv_python), "-m", "wixy_server"])
+    sys.exit(result.returncode)
 
 
 if __name__ == "__main__":
