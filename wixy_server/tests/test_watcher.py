@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -10,7 +12,7 @@ import pytest
 from builder.config import MediaConfig, ProjectConfig
 from wixy_server.checkout import current_sha
 from wixy_server.storage import ProjectPaths, project_paths
-from wixy_server.watcher import WatcherStatus, fetch_once, watch_upstream
+from wixy_server.watcher import _LOCK_STALE_AFTER_S, WatcherStatus, fetch_once, watch_upstream
 
 
 def _git(args: list[str], cwd: Path) -> None:
@@ -75,6 +77,26 @@ class TestFetchOnce:
         assert not (paths.repo / ".git").exists()  # never even attempted the clone
         assert status.fetched_at is None
         assert status.last_error is None  # a skip is not a failure
+
+    def test_proceeds_when_the_publish_lock_is_stale(
+        self, project: ProjectConfig, paths: ProjectPaths
+    ) -> None:
+        """A genuine process kill (not a caught exception) skips `run_publish`'s
+        `finally` and leaves the lock file on disk forever — decisions/00030's
+        kill-during-publish drill found this would otherwise pause the watcher
+        permanently. A lock file older than `_LOCK_STALE_AFTER_S` must be treated
+        as abandoned, not as an in-flight publish."""
+        paths.locks_dir.mkdir(parents=True)
+        paths.publish_lock.write_text("locked", encoding="utf-8")
+        stale_time = time.time() - _LOCK_STALE_AFTER_S - 1
+        os.utime(paths.publish_lock, (stale_time, stale_time))
+
+        status = WatcherStatus()
+        fetch_once(project, paths, status)
+
+        assert (paths.repo / ".git").exists()  # proceeded despite the lock file
+        assert status.fetched_at is not None
+        assert status.last_error is None
 
     def test_fetches_when_present(
         self, project: ProjectConfig, paths: ProjectPaths, origin_repo: Path

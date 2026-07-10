@@ -59,3 +59,29 @@ export function waitForNextDraftPatchAccepted(page: Page): Promise<void> {
       }
     });
 }
+
+/** Opens the publish drawer (the top-bar Publish button — spec/05 §5), confirms,
+ * and waits for `POST /api/admin/publish` to come back 200, returning the new
+ * version number. Every E2E flow that publishes (1, 4, 5, 6) needs this exact
+ * sequence, so it's shared from the moment a SECOND flow needs it rather than
+ * duplicated per spec file — unlike `gotoEditAndWaitReady`/`editTextField`/
+ * `trackConsoleErrors` (decisions/00023 decision 2), which waited for a third
+ * consumer, here all four consumers were already known up front. Fails loudly on
+ * a conflict/failure outcome — every flow using this expects the publish to
+ * succeed; a failure is a bug the test should surface, not a branch to swallow. */
+export async function publishAndWait(page: Page): Promise<number> {
+  await page.click(".wx-publish-button");
+  await page.waitForSelector(".wx-publish-confirm");
+  const publishResponse = page.waitForResponse(
+    (res) => res.url().endsWith("/api/admin/publish") && res.request().method() === "POST",
+  );
+  await page.click(".wx-publish-confirm");
+  const response = await publishResponse;
+  if (response.status() !== 200) {
+    const body = await response.text();
+    throw new Error(`expected POST /api/admin/publish to 200, got ${response.status()}: ${body}`);
+  }
+  const body = (await response.json()) as { version: number };
+  await page.waitForSelector(".wx-publish-progress:has-text('Published as version')");
+  return body.version;
+}

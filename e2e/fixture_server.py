@@ -58,14 +58,25 @@ def _git(args: list[str], cwd: Path) -> None:
 
 
 def _build_site_origin(tmp_root: Path) -> Path:
-    origin = tmp_root / "site-origin"
-    shutil.copytree(MINI_SITE_FIXTURE, origin)
-    _git(["init", "--initial-branch=main"], origin)
-    _git(["config", "user.email", "e2e@example.invalid"], origin)
-    _git(["config", "user.name", "E2E Fixture"], origin)
-    _git(["add", "."], origin)
-    _git(["commit", "-m", "initial fixture site"], origin)
-    return origin
+    """A genuine BARE repo (spec/08 §1, mirroring wixy_server/tests/test_publisher.py's
+    own `bare_origin` fixture) — pushed to from a scratch seed clone, never a working
+    tree of its own. A non-bare origin refuses `git push` to its checked-out branch by
+    default, which would break every E2E flow that actually publishes (1, 4, 5, 6) the
+    moment they existed; this fixture predates any of them needing a real push, so the
+    gap was latent until milestone 9 slice 5."""
+    bare = tmp_root / "site-origin.git"
+    bare.mkdir(parents=True)
+    _git(["init", "--bare", "--initial-branch=main"], bare)
+
+    seed = tmp_root / "site-origin-seed"
+    _git(["clone", str(bare), str(seed)], tmp_root)
+    shutil.copytree(MINI_SITE_FIXTURE, seed, dirs_exist_ok=True)
+    _git(["config", "user.email", "e2e@example.invalid"], seed)
+    _git(["config", "user.name", "E2E Fixture"], seed)
+    _git(["add", "."], seed)
+    _git(["commit", "-m", "initial fixture site"], seed)
+    _git(["push", "origin", "main"], seed)
+    return bare
 
 
 def _write_project_registry(tmp_root: Path, site_origin: Path) -> Path:
