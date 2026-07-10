@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,7 @@ from builder.jsontypes import JsonObject, JsonValue
 from builder.render import SiteSource
 from builder.theme import FontSpec, Theme
 from wixy_server.merged_content import merge_overlay
-from wixy_server.overlay import SetOp, apply_patch, empty_overlay
+from wixy_server.overlay import PageAdd, SetOp, add_page, apply_patch, delete_page, empty_overlay
 
 
 def _at(content: JsonObject, path: str) -> JsonValue:
@@ -175,3 +176,57 @@ class TestMergeOverlay:
         )
         merged = merge_overlay(source, overlay)
         assert _at(merged.page_contents["index"], "hero.tag") == "Original tag"
+
+
+class TestMergeOverlayPageOps:
+    def test_a_page_added_via_duplicate_is_seeded_from_its_source_page(
+        self, source: SiteSource
+    ) -> None:
+        overlay = add_page(
+            empty_overlay("abc123"),
+            0,
+            from_slug="index",
+            slug="index-copy",
+            nav_label="Index Copy",
+            by="editor",
+            now="t1",
+        )
+        merged = merge_overlay(source, overlay)
+        assert "index-copy" in merged.page_contents
+        assert _at(merged.page_contents["index-copy"], "hero.title") == "Original Title"
+        assert _at(merged.page_contents["index-copy"], "meta.navLabel") == "Index Copy"
+        # the SOURCE page is untouched by duplicating it
+        found, _ = dotted_get(merged.page_contents["index"], "meta.navLabel")
+        assert not found
+
+    def test_a_page_added_from_an_unknown_source_slug_is_skipped_not_raised(
+        self, source: SiteSource
+    ) -> None:
+        overlay = add_page(
+            empty_overlay("abc123"),
+            0,
+            from_slug="does-not-exist",
+            slug="new-page",
+            nav_label="New",
+            by="editor",
+            now="t1",
+        )
+        merged = merge_overlay(source, overlay)  # must not raise
+        assert "new-page" not in merged.page_contents
+
+    def test_a_page_added_never_overwrites_an_existing_slug(self, source: SiteSource) -> None:
+        # Defensive: the route validates this can't happen, but merge_overlay
+        # itself should never let a page-add clobber real, already-published
+        # content for a slug that happens to collide.
+        overlay = dataclasses.replace(
+            empty_overlay("abc123"), pages_added=(PageAdd(slug="index", from_slug="index"),)
+        )
+        merged = merge_overlay(source, overlay)
+        assert merged.page_contents["index"] == source.page_contents["index"]
+
+    def test_a_page_staged_for_deletion_still_renders_normally(self, source: SiteSource) -> None:
+        overlay = delete_page(empty_overlay("abc123"), 0, "index")
+        merged = merge_overlay(source, overlay)
+        # spec/04 §5: deletion "takes effect at publish" — the draft view is
+        # unaffected until then.
+        assert merged.page_contents["index"] == source.page_contents["index"]

@@ -1,12 +1,16 @@
 """`/api/admin/*` — the M6 subset (`state`, `content/{page}`, `draft` PATCH+DELETE)
-plus milestone 8's media upload/delete and milestone 9's publish/restore.
-Pages-ops/chat are M7/M10 — not built here (spec/04 §8's full table has more
-rows; those are out of scope until their milestone).
+plus milestone 8's media upload/delete, milestone 9's publish/restore, and
+milestone 9 slice 4's page duplicate/delete (spec/09's own M7 line named this
+as part of "the pages panel," but decisions/00015 deferred it — building the
+routes needed the materialize-time semantics this milestone's publisher
+designed; decisions/00029 records the explicit scope call). Chat is M10 — not
+built here.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -16,7 +20,7 @@ from typing import Annotated, Any
 import anyio
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from builder.bindings_map import bindings_map_to_dict, extract_bindings_map
 from builder.config import ProjectConfig
@@ -45,7 +49,9 @@ from wixy_server.overlay import (
     PatchOp,
     RevConflictError,
     SetOp,
+    add_page,
     apply_patch,
+    delete_page,
     discard_all,
     load_overlay,
     save_overlay,
@@ -59,6 +65,14 @@ from wixy_server.watcher import WatcherStatus
 router = APIRouter(prefix="/api/admin")
 
 _DEV_BYPASS_AUTHOR = "editor"
+_SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+
+
+class PageOpError(Exception):
+    """A page-duplicate/delete request can't be performed as given (an
+    invalid slug, or a slug that already exists) — distinct from `BuildError`
+    ("no such page," reusing the exact same 404 convention every other route
+    already uses for a referenced-but-missing resource)."""
 
 
 def _current_author(request: Request) -> str:
@@ -117,6 +131,12 @@ def _build_state(
             "slug": slug,
             "meta": content.get("meta", {}),
             "lastModified": _last_modified_for_page(overlay, slug),
+            # A page just staged via `pages/duplicate` (milestone 9 slice 4)
+            # has no template on disk until publish materializes it
+            # (decisions/00024 decision 4) — the pages panel disables Edit
+            # for it rather than linking to a preview that would 404.
+            "editable": (source.pages_dir / f"{slug}.html").exists(),
+            "pendingDelete": slug in overlay.pages_deleted,
         }
         for slug, content in sorted(merged.page_contents.items())
     ]
@@ -636,3 +656,117 @@ async def post_restore(body: RestoreIn, request: Request) -> JsonObject:
     except RestoreError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"version": result.version, "sha": result.sha, "of": result.of}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/admin/pages/duplicate, POST /api/admin/pages/delete
+# (milestone 9 slice 4)
+# ---------------------------------------------------------------------------
+
+
+class PagesDuplicateIn(BaseModel):
+    """`from` is a Python keyword, so the wire field (spec/05 §2: `{from, slug,
+    navLabel}`) is aliased to the `from_` attribute. FastAPI's request-body
+    parsing path emits a spurious `UnsupportedFieldAttributeWarning` for this
+    (verified harmless — `model_validate`/`model_dump(by_alias=True)` both
+    round-trip correctly; only FastAPI's own runtime parsing path triggers the
+    warning, not a plain pydantic `model_validate` or app/route construction —
+    `Annotated[str, Field(alias=...)]` doesn't avoid it either, so the simpler
+    assignment form is used) — a known, accepted cosmetic pydantic quirk, not
+    a functional problem; see decisions/00029."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    from_: str = Field(alias="from")
+    slug: str
+    navLabel: str
+    expectedRev: int
+
+
+class PagesDeleteIn(BaseModel):
+    slug: str
+    expectedRev: int
+
+
+def _merged_pages(project: ProjectConfig, paths: ProjectPaths, overlay: Overlay) -> set[str]:
+    source = build_site_source(project, paths.repo)
+    merged = merge_overlay(source, overlay)
+    return set(merged.page_contents)
+
+
+def _apply_page_duplicate(
+    project: ProjectConfig, paths: ProjectPaths, body: PagesDuplicateIn, *, by: str, now: str
+) -> int:
+    overlay = _load_overlay_for(paths)
+    if not _SLUG_RE.match(body.slug):
+        raise PageOpError(f"invalid page slug: {body.slug!r}")
+    pages = _merged_pages(project, paths, overlay)
+    if body.from_ not in pages:
+        raise BuildError(f"no such page: {body.from_}", location=body.from_)
+    if body.slug in pages:
+        raise PageOpError(f"page already exists: {body.slug}")
+
+    new_overlay = add_page(
+        overlay,
+        body.expectedRev,
+        from_slug=body.from_,
+        slug=body.slug,
+        nav_label=body.navLabel,
+        by=by,
+        now=now,
+    )
+    save_overlay(paths.draft_overlay, new_overlay)
+    return new_overlay.rev
+
+
+@router.post("/pages/duplicate", response_model=None)
+async def post_pages_duplicate(body: PagesDuplicateIn, request: Request) -> dict[str, int]:
+    project: ProjectConfig = request.app.state.project
+    paths: ProjectPaths = request.app.state.paths
+    by = _current_author(request)
+    now = datetime.now(UTC).isoformat()
+
+    def _run() -> int:
+        return _apply_page_duplicate(project, paths, body, by=by, now=now)
+
+    try:
+        rev = await anyio.to_thread.run_sync(_run)
+    except CheckoutError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except RevConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except BuildError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PageOpError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"rev": rev}
+
+
+def _apply_page_delete(project: ProjectConfig, paths: ProjectPaths, body: PagesDeleteIn) -> int:
+    overlay = _load_overlay_for(paths)
+    pages = _merged_pages(project, paths, overlay)
+    if body.slug not in pages:
+        raise BuildError(f"no such page: {body.slug}", location=body.slug)
+
+    new_overlay = delete_page(overlay, body.expectedRev, body.slug)
+    save_overlay(paths.draft_overlay, new_overlay)
+    return new_overlay.rev
+
+
+@router.post("/pages/delete", response_model=None)
+async def post_pages_delete(body: PagesDeleteIn, request: Request) -> dict[str, int]:
+    project: ProjectConfig = request.app.state.project
+    paths: ProjectPaths = request.app.state.paths
+
+    def _run() -> int:
+        return _apply_page_delete(project, paths, body)
+
+    try:
+        rev = await anyio.to_thread.run_sync(_run)
+    except CheckoutError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except RevConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except BuildError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"rev": rev}

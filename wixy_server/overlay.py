@@ -181,6 +181,59 @@ def apply_patch(
     )
 
 
+def add_page(
+    overlay: Overlay,
+    expected_rev: int,
+    *,
+    from_slug: str,
+    slug: str,
+    nav_label: str,
+    by: str,
+    now: str,
+) -> Overlay:
+    """Duplicates `from_slug` as `slug` (spec/05 §2: `POST pages/duplicate
+    {from, slug, navLabel}`) — records a `PageAdd` (materialized at publish
+    time by `publisher._add_page`, which copies the template file) plus an
+    ordinary overlay SET op seeding the new page's `meta.navLabel`, the exact
+    same per-file application every other page content edit already goes
+    through (decisions/00024 decision 4: no new storage convention for the
+    new page's content). Existence/slug-format validation is the caller's
+    job (routes_admin_api.py) — this function only appends the two records."""
+    if expected_rev != overlay.rev:
+        raise RevConflictError(expected_rev, overlay.rev)
+
+    new_ops = dict(overlay.ops)
+    new_ops[f"{slug}:meta.navLabel"] = OverlayOp(value=nav_label, ts=now, by=by)
+    return Overlay(
+        rev=overlay.rev + 1,
+        base_sha=overlay.base_sha,
+        ops=new_ops,
+        pages_added=(*overlay.pages_added, PageAdd(slug=slug, from_slug=from_slug)),
+        pages_deleted=overlay.pages_deleted,
+    )
+
+
+def delete_page(overlay: Overlay, expected_rev: int, slug: str) -> Overlay:
+    """Stages `slug` for deletion (spec/05 §2: takes effect at publish as a
+    `git rm`, `publisher._delete_page`). Always bumps `rev` even if `slug` was
+    already staged (idempotent in effect, not in rev — consistent with
+    `apply_patch`'s own unconditional bump, so a client's rev-tracking never
+    needs to special-case "did this call actually change anything")."""
+    if expected_rev != overlay.rev:
+        raise RevConflictError(expected_rev, overlay.rev)
+
+    pages_deleted = (
+        overlay.pages_deleted if slug in overlay.pages_deleted else (*overlay.pages_deleted, slug)
+    )
+    return Overlay(
+        rev=overlay.rev + 1,
+        base_sha=overlay.base_sha,
+        ops=overlay.ops,
+        pages_added=overlay.pages_added,
+        pages_deleted=pages_deleted,
+    )
+
+
 def discard_all(overlay: Overlay) -> Overlay:
     """Empty the overlay's ops + page ops WITHOUT committing anything (spec/02 §8:
     "Discard-draft empties it without committing"). Still bumps `rev` — a

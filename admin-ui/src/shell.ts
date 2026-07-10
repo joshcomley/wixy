@@ -248,6 +248,12 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       main.appendChild(
         renderPagesPanel(state.pages, {
           onEdit: (slug) => navigateTo({ kind: "edit", page: slug }, win),
+          onDuplicate: (fromSlug, slug, navLabel) =>
+            api.duplicatePage(fromSlug, slug, navLabel, state?.draft.rev ?? 0),
+          onDelete: (slug) => api.deletePage(slug, state?.draft.rev ?? 0),
+          onChanged: () => {
+            void refreshPagesPanel();
+          },
         }),
       );
       return;
@@ -381,6 +387,16 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       // Best-effort — the OpQueue's own onError already surfaces a real save
       // failure; a background refresh miss here isn't independently actionable.
     }
+  }
+
+  /** Unlike `refreshStateInBackground` (deliberately never touches the mounted
+   * panel, so an in-progress edit iframe isn't reloaded mid-keystroke), the
+   * pages panel has no live-typing state to lose — re-rendering it after a
+   * duplicate/delete succeeds is safe and is what actually shows the
+   * new/removed page immediately. */
+  async function refreshPagesPanel(): Promise<void> {
+    await refreshStateInBackground();
+    if (activeRoute?.kind === "pages") mountPanel(activeRoute);
   }
 
   const unsubscribeRoute = onRouteChange(handleRoute, win);
