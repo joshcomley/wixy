@@ -82,27 +82,44 @@ same way, backend-first:
   matching historyPanel.ts's established pattern). Full reasoning, incl. a
   spurious-but-harmless pydantic aliasing warning investigated and accepted:
   decisions/00029.
-- Slice 5 (closing): E2E 1, 4, 5, 6 (not just 5/6 — E2E 1 "text edit" and E2E 4
-  "collection" were deferred THROUGH M7/M8 pending this milestone's publisher,
-  decisions/00015 decision 4/00019/00023 — none of the four exist as Playwright
-  specs yet) + a real kill-during-publish drill + closing decision, matching
-  M6/M7/M8's own "E2E + closing decision" precedent.
+- Slice 5 [DONE]: E2E + closing. Built E2E 1 (text edit), 4 (collection), 5
+  (restore), 6 (AI-lane faked); extended E2E 2/3 with real publish-tail
+  assertions, closing decisions/00023's own flagged nice-to-have; a real
+  kill-during-publish drill (`wixy_server/tests/test_kill_during_publish.py`,
+  new — a genuine `Popen.kill()` against a real subprocess, not a monkeypatched
+  exception). Found and fixed FIVE real bugs along the way: the item toolbar
+  self-cleared the instant it was hovered (editor/src/overlay.ts, shipped since
+  M7); an emptied text field collapsed to zero height and became permanently
+  unclickable (same file); a genuinely killed publish left `publish_lock`
+  orphaned forever, permanently pausing the upstream watcher (`watcher.py`, no
+  staleness check existed); spec/04 §7's "fetch immediately before preview loads
+  after >10s staleness" trigger was never actually built (only the periodic 60s
+  loop + always-fetch-before-publish existed) — built properly in
+  `routes_preview.py`, a configurable `create_app` parameter mirroring
+  `watcher_interval_s`'s existing pattern; and `e2e/fixture_server.py`'s site
+  origin was a non-bare repo that would have refused every one of this slice's
+  own publishes. Full reasoning, incl. an investigated-and-explained
+  intermittent full-suite-only timeout (matches this box's own already-
+  documented transient disk-I/O contention pattern, decisions/00025/00027):
+  decisions/00030.
 
 ## Relevant files
 - spec/04-server.md §5-7 (publish pipeline steps, restore semantics, upstream watcher)
 - spec/05-editor.md §5 (publish drawer / history UX)
 - spec/08-testing-acceptance.md §1 (publish pipeline test list incl. every failure leg),
-  §2 E2E 5, 6 (also 1, 4 — see slice 5 above)
+  §2 (all 8 flows except E2E 7, deferred to M10's chat)
 
 ## How to continue + acceptance
 Every publish step's failure leaves live serving + draft intact (tested on temp git
-repos with simulated bare-repo origin) — DONE (slice 1). Kill-during-publish drill
-passes — slice 5. Restore diff granularity is binding-map-driven (whole-array for
-lists, per-leaf for scalars) — DONE (slice 3). E2E 5 (two publishes -> restore #1)
-and 6 (AI-lane faked commit -> preview banner -> publish drawer lists it) passing
-— slice 5.
+repos with simulated bare-repo origin) — DONE (slice 1), AND now also exercised as
+a genuine OS-level kill, not just a monkeypatched exception — DONE (slice 5,
+decisions/00030). Restore diff granularity is binding-map-driven (whole-array for
+lists, per-leaf for scalars) — DONE (slice 3). E2E 1/2/3/4/5/6/8 all built and
+passing; E2E 7 correctly deferred to milestone 10 (needs the chat panel).
 
-Next: slice 5 (E2E + closing) — the last slice in milestone 9.
+**Milestone 9 is CLOSED.** Next: milestone 10 (AI chat) — read spec/06-ai-chat.md
+in full first, genuinely new territory unlike M9 which built on M6-M8's existing
+foundations.
 
 ## Links
 PR (slice 1): https://github.com/joshcomley/wixy/pull/35 (merged d0e0880; required a
@@ -112,4 +129,5 @@ on CI's clean runner, fixed by passing the same `-c user.name=/-c user.email=`
 override already used for `_commit`)
 PR (slice 2): https://github.com/joshcomley/wixy/pull/36 (merged b32e48d)
 PR (slice 3): https://github.com/joshcomley/wixy/pull/37 (merged 2c48600)
-PR (slice 4): (fill in once opened)
+PR (slice 4): https://github.com/joshcomley/wixy/pull/38 (merged a3ed487)
+PR (slice 5): (fill in once opened)

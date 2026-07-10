@@ -11,14 +11,26 @@ lock; skipped while a publish/materialize is in flight)". This closes
 decisions/00013's own flagged gap: a background fetch racing a publish's uncommitted
 materialize/commit work could otherwise fast-forward the working tree out from under
 it mid-pipeline.
+
+The lock is only ever REMOVED by `run_publish`'s own `finally` block — a genuine
+process kill (not a caught exception) skips `finally` entirely and leaves the lock
+file on disk forever, found by milestone 9 slice 5's kill-during-publish drill
+(decisions/00030). Without a staleness check, that orphaned lock would pause this
+watcher permanently: `_publish_lock_is_live` treats a lock older than
+`_LOCK_STALE_AFTER_S` as abandoned rather than in-flight, self-healing within that
+window with no operator action needed. The threshold is deliberately generous (far
+longer than any real publish, including a slow network push/build, should ever take)
+so a genuinely slow-but-alive publish is never mistaken for a dead one.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 
 import anyio
 
@@ -29,6 +41,15 @@ from wixy_server.storage import ProjectPaths
 logger = logging.getLogger(__name__)
 
 DEFAULT_INTERVAL_S = 60.0
+_LOCK_STALE_AFTER_S = 600.0
+
+
+def _publish_lock_is_live(lock_path: Path) -> bool:
+    try:
+        age_s = time.time() - lock_path.stat().st_mtime
+    except FileNotFoundError:
+        return False
+    return age_s < _LOCK_STALE_AFTER_S
 
 
 @dataclass
@@ -49,11 +70,12 @@ def fetch_once(
     """One fetch-and-fast-forward attempt. Synchronous (git subprocess I/O) — callers
     on the event loop must run it via `anyio.to_thread.run_sync`.
 
-    A no-op while `paths.publish_lock` exists (spec/04 §7) — checked BEFORE calling
-    `ensure_checkout` at all, so this tick doesn't even attempt a fetch/merge while
-    the publisher owns the working tree; the next tick (after the lock is released)
-    picks up wherever the publish's own fetch/merge left the checkout."""
-    if paths.publish_lock.exists():
+    A no-op while `paths.publish_lock` exists AND is still live (spec/04 §7) —
+    checked BEFORE calling `ensure_checkout` at all, so this tick doesn't even
+    attempt a fetch/merge while the publisher owns the working tree; the next tick
+    (after the lock is released, or ages past `_LOCK_STALE_AFTER_S`) picks up
+    wherever the publish's own fetch/merge left the checkout."""
+    if _publish_lock_is_live(paths.publish_lock):
         return
     try:
         ensure_checkout(project.repo, project.default_branch, paths.repo)

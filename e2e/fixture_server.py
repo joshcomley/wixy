@@ -27,7 +27,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 from pathlib import Path
+
+import anyio
 
 E2E_DIR = Path(__file__).resolve().parent
 WIXY_REPO_ROOT = E2E_DIR.parent
@@ -41,7 +44,8 @@ from builder.config import ProjectConfig  # noqa: E402
 from wixy_server.checkout import current_sha, ensure_checkout  # noqa: E402
 from wixy_server.registry import load_registry  # noqa: E402
 from wixy_server.site_source import build_site_source  # noqa: E402
-from wixy_server.storage import ensure_project_dirs, project_paths  # noqa: E402
+from wixy_server.storage import ProjectPaths, ensure_project_dirs, project_paths  # noqa: E402
+from wixy_server.watcher import WatcherStatus, fetch_once  # noqa: E402
 
 
 def _git(args: list[str], cwd: Path) -> None:
@@ -58,14 +62,25 @@ def _git(args: list[str], cwd: Path) -> None:
 
 
 def _build_site_origin(tmp_root: Path) -> Path:
-    origin = tmp_root / "site-origin"
-    shutil.copytree(MINI_SITE_FIXTURE, origin)
-    _git(["init", "--initial-branch=main"], origin)
-    _git(["config", "user.email", "e2e@example.invalid"], origin)
-    _git(["config", "user.name", "E2E Fixture"], origin)
-    _git(["add", "."], origin)
-    _git(["commit", "-m", "initial fixture site"], origin)
-    return origin
+    """A genuine BARE repo (spec/08 §1, mirroring wixy_server/tests/test_publisher.py's
+    own `bare_origin` fixture) — pushed to from a scratch seed clone, never a working
+    tree of its own. A non-bare origin refuses `git push` to its checked-out branch by
+    default, which would break every E2E flow that actually publishes (1, 4, 5, 6) the
+    moment they existed; this fixture predates any of them needing a real push, so the
+    gap was latent until milestone 9 slice 5."""
+    bare = tmp_root / "site-origin.git"
+    bare.mkdir(parents=True)
+    _git(["init", "--bare", "--initial-branch=main"], bare)
+
+    seed = tmp_root / "site-origin-seed"
+    _git(["clone", str(bare), str(seed)], tmp_root)
+    shutil.copytree(MINI_SITE_FIXTURE, seed, dirs_exist_ok=True)
+    _git(["config", "user.email", "e2e@example.invalid"], seed)
+    _git(["config", "user.name", "E2E Fixture"], seed)
+    _git(["add", "."], seed)
+    _git(["commit", "-m", "initial fixture site"], seed)
+    _git(["push", "origin", "main"], seed)
+    return bare
 
 
 def _write_project_registry(tmp_root: Path, site_origin: Path) -> Path:
@@ -108,6 +123,35 @@ def _publish_initial_build(project: ProjectConfig, storage_root: Path, slug: str
     )
 
 
+def _simulate_upstream_commit(site_origin: Path, tmp_root: Path, title: str) -> str:
+    """E2E 6 (spec/08 §2): "fake cmd 'ships' a commit to the temp origin's main."
+    A scratch clone edits `content/index.json`'s `hero.title` and pushes straight
+    to the bare origin, exactly as a real AI-lane merge (milestone 10's cmdchat,
+    not built yet) would land one — fixture-only simulation, never imported by
+    product code. Returns the new commit's SHA (unused today, kept for a future
+    assertion/debugging)."""
+    scratch = tmp_root / f"upstream-commit-{uuid.uuid4().hex[:8]}"
+    _git(["clone", str(site_origin), str(scratch)], tmp_root)
+    content_path = scratch / "content" / "index.json"
+    data = json.loads(content_path.read_text(encoding="utf-8"))
+    data["hero"]["title"] = title
+    content_path.write_text(json.dumps(data), encoding="utf-8")
+    _git(["config", "user.email", "ai-lane@example.invalid"], scratch)
+    _git(["config", "user.name", "AI Lane"], scratch)
+    _git(["add", "."], scratch)
+    _git(["commit", "-m", f"AI: {title}"], scratch)
+    _git(["push", "origin", "main"], scratch)
+    result = subprocess.run(
+        ["git", "-c", "credential.helper=", "rev-parse", "HEAD"],
+        cwd=scratch,
+        capture_output=True,
+        text=True,
+        check=True,
+        encoding="utf-8",
+    )
+    return result.stdout.strip()
+
+
 def main() -> None:
     tmp_root = Path(tempfile.mkdtemp(prefix="wixy-e2e-"))
     site_origin = _build_site_origin(tmp_root)
@@ -124,7 +168,44 @@ def main() -> None:
 
     from wixy_server.app import create_app
 
-    app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+    app = create_app(
+        storage_root=storage_root,
+        wixy_repo_root=wixy_repo_root,
+        # No E2E flow depends on the PERIODIC watcher tick (spec/04 §7) — E2E 6's
+        # own simulated upstream commit fetches directly (this file's
+        # `/test/simulate-upstream-commit`, decisions/00030), never waiting on
+        # it. A rare, full-suite-only theme-change.spec.ts timeout was
+        # INVESTIGATED and this periodic tick coinciding with the suite's own
+        # ~60s runtime was a suspected cause — DISPROVEN (the timeout still
+        # occurred, equally rarely, with the tick disabled entirely); kept
+        # disabled anyway purely because it's genuinely unneeded background
+        # work for this fixture, not as a fix. The real pattern matches this
+        # box's own already-documented transient disk-I/O contention from
+        # OTHER unrelated processes (decisions/00025, 00027) — profiled with
+        # `fleet_diag.py` during an active failure window and confirmed
+        # elevated CPU/disk-I/O from unrelated PIDs, same as those prior
+        # incidents (decisions/00030).
+        watcher_interval_s=3600.0,
+    )
+
+    @app.post("/test/simulate-upstream-commit", include_in_schema=False)
+    async def _post_simulate_upstream_commit(payload: dict[str, str]) -> dict[str, str]:
+        """E2E 6 (decisions/00030) needs the pushed commit to be visible to the
+        checkout deterministically and promptly, without depending on (or
+        lowering, suite-wide) the real staleness-triggered fetch on the preview
+        route (spec/04 §7) — that mechanism is for a REAL AI-lane merge arriving
+        with no other signal; this fixture-only endpoint has a much stronger
+        signal available (it just pushed the commit itself), so it fetches
+        directly rather than waiting for the next preview load to notice."""
+        paths: ProjectPaths = app.state.paths
+        project: ProjectConfig = app.state.project
+        watcher_status: WatcherStatus = app.state.watcher_status
+        sha = await anyio.to_thread.run_sync(
+            _simulate_upstream_commit, site_origin, tmp_root, payload["title"]
+        )
+        await anyio.to_thread.run_sync(fetch_once, project, paths, watcher_status)
+        return {"sha": sha}
+
     uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
 
 

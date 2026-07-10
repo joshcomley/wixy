@@ -9,7 +9,17 @@ export async function gotoEditAndWaitReady(page: Page, slug: string): Promise<vo
   const contentFetch = page.waitForResponse(
     (res) => res.url().includes(`/api/admin/content/${slug}`) && res.request().method() === "GET",
   );
-  await page.goto(`/admin#/edit/${slug}`);
+  const target = `/admin#/edit/${slug}`;
+  // A same-URL `goto` (including an IDENTICAL hash) is a browser no-op — no
+  // navigation, no hashchange, so the SPA router never remounts the edit view
+  // and the content fetch this function waits for never fires. A flow that
+  // revisits the same page's edit route twice (e.g. E2E 5's restore flow,
+  // decisions/00030) needs a genuine reload to see fresh server state.
+  if (page.url().endsWith(target)) {
+    await page.reload();
+  } else {
+    await page.goto(target);
+  }
   await contentFetch;
   // The content response is what triggers the shell's `init` postMessage to the
   // overlay (editView.ts's requestInit) — a small buffer covers that last, very
@@ -44,18 +54,70 @@ export function trackConsoleErrors(page: Page): string[] {
   return errors;
 }
 
-/** Waits for the NEXT `PATCH /api/admin/draft` this page makes to come back 200 —
- * the OpQueue's 300ms coalesce + network round trip is real time a test must not
- * race ahead of before checking server-side state (or, for a discard, before the
- * panel's own post-accept refetch has had a chance to re-render). */
-export function waitForNextDraftPatchAccepted(page: Page): Promise<void> {
+/** Waits for the NEXT `PATCH /api/admin/draft` this page makes to come back 200,
+ * returning the new rev — the OpQueue's 300ms coalesce + network round trip is
+ * real time a test must not race ahead of before checking server-side state (or,
+ * for a discard, before the panel's own post-accept refetch has had a chance to
+ * re-render). */
+export function waitForNextDraftPatchAccepted(page: Page): Promise<number> {
   return page
     .waitForResponse(
       (res) => res.url().endsWith("/api/admin/draft") && res.request().method() === "PATCH",
     )
-    .then((res) => {
+    .then(async (res) => {
       if (res.status() !== 200) {
         throw new Error(`expected PATCH /api/admin/draft to 200, got ${res.status()}`);
       }
+      const body = (await res.json()) as { rev: number };
+      return body.rev;
     });
+}
+
+const PUBLISH_CONFLICT_RETRY_LIMIT = 5;
+
+/** Opens the publish drawer (the top-bar Publish button — spec/05 §5), confirms,
+ * and waits for `POST /api/admin/publish` to come back 200, returning the new
+ * version number. Every E2E flow that publishes (1, 4, 5, 6) needs this exact
+ * sequence, so it's shared from the moment a SECOND flow needs it rather than
+ * duplicated per spec file — unlike `gotoEditAndWaitReady`/`editTextField`/
+ * `trackConsoleErrors` (decisions/00023 decision 2), which waited for a third
+ * consumer, here all four consumers were already known up front.
+ *
+ * Retries on a 409 rev-conflict: every accepted PATCH fires a background,
+ * un-awaited `GET /api/admin/state` (shell.ts's `refreshStateInBackground`, off
+ * the OpQueue's `onAccepted`) that the drawer's `expectedRev` is built from —
+ * chaining several edits with little else between them (as a real user rapidly
+ * clicking through an item toolbar would, or as `waitForNextDraftPatchAccepted`
+ * alone permits) can open the drawer on a STALE rev, since that background
+ * refresh hasn't necessarily landed yet. Found via real-browser E2E
+ * verification the moment a flow did more than one edit before publishing —
+ * decisions/00030. A 409 here means exactly that race, not a real conflict (no
+ * other actor touches this fixture's draft) — closing and reopening the drawer
+ * re-reads whatever `state` is by then, which converges within a couple of
+ * attempts. Any OTHER failure status fails loudly and immediately; every flow
+ * using this expects the publish to eventually succeed. */
+export async function publishAndWait(page: Page): Promise<number> {
+  for (let attempt = 0; attempt < PUBLISH_CONFLICT_RETRY_LIMIT; attempt++) {
+    await page.click(".wx-publish-button");
+    await page.waitForSelector(".wx-publish-confirm");
+    const publishResponse = page.waitForResponse(
+      (res) => res.url().endsWith("/api/admin/publish") && res.request().method() === "POST",
+    );
+    await page.click(".wx-publish-confirm");
+    const response = await publishResponse;
+    if (response.status() === 200) {
+      const body = (await response.json()) as { version: number };
+      await page.waitForSelector(".wx-publish-progress:has-text('Published as version')");
+      return body.version;
+    }
+    if (response.status() !== 409) {
+      const body = await response.text();
+      throw new Error(`expected POST /api/admin/publish to 200, got ${response.status()}: ${body}`);
+    }
+    await page.click(".wx-drawer-close");
+    await page.waitForTimeout(200);
+  }
+  throw new Error(
+    `publishAndWait: still 409-ing after ${PUBLISH_CONFLICT_RETRY_LIMIT} attempts`,
+  );
 }

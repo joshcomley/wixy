@@ -9,9 +9,10 @@
 // themePanel.ts's FONT_ROLES mapping, confirmed against the real CA site.css's own
 // usage per decisions/00021).
 //
-// Only the EDITING-side half is built here — the publish-tail half ("theme.css +
-// fonts link reflect it" on the PUBLISHED site) needs milestone 9's publisher,
-// matching decisions/00015 decision 4's established E2E 1/4 caveat.
+// The publish-tail half ("theme.css + fonts link reflect it" on the PUBLISHED
+// site) was deferred through M7/M8 pending milestone 9's publisher (decisions/
+// 00015 decision 4), which now exists — extended here (decisions/00030), closing
+// decisions/00023's own flagged "consider extending E2E 2/3" nice-to-have.
 //
 // Google Fonts requests are blocked (spec/08 §1: "never hit the real network") —
 // this test asserts the fonts <link> href updates correctly, not that the family
@@ -19,7 +20,7 @@
 // depend on).
 
 import { expect, test } from "@playwright/test";
-import { trackConsoleErrors, waitForNextDraftPatchAccepted } from "./helpers";
+import { publishAndWait, trackConsoleErrors, waitForNextDraftPatchAccepted } from "./helpers";
 
 test.describe("E2E 3: theme change", () => {
   test.beforeEach(async ({ request }) => {
@@ -88,6 +89,13 @@ test.describe("E2E 3: theme change", () => {
     expect(theme.theme.colors.cream).toBe("#00AA33");
     expect(theme.theme.fonts.serif.family).toBe("Playfair Display");
 
+    // "publish → theme.css + fonts link reflect it" (spec/08 §2's own wording)
+    await publishAndWait(page);
+    const themeCss = await page.request.get("/theme.css").then((r) => r.text());
+    expect(themeCss).toContain("#00AA33");
+    const liveHtml = await page.request.get("/").then((r) => r.text());
+    expect(liveHtml).toContain("Playfair+Display");
+
     expect(consoleErrors).toEqual([]);
   });
 
@@ -96,6 +104,16 @@ test.describe("E2E 3: theme change", () => {
   }) => {
     await page.route("https://fonts.googleapis.com/**", (route) => route.abort());
     const consoleErrors = trackConsoleErrors(page);
+
+    // The CURRENT checked-out/published cream value — captured fresh rather
+    // than hardcoded to the fixture's original "#F1E8D9": this suite's OTHER
+    // theme-change test now actually publishes a cream change (decisions/00030's
+    // E2E 2/3 publish-tail extension), so "the published value" is whatever it
+    // last left behind, not necessarily the pristine fixture default. Matches
+    // decisions/00023 decision 5's already-established "one shared fixture
+    // server" cross-file-state lesson.
+    const originalTheme = await page.request.get("/api/admin/theme").then((r) => r.json());
+    const originalCream: string = originalTheme.theme.colors.cream;
 
     const themeFetch = page.waitForResponse(
       (res) => res.url().includes("/api/admin/theme") && res.request().method() === "GET",
@@ -128,15 +146,18 @@ test.describe("E2E 3: theme change", () => {
     // fully rebuilds every row on refetch, so re-scope to the cream row specifically
     // rather than a bare ".wx-theme-hex" (which would match "coffee"'s row first —
     // `Object.keys(...).sort()` renders colors alphabetically).
-    await expect(creamHex).toHaveValue("#F1E8D9");
-    await page.waitForFunction(() => {
-      const iframe = document.querySelector("iframe.wx-preview-iframe") as HTMLIFrameElement | null;
-      const doc = iframe?.contentDocument;
-      return doc?.documentElement.style.getPropertyValue("--cream").trim() === "#F1E8D9";
-    });
+    await expect(creamHex).toHaveValue(originalCream);
+    await page.waitForFunction(
+      (expected) => {
+        const iframe = document.querySelector("iframe.wx-preview-iframe") as HTMLIFrameElement | null;
+        const doc = iframe?.contentDocument;
+        return doc?.documentElement.style.getPropertyValue("--cream").trim() === expected;
+      },
+      originalCream,
+    );
 
     const theme = await page.request.get("/api/admin/theme").then((r) => r.json());
-    expect(theme.theme.colors.cream).toBe("#F1E8D9");
+    expect(theme.theme.colors.cream).toBe(originalCream);
 
     expect(consoleErrors).toEqual([]);
   });

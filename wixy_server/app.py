@@ -24,6 +24,7 @@ from wixy_server.publisher import PublishJob
 from wixy_server.registry import load_registry
 from wixy_server.routes_admin_api import router as admin_api_router
 from wixy_server.routes_internal import router as internal_router
+from wixy_server.routes_preview import DEFAULT_PREVIEW_STALENESS_THRESHOLD_S
 from wixy_server.routes_preview import router as preview_router
 from wixy_server.routes_public import router as public_router
 from wixy_server.routes_version import router as version_router
@@ -41,6 +42,7 @@ def create_app(
     storage_root: Path,
     wixy_repo_root: Path,
     watcher_interval_s: float = DEFAULT_INTERVAL_S,
+    preview_staleness_threshold_s: float = DEFAULT_PREVIEW_STALENESS_THRESHOLD_S,
 ) -> FastAPI:
     """Build the Wixy FastAPI app for one project.
 
@@ -102,6 +104,7 @@ def create_app(
     app.state.paths = paths
     app.state.settings = settings
     app.state.watcher_status = watcher_status
+    app.state.preview_staleness_threshold_s = preview_staleness_threshold_s
     app.state.publish_job = publish_job
     app.state.wixy_repo_root = wixy_repo_root
 
