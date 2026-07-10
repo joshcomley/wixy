@@ -96,28 +96,43 @@ Sliced into repo-code first, then live execution — mirrors this whole chain's 
   it), left running rather than killed since it wasn't causing harm and my own
   fixes resolved the underlying issue directly.
 
-  **Remaining, BLOCKED**: Cloudflare provisioning (spec/07 §3). Operator confirmed
-  go-ahead via AskUserQuestion (2026-07-10). Tried both elevation channels in order
-  per the global CLAUDE.md: (1) admin gate — HEARTBEAT read 16h+ stale; did NOT
-  assume closed from that alone, submitted a real no-op probe through the inbox and
-  polled 30s — genuinely no result, confirmed closed, not just idle; (2) fallback
-  `request_admin_action` — submitted for real (`requestId 36ffaf8f`, full
-  request text in `C:\Users\josh\.claude\admin-requests\req-36ffaf8f-....json`),
-  the triple-model consensus classifier came back `verdict: "blocked", unanimous:
-  false` (`D:\Servers\Cmd-Admin\Storage\admin-audit.log`) — at least one model
-  voted BLOCKED, which rejects outright regardless of the other two. No per-model
-  reasoning available in the audit log, only the aggregate verdict. This is a
-  working safety gate declining a genuinely elevated, security-relevant op
-  (LocalSystem config edit + shared service restart + a new public auth policy) —
-  not routed around; reported back to the operator to decide how to proceed
-  (run it themselves, investigate the classifier's reasoning, or resubmit with
-  different framing). `tooling/provision_ca_cloudflare.py` itself is unchanged,
-  ready to run whenever an approval path opens.
+- Cloudflare provisioning [DONE — MILESTONE 11 CLOSED]: operator confirmed
+  go-ahead via AskUserQuestion, then opened the admin gate directly after both
+  automated elevation channels had genuinely failed (gate closed per a real probe,
+  `request_admin_action` blocked by the consensus classifier — a working safety
+  gate declining a genuinely elevated op, not something to route around; both
+  attempts documented in git history for the record). Ran
+  `tooling/provision_ca_cloudflare.py` through the now-open gate: DNS created,
+  tunnel ingress inserted (22 hostnames survive the sanity check, every other
+  fleet subdomain untouched), Cloudflared restarted (succeeded on attempt 3 —
+  the documented "try again" transient, the retry loop earned its keep on the
+  first real run), Access app "Wixy Admin (ca)" created with both mirrored
+  policies attached. One real, informative gap: writing `WIXY_CF_TEAM_DOMAIN`/
+  `WIXY_CF_ACCESS_AUD` back to `Storage\.env` failed — diagnosed (not guessed)
+  via a second small probe through the gate: BOTH `CF_ACCESS_TOKEN` and
+  `CF_API_TOKEN` get a real 403 on `GET .../access/organizations` specifically
+  (every other endpoint they touched worked fine) — a genuine token-scope gap.
+  Rather than request broader token permissions, discovered the team domain by
+  observation: opened a real headed browser (Playwright, system Chrome) to
+  `https://ca.cinnamons.uk/admin`, and the freshly-created Access app's OWN
+  login-wall redirect revealed `cinnamons.cloudflareaccess.com` directly, with
+  the `aud` embedded in that same URL matching what the provisioning script had
+  already captured — independent proof the app is genuinely, correctly wired
+  before writing anything. Wrote both values into `Storage\.env` by hand,
+  restarted Wixy. Full reasoning: decisions/00041.
 
-  Once Cloudflare is done, spec/07 §4's remaining verification items (3-8) need a
-  real external check (public HTTPS reachability, CF Access wall, edge-header
-  guard from outside, robots.txt/indexable, reboot survival) — items 1-2 (health,
-  slot-cycle proof) are fully done and verified above.
+  **spec/07 §4 verification — all checked for real, externally, over HTTPS
+  through the actual Cloudflare edge**: (1) status/healthz/version ✅; (2)
+  slot-cycle proof ✅ (above); (3) `https://ca.cinnamons.uk/` → 200, real
+  homepage, zero auth ✅; (4) `/admin` anonymous → CF Access login wall ✅ (real
+  browser); a JWT-stripped direct loopback request to `:9380/admin` still 302s
+  (middleware works independently of the edge) ✅; (5) `/api/admin/state`
+  unauthenticated → 302 ✅; (5b) `/healthz` + `/internal/ready` from outside →
+  404 (edge-header guard) while working on loopback; `/api/version` public →
+  200 ✅; (6) restart drill ✅ (needed anyway, for the new env values); (7)
+  reboot survival — NOT exercised (no real hub reboot this session), noted as
+  unexercised rather than claimed done; (8) `robots.txt` = `Disallow: /`,
+  matches `indexable: false` ✅.
 
 ## Relevant files
 - spec/07-hosting-deploy.md (full — repo artifacts §1, registrations §2, Cloudflare §3,
@@ -129,11 +144,17 @@ Sliced into repo-code first, then live execution — mirrors this whole chain's 
   D:\Servers\Tenna\Storage\provision_cf.py
 
 ## How to continue + acceptance
-Port 9380. Never touch SCM/NSSM directly — Devfleet supervises. CF Access app scopes
-ONLY /admin* + /api/admin* (never the whole hostname — public site must load with zero
-auth). Admin gate for elevated steps (tunnel config edit, CF API calls) per fleet rules.
-Verification checklist 07 §4 items 1-2 (status healthy, slot cycle proof) achievable
-before cutover; items 3-8 fully verifiable only after M12/M13.
+**MILESTONE 11 IS FULLY CLOSED** — every spec/09 acceptance point done, spec/07 §4's
+verification checklist complete except item 7 (reboot survival, needs an actual hub
+reboot this session had no reason to trigger — Devfleet `restart="always"` + the tunnel
+watchdog should cover it per spec's own reasoning; worth a real check whenever a natural
+reboot window occurs, not worth forcing one just to test this).
+
+Next: milestone 12 (CA cutover) per spec/09's own table — point Wixy at CA main, first
+real human publish (replacing the bootstrap "version 0"), retire GH Pages, README,
+contact-page wording fix. Read spec/07's already-noted "future real-domain cutover"
+section (out of scope for M12 itself, but useful context) and whatever M12 doc exists
+before starting — not yet read fresh by this chain.
 
 ## Links
 PR (slice 1): https://github.com/joshcomley/wixy/pull/45 (merged b838f21)
@@ -141,3 +162,5 @@ PR (execv fix): https://github.com/joshcomley/wixy/pull/46 (merged 03f3246)
 PR (slice 2 record / slot-cycle trigger): https://github.com/joshcomley/wixy/pull/47 (merged 72ccec1)
 PR (venv self-lock fix): https://github.com/joshcomley/wixy/pull/48 (merged 92bc6c3)
 PR (post_restart arity fix): https://github.com/joshcomley/wixy/pull/49 (merged 54ad4cd — confirmed live via a fully automatic Slots deploy cycle)
+PR (Cloudflare-blocked status record): https://github.com/joshcomley/wixy/pull/51 (merged 8d59628)
+PR (Cloudflare provisioned, M11 closed): (fill in when opened)
