@@ -2,15 +2,36 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Wixy Admin</title>
 <meta name="robots" content="noindex">
+<script>
+  // Synchronous theme bootstrap — runs before admin.css/admin.js load, so the
+  // pre-JS loading screen (and the real shell right after it) never flashes
+  // the wrong theme. admin-ui/src/theme.ts owns everything from here on
+  // (live OS-preference tracking while "system" is selected, persistence);
+  // this inline copy exists only because it must run before first paint,
+  // which rules out waiting for the bundled JS. Keep the storage key and
+  // "system" fallback behavior identical to theme.ts's own loadThemeMode.
+  (function () {
+    var mode = "system";
+    try {
+      var stored = localStorage.getItem("wx-theme-mode");
+      if (stored === "light" || stored === "dark" || stored === "system") mode = stored;
+    } catch (e) {}
+    var variant = mode === "system"
+      ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+      : mode;
+    document.documentElement.setAttribute("data-theme", variant);
+  })();
+</script>
 <link rel="stylesheet" href="/admin/static/admin/admin.css">
 <style>
   html, body { margin: 0; height: 100%; }
   body {
     font-family: system-ui, -apple-system, sans-serif;
-    background: #faf8f5;
-    color: #2a2420;
+    background: var(--wx-canvas, #eaedf3);
+    color: var(--wx-ink, #1e2430);
   }
   /* Pre-JS instant-render loading screen only (fleet instant-render rule: this
      paints before any fetch/JS runs). Scoped to a child wrapper, not #wx-shell

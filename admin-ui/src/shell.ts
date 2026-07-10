@@ -16,6 +16,7 @@ import { renderPagesPanel } from "./pagesPanel";
 import { mountPublishDrawer } from "./publishDrawer";
 import { currentRoute, navigateTo, onRouteChange, type Route } from "./router";
 import { mountThemePanel, type ThemePanel } from "./themePanel";
+import { initTheme, type ThemeController, type ThemeMode } from "./theme";
 
 interface Drawer {
   element: HTMLElement;
@@ -84,7 +85,33 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   siteLink.target = "_blank";
   siteLink.rel = "noopener noreferrer";
   siteLink.hidden = true;
-  topbar.append(titleEl, spacer, chipEl, publishButton, siteLink);
+
+  const themeController = initTheme(win);
+  const THEME_ICONS: Record<ThemeMode, string> = { light: "☀️", dark: "🌙", system: "💻" };
+  const THEME_LABELS: Record<ThemeMode, string> = {
+    light: "Light theme",
+    dark: "Dark theme",
+    system: "Follow system theme",
+  };
+  const THEME_CYCLE: readonly ThemeMode[] = ["light", "dark", "system"];
+  const themeToggle = document.createElement("button");
+  themeToggle.type = "button";
+  themeToggle.className = "wx-theme-toggle";
+  function renderThemeToggle(): void {
+    const mode = themeController.getMode();
+    themeToggle.textContent = THEME_ICONS[mode];
+    themeToggle.title = THEME_LABELS[mode];
+    themeToggle.setAttribute("aria-label", THEME_LABELS[mode]);
+  }
+  themeToggle.addEventListener("click", () => {
+    const mode = themeController.getMode();
+    const next = THEME_CYCLE[(THEME_CYCLE.indexOf(mode) + 1) % THEME_CYCLE.length] ?? "system";
+    themeController.setMode(next);
+    renderThemeToggle();
+  });
+  renderThemeToggle();
+
+  topbar.append(titleEl, spacer, chipEl, publishButton, siteLink, themeToggle);
 
   const body = document.createElement("div");
   body.className = "wx-body";
@@ -418,6 +445,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       if (stateRetryTimer !== null) clearTimeout(stateRetryTimer);
       activePanelTeardown?.();
       closeDrawer();
+      themeController.teardown();
     },
   };
 }
