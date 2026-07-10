@@ -24,6 +24,22 @@
       : mode;
     document.documentElement.setAttribute("data-theme", variant);
   })();
+  // Same synchronous-bootstrap reasoning as the theme block above, for the
+  // other two Uxer session-persisted view controls (admin-ui/src/zoom.ts,
+  // fontScale.ts own everything from here on). Keep the storage keys and
+  // min/max/default bounds identical to those modules' own constants.
+  (function () {
+    try {
+      var zoom = parseInt(localStorage.getItem("wx-zoom-level"), 10);
+      if (!isFinite(zoom) || zoom < 50 || zoom > 200) zoom = 100;
+      document.documentElement.style.zoom = String(zoom / 100);
+    } catch (e) {}
+    try {
+      var fontScale = parseInt(localStorage.getItem("wx-font-scale"), 10);
+      if (!isFinite(fontScale) || fontScale < 80 || fontScale > 150) fontScale = 100;
+      document.documentElement.style.fontSize = fontScale + "%";
+    } catch (e) {}
+  })();
 </script>
 <link rel="stylesheet" href="/admin/static/admin/admin.css">
 <style>
