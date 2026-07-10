@@ -1209,3 +1209,145 @@ class TestGetVersionAsset:
             response = client.get("/admin/versions/1/index.html")
         assert response.status_code == 200
         assert "Original Title" in response.text
+
+
+def _find_page(pages: list[dict[str, object]], slug: str) -> dict[str, object]:
+    for page in pages:
+        if page["slug"] == slug:
+            return page
+    raise AssertionError(f"no page named {slug!r} in {pages!r}")
+
+
+def _meta(page: dict[str, object]) -> dict[str, object]:
+    meta = page["meta"]
+    assert isinstance(meta, dict)
+    return meta
+
+
+class TestPostPagesDuplicate:
+    def test_duplicates_and_the_new_page_appears_in_state(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/pages/duplicate",
+                json={"from": "about", "slug": "contact", "navLabel": "Contact", "expectedRev": 0},
+            )
+            assert response.status_code == 200
+            assert response.json() == {"rev": 1}
+            state = client.get("/api/admin/state").json()
+        page = _find_page(state["pages"], "contact")
+        assert _meta(page)["navLabel"] == "Contact"
+        assert page["editable"] is False  # no template on disk until publish
+        assert page["pendingDelete"] is False
+
+    def test_the_source_pages_content_is_copied_into_the_new_page(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            client.post(
+                "/api/admin/pages/duplicate",
+                json={"from": "about", "slug": "contact", "navLabel": "Contact", "expectedRev": 0},
+            )
+            # GET /content/<slug> also works via extract_bindings_map's own
+            # template lookup - but that legitimately 404s (no template on
+            # disk yet), so this asserts via /state's merged meta instead,
+            # matching what the pages panel actually reads.
+            state = client.get("/api/admin/state").json()
+        page = _find_page(state["pages"], "contact")
+        assert _meta(page)["title"] == "About"  # copied from about.json
+
+    def test_unknown_from_slug_is_404(self, storage_root: Path, wixy_repo_root: Path) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/pages/duplicate",
+                json={
+                    "from": "does-not-exist",
+                    "slug": "contact",
+                    "navLabel": "Contact",
+                    "expectedRev": 0,
+                },
+            )
+        assert response.status_code == 404
+
+    def test_a_slug_that_already_exists_is_422(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/pages/duplicate",
+                json={"from": "about", "slug": "index", "navLabel": "Home", "expectedRev": 0},
+            )
+        assert response.status_code == 422
+
+    def test_an_invalid_slug_format_is_422(self, storage_root: Path, wixy_repo_root: Path) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/pages/duplicate",
+                json={
+                    "from": "about",
+                    "slug": "Contact Page",
+                    "navLabel": "Contact",
+                    "expectedRev": 0,
+                },
+            )
+        assert response.status_code == 422
+
+    def test_a_stale_rev_is_409(self, storage_root: Path, wixy_repo_root: Path) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/pages/duplicate",
+                json={"from": "about", "slug": "contact", "navLabel": "Contact", "expectedRev": 99},
+            )
+        assert response.status_code == 409
+
+
+class TestPostPagesDelete:
+    def test_stages_deletion_and_the_page_still_appears_pending(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/pages/delete", json={"slug": "about", "expectedRev": 0}
+            )
+            assert response.status_code == 200
+            assert response.json() == {"rev": 1}
+            state = client.get("/api/admin/state").json()
+        page = _find_page(state["pages"], "about")
+        assert page["pendingDelete"] is True
+
+    def test_unknown_slug_is_404(self, storage_root: Path, wixy_repo_root: Path) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/pages/delete", json={"slug": "does-not-exist", "expectedRev": 0}
+            )
+        assert response.status_code == 404
+
+    def test_a_stale_rev_is_409(self, storage_root: Path, wixy_repo_root: Path) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/pages/delete", json={"slug": "about", "expectedRev": 99}
+            )
+        assert response.status_code == 409
+
+    def test_deletion_actually_takes_effect_at_publish(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            client.post("/api/admin/pages/delete", json={"slug": "about", "expectedRev": 0})
+            publish_response = client.post(
+                "/api/admin/publish", json={"message": "delete about", "expectedRev": 1}
+            )
+            assert publish_response.status_code == 200
+            state = client.get("/api/admin/state").json()
+        assert not any(p["slug"] == "about" for p in state["pages"])

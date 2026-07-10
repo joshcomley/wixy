@@ -13,6 +13,13 @@ export interface PageSummary {
    * no draft edits — there's no other "last modified" signal until milestone 9's
    * publish ledger exists. */
   lastModified: string | null;
+  /** `false` for a page just staged via `pages/duplicate` (milestone 9 slice
+   * 4) — no template exists on disk until publish materializes it, so Edit
+   * would 404 a live preview; the pages panel disables Edit until then. */
+  editable: boolean;
+  /** `true` once staged via `pages/delete` — takes effect at the next
+   * publish (spec/04 §5), not immediately. */
+  pendingDelete: boolean;
 }
 
 /** `PublishStage` mirrors `wixy_server.publisher.PublishStage` exactly (spec/04
@@ -109,6 +116,13 @@ export type RestoreOutcome =
   | { kind: "ok"; version: number; sha: string; of: number }
   | { kind: "conflict"; message: string }
   | { kind: "failed"; message: string };
+
+/** `pages/duplicate` and `pages/delete`'s outcome (milestone 9 slice 4) — a
+ * single ok/failed shape rather than `PublishOutcome`'s 3-way kind: neither
+ * caller (`pagesPanel.ts`) needs to distinguish a 404/409/422 from each
+ * other, only whether it worked and, if not, why (the server's own detail
+ * message, shown verbatim). */
+export type PageOpOutcome = { ok: true } | { ok: false; message: string };
 
 export interface ContentResponse {
   content: Record<string, JsonValue>;
@@ -231,6 +245,8 @@ export interface AdminApi {
   publish(message: string, expectedRev: number): Promise<PublishOutcome>;
   getPublishes(limit?: number): Promise<PublishesEntry[]>;
   restore(version: number): Promise<RestoreOutcome>;
+  duplicatePage(fromSlug: string, slug: string, navLabel: string, expectedRev: number): Promise<PageOpOutcome>;
+  deletePage(slug: string, expectedRev: number): Promise<PageOpOutcome>;
 }
 
 export function createApi(): AdminApi {
@@ -321,6 +337,28 @@ export function createApi(): AdminApi {
       }
       const body = await parseJson<{ version: number; sha: string; of: number }>(response);
       return { kind: "ok", version: body.version, sha: body.sha, of: body.of };
+    },
+    async duplicatePage(fromSlug, slug, navLabel, expectedRev) {
+      const response = await fetchWithRetry("/api/admin/pages/duplicate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from: fromSlug, slug, navLabel, expectedRev }),
+      });
+      if (!response.ok) {
+        return { ok: false, message: await extractDetail(response, "duplicate failed") };
+      }
+      return { ok: true };
+    },
+    async deletePage(slug, expectedRev) {
+      const response = await fetchWithRetry("/api/admin/pages/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug, expectedRev }),
+      });
+      if (!response.ok) {
+        return { ok: false, message: await extractDetail(response, "delete failed") };
+      }
+      return { ok: true };
     },
   };
 }

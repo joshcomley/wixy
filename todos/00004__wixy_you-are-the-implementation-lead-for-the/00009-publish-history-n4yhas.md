@@ -64,11 +64,24 @@ same way, backend-first:
   box-level rare full-suite-scale test flakiness pattern, investigated,
   unrelated to restore's own correctness) and decisions/00028 (the history
   panel's UI decisions).
-- Slice 4 (scope decision needed when reached): page duplicate/delete routes +
-  wiring the pages-panel's dead buttons — `_materialize`'s page-ops handling
-  (this slice) already supports `pages_added`/`pages_deleted` generically, but
-  NO route produces them yet. Decide explicitly whether M9 closes this out or
-  re-defers it further (spec/09's own M9 one-liner doesn't name it).
+- Slice 4 [DONE]: page duplicate/delete. Scope resolved: spec/09's own M7 line
+  (not M9's) explicitly names "pages panel incl. duplicate/delete" — decisions/
+  00015 deferred it pending M9's materialize contract, which now exists; M9 is
+  where it lands (decisions/00029 decision 1). `wixy_server/overlay.py` gained
+  `add_page`/`delete_page` (rev-checked `Overlay` mutators, mirroring
+  `apply_patch`'s shape). `POST /api/admin/pages/duplicate` + `/pages/delete`
+  added. `merge_overlay` extended to seed a duplicated page's CONTENT from its
+  source page (decisions/00029 decision 2) — closing a real gap where the new
+  page's own overlay op would have been silently dropped and the page
+  invisible in the pages panel until published. The page's TEMPLATE still
+  doesn't exist until publish (unchanged from slice 1), so `_build_state`'s
+  pages now carry `editable`/`pendingDelete` flags and the pages panel
+  disables Edit for a not-yet-published new page rather than linking to a
+  404ing preview. `admin-ui/src/pagesPanel.ts` wired: Duplicate (inline
+  from-slug/new-slug/navLabel form) and Delete (typed "DELETE" confirmation,
+  matching historyPanel.ts's established pattern). Full reasoning, incl. a
+  spurious-but-harmless pydantic aliasing warning investigated and accepted:
+  decisions/00029.
 - Slice 5 (closing): E2E 1, 4, 5, 6 (not just 5/6 — E2E 1 "text edit" and E2E 4
   "collection" were deferred THROUGH M7/M8 pending this milestone's publisher,
   decisions/00015 decision 4/00019/00023 — none of the four exist as Playwright
@@ -89,10 +102,7 @@ lists, per-leaf for scalars) — DONE (slice 3). E2E 5 (two publishes -> restore
 and 6 (AI-lane faked commit -> preview banner -> publish drawer lists it) passing
 — slice 5.
 
-Next: slice 4 (page duplicate/delete routes — resolve the open scope question
-first) or slice 5 (E2E + closing) — either order is defensible; slice 4 is smaller
-and its own scope question benefits from being resolved before the closing E2E
-pass locks in what milestone 9 covers.
+Next: slice 5 (E2E + closing) — the last slice in milestone 9.
 
 ## Links
 PR (slice 1): https://github.com/joshcomley/wixy/pull/35 (merged d0e0880; required a
@@ -102,3 +112,4 @@ on CI's clean runner, fixed by passing the same `-c user.name=/-c user.email=`
 override already used for `_commit`)
 PR (slice 2): https://github.com/joshcomley/wixy/pull/36 (merged b32e48d)
 PR (slice 3): https://github.com/joshcomley/wixy/pull/37 (merged 2c48600)
+PR (slice 4): (fill in once opened)

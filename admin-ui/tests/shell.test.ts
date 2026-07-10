@@ -37,11 +37,15 @@ function fakeState(overrides: Partial<StateResponse> = {}): StateResponse {
         slug: "index",
         meta: { title: "Home", navLabel: "Home", inNav: true, navOrder: 10 },
         lastModified: null,
+        editable: true,
+        pendingDelete: false,
       },
       {
         slug: "about",
         meta: { title: "About", navLabel: "About", inNav: true, navOrder: 20 },
         lastModified: null,
+        editable: true,
+        pendingDelete: false,
       },
     ],
     draft: { rev: 0, opCount: 0 },
@@ -71,6 +75,8 @@ function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
     publish: vi.fn(async () => ({ kind: "ok" as const, version: 1, sha: "a".repeat(40) })),
     getPublishes: vi.fn(async () => []),
     restore: vi.fn(async () => ({ kind: "ok" as const, version: 1, sha: "a".repeat(40), of: 0 })),
+    duplicatePage: vi.fn(async () => ({ ok: true as const })),
+    deletePage: vi.fn(async () => ({ ok: true as const })),
     ...overrides,
   } as AdminApi;
 }

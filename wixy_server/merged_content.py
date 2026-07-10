@@ -29,10 +29,23 @@ def merge_overlay(source: SiteSource, overlay: Overlay) -> SiteSource:
     stale draft" posture as everywhere else content is merged; the editor's own
     UI is what surfaces a dangling reference to the owner, this layer just
     doesn't crash on it.
+
+    A page staged in `overlay.pages_added` (milestone 9 slice 4's page
+    duplicate) is seeded here by copying `from_slug`'s CONTENT (not its
+    template — that only gets copied at publish-time materialize,
+    decisions/00024 decision 4/decisions/00029) so the new slug is a real key
+    ops can target and the pages list can show it (meta/navLabel) before it's
+    ever published. `pages_deleted` is deliberately NOT filtered out here —
+    spec/04 §5's restore paragraph and this feature's own contract both say
+    deletion "takes effect at publish," so a staged-for-deletion page keeps
+    rendering normally in the draft until then.
     """
     page_contents: dict[str, JsonObject] = {
         slug: copy.deepcopy(content) for slug, content in source.page_contents.items()
     }
+    for page_add in overlay.pages_added:
+        if page_add.slug not in page_contents and page_add.from_slug in page_contents:
+            page_contents[page_add.slug] = copy.deepcopy(page_contents[page_add.from_slug])
     global_content: JsonObject = copy.deepcopy(source.global_content)
     theme_dict: JsonObject | None = (
         theme_to_dict(source.theme) if source.theme is not None else None
