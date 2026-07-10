@@ -21,9 +21,12 @@ process Devfleet spawned (whatever interpreter is in Devfleet's `argv[0]`), and
 point at the newly-active slot's venv python, so the *next* restart picks it up.
 
 spec/07 §1-§2 gives Wixy a different, simpler, EXPLICIT design: `launcher.py` itself
-resolves `active.txt` and does the re-exec (`os.execv` into
-`<slot>/.venv/Scripts/python.exe -m wixy_server`), and §2's own `services.toml` snippet
-confirms this — `argv` is FIXED (`pythoncore-3.14-64\python.exe launcher.py`, no
+resolves `active.txt` and hands off to `<slot>/.venv/Scripts/python.exe -m
+wixy_server` (**originally implemented via `os.execv`; corrected to a blocking child
+`subprocess.run` in decisions/00037 after a real Devfleet registration showed `execv`
+orphans the server from Windows Job Object supervision — the handoff MECHANISM was a
+bug, not this decision's actual point, which is §2's own `services.toml` snippet
+confirming `argv` stays FIXED** (`pythoncore-3.14-64\python.exe launcher.py`, no
 subcommand, never mutated by any hook). This is spec's own decided design, not
 something to reconcile with Loom's older mechanism — implemented literally, and it's
 materially simpler (no post_swap argv-rewriting, no Devfleet-reload dependency for a
