@@ -84,12 +84,31 @@ foreground/background pairing the app renders: light `--wx-muted` on `--wx-canva
 variable, two roles" problem decisions/00045 already solved for `--wx-brand-blue`,
 now applied to danger too via the same fill/text split). See decisions/00049 for
 full reasoning, root causes, and the exact color values chosen.
-Slice 7 remains - continue in the same branch-per-slice, PR, wait-green, merge
-discipline as the rest of this project.
+Slice 7 (MCP compliance-bridge integration) done — the final slice; the whole 7-slice
+Uxer adoption project is now COMPLETE. Cloned `Uxer/` (gitignored) into the repo root
+and built its web bundle; mounted `/admin/static/uxer` before the existing
+`/admin/static` mount; added `/uxer-style.json` and `/.uxer-web-port` routes (both
+correctly unauthenticated per `auth.py`'s `ADMIN_PATH_PREFIXES`). Wrote `uxer-style.json`
+with every mandatory field genuinely derived from the real `style.css` palette/type/
+spacing/shape/motion (not the template's placeholder defaults) — full per-field
+provenance in decisions/00050. Key architectural adaptation: `admin_shell.html` is a
+static, module-cached HTML string (no per-request Jinja2 templating), so
+UXER-INTEGRATION.md's own `{% if request.query_params.get('uxer') %}` gate became a
+client-side `location.search` check before a dynamic `import()` of the bundle — normal
+editor sessions fetch/run zero Uxer code. Found and fixed a real bug this same dynamic-
+import gating pattern introduces: a bare `window.addEventListener('load', ...)` can
+register after `load` already fired (dynamic imports aren't part of the page's
+load-blocking resource graph the way static imports are), silently breaking the
+`uxer-style.json` fetch — fixed with a `document.readyState === "complete"` check.
+Verified via a real Playwright run against `e2e/fixture_server.py`: zero footprint
+without `?uxer=`, full bridge activation (adapter + bundle + style tokens all fetched)
+with `?uxer=1`. Full pytest suite (542 tests), ruff, mypy --strict all green. See
+decisions/00050 for complete reasoning.
 
 ## Links
 PR (slice 1): #57 (merged)
 PR (slice 3): #58 (merged)
 PR (slice 4): #59 (merged)
 PR (slice 5): #60 (merged)
-PR (slice 6): (fill in when opened)
+PR (slice 6): #61 (merged)
+PR (slice 7): #62 (merged)
