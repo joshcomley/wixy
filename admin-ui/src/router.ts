@@ -1,11 +1,11 @@
 // Client-side hash routing (spec/05-editor.md §1): "#/pages", "#/edit/<page>",
 // "#/theme", "#/media", "#/chat", "#/chat/<conv>", "#/history",
-// "#/settings", "#/settings/shortcuts". No History-API routing — the whole
-// admin is a single served document (wixy_server.app.get_admin_shell:
-// "every /admin sub-route the browser might deep-link to is this same
-// document").
+// "#/settings", "#/settings/appearance", "#/settings/shortcuts". No
+// History-API routing — the whole admin is a single served document
+// (wixy_server.app.get_admin_shell: "every /admin sub-route the browser
+// might deep-link to is this same document").
 
-export type SettingsPage = "general" | "shortcuts";
+export type SettingsPage = "general" | "appearance" | "shortcuts";
 
 export type Route =
   | { kind: "pages" }
@@ -42,7 +42,10 @@ export function parseHash(hash: string): Route {
     case "history":
       return { kind: "history" };
     case "settings":
-      return { kind: "settings", page: second === "shortcuts" ? "shortcuts" : "general" };
+      return {
+        kind: "settings",
+        page: second === "shortcuts" ? "shortcuts" : second === "appearance" ? "appearance" : "general",
+      };
     default:
       return DEFAULT_ROUTE;
   }
@@ -63,7 +66,9 @@ export function routeToHash(route: Route): string {
     case "history":
       return "#/history";
     case "settings":
-      return route.page === "shortcuts" ? "#/settings/shortcuts" : "#/settings";
+      if (route.page === "shortcuts") return "#/settings/shortcuts";
+      if (route.page === "appearance") return "#/settings/appearance";
+      return "#/settings";
   }
 }
 

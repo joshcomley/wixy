@@ -21,11 +21,29 @@
   --wx-brand-blue-text: #2563eb;
   --wx-brand-blue-tint: #eaf0fe;
   --wx-ink: #1e2430;
-  --wx-muted: #667085;
+  /* #667085 (slice 1's original) cleared 4.5:1 against --wx-surface (4.56,
+     decisions/00045) but was never checked against the slightly-darker
+     --wx-canvas it also renders on (.wx-coming-soon and others sit on
+     canvas directly, .wx-main has no surface behind them) - only 4.24:1
+     there, a real AA failure. Slice 6's theme editor's live contrast
+     checker caught it; darkened just enough to clear both (4.61 on canvas,
+     4.95 on surface) - see decisions/00049. */
+  --wx-muted: #616a7e;
   --wx-surface: #f3f5f9;
   --wx-canvas: #eaedf3;
   --wx-border: #dde2ea;
+  /* Same split as --wx-brand-blue/--wx-brand-blue-text (decisions/00045):
+     --wx-danger is the FILL (paired with white text - .wx-toast-error,
+     .wx-chat-offline-banner), --wx-danger-text is the same hue used as
+     plain text on surface/canvas/danger-tint. Light mode's single
+     #b91c1c happened to clear AA in both roles (6.47 white-on-fill, and
+     decisions/00045's verified danger/surface); dark mode did NOT - the
+     original single --wx-danger (#f87171, tuned only for the text role at
+     6.08 on surface) was never checked as a FILL under white text, where
+     it's only 2.77:1, a real AA failure caught by slice 6's theme editor.
+     See decisions/00049. */
   --wx-danger: #b91c1c;
+  --wx-danger-text: #b91c1c;
   --wx-danger-tint: #fef2f2;
   --wx-solid-dark: #1e2430;
   --wx-solid-dark-text: #e2e6ec;
@@ -44,7 +62,8 @@
   --wx-surface: #1a1d26;
   --wx-canvas: #14161d;
   --wx-border: #2d3140;
-  --wx-danger: #f87171;
+  --wx-danger: #cf3a3a;
+  --wx-danger-text: #f87171;
   --wx-danger-tint: #3a1e1e;
   --wx-solid-dark: #0d0f14;
   --wx-solid-dark-text: #e2e6ec;
@@ -67,7 +86,8 @@
     --wx-surface: #1a1d26;
     --wx-canvas: #14161d;
     --wx-border: #2d3140;
-    --wx-danger: #f87171;
+    --wx-danger: #cf3a3a;
+    --wx-danger-text: #f87171;
     --wx-danger-tint: #3a1e1e;
     --wx-solid-dark: #0d0f14;
     --wx-solid-dark-text: #e2e6ec;
@@ -377,7 +397,7 @@
 }
 
 .wx-pages-badge-delete {
-  color: var(--wx-danger);
+  color: var(--wx-danger-text);
 }
 
 .wx-pages-badge-new {
@@ -402,7 +422,7 @@
 }
 
 .wx-pages-error {
-  color: var(--wx-danger);
+  color: var(--wx-danger-text);
 }
 
 /* -- Edit view ----------------------------------------------------------------- */
@@ -642,7 +662,7 @@
 
 .wx-diff-validate {
   border-color: var(--wx-danger);
-  color: var(--wx-danger);
+  color: var(--wx-danger-text);
 }
 
 .wx-diff-upstream h4,
@@ -664,7 +684,7 @@
 
 .wx-publish-error {
   font: 0.75rem/1.4 ui-monospace, monospace;
-  color: var(--wx-danger);
+  color: var(--wx-danger-text);
   background: var(--wx-canvas);
   border: 1px solid var(--wx-danger);
   border-radius: var(--wx-radius);
@@ -1074,7 +1094,7 @@ div.wx-media-thumb {
 }
 
 .wx-history-error {
-  color: var(--wx-danger);
+  color: var(--wx-danger-text);
 }
 
 /* -- Settings panel (Uxer's Settings-view + Keyboard-Shortcuts mandate) --------- */
@@ -1210,8 +1230,197 @@ div.wx-media-thumb {
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-danger);
   background: var(--wx-danger-tint);
-  color: var(--wx-danger);
+  color: var(--wx-danger-text);
   cursor: pointer;
+}
+
+.wx-settings-link-button {
+  font: 600 0.75rem/1 system-ui, sans-serif;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--wx-brand-blue-text);
+  cursor: pointer;
+}
+
+.wx-settings-link-button:hover {
+  text-decoration: underline;
+}
+
+/* -- Appearance (theme editor) --------------------------------------------- */
+
+.wx-settings-appearance {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 640px;
+}
+
+.wx-settings-appearance-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wx-settings-color-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-top: 1px solid var(--wx-border);
+}
+
+.wx-settings-section h3 + .wx-settings-color-row {
+  border-top: none;
+}
+
+.wx-settings-color-label {
+  flex: 1;
+  font: 500 0.8125rem/1.4 system-ui, sans-serif;
+}
+
+.wx-settings-color-row input[type="color"] {
+  width: 32px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--wx-border);
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+
+.wx-settings-color-hex {
+  font: 0.8125rem/1.4 ui-monospace, monospace;
+  color: var(--wx-ink);
+  background: var(--wx-canvas);
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  padding: 5px 8px;
+  width: 84px;
+}
+
+.wx-settings-contrast-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-top: 1px solid var(--wx-border);
+}
+
+.wx-settings-section h3 + .wx-settings-contrast-row {
+  border-top: none;
+}
+
+.wx-settings-contrast-label {
+  flex: 1;
+  font: 500 0.8125rem/1.4 system-ui, sans-serif;
+}
+
+.wx-settings-contrast-swatches {
+  display: flex;
+  flex: none;
+}
+
+.wx-settings-contrast-swatch {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--wx-border);
+}
+
+.wx-settings-contrast-swatch:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.wx-settings-contrast-swatch:last-child {
+  border-radius: 0 4px 4px 0;
+  margin-left: -1px;
+}
+
+.wx-settings-contrast-ratio {
+  flex: none;
+  font: 600 0.75rem/1 ui-monospace, monospace;
+  color: var(--wx-muted);
+  min-width: 52px;
+  text-align: right;
+}
+
+.wx-settings-contrast-badge {
+  flex: none;
+  font: 600 0.6875rem/1 system-ui, sans-serif;
+  padding: 4px 8px;
+  border-radius: 999px;
+  min-width: 52px;
+  text-align: center;
+}
+
+.wx-settings-contrast-pass {
+  background: var(--wx-brand-blue-tint);
+  color: var(--wx-brand-blue-text);
+}
+
+.wx-settings-contrast-fail {
+  background: var(--wx-danger-tint);
+  color: var(--wx-danger-text);
+}
+
+.wx-settings-theme-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wx-settings-theme-actions button {
+  font: 600 0.75rem/1 system-ui, sans-serif;
+  padding: 8px 12px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  cursor: pointer;
+}
+
+.wx-settings-theme-actions button:hover {
+  background: var(--wx-canvas);
+}
+
+.wx-settings-theme-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.wx-settings-theme-actions .wx-settings-save-button {
+  border-color: var(--wx-brand-blue);
+  background: var(--wx-brand-blue);
+  color: #fff;
+}
+
+.wx-settings-save-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.wx-settings-theme-warning {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--wx-danger-text);
+  background: var(--wx-danger-tint);
+  border: 1px solid var(--wx-danger);
+  border-radius: var(--wx-radius);
+  padding: 8px 10px;
+}
+
+.wx-settings-theme-textarea {
+  width: 100%;
+  min-height: 120px;
+  font: 0.75rem/1.4 ui-monospace, monospace;
+  color: var(--wx-ink);
+  background: var(--wx-canvas);
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  padding: 8px;
+  resize: vertical;
+  box-sizing: border-box;
 }
 
 .wx-settings-shortcuts-toolbar {
@@ -1297,7 +1506,7 @@ div.wx-media-thumb {
 .wx-settings-shortcut-error {
   flex-basis: 100%;
   font-size: 0.75rem;
-  color: var(--wx-danger);
+  color: var(--wx-danger-text);
 }
 
 /* -- Toasts --------------------------------------------------------------------- */
@@ -1433,7 +1642,7 @@ div.wx-media-thumb {
 
 .wx-chat-compose-error,
 .wx-chat-composer-error {
-  color: var(--wx-danger);
+  color: var(--wx-danger-text);
   font-size: 0.75rem;
 }
 
@@ -1642,7 +1851,7 @@ div.wx-media-thumb {
 .wx-chat-error-row {
   align-self: center;
   font-size: 0.75rem;
-  color: var(--wx-danger);
+  color: var(--wx-danger-text);
   background: var(--wx-danger-tint);
   border: 1px solid var(--wx-danger);
   border-radius: var(--wx-radius);

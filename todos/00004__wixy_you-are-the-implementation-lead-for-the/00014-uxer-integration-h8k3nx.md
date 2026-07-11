@@ -69,11 +69,27 @@ blank frame. Also rediscovered that `admin_shell.html` is cached in memory at
 server startup (unlike the JS/CSS static assets), so the long-running fixture
 server from slices 3-4 needed a restart to pick up the new favicon links — see
 decisions/00048 for full reasoning.
-Slices 6-7 remain - continue in the same branch-per-slice, PR, wait-green, merge
+Slice 6 (theme editor) done: new third Settings tab "Appearance" (separate from
+General's quick toggle, per Uxer's own "toggle picks a preset, editor tailors one"
+distinction), live color editing via inline CSS custom properties (wins over
+style.css by specificity, no iframe needed since the admin's own chrome IS the
+surface being edited), defaults read straight from the loaded stylesheet's CSSOM
+(not a hardcoded second copy, per decisions/00047's instruction), a new `contrast.ts`
+WCAG formula cross-checked against decisions/00045's own numbers, and a save-time
+WCAG-AA gate with a "Save anyway" override. Found and fixed TWO real, previously-
+unverified accessibility bugs in the shipped palette by testing every actual
+foreground/background pairing the app renders: light `--wx-muted` on `--wx-canvas`
+(4.24:1, fails - only muted/surface had been checked) and white text on dark-mode
+`--wx-danger` fill (2.77:1, fails even the relaxed bar - the exact same "one
+variable, two roles" problem decisions/00045 already solved for `--wx-brand-blue`,
+now applied to danger too via the same fill/text split). See decisions/00049 for
+full reasoning, root causes, and the exact color values chosen.
+Slice 7 remains - continue in the same branch-per-slice, PR, wait-green, merge
 discipline as the rest of this project.
 
 ## Links
 PR (slice 1): #57 (merged)
 PR (slice 3): #58 (merged)
 PR (slice 4): #59 (merged)
-PR (slice 5): (fill in when opened)
+PR (slice 5): #60 (merged)
+PR (slice 6): (fill in when opened)

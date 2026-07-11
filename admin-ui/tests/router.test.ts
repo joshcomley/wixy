@@ -31,8 +31,9 @@ describe("parseHash", () => {
     expect(parseHash("#/chat/abc123")).toEqual({ kind: "chat", conversation: "abc123" });
   });
 
-  it("parses #/settings and #/settings/shortcuts", () => {
+  it("parses #/settings, #/settings/appearance, and #/settings/shortcuts", () => {
     expect(parseHash("#/settings")).toEqual({ kind: "settings", page: "general" });
+    expect(parseHash("#/settings/appearance")).toEqual({ kind: "settings", page: "appearance" });
     expect(parseHash("#/settings/shortcuts")).toEqual({ kind: "settings", page: "shortcuts" });
   });
 
@@ -56,6 +57,7 @@ describe("routeToHash", () => {
       { kind: "chat", conversation: "abc123" },
       { kind: "history" },
       { kind: "settings", page: "general" },
+      { kind: "settings", page: "appearance" },
       { kind: "settings", page: "shortcuts" },
     ];
     for (const route of routes) {
