@@ -17,7 +17,7 @@ from pathlib import Path
 import anyio
 import httpx
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from wixy_server.auth import JwksCache, build_admin_auth_middleware, jwks_url
@@ -41,6 +41,17 @@ from wixy_server.watcher import DEFAULT_INTERVAL_S, WatcherStatus, fetch_once, w
 
 _STATIC_DIR = Path(__file__).parent / "static"
 _ADMIN_SHELL_HTML = (_STATIC_DIR / "admin_shell.html").read_text(encoding="utf-8")
+# Uxer MCP compliance-bridge integration (slice 7, decisions/00050). `Uxer/`
+# is gitignored (cloned + `npm run build` locally per UXER-INTEGRATION.md's
+# "Web Application Integration" section) and won't exist on a fresh checkout
+# or the deployed slot unless someone's explicitly built it there — this is
+# an AI/MCP-tooling-only surface gated behind `?uxer=` client-side (see
+# admin_shell.html), so a missing bundle just means the overlay never
+# activates, not a broken app.
+_REPO_ROOT = Path(__file__).parent.parent
+_UXER_DIST_DIR = _REPO_ROOT / "Uxer" / "web" / "dist"
+_UXER_STYLE_PATH = _REPO_ROOT / "uxer-style.json"
+_UXER_WEB_PORT_PATH = _REPO_ROOT / ".uxer-web-port"
 
 
 def create_app(
@@ -162,6 +173,31 @@ def create_app(
         entirely client-side hash fragments (`#/pages`, `#/edit/<page>`, …), so every
         `/admin` sub-route the browser might deep-link to is this same document."""
         return HTMLResponse(content=_ADMIN_SHELL_HTML)
+
+    @app.get("/uxer-style.json", include_in_schema=False)
+    async def uxer_style() -> FileResponse:
+        """Uxer MCP compliance-bridge design tokens (slice 7, decisions/00050) —
+        a fixed, protocol-level path Uxer's own browser module and MCP server
+        look for by convention, not something wixy renames the way the static
+        asset mount below is namespaced under /admin/static."""
+        return FileResponse(_UXER_STYLE_PATH)
+
+    @app.get("/.uxer-web-port", include_in_schema=False)
+    async def uxer_web_port() -> HTMLResponse:
+        """Uxer bridge auto-discovery — the MCP server's WebSocket port, if one
+        is running locally. Absent outside an active `ui_launch`/MCP session,
+        which is expected — the bridge just fails to connect, same as any
+        other optional dev-tooling endpoint would."""
+        if _UXER_WEB_PORT_PATH.exists():
+            return HTMLResponse(_UXER_WEB_PORT_PATH.read_text(encoding="utf-8").strip())
+        return HTMLResponse("0", status_code=404)
+
+    # Mount BEFORE /admin/static (more specific path first, per Uxer's own
+    # doc) so /admin/static/uxer/... resolves here rather than falling
+    # through to the broader static mount below.
+    if not _UXER_DIST_DIR.exists():
+        _UXER_DIST_DIR.mkdir(parents=True, exist_ok=True)
+    app.mount("/admin/static/uxer", StaticFiles(directory=_UXER_DIST_DIR), name="uxer-static")
 
     app.mount("/admin/static", StaticFiles(directory=_STATIC_DIR), name="admin-static")
     # Serves whatever `_save_upload`/`_media_item` (routes_admin_api.py) construct as
