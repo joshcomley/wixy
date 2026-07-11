@@ -22,6 +22,7 @@ import { mountPageSettingsDrawer } from "./pageSettingsDrawer";
 import { renderPagesPanel } from "./pagesPanel";
 import { mountPublishDrawer } from "./publishDrawer";
 import { currentRoute, navigateTo, onRouteChange, type Route } from "./router";
+import { captureScreenshot, copyBlobToClipboard, downloadBlob, flashScreen, screenshotFilename } from "./screenshot";
 import { clearLastRoute, loadLastRoute, saveLastRoute } from "./sessionState";
 import { mountSettingsPanel } from "./settingsPanel";
 import { formatBinding, initShortcuts, type ShortcutCommand } from "./shortcuts";
@@ -252,6 +253,40 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   renderThemeToggle();
   themeController.subscribe(() => renderThemeToggle());
 
+  // -- Screenshot -------------------------------------------------------------
+
+  const screenshotButton = document.createElement("button");
+  screenshotButton.type = "button";
+  screenshotButton.className = "wx-screenshot-button";
+  screenshotButton.textContent = "📷";
+  screenshotButton.title = "Screenshot";
+  screenshotButton.setAttribute("aria-label", "Take a screenshot");
+  screenshotButton.addEventListener("click", () => void handleScreenshotClick());
+
+  async function handleScreenshotClick(): Promise<void> {
+    screenshotButton.disabled = true;
+    try {
+      const outcome = await captureScreenshot(win);
+      if (!outcome.ok) {
+        // "denied" covers the user cancelling the browser's own source
+        // picker — not an app error worth a toast, same as cancelling any
+        // other native browser dialog is silent elsewhere in the app.
+        if (outcome.reason !== "denied") showTransientToast(outcome.message, "error");
+        return;
+      }
+      flashScreen(win.document);
+      const filename = screenshotFilename();
+      downloadBlob(outcome.blob, filename, win.document);
+      const copied = await copyBlobToClipboard(outcome.blob, win);
+      showTransientToast(
+        copied ? `Screenshot saved as ${filename} and copied to clipboard.` : `Screenshot saved as ${filename}.`,
+        "info",
+      );
+    } finally {
+      screenshotButton.disabled = false;
+    }
+  }
+
   // -- Settings toggle ------------------------------------------------------
 
   const settingsToggle = document.createElement("button");
@@ -262,7 +297,18 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   settingsToggle.setAttribute("aria-label", "Settings");
   settingsToggle.addEventListener("click", () => navigateTo({ kind: "settings", page: "general" }, win));
 
-  topbar.append(titleEl, spacer, chipEl, publishButton, siteLink, zoomGroup, fontScaleGroup, themeToggle, settingsToggle);
+  topbar.append(
+    titleEl,
+    spacer,
+    chipEl,
+    publishButton,
+    siteLink,
+    zoomGroup,
+    fontScaleGroup,
+    screenshotButton,
+    themeToggle,
+    settingsToggle,
+  );
 
   const body = document.createElement("div");
   body.className = "wx-body";
@@ -347,9 +393,10 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     toastRegion.innerHTML = "";
   }
 
-  function showTransientError(message: string): void {
+  function showTransientToast(message: string, variant: "error" | "info" = "error"): void {
     const toast = document.createElement("div");
-    toast.className = "wx-toast wx-toast-error wx-toast-transient";
+    toast.className =
+      variant === "error" ? "wx-toast wx-toast-error wx-toast-transient" : "wx-toast wx-toast-transient";
     toast.textContent = message;
     toastRegion.appendChild(toast);
     setTimeout(() => toast.remove(), TRANSIENT_TOAST_MS);
@@ -570,7 +617,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
             activeThemePanel?.onOpsAccepted(ops);
             void refreshStateInBackground();
           },
-          onError: () => showTransientError("Couldn't save your last change — retrying…"),
+          onError: () => showTransientToast("Couldn't save your last change — retrying…"),
         });
       }
       renderTopBar();

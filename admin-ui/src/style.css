@@ -1327,6 +1327,49 @@ div.wx-media-thumb {
   background: var(--wx-danger);
 }
 
+/* -- Screenshot ------------------------------------------------------------------- */
+
+.wx-screenshot-button {
+  flex: none;
+  font-size: 1rem;
+  line-height: 1;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wx-screenshot-button:hover {
+  background: var(--wx-canvas);
+}
+
+.wx-screenshot-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Instant bright flash, faded to transparent by JS toggling
+ * wx-screenshot-flash-fade one animation frame after mount (screenshot.ts's
+ * flashScreen) — Uxer's "flash the screen briefly" capture feedback. */
+.wx-screenshot-flash {
+  position: fixed;
+  inset: 0;
+  background: #fff;
+  opacity: 0.85;
+  pointer-events: none;
+  z-index: 9999;
+  transition: opacity 150ms ease-out;
+}
+
+.wx-screenshot-flash-fade {
+  opacity: 0;
+}
+
 /* -- Chat (spec/05 §6, spec/06) --------------------------------------------- */
 
 .wx-chat-panel h2 {
