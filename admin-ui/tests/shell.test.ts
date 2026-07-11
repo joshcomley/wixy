@@ -22,8 +22,18 @@ function fakeStorage(): Storage {
 /** `storage` is an explicit param (rather than always fresh) so a test can
  * share one across two separate `fakeWindow()` calls — simulating a fresh
  * page load reusing the same browser's localStorage (see the last-active-
- * route restore test below). */
-function fakeWindow(opts: { storage?: Storage; initialHash?: string } = {}): Window {
+ * route restore test below). `getDisplayMedia` defaults to "unsupported"
+ * (undefined) — screenshot.test.ts already covers captureScreenshot's own
+ * logic in depth; shell-level tests only need to confirm the click ->
+ * captureScreenshot -> toast wiring, which the "unsupported" path exercises
+ * without needing a fake <video>/<canvas>. */
+function fakeWindow(
+  opts: {
+    storage?: Storage;
+    initialHash?: string;
+    getDisplayMedia?: (options: unknown) => Promise<MediaStream>;
+  } = {},
+): Window {
   const listeners = new Map<string, Set<(e?: Event) => void>>();
   let hash = opts.initialHash ?? "";
   const win = {
@@ -38,6 +48,10 @@ function fakeWindow(opts: { storage?: Storage; initialHash?: string } = {}): Win
       origin: "https://wixy.test",
     },
     localStorage: opts.storage ?? fakeStorage(),
+    navigator: {
+      mediaDevices: opts.getDisplayMedia === undefined ? undefined : { getDisplayMedia: opts.getDisplayMedia },
+      clipboard: undefined,
+    },
     addEventListener: (type: string, listener: (e?: Event) => void) => {
       if (!listeners.has(type)) listeners.set(type, new Set());
       listeners.get(type)?.add(listener);
@@ -600,5 +614,52 @@ describe("mountShell", () => {
 
     expect(win3.location.hash).toBe("#/history");
     expect(container3.querySelector(".wx-history-panel")).not.toBeNull();
+  });
+
+  it("clicking the screenshot button when capture is unsupported shows an error toast", async () => {
+    const api = fakeApi();
+    const win = fakeWindow(); // no getDisplayMedia -> "unsupported"
+    const container = document.createElement("div");
+
+    mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+    await flushState(api);
+
+    container.querySelector<HTMLButtonElement>(".wx-screenshot-button")?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const toast = container.querySelector(".wx-toast-error");
+    expect(toast?.textContent).toBe("Screenshot capture isn't supported in this browser.");
+  });
+
+  it("a denied/cancelled capture shows no toast (matches cancelling any other native dialog elsewhere in the app)", async () => {
+    const api = fakeApi();
+    const win = fakeWindow({ getDisplayMedia: () => Promise.reject(new Error("NotAllowedError")) });
+    const container = document.createElement("div");
+
+    mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+    await flushState(api);
+
+    container.querySelector<HTMLButtonElement>(".wx-screenshot-button")?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(container.querySelector(".wx-toast-error")).toBeNull();
+  });
+
+  it("the screenshot button re-enables after a capture attempt completes", async () => {
+    const api = fakeApi();
+    const win = fakeWindow();
+    const container = document.createElement("div");
+
+    mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+    await flushState(api);
+
+    const button = container.querySelector<HTMLButtonElement>(".wx-screenshot-button")!;
+    button.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(button.disabled).toBe(false);
   });
 });

@@ -57,10 +57,23 @@ OS-preference listener), added `sessionState.ts` for last-active-route persisten
 and a new `settingsPanel.ts` (General + Keyboard Shortcuts tabs) reachable via a new
 topbar gear icon. 27-check real-browser verification incl. the full rebind flow with
 genuine keypresses — see decisions/00047 for full reasoning.
-Slices 5-7 remain - continue in the same branch-per-slice, PR, wait-green, merge
+Slice 5 (screenshot button + app icon) done: chose getDisplayMedia (true pixel
+capture, correctly includes the live-preview iframe) over a foreignObject/DOM-
+serialization approach (would render the iframe blank) after empirically confirming
+it's fully automatable headlessly (`--use-fake-ui-for-media-stream`) rather than
+assuming a permission prompt would block real-browser verification; generated a
+"W"-monogram favicon/icon set with PIL (no icon existed before) since none was
+supplied. Verification's decisive check: the captured PNG has 6244 distinct colors
+on an edit view with its iframe visible, proving genuine pixel capture rather than a
+blank frame. Also rediscovered that `admin_shell.html` is cached in memory at
+server startup (unlike the JS/CSS static assets), so the long-running fixture
+server from slices 3-4 needed a restart to pick up the new favicon links — see
+decisions/00048 for full reasoning.
+Slices 6-7 remain - continue in the same branch-per-slice, PR, wait-green, merge
 discipline as the rest of this project.
 
 ## Links
 PR (slice 1): #57 (merged)
 PR (slice 3): #58 (merged)
-PR (slice 4): (fill in when opened)
+PR (slice 4): #59 (merged)
+PR (slice 5): (fill in when opened)
