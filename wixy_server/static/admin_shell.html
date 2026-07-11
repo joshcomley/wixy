@@ -26,6 +26,28 @@
       ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
       : mode;
     document.documentElement.setAttribute("data-theme", variant);
+
+    // themeEditor.ts's custom-theme overrides (Uxer's theme-editor mandate,
+    // item 9) — reuses the `variant` just resolved above rather than
+    // recomputing it. Only this variant's half is needed pre-paint; the
+    // other half (if any) is applied later by themeEditor.ts itself, same
+    // as how a live mode switch re-applies. Validated the same shape
+    // themeEditor.ts's own sanitizeColors requires (a plain #rrggbb hex per
+    // key) before touching the CSSOM.
+    try {
+      var customRaw = localStorage.getItem("wx-custom-theme");
+      if (customRaw) {
+        var custom = JSON.parse(customRaw);
+        var colors = custom && custom[variant];
+        if (colors && typeof colors === "object") {
+          for (var key in colors) {
+            if (/^[a-zA-Z0-9-]+$/.test(key) && /^#[0-9a-fA-F]{6}$/.test(colors[key])) {
+              document.documentElement.style.setProperty("--" + key, colors[key]);
+            }
+          }
+        }
+      }
+    } catch (e) {}
   })();
   // Same synchronous-bootstrap reasoning as the theme block above, for the
   // other two Uxer session-persisted view controls (admin-ui/src/zoom.ts,

@@ -28,6 +28,7 @@ import { mountSettingsPanel } from "./settingsPanel";
 import { formatBinding, initShortcuts, type ShortcutCommand } from "./shortcuts";
 import { mountThemePanel, type ThemePanel } from "./themePanel";
 import { initTheme, type ThemeMode } from "./theme";
+import { initThemeEditor } from "./themeEditor";
 import { initZoom } from "./zoom";
 
 interface Drawer {
@@ -144,12 +145,15 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     },
   ];
   const shortcutsController = initShortcuts(SHORTCUT_COMMANDS, win);
+  const themeEditorController = initThemeEditor(themeController, win);
 
   function resetAllSettings(): void {
     themeController.setMode("system");
     zoomController.reset();
     fontScaleController.reset();
     shortcutsController.resetAll();
+    themeEditorController.resetVariant("light");
+    themeEditorController.resetVariant("dark");
     clearLastRoute(win);
   }
 
@@ -575,6 +579,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
         zoomController,
         fontScaleController,
         shortcutsController,
+        themeEditorController,
         onNavigate: (page) => navigateTo({ kind: "settings", page }, win),
         onResetAll: resetAllSettings,
       });
@@ -673,6 +678,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       closeDrawer();
       themeController.teardown();
       shortcutsController.teardown();
+      themeEditorController.teardown();
     },
   };
 }

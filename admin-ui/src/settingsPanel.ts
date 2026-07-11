@@ -1,13 +1,17 @@
-// The Settings panel (#/settings, #/settings/shortcuts) — Uxer's Settings-
-// view mandate (item 5) plus surfacing the session-persistence story (item
-// 6) in one place. General: appearance controls that ALSO exist in the
-// topbar chrome (theme mode, zoom, font size) — Uxer's own doc is explicit
-// that's expected ("the title bar toggle is mandatory for quick access...
-// the Settings view may also include a theme selector"), plus a
-// session-state summary and a reset-everything escape hatch. Keyboard
-// Shortcuts: list every shortcut (grouped by category), rebind, disable,
-// reset to defaults.
+// The Settings panel (#/settings, #/settings/appearance,
+// #/settings/shortcuts) — Uxer's Settings-view mandate (item 5) plus
+// surfacing the session-persistence story (item 6) in one place. General:
+// quick appearance controls that ALSO exist in the topbar chrome (theme
+// mode, zoom, font size) — Uxer's own doc is explicit that's expected
+// ("the title bar toggle is mandatory for quick access... the Settings
+// view may also include a theme selector"), plus a session-state summary
+// and a reset-everything escape hatch. Appearance: the full theme editor
+// (item 9) — a separate tab from General's quick toggle, matching Uxer's
+// own distinction ("the toggle lets a user *pick* a preset; the theme
+// editor lets them *tailor* one"). Keyboard Shortcuts: list every shortcut
+// (grouped by category), rebind, disable, reset to defaults.
 
+import { AA_LARGE_TEXT, AA_NORMAL_TEXT, contrastRatioHex, passesAA } from "./contrast";
 import type { FontScaleController } from "./fontScale";
 import type { SettingsPage } from "./router";
 import {
@@ -17,7 +21,8 @@ import {
   type ShortcutListItem,
   type ShortcutsController,
 } from "./shortcuts";
-import { resolveVariant, type ThemeController, type ThemeMode } from "./theme";
+import { resolveVariant, type ThemeController, type ThemeMode, type ThemeVariant } from "./theme";
+import { CONTRAST_PAIRS, PALETTE, type ContrastPair, type PaletteEntry, type ThemeEditorController } from "./themeEditor";
 import type { ZoomController } from "./zoom";
 
 export interface SettingsPanelDeps {
@@ -27,10 +32,11 @@ export interface SettingsPanelDeps {
   zoomController: ZoomController;
   fontScaleController: FontScaleController;
   shortcutsController: ShortcutsController;
+  themeEditorController: ThemeEditorController;
   onNavigate: (page: SettingsPage) => void;
-  /** Resets theme/zoom/font-scale/shortcuts to defaults AND clears the
-   * persisted last-active-route — owned by shell.ts since it's the one
-   * place all five controllers are already in scope together. */
+  /** Resets theme/zoom/font-scale/shortcuts/custom-theme to defaults AND
+   * clears the persisted last-active-route — owned by shell.ts since it's
+   * the one place all the controllers are already in scope together. */
   onResetAll: () => void;
 }
 
@@ -41,6 +47,7 @@ export interface SettingsPanel {
 
 const THEME_MODE_LABELS: Record<ThemeMode, string> = { light: "Light", dark: "Dark", system: "System" };
 const THEME_MODES: readonly ThemeMode[] = ["light", "dark", "system"];
+const HEX_PATTERN = /^#[0-9a-fA-F]{6}$/;
 
 function settingsSection(title: string): HTMLElement {
   const section = document.createElement("div");
@@ -61,26 +68,28 @@ export function mountSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
 
   const tabs = document.createElement("div");
   tabs.className = "wx-settings-tabs";
-  const generalTab = document.createElement("button");
-  generalTab.type = "button";
-  generalTab.className = "wx-settings-tab";
-  generalTab.textContent = "General";
-  generalTab.classList.toggle("wx-settings-tab-active", deps.page === "general");
-  generalTab.addEventListener("click", () => deps.onNavigate("general"));
-  const shortcutsTab = document.createElement("button");
-  shortcutsTab.type = "button";
-  shortcutsTab.className = "wx-settings-tab";
-  shortcutsTab.textContent = "Keyboard Shortcuts";
-  shortcutsTab.classList.toggle("wx-settings-tab-active", deps.page === "shortcuts");
-  shortcutsTab.addEventListener("click", () => deps.onNavigate("shortcuts"));
-  tabs.append(generalTab, shortcutsTab);
+  function tabButton(label: string, page: SettingsPage): HTMLButtonElement {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "wx-settings-tab";
+    button.textContent = label;
+    button.classList.toggle("wx-settings-tab-active", deps.page === page);
+    button.addEventListener("click", () => deps.onNavigate(page));
+    return button;
+  }
+  tabs.append(tabButton("General", "general"), tabButton("Appearance", "appearance"), tabButton("Keyboard Shortcuts", "shortcuts"));
   root.appendChild(tabs);
 
   const body = document.createElement("div");
   root.appendChild(body);
 
   const teardownFns: Array<() => void> = [];
-  body.appendChild(deps.page === "general" ? renderGeneral(deps, teardownFns) : renderShortcuts(deps, teardownFns));
+  const pageRenderers: Record<SettingsPage, (d: SettingsPanelDeps, t: Array<() => void>) => HTMLElement> = {
+    general: renderGeneral,
+    appearance: renderAppearance,
+    shortcuts: renderShortcuts,
+  };
+  body.appendChild(pageRenderers[deps.page](deps, teardownFns));
 
   return {
     element: root,
@@ -131,7 +140,16 @@ function renderGeneral(deps: SettingsPanelDeps, teardownFns: Array<() => void>):
   const unsubTheme = deps.themeController.subscribe((mode) => renderTheme(mode));
   teardownFns.push(unsubTheme);
 
-  appearance.append(themeRow, themeResolvedRow);
+  const appearanceLink = document.createElement("p");
+  appearanceLink.className = "wx-settings-hint";
+  const appearanceLinkButton = document.createElement("button");
+  appearanceLinkButton.type = "button";
+  appearanceLinkButton.className = "wx-settings-link-button";
+  appearanceLinkButton.textContent = "Open the theme editor to tailor colors →";
+  appearanceLinkButton.addEventListener("click", () => deps.onNavigate("appearance"));
+  appearanceLink.appendChild(appearanceLinkButton);
+
+  appearance.append(themeRow, themeResolvedRow, appearanceLink);
 
   // -- Zoom & font size ------------------------------------------------------
   const view = settingsSection("Zoom & Font Size");
@@ -165,13 +183,13 @@ function renderGeneral(deps: SettingsPanelDeps, teardownFns: Array<() => void>):
   const sessionHint = document.createElement("p");
   sessionHint.className = "wx-settings-hint";
   sessionHint.textContent =
-    "Theme, zoom, font size, keyboard shortcut bindings, and your last-active view are all remembered on this device.";
+    "Theme, custom colors, zoom, font size, keyboard shortcut bindings, and your last-active view are all remembered on this device.";
   const resetAllButton = document.createElement("button");
   resetAllButton.type = "button";
   resetAllButton.className = "wx-settings-reset-all";
   resetAllButton.textContent = "Reset all settings to defaults";
   resetAllButton.addEventListener("click", () => {
-    if (!deps.win.confirm("Reset theme, zoom, font size, and keyboard shortcuts to their defaults?")) return;
+    if (!deps.win.confirm("Reset theme, custom colors, zoom, font size, and keyboard shortcuts to their defaults?")) return;
     deps.onResetAll();
   });
   session.append(sessionHint, resetAllButton);
@@ -216,6 +234,335 @@ function stepperRow(
   refresh();
 
   return { row, refresh };
+}
+
+// -- Appearance (theme editor) -----------------------------------------------
+
+function themeColorRow(
+  entry: PaletteEntry,
+  getValue: () => string,
+  onChange: (hex: string) => void,
+): { row: HTMLElement; refresh: () => void } {
+  const row = document.createElement("div");
+  row.className = "wx-settings-color-row";
+
+  const label = document.createElement("span");
+  label.className = "wx-settings-color-label";
+  label.textContent = entry.label;
+
+  const colorInput = document.createElement("input");
+  colorInput.type = "color";
+  const hexInput = document.createElement("input");
+  hexInput.type = "text";
+  hexInput.className = "wx-settings-color-hex";
+  hexInput.spellcheck = false;
+  hexInput.maxLength = 7;
+
+  function setDisplayed(value: string): void {
+    hexInput.value = value;
+    if (HEX_PATTERN.test(value)) colorInput.value = value;
+  }
+
+  colorInput.addEventListener("input", () => {
+    setDisplayed(colorInput.value);
+    onChange(colorInput.value);
+  });
+  hexInput.addEventListener("input", () => {
+    if (HEX_PATTERN.test(hexInput.value)) {
+      colorInput.value = hexInput.value;
+      onChange(hexInput.value);
+    }
+  });
+
+  row.append(label, colorInput, hexInput);
+
+  function refresh(): void {
+    setDisplayed(getValue());
+  }
+  refresh();
+
+  return { row, refresh };
+}
+
+function contrastPairRow(
+  pair: ContrastPair,
+  getFg: () => string,
+  getBg: () => string,
+): { row: HTMLElement; refresh: () => void } {
+  const row = document.createElement("div");
+  row.className = "wx-settings-contrast-row";
+  const label = document.createElement("span");
+  label.className = "wx-settings-contrast-label";
+  label.textContent = pair.label;
+  const swatches = document.createElement("span");
+  swatches.className = "wx-settings-contrast-swatches";
+  const fgSwatch = document.createElement("span");
+  fgSwatch.className = "wx-settings-contrast-swatch";
+  const bgSwatch = document.createElement("span");
+  bgSwatch.className = "wx-settings-contrast-swatch";
+  swatches.append(fgSwatch, bgSwatch);
+  const ratioEl = document.createElement("span");
+  ratioEl.className = "wx-settings-contrast-ratio";
+  const badgeEl = document.createElement("span");
+  badgeEl.className = "wx-settings-contrast-badge";
+  row.append(label, swatches, ratioEl, badgeEl);
+
+  function refresh(): void {
+    const fg = getFg();
+    const bg = getBg();
+    fgSwatch.style.backgroundColor = fg;
+    bgSwatch.style.backgroundColor = bg;
+    const ratio = contrastRatioHex(fg, bg);
+    if (ratio === null) {
+      ratioEl.textContent = "—";
+      badgeEl.textContent = "";
+      badgeEl.className = "wx-settings-contrast-badge";
+      return;
+    }
+    ratioEl.textContent = `${ratio.toFixed(2)}:1`;
+    const pass = passesAA(ratio, pair.isLargeOrUi);
+    badgeEl.textContent = pass ? "AA ✓" : "Fail ✗";
+    badgeEl.className = `wx-settings-contrast-badge ${pass ? "wx-settings-contrast-pass" : "wx-settings-contrast-fail"}`;
+    badgeEl.title = `Needs ${pair.isLargeOrUi ? AA_LARGE_TEXT : AA_NORMAL_TEXT}:1 for WCAG AA`;
+  }
+  refresh();
+
+  return { row, refresh };
+}
+
+function renderAppearance(deps: SettingsPanelDeps, teardownFns: Array<() => void>): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "wx-settings-appearance";
+  const editor = deps.themeEditorController;
+
+  const intro = document.createElement("p");
+  intro.className = "wx-settings-hint";
+  intro.textContent =
+    "Tailor the shipped palette for each theme variant. Changes preview live across the whole admin as you edit — nothing is written to this device until you click Save.";
+  wrap.appendChild(intro);
+
+  let editingVariant: ThemeVariant = resolveVariant(deps.themeController.getMode(), deps.win);
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "wx-settings-appearance-toolbar";
+  const variantLabel = document.createElement("span");
+  variantLabel.className = "wx-settings-row-label";
+  variantLabel.textContent = "Editing";
+  const variantGroup = document.createElement("div");
+  variantGroup.className = "wx-settings-button-group";
+  const lightButton = document.createElement("button");
+  lightButton.type = "button";
+  lightButton.textContent = "Light";
+  const darkButton = document.createElement("button");
+  darkButton.type = "button";
+  darkButton.textContent = "Dark";
+  variantGroup.append(lightButton, darkButton);
+  toolbar.append(variantLabel, variantGroup);
+  wrap.appendChild(toolbar);
+
+  const colorRefreshers: Array<() => void> = [];
+  const contrastRefreshers: Array<() => void> = [];
+
+  function renderVariantButtons(): void {
+    lightButton.classList.toggle("wx-settings-button-active", editingVariant === "light");
+    darkButton.classList.toggle("wx-settings-button-active", editingVariant === "dark");
+  }
+  function refreshAll(): void {
+    colorRefreshers.forEach((fn) => fn());
+    contrastRefreshers.forEach((fn) => fn());
+    refreshActions();
+  }
+  lightButton.addEventListener("click", () => {
+    editingVariant = "light";
+    renderVariantButtons();
+    refreshAll();
+  });
+  darkButton.addEventListener("click", () => {
+    editingVariant = "dark";
+    renderVariantButtons();
+    refreshAll();
+  });
+  renderVariantButtons();
+
+  // -- Color categories, grouped in PALETTE's own declared order --------------
+  const categories = Array.from(new Set(PALETTE.map((entry) => entry.category)));
+  for (const category of categories) {
+    const section = settingsSection(category);
+    for (const entry of PALETTE.filter((p) => p.category === category)) {
+      const { row, refresh } = themeColorRow(
+        entry,
+        () => editor.getEffective(editingVariant)[entry.key],
+        (hex) => editor.setColor(editingVariant, entry.key, hex),
+      );
+      colorRefreshers.push(refresh);
+      section.appendChild(row);
+    }
+    wrap.appendChild(section);
+  }
+
+  // -- Contrast -------------------------------------------------------------
+  const contrastSection = settingsSection("Contrast (WCAG AA)");
+  for (const pair of CONTRAST_PAIRS) {
+    const { row, refresh } = contrastPairRow(
+      pair,
+      () => (pair.fg === "white" ? "#ffffff" : editor.getEffective(editingVariant)[pair.fg]),
+      () => editor.getEffective(editingVariant)[pair.bg],
+    );
+    contrastRefreshers.push(refresh);
+    contrastSection.appendChild(row);
+  }
+  wrap.appendChild(contrastSection);
+
+  // -- Save / Reset / Discard / Export / Import --------------------------------
+  const actions = settingsSection("Save, Export & Import");
+
+  const dirtyHint = document.createElement("p");
+  dirtyHint.className = "wx-settings-hint";
+  dirtyHint.textContent = "You have unsaved changes.";
+
+  const warningEl = document.createElement("p");
+  warningEl.className = "wx-settings-theme-warning";
+  warningEl.hidden = true;
+
+  const buttonRow = document.createElement("div");
+  buttonRow.className = "wx-settings-theme-actions";
+
+  const saveButton = document.createElement("button");
+  saveButton.type = "button";
+  saveButton.className = "wx-settings-save-button";
+  saveButton.textContent = "Save";
+
+  const saveAnywayButton = document.createElement("button");
+  saveAnywayButton.type = "button";
+  saveAnywayButton.className = "wx-settings-reset-all";
+  saveAnywayButton.textContent = "Save anyway";
+  saveAnywayButton.hidden = true;
+
+  const discardButton = document.createElement("button");
+  discardButton.type = "button";
+  discardButton.textContent = "Discard unsaved changes";
+  discardButton.addEventListener("click", () => editor.discardDraft());
+
+  const resetVariantButton = document.createElement("button");
+  resetVariantButton.type = "button";
+  resetVariantButton.className = "wx-settings-reset-all";
+  resetVariantButton.textContent = `Reset ${editingVariant} theme to defaults`;
+  resetVariantButton.addEventListener("click", () => {
+    if (!deps.win.confirm(`Reset the ${editingVariant} theme to its shipped defaults?`)) return;
+    editor.resetVariant(editingVariant);
+  });
+
+  function failingBodyTextPairs(variant: ThemeVariant): ContrastPair[] {
+    return CONTRAST_PAIRS.filter((pair) => pair.isBodyText).filter((pair) => {
+      const fg = pair.fg === "white" ? "#ffffff" : editor.getEffective(variant)[pair.fg];
+      const bg = editor.getEffective(variant)[pair.bg];
+      const ratio = contrastRatioHex(fg, bg);
+      return ratio === null || !passesAA(ratio, pair.isLargeOrUi);
+    });
+  }
+
+  let acknowledgedFailures = false;
+
+  function attemptSave(): void {
+    const failures = (["light", "dark"] as const).flatMap((variant) =>
+      failingBodyTextPairs(variant).map((pair) => `${pair.label} (${variant})`),
+    );
+    if (failures.length > 0 && !acknowledgedFailures) {
+      warningEl.hidden = false;
+      warningEl.textContent = `This would fail WCAG AA for: ${failures.join(", ")}. Adjust the colors above, or click "Save anyway".`;
+      saveAnywayButton.hidden = false;
+      return;
+    }
+    editor.save();
+    acknowledgedFailures = false;
+    warningEl.hidden = true;
+    saveAnywayButton.hidden = true;
+  }
+  saveButton.addEventListener("click", attemptSave);
+  saveAnywayButton.addEventListener("click", () => {
+    acknowledgedFailures = true;
+    attemptSave();
+  });
+
+  buttonRow.append(saveButton, saveAnywayButton, discardButton, resetVariantButton);
+
+  const exportImportRow = document.createElement("div");
+  exportImportRow.className = "wx-settings-theme-actions";
+  const exportButton = document.createElement("button");
+  exportButton.type = "button";
+  exportButton.textContent = "Export…";
+  const importButton = document.createElement("button");
+  importButton.type = "button";
+  importButton.textContent = "Import…";
+  exportImportRow.append(exportButton, importButton);
+
+  const exportArea = document.createElement("textarea");
+  exportArea.className = "wx-settings-theme-textarea";
+  exportArea.readOnly = true;
+  exportArea.hidden = true;
+  exportButton.addEventListener("click", () => {
+    exportArea.hidden = !exportArea.hidden;
+    if (!exportArea.hidden) exportArea.value = editor.exportJson();
+  });
+
+  const importArea = document.createElement("textarea");
+  importArea.className = "wx-settings-theme-textarea";
+  importArea.placeholder = "Paste an exported theme JSON snippet here…";
+  importArea.hidden = true;
+  const importApplyButton = document.createElement("button");
+  importApplyButton.type = "button";
+  importApplyButton.textContent = "Apply";
+  importApplyButton.hidden = true;
+  const importErrorEl = document.createElement("span");
+  importErrorEl.className = "wx-settings-shortcut-error";
+  importErrorEl.hidden = true;
+  importButton.addEventListener("click", () => {
+    importArea.hidden = !importArea.hidden;
+    importApplyButton.hidden = importArea.hidden;
+    importErrorEl.hidden = true;
+  });
+  importApplyButton.addEventListener("click", () => {
+    const result = editor.importJson(importArea.value);
+    if (!result.ok) {
+      importErrorEl.hidden = false;
+      importErrorEl.textContent = result.message;
+      return;
+    }
+    importErrorEl.hidden = true;
+    importArea.hidden = true;
+    importApplyButton.hidden = true;
+    importArea.value = "";
+  });
+
+  function refreshActions(): void {
+    const dirty = editor.isDirty();
+    dirtyHint.hidden = !dirty;
+    discardButton.disabled = !dirty;
+    resetVariantButton.textContent = `Reset ${editingVariant} theme to defaults`;
+    if (!dirty) {
+      warningEl.hidden = true;
+      saveAnywayButton.hidden = true;
+      acknowledgedFailures = false;
+    }
+  }
+  refreshActions();
+
+  actions.append(
+    dirtyHint,
+    warningEl,
+    buttonRow,
+    exportImportRow,
+    exportArea,
+    importArea,
+    importApplyButton,
+    importErrorEl,
+  );
+  wrap.appendChild(actions);
+
+  const unsubEditor = editor.subscribe(refreshAll);
+  teardownFns.push(unsubEditor);
+
+  return wrap;
 }
 
 // -- Keyboard Shortcuts -----------------------------------------------------
