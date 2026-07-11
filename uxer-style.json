@@ -1,0 +1,89 @@
+{
+  "$uxer": "1.0",
+  "identity": {
+    "name": "Wixy Admin",
+    "subtitle": "Self-hosted CMS admin for Cottage Aesthetics",
+    "mission": "A self-hosted website manager — lightweight CMS, visual editor, AI assistant, and one-click publisher — for the Cottage Aesthetics site, edited live at /admin and published to ca.cinnamons.uk.",
+    "logo": "/admin/static/icon-512.png",
+    "platform": "web",
+    "personality": { "warmth": 0.1, "density": 0.5, "energy": 0.15 }
+  },
+  "typography": {
+    "families": {
+      "primary": "system-ui, -apple-system, \"Segoe UI\", sans-serif",
+      "secondary": "ui-monospace, monospace"
+    },
+    "roots": {
+      "heading":   { "size": 18, "weight": 700, "lineHeight": 1.2, "step": { "ratio": 0.78, "levels": 3 } },
+      "paragraph": { "size": 14, "weight": 400, "lineHeight": 1.4, "step": { "ratio": 0.88, "levels": 2 } },
+      "subtext":   { "size": 13, "weight": 400, "lineHeight": 1.4, "step": { "ratio": 0.85, "levels": 2 } },
+      "label":     { "size": 12, "weight": 400, "lineHeight": 1.4, "step": { "ratio": 0.85, "levels": 2 } }
+    }
+  },
+  "spacing": {
+    "gridBase": 4,
+    "roots": {
+      "blockPadding":  { "value": 16, "step": { "ratio": 0.667, "levels": 3 } },
+      "elementGap":    { "value": 12, "step": { "ratio": 0.5,   "levels": 3 } },
+      "inlineGap":     { "value": 8,  "step": { "ratio": 0.5,   "levels": 2 } },
+      "sectionGap":    { "value": 20, "step": { "ratio": 0.667, "levels": 3 } },
+      "screenMargin":  { "value": 16, "step": { "ratio": 0.6,   "levels": 2 } }
+    }
+  },
+  "color": {
+    "background": "#eaedf3",
+    "foreground": "#1e2430",
+    "accent": "#2563eb",
+    "surfaces":    { "root": "#f3f5f9", "step": { "lightnessShift": -3, "levels": 4 } },
+    "semantic":    { "success": "#16a34a", "warning": "#d97706", "error": "#b91c1c", "info": "#2563eb" },
+    "foregrounds": { "primary": "#1e2430", "step": { "opacityRatio": 0.6, "levels": 3 } }
+  },
+  "contrast": {
+    "wcagLevel": "AA",
+    "roots": {
+      "textContrast":    { "ratio": 4.5, "step": { "ratio": 0.64, "levels": 4 } },
+      "surfaceContrast": { "lightnessStep": 3, "step": { "ratio": 1.5, "levels": 3 } }
+    }
+  },
+  "shape": {
+    "roots": {
+      "containerRadius": { "value": 6, "step": { "ratio": 0.667, "levels": 3 } },
+      "controlRadius":   { "value": 6, "step": { "ratio": 0.5,   "levels": 2 } },
+      "indicatorRadius": { "value": 4, "step": { "ratio": 0.5,   "levels": 2 } }
+    }
+  },
+  "elevation": {
+    "roots": {
+      "raised":   { "blur": 4,  "offsetY": 1,  "opacity": 0.14 },
+      "floating": { "blur": 24, "offsetY": 8,  "opacity": 0.14 },
+      "overlay":  { "blur": 32, "offsetY": 12, "opacity": 0.18 }
+    },
+    "color": "black"
+  },
+  "motion": {
+    "roots": { "micro": 100, "standard": 150, "emphasis": 400 },
+    "easing": {
+      "enter":    "cubic-bezier(0, 0, 0.2, 1)",
+      "exit":     "cubic-bezier(0, 0, 0.58, 1)",
+      "standard": "cubic-bezier(0.25, 0.1, 0.25, 1)"
+    }
+  },
+  "targets": {
+    "roots": { "touch": 44, "mouse": 32, "compact": 24 },
+    "gapMinimum": 8
+  },
+  "darkMode": {
+    "enabled": true,
+    "colors": {
+      "background": "#14161d",
+      "foreground": "#e4e7ed",
+      "accent": "#3f6fcf",
+      "surfaces":    { "root": "#1a1d26", "step": { "lightnessShift": 3, "levels": 4 } },
+      "semantic":    { "success": "#16a34a", "warning": "#d97706", "error": "#cf3a3a", "info": "#3f6fcf" },
+      "foregrounds": { "primary": "#e4e7ed", "step": { "opacityRatio": 0.65, "levels": 3 } }
+    }
+  },
+  "responsive": {
+    "breakpoints": { "compact": 480, "medium": 720, "expanded": 900 }
+  }
+}
