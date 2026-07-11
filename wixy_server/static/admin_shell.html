@@ -91,5 +91,53 @@
 <body>
 <div id="wx-shell"><div class="wx-loading-wrap"><p class="wx-loading">Loading Wixy Admin&hellip;</p></div></div>
 <script src="/admin/static/admin/admin.js"></script>
+<script type="module">
+  // Uxer MCP compliance-bridge (slice 7, decisions/00050). admin_shell.html is a
+  // static, module-level-cached HTML string (wixy_server/app.py's get_admin_shell
+  // reads it once at startup, no per-request Jinja2 templating) — so
+  // UXER-INTEGRATION.md's own `{% if request.query_params.get('uxer') %}` gate
+  // isn't available here. This reimplements the same guard client-side against
+  // location.search, and uses a dynamic import() so the ~530kb compliance bundle
+  // is never even fetched unless the param is present — normal visitors (every
+  // real editor session) see zero Uxer footprint.
+  const uxerParam = new URLSearchParams(location.search).get("uxer");
+  if (uxerParam !== null) {
+    const { runAndShow, bridgeConnect, registerAdapter, ServerRenderedAdapter, mountBridgeOverlay } =
+      await import("/admin/static/uxer/uxer-compliance.js");
+
+    // The real hash-routed panels (admin-ui/src/router.ts's Route union) — the
+    // whole admin is one served document (see get_admin_shell's own docstring),
+    // so these are hash fragments, not separate server-rendered pages.
+    const adapter = new ServerRenderedAdapter({
+      modules: [
+        { id: "pages", name: "Pages", url: "/admin#/pages" },
+        { id: "theme", name: "Theme", url: "/admin#/theme" },
+        { id: "media", name: "Media", url: "/admin#/media" },
+        { id: "chat", name: "Chat", url: "/admin#/chat" },
+        { id: "history", name: "History", url: "/admin#/history" },
+        { id: "settings", name: "Settings", url: "/admin#/settings" },
+      ],
+    });
+    window.__uxerAdapter = adapter;
+    registerAdapter(adapter);
+
+    // Not a plain `window.addEventListener("load", ...)` (the doc's own literal
+    // example): the `await import()` above already yields to the event loop
+    // while fetching the ~530kb bundle, so `load` has very often already fired
+    // by the time we get here — a bare listener would then just never run.
+    // `readyState === "complete"` is `load`'s own after-the-fact signal, so
+    // this covers both orderings.
+    const runInit = async () => {
+      await runAndShow("/uxer-style.json");
+      bridgeConnect(uxerParam !== "1" ? parseInt(uxerParam, 10) : undefined);
+      mountBridgeOverlay();
+    };
+    if (document.readyState === "complete") {
+      runInit();
+    } else {
+      window.addEventListener("load", runInit, { once: true });
+    }
+  }
+</script>
 </body>
 </html>

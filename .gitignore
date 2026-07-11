@@ -43,3 +43,9 @@ Thumbs.db
 
 # handover skill scratch — disposable per-handover continuation docs
 handover/
+
+# Uxer framework source (slice 7's MCP compliance-bridge integration) — cloned
+# locally for its web/dist/uxer-compliance.js bundle, not committed (mirrors
+# Uxer's own integration-guide convention: "Add Uxer/ to your .gitignore so
+# the Uxer source is not committed into your repo").
+Uxer/
