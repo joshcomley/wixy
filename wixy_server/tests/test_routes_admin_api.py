@@ -1377,3 +1377,53 @@ class TestPostPagesDelete:
             assert publish_response.status_code == 200
             state = client.get("/api/admin/state").json()
         assert not any(p["slug"] == "about" for p in state["pages"])
+
+
+class TestTreeReadConsistency:
+    """Regression for the Edit-button latch incident (2026-07-19): a state read
+    racing a working-tree mutation (watcher fast-forward / publish materialize)
+    could observe a template mid-replacement, report `editable: false`, and the
+    shell cached that snapshot. Fix = the process-wide tree lock (`treelock.py`)
+    held by every tree mutation AND every tree read: a state request issued
+    while a mutation holds the lock must block until the tree is whole again,
+    so no snapshot ever reports a real page uneditable."""
+
+    def test_state_never_observes_a_template_mid_replacement(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        import threading
+        import time
+
+        from wixy_server.treelock import tree_lock
+
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            template: Path = app.state.paths.repo / "pages" / "about.html"
+            assert template.exists()
+            saved = template.read_bytes()
+            window_open = threading.Event()
+
+            def mutate() -> None:
+                # The exact shape of a real mutation: the template is transiently
+                # absent while the tree lock is held (ensure_checkout and the
+                # publisher's materialize/commit steps hold this same lock).
+                with tree_lock():
+                    template.unlink()
+                    window_open.set()
+                    time.sleep(0.6)
+                    template.write_bytes(saved)
+
+            mutator = threading.Thread(target=mutate)
+            mutator.start()
+            try:
+                assert window_open.wait(timeout=5.0)
+                response = client.get("/api/admin/state")
+                assert response.status_code == 200
+                editable = {p["slug"]: p["editable"] for p in response.json()["pages"]}
+                assert editable.get("about") is True, (
+                    "state observed the checkout mid-mutation — the tree lock is "
+                    f"not protecting reads (editable map: {editable})"
+                )
+            finally:
+                mutator.join(timeout=10.0)
+            assert template.exists()

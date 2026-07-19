@@ -340,12 +340,28 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     return button;
   }
 
+  // A real button, not a breadcrumb: it used to be created disabled with no
+  // click handler — permanently dead until you were already editing, which read
+  // as "the Edit button disabled itself" (operator report, 2026-07-19). Now it
+  // opens the page you last edited, falling back to the home page / first
+  // editable page, and only stays disabled while no editable page exists.
   const editNavItem = document.createElement("button");
   editNavItem.type = "button";
   editNavItem.className = "wx-nav-item wx-nav-item-edit";
   editNavItem.disabled = true;
   editNavItem.dataset["routeKind"] = "edit";
   editNavItem.textContent = "Edit";
+  let lastEditPage: string | null = null;
+  editNavItem.addEventListener("click", () => {
+    const fallback =
+      state?.pages.find((p) => p.slug === "index" && p.editable) ??
+      state?.pages.find((p) => p.editable);
+    const page = lastEditPage ?? fallback?.slug ?? null;
+    if (page !== null) navigateTo({ kind: "edit", page }, win);
+  });
+  function updateEditNavItem(): void {
+    editNavItem.disabled = state === null || !state.pages.some((p) => p.editable);
+  }
 
   navEl.appendChild(navButton("Pages", { kind: "pages" }));
   navEl.appendChild(editNavItem);
@@ -357,6 +373,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     navEl.querySelectorAll<HTMLElement>(".wx-nav-item").forEach((el) => {
       el.classList.toggle("wx-nav-active", el.dataset["routeKind"] === route.kind);
     });
+    if (route.kind === "edit") lastEditPage = route.page;
     editNavItem.textContent = route.kind === "edit" ? `Edit: ${route.page}` : "Edit";
     settingsToggle.classList.toggle("wx-settings-toggle-active", route.kind === "settings");
   }
@@ -364,6 +381,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   // -- Top bar ------------------------------------------------------------------
 
   function renderTopBar(): void {
+    updateEditNavItem();
     if (state === null) return;
     titleEl.textContent = `Wixy · ${state.project.name}`;
     const opCount = state.draft.opCount;
@@ -657,6 +675,50 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     if (activeRoute?.kind === "pages") mountPanel(activeRoute);
   }
 
+  // -- Revalidation (Edit-button latch incident, 2026-07-19) -------------------
+  // A snapshot fetched at one bad moment used to latch forever: no periodic
+  // refresh, no focus refresh, and a tab could outlive many Slots deploys.
+  // Now: while the tab is visible, state revalidates every REVALIDATE_MS and
+  // whenever the tab regains visibility; a mounted pages panel re-renders from
+  // the fresh snapshot (it has no typing state to lose — same rationale as
+  // refreshPagesPanel); and a server deploy (commit change on /api/version)
+  // reloads the shell outside the edit view (inside it, a toast asks instead —
+  // never yank a live editing iframe out from under a keystroke).
+
+  const REVALIDATE_MS = 60_000;
+  let knownServerCommit: string | null = null;
+
+  async function revalidate(): Promise<void> {
+    if (win.document.visibilityState !== "visible") return;
+    const commit = await api.getServerCommit();
+    if (commit !== null) {
+      if (knownServerCommit === null) {
+        knownServerCommit = commit;
+      } else if (commit !== knownServerCommit) {
+        if (activeRoute?.kind !== "edit") {
+          win.location.reload();
+          return;
+        }
+        showTransientToast("Wixy was updated — reload the page when you're done here");
+        knownServerCommit = commit;
+      }
+    }
+    await refreshStateInBackground();
+    if (activeRoute?.kind === "pages") mountPanel(activeRoute);
+  }
+
+  // Capability-guarded: unit-test fakes of `win` may omit timers/document.
+  const revalidateTimer =
+    typeof win.setInterval === "function"
+      ? win.setInterval(() => void revalidate(), REVALIDATE_MS)
+      : null;
+  const onVisibilityChange = (): void => {
+    if (win.document?.visibilityState === "visible") void revalidate();
+  };
+  if (typeof win.document?.addEventListener === "function") {
+    win.document.addEventListener("visibilitychange", onVisibilityChange);
+  }
+
   // Uxer session-persistence mandate (item 6, "last active view/module"): an
   // explicit deep-link hash always wins (normal web navigation expectations);
   // only an EMPTY hash (a bare "/admin" load) falls back to wherever the user
@@ -673,6 +735,10 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   return {
     teardown(): void {
       unsubscribeRoute();
+      if (revalidateTimer !== null) win.clearInterval(revalidateTimer);
+      if (typeof win.document?.removeEventListener === "function") {
+        win.document.removeEventListener("visibilitychange", onVisibilityChange);
+      }
       if (stateRetryTimer !== null) clearTimeout(stateRetryTimer);
       activePanelTeardown?.();
       closeDrawer();

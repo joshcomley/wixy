@@ -71,6 +71,7 @@ from wixy_server.overlay import (
 )
 from wixy_server.site_source import build_site_source
 from wixy_server.storage import ProjectPaths
+from wixy_server.treelock import tree_lock
 
 PublishStage = Literal[
     "pulling", "merging", "committing", "building", "verifying", "swapping", "done", "failed"
@@ -320,6 +321,14 @@ def _reset_hard(repo: Path, ref: str) -> None:
 
 
 def _materialize(project: ProjectConfig, paths: ProjectPaths, overlay: Overlay) -> None:
+    # Working-tree mutation step: hold the process-wide tree lock so admin
+    # state/content/preview reads never observe a half-materialized checkout
+    # (treelock.py; Edit-button latch incident 2026-07-19).
+    with tree_lock():
+        _materialize_locked(project, paths, overlay)
+
+
+def _materialize_locked(project: ProjectConfig, paths: ProjectPaths, overlay: Overlay) -> None:
     ops_by_file: dict[str, dict[str, JsonValue]] = {}
     for key, op in overlay.ops.items():
         file_key, sep, dotted_path = key.partition(":")
@@ -437,6 +446,23 @@ def _tag_and_push(repo: Path, version: int, message: str, sha: str) -> None:
 
 
 def _commit_push_and_tag(
+    project: ProjectConfig,
+    paths: ProjectPaths,
+    overlay: Overlay,
+    *,
+    message: str,
+    version: int,
+    job: PublishJob,
+) -> str:
+    # Same tree-lock discipline as _materialize: commits, retry re-merges and
+    # failure resets all rewrite the working tree.
+    with tree_lock():
+        return _commit_push_and_tag_locked(
+            project, paths, overlay, message=message, version=version, job=job
+        )
+
+
+def _commit_push_and_tag_locked(
     project: ProjectConfig,
     paths: ProjectPaths,
     overlay: Overlay,

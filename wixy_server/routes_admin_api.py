@@ -63,6 +63,7 @@ from wixy_server.publisher import PublishError, PublishJob, PublishResult, run_p
 from wixy_server.restore import RestoreError, RestoreResult, run_restore
 from wixy_server.site_source import build_site_source
 from wixy_server.storage import ProjectPaths
+from wixy_server.treelock import tree_lock
 from wixy_server.watcher import WatcherStatus
 
 router = APIRouter(prefix="/api/admin")
@@ -128,6 +129,21 @@ def _chats_snapshot(
 
 
 def _build_state(
+    project: ProjectConfig,
+    paths: ProjectPaths,
+    watcher_status: WatcherStatus,
+    publish_job: PublishJob | None,
+    chat_runtime: dict[str, ChatRuntimeEntry],
+) -> JsonObject:
+    # Tree READ under the process-wide tree lock: without it, a state snapshot
+    # racing the watcher's fast-forward or a publish's materialize/reset can see
+    # templates mid-replacement and report `editable: false` — which the admin
+    # shell then caches (Edit-button latch incident, 2026-07-19; treelock.py).
+    with tree_lock():
+        return _build_state_locked(project, paths, watcher_status, publish_job, chat_runtime)
+
+
+def _build_state_locked(
     project: ProjectConfig,
     paths: ProjectPaths,
     watcher_status: WatcherStatus,
@@ -204,6 +220,11 @@ async def get_state(request: Request) -> JsonObject:
 
 
 def _build_content(project: ProjectConfig, paths: ProjectPaths, slug: str) -> JsonObject:
+    with tree_lock():  # same read-consistency rule as _build_state
+        return _build_content_locked(project, paths, slug)
+
+
+def _build_content_locked(project: ProjectConfig, paths: ProjectPaths, slug: str) -> JsonObject:
     source = build_site_source(project, paths.repo)
     overlay = _load_overlay_for(paths)
     merged = merge_overlay(source, overlay)

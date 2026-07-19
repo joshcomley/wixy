@@ -23,6 +23,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from wixy_server.treelock import tree_lock
+
 _GIT_TIMEOUT_S = 60
 _LOG_FIELD_SEP = "\x1f"  # ASCII unit separator — never appears in a commit subject/author
 
@@ -53,14 +55,15 @@ def ensure_checkout(repo_url: str, default_branch: str, checkout_dir: Path) -> N
     Raises `CheckoutError` (with the git stderr) on any failure. A non-fast-forward
     local state is treated as a bug, never silently forced (spec/04 §5 step 1).
     """
-    if (checkout_dir / ".git").exists():
-        _fetch_and_fast_forward(checkout_dir, default_branch)
-        return
+    with tree_lock():
+        if (checkout_dir / ".git").exists():
+            _fetch_and_fast_forward(checkout_dir, default_branch)
+            return
 
-    checkout_dir.parent.mkdir(parents=True, exist_ok=True)
-    result = run_git(["clone", "--branch", default_branch, repo_url, str(checkout_dir)])
-    if result.returncode != 0:
-        raise CheckoutError(f"git clone failed: {result.stderr.strip()}")
+        checkout_dir.parent.mkdir(parents=True, exist_ok=True)
+        result = run_git(["clone", "--branch", default_branch, repo_url, str(checkout_dir)])
+        if result.returncode != 0:
+            raise CheckoutError(f"git clone failed: {result.stderr.strip()}")
 
 
 def _fetch_and_fast_forward(checkout_dir: Path, default_branch: str) -> None:
