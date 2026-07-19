@@ -69,8 +69,8 @@ verdict above was for this exact commit/content, unaffected by the renumbering.
 stacks on until every PR stacked on it has already been retargeted or merged.**
 
 ## How to continue + acceptance
-**SECURITY-GATED, ALREADY APPROVED** — merge PR #72 once CI is green (checklist 03 §4
-already satisfied per the review above; nothing further to gate on).
+**DONE — merged PR #72** (2026-07-19, commit ae9e68e). Green on real runners
+(python/frontend/image-boot-proof/e2e) once the Actions billing outage resolved.
 
 ## Links
 spec/independence/03 (full); spec/independence/09 row 3.
