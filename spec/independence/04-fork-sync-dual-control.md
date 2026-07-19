@@ -1,51 +1,62 @@
-# 04 — Fork sync & dual control
+# 04 — Fork sync & dual control (SECURITY-GATED milestone)
 
-Her org's `wixy-engine` fork is production's source of truth; `joshcomley/wixy` is the
-dev upstream. Two flows connect them; both are hers to run or refuse.
+Her fork is production's source of truth; `joshcomley/wixy` is the dev upstream.
+Updates reach her ONLY when she asks (01 §5 d9).
 
-## 1. The sync workflow (in the fork: `.github/workflows/sync-upstream.yml`)
+## 1. The sync workflow (`.github/workflows/sync-upstream.yml`, lives in the engine)
 
-- Triggers: `workflow_dispatch` (the button) + weekly schedule (Mon 06:00 UTC — a
-  gentle default she can disable; NOT daily: updates arrive when chosen, and the
-  weekly tick just keeps drift small).
-- Steps: fetch upstream → `git merge upstream/main` into fork `main`.
-  - **Clean merge** → push → her image rebuilds → Watchtower deploys within minutes.
-  - **Conflict** → the workflow opens a PR (`sync/upstream-<date>`) with the conflict
-    markers + a plain-English comment ("Josh's version changed the same files as
-    yours") — resolvable by her AI lane (05 §3) or left parked; production simply stays
-    on her current code. Never force, never auto-resolve.
-- The workflow is part of the ENGINE repo (so upstream improvements to the sync flow
-  itself reach her the same way), parameterized by `vars.UPSTREAM_REPO`.
+- Triggers: `workflow_dispatch` (the button). The weekly schedule (Mon 06:00 UTC)
+  is **notify-only**: it refreshes the commits-behind data (and opens/updates a
+  "updates available" issue) — it NEVER merges or deploys.
+- On dispatch: fetch upstream → merge into a work branch → **push with the dedicated
+  `SYNC_PUSH_TOKEN` fine-grained PAT secret** (contents:write on the fork) — never
+  `GITHUB_TOKEN`, whose events trigger no downstream workflows (the image build would
+  silently never run; conflict PRs would get no CI). Clean merge → push to `main` →
+  image build fires → Watchtower deploys within minutes.
+- **Unconditional conflict-PR path** for: any textual conflict, AND any sync whose
+  diff touches `.github/workflows/**` (workflow changes run with access to her
+  secrets — a human/agent eye is mandatory even when the merge is clean). The PR gets
+  a plain-English comment; production stays on current code until it's resolved
+  (her AI lane can do it — 05).
+- `vars.UPSTREAM_REPO` parameterizes it; in the upstream repo itself the workflow
+  no-ops cleanly (guard step) so shipping it there is harmless.
+- Fork housekeeping the guide covers (M5 findings): forks have **Actions disabled**
+  until enabled and **schedules disabled by default** — two explicit guide steps; org
+  settings must permit fine-grained PATs.
 
 ## 2. The admin surface (standalone edition only)
 
-Settings → **Engine** card:
-- Version now (sha + date), upstream commits-behind count, and the plain-English
-  changelog: upstream's `git log fork-main..upstream/main --format=%s` rendered as
-  bullets (conventional-commit prefixes translated: `fix:` → "Fixed…", `feat:` →
-  "New…" — a tiny formatter, not AI).
-- **"Get engine updates"** → triggers `sync-upstream.yml` via the org PAT → progress
-  states (checking → merging → building → deploying → done, polled from the workflow
-  run + Watchtower's restart) → "You're up to date". Conflict → friendly explanation +
-  "ask your assistant to sort it out" pointer.
-- Server side: a `github.py` client (fine-grained PAT, workflows + commits read) — new
-  admin routes `/api/admin/engine/{status,update}`; the commits-behind check is cached
-  (15 min) and NEVER blocks state (separate endpoint, skeleton-loaded card).
+Settings → **Engine** card: version now (from `/api/version`'s baked SHA), commits
+behind, plain-English changelog (`git log`-derived subjects, conventional-commit
+prefixes translated); **"Get engine updates"** → triggers the workflow via the org PAT
+(`actions:write + contents:read`) → progress (checking → merging → building →
+deploying → done, polled from the run + the deployed version change) → "You're up to
+date". Conflict → friendly explanation + assistant pointer. Server: `github.py`
+client; routes `/api/admin/engine/{status,update,rollback}`; commits-behind cached
+15 min, never blocking state. These routes DEPLOY PRODUCTION CODE — they sit behind
+the same Access+JWT gate as everything `/api/admin`, are POST-only with the shell's
+CSRF-safe fetch conventions, and are part of this milestone's Fable review checklist
+(PAT scope minimality, PAT never logged, no trigger without explicit user action).
 
-## 3. Her feature lane
+## 3. Engine-update ROLLBACK (hers, one tap)
 
-Same shape as Josh's train, re-homed: her AI backend (05) can be pointed at the ENGINE
-fork as well as the site repo — "ask for an editor feature" spawns an agent working in a
-clone of `wixy-engine`, PR into the fork, fork CI (inherited: pytest/tsc/vitest — the
-same workflows travel with the fork) gates merge, Watchtower deploys. v1 surfaces this
-NOT as a chat tab but as the guide's documented flow + the conflict-resolution assistant
-(§1) — a full in-admin engine-dev chat rides the existing chat panel with a repo
-selector as a later enhancement (noted, not built now: the drill only requires the
-PR-path to work end-to-end once, driven by the implementer).
+Before flipping `:latest`, the sync workflow re-tags the currently-deployed image
+`:rollback`. "Undo last update" (Engine card) + `update.sh --rollback` pin the compose
+service to `:rollback` (and hold Watchtower via label until she updates again). The
+drill exercises this (08 §1). This is the answer to "an update broke my site" without
+Josh.
 
-## 4. Divergence policy
+## 4. Her feature lane
 
-Her fork may carry local commits indefinitely (that's the point). To keep merges sane:
-upstream promises (documented in the engine README): no history rewrites on main, no
-renames of `deploy/standalone/` contract files without a compat shim + changelog note.
-Fleet staging runs upstream main, so Josh sees breakage before she can pull it.
+Same shape as Josh's train, re-homed: her AI backend (05) works a clone of
+`wixy-engine`, PRs into the fork, fork CI (enabled per §1) gates, her button/Watchtower
+deploys. v1 surfaces it via the documented flow + the conflict assistant; the drill
+proves the PR path end-to-end once (08 §1). A full in-admin engine-dev chat tab is a
+noted later enhancement.
+
+## 5. Divergence policy
+
+Her fork may diverge indefinitely. Upstream promises (engine README): no main history
+rewrites; no renames of `deploy/standalone/` contract files without a compat shim +
+changelog note. Upstream CI boots the image per merge (03 §5), so container breakage
+is Josh's to see before she can pull it.

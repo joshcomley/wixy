@@ -30,9 +30,15 @@ Ground rules for the implementer:
 1. **The spec is decided** — implement faithfully; reality-vs-spec conflicts follow the
    CMS spec's rule (prefer reality, record a `decisions/` entry, keep moving; peer the
    author only for architectural conflicts).
-2. **Review gates are mandatory** (09 §3): security-sensitive milestones (licensing
-   audit, auth, secrets, deploy scripts) wait for Fable's PR review before merge;
-   everything else rides the normal CI-gated auto-merge train.
+2. **Review gates are mandatory** (09): milestones **2, 3, 4, 6 and 7** wait for
+   Fable's PR review before merge (licensing audit; deploy scripts/secrets; the
+   sync/deploy-trigger surface; AI key handling; backup key scope), and milestone 9
+   is the Fable acceptance review; everything else rides CI-gated auto-merge.
+   This spec was adversarially reviewed 2026-07-19 (verdict NOT-READY, 6 critical +
+   11 major findings) and revised to fold in every finding — including the phantom
+   media repo, the public-not-private site repo, GitHub's GITHUB_TOKEN
+   trigger-suppression, the Docker-less hub, and the kill-test-vs-production
+   contradiction. Trust this text over memory of either system.
 3. **Nothing here may degrade the running production site.** ca.cinnamons.uk keeps
    serving throughout; the cutover to her infrastructure is a deliberate, reversible,
    guide-driven step at the end — not a side effect of any earlier milestone.

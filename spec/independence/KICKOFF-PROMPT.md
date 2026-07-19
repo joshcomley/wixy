@@ -20,12 +20,13 @@ First actions, in order:
    coding.
 3. Create your workspace's persistent todos, one task per milestone of
    spec/independence/09-work-plan.md.
-4. Run the train end-to-end. Milestones 2, 3 and 6 are SECURITY-GATED: open the PR,
-   peer-message session c42ea1cb-a9d6-413d-bdcb-fc77fc49abba (the spec author; cmd
+4. Run the train end-to-end. Milestones 2, 3, 4, 6 and 7 are SECURITY-GATED: open the
+   PR, peer-message session c42ea1cb-a9d6-413d-bdcb-fc77fc49abba (the spec author; cmd
    routes to its successor if handed over) with the PR number + the milestone's review
    checklist, arm a ScheduleWakeup, and MERGE ONLY AFTER an explicit approval reply.
-   While waiting, continue any milestone not dependent on the gated one. All other
-   milestones auto-merge on green CI.
+   Milestone 9 ends in the Fable ACCEPTANCE review (08 §3) — the phase is not done
+   until that approval. While waiting on any gate, continue milestones not dependent
+   on it. Everything else auto-merges on green CI.
 
 Binding rules:
 - The spec is DECIDED — implement faithfully; reality conflicts → prefer reality +

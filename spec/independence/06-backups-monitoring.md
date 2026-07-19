@@ -1,30 +1,32 @@
-# 06 — Backups & monitoring (hers, automatic)
+# 06 — Backups & monitoring (hers, automatic; key-scope Fable-checked with M4/M7 gate)
 
-## 1. What needs backing up (and what doesn't)
+## 1. What needs backing up
 
-Git already IS the backup for: site content/templates/theme (site repo), media +
-consent records (media repo), engine code (fork). The residual state on the droplet:
-`live.json`, `publishes.jsonl`, git tags (already pushed), the draft overlay, chat
-transcripts, staged media, and `.env` (the one thing that must NOT go to a repo).
+Git already holds: site content/templates/theme (site repo, incl. `images/`), engine
+(fork), owner docs (`ca-business`). Residual droplet state: `live.json`,
+`publishes.jsonl`, draft overlay, chat transcripts, staged media. NOT backed up to any
+repo: `.env`/keys (password manager is their recovery path) and `builds/`
+(reproducible).
 
-## 2. Nightly state mirror
+## 2. Nightly state snapshot (bounded by design — no history growth)
 
-`backup` container (03 §2): nightly, bundles `/data` minus builds/ and .env into a
-dated tarball, commits it to `<org>/ca-state-backup` (private; keep last 30 nightly +
-12 monthly, pruned by the job), via its own deploy key. Also verifies (not just
-copies): after push, downloads the blob back and checksums. Restore path documented in
-the guide's appendix ("give this page to any developer"): fresh droplet + setup.sh +
-untar into the volume = full state. `.env` recovery = her password manager (03 §4).
-Until cutover, an equivalent scheduled job on the hub mirrors the fleet Storage the
-same way — so her backup custody starts BEFORE her hosting does.
+`backup` container: nightly, copies `/data` (minus `builds/`, minus secrets) as a
+PLAIN FILE TREE into a checkout of `<org>/ca-state-backup` and **force-pushes a
+single-commit `snapshot` branch** (history never accumulates); the 1st of each month
+it also pushes a `monthly/YYYY-MM` tag (12 kept, oldest tag deleted). Text state
+diffs well; media stages are small. After push it re-clones shallowly and checksums —
+a backup that isn't verified isn't a backup. Deploy key: write-scoped to
+`ca-state-backup` ONLY (gate checklist item). Restore path (guide Appendix A): fresh
+droplet + `setup.sh` + copy the snapshot tree into the volume. Until cutover, an
+equivalent scheduled hub job mirrors fleet Storage the same way — her backup custody
+starts BEFORE her hosting does.
 
 ## 3. Monitoring that reaches HER
 
-- **UptimeRobot free** (guide signup, her account): HTTPS check on the public site +
-  keyword check on `/api/version`, alert to her email. External to everything.
-- **In-admin health**: Settings → System card — last backup age (red > 48 h), disk
-  usage, last publish, engine version (04 §2). The admin shell shows a banner when the
-  backup is stale — self-diagnosing before anyone has to be asked.
-- Publish failures already surface in the publish drawer; additionally email her
-  (SMTP env optional — if unset, banner only; the guide offers a free Brevo/SMTP2GO
-  signup as an optional step, not a dependency).
+- **UptimeRobot free** (her account, guide step): HTTPS check on the site + keyword
+  check on `/api/version` (works in-image via the baked SHA — 03 §1), alerts to her
+  email.
+- **In-admin System card**: last backup age (banner when > 48 h), disk usage, last
+  publish, engine version/edition.
+- Publish failures: drawer (exists) + optional email if SMTP env set (guide offers a
+  free SMTP signup as optional, never a dependency).

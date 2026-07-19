@@ -6,7 +6,7 @@ Purdi currently leans on Josh for: changes to the editor, hosting the editor, an
 anything in the publish flow. Her worry: "if we fall out, what happens?" The answer must
 become: **nothing happens** — she keeps the site, the editor, the history, the AI help,
 and the ability to evolve all of it, on accounts in her own name, at a cost a small
-clinic absorbs (~£12/mo hosting + her own AI spend + ~£10/yr domain).
+clinic absorbs (~£9.50/mo hosting + her own capped AI spend + ~£10/yr domain).
 
 ## Current dependency inventory (what this phase eliminates)
 
@@ -14,7 +14,7 @@ clinic absorbs (~£12/mo hosting + her own AI spend + ~£10/yr domain).
 |---|---|---|
 | Hosting | Josh's hub VM (fleet Slots/Devfleet) | Her DigitalOcean droplet (Docker compose), fleet becomes Josh's staging |
 | Domain + ingress + admin login | Josh's cinnamons.uk + Cloudflare account | Her `cottageaesthetics.co.uk` + HER free Cloudflare account (tunnel + Access) |
-| Site + media repos | `joshcomley/*` (his account) | Her GitHub org; Josh a revocable outside collaborator |
+| Site repo (media lives inside it) + her business docs | `joshcomley/*` (his account) | Her GitHub org (site transferred; owner docs to a new private `ca-business`); Josh a revocable outside collaborator |
 | Engine code | `joshcomley/wixy`, private | MIT open source; her org runs a synced fork; his repo stays the dev upstream |
 | Engine updates & fixes | Josh's build lane only | BOTH: his lane ships upstream; her fork syncs on demand; her own AI lane ships to her fork |
 | AI (content chat, future features) | cmd on Josh's Claude subscription | Pluggable backend: her own Anthropic key in standalone; cmd remains the fleet-deploy backend |
