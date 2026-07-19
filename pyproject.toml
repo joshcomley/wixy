@@ -2,6 +2,9 @@
 name = "wixy"
 version = "0.1.0"
 description = "Wixy — self-hosted CMS engine + visual editor + AI chat for ca.cinnamons.uk"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Josh Comley" }]
 requires-python = ">=3.14"
 # Core = exactly what `builder` (incl. its parity harness) needs. The site repo's CI
 # installs just this (04-server.md: "importable standalone (site-repo CI installs just

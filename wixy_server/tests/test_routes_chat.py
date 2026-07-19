@@ -21,6 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from builder.jsontypes import JsonObject
+from wixy_server.ai.backend import AIBackend, CmdAIBackend
 from wixy_server.app import create_app
 from wixy_server.chats import ChatConversation, ChatRuntimeEntry, add_chat, find_chat
 from wixy_server.cmdchat import CmdChatClient
@@ -127,6 +128,17 @@ def cmdchat_client(fake_cmd_state: FakeCmdState) -> CmdChatClient:
         readiness_timeout_s=0.3,
         ws_connect=_ws_connect_always_fails,
     )
+
+
+@pytest.fixture
+def ai_backend(cmdchat_client: CmdChatClient) -> AIBackend:
+    """spec/independence/05 §1's extraction — `_stream_events` (unlike
+    `create_app`, which still accepts a bare `cmdchat_client` for backward
+    compatibility, see `wixy_server.app`) takes an `AIBackend` directly, since
+    tests below call it as a plain function, not through the app. `cmd_project`
+    is irrelevant here: only `create_conversation` (a different route entirely)
+    ever reads it."""
+    return CmdAIBackend(cmdchat_client, cmd_project="")
 
 
 @pytest.fixture
@@ -619,7 +631,7 @@ class TestConversationStream:
     async def test_delivers_pre_existing_messages(
         self,
         tmp_path: Path,
-        cmdchat_client: CmdChatClient,
+        ai_backend: AIBackend,
         fake_cmd_state: FakeCmdState,
         fast_stream_timing: StreamTiming,
     ) -> None:
@@ -631,7 +643,7 @@ class TestConversationStream:
         runtime: dict[str, ChatRuntimeEntry] = {}
 
         gen = _stream_events(
-            cmdchat_client, chats_path, runtime, conv_id, session.session_id, fast_stream_timing
+            ai_backend, chats_path, runtime, conv_id, session.session_id, fast_stream_timing
         )
         events = await _collect_stream_events(gen, count=2)
 
@@ -642,7 +654,7 @@ class TestConversationStream:
     async def test_hides_thinking_messages_by_default_but_includes_when_asked(
         self,
         tmp_path: Path,
-        cmdchat_client: CmdChatClient,
+        ai_backend: AIBackend,
         fake_cmd_state: FakeCmdState,
         fast_stream_timing: StreamTiming,
     ) -> None:
@@ -660,7 +672,7 @@ class TestConversationStream:
         conv_id = _seed_conversation(chats_path, session.session_id)
 
         hidden_gen = _stream_events(
-            cmdchat_client,
+            ai_backend,
             chats_path,
             {},
             conv_id,
@@ -673,7 +685,7 @@ class TestConversationStream:
         assert [_message_payload(e)["index"] for e in hidden_messages] == [1]
 
         shown_gen = _stream_events(
-            cmdchat_client,
+            ai_backend,
             chats_path,
             {},
             conv_id,
@@ -694,7 +706,7 @@ class TestConversationStream:
     async def test_delivers_messages_appended_after_connecting(
         self,
         tmp_path: Path,
-        cmdchat_client: CmdChatClient,
+        ai_backend: AIBackend,
         fake_cmd_state: FakeCmdState,
         fast_stream_timing: StreamTiming,
     ) -> None:
@@ -705,7 +717,7 @@ class TestConversationStream:
         runtime: dict[str, ChatRuntimeEntry] = {}
 
         gen = _stream_events(
-            cmdchat_client, chats_path, runtime, conv_id, session.session_id, fast_stream_timing
+            ai_backend, chats_path, runtime, conv_id, session.session_id, fast_stream_timing
         )
         try:
             with anyio.fail_after(5.0):
@@ -726,7 +738,7 @@ class TestConversationStream:
     async def test_resends_a_message_whose_content_later_changes(
         self,
         tmp_path: Path,
-        cmdchat_client: CmdChatClient,
+        ai_backend: AIBackend,
         fake_cmd_state: FakeCmdState,
         fast_stream_timing: StreamTiming,
     ) -> None:
@@ -741,7 +753,7 @@ class TestConversationStream:
         runtime: dict[str, ChatRuntimeEntry] = {}
 
         gen = _stream_events(
-            cmdchat_client, chats_path, runtime, conv_id, session.session_id, fast_stream_timing
+            ai_backend, chats_path, runtime, conv_id, session.session_id, fast_stream_timing
         )
         try:
             with anyio.fail_after(5.0):
@@ -772,7 +784,7 @@ class TestConversationStream:
     async def test_waits_out_pending_then_delivers(
         self,
         tmp_path: Path,
-        cmdchat_client: CmdChatClient,
+        ai_backend: AIBackend,
         fake_cmd_state: FakeCmdState,
         fast_stream_timing: StreamTiming,
     ) -> None:
@@ -786,7 +798,7 @@ class TestConversationStream:
             runtime[conv_id] = ChatRuntimeEntry(status="ready")
 
         gen = _stream_events(
-            cmdchat_client, chats_path, runtime, conv_id, session.session_id, fast_stream_timing
+            ai_backend, chats_path, runtime, conv_id, session.session_id, fast_stream_timing
         )
         events: list[JsonObject] = []
         async with anyio.create_task_group() as tg:
@@ -799,7 +811,7 @@ class TestConversationStream:
     async def test_reports_failure_and_closes_when_provisioning_failed(
         self,
         tmp_path: Path,
-        cmdchat_client: CmdChatClient,
+        ai_backend: AIBackend,
         fake_cmd_state: FakeCmdState,
         fast_stream_timing: StreamTiming,
     ) -> None:
@@ -813,7 +825,7 @@ class TestConversationStream:
         }
 
         gen = _stream_events(
-            cmdchat_client, chats_path, runtime, conv_id, session.session_id, fast_stream_timing
+            ai_backend, chats_path, runtime, conv_id, session.session_id, fast_stream_timing
         )
         events = await _collect_stream_events(gen)  # no count: collect until it naturally ends
 
@@ -824,7 +836,7 @@ class TestConversationStream:
     async def test_follows_handover_to_the_new_session(
         self,
         tmp_path: Path,
-        cmdchat_client: CmdChatClient,
+        ai_backend: AIBackend,
         fake_cmd_state: FakeCmdState,
         fast_stream_timing: StreamTiming,
     ) -> None:
@@ -855,7 +867,7 @@ class TestConversationStream:
         # the reset `None` baseline exactly once) — 2 events total, not more,
         # since nothing else changes after that.
         gen = _stream_events(
-            cmdchat_client, chats_path, runtime, conv_id, old_session.session_id, fast_stream_timing
+            ai_backend, chats_path, runtime, conv_id, old_session.session_id, fast_stream_timing
         )
         events = await _collect_stream_events(gen, count=2)
 

@@ -50,6 +50,8 @@ class TestLoadSettings:
             "WIXY_CF_TEAM_DOMAIN",
             "WIXY_CF_ACCESS_AUD",
             "WIXY_SLOT",
+            "WIXY_EDITION",
+            "WIXY_CONTAINERIZED",
         ):
             monkeypatch.delenv(key, raising=False)
         settings = load_settings(tmp_path)
@@ -58,6 +60,8 @@ class TestLoadSettings:
         assert settings.dev_no_auth is False
         assert settings.storage_root == tmp_path
         assert settings.slot is None
+        assert settings.edition == "fleet"
+        assert settings.containerized is False
 
     def test_slot_reads_from_process_env_only(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -107,3 +111,39 @@ class TestLoadSettings:
         monkeypatch.setenv("WIXY_DEV_NO_AUTH", "1")
         settings = load_settings(tmp_path)
         assert settings.dev_no_auth is True
+
+
+class TestEdition:
+    def test_defaults_to_fleet(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("WIXY_EDITION", raising=False)
+        assert load_settings(tmp_path).edition == "fleet"
+
+    def test_standalone_from_process_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WIXY_EDITION", "standalone")
+        assert load_settings(tmp_path).edition == "standalone"
+
+    def test_reads_from_env_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("WIXY_EDITION", raising=False)
+        (tmp_path / ".env").write_text("WIXY_EDITION=standalone\n", encoding="utf-8")
+        assert load_settings(tmp_path).edition == "standalone"
+
+    def test_invalid_value_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("WIXY_EDITION", "bogus")
+        with pytest.raises(RuntimeError, match="WIXY_EDITION"):
+            load_settings(tmp_path)
+
+
+class TestContainerized:
+    def test_defaults_to_false(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("WIXY_CONTAINERIZED", raising=False)
+        assert load_settings(tmp_path).containerized is False
+
+    def test_true_from_process_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("WIXY_CONTAINERIZED", "1")
+        assert load_settings(tmp_path).containerized is True
+
+    def test_false_value_stays_false(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("WIXY_CONTAINERIZED", "0")
+        assert load_settings(tmp_path).containerized is False

@@ -57,3 +57,58 @@ class TestLoadRegistry:
         registry = load_registry(tmp_path)
         with pytest.raises(UnknownProjectError):
             registry.get("nonexistent")
+
+
+class TestEnvOverrides:
+    """spec/independence/01 §2.2: WIXY_SITE_REPO/WIXY_DOMAIN/WIXY_INDEXABLE layer over
+    the committed projects/*.json, process environment only."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for key in ("WIXY_SITE_REPO", "WIXY_DOMAIN", "WIXY_INDEXABLE"):
+            monkeypatch.delenv(key, raising=False)
+
+    def test_no_overrides_leaves_config_unchanged(self, tmp_path: Path) -> None:
+        _write_project(tmp_path / "projects", "ca")
+        registry = load_registry(tmp_path)
+        cfg = registry.get("ca")
+        assert cfg.repo == "https://example.invalid/ca.git"
+        assert cfg.domain == "ca.example.invalid"
+        assert cfg.indexable is False
+
+    def test_site_repo_override(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _write_project(tmp_path / "projects", "ca")
+        monkeypatch.setenv("WIXY_SITE_REPO", "git@github.com:cottage-aesthetics/site.git")
+        registry = load_registry(tmp_path)
+        assert registry.get("ca").repo == "git@github.com:cottage-aesthetics/site.git"
+
+    def test_domain_override(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _write_project(tmp_path / "projects", "ca")
+        monkeypatch.setenv("WIXY_DOMAIN", "www.cottageaesthetics.co.uk")
+        registry = load_registry(tmp_path)
+        assert registry.get("ca").domain == "www.cottageaesthetics.co.uk"
+
+    def test_indexable_override_true(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _write_project(tmp_path / "projects", "ca")  # committed indexable: false
+        monkeypatch.setenv("WIXY_INDEXABLE", "1")
+        registry = load_registry(tmp_path)
+        assert registry.get("ca").indexable is True
+
+    def test_indexable_override_false_is_explicit_not_just_absence(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WIXY_INDEXABLE", "0")
+        _write_project(tmp_path / "projects", "ca")
+        registry = load_registry(tmp_path)
+        assert registry.get("ca").indexable is False
+
+    def test_other_fields_untouched_by_overrides(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write_project(tmp_path / "projects", "ca")
+        monkeypatch.setenv("WIXY_DOMAIN", "www.cottageaesthetics.co.uk")
+        registry = load_registry(tmp_path)
+        cfg = registry.get("ca")
+        assert cfg.slug == "ca"
+        assert cfg.name == "CA"
+        assert cfg.repo == "https://example.invalid/ca.git"

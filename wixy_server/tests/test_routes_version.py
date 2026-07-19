@@ -125,3 +125,96 @@ class TestApiVersion:
         with TestClient(app) as client:
             response = client.get("/api/version", headers={"Cf-Ray": "abc123"})
         assert response.status_code == 200
+
+
+class TestEdition:
+    """spec/independence/01 §2.6: `/api/version` reports the running edition."""
+
+    def test_defaults_to_fleet(self, tmp_path: Path, wixy_repo_root: Path) -> None:
+        app = create_app(storage_root=tmp_path / "storage", wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/version")
+        assert response.json()["edition"] == "fleet"
+
+    def test_reports_standalone(
+        self, tmp_path: Path, wixy_repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WIXY_EDITION", "standalone")
+        app = create_app(storage_root=tmp_path / "storage", wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/version")
+        assert response.json()["edition"] == "standalone"
+
+
+class TestBakedEngineSha:
+    """spec/independence/01 §2.6, 03 §1: `WIXY_ENGINE_SHA` (baked at image-build time)
+    is preferred over the git-shell fallback, and a missing `.git` never 500s."""
+
+    def test_baked_sha_wins_over_git(
+        self, tmp_path: Path, wixy_repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WIXY_ENGINE_SHA", "deadbeef" * 5)
+        app = create_app(storage_root=tmp_path / "storage", wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/version")
+        assert response.json()["commit"]["sha_full"] == "deadbeef" * 5
+
+    def test_gitless_repo_root_returns_null_sha_not_500(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The M2 finding this field exists to fix: a pip-installed image has no
+        `.git` directory at all — this must degrade to `null`, never crash."""
+        monkeypatch.delenv("WIXY_ENGINE_SHA", raising=False)
+        gitless_root = tmp_path / "gitless-wixy-repo"
+        (gitless_root / "projects").mkdir(parents=True)
+        (gitless_root / "projects" / "test.json").write_text(
+            json.dumps(
+                {
+                    "slug": "test",
+                    "name": "test",
+                    "repo": "https://example.invalid/unused.git",
+                    "defaultBranch": "main",
+                    "cmdProject": "test",
+                    "domain": "test.example.invalid",
+                    "locale": "en-GB",
+                    "indexable": False,
+                    "media": {"maxLongSidePx": 2000, "jpegQuality": 85},
+                }
+            ),
+            encoding="utf-8",
+        )
+        app = create_app(storage_root=tmp_path / "storage", wixy_repo_root=gitless_root)
+        with TestClient(app) as client:
+            response = client.get("/api/version")
+        assert response.status_code == 200
+        assert response.json()["commit"]["sha_full"] is None
+
+    def test_git_fallback_used_when_baked_sha_unset(
+        self, tmp_path: Path, wixy_repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("WIXY_ENGINE_SHA", raising=False)
+        engine_sha = _git(["rev-parse", "HEAD"], wixy_repo_root).stdout.strip()
+        app = create_app(storage_root=tmp_path / "storage", wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/version")
+        assert response.json()["commit"]["sha_full"] == engine_sha
+
+
+class TestSyncBase:
+    """spec/independence/04: `syncBase` — her fork's last-synced-from upstream commit,
+    a baked build-arg env only; null on the fleet edition (not a fork)."""
+
+    def test_null_when_unset(self, tmp_path: Path, wixy_repo_root: Path) -> None:
+        app = create_app(storage_root=tmp_path / "storage", wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/version")
+        assert response.json()["syncBase"] is None
+
+    def test_reports_baked_sync_base(
+        self, tmp_path: Path, wixy_repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WIXY_SYNC_BASE", "cafebabe" * 5)
+        app = create_app(storage_root=tmp_path / "storage", wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/version")
+        assert response.json()["syncBase"] == "cafebabe" * 5

@@ -1,0 +1,1 @@
+Publish-materialize content writes were non-atomic — a hard kill mid-publish could permanently corrupt content/*.json and break the entire admin API; found via a full-suite test flake, root-caused, fixed with atomic_write_json + red/green tests
