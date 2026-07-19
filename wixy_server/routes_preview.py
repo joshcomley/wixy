@@ -26,6 +26,7 @@ from wixy_server.overlay import load_overlay
 from wixy_server.preview import render_preview_page
 from wixy_server.site_source import build_site_source
 from wixy_server.storage import ProjectPaths
+from wixy_server.treelock import tree_lock
 from wixy_server.watcher import WatcherStatus, fetch_once
 
 router = APIRouter()
@@ -48,10 +49,11 @@ def _build_preview_html(project: ProjectConfig, paths: ProjectPaths, slug: str) 
     """The full per-request preview pipeline — synchronous/blocking (filesystem +
     git rev-parse + HTML parsing). Callers on the event loop must run this via
     `anyio.to_thread.run_sync` (spec/04 §8: "no route blocks the event loop")."""
-    source = build_site_source(project, paths.repo)
-    base_sha = current_sha(paths.repo)
-    overlay = load_overlay(paths.draft_overlay, default_base_sha=base_sha)
-    merged = merge_overlay(source, overlay)
+    with tree_lock():  # read-consistency vs watcher/publish mutations (treelock.py)
+        source = build_site_source(project, paths.repo)
+        base_sha = current_sha(paths.repo)
+        overlay = load_overlay(paths.draft_overlay, default_base_sha=base_sha)
+        merged = merge_overlay(source, overlay)
     return render_preview_page(merged, slug)
 
 

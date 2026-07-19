@@ -287,6 +287,7 @@ async function extractDetail(response: Response, fallback: string): Promise<stri
 
 export interface AdminApi {
   getState(): Promise<StateResponse>;
+  getServerCommit(): Promise<string | null>;
   getContent(page: string): Promise<ContentResponse>;
   patchDraft(expectedRev: number, ops: DraftOp[]): Promise<PatchResult>;
   discardDraft(): Promise<{ rev: number }>;
@@ -310,6 +311,20 @@ export function createApi(): AdminApi {
   return {
     async getState() {
       return parseJson<StateResponse>(await fetchWithRetry("/api/admin/state"));
+    },
+
+    /** The server's deployed commit (unauthenticated `/api/version`) — used by the
+     * shell's revalidation loop to detect a Slots deploy under a long-lived tab
+     * (Edit-button latch incident, 2026-07-19: stale tabs must self-heal). */
+    async getServerCommit(): Promise<string | null> {
+      try {
+        const version = await parseJson<{ commit?: { sha_full?: string } }>(
+          await fetchWithRetry("/api/version"),
+        );
+        return version.commit?.sha_full ?? null;
+      } catch {
+        return null;
+      }
     },
     async getContent(page) {
       return parseJson<ContentResponse>(
