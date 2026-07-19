@@ -1,11 +1,13 @@
 // Client-side hash routing (spec/05-editor.md §1): "#/pages", "#/edit/<page>",
 // "#/theme", "#/media", "#/chat", "#/chat/<conv>", "#/history",
-// "#/settings", "#/settings/appearance", "#/settings/shortcuts". No
-// History-API routing — the whole admin is a single served document
-// (wixy_server.app.get_admin_shell: "every /admin sub-route the browser
-// might deep-link to is this same document").
+// "#/settings", "#/settings/appearance", "#/settings/shortcuts",
+// "#/settings/engine" (spec/independence/04 §2 — standalone-only content,
+// but the route/tab always exists; the panel itself degrades gracefully on
+// the fleet edition). No History-API routing — the whole admin is a single
+// served document (wixy_server.app.get_admin_shell: "every /admin sub-route
+// the browser might deep-link to is this same document").
 
-export type SettingsPage = "general" | "appearance" | "shortcuts";
+export type SettingsPage = "general" | "appearance" | "shortcuts" | "engine";
 
 export type Route =
   | { kind: "pages" }
@@ -44,7 +46,14 @@ export function parseHash(hash: string): Route {
     case "settings":
       return {
         kind: "settings",
-        page: second === "shortcuts" ? "shortcuts" : second === "appearance" ? "appearance" : "general",
+        page:
+          second === "shortcuts"
+            ? "shortcuts"
+            : second === "appearance"
+              ? "appearance"
+              : second === "engine"
+                ? "engine"
+                : "general",
       };
     default:
       return DEFAULT_ROUTE;
@@ -68,6 +77,7 @@ export function routeToHash(route: Route): string {
     case "settings":
       if (route.page === "shortcuts") return "#/settings/shortcuts";
       if (route.page === "appearance") return "#/settings/appearance";
+      if (route.page === "engine") return "#/settings/engine";
       return "#/settings";
   }
 }

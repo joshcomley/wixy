@@ -1,0 +1,226 @@
+name: Sync from upstream
+
+# spec/independence/04 §1 — the engine's own dual-control fork-sync engine. Ships
+# IN this repo (joshcomley/wixy) so a sync pulls it into her fork automatically;
+# lives here too so upstream carries a copy, where the `guard` job below makes it
+# a clean no-op (this repo has no "upstream" to sync from).
+#
+# workflow_dispatch `mode` picks one of two real actions:
+#   sync     — fetch upstream, merge into main. Clean, and the diff doesn't touch
+#              .github/workflows/**: snapshot the current :latest image as
+#              :rollback, then push main with SYNC_PUSH_TOKEN (never
+#              GITHUB_TOKEN — its pushes don't trigger publish-image.yml, so the
+#              image would silently never rebuild). A textual conflict, OR any
+#              diff touching .github/workflows/** even when it merges cleanly
+#              (workflow files run with access to her secrets — always a human/
+#              agent eye), opens a PR instead and leaves production alone.
+#   rollback — no git, no build: re-point the :latest GHCR tag at whatever
+#              :rollback currently references, so Watchtower's own ~5 min poll
+#              redeploys the pre-update image through the exact same path as a
+#              real update. This is the in-app "Undo last update" button's only
+#              lever (wixy_server/routes_engine.py) — the container has no
+#              docker.sock/.env access (03 §2 boundary), so it can never touch
+#              the host directly. `update.sh --rollback` (03 §3) is the separate,
+#              host-level, GH-Actions-independent escape hatch for when Actions
+#              itself is unreachable.
+#
+# The Mon 06:00 UTC schedule is notify-only (§1): refresh the comparison and
+# open/update/close an "updates available" issue. It never merges, pushes, or
+# touches images.
+#
+# SYNC_PUSH_TOKEN must be scoped `contents:write` + `pull_requests:write` (Fable
+# review, PR #74 R2 — corrects spec/independence/04 §1's own under-specified
+# "(contents:write on the fork)": `gh pr create` in the "Open a review PR
+# instead" step below needs pull_requests:write too, or the conflict path
+# 403s at exactly the moment it matters). Never GITHUB_TOKEN for either the
+# push or the PR create — see above.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "sync: merge upstream + deploy. rollback: restore the previous image."
+        required: true
+        default: sync
+        type: choice
+        options:
+          - sync
+          - rollback
+  schedule:
+    - cron: "0 6 * * 1"
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      is_upstream: ${{ steps.check.outputs.is_upstream }}
+      upstream_repo: ${{ steps.check.outputs.upstream_repo }}
+    steps:
+      - id: check
+        run: |
+          upstream="${{ vars.UPSTREAM_REPO }}"
+          upstream="${upstream:-joshcomley/wixy}"
+          echo "upstream_repo=$upstream" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.repository }}" = "$upstream" ]; then
+            echo "is_upstream=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_upstream=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  notify:
+    needs: guard
+    if: needs.guard.outputs.is_upstream == 'false' && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compare against upstream
+        id: compare
+        run: |
+          git remote add upstream "https://github.com/${{ needs.guard.outputs.upstream_repo }}.git"
+          git fetch upstream main
+          ahead_by=$(git rev-list --count HEAD..upstream/main)
+          echo "ahead_by=$ahead_by" >> "$GITHUB_OUTPUT"
+
+      - name: Open, update or close the "updates available" issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create engine-updates-available --color FBCA04 \
+            --description "Opened automatically by sync-upstream.yml" 2>/dev/null || true
+
+          existing=$(gh issue list --label engine-updates-available --state open --json number --jq '.[0].number')
+
+          if [ "${{ steps.compare.outputs.ahead_by }}" -eq 0 ]; then
+            if [ -n "$existing" ]; then
+              gh issue close "$existing" --comment "Up to date with the upstream engine again — closing."
+            fi
+            exit 0
+          fi
+
+          title="Engine updates available (${{ steps.compare.outputs.ahead_by }} commit(s) behind)"
+          body=$(git log --pretty='format:- %s (%an)' HEAD..upstream/main)
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --title "$title" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body" --label engine-updates-available
+          fi
+
+  sync:
+    needs: guard
+    if: needs.guard.outputs.is_upstream == 'false' && github.event_name == 'workflow_dispatch' && inputs.mode == 'sync'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_PUSH_TOKEN }}
+
+      - name: Check whether the incoming change touches workflow files
+        id: workflow_diff
+        run: |
+          git remote add upstream "https://github.com/${{ needs.guard.outputs.upstream_repo }}.git"
+          git fetch upstream main
+          if git diff --name-only HEAD upstream/main -- .github/workflows | grep -q .; then
+            echo "touches_workflows=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "touches_workflows=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Attempt the merge
+        id: merge
+        run: |
+          git config user.name "wixy-sync"
+          git config user.email "wixy-sync@users.noreply.github.com"
+          if git merge --no-edit upstream/main; then
+            echo "conflict=false" >> "$GITHUB_OUTPUT"
+          else
+            git merge --abort
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Log in to GHCR
+        if: steps.merge.outputs.conflict == 'false' && steps.workflow_diff.outputs.touches_workflows == 'false'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.merge.outputs.conflict == 'false' && steps.workflow_diff.outputs.touches_workflows == 'false'
+
+      - name: Snapshot the current image as :rollback before flipping :latest
+        if: steps.merge.outputs.conflict == 'false' && steps.workflow_diff.outputs.touches_workflows == 'false'
+        run: |
+          image="ghcr.io/${{ github.repository_owner }}/wixy"
+          if docker buildx imagetools inspect "$image:latest" >/dev/null 2>&1; then
+            docker buildx imagetools create --tag "$image:rollback" "$image:latest"
+          else
+            echo "No existing :latest yet (first sync) — nothing to snapshot."
+          fi
+
+      - name: Push the merge to main
+        if: steps.merge.outputs.conflict == 'false' && steps.workflow_diff.outputs.touches_workflows == 'false'
+        run: git push origin HEAD:main
+
+      - name: Open a review PR instead
+        if: steps.merge.outputs.conflict == 'true' || steps.workflow_diff.outputs.touches_workflows == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_PUSH_TOKEN }}
+        run: |
+          branch="sync/upstream-$(date -u +%Y%m%d%H%M%S)"
+          body_file="$(mktemp)"
+          if [ "${{ steps.merge.outputs.conflict }}" = "true" ]; then
+            git push origin upstream/main:refs/heads/"$branch"
+            printf '%s\n' \
+              "This update couldn't be merged automatically because it conflicts with something already in this repository." \
+              "" \
+              "GitHub's conflict editor may be able to help — open this PR and look for a \"Resolve conflicts\" button — or ask a developer to sort it out." \
+              "" \
+              "Production is unaffected: it's still running the version from before this update, and will keep running it until this PR is resolved and merged." \
+              > "$body_file"
+          else
+            git push origin HEAD:refs/heads/"$branch"
+            printf '%s\n' \
+              "This update changes files under .github/workflows/ — the automation that has access to this repository's secrets — so it always gets a quick look before deploying, even though it merges without conflicts." \
+              "" \
+              "If it looks right, just merge this PR and the update will go out normally." \
+              > "$body_file"
+          fi
+          gh pr create --base main --head "$branch" \
+            --title "Engine update: review needed" \
+            --body-file "$body_file"
+
+  rollback:
+    needs: guard
+    if: needs.guard.outputs.is_upstream == 'false' && github.event_name == 'workflow_dispatch' && inputs.mode == 'rollback'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Point :latest back at :rollback
+        run: |
+          image="ghcr.io/${{ github.repository_owner }}/wixy"
+          if ! docker buildx imagetools inspect "$image:rollback" >/dev/null 2>&1; then
+            echo "::error::No :rollback image exists yet — there's nothing to undo. A :rollback tag is created automatically the first time an update runs."
+            exit 1
+          fi
+          docker buildx imagetools create --tag "$image:latest" "$image:rollback"

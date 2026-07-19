@@ -25,12 +25,15 @@ from wixy_server.auth import JwksCache, build_admin_auth_middleware, jwks_url
 from wixy_server.bootstrap import bootstrap_if_needed
 from wixy_server.chats import ChatRuntimeEntry
 from wixy_server.cmdchat import CmdChatClient
+from wixy_server.github import GitHubClient
 from wixy_server.publisher import PublishJob
 from wixy_server.redirects import load_redirects
 from wixy_server.registry import load_registry
 from wixy_server.routes_admin_api import router as admin_api_router
 from wixy_server.routes_chat import StreamTiming
 from wixy_server.routes_chat import router as chat_router
+from wixy_server.routes_engine import EngineStatusCache
+from wixy_server.routes_engine import router as engine_router
 from wixy_server.routes_internal import router as internal_router
 from wixy_server.routes_preview import DEFAULT_PREVIEW_STALENESS_THRESHOLD_S
 from wixy_server.routes_preview import router as preview_router
@@ -64,6 +67,7 @@ def create_app(
     preview_staleness_threshold_s: float = DEFAULT_PREVIEW_STALENESS_THRESHOLD_S,
     cmdchat_client: CmdChatClient | None = None,
     chat_stream_timing: StreamTiming | None = None,
+    github_client: GitHubClient | None = None,
 ) -> FastAPI:
     """Build the Wixy FastAPI app for one project.
 
@@ -81,6 +85,12 @@ def create_app(
     `chat_stream_timing` defaults to spec/06 §1's own numbers (1.2s poll, 10s offline
     retry, 15s transcript-lag grace) — overridable so tests don't have to wait out
     real multi-second intervals to exercise the stream's timing-dependent branches.
+    `github_client` defaults to a real `GitHubClient(pat=settings.engine_pat)`
+    (spec/independence/04 §2) — overridable so tests point `routes_engine.py` at a
+    fake GitHub double instead, same reason `cmdchat_client` is. Constructed
+    unconditionally (even on the fleet edition, where `engine_pat` is empty and
+    `_require_standalone` 404s before ever touching it) — same posture `cmdchat_client`
+    already takes, no per-edition branching needed.
     """
     settings = load_settings(storage_root)
     registry = load_registry(wixy_repo_root)
@@ -103,6 +113,9 @@ def create_app(
     ai_backend = CmdAIBackend(chat_client, cmd_project=project.cmd_project)
     chat_runtime: dict[str, ChatRuntimeEntry] = {}
     stream_timing = chat_stream_timing if chat_stream_timing is not None else StreamTiming()
+    gh_client = (
+        github_client if github_client is not None else GitHubClient(pat=settings.engine_pat)
+    )
 
     jwks = JwksCache(
         fetch=functools.partial(_fetch_jwks, settings.cf_access_team_domain),
@@ -148,6 +161,7 @@ def create_app(
                 tg.cancel_scope.cancel()
         finally:
             await chat_client.aclose()
+            await gh_client.aclose()
 
     app = FastAPI(lifespan=lifespan)
     app.state.project = project
@@ -161,7 +175,9 @@ def create_app(
     app.state.ai_backend = ai_backend
     app.state.chat_runtime = chat_runtime
     app.state.chat_stream_timing = stream_timing
+    app.state.github_client = gh_client
     app.state.redirects = load_redirects()
+    app.state.engine_status_cache = EngineStatusCache()
 
     app.middleware("http")(admin_auth)
 
@@ -172,6 +188,7 @@ def create_app(
     app.include_router(preview_router)
     app.include_router(admin_api_router)
     app.include_router(chat_router)
+    app.include_router(engine_router)
     app.include_router(versions_router)
 
     @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)

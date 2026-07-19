@@ -67,5 +67,12 @@ population procedure (`git checkout 7c4fa3c -- <paths>`) as an EXECUTED step, no
 just a recorded fact — carry this into the M8 guide-writing work (also noted in the
 M8 sidecar, 00008-html-guide-ni08h9.md).
 
+**DONE — merged PR #68** (2026-07-19, commit 26bc757). Needed one manual sync-with-main
+round (README.md conflict against PR #71's independent doc sweep) after the Fable verdict
+was banked but before CI could actually run green — resolved by hand, merging both sides'
+content (kept the license badge/MIT narrative/fleet-ops section from this PR, kept the new
+docs/ai/ pointer section from the other), no scope change, re-verified ruff/mypy/pytest
+clean post-merge before pushing.
+
 ## Links
 spec/independence/02 (full); spec/independence/09 row 2.

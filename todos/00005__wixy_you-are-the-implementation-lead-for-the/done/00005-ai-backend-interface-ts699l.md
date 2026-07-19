@@ -31,12 +31,13 @@ mistake that briefly mis-renamed 10 unrelated functions — caught via mypy, fix
 `--delete-branch`, GitHub auto-CLOSED every other open PR based on that branch instead
 of retargeting. Branch + commits untouched (head
 `c314752cec3375451ec4e855364967ee04992ecc`), recreated as a fresh PR against `main`
-directly. Not yet Fable-reviewed under either number.
+directly. Not Fable-gated (spec/independence/09-work-plan.md row 5: CI-gated only, not
+in the {2,3,4,6,7} security-gated set), so no review was needed either way.
 
 ## How to continue + acceptance
-CI-gated only, auto-merge on green (PR #73). Acceptance: all existing chat/cmdchat tests
-pass unmodified in assertions (only their target/import may change); no route-visible
-behavior change on the fleet edition — verified via the full suite.
+**DONE — merged PR #73** (2026-07-19, commit 8c924cf). All existing chat/cmdchat tests
+pass unmodified in assertions; no route-visible behavior change on the fleet edition —
+full suite green (606 passed) both before and after this merge.
 
 ## Links
 spec/independence/05 §1; spec/independence/09 row 5.
