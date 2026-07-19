@@ -64,9 +64,11 @@ pins `joshcomley/wixy` + `secrets.WIXY_DEPLOY_KEY`) or its `CLAUDE.md` (currentl
 her independent deployment).
 
 ## How to continue + acceptance
-**SECURITY-GATED**: full ruff/mypy/pytest (backend) + tsc/vitest (frontend) green.
-Still needed before opening the PR: the site-repo CI re-point (separate PR, above).
-Then: PR -> peer author with checklist 04 §2 (PAT scope minimality, PAT never
+**SECURITY-GATED. PR #74 opened** (engine repo, `indep/m4-fork-sync-engine-card` ->
+`main`) — full ruff/mypy/pytest (606 passed) + tsc/vitest (381 passed) green locally,
+CI running. Site-repo CI re-point (separate PR, above) still in progress in parallel
+— not a blocker on #74's own review since it's a different repository. Next: PR ->
+peer author with checklist 04 §2 (PAT scope minimality, PAT never
 logged, no trigger without explicit user action, deploy-trigger routes properly
 gated, rollback path proven) -> ScheduleWakeup -> merge only on explicit approval.
 
