@@ -152,6 +152,86 @@ class TestPublishedSite:
         assert response.status_code == 200
 
 
+class TestRedirects:
+    """spec/independence/01 §2.2, 03 §2 — served by routes_public before file
+    resolution, and before the 503-no-live-pointer check."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_redirects_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("WIXY_REDIRECTS_FILE", raising=False)
+
+    def _redirects_file(self, tmp_path: Path, mapping: dict[str, str]) -> Path:
+        path = tmp_path / "redirects.json"
+        path.write_text(json.dumps(mapping), encoding="utf-8")
+        return path
+
+    def test_matched_path_redirects_before_serving_a_file(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        paths: ProjectPaths,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _publish_build(paths, "a" * 40, 1)
+        monkeypatch.setenv(
+            "WIXY_REDIRECTS_FILE", str(self._redirects_file(tmp_path, {"/old-page": "/about.html"}))
+        )
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app, follow_redirects=False) as client:
+            response = client.get("/old-page")
+        assert response.status_code == 301
+        assert response.headers["location"] == "/about.html"
+
+    def test_unmatched_path_falls_through_to_normal_serving(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        paths: ProjectPaths,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _publish_build(paths, "a" * 40, 1)
+        monkeypatch.setenv(
+            "WIXY_REDIRECTS_FILE", str(self._redirects_file(tmp_path, {"/old-page": "/about.html"}))
+        )
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/about.html")
+        assert response.status_code == 200
+        assert "About" in response.text
+
+    def test_redirect_applies_even_before_any_publish(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A redirect is a pure URL-routing decision, independent of publish state —
+        it must win over the 503 "not yet published" response too."""
+        monkeypatch.setenv(
+            "WIXY_REDIRECTS_FILE",
+            str(self._redirects_file(tmp_path, {"/old-page": "https://example.com/new"})),
+        )
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app, follow_redirects=False) as client:
+            response = client.get("/old-page")
+        assert response.status_code == 301
+        assert response.headers["location"] == "https://example.com/new"
+
+    def test_no_env_var_means_no_redirects_at_all(
+        self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
+    ) -> None:
+        """The fleet ships none (spec/independence/01 §2.2) — confirm the ordinary
+        404 behavior is completely unaffected when WIXY_REDIRECTS_FILE is unset."""
+        _publish_build(paths, "a" * 40, 1)
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/old-page")
+        assert response.status_code == 404
+
+
 class TestResolveWithinBuildDir:
     """Direct tests of the path-traversal guard itself — not subject to any HTTP
     client's own URL normalization, unlike a request made through `TestClient`."""

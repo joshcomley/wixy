@@ -25,6 +25,7 @@ from wixy_server.bootstrap import bootstrap_if_needed
 from wixy_server.chats import ChatRuntimeEntry
 from wixy_server.cmdchat import CmdChatClient
 from wixy_server.publisher import PublishJob
+from wixy_server.redirects import load_redirects
 from wixy_server.registry import load_registry
 from wixy_server.routes_admin_api import router as admin_api_router
 from wixy_server.routes_chat import StreamTiming
@@ -153,6 +154,7 @@ def create_app(
     app.state.cmdchat_client = chat_client
     app.state.chat_runtime = chat_runtime
     app.state.chat_stream_timing = stream_timing
+    app.state.redirects = load_redirects()
 
     app.middleware("http")(admin_auth)
 

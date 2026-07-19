@@ -14,6 +14,15 @@ The storage root itself can't live IN `.env` (that file lives inside the root it
 would be naming) — it's resolved first, from `WIXY_STORAGE_ROOT` in the process
 environment only (set by `launcher.py` at process start, spec/07), falling back to
 the production default. Tests always override it explicitly.
+
+Independence-phase additions (spec/independence/01 §2.2, 03 §2): `WIXY_EDITION`
+(`fleet` default, or `standalone`) — which AI backend/feature set this process runs,
+consumed from milestone 5 onward, but the field is added now so nothing downstream
+needs a settings-schema change; and `WIXY_CONTAINERIZED` — set by the standalone
+compose file only, gates `__main__.py`'s bind address (0.0.0.0 vs the fleet's
+loopback-only default). Both follow the same `.env`-or-process-env precedence as
+every other setting in this module (the standalone `/opt/wixy/.env` doctrine, 01 §3,
+holds general `WIXY_*` config alongside secrets).
 """
 
 from __future__ import annotations
@@ -44,6 +53,9 @@ def parse_env_file(path: Path) -> dict[str, str]:
     return values
 
 
+_VALID_EDITIONS = ("fleet", "standalone")
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     port: int
@@ -53,6 +65,8 @@ class Settings:
     cf_access_aud: str
     storage_root: Path
     slot: str | None
+    edition: str
+    containerized: bool
 
 
 def load_settings(storage_root: Path) -> Settings:
@@ -70,6 +84,14 @@ def load_settings(storage_root: Path) -> Settings:
             "(spec/04 §9: the auth bypass is dev/test only)"
         )
 
+    edition = _get("WIXY_EDITION", "fleet")
+    if edition not in _VALID_EDITIONS:
+        raise RuntimeError(
+            f"WIXY_EDITION={edition!r} is not valid — must be one of {_VALID_EDITIONS} "
+            "(spec/independence/01 §2.2)"
+        )
+    containerized = _get("WIXY_CONTAINERIZED", "0") in ("1", "true", "True")
+
     return Settings(
         port=int(_get("WIXY_PORT", "8000")),
         env=env,
@@ -83,4 +105,6 @@ def load_settings(storage_root: Path) -> Settings:
         # inside a Storage tree shared by both slots, so it can't know which one is
         # currently active.
         slot=os.environ.get("WIXY_SLOT"),
+        edition=edition,
+        containerized=containerized,
     )

@@ -32,12 +32,28 @@ env-var override path and `/api/version` (`wixy_server/routes_version.py` ->
 - `decisions/` next free number: `00051`.
 
 ## Relevant files + commits
-(fill in as PR lands)
+`wixy_server/settings.py` (edition+containerized), `wixy_server/registry.py` (env
+overrides), `wixy_server/__main__.py` (bind gate), `wixy_server/routes_version.py`
+(edition+baked-SHA+syncBase), `wixy_server/redirects.py` (new), `wixy_server/
+routes_public.py` + `app.py` (redirects wiring), `deploy/standalone/README.md` +
+`guide/README.md` (skeletons), `decisions/00051` (9 foundational), `decisions/00052`
+(M1 implementation calls), `CLAUDE.md` (independence pointer + staleness fixes).
+
+Side quest: investigating a `test_kill_during_publish.py` full-suite-load failure
+(never dismissed as pre-existing per fleet rule) uncovered a REAL data-corruption bug
+in `wixy_server/publisher.py::_apply_ops_to_file` (non-atomic content-file writes,
+crash-safety violation) — split into its OWN PR (#66,
+`decisions/00053`) since it's unrelated to M1's scope, landing independently.
+Also found+fixed: Playwright chromium browser binary missing for this workspace's
+pinned interpreter (`playwright install chromium`, machine-state only, no commit).
 
 ## How to continue + acceptance
 CI-gated only (no Fable review) — auto-merge on green. Acceptance: existing test suite
-still green; new env overrides covered by unit tests; `/api/version` has a test for the
-no-`.git` fallback path; redirects facility has a unit test with a sample map.
+still green (578 passed); new env overrides covered by unit tests
+(`TestEnvOverrides`); `/api/version` has tests for the no-`.git` fallback path
+(`TestBakedEngineSha`) + edition/syncBase (`TestEdition`/`TestSyncBase`); redirects
+facility has full unit + integration test coverage (`test_redirects.py`,
+`TestRedirects` in `test_routes_public.py`). ruff/mypy/pytest all green.
 
 ## Links
 spec/independence/01 §2, §5; spec/independence/09 row 1.
