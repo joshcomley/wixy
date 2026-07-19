@@ -33,7 +33,11 @@ already-decided specification lives in this repo.
 First actions, in this order:
 1. git fetch origin && git merge origin/main --no-edit  (fleet handover-receiver rule).
 2. Read spec/README.md, then EVERY spec file in numbered order (00–09), IN FULL — no
-   skimming — then spec/KICKOFF-PROMPT.md, brief.md, and docs/DESIGN-AND-CONTENT.md.
+   skimming — then spec/KICKOFF-PROMPT.md, brief.md, and docs/DESIGN-AND-CONTENT.md
+   (the latter two moved to the owner's private `ca-business` repo pre-publication,
+   spec/independence/02 §2.3 — retrievable from this repo's history at commit
+   `7c4fa3c` before that repo exists; historical note — this kickoff already ran and
+   the 13-milestone build below is complete, see todos/TODO-00004.md).
 3. Create this workspace's persistent todos (todos/TODO-<workspaceID>.md + sidecars per
    the persistent-todos skill), one task per milestone of spec/09-work-plan.md.
 4. Execute the 13-milestone PR train end-to-end without stopping between milestones:

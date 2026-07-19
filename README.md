@@ -1,19 +1,27 @@
-# wixy
+# Wixy
 
-Self-hosted CMS engine + live visual editor + embedded AI chat + one-click publisher for
-sites that are plain HTML/CSS/JS. The first (and, in v1, only) site is **Cottage Aesthetics**,
-served at [`ca.cinnamons.uk`](https://ca.cinnamons.uk).
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-The owner browses their site in edit mode, clicks any text or image to change it, tweaks
-colours and fonts with live preview, chats with an AI that edits the site, presses **Publish**
-to go live, and can restore any previous version with one click. Four principles make that
-safe: **git is the database** (content lives in the site repo; every publish is a commit),
-**the public site stays plain static files** (no framework on the visitor path), **one human
-gate** (the editor and AI both stage into a draft — only Publish changes the live site), and
-**engine ≠ content** (this repo is generic; everything site-specific is in the site repo +
-`projects/ca.json`).
+Self-hosted CMS engine + live visual editor + embedded AI chat + one-click publisher.
+Git is the database — every edit, publish, and rollback is a commit; no separate
+content store, no vendor lock-in.
+
+Wixy exists because Cottage Aesthetics, a small aesthetics clinic in the UK, needed a
+site its owner could run herself: edit copy and images from a live visual editor, get
+AI help with content changes, publish with one click, and never depend on a developer
+to keep the lights on. `ca.cinnamons.uk` is Wixy's first production deployment; the
+engine is released here under the MIT license so anyone with a similar need — full
+ownership of a small business's web presence, on infrastructure they control — can run
+it too. See `CLAUDE.md` for dev commands and layout, `spec/README.md` for the full
+build specification, and `spec/independence/README.md` for how a second, fully
+independent deployment (its own hosting, domain, and AI billing) works end to end.
 
 ## Quickstart
+
+Wixy runs anywhere Docker runs — see [`deploy/standalone/`](deploy/standalone/) for the
+one-line setup script and full instructions.
+
+To develop on the engine itself:
 
 Python (interpreter: `pythoncore-3.14`; once: `pip install -e ".[server,dev]"` +
 `playwright install --with-deps chromium`):
@@ -34,18 +42,19 @@ npm ci && npm run typecheck && npm test && npm run build   # esbuild → wixy_se
 
 E2E (`e2e/`, Playwright, against a local full stack): `npm ci && npx playwright test`.
 
-## Repo layout
+## What's here
 
 - `builder/` — pure Python library: parse templates, resolve `data-wx-*` bindings,
-  build/validate/serve. No server imports; importable standalone (the site repo's CI installs
-  just this).
-- `wixy_server/` — FastAPI app: public serving, `/admin` + `/api/admin/*`, draft overlay,
-  publish pipeline, cmd-powered AI chat. Imports `builder`.
-- `admin-ui/` — admin shell + panels (strict TS, esbuild, no framework) → `wixy_server/static/admin/`.
-- `editor/` — the overlay injected into the live-preview iframe → `wixy_server/static/editor/`.
-- `e2e/` — Playwright end-to-end flows against a local full stack.
-- `projects/*.json` — the per-site project registry. `spec/` — the decided build spec.
-  `decisions/` — the architecture decision log. `docs/` — design docs + the AI operator manual.
+  build/validate/serve the static output. No server imports; importable standalone.
+- `wixy_server/` — FastAPI app: public serving, `/admin` + `/api/admin/*`, draft
+  overlay, publish pipeline, pluggable AI chat.
+- `admin-ui/` / `editor/` — the admin shell + the live visual editor overlay (strict
+  TypeScript, no framework, self-hosted assets only).
+- `deploy/standalone/` — the portable Docker deployment target.
+- `guide/` — a step-by-step, non-technical guide for running your own independent
+  deployment.
+- `spec/` — the full, decided build specification. `decisions/` — the architecture
+  decision log.
 
 ## Documentation
 
@@ -56,7 +65,13 @@ E2E (`e2e/`, Playwright, against a local full stack): `npm ci && npx playwright 
 - **[`spec/README.md`](spec/README.md)** — the full, authoritative build specification (00–09).
 - **[`CLAUDE.md`](CLAUDE.md)** — orientation + the rules that bind this repo.
 
-## Deployment
+## This deployment: Cottage Aesthetics
+
+The `ca.cinnamons.uk` production instance runs on Josh Comley's own fleet as a staging
+environment for engine development — a second, fully independent deployment for the
+site's actual owner is the subject of `spec/independence/`. This section documents that
+fleet instance's own operational detail (internal hostnames/ports are loopback- or
+Access-gated, not a security concern).
 
 Fleet service **`Wixy`**, `D:\Servers\Wixy\`, loopback port **9380**, blue/green via Slots
 (full runbook: [`docs/ai/runbook.md`](docs/ai/runbook.md) / `spec/07-hosting-deploy.md`). In
@@ -71,5 +86,9 @@ short:
   both venvs, seeds `Storage\.env`, clones the site repo, and bootstraps serving (version 0).
 - **Logs**: `D:\Servers\Wixy\Storage\logs\`. **Bounce**: Devfleet
   `POST http://127.0.0.1:9999/restart/Wixy` (never `Start-Service`/NSSM directly).
-- **Health**: `curl http://127.0.0.1:9380/healthz`; `GET /api/version` reports the engine's
-  git SHA + active slot + the currently published site version.
+- **Health**: `curl http://127.0.0.1:9380/healthz`; `GET /api/version` reports the
+  engine's own git SHA + active slot + the currently published site version.
+
+## License
+
+MIT — see [`LICENSE`](LICENSE). Copyright (c) 2026 Josh Comley.

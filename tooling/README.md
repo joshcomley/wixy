@@ -22,8 +22,6 @@ Default staff resource ("Business Owner"): `1c41ada4-0c28-47dc-8d76-bf31e0776abf
 ## Scripts
 - `provision_bookings.py` — idempotently creates the bookable treatments in Wix
   Bookings (Services v2 API). Safe to re-run; skips existing by name.
-- `downscale_photos.py` — downscales `photos/*` to <=1280px JPEGs in
-  `photos/ai-downscaled/` (keeps context/light and version-controllable).
 - `provision_ca_cloudflare.py` — wixy engine infra, not Wix-site tooling
   (spec/07-hosting-deploy.md §3): provisions `ca.cinnamons.uk` on Cloudflare (DNS
   CNAME, tunnel ingress, a path-scoped Access app covering only `/admin` +

@@ -5,7 +5,9 @@
 **Wixy becomes a self-hosted website manager** (a lightweight CMS + visual editor + AI
 assistant + one-click publisher) for sites that are plain HTML/CSS/JS. The first and
 driving customer is **Cottage Aesthetics** — a real nurse-led aesthetics clinic in
-Hartlebury (see `brief.md` + `docs/DESIGN-AND-CONTENT.md` in this repo). Its site was
+Hartlebury (see `brief.md` + `docs/DESIGN-AND-CONTENT.md`, moved to the owner's private
+`ca-business` repo pre-publication per spec/independence/02 §2.3; retrievable from this
+repo's history at commit `7c4fa3c` before that repo exists). Its site was
 AI-generated as static pages (repo `joshcomley/cottage-aesthetics-preview`, currently on
 GitHub Pages) and is conceptually "on Wix", but uses no Wix feature — so we take over
 hosting and management entirely.
