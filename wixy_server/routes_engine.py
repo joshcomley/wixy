@@ -11,15 +11,25 @@ sensible to call GitHub about).
 Rollback (spec/independence/04 §3) deliberately does NOT reach for docker/host-level
 control from inside this process: the `wixy` container has no docker.sock mount and
 no write access to `/opt/wixy/.env` (both a deliberate M3 boundary — see
-decisions/00055's Fable-review trail on `watchtower`'s own docker.sock scope). Both
-"update" and "rollback" instead dispatch the SAME `sync-upstream.yml` workflow with a
-different `mode` input — the workflow itself tags `pre-sync` before every merge
-(`.github/workflows/sync-upstream.yml`), so `mode=rollback` is just `git reset --hard
-pre-sync && push --force`, flowing through the exact same PAT-authenticated,
-Watchtower-polled deploy path as a normal update. `update.sh --rollback` (03 §3)
-remains the separate, host-level, GH-Actions-independent escape hatch for when
-Actions itself is unavailable — the two mechanisms are not the same code path and
-are not expected to be.
+docker-compose.yml's own comments on `watchtower`'s docker.sock scope). Both "update"
+and "rollback" instead dispatch the SAME `sync-upstream.yml` workflow with a
+different `mode` input. That workflow re-tags the GHCR image, never git: before
+flipping `:latest` to a freshly-merged build, `mode=sync` snapshots the
+then-current `:latest` digest as `:rollback`; `mode=rollback` does no git and no
+build at all — it just points `:latest` back at whatever `:rollback` currently
+references. Either way, Watchtower's own ~5 min poll on `:latest`'s digest is what
+actually redeploys — the exact same PAT-free, credential-free path a normal update
+takes, just walked backwards. `update.sh --rollback` (03 §3) is the separate,
+host-level, GH-Actions-independent escape hatch that pins the compose service to
+`:rollback` directly on the droplet (for when Actions itself is unreachable) — it
+edits `/opt/wixy/.env` and pauses Watchtower by hand, a real host action this
+process could never take itself; the two mechanisms are not the same code path
+and are not expected to be.
+
+The `GitHubClient` these handlers use is `request.app.state.github_client` — one
+shared, app-lifetime instance built by `wixy_server.app.create_app` (same DI shape
+as `app.state.cmdchat_client`), not constructed fresh per request. Tests override it
+via `create_app`'s `github_client=` parameter to point at `fake_github.py`'s double.
 """
 
 from __future__ import annotations
@@ -31,7 +41,7 @@ import anyio
 from fastapi import APIRouter, HTTPException, Request
 
 from builder.jsontypes import JsonObject
-from wixy_server.github import SYNC_WORKFLOW_FILE, GitHubApiError, GitHubClient
+from wixy_server.github import SYNC_WORKFLOW_FILE, CommitInfo, GitHubApiError, GitHubClient
 from wixy_server.routes_version import resolve_engine_sha
 from wixy_server.settings import Settings
 
@@ -48,11 +58,7 @@ class EngineStatusCache:
 
     checked_at: float | None = None
     ahead_by: int | None = None
-    changelog: list[JsonObject] | None = None
-
-
-def _client_for(settings: Settings) -> GitHubClient:
-    return GitHubClient(pat=settings.engine_pat)
+    changelog: list[CommitInfo] | None = None
 
 
 def _require_standalone(settings: Settings) -> None:
@@ -63,17 +69,13 @@ def _require_standalone(settings: Settings) -> None:
         raise HTTPException(status_code=404, detail="the engine-update surface is standalone-only")
 
 
-async def _refresh_status_cache(settings: Settings, cache: EngineStatusCache) -> None:
-    async with _client_for(settings) as client:
-        result = await client.compare_commits(
-            settings.engine_repo, "main", _upstream_head(settings)
-        )
+async def _refresh_status_cache(
+    client: GitHubClient, settings: Settings, cache: EngineStatusCache
+) -> None:
+    result = await client.compare_commits(settings.engine_repo, "main", _upstream_head(settings))
     cache.checked_at = time.monotonic()
     cache.ahead_by = result.ahead_by
-    cache.changelog = [
-        {"sha": c.sha, "subject": c.subject, "author": c.author, "when": c.when}
-        for c in result.commits
-    ]
+    cache.changelog = result.commits
 
 
 def _upstream_head(settings: Settings) -> str:
@@ -90,6 +92,7 @@ async def get_engine_status(request: Request) -> JsonObject:
     settings: Settings = request.app.state.settings
     _require_standalone(settings)
     cache: EngineStatusCache = request.app.state.engine_status_cache
+    client: GitHubClient = request.app.state.github_client
 
     is_stale = (
         cache.checked_at is None or (time.monotonic() - cache.checked_at) > _STATUS_CACHE_TTL_S
@@ -97,7 +100,7 @@ async def get_engine_status(request: Request) -> JsonObject:
     refresh_error: str | None = None
     if is_stale:
         try:
-            await _refresh_status_cache(settings, cache)
+            await _refresh_status_cache(client, settings, cache)
         except GitHubApiError as exc:
             # "never blocking state": fall back to whatever's already cached
             # (possibly nothing yet) rather than erroring the whole endpoint.
@@ -105,8 +108,7 @@ async def get_engine_status(request: Request) -> JsonObject:
 
     update_run: JsonObject | None = None
     try:
-        async with _client_for(settings) as client:
-            run = await client.get_latest_workflow_run(settings.engine_repo, SYNC_WORKFLOW_FILE)
+        run = await client.get_latest_workflow_run(settings.engine_repo, SYNC_WORKFLOW_FILE)
         if run is not None:
             update_run = {
                 "status": run.status,
@@ -124,7 +126,10 @@ async def get_engine_status(request: Request) -> JsonObject:
         "engineRepo": settings.engine_repo,
         "currentSha": current_sha,
         "commitsBehind": cache.ahead_by,
-        "changelog": cache.changelog or [],
+        "changelog": [
+            {"sha": c.sha, "subject": c.subject, "author": c.author, "when": c.when}
+            for c in (cache.changelog or [])
+        ],
         "checkedAt": cache.checked_at,
         "stale": is_stale,
         "checkError": refresh_error,
@@ -136,11 +141,11 @@ async def get_engine_status(request: Request) -> JsonObject:
 async def post_engine_update(request: Request) -> JsonObject:
     settings: Settings = request.app.state.settings
     _require_standalone(settings)
+    client: GitHubClient = request.app.state.github_client
     try:
-        async with _client_for(settings) as client:
-            await client.trigger_workflow_dispatch(
-                settings.engine_repo, SYNC_WORKFLOW_FILE, inputs={"mode": "sync"}
-            )
+        await client.trigger_workflow_dispatch(
+            settings.engine_repo, SYNC_WORKFLOW_FILE, inputs={"mode": "sync"}
+        )
     except GitHubApiError as exc:
         raise HTTPException(status_code=502, detail=f"couldn't trigger the update: {exc}") from exc
     return {"triggered": True}
@@ -150,11 +155,11 @@ async def post_engine_update(request: Request) -> JsonObject:
 async def post_engine_rollback(request: Request) -> JsonObject:
     settings: Settings = request.app.state.settings
     _require_standalone(settings)
+    client: GitHubClient = request.app.state.github_client
     try:
-        async with _client_for(settings) as client:
-            await client.trigger_workflow_dispatch(
-                settings.engine_repo, SYNC_WORKFLOW_FILE, inputs={"mode": "rollback"}
-            )
+        await client.trigger_workflow_dispatch(
+            settings.engine_repo, SYNC_WORKFLOW_FILE, inputs={"mode": "rollback"}
+        )
     except GitHubApiError as exc:
         raise HTTPException(
             status_code=502, detail=f"couldn't trigger the rollback: {exc}"
