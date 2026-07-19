@@ -54,19 +54,24 @@ admin.js`. decisions/00057 (this milestone's implementation calls), decisions/00
 auto-closes a PR when its base branch is deleted rather than retargeting it; not
 M4-specific but discovered during this milestone's work).
 
-Site-repo CI re-point (C6) is a genuinely SEPARATE PR against a DIFFERENT repo
-(the site checkout, not this engine) — not started yet. The local clone at
-`D:\Servers\Cmd\Storage\clones\cottage-aesthetics-preview` was confirmed stale
-earlier this session (pre-migration working tree); needs a fresh `git fetch origin`
-+ checkout of `origin/main` before touching its `.github/workflows/ci.yml` (currently
-pins `joshcomley/wixy` + `secrets.WIXY_DEPLOY_KEY`) or its `CLAUDE.md` (currently says
-"private repo `joshcomley/wixy`" + cites fleet auto-merge rules that don't apply to
-her independent deployment).
+Site-repo CI re-point (C6): **DONE — PR #17 opened** against
+`joshcomley/cottage-aesthetics-preview` (new worktree
+`cottage-aesthetics-preview__worktrees/00003__site-ci-repoint-claude-md-neutralize`,
+branch `indep/site-ci-repoint-and-claude-md-neutralize` off a freshly-fetched
+`origin/main` — the old clone at the repo root was confirmed stale, primary-checkout
+guarded, so a proper worktree was created rather than editing it in place).
+`ci.yml`'s wixy-engine checkout now reads `${{ vars.WIXY_ENGINE_REPO ||
+'joshcomley/wixy' }}` with no `ssh-key`/deploy-key at all (the engine's own M2 made it
+public); `CLAUDE.md`/`README.md`'s "private repo"/fleet-auto-merge wording removed.
+Not security-gated itself (config/docs only, no live-site behavior change) — normal
+CI-gate, but its own repo has required-status-checks branch protection
+(`mergeStateStatus: BLOCKED` until CI passes) unlike wixy's own `main`
+(decisions/00058's flag).
 
 ## How to continue + acceptance
 **SECURITY-GATED. PR #74 opened** (engine repo, `indep/m4-fork-sync-engine-card` ->
 `main`) — full ruff/mypy/pytest (606 passed) + tsc/vitest (381 passed) green locally,
-CI running. Site-repo CI re-point (separate PR, above) still in progress in parallel
+CI running. Site-repo PR #17 CI running too, not itself gated on #74's review
 — not a blocker on #74's own review since it's a different repository. Next: PR ->
 peer author with checklist 04 §2 (PAT scope minimality, PAT never
 logged, no trigger without explicit user action, deploy-trigger routes properly
