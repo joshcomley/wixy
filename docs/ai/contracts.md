@@ -82,6 +82,30 @@ disables Edit rather than linking to a preview that would 404). The whole `state
 (`_build_state` → `_build_state_locked`) so a snapshot never observes a template
 mid-replacement — see [serving-and-overlay.md](serving-and-overlay.md) §Concurrency.
 
+### Engine (`/api/admin/engine/*`, all Auth: CF, **standalone edition only**)
+
+spec/independence/04 §2. `wixy_server/routes_engine.py`. **404s entirely on the fleet
+edition** (`settings.edition != "standalone"` or `settings.engine_repo` unset) — these
+routes don't exist there, not merely gated. Talks to GitHub via `wixy_server/github.py`'s
+`GitHubClient`, one shared `app.state.github_client` instance for the app's whole
+lifetime (not constructed per request — decisions/00057).
+
+| Method | Path | Handler | Request | Response |
+|---|---|---|---|---|
+| GET | `engine/status` | `get_engine_status` | — | `{"engineRepo":str, "currentSha":str\|null, "commitsBehind":int\|null, "changelog":[{sha,subject,author,when}], "checkedAt":float\|null, "stale":bool, "checkError":str\|null, "updateRun":{status,conclusion,htmlUrl,createdAt}\|null}`; **404** (not standalone) |
+| POST | `engine/update` | `post_engine_update` | — | `{"triggered": true}`; 404, **502** (GitHubApiError) |
+| POST | `engine/rollback` | `post_engine_rollback` | — | `{"triggered": true}`; 404, **502** (GitHubApiError) |
+
+`commitsBehind`/`changelog` are cached 15 min (`EngineStatusCache`, one process-lifetime
+slot) — a stale/unreachable GitHub API falls back to whatever's cached (`checkError` set,
+never a 5xx for the whole endpoint: "never blocking state"). `update`/`rollback` both
+dispatch `.github/workflows/sync-upstream.yml` (lives in the engine repo, ships to her
+fork via a normal sync) with a `mode` input — `sync` merges upstream and, on a clean
+merge, re-tags the current GHCR `:latest` as `:rollback` before pushing; `rollback` does
+no git/build at all, it just re-points `:latest` back at `:rollback` (a pure registry
+retag) so Watchtower's own poll redeploys it. Neither route waits for the workflow to
+finish — the Engine admin-ui card polls `status`'s `updateRun` field for progress.
+
 ### Preview / versions / shell / public
 
 | Method | Path | Handler | Auth | Response |
@@ -96,7 +120,7 @@ mid-replacement — see [serving-and-overlay.md](serving-and-overlay.md) §Concu
 | GET,HEAD | `/{path}` | `routes_public.py:get_path` | none | `FileResponse` from live build (**registered last** — catch-all); 503 plain text; 404 → `404.html` or `"Not found"` |
 
 Router include order in `create_app` is load-bearing: internal → version → preview →
-admin_api → chat → versions → (inline `/admin`, uxer) → static mounts → **public last**.
+admin_api → chat → engine → versions → (inline `/admin`, uxer) → static mounts → **public last**.
 
 ## 3. Error conventions
 
