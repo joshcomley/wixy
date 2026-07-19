@@ -52,7 +52,12 @@ hypothetical features; the v1 single-project-serving non-goal) — not documente
 `.aim/settings.json` + `.aim/audit-history.jsonl` committed. Committed on `cmd/workspace-00007`,
 pushed, **PR #71 open + mergeable** (docs-only, CI-safe).
 
-## ⚠ MERGE BLOCKED — repo-wide CI outage (operator action needed)
+## ✅ RESOLVED — merged 2026-07-19 (`1eb48feb`)
+The CI outage below was operator-resolved (spending limit raised). PR #71 merged to `main`;
+branch deleted; subsequent `main` CI runs are **green with the docs in them** (verified: all 12
+`docs/ai/*` files present on `main`, merge commit is an ancestor). Task complete.
+
+## (historical) MERGE BLOCKED — repo-wide CI outage
 On trying to merge, found GitHub Actions **failing repo-wide**: every CI run since
 2026-07-19 ~15:04 fails in ~3s with **zero steps executed** — on `main` pushes AND every branch
 (the active `indep/m1..m5`, `fix/*`, `cmd/workspace-00003`, and this PR). Last green run was
