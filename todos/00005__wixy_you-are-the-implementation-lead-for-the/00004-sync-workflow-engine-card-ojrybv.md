@@ -78,10 +78,21 @@ via a real Wixy CMS publish (`wixy: publish v7`) but the parity baseline (lives 
 wixy ENGINE repo at `wixy/builder/tests/parity/baseline`, checked out fresh into
 site-repo CI) was never re-captured to match. This is a live-site CONTENT question
 (intentional edit vs. needs reverting) outside my delegated scope (kickoff prompt:
-never touch her real content) — raised as operator decision #19, delayed mode, not
-blocking anything else. PR #17 itself is parked (mergeStateStatus BLOCKED by this
-repo's own required-status-checks branch protection) until that's resolved — its own
-diff (CI config + doc wording) is correct and unaffected either way.
+never touch her real content) — raised as operator decision #19, delayed mode.
+**Operator answered: "the new short bio is correct"** — triggered
+`capture-baseline.yml` (workflow_dispatch, `ca_ref=402e8eb209ff9cce10a3ea89a1a7b5e39ae13be9`
+= cottage-aesthetics-preview's current main HEAD) to recapture against it; run
+https://github.com/joshcomley/wixy/actions/runs/29703707753, watching for completion.
+Once it lands (a direct commit+push to wixy's own `main`, per that workflow's own
+established design — no PR, it's the accepted mechanism for baseline recapture
+specifically), PR #17's CI should go green on its next run.
+
+**PR #74 (engine repo, this milestone's main deliverable): all CI green** (python/
+frontend/image-boot-proof/e2e), also added `docs/ai/contracts.md`'s `/api/admin/
+engine/*` route table entry + fixed the documented router-include order (anti-drift
+rule in that file's own header — a new public surface updates it in the same PR).
+**Fable review request sent** to session c42ea1cb-a9d6-413d-bdcb-fc77fc49abba with
+full checklist (04 §2) + links to decisions/00057 and 00058. Awaiting reply.
 
 ## How to continue + acceptance
 **SECURITY-GATED. PR #74 opened** (engine repo, `indep/m4-fork-sync-engine-card` ->
