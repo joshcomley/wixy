@@ -19,12 +19,31 @@ thing to wrap, not rewrite. `wixy_server/tests/test_cmdchat.py` (449 lines) is t
 coverage that must stay green untouched in behavior.
 
 ## Relevant files + commits
-(fill in as PR lands)
+`wixy_server/ai/__init__.py` + `ai/backend.py` (new: AIBackend Protocol,
+ConversationRef, AIBackendError, CmdAIBackend), `wixy_server/app.py` (constructs
+CmdAIBackend, exposes app.state.ai_backend alongside the unchanged
+app.state.cmdchat_client), `wixy_server/routes_chat.py` (consumes AIBackend
+throughout; `_prompt_for` deleted, its logic moved into CmdAIBackend.create_conversation),
+`wixy_server/tests/test_routes_chat.py` (17 fixture-wiring updates, zero assertion
+changes), `decisions/00056`. Branch: `indep/m5-ai-backend-interface` (stacked on M1 —
+touches settings.py-adjacent territory conceptually, though this milestone itself
+didn't add WIXY_AI_BACKEND, deliberately — decisions/00056 decision 5).
+
+Self-caught-and-fixed mid-flight: an over-broad replace_all during the mechanical
+test-wiring pass wrongly renamed 10 unrelated test functions' fixture parameters
+(ones using cmdchat_client for create_app, not _stream_events) — caught immediately
+via mypy + the test suite, fixed with 10 individually-anchored edits. Full account in
+decisions/00056's "what to watch for".
+
+One flaky test observed under full-suite load (TestStateChatsField::
+test_state_reflects_created_conversations) — third occurrence of the known
+full-suite-contention timing-flake class already documented in decisions/00025 and
+00053; passed cleanly in isolation and on immediate re-run, not chased further.
 
 ## How to continue + acceptance
 CI-gated only, auto-merge on green. Acceptance: all existing chat/cmdchat tests pass
 unmodified in assertions (only their target/import may change); no route-visible behavior
-change on the fleet edition.
+change on the fleet edition. Met: ruff/mypy clean, full suite 578 passed.
 
 ## Links
 spec/independence/05 §1; spec/independence/09 row 5.
