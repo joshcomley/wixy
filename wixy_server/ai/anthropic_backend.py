@@ -40,6 +40,7 @@ from wixy_server.cmdchat import (
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass(frozen=True, slots=True)
 class BudgetStatus:
     """`GET /budget`'s shape (spec/independence/05 §2: "the Settings -> AI

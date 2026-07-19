@@ -100,9 +100,7 @@ def _append_error(conv: WorkerConversation, text: str) -> None:
     )
 
 
-async def _ensure_workspace(
-    conv: WorkerConversation, dest: Path, settings: WorkerSettings
-) -> bool:
+async def _ensure_workspace(conv: WorkerConversation, dest: Path, settings: WorkerSettings) -> bool:
     """Provisions `dest` (clone + branch) the first time this conversation
     runs a turn — a no-op on every later turn (`workspace_provisioned` already
     True). Returns whether the conversation is safe to proceed (False means a

@@ -39,9 +39,7 @@ def transcript_path(transcripts_root: Path, conv_id: str) -> Path:
     return transcripts_root / conv_id / _TRANSCRIPT_FILENAME
 
 
-def write_transcript(
-    transcripts_root: Path, conv_id: str, messages: list[WorkerMessage]
-) -> None:
+def write_transcript(transcripts_root: Path, conv_id: str, messages: list[WorkerMessage]) -> None:
     """Rewrites the conversation's WHOLE transcript (not a true incremental
     append) — called after each turn completes (`wixy_server.worker.app`),
     so this is at most one extra file write per turn, not one per streamed

@@ -218,15 +218,15 @@ class TestCreateConversation:
                 # (this fixture's repo URL is deliberately unreachable, these
                 # tests never touch the site checkout at all otherwise).
                 listed = client.get("/api/admin/chat/conversations").json()["conversations"]
-                return bool(listed) and listed[0]["convId"] == conv["convId"] and (
-                    listed[0]["status"] == "ready"
+                return (
+                    bool(listed)
+                    and listed[0]["convId"] == conv["convId"]
+                    and (listed[0]["status"] == "ready")
                 )
 
             _poll_until(_is_ready)
 
-    def test_worker_unreachable_returns_502(
-        self, storage_root: Path, wixy_repo_root: Path
-    ) -> None:
+    def test_worker_unreachable_returns_502(self, storage_root: Path, wixy_repo_root: Path) -> None:
         unreachable = AnthropicAIBackend(
             worker_base_url="http://127.0.0.1:1", timeout_s=0.5, max_attempts=1
         )
