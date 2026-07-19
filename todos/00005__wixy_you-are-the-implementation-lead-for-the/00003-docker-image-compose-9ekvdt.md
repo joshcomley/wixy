@@ -50,15 +50,27 @@ wiring on alternate ports). The CI `image-boot-proof` job is the first real
 `docker build`/`docker run` this Dockerfile ever gets — flagged explicitly in
 the PR, not claimed as tested.
 
-Still blocked on the same GitHub Actions billing outage as #66/#67/#68 — Fable
-session 5759e89d has independently pre-verified #66/#67 green locally (python+
-frontend jobs, bar e2e) while waiting on operator decision #13.
+Blocked on the GitHub Actions billing outage (decision #13) — RESOLVED 2026-07-19
+20:00Z, operator fixed billing, Fable session 5759e89d independently verified real
+runners on main/#66/#67/#68/#69 (this PR's old number). **Fable APPROVED** this
+milestone (review round 1: R1 ssh-keyscan->hardcoded host keys, R2 :latest->digest
+pins, R3 NodeSource curl|bash->pinned tarball+checksum, R4 umask 077, R5 TUNNEL_TOKEN
+argv->env — all fixed, see decisions/00055).
+
+**PR renumbered #69 -> #72.** When PR #67 (M1) merged with `--delete-branch`, GitHub
+auto-CLOSED (did not retarget) every other open PR based on that branch — #69 and
+#70 both went CLOSED with no way to reopen (base ref gone) or re-edit the base of a
+closed PR (both API calls refused). Branch + commits were untouched (`git branch`
+still showed `indep/m3-docker-standalone-deploy` at the same head sha
+`6bfc568d9a35c3d2b86d11d71862994fc68d9b75`), so recreated as a fresh PR (#72,
+same branch, base `main` directly) rather than losing any work. The Fable APPROVED
+verdict above was for this exact commit/content, unaffected by the renumbering.
+**Lesson for future milestones: never `--delete-branch` a base another open PR
+stacks on until every PR stacked on it has already been retargeted or merged.**
 
 ## How to continue + acceptance
-**SECURITY-GATED**: PR -> peer author with checklist 03 §4 (no secret echoed to logs;
-/opt/wixy perms; no published ports; non-root; pinned known_hosts; image provenance;
-WIXY_CONTAINERIZED gate refuses 0.0.0.0 outside container) -> ScheduleWakeup -> merge only
-on explicit approval.
+**SECURITY-GATED, ALREADY APPROVED** — merge PR #72 once CI is green (checklist 03 §4
+already satisfied per the review above; nothing further to gate on).
 
 ## Links
 spec/independence/03 (full); spec/independence/09 row 3.
