@@ -24,10 +24,12 @@ reality only when something errors.
 | [09-work-plan.md](09-work-plan.md) | The PR train (13 milestones across the two repos) |
 | [KICKOFF-PROMPT.md](KICKOFF-PROMPT.md) | How the implementation chat gets started + its opening prompt |
 
-Context documents (read after the spec): `brief.md` (client brief),
-`docs/DESIGN-AND-CONTENT.md` (design blueprint + treatment catalogue),
-`todos/TODO-00002.md` (open gallery task 00002 — unrelated lane, don't absorb it),
-`docs/projects/01-cottage-aesthetics.md` + `docs/wix-cli/` (the dormant Wix-portal
+Context documents (read after the spec): `brief.md` (client brief) and
+`docs/DESIGN-AND-CONTENT.md` (design blueprint + treatment catalogue) — moved to the
+owner's private `ca-business` repo pre-publication (spec/independence/02 §2.3;
+retrievable from this repo's history at commit `7c4fa3c` if needed before that repo
+exists), `todos/TODO-00002.md` (open gallery task 00002 — unrelated lane, don't absorb
+it), `docs/projects/01-cottage-aesthetics.md` + `docs/wix-cli/` (the dormant Wix-portal
 framing — historical context only).
 
 Ground rules for the implementer:
