@@ -31,10 +31,12 @@ describe("parseHash", () => {
     expect(parseHash("#/chat/abc123")).toEqual({ kind: "chat", conversation: "abc123" });
   });
 
-  it("parses #/settings, #/settings/appearance, and #/settings/shortcuts", () => {
+  it("parses #/settings and every settings sub-page", () => {
     expect(parseHash("#/settings")).toEqual({ kind: "settings", page: "general" });
     expect(parseHash("#/settings/appearance")).toEqual({ kind: "settings", page: "appearance" });
     expect(parseHash("#/settings/shortcuts")).toEqual({ kind: "settings", page: "shortcuts" });
+    expect(parseHash("#/settings/engine")).toEqual({ kind: "settings", page: "engine" });
+    expect(parseHash("#/settings/ai")).toEqual({ kind: "settings", page: "ai" });
   });
 
   it("falls back to general for an unrecognized settings sub-page", () => {
@@ -59,6 +61,8 @@ describe("routeToHash", () => {
       { kind: "settings", page: "general" },
       { kind: "settings", page: "appearance" },
       { kind: "settings", page: "shortcuts" },
+      { kind: "settings", page: "engine" },
+      { kind: "settings", page: "ai" },
     ];
     for (const route of routes) {
       expect(parseHash(routeToHash(route))).toEqual(route);

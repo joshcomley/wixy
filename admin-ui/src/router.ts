@@ -3,11 +3,13 @@
 // "#/settings", "#/settings/appearance", "#/settings/shortcuts",
 // "#/settings/engine" (spec/independence/04 §2 — standalone-only content,
 // but the route/tab always exists; the panel itself degrades gracefully on
-// the fleet edition). No History-API routing — the whole admin is a single
+// the fleet edition), "#/settings/ai" (spec/independence/05 §2 —
+// anthropic-backend-only content, same always-exists-but-degrades-gracefully
+// shape as "engine"). No History-API routing — the whole admin is a single
 // served document (wixy_server.app.get_admin_shell: "every /admin sub-route
 // the browser might deep-link to is this same document").
 
-export type SettingsPage = "general" | "appearance" | "shortcuts" | "engine";
+export type SettingsPage = "general" | "appearance" | "shortcuts" | "engine" | "ai";
 
 export type Route =
   | { kind: "pages" }
@@ -53,7 +55,9 @@ export function parseHash(hash: string): Route {
               ? "appearance"
               : second === "engine"
                 ? "engine"
-                : "general",
+                : second === "ai"
+                  ? "ai"
+                  : "general",
       };
     default:
       return DEFAULT_ROUTE;
@@ -78,6 +82,7 @@ export function routeToHash(route: Route): string {
       if (route.page === "shortcuts") return "#/settings/shortcuts";
       if (route.page === "appearance") return "#/settings/appearance";
       if (route.page === "engine") return "#/settings/engine";
+      if (route.page === "ai") return "#/settings/ai";
       return "#/settings";
   }
 }

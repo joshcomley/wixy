@@ -34,46 +34,64 @@ Ground-truth-verified the REAL `claude-agent-sdk` Python package (installed it, 
 `ResultMessage`'s fields turned out to be wrong, see decisions/00059's sibling note in
 `wixy_server/worker/agent_client.py`'s own docstring) before designing the worker.
 
-**Slice 1 — DONE, tested, all checks green**: `wixy_server/ai/anthropic_backend.py`
-(`AnthropicAIBackend`, `supports_handover_chains=False`) + `wixy_server/worker/` (new
-subpackage: `agent_client.py` DI protocol around `ClaudeSDKClient`, `state.py`,
-`runner.py` — the SDK-message-to-transcript translation layer, `app.py` — the internal
-HTTP API with budget-refusal (402) + idempotent sends, `settings.py`, `__main__.py`).
-Two REAL bugs found by tests interfering with each other across the same file (root-
-caused properly, not dismissed as a flake) — decisions/00059: a module-level `APIRouter`
-singleton causing stale-closure cross-test pollution, and `send_message` returning 200
-instead of the 202 the client contract requires (would have broken every real send).
-40 new tests (`test_anthropic_backend.py` 18, `test_worker_runner.py` 10,
-`test_worker_app.py` 12). `pyproject.toml` gained `claude-agent-sdk` in the `server`
-extra.
+**Slice 1 — DONE**: `wixy_server/ai/anthropic_backend.py` (`AnthropicAIBackend`,
+`supports_handover_chains=False`) + `wixy_server/worker/` skeleton (`agent_client.py`
+DI protocol, `state.py`, `runner.py`, `app.py` internal HTTP API, `settings.py`,
+`__main__.py`). Two real bugs found+fixed via tests interfering with each other —
+decisions/00059.
 
-**Not yet built**: real git workspace cloning/branching/PR-shipping (currently uses a
-bare per-conversation scratch dir with no repo content at all — the agent has nowhere
-real to work yet), the bot PAT/credential design for that (needs its own decisions/
-entry — NOT the same token as `WIXY_ENGINE_PAT` from M4, which only dispatches/reads;
-this one needs `contents:write`+`pull_requests:write` on both her site repo and engine
-fork), `wixy_server/app.py`'s own backend-selection wiring (`WIXY_AI_BACKEND=cmd|
-anthropic`), docker-compose.yml's `worker` service, transcript JSONL persistence to
-disk (current state is in-memory only, lost on worker restart — acceptable for now per
-the module's own docstring, but the spec calls for JSONL specifically), the Settings ->
-AI card (frontend), the `@live_anthropic` smoke test, and the full Fable review.
+**Slice 2 — DONE**: real git workspace model. `wixy_server/worker/workspace.py`
+(clone/branch/push against the site repo, one-off `-c http.extraHeader=` per
+credentialed git call so the bot PAT never touches `.git/config` at rest — the agent
+has unrestricted Bash access inside the clone all turn, decisions/00060). Bot PAT design
+(`WIXY_AI_BOT_PAT`, distinct from M4's `WIXY_ENGINE_PAT` — decisions/00061).
+`WIXY_AI_BACKEND` (cmd|anthropic) wiring in `wixy_server/settings.py`+`app.py`
+(independent of `WIXY_EDITION`, per spec's own literal wording). Two robustness bugs
+fixed along the way (Windows read-only-file cleanup failure, scratch-sweep sharing a
+task group with every live conversation with no exception guard — see decisions/00060).
+
+**Slice 3 — DONE**: `docker-compose.yml`'s `worker` service (own scratch volume, no
+site-repo deploy key — authenticates as the bot PAT instead), `setup.sh` prompts
+(Anthropic key, AI budget, bot-PAT creation walkthrough), `verify.sh`/`update.sh`
+updated for the second service.
+
+**Slice 4 — DONE**: transcript JSONL persistence. `wixy_server/worker/transcript.py`,
+written once per turn from `_run_and_track`'s own `finally`. A SEPARATE volume/root
+from the git scratch clones on purpose — the agent's own `git add -A` habit could
+otherwise commit the transcript into her site repo (decisions/00062).
+
+**Slice 5 — DONE**: Settings -> AI card. `wixy_server/routes_ai.py` (`GET
+/api/admin/ai/budget`, anthropic-backend-only, proxies the worker's own new `GET
+/budget`) + `AnthropicAIBackend.get_budget_status` (lives on the concrete class, not
+the shared `AIBackend` protocol — decisions/00063) + `admin-ui` Settings -> AI tab
+(mirrors the Engine card's loading/not-available/error states, simpler flat 60s poll,
+no in-flight-run tracking needed). Frontend bundle rebuilt+committed.
+
+**Not yet built**: the `@live_anthropic` smoke test (spec §4 — skipped in CI, run for
+real in the M9 drill with a real key), a pass verifying the backend-contract test suite
+genuinely covers both backends' shared contract (spec §4 — separate thorough test files
+may already satisfy the spirit of this, needs a judgment-call review pass), the Fable
+checklist verification pass itself (05 §4: key never logged/committed — verified in
+code+tests already, worth a final explicit checklist pass; egress restricted as far as
+compose allows — done, documented as best-effort; scratch clones cleaned — done,
+decisions/00060; budget enforcement tested — the single-conversation 402 test exists,
+a multi-conversation-hits-cap test would round this out), and the actual PR open +
+Fable review round.
 
 ## Relevant files + commits
-Branch: `indep/m6-anthropic-backend-worker` (off main, after M4/M5 merged). Commits so
-far: AnthropicAIBackend client + fake_worker.py double; worker skeleton (github.py-style
-agent_client.py, state.py, runner.py, app.py, settings.py, __main__.py) +
-fake_agent_sdk.py scripted-episode harness + the two bugfixes above. decisions/00059.
+Branch: `indep/m6-anthropic-backend-worker` (off main, after M4/M5 merged). 5 commits
+so far (slices 1-5 above, one commit each after slice 1's two): `8adb598` (slice 1a),
+`473db3b` (slice 2, workspace model + backend wiring), `9cdd885` (slice 3, compose),
+`08ddc40` (slice 4, transcript), plus slice 5's commit (AI budget card — commit hash
+not yet recorded here, check `git log`). decisions/00059-00063.
 
 ## How to continue + acceptance
-**SECURITY-GATED**: NOT ready for Fable review yet — real key-handling (workspace
-cloning with a real bot credential) and budget enforcement's cost-tracking are only
-partially real (cost accumulates correctly from `ResultMessage.total_cost_usd`, but
-nothing exercises it against a real repo yet). Continue building: workspace/git model
-next (biggest remaining piece), then compose/settings wiring, then transcript
-persistence + frontend AI card, THEN checklist 05 §4 (key never logged/committed;
-worker egress restricted to Anthropic+GitHub as far as compose allows; scratch clones
-cleaned; budget enforcement tested) -> peer author -> ScheduleWakeup -> merge only on
-explicit approval.
+Functionally complete — what's left is verification/polish (smoke test, contract-suite
+coverage judgment call, an explicit checklist pass, a stronger budget-cap test) before
+the PR opens. Once those land: open PR -> green CI -> peer-message
+`c42ea1cb-a9d6-413d-bdcb-fc77fc49abba` (Fable) with PR#+the 05§4 checklist -> wait for
+explicit "APPROVED -- merge" (never merge without it; delta-only re-review if changes
+requested, per M4's precedent) -> merge -> continue the train (M7).
 
 ## Links
 spec/independence/05 (full, esp. §2-4); spec/independence/09 row 6.

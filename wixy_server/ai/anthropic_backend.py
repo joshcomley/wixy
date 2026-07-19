@@ -22,6 +22,7 @@ docstring: "may leave this unimplemented").
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 import anyio
 import httpx
@@ -38,6 +39,23 @@ from wixy_server.cmdchat import (
 )
 
 logger = logging.getLogger(__name__)
+
+@dataclass(frozen=True, slots=True)
+class BudgetStatus:
+    """`GET /budget`'s shape (spec/independence/05 §2: "the Settings -> AI
+    card shows month-to-date spend") — deliberately a method on THIS class,
+    not the shared `AIBackend` protocol: the cmd backend has no monthly-
+    budget concept at all (Josh's fleet subscription, not a per-project
+    budgeted resource), so there's no meaningful "unsupported" value worth
+    forcing into the generic interface the way `supports_handover_chains`
+    reasonably can. `wixy_server.routes_ai`'s route confirms
+    `settings.ai_backend == "anthropic"` (the same condition that made
+    `wixy_server.app.create_app` construct an `AnthropicAIBackend` as
+    `app.state.ai_backend` in the first place) before ever calling this."""
+
+    month_to_date_usd: float
+    monthly_budget_usd: float
+
 
 DEFAULT_TIMEOUT_S = 10.0
 # The worker's own conversation-create step may involve cloning a repo (05 §2) —
@@ -205,6 +223,25 @@ class AnthropicAIBackend:
     async def get_chain(self, conv_ref: ConversationRef) -> list[str]:
         # Never called: supports_handover_chains is False (see module docstring).
         raise AIBackendError("the anthropic backend has no handover-chain concept")
+
+    async def get_budget_status(self) -> BudgetStatus:
+        response = await self._request("GET", "/budget")
+        if response.status_code != 200:
+            raise AIBackendError(
+                f"get_budget_status returned {response.status_code}: {response.text[:500]}"
+            )
+        body = response.json()
+        if not isinstance(body, dict):
+            raise AIBackendError(f"budget response malformed: {body!r}")
+        month_to_date = body.get("monthToDateUsd")
+        monthly_budget = body.get("monthlyBudgetUsd")
+        if not isinstance(month_to_date, (int, float)) or not isinstance(
+            monthly_budget, (int, float)
+        ):
+            raise AIBackendError(f"budget response malformed: {body!r}")
+        return BudgetStatus(
+            month_to_date_usd=float(month_to_date), monthly_budget_usd=float(monthly_budget)
+        )
 
 
 def _message_from_dict(data: object) -> ChatMessage | None:

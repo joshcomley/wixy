@@ -142,6 +142,40 @@ def _fake_github_client_factory(fake_app: FastAPI) -> Callable[[], GitHubClient]
     return lambda: GitHubClient(pat="fake-bot-pat", transport=httpx.ASGITransport(app=fake_app))
 
 
+class TestGetBudget:
+    def test_reports_zero_spend_and_the_configured_budget_initially(self, tmp_path: Path) -> None:
+        _clients, factory = create_fake_agent_sdk_client_factory([])
+        app = create_worker_app(
+            settings=_settings(tmp_path, monthly_budget_usd=25.0), client_factory=factory
+        )
+        with TestClient(app) as client:
+            response = client.get("/budget")
+
+        assert response.status_code == 200
+        assert response.json() == {"monthToDateUsd": 0.0, "monthlyBudgetUsd": 25.0}
+
+    def test_reflects_accumulated_spend_after_a_turn(self, tmp_path: Path) -> None:
+        episodes = [_text_episode("done", cost=0.07)]
+        _clients, factory = create_fake_agent_sdk_client_factory(episodes)
+        app = create_worker_app(settings=_settings(tmp_path), client_factory=factory)
+        with TestClient(app) as client:
+            create = client.post(
+                "/conversations",
+                json={"preamble": "you are a site editor", "firstMessage": "go"},
+            )
+            conv_id = create.json()["convId"]
+            _poll_until(
+                lambda: any(
+                    m["role"] == "assistant"
+                    for m in client.get(f"/conversations/{conv_id}/messages").json()["messages"]
+                )
+            )
+            time.sleep(0.1)
+            response = client.get("/budget")
+
+        assert response.json()["monthToDateUsd"] == pytest.approx(0.07)
+
+
 class TestCreateConversation:
     def test_returns_202_with_conv_id(self, tmp_path: Path) -> None:
         _clients, factory = create_fake_agent_sdk_client_factory([])

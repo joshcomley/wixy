@@ -38,6 +38,9 @@ class FakeWorkerState:
     conversations: dict[str, FakeConversation] = field(default_factory=dict)
     next_id_n: int = 1
     create_status_code: int = 202
+    month_to_date_usd: float = 0.0
+    monthly_budget_usd: float = 40.0
+    budget_status_code: int = 200
 
     def create_conversation(self, preamble: str, first_message: str | None) -> FakeConversation:
         n = self.next_id_n
@@ -112,5 +115,16 @@ def create_fake_worker_app(state: FakeWorkerState | None = None) -> FastAPI:
             items = filtered
         items = items[-limit:] if limit > 0 else items
         return JSONResponse({"messages": items})
+
+    @app.get("/budget")
+    async def budget() -> Response:
+        if state.budget_status_code != 200:
+            return Response(status_code=state.budget_status_code)
+        return JSONResponse(
+            {
+                "monthToDateUsd": state.month_to_date_usd,
+                "monthlyBudgetUsd": state.monthly_budget_usd,
+            }
+        )
 
     return app

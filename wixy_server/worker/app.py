@@ -473,4 +473,17 @@ def create_worker_app(
     app.state.settings = resolved_settings
     app.state.worker_state = state
     app.include_router(router)
+
+    @app.get("/budget", response_model=None)
+    async def get_budget() -> JsonObject:
+        # spec §2: "the worker tracks spend... the Settings -> AI card shows
+        # month-to-date spend" — top-level, not under `/conversations`
+        # (`router`'s own prefix): budget is a property of the WORKER, not of
+        # any one conversation. `wixy_server.ai.anthropic_backend.
+        # AnthropicAIBackend.get_budget_status` is this route's client.
+        return {
+            "monthToDateUsd": state.month_to_date_usd,
+            "monthlyBudgetUsd": resolved_settings.monthly_budget_usd,
+        }
+
     return app

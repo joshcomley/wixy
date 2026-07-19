@@ -77,6 +77,14 @@ export interface EngineStatus {
   updateRun: EngineUpdateRun | null;
 }
 
+/** `GET /api/admin/ai/budget`'s exact shape (spec/independence/05 §2) —
+ * anthropic-backend-only; a `cmd`-backend deployment 404s this route entirely
+ * (mirrors `EngineStatus`'s own standalone-only precedent). */
+export interface AiBudgetStatus {
+  monthToDateUsd: number;
+  monthlyBudgetUsd: number;
+}
+
 /** `wixy_server.chats.conversation_summary`'s exact shape (spec/06 §1) — the
  * shared wire type both `GET/POST /api/admin/chat/conversations` and
  * `GET /api/admin/state`'s `chats` field return. */
@@ -331,6 +339,7 @@ export interface AdminApi {
   getEngineStatus(): Promise<EngineStatus>;
   triggerEngineUpdate(): Promise<{ triggered: true }>;
   triggerEngineRollback(): Promise<{ triggered: true }>;
+  getAiBudgetStatus(): Promise<AiBudgetStatus>;
 }
 
 export function createApi(): AdminApi {
@@ -514,6 +523,9 @@ export function createApi(): AdminApi {
           headers: { "Content-Type": "application/json" },
         }),
       );
+    },
+    async getAiBudgetStatus() {
+      return parseJson<AiBudgetStatus>(await fetchWithRetry("/api/admin/ai/budget"));
     },
   };
 }

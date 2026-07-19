@@ -31,6 +31,7 @@ from wixy_server.publisher import PublishJob
 from wixy_server.redirects import load_redirects
 from wixy_server.registry import load_registry
 from wixy_server.routes_admin_api import router as admin_api_router
+from wixy_server.routes_ai import router as ai_router
 from wixy_server.routes_chat import StreamTiming
 from wixy_server.routes_chat import router as chat_router
 from wixy_server.routes_engine import EngineStatusCache
@@ -212,6 +213,7 @@ def create_app(
     app.include_router(admin_api_router)
     app.include_router(chat_router)
     app.include_router(engine_router)
+    app.include_router(ai_router)
     app.include_router(versions_router)
 
     @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)

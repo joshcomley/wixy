@@ -284,6 +284,31 @@ async def test_get_chain_raises_never_called_in_practice() -> None:
 
 
 # ---------------------------------------------------------------------------
+# get_budget_status
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_budget_status_parses_the_response() -> None:
+    state = FakeWorkerState(month_to_date_usd=12.5, monthly_budget_usd=40.0)
+    app = create_fake_worker_app(state)
+    async with _make_backend(app) as backend:
+        status = await backend.get_budget_status()
+
+    assert status.month_to_date_usd == 12.5
+    assert status.monthly_budget_usd == 40.0
+
+
+@pytest.mark.asyncio
+async def test_get_budget_status_non_200_raises() -> None:
+    state = FakeWorkerState(budget_status_code=500)
+    app = create_fake_worker_app(state)
+    async with _make_backend(app) as backend:
+        with pytest.raises(AIBackendError):
+            await backend.get_budget_status()
+
+
+# ---------------------------------------------------------------------------
 # Connect-error retry behavior
 # ---------------------------------------------------------------------------
 
