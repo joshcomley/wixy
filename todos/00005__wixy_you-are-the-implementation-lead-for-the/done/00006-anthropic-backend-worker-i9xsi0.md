@@ -85,8 +85,8 @@ branch-protection guarantee, not a convention) — both fixed and verified local
 (ruff/mypy/pytest all clean), both are the "best-reasoned milestone yet" per
 Fable's own words, no scope creep into the deeper privilege-separation redesign
 Fable explicitly accepted deferring. Full detail: decisions/00065's "Correction
-(Fable review, PR #76 R1+R2)". Not yet pushed/sent as of this note — see "How to
-continue" below.
+(Fable review, PR #76 R1+R2)". R1+R2 pushed as commit `e9eb5f2`, CI green (all 4
+jobs), delta-only re-review requested.
 
 ## Relevant files + commits
 Branch: `indep/m6-anthropic-backend-worker` (off main, after M4/M5 merged), PR #76.
@@ -94,16 +94,26 @@ Six slice commits: `8adb598` (slice 1a), `473db3b` (slice 2, workspace model + b
 wiring), `9cdd885` (slice 3, compose), `08ddc40` (slice 4, transcript), `53770b0`
 (slice 5, AI budget card + live smoke test), `d3e261d` (slice 6, backend-contract
 coverage + budget test), `358147a` (wrap-up: decisions/00065), `90ecc50` (ruff format
-fix), plus the R1+R2 follow-up commit(s) — check `git log` for the current HEAD.
-decisions/00059-00065.
+fix), `e9eb5f2` (Fable gate review R1+R2). decisions/00059-00065.
 
-## How to continue + acceptance
-R1+R2 implemented (`wixy_server/worker/settings.py`, `wixy_server/worker/workspace.py`,
-`deploy/standalone/setup.sh`, `deploy/standalone/README.md`, `wixy_server/tests/
-test_worker_settings.py`, decisions/00065 addendum, forward obligations recorded in the
-M8/M9 sidecars). Once CI is confirmed green post-push: delta-only re-review request to
-`c42ea1cb-a9d6-413d-bdcb-fc77fc49abba` (Fable) -> wait for explicit "APPROVED -- merge"
-(never merge without it) -> merge -> continue the train (M7).
+## Fable review verdict
+**APPROVED — merge**, session `c42ea1cb-a9d6-413d-bdcb-fc77fc49abba`, 2026-07-19,
+re-reviewing commit `e9eb5f2`. Verified the deltas directly: the `os.environ.pop`
+happens at the exact right moment with the threat model documented where the next
+maintainer will read it; `ANTHROPIC_API_KEY` correctly left inheritable; four tests
+incl. the second-load case; `workspace.py` documents the residual `/proc` channel
+honestly and records the privilege-separation deferral as a reviewed decision;
+`setup.sh` walks both repos through branch protection with the pause-and-confirm
+pattern before any secret is written; forward obligations landed in the M8/M9
+sidecars. Explicitly RATIFIED the direct-push-assertion placement call (drill, not
+`verify.sh`) as "exactly the kind of spec-interpretation judgment the kickoff hoped
+for." Fable mirrored the branch-protection + PAT-scrub requirement into
+spec/independence/05 §2 herself, commit `22be2d1` (landed on `main` independently,
+picked up automatically by the merge).
+
+**DONE — merged PR #76** (2026-07-19, merge commit `452188e`). Remote branch
+deleted via `--delete-branch`; local worktree moved on to `indep/m7-backups-monitoring`
+off the fresh `origin/main`.
 
 ## Links
 spec/independence/05 (full, esp. §2-4); spec/independence/09 row 6.
