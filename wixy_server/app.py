@@ -30,6 +30,8 @@ from wixy_server.registry import load_registry
 from wixy_server.routes_admin_api import router as admin_api_router
 from wixy_server.routes_chat import StreamTiming
 from wixy_server.routes_chat import router as chat_router
+from wixy_server.routes_engine import EngineStatusCache
+from wixy_server.routes_engine import router as engine_router
 from wixy_server.routes_internal import router as internal_router
 from wixy_server.routes_preview import DEFAULT_PREVIEW_STALENESS_THRESHOLD_S
 from wixy_server.routes_preview import router as preview_router
@@ -155,6 +157,7 @@ def create_app(
     app.state.chat_runtime = chat_runtime
     app.state.chat_stream_timing = stream_timing
     app.state.redirects = load_redirects()
+    app.state.engine_status_cache = EngineStatusCache()
 
     app.middleware("http")(admin_auth)
 
@@ -165,6 +168,7 @@ def create_app(
     app.include_router(preview_router)
     app.include_router(admin_api_router)
     app.include_router(chat_router)
+    app.include_router(engine_router)
     app.include_router(versions_router)
 
     @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)

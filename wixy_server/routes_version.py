@@ -29,7 +29,11 @@ from wixy_server.storage import ProjectPaths
 router = APIRouter()
 
 
-def _resolve_engine_sha(wixy_repo_root: Path) -> str | None:
+def resolve_engine_sha(wixy_repo_root: Path) -> str | None:
+    """Blocking (may shell `git rev-parse`) — callers off the event loop wrap this
+    in `anyio.to_thread.run_sync`, same as `_build_version` below does for the
+    `/api/version` route; `wixy_server/routes_engine.py` reuses this directly for
+    the Engine card's `currentSha` field rather than re-deriving it."""
     baked = os.environ.get("WIXY_ENGINE_SHA")
     if baked:
         return baked
@@ -45,7 +49,7 @@ def _resolve_engine_sha(wixy_repo_root: Path) -> str | None:
 def _build_version(
     wixy_repo_root: Path, paths: ProjectPaths, slot: str | None, edition: str
 ) -> dict[str, object]:
-    engine_sha = _resolve_engine_sha(wixy_repo_root)
+    engine_sha = resolve_engine_sha(wixy_repo_root)
     # Her fork's last-synced-from upstream commit (spec/independence/04) — a baked
     # build-arg only; unset (null) on the fleet edition, which isn't a fork and has no
     # equivalent git ref to fall back to.

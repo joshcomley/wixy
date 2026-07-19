@@ -23,6 +23,14 @@ compose file only, gates `__main__.py`'s bind address (0.0.0.0 vs the fleet's
 loopback-only default). Both follow the same `.env`-or-process-env precedence as
 every other setting in this module (the standalone `/opt/wixy/.env` doctrine, 01 §3,
 holds general `WIXY_*` config alongside secrets).
+
+Milestone 4 additions (spec/independence/04 §2, 01 §3): `WIXY_ENGINE_REPO` (her
+fork's `owner/repo` slug, e.g. `cottage-aesthetics/wixy-engine` — what "Get engine
+updates" dispatches a workflow on and what the commits-behind comparison targets),
+`WIXY_ENGINE_UPSTREAM` (the upstream to compare against, default `joshcomley/wixy`),
+`WIXY_ENGINE_PAT` (the org fine-grained PAT scoped `actions:write` + `contents:read`
+on her fork only, spec's own words — a secret, never logged). All empty/absent on the
+fleet edition, where the Engine card doesn't render at all (standalone-only, 04 §2).
 """
 
 from __future__ import annotations
@@ -67,6 +75,9 @@ class Settings:
     slot: str | None
     edition: str
     containerized: bool
+    engine_repo: str
+    engine_upstream: str
+    engine_pat: str
 
 
 def load_settings(storage_root: Path) -> Settings:
@@ -107,4 +118,7 @@ def load_settings(storage_root: Path) -> Settings:
         slot=os.environ.get("WIXY_SLOT"),
         edition=edition,
         containerized=containerized,
+        engine_repo=_get("WIXY_ENGINE_REPO"),
+        engine_upstream=_get("WIXY_ENGINE_UPSTREAM", "joshcomley/wixy"),
+        engine_pat=_get("WIXY_ENGINE_PAT"),
     )
