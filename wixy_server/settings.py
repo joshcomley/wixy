@@ -31,6 +31,18 @@ updates" dispatches a workflow on and what the commits-behind comparison targets
 `WIXY_ENGINE_PAT` (the org fine-grained PAT scoped `actions:write` + `contents:read`
 on her fork only, spec's own words — a secret, never logged). All empty/absent on the
 fleet edition, where the Engine card doesn't render at all (standalone-only, 04 §2).
+
+Milestone 6 addition (spec/independence/05 §1): `WIXY_AI_BACKEND` (`cmd` default,
+or `anthropic`) — which `AIBackend` implementation `wixy_server.app.create_app`
+constructs for `app.state.ai_backend`. Deliberately its OWN setting, independent
+of `edition` (the spec's own literal wording: "chosen by WIXY_AI_BACKEND"; "fleet
+deployment SETS WIXY_AI_BACKEND=cmd") rather than derived from it — `edition`
+governs the broader fleet-vs-standalone feature set (the Engine card, `engine_pat`,
+etc.), `ai_backend` is specifically which chat backend answers the AI panel. The
+worker itself (a separate process/container, `wixy_server.worker.settings`) is
+NOT read from here — `AnthropicAIBackend` only needs the worker's base URL, never
+the worker's own secrets (`WIXY_AI_BOT_PAT`, `ANTHROPIC_API_KEY`), which reach the
+worker container's env directly and never this process's.
 """
 
 from __future__ import annotations
@@ -62,6 +74,7 @@ def parse_env_file(path: Path) -> dict[str, str]:
 
 
 _VALID_EDITIONS = ("fleet", "standalone")
+_VALID_AI_BACKENDS = ("cmd", "anthropic")
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +91,7 @@ class Settings:
     engine_repo: str
     engine_upstream: str
     engine_pat: str
+    ai_backend: str
 
 
 def load_settings(storage_root: Path) -> Settings:
@@ -103,6 +117,13 @@ def load_settings(storage_root: Path) -> Settings:
         )
     containerized = _get("WIXY_CONTAINERIZED", "0") in ("1", "true", "True")
 
+    ai_backend = _get("WIXY_AI_BACKEND", "cmd")
+    if ai_backend not in _VALID_AI_BACKENDS:
+        raise RuntimeError(
+            f"WIXY_AI_BACKEND={ai_backend!r} is not valid — must be one of "
+            f"{_VALID_AI_BACKENDS} (spec/independence/05 §1)"
+        )
+
     return Settings(
         port=int(_get("WIXY_PORT", "8000")),
         env=env,
@@ -121,4 +142,5 @@ def load_settings(storage_root: Path) -> Settings:
         engine_repo=_get("WIXY_ENGINE_REPO"),
         engine_upstream=_get("WIXY_ENGINE_UPSTREAM", "joshcomley/wixy"),
         engine_pat=_get("WIXY_ENGINE_PAT"),
+        ai_backend=ai_backend,
     )

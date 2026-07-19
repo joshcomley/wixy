@@ -91,8 +91,35 @@ specifically), PR #17's CI should go green on its next run.
 frontend/image-boot-proof/e2e), also added `docs/ai/contracts.md`'s `/api/admin/
 engine/*` route table entry + fixed the documented router-include order (anti-drift
 rule in that file's own header — a new public surface updates it in the same PR).
-**Fable review request sent** to session c42ea1cb-a9d6-413d-bdcb-fc77fc49abba with
-full checklist (04 §2) + links to decisions/00057 and 00058. Awaiting reply.
+**Fable review request sent** — verdict: **CHANGES REQUIRED, 2 items** (both small,
+rest of the PR explicitly praised — injection-safe changelog construction, retag-
+before-push ordering, PAT-authenticated conflict-PRs so CI runs on them, notify job
+correctly on GITHUB_TOKEN, edition-404, shared-client DI, hermetic tests all called
+out as right):
+- **R1 (CSRF)**: `update`/`rollback` took no body, making them the only admin
+  mutations a cross-site form POST could fire (forms can't send
+  `application/json`). Fixed: `_require_json_content_type()` guard, 415 otherwise,
+  both routes + both success-path tests updated + 2 new 415 tests + frontend
+  `api.ts` now sends the header + `docs/ai/contracts.md` updated.
+- **R2 (PAT scope)**: `SYNC_PUSH_TOKEN` needs `contents:write` + `pull_requests:write`
+  — `gh pr create` in the conflict-PR step needs the latter or it 403s exactly
+  when the review-PR mechanism matters most. This was spec/independence/04 §1's
+  OWN under-specification ("(contents:write on the fork)"), not a misreading —
+  Fable is amending the spec line; `sync-upstream.yml`'s comment + decisions/00057
+  corrected here.
+
+R1+R2 pushed (commit 247ea70), CI green again, delta-only re-review requested per
+Fable's own preference.
+
+**APPROVED — merge.** Fable verified the deltas directly (guard present in both
+handlers with 415 semantics, tests assert both the 415 AND the GitHub client is
+never reached, api.ts sends the header on both triggers, bundles rebuilt,
+contracts.md carries the 415, workflow header + decisions/00057 state the corrected
+PAT scope) — scope was exactly the delta files, no creep. Spec correction merged
+upstream too (spec/independence/04 §1 now reads `contents:write +
+pull_requests:write`, PR #75, Fable's own action).
+
+## DONE — merged PR #74 (2026-07-19, commit 625c3e7).
 
 ## How to continue + acceptance
 **SECURITY-GATED. PR #74 opened** (engine repo, `indep/m4-fork-sync-engine-card` ->

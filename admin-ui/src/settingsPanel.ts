@@ -11,7 +11,7 @@
 // editor lets them *tailor* one"). Keyboard Shortcuts: list every shortcut
 // (grouped by category), rebind, disable, reset to defaults.
 
-import type { AdminApi, EngineStatus } from "./api";
+import type { AdminApi, AiBudgetStatus, EngineStatus } from "./api";
 import { ApiError } from "./api";
 import { AA_LARGE_TEXT, AA_NORMAL_TEXT, contrastRatioHex, passesAA } from "./contrast";
 import type { FontScaleController } from "./fontScale";
@@ -85,6 +85,7 @@ export function mountSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
     tabButton("Appearance", "appearance"),
     tabButton("Keyboard Shortcuts", "shortcuts"),
     tabButton("Engine", "engine"),
+    tabButton("AI", "ai"),
   );
   root.appendChild(tabs);
 
@@ -97,6 +98,7 @@ export function mountSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
     appearance: renderAppearance,
     shortcuts: renderShortcuts,
     engine: renderEngine,
+    ai: renderAi,
   };
   body.appendChild(pageRenderers[deps.page](deps, teardownFns));
 
@@ -888,6 +890,95 @@ function renderEngine(deps: SettingsPanelDeps, teardownFns: Array<() => void>): 
         }
         renderLoadError(error instanceof Error ? error.message : "unknown error");
         schedule(ENGINE_POLL_IDLE_MS);
+      });
+  }
+
+  load();
+
+  teardownFns.push(() => {
+    cancelled = true;
+    if (pollTimer !== null) clearTimeout(pollTimer);
+  });
+
+  return wrap;
+}
+
+// -- AI (spec/independence/05 §2, anthropic-backend only) -------------------
+
+const AI_BUDGET_POLL_MS = 60_000;
+
+function renderAi(deps: SettingsPanelDeps, teardownFns: Array<() => void>): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "wx-settings-ai";
+  wrap.textContent = "Loading…";
+
+  let cancelled = false;
+  let pollTimer: number | null = null;
+
+  function schedule(delayMs: number): void {
+    if (cancelled) return;
+    if (pollTimer !== null) clearTimeout(pollTimer);
+    pollTimer = setTimeout(() => void load(), delayMs) as unknown as number;
+  }
+
+  function renderNotAvailable(): void {
+    wrap.innerHTML = "";
+    const p = document.createElement("p");
+    p.className = "wx-settings-hint";
+    p.textContent = "The AI card isn't available on this deployment.";
+    wrap.appendChild(p);
+  }
+
+  function renderLoadError(message: string): void {
+    wrap.innerHTML = "";
+    const p = document.createElement("p");
+    p.className = "wx-settings-hint";
+    p.textContent = `Couldn't load AI budget: ${message}`;
+    wrap.appendChild(p);
+  }
+
+  function formatUsd(amount: number): string {
+    return `$${amount.toFixed(2)}`;
+  }
+
+  function renderLoaded(status: AiBudgetStatus): void {
+    wrap.innerHTML = "";
+
+    const section = settingsSection("AI spend");
+
+    const spendRow = document.createElement("p");
+    spendRow.className = "wx-settings-hint";
+    spendRow.textContent =
+      `${formatUsd(status.monthToDateUsd)} of ${formatUsd(status.monthlyBudgetUsd)} spent this month.`;
+    section.appendChild(spendRow);
+
+    if (status.monthToDateUsd >= status.monthlyBudgetUsd) {
+      const capRow = document.createElement("p");
+      capRow.className = "wx-settings-hint";
+      capRow.textContent =
+        "This month's budget has been used up — new conversations are paused until it resets on the 1st.";
+      section.appendChild(capRow);
+    }
+
+    wrap.appendChild(section);
+    schedule(AI_BUDGET_POLL_MS);
+  }
+
+  function load(): void {
+    deps.api
+      .getAiBudgetStatus()
+      .then((status) => {
+        if (cancelled) return;
+        renderLoaded(status);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        if (error instanceof ApiError && error.status === 404) {
+          renderNotAvailable();
+          return;
+        }
+        renderLoadError(error instanceof Error ? error.message : "unknown error");
+        schedule(AI_BUDGET_POLL_MS);
       });
   }
 

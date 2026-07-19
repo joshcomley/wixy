@@ -9,7 +9,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from wixy_server.github import GitHubApiError, GitHubClient
+from wixy_server.github import GitHubApiError, GitHubClient, PullRequestInfo
 from wixy_server.tests.fake_github import FakeGitHubState, create_fake_github_app
 
 
@@ -169,6 +169,61 @@ async def test_compare_commits_non_200_raises() -> None:
     async with _make_client(app) as client:
         with pytest.raises(GitHubApiError):
             await client.compare_commits("acme/wixy-engine", "main", "joshcomley:main")
+
+
+# ---------------------------------------------------------------------------
+# create_pull_request
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_create_pull_request_sends_head_base_title_body() -> None:
+    state = FakeGitHubState()
+    app = create_fake_github_app(state)
+    async with _make_client(app) as client:
+        pr = await client.create_pull_request(
+            "acme/wixy-site",
+            head="wixy-ai/anthropic-1",
+            base="main",
+            title="Wixy AI: fix the footer typo",
+            body="Opened automatically...",
+        )
+
+    assert isinstance(pr, PullRequestInfo)
+    assert pr.number == 1
+    assert pr.html_url == "https://github.com/acme/wixy-site/pull/1"
+    assert len(state.pull_request_calls) == 1
+    assert state.pull_request_calls[0]["head"] == "wixy-ai/anthropic-1"
+    assert state.pull_request_calls[0]["base"] == "main"
+    assert state.pull_request_calls[0]["title"] == "Wixy AI: fix the footer typo"
+
+
+@pytest.mark.asyncio
+async def test_create_pull_request_numbers_increment_across_calls() -> None:
+    state = FakeGitHubState()
+    app = create_fake_github_app(state)
+    async with _make_client(app) as client:
+        first = await client.create_pull_request(
+            "acme/wixy-site", head="wixy-ai/a", base="main", title="t1", body="b1"
+        )
+        second = await client.create_pull_request(
+            "acme/wixy-site", head="wixy-ai/b", base="main", title="t2", body="b2"
+        )
+
+    assert first.number == 1
+    assert second.number == 2
+
+
+@pytest.mark.asyncio
+async def test_create_pull_request_non_201_raises() -> None:
+    state = FakeGitHubState()
+    state.pull_request_status_code = 422
+    app = create_fake_github_app(state)
+    async with _make_client(app) as client:
+        with pytest.raises(GitHubApiError):
+            await client.create_pull_request(
+                "acme/wixy-site", head="wixy-ai/a", base="main", title="t", body="b"
+            )
 
 
 # ---------------------------------------------------------------------------

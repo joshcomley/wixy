@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from wixy_server.ai.anthropic_backend import AnthropicAIBackend
+from wixy_server.ai.backend import CmdAIBackend
 from wixy_server.app import create_app
 
 _INDEX_HTML = """<!DOCTYPE html>
@@ -279,3 +281,42 @@ class TestCreateAppProjectCountAssertion:
             )
         with pytest.raises(RuntimeError, match="exactly one"):
             create_app(storage_root=tmp_path / "storage", wixy_repo_root=wixy_repo_root)
+
+
+class TestAIBackendSelection:
+    """spec/independence/05 §1: "chosen by WIXY_AI_BACKEND" — `create_app`
+    picks between the two concrete `AIBackend` implementations based on
+    `settings.ai_backend`, or the `ai_backend` PARAMETER overrides that choice
+    outright (same override-point convention as `cmdchat_client`/
+    `github_client` — see `create_app`'s own docstring)."""
+
+    def test_defaults_to_cmd_backend(
+        self, storage_root: Path, wixy_repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("WIXY_AI_BACKEND", raising=False)
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        assert isinstance(app.state.ai_backend, CmdAIBackend)
+
+    def test_wixy_ai_backend_anthropic_selects_anthropic_backend(
+        self, storage_root: Path, wixy_repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WIXY_AI_BACKEND", "anthropic")
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        assert isinstance(app.state.ai_backend, AnthropicAIBackend)
+
+    def test_ai_backend_param_overrides_the_env_setting(
+        self, storage_root: Path, wixy_repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WIXY_AI_BACKEND", "anthropic")
+        override = AnthropicAIBackend(worker_base_url="http://fake-worker:1234")
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, ai_backend=override
+        )
+        assert app.state.ai_backend is override
+
+    def test_invalid_wixy_ai_backend_raises(
+        self, storage_root: Path, wixy_repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WIXY_AI_BACKEND", "bogus")
+        with pytest.raises(RuntimeError, match="WIXY_AI_BACKEND"):
+            create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)

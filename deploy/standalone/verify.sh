@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # spec/independence/03 §3 — healthz, tunnel connected, site clone OK,
-# version/edition: one [OK]/[FAIL] line per check, printed even when a check
-# fails (never aborts early) so a single run always shows the FULL picture and
-# names which guide step to revisit. Runs FROM the droplet, against the
-# container — no ports are published (spec's own design), so every app-level
-# check goes through `docker compose exec` rather than curling a host port.
+# version/edition, worker container up: one [OK]/[FAIL] line per check,
+# printed even when a check fails (never aborts early) so a single run
+# always shows the FULL picture and names which guide step to revisit. Runs
+# FROM the droplet, against the container — no ports are published (spec's
+# own design), so every app-level check goes through `docker compose exec`
+# rather than curling a host port.
 set -uo pipefail
 
 INSTALL_ROOT="${WIXY_INSTALL_ROOT:-/opt/wixy}"
@@ -48,7 +49,7 @@ check() {
 }
 
 check_services_up() {
-  [ -n "$(dc ps --status running -q wixy)" ]
+  [ -n "$(dc ps --status running -q wixy)" ] && [ -n "$(dc ps --status running -q worker)" ]
 }
 
 check_healthz() {
@@ -71,7 +72,7 @@ check_tunnel() {
 echo "Wixy standalone -- verify"
 echo "========================="
 
-check "docker compose services are up"          "The droplet setup"              check_services_up
+check "docker compose services are up (wixy + worker)" "The droplet setup"       check_services_up
 check "wixy container responds on /healthz"     "The droplet setup"              check_healthz
 check "wixy reports edition=standalone"         "The droplet setup"              check_edition
 check "site repo checkout exists"               "Site repo deploy key"           check_site_checkout

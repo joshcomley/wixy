@@ -20,7 +20,8 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from wixy_server.ai.backend import CmdAIBackend
+from wixy_server.ai.anthropic_backend import AnthropicAIBackend
+from wixy_server.ai.backend import AIBackend, CmdAIBackend
 from wixy_server.auth import JwksCache, build_admin_auth_middleware, jwks_url
 from wixy_server.bootstrap import bootstrap_if_needed
 from wixy_server.chats import ChatRuntimeEntry
@@ -30,6 +31,7 @@ from wixy_server.publisher import PublishJob
 from wixy_server.redirects import load_redirects
 from wixy_server.registry import load_registry
 from wixy_server.routes_admin_api import router as admin_api_router
+from wixy_server.routes_ai import router as ai_router
 from wixy_server.routes_chat import StreamTiming
 from wixy_server.routes_chat import router as chat_router
 from wixy_server.routes_engine import EngineStatusCache
@@ -68,6 +70,7 @@ def create_app(
     cmdchat_client: CmdChatClient | None = None,
     chat_stream_timing: StreamTiming | None = None,
     github_client: GitHubClient | None = None,
+    ai_backend: AIBackend | None = None,
 ) -> FastAPI:
     """Build the Wixy FastAPI app for one project.
 
@@ -78,8 +81,10 @@ def create_app(
     for real; this function never guesses a default for either path. `cmdchat_client`
     defaults to a real `CmdChatClient()` (localhost cmd, spec/06 §1) — overridable so
     the E2E fixture server can point it at a fake cmd instead (milestone 10 slice 5).
-    Wrapped in `CmdAIBackend` and exposed to routes as `app.state.ai_backend`
-    (spec/independence/05 §1) — `cmdchat_client` itself stays the override point
+    Wrapped in `CmdAIBackend`, one of two backend candidates `app.state.ai_backend`
+    (spec/independence/05 §1) is picked from — `settings.ai_backend` (`WIXY_AI_BACKEND`)
+    chooses `cmd` vs `anthropic` unless the `ai_backend` PARAMETER below overrides that
+    choice outright. `cmdchat_client` itself stays its own separate override point
     (every existing test constructs a fake-cmd-pointed `CmdChatClient` this way;
     wrapping it internally means none of them need to change for this extraction).
     `chat_stream_timing` defaults to spec/06 §1's own numbers (1.2s poll, 10s offline
@@ -90,7 +95,13 @@ def create_app(
     fake GitHub double instead, same reason `cmdchat_client` is. Constructed
     unconditionally (even on the fleet edition, where `engine_pat` is empty and
     `_require_standalone` 404s before ever touching it) — same posture `cmdchat_client`
-    already takes, no per-edition branching needed.
+    already takes, no per-edition branching needed. `ai_backend` (the parameter)
+    overrides `settings.ai_backend`'s choice entirely — tests that want to exercise
+    `AnthropicAIBackend` specifically pass one pointed at a fake worker
+    (`wixy_server.tests.fake_worker`), same reasoning as every override above; both
+    concrete backends are still constructed unconditionally below (same "no
+    per-edition branching, everything closes uniformly at shutdown" posture as
+    `gh_client`), only WHICH ONE gets exposed on `app.state` branches.
     """
     settings = load_settings(storage_root)
     registry = load_registry(wixy_repo_root)
@@ -110,7 +121,12 @@ def create_app(
     watcher_status = WatcherStatus()
     publish_job: PublishJob | None = None
     chat_client = cmdchat_client if cmdchat_client is not None else CmdChatClient()
-    ai_backend = CmdAIBackend(chat_client, cmd_project=project.cmd_project)
+    if ai_backend is not None:
+        resolved_ai_backend: AIBackend = ai_backend
+    elif settings.ai_backend == "anthropic":
+        resolved_ai_backend = AnthropicAIBackend()
+    else:
+        resolved_ai_backend = CmdAIBackend(chat_client, cmd_project=project.cmd_project)
     chat_runtime: dict[str, ChatRuntimeEntry] = {}
     stream_timing = chat_stream_timing if chat_stream_timing is not None else StreamTiming()
     gh_client = (
@@ -162,6 +178,14 @@ def create_app(
         finally:
             await chat_client.aclose()
             await gh_client.aclose()
+            # `CmdAIBackend.aclose()` is just a passthrough to `chat_client`
+            # (already closed above) — closing it again would double-close
+            # that same underlying httpx client, so only close
+            # `resolved_ai_backend` itself when it's a genuinely SEPARATE
+            # resource (AnthropicAIBackend's own httpx client, or an injected
+            # override neither of the two concrete types above).
+            if not isinstance(resolved_ai_backend, CmdAIBackend):
+                await resolved_ai_backend.aclose()
 
     app = FastAPI(lifespan=lifespan)
     app.state.project = project
@@ -172,7 +196,7 @@ def create_app(
     app.state.publish_job = publish_job
     app.state.wixy_repo_root = wixy_repo_root
     app.state.cmdchat_client = chat_client
-    app.state.ai_backend = ai_backend
+    app.state.ai_backend = resolved_ai_backend
     app.state.chat_runtime = chat_runtime
     app.state.chat_stream_timing = stream_timing
     app.state.github_client = gh_client
@@ -189,6 +213,7 @@ def create_app(
     app.include_router(admin_api_router)
     app.include_router(chat_router)
     app.include_router(engine_router)
+    app.include_router(ai_router)
     app.include_router(versions_router)
 
     @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)

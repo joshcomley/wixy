@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, type AdminApi, type EngineStatus } from "../src/api";
+import { ApiError, type AdminApi, type AiBudgetStatus, type EngineStatus } from "../src/api";
 import { initFontScale } from "../src/fontScale";
 import { mountSettingsPanel } from "../src/settingsPanel";
 import { initShortcuts, type ShortcutCommand } from "../src/shortcuts";
@@ -31,6 +31,7 @@ function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
     getEngineStatus: vi.fn(),
     triggerEngineUpdate: vi.fn(),
     triggerEngineRollback: vi.fn(),
+    getAiBudgetStatus: vi.fn(),
     ...overrides,
   } as AdminApi;
 }
@@ -46,6 +47,11 @@ const ENGINE_STATUS: EngineStatus = {
   stale: true,
   checkError: null,
   updateRun: null,
+};
+
+const AI_BUDGET_STATUS: AiBudgetStatus = {
+  monthToDateUsd: 8.25,
+  monthlyBudgetUsd: 40,
 };
 
 const TEST_CSS = `
@@ -232,6 +238,27 @@ function mountEngine(win: Window, api: AdminApi) {
   const panel = mountSettingsPanel({
     win,
     page: "engine",
+    api,
+    themeController,
+    zoomController,
+    fontScaleController,
+    shortcutsController,
+    themeEditorController,
+    onNavigate: vi.fn(),
+    onResetAll: vi.fn(),
+  });
+  return { panel };
+}
+
+function mountAi(win: Window, api: AdminApi) {
+  const themeController = initTheme(win);
+  const zoomController = initZoom(win);
+  const fontScaleController = initFontScale(win);
+  const shortcutsController = initShortcuts(TEST_COMMANDS, win);
+  const themeEditorController = initThemeEditor(themeController, win);
+  const panel = mountSettingsPanel({
+    win,
+    page: "ai",
     api,
     themeController,
     zoomController,
@@ -762,5 +789,100 @@ describe("mountSettingsPanel — Engine", () => {
     panel.teardown();
     await vi.advanceTimersByTimeAsync(120_000);
     expect(getEngineStatus).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("mountSettingsPanel — AI", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("shows a loading state before the status arrives", () => {
+    const api = fakeApi({
+      getAiBudgetStatus: vi.fn(() => new Promise<AiBudgetStatus>(() => {})),
+    });
+    const { panel } = mountAi(fakeWindow(), api);
+    expect(panel.element.textContent).toContain("Loading");
+  });
+
+  it("renders month-to-date spend and the monthly budget once loaded", async () => {
+    const api = fakeApi({ getAiBudgetStatus: vi.fn(async () => AI_BUDGET_STATUS) });
+    const { panel } = mountAi(fakeWindow(), api);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(panel.element.textContent).toContain("$8.25");
+    expect(panel.element.textContent).toContain("$40.00");
+  });
+
+  it("a 404 (cmd backend) shows a graceful not-available message, not an error", async () => {
+    const api = fakeApi({
+      getAiBudgetStatus: vi.fn(async () => {
+        throw new ApiError("not found", 404);
+      }),
+    });
+    const { panel } = mountAi(fakeWindow(), api);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(panel.element.textContent).toContain("isn't available on this deployment");
+  });
+
+  it("a non-404 error shows a load-error message", async () => {
+    const api = fakeApi({
+      getAiBudgetStatus: vi.fn(async () => {
+        throw new Error("boom");
+      }),
+    });
+    const { panel } = mountAi(fakeWindow(), api);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(panel.element.textContent).toContain("Couldn't load AI budget: boom");
+  });
+
+  it("spend at or past the cap shows the paused-until-reset message", async () => {
+    const api = fakeApi({
+      getAiBudgetStatus: vi.fn(async () => ({ monthToDateUsd: 40, monthlyBudgetUsd: 40 })),
+    });
+    const { panel } = mountAi(fakeWindow(), api);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(panel.element.textContent).toContain("paused until it resets on the 1st");
+  });
+
+  it("spend under the cap does not show the paused message", async () => {
+    const api = fakeApi({ getAiBudgetStatus: vi.fn(async () => AI_BUDGET_STATUS) });
+    const { panel } = mountAi(fakeWindow(), api);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(panel.element.textContent).not.toContain("paused until it resets");
+  });
+
+  it("re-polls after 60s", async () => {
+    vi.useFakeTimers();
+    const getAiBudgetStatus = vi.fn(async () => AI_BUDGET_STATUS);
+    const api = fakeApi({ getAiBudgetStatus });
+    mountAi(fakeWindow(), api);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getAiBudgetStatus).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(getAiBudgetStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it("teardown stops the poll loop — no further getAiBudgetStatus calls", async () => {
+    vi.useFakeTimers();
+    const getAiBudgetStatus = vi.fn(async () => AI_BUDGET_STATUS);
+    const api = fakeApi({ getAiBudgetStatus });
+    const { panel } = mountAi(fakeWindow(), api);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getAiBudgetStatus).toHaveBeenCalledTimes(1);
+
+    panel.teardown();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(getAiBudgetStatus).toHaveBeenCalledTimes(1);
   });
 });

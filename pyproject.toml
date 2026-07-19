@@ -29,6 +29,12 @@ server = [
   "anyio>=4.6",
   "python-multipart>=0.0.12",
   "websockets>=13.0",
+  # spec/independence/05 §2 — the `anthropic` backend's worker role (milestone 6).
+  # One image serves both roles (WIXY_EDITION=standalone's `wixy` and `worker`
+  # compose services alike, decisions/00051 #6's precedent extended) so this
+  # lives in the same `server` extra rather than a separate one; the fleet
+  # edition's own `wixy` process simply never imports `wixy_server.worker`.
+  "claude-agent-sdk>=0.2",
 ]
 dev = [
   "pytest>=8.3",
@@ -49,14 +55,19 @@ build-backend = "setuptools.build_meta"
 include = ["builder*", "wixy_server*"]
 
 [tool.pytest.ini_options]
-# "-m 'not live_cmd'" — spec/06-ai-chat.md §4: the @live_cmd smoke test needs a
-# real local cmd instance and is deliberately "skipped in CI, run during 07
-# verification," not part of the everyday suite. Run it explicitly later via
-# `pytest -o addopts="" -m live_cmd <path>`.
-addopts = "-n 4 -m 'not live_cmd'"
+# "-m 'not live_cmd and not live_anthropic'" — spec/06-ai-chat.md §4's @live_cmd
+# and spec/independence/05-pluggable-ai.md §4's @live_anthropic smoke tests each
+# need a real live counterpart (a local cmd instance; a real ANTHROPIC_API_KEY +
+# WIXY_AI_BOT_PAT + site repo) and are deliberately "skipped in CI, run during
+# verification" (07 for live_cmd; the M9 drill for live_anthropic — it opens a
+# REAL pull request and spends REAL money, never run without the operator's
+# explicit go-ahead), not part of the everyday suite. Run one explicitly via
+# `pytest -o addopts="" -m live_cmd <path>` / `-m live_anthropic <path>`.
+addopts = "-n 4 -m 'not live_cmd and not live_anthropic'"
 testpaths = ["builder/tests", "wixy_server/tests"]
 markers = [
   "live_cmd: needs a real local cmd instance on 127.0.0.1:9320/9321 (spec/06 §4); excluded by default addopts",
+  "live_anthropic: needs a real ANTHROPIC_API_KEY + WIXY_AI_BOT_PAT + site repo (spec/independence/05 §4); opens a real PR and spends real money; excluded by default addopts",
 ]
 
 [tool.mypy]

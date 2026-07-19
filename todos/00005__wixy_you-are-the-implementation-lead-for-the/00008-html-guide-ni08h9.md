@@ -34,6 +34,21 @@ material actually gets INTO the new private `ca-business` repo once she creates 
 without this step the guide would tell her to create an empty repo and never explain
 how the moved content gets there.
 
+**FORWARD OBLIGATION (from M6's Fable gate review, PR #76 R2, 2026-07-20,
+decisions/00065's "Correction (Fable review, PR #76 R1+R2)")**: Track P.2
+(GitHub account + organisation chapter) MUST include an illustrated step for
+turning on **branch protection on `main`** — require a pull request + a
+passing required status check, no bypass actors — on BOTH her site repo and
+her engine fork. `deploy/standalone/setup.sh` already pauses for this (a bare
+`print_branch_protection_step` prompt, no screenshots, linking
+`<repo>/settings/branches`) so the stack can't be started without it being
+at least confirmed — the guide's job is the friendly, screenshotted version
+of that same step, placed where she'll actually reach it BEFORE the droplet
+setup chapter (P.6), matching spec/independence/07 §2's own chapter
+ordering. Explain WHY in one sentence (per 07 §1's voice rules): this is what
+stops even a leaked AI-assistant credential from ever being able to push
+straight to her live site's source.
+
 ## Relevant files + commits
 (fill in as PR lands)
 

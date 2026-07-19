@@ -103,6 +103,56 @@ https_settings_url_from_ssh() {
   printf '%s' "$1" | sed -E 's#^git@github\.com:#https://github.com/#; s#\.git$##'
 }
 
+print_bot_pat_step() {
+  # $1 = repo settings URL (https, no .git) — spec/independence/05 §2's
+  # "her bot deploy key/PAT" (decisions/00061): a fine-grained PAT, NOT a
+  # locally-generated SSH keypair like the site-repo deploy key above, so
+  # this is a "go create it on GitHub's website" step rather than a
+  # `print_deploy_key_step`-style "paste this public key" one.
+  local repo_url="$1"
+  echo
+  echo "----------------------------------------------------------------------"
+  echo "  Your AI assistant needs its own GitHub credential to open pull"
+  echo "  requests with the changes it makes. Create a fine-grained personal"
+  echo "  access token:"
+  echo "  https://github.com/settings/personal-access-tokens/new"
+  echo
+  echo "  - Repository access: Only select repositories -> your site repo"
+  echo "    (${repo_url})"
+  echo "  - Permissions: Contents = Read and write, Pull requests = Read and write"
+  echo "  - Consider creating this under a separate 'bot' GitHub account first,"
+  echo "    so AI-authored pull requests are visually distinct from your own"
+  echo "    (optional, but recommended)."
+  echo "----------------------------------------------------------------------"
+  ask_secret "Paste the token here" WIXY_AI_BOT_PAT
+}
+
+print_branch_protection_step() {
+  # $1 = human label $2 = repo settings URL (https, no .git) — Fable M6 gate
+  # review R2 (decisions/00065): GitHub-ENFORCED branch protection is what
+  # turns "agents can only PR, never push to main" from a convention into a
+  # guarantee — with this on, even a leaked bot PAT in the agent's own hands
+  # cannot push main directly, so the safety claim stops depending on the
+  # PAT's secrecy at all. setup.sh can't configure this FOR you: it needs
+  # repo-admin access, which the bot PAT deliberately does NOT have (scoped
+  # to contents:write + pull_requests:write only, decisions/00061) — same
+  # shape as the deploy-key/PAT steps above, a one-time manual GitHub
+  # settings page this script pauses for rather than skips.
+  local label="$1" repo_url="$2"
+  echo
+  echo "----------------------------------------------------------------------"
+  echo "  Protect ${label}'s main branch, so nothing -- not even a leaked"
+  echo "  token -- can ever push straight to it:"
+  echo "  ${repo_url}/settings/branches"
+  echo
+  echo "  - Add a branch protection rule for 'main'"
+  echo "  - Require a pull request before merging"
+  echo "  - Require status checks to pass before merging"
+  echo "  - Do NOT add yourself (or anyone) as a bypass actor"
+  echo "----------------------------------------------------------------------"
+  read -r -p "Press Enter once you've set this up on $label... " _
+}
+
 write_env_file() {
   log "Writing $ENV_FILE (root, 0600)..."
   cat > "$ENV_FILE" <<EOF
@@ -117,6 +167,10 @@ WIXY_CF_ACCESS_AUD=${WIXY_CF_ACCESS_AUD}
 CF_TUNNEL_TOKEN=${CF_TUNNEL_TOKEN}
 WIXY_IMAGE=${WIXY_IMAGE}
 WIXY_KEYS_DIR=${KEYS_DIR}
+WIXY_AI_BACKEND=anthropic
+ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+WIXY_AI_BOT_PAT=${WIXY_AI_BOT_PAT}
+WIXY_AI_MONTHLY_BUDGET_USD=${WIXY_AI_MONTHLY_BUDGET_USD}
 EOF
   chmod 600 "$ENV_FILE"
 }
@@ -162,10 +216,16 @@ main() {
   ask_secret "Your Cloudflare Tunnel token" CF_TUNNEL_TOKEN
   ask "Your Cloudflare Access team domain (e.g. yourteam.cloudflareaccess.com)" WIXY_CF_TEAM_DOMAIN
   ask "Your Cloudflare Access app's AUD tag (from the Access app you created)" WIXY_CF_ACCESS_AUD
+  ask_secret "Your Anthropic API key (console.anthropic.com -> API Keys)" ANTHROPIC_API_KEY
+  ask "Monthly AI budget in USD (a friendly cap, not a hard bill — see the guide)" \
+    WIXY_AI_MONTHLY_BUDGET_USD "40"
   ask "Container image to run" WIXY_IMAGE "ghcr.io/joshcomley/wixy:latest"
 
   generate_deploy_key "site-repo"
   print_deploy_key_step "site-repo" "your site repo" "$(https_settings_url_from_ssh "$WIXY_SITE_REPO")"
+  print_bot_pat_step "$(https_settings_url_from_ssh "$WIXY_SITE_REPO")"
+  print_branch_protection_step "your site repo" "$(https_settings_url_from_ssh "$WIXY_SITE_REPO")"
+  print_branch_protection_step "your engine fork" "$(https_settings_url_from_ssh "$WIXY_ENGINE_REPO")"
 
   write_env_file
   install_systemd_unit
