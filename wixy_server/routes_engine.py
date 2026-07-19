@@ -69,6 +69,20 @@ def _require_standalone(settings: Settings) -> None:
         raise HTTPException(status_code=404, detail="the engine-update surface is standalone-only")
 
 
+def _require_json_content_type(request: Request) -> None:
+    # CSRF guard (Fable review, PR #74 R1): every OTHER admin mutation takes a
+    # JSON body, so a cross-site HTML form POST (which can never send
+    # `application/json` — only `application/x-www-form-urlencoded` or
+    # `multipart/form-data`) already 422s there incidentally. `update`/
+    # `rollback` take no body at all, which would otherwise make them the
+    # ONLY admin mutations a forged form POST from her live CF Access session
+    # could actually fire. Requiring this header closes that gap the same way,
+    # without needing a body these routes have no other use for.
+    content_type = request.headers.get("content-type", "")
+    if not content_type.startswith("application/json"):
+        raise HTTPException(status_code=415, detail="Content-Type must be application/json")
+
+
 async def _refresh_status_cache(
     client: GitHubClient, settings: Settings, cache: EngineStatusCache
 ) -> None:
@@ -141,6 +155,7 @@ async def get_engine_status(request: Request) -> JsonObject:
 async def post_engine_update(request: Request) -> JsonObject:
     settings: Settings = request.app.state.settings
     _require_standalone(settings)
+    _require_json_content_type(request)
     client: GitHubClient = request.app.state.github_client
     try:
         await client.trigger_workflow_dispatch(
@@ -155,6 +170,7 @@ async def post_engine_update(request: Request) -> JsonObject:
 async def post_engine_rollback(request: Request) -> JsonObject:
     settings: Settings = request.app.state.settings
     _require_standalone(settings)
+    _require_json_content_type(request)
     client: GitHubClient = request.app.state.github_client
     try:
         await client.trigger_workflow_dispatch(

@@ -93,8 +93,8 @@ lifetime (not constructed per request — decisions/00057).
 | Method | Path | Handler | Request | Response |
 |---|---|---|---|---|
 | GET | `engine/status` | `get_engine_status` | — | `{"engineRepo":str, "currentSha":str\|null, "commitsBehind":int\|null, "changelog":[{sha,subject,author,when}], "checkedAt":float\|null, "stale":bool, "checkError":str\|null, "updateRun":{status,conclusion,htmlUrl,createdAt}\|null}`; **404** (not standalone) |
-| POST | `engine/update` | `post_engine_update` | — | `{"triggered": true}`; 404, **502** (GitHubApiError) |
-| POST | `engine/rollback` | `post_engine_rollback` | — | `{"triggered": true}`; 404, **502** (GitHubApiError) |
+| POST | `engine/update` | `post_engine_update` | requires `Content-Type: application/json` (no body) | `{"triggered": true}`; 404, **415** (missing/wrong Content-Type — CSRF guard, no other admin mutation takes zero body so this is the one route a forged form POST could otherwise fire), **502** (GitHubApiError) |
+| POST | `engine/rollback` | `post_engine_rollback` | requires `Content-Type: application/json` (no body) | `{"triggered": true}`; 404, **415**, **502** (GitHubApiError) |
 
 `commitsBehind`/`changelog` are cached 15 min (`EngineStatusCache`, one process-lifetime
 slot) — a stale/unreachable GitHub API falls back to whatever's cached (`checkError` set,

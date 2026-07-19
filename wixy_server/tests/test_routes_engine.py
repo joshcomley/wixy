@@ -280,7 +280,9 @@ class TestPostUpdate:
             github_client=github_client,
         )
         with TestClient(app) as client:
-            response = client.post("/api/admin/engine/update")
+            response = client.post(
+                "/api/admin/engine/update", headers={"Content-Type": "application/json"}
+            )
 
         assert response.status_code == 200
         assert response.json() == {"triggered": True}
@@ -301,8 +303,31 @@ class TestPostUpdate:
             github_client=github_client,
         )
         with TestClient(app) as client:
-            response = client.post("/api/admin/engine/update")
+            response = client.post(
+                "/api/admin/engine/update", headers={"Content-Type": "application/json"}
+            )
         assert response.status_code == 502
+
+    def test_415s_without_json_content_type(
+        self,
+        tmp_path: Path,
+        wixy_repo_root: Path,
+        github_client: GitHubClient,
+        fake_github_state: FakeGitHubState,
+    ) -> None:
+        """CSRF guard (Fable review, PR #74 R1): a cross-site HTML form can never
+        send `application/json`, so this is what stops a forged form POST from
+        dispatching an update through her live CF Access session."""
+        app = create_app(
+            storage_root=tmp_path / "storage",
+            wixy_repo_root=wixy_repo_root,
+            github_client=github_client,
+        )
+        with TestClient(app) as client:
+            response = client.post("/api/admin/engine/update")
+
+        assert response.status_code == 415
+        assert len(fake_github_state.dispatch_calls) == 0
 
 
 class TestPostRollback:
@@ -319,7 +344,9 @@ class TestPostRollback:
             github_client=github_client,
         )
         with TestClient(app) as client:
-            response = client.post("/api/admin/engine/rollback")
+            response = client.post(
+                "/api/admin/engine/rollback", headers={"Content-Type": "application/json"}
+            )
 
         assert response.status_code == 200
         assert response.json() == {"triggered": True}
@@ -340,5 +367,25 @@ class TestPostRollback:
             github_client=github_client,
         )
         with TestClient(app) as client:
-            response = client.post("/api/admin/engine/rollback")
+            response = client.post(
+                "/api/admin/engine/rollback", headers={"Content-Type": "application/json"}
+            )
         assert response.status_code == 502
+
+    def test_415s_without_json_content_type(
+        self,
+        tmp_path: Path,
+        wixy_repo_root: Path,
+        github_client: GitHubClient,
+        fake_github_state: FakeGitHubState,
+    ) -> None:
+        app = create_app(
+            storage_root=tmp_path / "storage",
+            wixy_repo_root=wixy_repo_root,
+            github_client=github_client,
+        )
+        with TestClient(app) as client:
+            response = client.post("/api/admin/engine/rollback")
+
+        assert response.status_code == 415
+        assert len(fake_github_state.dispatch_calls) == 0

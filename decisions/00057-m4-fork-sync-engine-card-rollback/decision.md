@@ -74,15 +74,28 @@ GitHub's own PR mergeability computation shows the conflict natively (including 
 web-based conflict editor when trivial) rather than the workflow trying to hand-roll
 conflict resolution or markers itself.
 
-`SYNC_PUSH_TOKEN` (a real fine-grained PAT, `contents:write`) is used for BOTH the
-direct-to-main push and the conflict/review-PR's branch push + `gh pr create` —
-never `GITHUB_TOKEN` for either, because `GITHUB_TOKEN`-authored pushes and PR-opens
-don't trigger other workflows (spec's own stated reason: "the image build would
-silently never run"). The registry retag steps (snapshot-before-flip, and the whole
-of `mode=rollback`) use plain `GITHUB_TOKEN` with `packages: write` instead — they're
-terminal actions that don't need to cascade into anything else, so there's no reason
-to widen `SYNC_PUSH_TOKEN`'s own scope beyond the `contents:write` the spec
-literally names for it (Fable review checklist item: "PAT scope minimality").
+`SYNC_PUSH_TOKEN` (a real fine-grained PAT, `contents:write` + `pull_requests:write`)
+is used for BOTH the direct-to-main push and the conflict/review-PR's branch push +
+`gh pr create` — never `GITHUB_TOKEN` for either, because `GITHUB_TOKEN`-authored
+pushes and PR-opens don't trigger other workflows (spec's own stated reason: "the
+image build would silently never run"). The registry retag steps (snapshot-before-
+flip, and the whole of `mode=rollback`) use plain `GITHUB_TOKEN` with
+`packages: write` instead — they're terminal actions that don't need to cascade into
+anything else, so there's no reason to widen `SYNC_PUSH_TOKEN`'s own scope any
+further than these two git-and-PR-writing operations actually need (Fable review
+checklist item: "PAT scope minimality").
+
+**Correction (Fable review, PR #74 R2)**: the first draft of this decision, and the
+PAT scope this repo's own `sync-upstream.yml` comments originally didn't state at
+all, both under-scoped this to `contents:write` alone — matching spec/independence/
+04 §1's own literal words, "(contents:write on the fork)". That's not enough:
+`gh pr create` in the conflict-PR step needs `pull_requests:write` too, or that path
+403s exactly when it's needed (a real conflict or workflow-file diff, the two cases
+the review-PR mechanism exists for). This was the SPEC's own under-specification,
+not a misreading of it — Fable (spec author) is amending 04 §1 to match. `sync-
+upstream.yml`'s header comment now states the correct two-scope requirement
+explicitly, and the guide (M8, not yet written) must carry it into whatever PAT-
+creation step it walks her through.
 
 ## Decision 4: a YAML-authoring bug, caught by validating before running
 

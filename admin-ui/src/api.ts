@@ -498,13 +498,21 @@ export function createApi(): AdminApi {
       return parseJson<EngineStatus>(await fetchWithRetry("/api/admin/engine/status"));
     },
     async triggerEngineUpdate() {
+      // Content-Type is required even with no body (CSRF guard, Fable review
+      // PR #74 R1) — a cross-site form POST can never send this header.
       return parseJson<{ triggered: true }>(
-        await fetchWithRetry("/api/admin/engine/update", { method: "POST" }),
+        await fetchWithRetry("/api/admin/engine/update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        }),
       );
     },
     async triggerEngineRollback() {
       return parseJson<{ triggered: true }>(
-        await fetchWithRetry("/api/admin/engine/rollback", { method: "POST" }),
+        await fetchWithRetry("/api/admin/engine/rollback", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        }),
       );
     },
   };

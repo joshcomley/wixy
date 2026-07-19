@@ -27,6 +27,13 @@ name: Sync from upstream
 # The Mon 06:00 UTC schedule is notify-only (§1): refresh the comparison and
 # open/update/close an "updates available" issue. It never merges, pushes, or
 # touches images.
+#
+# SYNC_PUSH_TOKEN must be scoped `contents:write` + `pull_requests:write` (Fable
+# review, PR #74 R2 — corrects spec/independence/04 §1's own under-specified
+# "(contents:write on the fork)": `gh pr create` in the "Open a review PR
+# instead" step below needs pull_requests:write too, or the conflict path
+# 403s at exactly the moment it matters). Never GITHUB_TOKEN for either the
+# push or the PR create — see above.
 
 on:
   workflow_dispatch:
