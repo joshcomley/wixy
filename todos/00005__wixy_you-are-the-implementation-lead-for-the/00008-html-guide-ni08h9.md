@@ -23,6 +23,17 @@ Depends on M1-M7 all existing (the guide documents real buttons/scripts/cards). 
 iterate with M9 (drill) — expected loop per 09 notes, not a blocker to landing M8's CI-gated
 skeleton+content first.
 
+**FORWARD OBLIGATION (from M2's Fable review, PR #68, 2026-07-19)**: the Track J
+`ca-business` creation step MUST include the actual population procedure —
+`git checkout 7c4fa3c02957599bfed994ddb37a93ed293e685f -- photos/ advertising/
+brief.md docs/DESIGN-AND-CONTENT.md docs/google-reviews.json docs/booking-platform-
+comparison.md reviews-demo.html tooling/downscale_photos.py` (or equivalent per-path
+`git show`/`git checkout`) — as an EXECUTED guide step with its own "you know it
+worked when…" line, not just a footnote referencing the SHA. This is how the owner
+material actually gets INTO the new private `ca-business` repo once she creates it;
+without this step the guide would tell her to create an empty repo and never explain
+how the moved content gets there.
+
 ## Relevant files + commits
 (fill in as PR lands)
 

@@ -160,14 +160,17 @@ This is the contract every AI-lane chat inherits. It MUST cover, concisely:
   SHA — merging to main is invisible to the live site until then.
 - Run `python -m builder validate` and the parity/CI suite before shipping; never commit a
   broken build. How to preview locally (`python -m builder serve` from a worktree).
-- Brand/voice guardrails (from `brief.md` / `docs/DESIGN-AND-CONTENT.md` in the wixy repo,
+- Brand/voice guardrails (from `brief.md` / `docs/DESIGN-AND-CONTENT.md` — moved to the
+  owner's private `ca-business` repo pre-publication, spec/independence/02 §2.3;
+  retrievable from the wixy repo's history at commit `7c4fa3c` before that repo exists —
   distilled): calm, understated, never salesy; British English; the prescription-only
   pricing must stay ≥2 clicks from the homepage; **never publish client photos or reviews
   that lack recorded consent/permission** (gallery images all carry consent notes; Google
   reviews page exists with the owner's knowledge — new such content needs explicit owner
   sign-off in the chat).
 - Where images live + the upload conventions (02 §9), and that oversized images must be
-  downscaled before commit (tooling exists in the wixy repo `tooling/downscale_photos.py`).
+  downscaled before commit (the former `tooling/downscale_photos.py` moved alongside
+  `photos/` pre-publication — same commit, same retrieval path).
 
 ## 7. Site repo CI (`ci.yml`)
 

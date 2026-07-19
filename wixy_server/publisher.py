@@ -52,7 +52,7 @@ from bs4 import BeautifulSoup
 
 from builder.build import build_site
 from builder.config import ProjectConfig
-from builder.content import dotted_set, load_json_object, write_json_canonical
+from builder.content import atomic_write_json, dotted_set, load_json_object
 from builder.errors import BuildError
 from builder.jsontypes import JsonValue
 from builder.render import SiteSource
@@ -266,14 +266,26 @@ def _apply_ops_to_file(
     — no `Theme`/`FontSpec` parsing here; a structurally-invalid theme write would
     surface as a `BuildError` from the very next `build_site_source` call in
     `_materialize` (caught there), not silently persisted as something a build
-    could never actually load."""
+    could never actually load.
+
+    Writes via `atomic_write_json`, NOT `write_json_canonical` (decisions/00053):
+    this file is concurrently read by `/api/admin/state` (`build_site_source` ->
+    `_load_content_or_empty`) — `_materialize`'s `tree_lock()` only guards
+    concurrent THREADS within this same live process, not a hard process kill
+    landing mid-`write_text`, which a new process started afterward has no lock to
+    consult before reading the same half-written bytes off disk. A truncated
+    content file then 500s every single `/api/admin/state` call forever (found via
+    a real `Popen.kill()` mid-materialize, `wixy_server/tests/test_kill_during_
+    publish.py`) — exactly the "never crash, never stay broken" guarantee
+    `atomic_write_json`'s tmp+rename already exists to provide elsewhere
+    (`overlay.json`, `chats.json`, `live.json`)."""
     target = _content_file_for(paths, file_key)
     if file_key == "theme" and not target.exists():
         return  # pre-migration-step-4 project with no theme.json yet (decisions/00004)
     data = load_json_object(target) if target.exists() else {}
     for dotted_path, value in path_values.items():
         dotted_set(data, dotted_path, _rewrite_draft_media_refs(value))
-    write_json_canonical(target, data)
+    atomic_write_json(target, data)
 
 
 def _delete_page(paths: ProjectPaths, slug: str) -> None:

@@ -26,12 +26,46 @@ doesn't publish, or staged for the guide step to paste into the new private repo
 creates it) — resolve the exact mechanics against reality when coding this milestone.
 
 ## Relevant files + commits
-(fill in as PR lands)
+`LICENSE` (new), `README.md` (rewrite), `pyproject.toml` (license/authors/readme
+fields), `admin-ui/editor/e2e` `package.json` (license field), `spec/README.md` +
+`spec/00-mission.md` + `spec/03-site-migration.md` + `spec/KICKOFF-PROMPT.md` +
+`tooling/README.md` (dangling-reference fixes from the move), `decisions/00054`
+(full audit writeup). Removed: `photos/`, `advertising/`, `brief.md`, `docs/DESIGN-
+AND-CONTENT.md`, `docs/google-reviews.json`, `docs/booking-platform-comparison.md`,
+`reviews-demo.html`, `tooling/downscale_photos.py` (one addition beyond the spec's
+literal list — coupled dead code, reasoning in decisions/00054). Pre-removal
+reference SHA: `7c4fa3c02957599bfed994ddb37a93ed293e685f`. gitleaks 8.30.1
+(winget-installed) full-history scan: clean, 123 commits. PR: branch
+`indep/m2-prepublication-audit` (opened against origin/main directly, NOT stacked
+on the still-unmerged M1 branch — disjoint files, no conflict risk).
+
+Blocked on: GitHub Actions CI outage on joshcomley/wixy (every run fails instantly,
+0 runner assigned, since 2026-07-19 — looks like a private-repo Actions spend/quota
+block). Raised to the operator as decision #12; operator asked for a separate
+Fable 5 "plan and delegate" session to investigate+fix, spawned at session
+5759e89d-2f58-4bdd-89c9-d0922dfaae9a (workspace 00006). Both this PR and #66/#67
+wait on that before CI can even run, let alone go green.
 
 ## How to continue + acceptance
 **SECURITY-GATED**: open PR -> peer session c42ea1cb-a9d6-413d-bdcb-fc77fc49abba with PR
 number + checklist (02 §2) -> ScheduleWakeup -> merge ONLY on explicit "APPROVED — merge".
 After merge: Josh's publish click (Track J, human step, NOT this agent) flips visibility.
+Acceptance so far: ruff/mypy clean, full pytest suite green (543 passed), frontend
+typecheck+test+build green with zero bundle drift — CI itself can't confirm this
+independently until the Actions outage above resolves.
+
+## Fable review verdict
+**APPROVED — merge (once CI is unblocked)**, session c42ea1cb-a9d6-413d-bdcb-fc77fc49abba,
+2026-07-19. Independently re-ran a targeted secret sweep across all 191 reachable
+commits (broader than gitleaks' 123 — worth noting the count difference, not
+investigated further since both came back clean) — zero hits, corroborating.
+Confirmed session-id exemption intact. Agreed with the `tooling/downscale_photos.py`
+scope addition. Two banked notes: (1) explicit sign-off on history-retention for the
+moved material (nothing was ever secret, no history rewrite needed); (2) **FORWARD
+OBLIGATION for M8**: the guide's Track J `ca-business` step MUST include the actual
+population procedure (`git checkout 7c4fa3c -- <paths>`) as an EXECUTED step, not
+just a recorded fact — carry this into the M8 guide-writing work (also noted in the
+M8 sidecar, 00008-html-guide-ni08h9.md).
 
 ## Links
 spec/independence/02 (full); spec/independence/09 row 2.
