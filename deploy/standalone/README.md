@@ -34,7 +34,13 @@ paste each printed deploy-key public key at the GitHub URL it names when asked.
   path in) + `cloudflared` (the tunnel) + `watchtower` (image-pull polling **is** the
   deploy mechanism — no inbound surface, no CI credentials ever reach the droplet).
   `worker` (the AI backend, milestone 6) and `backup` (the nightly state mirror,
-  milestone 7) are added by their own later PRs.
+  milestone 7) are added by their own later PRs. `cloudflared` and `watchtower` are
+  pinned by **image digest**, not `:latest` — `watchtower` mounts the Docker socket
+  (root-equivalent on the droplet) and `cloudflared` is the sole ingress path, so
+  silently auto-upgrading either on every poll would be the one supply-chain hole in
+  an otherwise zero-inbound design. **To bump a pinned digest deliberately**: `docker
+  buildx imagetools inspect <image>:latest` for the current manifest-list digest (or
+  the registry's own UI), update the pin, land it as its own reviewed PR.
 - **`setup.sh`** — idempotent. Installs Docker if missing, clones your fork, generates
   the site-repo deploy key pair (printing the public half + the exact GitHub URL to
   paste it at), writes `/opt/wixy/.env` + `/opt/wixy/keys/*` (root, 0600), installs a

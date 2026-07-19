@@ -10,6 +10,11 @@
 # drill (milestone 9) and local testing. Idempotent: safe to re-run (skips an
 # already-generated key, overwrites .env/the systemd unit with current answers).
 set -euo pipefail
+# Birth-restrictive perms: every file this script creates (.env, keys/*) is
+# secret-bearing. The explicit chmod 600/700 calls below are belt-and-braces;
+# this closes the whole class of "briefly world/group-readable between write
+# and chmod" windows in one line, for every write this script makes.
+umask 077
 
 WIXY_ENGINE_REPO="${WIXY_ENGINE_REPO:-https://github.com/joshcomley/wixy.git}"
 WIXY_ENGINE_BRANCH="${WIXY_ENGINE_BRANCH:-main}"

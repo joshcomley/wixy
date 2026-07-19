@@ -27,30 +27,49 @@ ENV WIXY_ENGINE_SHA=${WIXY_ENGINE_SHA} \
 #   credential helpers, so HTTPS+token isn't an option; deploy keys need SSH).
 # ca-certificates — TLS to GitHub/GHCR/Anthropic.
 # curl — the healthcheck below, and the guide's own one-liner pattern for parity.
-# gnupg — needed by the NodeSource setup script below.
+# xz-utils — extracting the Node tarball below.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       git \
       ffmpeg \
       openssh-client \
       ca-certificates \
       curl \
-      gnupg \
+      xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Node LTS — the Agent SDK worker (milestone 6) wraps the Node-based Claude Code
 # CLI. Baked into this one image now (rather than added only when M6 lands) so
 # "one image, both editions" never needs a second build stage or a rebuild that
-# changes the base layer everyone else already pulled.
-RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && rm -rf /var/lib/apt/lists/* \
+# changes the base layer everyone else already pulled. Installed from the
+# official tarball, pinned by version + sha256 (verified against nodejs.org's
+# own published SHASUMS256.txt for this exact release) — the NodeSource
+# curl|bash setup script would trust whatever the build network hands back at
+# build time, the same class of problem as R1 below; deterministic-build
+# provenance (the WIXY_ENGINE_SHA/WIXY_SYNC_BASE args above) should cover the
+# base toolchain too, not just the Python layer.
+ARG NODE_VERSION=24.18.0
+ARG NODE_SHA256=55aa7153f9d88f28d765fcdad5ae6945b5c0f98a36881703817e4c450fa76742
+RUN curl -fsSLO "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+    && echo "${NODE_SHA256}  node-v${NODE_VERSION}-linux-x64.tar.xz" | sha256sum -c - \
+    && tar -xJf "node-v${NODE_VERSION}-linux-x64.tar.xz" -C /usr/local --strip-components=1 \
+    && rm "node-v${NODE_VERSION}-linux-x64.tar.xz" \
     && node --version
 
-# Pin github.com's host key (spec/independence/01 §2.2) so the SSH-URL site-repo/
-# engine-fork checkouts never hit an interactive (and here, un-answerable) host-key
-# prompt on first connection.
-RUN mkdir -p /etc/ssh \
-    && ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> /etc/ssh/ssh_known_hosts 2>/dev/null
+# Pin github.com's PUBLISHED host keys (spec/independence/01 §2.2) so the
+# SSH-URL site-repo/engine-fork checkouts never hit an interactive (and here,
+# un-answerable) host-key prompt — and, critically, so a compromised/MITM'd
+# build network can never bake a poisoned host key into an image that goes on
+# to mount her real deploy keys. `ssh-keyscan` TRUSTS whatever the build
+# network hands back at build time (scanning, not pinning); these three lines
+# are GitHub's own keys as published at https://api.github.com/meta's
+# `ssh_keys` field (verified live against that endpoint, not typed from
+# memory) — update only if GitHub itself rotates them (rare; announced), by
+# re-checking that same endpoint.
+RUN mkdir -p /etc/ssh && { \
+      echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl'; \
+      echo 'github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg='; \
+      echo 'github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk='; \
+    } >> /etc/ssh/ssh_known_hosts
 
 WORKDIR /app
 

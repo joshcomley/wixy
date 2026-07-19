@@ -47,15 +47,29 @@ services:
     # No published ports (spec's own words) — cloudflared is the only path in;
     # reachable from other services on this compose network as http://wixy:<port>.
 
+  # Pinned by digest, not :latest (Fable review, PR #69 R2): this container
+  # mounts /var/run/docker.sock below — root-equivalent on the droplet — and
+  # cloudflared is the sole ingress path, so silently auto-upgrading either of
+  # these two on every Watchtower poll is the one supply-chain hole in an
+  # otherwise zero-inbound design. To bump either digest deliberately: `docker
+  # buildx imagetools inspect <image>:latest` (or the Docker Hub UI) for the
+  # current manifest-list digest, update the pin here, and land it as its own
+  # reviewed PR — never silently.
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared@sha256:4f6655284ab3d252b7f28fedb19fe6c8fc82ee5b1295c20ac74d475e5398a52d
     restart: unless-stopped
-    command: tunnel run --token ${CF_TUNNEL_TOKEN}
+    command: tunnel run
+    environment:
+      # TUNNEL_TOKEN (cloudflared's native env form of --token) instead of
+      # passing it in `command:` argv (Fable review R5) — argv is visible to
+      # anything that can run `docker inspect`/`ps` on the host far more
+      # casually than an env var is.
+      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN}
     depends_on:
       - wixy
 
   watchtower:
-    image: containrrr/watchtower:latest
+    image: containrrr/watchtower@sha256:6dd50763bbd632a83cb154d5451700530d1e44200b268a4e9488fefdfcf2b038
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

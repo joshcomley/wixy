@@ -123,3 +123,40 @@ misconfigured. Added both prompts + wired them into `.env`/`environment:`.
 - If M4/M6/M7 land and need to extend `docker-compose.yml`/`setup.sh`, follow the same
   incremental-delivery principle this milestone established: add exactly what that
   milestone needs, don't pre-stub for milestones further out.
+
+## Fable review round 1 (PR #69) — five required changes, all applied
+
+1. **R1 — `ssh-keyscan` replaced with GitHub's published host keys, hardcoded.**
+   `ssh-keyscan` at build time TRUSTS the build network — that's scanning, not
+   pinning, and this image mounts her real site-repo deploy key, so a poisoned build
+   environment must never be able to bake a MITM host key into it. Fetched GitHub's
+   own current keys LIVE from `https://api.github.com/meta`'s `ssh_keys` field
+   (verified against the authoritative source, not typed from memory) and hardcoded
+   all three (ed25519/ecdsa/rsa) into the Dockerfile.
+2. **R2 — `watchtower`/`cloudflared` pinned by image digest, not `:latest`.**
+   `watchtower` mounts `/var/run/docker.sock` (root-equivalent on the droplet) and
+   `cloudflared` is the sole ingress path — auto-upgrading either silently on every
+   ~5 min poll was the one supply-chain hole in an otherwise zero-inbound design.
+   Fetched both current manifest-list digests LIVE via the Docker Registry HTTP API
+   v2 (anonymous auth token + a HEAD request against `registry-1.docker.io`, not
+   guessed) and pinned both. Bump procedure documented in both the compose file's own
+   comment and the README (`docker buildx imagetools inspect <image>:latest`, land
+   the new digest as its own reviewed PR).
+3. **R3 — Node LTS install replaced: NodeSource `curl\|bash` -> pinned tarball +
+   sha256.** Same class of problem as R1 (trusting the build network). Fetched the
+   current LTS version from `nodejs.org/dist/index.json` and the exact tarball's
+   checksum from that release's own `SHASUMS256.txt` (both live, both verified end-
+   to-end locally: downloaded the real tarball and confirmed `sha256sum -c` passes
+   against the pinned value before ever putting it in the Dockerfile).
+4. **R4 — `umask 077` added to the top of `setup.sh`.** Closes the "briefly world/
+   group-readable between write and chmod" window class in one line, belt-and-braces
+   with the existing explicit `chmod 600`/`700` calls.
+5. **R5 — cloudflared's tunnel token moved from `command:` argv to `TUNNEL_TOKEN`
+   environment.** `docker inspect`/`ps` expose argv far more casually than an env var;
+   cloudflared supports the env form of every CLI flag natively.
+
+Every fetched value (GitHub's host keys, both image digests, Node's version+checksum)
+was retrieved from its authoritative live source during this fix round, not recalled
+from memory or guessed — consistent with this repo's fleet-wide "no fabricated facts"
+discipline, doubly load-bearing here since R1/R2/R3 are all supply-chain-integrity
+fixes where a wrong hardcoded value would be worse than the problem being fixed.
