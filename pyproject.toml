@@ -29,6 +29,12 @@ server = [
   "anyio>=4.6",
   "python-multipart>=0.0.12",
   "websockets>=13.0",
+  # spec/independence/05 §2 — the `anthropic` backend's worker role (milestone 6).
+  # One image serves both roles (WIXY_EDITION=standalone's `wixy` and `worker`
+  # compose services alike, decisions/00051 #6's precedent extended) so this
+  # lives in the same `server` extra rather than a separate one; the fleet
+  # edition's own `wixy` process simply never imports `wixy_server.worker`.
+  "claude-agent-sdk>=0.2",
 ]
 dev = [
   "pytest>=8.3",
