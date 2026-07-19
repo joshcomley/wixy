@@ -594,3 +594,58 @@ class TestLock:
         with pytest.raises(PublishError):
             run_publish(project, paths, message="test", expected_rev=0, now=_TS, job=_new_job())
         assert not paths.publish_lock.exists()
+
+
+class TestMaterializeCrashSafety:
+    """decisions/00053: found via a real `Popen.kill()` mid-publish
+    (`wixy_server/tests/test_kill_during_publish.py`) — a hard kill landing while
+    `_apply_ops_to_file` was writing `content/index.json` left it truncated to 0
+    bytes on disk, and every subsequent `/api/admin/state` call (which reads that
+    same file via `build_site_source`) 500'd forever: `_materialize`'s `tree_lock()`
+    only guards concurrent THREADS in the same live process, never a killed process
+    vs. a fresh one started afterward reading the same bytes off disk. RED before
+    the fix (`_apply_ops_to_file` called the explicitly-non-atomic
+    `write_json_canonical`, writing the real target directly): a kill mid-write
+    left the target file truncated. GREEN after (`atomic_write_json`,
+    tmp-file-in-the-same-dir + `os.replace`): the original is provably untouched,
+    because the interrupted write lands on a scratch tmp file the real target is
+    never a party to until one atomic rename."""
+
+    def test_an_interrupted_write_never_corrupts_the_pre_existing_content_file(
+        self, project: ProjectConfig, paths: ProjectPaths, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Establish a real, on-disk checkout with known-good content first — the
+        # same one-time "pulling" step `run_publish` itself would have done.
+        save_overlay(paths.draft_overlay, _make_overlay({"index:hero.title": "First"}, rev=0))
+        run_publish(project, paths, message="seed", expected_rev=0, now=_TS, job=_new_job())
+        content_path = paths.repo / "content" / "index.json"
+        original_bytes = content_path.read_bytes()
+        assert b"First" in original_bytes
+
+        save_overlay(paths.draft_overlay, _make_overlay({"index:hero.title": "Interrupted"}, rev=1))
+
+        # A faithful kill simulation: SOME bytes land on disk, then nothing — not
+        # "the write never started" (which trivially leaves anything untouched and
+        # would prove nothing). Filtered by CONTENT, not filename, so it fires
+        # identically whether the write lands on the real target (the old, buggy
+        # behavior) or a disposable tmp file (the new, safe behavior) — the point
+        # of this test is that it must not matter which.
+        real_write_text = Path.write_text
+
+        def _flaky_write_text(self: Path, text: str, *args: object, **kwargs: object) -> int:
+            if "Interrupted" in text:
+                truncated = text[: len(text) // 2]
+                real_write_text(self, truncated, *args, **kwargs)  # type: ignore[arg-type]
+                raise OSError("simulated hard kill mid-write")
+            return real_write_text(self, text, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Path, "write_text", _flaky_write_text)
+
+        with pytest.raises(OSError, match="simulated hard kill mid-write"):
+            run_publish(project, paths, message="test", expected_rev=1, now=_TS, job=_new_job())
+
+        # The regression: this used to be a truncated half-write of "Interrupted"'s
+        # JSON, not byte-identical to the pre-crash content — now it's untouched.
+        assert content_path.read_bytes() == original_bytes
+        json.loads(content_path.read_text(encoding="utf-8"))  # still valid JSON
+        json.loads(content_path.read_text(encoding="utf-8"))  # still valid JSON, not corrupted

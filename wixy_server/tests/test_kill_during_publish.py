@@ -160,20 +160,50 @@ def _launcher_script(tmp_path: Path, storage_root: Path, wixy_repo_root: Path, p
     return script
 
 
-def _start_server(script: Path) -> subprocess.Popen[bytes]:
+def _start_server(script: Path, log_path: Path) -> subprocess.Popen[bytes]:
+    # Redirected to a real file, not `DEVNULL`/`PIPE`: `DEVNULL` throws away the one
+    # thing that would explain a startup failure (decisions/00053), and a `PIPE` risks
+    # a classic deadlock if the child ever writes enough to fill the OS pipe buffer
+    # with nobody draining it — a file has neither problem and needs no reader thread.
     env = {**os.environ, "WIXY_DEV_NO_AUTH": "1", "WIXY_ENV": "dev"}
-    return subprocess.Popen(
-        [sys.executable, str(script)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        env=env,
-    )
+    logf = log_path.open("wb")
+    try:
+        return subprocess.Popen(
+            [sys.executable, str(script)],
+            stdout=logf,
+            stderr=subprocess.STDOUT,
+            env=env,
+        )
+    finally:
+        # Safe to close the parent's handle immediately: Popen already duplicated the
+        # underlying file descriptor/handle for the child on both POSIX and Windows.
+        logf.close()
 
 
-def _wait_until_serving_state(base_url: str, *, timeout_s: float = 30.0) -> None:
+def _wait_until_serving_state(
+    base_url: str, proc: subprocess.Popen[bytes], log_path: Path, *, timeout_s: float = 60.0
+) -> None:
+    """`timeout_s` default is deliberately generous (decisions/00053): this spawns a
+    real, cold Python process — interpreter start, FastAPI/uvicorn import, a real git
+    fetch/bootstrap in the ASGI lifespan — and under this repo's full-suite `-n 4`
+    xdist load, that cold start competes with every other worker's own subprocess/
+    Playwright-browser work. Measured: reliably ~6-10s in isolation; a bare 30s budget
+    was observed to intermittently starve under full-suite contention (not a logic
+    defect — see the decision entry for the elimination of the alternative
+    hypotheses). Polls `proc.poll()` on every iteration so a genuine crash (e.g. a
+    stray port bind failure) fails FAST with the real cause instead of silently
+    burning the whole timeout first.
+    """
     deadline = time.monotonic() + timeout_s
     last_exc: Exception | None = None
     while time.monotonic() < deadline:
+        exit_code = proc.poll()
+        if exit_code is not None:
+            output = log_path.read_text(encoding="utf-8", errors="replace")
+            raise RuntimeError(
+                f"server process for {base_url} exited early with code {exit_code} "
+                f"while waiting for it to become ready — captured output:\n{output}"
+            )
         try:
             resp = httpx.get(f"{base_url}/api/admin/state", timeout=2.0)
             if resp.status_code == 200:
@@ -181,7 +211,11 @@ def _wait_until_serving_state(base_url: str, *, timeout_s: float = 30.0) -> None
         except httpx.HTTPError as exc:
             last_exc = exc
         time.sleep(0.05)
-    raise TimeoutError(f"server never became ready at {base_url}") from last_exc
+    output = log_path.read_text(encoding="utf-8", errors="replace")
+    raise TimeoutError(
+        f"server never became ready at {base_url} within {timeout_s}s (still running: "
+        f"{proc.poll() is None}) — captured output:\n{output}"
+    ) from last_exc
 
 
 def _read_or_none(path: Path) -> bytes | None:
@@ -194,10 +228,11 @@ def test_a_real_process_kill_mid_publish_leaves_live_ledger_and_draft_untouched(
     port = _free_port()
     base_url = f"http://127.0.0.1:{port}"
     script = _launcher_script(tmp_path, storage_root, wixy_repo_root, port)
+    log_path = tmp_path / "server1.log"
 
-    proc = _start_server(script)
+    proc = _start_server(script, log_path)
     try:
-        _wait_until_serving_state(base_url)
+        _wait_until_serving_state(base_url, proc, log_path)
 
         with httpx.Client(base_url=base_url, timeout=10.0) as client:
             patch_resp = client.patch(
@@ -286,9 +321,10 @@ def test_a_real_process_kill_mid_publish_leaves_live_ledger_and_draft_untouched(
     port2 = _free_port()
     base_url2 = f"http://127.0.0.1:{port2}"
     script2 = _launcher_script(tmp_path, storage_root, wixy_repo_root, port2)
-    proc2 = _start_server(script2)
+    log_path2 = tmp_path / "server2.log"
+    proc2 = _start_server(script2, log_path2)
     try:
-        _wait_until_serving_state(base_url2)
+        _wait_until_serving_state(base_url2, proc2, log_path2)
         with httpx.Client(base_url=base_url2, timeout=15.0) as client:
             state_resp = client.get("/api/admin/state")
             assert state_resp.status_code == 200
