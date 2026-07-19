@@ -54,19 +54,34 @@ admin.js`. decisions/00057 (this milestone's implementation calls), decisions/00
 auto-closes a PR when its base branch is deleted rather than retargeting it; not
 M4-specific but discovered during this milestone's work).
 
-Site-repo CI re-point (C6): **DONE — PR #17 opened** against
-`joshcomley/cottage-aesthetics-preview` (new worktree
+Site-repo CI re-point (C6): **code DONE, PR #17 opened, BLOCKED on an unrelated
+pre-existing issue** against `joshcomley/cottage-aesthetics-preview` (new worktree
 `cottage-aesthetics-preview__worktrees/00003__site-ci-repoint-claude-md-neutralize`,
 branch `indep/site-ci-repoint-and-claude-md-neutralize` off a freshly-fetched
 `origin/main` — the old clone at the repo root was confirmed stale, primary-checkout
 guarded, so a proper worktree was created rather than editing it in place).
 `ci.yml`'s wixy-engine checkout now reads `${{ vars.WIXY_ENGINE_REPO ||
-'joshcomley/wixy' }}` with no `ssh-key`/deploy-key at all (the engine's own M2 made it
-public); `CLAUDE.md`/`README.md`'s "private repo"/fleet-auto-merge wording removed.
-Not security-gated itself (config/docs only, no live-site behavior change) — normal
-CI-gate, but its own repo has required-status-checks branch protection
-(`mergeStateStatus: BLOCKED` until CI passes) unlike wixy's own `main`
-(decisions/00058's flag).
+'joshcomley/wixy' }}`. First attempt dropped the deploy key outright and broke CI —
+self-caught: `joshcomley/wixy` is still PRIVATE (the M2 LICENSE/audit work landed, but
+the actual GitHub visibility flip is Josh's own separate manual click, not yet done).
+Fixed properly: `ssh-key` is now supplied only when `WIXY_ENGINE_REPO` is unset (the
+upstream case) — a deploy key is scoped to the one repo it was issued against, so
+unconditionally keeping it would have ALSO broken the fork-pointing case once someone
+sets `WIXY_ENGINE_REPO` to their own (public) fork. `CLAUDE.md`/`README.md`'s "private
+repo"/fleet-auto-merge wording removed (this part is accurate regardless of visibility
+— it's a licensing fact, not a visibility claim).
+
+**Found separately, NOT caused by this PR**: the site repo's `main` CI (rendered-parity
+check) has been red since 2026-07-19 15:53 — confirmed via `gh run list --branch main`
+history, predates any of today's work. The About page's "Meet Purdi" bio was shortened
+via a real Wixy CMS publish (`wixy: publish v7`) but the parity baseline (lives in the
+wixy ENGINE repo at `wixy/builder/tests/parity/baseline`, checked out fresh into
+site-repo CI) was never re-captured to match. This is a live-site CONTENT question
+(intentional edit vs. needs reverting) outside my delegated scope (kickoff prompt:
+never touch her real content) — raised as operator decision #19, delayed mode, not
+blocking anything else. PR #17 itself is parked (mergeStateStatus BLOCKED by this
+repo's own required-status-checks branch protection) until that's resolved — its own
+diff (CI config + doc wording) is correct and unaffected either way.
 
 ## How to continue + acceptance
 **SECURITY-GATED. PR #74 opened** (engine repo, `indep/m4-fork-sync-engine-card` ->
