@@ -1,0 +1,1 @@
+Nine foundational independence-phase decisions (fork-sync dual control, Cloudflare Tunnel, Watchtower deploys, transfer/fork/new-repo split, MIT, one image via WIXY_EDITION, public GHCR, dedicated SYNC_PUSH_TOKEN, notify-only schedule)

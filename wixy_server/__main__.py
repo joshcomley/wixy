@@ -22,9 +22,16 @@ def main() -> None:
     storage_root = resolve_storage_root()
     settings = load_settings(storage_root)
     app = create_app(storage_root=storage_root, wixy_repo_root=_WIXY_REPO_ROOT)
-    # Loopback-only (spec/07's opening line) — the cloudflared tunnel is the only
-    # path in from the public internet, never a direct bind on a routable interface.
-    uvicorn.run(app, host="127.0.0.1", port=settings.port)
+    # Loopback-only by default (spec/07's opening line) — the cloudflared tunnel is
+    # the only path in from the public internet, never a direct bind on a routable
+    # interface. The standalone edition's compose file sets WIXY_CONTAINERIZED=1
+    # (spec/independence/01 §2.2, 03 §2): its own cloudflared container reaches this
+    # process over the compose network, not loopback, so binding 0.0.0.0 there stays
+    # container-internal (docker-compose.yml publishes no ports) rather than a public
+    # bind — the gate exists so a bare-metal/non-compose run can never accidentally
+    # bind a routable interface.
+    host = "0.0.0.0" if settings.containerized else "127.0.0.1"
+    uvicorn.run(app, host=host, port=settings.port)
 
 
 if __name__ == "__main__":

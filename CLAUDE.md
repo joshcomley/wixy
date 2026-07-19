@@ -1,15 +1,20 @@
 # wixy — engine repo
 
-Self-hosted CMS engine for `ca.cinnamons.uk` (Cottage Aesthetics). The full spec lives in
-`spec/` (read `spec/README.md` first) — it is authoritative and decided. This file is quick
-orientation; the **operator manual is [`docs/ai/`](docs/ai/architecture.md)** (start there
-for the mental model, then the per-subsystem deep-dives and [invariants](docs/ai/invariants.md)).
+Self-hosted CMS engine for `ca.cinnamons.uk` (Cottage Aesthetics), deployed and serving
+production. The full build spec lives in `spec/` (read `spec/README.md` first) — it is
+authoritative and decided; this file is quick orientation, not a substitute. The
+**operator manual is [`docs/ai/`](docs/ai/architecture.md)** (start there for the mental
+model, then the per-subsystem deep-dives and [invariants](docs/ai/invariants.md)) — `spec/`
+is the decided intent, `docs/ai/` is the code reality + how to work. The INDEPENDENCE phase
+(make her whole web presence run on her own accounts, dual-control with Josh's dev lane) is
+specified in `spec/independence/` (read `spec/independence/README.md` first) — same
+authority, layered on top of the base spec where it's silent.
 
 **Status:** the v1 build is complete and deployed — all 13 milestones + the Uxer admin-UI
 adoption shipped (50 `decisions/` entries; live at `ca.cinnamons.uk`). The
 [`spec/independence/`](spec/independence/README.md) phase (owner-controlled infra, MIT fork,
-pluggable AI, HTML setup guide) is **specced but not yet implemented** — roadmap, not current
-behaviour.
+pluggable AI, HTML setup guide) is now **in progress** — see `spec/independence/
+09-work-plan.md` for milestone status.
 
 ## What's here
 
@@ -23,8 +28,15 @@ behaviour.
 - `editor/` — the overlay injected into the live preview iframe (strict TS, esbuild) →
   bundles into `wixy_server/static/editor/`.
 - `e2e/` — Playwright end-to-end flows against a local full stack (spec/08 §2).
-- `projects/*.json` — per-site project registry (repo URL, domain, media limits).
+- `projects/*.json` — per-site project registry (repo URL, domain, media limits);
+  overridable per-deployment via `WIXY_SITE_REPO`/`WIXY_DOMAIN`/`WIXY_INDEXABLE` env
+  vars (`wixy_server/registry.py`, spec/independence/01 §2.2).
+- `deploy/standalone/` — the portable Docker deployment target (spec/independence/03);
+  the fleet's own blue/green Slots deploy at the repo root is untouched by this.
+- `guide/` — the independence-phase HTML guide for the site owner (spec/independence/07).
 - `spec/` — the full, decided build specification (00–09).
+- `spec/independence/` — the independence-phase specification (00–09 + README);
+  layered on top of the base spec, same "decided, implement faithfully" authority.
 - `docs/` — brief + design blueprint for the driving customer, Cottage Aesthetics.
 - `decisions/` — architecture decision log (`NNNNN-slug/{title,decision}.md`).
 - `todos/` — persistent per-workspace task lists (survive handovers).
@@ -80,6 +92,15 @@ npx playwright test
   blue/green checkout) — this repo is the source; see the global
   `D:\Servers\CLAUDE.md` worktree-guard rule. Branch here, PR, merge to `main`; Slots
   deploys it.
+- Independence-phase milestones 2, 3, 4, 6 and 7 (spec/independence/09-work-plan.md)
+  are SECURITY-GATED: open the PR, peer-message the spec author session with the PR
+  number + that milestone's review checklist, and merge only after an explicit
+  approval reply — never auto-merge those on green CI alone. Milestone 9 additionally
+  needs a full Fable acceptance review before the phase is called done.
+- `WIXY_EDITION=standalone` is the one operator-decided exception to the
+  no-direct-Anthropic-API rule above (spec/independence/05 §2, milestone 6) — scoped
+  to that backend only; the fleet edition (`WIXY_EDITION=fleet`, the default) keeps
+  the cmd backend and the rule as stated.
 
 ## Documentation map (`docs/ai/`)
 

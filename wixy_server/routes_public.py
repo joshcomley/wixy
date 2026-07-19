@@ -4,6 +4,11 @@ there's no in-process cache to invalidate, see `live_pointer`'s own docstring).
 
 Registered LAST in `app.py` — `GET /{path:path}` is a catch-all and must never shadow
 `/admin*`, `/api/*`, `/internal/*`, `/healthz`, or the `/admin/static` mount.
+
+Also serves the redirects facility (spec/independence/01 §2.2, 03 §2): a request path
+found in `app.state.redirects` gets a 301 before any file resolution is attempted, so
+it applies even when there's no live pointer yet (a pure URL-routing decision, not a
+publish-state one).
 """
 
 from __future__ import annotations
@@ -12,9 +17,10 @@ from pathlib import Path
 
 import anyio
 from fastapi import APIRouter, Request
-from fastapi.responses import FileResponse, PlainTextResponse, Response
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse, Response
 
 from wixy_server.live_pointer import LivePointer, load_live_pointer
+from wixy_server.redirects import RedirectMap, resolve_redirect
 from wixy_server.storage import ProjectPaths
 
 router = APIRouter()
@@ -47,7 +53,11 @@ def _load_pointer(paths: ProjectPaths) -> LivePointer | None:
     return load_live_pointer(paths)
 
 
-async def _serve(paths: ProjectPaths, request_path: str) -> Response:
+async def _serve(paths: ProjectPaths, redirects: RedirectMap, request_path: str) -> Response:
+    target = resolve_redirect(redirects, request_path)
+    if target is not None:
+        return RedirectResponse(target, status_code=301)
+
     pointer = await anyio.to_thread.run_sync(_load_pointer, paths)
     if pointer is None:
         # spec/04 §3: no live.json yet (pre-bootstrap) -> plain 503, never a crash.
@@ -73,10 +83,12 @@ async def get_root(request: Request) -> Response:
     FastAPI/Starlette only auto-derives HEAD from a GET route when you register both
     explicitly via `api_route`/`methods=`, it isn't implicit."""
     paths: ProjectPaths = request.app.state.paths
-    return await _serve(paths, "/")
+    redirects: RedirectMap = request.app.state.redirects
+    return await _serve(paths, redirects, "/")
 
 
 @router.api_route("/{path:path}", methods=["GET", "HEAD"])
 async def get_path(path: str, request: Request) -> Response:
     paths: ProjectPaths = request.app.state.paths
-    return await _serve(paths, f"/{path}")
+    redirects: RedirectMap = request.app.state.redirects
+    return await _serve(paths, redirects, f"/{path}")

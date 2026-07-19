@@ -5,13 +5,29 @@ fixes the convention that the wixy repo checkout's own `projects/` directory (no
 a site repo's) is the source, and fails loudly if it's empty or a requested slug
 is unknown — a server with no projects loaded is a misconfiguration, not a valid
 empty state (unlike the CLI, which always names one project explicitly).
+
+Independence-phase env overrides (spec/independence/01 §2.2): `WIXY_SITE_REPO` (an
+SSH URL — `checkout.run_git` disables credential helpers, so HTTPS+token isn't an
+option), `WIXY_DOMAIN`, `WIXY_INDEXABLE` layer over the committed `projects/*.json`
+so her standalone deployment can point at her own transferred site repo/domain
+without forking the registry file itself. Deliberately kept in THIS module rather
+than `builder/config.py` — `builder/` has no server imports and must stay importable
+standalone by the site repo's own CI (see repo CLAUDE.md); env-var resolution is a
+server/deployment concern. Process environment only, same precedent as
+`WIXY_STORAGE_ROOT`/`WIXY_SLOT` (settings.py) — this loader has no `.env` access and
+none is needed: these are deployment-identity facts fixed for the container's
+lifetime, not something hand-edited after install.
 """
 
 from __future__ import annotations
 
+import os
+from dataclasses import replace
 from pathlib import Path
 
 from builder.config import ProjectConfig, load_all_projects
+
+_TRUTHY = {"1", "true", "True"}
 
 
 class UnknownProjectError(Exception):
@@ -37,6 +53,15 @@ class ProjectRegistry:
         return slug in self._projects
 
 
+def _apply_env_overrides(cfg: ProjectConfig) -> ProjectConfig:
+    repo = os.environ.get("WIXY_SITE_REPO") or cfg.repo
+    domain = os.environ.get("WIXY_DOMAIN") or cfg.domain
+    indexable_raw = os.environ.get("WIXY_INDEXABLE")
+    indexable = cfg.indexable if indexable_raw is None else indexable_raw in _TRUTHY
+    return replace(cfg, repo=repo, domain=domain, indexable=indexable)
+
+
 def load_registry(wixy_repo_root: Path) -> ProjectRegistry:
     projects = load_all_projects(wixy_repo_root / "projects")
-    return ProjectRegistry(projects)
+    overridden = {slug: _apply_env_overrides(cfg) for slug, cfg in projects.items()}
+    return ProjectRegistry(overridden)
