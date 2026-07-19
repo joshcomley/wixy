@@ -49,4 +49,17 @@ missing-critical → cosmetic; mean confidence 5.2 → 7.33 → 7.67 → 7.0. No
 `py_compile` (exit 0) — it's valid PEP 758 syntax on Python ≥3.14, captured as Invariant 14.
 Remaining audit "gaps" are by-design (unbuilt independence phase → `spec/independence/`;
 hypothetical features; the v1 single-project-serving non-goal) — not documented, correctly.
-`.aim/settings.json` + `.aim/audit-history.jsonl` committed. Shipped via PR (docs-only, CI-safe).
+`.aim/settings.json` + `.aim/audit-history.jsonl` committed. Committed on `cmd/workspace-00007`,
+pushed, **PR #71 open + mergeable** (docs-only, CI-safe).
+
+## ⚠ MERGE BLOCKED — repo-wide CI outage (operator action needed)
+On trying to merge, found GitHub Actions **failing repo-wide**: every CI run since
+2026-07-19 ~15:04 fails in ~3s with **zero steps executed** — on `main` pushes AND every branch
+(the active `indep/m1..m5`, `fix/*`, `cmd/workspace-00003`, and this PR). Last green run was
+2026-07-11. Evidence: wixy is a **private** repo, Actions is **enabled** (`enabled:true`), jobs
+are created but can't start (0 steps), the account Actions-billing API is 403 to the bot PAT.
+Diagnosis: **GitHub Actions spending-limit / included-minutes exhausted** for the private repo.
+This is an **operator-only fix** and blocks ALL wixy PRs, not just this one. Did NOT force-merge
+or `--admin-bypass` (fleet rule). Next step for whoever continues: once Josh restores Actions
+(raise spending limit / add payment, or make the repo public), re-run CI and `gh pr merge 71
+--merge --delete-branch`. Operator decision raised via op-ask-question.
