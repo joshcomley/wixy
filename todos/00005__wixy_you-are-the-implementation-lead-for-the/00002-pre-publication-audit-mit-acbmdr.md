@@ -54,5 +54,18 @@ Acceptance so far: ruff/mypy clean, full pytest suite green (543 passed), fronte
 typecheck+test+build green with zero bundle drift — CI itself can't confirm this
 independently until the Actions outage above resolves.
 
+## Fable review verdict
+**APPROVED — merge (once CI is unblocked)**, session c42ea1cb-a9d6-413d-bdcb-fc77fc49abba,
+2026-07-19. Independently re-ran a targeted secret sweep across all 191 reachable
+commits (broader than gitleaks' 123 — worth noting the count difference, not
+investigated further since both came back clean) — zero hits, corroborating.
+Confirmed session-id exemption intact. Agreed with the `tooling/downscale_photos.py`
+scope addition. Two banked notes: (1) explicit sign-off on history-retention for the
+moved material (nothing was ever secret, no history rewrite needed); (2) **FORWARD
+OBLIGATION for M8**: the guide's Track J `ca-business` step MUST include the actual
+population procedure (`git checkout 7c4fa3c -- <paths>`) as an EXECUTED step, not
+just a recorded fact — carry this into the M8 guide-writing work (also noted in the
+M8 sidecar, 00008-html-guide-ni08h9.md).
+
 ## Links
 spec/independence/02 (full); spec/independence/09 row 2.
