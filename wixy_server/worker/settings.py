@@ -26,12 +26,22 @@ from dataclasses import dataclass
 from pathlib import Path
 
 _DEFAULT_SCRATCH_ROOT = Path("/data/worker-scratch")
+# A separate volume/root from scratch_root, ON PURPOSE — see
+# wixy_server.worker.transcript's own module docstring for why a transcript
+# must never live inside a conversation's git clone.
+_DEFAULT_TRANSCRIPTS_ROOT = Path("/data/worker-transcripts")
 
 
 @dataclass(frozen=True, slots=True)
 class WorkerSettings:
     port: int
     scratch_root: Path
+    # No default (like `scratch_root` above, unlike the two string fields
+    # below) — a real filesystem path a test forgetting to override could
+    # silently write outside its own tmp_path; forcing every construction
+    # site to supply it explicitly is the safer failure mode (a TypeError,
+    # not a stray write to a real path on the machine running the tests).
+    transcripts_root: Path
     # spec §2: "WIXY_AI_MONTHLY_BUDGET_USD (default 40 ... USD because that's
     # what the SDK's usage reporting speaks)". `None` would mean "no cap" —
     # never actually valid per spec (a budget is always enforced), but kept
@@ -48,10 +58,15 @@ class WorkerSettings:
     bot_pat: str = ""
 
 
-def load_worker_settings(*, scratch_root: Path | None = None) -> WorkerSettings:
+def load_worker_settings(
+    *, scratch_root: Path | None = None, transcripts_root: Path | None = None
+) -> WorkerSettings:
     return WorkerSettings(
         port=int(os.environ.get("WIXY_WORKER_PORT", "8100")),
         scratch_root=scratch_root if scratch_root is not None else _DEFAULT_SCRATCH_ROOT,
+        transcripts_root=(
+            transcripts_root if transcripts_root is not None else _DEFAULT_TRANSCRIPTS_ROOT
+        ),
         monthly_budget_usd=float(os.environ.get("WIXY_AI_MONTHLY_BUDGET_USD", "40")),
         site_repo_url=os.environ.get("WIXY_SITE_REPO", ""),
         bot_pat=os.environ.get("WIXY_AI_BOT_PAT", ""),

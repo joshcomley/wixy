@@ -70,6 +70,14 @@ services:
     restart: unless-stopped
     volumes:
       - worker-scratch:/data/worker-scratch
+      # A SEPARATE volume from worker-scratch, on purpose (wixy_server/
+      # worker/transcript.py's own docstring): conversation transcripts must
+      # never live inside a conversation's git clone, where the agent's own
+      # Bash access could accidentally `git add`/commit one into the site
+      # repo. Durable across restarts (spec §2's "persists conversations as
+      # JSONL") — never swept by the scratch-clone idle sweep, which only
+      # ever touches worker-scratch.
+      - worker-transcripts:/data/worker-transcripts
     environment:
       # Never reaches `wixy` (see the block comment above) — both secrets
       # exist ONLY in this service's env.
@@ -120,3 +128,4 @@ services:
 volumes:
   wixy-storage:
   worker-scratch:
+  worker-transcripts:

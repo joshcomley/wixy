@@ -7,6 +7,7 @@ episodes so the background agent-run task completes fast and deterministically
 
 from __future__ import annotations
 
+import json
 import subprocess
 import time
 from collections.abc import Callable
@@ -24,6 +25,7 @@ from wixy_server.tests.fake_agent_sdk import ScriptedEpisode, create_fake_agent_
 from wixy_server.tests.fake_github import FakeGitHubState, create_fake_github_app
 from wixy_server.worker.app import create_worker_app
 from wixy_server.worker.settings import WorkerSettings
+from wixy_server.worker.transcript import transcript_path
 
 
 def _result(total_cost_usd: float = 0.01) -> ResultMessage:
@@ -58,6 +60,7 @@ def _settings(
     return WorkerSettings(
         port=8100,
         scratch_root=tmp_path,
+        transcripts_root=tmp_path / "transcripts",
         monthly_budget_usd=monthly_budget_usd,
         site_repo_url=site_repo_url,
         bot_pat=bot_pat,
@@ -560,3 +563,94 @@ class TestWorkspaceIntegration:
         assert status["failureReason"] == "workspace_failed"
         assert status["ready"] is False
         assert any(m["kind"] == "error" for m in messages)
+
+
+class TestTranscriptPersistence:
+    """spec/independence/05 §2: "the worker persists conversations as JSONL
+    compatible with the existing chat panel's message model." Written once
+    per turn, in `_run_and_track`'s own `finally` (see that function's
+    docstring) — these tests drive it through the real HTTP API rather than
+    calling `write_transcript` directly, so they prove the WIRING, not just
+    the module in isolation (that's `test_worker_transcript.py`'s job)."""
+
+    def test_transcript_file_exists_after_a_turn(self, tmp_path: Path) -> None:
+        episodes = [_text_episode("Sure, I'll help with that.")]
+        _clients, factory = create_fake_agent_sdk_client_factory(episodes)
+        app = create_worker_app(settings=_settings(tmp_path), client_factory=factory)
+        with TestClient(app) as client:
+            create = client.post(
+                "/conversations",
+                json={"preamble": "you are a site editor", "firstMessage": "fix the typo"},
+            )
+            conv_id = create.json()["convId"]
+
+            def _has_assistant_reply() -> bool:
+                body = client.get(f"/conversations/{conv_id}/messages").json()
+                return any(m["role"] == "assistant" for m in body["messages"])
+
+            _poll_until(_has_assistant_reply)
+            time.sleep(0.1)  # the finally-block write races the poll by a beat
+
+        path = transcript_path(tmp_path / "transcripts", conv_id)
+        assert path.exists()
+        lines = path.read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 2  # the user message + the assistant's reply
+        assert json.loads(lines[0])["text"] == "fix the typo"
+        assert json.loads(lines[1])["text"] == "Sure, I'll help with that."
+
+    def test_transcript_survives_an_agent_run_failure(self, tmp_path: Path) -> None:
+        episodes = [ScriptedEpisode(raises=ConnectionError("CLI subprocess died"))]
+        _clients, factory = create_fake_agent_sdk_client_factory(episodes)
+        app = create_worker_app(settings=_settings(tmp_path), client_factory=factory)
+        with TestClient(app) as client:
+            create = client.post(
+                "/conversations",
+                json={"preamble": "you are a site editor", "firstMessage": "go"},
+            )
+            conv_id = create.json()["convId"]
+
+            def _failed() -> bool:
+                body = client.get(f"/conversations/{conv_id}/status").json()
+                return bool(body["failureReason"] is not None)
+
+            _poll_until(_failed)
+            time.sleep(0.1)
+
+        path = transcript_path(tmp_path / "transcripts", conv_id)
+        assert path.exists()
+        lines = path.read_text(encoding="utf-8").splitlines()
+        assert json.loads(lines[0])["text"] == "go"
+
+    def test_second_turn_rewrites_the_transcript_with_both_turns(self, tmp_path: Path) -> None:
+        episodes = [_text_episode("first reply"), _text_episode("second reply")]
+        _clients, factory = create_fake_agent_sdk_client_factory(episodes)
+        app = create_worker_app(settings=_settings(tmp_path), client_factory=factory)
+        with TestClient(app) as client:
+            create = client.post(
+                "/conversations",
+                json={"preamble": "you are a site editor", "firstMessage": "first message"},
+            )
+            conv_id = create.json()["convId"]
+            _poll_until(
+                lambda: any(
+                    m["role"] == "assistant"
+                    for m in client.get(f"/conversations/{conv_id}/messages").json()["messages"]
+                )
+            )
+
+            client.post(
+                f"/conversations/{conv_id}/messages",
+                json={"text": "second message", "idempotencyKey": "k2"},
+            )
+
+            def _second_reply() -> bool:
+                body = client.get(f"/conversations/{conv_id}/messages").json()
+                return any(m.get("text") == "second reply" for m in body["messages"])
+
+            _poll_until(_second_reply)
+            time.sleep(0.1)
+
+        path = transcript_path(tmp_path / "transcripts", conv_id)
+        lines = path.read_text(encoding="utf-8").splitlines()
+        texts = [json.loads(line)["text"] for line in lines]
+        assert texts == ["first message", "first reply", "second message", "second reply"]

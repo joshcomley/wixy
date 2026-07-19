@@ -31,6 +31,7 @@ from wixy_server.worker.agent_client import AgentSDKClientFactory
 from wixy_server.worker.runner import run_turn
 from wixy_server.worker.settings import WorkerSettings, load_worker_settings
 from wixy_server.worker.state import WorkerConversation, WorkerMessage, WorkerState
+from wixy_server.worker.transcript import write_transcript
 from wixy_server.worker.workspace import (
     WorkspaceError,
     github_https_clone_url,
@@ -195,6 +196,12 @@ async def _run_and_track(
     `wixy_server.checkout.run_git` doesn't catch that itself, matching
     `wixy_server.publisher`'s own pre-existing gap there — but publisher.py's
     failure mode is one failed HTTP request, not a shared task group).
+
+    The transcript (spec §2: "persists conversations as JSONL") is written
+    ONCE here, in a `finally`, rather than scattered across every place a
+    message gets appended — this is the one place guaranteed to run after
+    EVERY turn settles, success or failure, so it always captures the full,
+    current `conv.messages` regardless of which internal path was taken.
     """
     try:
         await _run_and_track_inner(
@@ -205,6 +212,10 @@ async def _run_and_track(
         if conv.failure_reason is None:
             conv.failure_reason = "agent_run_failed"
             conv.failure_message = "An unexpected error occurred while running this turn."
+    finally:
+        await anyio.to_thread.run_sync(
+            lambda: write_transcript(settings.transcripts_root, conv.conv_id, conv.messages)
+        )
 
 
 async def _run_and_track_inner(
