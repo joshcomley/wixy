@@ -9,7 +9,10 @@ Updates reach her ONLY when she asks (01 §5 d9).
   is **notify-only**: it refreshes the commits-behind data (and opens/updates a
   "updates available" issue) — it NEVER merges or deploys.
 - On dispatch: fetch upstream → merge into a work branch → **push with the dedicated
-  `SYNC_PUSH_TOKEN` fine-grained PAT secret** (contents:write on the fork) — never
+  `SYNC_PUSH_TOKEN` fine-grained PAT secret** (contents:write **+ pull_requests:write**
+  on the fork — PR creation for the conflict path needs the latter; a contents-only PAT
+  403s on `gh pr create`. Corrected after the M4 gate review; the original spec text
+  under-specified this) — never
   `GITHUB_TOKEN`, whose events trigger no downstream workflows (the image build would
   silently never run; conflict PRs would get no CI). Clean merge → push to `main` →
   image build fires → Watchtower deploys within minutes.
