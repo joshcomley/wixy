@@ -31,8 +31,14 @@ existing tests keep passing against the fake cmd server).
   private repo; milestone 4's site-repo PR neutralizes that wording (01 §3), and this
   backend depends on that landing first. The worker image includes **Node LTS** — the
   Agent SDK wraps the Node-based CLI (03 §1).
-- **Safety identical to today**: agents can only PR; her fork/site CI gates merges; only
-  her Publish button changes the live site; History/Restore unchanged. Spend control:
+- **Safety identical to today**: agents can only PR — and that property is
+  **GitHub-enforced, not conventional** (M6 gate review): branch protection on the site
+  repo's `main` AND the engine fork's `main` (require PR + required CI check, no bypass
+  actors) means even a leaked bot PAT cannot push `main` directly; the worker also
+  scrubs `WIXY_AI_BOT_PAT` from its environment before any SDK child spawns (same-uid
+  /proc residual documented honestly — secrecy is reduced-exposure, protection is the
+  guarantee). Her fork/site CI gates merges; only her Publish button changes the live
+  site; History/Restore unchanged. Spend control:
   `WIXY_AI_MONTHLY_BUDGET_USD` (default 40 — USD because that's what the SDK's usage
   reporting speaks; the guide states the ≈£ equivalent) — the worker tracks spend,
   refuses new conversations past the cap with a friendly message, and the Settings →
