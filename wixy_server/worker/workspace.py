@@ -19,6 +19,24 @@ transcript the owner reads. `origin` is reset to a bare, credential-less HTTPS
 URL immediately after the clone, and stays that way for the entire time the
 agent has Bash access — only the worker's OWN push call (never agent-issued,
 which only ever runs after the agent's turn has ended) uses the header again.
+
+Fable M6 gate review, R1: disk/config is not the only channel a secret can
+cross on its way to the agent — process-environment inheritance is another,
+closed separately (`wixy_server.worker.settings.load_worker_settings` pops
+`WIXY_AI_BOT_PAT` from `os.environ` at load time, before this module or the
+Agent SDK's spawned CLI child can ever see it as an inherited env var). Stated
+honestly, per Fable's own wording: this reduces casual/accidental exposure, it
+does NOT claim container-grade separation. Within one container running as one
+uid, `/proc/<worker-pid>/environ` remains readable by anything running as that
+same uid regardless of what this module or `load_worker_settings` does — no
+in-process file/env discipline closes that residual channel. Full privilege
+separation (moving push/PR duties out of the agent's container into the server
+via a read-only-mounted scratch fetch) would close it, and was considered and
+explicitly deferred as disproportionate for v1 (decisions/00065's "Correction
+(Fable review, PR #76 R1+R2)") — the blast radius of a leaked site-repo PAT is
+repo vandalism on branches, not live-site compromise (publishes are
+owner-pinned SHAs) or the engine or her key. Banked as a hardening upgrade
+alongside that same entry's egress-sidecar note.
 """
 
 from __future__ import annotations

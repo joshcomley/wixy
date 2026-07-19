@@ -92,6 +92,69 @@ crosses the cap.
   slice makes the durable HISTORY survive without also rebuilding the live
   session bookkeeping, which spec's own wording doesn't explicitly demand.
 
+## Correction (Fable review, PR #76 R1+R2)
+
+Fable's actual gate review found one real gap this self-verification's "key never
+logged/committed" pass missed, plus one hardening the self-verification didn't think
+to ask for at all — both closable, neither requiring the deeper redesign also on the
+table. Full review reply banked in the session handover
+(`handover/2607200017-wixy-m6-ci-fix-and-fable-review.md`); the operative findings and
+fixes:
+
+**R1 — process-environment inheritance.** "Key never logged/committed" (above) checked
+disk and log-line channels but missed a third: `runner.build_options` passes no `env=`
+to `ClaudeAgentOptions`, and the Agent SDK's spawned CLI child inherits the WHOLE
+worker process environment by default (confirmed by reading
+`claude_agent_sdk/_internal/transport/subprocess_cli.py` — `ClaudeAgentOptions.env`
+only ADDS keys on top of the inherited set, it cannot un-inherit one). So
+`WIXY_AI_BOT_PAT`, sitting in `os.environ` after `load_worker_settings` read it, would
+have been handed straight to the agent's own Bash tool (`echo $WIXY_AI_BOT_PAT`) — a
+misbehaving or prompt-injected turn could have pushed straight to `main`, exactly the
+credential the "agents can only PR" trust model depends on. **Fix**:
+`load_worker_settings` (`wixy_server/worker/settings.py`) now pops
+`WIXY_AI_BOT_PAT` from `os.environ` the instant after capturing it into
+`WorkerSettings.bot_pat` — proven by `wixy_server/tests/test_worker_settings.py`
+(`os.environ` no longer holds it after the call, a second call sees it already gone,
+`ANTHROPIC_API_KEY` — which the SDK IS supposed to inherit, by its own documented
+contract — is deliberately left untouched). Stated honestly, not overclaimed:
+`wixy_server/worker/workspace.py`'s module docstring now documents the residual
+same-uid `/proc/<worker-pid>/environ` channel this does NOT close — full privilege
+separation (moving push/PR duties server-side via a read-only-mounted scratch fetch)
+would close it, and Fable explicitly ACCEPTED deferring that as disproportionate for
+v1 (the blast radius of a leaked site-repo PAT is repo vandalism on branches, not
+live-site compromise — publishes are owner-pinned SHAs — or the engine or her key),
+banked as a hardening upgrade alongside the egress-sidecar note already above.
+
+**R2 — GitHub-ENFORCED branch protection, not a convention.** Even with R1 fixed, the
+"agents can only PR" safety claim still ultimately rested on the bot PAT never leaking
+by ANY channel — a claim about secrecy, not a structural guarantee. Requiring branch
+protection on `main` (PR + a passing required status check, no bypass actors) on BOTH
+her site repo and her engine fork removes main-integrity from the trust equation
+entirely: even a PAT in the wrong hands cannot push `main` once this is on. This is a
+manual, per-repo GitHub org/admin settings step no deploy script can perform on her
+behalf (the bot PAT is deliberately scoped to `contents:write` + `pull_requests:write`
+only, decisions/00061 — not repo-admin). Three deliverables, landed at the layer each
+actually belongs to right now: (1) `deploy/standalone/setup.sh` gained
+`print_branch_protection_step`, pausing for confirmation on both repos before it
+writes `.env` — the concrete, shippable-today piece, mirroring the existing
+deploy-key/PAT manual-step pattern; `deploy/standalone/README.md` documents the why.
+(2) The friendly, illustrated walkthrough version of this same step belongs in the
+M8 guide's Track P.2 chapter (GitHub org/repo setup) — forward obligation recorded in
+that milestone's own todo sidecar, same precedent as M2's `ca-business` population
+procedure. (3) Fable's own ask for **"a verify/drill assertion that main rejects a
+direct push"** does NOT belong in `verify.sh`: that script is a droplet/compose
+infra-health check with no GitHub-API surface at all today, and per spec/independence/
+07 §2's own chapter ordering, Track P's GitHub-settings chapter (2) runs BEFORE the
+droplet-setup chapter (6) — so by the time `verify.sh` ever runs, branch protection
+should already be configured, but `verify.sh` has no way to know that reliably for a
+script that must "stay always green on a correctly-configured install," not fail on a
+manual step it can't observe. The drill (chapter 7, spec/independence/08 §1 item 1
+"org + repos in place") runs strictly after the GitHub-settings chapter and already
+exercises real GitHub credentials against real (drill) repos — the live assertion
+belongs there. Forward obligation recorded in the M9 todo sidecar. Fable will mirror
+the branch-protection requirement into spec/independence/05 §2 themselves — not edited
+here.
+
 ## What to watch for
 
 - `wixy_server/worker/app.py`'s `_DEFAULT_BRANCH = "main"` and the

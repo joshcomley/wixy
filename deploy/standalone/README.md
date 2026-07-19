@@ -48,8 +48,10 @@ paste each printed deploy-key public key at the GitHub URL it names when asked.
   the site-repo deploy key pair (printing the public half + the exact GitHub URL to
   paste it at), walks you through creating the AI bot's fine-grained PAT
   (`contents:write` + `pull_requests:write` on your site repo, decisions/00061),
-  writes `/opt/wixy/.env` + `/opt/wixy/keys/*` (root, 0600), installs a systemd unit,
-  starts the stack, runs `verify.sh`.
+  pauses for you to turn on **branch protection on both your site repo's and your
+  engine fork's `main`** (see "GitHub repo protections" below), writes
+  `/opt/wixy/.env` + `/opt/wixy/keys/*` (root, 0600), installs a systemd unit, starts
+  the stack, runs `verify.sh`.
 - **`verify.sh`** — six checks (services up — `wixy` AND `worker` — `/healthz`,
   `/api/version` reports `edition:"standalone"`, the site repo checkout exists on
   disk, the tunnel shows a registered connection in its logs), one `[OK]`/`[FAIL]`
@@ -64,6 +66,19 @@ paste each printed deploy-key public key at the GitHub URL it names when asked.
 - **`logs.sh`** — `docker compose logs`, forwarding any args (`logs.sh -f`,
   `logs.sh cloudflared`).
 
+## GitHub repo protections
+
+`setup.sh` pauses and asks you to turn on **branch protection on `main`** for both
+your site repo and your engine fork (require a pull request + a passing status
+check, no bypass actors) before it writes `.env`/starts the stack — a one-time
+manual GitHub settings step (`<repo>/settings/branches`) it can't do for you (would
+need repo-admin access, which the bot PAT deliberately doesn't have). This is what
+makes "the AI assistant can only open pull requests, never push to `main` directly"
+an actual GitHub-enforced guarantee rather than a convention: with it on, even a
+leaked bot PAT in the assistant's own hands cannot push `main` — the safety of this
+whole feature stops depending on that token's secrecy at all (Fable M6 gate review
+R2, decisions/00065).
+
 ## Secrets doctrine
 
 Every secret exists only under `/opt/wixy/` (`.env` + `keys/`, root-owned, mode 0600)
@@ -73,9 +88,13 @@ the tunnel token, `ANTHROPIC_API_KEY` + `WIXY_AI_BOT_PAT` (the `worker` service 
 deploy-key PRIVATE halves live as separate files under `keys/` (a multi-line PEM
 doesn't fit the `.env` `KEY=VALUE` format) and are mounted read-only into the
 container, consumed via `GIT_SSH_COMMAND`. The bot PAT is a plain `.env` value (a
-fine-grained PAT is a single token, not a multi-line key) but never touches disk
-inside the `worker` container beyond process environment — see decisions/00060 for
-how the worker itself keeps it out of the clones it creates.
+fine-grained PAT is a single token, not a multi-line key); inside the `worker`
+container it's popped from the process's own environment the instant it's read
+(decisions/00065 R1) so the Agent SDK's spawned CLI child never inherits it, on top
+of never touching disk in the clones the worker creates (decisions/00060) — see
+`wixy_server/worker/settings.py` and `wixy_server/worker/workspace.py`'s own module
+docstrings for the exact mechanism and the residual same-uid `/proc` channel this
+does not close.
 
 ## CI proof
 

@@ -67,31 +67,43 @@ the shared `AIBackend` protocol — decisions/00063) + `admin-ui` Settings -> AI
 (mirrors the Engine card's loading/not-available/error states, simpler flat 60s poll,
 no in-flight-run tracking needed). Frontend bundle rebuilt+committed.
 
-**Not yet built**: the `@live_anthropic` smoke test (spec §4 — skipped in CI, run for
-real in the M9 drill with a real key), a pass verifying the backend-contract test suite
-genuinely covers both backends' shared contract (spec §4 — separate thorough test files
-may already satisfy the spirit of this, needs a judgment-call review pass), the Fable
-checklist verification pass itself (05 §4: key never logged/committed — verified in
-code+tests already, worth a final explicit checklist pass; egress restricted as far as
-compose allows — done, documented as best-effort; scratch clones cleaned — done,
-decisions/00060; budget enforcement tested — the single-conversation 402 test exists,
-a multi-conversation-hits-cap test would round this out), and the actual PR open +
-Fable review round.
+**Slice 6 — DONE**: backend-contract route coverage (`test_routes_chat_backend_contract.py`
+— `routes_chat.py`'s existing suite only ever exercised the `cmd` backend; surfaced a
+real `fake_worker.py` bug, never filtered `includeThinking` — decisions/00064) + a
+genuine multi-conversation budget-accumulation test (two conversations under a shared
+cap both succeed, combined spend confirmed via `GET /budget`, a third is refused only
+once the total actually crosses it).
+
+**M6 wrap-up — DONE**: explicit self-verification against spec/independence/05 §4's
+Fable checklist, written out with evidence before requesting review (decisions/00065).
+PR #76 opened (`indep/m6-anthropic-backend-worker` -> `main`), CI green.
+
+**Fable gate review round 1**: Fable replied CHANGES REQUIRED with two findings
+(R1: `WIXY_AI_BOT_PAT` leaking to the Agent SDK's spawned CLI child via process-
+environment inheritance; R2: "agents can only PR" needed to be a GitHub-ENFORCED
+branch-protection guarantee, not a convention) — both fixed and verified locally
+(ruff/mypy/pytest all clean), both are the "best-reasoned milestone yet" per
+Fable's own words, no scope creep into the deeper privilege-separation redesign
+Fable explicitly accepted deferring. Full detail: decisions/00065's "Correction
+(Fable review, PR #76 R1+R2)". Not yet pushed/sent as of this note — see "How to
+continue" below.
 
 ## Relevant files + commits
-Branch: `indep/m6-anthropic-backend-worker` (off main, after M4/M5 merged). 5 commits
-so far (slices 1-5 above, one commit each after slice 1's two): `8adb598` (slice 1a),
-`473db3b` (slice 2, workspace model + backend wiring), `9cdd885` (slice 3, compose),
-`08ddc40` (slice 4, transcript), plus slice 5's commit (AI budget card — commit hash
-not yet recorded here, check `git log`). decisions/00059-00063.
+Branch: `indep/m6-anthropic-backend-worker` (off main, after M4/M5 merged), PR #76.
+Six slice commits: `8adb598` (slice 1a), `473db3b` (slice 2, workspace model + backend
+wiring), `9cdd885` (slice 3, compose), `08ddc40` (slice 4, transcript), `53770b0`
+(slice 5, AI budget card + live smoke test), `d3e261d` (slice 6, backend-contract
+coverage + budget test), `358147a` (wrap-up: decisions/00065), `90ecc50` (ruff format
+fix), plus the R1+R2 follow-up commit(s) — check `git log` for the current HEAD.
+decisions/00059-00065.
 
 ## How to continue + acceptance
-Functionally complete — what's left is verification/polish (smoke test, contract-suite
-coverage judgment call, an explicit checklist pass, a stronger budget-cap test) before
-the PR opens. Once those land: open PR -> green CI -> peer-message
-`c42ea1cb-a9d6-413d-bdcb-fc77fc49abba` (Fable) with PR#+the 05§4 checklist -> wait for
-explicit "APPROVED -- merge" (never merge without it; delta-only re-review if changes
-requested, per M4's precedent) -> merge -> continue the train (M7).
+R1+R2 implemented (`wixy_server/worker/settings.py`, `wixy_server/worker/workspace.py`,
+`deploy/standalone/setup.sh`, `deploy/standalone/README.md`, `wixy_server/tests/
+test_worker_settings.py`, decisions/00065 addendum, forward obligations recorded in the
+M8/M9 sidecars). Once CI is confirmed green post-push: delta-only re-review request to
+`c42ea1cb-a9d6-413d-bdcb-fc77fc49abba` (Fable) -> wait for explicit "APPROVED -- merge"
+(never merge without it) -> merge -> continue the train (M7).
 
 ## Links
 spec/independence/05 (full, esp. §2-4); spec/independence/09 row 6.

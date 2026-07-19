@@ -23,6 +23,20 @@ provisioning is described in the spec, the spec is not itself the spend authoriz
 MUST ask the operator immediately before this milestone's provisioning step, not silently
 assume the ~£10-15 estimate authorizes the charge.
 
+**FORWARD OBLIGATION (from M6's Fable gate review, PR #76 R2, 2026-07-20,
+decisions/00065's "Correction (Fable review, PR #76 R1+R2)")**: drill step 1
+("Org + repos in place") MUST include a LIVE assertion that `main` actually
+rejects a direct push on BOTH the drill site repo and the drill engine fork —
+attempt a direct push with the bot PAT (or an equivalent credential) against
+each repo's `main` and confirm GitHub rejects it (protected branch), not just
+a visual check that the branch-protection setting LOOKS enabled. This is the
+verify/drill assertion Fable's review explicitly asked for; it belongs here
+(not `verify.sh`, a droplet/compose infra-health check with no GitHub-API
+surface) because by drill time (Track P chapter 7) the GitHub-settings chapter
+(Track P.2, where branch protection gets configured per the M8 forward
+obligation below) has already run — see decisions/00065 for the full
+reasoning on why this lands here and not in `verify.sh`.
+
 ## Relevant files + commits
 (fill in as PR lands)
 

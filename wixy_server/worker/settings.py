@@ -17,6 +17,19 @@ compose env file), not two copies that could drift. `site_repo_url` empty means
 own "empty on fleet" precedent): `wixy_server.worker.app` skips workspace
 provisioning entirely in that case, matching the module's pre-M6-slice-2
 behavior exactly (used by every worker test that doesn't care about git).
+
+Fable M6 gate review, R1: `load_worker_settings` pops `WIXY_AI_BOT_PAT` from
+`os.environ` the instant after capturing it into `WorkerSettings.bot_pat` — the
+Agent SDK's spawned CLI child inherits this process's ENTIRE environment by
+default (`wixy_server.worker.runner.build_options` passes no `env=` override,
+and `ClaudeAgentOptions.env` only ADDS keys on top of the inherited set, it
+can't un-inherit one), so leaving the PAT in `os.environ` would hand it
+straight to the agent's own Bash tool (`echo $WIXY_AI_BOT_PAT`) — exactly the
+credential the "agents can only PR, never push to main directly" trust model
+depends on. `ANTHROPIC_API_KEY` is deliberately NOT scrubbed: unlike the bot
+PAT, the SDK child is SUPPOSED to inherit it (see above, its own documented
+contract). See `wixy_server.worker.workspace`'s own module docstring for the
+residual same-uid `/proc/<worker-pid>/environ` channel this does not close.
 """
 
 from __future__ import annotations
@@ -61,7 +74,7 @@ class WorkerSettings:
 def load_worker_settings(
     *, scratch_root: Path | None = None, transcripts_root: Path | None = None
 ) -> WorkerSettings:
-    return WorkerSettings(
+    settings = WorkerSettings(
         port=int(os.environ.get("WIXY_WORKER_PORT", "8100")),
         scratch_root=scratch_root if scratch_root is not None else _DEFAULT_SCRATCH_ROOT,
         transcripts_root=(
@@ -71,3 +84,13 @@ def load_worker_settings(
         site_repo_url=os.environ.get("WIXY_SITE_REPO", ""),
         bot_pat=os.environ.get("WIXY_AI_BOT_PAT", ""),
     )
+    # R1 (module docstring): captured into `settings.bot_pat` above already —
+    # popping it here means no code running later in this process (in
+    # particular no Agent SDK child `wixy_server.worker.runner.run_turn`
+    # spawns) can inherit it via `os.environ`, regardless of how many times
+    # this function is called (`wixy_server.worker.app.create_worker_app`'s
+    # own settings=None fallback calls it a second time in some tests; a
+    # second call correctly sees "" — the var is genuinely gone from this
+    # process, not just from this function's view of it).
+    os.environ.pop("WIXY_AI_BOT_PAT", None)
+    return settings

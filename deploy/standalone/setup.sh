@@ -127,6 +127,32 @@ print_bot_pat_step() {
   ask_secret "Paste the token here" WIXY_AI_BOT_PAT
 }
 
+print_branch_protection_step() {
+  # $1 = human label $2 = repo settings URL (https, no .git) — Fable M6 gate
+  # review R2 (decisions/00065): GitHub-ENFORCED branch protection is what
+  # turns "agents can only PR, never push to main" from a convention into a
+  # guarantee — with this on, even a leaked bot PAT in the agent's own hands
+  # cannot push main directly, so the safety claim stops depending on the
+  # PAT's secrecy at all. setup.sh can't configure this FOR you: it needs
+  # repo-admin access, which the bot PAT deliberately does NOT have (scoped
+  # to contents:write + pull_requests:write only, decisions/00061) — same
+  # shape as the deploy-key/PAT steps above, a one-time manual GitHub
+  # settings page this script pauses for rather than skips.
+  local label="$1" repo_url="$2"
+  echo
+  echo "----------------------------------------------------------------------"
+  echo "  Protect ${label}'s main branch, so nothing -- not even a leaked"
+  echo "  token -- can ever push straight to it:"
+  echo "  ${repo_url}/settings/branches"
+  echo
+  echo "  - Add a branch protection rule for 'main'"
+  echo "  - Require a pull request before merging"
+  echo "  - Require status checks to pass before merging"
+  echo "  - Do NOT add yourself (or anyone) as a bypass actor"
+  echo "----------------------------------------------------------------------"
+  read -r -p "Press Enter once you've set this up on $label... " _
+}
+
 write_env_file() {
   log "Writing $ENV_FILE (root, 0600)..."
   cat > "$ENV_FILE" <<EOF
@@ -198,6 +224,8 @@ main() {
   generate_deploy_key "site-repo"
   print_deploy_key_step "site-repo" "your site repo" "$(https_settings_url_from_ssh "$WIXY_SITE_REPO")"
   print_bot_pat_step "$(https_settings_url_from_ssh "$WIXY_SITE_REPO")"
+  print_branch_protection_step "your site repo" "$(https_settings_url_from_ssh "$WIXY_SITE_REPO")"
+  print_branch_protection_step "your engine fork" "$(https_settings_url_from_ssh "$WIXY_ENGINE_REPO")"
 
   write_env_file
   install_systemd_unit
