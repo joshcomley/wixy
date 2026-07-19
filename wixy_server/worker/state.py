@@ -41,6 +41,12 @@ class WorkerMessage:
 class WorkerConversation:
     conv_id: str
     preamble: str
+    # spec/independence/05 §2's "clones... branches, and ships a PR" — one
+    # fixed branch per conversation, decided at construction (WorkerState.
+    # new_conversation, below) so every turn's push/PR-open targets the same
+    # ref regardless of which turn actually provisions the workspace (the
+    # create-time first message, or a later send if none was given up front).
+    branch_name: str
     sdk_session_id: str | None = None
     messages: list[WorkerMessage] = field(default_factory=list)
     ready: bool = False
@@ -49,6 +55,12 @@ class WorkerConversation:
     activity: str | None = None
     total_cost_usd: float = 0.0
     idempotency_seen: dict[str, int] = field(default_factory=dict)
+    # Has `wixy_server.worker.workspace.provision_workspace` already run for
+    # this conversation — distinct from `ready` (which flips true once
+    # provisioning succeeds, but stays true across every later turn; this
+    # flag is what later turns check to know NOT to re-provision).
+    workspace_provisioned: bool = False
+    pr_url: str | None = None
 
     def next_index(self) -> int:
         return len(self.messages)
@@ -73,6 +85,9 @@ class WorkerState:
     def new_conversation(self, preamble: str) -> WorkerConversation:
         n = self.next_id_n
         self.next_id_n += 1
-        conv = WorkerConversation(conv_id=f"anthropic-{n}", preamble=preamble)
+        conv_id = f"anthropic-{n}"
+        conv = WorkerConversation(
+            conv_id=conv_id, preamble=preamble, branch_name=f"wixy-ai/{conv_id}"
+        )
         self.conversations[conv.conv_id] = conv
         return conv

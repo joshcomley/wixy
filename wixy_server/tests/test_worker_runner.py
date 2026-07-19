@@ -39,7 +39,7 @@ def _result(
 
 @pytest.mark.asyncio
 async def test_text_block_appended_as_assistant_text() -> None:
-    conv = WorkerConversation(conv_id="c1", preamble="edit the site")
+    conv = WorkerConversation(conv_id="c1", preamble="edit the site", branch_name="wixy-ai/c1")
     episodes = [
         ScriptedEpisode(
             messages=[
@@ -61,7 +61,7 @@ async def test_text_block_appended_as_assistant_text() -> None:
 
 @pytest.mark.asyncio
 async def test_tool_use_and_tool_result_both_appended() -> None:
-    conv = WorkerConversation(conv_id="c1", preamble="edit the site")
+    conv = WorkerConversation(conv_id="c1", preamble="edit the site", branch_name="wixy-ai/c1")
     episodes = [
         ScriptedEpisode(
             messages=[
@@ -89,7 +89,7 @@ async def test_tool_use_and_tool_result_both_appended() -> None:
 
 @pytest.mark.asyncio
 async def test_thinking_block_appended_with_thinking_kind() -> None:
-    conv = WorkerConversation(conv_id="c1", preamble="edit the site")
+    conv = WorkerConversation(conv_id="c1", preamble="edit the site", branch_name="wixy-ai/c1")
     episodes = [
         ScriptedEpisode(
             messages=[
@@ -110,7 +110,7 @@ async def test_thinking_block_appended_with_thinking_kind() -> None:
 
 @pytest.mark.asyncio
 async def test_cost_accumulates_from_result_message() -> None:
-    conv = WorkerConversation(conv_id="c1", preamble="edit the site")
+    conv = WorkerConversation(conv_id="c1", preamble="edit the site", branch_name="wixy-ai/c1")
     episodes = [ScriptedEpisode(messages=[_result(total_cost_usd=0.05)])]
     _clients, factory = create_fake_agent_sdk_client_factory(episodes)
     await run_turn(conv, "please help", cwd="/scratch/c1", client_factory=factory)
@@ -120,7 +120,7 @@ async def test_cost_accumulates_from_result_message() -> None:
 
 @pytest.mark.asyncio
 async def test_second_turn_adds_to_existing_cost() -> None:
-    conv = WorkerConversation(conv_id="c1", preamble="edit the site")
+    conv = WorkerConversation(conv_id="c1", preamble="edit the site", branch_name="wixy-ai/c1")
     episodes = [
         ScriptedEpisode(messages=[_result(total_cost_usd=0.05)]),
         ScriptedEpisode(messages=[_result(total_cost_usd=0.03)]),
@@ -134,7 +134,7 @@ async def test_second_turn_adds_to_existing_cost() -> None:
 
 @pytest.mark.asyncio
 async def test_result_error_appends_error_entry() -> None:
-    conv = WorkerConversation(conv_id="c1", preamble="edit the site")
+    conv = WorkerConversation(conv_id="c1", preamble="edit the site", branch_name="wixy-ai/c1")
     episodes = [ScriptedEpisode(messages=[_result(is_error=True, result="ran out of turns")])]
     _clients, factory = create_fake_agent_sdk_client_factory(episodes)
     await run_turn(conv, "please help", cwd="/scratch/c1", client_factory=factory)
@@ -145,7 +145,7 @@ async def test_result_error_appends_error_entry() -> None:
 
 @pytest.mark.asyncio
 async def test_system_init_message_captures_session_id() -> None:
-    conv = WorkerConversation(conv_id="c1", preamble="edit the site")
+    conv = WorkerConversation(conv_id="c1", preamble="edit the site", branch_name="wixy-ai/c1")
     episodes = [
         ScriptedEpisode(
             messages=[
@@ -162,7 +162,7 @@ async def test_system_init_message_captures_session_id() -> None:
 
 @pytest.mark.asyncio
 async def test_resume_passes_captured_session_id_on_next_turn() -> None:
-    conv = WorkerConversation(conv_id="c1", preamble="edit the site")
+    conv = WorkerConversation(conv_id="c1", preamble="edit the site", branch_name="wixy-ai/c1")
     episodes = [
         ScriptedEpisode(
             messages=[SystemMessage(subtype="init", data={"session_id": "sdk-abc-123"}), _result()]
@@ -179,7 +179,7 @@ async def test_resume_passes_captured_session_id_on_next_turn() -> None:
 
 @pytest.mark.asyncio
 async def test_options_pass_cwd_and_budget_through() -> None:
-    conv = WorkerConversation(conv_id="c1", preamble="edit the site")
+    conv = WorkerConversation(conv_id="c1", preamble="edit the site", branch_name="wixy-ai/c1")
     episodes = [ScriptedEpisode(messages=[_result()])]
     clients, factory = create_fake_agent_sdk_client_factory(episodes)
     await run_turn(
@@ -196,7 +196,7 @@ async def test_connection_failure_propagates_not_swallowed() -> None:
     ResultMessage(is_error=True)) must propagate — the caller
     (wixy_server.worker.app) is what turns this into the conversation's own
     failure_reason/failure_message, not run_turn itself."""
-    conv = WorkerConversation(conv_id="c1", preamble="edit the site")
+    conv = WorkerConversation(conv_id="c1", preamble="edit the site", branch_name="wixy-ai/c1")
     episodes = [ScriptedEpisode(raises=ConnectionError("worker lost the CLI subprocess"))]
     _clients, factory = create_fake_agent_sdk_client_factory(episodes)
     with pytest.raises(ConnectionError, match="lost the CLI subprocess"):

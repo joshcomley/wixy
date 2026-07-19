@@ -135,6 +135,28 @@ class TestEdition:
             load_settings(tmp_path)
 
 
+class TestAiBackend:
+    def test_defaults_to_cmd(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("WIXY_AI_BACKEND", raising=False)
+        assert load_settings(tmp_path).ai_backend == "cmd"
+
+    def test_anthropic_from_process_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WIXY_AI_BACKEND", "anthropic")
+        assert load_settings(tmp_path).ai_backend == "anthropic"
+
+    def test_reads_from_env_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("WIXY_AI_BACKEND", raising=False)
+        (tmp_path / ".env").write_text("WIXY_AI_BACKEND=anthropic\n", encoding="utf-8")
+        assert load_settings(tmp_path).ai_backend == "anthropic"
+
+    def test_invalid_value_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("WIXY_AI_BACKEND", "bogus")
+        with pytest.raises(RuntimeError, match="WIXY_AI_BACKEND"):
+            load_settings(tmp_path)
+
+
 class TestContainerized:
     def test_defaults_to_false(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("WIXY_CONTAINERIZED", raising=False)

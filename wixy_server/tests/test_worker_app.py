@@ -7,14 +7,21 @@ episodes so the background agent-run task completes fast and deterministically
 
 from __future__ import annotations
 
+import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
 
+import httpx
+import pytest
 from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ThinkingBlock
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import wixy_server.worker.app as worker_app_module
+from wixy_server.github import GitHubClient
 from wixy_server.tests.fake_agent_sdk import ScriptedEpisode, create_fake_agent_sdk_client_factory
+from wixy_server.tests.fake_github import FakeGitHubState, create_fake_github_app
 from wixy_server.worker.app import create_worker_app
 from wixy_server.worker.settings import WorkerSettings
 
@@ -41,8 +48,20 @@ def _text_episode(text: str, *, cost: float = 0.01) -> ScriptedEpisode:
     )
 
 
-def _settings(tmp_path: Path, *, monthly_budget_usd: float = 40.0) -> WorkerSettings:
-    return WorkerSettings(port=8100, scratch_root=tmp_path, monthly_budget_usd=monthly_budget_usd)
+def _settings(
+    tmp_path: Path,
+    *,
+    monthly_budget_usd: float = 40.0,
+    site_repo_url: str = "",
+    bot_pat: str = "",
+) -> WorkerSettings:
+    return WorkerSettings(
+        port=8100,
+        scratch_root=tmp_path,
+        monthly_budget_usd=monthly_budget_usd,
+        site_repo_url=site_repo_url,
+        bot_pat=bot_pat,
+    )
 
 
 def _poll_until(
@@ -54,6 +73,70 @@ def _poll_until(
             return
         time.sleep(interval_s)
     raise AssertionError(f"condition not met within {timeout_s}s")
+
+
+# ---------------------------------------------------------------------------
+# Real-git workspace integration helpers (spec/independence/05 §2, §4) — a
+# genuine bare repo standing in for github.com, mirroring `test_publisher.py`'s
+# own `bare_origin` fixture / spec/08-testing-acceptance.md §1's "real repos,
+# not mocked" convention. `wixy_server.worker.app.github_https_clone_url` is
+# monkeypatched (per-test) to redirect the CLONE target to this local repo —
+# `owner_repo_slug` (used for the PR-open call) is deliberately left UNpatched
+# so it still derives a realistic slug from a realistic `site_repo_url` value.
+# ---------------------------------------------------------------------------
+
+
+def _run_git(args: list[str], cwd: Path) -> None:
+    subprocess.run(
+        ["git", "-c", "credential.helper=", *args],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+
+def _make_bare_origin(tmp_path: Path) -> Path:
+    remote_root = tmp_path / "remote"
+    bare_dir = remote_root / "origin.git"
+    bare_dir.mkdir(parents=True)
+    _run_git(["init", "--bare", "--initial-branch=main"], cwd=bare_dir)
+
+    seed = remote_root / "seed"
+    _run_git(["clone", str(bare_dir), str(seed)], cwd=remote_root)
+    _run_git(["config", "user.email", "seed@example.com"], cwd=seed)
+    _run_git(["config", "user.name", "Seed"], cwd=seed)
+    (seed / "content").mkdir()
+    (seed / "content" / "index.json").write_text('{"hero": "original"}', encoding="utf-8")
+    _run_git(["add", "."], cwd=seed)
+    _run_git(["commit", "-m", "initial"], cwd=seed)
+    _run_git(["push", "origin", "main"], cwd=seed)
+    return bare_dir
+
+
+def _commit_change_episode(dest: Path, *, text: str, cost: float = 0.01) -> ScriptedEpisode:
+    """A scripted turn that ALSO makes a real commit in `dest` via its
+    `on_query` hook — standing in for what the real agent's own Bash-tool
+    `git commit` would have done (this fake never executes tools for real,
+    see `fake_agent_sdk.py`'s own docstring)."""
+
+    def _make_commit() -> None:
+        (dest / "content" / "index.json").write_text('{"hero": "updated"}', encoding="utf-8")
+        _run_git(["add", "."], cwd=dest)
+        _run_git(["commit", "-m", "wixy-ai: update hero"], cwd=dest)
+
+    return ScriptedEpisode(
+        on_query=_make_commit,
+        messages=[
+            AssistantMessage(content=[TextBlock(text=text)], model="claude-sonnet-5"),
+            _result(total_cost_usd=cost),
+        ],
+    )
+
+
+def _fake_github_client_factory(fake_app: FastAPI) -> Callable[[], GitHubClient]:
+    return lambda: GitHubClient(pat="fake-bot-pat", transport=httpx.ASGITransport(app=fake_app))
 
 
 class TestCreateConversation:
@@ -266,3 +349,214 @@ def test_agent_run_failure_surfaces_as_conversation_failure(tmp_path: Path) -> N
 
     assert status["failureReason"] == "agent_run_failed"
     assert "CLI subprocess died" in status["failureMessage"]
+
+
+class TestWorkspaceIntegration:
+    """The real git-clone/branch/push/PR flow (spec/independence/05 §2) driven
+    end to end through the HTTP API — a REAL local bare repo standing in for
+    github.com (see the module-level helpers above), a REAL commit made via
+    `ScriptedEpisode.on_query` standing in for the agent's own Bash-tool `git
+    commit`, and a fake GitHub app standing in for the REST PR-open call.
+    `github_https_clone_url` is monkeypatched to redirect the clone target at
+    the local bare repo; nothing else in the real code path is faked."""
+
+    def test_full_turn_clones_commits_pushes_and_opens_pr(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bare_origin = _make_bare_origin(tmp_path)
+        monkeypatch.setattr(
+            worker_app_module, "github_https_clone_url", lambda _url: str(bare_origin)
+        )
+        # The first conversation `create_worker_app`'s fresh WorkerState hands
+        # out is always "anthropic-1" (next_id_n starts at 1) — deterministic,
+        # so the scratch dir the episode's on_query hook writes into is known
+        # up front.
+        dest = tmp_path / "scratch" / "anthropic-1"
+        episodes = [_commit_change_episode(dest, text="Updated the hero title for you.")]
+        _clients, agent_factory = create_fake_agent_sdk_client_factory(episodes)
+        github_state = FakeGitHubState()
+        fake_github_app = create_fake_github_app(github_state)
+        app = create_worker_app(
+            settings=_settings(
+                tmp_path / "scratch",
+                site_repo_url="https://github.com/acme/wixy-site.git",
+                bot_pat="fake-bot-pat",
+            ),
+            client_factory=agent_factory,
+            github_client_factory=_fake_github_client_factory(fake_github_app),
+        )
+        with TestClient(app) as client:
+            create = client.post(
+                "/conversations",
+                json={"preamble": "you are a site editor", "firstMessage": "update the hero"},
+            )
+            conv_id = create.json()["convId"]
+            assert conv_id == "anthropic-1"
+
+            def _ready() -> bool:
+                return bool(client.get(f"/conversations/{conv_id}/status").json()["ready"])
+
+            _poll_until(_ready)
+
+            def _has_assistant_reply() -> bool:
+                body = client.get(f"/conversations/{conv_id}/messages").json()
+                return any(m["role"] == "assistant" for m in body["messages"])
+
+            _poll_until(_has_assistant_reply)
+
+            def _pr_opened() -> bool:
+                return len(github_state.pull_request_calls) > 0
+
+            _poll_until(_pr_opened)
+            status = client.get(f"/conversations/{conv_id}/status").json()
+
+        # The branch actually landed on "origin" (the real bare repo).
+        branches = subprocess.run(
+            ["git", "branch", "-a"],
+            cwd=bare_origin,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        assert "wixy-ai/anthropic-1" in branches.stdout
+
+        # The PR-open call carried the right head/base/repo.
+        assert len(github_state.pull_request_calls) == 1
+        pr_call = github_state.pull_request_calls[0]
+        assert pr_call["head"] == "wixy-ai/anthropic-1"
+        assert pr_call["base"] == "main"
+        pr_title = pr_call["title"]
+        assert isinstance(pr_title, str)
+        assert "update the hero" in pr_title
+
+        # No failure recorded, and the PAT never touched disk in the clone.
+        assert status["failureReason"] is None
+        config_text = (dest / ".git" / "config").read_text(encoding="utf-8")
+        assert "fake-bot-pat" not in config_text
+
+    def test_second_turn_pushes_more_commits_without_a_second_pr(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bare_origin = _make_bare_origin(tmp_path)
+        monkeypatch.setattr(
+            worker_app_module, "github_https_clone_url", lambda _url: str(bare_origin)
+        )
+        dest = tmp_path / "scratch" / "anthropic-1"
+        episodes = [
+            _commit_change_episode(dest, text="First update done."),
+            _commit_change_episode(dest, text="Second update done."),
+        ]
+        _clients, agent_factory = create_fake_agent_sdk_client_factory(episodes)
+        github_state = FakeGitHubState()
+        fake_github_app = create_fake_github_app(github_state)
+        app = create_worker_app(
+            settings=_settings(
+                tmp_path / "scratch",
+                site_repo_url="https://github.com/acme/wixy-site.git",
+                bot_pat="fake-bot-pat",
+            ),
+            client_factory=agent_factory,
+            github_client_factory=_fake_github_client_factory(fake_github_app),
+        )
+        with TestClient(app) as client:
+            create = client.post(
+                "/conversations",
+                json={"preamble": "you are a site editor", "firstMessage": "first change"},
+            )
+            conv_id = create.json()["convId"]
+            _poll_until(lambda: len(github_state.pull_request_calls) > 0)
+
+            client.post(
+                f"/conversations/{conv_id}/messages",
+                json={"text": "second change", "idempotencyKey": "k2"},
+            )
+
+            def _second_reply() -> bool:
+                body = client.get(f"/conversations/{conv_id}/messages").json()
+                return any(m.get("text") == "Second update done." for m in body["messages"])
+
+            _poll_until(_second_reply)
+            # Give the post-turn push a moment to complete (no PR-count change
+            # to poll on for the "stayed at one" case).
+            time.sleep(0.2)
+
+        # Still exactly ONE PR opened — the second turn's push just updated
+        # the same branch (GitHub's own auto-update-on-push behavior).
+        assert len(github_state.pull_request_calls) == 1
+
+    def test_turn_with_no_commits_never_pushes_or_opens_pr(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bare_origin = _make_bare_origin(tmp_path)
+        monkeypatch.setattr(
+            worker_app_module, "github_https_clone_url", lambda _url: str(bare_origin)
+        )
+        episodes = [_text_episode("Sure, here's an answer with no edits needed.")]
+        _clients, agent_factory = create_fake_agent_sdk_client_factory(episodes)
+        github_state = FakeGitHubState()
+        fake_github_app = create_fake_github_app(github_state)
+        app = create_worker_app(
+            settings=_settings(
+                tmp_path / "scratch",
+                site_repo_url="https://github.com/acme/wixy-site.git",
+                bot_pat="fake-bot-pat",
+            ),
+            client_factory=agent_factory,
+            github_client_factory=_fake_github_client_factory(fake_github_app),
+        )
+        with TestClient(app) as client:
+            create = client.post(
+                "/conversations",
+                json={"preamble": "you are a site editor", "firstMessage": "what does this do?"},
+            )
+            conv_id = create.json()["convId"]
+
+            def _has_assistant_reply() -> bool:
+                body = client.get(f"/conversations/{conv_id}/messages").json()
+                return any(m["role"] == "assistant" for m in body["messages"])
+
+            _poll_until(_has_assistant_reply)
+            time.sleep(0.2)  # let any (wrongly) pending push/PR settle
+
+        assert github_state.pull_request_calls == []
+        branches = subprocess.run(
+            ["git", "branch", "-a"],
+            cwd=bare_origin,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        assert "wixy-ai/anthropic-1" not in branches.stdout
+
+    def test_bad_repo_url_surfaces_as_workspace_failed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _clients, agent_factory = create_fake_agent_sdk_client_factory([])
+        app = create_worker_app(
+            settings=_settings(
+                tmp_path / "scratch",
+                site_repo_url="https://github.com/acme/does-not-exist.git",
+                bot_pat="fake-bot-pat",
+            ),
+            client_factory=agent_factory,
+        )
+        with TestClient(app) as client:
+            create = client.post(
+                "/conversations",
+                json={"preamble": "you are a site editor", "firstMessage": "go"},
+            )
+            conv_id = create.json()["convId"]
+
+            def _failed() -> bool:
+                body = client.get(f"/conversations/{conv_id}/status").json()
+                return bool(body["failureReason"] is not None)
+
+            _poll_until(_failed)
+            status = client.get(f"/conversations/{conv_id}/status").json()
+            messages = client.get(f"/conversations/{conv_id}/messages").json()["messages"]
+
+        assert status["failureReason"] == "workspace_failed"
+        assert status["ready"] is False
+        assert any(m["kind"] == "error" for m in messages)

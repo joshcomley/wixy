@@ -27,6 +27,9 @@ class FakeGitHubState:
     compare_ahead_by: int = 0
     compare_commits: list[JsonObject] = field(default_factory=list)
     compare_status_code: int = 200
+    pull_request_calls: list[JsonObject] = field(default_factory=list)
+    pull_request_status_code: int = 201
+    next_pull_request_number: int = 1
 
 
 def create_fake_github_app(state: FakeGitHubState | None = None) -> FastAPI:
@@ -54,5 +57,21 @@ def create_fake_github_app(state: FakeGitHubState | None = None) -> FastAPI:
         if state.compare_status_code != 200:
             return Response(status_code=state.compare_status_code, content=b"boom")
         return JSONResponse({"ahead_by": state.compare_ahead_by, "commits": state.compare_commits})
+
+    @app.post("/repos/{owner}/{repo}/pulls")
+    async def create_pull(owner: str, repo: str, request: Request) -> Response:
+        if state.pull_request_status_code != 201:
+            return Response(status_code=state.pull_request_status_code, content=b"boom")
+        body = await request.json()
+        state.pull_request_calls.append(body if isinstance(body, dict) else {})
+        number = state.next_pull_request_number
+        state.next_pull_request_number += 1
+        return JSONResponse(
+            status_code=201,
+            content={
+                "number": number,
+                "html_url": f"https://github.com/{owner}/{repo}/pull/{number}",
+            },
+        )
 
     return app

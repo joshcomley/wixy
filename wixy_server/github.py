@@ -59,6 +59,17 @@ class WorkflowRun:
     created_at: str
 
 
+@dataclass(frozen=True, slots=True)
+class PullRequestInfo:
+    """spec/independence/05 §2: the anthropic-backend worker "ships a PR via
+    her bot deploy key/PAT" — `number`/`html_url` are all that caller
+    (`wixy_server.worker.app`) needs: the PR number to detect "already open,
+    a later push just updates it" and the URL to surface to the owner."""
+
+    number: int
+    html_url: str
+
+
 @dataclass(slots=True)
 class _RetryState:
     last_error: Exception | None = field(default=None)
@@ -201,6 +212,35 @@ class GitHubClient:
             html_url=html_url if isinstance(html_url, str) else "",
             created_at=created_at if isinstance(created_at, str) else "",
         )
+
+    async def create_pull_request(
+        self, repo: str, *, head: str, base: str, title: str, body: str
+    ) -> PullRequestInfo:
+        """`POST /repos/{repo}/pulls` — opens a PR from `head` into `base`,
+        both branches on the SAME repo (the anthropic-backend worker never
+        forks, spec/independence/05 §2: "a clone... branches, and ships a PR"
+        all against the one target repo). GitHub itself 422s if `head` has no
+        commits ahead of `base` — callers (`wixy_server.worker.app`) are
+        expected to check that themselves first (never push/PR an empty
+        turn), so this method doesn't special-case that response."""
+        response = await self._request(
+            "POST",
+            f"/repos/{repo}/pulls",
+            json_body={"head": head, "base": base, "title": title, "body": body},
+        )
+        if response.status_code != 201:
+            raise GitHubApiError(
+                f"create_pull_request on {repo} returned {response.status_code}: "
+                f"{response.text[:500]}"
+            )
+        data = response.json()
+        if not isinstance(data, dict):
+            raise GitHubApiError(f"create_pull_request response malformed: {data!r}")
+        number = data.get("number")
+        html_url = data.get("html_url")
+        if not isinstance(number, int) or not isinstance(html_url, str):
+            raise GitHubApiError(f"create_pull_request response malformed: {data!r}")
+        return PullRequestInfo(number=number, html_url=html_url)
 
     async def compare_commits(self, repo: str, base: str, head: str) -> CompareResult:
         """`GET /repos/{repo}/compare/{base}...{head}` — `head` may name a

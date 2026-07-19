@@ -13,7 +13,7 @@ collected by pytest itself.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field
 
 from claude_agent_sdk import ClaudeAgentOptions
@@ -27,10 +27,20 @@ class ScriptedEpisode:
     output — the messages `receive_response()` yields for the NEXT `query()`
     call. `raises`, if set, is raised from `__aenter__` instead (a connection/
     transport-level failure, distinct from an in-episode `ResultMessage(is_error
-    =True)`, which `messages` itself can already express)."""
+    =True)`, which `messages` itself can already express).
+
+    `on_query`, if set, runs synchronously from `query()` before anything else
+    — this fake never actually executes tools (it just yields canned
+    transcript entries), so a test that needs to prove the WORKER correctly
+    detects/pushes/PRs a real commit (spec/independence/05 §2's "the agent...
+    branches" — i.e. the real thing `wixy_server.worker.workspace.head_sha`
+    diffs against) uses this hook to make one for real in `options.cwd`,
+    standing in for what the agent's own Bash-tool `git commit` would have
+    done."""
 
     messages: Sequence[AgentMessage] = field(default_factory=list)
     raises: Exception | None = None
+    on_query: Callable[[], None] | None = None
 
 
 class FakeAgentSDKClient:
@@ -53,6 +63,8 @@ class FakeAgentSDKClient:
 
     async def query(self, prompt: str, session_id: str = "default") -> None:
         self._current = self._episodes.pop(0) if self._episodes else ScriptedEpisode()
+        if self._current.on_query is not None:
+            self._current.on_query()
         if self._current.raises is not None:
             raise self._current.raises
 
