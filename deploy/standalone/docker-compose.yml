@@ -1,0 +1,68 @@
+# spec/independence/03 §2. `worker` (the AI backend, milestone 6) and `backup`
+# (the nightly state mirror, milestone 6/06) are added by their own later PRs —
+# this file defines exactly what milestone 3 delivers: the server + ingress +
+# the deploy mechanism itself (decisions/00051 #3: Watchtower's image-pull
+# polling IS the deploy — no inbound surface, no CI credentials ever reach the
+# droplet).
+services:
+  wixy:
+    image: ${WIXY_IMAGE:-ghcr.io/joshcomley/wixy:latest}
+    restart: unless-stopped
+    volumes:
+      - wixy-storage:/data
+      # Deploy keys (setup.sh generates them under here, root 0600, spec/
+      # independence/01 §3) — read-only into the container; GIT_SSH_COMMAND
+      # below points git at the site-repo one. Never in .env: a multi-line PEM
+      # doesn't fit the KEY=VALUE format the settings loader/.env files share.
+      - ${WIXY_KEYS_DIR:-/opt/wixy/keys}:/keys:ro
+    # No `env_file:` here on purpose — a relative `.env` path resolves against
+    # THIS file's own directory (the cloned engine checkout), never against
+    # /opt/wixy/.env where setup.sh actually writes it. Every value the
+    # container needs is instead substituted below from the SAME file, via
+    # every script's own `docker compose --env-file /opt/wixy/.env ...` — one
+    # substitution mechanism, no risk of the two silently diverging.
+    environment:
+      # Read straight from /opt/wixy/.env (setup.sh writes all of these):
+      WIXY_EDITION: ${WIXY_EDITION:-standalone}
+      WIXY_ENV: ${WIXY_ENV:-prod}
+      WIXY_PORT: ${WIXY_PORT:-9380}
+      WIXY_DOMAIN: ${WIXY_DOMAIN}
+      WIXY_INDEXABLE: ${WIXY_INDEXABLE:-1}
+      WIXY_SITE_REPO: ${WIXY_SITE_REPO}
+      WIXY_CF_TEAM_DOMAIN: ${WIXY_CF_TEAM_DOMAIN}
+      WIXY_CF_ACCESS_AUD: ${WIXY_CF_ACCESS_AUD}
+      # WIXY_STORAGE_ROOT=/data is the real setting name (wixy_server/
+      # settings.py) — fixed by this compose file, not operator-configured.
+      # WIXY_CONTAINERIZED=1 gates the 0.0.0.0 bind (__main__.py refuses it
+      # outside a container).
+      WIXY_STORAGE_ROOT: /data
+      WIXY_CONTAINERIZED: "1"
+      # IdentitiesOnly so ssh never falls back to trying every other key/agent
+      # identity first; the engine image already pins github.com's host key
+      # into /etc/ssh/ssh_known_hosts (Dockerfile), so StrictHostKeyChecking
+      # can stay at its secure default instead of being disabled here.
+      GIT_SSH_COMMAND: "ssh -i /keys/site-repo -o IdentitiesOnly=yes"
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    # No published ports (spec's own words) — cloudflared is the only path in;
+    # reachable from other services on this compose network as http://wixy:<port>.
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel run --token ${CF_TUNNEL_TOKEN}
+    depends_on:
+      - wixy
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    # Label-scoped (only the `wixy` service above) + ~5 min poll — this IS the
+    # deploy mechanism (decisions/00051 #3): no inbound surface, no CI
+    # credentials ever reach the droplet, it only ever pulls.
+    command: --interval 300 --label-enable --cleanup
+
+volumes:
+  wixy-storage:

@@ -82,3 +82,66 @@ jobs:
       - name: playwright test
         working-directory: e2e
         run: npx playwright test
+
+  # spec/independence/03 §5: the same image boots both editions — this is the
+  # ONLY place that's ever proven (the hub has no Docker; Slots deploys the
+  # fleet edition from source, never the image). Runs on every PR AND every
+  # main push (stricter than the spec's literal "on every main merge" — a
+  # broken image should never merge in the first place).
+  image-boot-proof:
+    runs-on: ubuntu-latest
+    needs: [python, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: |
+          docker build -f deploy/standalone/Dockerfile \
+            --build-arg WIXY_ENGINE_SHA=${{ github.sha }} \
+            -t wixy:ci .
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install wixy (the fake-cmd harness needs it importable)
+        run: pip install -e ".[server,dev]"
+      - name: Start fake cmd on 127.0.0.1:9320 + :9321
+        run: |
+          nohup python deploy/standalone/ci_fake_cmd.py > fake_cmd.log 2>&1 &
+          for _ in $(seq 1 20); do
+            grep -q "fake cmd up" fake_cmd.log 2>/dev/null && break
+            sleep 0.5
+          done
+          cat fake_cmd.log
+      - name: Boot + assert — standalone edition
+        run: |
+          docker run -d --name wixy-standalone --network host \
+            -e WIXY_EDITION=standalone -e WIXY_CONTAINERIZED=1 \
+            -e WIXY_STORAGE_ROOT=/data -e WIXY_PORT=18001 \
+            -e WIXY_DEV_NO_AUTH=1 -e WIXY_ENV=dev \
+            wixy:ci
+          ok=0
+          for _ in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:18001/healthz >/dev/null 2>&1 && { ok=1; break; }
+            sleep 1
+          done
+          docker logs wixy-standalone || true
+          [ "$ok" -eq 1 ] || { echo "standalone /healthz never came up"; exit 1; }
+          curl -fsS http://127.0.0.1:18001/api/version | tee /tmp/version-standalone.json
+          grep -q '"edition":"standalone"' /tmp/version-standalone.json
+          docker rm -f wixy-standalone
+      - name: Boot + assert — fleet edition (cmd faked)
+        run: |
+          docker run -d --name wixy-fleet --network host \
+            -e WIXY_EDITION=fleet -e WIXY_CONTAINERIZED=1 \
+            -e WIXY_STORAGE_ROOT=/data -e WIXY_PORT=18002 \
+            -e WIXY_DEV_NO_AUTH=1 -e WIXY_ENV=dev \
+            wixy:ci
+          ok=0
+          for _ in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:18002/healthz >/dev/null 2>&1 && { ok=1; break; }
+            sleep 1
+          done
+          docker logs wixy-fleet || true
+          [ "$ok" -eq 1 ] || { echo "fleet /healthz never came up"; exit 1; }
+          curl -fsS http://127.0.0.1:18002/api/version | tee /tmp/version-fleet.json
+          grep -q '"edition":"fleet"' /tmp/version-fleet.json
+          docker rm -f wixy-fleet
