@@ -20,6 +20,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from wixy_server.ai.backend import CmdAIBackend
 from wixy_server.auth import JwksCache, build_admin_auth_middleware, jwks_url
 from wixy_server.bootstrap import bootstrap_if_needed
 from wixy_server.chats import ChatRuntimeEntry
@@ -77,6 +78,10 @@ def create_app(
     for real; this function never guesses a default for either path. `cmdchat_client`
     defaults to a real `CmdChatClient()` (localhost cmd, spec/06 §1) — overridable so
     the E2E fixture server can point it at a fake cmd instead (milestone 10 slice 5).
+    Wrapped in `CmdAIBackend` and exposed to routes as `app.state.ai_backend`
+    (spec/independence/05 §1) — `cmdchat_client` itself stays the override point
+    (every existing test constructs a fake-cmd-pointed `CmdChatClient` this way;
+    wrapping it internally means none of them need to change for this extraction).
     `chat_stream_timing` defaults to spec/06 §1's own numbers (1.2s poll, 10s offline
     retry, 15s transcript-lag grace) — overridable so tests don't have to wait out
     real multi-second intervals to exercise the stream's timing-dependent branches.
@@ -105,6 +110,7 @@ def create_app(
     watcher_status = WatcherStatus()
     publish_job: PublishJob | None = None
     chat_client = cmdchat_client if cmdchat_client is not None else CmdChatClient()
+    ai_backend = CmdAIBackend(chat_client, cmd_project=project.cmd_project)
     chat_runtime: dict[str, ChatRuntimeEntry] = {}
     stream_timing = chat_stream_timing if chat_stream_timing is not None else StreamTiming()
     gh_client = (
@@ -166,6 +172,7 @@ def create_app(
     app.state.publish_job = publish_job
     app.state.wixy_repo_root = wixy_repo_root
     app.state.cmdchat_client = chat_client
+    app.state.ai_backend = ai_backend
     app.state.chat_runtime = chat_runtime
     app.state.chat_stream_timing = stream_timing
     app.state.github_client = gh_client

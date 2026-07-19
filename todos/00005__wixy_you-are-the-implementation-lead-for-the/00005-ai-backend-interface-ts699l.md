@@ -19,12 +19,24 @@ thing to wrap, not rewrite. `wixy_server/tests/test_cmdchat.py` (449 lines) is t
 coverage that must stay green untouched in behavior.
 
 ## Relevant files + commits
-(fill in as PR lands)
+`wixy_server/ai/{__init__.py,backend.py}` (new — `AIBackendError`, `ConversationRef`
+frozen dataclass, `AIBackend` Protocol, `CmdAIBackend` wrapping `CmdChatClient`),
+`wixy_server/app.py` (wires `CmdAIBackend`), `wixy_server/routes_chat.py` (full
+rewrite onto `AIBackend`/`ConversationRef`), `wixy_server/tests/test_routes_chat.py`
+(7 functions' fixture renamed to `ai_backend`). Branch: `indep/m5-ai-backend-interface`
+(stacked on M1). decisions/00056 (includes a self-review note on a replace_all
+mistake that briefly mis-renamed 10 unrelated functions — caught via mypy, fixed).
+
+**PR renumbered #70 -> #73.** Same incident as M3's #69->#72: PR #67 (M1) merged with
+`--delete-branch`, GitHub auto-CLOSED every other open PR based on that branch instead
+of retargeting. Branch + commits untouched (head
+`c314752cec3375451ec4e855364967ee04992ecc`), recreated as a fresh PR against `main`
+directly. Not yet Fable-reviewed under either number.
 
 ## How to continue + acceptance
-CI-gated only, auto-merge on green. Acceptance: all existing chat/cmdchat tests pass
-unmodified in assertions (only their target/import may change); no route-visible behavior
-change on the fleet edition.
+CI-gated only, auto-merge on green (PR #73). Acceptance: all existing chat/cmdchat tests
+pass unmodified in assertions (only their target/import may change); no route-visible
+behavior change on the fleet edition — verified via the full suite.
 
 ## Links
 spec/independence/05 §1; spec/independence/09 row 5.
