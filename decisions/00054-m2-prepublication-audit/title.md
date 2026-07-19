@@ -1,0 +1,1 @@
+M2 pre-publication audit: gitleaks clean over full history, owner material moved (photos/+advertising/+downscale_photos.py added to the spec's list), dependency licenses verified MIT/BSD/Apache/MPL-2.0-devonly
