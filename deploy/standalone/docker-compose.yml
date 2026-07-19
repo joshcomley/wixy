@@ -1,9 +1,8 @@
-# spec/independence/03 §2. `worker` (the AI backend, milestone 6) and `backup`
-# (the nightly state mirror, milestone 6/06) are added by their own later PRs —
-# this file defines exactly what milestone 3 delivers: the server + ingress +
-# the deploy mechanism itself (decisions/00051 #3: Watchtower's image-pull
-# polling IS the deploy — no inbound surface, no CI credentials ever reach the
-# droplet).
+# spec/independence/03 §2 (server + ingress + the deploy mechanism itself,
+# decisions/00051 #3: Watchtower's image-pull polling IS the deploy — no
+# inbound surface, no CI credentials ever reach the droplet) plus `worker`
+# (the AI backend, milestone 6, spec/independence/05 §2). `backup` (the
+# nightly state mirror, milestone 6/06) is added by its own later PR.
 services:
   wixy:
     image: ${WIXY_IMAGE:-ghcr.io/joshcomley/wixy:latest}
@@ -31,6 +30,10 @@ services:
       WIXY_SITE_REPO: ${WIXY_SITE_REPO}
       WIXY_CF_TEAM_DOMAIN: ${WIXY_CF_TEAM_DOMAIN}
       WIXY_CF_ACCESS_AUD: ${WIXY_CF_ACCESS_AUD}
+      # spec/independence/05 §1: "chosen by WIXY_AI_BACKEND" — the standalone
+      # edition's whole point is running on her own key, via the `worker`
+      # service below (http://worker:8100, AnthropicAIBackend's own default).
+      WIXY_AI_BACKEND: ${WIXY_AI_BACKEND:-anthropic}
       # WIXY_STORAGE_ROOT=/data is the real setting name (wixy_server/
       # settings.py) — fixed by this compose file, not operator-configured.
       # WIXY_CONTAINERIZED=1 gates the 0.0.0.0 bind (__main__.py refuses it
@@ -46,6 +49,40 @@ services:
       - "com.centurylinklabs.watchtower.enable=true"
     # No published ports (spec's own words) — cloudflared is the only path in;
     # reachable from other services on this compose network as http://wixy:<port>.
+
+  # The AI backend (milestone 6, spec/independence/05 §2) — same image as
+  # `wixy`, different `command:`. "Isolated from the serving container;
+  # shares nothing but an internal queue volume/API" (spec's own words): its
+  # own dedicated scratch volume (never `wixy-storage`), no site-repo deploy
+  # key (it authenticates as the bot PAT instead, decisions/00060 #00061 —
+  # git transport AND the PR-open REST call use the same credential), and no
+  # published ports — reachable from `wixy` alone, by service name, over
+  # compose's own default network (the same implicit network every service in
+  # this file already shares; no explicit `networks:` needed for that).
+  # Egress restriction beyond "no published ports" is best-effort only (spec's
+  # own words: "plain compose cannot express egress allowlists" — a proxy/
+  # iptables sidecar is a noted hardening upgrade, not v1); the documented
+  # egress this container legitimately needs is api.anthropic.com and
+  # github.com/api.github.com, nothing else.
+  worker:
+    image: ${WIXY_IMAGE:-ghcr.io/joshcomley/wixy:latest}
+    command: ["python", "-m", "wixy_server.worker"]
+    restart: unless-stopped
+    volumes:
+      - worker-scratch:/data/worker-scratch
+    environment:
+      # Never reaches `wixy` (see the block comment above) — both secrets
+      # exist ONLY in this service's env.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      WIXY_AI_BOT_PAT: ${WIXY_AI_BOT_PAT}
+      # Same site repo the `wixy` service checks out (WIXY_SITE_REPO above) —
+      # deliberately read from the SAME `.env` value rather than passed
+      # through the internal HTTP call, so there's one source of truth, not
+      # two that could drift (decisions/00060).
+      WIXY_SITE_REPO: ${WIXY_SITE_REPO}
+      WIXY_AI_MONTHLY_BUDGET_USD: ${WIXY_AI_MONTHLY_BUDGET_USD:-40}
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
 
   # Pinned by digest, not :latest (Fable review, PR #69 R2): this container
   # mounts /var/run/docker.sock below — root-equivalent on the droplet — and
@@ -73,10 +110,13 @@ services:
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-    # Label-scoped (only the `wixy` service above) + ~5 min poll — this IS the
-    # deploy mechanism (decisions/00051 #3): no inbound surface, no CI
-    # credentials ever reach the droplet, it only ever pulls.
+    # Label-scoped (`wixy` + `worker` above — both the SAME image, kept in
+    # lockstep so the worker never quietly runs stale code after `wixy`
+    # updates) + ~5 min poll — this IS the deploy mechanism (decisions/00051
+    # #3): no inbound surface, no CI credentials ever reach the droplet, it
+    # only ever pulls.
     command: --interval 300 --label-enable --cleanup
 
 volumes:
   wixy-storage:
+  worker-scratch:
