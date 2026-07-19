@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from builder.content import dotted_get, dotted_set, scan_image_refs, write_json_canonical
+import pytest
+
+from builder.content import (
+    atomic_write_json,
+    dotted_get,
+    dotted_set,
+    scan_image_refs,
+    write_json_canonical,
+)
 from builder.jsontypes import JsonObject
 
 
@@ -62,6 +70,83 @@ class TestCanonicalWrite:
         path = tmp_path / "out.json"
         write_json_canonical(path, {"a": "café"})
         assert "café" in path.read_text(encoding="utf-8")
+
+
+class TestAtomicWrite:
+    """decisions/00053: the crash-safety guarantee `_apply_ops_to_file`
+    (`wixy_server/publisher.py`) now depends on for content files that are
+    concurrently read while a publish is running."""
+
+    def test_writes_correctly_in_the_success_case(self, tmp_path: Path) -> None:
+        path = tmp_path / "out.json"
+        atomic_write_json(path, {"b": 1, "a": 2})
+        assert path.read_text(encoding="utf-8") == '{\n  "a": 2,\n  "b": 1\n}\n'
+
+    def test_matches_write_json_canonical_byte_for_byte(self, tmp_path: Path) -> None:
+        data: JsonObject = {"z": [1, 2, {"y": "x"}], "a": "café"}
+        plain_path = tmp_path / "plain.json"
+        atomic_path = tmp_path / "atomic.json"
+        write_json_canonical(plain_path, data)
+        atomic_write_json(atomic_path, data)
+        assert plain_path.read_bytes() == atomic_path.read_bytes()
+
+    def test_no_tmp_file_left_behind_on_success(self, tmp_path: Path) -> None:
+        atomic_write_json(tmp_path / "out.json", {"a": 1})
+        leftovers = [p for p in tmp_path.iterdir() if p.name != "out.json"]
+        assert leftovers == []
+
+    def test_a_write_failure_leaves_the_original_file_byte_identical(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The exact guarantee decisions/00053 depends on: if the process dies (or
+        anything else raises) partway through writing the tmp file, the real
+        target — the one a concurrent reader actually opens — must be completely
+        untouched, never truncated or partially overwritten."""
+        path = tmp_path / "out.json"
+        atomic_write_json(path, {"original": True})
+        original_bytes = path.read_bytes()
+
+        def _boom(*_args: object, **_kwargs: object) -> None:
+            raise OSError("simulated crash mid-write")
+
+        monkeypatch.setattr("builder.content.write_json_canonical", _boom)
+        with pytest.raises(OSError, match="simulated crash mid-write"):
+            atomic_write_json(path, {"original": False, "corrupted": "should never land"})
+
+        assert path.read_bytes() == original_bytes
+
+    def test_a_write_failure_leaves_no_tmp_file_behind(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = tmp_path / "out.json"
+        atomic_write_json(path, {"original": True})
+
+        def _boom(*_args: object, **_kwargs: object) -> None:
+            raise OSError("simulated crash mid-write")
+
+        monkeypatch.setattr("builder.content.write_json_canonical", _boom)
+        with pytest.raises(OSError):
+            atomic_write_json(path, {"corrupted": "should never land"})
+
+        leftovers = [p for p in tmp_path.iterdir() if p.name != "out.json"]
+        assert leftovers == []
+
+    def test_first_ever_write_with_a_failure_leaves_no_file_at_all(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Same guarantee, but for a target that never existed before — the failure
+        must not leave a corrupted FIRST version behind either."""
+        path = tmp_path / "brand-new.json"
+
+        def _boom(*_args: object, **_kwargs: object) -> None:
+            raise OSError("simulated crash mid-write")
+
+        monkeypatch.setattr("builder.content.write_json_canonical", _boom)
+        with pytest.raises(OSError):
+            atomic_write_json(path, {"a": 1})
+
+        assert not path.exists()
+        assert list(tmp_path.iterdir()) == []
 
 
 class TestScanImageRefs:

@@ -1,0 +1,42 @@
+{
+  "documentation": {
+    "enabled": true,
+    "enabledAt": "2026-07-19T18:27:58.919Z",
+    "stack": {
+      "languages": [
+        "python"
+      ],
+      "frameworks": [
+        "fastapi"
+      ],
+      "markerFiles": [
+        "pyproject.toml",
+        "requirements.txt"
+      ]
+    },
+    "_aim": {
+      "scopeRepo": "joshcomley/Aim.Mcp.Common",
+      "scopePath": "code/aim-doc-mcp",
+      "rulesPath": "code/aim-doc-mcp/RULES.md",
+      "installedAtCommit": "bc5cbbb57934f03560964c87f7fb2ee7352a8c28",
+      "lastSweepAtCommit": "bc5cbbb57934f03560964c87f7fb2ee7352a8c28",
+      "installedAt": "2026-07-19T18:27:58.954Z",
+      "lastSweepAt": "2026-07-19T18:49:03.130Z"
+    },
+    "lastSweepAt": "2026-07-19T18:49:03.098Z",
+    "lastAuditAt": "2026-07-19T19:30:26.385Z",
+    "lastAuditConfidence": 7
+  },
+  "_aim": {
+    "schemaVersion": 1,
+    "self": {
+      "scopeRepo": "joshcomley/Aim.Mcp.Common",
+      "scopePath": "code/aim-mcp",
+      "rulesPath": "code/aim-mcp/RULES.md",
+      "installedAtCommit": "pre-aim",
+      "lastSweepAtCommit": "bc5cbbb57934f03560964c87f7fb2ee7352a8c28",
+      "installedAt": "2026-07-19T18:27:58.954Z",
+      "lastSweepAt": "2026-07-19T18:27:58.954Z"
+    }
+  }
+}
