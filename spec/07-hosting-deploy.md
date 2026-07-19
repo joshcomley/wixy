@@ -112,17 +112,27 @@ Template: `D:\Servers\Tenna\Storage\provision_cf.py` (idempotent; replicates bio
    the stop can report "starting or stopping — try again"; submit the provision and a
    robust stop-wait-start restart as **two separate gate scripts** and expect to run the
    second once or twice.
-4. **Access app** (the critical divergence from the template — the template gates the
-   WHOLE hostname; we must NOT): create ONE self-hosted app named `Wixy Admin (ca)` with
+4. **Access app** — a **SEPARATE, DEDICATED app, isolated from every existing fleet
+   Access app** (operator directive 2026-07-09: the clinic owner, Purdi, will be granted
+   access to THIS tool and nothing else devfleet-hosted; conversely the template's
+   whole-hostname gating must not be copied either). Create ONE self-hosted app named
+   `Wixy Admin (Cottage Aesthetics)` with
    `self_hosted_domains: ["ca.cinnamons.uk/admin", "ca.cinnamons.uk/api/admin"]`,
-   `session_duration: 720h`, and two policies: (a) allow email OTP for the operator's
-   Access email(s) — copy the allow-list emails from the existing apps' policy (the
-   provision template shows the pattern); (b) `non_identity` Service Auth policy for the
-   fleet service token (automated probes). **No app covers `/` — the public site must
-   load with zero auth.** Capture the created app's **AUD** and the account's Access
-   **team domain** (`GET /accounts/{id}/access/organizations`) into
-   `Storage\.env` (`WIXY_CF_ACCESS_AUD`, `WIXY_CF_TEAM_DOMAIN`) — the JWT middleware
-   (04 §9) consumes these.
+   `session_duration: 720h` (30-day sessions — right UX for a non-technical owner), and
+   two policies:
+   (a) allow email OTP for: the operator's existing Access email(s) (copy from a live
+   fleet app policy — the source of truth for which address he actually uses) **plus
+   `cottageaestheticshartlebury@gmail.com` (Purdi)** — her grant lives in THIS app's
+   policy only; never add her, and never add `ca.cinnamons.uk` paths, to any existing
+   fleet app;
+   (b) `non_identity` Service Auth accepting the existing fleet service token (automated
+   probes only — a machine credential; it grants no human anything).
+   **No app covers `/` — the public site must load with zero auth.** Capture the created
+   app's **AUD** and the account's Access **team domain**
+   (`GET /accounts/{id}/access/organizations`) into `Storage\.env`
+   (`WIXY_CF_ACCESS_AUD`, `WIXY_CF_TEAM_DOMAIN`) — the JWT middleware (04 §9) consumes
+   these, and because it pins THIS app's AUD, even a Cloudflare-side misconfiguration
+   granting some other app's session cannot open the admin.
 
 Gate mechanics (global CLAUDE.md): check `D:\Servers\Cmd-Admin\admin-gate\HEARTBEAT`
 freshness (≤~6 s) → write `inbox\req-<id>.cmd.ps1.tmp` → rename to `.cmd.ps1` → poll
@@ -141,6 +151,11 @@ request-admin-action.request_admin_action`. Never hand-run elevated steps.
 4. `https://ca.cinnamons.uk/admin` → CF Access login wall when anonymous; loads with the
    operator identity; `curl` with service-token headers passes; a JWT-stripped direct
    request to 9380 `/admin` (localhost) still 401s (middleware works independently).
+   **Isolation checks**: the new app's AUD differs from every existing fleet app's; an
+   OTP login as `cottageaestheticshartlebury@gmail.com` opens `ca.cinnamons.uk/admin`
+   but the same identity is refused by `cmd.cinnamons.uk` (and the other fleet
+   hostnames); the operator's fleet session does not open the Wixy admin without
+   passing THIS app (separate AUD → middleware 401).
 5. `https://ca.cinnamons.uk/api/admin/state` unauthenticated → 401/302; with service
    token → 200.
 5b. `https://ca.cinnamons.uk/healthz` and `…/internal/ready` from outside → **404**

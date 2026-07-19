@@ -8,6 +8,12 @@ care/verification depth matters even with a decided spec).
   (workspace_id 4287a71f-195c-49fe-ba00-8d029a94de9e), opening prompt = spec/KICKOFF-PROMPT.md verbatim.
 - Confirmed live: workspace_chat, source=user, first assistant turn began the kickoff sequence.
 
+2026-07-09 operator directive relayed to the builder: PUBLISH NOW — milestone 11
+(hosting/deploy) pulled forward ahead of M7–M10, using the spec'd bootstrap-serving path;
+CF Access app must be the SEPARATE `Wixy Admin (Cottage Aesthetics)` app (spec 07 §3.4
+amended) with Purdi's email in ITS policy only — she gets this tool, nothing else
+fleet-hosted. Subsequent milestones auto-deploy via Slots as they merge.
+
 REMAINING (this task stays open): steward peer questions from that session to
 c42ea1cb-a9d6-413d-bdcb-fc77fc49abba (or its handover successor) strictly per the
 consultation contract in spec/KICKOFF-PROMPT.md — answer by pointing at the spec section
