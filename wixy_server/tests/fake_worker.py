@@ -106,6 +106,13 @@ def create_fake_worker_app(state: FakeWorkerState | None = None) -> FastAPI:
         if conv is None:
             return Response(status_code=404)
         items = conv.messages
+        # Matches wixy_server.worker.app.get_messages's own real filtering
+        # exactly (spec/06 §1's "thinking hidden... default-off") -- without
+        # this the fake can't stand in for a real "hides thinking by default"
+        # test at all, it would just return everything regardless of the
+        # query param.
+        if not includeThinking:
+            items = [m for m in items if m.get("kind") != "thinking"]
         if after is not None:
             filtered = []
             for m in items:

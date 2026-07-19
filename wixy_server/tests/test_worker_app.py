@@ -233,6 +233,58 @@ class TestCreateConversation:
         assert response.status_code == 402
         assert "budget" in response.json()["detail"].lower()
 
+    def test_spend_accumulates_across_conversations_until_a_later_one_402s(
+        self, tmp_path: Path
+    ) -> None:
+        """spec §2: "refuses NEW conversations past the cap" — a real
+        multi-conversation test, not just the single already-over-cap case
+        above: two $0.30 conversations against a $0.50 budget cross the cap
+        only on their COMBINED spend, and only the THIRD create attempt
+        (after both have landed) is refused — the first two must both
+        succeed, proving accumulation isn't gated too early either."""
+        episodes = [_text_episode("done one", cost=0.30), _text_episode("done two", cost=0.30)]
+        _clients, factory = create_fake_agent_sdk_client_factory(episodes)
+        app = create_worker_app(
+            settings=_settings(tmp_path, monthly_budget_usd=0.50), client_factory=factory
+        )
+        with TestClient(app) as client:
+            first = client.post(
+                "/conversations",
+                json={"preamble": "you are a site editor", "firstMessage": "first"},
+            )
+            assert first.status_code == 202
+            first_id = first.json()["convId"]
+            _poll_until(
+                lambda: any(
+                    m["role"] == "assistant"
+                    for m in client.get(f"/conversations/{first_id}/messages").json()["messages"]
+                )
+            )
+            time.sleep(0.1)  # let month_to_date_usd actually accumulate
+
+            second = client.post(
+                "/conversations",
+                json={"preamble": "you are a site editor", "firstMessage": "second"},
+            )
+            assert second.status_code == 202, "0.30 spent so far is still under the 0.50 cap"
+            second_id = second.json()["convId"]
+            _poll_until(
+                lambda: any(
+                    m["role"] == "assistant"
+                    for m in client.get(f"/conversations/{second_id}/messages").json()["messages"]
+                )
+            )
+            time.sleep(0.1)
+
+            budget = client.get("/budget").json()
+            assert budget["monthToDateUsd"] == pytest.approx(0.60)
+
+            third = client.post(
+                "/conversations",
+                json={"preamble": "you are a site editor", "firstMessage": "third"},
+            )
+            assert third.status_code == 402, "0.60 spent now exceeds the 0.50 cap"
+
 
 class TestStatus:
     def test_ready_immediately_no_workspace_provisioning_yet(self, tmp_path: Path) -> None:
