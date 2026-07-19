@@ -54,6 +54,29 @@ export interface UpstreamCommit {
   when: string;
 }
 
+/** `wixy_server.routes_engine.get_engine_status`'s `updateRun` field — the
+ * most recent `sync-upstream.yml` run, however it was triggered (button or
+ * schedule). `conclusion` is `null` until the run finishes. */
+export interface EngineUpdateRun {
+  status: string;
+  conclusion: string | null;
+  htmlUrl: string;
+  createdAt: string;
+}
+
+/** `GET /api/admin/engine/status`'s exact shape (spec/independence/04 §2) —
+ * standalone-edition only; a fleet deployment 404s this route entirely. */
+export interface EngineStatus {
+  engineRepo: string;
+  currentSha: string | null;
+  commitsBehind: number | null;
+  changelog: UpstreamCommit[];
+  checkedAt: number | null;
+  stale: boolean;
+  checkError: string | null;
+  updateRun: EngineUpdateRun | null;
+}
+
 /** `wixy_server.chats.conversation_summary`'s exact shape (spec/06 §1) — the
  * shared wire type both `GET/POST /api/admin/chat/conversations` and
  * `GET /api/admin/state`'s `chats` field return. */
@@ -305,6 +328,9 @@ export interface AdminApi {
   getConversations(): Promise<ConversationSummary[]>;
   sendMessage(convId: string, text: string, idempotencyKey: string): Promise<SendMessageResult>;
   renameConversation(convId: string, title: string): Promise<ConversationSummary>;
+  getEngineStatus(): Promise<EngineStatus>;
+  triggerEngineUpdate(): Promise<{ triggered: true }>;
+  triggerEngineRollback(): Promise<{ triggered: true }>;
 }
 
 export function createApi(): AdminApi {
@@ -467,6 +493,19 @@ export function createApi(): AdminApi {
         },
       );
       return parseJson<ConversationSummary>(response);
+    },
+    async getEngineStatus() {
+      return parseJson<EngineStatus>(await fetchWithRetry("/api/admin/engine/status"));
+    },
+    async triggerEngineUpdate() {
+      return parseJson<{ triggered: true }>(
+        await fetchWithRetry("/api/admin/engine/update", { method: "POST" }),
+      );
+    },
+    async triggerEngineRollback() {
+      return parseJson<{ triggered: true }>(
+        await fetchWithRetry("/api/admin/engine/rollback", { method: "POST" }),
+      );
     },
   };
 }

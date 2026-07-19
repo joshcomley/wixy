@@ -55,5 +55,11 @@ still green (578 passed); new env overrides covered by unit tests
 facility has full unit + integration test coverage (`test_redirects.py`,
 `TestRedirects` in `test_routes_public.py`). ruff/mypy/pytest all green.
 
+**DONE — merged PR #67** (2026-07-19, commit d796b0e onward). CI green (python/frontend/
+e2e all pass with real runners once the repo-wide GitHub Actions billing outage — decision
+#13 — resolved). Needed one manual sync-with-main round (CLAUDE.md + two todo-sidecar
+add/add conflicts) after PR #71's independent doc sweep landed on main during the outage;
+resolved by hand, no scope change.
+
 ## Links
 spec/independence/01 §2, §5; spec/independence/09 row 1.

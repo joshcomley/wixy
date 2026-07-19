@@ -593,6 +593,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       const panel = mountSettingsPanel({
         win,
         page: route.page,
+        api,
         themeController,
         zoomController,
         fontScaleController,

@@ -1,10 +1,52 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ApiError, type AdminApi, type EngineStatus } from "../src/api";
 import { initFontScale } from "../src/fontScale";
 import { mountSettingsPanel } from "../src/settingsPanel";
 import { initShortcuts, type ShortcutCommand } from "../src/shortcuts";
 import { initTheme } from "../src/theme";
 import { initThemeEditor } from "../src/themeEditor";
 import { initZoom } from "../src/zoom";
+
+function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
+  return {
+    getState: vi.fn(),
+    getServerCommit: vi.fn(),
+    getContent: vi.fn(),
+    patchDraft: vi.fn(),
+    discardDraft: vi.fn(),
+    getMedia: vi.fn(),
+    uploadMedia: vi.fn(),
+    deleteMedia: vi.fn(),
+    getTheme: vi.fn(),
+    getPublishPreview: vi.fn(),
+    publish: vi.fn(),
+    getPublishes: vi.fn(),
+    restore: vi.fn(),
+    duplicatePage: vi.fn(),
+    deletePage: vi.fn(),
+    createConversation: vi.fn(),
+    getConversations: vi.fn(),
+    sendMessage: vi.fn(),
+    renameConversation: vi.fn(),
+    getEngineStatus: vi.fn(),
+    triggerEngineUpdate: vi.fn(),
+    triggerEngineRollback: vi.fn(),
+    ...overrides,
+  } as AdminApi;
+}
+
+const ENGINE_STATUS: EngineStatus = {
+  engineRepo: "acme/wixy-engine",
+  currentSha: "a".repeat(40),
+  commitsBehind: 2,
+  changelog: [
+    { sha: "abc123", subject: "feat: thing", author: "Jane", when: "2026-07-18T10:00:00Z" },
+  ],
+  checkedAt: 1000,
+  stale: true,
+  checkError: null,
+  updateRun: null,
+};
 
 const TEST_CSS = `
 :root {
@@ -124,6 +166,7 @@ function mountGeneral(win: Window, onResetAll: () => void = vi.fn()) {
   const panel = mountSettingsPanel({
     win,
     page: "general",
+    api: fakeApi(),
     themeController,
     zoomController,
     fontScaleController,
@@ -145,6 +188,7 @@ function mountShortcuts(win: Window) {
   const panel = mountSettingsPanel({
     win,
     page: "shortcuts",
+    api: fakeApi(),
     themeController,
     zoomController,
     fontScaleController,
@@ -167,6 +211,7 @@ function mountAppearance(win: Window, doc: Document) {
   const panel = mountSettingsPanel({
     win,
     page: "appearance",
+    api: fakeApi(),
     themeController,
     zoomController,
     fontScaleController,
@@ -176,6 +221,27 @@ function mountAppearance(win: Window, doc: Document) {
     onResetAll,
   });
   return { panel, themeController, themeEditorController, onNavigate, onResetAll };
+}
+
+function mountEngine(win: Window, api: AdminApi) {
+  const themeController = initTheme(win);
+  const zoomController = initZoom(win);
+  const fontScaleController = initFontScale(win);
+  const shortcutsController = initShortcuts(TEST_COMMANDS, win);
+  const themeEditorController = initThemeEditor(themeController, win);
+  const panel = mountSettingsPanel({
+    win,
+    page: "engine",
+    api,
+    themeController,
+    zoomController,
+    fontScaleController,
+    shortcutsController,
+    themeEditorController,
+    onNavigate: vi.fn(),
+    onResetAll: vi.fn(),
+  });
+  return { panel };
 }
 
 describe("mountSettingsPanel — General", () => {
@@ -553,5 +619,148 @@ describe("mountSettingsPanel — Keyboard Shortcuts", () => {
     // the capture listener must be gone — this keydown should not rebind zoom.in
     keydown(win, { ctrlKey: true, altKey: true, code: "KeyZ" });
     expect(shortcutsController.list().find((i) => i.id === "zoom.in")!.isCustom).toBe(false);
+  });
+});
+
+describe("mountSettingsPanel — Engine", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("shows a loading state before the status arrives", () => {
+    const api = fakeApi({
+      getEngineStatus: vi.fn(() => new Promise<EngineStatus>(() => {})),
+    });
+    const { panel } = mountEngine(fakeWindow(), api);
+    expect(panel.element.textContent).toContain("Loading");
+  });
+
+  it("renders repo/sha/commits-behind/changelog once the status loads", async () => {
+    const api = fakeApi({ getEngineStatus: vi.fn(async () => ENGINE_STATUS) });
+    const { panel } = mountEngine(fakeWindow(), api);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(panel.element.textContent).toContain(ENGINE_STATUS.currentSha!.slice(0, 12));
+    expect(panel.element.textContent).toContain("2 updates available");
+    expect(panel.element.textContent).toContain("feat: thing");
+    expect(panel.element.textContent).toContain("Jane");
+  });
+
+  it("a 404 (fleet edition) shows a graceful not-available message, not an error", async () => {
+    const api = fakeApi({
+      getEngineStatus: vi.fn(async () => {
+        throw new ApiError("not found", 404);
+      }),
+    });
+    const { panel } = mountEngine(fakeWindow(), api);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(panel.element.textContent).toContain("isn't available on this deployment");
+  });
+
+  it("a non-404 error shows a load-error message", async () => {
+    const api = fakeApi({
+      getEngineStatus: vi.fn(async () => {
+        throw new Error("boom");
+      }),
+    });
+    const { panel } = mountEngine(fakeWindow(), api);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(panel.element.textContent).toContain("Couldn't load engine status: boom");
+  });
+
+  it("commitsBehind 0 disables the update button but not rollback", async () => {
+    const api = fakeApi({
+      getEngineStatus: vi.fn(async () => ({ ...ENGINE_STATUS, commitsBehind: 0 })),
+    });
+    const { panel } = mountEngine(fakeWindow(), api);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const buttons = Array.from(panel.element.querySelectorAll("button"));
+    const updateButton = buttons.find((b) => b.textContent === "Get engine updates")!;
+    const rollbackButton = buttons.find((b) => b.textContent === "Undo last update")!;
+    expect(updateButton.disabled).toBe(true);
+    expect(rollbackButton.disabled).toBe(false);
+  });
+
+  it("clicking 'Get engine updates' triggers the update and re-polls", async () => {
+    vi.useFakeTimers();
+    const getEngineStatus = vi.fn(async () => ENGINE_STATUS);
+    const triggerEngineUpdate = vi.fn(async () => ({ triggered: true as const }));
+    const api = fakeApi({ getEngineStatus, triggerEngineUpdate });
+    const { panel } = mountEngine(fakeWindow(), api);
+    await vi.advanceTimersByTimeAsync(0);
+
+    const updateButton = Array.from(panel.element.querySelectorAll("button")).find(
+      (b) => b.textContent === "Get engine updates",
+    )!;
+    updateButton.click();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(triggerEngineUpdate).toHaveBeenCalledTimes(1);
+    expect(getEngineStatus).toHaveBeenCalledTimes(1); // not yet — the re-poll is scheduled 1s out
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(getEngineStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it("clicking 'Undo last update' asks for confirmation before triggering rollback", async () => {
+    const triggerEngineRollback = vi.fn(async () => ({ triggered: true as const }));
+    const api = fakeApi({
+      getEngineStatus: vi.fn(async () => ENGINE_STATUS),
+      triggerEngineRollback,
+    });
+    const win = fakeWindow({ confirmReturns: false });
+    const { panel } = mountEngine(win, api);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const rollbackButton = Array.from(panel.element.querySelectorAll("button")).find(
+      (b) => b.textContent === "Undo last update",
+    )!;
+    rollbackButton.click();
+    await Promise.resolve();
+
+    expect(triggerEngineRollback).not.toHaveBeenCalled();
+  });
+
+  it("a failed trigger shows the error and re-enables the buttons", async () => {
+    const api = fakeApi({
+      getEngineStatus: vi.fn(async () => ENGINE_STATUS),
+      triggerEngineUpdate: vi.fn(async () => {
+        throw new Error("dispatch failed");
+      }),
+    });
+    const { panel } = mountEngine(fakeWindow(), api);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const updateButton = Array.from(panel.element.querySelectorAll("button")).find(
+      (b) => b.textContent === "Get engine updates",
+    )!;
+    updateButton.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(panel.element.textContent).toContain("Couldn't start the update: dispatch failed");
+    expect(updateButton.disabled).toBe(false);
+  });
+
+  it("teardown stops the poll loop — no further getEngineStatus calls", async () => {
+    vi.useFakeTimers();
+    const getEngineStatus = vi.fn(async () => ENGINE_STATUS);
+    const api = fakeApi({ getEngineStatus });
+    const { panel } = mountEngine(fakeWindow(), api);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getEngineStatus).toHaveBeenCalledTimes(1);
+
+    panel.teardown();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(getEngineStatus).toHaveBeenCalledTimes(1);
   });
 });

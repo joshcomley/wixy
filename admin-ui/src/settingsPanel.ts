@@ -11,6 +11,8 @@
 // editor lets them *tailor* one"). Keyboard Shortcuts: list every shortcut
 // (grouped by category), rebind, disable, reset to defaults.
 
+import type { AdminApi, EngineStatus } from "./api";
+import { ApiError } from "./api";
 import { AA_LARGE_TEXT, AA_NORMAL_TEXT, contrastRatioHex, passesAA } from "./contrast";
 import type { FontScaleController } from "./fontScale";
 import type { SettingsPage } from "./router";
@@ -28,6 +30,7 @@ import type { ZoomController } from "./zoom";
 export interface SettingsPanelDeps {
   win: Window;
   page: SettingsPage;
+  api: AdminApi;
   themeController: ThemeController;
   zoomController: ZoomController;
   fontScaleController: FontScaleController;
@@ -77,7 +80,12 @@ export function mountSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
     button.addEventListener("click", () => deps.onNavigate(page));
     return button;
   }
-  tabs.append(tabButton("General", "general"), tabButton("Appearance", "appearance"), tabButton("Keyboard Shortcuts", "shortcuts"));
+  tabs.append(
+    tabButton("General", "general"),
+    tabButton("Appearance", "appearance"),
+    tabButton("Keyboard Shortcuts", "shortcuts"),
+    tabButton("Engine", "engine"),
+  );
   root.appendChild(tabs);
 
   const body = document.createElement("div");
@@ -88,6 +96,7 @@ export function mountSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
     general: renderGeneral,
     appearance: renderAppearance,
     shortcuts: renderShortcuts,
+    engine: renderEngine,
   };
   body.appendChild(pageRenderers[deps.page](deps, teardownFns));
 
@@ -699,6 +708,194 @@ function renderShortcuts(deps: SettingsPanelDeps, teardownFns: Array<() => void>
   teardownFns.push(() => {
     stopCapture();
     unsubscribe();
+  });
+
+  return wrap;
+}
+
+// -- Engine (spec/independence/04 §2, standalone-edition only) --------------
+
+// Poll faster while a triggered update/rollback run is still in flight (no
+// `conclusion` yet), slower once idle — the server's own commits-behind cache
+// is 15 min anyway, so idle polling exists only to notice a run finishing.
+const ENGINE_POLL_IN_FLIGHT_MS = 5_000;
+const ENGINE_POLL_IDLE_MS = 60_000;
+
+function renderEngine(deps: SettingsPanelDeps, teardownFns: Array<() => void>): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "wx-settings-engine";
+  wrap.textContent = "Loading…";
+
+  let cancelled = false;
+  let pollTimer: number | null = null;
+  let triggering = false;
+
+  function schedule(delayMs: number): void {
+    if (cancelled) return;
+    if (pollTimer !== null) clearTimeout(pollTimer);
+    pollTimer = setTimeout(() => void load(), delayMs) as unknown as number;
+  }
+
+  function renderNotAvailable(): void {
+    wrap.innerHTML = "";
+    const p = document.createElement("p");
+    p.className = "wx-settings-hint";
+    p.textContent = "The Engine card isn't available on this deployment.";
+    wrap.appendChild(p);
+  }
+
+  function renderLoadError(message: string): void {
+    wrap.innerHTML = "";
+    const p = document.createElement("p");
+    p.className = "wx-settings-hint";
+    p.textContent = `Couldn't load engine status: ${message}`;
+    wrap.appendChild(p);
+  }
+
+  function commitsBehindLabel(commitsBehind: number | null): string {
+    if (commitsBehind === null) return "Couldn't check for updates yet.";
+    if (commitsBehind === 0) return "Up to date.";
+    return commitsBehind === 1 ? "1 update available." : `${commitsBehind} updates available.`;
+  }
+
+  function updateRunLabel(run: EngineStatus["updateRun"]): string {
+    if (run === null) return "";
+    if (run.conclusion === null) return `Last update: ${run.status}…`;
+    return run.conclusion === "success" ? "Last update: done." : `Last update: ${run.conclusion}.`;
+  }
+
+  function renderLoaded(status: EngineStatus): void {
+    wrap.innerHTML = "";
+
+    const versionSection = settingsSection("Engine version");
+    const shaRow = document.createElement("p");
+    shaRow.className = "wx-settings-hint";
+    shaRow.textContent =
+      status.currentSha !== null ? `Running ${status.currentSha.slice(0, 12)}.` : "Version unknown.";
+    versionSection.appendChild(shaRow);
+
+    const behindRow = document.createElement("p");
+    behindRow.className = "wx-settings-hint";
+    behindRow.textContent = commitsBehindLabel(status.commitsBehind);
+    versionSection.appendChild(behindRow);
+
+    if (status.checkError !== null) {
+      const errRow = document.createElement("p");
+      errRow.className = "wx-settings-hint";
+      errRow.textContent = `Last check failed: ${status.checkError}`;
+      versionSection.appendChild(errRow);
+    }
+
+    if (status.changelog.length > 0) {
+      const changelogTitle = document.createElement("p");
+      changelogTitle.className = "wx-settings-hint";
+      changelogTitle.textContent = "What's new:";
+      versionSection.appendChild(changelogTitle);
+      const list = document.createElement("ul");
+      for (const commit of status.changelog) {
+        const item = document.createElement("li");
+        item.textContent = `${commit.subject} — ${commit.author}`;
+        list.appendChild(item);
+      }
+      versionSection.appendChild(list);
+    }
+    wrap.appendChild(versionSection);
+
+    const actionsSection = settingsSection("Updates");
+
+    const progressRow = document.createElement("p");
+    progressRow.className = "wx-settings-hint";
+    const runLabel = updateRunLabel(status.updateRun);
+    progressRow.hidden = runLabel === "";
+    progressRow.textContent = runLabel;
+    actionsSection.appendChild(progressRow);
+
+    const buttonRow = document.createElement("div");
+    buttonRow.className = "wx-settings-theme-actions";
+
+    const updateButton = document.createElement("button");
+    updateButton.type = "button";
+    updateButton.textContent = "Get engine updates";
+    updateButton.disabled = triggering || status.commitsBehind === 0;
+
+    const rollbackButton = document.createElement("button");
+    rollbackButton.type = "button";
+    rollbackButton.className = "wx-settings-reset-all";
+    rollbackButton.textContent = "Undo last update";
+    rollbackButton.disabled = triggering;
+
+    function onTriggerFailed(action: string, error: unknown): void {
+      triggering = false;
+      progressRow.hidden = false;
+      progressRow.textContent =
+        error instanceof Error ? `Couldn't ${action}: ${error.message}` : `Couldn't ${action}.`;
+      updateButton.disabled = status.commitsBehind === 0;
+      rollbackButton.disabled = false;
+    }
+
+    updateButton.addEventListener("click", () => {
+      triggering = true;
+      updateButton.disabled = true;
+      rollbackButton.disabled = true;
+      progressRow.hidden = false;
+      progressRow.textContent = "Starting…";
+      deps.api
+        .triggerEngineUpdate()
+        .then(() => {
+          triggering = false;
+          schedule(1_000);
+        })
+        .catch((error: unknown) => onTriggerFailed("start the update", error));
+    });
+
+    rollbackButton.addEventListener("click", () => {
+      if (!deps.win.confirm("Undo the last engine update? This restores the previous version."))
+        return;
+      triggering = true;
+      updateButton.disabled = true;
+      rollbackButton.disabled = true;
+      progressRow.hidden = false;
+      progressRow.textContent = "Starting…";
+      deps.api
+        .triggerEngineRollback()
+        .then(() => {
+          triggering = false;
+          schedule(1_000);
+        })
+        .catch((error: unknown) => onTriggerFailed("start the rollback", error));
+    });
+
+    buttonRow.append(updateButton, rollbackButton);
+    actionsSection.appendChild(buttonRow);
+    wrap.appendChild(actionsSection);
+
+    const runInFlight = status.updateRun !== null && status.updateRun.conclusion === null;
+    schedule(runInFlight ? ENGINE_POLL_IN_FLIGHT_MS : ENGINE_POLL_IDLE_MS);
+  }
+
+  function load(): void {
+    deps.api
+      .getEngineStatus()
+      .then((status) => {
+        if (cancelled) return;
+        renderLoaded(status);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        if (error instanceof ApiError && error.status === 404) {
+          renderNotAvailable();
+          return;
+        }
+        renderLoadError(error instanceof Error ? error.message : "unknown error");
+        schedule(ENGINE_POLL_IDLE_MS);
+      });
+  }
+
+  load();
+
+  teardownFns.push(() => {
+    cancelled = true;
+    if (pollTimer !== null) clearTimeout(pollTimer);
   });
 
   return wrap;
