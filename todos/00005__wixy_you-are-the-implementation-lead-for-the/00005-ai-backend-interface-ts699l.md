@@ -45,5 +45,8 @@ CI-gated only, auto-merge on green. Acceptance: all existing chat/cmdchat tests 
 unmodified in assertions (only their target/import may change); no route-visible behavior
 change on the fleet edition. Met: ruff/mypy clean, full suite 578 passed.
 
+PR: https://github.com/joshcomley/wixy/pull/70 (branch indep/m5-ai-backend-interface,
+stacked on #67/M1). Blocked on the same CI outage as #66-69.
+
 ## Links
 spec/independence/05 §1; spec/independence/09 row 5.
