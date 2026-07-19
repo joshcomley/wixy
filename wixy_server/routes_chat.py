@@ -20,8 +20,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from builder.config import ProjectConfig
 from builder.jsontypes import JsonObject
+from wixy_server.ai.backend import AIBackend, AIBackendError, ConversationRef
 from wixy_server.chats import (
     ChatConversation,
     ChatNotFoundError,
@@ -33,14 +33,7 @@ from wixy_server.chats import (
     rename_chat,
     update_session_id,
 )
-from wixy_server.cmdchat import (
-    ChatMessage,
-    ChatStatus,
-    CmdChatClient,
-    CmdChatError,
-    FailedOutcome,
-    ReadyOutcome,
-)
+from wixy_server.cmdchat import ChatMessage, ChatStatus, FailedOutcome, ReadyOutcome
 from wixy_server.storage import ProjectPaths
 
 router = APIRouter(prefix="/api/admin/chat")
@@ -62,19 +55,8 @@ def _title_from_first_message(text: str) -> str:
     return (truncated[:boundary] if boundary > 0 else truncated).rstrip() + "…"
 
 
-def _prompt_for(first_message: str | None) -> str:
-    """spec/06 §1's create-time body: `"<PREAMBLE>\\n\\n---\\n\\n<user's first
-    message>"` — the preamble alone (no trailing separator) when the owner starts
-    a conversation with no opening message (creation without one is explicitly
-    supported: "user clicks 'New conversation', optionally with a first
-    message")."""
-    if first_message is None or first_message.strip() == "":
-        return _PREAMBLE_TEXT
-    return f"{_PREAMBLE_TEXT}\n\n---\n\n{first_message}"
-
-
 async def _track_readiness(
-    client: CmdChatClient, runtime: dict[str, ChatRuntimeEntry], conv_id: str, session_id: str
+    client: AIBackend, runtime: dict[str, ChatRuntimeEntry], conv_id: str, session_id: str
 ) -> None:
     """Runs in the app's own background task group (spawned by `create_conversation`
     below) — drives one conversation's `queued -> ... -> ready`/`failed` transition
@@ -82,8 +64,8 @@ async def _track_readiness(
     `/api/admin/state`'s `chats` snapshot) can report current status without
     themselves ever talking to cmd."""
     try:
-        outcome = await client.wait_until_ready(session_id)
-    except CmdChatError as exc:
+        outcome = await client.wait_until_ready(ConversationRef(id=session_id))
+    except AIBackendError as exc:
         # cmd itself unreachable — spec/06 §3's offline-banner case, distinct from
         # a genuine workspace_failed/cli_failed/timeout (decisions/00031 decision 2).
         runtime[conv_id] = ChatRuntimeEntry(
@@ -105,18 +87,20 @@ class ConversationCreateIn(BaseModel):
 
 @router.post("/conversations", response_model=None)
 async def create_conversation(body: ConversationCreateIn, request: Request) -> JsonObject:
-    project: ProjectConfig = request.app.state.project
     paths: ProjectPaths = request.app.state.paths
-    client: CmdChatClient = request.app.state.cmdchat_client
+    client: AIBackend = request.app.state.ai_backend
     runtime: dict[str, ChatRuntimeEntry] = request.app.state.chat_runtime
     background: TaskGroup = request.app.state.background_tasks
 
     first_message = body.firstMessage
-    prompt = _prompt_for(first_message)
-
+    # spec/06 §1's create-time body ("<PREAMBLE>\n\n---\n\n<first message>", or
+    # the preamble alone with no opening message) is now the BACKEND's own job
+    # (spec/independence/05 §1: create_conversation takes preamble + first_message
+    # separately) — CmdAIBackend combines them identically to what this route used
+    # to do itself; a future backend may combine them differently.
     try:
-        result = await client.new_chat(project.cmd_project, prompt)
-    except CmdChatError as exc:
+        result = await client.create_conversation(_PREAMBLE_TEXT, first_message)
+    except AIBackendError as exc:
         raise HTTPException(status_code=502, detail=f"couldn't reach cmd: {exc}") from exc
 
     conv_id = uuid.uuid4().hex
@@ -127,7 +111,7 @@ async def create_conversation(body: ConversationCreateIn, request: Request) -> J
     )
     conversation = ChatConversation(
         conv_id=conv_id,
-        session_id=result.session_id,
+        session_id=result.id,
         title=title,
         created_at=datetime.now(UTC).isoformat(),
     )
@@ -139,7 +123,7 @@ async def create_conversation(body: ConversationCreateIn, request: Request) -> J
     runtime[conv_id] = ChatRuntimeEntry(status="pending")
 
     async def _track() -> None:
-        await _track_readiness(client, runtime, conv_id, result.session_id)
+        await _track_readiness(client, runtime, conv_id, result.id)
 
     background.start_soon(_track)
 
@@ -174,7 +158,7 @@ class SendMessageIn(BaseModel):
 @router.post("/conversations/{conv_id}/messages", response_model=None)
 async def send_message(conv_id: str, body: SendMessageIn, request: Request) -> JsonObject:
     paths: ProjectPaths = request.app.state.paths
-    client: CmdChatClient = request.app.state.cmdchat_client
+    client: AIBackend = request.app.state.ai_backend
 
     def _find() -> ChatConversation | None:
         return find_chat(paths.chats_json, conv_id)
@@ -184,8 +168,10 @@ async def send_message(conv_id: str, body: SendMessageIn, request: Request) -> J
         raise HTTPException(status_code=404, detail=f"no conversation with id '{conv_id}'")
 
     try:
-        result = await client.send_message(conversation.session_id, body.text, body.idempotencyKey)
-    except CmdChatError as exc:
+        result = await client.send(
+            ConversationRef(id=conversation.session_id), body.text, body.idempotencyKey
+        )
+    except AIBackendError as exc:
         # spec/06 §3: "Send 502 / non-delivery -> Bubble-level error + manual
         # retry with the same idempotency key" — the browser keeps the composer
         # text and reuses the SAME idempotencyKey on its own retry; wixy's job
@@ -307,7 +293,7 @@ async def _wait_until_conversation_ready(
 
 
 async def _stream_events(
-    client: CmdChatClient,
+    client: AIBackend,
     chats_path: Path,
     runtime: dict[str, ChatRuntimeEntry],
     conv_id: str,
@@ -344,8 +330,8 @@ async def _stream_events(
 
     while True:
         try:
-            status = await client.get_status(current_session_id)
-        except CmdChatError as exc:
+            status = await client.status(ConversationRef(id=current_session_id))
+        except AIBackendError as exc:
             if anyio.current_time() - ready_since < timing.transcript_grace_s:
                 await anyio.sleep(timing.poll_interval_s)
                 continue
@@ -353,13 +339,17 @@ async def _stream_events(
             await anyio.sleep(timing.offline_retry_s)
             continue
 
-        if status.handover_state is not None:
+        if client.supports_handover_chains and status.handover_state is not None:
             # spec/06 §1: "Detect + follow: watch .../status for handover_state
             # ... then call .../chain, adopt the LAST element as the live
-            # session id, update chats.json, and continue seamlessly."
+            # session id, update chats.json, and continue seamlessly." Only
+            # meaningful on a backend that has a fleet handover concept at all
+            # (spec/independence/05 §1's supports_handover_chains flag) — the
+            # future anthropic backend never sets handover_state in the first
+            # place, so this stays dead code for it, not a wrong call.
             try:
-                chain = await client.get_chain(current_session_id)
-            except CmdChatError:
+                chain = await client.get_chain(ConversationRef(id=current_session_id))
+            except AIBackendError:
                 chain = []
             leaf = chain[-1] if chain else None
             if leaf is not None and leaf != current_session_id:
@@ -370,10 +360,10 @@ async def _stream_events(
                 continue
 
         try:
-            messages = await client.get_messages(
-                current_session_id, limit=80, include_thinking=include_thinking
+            messages = await client.read(
+                ConversationRef(id=current_session_id), limit=80, include_thinking=include_thinking
             )
-        except CmdChatError as exc:
+        except AIBackendError as exc:
             if anyio.current_time() - ready_since < timing.transcript_grace_s:
                 await anyio.sleep(timing.poll_interval_s)
                 continue
@@ -404,7 +394,7 @@ async def conversation_stream(
     conv_id: str, request: Request, includeThinking: bool = False
 ) -> StreamingResponse:
     paths: ProjectPaths = request.app.state.paths
-    client: CmdChatClient = request.app.state.cmdchat_client
+    client: AIBackend = request.app.state.ai_backend
     runtime: dict[str, ChatRuntimeEntry] = request.app.state.chat_runtime
     timing: StreamTiming = request.app.state.chat_stream_timing
 
