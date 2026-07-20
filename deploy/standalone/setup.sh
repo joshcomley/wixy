@@ -162,6 +162,7 @@ WIXY_PORT=9380
 WIXY_DOMAIN=${WIXY_DOMAIN}
 WIXY_INDEXABLE=1
 WIXY_SITE_REPO=${WIXY_SITE_REPO}
+WIXY_STATE_BACKUP_REPO=${WIXY_STATE_BACKUP_REPO}
 WIXY_CF_TEAM_DOMAIN=${WIXY_CF_TEAM_DOMAIN}
 WIXY_CF_ACCESS_AUD=${WIXY_CF_ACCESS_AUD}
 CF_TUNNEL_TOKEN=${CF_TUNNEL_TOKEN}
@@ -213,6 +214,8 @@ main() {
   echo "what to save, and as what name, along the way)."
   ask "Your domain (e.g. www.yoursite.co.uk)" WIXY_DOMAIN
   ask "Your site repo's SSH URL (e.g. git@github.com:your-org/your-site.git)" WIXY_SITE_REPO
+  ask "Your state-backup repo's SSH URL (e.g. git@github.com:your-org/ca-state-backup.git)" \
+    WIXY_STATE_BACKUP_REPO
   ask_secret "Your Cloudflare Tunnel token" CF_TUNNEL_TOKEN
   ask "Your Cloudflare Access team domain (e.g. yourteam.cloudflareaccess.com)" WIXY_CF_TEAM_DOMAIN
   ask "Your Cloudflare Access app's AUD tag (from the Access app you created)" WIXY_CF_ACCESS_AUD
@@ -226,6 +229,13 @@ main() {
   print_bot_pat_step "$(https_settings_url_from_ssh "$WIXY_SITE_REPO")"
   print_branch_protection_step "your site repo" "$(https_settings_url_from_ssh "$WIXY_SITE_REPO")"
   print_branch_protection_step "your engine fork" "$(https_settings_url_from_ssh "$WIXY_ENGINE_REPO")"
+
+  # write-scoped to ca-state-backup ONLY (spec/independence/06 §2, M7's
+  # FABLE-light gate checklist item) — a separate keypair from the site-repo
+  # one above, never reused across repos.
+  generate_deploy_key "state-backup"
+  print_deploy_key_step "state-backup" "your state-backup repo" \
+    "$(https_settings_url_from_ssh "$WIXY_STATE_BACKUP_REPO")"
 
   write_env_file
   install_systemd_unit

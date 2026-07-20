@@ -106,6 +106,37 @@ no git/build at all, it just re-points `:latest` back at `:rollback` (a pure reg
 retag) so Watchtower's own poll redeploys it. Neither route waits for the workflow to
 finish — the Engine admin-ui card polls `status`'s `updateRun` field for progress.
 
+### AI (`/api/admin/ai/*`, all Auth: CF, **anthropic backend only**)
+
+spec/independence/05 §2. `wixy_server/routes_ai.py`. **404s entirely when
+`settings.ai_backend != "anthropic"`** (the fleet's `cmd` backend has no
+monthly-budget concept at all) — same "this feature doesn't exist here, not a
+permission problem" reasoning as the Engine routes above.
+
+| Method | Path | Handler | Request | Response |
+|---|---|---|---|---|
+| GET | `ai/budget` | `get_ai_budget` | — | `{"monthToDateUsd":float, "monthlyBudgetUsd":float}`; **404** (backend isn't anthropic), **502** (worker unreachable) |
+
+### System (`/api/admin/system/*`, Auth: CF, **both editions**)
+
+spec/independence/06 §3. `wixy_server/routes_system.py`. NOT edition-gated
+(unlike Engine/AI above) — a system-health summary is meaningful on the
+fleet edition too, which just reports `backup: {stale: true, ...}` always
+(no `backup` compose service runs there). One combined fetch for the whole
+Settings → System card.
+
+| Method | Path | Handler | Request | Response |
+|---|---|---|---|---|
+| GET | `system/status` | `get_system_status` | — | `{"backup":{"lastAttemptAt":str\|null,"ok":bool\|null,"verified":bool\|null,"error":str\|null,"stale":bool}, "diskUsage":{"totalBytes":int,"usedBytes":int,"freeBytes":int}, "lastPublish":{"version":int,"when":str}\|null, "engine":{"currentSha":str\|null,"edition":str}}` |
+
+`backup.stale` is `true` whenever no backup has ever run, the last run
+failed or wasn't verified, or the last successful run is more than 48h old
+(spec's own "banner when > 48 h") — computed server-side so the frontend
+never does its own date math. Reads `wixy_server/backup/status.py`'s status
+file (written by the separate `backup` compose service, never by this
+process) off a fixed, non-configurable container path — see that module and
+`routes_system.py`'s own docstrings.
+
 ### Preview / versions / shell / public
 
 | Method | Path | Handler | Auth | Response |
@@ -120,7 +151,8 @@ finish — the Engine admin-ui card polls `status`'s `updateRun` field for progr
 | GET,HEAD | `/{path}` | `routes_public.py:get_path` | none | `FileResponse` from live build (**registered last** — catch-all); 503 plain text; 404 → `404.html` or `"Not found"` |
 
 Router include order in `create_app` is load-bearing: internal → version → preview →
-admin_api → chat → engine → versions → (inline `/admin`, uxer) → static mounts → **public last**.
+admin_api → chat → engine → ai → system → versions → (inline `/admin`, uxer) →
+static mounts → **public last**.
 
 ## 3. Error conventions
 

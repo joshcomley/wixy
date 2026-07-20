@@ -5,11 +5,13 @@
 // but the route/tab always exists; the panel itself degrades gracefully on
 // the fleet edition), "#/settings/ai" (spec/independence/05 §2 —
 // anthropic-backend-only content, same always-exists-but-degrades-gracefully
-// shape as "engine"). No History-API routing — the whole admin is a single
-// served document (wixy_server.app.get_admin_shell: "every /admin sub-route
-// the browser might deep-link to is this same document").
+// shape as "engine"), "#/settings/system" (spec/independence/06 §3 — backup
+// age/disk usage/last publish/engine version, meaningful on BOTH editions,
+// unlike "engine"/"ai" above). No History-API routing — the whole admin is a
+// single served document (wixy_server.app.get_admin_shell: "every /admin
+// sub-route the browser might deep-link to is this same document").
 
-export type SettingsPage = "general" | "appearance" | "shortcuts" | "engine" | "ai";
+export type SettingsPage = "general" | "appearance" | "shortcuts" | "engine" | "ai" | "system";
 
 export type Route =
   | { kind: "pages" }
@@ -57,7 +59,9 @@ export function parseHash(hash: string): Route {
                 ? "engine"
                 : second === "ai"
                   ? "ai"
-                  : "general",
+                  : second === "system"
+                    ? "system"
+                    : "general",
       };
     default:
       return DEFAULT_ROUTE;
@@ -83,6 +87,7 @@ export function routeToHash(route: Route): string {
       if (route.page === "appearance") return "#/settings/appearance";
       if (route.page === "engine") return "#/settings/engine";
       if (route.page === "ai") return "#/settings/ai";
+      if (route.page === "system") return "#/settings/system";
       return "#/settings";
   }
 }

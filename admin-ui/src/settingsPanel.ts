@@ -11,7 +11,7 @@
 // editor lets them *tailor* one"). Keyboard Shortcuts: list every shortcut
 // (grouped by category), rebind, disable, reset to defaults.
 
-import type { AdminApi, AiBudgetStatus, EngineStatus } from "./api";
+import type { AdminApi, AiBudgetStatus, EngineStatus, SystemStatus } from "./api";
 import { ApiError } from "./api";
 import { AA_LARGE_TEXT, AA_NORMAL_TEXT, contrastRatioHex, passesAA } from "./contrast";
 import type { FontScaleController } from "./fontScale";
@@ -86,6 +86,7 @@ export function mountSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
     tabButton("Keyboard Shortcuts", "shortcuts"),
     tabButton("Engine", "engine"),
     tabButton("AI", "ai"),
+    tabButton("System", "system"),
   );
   root.appendChild(tabs);
 
@@ -99,6 +100,7 @@ export function mountSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
     shortcuts: renderShortcuts,
     engine: renderEngine,
     ai: renderAi,
+    system: renderSystem,
   };
   body.appendChild(pageRenderers[deps.page](deps, teardownFns));
 
@@ -979,6 +981,131 @@ function renderAi(deps: SettingsPanelDeps, teardownFns: Array<() => void>): HTML
         }
         renderLoadError(error instanceof Error ? error.message : "unknown error");
         schedule(AI_BUDGET_POLL_MS);
+      });
+  }
+
+  load();
+
+  teardownFns.push(() => {
+    cancelled = true;
+    if (pollTimer !== null) clearTimeout(pollTimer);
+  });
+
+  return wrap;
+}
+
+// -- System (spec/independence/06 §3, both editions -- not edition-gated) ---
+
+const SYSTEM_STATUS_POLL_MS = 60_000;
+const STALE_BACKUP_HINT =
+  "No verified backup in the last 48 hours -- check the backup container's logs.";
+
+function formatWhen(iso: string): string {
+  const parsed = new Date(iso);
+  return Number.isNaN(parsed.getTime()) ? iso : parsed.toLocaleString();
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${Math.round(kb)} KB`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb.toFixed(1)} MB`;
+  return `${(mb / 1024).toFixed(1)} GB`;
+}
+
+function renderSystem(deps: SettingsPanelDeps, teardownFns: Array<() => void>): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "wx-settings-system";
+  wrap.textContent = "Loading…";
+
+  let cancelled = false;
+  let pollTimer: number | null = null;
+
+  function schedule(delayMs: number): void {
+    if (cancelled) return;
+    if (pollTimer !== null) clearTimeout(pollTimer);
+    pollTimer = setTimeout(() => void load(), delayMs) as unknown as number;
+  }
+
+  function renderLoadError(message: string): void {
+    wrap.innerHTML = "";
+    const p = document.createElement("p");
+    p.className = "wx-settings-hint";
+    p.textContent = `Couldn't load system status: ${message}`;
+    wrap.appendChild(p);
+  }
+
+  function renderLoaded(status: SystemStatus): void {
+    wrap.innerHTML = "";
+
+    const backupSection = settingsSection("Backup");
+    const backupRow = document.createElement("p");
+    backupRow.className = "wx-settings-hint";
+    backupRow.textContent =
+      status.backup.lastAttemptAt === null
+        ? "No backup has run yet."
+        : `Last backup: ${formatWhen(status.backup.lastAttemptAt)}${
+            status.backup.ok ? "" : " (failed)"
+          }.`;
+    backupSection.appendChild(backupRow);
+    if (status.backup.stale) {
+      const staleRow = document.createElement("p");
+      staleRow.className = "wx-settings-hint";
+      staleRow.textContent = STALE_BACKUP_HINT;
+      backupSection.appendChild(staleRow);
+    }
+    if (status.backup.error !== null) {
+      const errRow = document.createElement("p");
+      errRow.className = "wx-settings-hint";
+      errRow.textContent = `Last error: ${status.backup.error}`;
+      backupSection.appendChild(errRow);
+    }
+    wrap.appendChild(backupSection);
+
+    const diskSection = settingsSection("Disk usage");
+    const diskRow = document.createElement("p");
+    diskRow.className = "wx-settings-hint";
+    diskRow.textContent = `${formatBytes(status.diskUsage.usedBytes)} used of ${formatBytes(
+      status.diskUsage.totalBytes,
+    )}.`;
+    diskSection.appendChild(diskRow);
+    wrap.appendChild(diskSection);
+
+    const publishSection = settingsSection("Last publish");
+    const publishRow = document.createElement("p");
+    publishRow.className = "wx-settings-hint";
+    publishRow.textContent =
+      status.lastPublish === null
+        ? "Nothing published yet."
+        : `Version ${status.lastPublish.version}, ${formatWhen(status.lastPublish.when)}.`;
+    publishSection.appendChild(publishRow);
+    wrap.appendChild(publishSection);
+
+    const engineSection = settingsSection("Engine");
+    const engineRow = document.createElement("p");
+    engineRow.className = "wx-settings-hint";
+    engineRow.textContent =
+      status.engine.currentSha !== null
+        ? `Running ${status.engine.currentSha.slice(0, 12)} (${status.engine.edition}).`
+        : `Version unknown (${status.engine.edition}).`;
+    engineSection.appendChild(engineRow);
+    wrap.appendChild(engineSection);
+
+    schedule(SYSTEM_STATUS_POLL_MS);
+  }
+
+  function load(): void {
+    deps.api
+      .getSystemStatus()
+      .then((status) => {
+        if (cancelled) return;
+        renderLoaded(status);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        renderLoadError(error instanceof Error ? error.message : "unknown error");
+        schedule(SYSTEM_STATUS_POLL_MS);
       });
   }
 
