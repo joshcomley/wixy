@@ -17,7 +17,11 @@ function text(value: unknown, fallback = ""): string {
 function formatLastModified(iso: string | null): string {
   if (iso === null) return "—";
   const parsed = new Date(iso);
-  return Number.isNaN(parsed.getTime()) ? iso : parsed.toLocaleString();
+  // Medium-date/short-time keeps the value compact — it shares one wrapping
+  // meta line with the other fields in the narrow-viewport stacked layout.
+  return Number.isNaN(parsed.getTime())
+    ? iso
+    : parsed.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
 export interface PagesPanelCallbacks {
@@ -209,30 +213,47 @@ export function renderPagesPanel(pages: PageSummary[], callbacks: PagesPanelCall
     row.dataset["slug"] = page.slug;
     if (page.pendingDelete) row.classList.add("wx-pages-pending-delete");
 
+    // Per-cell classes + data-label attributes are what the narrow-viewport
+    // stylesheet hooks onto to restack each row as a compact list item (label
+    // line, title line, one wrapping meta line, buttons at the bottom). On
+    // wide viewports nothing matches them and the table renders unchanged.
+    const navLabelText = text(page.meta["navLabel"], page.slug);
+    const titleText = text(page.meta["title"], page.slug);
+    if (titleText === navLabelText) row.classList.add("wx-pages-title-dupe");
+
     const navLabel = document.createElement("td");
-    navLabel.textContent = text(page.meta["navLabel"], page.slug);
+    navLabel.className = "wx-pages-cell-label";
+    navLabel.textContent = navLabelText;
     if (page.pendingDelete) navLabel.append(" ", _pendingBadge());
     if (!page.editable) navLabel.append(" ", _unpublishedBadge());
     row.appendChild(navLabel);
 
     const title = document.createElement("td");
-    title.textContent = text(page.meta["title"], page.slug);
+    title.className = "wx-pages-cell-title";
+    title.textContent = titleText;
     row.appendChild(title);
 
     const inNav = document.createElement("td");
+    inNav.className = "wx-pages-cell-meta";
+    inNav.dataset["label"] = "In nav";
     inNav.textContent = page.meta["inNav"] === true ? "Yes" : "No";
     row.appendChild(inNav);
 
     const navOrder = document.createElement("td");
+    navOrder.className = "wx-pages-cell-meta";
+    navOrder.dataset["label"] = "Order";
     navOrder.textContent =
       typeof page.meta["navOrder"] === "number" ? String(page.meta["navOrder"]) : "—";
     row.appendChild(navOrder);
 
     const lastModified = document.createElement("td");
+    lastModified.className = "wx-pages-cell-meta";
+    lastModified.dataset["label"] = "Modified";
     lastModified.textContent = formatLastModified(page.lastModified);
     row.appendChild(lastModified);
 
     const actions = document.createElement("td");
+    actions.className = "wx-pages-cell-actions";
     const editButton = document.createElement("button");
     editButton.type = "button";
     editButton.className = "wx-pages-edit";

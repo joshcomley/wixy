@@ -1997,13 +1997,116 @@ div.wx-media-thumb {
 
   /* Tables don't reflow to narrow viewports gracefully - let them scroll
      horizontally within their own box rather than overflow the page or force
-     every other element to shrink to fit the widest column. */
-  .wx-pages-table,
+     every other element to shrink to fit the widest column. (The pages table
+     is the exception: it restacks as a compact list instead, below.) */
   .wx-history-table,
   .wx-chat-list-table {
     display: block;
     overflow-x: auto;
     white-space: nowrap;
+  }
+
+  /* Pages table → compact stacked list. The desktop columns can't fit a
+     phone (the action buttons scrolled off-screen, reachable only by
+     horizontal scrolling); instead each row becomes a small block: the nav
+     label (+ status badges) on the first line, the title below it (skipped
+     when it just repeats the label), one wrapping meta line of
+     "Label: value" pairs, and the action buttons as a full-width row at the
+     bottom of the item. */
+  .wx-pages-table {
+    display: block;
+  }
+
+  .wx-pages-table thead {
+    display: none;
+  }
+
+  .wx-pages-table tbody {
+    display: block;
+  }
+
+  .wx-pages-table tbody tr {
+    display: block;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--wx-border);
+    line-height: 1.45;
+  }
+
+  .wx-pages-table tbody tr:last-child {
+    border-bottom: none;
+  }
+
+  .wx-pages-table td {
+    display: block;
+    border-bottom: none;
+    padding: 0;
+    white-space: normal;
+  }
+
+  .wx-pages-table td.wx-pages-cell-label {
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+
+  .wx-pages-table td.wx-pages-cell-title {
+    color: var(--wx-muted);
+  }
+
+  .wx-pages-table tr.wx-pages-title-dupe td.wx-pages-cell-title {
+    display: none;
+  }
+
+  /* The three meta cells flow together inline so they share one wrapping
+     line; each contributes its own "Label: " prefix, subsequent pairs get a
+     "·" separator. */
+  .wx-pages-table td.wx-pages-cell-meta {
+    display: inline;
+    color: var(--wx-muted);
+    font-size: 0.75rem;
+  }
+
+  .wx-pages-table td.wx-pages-cell-meta::before {
+    content: attr(data-label) ": ";
+  }
+
+  .wx-pages-table td.wx-pages-cell-meta + td.wx-pages-cell-meta::before {
+    content: " · " attr(data-label) ": ";
+  }
+
+  .wx-pages-table td.wx-pages-cell-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+
+  .wx-pages-table td.wx-pages-cell-actions button {
+    flex: 1 1 auto;
+    margin-left: 0;
+    justify-content: center;
+  }
+
+  /* The inline duplicate/delete forms are flex-wrap rows inside their own
+     full-width row; the row's own padding is dropped (the form pads itself).
+     On a phone each field label takes a full line above its input (instead
+     of wrapping onto the end of the previous input's line), and the buttons
+     share one row with the same touch target as the row actions. */
+  .wx-pages-table tbody tr.wx-pages-duplicate-row,
+  .wx-pages-table tbody tr.wx-pages-delete-row {
+    padding: 0;
+  }
+
+  .wx-pages-inline-form span {
+    flex: 1 1 100%;
+  }
+
+  .wx-pages-inline-form input {
+    flex: 1 1 100%;
+  }
+
+  .wx-pages-inline-form button {
+    flex: 1 1 auto;
+    min-height: 44px;
   }
 
   .wx-pages-edit,
