@@ -78,7 +78,9 @@ One `OpQueue` per session (owned by `shell.ts`); panels take only the `OpQueueLi
 `shell.ts` (chrome + state + the OpQueue + a 60s revalidation loop that reloads on an
 `/api/version` commit change unless mid-edit); `router.ts` (hash routes: pages/edit/theme/
 media/chat/history/settings); `pagesPanel.ts` + `pageSettingsDrawer.ts` (`meta.*` editing);
-`publishDrawer.ts` (review diff + `POST /api/admin/publish` + SSE progress); `historyPanel.ts`
+`publishDrawer.ts` (review diff + `POST /api/admin/publish` + SSE progress; disables Publish
+with a "Nothing to publish" hint when the preview's `opCount` is 0 AND no upstream commits are
+pending — decisions/00071); `historyPanel.ts`
 (ledger + typed-confirm restore + a per-row **Changes** expander showing the version's old→new
 key diff from `GET /api/admin/publishes/{n}/diff`, each row with a **Reinstate** button that
 PATCHes the shown old value back into the current draft — hidden for added-in-that-version keys

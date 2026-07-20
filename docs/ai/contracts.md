@@ -59,9 +59,9 @@ Handler column is `file:func`. "Auth: CF" = gated by the admin middleware. Respo
 | GET | `media` | `get_media` | — | `{"media":[{name,url,source,sizeBytes,width,height,references:[...]}]}`; 503 |
 | POST | `media` | `upload_media` | `multipart/form-data` field `file` | `{name,url,source:"draft",sizeBytes,width,height,references:[]}`; **422** (MediaUpload) |
 | DELETE | `media/{name}` | `delete_media` | — | `{"deleted": true}`; 503, 404, **409** (referenced) |
-| POST | `publish` | `start_publish` | `{"message":str, "expectedRev":int}` | `{"version":int, "sha":str}`; **409** (running/RevConflict), **502** (Publish/Checkout/Build) |
+| POST | `publish` | `start_publish` | `{"message":str, "expectedRev":int}` | `{"version":int, "sha":str}`; **409** (running/RevConflict), **422** (nothing to publish: no staged changes AND no upstream commits pending), **502** (Publish/Checkout/Build) |
 | GET | `publish/stream` | `publish_stream` | — | **SSE**, see §4 |
-| GET | `publish/preview` | `get_publish_preview` | — | `{"changes":{<fileKey>:[{key,kind,old,new}]}, "validate":{ok:bool,errors:[<err>]}}`; 503 |
+| GET | `publish/preview` | `get_publish_preview` | — | `{"changes":{<fileKey>:[{key,kind,old,new}]}, "opCount":int (content ops + staged page adds/deletes), "validate":{ok:bool,errors:[<err>]}}`; 503 |
 | GET | `publishes?limit=` | `get_publishes` | query `limit?` | `{"publishes":[{...LedgerEntry, "live":bool}]}` newest-first; 503 |
 | GET | `publishes/{version}/diff` | `get_publish_version_diff` | — | `{"version":int, "of":int\|null, "changes":{<fileKey>:[{key,kind,old,new}]}}` (publish-preview's `changes` shape; `of` = the previous ledger entry's version, the diff baseline); 503, 404 |
 | POST | `restore` | `post_restore` | `{"version":int}` | `{"version":int, "sha":str, "of":int}`; **409** (running), 503, **422** (Restore) |

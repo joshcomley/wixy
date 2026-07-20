@@ -33,7 +33,13 @@ from builder.render import SiteSource
 from builder.theme import theme_to_dict
 from builder.validate import validate_site
 from wixy_server.chats import ChatConversation, ChatRuntimeEntry, conversation_summary, load_chats
-from wixy_server.checkout import CheckoutError, UpstreamCommit, commits_ahead, current_sha
+from wixy_server.checkout import (
+    CheckoutError,
+    UpstreamCommit,
+    commits_ahead,
+    current_sha,
+    ensure_checkout,
+)
 from wixy_server.ledger import read_ledger
 from wixy_server.live_pointer import load_live_pointer
 from wixy_server.media import (
@@ -484,6 +490,50 @@ async def start_publish(body: PublishIn, request: Request) -> JsonObject:
             status_code=409, detail=f"a publish is already running (job {previous.id})"
         )
 
+    def _preflight() -> None:
+        """decisions/00071's nothing-to-publish refusal, checked BEFORE a job
+        exists: a publish with no staged changes and no upstream commits to
+        merge records a version that changes nothing (same SHA re-ledgered —
+        operator confusion, 2026-07-20). The rev check comes first so a stale
+        rev keeps its 409 contract even on an empty draft; the fetch is the
+        same one the pipeline's own pulling stage would do next anyway, so
+        "upstream pending?" is answered from fresh origin state, not stale
+        local refs. With no checkout yet (a never-published/broken install)
+        the guard stays out of the pipeline's way entirely — its own pulling
+        stage owns that failure mode (and its 502 contract)."""
+        # The overlay load is guarded the same way run_publish's own is
+        # (publisher.py): `current_sha` shells out with the checkout as cwd,
+        # which may not exist at all on a never-published/broken install.
+        base_sha = current_sha(paths.repo) if (paths.repo / ".git").exists() else ""
+        overlay = load_overlay(paths.draft_overlay, default_base_sha=base_sha)
+        if overlay.rev != body.expectedRev:
+            raise RevConflictError(body.expectedRev, overlay.rev)
+        if overlay.ops or overlay.pages_added or overlay.pages_deleted:
+            return  # something staged — always publishable
+        pointer = load_live_pointer(paths)
+        if pointer is None or not (paths.repo / ".git").exists():
+            return
+        ensure_checkout(project.repo, project.default_branch, paths.repo)
+        if not commits_ahead(paths.repo, pointer.sha):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "nothing to publish: no draft changes and no upstream commits "
+                    "since the live version"
+                ),
+            )
+
+    try:
+        await anyio.to_thread.run_sync(_preflight)
+    except RevConflictError as exc:
+        # No job was ever created — the app-wide slot is untouched, so unlike
+        # the run_publish path below there is nothing to roll back.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except CheckoutError as exc:
+        # The preflight fetch hit the same failure the pipeline's pulling
+        # stage would have — same 502 contract.
+        raise HTTPException(status_code=502, detail=f"fetch/merge failed: {exc}") from exc
+
     job = PublishJob(id=uuid.uuid4().hex)
     request.app.state.publish_job = job
     now = datetime.now(UTC).isoformat()
@@ -642,6 +692,10 @@ def _build_publish_preview(
         "changes": {
             file_key: [entry for entry in entries] for file_key, entries in changes.items()
         },
+        # Total staged draft changes — content ops + staged page adds/deletes
+        # (a staged page deletion produces no `changes` entries, so the review
+        # drawer's nothing-to-publish rule can't count those, decisions/00071).
+        "opCount": len(overlay.ops) + len(overlay.pages_added) + len(overlay.pages_deleted),
         "validate": {
             "ok": not filtered_errors,
             "errors": [{k: v for k, v in e.to_dict().items()} for e in filtered_errors],
