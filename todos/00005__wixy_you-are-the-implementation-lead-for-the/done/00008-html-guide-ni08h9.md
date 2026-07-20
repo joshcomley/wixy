@@ -68,7 +68,13 @@ test + full existing suite: 780 passed. `ruff check`/`ruff format --check`/`mypy
 all clean.
 
 ## Relevant files + commits
-Branch `indep/m8-html-guide` (off main, after M7 merged). decisions/00068.
+Branch `indep/m8-html-guide` (off main, after M7 merged), PR #80. Commit `1cf8efe` (the
+full remaining-chapter build + three gap fixes). decisions/00068.
+
+**DONE — merged PR #80** (2026-07-20, merge commit `ccc5d19`). All 5 CI jobs green
+(python, guide-linkcheck, frontend, e2e, image-boot-proof) — `guide-linkcheck` needed
+one re-run after `joshcomley/wixy` was flipped public (operator action, mid-review) to
+resolve its one real external-link check. Remote branch deleted via `--delete-branch`.
 
 ## How to continue + acceptance
 CI-gated (drill validates) — auto-merge on green linkcheck+build. Real acceptance test is
