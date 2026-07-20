@@ -11,6 +11,7 @@ STRING. Kept out of `builder/`, which has zero server imports by design (spec/04
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from bs4 import BeautifulSoup, Tag
 
@@ -18,9 +19,21 @@ from builder.bindings_map import PageBindings, bindings_map_to_dict, extract_bin
 from builder.errors import BuildError
 from builder.jsontypes import JsonObject
 from builder.render import SiteSource, render_page
+from wixy_server.staticcache import fingerprinted_url
 
-EDITOR_SCRIPT_PATH = "/admin/static/editor/editor.js"
-EDITOR_STYLESHEET_PATH = "/admin/static/editor/editor.css"
+_STATIC_EDITOR_DIR = Path(__file__).parent / "static" / "editor"
+
+# Content-fingerprinted (`?v=<hash>`) so a rebuilt editor bundle is a new URL no
+# browser/edge cache can serve stale (decisions/00069 — same stale-bundle bug
+# class as the admin shell's own assets). The preview HTML carrying these URLs
+# is itself `Cache-Control: no-store` (routes_preview.py), so new fingerprints
+# propagate immediately.
+EDITOR_SCRIPT_PATH = fingerprinted_url(
+    "/admin/static/editor/editor.js", _STATIC_EDITOR_DIR / "editor.js"
+)
+EDITOR_STYLESHEET_PATH = fingerprinted_url(
+    "/admin/static/editor/editor.css", _STATIC_EDITOR_DIR / "editor.css"
+)
 BINDINGS_SCRIPT_ID = "wx-bindings"
 
 # Escape the characters that are significant to an HTML parser (not to JSON) before

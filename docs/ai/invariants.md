@@ -165,3 +165,16 @@ decisions/00037). `deploy.py:_pip_install_venv` builds `<slot>/.venv.new` fresh 
 **atomically swaps it in** (`_atomic_swap_dir`), never `shutil.rmtree` in place (an in-place
 delete fails because the build-step runs *using* that venv's interpreter — decisions/00039).
 `deploy.py` hooks are `fn(ctx)`-arity (decisions/00040).
+
+### Inv 22 — Every `/admin/static/*` URL referenced from served HTML is content-fingerprinted
+Any `src`/`href` into `/admin/static/` must carry `?v=<sha256(file)[:10]>`
+(`staticcache.fingerprinted_url`), and the document carrying those URLs must itself be
+non-heuristically-cacheable (`GET /admin` is `Cache-Control: no-cache`; preview HTML is
+`no-store`). Otherwise a redeployed bundle is invisible behind the browser's heuristic cache
+for days — the bug decisions/00069 fixed. The shell is rewritten by construction
+(`app.py:_fingerprint_shell_assets`); anything new that references `/admin/static/*` from a
+served document must go through `fingerprinted_url` too. *Enforced by:*
+`test_staticcache.py` (incl. the no-bare-references guard). *Known exception:* the
+`?uxer=`-gated Uxer compliance-bridge `import()` (AI-tooling-only surface, gitignored
+local build) — see decisions/00069's "what to watch for".
+
