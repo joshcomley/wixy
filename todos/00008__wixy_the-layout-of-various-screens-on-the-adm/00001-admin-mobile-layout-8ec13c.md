@@ -28,16 +28,30 @@ gitignored `e2e/test-results/`), then rebuild the committed bundles
   `?v=<sha256[:10]>` with immutable year-long cache; `/admin` is `no-cache`.
 - **History** — SHIPPED (PR #83, merged 2026-07-20): same restack + restore-confirm form
   stacking; 2 new vitest hooks tests; visual-verified at 1280/390/320px; e2e 9/9, pytest 791.
-- **Media** — implemented (this branch): pure CSS in the ≤720px block (no markup hooks
+- **Media** — SHIPPED (PR #84, merged 2026-07-20): pure CSS in the ≤720px block (no markup hooks
   needed — every target already had a class). Picker dialog → explicit full-width sheet
   with `box-sizing: border-box` (root cause of a 320px clip: no global border-box reset,
   so the base rule's `max-width: 92vw` applied to the content box and padding pushed the
   dialog 32px past the edge); alt-step Back/Use-this-image → full-width 44px row (were
-  21px); Upload joins the shared 44px rule; `.wx-media-meta` wraps. Verified with a
-  baseline→fixed ad-hoc Playwright pass at 390/320px (zero overflow, 44px targets).
-- **Remaining (operator picks order):** Chat, Settings/Theme,
-  and the pre-existing mobile topbar/nav wrap at ≤720px (seen at 320px —
-  untouched so far).
+  21px); Upload joins the shared 44px rule; `.wx-media-meta` wraps.
+- **Chat** — SHIPPED (PR #85, merged 2026-07-20): list restacks (dot pinned to the first
+  line via absolute positioning; title link 44px via `padding: 13px 0` — min-height would
+  re-center wrapped titles away from the dot); conversation header one line (ellipsis
+  title); all chat buttons joined the shared 44px rule; the horizontal-scroll table
+  fallback was DELETED (chat was its last member).
+- **Transcript os.replace hardening** — SHIPPED (PR #86): bounded retry (5 attempts,
+  linear 50ms backoff) on PermissionError around write_transcript's os.replace — root
+  cause of two pytest flakes on hub (Windows Defender/indexer briefly locking the fresh
+  tmp file, WinError 5, tearing down the TestClient lifespan). Windows-only; CI Linux
+  unaffected, but the flake was real on this box.
+- **Settings/Theme** — implemented (this branch): theme color row re-grids at ≤720px
+  (presets were squeezed out of the 1fr cell — now a full-width second line, with pinned
+  grid-row/grid-column so DOM order can't drop Reset onto a third line); color well,
+  hex, font picker/family, shadow input 44px; swatches 18→44px; theme Reset/Reset-all +
+  settings Reset-all joined the shared 44px rule. Steppers + the device switcher stay
+  compact (documented prior decision: topbar-chrome tier).
+- **Remaining:** the pre-existing mobile topbar/nav wrap at ≤720px (seen at 320px —
+  untouched so far). Candidate to raise with the operator once Settings/Theme ships.
 
 ## Working agreements
 
