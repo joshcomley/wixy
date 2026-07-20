@@ -26,9 +26,16 @@ gitignored `e2e/test-results/`), then rebuild the committed bundles
   Inv 22). Root cause of "nothing appears to have changed" after deploys:
   unfingerprinted bundle URLs + heuristic browser caching. Bundles now carry
   `?v=<sha256[:10]>` with immutable year-long cache; `/admin` is `no-cache`.
-- **History** — implemented (this branch): same restack + restore-confirm form
-  stacking; 2 new vitest hooks tests; visual-verified at 1280/390/320px.
-- **Remaining (operator picks order):** Media dialogs, Chat, Settings/Theme,
+- **History** — SHIPPED (PR #83, merged 2026-07-20): same restack + restore-confirm form
+  stacking; 2 new vitest hooks tests; visual-verified at 1280/390/320px; e2e 9/9, pytest 791.
+- **Media** — implemented (this branch): pure CSS in the ≤720px block (no markup hooks
+  needed — every target already had a class). Picker dialog → explicit full-width sheet
+  with `box-sizing: border-box` (root cause of a 320px clip: no global border-box reset,
+  so the base rule's `max-width: 92vw` applied to the content box and padding pushed the
+  dialog 32px past the edge); alt-step Back/Use-this-image → full-width 44px row (were
+  21px); Upload joins the shared 44px rule; `.wx-media-meta` wraps. Verified with a
+  baseline→fixed ad-hoc Playwright pass at 390/320px (zero overflow, 44px targets).
+- **Remaining (operator picks order):** Chat, Settings/Theme,
   and the pre-existing mobile topbar/nav wrap at ≤720px (seen at 320px —
   untouched so far).
 

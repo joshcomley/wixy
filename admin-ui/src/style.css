@@ -2221,7 +2221,8 @@ div.wx-media-thumb {
   .wx-pages-delete,
   .wx-history-view,
   .wx-history-restore,
-  .wx-media-delete {
+  .wx-media-delete,
+  .wx-media-upload-button {
     min-height: 44px;
     display: inline-flex;
     align-items: center;
@@ -2229,6 +2230,31 @@ div.wx-media-thumb {
 
   .wx-media-grid {
     grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  }
+
+  /* The picker dialog becomes a full-width sheet. The base rule's
+     max-width: 92vw applies to the CONTENT box (there is no global
+     border-box reset), so its 32px of horizontal padding pushed the dialog
+     past the viewport edge on the narrowest phones (326px wide at 320px —
+     clipped); sizing the sheet explicitly with border-box fixes that clip
+     and matches the drawer's own ≤720px full-width behavior. */
+  .wx-media-dialog {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  /* Long dimension/size/reference strings wrap onto a second line inside the
+     cell instead of overflowing it. */
+  .wx-media-meta {
+    flex-wrap: wrap;
+  }
+
+  /* The alt-text step's Back / Use-this-image buttons share a full-width row
+     with the standard 44px touch target (they were 21px text buttons). */
+  .wx-media-alt-actions button {
+    flex: 1 1 auto;
+    min-height: 44px;
   }
 
   .wx-chat-bubble {
