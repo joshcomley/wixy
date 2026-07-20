@@ -154,6 +154,10 @@ export interface PublishPreview {
   /** Keyed by page slug, `"_global"`, or `"theme"` — same grouping the ledger's
    * own `changed` summary uses. */
   changes: Record<string, PublishDiffEntry[]>;
+  /** Total staged draft changes: content ops + staged page adds/deletes (a
+   * staged page deletion produces no `changes` entries, so the drawer's
+   * nothing-to-publish rule — decisions/00071 — counts this, not the groups). */
+  opCount: number;
   validate: { ok: boolean; errors: ValidateError[] };
 }
 
@@ -454,6 +458,10 @@ export function createApi(): AdminApi {
       });
       if (response.status === 409) {
         return { kind: "conflict", message: await extractDetail(response, "publish conflict") };
+      }
+      if (response.status === 422) {
+        // decisions/00071's nothing-to-publish refusal — not retryable, shown verbatim.
+        return { kind: "failed", message: await extractDetail(response, "nothing to publish") };
       }
       if (response.status === 502) {
         return { kind: "failed", message: await extractDetail(response, "publish failed") };

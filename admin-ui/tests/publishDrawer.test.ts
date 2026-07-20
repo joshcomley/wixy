@@ -14,6 +14,7 @@ function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
     getTheme: vi.fn(),
     getPublishPreview: vi.fn(async (): Promise<PublishPreview> => ({
       changes: {},
+      opCount: 1,
       validate: { ok: true, errors: [] },
     })),
     publish: vi.fn(async (): Promise<PublishOutcome> => ({ kind: "ok", version: 1, sha: "a".repeat(40) })),
@@ -28,7 +29,13 @@ function noopStream(): PublishStreamHandle {
 describe("mountPublishDrawer", () => {
   it("shows 'No draft changes' when the preview has none", async () => {
     const drawer = mountPublishDrawer({
-      api: fakeApi(),
+      api: fakeApi({
+        getPublishPreview: vi.fn(async (): Promise<PublishPreview> => ({
+          changes: {},
+          opCount: 1, // e.g. a staged page op — content changes alone can be empty
+          validate: { ok: true, errors: [] },
+        })),
+      }),
       expectedRev: 0,
       upstream: [],
       onClose: vi.fn(),
@@ -41,6 +48,78 @@ describe("mountPublishDrawer", () => {
     expect(drawer.element.querySelector(".wx-diff-empty")?.textContent).toBe("No draft changes.");
   });
 
+  it("disables Publish with a hint when there is nothing to ship (no staged changes, no upstream)", async () => {
+    const publish = vi.fn();
+    const drawer = mountPublishDrawer({
+      api: fakeApi({
+        getPublishPreview: vi.fn(async (): Promise<PublishPreview> => ({
+          changes: {},
+          opCount: 0,
+          validate: { ok: true, errors: [] },
+        })),
+        publish,
+      }),
+      expectedRev: 0,
+      upstream: [],
+      onClose: vi.fn(),
+      onPublished: vi.fn(),
+      openStream: noopStream,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const confirmButton = drawer.element.querySelector<HTMLButtonElement>(".wx-publish-confirm");
+    expect(confirmButton?.disabled).toBe(true);
+    expect(drawer.element.querySelector(".wx-publish-empty-hint")?.textContent).toContain(
+      "Nothing to publish",
+    );
+    confirmButton?.click();
+    await Promise.resolve();
+    expect(publish).not.toHaveBeenCalled();
+  });
+
+  it("keeps Publish enabled when only upstream commits are pending (they merge on publish)", async () => {
+    const drawer = mountPublishDrawer({
+      api: fakeApi({
+        getPublishPreview: vi.fn(async (): Promise<PublishPreview> => ({
+          changes: {},
+          opCount: 0,
+          validate: { ok: true, errors: [] },
+        })),
+      }),
+      expectedRev: 0,
+      upstream: [{ sha: "abc123", subject: "fix typo", author: "AI", when: "2026-01-01" }],
+      onClose: vi.fn(),
+      onPublished: vi.fn(),
+      openStream: noopStream,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(
+      drawer.element.querySelector<HTMLButtonElement>(".wx-publish-confirm")?.disabled,
+    ).toBe(false);
+    expect(drawer.element.querySelector(".wx-publish-empty-hint")).toBeNull();
+  });
+
+  it("keeps Publish enabled when staged page ops leave the content diff empty", async () => {
+    const drawer = mountPublishDrawer({
+      api: fakeApi(), // default preview: changes {}, opCount 1
+      expectedRev: 0,
+      upstream: [],
+      onClose: vi.fn(),
+      onPublished: vi.fn(),
+      openStream: noopStream,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(
+      drawer.element.querySelector<HTMLButtonElement>(".wx-publish-confirm")?.disabled,
+    ).toBe(false);
+    expect(drawer.element.querySelector(".wx-publish-empty-hint")).toBeNull();
+  });
+
   it("renders diff entries grouped by page/global/theme", async () => {
     const api = fakeApi({
       getPublishPreview: vi.fn(async () => ({
@@ -48,6 +127,7 @@ describe("mountPublishDrawer", () => {
           index: [{ key: "hero.title", kind: "text", old: "Old", new: "New" }],
           theme: [{ key: "colors.cream", kind: "theme", old: "#FFF", new: "#000" }],
         },
+        opCount: 2,
         validate: { ok: true, errors: [] },
       })),
     });
@@ -82,6 +162,7 @@ describe("mountPublishDrawer", () => {
             },
           ],
         },
+        opCount: 1,
         validate: { ok: true, errors: [] },
       })),
     });
@@ -126,6 +207,7 @@ describe("mountPublishDrawer", () => {
     const api = fakeApi({
       getPublishPreview: vi.fn(async () => ({
         changes: {},
+        opCount: 1,
         validate: {
           ok: false,
           errors: [{ code: "missing-image", message: "image file 'x.jpg' does not exist", file: "content/index.json" }],

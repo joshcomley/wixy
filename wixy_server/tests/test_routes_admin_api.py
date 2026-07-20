@@ -830,6 +830,13 @@ class TestPostPublish:
             # app.state (run_publish's own contract: the job never "started" for
             # this case) — a subsequent, correctly-revved publish must still go
             # through rather than 409-locking forever.
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [{"file": "index", "path": "hero.title", "value": "Real change"}],
+                },
+            )
             good_response = client.post(
                 "/api/admin/publish",
                 json={"message": "test", "expectedRev": _current_rev(client)},
@@ -871,6 +878,13 @@ class TestPostPublish:
     ) -> None:
         app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
         with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [{"file": "index", "path": "hero.title", "value": "Real change"}],
+                },
+            )
             client.post(
                 "/api/admin/publish",
                 json={"message": "test", "expectedRev": _current_rev(client)},
@@ -878,6 +892,55 @@ class TestPostPublish:
             state = client.get("/api/admin/state").json()
         assert state["publishJob"]["stage"] == "done"
         assert state["publishJob"]["version"] == 1
+
+    def test_an_empty_draft_with_nothing_upstream_is_a_422_not_a_noop_version(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        """decisions/00071 — publishing with no staged changes AND no upstream
+        commits to merge records a version that changes nothing (the live SHA
+        stays the same), which read as a broken/mysterious history entry. The
+        route refuses it instead; the review drawer disables Publish in the
+        same situation."""
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/publish",
+                json={"message": "test", "expectedRev": _current_rev(client)},
+            )
+            ledger = client.get("/api/admin/publishes").json()["publishes"]
+        assert response.status_code == 422
+        assert "nothing to publish" in response.json()["detail"]
+        # No no-op version was recorded: still just the bootstrap entry.
+        assert [p["version"] for p in ledger] == [0]
+
+    def test_an_empty_draft_with_upstream_commits_pending_publishes(
+        self, storage_root: Path, wixy_repo_root_bare: Path, tmp_path: Path
+    ) -> None:
+        """The flip side of the 422 guard (decisions/00071): an empty draft is
+        exactly right when upstream (AI-lane) commits are waiting to merge —
+        that publish is the designed 'upstream riding through' case and must
+        NOT be refused."""
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            # An upstream commit lands at origin after the app's bootstrap.
+            work = tmp_path / "upstream-work"
+            _git(["clone", str(tmp_path / "origin.git"), str(work)], tmp_path)
+            _git(["config", "user.email", "ai@example.com"], work)
+            _git(["config", "user.name", "AI"], work)
+            index_json = work / "content" / "index.json"
+            content = json.loads(index_json.read_text(encoding="utf-8"))
+            content["hero"]["title"] = "Upstream Title"
+            index_json.write_text(json.dumps(content), encoding="utf-8")
+            _git(["add", "."], work)
+            _git(["commit", "-m", "AI: retitle"], work)
+            _git(["push", "origin", "main"], work)
+
+            response = client.post(
+                "/api/admin/publish",
+                json={"message": "merge upstream", "expectedRev": _current_rev(client)},
+            )
+        assert response.status_code == 200
+        assert response.json()["version"] == 1
 
 
 class TestPublishStream:
@@ -1035,6 +1098,36 @@ class TestGetPublishVersionDiff:
 
 
 class TestGetPublishPreview:
+    def test_op_count_covers_content_ops_and_staged_page_ops(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        """The review drawer disables Publish when there's nothing to ship
+        (decisions/00071) — `opCount` is its signal, and it must count staged
+        page deletions too, since those produce no `changes` entries."""
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            assert client.get("/api/admin/publish/preview").json()["opCount"] == 0
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [
+                        {"file": "index", "path": "hero.title", "value": "One"},
+                        {"file": "index", "path": "meta.title", "value": "Two"},
+                    ],
+                },
+            )
+            assert client.get("/api/admin/publish/preview").json()["opCount"] == 2
+            # Discard, then stage ONLY a page deletion.
+            client.delete("/api/admin/draft")
+            client.post(
+                "/api/admin/pages/delete",
+                json={"slug": "about", "expectedRev": _current_rev(client)},
+            )
+            preview = client.get("/api/admin/publish/preview").json()
+        assert preview["changes"] == {}
+        assert preview["opCount"] == 1
+
     def test_a_text_op_is_diffed_with_old_and_new_values(
         self, storage_root: Path, wixy_repo_root: Path
     ) -> None:
@@ -1079,7 +1172,11 @@ class TestGetPublishPreview:
         with TestClient(app) as client:
             response = client.get("/api/admin/publish/preview")
         assert response.status_code == 200
-        assert response.json() == {"changes": {}, "validate": {"ok": True, "errors": []}}
+        assert response.json() == {
+            "changes": {},
+            "opCount": 0,
+            "validate": {"ok": True, "errors": []},
+        }
 
     def test_a_genuinely_missing_image_is_a_validate_error(
         self, storage_root: Path, wixy_repo_root_with_image_binding: Path
@@ -1257,6 +1354,13 @@ class TestGetVersionAsset:
     ) -> None:
         app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
         with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [{"file": "index", "path": "hero.title", "value": "Archived Title"}],
+                },
+            )
             client.post(
                 "/api/admin/publish", json={"message": "first", "expectedRev": _current_rev(client)}
             )
@@ -1268,6 +1372,16 @@ class TestGetVersionAsset:
     ) -> None:
         app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
         with TestClient(app) as client:
+            # The archived build must keep the initial content — stage the
+            # required change (decisions/00071: empty publishes are refused)
+            # on a DIFFERENT page so index.html still says "Original Title".
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [{"file": "about", "path": "intro.body", "value": "Changed about"}],
+                },
+            )
             client.post(
                 "/api/admin/publish", json={"message": "first", "expectedRev": _current_rev(client)}
             )

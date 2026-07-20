@@ -147,6 +147,20 @@ export function mountPublishDrawer(deps: PublishDrawerDeps): PublishDrawer {
     confirmButton.textContent = "Publish";
     body.appendChild(confirmButton);
 
+    // decisions/00071 — with no staged changes AND no upstream commits to
+    // merge, a publish records a version that changes nothing (the live SHA
+    // is simply re-ledgered), which reads as a broken history entry. The
+    // server refuses it (422); the drawer makes the same call visible up
+    // front by disabling Publish with the reason next to it. Upstream
+    // commits alone keep it enabled — merging them IS the change.
+    if (preview.opCount === 0 && deps.upstream.length === 0) {
+      confirmButton.disabled = true;
+      const hint = document.createElement("p");
+      hint.className = "wx-publish-empty-hint";
+      hint.textContent = "Nothing to publish — make an edit first.";
+      body.appendChild(hint);
+    }
+
     function resetToIdle(): void {
       confirmButton.disabled = false;
       messageInput.disabled = false;

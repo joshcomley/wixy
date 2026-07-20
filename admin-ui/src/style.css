@@ -32,6 +32,10 @@
   --wx-surface: #f3f5f9;
   --wx-canvas: #eaedf3;
   --wx-border: #dde2ea;
+  /* Raised-button fill (decisions/00071): one step LIGHTER than the surface
+     the button sits on, so secondary actions read as tappable chips instead
+     of blending into their card. */
+  --wx-btn-bg: #ffffff;
   /* Same split as --wx-brand-blue/--wx-brand-blue-text (decisions/00045):
      --wx-danger is the FILL (paired with white text - .wx-toast-error,
      .wx-chat-offline-banner), --wx-danger-text is the same hue used as
@@ -62,6 +66,7 @@
   --wx-surface: #1a1d26;
   --wx-canvas: #14161d;
   --wx-border: #2d3140;
+  --wx-btn-bg: #2e3446;
   --wx-danger: #cf3a3a;
   --wx-danger-text: #f87171;
   --wx-danger-tint: #3a1e1e;
@@ -86,6 +91,7 @@
     --wx-surface: #1a1d26;
     --wx-canvas: #14161d;
     --wx-border: #2d3140;
+    --wx-btn-bg: #2e3446;
     --wx-danger: #cf3a3a;
     --wx-danger-text: #f87171;
     --wx-danger-tint: #3a1e1e;
@@ -1083,7 +1089,7 @@ div.wx-media-thumb {
   padding: 5px 10px;
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-border);
-  background: var(--wx-surface);
+  background: var(--wx-btn-bg);
   cursor: pointer;
   text-decoration: none;
   color: var(--wx-ink);
@@ -1104,7 +1110,7 @@ div.wx-media-thumb {
   padding: 4px 8px;
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-border);
-  background: var(--wx-surface);
+  background: var(--wx-btn-bg);
   color: var(--wx-ink);
   cursor: pointer;
   flex: none;
@@ -1137,8 +1143,23 @@ div.wx-media-thumb {
   padding: 4px 8px;
 }
 
+.wx-history-confirm button {
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  cursor: pointer;
+}
+
 .wx-history-error {
   color: var(--wx-danger-text);
+}
+
+/* The review drawer's nothing-to-publish note (decisions/00071). */
+.wx-publish-empty-hint {
+  margin: 8px 0 0;
+  color: var(--wx-muted);
+  font-size: 0.75rem;
 }
 
 /* -- Settings panel (Uxer's Settings-view + Keyboard-Shortcuts mandate) --------- */
@@ -2320,14 +2341,16 @@ div.wx-media-thumb {
     min-height: 44px;
   }
 
-  /* History table → compact stacked list (same pattern as the pages table
-     above): the version on the first line, the timestamp under it (muted —
-     it's self-identifying, so it carries no "Label: " prefix), the message
-     on its own line, one wrapping meta line of "Label: value" pairs
-     (author/SHA/changed), and View/Restore as a full-width button row at the
-     bottom. */
+  /* History table → a stack of separate CARDS (operator round 4,
+     decisions/00071 — "put a small gap between each item, so each is its own
+     card; with all the detail it becomes difficult to discern end and
+     start"): the table frame dissolves, each version is its own bordered
+     card, and a restore-confirm/Changes detail row fuses onto the bottom of
+     the card it belongs to (negative margin eats the flex gap). */
   .wx-history-table {
     display: block;
+    background: transparent;
+    border: none;
   }
 
   .wx-history-table thead {
@@ -2335,18 +2358,24 @@ div.wx-media-thumb {
   }
 
   .wx-history-table tbody {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
   }
 
   .wx-history-table tbody tr {
     display: block;
     padding: 10px 12px;
-    border-bottom: 1px solid var(--wx-border);
+    background: var(--wx-surface);
+    border: 1px solid var(--wx-border);
+    border-radius: var(--wx-radius);
+    overflow: hidden;
     line-height: 1.45;
   }
 
-  .wx-history-table tbody tr:last-child {
-    border-bottom: none;
+  .wx-history-table tbody tr:has(+ .wx-history-confirm-row),
+  .wx-history-table tbody tr:has(+ .wx-history-diff-row) {
+    border-radius: var(--wx-radius) var(--wx-radius) 0 0;
   }
 
   .wx-history-table td {
@@ -2395,24 +2424,42 @@ div.wx-media-thumb {
   }
 
   .wx-history-table td.wx-history-cell-actions > * {
-    /* Content-width, NOT stretched: flex:1 made View/Restore two half-row
-       jumbo buttons (operator feedback, decisions/00070). Touch height comes
-       from the shared 44px rule below; width hugs the label. */
+    /* Content-width AND short (operator rounds 3+4): flex:1 made these
+       half-row jumbo buttons, and even at content width the 44px
+       touch-target height read "very tall" on a phone. 34px is the
+       operator-approved compromise — clearly compact, still comfortably
+       tappable for row-level secondary actions. */
     flex: 0 0 auto;
     margin-right: 0;
     justify-content: center;
     text-align: center;
   }
 
-  /* The restore-confirm and Changes-diff forms live in their own full-width
-     rows; each row's own padding is dropped (the inner block pads itself). On
-     a phone the confirm's prompt and input each take a full line, and
-     Confirm/Cancel share one row with the same touch target as the row
-     actions (the pages inline-form fix — full-width basis for fields, auto
-     basis for buttons). */
+  .wx-history-view,
+  .wx-history-restore,
+  .wx-history-changes,
+  .wx-diff-reinstate {
+    /* border-box so min-height is the TOTAL height (these classes sit outside
+       every component-scoped border-box reset — without this the 34px is
+       content-only and padding+border inflate the button to 44px again). */
+    box-sizing: border-box;
+    min-height: 34px;
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 12px;
+  }
+
+  /* The restore-confirm and Changes-diff forms fuse onto the bottom of the
+     card above them (the round-4 card stack): no gap, no top border, shared
+     bottom radius; each row's own padding is dropped (the inner block pads
+     itself). On a phone the confirm's prompt and input each take a full
+     line, and Confirm/Cancel share one row. */
   .wx-history-table tbody tr.wx-history-confirm-row,
   .wx-history-table tbody tr.wx-history-diff-row {
     padding: 0;
+    margin-top: -13px; /* eat the 12px card gap + tuck 1px under the card's border */
+    border-top: none;
+    border-radius: 0 0 var(--wx-radius) var(--wx-radius);
   }
 
   /* Diff rows wrap on a phone: key on its own line start, old → new values
@@ -2515,10 +2562,6 @@ div.wx-media-thumb {
   .wx-pages-edit,
   .wx-pages-duplicate,
   .wx-pages-delete,
-  .wx-history-view,
-  .wx-history-restore,
-  .wx-history-changes,
-  .wx-diff-reinstate,
   .wx-media-delete,
   .wx-media-upload-button,
   .wx-chat-new-button,
