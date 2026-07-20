@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Track P, chapter 3 — Your DigitalOcean account and droplet — Going independent, a guide for Cottage Aesthetics</title>
+<link rel="stylesheet" href="guide.css">
+</head>
+<body>
+<div class="guide-shell">
+<nav class="guide-nav" aria-label="Guide chapters">
+<h1>Going independent</h1>
+<p class="guide-time">A guide for Cottage Aesthetics — about 2–3 hours across a week, no step urgent.</p>
+<div class="guide-nav-group">
+<ul>
+<li><a href="start-here.html">Start here</a></li>
+<li><a href="track-j.html">Track J — Josh</a></li>
+</ul></div>
+<div class="guide-nav-group">
+<h2>Track P — Purdi</h2>
+<ul>
+<li><a href="track-p-1-password-manager.html">1. Password manager</a></li>
+<li><a href="track-p-2-github.html">2. GitHub</a></li>
+<li><a href="track-p-3-digitalocean.html" aria-current="page">3. DigitalOcean</a></li>
+<li><a href="track-p-4-cloudflare.html">4. Cloudflare</a></li>
+<li><a href="track-p-5-anthropic.html">5. Anthropic (AI)</a></li>
+<li><a href="track-p-6-droplet-setup.html">6. Droplet setup</a></li>
+<li><a href="track-p-7-drill.html">7. The drill</a></li>
+<li><a href="track-p-8-go-live.html">8. Go live</a></li>
+</ul></div>
+<div class="guide-nav-group">
+<h2>Appendices</h2>
+<ul>
+<li><a href="appendix-a-if-josh-disappears.html">A. If Josh disappears</a></li>
+<li><a href="appendix-b-costs.html">B. Costs</a></li>
+<li><a href="appendix-c-revoking-access.html">C. Revoking access</a></li>
+</ul></div>
+</nav>
+<main class="guide-main">
+<p class="guide-chapter-meta">Track P — Purdi · 15 minutes</p>
+<h1>Track P, chapter 3 — Your DigitalOcean account and droplet</h1>
+
+<p class="guide-lede">
+This is where your website will actually live from now on: a small computer of your
+own, rented by the month from a hosting company called DigitalOcean. This chapter
+gets that computer switched on and ready — the next chapter connects it to the
+internet, and chapter 6 puts your website onto it.
+</p>
+
+<div class="guide-reassurance">
+<strong>You won't need to install anything.</strong> Everything in this guide —
+including the single command you'll paste in chapter 6 — happens inside
+DigitalOcean's own website, in a black, terminal-style window that runs right there
+in your browser tab. There's no separate
+<a class="guide-gloss" title="A way of typing commands into a distant computer over the internet — normally needs its own software installed. This guide avoids it completely.">SSH</a>
+software to find, install, or learn.
+</div>
+
+<ol class="guide-steps">
+
+<li>
+<p class="guide-step-what">Create your DigitalOcean account.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Go to digitalocean.com and choose "Sign up." An email address and password (or
+signing up with your Google account) is enough to get started — but before you
+can create anything, you'll also be asked to add a card. DigitalOcean is not a
+free service: go in expecting a recurring charge of about $12 US a month (roughly
+£9.50, since DigitalOcean bills in dollars) once you create your droplet in the
+next step.</div>
+<div class="guide-save-credential">Save this in your password manager as <strong>"Cottage Aesthetics — DigitalOcean account"</strong>.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> you're looking at the DigitalOcean dashboard (sometimes called the "Control Panel"), ready to create your first server.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Start creating a <a class="guide-gloss" title="DigitalOcean's name for a small virtual computer of your own, running in one of their data centres.">droplet</a>, choosing the exact image, plan, and region below.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Click "Create," then "Droplets." Under "Choose an image," switch to the
+<strong>Marketplace</strong> tab, search for "Docker," and pick the one called
+<strong>"Docker on Ubuntu."</strong> (Not plain "Ubuntu" on its own — the
+Marketplace version comes with software your droplet needs already installed.)
+Under "Choose a region," pick <strong>London</strong>. Under "Choose Size," stay
+on the <strong>Basic</strong> tab, then <strong>Regular</strong>, and pick the row
+showing 2 GB memory / 1
+<a class="guide-gloss" title="A virtual processor core — DigitalOcean's word for how much computing power is set aside for your server.">vCPU</a>
+<span class="guide-cost-flag">~£9.50/mo</span>. Leave Backups, Monitoring, and any
+extra volumes switched off underneath — you don't need any of them; Wixy has its
+own backup system, covered later in this guide.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> you can see the 2 GB / 1 vCPU row selected, with "Docker on Ubuntu" and "London" chosen above it.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Set a password for the droplet, then finish creating it.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Further down the same page, under "Authentication," choose the
+<strong>Password</strong> tab (not "SSH keys" — you won't need one). Type a
+strong password, or use DigitalOcean's own "Generate password" option if it's
+offered. You can leave the hostname as it is, or rename it to something
+recognisable like "cottage-aesthetics." Scroll to the bottom and click
+<strong>"Create Droplet."</strong></div>
+<div class="guide-save-credential">Save this in your password manager as <strong>"Cottage Aesthetics — DigitalOcean droplet password"</strong>.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> DigitalOcean takes you to the droplet's own page, showing it "starting up."</p>
+</li>
+
+<li>
+<p class="guide-step-what">Wait for the droplet to finish setting itself up.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Stay on the droplet's page, or find it again from your list of Droplets — this
+usually takes well under a minute. You don't need to note down its address (its
+"IP address"): you'll only ever reach this droplet through DigitalOcean's own
+browser console, and because it only ever reaches <em>out</em> to the internet —
+through a secure tunnel you'll set up in the next chapter — rather than waiting
+for anything to reach <em>in</em>, it doesn't need a fixed address at all. If
+DigitalOcean offers you a "Reserved IP" anywhere, you can skip it.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> the droplet's status shows <strong>"Active."</strong></p>
+</li>
+
+</ol>
+
+<div class="guide-footer-nav">
+<a href="track-p-2-github.html">← 2. GitHub</a>
+<a href="track-p-4-cloudflare.html">4. Cloudflare →</a>
+</div>
+</main>
+</div>
+<script src="guide.js"></script>
+</body>
+</html>

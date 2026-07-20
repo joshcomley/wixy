@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Track J — what Josh does once — Going independent, a guide for Cottage Aesthetics</title>
+<link rel="stylesheet" href="guide.css">
+</head>
+<body>
+<div class="guide-shell">
+<nav class="guide-nav" aria-label="Guide chapters">
+<h1>Going independent</h1>
+<p class="guide-time">A guide for Cottage Aesthetics — about 2–3 hours across a week, no step urgent.</p>
+<div class="guide-nav-group">
+<ul>
+<li><a href="start-here.html">Start here</a></li>
+<li><a href="track-j.html" aria-current="page">Track J — Josh</a></li>
+</ul></div>
+<div class="guide-nav-group">
+<h2>Track P — Purdi</h2>
+<ul>
+<li><a href="track-p-1-password-manager.html">1. Password manager</a></li>
+<li><a href="track-p-2-github.html">2. GitHub</a></li>
+<li><a href="track-p-3-digitalocean.html">3. DigitalOcean</a></li>
+<li><a href="track-p-4-cloudflare.html">4. Cloudflare</a></li>
+<li><a href="track-p-5-anthropic.html">5. Anthropic (AI)</a></li>
+<li><a href="track-p-6-droplet-setup.html">6. Droplet setup</a></li>
+<li><a href="track-p-7-drill.html">7. The drill</a></li>
+<li><a href="track-p-8-go-live.html">8. Go live</a></li>
+</ul></div>
+<div class="guide-nav-group">
+<h2>Appendices</h2>
+<ul>
+<li><a href="appendix-a-if-josh-disappears.html">A. If Josh disappears</a></li>
+<li><a href="appendix-b-costs.html">B. Costs</a></li>
+<li><a href="appendix-c-revoking-access.html">C. Revoking access</a></li>
+</ul></div>
+</nav>
+<main class="guide-main">
+<p class="guide-chapter-meta">≈1 hour</p>
+<h1>Track J — what Josh does once</h1>
+<p class="guide-lede">
+You don't need to do anything in this chapter — it's here so you know what's
+happening behind the scenes before you start Track P. Josh does these six things,
+once, in this order, before handing the rest over to you.
+</p>
+
+<ol class="guide-steps">
+
+<li>
+<p class="guide-step-what">Publishes the engine — the software itself becomes public and open-source.</p>
+<div class="guide-where"><span class="guide-where-label">What this means</span>
+The code that runs your website (not your content — just the underlying software)
+becomes freely available under an open licence called <a href="https://opensource.org/license/mit/" class="guide-gloss" title="A short, permissive open-source licence — anyone can use, copy, and change the software, including you.">MIT</a>.
+This is what makes it possible for you to keep your own independent copy that nobody
+can take away.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> Josh tells you the engine's GitHub page is public and readable by anyone.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Provisions a small, temporary "drill kit" — a practice run, on Josh's own money.</p>
+<div class="guide-where"><span class="guide-where-label">What this means</span>
+Before doing anything with your real accounts, Josh rehearses this entire guide
+end-to-end on a set of throwaway test accounts (a test website address, a
+temporary server, a small pre-approved AI budget — about £10–15 total, on Josh's
+own card, agreed with him in advance). This finds and fixes any confusing steps
+before you ever see them.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> Josh tells you the practice run is done and the guide has been corrected against anything that tripped him up.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Runs a backup of your website's current state, from Josh's side.</p>
+<div class="guide-where"><span class="guide-where-label">What this means</span>
+A safety copy of everything about your site — the pages, the images, the settings —
+is taken and stored in a private backup location, before anything else changes.
+Your backup custody starts before your new hosting does.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> Josh confirms the first backup snapshot exists.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Starts the transfer of your website's code repository to your organisation, and creates a new private one for your own business documents.</p>
+<div class="guide-where"><span class="guide-where-label">What this means</span>
+GitHub is where all the code and content for your site lives. Josh starts a
+transfer of the existing one into your organisation (you'll accept it in Track P,
+chapter 2) and creates a brand new, <strong>private</strong> repository called
+<code>ca-business</code> for documents that were only ever useful to the running
+of your business, not to the website's code — things like your own photos,
+your original brief, and your Google reviews. Josh moves that material out of the
+public engine code and into this new private repository, using the exact
+commands below, so nothing personal ends up somewhere public by mistake.</div>
+<div class="guide-copy-block"><code>git checkout 7c4fa3c02957599bfed994ddb37a93ed293e685f -- \
+  photos/ advertising/ brief.md \
+  docs/DESIGN-AND-CONTENT.md docs/google-reviews.json \
+  docs/booking-platform-comparison.md reviews-demo.html \
+  tooling/downscale_photos.py</code><button type="button" class="guide-copy-button">Copy</button></div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> Josh shows you the new <code>ca-business</code> repository containing your photos and documents, and confirms the public engine code no longer contains them.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Lowers the time-to-live (TTL) on your domain's DNS records at your registrar.</p>
+<div class="guide-where"><span class="guide-where-label">What this means</span>
+This is a small technical setting that controls how quickly changes to your
+website's address take effect elsewhere on the internet. Lowering it now (a few
+days before "Go live") means that when the final switch happens in Track P,
+chapter 8, it takes effect quickly everywhere, instead of slowly over the following
+day or two.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> Josh confirms the TTL has been lowered and it's safe to schedule "Go live."</p>
+</li>
+
+<li>
+<p class="guide-step-what">Does the final DNS flip with you, live, on the phone.</p>
+<div class="guide-where"><span class="guide-where-label">What this means</span>
+This is the one moment that changes what your visitors see — covered fully in
+Track P, chapter 8 ("Go live"), which you'll do together.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> You've read Track P, chapter 8 — you'll do this step together when you both get there, not before.</p>
+</li>
+
+</ol>
+
+<div class="guide-footer-nav">
+<a href="start-here.html">← Start here</a>
+<a href="track-p-1-password-manager.html">1. Password manager →</a>
+</div>
+</main>
+</div>
+<script src="guide.js"></script>
+</body>
+</html>

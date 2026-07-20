@@ -147,6 +147,7 @@ process) off a fixed, non-configurable container path — see that module and
 | GET | `/uxer-style.json` | `app.py:uxer_style` | none | `FileResponse` (Uxer MCP dev tooling) |
 | GET | `/.uxer-web-port` | `app.py:uxer_web_port` | none | port string, or `"0"` 404 |
 | — | `/admin/static/uxer/*`, `/admin/static/*`, `/admin/draft-media/*` | `StaticFiles` mounts | CF | file bytes / 404 |
+| GET | `/admin/guide/*` | `StaticFiles` mount (`html=True`) | CF | file bytes; `/admin/guide/` root and extension-less paths resolve `index.html` — spec/independence/07's HTML guide (milestone 8), built by `guide.build` from `guide/chapters/*.html`, committed output under `wixy_server/static/guide/` |
 | GET,HEAD | `/` | `routes_public.py:get_root` | none | `FileResponse index.html` from live build; **503 plain text** `"Site not yet published"` if no live pointer |
 | GET,HEAD | `/{path}` | `routes_public.py:get_path` | none | `FileResponse` from live build (**registered last** — catch-all); 503 plain text; 404 → `404.html` or `"Not found"` |
 

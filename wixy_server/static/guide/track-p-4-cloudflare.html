@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Track P, chapter 4 — Your Cloudflare account and tunnel — Going independent, a guide for Cottage Aesthetics</title>
+<link rel="stylesheet" href="guide.css">
+</head>
+<body>
+<div class="guide-shell">
+<nav class="guide-nav" aria-label="Guide chapters">
+<h1>Going independent</h1>
+<p class="guide-time">A guide for Cottage Aesthetics — about 2–3 hours across a week, no step urgent.</p>
+<div class="guide-nav-group">
+<ul>
+<li><a href="start-here.html">Start here</a></li>
+<li><a href="track-j.html">Track J — Josh</a></li>
+</ul></div>
+<div class="guide-nav-group">
+<h2>Track P — Purdi</h2>
+<ul>
+<li><a href="track-p-1-password-manager.html">1. Password manager</a></li>
+<li><a href="track-p-2-github.html">2. GitHub</a></li>
+<li><a href="track-p-3-digitalocean.html">3. DigitalOcean</a></li>
+<li><a href="track-p-4-cloudflare.html" aria-current="page">4. Cloudflare</a></li>
+<li><a href="track-p-5-anthropic.html">5. Anthropic (AI)</a></li>
+<li><a href="track-p-6-droplet-setup.html">6. Droplet setup</a></li>
+<li><a href="track-p-7-drill.html">7. The drill</a></li>
+<li><a href="track-p-8-go-live.html">8. Go live</a></li>
+</ul></div>
+<div class="guide-nav-group">
+<h2>Appendices</h2>
+<ul>
+<li><a href="appendix-a-if-josh-disappears.html">A. If Josh disappears</a></li>
+<li><a href="appendix-b-costs.html">B. Costs</a></li>
+<li><a href="appendix-c-revoking-access.html">C. Revoking access</a></li>
+</ul></div>
+</nav>
+<main class="guide-main">
+<p class="guide-chapter-meta">Track P — Purdi · 20–30 minutes</p>
+<h1>Track P, chapter 4 — Your Cloudflare account and tunnel</h1>
+
+<p class="guide-lede">
+Cloudflare does two jobs for you: it manages your domain's address book — which
+computer people reach when they type your web address — and it opens a secure,
+one-way tunnel from your droplet to the internet, so your website is reachable
+without ever leaving an open door on your server. This is the most involved chapter
+after GitHub; every step here is safe to pause on if you need a break partway through.
+</p>
+
+<ol class="guide-steps">
+
+<li>
+<p class="guide-step-what">Create your Cloudflare account.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Go to cloudflare.com and choose "Sign up." An email address and password is
+enough — this account itself is free, no card needed yet.</div>
+<div class="guide-save-credential">Save this in your password manager as <strong>"Cottage Aesthetics — Cloudflare account"</strong>.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> you're looking at the Cloudflare dashboard, with no websites added yet.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Add your domain to Cloudflare.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+From the dashboard, choose "Add a domain" (sometimes shown as "+ Add site") and
+type your domain exactly as you own it. Cloudflare scans your existing settings
+and then shows you a choice of plans — pick <strong>Free</strong>, which is
+everything this guide needs.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> your domain appears in Cloudflare's list of websites, and it shows you two
+<a class="guide-gloss" title="The addresses that tell the rest of the internet Cloudflare is now in charge of your domain's settings — you'll copy these into your registrar next.">nameservers</a>
+to copy, both ending in <code>.ns.cloudflare.com</code>.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Point your domain at Cloudflare by updating its nameservers at the company you registered it with.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+This company is called your
+<a class="guide-gloss" title="Whichever company you originally registered your domain name through — common examples include GoDaddy, Namecheap, and 123-Reg.">registrar</a>.
+Log in there, find its DNS or nameserver settings, and replace whatever is
+currently listed with the two Cloudflare nameservers you copied in the previous
+step.</div>
+<div class="guide-reassurance">
+<strong>Your site keeps working normally throughout this.</strong> This step only
+moves who <em>manages</em> your domain's settings — it doesn't change what your
+visitors see today. That only happens right at the very end of this guide ("Go
+live"), which you'll do together with Josh, and even that can be undone in
+minutes.
+</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> your registrar shows the two Cloudflare nameservers saved (Cloudflare itself may take a while to notice and mark your domain "active" there — that's fine, and nothing you need to wait for before continuing).</p>
+</li>
+
+<li>
+<p class="guide-step-what">Turn on Cloudflare
+<a class="guide-gloss" title="A separate part of Cloudflare, included free, that handles secure tunnels and who's allowed into your admin area.">Zero Trust</a>
+and choose a team name.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+In the Cloudflare dashboard, find "Zero Trust" in the navigation — it opens its
+own section of the site. The first time you go in, it asks you to choose a team
+name; this becomes part of an address you'll use shortly, like
+<code>cottage-aesthetics.cloudflareaccess.com</code>, so pick something
+recognisable, lower-case, with no spaces. You may also be asked for a payment
+method at this point <span class="guide-cost-flag">£0</span> — that's normal
+Cloudflare behaviour for this section, not a hidden charge; the plan you want is
+Free.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> you're looking at the Zero Trust dashboard — a different-looking area from the main Cloudflare site.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Create a Tunnel and copy the
+<a class="guide-gloss" title="A long, secret string of letters and numbers that lets your droplet connect securely to Cloudflare — treat it like a password.">token</a>
+it gives you.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+In the Zero Trust dashboard, look for "Networks," then "Tunnels" (Cloudflare
+moves this occasionally — if you don't see "Networks," check under "Access," or
+use the search box at the top of the page). Choose "Create a tunnel," pick the
+"Cloudflared" connector, and name it something recognisable like
+"cottage-aesthetics." On the next page, Cloudflare shows you an install command
+containing a long string after the word <code>--token</code> — that string, on
+its own, is what you need.</div>
+<div class="guide-save-credential">Save this in your password manager as <strong>"Cottage Aesthetics — Cloudflare Tunnel token"</strong>.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> your new tunnel appears in the Tunnels list, and you've copied its token somewhere safe.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Note down your Zero Trust team domain.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Still in the Zero Trust dashboard, open "Settings," then "General" — there's a
+field called <strong>"Team domain,"</strong> showing the full address based on
+the team name you chose earlier, ending in <code>.cloudflareaccess.com</code>.
+Copy the whole thing.</div>
+<div class="guide-save-credential">Save this in your password manager as <strong>"Cottage Aesthetics — Cloudflare team domain"</strong>.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> you have the full address saved, ending in <code>.cloudflareaccess.com</code>.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Create the Access application that protects your admin area.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+In the Zero Trust dashboard, find "Access," then "Applications," and choose
+"Add an application," then <strong>"Self-hosted."</strong> Give it a name like
+"Cottage Aesthetics admin." For the application domain, enter your domain with
+the path <code>/admin</code>; there's an option nearby to add a second domain —
+use it to also add your domain with the path <code>/api/admin</code> (both need
+protecting: the second is what your admin screen's own behind-the-scenes traffic
+uses, and the admin screen won't work correctly without it). Further into the
+same wizard, add one policy — call it something like "Owner and Josh," set it to
+<strong>Allow</strong>, and under its rule choose "Emails," then list exactly two
+addresses: your own, and Josh's. Save through to the end of the wizard.</div>
+<div class="guide-reassurance">
+Josh's email stays on this list for now so he can still help you if you ever
+need it — this is entirely your choice to keep or remove, and Appendix C shows
+you exactly how to take it off whenever you're ready.
+</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> your new application appears in the Access "Applications" list, showing both paths and a policy with two email addresses.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Copy the application's
+<a class="guide-gloss" title="A unique ID Cloudflare generates for this specific Access application — your droplet uses it to confirm a login was meant for this admin area, and not some other Cloudflare account's.">Audience tag</a>.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Open the application you just created from the "Applications" list — its
+overview shows a field called <strong>"Application Audience (AUD) Tag,"</strong>
+a long string of letters and numbers, with its own copy button.</div>
+<div class="guide-save-credential">Save this in your password manager as <strong>"Cottage Aesthetics — Cloudflare Access AUD tag"</strong>.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> you have the full tag saved, copied straight from that field rather than retyped by hand.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Do a final check that everything from this chapter is safely saved.</p>
+<div class="guide-where"><span class="guide-where-label">Check</span>
+Open your password manager and look for three new entries from today: your
+Cloudflare Tunnel token, your Cloudflare team domain, and your Cloudflare Access
+AUD tag. Chapter 6 asks for these three back, by name, so having them ready now
+saves you a trip back here later.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> all three are saved, and your domain registrar shows Cloudflare's two nameservers in place (even if Cloudflare hasn't marked your domain "active" yet — that isn't blocking you).</p>
+</li>
+
+</ol>
+
+<div class="guide-footer-nav">
+<a href="track-p-3-digitalocean.html">← 3. DigitalOcean</a>
+<a href="track-p-5-anthropic.html">5. Anthropic (AI) →</a>
+</div>
+</main>
+</div>
+<script src="guide.js"></script>
+</body>
+</html>

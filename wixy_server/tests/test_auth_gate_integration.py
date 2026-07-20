@@ -149,6 +149,18 @@ class TestAdminGateRejectsUnauthenticated:
             response = client.get("/admin/static/admin/admin.js")
         assert response.status_code == 302
 
+    def test_admin_guide_asset_without_token_is_redirected(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        """The guide's own mount (milestone 8, spec/independence/07) is a
+        SEPARATE `StaticFiles` mount from `/admin/static` — same middleware
+        coverage needs proving independently, not assumed from the other
+        mount's own test above."""
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app, follow_redirects=False) as client:
+            response = client.get("/admin/guide/start-here.html")
+        assert response.status_code == 302
+
     def test_garbage_token_is_401(self, storage_root: Path, wixy_repo_root: Path) -> None:
         app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
         with TestClient(app) as client:

@@ -1,0 +1,317 @@
+/* The independence-phase HTML guide's own stylesheet (spec/independence/07 §1:
+   "plain HTML/CSS, zero JS frameworks... printable"). Self-hosted, no CDN, no
+   web fonts — system font stack only, matching this repo's "self-hosted assets
+   only" rule. Deliberately its OWN palette, not admin-ui's theme system: the
+   guide must outlive every dependency it describes, including the engine's own
+   admin-ui build. */
+
+:root {
+  --guide-ink: #2a2420;
+  --guide-muted: #6b6259;
+  --guide-paper: #fdfbf7;
+  --guide-panel: #f5f0e8;
+  --guide-accent: #a8562f;
+  --guide-accent-ink: #ffffff;
+  --guide-border: #e2d9c9;
+  --guide-callout: #eef4f0;
+  --guide-callout-border: #b9d4c2;
+  --guide-warn: #fbf0e4;
+  --guide-warn-border: #e3b98a;
+  --guide-code-bg: #2a2420;
+  --guide-code-ink: #f5f0e8;
+  --guide-link: #8a3f20;
+  --font-body: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --guide-ink: #ece6dc;
+    --guide-muted: #b3a99b;
+    --guide-paper: #211d19;
+    --guide-panel: #2b2621;
+    --guide-accent: #d98a5f;
+    --guide-accent-ink: #211d19;
+    --guide-border: #45392d;
+    --guide-callout: #1d2b23;
+    --guide-callout-border: #3a5c47;
+    --guide-warn: #332619;
+    --guide-warn-border: #7a5330;
+    --guide-code-bg: #16130f;
+    --guide-code-ink: #ece6dc;
+    --guide-link: #e4a479;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  background: var(--guide-paper);
+  color: var(--guide-ink);
+  line-height: 1.6;
+}
+
+.guide-shell {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.guide-nav {
+  background: var(--guide-panel);
+  border-right: 1px solid var(--guide-border);
+  padding: 1.5rem 1.25rem;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.guide-nav h1 {
+  font-size: 1.05rem;
+  margin: 0 0 1rem;
+}
+
+.guide-nav .guide-time {
+  font-size: 0.85rem;
+  color: var(--guide-muted);
+  margin: 0 0 1.25rem;
+}
+
+.guide-nav-group {
+  margin-bottom: 1.25rem;
+}
+
+.guide-nav-group h2 {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--guide-muted);
+  margin: 0 0 0.4rem;
+}
+
+.guide-nav-group ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.guide-nav-group li a {
+  display: block;
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  color: var(--guide-ink);
+  text-decoration: none;
+  font-size: 0.92rem;
+}
+
+.guide-nav-group li a:hover,
+.guide-nav-group li a[aria-current="page"] {
+  background: var(--guide-border);
+}
+
+.guide-main {
+  padding: 2.5rem 3rem 5rem;
+  max-width: 46rem;
+}
+
+.guide-chapter-meta {
+  color: var(--guide-muted);
+  font-size: 0.9rem;
+  margin: -0.5rem 0 1.5rem;
+}
+
+h1, h2, h3 { line-height: 1.25; }
+h1 { font-size: 2rem; }
+h2 { font-size: 1.4rem; margin-top: 2.5rem; }
+h3 { font-size: 1.1rem; }
+
+a { color: var(--guide-link); }
+
+.guide-lede {
+  font-size: 1.1rem;
+  color: var(--guide-muted);
+}
+
+.guide-reassurance {
+  background: var(--guide-callout);
+  border: 1px solid var(--guide-callout-border);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  margin: 1.5rem 0;
+}
+
+ol.guide-steps {
+  list-style: none;
+  margin: 1.5rem 0;
+  padding: 0;
+  counter-reset: guide-step;
+}
+
+ol.guide-steps > li {
+  counter-increment: guide-step;
+  position: relative;
+  padding: 0 0 1.75rem 3rem;
+  border-left: 2px solid var(--guide-border);
+  margin-left: 0.9rem;
+}
+
+ol.guide-steps > li:last-child {
+  border-left-color: transparent;
+  padding-bottom: 0;
+}
+
+ol.guide-steps > li::before {
+  content: counter(guide-step);
+  position: absolute;
+  left: -0.9rem;
+  top: 0;
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 50%;
+  background: var(--guide-accent);
+  color: var(--guide-accent-ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.guide-step-what {
+  font-weight: 600;
+  margin: 0 0 0.4rem;
+}
+
+.guide-where {
+  background: var(--guide-panel);
+  border: 1px solid var(--guide-border);
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.92rem;
+  margin: 0.5rem 0;
+}
+
+.guide-where .guide-where-label {
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  color: var(--guide-muted);
+  display: block;
+  margin-bottom: 0.2rem;
+}
+
+.guide-copy-block {
+  position: relative;
+  background: var(--guide-code-bg);
+  color: var(--guide-code-ink);
+  border-radius: 8px;
+  padding: 0.85rem 3rem 0.85rem 1rem;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  overflow-x: auto;
+  margin: 0.6rem 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.guide-copy-button {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  background: var(--guide-panel);
+  color: var(--guide-ink);
+  border: 1px solid var(--guide-border);
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  font-family: var(--font-body);
+}
+
+.guide-copy-button:hover { background: var(--guide-border); }
+
+.guide-worked-when {
+  background: var(--guide-callout);
+  border-left: 3px solid var(--guide-callout-border);
+  padding: 0.5rem 0.9rem;
+  font-size: 0.92rem;
+  margin: 0.6rem 0 0;
+}
+
+.guide-worked-when strong { display: block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--guide-muted); margin-bottom: 0.15rem; }
+
+.guide-save-credential {
+  background: var(--guide-warn);
+  border: 1px solid var(--guide-warn-border);
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.92rem;
+  margin: 0.6rem 0;
+}
+
+.guide-gloss {
+  border-bottom: 1px dotted var(--guide-muted);
+  cursor: help;
+  text-decoration: none;
+  color: inherit;
+}
+
+.guide-cost-flag {
+  display: inline-block;
+  background: var(--guide-warn);
+  border: 1px solid var(--guide-warn-border);
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+  font-size: 0.78rem;
+  margin-left: 0.4rem;
+}
+
+.guide-diagram {
+  width: 100%;
+  height: auto;
+  margin: 1rem 0;
+}
+
+.guide-footer-nav {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 3rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--guide-border);
+  font-size: 0.95rem;
+}
+
+table.guide-table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0;
+}
+
+table.guide-table th,
+table.guide-table td {
+  border: 1px solid var(--guide-border);
+  padding: 0.5rem 0.7rem;
+  text-align: left;
+  font-size: 0.92rem;
+}
+
+table.guide-table th {
+  background: var(--guide-panel);
+}
+
+@media (max-width: 780px) {
+  .guide-shell { grid-template-columns: 1fr; }
+  .guide-nav { position: static; height: auto; }
+  .guide-main { padding: 1.5rem 1.25rem 3rem; }
+}
+
+@media print {
+  .guide-nav, .guide-copy-button, .guide-footer-nav { display: none; }
+  .guide-shell { display: block; }
+  .guide-main { max-width: none; padding: 0; }
+  a { color: inherit; text-decoration: underline; }
+  .guide-copy-block { color: #000; background: #f3f3f3; border: 1px solid #999; }
+}

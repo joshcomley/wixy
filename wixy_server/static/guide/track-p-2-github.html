@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Track P, chapter 2 — Your GitHub account and organisation — Going independent, a guide for Cottage Aesthetics</title>
+<link rel="stylesheet" href="guide.css">
+</head>
+<body>
+<div class="guide-shell">
+<nav class="guide-nav" aria-label="Guide chapters">
+<h1>Going independent</h1>
+<p class="guide-time">A guide for Cottage Aesthetics — about 2–3 hours across a week, no step urgent.</p>
+<div class="guide-nav-group">
+<ul>
+<li><a href="start-here.html">Start here</a></li>
+<li><a href="track-j.html">Track J — Josh</a></li>
+</ul></div>
+<div class="guide-nav-group">
+<h2>Track P — Purdi</h2>
+<ul>
+<li><a href="track-p-1-password-manager.html">1. Password manager</a></li>
+<li><a href="track-p-2-github.html" aria-current="page">2. GitHub</a></li>
+<li><a href="track-p-3-digitalocean.html">3. DigitalOcean</a></li>
+<li><a href="track-p-4-cloudflare.html">4. Cloudflare</a></li>
+<li><a href="track-p-5-anthropic.html">5. Anthropic (AI)</a></li>
+<li><a href="track-p-6-droplet-setup.html">6. Droplet setup</a></li>
+<li><a href="track-p-7-drill.html">7. The drill</a></li>
+<li><a href="track-p-8-go-live.html">8. Go live</a></li>
+</ul></div>
+<div class="guide-nav-group">
+<h2>Appendices</h2>
+<ul>
+<li><a href="appendix-a-if-josh-disappears.html">A. If Josh disappears</a></li>
+<li><a href="appendix-b-costs.html">B. Costs</a></li>
+<li><a href="appendix-c-revoking-access.html">C. Revoking access</a></li>
+</ul></div>
+</nav>
+<main class="guide-main">
+<p class="guide-chapter-meta">Track P — Purdi · 20–30 minutes</p>
+<h1>Track P, chapter 2 — Your GitHub account and organisation</h1>
+<p class="guide-lede">
+GitHub is where the code behind your website lives — the filing cabinet and
+history book for the software that runs it. This chapter gets you your own
+account there, your own organisation to hold everything in — your site's
+code, the engine underneath it, your business documents — and a handful of
+one-off settings switched on so the later chapters go smoothly.
+</p>
+
+<ol class="guide-steps">
+
+<li>
+<p class="guide-step-what">Create your own personal GitHub account.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Go to github.com/join. Enter your email address, choose a password and a
+username, and confirm your email address when GitHub asks you to. This is
+your individual, personal login — the shared home for your website's code
+comes next, in step 2.</div>
+<div class="guide-save-credential">Save this in your password manager as
+<strong>"Cottage Aesthetics — GitHub (personal account)"</strong>.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> you're
+signed in and see your own GitHub homepage, with your username shown in the
+top right.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Create a GitHub
+<a class="guide-gloss" title="A GitHub account that owns repositories and can have several people with different levels of access to them — unlike your personal account, people can be cleanly added and removed later.">organisation</a>
+to hold everything.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Click the "+" menu near your profile photo (top right of any GitHub page)
+and choose "New organization". Pick the Free plan, then, on the form that
+follows, choose "My personal account" when asked who it belongs to, and use
+the text below for the organisation's name — if that exact name's already
+taken, a close variant such as <code>cottage-aesthetics-uk</code> is
+fine.</div>
+<div class="guide-copy-block"><code>cottage-aesthetics</code><button type="button" class="guide-copy-button">Copy</button></div>
+<div class="guide-reassurance">
+This is why an organisation, rather than just using your personal account
+directly: everything else in this guide — your site's code, the engine
+software, your business documents — lives inside it, not under your own
+personal login. That's what lets you cleanly add Josh to it now as a helper,
+and just as cleanly remove him later if you ever want to, without touching
+your own account at all (Appendix C).
+</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> you
+land on your new organisation's page, with its name at the top and an empty
+list of repositories underneath.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Accept the transfer of your website's existing
+code into your new organisation.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Josh already started this, in Track J. GitHub emails you when a transfer is
+waiting — open the email and follow its link. If you can't find the email,
+click the bell icon (top right of any GitHub page) for your GitHub
+notifications instead; either route leads to an invitation page naming the
+<a class="guide-gloss" title="A project's code and its full history, stored on GitHub — everything needed to rebuild or run it.">repository</a>
+and a big "Accept" button.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> a
+repository named <code>cottage-aesthetics-site</code> appears in your
+organisation's repository list.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Confirm your new private business-documents
+repository is there too.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+On your organisation's page, look through the repository list for one named
+<code>ca-business</code>, with a small padlock or "Private" label next to
+its name — Josh created this one alongside the transfer, for your photos,
+brief, and other business documents that have nothing to do with the
+website's code.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> you
+can open <code>ca-business</code> and see folders and files inside it, such
+as <code>photos/</code> or <code>brief.md</code>.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Make your own copy of the engine software — a
+"fork" — inside your organisation.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Go to
+<a href="https://github.com/joshcomley/wixy">github.com/joshcomley/wixy</a>
+and click "Fork" (top right, next to Star and Watch). On the "Create a new
+fork" page, change the Owner dropdown from your personal account to your new
+organisation, and change the Repository name to the text below — later
+chapters, and the setup script you'll run in chapter 6, refer to "your
+engine fork" and expect this exact name. Leave everything else as it is and
+click "Create fork".</div>
+<div class="guide-copy-block"><code>wixy-engine</code><button type="button" class="guide-copy-button">Copy</button></div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> you
+land on a new repository whose owner, shown top-left, is your organisation —
+not <code>joshcomley</code>.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Switch on
+<a class="guide-gloss" title="GitHub's own built-in automation: small jobs that run automatically, such as building your site's software or checking in weekly for updates.">Actions</a>
+for your new fork.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+On your <code>wixy-engine</code> repository, click the "Actions" tab. GitHub
+switches this off automatically on every new fork, as a spam-prevention
+measure, so you'll see a banner reading something like "Workflows aren't
+being run on this forked repository" with a button labelled "I understand my
+workflows, go ahead and enable them" — click it.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> the
+banner disappears and the Actions tab shows a (currently empty) list of
+workflow runs instead.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Switch on the weekly update-check workflow
+specifically.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Still on the Actions tab, find "Sync from upstream" in the list of workflows
+on the left. Even with Actions enabled generally, GitHub can leave a
+<a class="guide-gloss" title="A workflow that runs automatically on a repeating timer, rather than only when code changes.">scheduled</a>
+workflow like this one switched off separately — if its page shows a message
+that it's disabled, click the "Enable workflow" button.</div>
+<div class="guide-reassurance">
+This is the check that runs every Monday morning and tells you when Josh's
+engine has updates available. It's the only way you'd find out — without it
+switched on, updates could be sitting there and you'd simply never be told.
+</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong>
+"Sync from upstream"'s own page no longer shows a disabled message.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Allow fine-grained access tokens in your
+organisation's settings.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+On your organisation's page, go to Settings, then find "Third-party Access"
+in the left sidebar → "Personal access tokens" → "Settings". Make sure
+fine-grained
+<a class="guide-gloss" title="A password-like code that lets a program — like your AI assistant, later in this guide — act on your behalf on GitHub, limited to only what you allow it to do.">personal access tokens</a>
+are allowed, and switch off any "require administrator approval" option you
+see.</div>
+<div class="guide-reassurance">
+A later chapter has you create one of these tokens for your AI assistant. If
+administrator approval is left switched on, that token would sit waiting for
+an approval click you'd only end up giving yourself anyway — switching it
+off now saves you that extra round trip.
+</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> the
+settings page shows fine-grained personal access tokens as allowed, with
+administrator approval not required.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Turn on branch protection for your site
+repository's main branch.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Open your <code>cottage-aesthetics-site</code> repository, click "Settings"
+along its top menu, then "Branches" in the left sidebar. Click "Add branch
+protection rule" (it may just say "Add rule", depending on when you're
+reading this), and type <code>main</code> into the branch name pattern
+field. Tick "Require a pull request before merging" and "Require status
+checks to pass before merging" — if the box for choosing a specific check
+looks empty, that's fine, it fills in once a check has actually run; the
+tick itself is what matters. Do not add yourself, or anyone, to any list of
+people allowed to bypass these rules. Click "Create" (or "Save changes") to
+finish.</div>
+<div class="guide-reassurance">
+This one's required, not optional — chapter 6 pauses and waits for you to
+confirm it's done, for both this repository and the next step's, before it
+carries on. The reason: it's what stops even a leaked AI-assistant
+credential from ever being able to push straight to your live site's source
+— turning "the AI assistant can only open a
+<a class="guide-gloss" title="A proposed change to the code, submitted for review, rather than saved straight into the live version.">pull request</a>"
+from a convention into something GitHub itself enforces, no matter what.
+</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> a
+rule for <code>main</code> appears in the repository's branch protection
+list.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Repeat the same branch protection on your engine
+fork.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Open your <code>wixy-engine</code> repository and repeat the previous step
+exactly: Settings → Branches → add a rule for <code>main</code>, tick the
+same two boxes, and add no bypass actors.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> both
+<code>cottage-aesthetics-site</code> and <code>wixy-engine</code> show a
+branch protection rule on <code>main</code> — that's this chapter done.</p>
+</li>
+
+</ol>
+
+<div class="guide-footer-nav">
+<a href="track-p-1-password-manager.html">← 1. Password manager</a>
+<a href="track-p-3-digitalocean.html">3. DigitalOcean →</a>
+</div>
+</main>
+</div>
+<script src="guide.js"></script>
+</body>
+</html>
