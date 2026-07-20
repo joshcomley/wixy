@@ -1999,6 +1999,47 @@ div.wx-media-thumb {
     min-height: 320px;
   }
 
+  /* Theme editor controls get full touch targets at phone widths. The color
+     row re-grids: on desktop the preset swatches share the row's 1fr cell,
+     which squeezes to a sliver at 320px — they drop to their own full-width
+     line here and grow from 18px squares to 44px; the color well, hex
+     input, font pickers and shadow input all go 44px. (The theme Reset
+     buttons themselves are covered by the shared touch-target rule above.) */
+  .wx-theme-color-row {
+    grid-template-columns: 64px 44px 1fr auto;
+  }
+
+  .wx-theme-color-row input[type="color"] {
+    width: 44px;
+    height: 44px;
+  }
+
+  .wx-theme-color-row .wx-theme-presets {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  /* Pinned explicitly so DOM order (presets before the button) can't drop
+     Reset onto its own third line — line 1 is always label/well/hex/Reset,
+     line 2 the full-width swatches. */
+  .wx-theme-color-row .wx-theme-reset {
+    grid-column: 4;
+    grid-row: 1;
+  }
+
+  .wx-theme-preset-swatch {
+    width: 44px;
+    height: 44px;
+  }
+
+  .wx-theme-hex,
+  .wx-theme-font-picker,
+  .wx-theme-font-family,
+  .wx-theme-shadow-input {
+    min-height: 44px;
+    box-sizing: border-box;
+  }
+
   /* Pages table → compact stacked list. The desktop columns can't fit a
      phone (the action buttons scrolled off-screen, reachable only by
      horizontal scrolling); instead each row becomes a small block: the nav
@@ -2293,7 +2334,10 @@ div.wx-media-thumb {
   .wx-chat-reasoning-toggle,
   .wx-chat-tool-summary,
   .wx-chat-send-button,
-  .wx-chat-compose-actions button {
+  .wx-chat-compose-actions button,
+  .wx-theme-reset,
+  .wx-theme-reset-all,
+  .wx-settings-reset-all {
     min-height: 44px;
     display: inline-flex;
     align-items: center;
