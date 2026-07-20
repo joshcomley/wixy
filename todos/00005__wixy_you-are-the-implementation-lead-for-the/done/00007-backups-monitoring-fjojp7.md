@@ -38,7 +38,30 @@ the M10 sidecar). Full design writeup + FABLE-light self-verification: decisions
 clean.
 
 ## Relevant files + commits
-Branch `indep/m7-backups-monitoring` (off main, after M6 merged). decisions/00066.
+Branch `indep/m7-backups-monitoring` (off main, after M6 merged), PR #79. Two commits:
+`a9c68ae` (the full build) and `a2836c4` (a CI-caught test-determinism fix — see
+decisions/00066's own Correction section). decisions/00066, decisions/00067
+(unrelated incidental fix bundled in the same PR).
+
+## Fable review verdict
+**APPROVED — merge**, session `c42ea1cb-a9d6-413d-bdcb-fc77fc49abba`, 2026-07-20,
+reviewing commit `a2836c4`. Verified both light-gate items directly in the diff:
+(1) the backup service authenticates with its own dedicated `/keys/state-backup`
+identity (`IdentitiesOnly`), write-scoped to `ca-state-backup` only, every source
+volume mounted `:ro`, its status volume the sole writable surface — "least-privilege
+exactly as intended"; (2) `_SNAPSHOT_BRANCH` is a module constant, the module's single
+forced push names fully-qualified `refs/heads/snapshot` on BOTH sides of the refspec,
+and `TestForcePushTarget` proves `main` byte-identical across a real backup run
+against a real seeded bare repo — "testing the property, not the mock." Called out
+writing the gate item into the module docstring as "the right touch." Explicitly
+noted the two bundled non-review items (decisions/00067; the CI-caught SHA-determinism
+fix) as "appropriately flagged," and the honest CI-round-trip writeup as "exactly the
+discipline this train has made habitual." Confirmed this closes **all five security
+gates** (M2/M3/M4/M6/M7) for the independence phase.
+
+**DONE — merged PR #79** (2026-07-20, merge commit `177430d`). Remote branch deleted
+via `--delete-branch`; local worktree moved on to `indep/m8-html-guide` off the fresh
+`origin/main`.
 
 ## How to continue + acceptance
 **FABLE-LIGHT**: PR -> peer author, but checklist scope is narrow (key-scope + force-push-
