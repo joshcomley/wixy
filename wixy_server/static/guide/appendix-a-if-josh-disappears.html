@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Appendix A — If Josh disappears tomorrow — Going independent, a guide for Cottage Aesthetics</title>
+<link rel="stylesheet" href="guide.css">
+</head>
+<body>
+<div class="guide-shell">
+<nav class="guide-nav" aria-label="Guide chapters">
+<h1>Going independent</h1>
+<p class="guide-time">A guide for Cottage Aesthetics — about 2–3 hours across a week, no step urgent.</p>
+<div class="guide-nav-group">
+<ul>
+<li><a href="start-here.html">Start here</a></li>
+<li><a href="track-j.html">Track J — Josh</a></li>
+</ul></div>
+<div class="guide-nav-group">
+<h2>Track P — Purdi</h2>
+<ul>
+<li><a href="track-p-1-password-manager.html">1. Password manager</a></li>
+<li><a href="track-p-2-github.html">2. GitHub</a></li>
+<li><a href="track-p-3-digitalocean.html">3. DigitalOcean</a></li>
+<li><a href="track-p-4-cloudflare.html">4. Cloudflare</a></li>
+<li><a href="track-p-5-anthropic.html">5. Anthropic (AI)</a></li>
+<li><a href="track-p-6-droplet-setup.html">6. Droplet setup</a></li>
+<li><a href="track-p-7-drill.html">7. The drill</a></li>
+<li><a href="track-p-8-go-live.html">8. Go live</a></li>
+</ul></div>
+<div class="guide-nav-group">
+<h2>Appendices</h2>
+<ul>
+<li><a href="appendix-a-if-josh-disappears.html" aria-current="page">A. If Josh disappears</a></li>
+<li><a href="appendix-b-costs.html">B. Costs</a></li>
+<li><a href="appendix-c-revoking-access.html">C. Revoking access</a></li>
+</ul></div>
+</nav>
+<main class="guide-main">
+<p class="guide-chapter-meta">Appendices</p>
+<h1>Appendix A — If Josh disappears tomorrow</h1>
+<p class="guide-lede">
+This page is written for someone else — a competent developer you've hired, if Josh
+is ever unreachable and you need help. It's deliberately one page: what exists,
+where it lives, how to restore it from nothing, and how to run it day to day.
+Nothing below depends on Josh being available, or even being asked.
+</p>
+
+<div class="guide-reassurance">
+Everything named on this page is already yours — in your accounts, under your
+control, before this page is ever needed. A developer reading this needs no
+introduction from Josh and no access he hasn't already been given by you, in Track
+P of this guide.
+</div>
+
+<h2>What exists</h2>
+<table class="guide-table">
+<tr><th>Component</th><th>Where it lives</th></tr>
+<tr><td>Website code, content, theme, images</td><td>Your GitHub organisation, repository <code>cottage-aesthetics-site</code></td></tr>
+<tr><td>The underlying engine software</td><td>Your GitHub organisation, repository <code>wixy-engine</code> — a fork of the public, MIT-licensed <code>github.com/joshcomley/wixy</code></td></tr>
+<tr><td>Your own business documents (photos, brief, reviews)</td><td>Your GitHub organisation, private repository <code>ca-business</code></td></tr>
+<tr><td>Nightly state backups</td><td>Your GitHub organisation, private repository <code>ca-state-backup</code>, branch <code>snapshot</code></td></tr>
+<tr><td>The running website itself</td><td>Your DigitalOcean droplet — four small programs running together: the site, the AI assistant's worker, the nightly backup job, and the Cloudflare tunnel</td></tr>
+<tr><td>Your domain, address book, and admin login</td><td>Your Cloudflare account (DNS records + Zero Trust Access)</td></tr>
+<tr><td>The AI assistant</td><td>Your Anthropic account and API key, used only inside the droplet's own worker program — never by anyone directly</td></tr>
+<tr><td>Every password and token above</td><td>Your password manager, each saved as "Cottage Aesthetics — &lt;name&gt;"</td></tr>
+</table>
+
+<h2>Where to get in</h2>
+<p>
+Server access needs no separate software: DigitalOcean's own website has a
+"Console" button on your droplet's page, opening a full terminal in your browser.
+The one script that built the whole thing lives at
+<code>deploy/standalone/setup.sh</code> inside the <code>wixy-engine</code>
+repository — safe to read, and safe to run again from scratch if ever needed.
+</p>
+
+<h2>How to restore, from nothing but a backup</h2>
+<ol>
+<li>Create a new DigitalOcean droplet — same choices as Track P, chapter 3
+(Marketplace "Docker on Ubuntu," Basic Regular, 2 GB / 1 vCPU, London).</li>
+<li>Run the same one-line setup command as Track P, chapter 6, answering with the
+same values (all in the password manager). This gives you a clean, working,
+<em>empty</em> website.</li>
+<li>Clone the latest snapshot from <code>ca-state-backup</code>'s
+<code>snapshot</code> branch, and copy its contents into the running website's
+data volume (<code>docker compose cp</code>, or an equivalent mount-and-copy —
+it's a plain file tree, nothing proprietary or exotic).</li>
+<li>Restart the <code>wixy</code> container so it picks up the restored state.</li>
+<li>Point the domain at the new droplet's tunnel — same mechanism as Track P,
+chapter 8.</li>
+</ol>
+
+<h2>How to run it, day to day</h2>
+<ul>
+<li><strong>Publishing</strong> a change: the admin area's Publish button, at
+<code>/admin</code> on your domain (behind Cloudflare Access).</li>
+<li><strong>Engine updates</strong>: Settings → Engine card → "Get engine
+updates," with a one-tap "Undo last update" if anything ever goes wrong.</li>
+<li><strong>Logs and troubleshooting</strong>: <code>logs.sh</code>, in
+<code>deploy/standalone/</code>, run from the droplet's own console.</li>
+<li>The entire running stack is defined in one file —
+<code>deploy/standalone/docker-compose.yml</code>, inside the engine repository.
+Nothing about how this website runs is hidden anywhere else.</li>
+</ul>
+
+<div class="guide-footer-nav">
+<a href="track-p-8-go-live.html">← 8. Go live</a>
+<a href="appendix-b-costs.html">B. Costs →</a>
+</div>
+</main>
+</div>
+<script src="guide.js"></script>
+</body>
+</html>

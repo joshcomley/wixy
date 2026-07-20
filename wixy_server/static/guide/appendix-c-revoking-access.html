@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Appendix C — Revoking Josh's access — Going independent, a guide for Cottage Aesthetics</title>
+<link rel="stylesheet" href="guide.css">
+</head>
+<body>
+<div class="guide-shell">
+<nav class="guide-nav" aria-label="Guide chapters">
+<h1>Going independent</h1>
+<p class="guide-time">A guide for Cottage Aesthetics — about 2–3 hours across a week, no step urgent.</p>
+<div class="guide-nav-group">
+<ul>
+<li><a href="start-here.html">Start here</a></li>
+<li><a href="track-j.html">Track J — Josh</a></li>
+</ul></div>
+<div class="guide-nav-group">
+<h2>Track P — Purdi</h2>
+<ul>
+<li><a href="track-p-1-password-manager.html">1. Password manager</a></li>
+<li><a href="track-p-2-github.html">2. GitHub</a></li>
+<li><a href="track-p-3-digitalocean.html">3. DigitalOcean</a></li>
+<li><a href="track-p-4-cloudflare.html">4. Cloudflare</a></li>
+<li><a href="track-p-5-anthropic.html">5. Anthropic (AI)</a></li>
+<li><a href="track-p-6-droplet-setup.html">6. Droplet setup</a></li>
+<li><a href="track-p-7-drill.html">7. The drill</a></li>
+<li><a href="track-p-8-go-live.html">8. Go live</a></li>
+</ul></div>
+<div class="guide-nav-group">
+<h2>Appendices</h2>
+<ul>
+<li><a href="appendix-a-if-josh-disappears.html">A. If Josh disappears</a></li>
+<li><a href="appendix-b-costs.html">B. Costs</a></li>
+<li><a href="appendix-c-revoking-access.html" aria-current="page">C. Revoking access</a></li>
+</ul></div>
+</nav>
+<main class="guide-main">
+<p class="guide-chapter-meta">Appendices</p>
+<h1>Appendix C — Revoking Josh's access</h1>
+<p class="guide-lede">
+This page exists on purpose: proving you <em>can</em> remove Josh, cleanly and
+completely, whenever you like, is the whole point of everything you've just built.
+This isn't something to do now — it's here for whenever, if ever, you want it. Doing
+any or all of it needs no explanation to anyone.
+</p>
+
+<div class="guide-reassurance">
+Josh holds three things, and only three — each one you granted yourself, earlier in
+this guide, and each one removable in under a minute. He has never had your
+passwords, your billing details, or any way to change these back once you've
+removed them.
+</div>
+
+<ol class="guide-steps">
+
+<li>
+<p class="guide-step-what">Remove Josh from your GitHub site repository.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Open <code>cottage-aesthetics-site</code>, click "Settings," then "Collaborators
+and teams." Find <code>joshcomley</code> in the list and click "Remove."</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> he no
+longer appears in that repository's collaborator list.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Remove Josh's email from your Cloudflare Access
+policy.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+In Cloudflare Zero Trust, go to "Access," then "Applications," and open your admin
+application. Edit its policy, remove Josh's email address from the allowed list
+(leaving just your own), and save.</div>
+<div class="guide-reassurance">
+This takes effect immediately — including ending any session he might already have
+open. He'd need a fresh invitation from you, added back to this same list, to ever
+get in again.
+</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> the
+policy's allowed list shows only your own email address.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Remove Josh from your Anthropic console, if you added
+him.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Only relevant if you invited him in Track P, chapter 5. If you did: Anthropic
+Console → Settings → Members (or "People") → find his entry → remove. If you
+didn't, there's nothing to do here — he was never given access in the first
+place.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> he's no
+longer listed, or you've confirmed he never was.</p>
+</li>
+
+</ol>
+
+<p>
+That's the whole list — three places, three removals, each independent of the
+others. Nothing about your site, its history, or your own accounts changes when you
+do any of this. And if you ever want Josh back as a helper after removing him,
+chapters 2, 4, and 5 show you exactly how to re-invite him — any time, on your own
+terms, same as the first time.
+</p>
+
+<div class="guide-footer-nav">
+<a href="appendix-b-costs.html">← B. Costs</a>
+
+</div>
+</main>
+</div>
+<script src="guide.js"></script>
+</body>
+</html>

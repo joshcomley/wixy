@@ -26,6 +26,26 @@ jobs:
       - name: pytest (fixed -n 4, never auto)
         run: pytest
 
+  # spec/independence/07 §3: "Every external URL in the guide verified live
+  # at build time." Builds fresh (not from committed output) so the drift
+  # check catches a stale commit, then link-checks the fresh build against
+  # the real internet.
+  guide-linkcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install
+        run: pip install -e ".[server,dev]"
+      - name: Build the guide
+        run: python -m guide
+      - name: Guide bundle drift check (committed output must match a fresh build)
+        run: git diff --exit-code -- wixy_server/static/guide
+      - name: Link check (every external URL must be live)
+        run: python -m guide.linkcheck
+
   frontend:
     runs-on: ubuntu-latest
     steps:

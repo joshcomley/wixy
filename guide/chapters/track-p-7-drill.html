@@ -1,0 +1,127 @@
+<h1>Track P, chapter 7 — The drill</h1>
+<p class="guide-lede">
+Everything is installed. This chapter proves it all actually works — publishing,
+updates, and your AI assistant — on a temporary, private test address that only you
+(and Josh, if you've kept him on) can even reach. Nothing about your real, live
+website changes in this chapter; that's chapter 8, once you're confident.
+</p>
+
+<ol class="guide-steps">
+
+<li>
+<p class="guide-step-what">Add a temporary test address, pointed at your droplet
+through your tunnel.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+In the Cloudflare Zero Trust dashboard, go to "Networks," then "Tunnels" (the same
+place you created your tunnel in chapter 4), and click on its name. Find the
+"Public Hostname" tab, then "Add a public hostname." For "Subdomain," type
+<code>test</code>; for "Domain," choose your domain from the dropdown; leave the
+path blank. Under "Service," choose type <strong>HTTP</strong>, and for the URL,
+type the address below exactly.</div>
+<div class="guide-copy-block"><code>wixy:9380</code><button type="button" class="guide-copy-button">Copy</button></div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> your new
+hostname appears in the Public Hostname list, showing <code>test.yourdomain</code>
+routed to <code>wixy:9380</code>.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Protect this test address's admin area too, the same
+way your real one already is.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+In Zero Trust, go to "Access," then "Applications," and open the application you
+created in chapter 4 ("Cottage Aesthetics admin" or similar). Click "Edit," and in
+its list of application domains, add two more: your new test address with
+<code>/admin</code>, and again with <code>/api/admin</code> — exactly like the
+two you added in chapter 4, just with <code>test.</code> in front this time. Save.</div>
+<div class="guide-reassurance">
+Skipping this step would leave your test admin area reachable by anyone who
+guessed the address, with no login at all — this is what closes that gap, using the
+exact same two people (you and Josh) already trusted on your real one.
+</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> the
+application's domain list shows four entries in total: your real domain's
+<code>/admin</code> and <code>/api/admin</code>, and now your test address's
+matching pair.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Visit your test address and confirm your website
+loads.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+In any browser, go to <code>https://test.</code> followed by your domain (for
+example <code>https://test.yourdomain.co.uk</code>). Give it a minute if it doesn't
+load first try — the tunnel and Cloudflare both need a few moments to notice the
+new address after step 1.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> your website
+appears, looking exactly like the live one — because it's the same site, just not
+the address the public knows about yet.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Visit the test address's admin area and sign in.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Add <code>/admin</code> to the same address (e.g.
+<code>https://test.yourdomain.co.uk/admin</code>). Cloudflare Access stops you here
+and asks for your email; enter it, then enter the one-time code it emails you.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> you land on
+your familiar admin screen — draft editing, chat panel, Settings, all present.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Make a small test change and publish it.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Edit any piece of text on any page — something harmless and easy to spot, like
+adding the word "test" somewhere unused — then use the Publish button as you
+normally would.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> refreshing
+<code>https://test.yourdomain.co.uk</code> (no <code>/admin</code>) shows your
+change, live. Feel free to undo it with History afterwards.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Check for engine updates.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+In the admin area, go to Settings, then the "Engine" card. It shows your current
+version and whether any updates are available. If it offers one, click "Get engine
+updates" and watch it progress through checking, building, and deploying — usually
+a couple of minutes. If it already says "You're up to date," that's a pass too;
+there's nothing else to do here.</div>
+<div class="guide-reassurance">
+If an update ever causes a problem, the same card has an "Undo last update" button
+that puts things back exactly as they were, in one click — you don't need to use it
+now, just know it's there.
+</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> the Engine
+card shows "You're up to date," whether or not it needed to do anything to get
+there.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Ask your AI assistant to make a small change, and watch
+it become a real, published edit.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Open the chat panel and ask for something simple — "change the word 'Welcome' to
+'Hello' at the top of the home page" is a good test. The assistant works in the
+background and, when it's done, leaves you a link to review its suggested change on
+GitHub as a
+<a class="guide-gloss" title="A proposed change to the code, submitted for review, rather than saved straight into the live version.">pull request</a>.
+Open that link, check the change looks right, and click "Merge."</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> after
+merging, the change appears in your admin area as a new draft — publish it the
+normal way, and it's live on your test address too.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Note where your backup status lives, for later.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+In Settings, the "System" card shows the age of your last automatic backup, along
+with your disk usage and current engine version. Your very first backup runs
+tonight, so there's nothing to see there yet — this step is just so you know where
+to look afterwards, and to recognise the warning banner (backup older than 48
+hours) if you ever see it.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> you can find
+the System card and understand what it's telling you — nothing to check off here
+until tomorrow.</p>
+</li>
+
+</ol>

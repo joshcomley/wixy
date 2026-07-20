@@ -1,0 +1,162 @@
+<h1>Track P, chapter 6 — Setting up your droplet</h1>
+<p class="guide-lede">
+This is the chapter where it all comes together: one script, run once, turns your
+empty droplet into your live website's new home. It asks a series of questions —
+mostly things you've already saved in your password manager from earlier chapters —
+and takes care of the rest itself.
+</p>
+
+<div class="guide-reassurance">
+<strong>Have your password manager open before you start.</strong> Nearly every
+answer this chapter needs, you've already saved: your Cloudflare Tunnel token, team
+domain, and Access AUD tag from chapter 4, and your Anthropic API key from chapter 5.
+</div>
+
+<ol class="guide-steps">
+
+<li>
+<p class="guide-step-what">Create one more empty, private repository — this one for
+your automatic nightly backups.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+On your organisation's page, click "New," choose "Private," and use the exact name
+below (if it's taken, a close variant is fine, the same as your organisation's own
+name in chapter 2). Leave everything else as it is — no README, no template — and
+click "Create repository." There's nothing to put in it yourself; your droplet fills
+it in automatically, every night, once it's running.</div>
+<div class="guide-copy-block"><code>ca-state-backup</code><button type="button" class="guide-copy-button">Copy</button></div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> an empty
+repository named <code>ca-state-backup</code> appears in your organisation's
+repository list.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Find and note down the "SSH URL" for both your site
+repository and this new backup repository.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+On each repository's own page, click the green "Code" button, then the "SSH" tab
+(not "HTTPS," which is selected by default), and copy the address shown — it starts
+with <code>git@github.com:</code>. Do this once for
+<code>cottage-aesthetics-site</code> and once for <code>ca-state-backup</code>; keep
+both handy, you'll paste them into the script in a moment.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> you have two
+addresses copied, each starting <code>git@github.com:</code> and ending
+<code>.git</code>.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Open your droplet's console and paste the one setup
+command.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+On your droplet's page in DigitalOcean, click "Console" (top right) — a black,
+terminal-style window opens right there in your browser tab. Click inside it, then
+paste the command below and press Enter.
+<strong>Before you copy it, replace <code>&lt;your-org&gt;</code> — it appears
+twice — with the organisation name you chose in Track P, chapter 2, step 2</strong>
+(<code>cottage-aesthetics</code>, unless GitHub asked you to use a variant).</div>
+<div class="guide-copy-block"><code>curl -fsSL https://raw.githubusercontent.com/&lt;your-org&gt;/wixy-engine/main/deploy/standalone/setup.sh | WIXY_ENGINE_REPO=https://github.com/&lt;your-org&gt;/wixy-engine.git bash</code><button type="button" class="guide-copy-button">Copy</button></div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> the console
+starts printing lines of text — it's fetching the setup script and about to start
+asking you questions.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Answer the script's questions, in the order it asks
+them.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Type or paste each answer into the console and press Enter. A couple of these
+(marked "secret" below) show nothing on screen as you paste — that's deliberate,
+not a fault; paste anyway and press Enter as normal.</div>
+<table class="guide-table">
+<tr><th>It asks for</th><th>Answer with</th></tr>
+<tr><td>Your domain</td><td>your website's address, e.g. <code>www.yourdomain.co.uk</code></td></tr>
+<tr><td>Your site repo's SSH URL</td><td>the first address from step 2, above</td></tr>
+<tr><td>Your state-backup repo's SSH URL</td><td>the second address from step 2, above</td></tr>
+<tr><td>Your Cloudflare Tunnel token <em>(secret)</em></td><td>"Cottage Aesthetics — Cloudflare Tunnel token," from chapter 4</td></tr>
+<tr><td>Your Cloudflare Access team domain</td><td>"Cottage Aesthetics — Cloudflare team domain," from chapter 4</td></tr>
+<tr><td>Your Cloudflare Access app's AUD tag</td><td>"Cottage Aesthetics — Cloudflare Access AUD tag," from chapter 4</td></tr>
+<tr><td>Your Anthropic API key <em>(secret)</em></td><td>"Cottage Aesthetics — Anthropic API key," from chapter 5</td></tr>
+<tr><td>Monthly AI budget in USD</td><td>press Enter to accept 40, or type your own figure</td></tr>
+<tr><td>Container image to run</td><td>press Enter to accept the suggested default</td></tr>
+</table>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> the script
+stops asking questions and starts printing progress messages of its own — it's
+moving on to generating your security keys next.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Paste your site repository's new
+<a class="guide-gloss" title="A key generated just now, specific to this one repository, that lets your droplet download your site's code securely — different from a password, and different from the AI assistant's own token below.">deploy key</a>
+on GitHub, when the script pauses and asks.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+The console prints a block of text starting <code>ssh-ed25519</code>, followed by
+the exact GitHub page to paste it on. Open that page in a new browser tab, paste the
+key, tick <strong>"Allow write access,"</strong> and save it. Then go back to the
+console and press Enter to continue.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> the new
+deploy key appears in that repository's list, and the console has moved on to its
+next question.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Create your AI assistant's own GitHub token, when the
+script pauses and asks.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+The console shows the exact page to visit:
+github.com/settings/personal-access-tokens/new. Give it any name, set "Repository
+access" to your site repository only, and set both "Contents" and "Pull requests"
+permissions to "Read and write." Click "Generate token," copy it, and paste it back
+into the console.</div>
+<div class="guide-save-credential">Save this in your password manager as
+<strong>"Cottage Aesthetics — AI assistant token"</strong>.</div>
+<div class="guide-reassurance">
+This is the credential your AI assistant uses to open pull requests with the
+changes it suggests — deliberately scoped to nothing more than that. It's exactly
+why chapter 2's branch protection matters: even this token, in the wrong hands,
+still can't push straight to your live site.
+</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> the console
+accepts your paste and moves on.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Confirm branch protection, twice, when the script
+pauses and asks.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+The console asks you to confirm this is set up on your site repository, then again
+on your engine fork. You already did both, properly, back in chapter 2 — so for
+each, just check it's still there if you'd like, then press Enter to move on.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> the console
+continues both times without complaint.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Paste your backup repository's new deploy key on
+GitHub, when the script pauses and asks.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Exactly like step 5, but this time the exact page named is your new
+<code>ca-state-backup</code> repository's own deploy-keys page. Paste the key
+shown, tick "Allow write access," save it, then return to the console and press
+Enter.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> the key
+appears on <code>ca-state-backup</code>'s deploy-keys list, and the console
+carries on by itself from here — no more questions.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Watch the script finish, and check its final health
+report.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+The console now works unattended for a minute or two — installing, writing its
+settings, and starting your website — before running its own built-in check and
+printing one line per test, each ending <code>[OK]</code> or <code>[FAIL]</code>.</div>
+<div class="guide-reassurance">
+If anything shows <code>[FAIL]</code>, it names the exact chapter/step to revisit —
+fix that one thing and simply paste the whole setup command again; it's safe to
+re-run from the start as many times as you need, it won't create anything twice.
+</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> every line
+ends <code>[OK]</code>, and the final line reads something like "5 passed, 0
+failed."</p>
+</li>
+
+</ol>

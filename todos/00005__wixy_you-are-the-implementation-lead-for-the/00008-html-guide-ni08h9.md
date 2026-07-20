@@ -49,8 +49,26 @@ ordering. Explain WHY in one sentence (per 07 §1's voice rules): this is what
 stops even a leaked AI-assistant credential from ever being able to push
 straight to her live site's source.
 
+**Build — DONE**: `guide/` package (`manifest.py` single-source-of-truth chapter list,
+`build.py` chrome-template injection + nav/prev-next generation, `linkcheck.py` live
+external-link checker with retry, `__main__.py` CLI, `templates/chrome.html`,
+`assets/guide.{css,js}`), all 13 chapters with real content (`start-here`, `track-j`,
+`track-p-1`..`track-p-8`, `appendix-a`..`appendix-c`), `wixy_server/app.py`'s dedicated
+`/admin/guide` `StaticFiles` mount (CF-Access-gated automatically), `.github/workflows/
+ci.yml`'s new `guide-linkcheck` job. Both forward obligations (M2 ca-business population
+in `track-j.html`; M6/R2 branch protection in `track-p-2-github.html`) verified present.
+Three real cross-chapter gaps found and closed during integration (`ca-state-backup`
+repo creation never had a home; Appendix C's Josh-revocation promise had nothing granting
+GitHub-org/Anthropic access to revoke; chapter 7's temporary test hostname would have
+left `/admin` unauthenticated) — full writeup in decisions/00068. `joshcomley/wixy`
+flipped public (operator-confirmed) to satisfy the one real external link the guide's
+fork step needs; re-ran a full-history + working-tree gitleaks scan first (clean) rather
+than trust the M2-era scan. 24 `guide/tests` + 5 `test_guide_route.py` + 1 auth-gate
+test + full existing suite: 780 passed. `ruff check`/`ruff format --check`/`mypy`/`pytest`
+all clean.
+
 ## Relevant files + commits
-(fill in as PR lands)
+Branch `indep/m8-html-guide` (off main, after M7 merged). decisions/00068.
 
 ## How to continue + acceptance
 CI-gated (drill validates) — auto-merge on green linkcheck+build. Real acceptance test is

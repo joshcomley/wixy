@@ -1,0 +1,103 @@
+<h1>Track P, chapter 8 — Go live</h1>
+<p class="guide-lede">
+This is the one chapter that changes what your visitors see — everything before now
+has been invisible to them. It's short, it's designed to be done together with Josh
+on the phone, and it can be undone in minutes if anything ever looks wrong.
+</p>
+
+<ol class="guide-steps">
+
+<li>
+<p class="guide-step-what">Call Josh, and do this chapter together.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+However suits you both — phone, video call, sitting together. You'll each be
+watching your own real website's address as it changes, so it helps to have him on
+the line while you do.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> you're both
+ready, with this guide open, before you touch anything below.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Before changing anything, note down what your address
+currently points to.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+In the main Cloudflare dashboard (not Zero Trust this time) for your domain, go to
+"DNS," then "Records." Find the row for <code>www</code> and the row for your bare
+domain (shown as <code>@</code>) — for each, note down (or screenshot) its "Type"
+and "Content" columns. This is what your website currently points to — Wix's own
+servers — and it's your way back if you ever need it.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> you have
+both rows noted down or screenshotted, safely, before continuing.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Point your main address at your own droplet.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Back in Zero Trust → "Networks" → "Tunnels" → your tunnel → "Public Hostname" →
+"Add a public hostname." For "Subdomain," type <code>www</code>; for "Domain,"
+choose yours; under "Service," choose type <strong>HTTP</strong> and enter the
+address below. Cloudflare will likely warn you a record for <code>www</code>
+already exists (the one you just noted down) — choose to replace it.</div>
+<div class="guide-copy-block"><code>wixy:9380</code><button type="button" class="guide-copy-button">Copy</button></div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> the Public
+Hostname list shows <code>www.yourdomain</code> routed to <code>wixy:9380</code>.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Do the same for your bare address (no "www").</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Repeat the previous step once more: "Add a public hostname," leave "Subdomain"
+empty this time (so it applies to your domain on its own), same Service and same
+address as before. Confirm the same way if it warns about replacing an existing
+record.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> the Public
+Hostname list now shows two new entries — <code>www.yourdomain</code> and your bare
+domain — both routed to <code>wixy:9380</code>.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Visit your real address, together, and watch it change.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+In your browser, go to your website's normal address — the one your customers
+already use. Refresh a few times if the old site still shows at first; this
+normally clears within a minute or two, occasionally a little longer.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> your real
+address shows your Wixy site — the same one you tested in chapter 7 — and Josh
+confirms he sees it too, from wherever he is.</p>
+</li>
+
+<li>
+<p class="guide-step-what">If anything looks wrong, flip it back — this takes
+minutes, not hours.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Return to the same "Public Hostname" screen from steps 3–4 and edit (or delete)
+the <code>www</code> and bare-domain entries, restoring the "Type" and "Content"
+values you noted down in step 2. If you're ever unsure what those were, Wix
+support can always remind you — your Wix account and subscription haven't been
+touched by anything in this guide, so it's still there as a safety net for exactly
+this.</div>
+<div class="guide-reassurance">
+Nothing about this guide deletes anything. Every step from chapter 1 onward has
+been additive — new accounts, new droplet, new tunnel routes — right up until
+steps 3 and 4 just now. Undoing those two is the only "undo" this whole guide ever
+needs.
+</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> — only if
+you ever need this — your address shows your old site again, exactly as before.</p>
+</li>
+
+<li>
+<p class="guide-step-what">That's it. You're independent.</p>
+<div class="guide-where"><span class="guide-where-label">What's next</span>
+Nothing urgent — but three pages are worth knowing about, for whenever you need
+them: <strong>Appendix A</strong> is the one page you'd hand to any developer if
+Josh were ever unreachable; <strong>Appendix B</strong> lays out exactly what this
+now costs you, including when you might choose to cancel your old Wix
+subscription; and <strong>Appendix C</strong> shows you how to remove Josh's
+access, whenever — if ever — you'd like to.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> your website
+runs entirely on your own accounts, and you know exactly where everything lives.
+Well done.</p>
+</li>
+
+</ol>

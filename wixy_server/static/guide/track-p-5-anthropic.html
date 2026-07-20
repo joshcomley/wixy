@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Track P, chapter 5 — Your Anthropic account and API key — Going independent, a guide for Cottage Aesthetics</title>
+<link rel="stylesheet" href="guide.css">
+</head>
+<body>
+<div class="guide-shell">
+<nav class="guide-nav" aria-label="Guide chapters">
+<h1>Going independent</h1>
+<p class="guide-time">A guide for Cottage Aesthetics — about 2–3 hours across a week, no step urgent.</p>
+<div class="guide-nav-group">
+<ul>
+<li><a href="start-here.html">Start here</a></li>
+<li><a href="track-j.html">Track J — Josh</a></li>
+</ul></div>
+<div class="guide-nav-group">
+<h2>Track P — Purdi</h2>
+<ul>
+<li><a href="track-p-1-password-manager.html">1. Password manager</a></li>
+<li><a href="track-p-2-github.html">2. GitHub</a></li>
+<li><a href="track-p-3-digitalocean.html">3. DigitalOcean</a></li>
+<li><a href="track-p-4-cloudflare.html">4. Cloudflare</a></li>
+<li><a href="track-p-5-anthropic.html" aria-current="page">5. Anthropic (AI)</a></li>
+<li><a href="track-p-6-droplet-setup.html">6. Droplet setup</a></li>
+<li><a href="track-p-7-drill.html">7. The drill</a></li>
+<li><a href="track-p-8-go-live.html">8. Go live</a></li>
+</ul></div>
+<div class="guide-nav-group">
+<h2>Appendices</h2>
+<ul>
+<li><a href="appendix-a-if-josh-disappears.html">A. If Josh disappears</a></li>
+<li><a href="appendix-b-costs.html">B. Costs</a></li>
+<li><a href="appendix-c-revoking-access.html">C. Revoking access</a></li>
+</ul></div>
+</nav>
+<main class="guide-main">
+<p class="guide-chapter-meta">Track P — Purdi · 10 minutes</p>
+<h1>Track P, chapter 5 — Your Anthropic account and API key</h1>
+<p class="guide-lede">
+Anthropic makes Claude, the AI assistant behind your site's chat panel — the one you
+ask to change wording, add a section, or tweak the booking page. Today it runs on
+Josh's account; this chapter moves it onto your own, billed to you, with a spending
+cap you control.
+</p>
+
+<ol class="guide-steps">
+
+<li>
+<p class="guide-step-what">Create your Anthropic account.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Go to console.anthropic.com and choose "Sign up." An email address and password (or
+signing up with your Google account) is enough — you'll be asked for billing details
+before you can create a key, in the next step.</div>
+<div class="guide-save-credential">Save this in your password manager as
+<strong>"Cottage Aesthetics — Anthropic account"</strong>.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> you're looking
+at the Anthropic Console, signed in.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Create your
+<a class="guide-gloss" title="A secret code that lets a program — your website's server, in this case — act as you when talking to Claude, billed to your account.">API key</a>
+and save it straight away.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+In the Console's left-hand menu, choose "API Keys," then "Create Key." Give it a
+name such as "Cottage Aesthetics website," and click "Create." Anthropic shows you
+the key <strong>exactly once</strong> — copy it immediately, before doing anything
+else.</div>
+<div class="guide-save-credential">Save this in your password manager as
+<strong>"Cottage Aesthetics — Anthropic API key"</strong>.</div>
+<div class="guide-reassurance">
+If you ever navigate away before saving it, that's not a disaster — you can't see
+the same key again, but you can delete it and create a new one in its place, as many
+times as you need.
+</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> the key is
+saved in your password manager, starting with <code>sk-ant-</code>.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Set a spending limit inside your Anthropic account too —
+belt and braces.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Still in the Console, look under "Settings" or "Billing" for something named
+"Limits" or "Spend limits" (Anthropic's exact wording here shifts occasionally —
+the Console's own search box, if you see one, is a good fallback). Set a monthly
+limit — <strong>$40</strong> is a sensible starting point, matching the friendly cap
+your website's own settings will also enforce in chapter 6.</div>
+<div class="guide-reassurance">
+This is a second, independent safety net, not a duplicate: your website has its own
+monthly budget setting (chapter 6) that stops new conversations once it's reached,
+and now your Anthropic account itself has one too. Either one alone would catch a
+runaway bill — having both means one small mistake in either place still can't
+surprise you.
+</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> the limits
+page shows your chosen monthly figure saved.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Optional: invite Josh to your Anthropic console, so he
+can help if you ever hit an AI-related snag.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Look under "Settings" for "Members," "People," or "Team" (again, naming varies), and
+use its invite option with Josh's email address. If your plan doesn't offer team
+members, that's fine — skip this step entirely; nothing else in this guide depends
+on it.</div>
+<div class="guide-reassurance">
+Entirely optional, and entirely reversible — Appendix C shows exactly how to remove
+this whenever you'd like to. Josh already has none of your account's billing
+details or password either way; this only ever gives him visibility into usage and
+logs, never control over your payment method.
+</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> Josh's email
+appears in your account's member list (or, if you skipped this step, simply move on
+— chapter 6 is next).</p>
+</li>
+
+</ol>
+
+<div class="guide-footer-nav">
+<a href="track-p-4-cloudflare.html">← 4. Cloudflare</a>
+<a href="track-p-6-droplet-setup.html">6. Droplet setup →</a>
+</div>
+</main>
+</div>
+<script src="guide.js"></script>
+</body>
+</html>

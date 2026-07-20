@@ -60,6 +60,12 @@ _REPO_ROOT = Path(__file__).parent.parent
 _UXER_DIST_DIR = _REPO_ROOT / "Uxer" / "web" / "dist"
 _UXER_STYLE_PATH = _REPO_ROOT / "uxer-style.json"
 _UXER_WEB_PORT_PATH = _REPO_ROOT / ".uxer-web-port"
+# The independence-phase HTML guide (milestone 8, spec/independence/07) — built
+# by `guide.build` (source in `guide/`, committed output here, same "committed
+# bundle, CI checks for drift" convention admin-ui/editor already use). A
+# DEDICATED mount, not nested under `/admin/static` — spec's own literal
+# wording is "served... at /admin/guide/", not `/admin/static/guide/`.
+_GUIDE_DIST_DIR = _STATIC_DIR / "guide"
 
 
 def create_app(
@@ -253,6 +259,12 @@ def create_app(
     app.mount("/admin/static/uxer", StaticFiles(directory=_UXER_DIST_DIR), name="uxer-static")
 
     app.mount("/admin/static", StaticFiles(directory=_STATIC_DIR), name="admin-static")
+    # `html=True`: serves `index.html` for the bare `/admin/guide/` root and
+    # resolves an extension-less path — `guide.build`'s own output always
+    # includes an `index.html` copy of `start-here.html` for exactly this.
+    # CF Access already gates this (same `is_admin_path` middleware every
+    # other `/admin/*` path gets — no separate auth wiring needed here).
+    app.mount("/admin/guide", StaticFiles(directory=_GUIDE_DIST_DIR, html=True), name="guide")
     # Serves whatever `_save_upload`/`_media_item` (routes_admin_api.py) construct as
     # a staged upload's `url` (`/admin/draft-media/<hash8>-<slug>.<ext>`) — `paths.
     # draft_media` already exists by now (`ensure_project_dirs` above), and staying
