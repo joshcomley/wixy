@@ -79,6 +79,27 @@ no-op. Verified in `TestSingleCommitHistory`: two consecutive runs both leave
 `snapshot` at exactly one commit, and the second run's commit is a genuine new
 root (zero parents), not an amend of the first.
 
+**Correction (found via real CI, not local runs)**: the first draft of
+`test_second_run_produces_a_fresh_orphan_commit` also asserted `first.status.
+commit_sha != second.status.commit_sha`, both runs called with the identical
+fixed `now=_WHEN`. This passed reliably on the local (Windows, heavily
+parallel-loaded) dev machine but failed on GitHub's CI runner (Linux,
+`ubuntu-latest`) with both SHAs identical — correctly so: with byte-identical
+tree, message, author, AND git-commit-timestamp (author dates a git commit
+object carries have 1-second resolution; the whole two-run sequence
+apparently completed within the same second on that runner, something the
+locally-loaded machine's own slower per-subprocess overhead happened to avoid
+by chance), git's content-addressing legitimately produces the same SHA for
+both — that's correct git behavior, not a bug in `snapshot.py`, and asserting
+otherwise was simply a wrong test expectation, not a real invariant of the
+system. Fixed by giving the second call a different `now` (`_WHEN +
+timedelta(hours=1)`) — the one thing genuinely different between two real
+nightly runs — so the SHA-inequality check is deterministic proof of two
+independent commits, never a race against however fast git/the OS happen to
+execute on whatever machine runs the suite. The zero-parents assertion
+(already present, timing-independent) is what actually proves "orphan," and
+needed no change.
+
 ## Verification: re-clone and compare SHAs, not "did the push exit zero"
 
 `_verify_pushed` re-clones the `snapshot` branch SHALLOW into a fresh directory

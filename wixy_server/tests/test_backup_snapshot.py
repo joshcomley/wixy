@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import subprocess
 import tempfile
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -185,7 +185,15 @@ class TestSingleCommitHistory:
     ) -> None:
         settings = _settings(tmp_path, empty_bare_backup_repo)
         first = run_backup_once(settings, now=_WHEN)
-        second = run_backup_once(settings, now=_WHEN)
+        # A different `now`, not the same instant re-supplied -- two backup
+        # runs with byte-identical tree + message + author + timestamp WOULD
+        # legitimately produce the same commit SHA (git is content-addressed;
+        # that's correct behavior, not a bug to guard against). A real
+        # nightly run is never at the exact same instant twice, so this
+        # varies the one thing that's genuinely different between runs
+        # (deterministically, not by racing wall-clock/git-timestamp
+        # granularity against however fast this test happens to execute).
+        second = run_backup_once(settings, now=_WHEN + timedelta(hours=1))
 
         assert first.status.commit_sha != second.status.commit_sha
         parents = _git(
