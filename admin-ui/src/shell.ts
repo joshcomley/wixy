@@ -301,17 +301,64 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   settingsToggle.setAttribute("aria-label", "Settings");
   settingsToggle.addEventListener("click", () => navigateTo({ kind: "settings", page: "general" }, win));
 
+  // -- Secondary-controls overflow popover (narrow viewports) ----------------
+  // The zoom/font-scale/screenshot/theme/settings controls are wrapped in one
+  // container that is `display: contents` on wide viewports (its children lay
+  // out as direct topbar items exactly as before) and a hidden popover below
+  // ~720px, toggled by the ⋯ trigger — so the top bar stays one row on a
+  // phone while every control remains reachable (see style.css's
+  // `.wx-topbar-secondary` rules).
+  const secondary = document.createElement("div");
+  secondary.className = "wx-topbar-secondary";
+  secondary.append(zoomGroup, fontScaleGroup, screenshotButton, themeToggle, settingsToggle);
+
+  const overflowButton = document.createElement("button");
+  overflowButton.type = "button";
+  overflowButton.className = "wx-topbar-overflow";
+  overflowButton.textContent = "⋯";
+  overflowButton.setAttribute("aria-label", "More controls");
+  overflowButton.setAttribute("aria-haspopup", "true");
+  overflowButton.setAttribute("aria-expanded", "false");
+
+  function closeSecondary(): void {
+    secondary.classList.remove("wx-topbar-secondary-open");
+    overflowButton.setAttribute("aria-expanded", "false");
+    // Attached only while open (see openSecondary) — no listener accumulation.
+    document.removeEventListener("click", onSecondaryOutsideClick);
+  }
+  function onSecondaryOutsideClick(evt: Event): void {
+    if (evt.target instanceof Node && secondary.contains(evt.target)) return;
+    closeSecondary();
+  }
+  function openSecondary(): void {
+    secondary.classList.add("wx-topbar-secondary-open");
+    overflowButton.setAttribute("aria-expanded", "true");
+    document.addEventListener("click", onSecondaryOutsideClick);
+  }
+  overflowButton.addEventListener("click", (evt) => {
+    // The document-level outside-click listener is added during THIS event's
+    // dispatch; without stopping propagation it would fire for this very
+    // click (document is later in the bubble path) and instantly re-close.
+    evt.stopPropagation();
+    if (secondary.classList.contains("wx-topbar-secondary-open")) {
+      closeSecondary();
+    } else {
+      openSecondary();
+    }
+  });
+  function onSecondaryEscape(evt: KeyboardEvent): void {
+    if (evt.key === "Escape") closeSecondary();
+  }
+  win.addEventListener("keydown", onSecondaryEscape);
+
   topbar.append(
     titleEl,
     spacer,
     chipEl,
     publishButton,
     siteLink,
-    zoomGroup,
-    fontScaleGroup,
-    screenshotButton,
-    themeToggle,
-    settingsToggle,
+    secondary,
+    overflowButton,
   );
 
   const body = document.createElement("div");
@@ -741,6 +788,8 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
         win.document.removeEventListener("visibilitychange", onVisibilityChange);
       }
       if (stateRetryTimer !== null) clearTimeout(stateRetryTimer);
+      win.removeEventListener("keydown", onSecondaryEscape);
+      closeSecondary();
       activePanelTeardown?.();
       closeDrawer();
       themeController.teardown();

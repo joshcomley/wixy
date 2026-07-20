@@ -127,6 +127,19 @@
   flex: 1;
 }
 
+/* The secondary-controls wrapper carries no layout of its own on wide
+   viewports — `display: contents` makes the zoom/font/screenshot/theme/
+   settings children lay out as direct topbar items exactly as if the wrapper
+   weren't there. Below ~720px it becomes the ⋯ popover instead (see the
+   media query), which is also where the trigger appears at all. */
+.wx-topbar-secondary {
+  display: contents;
+}
+
+.wx-topbar-overflow {
+  display: none;
+}
+
 .wx-draft-chip {
   font: 0.75rem/1.4 system-ui, sans-serif;
   color: var(--wx-muted);
@@ -1943,6 +1956,114 @@ div.wx-media-thumb {
     min-height: 52px;
     padding: 8px 12px;
     row-gap: 6px;
+    /* Anchors the secondary-controls popover to the bar. */
+    position: relative;
+  }
+
+  /* The ⋯ trigger exists only at this width (its base rule is display: none)
+     — it tucks the five secondary control groups (zoom, font scale,
+     screenshot, theme, settings) into a popover so the bar takes one row. */
+  /* Deterministic two-row bar at this width: row 1 is identity (title,
+     slack, ⋯ trigger), row 2 the work controls (draft chip, Publish, Site) —
+     adaptive wrapping otherwise strands a lone button on the second line.
+     The ::after is an invisible flex break; DOM order is unchanged (the
+     trigger stays last for tab order), `order` only resequences visually. */
+  .wx-topbar-spacer {
+    order: 1;
+  }
+
+  .wx-topbar-overflow {
+    order: 2;
+  }
+
+  .wx-topbar::after {
+    content: "";
+    flex-basis: 100%;
+    height: 0;
+    order: 3;
+  }
+
+  .wx-draft-chip,
+  .wx-publish-button,
+  .wx-site-link {
+    order: 4;
+  }
+
+  .wx-topbar-overflow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    font: 600 1rem/1 system-ui, sans-serif;
+    padding: 6px 10px;
+    border-radius: var(--wx-radius);
+    border: 1px solid var(--wx-border);
+    background: var(--wx-surface);
+    color: var(--wx-ink);
+    cursor: pointer;
+  }
+
+  .wx-topbar-secondary {
+    position: absolute;
+    top: 100%;
+    right: 8px;
+    z-index: 60;
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 200px;
+    padding: 12px;
+    background: var(--wx-surface);
+    border: 1px solid var(--wx-border);
+    border-radius: var(--wx-radius);
+    box-shadow: var(--wx-shadow);
+  }
+
+  .wx-topbar-secondary.wx-topbar-secondary-open {
+    display: flex;
+  }
+
+  /* Each controls group gets a caption from its aria-label ("Zoom", "Font
+     size") above its buttons, and the standalone icon buttons (screenshot,
+     theme, settings) spell theirs out after the icon — a popover of bare
+     glyphs would be guesswork. Everything inside goes full 44px. */
+  .wx-topbar-secondary [role="group"] {
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .wx-topbar-secondary [role="group"]::before {
+    content: attr(aria-label);
+    flex: 1 1 100%;
+    font: 600 0.6875rem/1.4 system-ui, sans-serif;
+    color: var(--wx-muted);
+    margin-bottom: 2px;
+  }
+
+  /* The icon buttons are 30px squares inline in the bar (fixed width/height
+     in their base rules); in the popover they become full-width icon+label
+     rows — unset both dimensions or the label wraps three lines deep. */
+  .wx-topbar-secondary > button {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+    width: 100%;
+    height: auto;
+    padding: 8px 10px;
+  }
+
+  .wx-topbar-secondary > button::after {
+    content: attr(aria-label);
+    font: 0.8125rem/1.4 system-ui, sans-serif;
+  }
+
+  /* border-box so the 44px target is the OUTER height (there's no global
+     border-box reset in this stylesheet). */
+  .wx-topbar-secondary button {
+    box-sizing: border-box;
+    min-height: 44px;
   }
 
   .wx-topbar-title {

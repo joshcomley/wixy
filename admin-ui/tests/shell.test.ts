@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { mountShell } from "../src/shell";
+import type { Shell } from "../src/shell";
 import type { AdminApi, StateResponse } from "../src/api";
 import type { ChatPanel, ChatPanelDeps } from "../src/chatPanel";
 import type { EditView, MountEditViewDeps } from "../src/editView";
@@ -661,5 +662,81 @@ describe("mountShell", () => {
     await Promise.resolve();
 
     expect(button.disabled).toBe(false);
+  });
+});
+
+describe("mountShell — topbar overflow menu (narrow viewports)", () => {
+  /** The narrow-viewport stylesheet collapses the topbar's secondary controls
+   * (zoom, font scale, screenshot, theme, settings) into a popover behind the
+   * ⋯ trigger; these tests pin the behavior, not the pixels. The container is
+   * attached to document.body so clicks bubble to the document the way they
+   * do live (the outside-click listener is document-level). */
+
+  function mountWithOverflow(): {
+    container: HTMLElement;
+    secondary: HTMLElement;
+    trigger: HTMLButtonElement;
+    shell: Shell;
+    win: Window;
+  } {
+    const api = fakeApi();
+    const win = fakeWindow();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const shell = mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+    const secondary = container.querySelector<HTMLElement>(".wx-topbar-secondary")!;
+    const trigger = container.querySelector<HTMLButtonElement>(".wx-topbar-overflow")!;
+    return { container, secondary, trigger, shell, win };
+  }
+
+  it("wraps the five secondary controls and toggles the popover via the ⋯ trigger", async () => {
+    const { container, secondary, trigger, shell } = mountWithOverflow();
+    await Promise.resolve();
+
+    expect(secondary).not.toBeNull();
+    expect(trigger).not.toBeNull();
+    for (const sel of [
+      ".wx-zoom-controls",
+      ".wx-font-scale-controls",
+      ".wx-screenshot-button",
+      ".wx-theme-toggle",
+      ".wx-settings-toggle",
+    ]) {
+      expect(secondary.querySelector(sel), sel).not.toBeNull();
+    }
+    expect(secondary.classList.contains("wx-topbar-secondary-open")).toBe(false);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+
+    trigger.click();
+    expect(secondary.classList.contains("wx-topbar-secondary-open")).toBe(true);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+
+    trigger.click();
+    expect(secondary.classList.contains("wx-topbar-secondary-open")).toBe(false);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+
+    shell.teardown();
+    container.remove();
+  });
+
+  it("stays open for clicks inside the popover, closes on an outside click and on Escape", async () => {
+    const { container, secondary, trigger, shell, win } = mountWithOverflow();
+    await Promise.resolve();
+
+    trigger.click();
+    secondary.querySelector<HTMLButtonElement>(".wx-zoom-button")!.click();
+    expect(secondary.classList.contains("wx-topbar-secondary-open")).toBe(true);
+
+    document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(secondary.classList.contains("wx-topbar-secondary-open")).toBe(false);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+
+    trigger.click();
+    expect(secondary.classList.contains("wx-topbar-secondary-open")).toBe(true);
+    win.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(secondary.classList.contains("wx-topbar-secondary-open")).toBe(false);
+
+    shell.teardown();
+    container.remove();
   });
 });

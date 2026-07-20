@@ -52,6 +52,16 @@ gitignored `e2e/test-results/`), then rebuild the committed bundles
   compact (documented prior decision: topbar-chrome tier).
 - **Remaining:** the pre-existing mobile topbar/nav wrap at ≤720px (seen at 320px —
   untouched so far). Raised with the operator as the final candidate (question #23).
+- **Topbar compact (operator decision #23: "Compact the top bar")** — implemented (this
+  branch): the five secondary control groups (zoom, font scale, screenshot, theme,
+  settings) wrapped in `.wx-topbar-secondary` (`display: contents` on desktop — the bar
+  renders byte-identical; hidden popover at ≤720px) behind a ⋯ trigger. Popover labels
+  come from aria-labels via CSS `content: attr(aria-label)` (group captions ::before,
+  icon+label rows ::after); all buttons 44px border-box. Deterministic two-row bar at
+  ≤720 via flex `order` + an `::after` invisible break (row 1: title+⋯, row 2:
+  chip/Publish/Site) — adaptive wrapping stranded a lone button. Trigger toggles with
+  aria-expanded; outside-click listener attached only while open (no accumulation);
+  Escape closes; teardown cleans up. shell.test.ts +2 (27/27).
 
 ## Working agreements
 
