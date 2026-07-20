@@ -1,6 +1,8 @@
 # 00002 — Round 3: History compact buttons + Changes diff + Reinstate
 
-**Status (2026-07-20):** implemented, gates green (vitest 413, pytest 803), shipping pending.
+**Status (2026-07-20):** SHIPPED — PR #92 merged (a22ca53), live on ca.cinnamons.uk
+(slot blue), all gates green: vitest 413/413, tsc clean, pytest 803, e2e 9/9,
+ad-hoc Playwright 16/16 at 390+320px.
 
 ## Operator feedback that started it
 
