@@ -79,7 +79,11 @@ One `OpQueue` per session (owned by `shell.ts`); panels take only the `OpQueueLi
 `/api/version` commit change unless mid-edit); `router.ts` (hash routes: pages/edit/theme/
 media/chat/history/settings); `pagesPanel.ts` + `pageSettingsDrawer.ts` (`meta.*` editing);
 `publishDrawer.ts` (review diff + `POST /api/admin/publish` + SSE progress); `historyPanel.ts`
-(ledger + typed-confirm restore); `mediaPanel.ts` + `mediaDialog.ts` (library + picker);
+(ledger + typed-confirm restore + a per-row **Changes** expander showing the version's old→new
+key diff from `GET /api/admin/publishes/{n}/diff`, each row with a **Reinstate** button that
+PATCHes the shown old value back into the current draft — hidden for added-in-that-version keys
+and for pages that no longer exist); `diffView.ts` (the shared old→new diff renderer both the
+review drawer and the history Changes view use — one component, one `.wx-diff-*` CSS block); `mediaPanel.ts` + `mediaDialog.ts` (library + picker);
 `chatPanel.ts` + `markdown.ts` (see [ai-chat.md](ai-chat.md)); `themePanel.ts` + `themeVars.ts`
 + `googleFonts.ts` + `googleFontsCatalog.ts` (site-theme editing with live preview);
 `api.ts` (typed fetch: 10s timeout, 3 attempts, retries network+5xx only). The Uxer-adoption

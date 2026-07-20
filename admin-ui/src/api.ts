@@ -177,6 +177,20 @@ export interface PublishesEntry {
   of?: number;
 }
 
+/** `GET /api/admin/publishes/{version}/diff`'s shape (decisions/00070) — what
+ * that version actually changed on the live site, computed server-side as the
+ * content diff between its own SHA and the previous ledger entry's SHA (so
+ * upstream/AI-lane merges and restore entries are covered, not just the
+ * editor-lane keys the ledger's `changed` summary names). `changes` reuses
+ * the publish preview's exact per-entry shape so both render with the same
+ * component; `of` is the baseline version (null for the first entry ever
+ * recorded). */
+export interface VersionDiff {
+  version: number;
+  of: number | null;
+  changes: Record<string, PublishDiffEntry[]>;
+}
+
 export type RestoreOutcome =
   | { kind: "ok"; version: number; sha: string; of: number }
   | { kind: "conflict"; message: string }
@@ -351,6 +365,7 @@ export interface AdminApi {
   getPublishPreview(): Promise<PublishPreview>;
   publish(message: string, expectedRev: number): Promise<PublishOutcome>;
   getPublishes(limit?: number): Promise<PublishesEntry[]>;
+  getVersionDiff(version: number): Promise<VersionDiff>;
   restore(version: number): Promise<RestoreOutcome>;
   duplicatePage(fromSlug: string, slug: string, navLabel: string, expectedRev: number): Promise<PageOpOutcome>;
   deletePage(slug: string, expectedRev: number): Promise<PageOpOutcome>;
@@ -452,6 +467,11 @@ export function createApi(): AdminApi {
         await fetchWithRetry(`/api/admin/publishes${query}`),
       );
       return body.publishes;
+    },
+    async getVersionDiff(version) {
+      return parseJson<VersionDiff>(
+        await fetchWithRetry(`/api/admin/publishes/${version}/diff`),
+      );
     },
     async restore(version) {
       const response = await fetchWithRetry("/api/admin/restore", {

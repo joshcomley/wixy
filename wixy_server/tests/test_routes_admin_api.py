@@ -995,6 +995,45 @@ class TestGetPublishes:
         assert body[0]["version"] == 2
 
 
+def _publish_via_api(client: TestClient, path: str, value: str, message: str) -> None:
+    client.patch(
+        "/api/admin/draft",
+        json={
+            "expectedRev": _current_rev(client),
+            "ops": [{"file": "index", "path": path, "value": value}],
+        },
+    )
+    client.post(
+        "/api/admin/publish",
+        json={"message": message, "expectedRev": _current_rev(client)},
+    )
+
+
+class TestGetPublishVersionDiff:
+    def test_diffs_a_publish_against_the_previous_version(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            _publish_via_api(client, "hero.title", "V1", "first")
+            _publish_via_api(client, "hero.title", "V2", "second")
+            response = client.get("/api/admin/publishes/2/diff")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["version"] == 2
+        assert body["of"] == 1
+        assert body["changes"] == {
+            "index": [{"key": "hero.title", "kind": "text", "old": "V1", "new": "V2"}]
+        }
+
+    def test_unknown_version_is_a_404(self, storage_root: Path, wixy_repo_root: Path) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/admin/publishes/99/diff")
+        assert response.status_code == 404
+        assert response.json()["detail"] == "no such version: 99"
+
+
 class TestGetPublishPreview:
     def test_a_text_op_is_diffed_with_old_and_new_values(
         self, storage_root: Path, wixy_repo_root: Path

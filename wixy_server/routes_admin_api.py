@@ -26,7 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from builder.bindings_map import bindings_map_to_dict, extract_bindings_map
 from builder.config import ProjectConfig
-from builder.content import GLOBAL_CONTENT_NAME, dotted_get, scan_image_refs
+from builder.content import dotted_get, scan_image_refs
 from builder.errors import BuildError
 from builder.jsontypes import JsonObject, JsonValue
 from builder.render import SiteSource
@@ -64,6 +64,7 @@ from wixy_server.restore import RestoreError, RestoreResult, run_restore
 from wixy_server.site_source import build_site_source
 from wixy_server.storage import ProjectPaths
 from wixy_server.treelock import tree_lock
+from wixy_server.version_diff import binding_kind_lookup, build_version_diff, container_for
 from wixy_server.watcher import WatcherStatus
 
 router = APIRouter(prefix="/api/admin")
@@ -557,35 +558,37 @@ async def get_publishes(request: Request, limit: int | None = None) -> JsonObjec
 
 
 # ---------------------------------------------------------------------------
+# GET /api/admin/publishes/{version}/diff (decisions/00070 — the history
+# panel's per-row "Changes" expander: what that version actually changed on
+# the live site, old→new per content key, in the publish preview's own shape)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/publishes/{version}/diff", response_model=None)
+async def get_publish_version_diff(version: int, request: Request) -> JsonObject:
+    project: ProjectConfig = request.app.state.project
+    paths: ProjectPaths = request.app.state.paths
+
+    def _build() -> JsonObject:
+        result = build_version_diff(project, paths, version)
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"no such version: {version}")
+        return result
+
+    try:
+        return await anyio.to_thread.run_sync(_build)
+    except CheckoutError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except RestoreError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
 # GET /api/admin/publish/preview (milestone 9 slice 2 — the review drawer's
 # draft diff + validate result, spec/05 §5's "review drawer")
 # ---------------------------------------------------------------------------
 
 _DRAFT_MEDIA_URL_PREFIX = "/admin/draft-media/"
-
-
-def _binding_kind_lookup(merged: SiteSource) -> dict[str, dict[str, str]]:
-    """`{file_key: {dotted_key: kind}}` for every page's own bindings, plus one
-    shared `_global` entry (globals/partials are common to every page, so any
-    single page's bindings map already carries every `_global` binding too —
-    picked up here for free from whichever page is computed first, no extra
-    `extract_bindings_map` call). `theme` keys have no bindings-map entry at
-    all (spec's theme model is a separate typed thing, never walked via
-    `data-wx-*` attributes) — the caller reports `"theme"` directly instead."""
-    lookup: dict[str, dict[str, str]] = {}
-    for slug in merged.page_contents:
-        bindings = extract_bindings_map(merged, slug)
-        lookup[slug] = {field.key: field.kind for field in bindings.fields}
-    lookup[GLOBAL_CONTENT_NAME] = dict(lookup[sorted(lookup)[0]]) if lookup else {}
-    return lookup
-
-
-def _container_for(source: SiteSource, file_key: str) -> JsonValue:
-    if file_key == "theme":
-        return theme_to_dict(source.theme) if source.theme is not None else None
-    if file_key == GLOBAL_CONTENT_NAME:
-        return source.global_content
-    return source.page_contents.get(file_key)
 
 
 def _staged_image_keys(source: SiteSource, paths: ProjectPaths) -> set[tuple[str, str]]:
@@ -614,7 +617,7 @@ def _build_publish_preview(
 ) -> JsonObject:
     old_source = build_site_source(project, paths.repo)
     merged = merge_overlay(old_source, overlay)
-    kinds = _binding_kind_lookup(merged)
+    kinds = binding_kind_lookup(merged)
 
     changes: dict[str, list[JsonValue]] = {}
     for key in sorted(overlay.ops):
@@ -622,7 +625,7 @@ def _build_publish_preview(
         file_key, sep, dotted_path = key.partition(":")
         if not sep:
             continue  # malformed key (no ':') — same defensive skip merge_overlay uses
-        _, old_value = dotted_get(_container_for(old_source, file_key), dotted_path)
+        _, old_value = dotted_get(container_for(old_source, file_key), dotted_path)
         kind = "theme" if file_key == "theme" else kinds.get(file_key, {}).get(dotted_path, "text")
         entry: JsonObject = {"key": dotted_path, "kind": kind, "old": old_value, "new": op.value}
         changes.setdefault(file_key, []).append(entry)

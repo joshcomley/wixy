@@ -1077,7 +1077,8 @@ div.wx-media-thumb {
 }
 
 .wx-history-view,
-.wx-history-restore {
+.wx-history-restore,
+.wx-history-changes {
   font: 600 0.75rem/1 system-ui, sans-serif;
   padding: 5px 10px;
   border-radius: var(--wx-radius);
@@ -1088,6 +1089,32 @@ div.wx-media-thumb {
   color: var(--wx-ink);
   margin-right: 6px;
   display: inline-block;
+}
+
+/* The per-version Changes expander (decisions/00070): a full-width detail row
+   under the ledger row, sharing the review drawer's .wx-diff-* rendering. */
+.wx-history-diff {
+  padding: 8px 12px;
+  background: var(--wx-canvas);
+  font-size: 0.75rem;
+}
+
+.wx-diff-reinstate {
+  font: 600 0.6875rem/1 system-ui, sans-serif;
+  padding: 4px 8px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  cursor: pointer;
+  flex: none;
+}
+
+.wx-diff-reinstated {
+  flex: none;
+  color: var(--wx-muted);
+  font-size: 0.6875rem;
+  white-space: nowrap;
 }
 
 .wx-history-confirm {
@@ -2368,19 +2395,32 @@ div.wx-media-thumb {
   }
 
   .wx-history-table td.wx-history-cell-actions > * {
-    flex: 1 1 auto;
+    /* Content-width, NOT stretched: flex:1 made View/Restore two half-row
+       jumbo buttons (operator feedback, decisions/00070). Touch height comes
+       from the shared 44px rule below; width hugs the label. */
+    flex: 0 0 auto;
     margin-right: 0;
     justify-content: center;
     text-align: center;
   }
 
-  /* The restore-confirm form lives in its own full-width row; the row's own
-     padding is dropped (the form pads itself). On a phone the prompt and the
-     input each take a full line, and Confirm/Cancel share one row with the
-     same touch target as the row actions (the pages inline-form fix —
-     full-width basis for fields, auto basis for buttons). */
-  .wx-history-table tbody tr.wx-history-confirm-row {
+  /* The restore-confirm and Changes-diff forms live in their own full-width
+     rows; each row's own padding is dropped (the inner block pads itself). On
+     a phone the confirm's prompt and input each take a full line, and
+     Confirm/Cancel share one row with the same touch target as the row
+     actions (the pages inline-form fix — full-width basis for fields, auto
+     basis for buttons). */
+  .wx-history-table tbody tr.wx-history-confirm-row,
+  .wx-history-table tbody tr.wx-history-diff-row {
     padding: 0;
+  }
+
+  /* Diff rows wrap on a phone: key on its own line start, old → new values
+     flowing after, the Reinstate chip at the row's end — never a horizontal
+     squeeze. */
+  .wx-history-diff .wx-diff-row {
+    flex-wrap: wrap;
+    row-gap: 2px;
   }
 
   .wx-history-confirm span {
@@ -2477,6 +2517,8 @@ div.wx-media-thumb {
   .wx-pages-delete,
   .wx-history-view,
   .wx-history-restore,
+  .wx-history-changes,
+  .wx-diff-reinstate,
   .wx-media-delete,
   .wx-media-upload-button,
   .wx-chat-new-button,

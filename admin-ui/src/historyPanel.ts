@@ -1,17 +1,24 @@
 // The `#/history` panel (spec/05-editor.md §5): the publish ledger newest-first
 // — version #, when, message, author (editor/AI/mixed), SHA, changed-file
-// summary. Per-row actions: View (opens that build read-only at
-// `/admin/versions/<n>/…`) and Restore (typed confirmation, then
-// `POST /api/admin/restore` — spec/04 §5-6: instant live swap + draft reset to
-// that version, recorded as a new version).
+// summary. Per-row actions: Changes (decisions/00070 — expands an old→new
+// per-key diff of what that version actually changed on the live site, from
+// `GET /api/admin/publishes/<n>/diff`, with a per-row Reinstate that writes
+// the shown OLD value back into the current draft), View (opens that build
+// read-only at `/admin/versions/<n>/…`), and Restore (typed confirmation,
+// then `POST /api/admin/restore` — spec/04 §5-6: instant live swap + draft
+// reset to that version, recorded as a new version).
 
-import type { AdminApi, PublishesEntry } from "./api";
+import type { AdminApi, PublishDiffEntry, PublishesEntry, StateResponse } from "./api";
+import { renderDiffGroups } from "./diffView";
 
 const RESTORE_CONFIRM_PHRASE = "RESTORE";
 
 export interface HistoryPanelDeps {
   api: AdminApi;
-  onRestored: () => void;
+  /** Fired after anything that changes server-side draft/live state — a
+   * successful restore, or a Reinstate landing in the draft — so the shell
+   * can refresh its own state (draft badge, pages list) in the background. */
+  onDraftChanged: () => void;
 }
 
 export interface HistoryPanel {
@@ -110,7 +117,7 @@ export function mountHistoryPanel(deps: HistoryPanelDeps): HistoryPanel {
         .then((outcome) => {
           if (cancelled) return;
           if (outcome.kind === "ok") {
-            deps.onRestored();
+            deps.onDraftChanged();
             onDone();
             return;
           }
@@ -127,6 +134,120 @@ export function mountHistoryPanel(deps: HistoryPanelDeps): HistoryPanel {
           errorEl.textContent = error instanceof Error ? error.message : "Restore failed.";
         });
     });
+
+    return tr;
+  }
+
+  /** A Reinstate button for one diff row, or `null` when the row's old value
+   * can't be reinstated: the key was ADDED by that version (old is null —
+   * there's no earlier value to go back to), or the page it belongs to no
+   * longer exists in the current draft (the op would sit inert in the
+   * overlay — merge_overlay skips ops for unknown pages). Theme and _global
+   * can't be deleted, so their rows are always reinstatable. */
+  function makeReinstateAction(
+    state: StateResponse,
+    fileKey: string,
+    entry: PublishDiffEntry,
+  ): HTMLElement | null {
+    if (entry.old === null) return null;
+    if (
+      fileKey !== "theme" &&
+      fileKey !== "_global" &&
+      !state.pages.some((page) => page.slug === fileKey)
+    ) {
+      return null;
+    }
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "wx-diff-reinstate";
+    button.textContent = "Reinstate";
+    button.title = "Put this old value back into the current draft";
+
+    button.addEventListener("click", () => {
+      button.disabled = true;
+      // Every click re-reads state for a fresh draft rev (an earlier
+      // Reinstate on another row has already bumped it); a 409 — someone
+      // else edited between the read and the write — gets one refetch+retry,
+      // the same refetch-and-replay posture as the editor's op queue.
+      const attempt = (rev: number, retried: boolean): void => {
+        deps.api
+          .patchDraft(rev, [{ file: fileKey, path: entry.key, value: entry.old }])
+          .then((result) => {
+            if (cancelled) return;
+            if (result.kind === "ok") {
+              const done = document.createElement("span");
+              done.className = "wx-diff-reinstated";
+              done.textContent = "In draft ✓";
+              button.replaceWith(done);
+              deps.onDraftChanged();
+              return;
+            }
+            if (retried) {
+              button.disabled = false;
+              button.textContent = "Retry";
+              return;
+            }
+            deps.api
+              .getState()
+              .then((fresh) => {
+                if (cancelled) return;
+                attempt(fresh.draft.rev, true);
+              })
+              .catch(() => {
+                if (cancelled) return;
+                button.disabled = false;
+              });
+          })
+          .catch(() => {
+            if (cancelled) return;
+            button.disabled = false;
+          });
+      };
+      deps.api
+        .getState()
+        .then((fresh) => {
+          if (cancelled) return;
+          attempt(fresh.draft.rev, false);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          button.disabled = false;
+        });
+    });
+
+    return button;
+  }
+
+  function renderDiffRow(entry: PublishesEntry): HTMLTableRowElement {
+    const tr = document.createElement("tr");
+    tr.className = "wx-history-diff-row";
+    const td = document.createElement("td");
+    td.colSpan = 7;
+    tr.appendChild(td);
+
+    const holder = document.createElement("div");
+    holder.className = "wx-history-diff";
+    holder.textContent = "Loading…";
+    td.appendChild(holder);
+
+    // The diff and the current state (page set + draft rev) load together —
+    // the state decides which rows get a Reinstate button.
+    Promise.all([deps.api.getVersionDiff(entry.version), deps.api.getState()])
+      .then(([diff, state]) => {
+        if (cancelled) return;
+        holder.innerHTML = "";
+        holder.appendChild(
+          renderDiffGroups(diff.changes, {
+            emptyText: "No content changes.",
+            renderRowAction: (fileKey, change) => makeReinstateAction(state, fileKey, change),
+          }),
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        holder.textContent = "Couldn't load the changes.";
+      });
 
     return tr;
   }
@@ -198,6 +319,14 @@ export function mountHistoryPanel(deps: HistoryPanelDeps): HistoryPanel {
 
       const actions = document.createElement("td");
       actions.className = "wx-history-cell-actions";
+
+      const changesButton = document.createElement("button");
+      changesButton.type = "button";
+      changesButton.className = "wx-history-changes";
+      changesButton.textContent = "Changes";
+      changesButton.setAttribute("aria-expanded", "false");
+      actions.appendChild(changesButton);
+
       const viewLink = document.createElement("a");
       viewLink.className = "wx-history-view";
       viewLink.textContent = "View";
@@ -221,6 +350,19 @@ export function mountHistoryPanel(deps: HistoryPanelDeps): HistoryPanel {
           confirmRow = null;
         });
         row.after(confirmRow);
+      });
+
+      let diffRow: HTMLTableRowElement | null = null;
+      changesButton.addEventListener("click", () => {
+        if (diffRow !== null) {
+          diffRow.remove();
+          diffRow = null;
+          changesButton.setAttribute("aria-expanded", "false");
+          return;
+        }
+        changesButton.setAttribute("aria-expanded", "true");
+        diffRow = renderDiffRow(entry);
+        row.after(diffRow);
       });
 
       tbody.appendChild(row);
