@@ -38,8 +38,69 @@
 </nav>
 <main class="guide-main">
 <p class="guide-chapter-meta">Appendices</p>
-<h1>PLACEHOLDER: appendix-c-revoking-access</h1>
-<p>Content pending.</p>
+<h1>Appendix C — Revoking Josh's access</h1>
+<p class="guide-lede">
+This page exists on purpose: proving you <em>can</em> remove Josh, cleanly and
+completely, whenever you like, is the whole point of everything you've just built.
+This isn't something to do now — it's here for whenever, if ever, you want it. Doing
+any or all of it needs no explanation to anyone.
+</p>
+
+<div class="guide-reassurance">
+Josh holds three things, and only three — each one you granted yourself, earlier in
+this guide, and each one removable in under a minute. He has never had your
+passwords, your billing details, or any way to change these back once you've
+removed them.
+</div>
+
+<ol class="guide-steps">
+
+<li>
+<p class="guide-step-what">Remove Josh from your GitHub site repository.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Open <code>cottage-aesthetics-site</code>, click "Settings," then "Collaborators
+and teams." Find <code>joshcomley</code> in the list and click "Remove."</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> he no
+longer appears in that repository's collaborator list.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Remove Josh's email from your Cloudflare Access
+policy.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+In Cloudflare Zero Trust, go to "Access," then "Applications," and open your admin
+application. Edit its policy, remove Josh's email address from the allowed list
+(leaving just your own), and save.</div>
+<div class="guide-reassurance">
+This takes effect immediately — including ending any session he might already have
+open. He'd need a fresh invitation from you, added back to this same list, to ever
+get in again.
+</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> the
+policy's allowed list shows only your own email address.</p>
+</li>
+
+<li>
+<p class="guide-step-what">Remove Josh from your Anthropic console, if you added
+him.</p>
+<div class="guide-where"><span class="guide-where-label">Where</span>
+Only relevant if you invited him in Track P, chapter 5. If you did: Anthropic
+Console → Settings → Members (or "People") → find his entry → remove. If you
+didn't, there's nothing to do here — he was never given access in the first
+place.</div>
+<p class="guide-worked-when"><strong>You know it worked when…</strong> he's no
+longer listed, or you've confirmed he never was.</p>
+</li>
+
+</ol>
+
+<p>
+That's the whole list — three places, three removals, each independent of the
+others. Nothing about your site, its history, or your own accounts changes when you
+do any of this. And if you ever want Josh back as a helper after removing him,
+chapters 2, 4, and 5 show you exactly how to re-invite him — any time, on your own
+terms, same as the first time.
+</p>
 
 <div class="guide-footer-nav">
 <a href="appendix-b-costs.html">← B. Costs</a>
