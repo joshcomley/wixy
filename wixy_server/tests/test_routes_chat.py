@@ -399,8 +399,23 @@ class TestListConversations:
 
 class TestStateChatsField:
     def test_state_reflects_created_conversations(
-        self, storage_root: Path, wixy_repo_root: Path, cmdchat_client: CmdChatClient
+        self, storage_root: Path, wixy_repo_root: Path, fake_cmd_state: FakeCmdState
     ) -> None:
+        # A test-local client with a generous readiness_timeout_s, NOT the
+        # shared `cmdchat_client` fixture's deliberately tight 0.3s (chosen so
+        # OTHER tests can observe the timeout firing quickly, TestReadinessTimeout
+        # above) -- this test wants to observe "pending", which raced the same
+        # 0.3s background deadline under heavy parallel test-suite load (a real,
+        # reproducible flake: passes standalone, intermittently observed "failed"
+        # under `-n 4` when co-running tests starve this process's event loop for
+        # a stretch longer than 300ms). 30s makes the assumption true by
+        # construction instead of true by lucky scheduling.
+        cmdchat_client = CmdChatClient(
+            transport=httpx.ASGITransport(app=create_fake_cmd_app(fake_cmd_state)),
+            readiness_poll_interval_s=0.02,
+            readiness_timeout_s=30.0,
+            ws_connect=_ws_connect_always_fails,
+        )
         app = create_app(
             storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
         )

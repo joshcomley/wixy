@@ -1,8 +1,8 @@
 # spec/independence/03 §2 (server + ingress + the deploy mechanism itself,
 # decisions/00051 #3: Watchtower's image-pull polling IS the deploy — no
 # inbound surface, no CI credentials ever reach the droplet) plus `worker`
-# (the AI backend, milestone 6, spec/independence/05 §2). `backup` (the
-# nightly state mirror, milestone 6/06) is added by its own later PR.
+# (the AI backend, milestone 6, spec/independence/05 §2) and `backup` (the
+# nightly state mirror, milestone 7, spec/independence/06 §2).
 services:
   wixy:
     image: ${WIXY_IMAGE:-ghcr.io/joshcomley/wixy:latest}
@@ -14,6 +14,11 @@ services:
       # below points git at the site-repo one. Never in .env: a multi-line PEM
       # doesn't fit the KEY=VALUE format the settings loader/.env files share.
       - ${WIXY_KEYS_DIR:-/opt/wixy/keys}:/keys:ro
+      # Read-only — the System card (milestone 7, `wixy_server/routes_system.py`)
+      # reads the `backup` service's own last-run status file from here;
+      # `wixy` itself never writes to this volume, only `backup` does
+      # (`wixy_server/backup/status.py`'s own docstring).
+      - backup-status:/backup-status:ro
     # No `env_file:` here on purpose — a relative `.env` path resolves against
     # THIS file's own directory (the cloned engine checkout), never against
     # /opt/wixy/.env where setup.sh actually writes it. Every value the
@@ -92,6 +97,34 @@ services:
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 
+  # Nightly state backup (milestone 7, spec/independence/06 §2) — same image
+  # as `wixy`/`worker`, different `command:`. LEAST-PRIVILEGE mounts: both
+  # storage sources are READ-ONLY (this service only ever needs to COPY state
+  # elsewhere, never write to it — a bug in its own code structurally cannot
+  # touch the site's actual state) and its own small `backup-status` volume
+  # is the ONLY thing it can write to (its own last-run outcome, read
+  # read-only by `wixy` above for the System card). Its own deploy key,
+  # WRITE-SCOPED TO `ca-state-backup` ONLY — never the site-repo/engine-fork
+  # key (M7's FABLE-light gate checklist item; decisions/00066).
+  backup:
+    image: ${WIXY_IMAGE:-ghcr.io/joshcomley/wixy:latest}
+    command: ["python", "-m", "wixy_server.backup"]
+    restart: unless-stopped
+    volumes:
+      - wixy-storage:/data:ro
+      - worker-transcripts:/worker-transcripts:ro
+      - backup-status:/backup-status
+      - ${WIXY_KEYS_DIR:-/opt/wixy/keys}:/keys:ro
+    environment:
+      WIXY_STORAGE_ROOT: /data
+      WIXY_WORKER_TRANSCRIPTS_ROOT: /worker-transcripts
+      WIXY_STATE_BACKUP_REPO: ${WIXY_STATE_BACKUP_REPO}
+      # Same IdentitiesOnly reasoning as `wixy`'s own GIT_SSH_COMMAND above —
+      # a DIFFERENT key file, scoped to a DIFFERENT single repo.
+      GIT_SSH_COMMAND: "ssh -i /keys/state-backup -o IdentitiesOnly=yes"
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
   # Pinned by digest, not :latest (Fable review, PR #69 R2): this container
   # mounts /var/run/docker.sock below — root-equivalent on the droplet — and
   # cloudflared is the sole ingress path, so silently auto-upgrading either of
@@ -118,14 +151,15 @@ services:
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-    # Label-scoped (`wixy` + `worker` above — both the SAME image, kept in
-    # lockstep so the worker never quietly runs stale code after `wixy`
-    # updates) + ~5 min poll — this IS the deploy mechanism (decisions/00051
-    # #3): no inbound surface, no CI credentials ever reach the droplet, it
-    # only ever pulls.
+    # Label-scoped (`wixy` + `worker` + `backup` above — all the SAME image,
+    # kept in lockstep so neither the worker nor the backup process ever
+    # quietly runs stale code after `wixy` updates) + ~5 min poll — this IS
+    # the deploy mechanism (decisions/00051 #3): no inbound surface, no CI
+    # credentials ever reach the droplet, it only ever pulls.
     command: --interval 300 --label-enable --cleanup
 
 volumes:
   wixy-storage:
   worker-scratch:
   worker-transcripts:
+  backup-status:

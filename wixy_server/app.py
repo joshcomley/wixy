@@ -40,6 +40,7 @@ from wixy_server.routes_internal import router as internal_router
 from wixy_server.routes_preview import DEFAULT_PREVIEW_STALENESS_THRESHOLD_S
 from wixy_server.routes_preview import router as preview_router
 from wixy_server.routes_public import router as public_router
+from wixy_server.routes_system import router as system_router
 from wixy_server.routes_version import router as version_router
 from wixy_server.routes_versions import router as versions_router
 from wixy_server.settings import load_settings
@@ -214,6 +215,7 @@ def create_app(
     app.include_router(chat_router)
     app.include_router(engine_router)
     app.include_router(ai_router)
+    app.include_router(system_router)
     app.include_router(versions_router)
 
     @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)

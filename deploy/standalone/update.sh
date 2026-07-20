@@ -32,12 +32,12 @@ set_image() {
 }
 
 do_update() {
-  echo "Pulling the latest image and recreating the wixy + worker services..."
-  # wixy and worker are the SAME image (different command:) — pulling both
-  # explicitly rather than relying on the shared-tag cache being obvious to a
-  # future reader. Bring watchtower back too, in case a previous --rollback
-  # stopped it.
-  dc pull wixy worker
+  echo "Pulling the latest image and recreating the wixy + worker + backup services..."
+  # wixy, worker, and backup are the SAME image (different command:) —
+  # pulling all three explicitly rather than relying on the shared-tag cache
+  # being obvious to a future reader. Bring watchtower back too, in case a
+  # previous --rollback stopped it.
+  dc pull wixy worker backup
   dc up -d
   echo "Done. Run verify.sh to confirm the new version is serving."
 }
@@ -55,12 +55,12 @@ do_rollback() {
   fi
   echo "Pausing auto-updates (stopping watchtower) so it doesn't immediately undo this..."
   dc stop watchtower
-  echo "Pinning wixy + worker to ${rollback_ref}..."
+  echo "Pinning wixy + worker + backup to ${rollback_ref}..."
   set_image "$rollback_ref"
-  # Both services — they're the SAME image (different command:), so a
+  # All three services — they're the SAME image (different command:), so a
   # version bad enough to roll back wixy for is bad enough to roll worker
-  # back too, not leave the two running mismatched code.
-  dc up -d --no-deps wixy worker
+  # and backup back too, not leave them running mismatched code.
+  dc up -d --no-deps wixy worker backup
   echo "Rolled back to ${rollback_ref}. Run verify.sh to confirm."
   echo "To resume normal updates later, run: update.sh"
 }

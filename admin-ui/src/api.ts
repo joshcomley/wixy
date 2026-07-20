@@ -85,6 +85,28 @@ export interface AiBudgetStatus {
   monthlyBudgetUsd: number;
 }
 
+/** `GET /api/admin/system/status`'s `backup` field (spec/independence/06 §3)
+ * — `stale` is computed server-side (no backup has ever run, the last run
+ * failed/wasn't verified, or it's more than 48h old), never derived from
+ * `lastAttemptAt` client-side. */
+export interface BackupStatusSummary {
+  lastAttemptAt: string | null;
+  ok: boolean | null;
+  verified: boolean | null;
+  error: string | null;
+  stale: boolean;
+}
+
+/** `GET /api/admin/system/status`'s exact shape (spec/independence/06 §3) —
+ * NOT edition-gated (unlike `EngineStatus`/`AiBudgetStatus` above): a
+ * system-health summary is meaningful on both editions. */
+export interface SystemStatus {
+  backup: BackupStatusSummary;
+  diskUsage: { totalBytes: number; usedBytes: number; freeBytes: number };
+  lastPublish: { version: number; when: string } | null;
+  engine: { currentSha: string | null; edition: string };
+}
+
 /** `wixy_server.chats.conversation_summary`'s exact shape (spec/06 §1) — the
  * shared wire type both `GET/POST /api/admin/chat/conversations` and
  * `GET /api/admin/state`'s `chats` field return. */
@@ -340,6 +362,7 @@ export interface AdminApi {
   triggerEngineUpdate(): Promise<{ triggered: true }>;
   triggerEngineRollback(): Promise<{ triggered: true }>;
   getAiBudgetStatus(): Promise<AiBudgetStatus>;
+  getSystemStatus(): Promise<SystemStatus>;
 }
 
 export function createApi(): AdminApi {
@@ -526,6 +549,9 @@ export function createApi(): AdminApi {
     },
     async getAiBudgetStatus() {
       return parseJson<AiBudgetStatus>(await fetchWithRetry("/api/admin/ai/budget"));
+    },
+    async getSystemStatus() {
+      return parseJson<SystemStatus>(await fetchWithRetry("/api/admin/system/status"));
     },
   };
 }

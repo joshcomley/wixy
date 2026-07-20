@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, type AdminApi, type AiBudgetStatus, type EngineStatus } from "../src/api";
+import {
+  ApiError,
+  type AdminApi,
+  type AiBudgetStatus,
+  type EngineStatus,
+  type SystemStatus,
+} from "../src/api";
 import { initFontScale } from "../src/fontScale";
 import { mountSettingsPanel } from "../src/settingsPanel";
 import { initShortcuts, type ShortcutCommand } from "../src/shortcuts";
@@ -32,6 +38,7 @@ function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
     triggerEngineUpdate: vi.fn(),
     triggerEngineRollback: vi.fn(),
     getAiBudgetStatus: vi.fn(),
+    getSystemStatus: vi.fn(),
     ...overrides,
   } as AdminApi;
 }
@@ -52,6 +59,19 @@ const ENGINE_STATUS: EngineStatus = {
 const AI_BUDGET_STATUS: AiBudgetStatus = {
   monthToDateUsd: 8.25,
   monthlyBudgetUsd: 40,
+};
+
+const SYSTEM_STATUS: SystemStatus = {
+  backup: {
+    lastAttemptAt: "2026-07-20T03:00:00Z",
+    ok: true,
+    verified: true,
+    error: null,
+    stale: false,
+  },
+  diskUsage: { totalBytes: 25 * 1024 * 1024 * 1024, usedBytes: 2 * 1024 * 1024 * 1024, freeBytes: 23 * 1024 * 1024 * 1024 },
+  lastPublish: { version: 5, when: "2026-07-19T12:00:00Z" },
+  engine: { currentSha: "a".repeat(40), edition: "standalone" },
 };
 
 const TEST_CSS = `
@@ -259,6 +279,27 @@ function mountAi(win: Window, api: AdminApi) {
   const panel = mountSettingsPanel({
     win,
     page: "ai",
+    api,
+    themeController,
+    zoomController,
+    fontScaleController,
+    shortcutsController,
+    themeEditorController,
+    onNavigate: vi.fn(),
+    onResetAll: vi.fn(),
+  });
+  return { panel };
+}
+
+function mountSystem(win: Window, api: AdminApi) {
+  const themeController = initTheme(win);
+  const zoomController = initZoom(win);
+  const fontScaleController = initFontScale(win);
+  const shortcutsController = initShortcuts(TEST_COMMANDS, win);
+  const themeEditorController = initThemeEditor(themeController, win);
+  const panel = mountSettingsPanel({
+    win,
+    page: "system",
     api,
     themeController,
     zoomController,
@@ -884,5 +925,121 @@ describe("mountSettingsPanel — AI", () => {
     panel.teardown();
     await vi.advanceTimersByTimeAsync(120_000);
     expect(getAiBudgetStatus).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("mountSettingsPanel — System", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("shows a loading state before the status arrives", () => {
+    const api = fakeApi({
+      getSystemStatus: vi.fn(() => new Promise<SystemStatus>(() => {})),
+    });
+    const { panel } = mountSystem(fakeWindow(), api);
+    expect(panel.element.textContent).toContain("Loading");
+  });
+
+  it("renders backup time, disk usage, last publish, and engine sha once loaded", async () => {
+    const api = fakeApi({ getSystemStatus: vi.fn(async () => SYSTEM_STATUS) });
+    const { panel } = mountSystem(fakeWindow(), api);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(panel.element.textContent).toContain("2.0 GB");
+    expect(panel.element.textContent).toContain("25.0 GB");
+    expect(panel.element.textContent).toContain("Version 5");
+    expect(panel.element.textContent).toContain("aaaaaaaaaaaa");
+    expect(panel.element.textContent).toContain("standalone");
+  });
+
+  it("a stale backup shows the warning hint", async () => {
+    const api = fakeApi({
+      getSystemStatus: vi.fn(async () => ({
+        ...SYSTEM_STATUS,
+        backup: { ...SYSTEM_STATUS.backup, stale: true },
+      })),
+    });
+    const { panel } = mountSystem(fakeWindow(), api);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(panel.element.textContent).toContain("No verified backup in the last 48 hours");
+  });
+
+  it("a fresh backup does not show the warning hint", async () => {
+    const api = fakeApi({ getSystemStatus: vi.fn(async () => SYSTEM_STATUS) });
+    const { panel } = mountSystem(fakeWindow(), api);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(panel.element.textContent).not.toContain("No verified backup in the last 48 hours");
+  });
+
+  it("no backup ever run shows a plain never-run message, not an error", async () => {
+    const api = fakeApi({
+      getSystemStatus: vi.fn(async () => ({
+        ...SYSTEM_STATUS,
+        backup: { lastAttemptAt: null, ok: null, verified: null, error: null, stale: true },
+      })),
+    });
+    const { panel } = mountSystem(fakeWindow(), api);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(panel.element.textContent).toContain("No backup has run yet");
+  });
+
+  it("a backup error is shown", async () => {
+    const api = fakeApi({
+      getSystemStatus: vi.fn(async () => ({
+        ...SYSTEM_STATUS,
+        backup: { ...SYSTEM_STATUS.backup, ok: false, stale: true, error: "git push failed: boom" },
+      })),
+    });
+    const { panel } = mountSystem(fakeWindow(), api);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(panel.element.textContent).toContain("git push failed: boom");
+  });
+
+  it("a load error shows a load-error message", async () => {
+    const api = fakeApi({
+      getSystemStatus: vi.fn(async () => {
+        throw new Error("boom");
+      }),
+    });
+    const { panel } = mountSystem(fakeWindow(), api);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(panel.element.textContent).toContain("Couldn't load system status: boom");
+  });
+
+  it("re-polls after 60s", async () => {
+    vi.useFakeTimers();
+    const getSystemStatus = vi.fn(async () => SYSTEM_STATUS);
+    const api = fakeApi({ getSystemStatus });
+    mountSystem(fakeWindow(), api);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getSystemStatus).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(getSystemStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it("teardown stops the poll loop — no further getSystemStatus calls", async () => {
+    vi.useFakeTimers();
+    const getSystemStatus = vi.fn(async () => SYSTEM_STATUS);
+    const api = fakeApi({ getSystemStatus });
+    const { panel } = mountSystem(fakeWindow(), api);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getSystemStatus).toHaveBeenCalledTimes(1);
+
+    panel.teardown();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(getSystemStatus).toHaveBeenCalledTimes(1);
   });
 });
