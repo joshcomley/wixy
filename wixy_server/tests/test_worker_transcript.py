@@ -5,7 +5,11 @@ message model")."""
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+from typing import NoReturn
+
+import pytest
 
 from wixy_server.worker.state import WorkerMessage
 from wixy_server.worker.transcript import transcript_path, write_transcript
@@ -67,3 +71,44 @@ class TestWriteTranscript:
         conv_dir = transcript_path(tmp_path, "anthropic-1").parent
         leftovers = [p for p in conv_dir.iterdir() if p.suffix == ".tmp"]
         assert leftovers == []
+
+    def test_survives_transient_permission_denied_on_the_replace(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """On Windows an external reader (Defender real-time scan, Search
+        indexer) can briefly hold the freshly written tmp file, failing
+        `os.replace` with `PermissionError` (WinError 5) even though the lock
+        clears within milliseconds — seen as a real pytest flake taking down
+        the whole TestClient lifespan (2026-07-20). The write must ride out a
+        few denials, not fail the turn."""
+        real_replace = os.replace
+        state = {"denials": 0}
+
+        def flaky_replace(src: str | os.PathLike[str], dst: str | os.PathLike[str]) -> None:
+            if state["denials"] < 3:
+                state["denials"] += 1
+                raise PermissionError(5, "Access is denied")
+            real_replace(src, dst)
+
+        monkeypatch.setattr(os, "replace", flaky_replace)
+        write_transcript(tmp_path, "anthropic-1", [_message(0, "hello")])
+
+        assert "hello" in transcript_path(tmp_path, "anthropic-1").read_text(encoding="utf-8")
+        assert state["denials"] == 3
+
+    def test_gives_up_after_a_bounded_number_of_denials(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A genuinely un-writable target must still raise — the retry is a
+        courtesy for transient scanners, not a swallow-everything loop — and
+        the tmp file is cleaned up either way."""
+
+        def always_denied(src: str | os.PathLike[str], dst: str | os.PathLike[str]) -> NoReturn:
+            raise PermissionError(5, "Access is denied")
+
+        monkeypatch.setattr(os, "replace", always_denied)
+        with pytest.raises(PermissionError):
+            write_transcript(tmp_path, "anthropic-1", [_message(0, "hello")])
+
+        conv_dir = transcript_path(tmp_path, "anthropic-1").parent
+        assert [p for p in conv_dir.iterdir() if p.suffix == ".tmp"] == []

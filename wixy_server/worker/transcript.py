@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -34,9 +35,38 @@ if TYPE_CHECKING:
 
 _TRANSCRIPT_FILENAME = "transcript.jsonl"
 
+# `os.replace` retry budget for transient external locks (see
+# `_replace_riding_out_scanners`). Five attempts with a linear 50ms backoff =
+# at most 500ms of courtesy waiting before giving up and raising.
+_REPLACE_ATTEMPTS = 5
+_REPLACE_RETRY_BASE_S = 0.05
+
 
 def transcript_path(transcripts_root: Path, conv_id: str) -> Path:
     return transcripts_root / conv_id / _TRANSCRIPT_FILENAME
+
+
+def _replace_riding_out_scanners(tmp_path: Path, path: Path) -> None:
+    """`os.replace` with a bounded retry on `PermissionError`.
+
+    On Windows an external reader — Defender real-time scan, the Search
+    indexer — can briefly hold the freshly written tmp file (or the replace
+    target), failing the rename with WinError 5 even though nothing is
+    actually wrong and the lock clears within milliseconds. Seen in the wild
+    as a pytest flake that tore down a whole TestClient lifespan task group
+    (2026-07-20). Those locks release fast, so a short bounded retry keeps
+    the atomic-replace semantics without turning a transient scan into a
+    failed turn; the final attempt (and any non-PermissionError) raises as
+    before.
+    """
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            os.replace(tmp_path, path)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(_REPLACE_RETRY_BASE_S * (attempt + 1))
 
 
 def write_transcript(transcripts_root: Path, conv_id: str, messages: list[WorkerMessage]) -> None:
@@ -58,6 +88,6 @@ def write_transcript(transcripts_root: Path, conv_id: str, messages: list[Worker
     tmp_path = Path(tmp_name)
     try:
         tmp_path.write_text(text, encoding="utf-8")
-        os.replace(tmp_path, path)
+        _replace_riding_out_scanners(tmp_path, path)
     finally:
         tmp_path.unlink(missing_ok=True)
