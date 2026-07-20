@@ -7,10 +7,11 @@ version}`, still consumes a new sequential version number, spec's own "recorded
 as a new version" language — distinct from any git commit, which never happens
 here).
 
-`_worktree_at_sha` is the one new mechanism this slice adds: a scratch, detached
+`worktree_at_sha` is the one new mechanism this slice adds: a scratch, detached
 `git worktree add` checkout of the Storage repo at an arbitrary historical SHA,
 used both to rebuild a build directory `_prune_builds` (publisher.py) already
 deleted, and to load an old version's CONTENT for diffing against current main.
+`version_diff.py` (decisions/00070) reuses it for the same read-the-past purpose.
 This is a deliberate deviation from decisions/00010 decision 4's originally
 anticipated per-file `git show` reconstruction — pre-approved in
 decisions/00024's "what to watch for" — because `builder`'s own loading
@@ -56,7 +57,7 @@ class RestoreResult:
 
 
 @contextmanager
-def _worktree_at_sha(paths: ProjectPaths, sha: str) -> Iterator[Path]:
+def worktree_at_sha(paths: ProjectPaths, sha: str) -> Iterator[Path]:
     """A scratch, detached-HEAD checkout of `paths.repo` at `sha` — never
     touches `paths.repo`'s OWN checked-out branch/index (a `git worktree`
     is a fully independent working tree sharing only the object database),
@@ -88,7 +89,7 @@ def ensure_build(project: ProjectConfig, paths: ProjectPaths, sha: str) -> Path:
     build_dir = paths.build_dir(sha)
     if build_dir.is_dir():
         return build_dir
-    with _worktree_at_sha(paths, sha) as scratch:
+    with worktree_at_sha(paths, sha) as scratch:
         source = build_site_source(project, scratch)
         build_site(scratch, source, build_dir)
     return build_dir
@@ -138,7 +139,7 @@ def run_restore(
     ensure_build(project, paths, entry.sha)
 
     current_source = build_site_source(project, paths.repo)
-    with _worktree_at_sha(paths, entry.sha) as scratch:
+    with worktree_at_sha(paths, entry.sha) as scratch:
         old_source = build_site_source(project, scratch)
 
     old_pages = set(old_source.page_contents)

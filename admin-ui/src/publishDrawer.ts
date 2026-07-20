@@ -8,6 +8,7 @@
 // reset client-side on failure beyond re-enabling the form).
 
 import type { AdminApi, PublishJobData, PublishPreview, UpstreamCommit } from "./api";
+import { renderDiffGroups } from "./diffView";
 
 const DEFAULT_MESSAGE = "Content update via Wixy editor";
 
@@ -45,79 +46,6 @@ function defaultOpenStream(onUpdate: (job: PublishJobData) => void): PublishStre
     }
   };
   return { close: () => source.close() };
-}
-
-function isImageKind(kind: string): boolean {
-  return kind === "img" || kind === "bg";
-}
-
-function renderDiffValue(kind: string, value: unknown): HTMLElement {
-  if (isImageKind(kind) && value !== null && typeof value === "object") {
-    const src = (value as Record<string, unknown>)["src"];
-    if (typeof src === "string" && src.length > 0) {
-      const img = document.createElement("img");
-      img.className = "wx-diff-thumb";
-      img.src = src;
-      img.alt = "";
-      return img;
-    }
-  }
-  const span = document.createElement("span");
-  span.className = "wx-diff-value";
-  span.textContent =
-    value === null || value === undefined
-      ? "—"
-      : typeof value === "string"
-        ? value
-        : kind === "list"
-          ? `${Array.isArray(value) ? value.length : 0} item(s)`
-          : JSON.stringify(value);
-  return span;
-}
-
-function groupLabel(fileKey: string): string {
-  if (fileKey === "theme") return "Theme";
-  if (fileKey === "_global") return "Global";
-  return fileKey;
-}
-
-function renderChanges(preview: PublishPreview): HTMLElement {
-  const wrap = document.createElement("div");
-  wrap.className = "wx-diff-groups";
-  const groupKeys = Object.keys(preview.changes).sort();
-  if (groupKeys.length === 0) {
-    const empty = document.createElement("p");
-    empty.className = "wx-diff-empty";
-    empty.textContent = "No draft changes.";
-    wrap.appendChild(empty);
-    return wrap;
-  }
-  for (const groupKey of groupKeys) {
-    const group = document.createElement("div");
-    group.className = "wx-diff-group";
-    const title = document.createElement("h4");
-    title.textContent = groupLabel(groupKey);
-    group.appendChild(title);
-    for (const entry of preview.changes[groupKey] ?? []) {
-      const row = document.createElement("div");
-      row.className = "wx-diff-row";
-      const key = document.createElement("span");
-      key.className = "wx-diff-key";
-      key.textContent = entry.key;
-      const arrow = document.createElement("span");
-      arrow.className = "wx-diff-arrow";
-      arrow.textContent = "→";
-      row.append(
-        key,
-        renderDiffValue(entry.kind, entry.old),
-        arrow,
-        renderDiffValue(entry.kind, entry.new),
-      );
-      group.appendChild(row);
-    }
-    wrap.appendChild(group);
-  }
-  return wrap;
 }
 
 function renderUpstream(upstream: UpstreamCommit[]): HTMLElement | null {
@@ -191,7 +119,7 @@ export function mountPublishDrawer(deps: PublishDrawerDeps): PublishDrawer {
     const validateEl = renderValidate(preview);
     if (validateEl !== null) body.appendChild(validateEl);
 
-    body.appendChild(renderChanges(preview));
+    body.appendChild(renderDiffGroups(preview.changes, { emptyText: "No draft changes." }));
 
     const messageRow = document.createElement("label");
     messageRow.className = "wx-field-row";

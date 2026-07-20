@@ -621,7 +621,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     if (route.kind === "history") {
       const panel = mountHistoryPanel({
         api,
-        onRestored: () => {
+        onDraftChanged: () => {
           void refreshStateInBackground();
         },
       });
