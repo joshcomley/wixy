@@ -71,8 +71,9 @@ Computes `content = checkout ⊕ overlay` and is used by both preview and publis
 
 `GET /admin/preview/{page}.html` → `render_preview_page`: `build_site_source` +
 `load_overlay` + `merge_overlay` → `builder.render_page(mode="preview")`, all under
-`tree_lock()`. Injects `editor.js`/`editor.css` (`EDITOR_SCRIPT_PATH`/`EDITOR_STYLESHEET_PATH`)
-and a `<script type="application/json" id="wx-bindings">` blob (the page's binding map). If
+`tree_lock()`. Injects `editor.js`/`editor.css` (`EDITOR_SCRIPT_PATH`/`EDITOR_STYLESHEET_PATH`
+— both content-fingerprinted `?v=<hash>` URLs, decisions/00069) and a
+`<script type="application/json" id="wx-bindings">` blob (the page's binding map). If
 the watcher's last fetch is older than `preview_staleness_threshold_s` (default 10s) it runs
 an on-demand `fetch_once` first so freshly-merged upstream commits surface promptly. Must stay
 fast (`no-store`; it's only reloaded on a hard refresh — live edits are DOM-applied

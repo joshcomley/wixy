@@ -9,6 +9,7 @@ decisions/00014 for this slice's design choices. Slice 3's preview route
 from __future__ import annotations
 
 import functools
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -44,11 +45,32 @@ from wixy_server.routes_system import router as system_router
 from wixy_server.routes_version import router as version_router
 from wixy_server.routes_versions import router as versions_router
 from wixy_server.settings import load_settings
+from wixy_server.staticcache import FingerprintedStaticFiles, fingerprinted_url
 from wixy_server.storage import ensure_project_dirs, project_paths
 from wixy_server.watcher import DEFAULT_INTERVAL_S, WatcherStatus, fetch_once, watch_upstream
 
 _STATIC_DIR = Path(__file__).parent / "static"
-_ADMIN_SHELL_HTML = (_STATIC_DIR / "admin_shell.html").read_text(encoding="utf-8")
+
+
+def _fingerprint_shell_assets(shell_html: str) -> str:
+    """Rewrite every `src`/`href` pointing into `/admin/static/` to its
+    content-fingerprinted `?v=<hash>` form (wixy_server/staticcache.py —
+    decisions/00069). Done once at import, on the same cached string the shell
+    route serves, so a rebuilt bundle is a new URL on the very next deploy and
+    no cache layer can serve a stale copy. A reference whose file is missing
+    keeps its bare URL (fingerprinted_url's own fallback)."""
+
+    def repl(match: re.Match[str]) -> str:
+        attr, url, quote = match.group(1), match.group(2), match.group(3)
+        on_disk = _STATIC_DIR / url.removeprefix("/admin/static/")
+        return f'{attr}="{fingerprinted_url(url, on_disk)}{quote}'
+
+    return re.sub(r'(src|href)="(/admin/static/[^"?]+)(")', repl, shell_html)
+
+
+_ADMIN_SHELL_HTML = _fingerprint_shell_assets(
+    (_STATIC_DIR / "admin_shell.html").read_text(encoding="utf-8")
+)
 # Uxer MCP compliance-bridge integration (slice 7, decisions/00050). `Uxer/`
 # is gitignored (cloned + `npm run build` locally per UXER-INTEGRATION.md's
 # "Web Application Integration" section) and won't exist on a fresh checkout
@@ -230,8 +252,11 @@ def create_app(
         """Bare instant-render shell (spec/05 §1) — paints immediately, no server-side
         data dependency; the real admin-ui panels are milestone 7's job. Routing is
         entirely client-side hash fragments (`#/pages`, `#/edit/<page>`, …), so every
-        `/admin` sub-route the browser might deep-link to is this same document."""
-        return HTMLResponse(content=_ADMIN_SHELL_HTML)
+        `/admin` sub-route the browser might deep-link to is this same document.
+        `Cache-Control: no-cache` — the shell is the document that CARRIES the
+        fingerprinted bundle URLs (decisions/00069), so it must always be
+        revalidated for a deploy's new fingerprints to be picked up."""
+        return HTMLResponse(content=_ADMIN_SHELL_HTML, headers={"Cache-Control": "no-cache"})
 
     @app.get("/uxer-style.json", include_in_schema=False)
     async def uxer_style() -> FileResponse:
@@ -258,7 +283,7 @@ def create_app(
         _UXER_DIST_DIR.mkdir(parents=True, exist_ok=True)
     app.mount("/admin/static/uxer", StaticFiles(directory=_UXER_DIST_DIR), name="uxer-static")
 
-    app.mount("/admin/static", StaticFiles(directory=_STATIC_DIR), name="admin-static")
+    app.mount("/admin/static", FingerprintedStaticFiles(directory=_STATIC_DIR), name="admin-static")
     # `html=True`: serves `index.html` for the bare `/admin/guide/` root and
     # resolves an extension-less path — `guide.build`'s own output always
     # includes an `index.html` copy of `start-here.html` for exactly this.
