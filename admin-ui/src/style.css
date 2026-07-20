@@ -1084,6 +1084,10 @@ div.wx-media-thumb {
   padding: 8px 12px;
   background: var(--wx-canvas);
   font-size: 0.75rem;
+  /* Inert on wide viewports (the items fit on one line); on narrow ones the
+     stacked layout wraps prompt/input onto their own full lines — the same
+     shape `.wx-pages-inline-form` uses. */
+  flex-wrap: wrap;
 }
 
 .wx-history-confirm input {
@@ -1997,9 +2001,9 @@ div.wx-media-thumb {
 
   /* Tables don't reflow to narrow viewports gracefully - let them scroll
      horizontally within their own box rather than overflow the page or force
-     every other element to shrink to fit the widest column. (The pages table
-     is the exception: it restacks as a compact list instead, below.) */
-  .wx-history-table,
+     every other element to shrink to fit the widest column. (The pages and
+     history tables are the exceptions: they restack as compact lists
+     instead, below.) */
   .wx-chat-list-table {
     display: block;
     overflow-x: auto;
@@ -2105,6 +2109,109 @@ div.wx-media-thumb {
   }
 
   .wx-pages-inline-form button {
+    flex: 1 1 auto;
+    min-height: 44px;
+  }
+
+  /* History table → compact stacked list (same pattern as the pages table
+     above): the version on the first line, the timestamp under it (muted —
+     it's self-identifying, so it carries no "Label: " prefix), the message
+     on its own line, one wrapping meta line of "Label: value" pairs
+     (author/SHA/changed), and View/Restore as a full-width button row at the
+     bottom. */
+  .wx-history-table {
+    display: block;
+  }
+
+  .wx-history-table thead {
+    display: none;
+  }
+
+  .wx-history-table tbody {
+    display: block;
+  }
+
+  .wx-history-table tbody tr {
+    display: block;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--wx-border);
+    line-height: 1.45;
+  }
+
+  .wx-history-table tbody tr:last-child {
+    border-bottom: none;
+  }
+
+  .wx-history-table td {
+    display: block;
+    border-bottom: none;
+    padding: 0;
+    white-space: normal;
+  }
+
+  .wx-history-table td.wx-history-cell-version {
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+
+  .wx-history-table td.wx-history-cell-when {
+    color: var(--wx-muted);
+    font-size: 0.75rem;
+  }
+
+  .wx-history-table td.wx-history-cell-message {
+    margin-top: 2px;
+  }
+
+  /* The three meta cells flow together inline so they share one wrapping
+     line; each contributes its own "Label: " prefix, subsequent pairs get a
+     "·" separator. */
+  .wx-history-table td.wx-history-cell-meta {
+    display: inline;
+    color: var(--wx-muted);
+    font-size: 0.75rem;
+  }
+
+  .wx-history-table td.wx-history-cell-meta::before {
+    content: attr(data-label) ": ";
+  }
+
+  .wx-history-table td.wx-history-cell-meta + td.wx-history-cell-meta::before {
+    content: " · " attr(data-label) ": ";
+  }
+
+  .wx-history-table td.wx-history-cell-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+
+  .wx-history-table td.wx-history-cell-actions > * {
+    flex: 1 1 auto;
+    margin-right: 0;
+    justify-content: center;
+    text-align: center;
+  }
+
+  /* The restore-confirm form lives in its own full-width row; the row's own
+     padding is dropped (the form pads itself). On a phone the prompt and the
+     input each take a full line, and Confirm/Cancel share one row with the
+     same touch target as the row actions (the pages inline-form fix —
+     full-width basis for fields, auto basis for buttons). */
+  .wx-history-table tbody tr.wx-history-confirm-row {
+    padding: 0;
+  }
+
+  .wx-history-confirm span {
+    flex: 1 1 100%;
+  }
+
+  .wx-history-confirm input {
+    flex: 1 1 100%;
+  }
+
+  .wx-history-confirm button {
     flex: 1 1 auto;
     min-height: 44px;
   }

@@ -88,6 +88,45 @@ describe("mountHistoryPanel", () => {
     expect(link?.target).toBe("_blank");
   });
 
+  it("stamps the narrow-viewport restack hooks: per-cell classes + data-labels", async () => {
+    const api = fakeApi({ getPublishes: vi.fn(async () => [PUBLISH_ENTRY]) });
+    const panel = mountHistoryPanel({ api, onRestored: vi.fn() });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const row = panel.element.querySelector<HTMLTableRowElement>('tr[data-version="2"]');
+    expect(row).not.toBeNull();
+    const cells = row?.querySelectorAll("td");
+    // The ≤720px stylesheet hooks onto these classes/attributes to restack
+    // each row as a compact list item (mirrors the pages table's hooks).
+    expect(cells?.[0]?.className).toBe("wx-history-cell-version");
+    expect(cells?.[1]?.className).toBe("wx-history-cell-when");
+    expect(cells?.[2]?.className).toBe("wx-history-cell-message");
+    expect(cells?.[3]?.className).toBe("wx-history-cell-meta");
+    expect(cells?.[3]?.dataset["label"]).toBe("Author");
+    expect(cells?.[4]?.className).toBe("wx-history-cell-meta");
+    expect(cells?.[4]?.dataset["label"]).toBe("SHA");
+    expect(cells?.[5]?.className).toBe("wx-history-cell-meta");
+    expect(cells?.[5]?.dataset["label"]).toBe("Changed");
+    expect(cells?.[6]?.className).toBe("wx-history-cell-actions");
+  });
+
+  it("formats the timestamp medium-date/short-time so it fits the narrow meta line", async () => {
+    const api = fakeApi({ getPublishes: vi.fn(async () => [PUBLISH_ENTRY]) });
+    const panel = mountHistoryPanel({ api, onRestored: vi.fn() });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const row = panel.element.querySelector<HTMLTableRowElement>('tr[data-version="2"]');
+    const whenCell = row?.querySelectorAll("td")?.[1];
+    expect(whenCell?.textContent).toBe(
+      new Date(PUBLISH_ENTRY.when).toLocaleString(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+    );
+  });
+
   it("the confirm button stays disabled until the exact phrase is typed", async () => {
     const api = fakeApi({ getPublishes: vi.fn(async () => [PUBLISH_ENTRY]) });
     const panel = mountHistoryPanel({ api, onRestored: vi.fn() });
