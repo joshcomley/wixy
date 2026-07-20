@@ -1999,17 +1999,6 @@ div.wx-media-thumb {
     min-height: 320px;
   }
 
-  /* Tables don't reflow to narrow viewports gracefully - let them scroll
-     horizontally within their own box rather than overflow the page or force
-     every other element to shrink to fit the widest column. (The pages and
-     history tables are the exceptions: they restack as compact lists
-     instead, below.) */
-  .wx-chat-list-table {
-    display: block;
-    overflow-x: auto;
-    white-space: nowrap;
-  }
-
   /* Pages table → compact stacked list. The desktop columns can't fit a
      phone (the action buttons scrolled off-screen, reachable only by
      horizontal scrolling); instead each row becomes a small block: the nav
@@ -2216,13 +2205,95 @@ div.wx-media-thumb {
     min-height: 44px;
   }
 
+  /* Chat conversation list → compact stacked rows (the last table to leave
+     the horizontal-scroll fallback, which is gone now that every admin table
+     restacks): the status dot and title share the first line, the timestamp
+     drops to its own muted line underneath. */
+  .wx-chat-list-table {
+    display: block;
+  }
+
+  .wx-chat-list-table tbody {
+    display: block;
+  }
+
+  .wx-chat-list-row {
+    display: block;
+    position: relative;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--wx-border);
+    line-height: 1.45;
+  }
+
+  .wx-chat-list-row:last-child {
+    border-bottom: none;
+  }
+
+  .wx-chat-list-row td {
+    display: block;
+    border-bottom: none;
+    padding: 0 0 0 21px;
+    white-space: normal;
+  }
+
+  /* The status dot is pulled out of the flow and pinned to the first line's
+     left edge, so a title long enough to wrap stays indented under itself
+     instead of the second line sliding back under the dot. (top lines the
+     9px dot up with the first text line: row padding 10 + link padding 13 +
+     half a line ≈ 28px.) */
+  .wx-chat-list-row td.wx-chat-cell-dot {
+    position: absolute;
+    left: 12px;
+    top: 28px;
+    padding: 0;
+  }
+
+  /* The title link is the row's one action — vertical padding grows its box
+     (and hit area) to the 44px touch target while the text always starts at
+     a fixed offset, so wrapped titles keep the same first-line position the
+     dot is pinned to. */
+  .wx-chat-list-title {
+    display: inline-flex;
+    align-items: center;
+    padding: 13px 0;
+  }
+
+  .wx-chat-list-row td.wx-chat-list-when {
+    color: var(--wx-muted);
+    font-size: 0.75rem;
+    white-space: normal;
+  }
+
+  /* The conversation header stays on one line: the back link gets its 44px
+     target, and a long title truncates with an ellipsis instead of pushing
+     the Rename button off-screen. */
+  .wx-chat-back-link {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+  }
+
+  .wx-chat-conversation-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .wx-pages-edit,
   .wx-pages-duplicate,
   .wx-pages-delete,
   .wx-history-view,
   .wx-history-restore,
   .wx-media-delete,
-  .wx-media-upload-button {
+  .wx-media-upload-button,
+  .wx-chat-new-button,
+  .wx-chat-rename-button,
+  .wx-chat-reasoning-toggle,
+  .wx-chat-tool-summary,
+  .wx-chat-send-button,
+  .wx-chat-compose-actions button {
     min-height: 44px;
     display: inline-flex;
     align-items: center;

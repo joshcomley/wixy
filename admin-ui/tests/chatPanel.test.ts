@@ -165,6 +165,42 @@ describe("mountChatPanel — list view", () => {
     panel.teardown();
   });
 
+  it("stamps the narrow-viewport restack hooks: per-cell classes on list rows", async () => {
+    const api = fakeApi({
+      getConversations: vi.fn(async () => [fakeConversation({ convId: "c1", title: "first" })]),
+    });
+    const panel = mountChatPanel(null, { api, win: fakeWindow() });
+    await flush();
+
+    // The ≤720px stylesheet hooks onto these classes to restack each row
+    // (dot+title on the first line, timestamp under it — the pages/history
+    // tables' pattern). The when cell's pre-existing wx-chat-list-when class
+    // doubles as its hook.
+    const row = panel.element.querySelector(".wx-chat-list-row");
+    const cells = row?.querySelectorAll("td");
+    expect(cells?.[0]?.className).toBe("wx-chat-cell-dot");
+    expect(cells?.[1]?.className).toBe("wx-chat-cell-title");
+    expect(cells?.[2]?.className).toBe("wx-chat-list-when");
+    panel.teardown();
+  });
+
+  it("formats the list timestamp medium-date/short-time so it fits the narrow layout", async () => {
+    const api = fakeApi({
+      getConversations: vi.fn(async () => [fakeConversation({ convId: "c1" })]),
+    });
+    const panel = mountChatPanel(null, { api, win: fakeWindow() });
+    await flush();
+
+    const when = panel.element.querySelector(".wx-chat-list-when");
+    expect(when?.textContent).toBe(
+      new Date("2026-07-10T00:00:00Z").toLocaleString(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+    );
+    panel.teardown();
+  });
+
   it("New conversation -> Start with no text creates without a first message and navigates", async () => {
     const createConversation = vi.fn(async () => fakeConversation({ convId: "new1", status: "pending" }));
     const api = fakeApi({ createConversation });

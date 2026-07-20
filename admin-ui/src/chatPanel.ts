@@ -52,7 +52,12 @@ const WORKING_FRESHNESS_MS = 10_000;
 
 function formatWhen(iso: string): string {
   const parsed = new Date(iso);
-  return Number.isNaN(parsed.getTime()) ? iso : parsed.toLocaleString();
+  // Medium-date/short-time keeps the value compact — on narrow viewports the
+  // conversation list stacks it on its own line under the title (same trade
+  // the pages and history tables made).
+  return Number.isNaN(parsed.getTime())
+    ? iso
+    : parsed.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
 function statusLabel(summary: ConversationSummary): string {
@@ -164,7 +169,13 @@ function mountConversationList(deps: ChatPanelDeps): ChatPanel {
       const row = document.createElement("tr");
       row.className = "wx-chat-list-row";
 
+      // Per-cell classes are what the narrow-viewport stylesheet hooks onto
+      // to restack each row (dot+title on the first line, timestamp under it —
+      // the pages/history tables' pattern). On wide viewports nothing matches
+      // them and the table renders unchanged; the when cell's long-standing
+      // wx-chat-list-when class doubles as its hook.
       const dotCell = document.createElement("td");
+      dotCell.className = "wx-chat-cell-dot";
       const dot = document.createElement("span");
       dot.className = `wx-chat-dot ${statusDotClass(summary)}`;
       dot.title = statusLabel(summary) || "ready";
@@ -172,6 +183,7 @@ function mountConversationList(deps: ChatPanelDeps): ChatPanel {
       row.appendChild(dotCell);
 
       const titleCell = document.createElement("td");
+      titleCell.className = "wx-chat-cell-title";
       const link = document.createElement("a");
       link.className = "wx-chat-list-title";
       link.href = "#";
