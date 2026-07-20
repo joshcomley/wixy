@@ -1,6 +1,6 @@
 # 00003 — Round 4: History cards, lighter buttons, nothing-to-publish guard
 
-**Status (2026-07-21):** implemented, gates running (vitest 416 green, tsc clean).
+**Status (2026-07-21):** SHIPPED — PR #94 merged (155c6dd), live on ca.cinnamons.uk (slot blue). Gates: vitest 416/416, tsc clean, pytest 806, e2e 9/9, ad-hoc 20/20 at 390+320px.
 
 ## Operator feedback that started it (phone screenshot)
 
