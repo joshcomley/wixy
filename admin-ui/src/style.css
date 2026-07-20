@@ -1963,30 +1963,37 @@ div.wx-media-thumb {
   /* The ⋯ trigger exists only at this width (its base rule is display: none)
      — it tucks the five secondary control groups (zoom, font scale,
      screenshot, theme, settings) into a popover so the bar takes one row. */
-  /* Deterministic two-row bar at this width: row 1 is identity (title,
-     slack, ⋯ trigger), row 2 the work controls (draft chip, Publish, Site) —
-     adaptive wrapping otherwise strands a lone button on the second line.
-     The ::after is an invisible flex break; DOM order is unchanged (the
-     trigger stays last for tab order), `order` only resequences visually. */
+  /* ONE-row bar at this width: title (truncating as needed), draft chip,
+     Publish, ⋯ trigger. The site link lives in the popover (it's the least-
+     used control on a phone), and the paddings shrink so the row fits a
+     320px screen with a typical short chip; a long chip ("12 changes · 3
+     upstream commits") may still wrap the row as a last resort. */
+  .wx-topbar {
+    gap: 8px;
+  }
+
+  /* flex-wrap decides line breaks on HYPOTHETICAL (unshrunk) main sizes, so a
+     nowrap title whose content is 135px wraps the ⋯ trigger to a second row
+     even though it would shrink after the fact. A small flex-basis keeps the
+     wrap calculation at 60px while grow lets the title use whatever slack
+     the row actually has (and the empty spacer is redundant now). */
+  .wx-topbar-title {
+    min-width: 0;
+    flex: 1 1 60px;
+  }
+
   .wx-topbar-spacer {
-    order: 1;
+    display: none;
   }
 
-  .wx-topbar-overflow {
-    order: 2;
+  .wx-draft-chip {
+    font-size: 0.6875rem;
+    padding: 3px 8px;
+    white-space: nowrap;
   }
 
-  .wx-topbar::after {
-    content: "";
-    flex-basis: 100%;
-    height: 0;
-    order: 3;
-  }
-
-  .wx-draft-chip,
-  .wx-publish-button,
-  .wx-site-link {
-    order: 4;
+  .wx-publish-button {
+    padding: 8px 12px;
   }
 
   .wx-topbar-overflow {
@@ -2043,8 +2050,11 @@ div.wx-media-thumb {
 
   /* The icon buttons are 30px squares inline in the bar (fixed width/height
      in their base rules); in the popover they become full-width icon+label
-     rows — unset both dimensions or the label wraps three lines deep. */
-  .wx-topbar-secondary > button {
+     rows — unset both dimensions or the label wraps three lines deep. The
+     site link joins them as a row too (its own text is already the label,
+     so no ::after for it). */
+  .wx-topbar-secondary > button,
+  .wx-topbar-secondary > a {
     display: flex;
     align-items: center;
     justify-content: flex-start;
@@ -2057,6 +2067,13 @@ div.wx-media-thumb {
   .wx-topbar-secondary > button::after {
     content: attr(aria-label);
     font: 0.8125rem/1.4 system-ui, sans-serif;
+  }
+
+  .wx-topbar-secondary > a {
+    min-height: 44px;
+    box-sizing: border-box;
+    border: 1px solid var(--wx-border);
+    border-radius: var(--wx-radius);
   }
 
   /* border-box so the 44px target is the OUTER height (there's no global
@@ -2099,6 +2116,18 @@ div.wx-media-thumb {
 
   .wx-main {
     padding: 12px;
+  }
+
+  /* The header zone slims down: panel headings tighten, and the helper hints
+     (Pages/Media share .wx-pages-hint) are helper text the phone layout
+     already implies — hidden at this width. */
+  .wx-main h2 {
+    font-size: 1rem;
+    margin: 0 0 8px;
+  }
+
+  .wx-pages-hint {
+    display: none;
   }
 
   .wx-drawer {
@@ -2465,7 +2494,48 @@ div.wx-media-thumb {
   }
 
   .wx-media-grid {
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 8px;
+  }
+
+  /* Media cards compact down: the Delete button stops being a full-width row
+     under every card and becomes a small trash-icon chip overlaid on the
+     thumbnail's top-right corner (the DOM text stays "Delete" — the icon is
+     a CSS-only swap), the meta line shrinks, and the card padding tightens. */
+  .wx-media-item {
+    position: relative;
+    padding: 6px;
+    gap: 4px;
+  }
+
+  .wx-media-meta {
+    font-size: 0.625rem;
+  }
+
+  .wx-media-delete {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border-radius: 999px;
+    justify-content: center;
+    font-size: 0;
+    opacity: 0.92;
+    box-shadow: var(--wx-shadow);
+  }
+
+  .wx-media-delete::before {
+    content: "🗑";
+    font-size: 1rem;
+  }
+
+  /* A permanently-disabled delete (published/repo images) carries no action
+     on a phone — hide it, so the trash chip appears exactly on the cards it
+     can act on (its desktop disabled state is unchanged). */
+  .wx-media-delete:disabled {
+    display: none;
   }
 
   /* The picker dialog becomes a full-width sheet. The base rule's

@@ -696,6 +696,7 @@ describe("mountShell — topbar overflow menu (narrow viewports)", () => {
     expect(secondary).not.toBeNull();
     expect(trigger).not.toBeNull();
     for (const sel of [
+      ".wx-site-link",
       ".wx-zoom-controls",
       ".wx-font-scale-controls",
       ".wx-screenshot-button",

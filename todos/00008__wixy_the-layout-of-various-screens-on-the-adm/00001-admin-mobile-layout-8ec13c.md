@@ -66,6 +66,17 @@ gitignored `e2e/test-results/`), then rebuild the committed bundles
 **MISSION COMPLETE (2026-07-20):** all admin screens + the top bar are mobile-friendly
 and verified live (PRs #81–#88).
 
+**Round 2 (operator feedback same evening: "header is still huge, Media looks
+identical"):** topbar → ONE row at ≤720 (Site link moved into the ⋯ popover as its first
+labeled row; chip/Publish paddings compacted; title `flex: 1 1 60px` — flex-wrap decides
+breaks on HYPOTHETICAL main sizes, so a small basis is what actually keeps the row to
+one line; empty spacer hidden); helper hints (`.wx-pages-hint`, shared by Pages+Media)
+hidden at ≤720, panel h2s tightened; media cards compacted (~175px → ~127px tall:
+denser grid `minmax(100px)` gap 8, padding 6, meta 0.625rem) and the per-card full-width
+Delete button became a 44px 🗑 overlay chip on the thumbnail corner (CSS-only icon swap,
+DOM text unchanged), with permanently-disabled deletes HIDDEN at ≤720 (presence of the
+chip = deletable). PR #90.
+
 ## Working agreements
 
 - Operator directs screen order (answered via question #21: "History next").
