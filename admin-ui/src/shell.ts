@@ -302,15 +302,17 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   settingsToggle.addEventListener("click", () => navigateTo({ kind: "settings", page: "general" }, win));
 
   // -- Secondary-controls overflow popover (narrow viewports) ----------------
-  // The zoom/font-scale/screenshot/theme/settings controls are wrapped in one
-  // container that is `display: contents` on wide viewports (its children lay
-  // out as direct topbar items exactly as before) and a hidden popover below
-  // ~720px, toggled by the ⋯ trigger — so the top bar stays one row on a
-  // phone while every control remains reachable (see style.css's
-  // `.wx-topbar-secondary` rules).
+  // The site link + zoom/font-scale/screenshot/theme/settings controls are
+  // wrapped in one container that is `display: contents` on wide viewports
+  // (its children lay out as direct topbar items exactly as before) and a
+  // hidden popover below ~720px, toggled by the ⋯ trigger — so the top bar
+  // stays one row on a phone while every control remains reachable (see
+  // style.css's `.wx-topbar-secondary` rules). The site link keeps its own
+  // text label (it's not an icon); the icon buttons spell theirs out via
+  // their aria-labels in the popover.
   const secondary = document.createElement("div");
   secondary.className = "wx-topbar-secondary";
-  secondary.append(zoomGroup, fontScaleGroup, screenshotButton, themeToggle, settingsToggle);
+  secondary.append(siteLink, zoomGroup, fontScaleGroup, screenshotButton, themeToggle, settingsToggle);
 
   const overflowButton = document.createElement("button");
   overflowButton.type = "button";
@@ -356,7 +358,6 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     spacer,
     chipEl,
     publishButton,
-    siteLink,
     secondary,
     overflowButton,
   );
