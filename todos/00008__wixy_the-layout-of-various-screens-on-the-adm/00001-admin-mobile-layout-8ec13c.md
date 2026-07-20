@@ -44,14 +44,24 @@ gitignored `e2e/test-results/`), then rebuild the committed bundles
   cause of two pytest flakes on hub (Windows Defender/indexer briefly locking the fresh
   tmp file, WinError 5, tearing down the TestClient lifespan). Windows-only; CI Linux
   unaffected, but the flake was real on this box.
-- **Settings/Theme** — implemented (this branch): theme color row re-grids at ≤720px
+- **Settings/Theme** — SHIPPED (PR #87, merged 2026-07-20): theme color row re-grids at ≤720px
   (presets were squeezed out of the 1fr cell — now a full-width second line, with pinned
   grid-row/grid-column so DOM order can't drop Reset onto a third line); color well,
   hex, font picker/family, shadow input 44px; swatches 18→44px; theme Reset/Reset-all +
   settings Reset-all joined the shared 44px rule. Steppers + the device switcher stay
   compact (documented prior decision: topbar-chrome tier).
 - **Remaining:** the pre-existing mobile topbar/nav wrap at ≤720px (seen at 320px —
-  untouched so far). Candidate to raise with the operator once Settings/Theme ships.
+  untouched so far). Raised with the operator as the final candidate (question #23).
+- **Topbar compact (operator decision #23: "Compact the top bar")** — implemented (this
+  branch): the five secondary control groups (zoom, font scale, screenshot, theme,
+  settings) wrapped in `.wx-topbar-secondary` (`display: contents` on desktop — the bar
+  renders byte-identical; hidden popover at ≤720px) behind a ⋯ trigger. Popover labels
+  come from aria-labels via CSS `content: attr(aria-label)` (group captions ::before,
+  icon+label rows ::after); all buttons 44px border-box. Deterministic two-row bar at
+  ≤720 via flex `order` + an `::after` invisible break (row 1: title+⋯, row 2:
+  chip/Publish/Site) — adaptive wrapping stranded a lone button. Trigger toggles with
+  aria-expanded; outside-click listener attached only while open (no accumulation);
+  Escape closes; teardown cleans up. shell.test.ts +2 (27/27).
 
 ## Working agreements
 
