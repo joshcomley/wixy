@@ -21,7 +21,12 @@ export interface HistoryPanel {
 
 function formatWhen(iso: string): string {
   const parsed = new Date(iso);
-  return Number.isNaN(parsed.getTime()) ? iso : parsed.toLocaleString();
+  // Medium-date/short-time keeps the value compact — on narrow viewports the
+  // timestamp shares the stacked row layout with the other fields (same
+  // trade the pages table made for its last-modified column).
+  return Number.isNaN(parsed.getTime())
+    ? iso
+    : parsed.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
 function authorLabel(entry: PublishesEntry): string {
@@ -153,31 +158,46 @@ export function mountHistoryPanel(deps: HistoryPanelDeps): HistoryPanel {
       row.dataset["version"] = String(entry.version);
       if (entry.live) row.classList.add("wx-history-live");
 
+      // Per-cell classes + data-label attributes are what the narrow-viewport
+      // stylesheet hooks onto to restack each row as a compact list item
+      // (version line, timestamp line, message line, one wrapping meta line,
+      // buttons at the bottom — the pages table's pattern). On wide viewports
+      // nothing matches them and the table renders unchanged.
       const version = document.createElement("td");
+      version.className = "wx-history-cell-version";
       version.textContent = entry.live ? `${entry.version} (live)` : String(entry.version);
       row.appendChild(version);
 
       const when = document.createElement("td");
+      when.className = "wx-history-cell-when";
       when.textContent = formatWhen(entry.when);
       row.appendChild(when);
 
       const message = document.createElement("td");
+      message.className = "wx-history-cell-message";
       message.textContent = messageLabel(entry);
       row.appendChild(message);
 
       const author = document.createElement("td");
+      author.className = "wx-history-cell-meta";
+      author.dataset["label"] = "Author";
       author.textContent = authorLabel(entry);
       row.appendChild(author);
 
       const sha = document.createElement("td");
+      sha.className = "wx-history-cell-meta";
+      sha.dataset["label"] = "SHA";
       sha.textContent = entry.sha.slice(0, 8);
       row.appendChild(sha);
 
       const changed = document.createElement("td");
+      changed.className = "wx-history-cell-meta";
+      changed.dataset["label"] = "Changed";
       changed.textContent = changedSummary(entry);
       row.appendChild(changed);
 
       const actions = document.createElement("td");
+      actions.className = "wx-history-cell-actions";
       const viewLink = document.createElement("a");
       viewLink.className = "wx-history-view";
       viewLink.textContent = "View";
