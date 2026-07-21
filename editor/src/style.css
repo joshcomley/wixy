@@ -22,7 +22,9 @@
 }
 
 .wx-hover-chip {
-  position: fixed;
+  /* document-anchored (positionInDocument sets absolute inline too) — it
+     scrolls WITH its element, like the outline (decisions/00086). */
+  position: absolute;
   z-index: 2147483645;
   background: var(--wx-brand-blue);
   color: #fff;
@@ -153,7 +155,8 @@
 /* -- List item structural toolbar -------------------------------------------- */
 
 .wx-item-toolbar {
-  position: fixed;
+  /* document-anchored like the hover chip (decisions/00086). */
+  position: absolute;
   z-index: 2147483644;
   display: flex;
   gap: 2px;
