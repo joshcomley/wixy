@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createEditViewCore, type OpQueueLike } from "../src/editView";
+import { createEditViewCore, viewportScaleFor, type OpQueueLike } from "../src/editView";
 import type { AdminApi, ContentResponse } from "../src/api";
 import type { PageBindings, ShellToOverlayMessage } from "../src/protocol";
 
@@ -126,5 +126,22 @@ describe("createEditViewCore", () => {
     await Promise.resolve(); // let requestInit's .then() callback run
 
     expect(sent).toEqual([]);
+  });
+});
+
+describe("viewportScaleFor", () => {
+  it("is 1 when the wrap is at least as wide as the device", () => {
+    expect(viewportScaleFor(1280, 1280)).toBe(1);
+    expect(viewportScaleFor(1400, 1280)).toBe(1);
+  });
+
+  it("shrinks to fit when the wrap is narrower (squished simulation)", () => {
+    expect(viewportScaleFor(640, 1280)).toBe(0.5);
+    expect(viewportScaleFor(365, 1280)).toBeCloseTo(0.285, 3);
+    expect(viewportScaleFor(365, 820)).toBeCloseTo(0.445, 3);
+  });
+
+  it("is 1 for a not-yet-laid-out wrap rather than collapsing to 0", () => {
+    expect(viewportScaleFor(0, 1280)).toBe(1);
   });
 });

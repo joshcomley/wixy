@@ -100,7 +100,10 @@ const PUBLISH_CONFLICT_RETRY_LIMIT = 5;
  * using this expects the publish to eventually succeed. */
 export async function publishAndWait(page: Page): Promise<number> {
   for (let attempt = 0; attempt < PUBLISH_CONFLICT_RETRY_LIMIT; attempt++) {
-    await page.click(".wx-publish-button");
+    // The draft chip is the drawer trigger on EVERY route — in edit view it's
+    // the only visible one (the topbar's Publish button is hidden there,
+    // decisions/00076), elsewhere it's interchangeable with that button.
+    await page.click(".wx-draft-chip");
     await page.waitForSelector(".wx-publish-confirm");
     const publishResponse = page.waitForResponse(
       (res) => res.url().endsWith("/api/admin/publish") && res.request().method() === "POST",

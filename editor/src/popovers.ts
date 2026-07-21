@@ -26,7 +26,15 @@ function baseContainer(): HTMLDivElement {
 export function positionNear(el: HTMLElement, anchor: Element): void {
   const rect = anchor.getBoundingClientRect();
   el.style.left = `${Math.round(rect.left)}px`;
-  el.style.top = `${Math.round(rect.bottom + 4)}px`;
+  // Flip above the anchor when the element wouldn't fit below it — a bottom-
+  // edge item's toolbar/popover must never land outside the viewport (found
+  // via the E2E 4 reorder click missing the move-up button by 27px,
+  // decisions/00076). offsetHeight is 0 in jsdom, so tests keep the
+  // below-anchor behavior there.
+  const below = rect.bottom + 4;
+  const height = el.offsetHeight;
+  const top = below + height > window.innerHeight ? Math.max(0, rect.top - height - 4) : below;
+  el.style.top = `${Math.round(top)}px`;
 }
 
 function commitOnEnterCancelOnEsc(

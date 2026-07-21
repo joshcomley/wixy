@@ -87,6 +87,25 @@ describe("parseShellToOverlayMessage", () => {
     }
   });
 
+
+  it("parses setDevice with an optional viewport scale", () => {
+    expect(
+      parseShellToOverlayMessage({ wx: 1, type: "setDevice", device: "desktop", scale: 0.285 }),
+    ).toEqual({ wx: 1, type: "setDevice", device: "desktop", scale: 0.285 });
+  });
+
+  it("parses setDevice without scale (scale stays absent, not undefined)", () => {
+    const parsed = parseShellToOverlayMessage({ wx: 1, type: "setDevice", device: "mobile" });
+    expect(parsed).toEqual({ wx: 1, type: "setDevice", device: "mobile" });
+    expect(parsed !== null && "scale" in parsed ? parsed.scale : "ABSENT").toBe("ABSENT");
+  });
+
+  it("rejects setDevice with a non-number scale", () => {
+    expect(
+      parseShellToOverlayMessage({ wx: 1, type: "setDevice", device: "mobile", scale: "0.5" }),
+    ).toBeNull();
+  });
+
   it("rejects setDevice with an unknown device string", () => {
     expect(
       parseShellToOverlayMessage({ wx: 1, type: "setDevice", device: "watch" }),

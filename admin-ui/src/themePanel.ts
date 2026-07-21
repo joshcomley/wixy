@@ -74,6 +74,10 @@ export function mountThemePanel(deps: ThemePanelDeps): ThemePanel {
     // should follow along too, which it deliberately doesn't here: the theme panel
     // isn't tied to page routing the way `#/edit/<page>` is.
     onOverlayNavigated: () => {},
+    // Re-post the current vars every time the overlay (re)loads — a change made
+    // while the iframe was still loading otherwise lands in about:blank and is
+    // silently lost (the E2E-3 full-suite flake, decisions/00076).
+    onOverlayReady: () => liveApply(),
   });
   previewWrap.appendChild(view.element);
 

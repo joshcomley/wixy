@@ -543,6 +543,11 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   function mountPanel(route: Route): void {
     main.innerHTML = "";
     closeDrawer();
+    // The draft chip lives in the slim edit bar during edit view; every other
+    // route gets it back in the topbar (its original slot, before Publish).
+    if (route.kind !== "edit" && chipEl.parentElement !== topbar) {
+      topbar.insertBefore(chipEl, publishButton);
+    }
 
     if (route.kind === "pages") {
       if (state === null) {
@@ -570,21 +575,46 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       }
       const wrap = document.createElement("div");
       wrap.className = "wx-edit-wrap";
-      const toolbarRow = document.createElement("div");
-      toolbarRow.className = "wx-edit-toolbar-row";
+
+      // The slim one-line edit bar (decisions/00076): icon back button, the
+      // device switcher (added by editView between leading/trailing), Settings
+      // (renamed from "Page settings" so the row fits on a phone), and the ▾
+      // chrome-reveal toggle. Both title bars are hidden in edit view via the
+      // wx-shell-editing class (see handleRoute).
+      const backButton = document.createElement("button");
+      backButton.type = "button";
+      backButton.className = "wx-edit-back";
+      backButton.textContent = "←";
+      backButton.title = "Back to pages";
+      backButton.setAttribute("aria-label", "Back to pages");
+      backButton.addEventListener("click", () => navigateTo({ kind: "pages" }, win));
+
       const settingsButton = document.createElement("button");
       settingsButton.type = "button";
       settingsButton.className = "wx-page-settings-trigger";
-      settingsButton.textContent = "Page settings";
+      settingsButton.textContent = "Settings";
       settingsButton.addEventListener("click", () => toggleDrawer(route.page));
-      toolbarRow.appendChild(settingsButton);
-      wrap.appendChild(toolbarRow);
+
+      const revealButton = document.createElement("button");
+      revealButton.type = "button";
+      revealButton.className = "wx-chrome-reveal";
+      revealButton.textContent = "▾";
+      revealButton.title = "Show the menu (10 seconds)";
+      revealButton.setAttribute("aria-label", "Show the menu temporarily");
+      revealButton.setAttribute("aria-pressed", "false");
+      revealButton.addEventListener("click", () => toggleChromeReveal(revealButton));
 
       const view = createEditView(route.page, {
         api,
         opQueue,
         win,
         onOverlayNavigated: (page) => navigateTo({ kind: "edit", page }, win),
+        // The draft chip moves INTO the slim bar while editing (decisions/00076):
+        // with the topbar hidden it's the only publish trigger on screen, and
+        // the change count is exactly what you want visible mid-edit. It moves
+        // back to the topbar on the next non-edit mount (see mountPanel).
+        toolbarLeading: [backButton],
+        toolbarTrailing: [chipEl, settingsButton, revealButton],
       });
       activeEditView = view;
       wrap.appendChild(view.element);
@@ -656,10 +686,43 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     }
   }
 
+  // -- Edit-view chrome (decisions/00076) --------------------------------------
+  // In edit view both title bars hide (CSS, driven by wx-shell-editing) so the
+  // preview owns the screen; the ▾ button in the slim edit bar slides the
+  // chrome back down for CHROME_REVEAL_MS, then it auto-hides. Route changes
+  // always restore the correct state.
+
+  const CHROME_REVEAL_MS = 10_000;
+  let chromeRevealTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function setChromeRevealed(revealed: boolean, button?: HTMLButtonElement): void {
+    container.classList.toggle("wx-shell-chrome-revealed", revealed);
+    button?.setAttribute("aria-pressed", String(revealed));
+    if (chromeRevealTimer !== null) {
+      clearTimeout(chromeRevealTimer);
+      chromeRevealTimer = null;
+    }
+    if (revealed) {
+      chromeRevealTimer = setTimeout(() => {
+        chromeRevealTimer = null;
+        container.classList.remove("wx-shell-chrome-revealed");
+        container
+          .querySelector(".wx-chrome-reveal")
+          ?.setAttribute("aria-pressed", "false");
+      }, CHROME_REVEAL_MS);
+    }
+  }
+
+  function toggleChromeReveal(button: HTMLButtonElement): void {
+    setChromeRevealed(!container.classList.contains("wx-shell-chrome-revealed"), button);
+  }
+
   function handleRoute(route: Route): void {
     const reuseEditView =
       activeRoute?.kind === "edit" && route.kind === "edit" && activeEditView !== null;
     activeRoute = route;
+    setChromeRevealed(false);
+    container.classList.toggle("wx-shell-editing", route.kind === "edit");
     setActiveNavItem(route);
     saveLastRoute(route, win);
     if (reuseEditView && route.kind === "edit" && activeEditView !== null) {
@@ -789,6 +852,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
         win.document.removeEventListener("visibilitychange", onVisibilityChange);
       }
       if (stateRetryTimer !== null) clearTimeout(stateRetryTimer);
+      if (chromeRevealTimer !== null) clearTimeout(chromeRevealTimer);
       win.removeEventListener("keydown", onSecondaryEscape);
       closeSecondary();
       activePanelTeardown?.();
