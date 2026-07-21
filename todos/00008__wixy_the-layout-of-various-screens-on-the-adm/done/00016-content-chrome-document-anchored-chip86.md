@@ -22,7 +22,8 @@ delta): chip glued on scroll after tapping text; item toolbar glued on scroll. B
 RED-proven against stashed old code (drift = scroll delta), GREEN after.
 Ad-hoc 390+320 dark: drift 0.00 both; screenshot eyeballed (chip at outline's corner).
 
-**Gates:** editor vitest 192, tsc strict; admin-ui untouched (463, tsc green as shipped).
-pytest + full e2e: see index line / PR.
+**Gates:** editor vitest 192, editor tsc strict, pytest 855, full e2e 28/28 — all green.
+CI green on the PR.
 
-**PR:** (filled at ship) · **Decision:** decisions/00086
+**PR:** #118 (merged 2026-07-21; live on prod `e9544f8`, slot green — bundle markers
+verified in the deployed slot) · **Decision:** decisions/00086
