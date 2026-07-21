@@ -1,10 +1,31 @@
 import { describe, expect, it, vi } from "vitest";
 import { mountShell } from "../src/shell";
 import type { Shell } from "../src/shell";
-import type { AdminApi, StateResponse } from "../src/api";
+import type { AdminApi, PublishJobData, PublishOutcome, StateResponse } from "../src/api";
 import type { ChatPanel, ChatPanelDeps } from "../src/chatPanel";
 import type { EditView, MountEditViewDeps } from "../src/editView";
 import type { DraftOp } from "../src/protocol";
+
+/** jsdom has no `EventSource`, and shell tests below confirm a publish from the
+ * REAL drawer (the shell doesn't inject the drawer's stream) — stub the global
+ * so `defaultOpenStream` gets an inert, never-delivering connection. */
+class StubEventSource {
+  onmessage: ((event: MessageEvent<string>) => void) | null = null;
+  constructor(_url: string) {}
+  close(): void {}
+}
+(globalThis as Record<string, unknown>)["EventSource"] ??= StubEventSource;
+
+/** Naked microtask pump for tests running under fake timers (flushState's
+ * "await the getState result" pattern only covers the loadState chain, not the
+ * publish watch's own polls). */
+async function flushMicro(times = 4): Promise<void> {
+  for (let i = 0; i < times; i++) await Promise.resolve();
+}
+
+function runningJob(stage: PublishJobData["stage"]): PublishJobData {
+  return { id: "job-1", stage, log: [], version: null, error: null, isRunning: true };
+}
 
 function fakeStorage(): Storage {
   const store = new Map<string, string>();
@@ -865,6 +886,342 @@ describe("mountShell", () => {
     const chip = container.querySelector<HTMLButtonElement>(".wx-draft-chip");
     expect(publishButton?.disabled).toBe(true);
     expect(chip?.disabled).toBe(true);
+  });
+
+  describe("publish progress feedback (decisions/00089)", () => {
+    it("while a publish runs the status-bar button spins and the chip narrates the stage, then a toast announces live", async () => {
+      vi.useFakeTimers();
+      try {
+        let job: PublishJobData | null = runningJob("building");
+        const api = fakeApi({
+          getState: vi.fn(async () => fakeState({ publishJob: job })),
+        });
+        const win = fakeWindow();
+        const container = document.createElement("div");
+
+        mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+        const getStateMock = api.getState as ReturnType<typeof vi.fn>;
+        await getStateMock.mock.results[0]?.value;
+        await flushMicro();
+
+        const publishButton = container.querySelector<HTMLButtonElement>(".wx-publish-button")!;
+        const chip = container.querySelector<HTMLButtonElement>(".wx-draft-chip")!;
+        expect(publishButton.disabled).toBe(true);
+        expect(publishButton.querySelector(".wx-spinner")).not.toBeNull();
+        expect(publishButton.textContent).toContain("Publishing…");
+        expect(chip.textContent).toBe("Building the site…");
+        expect(container.querySelector(".wx-toast")).toBeNull();
+
+        // The job finishes — the shell's own watch (the drawer was never
+        // opened here) must notice and announce it, then restore the bar.
+        job = { id: "job-1", stage: "done", log: [], version: 3, error: null, isRunning: false };
+        await vi.advanceTimersByTimeAsync(2000); // the watch's poll cadence
+        await flushMicro();
+
+        const toasts = [...container.querySelectorAll(".wx-toast")].map((el) => el.textContent);
+        expect(toasts).toEqual(["Published — version 3 is live."]);
+        expect(publishButton.querySelector(".wx-spinner")).toBeNull();
+        expect(publishButton.textContent).toBe("Publish");
+        expect(publishButton.disabled).toBe(false);
+        expect(chip.textContent).toBe("No unpublished changes");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("closing the drawer mid-publish still announces live — the shell's watch owns completion", async () => {
+      vi.useFakeTimers();
+      try {
+        let job: PublishJobData | null = null;
+        let resolvePublish: ((outcome: PublishOutcome) => void) | null = null;
+        const api = fakeApi({
+          getState: vi.fn(async () => fakeState({ publishJob: job })),
+          getPublishPreview: vi.fn(async () => ({
+            changes: {},
+            mediaChanges: { replaced: [], deleted: [] },
+            opCount: 1,
+            validate: { ok: true, errors: [] },
+          })),
+          publish: vi.fn(
+            () => new Promise<PublishOutcome>((resolve) => { resolvePublish = resolve; }),
+          ),
+        });
+        const win = fakeWindow();
+        const container = document.createElement("div");
+
+        mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+        const getStateMock = api.getState as ReturnType<typeof vi.fn>;
+        await getStateMock.mock.results[0]?.value;
+        await flushMicro();
+
+        container.querySelector<HTMLButtonElement>(".wx-publish-button")!.click();
+        await flushMicro(); // preview renders
+        job = runningJob("merging");
+        container.querySelector<HTMLButtonElement>(".wx-publish-confirm")!.click();
+        await flushMicro(); // the watch's first poll observes "running"
+
+        // The user closes the drawer mid-publish — a torn-down drawer can
+        // never report the outcome.
+        container.querySelector<HTMLButtonElement>(".wx-drawer-close")!.click();
+        expect(container.querySelector(".wx-drawer-wide")).toBeNull();
+
+        // Even the POST resolving now reaches only the cancelled drawer — no
+        // toast may come from that path.
+        resolvePublish!({ kind: "ok", version: 7, sha: "a".repeat(40) });
+        await flushMicro();
+        expect(container.querySelector(".wx-toast")).toBeNull();
+
+        // …but the shell's watch is still polling and announces it itself.
+        job = { id: "job-1", stage: "done", log: [], version: 7, error: null, isRunning: false };
+        await vi.advanceTimersByTimeAsync(2000);
+        await flushMicro();
+        const toasts = [...container.querySelectorAll(".wx-toast")].map((el) => el.textContent);
+        expect(toasts).toEqual(["Published — version 7 is live."]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("a drawer-open success announces exactly once across the drawer and watch paths", async () => {
+      vi.useFakeTimers();
+      try {
+        let job: PublishJobData | null = null;
+        const api = fakeApi({
+          getState: vi.fn(async () => fakeState({ publishJob: job })),
+          getPublishPreview: vi.fn(async () => ({
+            changes: {},
+            mediaChanges: { replaced: [], deleted: [] },
+            opCount: 1,
+            validate: { ok: true, errors: [] },
+          })),
+          publish: vi.fn(async (): Promise<PublishOutcome> => ({ kind: "ok", version: 7, sha: "a".repeat(40) })),
+        });
+        const win = fakeWindow();
+        const container = document.createElement("div");
+
+        mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+        const getStateMock = api.getState as ReturnType<typeof vi.fn>;
+        await getStateMock.mock.results[0]?.value;
+        await flushMicro();
+
+        container.querySelector<HTMLButtonElement>(".wx-publish-button")!.click();
+        await flushMicro();
+        job = runningJob("committing");
+        container.querySelector<HTMLButtonElement>(".wx-publish-confirm")!.click();
+
+        // The busy affordance is SYNCHRONOUS with the confirm click (the
+        // in-flight bridge — the POST hasn't even been awaited yet), not
+        // something the first state poll discovers seconds later.
+        const statusPublish = container.querySelector<HTMLButtonElement>(".wx-publish-button")!;
+        expect(statusPublish.querySelector(".wx-spinner")).not.toBeNull();
+        expect(statusPublish.textContent).toContain("Publishing…");
+
+        await flushMicro(); // watch poll 1 (running) + the drawer's own promise resolution
+
+        expect(
+          [...container.querySelectorAll(".wx-toast")].map((el) => el.textContent),
+        ).toEqual(["Published — version 7 is live."]);
+
+        // The watch's next poll also sees the terminal job — version-guarded,
+        // it must NOT announce a second time.
+        job = { id: "job-1", stage: "done", log: [], version: 7, error: null, isRunning: false };
+        await vi.advanceTimersByTimeAsync(2000);
+        await flushMicro();
+        const toasts = [...container.querySelectorAll(".wx-toast")].map((el) => el.textContent);
+        expect(toasts.filter((t) => t === "Published — version 7 is live.")).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("a poll that lands only after the job completed still announces (state calls may block past the job's lifetime)", async () => {
+      // Found by the e2e: `/api/admin/state` does git work that queue behind
+      // the publish's own locks, so a 2s poll can BLOCK for the publish's
+      // whole lifetime and return only the terminal job — the watch must
+      // recognize the NEW terminal job by id, never having seen it "running".
+      vi.useFakeTimers();
+      try {
+        let job: PublishJobData | null = null;
+        let resolvePublish: ((outcome: PublishOutcome) => void) | null = null;
+        const api = fakeApi({
+          getState: vi.fn(async () => fakeState({ publishJob: job, draft: { rev: 1, opCount: 1 } })),
+          getPublishPreview: vi.fn(async () => ({
+            changes: {},
+            mediaChanges: { replaced: [], deleted: [] },
+            opCount: 1,
+            validate: { ok: true, errors: [] },
+          })),
+          publish: vi.fn(
+            () => new Promise<PublishOutcome>((resolve) => { resolvePublish = resolve; }),
+          ),
+        });
+        const win = fakeWindow();
+        const container = document.createElement("div");
+
+        mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+        const getStateMock = api.getState as ReturnType<typeof vi.fn>;
+        await getStateMock.mock.results[0]?.value;
+        await flushMicro();
+
+        container.querySelector<HTMLButtonElement>(".wx-publish-button")!.click();
+        await flushMicro();
+        container.querySelector<HTMLButtonElement>(".wx-publish-confirm")!.click();
+        await flushMicro(); // watch poll 1: still no job (POST not registered)
+        // Close the drawer so ONLY the watch can announce (the e2e shape).
+        container.querySelector<HTMLButtonElement>(".wx-drawer-close")!.click();
+
+        // The next poll "blocks" past the entire job: by the time ANY state
+        // lands, the job is already terminal — and the POST settles too.
+        job = { id: "job-new", stage: "done", log: [], version: 3, error: null, isRunning: false };
+        resolvePublish!({ kind: "ok", version: 3, sha: "a".repeat(40) });
+        await flushMicro();
+        await vi.advanceTimersByTimeAsync(2000);
+        await flushMicro();
+
+        const toasts = [...container.querySelectorAll(".wx-toast")].map((el) => el.textContent);
+        expect(toasts).toEqual(["Published — version 3 is live."]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("a stale terminal job from a previous publish never re-announces when a new publish starts", async () => {
+      vi.useFakeTimers();
+      try {
+        // The state snapshot still carries the LAST publish's done job (the
+        // server keeps it) — the watch must only toast a job it watched RUN.
+        let job: PublishJobData | null = {
+          id: "job-old",
+          stage: "done",
+          log: [],
+          version: 7,
+          error: null,
+          isRunning: false,
+        };
+        let resolvePublish: ((outcome: PublishOutcome) => void) | null = null;
+        const api = fakeApi({
+          getState: vi.fn(async () => fakeState({ publishJob: job, draft: { rev: 1, opCount: 1 } })),
+          getPublishPreview: vi.fn(async () => ({
+            changes: {},
+            mediaChanges: { replaced: [], deleted: [] },
+            opCount: 1,
+            validate: { ok: true, errors: [] },
+          })),
+          publish: vi.fn(
+            () => new Promise<PublishOutcome>((resolve) => { resolvePublish = resolve; }),
+          ),
+        });
+        const win = fakeWindow();
+        const container = document.createElement("div");
+
+        mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+        const getStateMock = api.getState as ReturnType<typeof vi.fn>;
+        await getStateMock.mock.results[0]?.value;
+        await flushMicro();
+        expect(container.querySelector(".wx-toast")).toBeNull(); // stale job alone announces nothing
+
+        container.querySelector<HTMLButtonElement>(".wx-publish-button")!.click();
+        await flushMicro();
+        container.querySelector<HTMLButtonElement>(".wx-publish-confirm")!.click();
+        await flushMicro(); // watch poll 1 sees the STALE done job mid-bridge
+        await vi.advanceTimersByTimeAsync(2000);
+        await flushMicro();
+        expect(container.querySelector(".wx-toast")).toBeNull(); // and polling it never toasted v7
+
+        // The new job registers, runs, completes — THAT one announces.
+        job = runningJob("building");
+        await vi.advanceTimersByTimeAsync(2000);
+        await flushMicro();
+        job = { id: "job-new", stage: "done", log: [], version: 8, error: null, isRunning: false };
+        resolvePublish!({ kind: "ok", version: 8, sha: "a".repeat(40) });
+        await flushMicro();
+        await vi.advanceTimersByTimeAsync(2000);
+        await flushMicro();
+
+        const toasts = [...container.querySelectorAll(".wx-toast")].map((el) => el.textContent);
+        expect(toasts.filter((t) => t?.includes("version 7"))).toHaveLength(0);
+        expect(toasts.filter((t) => t === "Published — version 8 is live.")).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("a 409 conflict (no job ever starts) drops the busy bridge without toasting", async () => {
+      vi.useFakeTimers();
+      try {
+        const api = fakeApi({
+          getState: vi.fn(async () => fakeState({ publishJob: null, draft: { rev: 1, opCount: 1 } })),
+          getPublishPreview: vi.fn(async () => ({
+            changes: {},
+            mediaChanges: { replaced: [], deleted: [] },
+            opCount: 1,
+            validate: { ok: true, errors: [] },
+          })),
+          publish: vi.fn(
+            async (): Promise<PublishOutcome> => ({ kind: "conflict", message: "expected rev 1, overlay is at rev 2" }),
+          ),
+        });
+        const win = fakeWindow();
+        const container = document.createElement("div");
+
+        mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+        const getStateMock = api.getState as ReturnType<typeof vi.fn>;
+        await getStateMock.mock.results[0]?.value;
+        await flushMicro();
+
+        container.querySelector<HTMLButtonElement>(".wx-publish-button")!.click();
+        await flushMicro();
+        container.querySelector<HTMLButtonElement>(".wx-publish-confirm")!.click();
+        // Busy synchronously…
+        expect(
+          container.querySelector<HTMLButtonElement>(".wx-publish-button")!.querySelector(".wx-spinner"),
+        ).not.toBeNull();
+        // …then the conflict settles: bridge drops, no spinner, no toast, and
+        // the watch doesn't spin to its cap on a job that never existed.
+        await flushMicro();
+        await vi.advanceTimersByTimeAsync(4000);
+        await flushMicro();
+
+        const publishButton = container.querySelector<HTMLButtonElement>(".wx-publish-button")!;
+        expect(publishButton.querySelector(".wx-spinner")).toBeNull();
+        expect(publishButton.textContent).toBe("Publish");
+        expect(publishButton.disabled).toBe(false);
+        expect(container.querySelector(".wx-toast")).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("a failed publish restores the bar and raises an error toast", async () => {
+      vi.useFakeTimers();
+      try {
+        let job: PublishJobData | null = runningJob("verifying");
+        const api = fakeApi({
+          getState: vi.fn(async () => fakeState({ publishJob: job })),
+        });
+        const win = fakeWindow();
+        const container = document.createElement("div");
+
+        mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+        const getStateMock = api.getState as ReturnType<typeof vi.fn>;
+        await getStateMock.mock.results[0]?.value;
+        await flushMicro();
+
+        job = { id: "job-1", stage: "failed", log: [], version: null, error: "boom", isRunning: false };
+        await vi.advanceTimersByTimeAsync(2000);
+        await flushMicro();
+
+        const toast = container.querySelector(".wx-toast-error");
+        expect(toast?.textContent).toBe("Publish failed — your draft changes are safe.");
+        const publishButton = container.querySelector<HTMLButtonElement>(".wx-publish-button")!;
+        expect(publishButton.querySelector(".wx-spinner")).toBeNull();
+        expect(publishButton.textContent).toBe("Publish");
+        expect(publishButton.disabled).toBe(false);
+        expect(container.querySelector(".wx-draft-chip")?.textContent).toBe("No unpublished changes");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it("opening the publish drawer while page settings is open switches to it", async () => {
