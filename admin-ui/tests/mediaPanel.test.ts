@@ -41,7 +41,7 @@ describe("mountMediaPanel", () => {
     const headerRow = panel.element.querySelector(".wx-media-header-row");
     expect(headerRow).not.toBeNull();
     expect(headerRow?.querySelector(".wx-media-upload-button")).not.toBeNull();
-    // thumbnails are buttons that open the detail sheet (decisions/00079)
+    // thumbnails are buttons that open the detail sheet (decisions/00080)
     expect(panel.element.querySelector(".wx-media-thumb")?.tagName).toBe("BUTTON");
   });
 

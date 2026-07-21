@@ -1,5 +1,11 @@
 # Media items are editable: detail sheet with staged in-place replace and staged repo deletion
 
+> **Renumbered 00079 → 00080 (2026-07-21):** two independent sessions shipped
+> decision entries numbered 00079 within minutes of each other (the peer's
+> composer-autogrow entry merged first, as PR #106). The later one (this one)
+> moved to the next free number; content unchanged.
+
+
 ## The complaint (operator, 2026-07-21)
 
 "I can't edit any media files" — the media panel was a read-only gallery for

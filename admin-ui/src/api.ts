@@ -154,7 +154,7 @@ export interface PublishPreview {
   /** Keyed by page slug, `"_global"`, or `"theme"` — same grouping the ledger's
    * own `changed` summary uses. */
   changes: Record<string, PublishDiffEntry[]>;
-  /** Staged media changes (decisions/00079): filenames with a replacement or
+  /** Staged media changes (decisions/00080): filenames with a replacement or
    * deletion pending at this publish. */
   mediaChanges: { replaced: string[]; deleted: string[] };
   /** Total staged draft changes: content ops + staged page adds/deletes (a
@@ -223,7 +223,7 @@ export interface ContentResponse {
 /** A media item from `GET /api/admin/media` (spec/02 §9): `width`/`height` are
  * present for a real file on disk; `references` lists the content keys (outermost
  * granularity) using it; `stagedReplace`/`stagedDelete` mark publish-pending
- * changes (decisions/00079) — a staged replacement's `url` already serves the
+ * changes (decisions/00080) — a staged replacement's `url` already serves the
  * new bytes from the staging area. */
 export interface MediaItem {
   name: string;

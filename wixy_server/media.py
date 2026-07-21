@@ -184,7 +184,7 @@ def delete_draft_media(paths: ProjectPaths, name: str, references: dict[str, lis
 
 
 # ---------------------------------------------------------------------------
-# Staged replacements + deletions of REPO images (decisions/00079)
+# Staged replacements + deletions of REPO images (decisions/00080)
 # ---------------------------------------------------------------------------
 #
 # Both follow the same publish-time materialization contract as pages
@@ -244,7 +244,7 @@ def _save_deletion_list(paths: ProjectPaths, names: list[str]) -> None:
 
 
 def stage_media_deletion(paths: ProjectPaths, name: str, references: dict[str, list[str]]) -> None:
-    """Stage a REPO image for deletion at the next publish (decisions/00079) —
+    """Stage a REPO image for deletion at the next publish (decisions/00080) —
     the operator's escape from 'published images can't be deleted'. Only
     unreferenced images stage; the publish re-checks references when applying
     (content may have changed since) and skips anything newly referenced."""
