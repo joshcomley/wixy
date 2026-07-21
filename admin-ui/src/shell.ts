@@ -398,10 +398,17 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   main.textContent = "Loading…";
   body.append(navEl, main);
 
+  // The slim edit bar's pinned home (decisions/00081): inside the shell's
+  // non-scrolling chrome, NOT the scrolling main, so it can never scroll out
+  // of reach (operator 2026-07-22: "that small top nav bar on Edit should
+  // ALWAYS be visible"). CSS shows it only in edit view.
+  const editBarHost = document.createElement("div");
+  editBarHost.className = "wx-edit-bar-host";
+
   const toastRegion = document.createElement("div");
   toastRegion.className = "wx-toast-region";
 
-  container.append(topbar, body, toastRegion);
+  container.append(topbar, editBarHost, body, toastRegion);
 
   // -- Nav --------------------------------------------------------------------
 
@@ -647,6 +654,9 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
         // back to the topbar on the next non-edit mount (see mountPanel).
         toolbarLeading: [backButton],
         toolbarTrailing: [chipEl, settingsButton, revealButton],
+        // And the bar itself pins into the shell chrome (decisions/00081) —
+        // never the scrolling main.
+        toolbarHost: editBarHost,
       });
       activeEditView = view;
       wrap.appendChild(view.element);

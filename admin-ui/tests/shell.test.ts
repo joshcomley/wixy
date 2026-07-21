@@ -165,7 +165,13 @@ function fakeMountEditView(): FakeEditViewHandle {
       const toolbar = document.createElement("div");
       toolbar.className = "wx-device-toolbar";
       toolbar.append(...(deps.toolbarLeading ?? []), ...(deps.toolbarTrailing ?? []));
-      element.appendChild(toolbar);
+      // ...and, like the real mount, parks the toolbar in toolbarHost when the
+      // shell pins it into the chrome (decisions/00081).
+      if (deps.toolbarHost !== undefined) {
+        deps.toolbarHost.appendChild(toolbar);
+      } else {
+        element.appendChild(toolbar);
+      }
       return {
         element,
         setPage: (p) => handle.setPageCalls.push(p),
@@ -173,6 +179,9 @@ function fakeMountEditView(): FakeEditViewHandle {
         postMessage: () => {},
         teardown: () => {
           handle.teardownCount += 1;
+          // Mirrors the real mount: the toolbar leaves with the view, wherever
+          // it was parked (host or root).
+          toolbar.remove();
         },
       };
     },
@@ -333,6 +342,32 @@ describe("mountShell", () => {
       expect(trailing[1]?.className).toBe("wx-page-settings-trigger");
       expect(trailing[1]?.textContent).toBe("Settings");
       expect(trailing[2]?.className).toBe("wx-chrome-reveal");
+    });
+
+    it("the slim edit bar pins into the shell chrome host, never the scrolling main (decisions/00081)", async () => {
+      const api = fakeApi();
+      const win = fakeWindow();
+      const container = document.createElement("div");
+      const editView = fakeMountEditView();
+
+      mountShell(container, { api, win, mountEditView: editView.fn });
+      await flushState(api);
+      win.location.hash = "#/edit/index";
+      await Promise.resolve();
+
+      const host = container.querySelector(".wx-edit-bar-host");
+      expect(host).not.toBeNull();
+      const toolbar = container.querySelector(".wx-device-toolbar");
+      expect(toolbar).not.toBeNull();
+      // the bar lives in the pinned host — outside .wx-main, so main scrolling
+      // (zoom, phone keyboard, any overshoot) can never take it out of reach
+      expect(toolbar?.closest(".wx-edit-bar-host")).not.toBeNull();
+      expect(toolbar?.closest(".wx-main")).toBeNull();
+
+      // leaving edit view removes it from the host (no stale bar on other routes)
+      win.location.hash = "#/pages";
+      await Promise.resolve();
+      expect(container.querySelector(".wx-device-toolbar")).toBeNull();
     });
 
     it("the draft chip moves back to the topbar when leaving edit view", async () => {
