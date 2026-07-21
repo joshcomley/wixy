@@ -533,6 +533,202 @@ class TestPatchDraft:
         assert response.json()["content"]["hero"]["title"] == "Persisted"
 
 
+_HOURS_HTML = """<!DOCTYPE html>
+<html><head><title>placeholder</title></head>
+<body>
+<!-- wx:partial header -->
+<ul data-wx-list="@hours">
+  <li data-wx-list-item><span data-wx=".day">Day</span><span data-wx=".value">Value</span></li>
+</ul>
+<a data-wx-href="@phoneHref">call</a>
+<!-- wx:partial footer -->
+<!-- wx:partial booking-modal -->
+</body></html>
+"""
+
+_CARDS_HTML = """<!DOCTYPE html>
+<html><head><title>placeholder</title></head>
+<body>
+<!-- wx:partial header -->
+<div data-wx-list="treatments.cards">
+  <div data-wx-list-item><h3 data-wx=".title">T</h3><img data-wx-img=".img" src="" alt=""></div>
+</div>
+<!-- wx:partial footer -->
+<!-- wx:partial booking-modal -->
+</body></html>
+"""
+
+
+@pytest.fixture
+def origin_repo_bindings(tmp_path: Path) -> Path:
+    """The base fixture site PLUS an @hours global list + @phoneHref global href
+    (contact.html) and a nested treatments.cards list with an img leaf
+    (treatments.html) — the shapes the kind-aware draft-write sanitize resolves."""
+    origin = tmp_path / "origin-bindings"
+    origin.mkdir()
+    _git(["init", "--initial-branch=main"], origin)
+    _git(["config", "user.email", "test@example.com"], origin)
+    _git(["config", "user.name", "Test"], origin)
+    _write_site_repo(origin)
+    (origin / "pages" / "contact.html").write_text(_HOURS_HTML, encoding="utf-8")
+    (origin / "pages" / "treatments.html").write_text(_CARDS_HTML, encoding="utf-8")
+    (origin / "content" / "contact.json").write_text(
+        json.dumps(
+            {"meta": {"title": "Contact", "navLabel": "Contact", "inNav": True, "navOrder": 30}}
+        ),
+        encoding="utf-8",
+    )
+    (origin / "content" / "treatments.json").write_text(
+        json.dumps(
+            {
+                "meta": {
+                    "title": "Treatments",
+                    "navLabel": "Treatments",
+                    "inNav": True,
+                    "navOrder": 40,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (origin / "content" / "_global.json").write_text(
+        json.dumps(
+            {"phoneHref": "tel:+441onal", "hours": [{"day": "Monday", "value": "10:00 – 19:00"}]}
+        ),
+        encoding="utf-8",
+    )
+    _git(["add", "."], origin)
+    _git(["commit", "-m", "initial"], origin)
+    return origin
+
+
+@pytest.fixture
+def wixy_repo_root_bindings(tmp_path: Path, origin_repo_bindings: Path) -> Path:
+    root = tmp_path / "wixy-repo-bindings"
+    _write_project_registry(root, origin_repo_bindings)
+    return root
+
+
+def _overlay_op_value(paths: ProjectPaths, key: str) -> object:
+    data = json.loads(paths.draft_overlay.read_text(encoding="utf-8"))
+    return data["ops"][key]["value"]
+
+
+class TestPatchDraftSanitize:
+    """spec/04 §9: draft writes are sanitized — kind-aware, so only text-kind
+    string leaves pass through sanitize_rich_lite (decisions/00074)."""
+
+    def test_text_kind_value_is_sanitized_on_write(
+        self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": 0,
+                    "ops": [
+                        {
+                            "file": "index",
+                            "path": "hero.title",
+                            "value": "New <script>alert(1)</script><strong>bold</strong> & such",
+                        }
+                    ],
+                },
+            )
+        assert (
+            _overlay_op_value(paths, "index:hero.title") == "New <strong>bold</strong> &amp; such"
+        )
+
+    def test_href_kind_value_passes_through_unsanitized(
+        self, storage_root: Path, wixy_repo_root_bindings: Path, paths: ProjectPaths
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bindings)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": 0,
+                    "ops": [
+                        {
+                            "file": "_global",
+                            "path": "phoneHref",
+                            "value": "https://x.test/call?a=1&b=2",
+                        }
+                    ],
+                },
+            )
+        # an HTML sanitizer would entity-escape the `&` and corrupt the URL
+        assert _overlay_op_value(paths, "_global:phoneHref") == "https://x.test/call?a=1&b=2"
+
+    def test_global_list_text_leaves_sanitized_via_cross_page_lookup(
+        self, storage_root: Path, wixy_repo_root_bindings: Path, paths: ProjectPaths
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bindings)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": 0,
+                    "ops": [
+                        {
+                            "file": "_global",
+                            "path": "hours",
+                            "value": [
+                                {"day": "Monday", "value": "10:00 <script>x</script>– 19:00"},
+                                {"day": "Tuesday", "value": "11:00 – 16:00"},
+                            ],
+                        }
+                    ],
+                },
+            )
+        assert _overlay_op_value(paths, "_global:hours") == [
+            {"day": "Monday", "value": "10:00 – 19:00"},
+            {"day": "Tuesday", "value": "11:00 – 16:00"},
+        ]
+
+    def test_nested_list_sanitizes_text_but_not_img_leaves(
+        self, storage_root: Path, wixy_repo_root_bindings: Path, paths: ProjectPaths
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bindings)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": 0,
+                    "ops": [
+                        {
+                            "file": "treatments",
+                            "path": "treatments.cards",
+                            "value": [
+                                {
+                                    "title": "Botox <em>plus</em> <script>bad</script>",
+                                    "img": {"src": "i.jpg?a=1&b=2", "alt": "R&D"},
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+        assert _overlay_op_value(paths, "treatments:treatments.cards") == [
+            {"title": "Botox <em>plus</em> ", "img": {"src": "i.jpg?a=1&b=2", "alt": "R&D"}}
+        ]
+
+    def test_unbound_path_passes_through_verbatim(
+        self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": 0,
+                    "ops": [{"file": "index", "path": "meta.title", "value": "A & <b>B</b>"}],
+                },
+            )
+        assert _overlay_op_value(paths, "index:meta.title") == "A & <b>B</b>"
+
+
 class TestDeleteDraft:
     def test_discards_all_ops_and_bumps_rev(self, storage_root: Path, wixy_repo_root: Path) -> None:
         app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)

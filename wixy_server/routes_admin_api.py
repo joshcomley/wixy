@@ -40,6 +40,7 @@ from wixy_server.checkout import (
     current_sha,
     ensure_checkout,
 )
+from wixy_server.draft_sanitize import sanitize_set_ops
 from wixy_server.ledger import read_ledger
 from wixy_server.live_pointer import load_live_pointer
 from wixy_server.media import (
@@ -306,9 +307,18 @@ def _to_patch_op(op_in: DraftOpIn) -> PatchOp:
     return SetOp(file=op_in.file, path=op_in.path, value=op_in.value)
 
 
-def _apply_draft_patch(paths: ProjectPaths, body: DraftPatchIn, *, by: str, now: str) -> int:
+def _apply_draft_patch(
+    project: ProjectConfig, paths: ProjectPaths, body: DraftPatchIn, *, by: str, now: str
+) -> int:
     overlay = _load_overlay_for(paths)
     ops = [_to_patch_op(op_in) for op_in in body.ops]
+    set_ops = [op for op in ops if isinstance(op, SetOp)]
+    if set_ops:
+        # spec/04 §9: draft writes are sanitized — kind-aware, so only text-kind
+        # string leaves pass through sanitize_rich_lite (decisions/00074).
+        source = build_site_source(project, paths.repo)
+        sanitized = sanitize_set_ops(source, set_ops)
+        ops = [sanitized.pop(0) if isinstance(op, SetOp) else op for op in ops]
     new_overlay = apply_patch(overlay, body.expectedRev, ops, by=by, now=now)
     save_overlay(paths.draft_overlay, new_overlay)
     return new_overlay.rev
@@ -316,12 +326,13 @@ def _apply_draft_patch(paths: ProjectPaths, body: DraftPatchIn, *, by: str, now:
 
 @router.patch("/draft")
 async def patch_draft(body: DraftPatchIn, request: Request) -> dict[str, int]:
+    project: ProjectConfig = request.app.state.project
     paths: ProjectPaths = request.app.state.paths
     by = _current_author(request)
     now = datetime.now(UTC).isoformat()
 
     def _apply() -> int:
-        return _apply_draft_patch(paths, body, by=by, now=now)
+        return _apply_draft_patch(project, paths, body, by=by, now=now)
 
     try:
         rev = await anyio.to_thread.run_sync(_apply)

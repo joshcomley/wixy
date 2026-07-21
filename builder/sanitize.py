@@ -2,9 +2,11 @@
 
 Allowlist: `a[href,target,rel,class]`, `em`, `strong`, `br`, `span[class]`. `class` values
 on `a`/`span` are restricted to a fixed allowlist (v1: `js-book` only — the FAQ answer's
-booking-modal trigger link). `href` must be http(s)/mailto/tel/relative. Applied on every
-draft write server-side (04 §9) and — belt-and-braces, since it's idempotent — on every
-render here, so hand-authored migration content is held to the same bar as editor input.
+booking-modal trigger link). `href` must be http(s)/mailto/tel/relative. Applied
+KIND-AWARE on every draft write server-side (04 §9 — `wixy_server.draft_sanitize`,
+text-kind string leaves only, decisions/00074) and — belt-and-braces, since it's
+idempotent — on every render here, so hand-authored migration content is held to the
+same bar as editor input.
 """
 
 from __future__ import annotations
