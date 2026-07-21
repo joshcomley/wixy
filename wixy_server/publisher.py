@@ -61,6 +61,7 @@ from wixy_server.checkout import CheckoutError, commits_ahead, current_sha, ensu
 from wixy_server.checkout import run_git as run_git  # re-exported: tests patch it via this module
 from wixy_server.ledger import LedgerEntry, PublishSource, append_ledger, next_version, read_ledger
 from wixy_server.live_pointer import LivePointer, load_live_pointer, save_live_pointer
+from wixy_server.media import load_deletion_list, scan_media_references
 from wixy_server.overlay import (
     Overlay,
     PageAdd,
@@ -327,6 +328,44 @@ def _copy_referenced_media(paths: ProjectPaths, names: set[str]) -> list[str]:
     return copied
 
 
+def _apply_media_staging(paths: ProjectPaths, references: dict[str, list[str]]) -> None:
+    """Apply staged media replacements + deletions (decisions/00080) to the
+    checkout: replacements overwrite `images/<name>` in place (every reference
+    keeps working); deletions `git rm` it, but ONLY when still unreferenced at
+    publish time (content may have gained a use since staging — that wins over
+    the stale intent, and the staged list entry drops away regardless). Staged
+    originals are left in place until validate succeeds (same deferral as
+    `_copy_referenced_media`)."""
+    images_dir = paths.repo / "images"
+    if paths.draft_media_replace.is_dir():
+        for staged in sorted(paths.draft_media_replace.iterdir()):
+            if not staged.is_file():
+                continue
+            target = images_dir / staged.name
+            target.write_bytes(staged.read_bytes())
+            run_git(["add", "--", str(target)], cwd=paths.repo)
+    deleted = load_deletion_list(paths)
+    for name in deleted:
+        if references.get(name):
+            continue  # gained a reference since staging — keep the file
+        target = images_dir / name
+        if target.exists():
+            # --ignore-unmatch keeps a drifted (untracked) file from erroring;
+            # the unlink covers that case since git rm no-ops on it then.
+            run_git(["rm", "-q", "--ignore-unmatch", "--", str(target)], cwd=paths.repo)
+            target.unlink(missing_ok=True)
+
+
+def _clear_media_staging(paths: ProjectPaths) -> None:
+    """Post-validate cleanup (only reached past every abort point)."""
+    if paths.draft_media_replace.is_dir():
+        for staged in paths.draft_media_replace.iterdir():
+            if staged.is_file():
+                staged.unlink()
+    if paths.draft_media_deleted_list.exists():
+        paths.draft_media_deleted_list.unlink()
+
+
 def _reset_hard(repo: Path, ref: str) -> None:
     run_git(["reset", "--hard", ref], cwd=repo)
     run_git(["clean", "-fd"], cwd=repo)
@@ -371,6 +410,11 @@ def _materialize_locked(project: ProjectConfig, paths: ProjectPaths, overlay: Ov
             "merging", f"failed to load the merged site after materializing: {exc}", []
         ) from exc
 
+    # Staged media replacements/deletions (decisions/00080) apply against the
+    # FINAL merged content — references are re-checked here, not at staging
+    # time, so an image that gained a use since staging is never removed.
+    _apply_media_staging(paths, scan_media_references(source))
+
     result = validate_site(source, paths.repo)
     if not result.ok:
         _reset_hard(paths.repo, "HEAD")
@@ -384,6 +428,7 @@ def _materialize_locked(project: ProjectConfig, paths: ProjectPaths, overlay: Ov
     # validate failure above never loses data even transiently.
     for name in copied_names:
         (paths.draft_media / name).unlink(missing_ok=True)
+    _clear_media_staging(paths)
 
 
 # ---------------------------------------------------------------------------

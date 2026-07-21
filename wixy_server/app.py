@@ -301,6 +301,13 @@ def create_app(
     # not by any of this milestone's existing unit tests (they mock the API and never
     # fetch the constructed URL).
     app.mount("/admin/draft-media", StaticFiles(directory=paths.draft_media), name="draft-media")
+    # Staged in-place replacements (decisions/00080) preview in the admin grid
+    # before the publish that applies them.
+    app.mount(
+        "/admin/draft-media-replace",
+        StaticFiles(directory=paths.draft_media_replace),
+        name="draft-media-replace",
+    )
 
     app.include_router(public_router)
 

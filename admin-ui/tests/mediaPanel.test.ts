@@ -17,7 +17,7 @@ function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
 }
 
 describe("mountMediaPanel", () => {
-  it("renders a heading and embeds the media grid (no onPick — thumbnails aren't buttons)", async () => {
+  it("renders a one-line header (Upload inside it) and embeds the media grid", async () => {
     const api = fakeApi({
       getMedia: vi.fn(async () => [
         {
@@ -37,7 +37,12 @@ describe("mountMediaPanel", () => {
 
     expect(panel.element.querySelector("h2")?.textContent).toBe("Media");
     expect(panel.element.querySelector(".wx-media-grid-root")).not.toBeNull();
-    expect(panel.element.querySelector(".wx-media-thumb")?.tagName).toBe("DIV");
+    // one-line header: Upload lives in the header row, not a separate toolbar line
+    const headerRow = panel.element.querySelector(".wx-media-header-row");
+    expect(headerRow).not.toBeNull();
+    expect(headerRow?.querySelector(".wx-media-upload-button")).not.toBeNull();
+    // thumbnails are buttons that open the detail sheet (decisions/00080)
+    expect(panel.element.querySelector(".wx-media-thumb")?.tagName).toBe("BUTTON");
   });
 
   it("teardown does not throw", () => {

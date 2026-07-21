@@ -118,7 +118,8 @@ content values, only shapes; text reads are chrome-stripped and demoted to markd
 Inv 23 + decisions/00075); `listOps.ts` (pure array transforms); `dom.ts` (binding
 discovery, precedence list→href→img→bg→text); `popovers.ts` (link + image editors only —
 text no longer has a popover); `composer.ts` (THE text editor: bottom-anchored sheet,
-auto-growing textarea, B/I/link row, maximize, live markdown preview, decisions/00075);
+auto-growing textarea, B/I/link row, maximize, live markdown preview, decisions/00075;
+auto-grow sizes only AFTER attach — caller must `refit()` post-`appendChild`, decisions/00079);
 `markdownText.ts` (inline-markdown render + demote — hand-synced twin of
 `builder/markdown_inline.py`, locked by the shared fixture, Inv 20);
 `controls.ts` (structured control sheets — opening-hours whole-array editor and

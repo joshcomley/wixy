@@ -48,9 +48,13 @@ export interface MediaGridDeps {
   api: AdminApi;
   win?: Window;
   /** Present only in PICK mode (the modal dialog) — omitted for the plain
-   * `#/media` panel, where a thumbnail click does nothing (picking is dialog-only
-   * behavior; the panel is management-only: upload, inspect, delete). */
+   * `#/media` panel, where a thumbnail click opens the media DETAIL sheet
+   * (preview/replace/delete/unstage, decisions/00080). */
   onPick?: (value: MediaPickValue) => void;
+  /** Panel mode: mount the Upload button into this host row (the panel's
+   * one-line header) instead of a separate toolbar line (operator 2026-07-21:
+   * "the media subheader is far too tall"). */
+  headerRow?: HTMLElement;
 }
 
 export interface MediaGrid {
@@ -76,7 +80,13 @@ export function renderMediaGrid(deps: MediaGridDeps): MediaGrid {
   fileInput.multiple = true;
   fileInput.hidden = true;
   uploadButton.addEventListener("click", () => fileInput.click());
-  toolbar.append(uploadButton, fileInput);
+  if (deps.headerRow !== undefined) {
+    deps.headerRow.appendChild(uploadButton);
+    toolbar.classList.add("wx-media-toolbar-bare");
+    toolbar.appendChild(fileInput);
+  } else {
+    toolbar.append(uploadButton, fileInput);
+  }
 
   const grid = document.createElement("div");
   grid.className = "wx-media-grid";
@@ -166,13 +176,16 @@ export function renderMediaGrid(deps: MediaGridDeps): MediaGrid {
   function renderItem(item: MediaItem): HTMLElement {
     const cell = document.createElement("div");
     cell.className = "wx-media-item";
+    if (item.stagedDelete === true) cell.classList.add("wx-media-item-staged-delete");
 
     const pickable = deps.onPick !== undefined;
-    const thumbWrap: HTMLElement = document.createElement(pickable ? "button" : "div");
+    const thumbWrap = document.createElement("button");
     thumbWrap.className = "wx-media-thumb";
-    if (thumbWrap instanceof HTMLButtonElement) {
-      thumbWrap.type = "button";
+    thumbWrap.type = "button";
+    if (pickable) {
       thumbWrap.addEventListener("click", () => renderAltStep(item));
+    } else {
+      thumbWrap.addEventListener("click", () => openMediaDetail(item));
     }
     const thumb = document.createElement("img");
     thumb.src = item.url;
@@ -182,6 +195,18 @@ export function renderMediaGrid(deps: MediaGridDeps): MediaGrid {
       const badge = document.createElement("span");
       badge.className = "wx-media-badge";
       badge.textContent = "draft";
+      thumbWrap.appendChild(badge);
+    }
+    if (item.stagedReplace === true) {
+      const badge = document.createElement("span");
+      badge.className = "wx-media-badge wx-media-badge-staged";
+      badge.textContent = "replace staged";
+      thumbWrap.appendChild(badge);
+    }
+    if (item.stagedDelete === true) {
+      const badge = document.createElement("span");
+      badge.className = "wx-media-badge wx-media-badge-delete-staged";
+      badge.textContent = "delete staged";
       thumbWrap.appendChild(badge);
     }
     cell.appendChild(thumbWrap);
@@ -198,21 +223,163 @@ export function renderMediaGrid(deps: MediaGridDeps): MediaGrid {
     meta.append(dims, size, refs);
     cell.appendChild(meta);
 
-    const canDelete = item.source === "draft" && item.references.length === 0;
+    const canDelete = item.references.length === 0;
     const deleteButton = document.createElement("button");
     deleteButton.type = "button";
     deleteButton.className = "wx-media-delete";
     deleteButton.textContent = "Delete";
     deleteButton.disabled = !canDelete;
-    deleteButton.title = canDelete
-      ? ""
-      : item.source === "repo"
-        ? "Published images can't be deleted from the draft yet (milestone 9)"
-        : "Still referenced — remove its uses first";
+    deleteButton.title = canDelete ? "" : "Still referenced — remove its uses first";
     deleteButton.addEventListener("click", () => void handleDelete(item));
     cell.appendChild(deleteButton);
 
     return cell;
+  }
+
+  // -- Detail sheet (panel mode, decisions/00080) -------------------------------
+
+  /** The media detail modal: big preview, meta, references, and the edit
+   * actions the operator reported missing ("I can't edit any media files"):
+   * in-place Replace (staged, applied at publish), Delete (draft deletes
+   * immediately; repo images stage for the next publish), and Undo for either
+   * staged state. */
+  function openMediaDetail(item: MediaItem): void {
+    const backdrop = document.createElement("div");
+    backdrop.className = "wx-media-dialog-backdrop";
+    const box = document.createElement("div");
+    box.className = "wx-media-dialog wx-media-detail";
+
+    function close(): void {
+      backdrop.remove();
+    }
+    async function act(fn: () => Promise<unknown>): Promise<void> {
+      try {
+        await fn();
+        await refresh();
+        close();
+      } catch (error) {
+        win.alert(error instanceof Error ? error.message : "That didn't work — please try again.");
+      }
+    }
+
+    const header = document.createElement("div");
+    header.className = "wx-drawer-header";
+    const heading = document.createElement("h3");
+    heading.textContent = item.name;
+    heading.className = "wx-media-detail-name";
+    const closeButton = document.createElement("button");
+    closeButton.type = "button";
+    closeButton.className = "wx-drawer-close";
+    closeButton.textContent = "×";
+    closeButton.setAttribute("aria-label", "Close");
+    closeButton.addEventListener("click", close);
+    header.append(heading, closeButton);
+
+    const preview = document.createElement("img");
+    preview.className = "wx-media-detail-preview";
+    preview.src = item.url;
+    preview.alt = item.name;
+
+    const meta = document.createElement("p");
+    meta.className = "wx-media-detail-meta";
+    const dims = item.width !== null && item.height !== null ? `${item.width}×${item.height}` : "—";
+    meta.textContent = `${dims} · ${formatSize(item.sizeBytes)} · ${item.source === "draft" ? "Draft (unpublished)" : "Published"}`;
+
+    const stagedNotes = document.createElement("div");
+    stagedNotes.className = "wx-media-detail-staged";
+    if (item.stagedReplace === true) {
+      const note = document.createElement("p");
+      note.className = "wx-media-detail-staged-note";
+      note.textContent = "A replacement is staged — it takes effect at the next publish.";
+      stagedNotes.appendChild(note);
+    }
+    if (item.stagedDelete === true) {
+      const note = document.createElement("p");
+      note.className = "wx-media-detail-staged-note wx-media-detail-staged-delete";
+      note.textContent = "Deletion is staged — the image is removed at the next publish.";
+      stagedNotes.appendChild(note);
+    }
+
+    const refsBlock = document.createElement("div");
+    refsBlock.className = "wx-media-detail-refs";
+    if (item.references.length === 0) {
+      refsBlock.textContent = "Not used anywhere.";
+    } else {
+      const refsTitle = document.createElement("p");
+      refsTitle.className = "wx-media-detail-refs-title";
+      refsTitle.textContent = "Used by:";
+      const list = document.createElement("ul");
+      for (const ref of item.references) {
+        const li = document.createElement("li");
+        li.textContent = ref;
+        list.appendChild(li);
+      }
+      refsBlock.append(refsTitle, list);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "wx-media-detail-actions";
+
+    const replaceInput = document.createElement("input");
+    replaceInput.type = "file";
+    replaceInput.accept = "image/*";
+    replaceInput.hidden = true;
+    replaceInput.addEventListener("change", () => {
+      const file = replaceInput.files?.[0];
+      if (file !== undefined) void act(() => deps.api.replaceMedia(item.name, file));
+      replaceInput.value = "";
+    });
+    const replaceButton = document.createElement("button");
+    replaceButton.type = "button";
+    replaceButton.className = "wx-media-detail-replace";
+    replaceButton.textContent = "Replace image…";
+    replaceButton.title = "Upload new bytes for this image — applied at the next publish, every use keeps working";
+    replaceButton.addEventListener("click", () => replaceInput.click());
+
+    actions.append(replaceButton, replaceInput);
+
+    if (item.stagedReplace === true) {
+      const undoReplace = document.createElement("button");
+      undoReplace.type = "button";
+      undoReplace.textContent = "Undo staged replace";
+      undoReplace.addEventListener("click", () => void act(() => deps.api.unstageReplaceMedia(item.name)));
+      actions.appendChild(undoReplace);
+    }
+
+    if (item.stagedDelete === true) {
+      const undoDelete = document.createElement("button");
+      undoDelete.type = "button";
+      undoDelete.textContent = "Undo staged delete";
+      undoDelete.addEventListener("click", () => void act(() => deps.api.unstageDeleteMedia(item.name)));
+      actions.appendChild(undoDelete);
+    } else {
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "wx-media-delete";
+      deleteButton.textContent = "Delete";
+      deleteButton.disabled = item.references.length > 0;
+      deleteButton.title =
+        item.references.length > 0
+          ? "Still referenced — remove its uses first"
+          : item.source === "draft"
+            ? "Delete this unpublished upload now"
+            : "Stage this image for deletion at the next publish";
+      deleteButton.addEventListener("click", () => {
+        const message =
+          item.source === "draft"
+            ? `Delete "${item.name}"? This can't be undone.`
+            : `Delete "${item.name}" at the next publish? You can undo the staged delete until then.`;
+        if (win.confirm(message)) void act(() => deps.api.deleteMedia(item.name));
+      });
+      actions.appendChild(deleteButton);
+    }
+
+    box.append(header, preview, meta, stagedNotes, refsBlock, actions);
+    backdrop.appendChild(box);
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) close();
+    });
+    document.body.appendChild(backdrop);
   }
 
   async function refresh(): Promise<void> {

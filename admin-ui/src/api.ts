@@ -154,9 +154,13 @@ export interface PublishPreview {
   /** Keyed by page slug, `"_global"`, or `"theme"` — same grouping the ledger's
    * own `changed` summary uses. */
   changes: Record<string, PublishDiffEntry[]>;
+  /** Staged media changes (decisions/00080): filenames with a replacement or
+   * deletion pending at this publish. */
+  mediaChanges: { replaced: string[]; deleted: string[] };
   /** Total staged draft changes: content ops + staged page adds/deletes (a
    * staged page deletion produces no `changes` entries, so the drawer's
-   * nothing-to-publish rule — decisions/00071 — counts this, not the groups). */
+   * nothing-to-publish rule — decisions/00071 — counts this, not the groups)
+   * + staged media replacements/deletions. */
   opCount: number;
   validate: { ok: boolean; errors: ValidateError[] };
 }
@@ -216,6 +220,11 @@ export interface ContentResponse {
  * `wixy_server/routes_admin_api.py`'s `_media_item`): dimensions/size are always
  * present for a real file on disk; `references` lists the content keys (outermost
  * granularity, decisions/00020 decision 3) using this file, empty if unused. */
+/** A media item from `GET /api/admin/media` (spec/02 §9): `width`/`height` are
+ * present for a real file on disk; `references` lists the content keys (outermost
+ * granularity) using it; `stagedReplace`/`stagedDelete` mark publish-pending
+ * changes (decisions/00080) — a staged replacement's `url` already serves the
+ * new bytes from the staging area. */
 export interface MediaItem {
   name: string;
   url: string;
@@ -224,6 +233,8 @@ export interface MediaItem {
   width: number | null;
   height: number | null;
   references: string[];
+  stagedReplace?: boolean;
+  stagedDelete?: boolean;
 }
 
 /** `theme/theme.json`'s shape (spec/02 §4), as returned by `GET /api/admin/theme` —
@@ -370,7 +381,10 @@ export interface AdminApi {  getState(): Promise<StateResponse>;
   discardDraft(): Promise<{ rev: number }>;
   getMedia(): Promise<MediaItem[]>;
   uploadMedia(file: File): Promise<MediaItem>;
-  deleteMedia(name: string): Promise<{ deleted: boolean }>;
+  deleteMedia(name: string): Promise<{ deleted?: boolean; stagedDelete?: boolean }>;
+  replaceMedia(name: string, blob: Blob): Promise<MediaItem>;
+  unstageReplaceMedia(name: string): Promise<{ deleted: boolean }>;
+  unstageDeleteMedia(name: string): Promise<{ deleted: boolean }>;
   putThumbnail(slug: string, blob: Blob): Promise<{ ok: boolean }>;
   getTheme(): Promise<ThemeData>;
   getPublishPreview(): Promise<PublishPreview>;
@@ -448,6 +462,28 @@ export function createApi(): AdminApi {
       const response = await fetchWithRetry(`/api/admin/media/${encodeURIComponent(name)}`, {
         method: "DELETE",
       });
+      return parseJson<{ deleted?: boolean; stagedDelete?: boolean }>(response);
+    },
+    async replaceMedia(name, blob) {
+      const response = await fetchWithRetry(`/api/admin/media/${encodeURIComponent(name)}`, {
+        method: "PUT",
+        headers: { "Content-Type": blob.type || "image/jpeg" },
+        body: blob,
+      });
+      return parseJson<MediaItem>(response);
+    },
+    async unstageReplaceMedia(name) {
+      const response = await fetchWithRetry(
+        `/api/admin/media-replace/${encodeURIComponent(name)}`,
+        { method: "DELETE" },
+      );
+      return parseJson<{ deleted: boolean }>(response);
+    },
+    async unstageDeleteMedia(name) {
+      const response = await fetchWithRetry(
+        `/api/admin/media-deletion/${encodeURIComponent(name)}`,
+        { method: "DELETE" },
+      );
       return parseJson<{ deleted: boolean }>(response);
     },
     async putThumbnail(slug, blob) {

@@ -13,8 +13,10 @@ import pytest
 
 from builder.config import MediaConfig, ProjectConfig
 from builder.jsontypes import JsonValue
+from wixy_server.checkout import ensure_checkout
 from wixy_server.ledger import read_ledger
 from wixy_server.live_pointer import load_live_pointer
+from wixy_server.media import stage_media_deletion
 from wixy_server.overlay import (
     Overlay,
     OverlayOp,
@@ -317,6 +319,58 @@ class TestRunPublishHappyPath:
 
         assert result.version == 2
         assert len(read_ledger(paths)) == 2
+
+
+class TestMediaStaging:
+    def test_staged_replacement_overwrites_in_place_and_clears(
+        self, project: ProjectConfig, paths: ProjectPaths
+    ) -> None:
+        ensure_checkout(project.repo, project.default_branch, paths.repo)
+        paths.draft_media_replace.mkdir(parents=True, exist_ok=True)
+        (paths.draft_media_replace / "hero.jpg").write_bytes(b"replacement-bytes")
+        save_overlay(paths.draft_overlay, _make_overlay({}))
+
+        result = run_publish(
+            project, paths, message="replace", expected_rev=0, now=_TS, job=_new_job()
+        )
+
+        assert result.version == 1
+        assert (paths.repo / "images" / "hero.jpg").read_bytes() == b"replacement-bytes"
+        assert not (paths.draft_media_replace / "hero.jpg").exists()
+
+    def test_staged_deletion_removes_and_clears(
+        self, project: ProjectConfig, paths: ProjectPaths
+    ) -> None:
+        ensure_checkout(project.repo, project.default_branch, paths.repo)
+        unused = paths.repo / "images" / "unused.jpg"
+        unused.write_bytes(b"unused-bytes")
+        _git(["add", "images/unused.jpg"], cwd=paths.repo)
+        _git(
+            ["-c", "user.name=T", "-c", "user.email=t@t", "commit", "-m", "add unused"],
+            cwd=paths.repo,
+        )
+        stage_media_deletion(paths, "unused.jpg", {})
+        save_overlay(paths.draft_overlay, _make_overlay({}))
+
+        run_publish(project, paths, message="delete", expected_rev=0, now=_TS, job=_new_job())
+
+        assert not unused.exists()
+        assert not paths.draft_media_deleted_list.exists()
+
+    def test_deletion_is_skipped_when_newly_referenced(
+        self, project: ProjectConfig, paths: ProjectPaths
+    ) -> None:
+        # hero.jpg IS referenced by the fixture content — staging a deletion
+        # for it must NOT remove it at publish (the publish-time re-check wins
+        # over the stale intent).
+        ensure_checkout(project.repo, project.default_branch, paths.repo)
+        stage_media_deletion(paths, "hero.jpg", {})  # staged without a refs check
+        save_overlay(paths.draft_overlay, _make_overlay({}))
+
+        run_publish(project, paths, message="should skip", expected_rev=0, now=_TS, job=_new_job())
+
+        assert (paths.repo / "images" / "hero.jpg").exists()
+        assert not paths.draft_media_deleted_list.exists()
 
 
 class TestRevConflict:

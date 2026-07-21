@@ -99,11 +99,104 @@ describe("renderMediaGrid (management mode, no onPick)", () => {
     expect(grid.element.querySelector(".wx-media-badge")?.textContent).toBe("draft");
   });
 
-  it("thumbnails are non-interactive divs, not buttons, when onPick is omitted", async () => {
+  it("thumbnails are buttons that open the detail sheet when onPick is omitted", async () => {
     const api = fakeApi({ getMedia: vi.fn(async () => [REPO_ITEM]) });
     const grid = renderMediaGrid({ api, win: fakeWin() });
     await flush();
-    expect(grid.element.querySelector(".wx-media-thumb")?.tagName).toBe("DIV");
+    const thumb = grid.element.querySelector<HTMLButtonElement>(".wx-media-thumb");
+    expect(thumb?.tagName).toBe("BUTTON");
+    thumb?.click();
+    const sheet = document.querySelector(".wx-media-detail");
+    expect(sheet).not.toBeNull();
+    expect(sheet?.textContent).toContain("hero.jpg");
+    expect(sheet?.textContent).toContain("1200×800");
+    expect(sheet?.textContent).toContain("hero.bg");
+    (sheet?.querySelector(".wx-drawer-close") as HTMLButtonElement).click();
+    expect(document.querySelector(".wx-media-detail")).toBeNull();
+  });
+
+  it("the detail sheet's Replace button calls replaceMedia and refreshes", async () => {
+    const replaceMedia = vi.fn(async (): Promise<MediaItem> => REPO_ITEM);
+    const getMedia = vi.fn().mockResolvedValue([REPO_ITEM]);
+    const api = fakeApi({ getMedia, replaceMedia });
+    const grid = renderMediaGrid({ api, win: fakeWin() });
+    await flush();
+
+    grid.element.querySelector<HTMLButtonElement>(".wx-media-thumb")?.click();
+    const sheet = document.querySelector(".wx-media-detail");
+    const replaceBtn = sheet?.querySelector<HTMLButtonElement>(".wx-media-detail-replace");
+    replaceBtn?.click(); // opens the hidden file input
+    const input = sheet?.querySelector<HTMLInputElement>('input[type="file"]');
+    const file = new File(["x"], "new.jpg", { type: "image/jpeg" });
+    Object.defineProperty(input, "files", { value: [file], configurable: true });
+    input?.dispatchEvent(new Event("change"));
+    await flush();
+
+    expect(replaceMedia).toHaveBeenCalledWith("hero.jpg", file);
+    expect(document.querySelector(".wx-media-detail")).toBeNull(); // closed after success
+  });
+
+  it("the detail sheet stages an unreferenced repo image's delete and closes", async () => {
+    const unreferencedRepo: MediaItem = { ...REPO_ITEM, references: [] };
+    const deleteMedia = vi.fn(async () => ({ stagedDelete: true }));
+    const api = fakeApi({
+      getMedia: vi.fn(async () => [unreferencedRepo]),
+      deleteMedia,
+    });
+    const win = fakeWin();
+    const grid = renderMediaGrid({ api, win });
+    await flush();
+
+    grid.element.querySelector<HTMLButtonElement>(".wx-media-thumb")?.click();
+    const sheet = document.querySelector(".wx-media-detail");
+    const deleteBtn = sheet?.querySelector<HTMLButtonElement>(".wx-media-delete");
+    expect(deleteBtn?.disabled).toBe(false);
+    deleteBtn?.click();
+    await flush();
+
+    expect(deleteMedia).toHaveBeenCalledWith("hero.jpg");
+    expect(document.querySelector(".wx-media-detail")).toBeNull();
+  });
+
+  it("renders staged badges and unstages from the detail sheet", async () => {
+    const staged: MediaItem = {
+      ...REPO_ITEM,
+      references: [],
+      stagedReplace: true,
+      stagedDelete: true,
+      url: "/admin/draft-media-replace/hero.jpg",
+    };
+    const unstageReplaceMedia = vi.fn(async () => ({ deleted: true }));
+    const unstageDeleteMedia = vi.fn(async () => ({ deleted: true }));
+    const api = fakeApi({
+      getMedia: vi.fn(async () => [staged]),
+      unstageReplaceMedia,
+      unstageDeleteMedia,
+    });
+    const grid = renderMediaGrid({ api, win: fakeWin() });
+    await flush();
+
+    expect(grid.element.querySelector(".wx-media-badge-staged")?.textContent).toBe("replace staged");
+    expect(grid.element.querySelector(".wx-media-badge-delete-staged")?.textContent).toBe("delete staged");
+    expect(grid.element.querySelector(".wx-media-item-staged-delete")).not.toBeNull();
+
+    grid.element.querySelector<HTMLButtonElement>(".wx-media-thumb")?.click();
+    const buttons = [...document.querySelectorAll<HTMLButtonElement>(".wx-media-detail-actions button")];
+    const undoReplace = buttons.find((b) => b.textContent === "Undo staged replace");
+    const undoDelete = buttons.find((b) => b.textContent === "Undo staged delete");
+    expect(undoReplace).not.toBeUndefined();
+    expect(undoDelete).not.toBeUndefined();
+    undoReplace?.click();
+    await flush();
+    expect(unstageReplaceMedia).toHaveBeenCalledWith("hero.jpg");
+  });
+
+  it("mounts the Upload button into a provided headerRow instead of the toolbar", async () => {
+    const headerRow = document.createElement("div");
+    const api = fakeApi();
+    renderMediaGrid({ api, win: fakeWin(), headerRow });
+    await flush();
+    expect(headerRow.querySelector(".wx-media-upload-button")).not.toBeNull();
   });
 
   it("disables delete for a repo-sourced item", async () => {

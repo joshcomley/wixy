@@ -24,10 +24,12 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import cast
 
 from PIL import Image, ImageOps
 
 from builder.config import MediaConfig
+from builder.content import atomic_write_json, load_json_object
 from builder.jsontypes import JsonValue
 from builder.render import SiteSource
 from wixy_server.storage import ProjectPaths
@@ -168,10 +170,8 @@ def delete_draft_media(paths: ProjectPaths, name: str, references: dict[str, lis
     "unreferenced-media delete" rule applied to the one case that doesn't need
     milestone 9's publish-time materialization: a draft upload was never written
     to the repo at all, so there's no git history/publish semantics to respect,
-    just a filesystem delete. A repo (already-published) image's deletion is
-    explicitly OUT of milestone 8's scope (mirrors decisions/00015 decision 3's
-    page-delete deferral — the identical "needs a publish-time materialization
-    contract that doesn't exist yet" reasoning) — this function only ever looks
+    just a filesystem delete. A repo (already-published) image's deletion goes
+    through `stage_media_deletion` below instead — this function only ever looks
     inside `draft_media/`, so a repo image's name naturally raises
     `MediaNotFoundError` here rather than needing a separate guard."""
     target = paths.draft_media / name
@@ -181,3 +181,97 @@ def delete_draft_media(paths: ProjectPaths, name: str, references: dict[str, lis
     if refs:
         raise MediaReferencedError(name, refs)
     target.unlink()
+
+
+# ---------------------------------------------------------------------------
+# Staged replacements + deletions of REPO images (decisions/00080)
+# ---------------------------------------------------------------------------
+#
+# Both follow the same publish-time materialization contract as pages
+# (decisions/00029): staging writes into `draft/media-replace/` /
+# `draft/media-deleted.json`; the publish pipeline applies them to the checkout
+# during `_materialize` (replacements overwrite `images/<name>` in place,
+# deletions `git rm` it — re-validating references at publish time) and clears
+# the staging only after validate succeeds, so a failed publish never loses
+# either the staged intent or the published bytes.
+
+
+def _safe_child(root: Path, name: str) -> Path:
+    """`root / name`, refusing anything that would escape root (a `..` name)."""
+    target = root / name
+    if target.resolve().parent != root.resolve():
+        raise MediaNotFoundError(name)
+    return target
+
+
+def stage_media_replacement(
+    paths: ProjectPaths, name: str, data: bytes, content_type: str, config: MediaConfig
+) -> ProcessedUpload:
+    """Stage new bytes for an EXISTING image (repo or draft-upload), keeping its
+    filename so every reference keeps working — applied to the checkout at the
+    next publish. The target must exist today (a replacement of nothing is an
+    upload, which has its own route)."""
+    exists = (paths.repo / "images" / name).is_file() or (paths.draft_media / name).is_file()
+    if not exists:
+        raise MediaNotFoundError(name)
+    processed = process_upload(data, name, content_type, config)
+    paths.draft_media_replace.mkdir(parents=True, exist_ok=True)
+    target = _safe_child(paths.draft_media_replace, name)
+    target.write_bytes(processed.content)
+    return processed
+
+
+def unstage_media_replacement(paths: ProjectPaths, name: str) -> bool:
+    """Discard a staged replacement (change of mind before publish)."""
+    target = _safe_child(paths.draft_media_replace, name)
+    if not target.is_file():
+        return False
+    target.unlink()
+    return True
+
+
+def load_deletion_list(paths: ProjectPaths) -> list[str]:
+    if not paths.draft_media_deleted_list.exists():
+        return []
+    raw = load_json_object(paths.draft_media_deleted_list)
+    names = raw.get("names", [])
+    return [n for n in names if isinstance(n, str)] if isinstance(names, list) else []
+
+
+def _save_deletion_list(paths: ProjectPaths, names: list[str]) -> None:
+    paths.draft_media_deleted_list.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(paths.draft_media_deleted_list, {"names": cast(JsonValue, names)})
+
+
+def stage_media_deletion(paths: ProjectPaths, name: str, references: dict[str, list[str]]) -> None:
+    """Stage a REPO image for deletion at the next publish (decisions/00080) —
+    the operator's escape from 'published images can't be deleted'. Only
+    unreferenced images stage; the publish re-checks references when applying
+    (content may have changed since) and skips anything newly referenced."""
+    target = _safe_child(paths.repo / "images", name)
+    if not target.is_file():
+        raise MediaNotFoundError(name)
+    refs = references.get(name, [])
+    if refs:
+        raise MediaReferencedError(name, refs)
+    names = load_deletion_list(paths)
+    if name not in names:
+        _save_deletion_list(paths, [*names, name])
+
+
+def unstage_media_deletion(paths: ProjectPaths, name: str) -> bool:
+    names = load_deletion_list(paths)
+    if name not in names:
+        return False
+    _save_deletion_list(paths, [n for n in names if n != name])
+    return True
+
+
+def media_staging(paths: ProjectPaths) -> dict[str, list[str]]:
+    """Both staged sets, for the media grid's badges + the publisher's apply."""
+    replaced = (
+        sorted(p.name for p in paths.draft_media_replace.iterdir() if p.is_file())
+        if paths.draft_media_replace.is_dir()
+        else []
+    )
+    return {"replaced": replaced, "deleted": load_deletion_list(paths)}

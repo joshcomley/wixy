@@ -48,13 +48,34 @@ code is `wixy_server/media.py`; the content-model rules are
 granularity. This backs the media library's per-image "references" list and the
 delete-if-unreferenced guard.
 
-## Delete (`media.py:delete_draft_media`)
+## Delete (`media.py:delete_draft_media` + `stage_media_deletion`)
 
-`DELETE /api/admin/media/{name}` deletes a **staged** upload only, with a traversal guard
-(`target.resolve().parent == draft_media.resolve()` and `is_file`, else `MediaNotFoundError`)
-and a reference guard (still referenced → `MediaReferencedError` → 409). A published
-`images/` file naturally raises `MediaNotFoundError` — repo-image deletion happens only at
-publish time and only when unreferenced by any binding (out of scope for the library UI).
+`DELETE /api/admin/media/{name}` has two shapes (decisions/00080, which supersedes
+the earlier repo-deletion deferral):
+- **Draft upload** → deleted immediately, with a traversal guard
+  (`target.resolve().parent == draft_media.resolve()` and `is_file`, else
+  `MediaNotFoundError`) and a reference guard (still referenced →
+  `MediaReferencedError` → 409). Response `{"deleted": true}`.
+- **Repo image** (`images/`) → STAGED for the next publish in
+  `draft/media-deleted.json` (unreferenced-only at staging time, same 409
+  otherwise). Response `{"stagedDelete": true}`. At publish, references are
+  **re-scanned against the final merged content** — an image that gained a use
+  since staging is kept, never removed. `DELETE /api/admin/media-deletion/{name}`
+  unstages.
+
+## Replace (`media.py:stage_media_replacement`)
+
+`PUT /api/admin/media/{name}` stages new bytes for an EXISTING image (404 if the
+name exists nowhere) in `draft/media-replace/<name>` — processed like an upload
+but keeping the exact filename, so every reference keeps working when the next
+publish overwrites `images/<name>` in place. The media grid previews the staged
+bytes immediately from `/admin/draft-media-replace/<name>` (StaticFiles mount)
+and badges "replace staged" / "delete staged" (from `media_staging()`).
+`DELETE /api/admin/media-replace/{name}` unstages. Staging clears only after
+validate succeeds, and `DELETE /api/admin/draft` clears it all (a discard takes
+staged media state with it). Staged media counts as publishable in both the
+preview (`mediaChanges` + `opCount`) and the nothing-to-publish preflight —
+without that a media-only publish reads as 422.
 
 ## Publish lifecycle (cross-ref)
 

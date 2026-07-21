@@ -171,7 +171,13 @@ export function initOverlay(win: Window = window): () => void {
     });
     activeComposer = composer;
     document.body.appendChild(composer.element);
-    closeActivePopover = () => composer.element.remove();
+    // Only NOW can auto-grow size the textarea — openComposer built it
+    // detached, where scrollHeight is always 0 (decisions/00079).
+    composer.refit();
+    closeActivePopover = () => {
+      composer.destroy();
+      composer.element.remove();
+    };
     composer.focus();
   }
 

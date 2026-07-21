@@ -56,9 +56,12 @@ Handler column is `file:func`. "Auth: CF" = gated by the admin middleware. Respo
 | GET | `theme` | `get_theme` | — | `{"theme": <dict>}`; 503, 404 |
 | PATCH | `draft` | `patch_draft` | `{"expectedRev":int, "ops":[{file,path,value}\|{file,path,discard:true}]}` | `{"rev": int}`; 503, **409** (RevConflict) |
 | DELETE | `draft` | `delete_draft` | — | `{"rev": int}`; 503 |
-| GET | `media` | `get_media` | — | `{"media":[{name,url,source,sizeBytes,width,height,references:[...]}]}`; 503 |
+| GET | `media` | `get_media` | — | `{"media":[{name,url,source,sizeBytes,width,height,references:[...], stagedReplace?,stagedDelete?}]}` (a staged replacement's `url` serves the staged bytes from `/admin/draft-media-replace/<name>`); 503 |
 | POST | `media` | `upload_media` | `multipart/form-data` field `file` | `{name,url,source:"draft",sizeBytes,width,height,references:[]}`; **422** (MediaUpload) |
-| DELETE | `media/{name}` | `delete_media` | — | `{"deleted": true}`; 503, 404, **409** (referenced) |
+| DELETE | `media/{name}` | `delete_media` | — | `{"deleted": true}` (draft upload) OR `{"stagedDelete": true}` (repo image — staged for the next publish); 503, 404, **409** (referenced) |
+| PUT | `media/{name}` | `replace_media` | raw image body (≤15MB, PIL-verified, re-encoded per project media config) | `{name,url:"/admin/draft-media-replace/<name>",sizeBytes,width,height,stagedReplace:true}`; 404 (no such image), **422** (MediaUpload) |
+| DELETE | `media-replace/{name}` | `unstage_replace_media` | — | `{"deleted": true}`; 404 (nothing staged) |
+| DELETE | `media-deletion/{name}` | `unstage_media_deletion_route` | — | `{"deleted": true}`; 404 (nothing staged) |
 | POST | `publish` | `start_publish` | `{"message":str, "expectedRev":int}` | `{"version":int, "sha":str}`; **409** (running/RevConflict), **422** (nothing to publish: no staged changes AND no upstream commits pending), **502** (Publish/Checkout/Build) |
 | GET | `publish/stream` | `publish_stream` | — | **SSE**, see §4 |
 | GET | `publish/preview` | `get_publish_preview` | — | `{"changes":{<fileKey>:[{key,kind,old,new}]}, "opCount":int (content ops + staged page adds/deletes), "validate":{ok:bool,errors:[<err>]}}`; 503 |
