@@ -459,6 +459,32 @@
   color: var(--wx-brand-blue-text);
 }
 
+/* Page thumbnails (decisions/00078) — mobile-view captures, phone aspect. */
+.wx-pages-cell-thumb {
+  width: 60px;
+  padding-right: 6px;
+}
+
+.wx-pages-thumb-img {
+  display: block;
+  width: 48px;
+  height: 72px;
+  object-fit: cover;
+  object-position: top;
+  border-radius: 4px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-canvas);
+}
+
+.wx-pages-thumb-placeholder {
+  display: block;
+  width: 48px;
+  height: 72px;
+  border-radius: 4px;
+  border: 1px dashed var(--wx-border);
+  background: var(--wx-canvas);
+}
+
 .wx-pages-inline-form {
   display: flex;
   align-items: center;
@@ -2328,6 +2354,16 @@ div.wx-media-thumb {
     border-bottom: none;
     padding: 0;
     white-space: normal;
+  }
+
+  .wx-pages-table td.wx-pages-cell-thumb {
+    float: left;
+    margin: 0 10px 6px 0;
+    padding: 0;
+  }
+
+  .wx-pages-table td.wx-pages-cell-actions {
+    clear: left;
   }
 
   .wx-pages-table td.wx-pages-cell-label {

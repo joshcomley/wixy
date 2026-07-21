@@ -356,8 +356,14 @@ async function extractDetail(response: Response, fallback: string): Promise<stri
   return detail ?? fallback;
 }
 
-export interface AdminApi {
-  getState(): Promise<StateResponse>;
+/** Version-pinned thumbnail URL for the Pages panel (decisions/00078): `?v=`
+ * carries the caller's current draft rev so a capture uploaded after an edit
+ * is refetched instead of served from heuristic cache. */
+export function thumbnailUrl(slug: string, rev: number): string {
+  return `/api/admin/pages/${encodeURIComponent(slug)}/thumbnail?v=${rev}`;
+}
+
+export interface AdminApi {  getState(): Promise<StateResponse>;
   getServerCommit(): Promise<string | null>;
   getContent(page: string): Promise<ContentResponse>;
   patchDraft(expectedRev: number, ops: DraftOp[]): Promise<PatchResult>;
@@ -365,6 +371,7 @@ export interface AdminApi {
   getMedia(): Promise<MediaItem[]>;
   uploadMedia(file: File): Promise<MediaItem>;
   deleteMedia(name: string): Promise<{ deleted: boolean }>;
+  putThumbnail(slug: string, blob: Blob): Promise<{ ok: boolean }>;
   getTheme(): Promise<ThemeData>;
   getPublishPreview(): Promise<PublishPreview>;
   publish(message: string, expectedRev: number): Promise<PublishOutcome>;
@@ -442,6 +449,13 @@ export function createApi(): AdminApi {
         method: "DELETE",
       });
       return parseJson<{ deleted: boolean }>(response);
+    },
+    async putThumbnail(slug, blob) {
+      const response = await fetchWithRetry(
+        `/api/admin/pages/${encodeURIComponent(slug)}/thumbnail`,
+        { method: "PUT", headers: { "Content-Type": "image/jpeg" }, body: blob },
+      );
+      return parseJson<{ ok: boolean }>(response);
     },
     async getTheme() {
       const body = await parseJson<{ theme: ThemeData }>(await fetchWithRetry("/api/admin/theme"));

@@ -74,6 +74,10 @@ class ProjectPaths:
         return self.root / "locks"
 
     @property
+    def thumbnails_dir(self) -> Path:
+        return self.root / "thumbnails"
+
+    @property
     def publish_lock(self) -> Path:
         return self.locks_dir / "publish.lock"
 
