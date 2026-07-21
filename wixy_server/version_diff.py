@@ -42,17 +42,36 @@ from wixy_server.storage import ProjectPaths
 
 def binding_kind_lookup(merged: SiteSource) -> dict[str, dict[str, str]]:
     """`{file_key: {dotted_key: kind}}` for every page's own bindings, plus one
-    shared `_global` entry (globals/partials are common to every page, so any
-    single page's bindings map already carries every `_global` binding too —
-    picked up here for free from whichever page is computed first, no extra
-    `extract_bindings_map` call). `theme` keys have no bindings-map entry at
-    all (spec's theme model is a separate typed thing, never walked via
-    `data-wx-*` attributes) — the caller reports `"theme"` directly instead."""
+    shared `_global` entry. `theme` keys have no bindings-map entry at all
+    (spec's theme model is a separate typed thing, never walked via `data-wx-*`
+    attributes) — the caller reports `"theme"` directly instead.
+
+    Keys are NORMALIZED: the bindings map keeps the template's `@` global-scope
+    marker (`data-wx-list="@hours"` → key `@hours`), but draft ops and content
+    JSON paths address the same field without it (`_global:hours`). Stripping a
+    leading `@` here reconciles the two — without it every global binding's
+    kind misses and falls back to `"text"`, which is how a whole-array global
+    list op (opening hours) rendered as a raw JSON dump in the review drawer
+    (decisions/00081).
+
+    The `_global` bucket is the UNION of every page's global (`@`-prefixed)
+    fields — a global binding is only bound on the pages that use it (the CA
+    site binds `@hours` on index + contact but NOT about), so copying any one
+    page's map would miss every global that page doesn't bind."""
     lookup: dict[str, dict[str, str]] = {}
+    global_fields: dict[str, str] = {}
     for slug in merged.page_contents:
         bindings = extract_bindings_map(merged, slug)
-        lookup[slug] = {field.key: field.kind for field in bindings.fields}
-    lookup[GLOBAL_CONTENT_NAME] = dict(lookup[sorted(lookup)[0]]) if lookup else {}
+        page_map: dict[str, str] = {}
+        for field in bindings.fields:
+            if field.key.startswith("@"):
+                key = field.key[1:]
+                page_map[key] = field.kind
+                global_fields.setdefault(key, field.kind)
+            else:
+                page_map[field.key] = field.kind
+        lookup[slug] = page_map
+    lookup[GLOBAL_CONTENT_NAME] = global_fields
     return lookup
 
 

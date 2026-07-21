@@ -33,10 +33,16 @@ function fakeWindow(
     storage?: Storage;
     initialHash?: string;
     getDisplayMedia?: (options: unknown) => Promise<MediaStream>;
+    /** When true the fake carries a minimal `document` (visibilityState +
+     * listener registry) so the shell's visibility-revalidation wiring can be
+     * exercised — the default fake omits it and the shell capability-guards
+     * it off. */
+    withDocument?: boolean;
   } = {},
 ): Window {
   const listeners = new Map<string, Set<(e?: Event) => void>>();
   let hash = opts.initialHash ?? "";
+  const docListeners = new Map<string, Set<() => void>>();
   const win = {
     location: {
       get hash() {
@@ -65,6 +71,24 @@ function fakeWindow(
       return true;
     },
     confirm: () => true,
+    ...(opts.withDocument === true
+      ? {
+          document: {
+            visibilityState: "visible",
+            addEventListener: (type: string, listener: () => void) => {
+              if (!docListeners.has(type)) docListeners.set(type, new Set());
+              docListeners.get(type)?.add(listener);
+            },
+            removeEventListener: (type: string, listener: () => void) => {
+              docListeners.get(type)?.delete(listener);
+            },
+            dispatchEvent: (event: Event) => {
+              docListeners.get(event.type)?.forEach((l) => l());
+              return true;
+            },
+          },
+        }
+      : {}),
   };
   return win as unknown as Window;
 }
@@ -233,7 +257,33 @@ describe("mountShell", () => {
 
     await flushState(api);
     expect(container.querySelector(".wx-topbar-title")?.textContent).toBe("Wixy · Cottage Aesthetics");
-    expect(container.querySelector(".wx-draft-chip")?.textContent).toBe("0 changes");
+    expect(container.querySelector(".wx-draft-chip")?.textContent).toBe("No unpublished changes");
+  });
+
+  it("the chip counts unpublished changes and outside site updates in layman wording", async () => {
+    const api = fakeApi({
+      getState: vi.fn(async () =>
+        fakeState({
+          draft: { rev: 0, opCount: 6 },
+          upstream: {
+            aheadOfPublished: [
+              { sha: "a".repeat(40), subject: "one", author: "AI", when: "2026-01-01" },
+              { sha: "b".repeat(40), subject: "two", author: "AI", when: "2026-01-02" },
+            ],
+            fetchedAt: null,
+          },
+        }),
+      ),
+    });
+    const win = fakeWindow();
+    const container = document.createElement("div");
+
+    mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+    await flushState(api);
+
+    expect(container.querySelector(".wx-draft-chip")?.textContent).toBe(
+      "6 unpublished changes · 2 site updates",
+    );
   });
 
   it("defaults to the pages panel and lists fetched pages", async () => {
@@ -711,6 +761,48 @@ describe("mountShell", () => {
     await Promise.resolve();
     expect(container.querySelectorAll(".wx-drawer")).toHaveLength(1);
     expect(container.querySelector(".wx-drawer-wide")).not.toBeNull();
+  });
+
+  it("keeps the publish drawer open when the tab regains visibility on the pages route", async () => {
+    // Operator report 2026-07-21: reviewing changes, switching to another
+    // Chrome tab and back kicked the user out of the review. The shell's
+    // visibility revalidation re-renders the mounted pages panel from the
+    // fresh snapshot — a same-route re-render, not a navigation — so it must
+    // not close the drawer (decisions/00081).
+    const api = fakeApi({ getServerCommit: vi.fn(async () => null) } as Partial<AdminApi>);
+    const win = fakeWindow({ withDocument: true });
+    const container = document.createElement("div");
+
+    mountShell(container, { api, win });
+    await flushState(api);
+
+    container.querySelector<HTMLButtonElement>(".wx-draft-chip")?.click();
+    await Promise.resolve();
+    expect(container.querySelector(".wx-drawer-wide")).not.toBeNull();
+
+    win.document.dispatchEvent(new Event("visibilitychange"));
+    await new Promise((resolve) => setTimeout(resolve, 0)); // drain revalidate's awaits
+    await flushState(api);
+
+    expect(container.querySelector(".wx-drawer-wide")).not.toBeNull();
+    expect(api.getServerCommit).toHaveBeenCalled(); // the revalidation genuinely ran
+  });
+
+  it("still closes the publish drawer on a genuine route change", async () => {
+    const api = fakeApi();
+    const win = fakeWindow();
+    const container = document.createElement("div");
+
+    mountShell(container, { api, win });
+    await flushState(api);
+
+    container.querySelector<HTMLButtonElement>(".wx-draft-chip")?.click();
+    await Promise.resolve();
+    expect(container.querySelector(".wx-drawer-wide")).not.toBeNull();
+
+    win.location.hash = "#/history";
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(container.querySelector(".wx-drawer-wide")).toBeNull();
   });
 
   it("the settings toggle navigates to #/settings and mounts the real settings panel", async () => {

@@ -45,7 +45,7 @@ test.describe("E2E 1: text edit", () => {
     // `aheadOfPublished` non-empty, e.g. restore.spec.ts's own E2E 5 moves the
     // live pointer BACKWARD relative to the checkout's HEAD on purpose, and
     // E2E 6's own upstream commit only clears once ITS publish runs).
-    await expect(page.locator(".wx-draft-chip")).toContainText("1 change");
+    await expect(page.locator(".wx-draft-chip")).toContainText("1 unpublished change");
 
     const version = await publishAndWait(page);
 

@@ -468,9 +468,14 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     titleEl.textContent = `Wixy · ${state.project.name}`;
     const opCount = state.draft.opCount;
     const ahead = state.upstream.aheadOfPublished.length;
-    const parts: string[] = [opCount === 1 ? "1 change" : `${opCount} changes`];
-    if (ahead > 0) parts.push(ahead === 1 ? "1 upstream commit" : `${ahead} upstream commits`);
-    chipEl.textContent = parts.join(" · ");
+    // Layman wording (decisions/00081): no git jargon. "Unpublished changes"
+    // are edits made in this editor not yet on the live site; "site updates"
+    // are changes made OUTSIDE the editor (the AI assistant, a merged pull
+    // request) that a publish will also take live — the drawer explains both.
+    const parts: string[] = [];
+    if (opCount > 0) parts.push(opCount === 1 ? "1 unpublished change" : `${opCount} unpublished changes`);
+    if (ahead > 0) parts.push(ahead === 1 ? "1 site update" : `${ahead} site updates`);
+    chipEl.textContent = parts.length === 0 ? "No unpublished changes" : parts.join(" · ");
     siteLink.href = `https://${state.project.domain}`;
     siteLink.hidden = false;
 
@@ -579,7 +584,12 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
 
   function mountPanel(route: Route): void {
     main.innerHTML = "";
-    closeDrawer();
+    // Deliberately NOT closeDrawer(): mountPanel is also invoked for SAME-route
+    // re-renders (pages-panel refresh after duplicate/delete, and the 60s /
+    // visibility revalidation below), which must not yank an open drawer out
+    // from under the user — a browser-tab switch used to close the publish
+    // review that way (operator report 2026-07-21). Genuine route changes
+    // close it in handleRoute instead.
     // The draft chip lives in the slim edit bar during edit view; every other
     // route gets it back in the topbar (its original slot, before Publish).
     if (route.kind !== "edit" && chipEl.parentElement !== topbar) {
@@ -771,8 +781,11 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     container.classList.toggle("wx-shell-editing", route.kind === "edit");
     setActiveNavItem(route);
     saveLastRoute(route, win);
+    // A genuine route change always closes an open drawer (it belongs to the
+    // view you were on). Same-route panel re-renders never reach here — see
+    // mountPanel's comment — so this can't fire on a background revalidation.
+    closeDrawer();
     if (reuseEditView && route.kind === "edit" && activeEditView !== null) {
-      closeDrawer();
       activeEditView.setPage(route.page);
       return;
     }
