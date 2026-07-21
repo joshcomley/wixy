@@ -23,7 +23,7 @@ import { OpQueue } from "./opQueue";
 import { mountPageSettingsDrawer } from "./pageSettingsDrawer";
 import { renderPagesPanel } from "./pagesPanel";
 import { mountPublishDrawer } from "./publishDrawer";
-import { currentRoute, navigateTo, onRouteChange, type Route } from "./router";
+import { canonicalizeUrl, currentRoute, navigateTo, onRouteChange, type Route } from "./router";
 import { captureScreenshot, copyBlobToClipboard, downloadBlob, flashScreen, screenshotFilename } from "./screenshot";
 import { clearLastRoute, loadLastRoute, saveLastRoute } from "./sessionState";
 import { mountSettingsPanel } from "./settingsPanel";
@@ -915,13 +915,20 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   }
 
   // Uxer session-persistence mandate (item 6, "last active view/module"): an
-  // explicit deep-link hash always wins (normal web navigation expectations);
-  // only an EMPTY hash (a bare "/admin" load) falls back to wherever the user
-  // last was, restored by updating the hash itself (not just calling
-  // handleRoute directly) so the address bar stays truthful too.
-  if (win.location.hash.replace(/^#/, "").length === 0) {
+  // explicit deep link always wins (normal web navigation expectations) — and a
+  // LEGACY "#/…" deep link additionally gets canonicalized to its path spelling
+  // (decisions/00087). Only a truly bare "/admin" load (no path route, no hash)
+  // falls back to wherever the user last was, restored by navigating (not just
+  // calling handleRoute directly) so the address bar stays truthful too; with
+  // nothing stored, the bare URL is canonicalized to "/admin/pages".
+  const hasLegacyHash = win.location.hash.replace(/^#/, "").length > 0;
+  const isBareAdmin = win.location.pathname === "/admin" || win.location.pathname === "/admin/";
+  if (hasLegacyHash) {
+    canonicalizeUrl(win);
+  } else if (isBareAdmin) {
     const lastRoute = loadLastRoute(win);
     if (lastRoute !== null) navigateTo(lastRoute, win);
+    else canonicalizeUrl(win);
   }
 
   const unsubscribeRoute = onRouteChange(handleRoute, win);

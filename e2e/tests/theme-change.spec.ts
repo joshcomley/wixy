@@ -36,7 +36,7 @@ test.describe("E2E 3: theme change", () => {
     const themeFetch = page.waitForResponse(
       (res) => res.url().includes("/api/admin/theme") && res.request().method() === "GET",
     );
-    await page.goto("/admin#/theme");
+    await page.goto("/admin/theme");
     await themeFetch;
     await page.waitForSelector(".wx-theme-panel");
 
@@ -118,7 +118,7 @@ test.describe("E2E 3: theme change", () => {
     const themeFetch = page.waitForResponse(
       (res) => res.url().includes("/api/admin/theme") && res.request().method() === "GET",
     );
-    await page.goto("/admin#/theme");
+    await page.goto("/admin/theme");
     await themeFetch;
     await page.waitForSelector(".wx-theme-panel");
 

@@ -14,7 +14,7 @@ test.describe("media editing", () => {
   }) => {
     const consoleErrors = trackConsoleErrors(page);
 
-    await page.goto("/admin#/media");
+    await page.goto("/admin/media");
     await expect(page.locator(".wx-media-grid")).toBeVisible();
 
     // open the detail sheet for hero.jpg (by its img alt — the grid is

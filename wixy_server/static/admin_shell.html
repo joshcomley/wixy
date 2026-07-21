@@ -117,17 +117,17 @@
     const { runAndShow, bridgeConnect, registerAdapter, ServerRenderedAdapter, mountBridgeOverlay } =
       await import("/admin/static/uxer/uxer-compliance.js");
 
-    // The real hash-routed panels (admin-ui/src/router.ts's Route union) — the
-    // whole admin is one served document (see get_admin_shell's own docstring),
-    // so these are hash fragments, not separate server-rendered pages.
+    // The real path-routed panels (admin-ui/src/router.ts's Route union) — the
+    // whole admin is one served document for EVERY /admin/* path (decisions/00087;
+    // get_admin_shell_deep_link serves them all), so these are paths, not hashes.
     const adapter = new ServerRenderedAdapter({
       modules: [
-        { id: "pages", name: "Pages", url: "/admin#/pages" },
-        { id: "theme", name: "Theme", url: "/admin#/theme" },
-        { id: "media", name: "Media", url: "/admin#/media" },
-        { id: "chat", name: "Chat", url: "/admin#/chat" },
-        { id: "history", name: "History", url: "/admin#/history" },
-        { id: "settings", name: "Settings", url: "/admin#/settings" },
+        { id: "pages", name: "Pages", url: "/admin/pages" },
+        { id: "theme", name: "Theme", url: "/admin/theme" },
+        { id: "media", name: "Media", url: "/admin/media" },
+        { id: "chat", name: "Chat", url: "/admin/chat" },
+        { id: "history", name: "History", url: "/admin/history" },
+        { id: "settings", name: "Settings", url: "/admin/settings" },
       ],
     });
     window.__uxerAdapter = adapter;

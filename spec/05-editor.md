@@ -24,12 +24,14 @@ All assets self-hosted (no CDN).
 
 Top bar is always present: project name, draft-status chip (n changed keys + upstream
 commits not yet published, click → review drawer), **Publish** button, and a "Site ▸" link
-opening the live site. Navigation is client-side routing on `#/pages`, `#/edit/<page>`,
-`#/theme`, `#/media`, `#/chat`, `#/chat/<conv>`, `#/history`.
+opening the live site. Navigation is client-side routing on proper paths — `/admin/pages`,
+`/admin/edit/<page>`, `/admin/theme`, `/admin/media`, `/admin/chat`, `/admin/chat/<conv>`,
+`/admin/history` (decisions/00087: every panel path serves the same shell; legacy `#/…`
+links canonicalize and keep working).
 
 ## 2. Edit mode (the heart of the product)
 
-`#/edit/<page>` shows a device-width toolbar (Desktop 1280 / Tablet 820 / Mobile 390) and an
+`/admin/edit/<page>` shows a device-width toolbar (Desktop 1280 / Tablet 820 / Mobile 390) and an
 **iframe** loading `/admin/preview/<page>.html` — the draft render (04 §4) with
 `editor.js` + `editor.css` injected by the preview renderer. Browsing inside the iframe
 stays in edit mode: the overlay rewrites internal link clicks to the preview equivalent and
@@ -146,7 +148,7 @@ Shift+Enter newline, and a status strip showing the agent's live state (typing/w
 indicator driven by the poll). A pinned banner explains the contract: *"Changes the
 assistant ships land in your draft preview — review them in Edit, then press Publish."*
 When the assistant's latest activity merged commits upstream, the panel surfaces a
-"Preview updated — review changes" chip linking to `#/edit/<likely page>`.
+"Preview updated — review changes" chip linking to `/admin/edit/<likely page>`.
 
 ## 7. Error & offline behavior
 

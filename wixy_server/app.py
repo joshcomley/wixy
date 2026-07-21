@@ -251,8 +251,10 @@ def create_app(
     async def get_admin_shell() -> HTMLResponse:
         """Bare instant-render shell (spec/05 §1) — paints immediately, no server-side
         data dependency; the real admin-ui panels are milestone 7's job. Routing is
-        entirely client-side hash fragments (`#/pages`, `#/edit/<page>`, …), so every
-        `/admin` sub-route the browser might deep-link to is this same document.
+        client-side on PROPER PATHS (`/admin/pages`, `/admin/edit/<page>`, … —
+        decisions/00087; legacy `#/…` hashes canonicalize client-side), so every
+        `/admin` sub-route the browser might deep-link to is this same document (see
+        `get_admin_shell_deep_link` below for the catch-all half).
         `Cache-Control: no-cache` — the shell is the document that CARRIES the
         fingerprinted bundle URLs (decisions/00069), so it must always be
         revalidated for a deploy's new fingerprints to be picked up."""
@@ -308,6 +310,16 @@ def create_app(
         StaticFiles(directory=paths.draft_media_replace),
         name="draft-media-replace",
     )
+
+    # SPA deep links (decisions/00087): the admin routes on PROPER PATHS
+    # (`/admin/edit/<page>`, `/admin/settings/<sub>`, …) — every panel path is
+    # this same shell document and the client router parses the path. Registered
+    # AFTER every real /admin/* mount above (Starlette matches in registration
+    # order) so static/guide/draft-media/preview always win their prefixes, and
+    # BEFORE routes_public's `/{path:path}` site catch-all below.
+    @app.get("/admin/{rest:path}", response_class=HTMLResponse, include_in_schema=False)
+    async def get_admin_shell_deep_link(rest: str) -> HTMLResponse:
+        return HTMLResponse(content=_ADMIN_SHELL_HTML, headers={"Cache-Control": "no-cache"})
 
     app.include_router(public_router)
 

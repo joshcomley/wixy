@@ -9,13 +9,13 @@
 // single-blob merge that would need admin_shell.html's pre-paint bootstrap
 // script to parse combined JSON for no real benefit.
 
-import { parseHash, routeToHash, type Route } from "./router";
+import { parseHash, parsePath, routeToPath, type Route } from "./router";
 
 const STORAGE_KEY = "wx-last-route";
 
 export function saveLastRoute(route: Route, win: Window = window): void {
   try {
-    win.localStorage.setItem(STORAGE_KEY, routeToHash(route));
+    win.localStorage.setItem(STORAGE_KEY, routeToPath(route));
   } catch {
     // best-effort persistence only
   }
@@ -24,7 +24,10 @@ export function saveLastRoute(route: Route, win: Window = window): void {
 export function loadLastRoute(win: Window = window): Route | null {
   try {
     const stored = win.localStorage.getItem(STORAGE_KEY);
-    return stored === null ? null : parseHash(stored);
+    if (stored === null) return null;
+    // Values written before decisions/00087 are hash spellings ("#/edit/x") —
+    // parse those too rather than orphaning the operator's stored view.
+    return stored.startsWith("#") ? parseHash(stored) : parsePath(stored);
   } catch {
     return null;
   }

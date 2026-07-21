@@ -26,7 +26,7 @@ import type {
 } from "./api";
 import { openConversationStream, type ConversationStreamHandle } from "./api";
 import { renderMarkdown } from "./markdown";
-import { navigateTo } from "./router";
+import { navigateTo, routeToPath } from "./router";
 
 export interface ChatPanelDeps {
   api: AdminApi;
@@ -356,7 +356,7 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
   const previewChip = document.createElement("a");
   previewChip.className = "wx-chat-preview-chip";
   previewChip.textContent = "Preview updated — review changes";
-  previewChip.href = "#/pages";
+  previewChip.href = routeToPath({ kind: "pages" });
   previewChip.hidden = true;
   previewChip.addEventListener("click", (evt) => {
     evt.preventDefault();

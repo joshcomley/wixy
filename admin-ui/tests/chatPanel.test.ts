@@ -58,9 +58,13 @@ function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
 }
 
 function fakeWindow(overrides: Record<string, unknown> = {}): Window {
+  let pathname = "/admin/chat";
   let hash = "";
   return {
     location: {
+      get pathname() {
+        return pathname;
+      },
       get hash() {
         return hash;
       },
@@ -68,8 +72,21 @@ function fakeWindow(overrides: Record<string, unknown> = {}): Window {
         hash = value.startsWith("#") ? value : `#${value}`;
       },
     },
+    // Path-routed admin (decisions/00087): navigateTo goes through history —
+    // record the path (and clear the hash like a real browser).
+    history: {
+      pushState: (_state: unknown, _title: string, url: string) => {
+        pathname = url;
+        hash = "";
+      },
+      replaceState: (_state: unknown, _title: string, url: string) => {
+        pathname = url;
+        hash = "";
+      },
+    },
     addEventListener: () => {},
     removeEventListener: () => {},
+    dispatchEvent: () => true,
     prompt: vi.fn(() => null),
     crypto: { randomUUID: () => "test-uuid" },
     ...overrides,
@@ -161,7 +178,7 @@ describe("mountChatPanel — list view", () => {
     const link = panel.element.querySelector<HTMLAnchorElement>(".wx-chat-list-title");
     link?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
 
-    expect(win.location.hash).toBe("#/chat/abc");
+    expect(win.location.pathname).toBe("/admin/chat/abc");
     panel.teardown();
   });
 
@@ -216,7 +233,7 @@ describe("mountChatPanel — list view", () => {
     await flush();
 
     expect(createConversation).toHaveBeenCalledWith(undefined);
-    expect(win.location.hash).toBe("#/chat/new1");
+    expect(win.location.pathname).toBe("/admin/chat/new1");
     panel.teardown();
   });
 

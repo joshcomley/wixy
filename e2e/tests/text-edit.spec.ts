@@ -60,7 +60,7 @@ test.describe("E2E 1: text edit", () => {
     expect(await liveResponse.text()).toContain(newTitle);
 
     // "History gained a version"
-    await page.goto("/admin#/history");
+    await page.goto("/admin/history");
     await expect(page.locator(`tr[data-version="${version}"]`)).toBeVisible();
 
     expect(consoleErrors).toEqual([]);
