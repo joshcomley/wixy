@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openComposer, type ComposerCallbacks } from "../src/composer";
 import { installFakeVisualViewport, uninstallFakeVisualViewport } from "./fakeVisualViewport";
 
@@ -188,6 +188,90 @@ describe("openComposer", () => {
       vv.height = 700;
       vv.fire("resize");
       expect(composer.element.style.bottom).toBe("");
+    });
+  });
+
+  describe("draft recovery (decisions/00088)", () => {
+    const KEY = "index:hero.title";
+    const STORE = `wx-composer-draft:${KEY}`;
+
+    beforeEach(() => {
+      window.localStorage.clear();
+    });
+
+    function mountWithDraft(seed: string, callbacks = makeCallbacks()) {
+      const composer = openComposer({ seed, scale: 1, draftKey: KEY, callbacks });
+      document.body.appendChild(composer.element);
+      const textarea = composer.element.querySelector("textarea") as HTMLTextAreaElement;
+      return { composer, textarea, callbacks };
+    }
+
+    function type(text: string, textarea: HTMLTextAreaElement): void {
+      textarea.value = text;
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+
+    it("persists every keystroke to localStorage under the draft key", () => {
+      const { textarea } = mountWithDraft("seed");
+      type("typed mid-edit", textarea);
+      const raw = window.localStorage.getItem(STORE);
+      expect(raw).not.toBeNull();
+      const stored = JSON.parse(raw!) as { text: string; updatedAt: number };
+      expect(stored.text).toBe("typed mid-edit");
+      expect(typeof stored.updatedAt).toBe("number");
+    });
+
+    it("offers Restore when reopening with a stored draft that differs from the seed — restoring refills and re-previews", () => {
+      window.localStorage.setItem(STORE, JSON.stringify({ text: "recovered text", updatedAt: Date.now() - 120_000 }));
+      const { composer, textarea, callbacks } = mountWithDraft("seed");
+      const banner = composer.element.querySelector(".wx-composer-draft-banner");
+      expect(banner).not.toBeNull();
+      expect(banner!.textContent).toContain("You were editing this before");
+      (banner!.querySelector(".wx-composer-draft-restore") as HTMLButtonElement).click();
+      expect(textarea.value).toBe("recovered text");
+      // Restoring routes through the input pipeline: live preview + re-saved draft.
+      expect(callbacks.preview).toHaveBeenCalledWith("recovered text");
+      expect(JSON.parse(window.localStorage.getItem(STORE)!).text).toBe("recovered text");
+      expect(composer.element.querySelector(".wx-composer-draft-banner")).toBeNull();
+    });
+
+    it("Discard drops the stored draft and keeps the seed", () => {
+      window.localStorage.setItem(STORE, JSON.stringify({ text: "old typing", updatedAt: Date.now() }));
+      const { composer, textarea } = mountWithDraft("seed");
+      const banner = composer.element.querySelector(".wx-composer-draft-banner");
+      expect(banner).not.toBeNull();
+      (banner!.querySelector(".wx-composer-draft-discard") as HTMLButtonElement).click();
+      expect(textarea.value).toBe("seed");
+      expect(window.localStorage.getItem(STORE)).toBeNull();
+      expect(composer.element.querySelector(".wx-composer-draft-banner")).toBeNull();
+    });
+
+    it("clears the stored draft on commit", () => {
+      const { composer, textarea } = mountWithDraft("seed");
+      type("typed", textarea);
+      (composer.element.querySelector(".wx-composer-commit") as HTMLButtonElement).click();
+      expect(window.localStorage.getItem(STORE)).toBeNull();
+    });
+
+    it("clears the stored draft on cancel", () => {
+      const { composer, textarea } = mountWithDraft("seed");
+      type("typed", textarea);
+      (composer.element.querySelector(".wx-composer-cancel") as HTMLButtonElement).click();
+      expect(window.localStorage.getItem(STORE)).toBeNull();
+    });
+
+    it("silently clears a stored draft identical to the seed — nothing to recover", () => {
+      window.localStorage.setItem(STORE, JSON.stringify({ text: "seed", updatedAt: Date.now() }));
+      const { composer } = mountWithDraft("seed");
+      expect(composer.element.querySelector(".wx-composer-draft-banner")).toBeNull();
+      expect(window.localStorage.getItem(STORE)).toBeNull();
+    });
+
+    it("no draftKey means no persistence and no banner (control sheets, popovers)", () => {
+      const { composer, textarea } = mount("seed");
+      type("typed", textarea);
+      expect(window.localStorage.getItem(STORE)).toBeNull();
+      expect(composer.element.querySelector(".wx-composer-draft-banner")).toBeNull();
     });
   });
 });

@@ -149,7 +149,10 @@ for CONTENT labels — the hover chip and list item toolbar ride the page on scr
 listener-free, or they detach from the element the moment the preview scrolls); `composer.ts` (THE text editor: bottom-anchored sheet,
 auto-growing textarea, B/I/link row, SVG maximize, live markdown preview, decisions/00075;
 auto-grow sizes only AFTER attach — caller must `refit()` post-`appendChild`, decisions/00079;
-pinned to the visual viewport — decisions/00084); `visualPin.ts` (the visual-viewport
+pinned to the visual viewport — decisions/00084; draft recovery — every keystroke
+persists to localStorage under the caller's per-binding `draftKey`, and reopening with a
+stored draft ≠ seed shows the Restore/Discard banner, so a reload mid-edit loses
+nothing — decisions/00088); `visualPin.ts` (the visual-viewport
 pin shared by the composer and the control sheets, plus the `interactive-widget` meta
 append); `markdownText.ts` (inline-markdown render + demote — hand-synced twin of
 `builder/markdown_inline.py`, locked by the shared fixture, Inv 20);
