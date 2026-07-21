@@ -133,6 +133,26 @@ class TestVerifyAccessJwt:
         with pytest.raises(AccessVerificationError):
             verify_access_jwt(token, jwks=jwks, audience=_AUDIENCE, team_domain=_TEAM_DOMAIN)
 
+    def test_future_iat_within_leeway_is_accepted(self, keypair: tuple[Any, Any]) -> None:
+        """CF edge mints a FRESH JWT per service-token request; an origin clock a few
+        seconds behind the edge must not reject it as "not yet valid" (2026-07-21:
+        hub ran ~3s behind and every service-token admin call 401'd while browser
+        sessions, whose JWT is minted at login time, kept working)."""
+        private, public = keypair
+        now = int(time.time())
+        token = _sign(private, iat=now + 15)
+        jwks = JwksCache(fetch=lambda: {"keys": [_jwk_dict(public, _KID)]})
+        claims = verify_access_jwt(token, jwks=jwks, audience=_AUDIENCE, team_domain=_TEAM_DOMAIN)
+        assert claims["sub"] == "user@example.com"
+
+    def test_future_iat_beyond_leeway_is_rejected(self, keypair: tuple[Any, Any]) -> None:
+        private, public = keypair
+        now = int(time.time())
+        token = _sign(private, iat=now + 120)
+        jwks = JwksCache(fetch=lambda: {"keys": [_jwk_dict(public, _KID)]})
+        with pytest.raises(AccessVerificationError):
+            verify_access_jwt(token, jwks=jwks, audience=_AUDIENCE, team_domain=_TEAM_DOMAIN)
+
     def test_token_signed_by_an_unrelated_key_is_rejected(self) -> None:
         """A token whose `kid` matches, but was actually signed by a DIFFERENT private
         key than the one published in the JWKS, must fail signature verification —

@@ -35,6 +35,14 @@ CF_ACCESS_JWT_HEADER = "cf-access-jwt-assertion"
 JWKS_CACHE_TTL_S = 6 * 60 * 60.0  # spec/04 §9: "cached, refreshed 6-hourly"
 _ALGORITHMS = ["RS256"]
 
+# Tolerated origin-vs-edge clock skew when validating iat/exp/nbf. CF edge mints a
+# FRESH JWT per service-token request (unlike browser logins, whose JWT is minted
+# once at sign-in), so an origin clock even a few seconds behind the edge otherwise
+# rejects every service-token call with "The token is not yet valid (iat)" — seen in
+# production 2026-07-21 (hub ~3s behind; decisions/00072). 30s covers realistic NTP
+# drift without meaningfully widening the replay window (tokens are 1h-lived).
+_CLOCK_SKEW_LEEWAY_S = 30
+
 
 class AccessVerificationError(Exception):
     """The request's CF Access JWT is missing, malformed, signed by an unknown key, or
@@ -116,6 +124,7 @@ def verify_access_jwt(
             algorithms=_ALGORITHMS,
             audience=audience,
             issuer=f"https://{team_domain}",
+            leeway=_CLOCK_SKEW_LEEWAY_S,
         )
     except jwt.PyJWTError as exc:
         raise AccessVerificationError(str(exc)) from exc
