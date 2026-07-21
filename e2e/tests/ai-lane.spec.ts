@@ -34,9 +34,9 @@ test.describe("E2E 6: AI lane (faked)", () => {
     await gotoEditAndWaitReady(page, "index");
 
     // "draft preview banner appears" — the draft-status chip surfaces upstream
-    // commits (shell.ts's renderTopBar: always "N changes", plus "· N upstream
-    // commit(s)" once there are any).
-    await expect(page.locator(".wx-draft-chip")).toHaveText("0 changes · 1 upstream commit");
+    // commits (shell.ts's renderTopBar: "N unpublished change(s)", plus "· M site
+    // update(s)" once there are any — layman wording, decisions/00081).
+    await expect(page.locator(".wx-draft-chip")).toHaveText("1 site update");
 
     // "publish drawer lists the upstream commit" — opened and closed again
     // (rather than confirming from here) so `publishAndWait` below opens a
@@ -44,7 +44,7 @@ test.describe("E2E 6: AI lane (faked)", () => {
     // it's the visible trigger in edit view — decisions/00076).
     await page.click(".wx-draft-chip");
     await page.waitForSelector(".wx-publish-confirm");
-    await expect(page.locator(".wx-diff-upstream")).toContainText("1 upstream commit");
+    await expect(page.locator(".wx-diff-upstream")).toContainText("1 update made outside the editor");
     await expect(page.locator(".wx-diff-upstream")).toContainText("AI: AI Lane Change");
     await expect(page.locator(".wx-diff-upstream")).toContainText("AI Lane");
     await page.click(".wx-drawer-close");

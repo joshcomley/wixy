@@ -593,9 +593,6 @@
   transform-origin: top left;
   transition: transform 0.15s ease;
 }
-  border: none;
-  display: block;
-}
 
 /* -- Page settings drawer ------------------------------------------------------- */
 
@@ -742,6 +739,40 @@
   overflow-wrap: anywhere;
 }
 
+/* Whole-array (list) ops render as per-item human lines rather than an
+   old → new pair (decisions/00081) — the key sits as a subheading with the
+   changed-item lines stacked below it. */
+.wx-diff-row-list {
+  display: block;
+}
+
+.wx-diff-row-list .wx-diff-key {
+  display: block;
+  width: auto;
+  margin-bottom: 2px;
+}
+
+.wx-diff-list-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 8px;
+  border-left: 2px solid var(--wx-border);
+}
+
+.wx-diff-list-line {
+  overflow-wrap: anywhere;
+}
+
+.wx-diff-list-label {
+  color: var(--wx-muted);
+}
+
+.wx-diff-list-more {
+  color: var(--wx-muted);
+  font-style: italic;
+}
+
 .wx-diff-thumb {
   flex: 1;
   max-width: 64px;
@@ -798,6 +829,12 @@
 .wx-diff-validate ul {
   margin: 0;
   padding-left: 18px;
+}
+
+.wx-diff-upstream-note {
+  margin: 0 0 6px;
+  color: var(--wx-muted);
+  font-size: 0.75rem;
 }
 
 .wx-publish-progress {

@@ -82,16 +82,22 @@ One `OpQueue` per session (owned by `shell.ts`); panels take only the `OpQueueLi
 ## admin-ui panels (`admin-ui/src/`)
 
 `shell.ts` (chrome + state + the OpQueue + a 60s revalidation loop that reloads on an
-`/api/version` commit change unless mid-edit); `router.ts` (hash routes: pages/edit/theme/
+`/api/version` commit change unless mid-edit; same-route panel re-renders from that loop
+never close an open drawer — only genuine route changes do, decisions/00081); `router.ts` (hash routes: pages/edit/theme/
 media/chat/history/settings); `pagesPanel.ts` + `pageSettingsDrawer.ts` (`meta.*` editing);
 `publishDrawer.ts` (review diff + `POST /api/admin/publish` + SSE progress; disables Publish
 with a "Nothing to publish" hint when the preview's `opCount` is 0 AND no upstream commits are
-pending — decisions/00071); `historyPanel.ts`
+pending — decisions/00071; layman wording throughout: the chip reads "N unpublished changes ·
+M site updates", the upstream section is "updates made outside the editor" with a plain-English
+explainer — decisions/00081); `historyPanel.ts`
 (ledger + typed-confirm restore + a per-row **Changes** expander showing the version's old→new
 key diff from `GET /api/admin/publishes/{n}/diff`, each row with a **Reinstate** button that
 PATCHes the shown old value back into the current draft — hidden for added-in-that-version keys
 and for pages that no longer exist); `diffView.ts` (the shared old→new diff renderer both the
-review drawer and the history Changes view use — one component, one `.wx-diff-*` CSS block); `mediaPanel.ts` + `mediaDialog.ts` (library + picker);
+review drawer and the history Changes view use — one component, one `.wx-diff-*` CSS block;
+whole-array `list` entries render as per-item human lines — "Wednesday: value: Closed → By
+phone enquiry", "Added: …", "Removed: …", capped at 10 + "…and N more" — never a raw JSON
+dump, decisions/00081); `mediaPanel.ts` + `mediaDialog.ts` (library + picker);
 `chatPanel.ts` + `markdown.ts` (see [ai-chat.md](ai-chat.md)); `themePanel.ts` + `themeVars.ts`
 + `googleFonts.ts` + `googleFontsCatalog.ts` (site-theme editing with live preview);
 `thumbnailService.ts` (mobile-view page captures for the Pages panel — hidden 390px
