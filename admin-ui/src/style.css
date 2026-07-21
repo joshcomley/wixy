@@ -506,7 +506,7 @@
   color: var(--wx-danger-text);
 }
 
-/* The slim edit bar's pinned host (decisions/00081) — in the shell's
+/* The slim edit bar's pinned host (decisions/00082) — in the shell's
    non-scrolling chrome (between topbar and body), visible only in edit view,
    so the bar can never scroll out of reach. */
 .wx-edit-bar-host {

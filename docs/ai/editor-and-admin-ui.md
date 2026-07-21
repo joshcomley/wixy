@@ -27,7 +27,7 @@ between them. Spec: [`spec/05-editor.md`](../../spec/05-editor.md). The wire typ
   device switcher left, Settings + a 10s chrome-reveal ▾ right) which the shell hands to
   `mountEditView` as `toolbarLeading`/`toolbarTrailing` and which pins into a
   `.wx-edit-bar-host` row in the shell's NON-scrolling chrome (`toolbarHost` dep,
-  decisions/00081) — never the scrolling `.wx-main`, so it can't scroll out of reach.
+  decisions/00082) — never the scrolling `.wx-main`, so it can't scroll out of reach.
 
 ## The edit protocol
 

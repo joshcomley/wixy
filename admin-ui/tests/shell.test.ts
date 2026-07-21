@@ -190,7 +190,7 @@ function fakeMountEditView(): FakeEditViewHandle {
       toolbar.className = "wx-device-toolbar";
       toolbar.append(...(deps.toolbarLeading ?? []), ...(deps.toolbarTrailing ?? []));
       // ...and, like the real mount, parks the toolbar in toolbarHost when the
-      // shell pins it into the chrome (decisions/00081).
+      // shell pins it into the chrome (decisions/00082).
       if (deps.toolbarHost !== undefined) {
         deps.toolbarHost.appendChild(toolbar);
       } else {
@@ -394,7 +394,7 @@ describe("mountShell", () => {
       expect(trailing[2]?.className).toBe("wx-chrome-reveal");
     });
 
-    it("the slim edit bar pins into the shell chrome host, never the scrolling main (decisions/00081)", async () => {
+    it("the slim edit bar pins into the shell chrome host, never the scrolling main (decisions/00082)", async () => {
       const api = fakeApi();
       const win = fakeWindow();
       const container = document.createElement("div");
@@ -768,7 +768,7 @@ describe("mountShell", () => {
     // Chrome tab and back kicked the user out of the review. The shell's
     // visibility revalidation re-renders the mounted pages panel from the
     // fresh snapshot — a same-route re-render, not a navigation — so it must
-    // not close the drawer (decisions/00081).
+    // not close the drawer (decisions/00082).
     const api = fakeApi({ getServerCommit: vi.fn(async () => null) } as Partial<AdminApi>);
     const win = fakeWindow({ withDocument: true });
     const container = document.createElement("div");

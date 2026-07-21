@@ -172,7 +172,7 @@ export interface MountEditViewDeps {
    * view's own root — the shell uses it to pin the slim edit bar in the
    * non-scrolling chrome (operator 2026-07-22: the bar must ALWAYS be
    * visible; inside the scrolling main it could scroll out of reach,
-   * decisions/00081). The edit view's root then contains only the iframe. */
+   * decisions/00082). The edit view's root then contains only the iframe. */
   toolbarHost?: HTMLElement;
 }
 
@@ -242,7 +242,7 @@ export function mountEditView(page: string, deps: MountEditViewDeps): EditView {
     // Only size the height from a MEASURED wrap — the pre-layout fallback to
     // window.innerHeight overshoots (the wrap is shorter than the window once
     // the slim bar exists), and an over-tall iframe is exactly the sort of
-    // thing that can push the main area into scrolling (decisions/00081).
+    // thing that can push the main area into scrolling (decisions/00082).
     // Until the wrap has laid out, the stylesheet's height:100% covers it.
     if (wrapHeight > 0) {
       iframe.style.height = `${Math.max(1, Math.round(wrapHeight / scale))}px`;
@@ -317,7 +317,7 @@ export function mountEditView(page: string, deps: MountEditViewDeps): EditView {
       resizeObserver?.disconnect();
       // The toolbar may live in the shell's pinned host (toolbarHost) rather
       // than inside this view's root — remove it from either parent or a
-      // stale bar lingers on the next route (decisions/00081).
+      // stale bar lingers on the next route (decisions/00082).
       toolbar.remove();
     },
   };

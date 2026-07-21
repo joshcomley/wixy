@@ -398,7 +398,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   main.textContent = "Loading…";
   body.append(navEl, main);
 
-  // The slim edit bar's pinned home (decisions/00081): inside the shell's
+  // The slim edit bar's pinned home (decisions/00082): inside the shell's
   // non-scrolling chrome, NOT the scrolling main, so it can never scroll out
   // of reach (operator 2026-07-22: "that small top nav bar on Edit should
   // ALWAYS be visible"). CSS shows it only in edit view.
@@ -468,7 +468,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     titleEl.textContent = `Wixy · ${state.project.name}`;
     const opCount = state.draft.opCount;
     const ahead = state.upstream.aheadOfPublished.length;
-    // Layman wording (decisions/00081): no git jargon. "Unpublished changes"
+    // Layman wording (decisions/00082): no git jargon. "Unpublished changes"
     // are edits made in this editor not yet on the live site; "site updates"
     // are changes made OUTSIDE the editor (the AI assistant, a merged pull
     // request) that a publish will also take live — the drawer explains both.
@@ -664,7 +664,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
         // back to the topbar on the next non-edit mount (see mountPanel).
         toolbarLeading: [backButton],
         toolbarTrailing: [chipEl, settingsButton, revealButton],
-        // And the bar itself pins into the shell chrome (decisions/00081) —
+        // And the bar itself pins into the shell chrome (decisions/00082) —
         // never the scrolling main.
         toolbarHost: editBarHost,
       });
