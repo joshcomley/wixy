@@ -4,7 +4,7 @@ Operator report: the "6 changes" drawer's layout was a mess on desktop + mobile,
 closed when switching Chrome tabs and back, and the wording ("upstream") wasn't layman-readable.
 
 Three independent root causes, all fixed + regression-tested; full story in
-`decisions/00079-publish-drawer-overlay-and-wording/`:
+`decisions/00081-publish-drawer-overlay-and-wording/`:
 
 1. **CSS parse bug** — an orphaned `border: none; display: block; }` (leftover selector-less
    tail from 35aab64) made CSS error recovery swallow the entire `.wx-drawer` rule → drawer

@@ -58,7 +58,7 @@ function renderUpstream(upstream: UpstreamCommit[]): HTMLElement | null {
       ? "1 update made outside the editor"
       : `${upstream.length} updates made outside the editor`;
   wrap.appendChild(title);
-  // Plain-English framing for a non-technical site owner (decisions/00079):
+  // Plain-English framing for a non-technical site owner (decisions/00081):
   // these are real changes to the site that just didn't go through this
   // editor, and publishing takes them live too — nothing extra to do.
   const note = document.createElement("p");

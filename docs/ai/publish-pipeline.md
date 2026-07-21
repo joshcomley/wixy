@@ -105,7 +105,7 @@ pairs each op's `new` value with the `old` read from merged content, and looks u
 defaults `"text"`). The kind lookup normalizes the bindings map's `@` global-scope marker
 (`@hours`) away — ops address the field as `hours` — and builds the `_global` bucket as the
 UNION of every page's global fields, since a global binding only appears on the pages that
-bind it (decisions/00079; both mistakes previously reported kind `"text"`, which rendered a
+bind it (decisions/00081; both mistakes previously reported kind `"text"`, which rendered a
 whole-array op as raw JSON in the drawer). Because collections are already stored as whole-array ops in the overlay,
 the granularity matches the overlay's collection rule (Inv 6) — but note this is a *different
 mechanism* from restore's diff, which computes ops by a full structural two-tree diff

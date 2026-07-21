@@ -740,7 +740,7 @@
 }
 
 /* Whole-array (list) ops render as per-item human lines rather than an
-   old → new pair (decisions/00079) — the key sits as a subheading with the
+   old → new pair (decisions/00081) — the key sits as a subheading with the
    changed-item lines stacked below it. */
 .wx-diff-row-list {
   display: block;

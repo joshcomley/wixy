@@ -1,4 +1,4 @@
-// The review drawer's list-value rendering (decisions/00079): a whole-array
+// The review drawer's list-value rendering (decisions/00081): a whole-array
 // op (opening hours, footer links, treatment cards) must read as human
 // per-item lines — "Wednesday: value: By phone enquiry → Closed" — never as a
 // raw `JSON.stringify` dump, which is what a total-layman site owner was

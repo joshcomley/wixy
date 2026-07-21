@@ -7,7 +7,7 @@
 //
 // List entries (whole-array ops — opening hours, footer links, treatment
 // cards) render as per-item human lines rather than a raw JSON dump or an
-// uninformative "7 item(s)" count (decisions/00079): aligned by index, each
+// uninformative "7 item(s)" count (decisions/00081): aligned by index, each
 // changed item shows its identity label (day/title/label/name, else its first
 // string value) and the fields that changed — "Wednesday: value: By phone
 // enquiry → Closed" — with added/removed items summarised on one line each.

@@ -52,7 +52,7 @@ def binding_kind_lookup(merged: SiteSource) -> dict[str, dict[str, str]]:
     leading `@` here reconciles the two — without it every global binding's
     kind misses and falls back to `"text"`, which is how a whole-array global
     list op (opening hours) rendered as a raw JSON dump in the review drawer
-    (decisions/00079).
+    (decisions/00081).
 
     The `_global` bucket is the UNION of every page's global (`@`-prefixed)
     fields — a global binding is only bound on the pages that use it (the CA

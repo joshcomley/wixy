@@ -461,7 +461,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     titleEl.textContent = `Wixy · ${state.project.name}`;
     const opCount = state.draft.opCount;
     const ahead = state.upstream.aheadOfPublished.length;
-    // Layman wording (decisions/00079): no git jargon. "Unpublished changes"
+    // Layman wording (decisions/00081): no git jargon. "Unpublished changes"
     // are edits made in this editor not yet on the live site; "site updates"
     // are changes made OUTSIDE the editor (the AI assistant, a merged pull
     // request) that a publish will also take live — the drawer explains both.

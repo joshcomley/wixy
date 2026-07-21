@@ -733,7 +733,7 @@ describe("mountShell", () => {
     // Chrome tab and back kicked the user out of the review. The shell's
     // visibility revalidation re-renders the mounted pages panel from the
     // fresh snapshot — a same-route re-render, not a navigation — so it must
-    // not close the drawer (decisions/00079).
+    // not close the drawer (decisions/00081).
     const api = fakeApi({ getServerCommit: vi.fn(async () => null) } as Partial<AdminApi>);
     const win = fakeWindow({ withDocument: true });
     const container = document.createElement("div");

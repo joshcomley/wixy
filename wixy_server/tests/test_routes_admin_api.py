@@ -1464,7 +1464,7 @@ class TestGetPublishPreview:
         """The drawer's readable list diff (added/removed/changed item lines
         instead of a raw JSON dump) hinges on the kind reaching the client as
         "list" — which only happens when the `@hours` bindings-map key is
-        reconciled with the op's `hours` path (decisions/00079)."""
+        reconciled with the op's `hours` path (decisions/00081)."""
         app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_with_global_list)
         with TestClient(app) as client:
             client.patch(
