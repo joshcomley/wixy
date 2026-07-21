@@ -49,7 +49,7 @@ export interface MediaGridDeps {
   win?: Window;
   /** Present only in PICK mode (the modal dialog) — omitted for the plain
    * `#/media` panel, where a thumbnail click opens the media DETAIL sheet
-   * (preview/replace/delete/unstage, decisions/00079). */
+   * (preview/replace/delete/unstage, decisions/00080). */
   onPick?: (value: MediaPickValue) => void;
   /** Panel mode: mount the Upload button into this host row (the panel's
    * one-line header) instead of a separate toolbar line (operator 2026-07-21:
@@ -236,7 +236,7 @@ export function renderMediaGrid(deps: MediaGridDeps): MediaGrid {
     return cell;
   }
 
-  // -- Detail sheet (panel mode, decisions/00079) -------------------------------
+  // -- Detail sheet (panel mode, decisions/00080) -------------------------------
 
   /** The media detail modal: big preview, meta, references, and the edit
    * actions the operator reported missing ("I can't edit any media files"):

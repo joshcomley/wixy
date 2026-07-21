@@ -361,7 +361,7 @@ def _discard_draft(paths: ProjectPaths) -> int:
         for staged in paths.draft_media.iterdir():
             if staged.is_file():
                 staged.unlink()
-    # Staged media changes are draft state too (decisions/00079) — a discard
+    # Staged media changes are draft state too (decisions/00080) — a discard
     # must take staged replacements/deletions with it, or they'd silently
     # apply at the next publish after the operator "started over".
     if paths.draft_media_replace.is_dir():
@@ -416,7 +416,7 @@ def _list_media(project: ProjectConfig, paths: ProjectPaths) -> list[JsonValue]:
         for entry in sorted(images_dir.iterdir(), key=lambda p: p.name):
             if entry.is_file():
                 item = _media_item(entry, f"/images/{entry.name}", "repo", references)
-                # Staged states (decisions/00079): a replacement shows its new
+                # Staged states (decisions/00080): a replacement shows its new
                 # bytes immediately (the grid previews the staged file, not the
                 # published one); a staged deletion is dimmed client-side.
                 if entry.name in staging["replaced"]:
@@ -496,7 +496,7 @@ def _delete_media(project: ProjectConfig, paths: ProjectPaths, name: str) -> Jso
     if (paths.draft_media / name).is_file():
         delete_draft_media(paths, name, references)
         return {"deleted": True}
-    # A repo image stages for deletion at the next publish (decisions/00079);
+    # A repo image stages for deletion at the next publish (decisions/00080);
     # unreferenced-only, exactly like the draft case.
     stage_media_deletion(paths, name, references)
     return {"stagedDelete": True}
@@ -521,14 +521,14 @@ async def delete_media(name: str, request: Request) -> JsonObject:
 
 
 # ---------------------------------------------------------------------------
-# Media replace + repo deletion staging (decisions/00079)
+# Media replace + repo deletion staging (decisions/00080)
 # ---------------------------------------------------------------------------
 
 
 @router.put("/media/{name}", response_model=None)
 async def replace_media(name: str, request: Request) -> JsonObject:
     """Stage new bytes for an existing image (in-place replacement at publish —
-    every reference keeps working, decisions/00079)."""
+    every reference keeps working, decisions/00080)."""
     project: ProjectConfig = request.app.state.project
     paths: ProjectPaths = request.app.state.paths
     data = await request.body()
@@ -647,7 +647,7 @@ async def start_publish(body: PublishIn, request: Request) -> JsonObject:
             return  # something staged — always publishable
         staging = media_staging(paths)
         if staging["replaced"] or staging["deleted"]:
-            return  # staged media changes are publishable too (decisions/00079)
+            return  # staged media changes are publishable too (decisions/00080)
         pointer = load_live_pointer(paths)
         if pointer is None or not (paths.repo / ".git").exists():
             return
@@ -826,7 +826,7 @@ def _build_publish_preview(
         if not (e.code == "missing-image" and (e.file, e.key) in safe_image_keys)
     ]
 
-    # Staged media changes are publishable changes too (decisions/00079) —
+    # Staged media changes are publishable changes too (decisions/00080) —
     # they produce no content ops, so without this a pure media-replacement
     # publish reads as "Nothing to publish" (found via E2E: the drawer's guard
     # disabled Publish over a staged replacement).
@@ -840,7 +840,7 @@ def _build_publish_preview(
         # Total staged draft changes — content ops + staged page adds/deletes
         # (a staged page deletion produces no `changes` entries, so the review
         # drawer's nothing-to-publish rule can't count those, decisions/00071)
-        # + staged media replacements/deletions (decisions/00079).
+        # + staged media replacements/deletions (decisions/00080).
         "opCount": len(overlay.ops)
         + len(overlay.pages_added)
         + len(overlay.pages_deleted)

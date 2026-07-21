@@ -50,7 +50,7 @@ delete-if-unreferenced guard.
 
 ## Delete (`media.py:delete_draft_media` + `stage_media_deletion`)
 
-`DELETE /api/admin/media/{name}` has two shapes (decisions/00079, which supersedes
+`DELETE /api/admin/media/{name}` has two shapes (decisions/00080, which supersedes
 the earlier repo-deletion deferral):
 - **Draft upload** → deleted immediately, with a traversal guard
   (`target.resolve().parent == draft_media.resolve()` and `is_file`, else

@@ -329,7 +329,7 @@ def _copy_referenced_media(paths: ProjectPaths, names: set[str]) -> list[str]:
 
 
 def _apply_media_staging(paths: ProjectPaths, references: dict[str, list[str]]) -> None:
-    """Apply staged media replacements + deletions (decisions/00079) to the
+    """Apply staged media replacements + deletions (decisions/00080) to the
     checkout: replacements overwrite `images/<name>` in place (every reference
     keeps working); deletions `git rm` it, but ONLY when still unreferenced at
     publish time (content may have gained a use since staging — that wins over
@@ -410,7 +410,7 @@ def _materialize_locked(project: ProjectConfig, paths: ProjectPaths, overlay: Ov
             "merging", f"failed to load the merged site after materializing: {exc}", []
         ) from exc
 
-    # Staged media replacements/deletions (decisions/00079) apply against the
+    # Staged media replacements/deletions (decisions/00080) apply against the
     # FINAL merged content — references are re-checked here, not at staging
     # time, so an image that gained a use since staging is never removed.
     _apply_media_staging(paths, scan_media_references(source))

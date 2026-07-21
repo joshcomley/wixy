@@ -801,7 +801,7 @@ class TestDeleteDraft:
     def test_clears_staged_replace_and_delete_too(
         self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
     ) -> None:
-        """A draft discard takes ALL staged state (decisions/00079) — staged
+        """A draft discard takes ALL staged state (decisions/00080) — staged
         media replacements/deletions must not survive a 'start over'."""
         paths.draft_media_replace.mkdir(parents=True)
         (paths.draft_media_replace / "hero.jpg").write_bytes(b"staged")
@@ -1010,7 +1010,7 @@ class TestDeleteMedia:
     def test_repo_image_delete_stages_for_publish(
         self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
     ) -> None:
-        # decisions/00079 supersedes the milestone-8 deferral: a repo image's
+        # decisions/00080 supersedes the milestone-8 deferral: a repo image's
         # deletion now STAGES (git rm at the next publish) rather than 404ing —
         # the file stays on disk and referenced until then.
         app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
@@ -1252,7 +1252,7 @@ class TestPostPublish:
     def test_an_empty_draft_with_staged_media_publishes(
         self, storage_root: Path, wixy_repo_root_bare: Path
     ) -> None:
-        """decisions/00079: a publish whose ONLY change is a staged media
+        """decisions/00080: a publish whose ONLY change is a staged media
         replacement must not hit the nothing-to-publish 422 — the staged media
         IS the change (found via E2E: the guard refused it)."""
         app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
