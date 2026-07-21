@@ -751,6 +751,29 @@
   border: 1px solid var(--wx-border);
 }
 
+.wx-diff-media {
+  font-size: 0.75rem;
+  padding: 8px 10px;
+  border-radius: var(--wx-radius);
+  background: var(--wx-canvas);
+  border: 1px solid var(--wx-border);
+  margin-bottom: 8px;
+}
+
+.wx-diff-media-title {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+
+.wx-diff-media ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.wx-diff-media-deleted {
+  color: var(--wx-danger-text);
+}
+
 .wx-diff-upstream,
 .wx-diff-validate {
   font-size: 0.75rem;
@@ -815,6 +838,23 @@
 .wx-media-panel h2 {
   margin: 0 0 4px;
   font-size: 1.125rem;
+}
+
+/* One-line media header (operator 2026-07-21: "the media subheader is far
+   too tall, doesn't need to be over two lines") — title left, Upload right. */
+.wx-media-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.wx-media-header-row h2 {
+  margin: 0;
+}
+
+.wx-media-toolbar-bare {
+  margin-bottom: 0;
 }
 
 .wx-media-toolbar {
@@ -935,6 +975,94 @@ div.wx-media-thumb {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* Media detail sheet + staged-state presentation (decisions/00079). */
+.wx-media-detail {
+  max-width: 420px;
+  width: 100%;
+}
+
+.wx-media-detail-name {
+  word-break: break-all;
+}
+
+.wx-media-detail-preview {
+  display: block;
+  max-width: 100%;
+  max-height: 40vh;
+  object-fit: contain;
+  margin: 10px auto;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-canvas);
+}
+
+.wx-media-detail-meta {
+  margin: 4px 0;
+  font-size: 0.8125rem;
+  color: var(--wx-muted);
+}
+
+.wx-media-detail-staged-note {
+  margin: 4px 0;
+  font-size: 0.8125rem;
+  color: var(--wx-brand-blue-text);
+}
+
+.wx-media-detail-staged-delete {
+  color: var(--wx-danger-text);
+}
+
+.wx-media-detail-refs {
+  margin: 6px 0;
+  font-size: 0.8125rem;
+  color: var(--wx-muted);
+}
+
+.wx-media-detail-refs ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.wx-media-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.wx-media-detail-actions button {
+  font: 600 0.8125rem/1 system-ui, sans-serif;
+  padding: 8px 12px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.wx-media-detail-replace {
+  border-color: var(--wx-brand-blue) !important;
+  background: var(--wx-brand-blue) !important;
+  color: #fff !important;
+}
+
+.wx-media-badge-staged {
+  background: var(--wx-brand-blue) !important;
+}
+
+.wx-media-badge-delete-staged {
+  background: var(--wx-danger) !important;
+}
+
+.wx-media-item-staged-delete {
+  opacity: 0.55;
+}
+
+.wx-media-item-staged-delete .wx-media-thumb img {
+  filter: grayscale(0.7);
 }
 
 .wx-media-dialog-backdrop {

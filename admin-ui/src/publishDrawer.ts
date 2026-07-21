@@ -48,8 +48,32 @@ function defaultOpenStream(onUpdate: (job: PublishJobData) => void): PublishStre
   return { close: () => source.close() };
 }
 
-function renderUpstream(upstream: UpstreamCommit[]): HTMLElement | null {
-  if (upstream.length === 0) return null;
+function renderMediaChanges(mediaChanges: { replaced: string[]; deleted: string[] }): HTMLElement | null {
+  if (mediaChanges.replaced.length === 0 && mediaChanges.deleted.length === 0) return null;
+  const wrap = document.createElement("div");
+  wrap.className = "wx-diff-media";
+  const count = mediaChanges.replaced.length + mediaChanges.deleted.length;
+  const title = document.createElement("p");
+  title.className = "wx-diff-media-title";
+  title.textContent = count === 1 ? "1 media change" : `${count} media changes`;
+  wrap.appendChild(title);
+  const list = document.createElement("ul");
+  for (const name of mediaChanges.replaced) {
+    const li = document.createElement("li");
+    li.textContent = `↻ ${name} — replaced`;
+    list.appendChild(li);
+  }
+  for (const name of mediaChanges.deleted) {
+    const li = document.createElement("li");
+    li.className = "wx-diff-media-deleted";
+    li.textContent = `✕ ${name} — deleted`;
+    list.appendChild(li);
+  }
+  wrap.appendChild(list);
+  return wrap;
+}
+
+function renderUpstream(upstream: UpstreamCommit[]): HTMLElement | null {  if (upstream.length === 0) return null;
   const wrap = document.createElement("div");
   wrap.className = "wx-diff-upstream";
   const title = document.createElement("h4");
@@ -115,6 +139,9 @@ export function mountPublishDrawer(deps: PublishDrawerDeps): PublishDrawer {
 
     const upstreamEl = renderUpstream(deps.upstream);
     if (upstreamEl !== null) body.appendChild(upstreamEl);
+
+    const mediaEl = renderMediaChanges(preview.mediaChanges);
+    if (mediaEl !== null) body.appendChild(mediaEl);
 
     const validateEl = renderValidate(preview);
     if (validateEl !== null) body.appendChild(validateEl);

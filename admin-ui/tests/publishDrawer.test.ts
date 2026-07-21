@@ -14,6 +14,7 @@ function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
     getTheme: vi.fn(),
     getPublishPreview: vi.fn(async (): Promise<PublishPreview> => ({
       changes: {},
+      mediaChanges: { replaced: [], deleted: [] },
       opCount: 1,
       validate: { ok: true, errors: [] },
     })),
@@ -27,12 +28,42 @@ function noopStream(): PublishStreamHandle {
 }
 
 describe("mountPublishDrawer", () => {
+  it("renders the media-changes section when media replacements/deletions are staged", async () => {
+    const drawer = mountPublishDrawer({
+      api: fakeApi({
+        getPublishPreview: vi.fn(async (): Promise<PublishPreview> => ({
+          changes: {},
+          mediaChanges: { replaced: ["hero.jpg"], deleted: ["unused.png"] },
+          opCount: 2,
+          validate: { ok: true, errors: [] },
+        })),
+      }),
+      expectedRev: 0,
+      upstream: [],
+      onClose: vi.fn(),
+      onPublished: vi.fn(),
+      openStream: noopStream,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const section = drawer.element.querySelector(".wx-diff-media");
+    expect(section).not.toBeNull();
+    expect(section?.textContent).toContain("2 media changes");
+    expect(section?.textContent).toContain("hero.jpg — replaced");
+    expect(section?.textContent).toContain("unused.png — deleted");
+    // and Publish stays enabled (opCount includes the media changes)
+    const confirm = drawer.element.querySelector<HTMLButtonElement>(".wx-publish-confirm");
+    expect(confirm?.disabled).toBe(false);
+  });
+
   it("shows 'No draft changes' when the preview has none", async () => {
     const drawer = mountPublishDrawer({
       api: fakeApi({
         getPublishPreview: vi.fn(async (): Promise<PublishPreview> => ({
           changes: {},
-          opCount: 1, // e.g. a staged page op — content changes alone can be empty
+          mediaChanges: { replaced: [], deleted: [] },
+      opCount: 1, // e.g. a staged page op — content changes alone can be empty
           validate: { ok: true, errors: [] },
         })),
       }),
@@ -54,7 +85,8 @@ describe("mountPublishDrawer", () => {
       api: fakeApi({
         getPublishPreview: vi.fn(async (): Promise<PublishPreview> => ({
           changes: {},
-          opCount: 0,
+          mediaChanges: { replaced: [], deleted: [] },
+      opCount: 0,
           validate: { ok: true, errors: [] },
         })),
         publish,
@@ -83,7 +115,8 @@ describe("mountPublishDrawer", () => {
       api: fakeApi({
         getPublishPreview: vi.fn(async (): Promise<PublishPreview> => ({
           changes: {},
-          opCount: 0,
+          mediaChanges: { replaced: [], deleted: [] },
+      opCount: 0,
           validate: { ok: true, errors: [] },
         })),
       }),
@@ -127,7 +160,8 @@ describe("mountPublishDrawer", () => {
           index: [{ key: "hero.title", kind: "text", old: "Old", new: "New" }],
           theme: [{ key: "colors.cream", kind: "theme", old: "#FFF", new: "#000" }],
         },
-        opCount: 2,
+        mediaChanges: { replaced: [], deleted: [] },
+      opCount: 2,
         validate: { ok: true, errors: [] },
       })),
     });
@@ -162,7 +196,8 @@ describe("mountPublishDrawer", () => {
             },
           ],
         },
-        opCount: 1,
+        mediaChanges: { replaced: [], deleted: [] },
+      opCount: 1,
         validate: { ok: true, errors: [] },
       })),
     });
@@ -207,7 +242,8 @@ describe("mountPublishDrawer", () => {
     const api = fakeApi({
       getPublishPreview: vi.fn(async () => ({
         changes: {},
-        opCount: 1,
+        mediaChanges: { replaced: [], deleted: [] },
+      opCount: 1,
         validate: {
           ok: false,
           errors: [{ code: "missing-image", message: "image file 'x.jpg' does not exist", file: "content/index.json" }],

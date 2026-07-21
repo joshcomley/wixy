@@ -51,6 +51,14 @@ class ProjectPaths:
         return self.draft_dir / "media"
 
     @property
+    def draft_media_replace(self) -> Path:
+        return self.draft_dir / "media-replace"
+
+    @property
+    def draft_media_deleted_list(self) -> Path:
+        return self.draft_dir / "media-deleted.json"
+
+    @property
     def builds(self) -> Path:
         return self.root / "builds"
 
@@ -98,5 +106,6 @@ def ensure_project_dirs(paths: ProjectPaths) -> None:
     """
     paths.root.mkdir(parents=True, exist_ok=True)
     paths.draft_media.mkdir(parents=True, exist_ok=True)
+    paths.draft_media_replace.mkdir(parents=True, exist_ok=True)
     paths.builds.mkdir(parents=True, exist_ok=True)
     paths.locks_dir.mkdir(parents=True, exist_ok=True)
