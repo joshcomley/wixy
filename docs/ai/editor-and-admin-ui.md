@@ -24,8 +24,10 @@ between them. Spec: [`spec/05-editor.md`](../../spec/05-editor.md). The wire typ
   (squished tablet/desktop simulation, decisions/00076); the scale rides
   `setDevice.scale` so the overlay's composer can counter-scale. In edit view the shell
   hides BOTH title bars (`wx-shell-editing`) behind a slim one-line edit bar (back icon,
-  device switcher left, Settings + a 10s chrome-reveal ▾ right); the shell hands those
-  buttons to `mountEditView` as `toolbarLeading`/`toolbarTrailing`.
+  device switcher left, Settings + a 10s chrome-reveal ▾ right) which the shell hands to
+  `mountEditView` as `toolbarLeading`/`toolbarTrailing` and which pins into a
+  `.wx-edit-bar-host` row in the shell's NON-scrolling chrome (`toolbarHost` dep,
+  decisions/00082) — never the scrolling `.wx-main`, so it can't scroll out of reach.
 
 ## The edit protocol
 

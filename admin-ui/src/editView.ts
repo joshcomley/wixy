@@ -168,6 +168,12 @@ export interface MountEditViewDeps {
    * while the iframe was still loading (or mid-reload) isn't silently lost
    * (the E2E-3 full-suite flake, decisions/00076). */
   onOverlayReady?: () => void;
+  /** Mount the device toolbar into THIS host element instead of the edit
+   * view's own root — the shell uses it to pin the slim edit bar in the
+   * non-scrolling chrome (operator 2026-07-22: the bar must ALWAYS be
+   * visible; inside the scrolling main it could scroll out of reach,
+   * decisions/00082). The edit view's root then contains only the iframe. */
+  toolbarHost?: HTMLElement;
 }
 
 export function mountEditView(page: string, deps: MountEditViewDeps): EditView {
@@ -207,7 +213,12 @@ export function mountEditView(page: string, deps: MountEditViewDeps): EditView {
   iframe.title = "Page preview";
   frameWrap.appendChild(iframe);
 
-  root.append(toolbar, frameWrap);
+  if (deps.toolbarHost !== undefined) {
+    deps.toolbarHost.appendChild(toolbar);
+    root.appendChild(frameWrap);
+  } else {
+    root.append(toolbar, frameWrap);
+  }
 
   function postToOverlay(message: ShellToOverlayMessage): void {
     iframe.contentWindow?.postMessage(message, win.location.origin);
@@ -224,11 +235,18 @@ export function mountEditView(page: string, deps: MountEditViewDeps): EditView {
 
   function applyViewport(): void {
     const wrapWidth = frameWrap.clientWidth || win.innerWidth;
-    const wrapHeight = frameWrap.clientHeight || win.innerHeight;
+    const wrapHeight = frameWrap.clientHeight;
     const deviceWidth = DEVICE_WIDTHS[currentDevice];
     const scale = viewportScaleFor(wrapWidth, deviceWidth);
     iframe.style.width = `${deviceWidth}px`;
-    iframe.style.height = `${Math.max(1, Math.round(wrapHeight / scale))}px`;
+    // Only size the height from a MEASURED wrap — the pre-layout fallback to
+    // window.innerHeight overshoots (the wrap is shorter than the window once
+    // the slim bar exists), and an over-tall iframe is exactly the sort of
+    // thing that can push the main area into scrolling (decisions/00082).
+    // Until the wrap has laid out, the stylesheet's height:100% covers it.
+    if (wrapHeight > 0) {
+      iframe.style.height = `${Math.max(1, Math.round(wrapHeight / scale))}px`;
+    }
     iframe.style.transform = scale === 1 ? "" : `scale(${scale})`;
     // deviceWidth * scale == wrapWidth exactly when shrunk (fills the wrap);
     // at scale 1 on a wider wrap, center the device frame as before.
@@ -297,6 +315,10 @@ export function mountEditView(page: string, deps: MountEditViewDeps): EditView {
     teardown(): void {
       win.removeEventListener("message", messageListener);
       resizeObserver?.disconnect();
+      // The toolbar may live in the shell's pinned host (toolbarHost) rather
+      // than inside this view's root — remove it from either parent or a
+      // stale bar lingers on the next route (decisions/00082).
+      toolbar.remove();
     },
   };
 }
