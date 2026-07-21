@@ -369,7 +369,7 @@ describe("mountShell", () => {
       expect(container.classList.contains("wx-shell-editing")).toBe(false);
     });
 
-    it("passes a slim-bar back button, the draft chip, Settings, and reveal button to the edit view", async () => {
+    it("passes a slim-bar back button, Settings, and reveal button to the edit view", async () => {
       const api = fakeApi();
       const win = fakeWindow();
       const container = document.createElement("div");
@@ -386,12 +386,13 @@ describe("mountShell", () => {
       const trailing = deps?.toolbarTrailing ?? [];
       expect(leading[0]?.className).toBe("wx-edit-back");
       expect(leading[0]?.getAttribute("aria-label")).toBe("Back to pages");
-      // The draft chip relocates into the slim bar while editing — the only
-      // publish trigger with the topbar hidden (decisions/00076).
-      expect(trailing[0]?.className).toBe("wx-draft-chip");
-      expect(trailing[1]?.className).toBe("wx-page-settings-trigger");
-      expect(trailing[1]?.textContent).toBe("Settings");
-      expect(trailing[2]?.className).toBe("wx-chrome-reveal");
+      // No draft chip in the slim bar any more (decisions/00083) — the publish
+      // surface is the always-visible status bar above, so the slim bar keeps
+      // just Settings and the chrome-reveal toggle.
+      expect(trailing).toHaveLength(2);
+      expect(trailing[0]?.className).toBe("wx-page-settings-trigger");
+      expect(trailing[0]?.textContent).toBe("Settings");
+      expect(trailing[1]?.className).toBe("wx-chrome-reveal");
     });
 
     it("the slim edit bar pins into the shell chrome host, never the scrolling main (decisions/00082)", async () => {
@@ -420,21 +421,41 @@ describe("mountShell", () => {
       expect(container.querySelector(".wx-device-toolbar")).toBeNull();
     });
 
-    it("the draft chip moves back to the topbar when leaving edit view", async () => {
+    it("the draft chip stays in the status bar on every route — never the slim bar or topbar (decisions/00083)", async () => {
       const api = fakeApi();
       const win = fakeWindow();
       const container = document.createElement("div");
 
       mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
       await flushState(api);
+      const chip = container.querySelector(".wx-draft-chip");
+      expect(chip?.closest(".wx-statusbar")).not.toBeNull();
+      expect(chip?.closest(".wx-topbar")).toBeNull();
+
       win.location.hash = "#/edit/index";
       await Promise.resolve();
-      const chip = container.querySelector(".wx-draft-chip");
-      expect(chip?.closest(".wx-topbar")).toBeNull();
+      expect(chip?.closest(".wx-statusbar")).not.toBeNull();
+      expect(chip?.closest(".wx-device-toolbar")).toBeNull();
 
       win.location.hash = "#/pages";
       await Promise.resolve();
-      expect(container.querySelector(".wx-draft-chip")?.closest(".wx-topbar")).not.toBeNull();
+      expect(chip?.closest(".wx-statusbar")).not.toBeNull();
+      expect(chip?.closest(".wx-topbar")).toBeNull();
+    });
+
+    it("the status bar sits at the very top of the shell with the chip left and Publish right", async () => {
+      const api = fakeApi();
+      const win = fakeWindow();
+      const container = document.createElement("div");
+
+      mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+      await flushState(api);
+
+      const statusBar = container.querySelector(".wx-statusbar");
+      expect(statusBar).not.toBeNull();
+      expect(container.firstElementChild).toBe(statusBar); // above the topbar
+      const children = Array.from(statusBar?.children ?? []).map((el) => el.className);
+      expect(children).toEqual(["wx-draft-chip", "wx-publish-button"]);
     });
 
     it("the slim-bar back button navigates to the pages list", async () => {
@@ -465,7 +486,7 @@ describe("mountShell", () => {
         win.location.hash = "#/edit/index";
         await Promise.resolve();
 
-        const reveal = editView.lastDeps?.toolbarTrailing?.[2];
+        const reveal = editView.lastDeps?.toolbarTrailing?.[1];
         expect(container.classList.contains("wx-shell-chrome-revealed")).toBe(false);
         reveal?.click();
         expect(container.classList.contains("wx-shell-chrome-revealed")).toBe(true);
@@ -490,7 +511,7 @@ describe("mountShell", () => {
       win.location.hash = "#/edit/index";
       await Promise.resolve();
 
-      editView.lastDeps?.toolbarTrailing?.[2]?.click();
+      editView.lastDeps?.toolbarTrailing?.[1]?.click();
       expect(container.classList.contains("wx-shell-chrome-revealed")).toBe(true);
       win.location.hash = "#/pages";
       await Promise.resolve();
@@ -751,8 +772,8 @@ describe("mountShell", () => {
     await Promise.resolve();
 
     // The Settings trigger is handed to the edit view's toolbar (decisions/00076) —
-    // trailing order is [draft chip, Settings, reveal].
-    editView.lastDeps?.toolbarTrailing?.[1]?.click();
+    // trailing order is [Settings, reveal].
+    editView.lastDeps?.toolbarTrailing?.[0]?.click();
     await Promise.resolve();
     expect(container.querySelectorAll(".wx-drawer")).toHaveLength(1);
     expect(container.querySelector(".wx-drawer-wide")).toBeNull();

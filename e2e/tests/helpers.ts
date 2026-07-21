@@ -77,14 +77,18 @@ export function waitForNextDraftPatchAccepted(page: Page): Promise<number> {
 
 const PUBLISH_CONFLICT_RETRY_LIMIT = 5;
 
-/** Opens the publish drawer (the top-bar Publish button — spec/05 §5), confirms,
- * and waits for `POST /api/admin/publish` to come back 200, returning the new
- * version number. Every E2E flow that publishes (1, 4, 5, 6) needs this exact
- * sequence, so it's shared from the moment a SECOND flow needs it rather than
- * duplicated per spec file — unlike `gotoEditAndWaitReady`/`editTextField`/
+/** Opens the publish drawer (the status bar's Publish button — spec/05 §5),
+ * confirms, and waits for `POST /api/admin/publish` to come back 200, returning
+ * the new version number. Every E2E flow that publishes (1, 4, 5, 6) needs this
+ * exact sequence, so it's shared from the moment a SECOND flow needs it rather
+ * than duplicated per spec file — unlike `gotoEditAndWaitReady`/`editTextField`/
  * `trackConsoleErrors` (decisions/00023 decision 2), which waited for a third
  * consumer, here all four consumers were already known up front.
  *
+ * The trigger is the status bar's Publish button (decisions/00083): the slim,
+ * always-visible unpublished-changes bar at the very top of the shell, shown
+ * on EVERY route including the edit view (the old topbar Publish button hid
+ * there; the draft chip no longer relocates into the slim edit bar either).
  * Retries on a 409 rev-conflict: every accepted PATCH fires a background,
  * un-awaited `GET /api/admin/state` (shell.ts's `refreshStateInBackground`, off
  * the OpQueue's `onAccepted`) that the drawer's `expectedRev` is built from —
@@ -100,10 +104,7 @@ const PUBLISH_CONFLICT_RETRY_LIMIT = 5;
  * using this expects the publish to eventually succeed. */
 export async function publishAndWait(page: Page): Promise<number> {
   for (let attempt = 0; attempt < PUBLISH_CONFLICT_RETRY_LIMIT; attempt++) {
-    // The draft chip is the drawer trigger on EVERY route — in edit view it's
-    // the only visible one (the topbar's Publish button is hidden there,
-    // decisions/00076), elsewhere it's interchangeable with that button.
-    await page.click(".wx-draft-chip");
+    await page.click(".wx-statusbar .wx-publish-button");
     await page.waitForSelector(".wx-publish-confirm");
     const publishResponse = page.waitForResponse(
       (res) => res.url().endsWith("/api/admin/publish") && res.request().method() === "POST",
