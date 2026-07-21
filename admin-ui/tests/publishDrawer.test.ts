@@ -153,15 +153,16 @@ describe("mountPublishDrawer", () => {
     expect(drawer.element.querySelector(".wx-publish-empty-hint")).toBeNull();
   });
 
-  it("renders diff entries grouped by page/global/theme", async () => {
+  it("renders diff entries grouped by page/global/theme with layman group labels", async () => {
     const api = fakeApi({
       getPublishPreview: vi.fn(async () => ({
         changes: {
           index: [{ key: "hero.title", kind: "text", old: "Old", new: "New" }],
+          _global: [{ key: "hours", kind: "list", old: [], new: [{}] }],
           theme: [{ key: "colors.cream", kind: "theme", old: "#FFF", new: "#000" }],
         },
         mediaChanges: { replaced: [], deleted: [] },
-      opCount: 2,
+        opCount: 3,
         validate: { ok: true, errors: [] },
       })),
     });
@@ -177,10 +178,15 @@ describe("mountPublishDrawer", () => {
     await Promise.resolve();
 
     const groups = drawer.element.querySelectorAll(".wx-diff-group");
-    expect(groups).toHaveLength(2);
+    expect(groups).toHaveLength(3);
+    const labels = [...groups].map((g) => g.querySelector("h4")?.textContent);
+    // Raw slugs ("_global", "index") never reach the user (decisions/00081).
+    // Groups render in Object-key sort order: _global, index, theme.
+    expect(labels).toEqual(["Site-wide", "Home", "Theme"]);
     const rows = drawer.element.querySelectorAll(".wx-diff-row");
-    expect(rows).toHaveLength(2);
-    expect(drawer.element.querySelector(".wx-diff-key")?.textContent).toBe("hero.title");
+    expect(rows).toHaveLength(3);
+    const keys = [...rows].map((r) => r.querySelector(".wx-diff-key")?.textContent);
+    expect(keys).toEqual(["hours", "hero.title", "colors.cream"]);
   });
 
   it("renders an image thumbnail for img/bg kind entries instead of raw JSON", async () => {
@@ -218,7 +224,7 @@ describe("mountPublishDrawer", () => {
     expect(thumbs[1]?.src).toContain("/admin/draft-media/new.jpg");
   });
 
-  it("shows upstream commits when present", async () => {
+  it("shows updates waiting in layman terms when upstream commits are present", async () => {
     const drawer = mountPublishDrawer({
       api: fakeApi(),
       expectedRev: 0,
@@ -231,10 +237,32 @@ describe("mountPublishDrawer", () => {
     await Promise.resolve();
 
     expect(drawer.element.querySelector(".wx-diff-upstream h4")?.textContent).toBe(
-      "1 upstream commit",
+      "1 update waiting to go live",
     );
+    // The plain-English framing: what these ARE and that publishing includes them.
+    expect(drawer.element.querySelector(".wx-diff-upstream-note")?.textContent).toContain(
+      "included automatically when you publish",
+    );
+    // The technical detail stays, listed under the explanation.
     expect(drawer.element.querySelector(".wx-diff-upstream li")?.textContent).toBe(
       "fix typo — AI",
+    );
+  });
+
+  it("frames the whole drawer as 'not live yet' with a plain-English intro", async () => {
+    const drawer = mountPublishDrawer({
+      api: fakeApi(),
+      expectedRev: 0,
+      upstream: [],
+      onClose: vi.fn(),
+      onPublished: vi.fn(),
+      openStream: noopStream,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(drawer.element.querySelector(".wx-publish-intro")?.textContent).toContain(
+      "Nothing below is on your live website yet",
     );
   });
 

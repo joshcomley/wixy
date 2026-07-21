@@ -461,8 +461,14 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     titleEl.textContent = `Wixy · ${state.project.name}`;
     const opCount = state.draft.opCount;
     const ahead = state.upstream.aheadOfPublished.length;
-    const parts: string[] = [opCount === 1 ? "1 change" : `${opCount} changes`];
-    if (ahead > 0) parts.push(ahead === 1 ? "1 upstream commit" : `${ahead} upstream commits`);
+    // Layman wording (decisions/00081): "unpublished changes" answers the one
+    // question the chip exists for ("is anything not live yet?"); "upstream
+    // commits" meant nothing to a non-developer — they're updates made outside
+    // the editor that aren't live either, explained fully in the drawer.
+    const parts: string[] = [
+      opCount === 1 ? "1 unpublished change" : `${opCount} unpublished changes`,
+    ];
+    if (ahead > 0) parts.push(ahead === 1 ? "1 update waiting" : `${ahead} updates waiting`);
     chipEl.textContent = parts.join(" · ");
     siteLink.href = `https://${state.project.domain}`;
     siteLink.hidden = false;
@@ -570,9 +576,14 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     return el;
   }
 
-  function mountPanel(route: Route): void {
+  function mountPanel(route: Route, options: { preserveDrawer?: boolean } = {}): void {
     main.innerHTML = "";
-    closeDrawer();
+    // A same-route background refresh (the revalidate tick, a pages-panel
+    // action) must NOT yank an open drawer out from under the user mid-review
+    // — only a genuine route change closes it (the 2026-07-21 report: the
+    // changes view vanished on every Chrome tab switch, because the
+    // visibilitychange revalidate remounted the pages panel underneath it).
+    if (options.preserveDrawer !== true) closeDrawer();
     // The draft chip lives in the slim edit bar during edit view; every other
     // route gets it back in the topbar (its original slot, before Publish).
     if (route.kind !== "edit" && chipEl.parentElement !== topbar) {
@@ -821,7 +832,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
    * new/removed page immediately. */
   async function refreshPagesPanel(): Promise<void> {
     await refreshStateInBackground();
-    if (activeRoute?.kind === "pages") mountPanel(activeRoute);
+    if (activeRoute?.kind === "pages") mountPanel(activeRoute, { preserveDrawer: true });
   }
 
   // -- Revalidation (Edit-button latch incident, 2026-07-19) -------------------
@@ -830,7 +841,8 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   // Now: while the tab is visible, state revalidates every REVALIDATE_MS and
   // whenever the tab regains visibility; a mounted pages panel re-renders from
   // the fresh snapshot (it has no typing state to lose — same rationale as
-  // refreshPagesPanel); and a server deploy (commit change on /api/version)
+  // refreshPagesPanel) WITHOUT disturbing an open drawer (mountPanel's
+  // preserveDrawer); and a server deploy (commit change on /api/version)
   // reloads the shell outside the edit view (inside it, a toast asks instead —
   // never yank a live editing iframe out from under a keystroke).
 
@@ -853,7 +865,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       }
     }
     await refreshStateInBackground();
-    if (activeRoute?.kind === "pages") mountPanel(activeRoute);
+    if (activeRoute?.kind === "pages") mountPanel(activeRoute, { preserveDrawer: true });
   }
 
   // Capability-guarded: unit-test fakes of `win` may omit timers/document.

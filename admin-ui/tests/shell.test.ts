@@ -27,15 +27,20 @@ function fakeStorage(): Storage {
  * (undefined) — screenshot.test.ts already covers captureScreenshot's own
  * logic in depth; shell-level tests only need to confirm the click ->
  * captureScreenshot -> toast wiring, which the "unsupported" path exercises
- * without needing a fake <video>/<canvas>. */
+ * without needing a fake <video>/<canvas>. `revalidation: true` installs the
+ * pieces the shell's revalidation loop needs (a manual-tick setInterval and a
+ * minimal visible `document`) — inert unless the test fires the captured tick
+ * itself, exposed as `win.__intervalCallbacks`. */
 function fakeWindow(
   opts: {
     storage?: Storage;
     initialHash?: string;
     getDisplayMedia?: (options: unknown) => Promise<MediaStream>;
+    revalidation?: boolean;
   } = {},
 ): Window {
   const listeners = new Map<string, Set<(e?: Event) => void>>();
+  const intervalCallbacks: Array<() => void> = [];
   let hash = opts.initialHash ?? "";
   const win = {
     location: {
@@ -65,8 +70,29 @@ function fakeWindow(
       return true;
     },
     confirm: () => true,
+    ...(opts.revalidation === true
+      ? {
+          setInterval: (cb: () => void) => {
+            intervalCallbacks.push(cb);
+            return intervalCallbacks.length;
+          },
+          clearInterval: () => undefined,
+          document: {
+            visibilityState: "visible",
+            addEventListener: () => undefined,
+            removeEventListener: () => undefined,
+          },
+          __intervalCallbacks: intervalCallbacks,
+        }
+      : {}),
   };
   return win as unknown as Window;
+}
+
+/** The captured revalidate-interval callbacks — only present when the window
+ * was built with `revalidation: true`. */
+function intervalCallbacksOf(win: Window): Array<() => void> {
+  return (win as unknown as { __intervalCallbacks: Array<() => void> }).__intervalCallbacks;
 }
 
 function fakeState(overrides: Partial<StateResponse> = {}): StateResponse {
@@ -224,7 +250,33 @@ describe("mountShell", () => {
 
     await flushState(api);
     expect(container.querySelector(".wx-topbar-title")?.textContent).toBe("Wixy · Cottage Aesthetics");
-    expect(container.querySelector(".wx-draft-chip")?.textContent).toBe("0 changes");
+    expect(container.querySelector(".wx-draft-chip")?.textContent).toBe("0 unpublished changes");
+  });
+
+  it("the draft chip says 'unpublished changes' and counts updates waiting in layman terms", async () => {
+    const api = fakeApi({
+      getState: vi.fn(async () =>
+        fakeState({
+          draft: { rev: 0, opCount: 6 },
+          upstream: {
+            aheadOfPublished: [
+              { sha: "a", subject: "s1", author: "x", when: "2026-01-01" },
+              { sha: "b", subject: "s2", author: "y", when: "2026-01-02" },
+            ],
+            fetchedAt: null,
+          },
+        }),
+      ),
+    });
+    const win = fakeWindow();
+    const container = document.createElement("div");
+
+    mountShell(container, { api, win });
+    await flushState(api);
+
+    expect(container.querySelector(".wx-draft-chip")?.textContent).toBe(
+      "6 unpublished changes · 2 updates waiting",
+    );
   });
 
   it("defaults to the pages panel and lists fetched pages", async () => {
@@ -625,6 +677,49 @@ describe("mountShell", () => {
     await Promise.resolve();
 
     expect(container.querySelector(".wx-drawer-wide")).not.toBeNull();
+  });
+
+  it("keeps the publish drawer open across a background revalidate tick", async () => {
+    // The 2026-07-21 report: reviewing changes, switching to another Chrome
+    // tab and back dropped the user out of the changes view — the
+    // visibilitychange/interval revalidate remounted the pages panel and the
+    // remount closed the drawer (decisions/00081).
+    const api = fakeApi({ getServerCommit: vi.fn(async () => null) });
+    const win = fakeWindow({ revalidation: true });
+    const container = document.createElement("div");
+
+    const shell = mountShell(container, { api, win });
+    await flushState(api);
+
+    container.querySelector<HTMLButtonElement>(".wx-draft-chip")?.click();
+    await Promise.resolve();
+    expect(container.querySelector(".wx-drawer-wide")).not.toBeNull();
+
+    const stateCallsBefore = (api.getState as ReturnType<typeof vi.fn>).mock.calls.length;
+    const ticks = intervalCallbacksOf(win);
+    expect(ticks.length).toBeGreaterThan(0);
+    ticks[0]!();
+    // revalidate() awaits getServerCommit before fetching state — flush
+    // microtasks until the fresh getState lands (all fakes resolve inline).
+    for (
+      let i = 0;
+      i < 20 &&
+      (api.getState as ReturnType<typeof vi.fn>).mock.calls.length === stateCallsBefore;
+      i += 1
+    ) {
+      await Promise.resolve();
+    }
+    await flushState(api);
+    await Promise.resolve();
+
+    // The revalidate really ran (fresh state fetched) and the pages panel
+    // remounted — but the drawer survived it.
+    expect((api.getState as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(
+      stateCallsBefore,
+    );
+    expect(container.querySelector(".wx-pages-table")).not.toBeNull();
+    expect(container.querySelector(".wx-drawer-wide")).not.toBeNull();
+    shell.teardown();
   });
 
   it("the Publish button and chip are disabled while a publish is already running", async () => {

@@ -45,7 +45,11 @@ function renderDiffValue(kind: string, value: unknown): HTMLElement {
 
 function groupLabel(fileKey: string): string {
   if (fileKey === "theme") return "Theme";
-  if (fileKey === "_global") return "Global";
+  // Layman labels (decisions/00081): `_global` holds site-wide things (contact
+  // details, opening hours, nav) and `index` is the home page — the raw slugs
+  // meant nothing to a non-developer reviewing their changes.
+  if (fileKey === "_global") return "Site-wide";
+  if (fileKey === "index") return "Home";
   return fileKey;
 }
 

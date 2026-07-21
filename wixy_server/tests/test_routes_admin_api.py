@@ -1527,6 +1527,38 @@ class TestGetPublishPreview:
             {"key": "colors.cream", "kind": "theme", "old": "#F1E8D9", "new": "#FFFFFF"}
         ]
 
+    def test_a_global_list_op_is_diffed_with_kind_list(
+        self, storage_root: Path, wixy_repo_root_bindings: Path
+    ) -> None:
+        """`_global` bindings are spelled `@hours` in templates but `hours` in
+        overlay ops — the preview's kind lookup must bridge that spelling gap
+        or the review drawer dumps the raw opening-hours JSON instead of the
+        compact "N item(s)" list rendering (decisions/00079)."""
+        new_hours = [
+            {"day": "Monday", "value": "10:00 – 19:00"},
+            {"day": "Tuesday", "value": "10:00 – 17:00"},
+        ]
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bindings)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [{"file": "_global", "path": "hours", "value": new_hours}],
+                },
+            )
+            response = client.get("/api/admin/publish/preview")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["changes"]["_global"] == [
+            {
+                "key": "hours",
+                "kind": "list",
+                "old": [{"day": "Monday", "value": "10:00 – 19:00"}],
+                "new": new_hours,
+            }
+        ]
+
     def test_no_draft_ops_is_an_empty_diff(self, storage_root: Path, wixy_repo_root: Path) -> None:
         app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
         with TestClient(app) as client:

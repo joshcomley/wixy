@@ -23,7 +23,7 @@ from wixy_server.overlay import Overlay, OverlayOp, load_overlay, save_overlay
 from wixy_server.publisher import PublishJob, run_publish
 from wixy_server.restore import run_restore
 from wixy_server.storage import ProjectPaths, ensure_project_dirs, project_paths
-from wixy_server.version_diff import build_version_diff
+from wixy_server.version_diff import binding_kind_for, build_version_diff
 
 _TS = "2026-07-10T09:00:00+00:00"
 
@@ -342,3 +342,24 @@ class TestBuildVersionDiff:
         _publish(project, paths, {"index:hero.title": "V1 Title"}, "first")
 
         assert build_version_diff(project, paths, 99) is None
+
+
+class TestBindingKindFor:
+    """The `@hours`-in-template vs `hours`-in-op spelling bridge
+    (decisions/00079): `_global` diff paths must resolve through the template's
+    `@`-prefixed binding keys, everything else must not."""
+
+    def test_global_list_key_resolves_via_at_prefixed_binding(self) -> None:
+        kinds = {"_global": {"@hours": "list", "@phone": "text"}}
+        assert binding_kind_for(kinds, "_global", "hours") == "list"
+        assert binding_kind_for(kinds, "_global", "phone") == "text"
+
+    def test_page_keys_never_retry_with_the_at_spelling(self) -> None:
+        kinds = {"index": {"@hours": "list"}, "_global": {"@hours": "list"}}
+        # A page-local key that happens to collide with a global binding name
+        # reports text (its true kind) rather than aliasing the global's kind.
+        assert binding_kind_for(kinds, "index", "hours") == "text"
+
+    def test_theme_and_unknown_keys(self) -> None:
+        assert binding_kind_for({}, "theme", "colors.cream") == "theme"
+        assert binding_kind_for({}, "index", "hero.title") == "text"

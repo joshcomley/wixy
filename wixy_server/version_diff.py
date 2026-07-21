@@ -42,17 +42,27 @@ from wixy_server.storage import ProjectPaths
 
 def binding_kind_lookup(merged: SiteSource) -> dict[str, dict[str, str]]:
     """`{file_key: {dotted_key: kind}}` for every page's own bindings, plus one
-    shared `_global` entry (globals/partials are common to every page, so any
-    single page's bindings map already carries every `_global` binding too —
-    picked up here for free from whichever page is computed first, no extra
-    `extract_bindings_map` call). `theme` keys have no bindings-map entry at
-    all (spec's theme model is a separate typed thing, never walked via
-    `data-wx-*` attributes) — the caller reports `"theme"` directly instead."""
+    shared `_global` entry. `theme` keys have no bindings-map entry at all
+    (spec's theme model is a separate typed thing, never walked via
+    `data-wx-*` attributes) — the caller reports `"theme"` directly instead.
+
+    The `_global` entry is the UNION of every page's `@`-prefixed bindings:
+    the old "copy whichever page sorts first" shortcut relied on partials
+    making every global binding visible on every page, which is NOT a real
+    invariant — Cottage Aesthetics binds `@hours` on contact+index only, so
+    first-page synthesis (about) dropped it and the publish review rendered
+    the hours diff as a raw JSON dump (decisions/00081). First page to bind a
+    key wins on a (never-seen) kind conflict, sorted for determinism."""
     lookup: dict[str, dict[str, str]] = {}
     for slug in merged.page_contents:
         bindings = extract_bindings_map(merged, slug)
         lookup[slug] = {field.key: field.kind for field in bindings.fields}
-    lookup[GLOBAL_CONTENT_NAME] = dict(lookup[sorted(lookup)[0]]) if lookup else {}
+    global_kinds: dict[str, str] = {}
+    for slug in sorted(lookup):
+        for key, kind in lookup[slug].items():
+            if key.startswith("@"):
+                global_kinds.setdefault(key, kind)
+    lookup[GLOBAL_CONTENT_NAME] = global_kinds
     return lookup
 
 
@@ -62,6 +72,25 @@ def container_for(source: SiteSource, file_key: str) -> JsonValue:
     if file_key == GLOBAL_CONTENT_NAME:
         return source.global_content
     return source.page_contents.get(file_key)
+
+
+def binding_kind_for(kinds: dict[str, dict[str, str]], file_key: str, dotted_path: str) -> str:
+    """The rendering kind for one diff entry, "text" when the binding is unknown.
+
+    Templates spell global bindings with the `@` marker (`data-wx-list="@hours"`,
+    `data-wx-href="@phoneHref"`) while overlay ops and diff paths use the bare
+    content key (`hours`) — a direct lookup therefore missed every `_global`
+    binding and fell back to "text", which is how the publish review ended up
+    dumping the raw opening-hours JSON instead of "7 item(s)" (decisions/00081).
+    The `@`-spelling retry is confined to `_global` so a page-local key that
+    genuinely starts with `@` can never alias onto a global binding."""
+    if file_key == "theme":
+        return "theme"
+    by_file = kinds.get(file_key, {})
+    kind = by_file.get(dotted_path)
+    if kind is None and file_key == GLOBAL_CONTENT_NAME:
+        kind = by_file.get(f"@{dotted_path}")
+    return kind if kind is not None else "text"
 
 
 def _diff_entries(
@@ -113,9 +142,7 @@ def _diff_group(
     return [
         {
             "key": dotted_path,
-            "kind": (
-                "theme" if file_key == "theme" else kinds.get(file_key, {}).get(dotted_path, "text")
-            ),
+            "kind": binding_kind_for(kinds, file_key, dotted_path),
             "old": old_value,
             "new": new_value,
         }

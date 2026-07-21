@@ -78,7 +78,12 @@ from wixy_server.site_source import build_site_source
 from wixy_server.storage import ProjectPaths
 from wixy_server.thumbnails import ThumbnailError, load_thumbnail, save_thumbnail
 from wixy_server.treelock import tree_lock
-from wixy_server.version_diff import binding_kind_lookup, build_version_diff, container_for
+from wixy_server.version_diff import (
+    binding_kind_for,
+    binding_kind_lookup,
+    build_version_diff,
+    container_for,
+)
 from wixy_server.watcher import WatcherStatus
 
 router = APIRouter(prefix="/api/admin")
@@ -814,7 +819,7 @@ def _build_publish_preview(
         if not sep:
             continue  # malformed key (no ':') — same defensive skip merge_overlay uses
         _, old_value = dotted_get(container_for(old_source, file_key), dotted_path)
-        kind = "theme" if file_key == "theme" else kinds.get(file_key, {}).get(dotted_path, "text")
+        kind = binding_kind_for(kinds, file_key, dotted_path)
         entry: JsonObject = {"key": dotted_path, "kind": kind, "old": old_value, "new": op.value}
         changes.setdefault(file_key, []).append(entry)
 

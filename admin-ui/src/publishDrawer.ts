@@ -78,8 +78,15 @@ function renderUpstream(upstream: UpstreamCommit[]): HTMLElement | null {  if (u
   wrap.className = "wx-diff-upstream";
   const title = document.createElement("h4");
   title.textContent =
-    upstream.length === 1 ? "1 upstream commit" : `${upstream.length} upstream commits`;
+    upstream.length === 1 ? "1 update waiting to go live" : `${upstream.length} updates waiting to go live`;
   wrap.appendChild(title);
+  // Layman framing (decisions/00081): "upstream commits" is git jargon — what
+  // these ARE is work done outside this editor that isn't on the site yet.
+  const note = document.createElement("p");
+  note.className = "wx-diff-upstream-note";
+  note.textContent =
+    "Made outside this editor (for example by the AI assistant or a developer). They're included automatically when you publish.";
+  wrap.appendChild(note);
   const list = document.createElement("ul");
   for (const commit of upstream) {
     const item = document.createElement("li");
@@ -136,6 +143,15 @@ export function mountPublishDrawer(deps: PublishDrawerDeps): PublishDrawer {
 
   function renderLoaded(preview: PublishPreview): void {
     body.innerHTML = "";
+
+    // The one-sentence answer to "does this mean I have unpublished changes?"
+    // (decisions/00081) — yes: everything listed here is not on the live site
+    // yet, and publishing is what takes it live.
+    const intro = document.createElement("p");
+    intro.className = "wx-publish-intro";
+    intro.textContent =
+      "Nothing below is on your live website yet. Review the changes, then press Publish to put them live.";
+    body.appendChild(intro);
 
     const upstreamEl = renderUpstream(deps.upstream);
     if (upstreamEl !== null) body.appendChild(upstreamEl);

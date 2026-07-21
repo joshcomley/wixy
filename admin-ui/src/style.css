@@ -593,9 +593,6 @@
   transform-origin: top left;
   transition: transform 0.15s ease;
 }
-  border: none;
-  display: block;
-}
 
 /* -- Page settings drawer ------------------------------------------------------- */
 
@@ -1369,6 +1366,25 @@ div.wx-media-thumb {
   margin: 8px 0 0;
   color: var(--wx-muted);
   font-size: 0.75rem;
+}
+
+/* The drawer's plain-English "nothing here is live yet" framing
+   (decisions/00081) — the first thing read, so body-sized but quiet. */
+.wx-publish-intro {
+  margin: 0;
+  color: var(--wx-muted);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+/* The upstream box's "made outside this editor" explainer — sits between the
+   heading and the (technical) commit list, which it de-emphasises by taking
+   the readable slot. */
+.wx-diff-upstream-note {
+  margin: 0 0 6px;
+  color: var(--wx-muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
 }
 
 /* -- Settings panel (Uxer's Settings-view + Keyboard-Shortcuts mandate) --------- */
