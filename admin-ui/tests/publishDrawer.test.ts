@@ -27,7 +27,7 @@ function noopStream(): PublishStreamHandle {
 }
 
 describe("mountPublishDrawer", () => {
-  it("shows 'No draft changes' when the preview has none", async () => {
+  it("shows 'No content edits to review' when the preview has none", async () => {
     const drawer = mountPublishDrawer({
       api: fakeApi({
         getPublishPreview: vi.fn(async (): Promise<PublishPreview> => ({
@@ -45,7 +45,9 @@ describe("mountPublishDrawer", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(drawer.element.querySelector(".wx-diff-empty")?.textContent).toBe("No draft changes.");
+    expect(drawer.element.querySelector(".wx-diff-empty")?.textContent).toBe(
+      "No content edits to review.",
+    );
   });
 
   it("disables Publish with a hint when there is nothing to ship (no staged changes, no upstream)", async () => {
@@ -183,7 +185,7 @@ describe("mountPublishDrawer", () => {
     expect(thumbs[1]?.src).toContain("/admin/draft-media/new.jpg");
   });
 
-  it("shows upstream commits when present", async () => {
+  it("shows updates made outside the editor (layman wording for upstream commits) when present", async () => {
     const drawer = mountPublishDrawer({
       api: fakeApi(),
       expectedRev: 0,
@@ -196,10 +198,15 @@ describe("mountPublishDrawer", () => {
     await Promise.resolve();
 
     expect(drawer.element.querySelector(".wx-diff-upstream h4")?.textContent).toBe(
-      "1 upstream commit",
+      "1 update made outside the editor",
     );
     expect(drawer.element.querySelector(".wx-diff-upstream li")?.textContent).toBe(
       "fix typo — AI",
+    );
+    // The plain-English explainer — what these ARE and that publishing covers
+    // them — is what makes the section understandable to a non-technical owner.
+    expect(drawer.element.querySelector(".wx-diff-upstream-note")?.textContent).toContain(
+      "Publishing takes everything live",
     );
   });
 

@@ -54,8 +54,19 @@ function renderUpstream(upstream: UpstreamCommit[]): HTMLElement | null {
   wrap.className = "wx-diff-upstream";
   const title = document.createElement("h4");
   title.textContent =
-    upstream.length === 1 ? "1 upstream commit" : `${upstream.length} upstream commits`;
+    upstream.length === 1
+      ? "1 update made outside the editor"
+      : `${upstream.length} updates made outside the editor`;
   wrap.appendChild(title);
+  // Plain-English framing for a non-technical site owner (decisions/00079):
+  // these are real changes to the site that just didn't go through this
+  // editor, and publishing takes them live too — nothing extra to do.
+  const note = document.createElement("p");
+  note.className = "wx-diff-upstream-note";
+  note.textContent =
+    "These changes were made for you outside this editor — for example by the AI assistant " +
+    "or your developer. Publishing takes everything live in one go.";
+  wrap.appendChild(note);
   const list = document.createElement("ul");
   for (const commit of upstream) {
     const item = document.createElement("li");
@@ -119,7 +130,9 @@ export function mountPublishDrawer(deps: PublishDrawerDeps): PublishDrawer {
     const validateEl = renderValidate(preview);
     if (validateEl !== null) body.appendChild(validateEl);
 
-    body.appendChild(renderDiffGroups(preview.changes, { emptyText: "No draft changes." }));
+    body.appendChild(
+      renderDiffGroups(preview.changes, { emptyText: "No content edits to review." }),
+    );
 
     const messageRow = document.createElement("label");
     messageRow.className = "wx-field-row";

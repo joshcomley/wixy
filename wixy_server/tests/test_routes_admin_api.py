@@ -192,6 +192,49 @@ def wixy_repo_root_bare(tmp_path: Path, bare_origin_repo: Path) -> Path:
 
 
 @pytest.fixture
+def wixy_repo_root_with_global_list(tmp_path: Path) -> Path:
+    """A repo whose INDEX page (only) binds a GLOBAL list
+    (`data-wx-list="@hours"`, the CA site's opening-hours shape — bound there
+    and on contact, deliberately NOT on about, so the preview's `_global` kind
+    bucket must union across pages rather than copy the first). Two
+    reconciliations under test: the bindings map keys it `@hours` (the `@`
+    global-scope marker) while draft ops address it as `_global:hours`, and the
+    first-alphabetical page (about) doesn't bind it at all. Either miss reports
+    kind "text" and the admin UI renders the whole array as raw JSON (operator
+    report, 2026-07-21)."""
+    origin = tmp_path / "origin-globallist"
+    origin.mkdir()
+    _git(["init", "--initial-branch=main"], origin)
+    _git(["config", "user.email", "test@example.com"], origin)
+    _git(["config", "user.name", "Test"], origin)
+    _write_site_repo(origin)
+    (origin / "pages" / "index.html").write_text(
+        """<!DOCTYPE html>
+<html><head><title>placeholder</title></head>
+<body>
+<!-- wx:partial header -->
+<h1 data-wx="hero.title">placeholder</h1>
+<ul data-wx-list="@hours">
+  <li data-wx-list-item><span data-wx=".day">d</span><span data-wx=".value">v</span></li>
+</ul>
+<!-- wx:partial footer -->
+<!-- wx:partial booking-modal -->
+</body></html>
+""",
+        encoding="utf-8",
+    )
+    (origin / "content" / "_global.json").write_text(
+        json.dumps({"hours": [{"day": "Monday", "value": "10:00 – 19:00", "closed": False}]}),
+        encoding="utf-8",
+    )
+    _git(["add", "."], origin)
+    _git(["commit", "-m", "add global hours list binding"], origin)
+    root = tmp_path / "wixy-repo-globallist"
+    _write_project_registry(root, origin)
+    return root
+
+
+@pytest.fixture
 def wixy_repo_root_with_image_binding(tmp_path: Path) -> Path:
     """A single-page repo with a real `data-wx-bg` binding — the base `origin_repo`
     fixture has no image binding at all, needed for the publish-preview validate
@@ -1414,6 +1457,35 @@ class TestGetPublishPreview:
         assert body["changes"]["theme"] == [
             {"key": "colors.cream", "kind": "theme", "old": "#F1E8D9", "new": "#FFFFFF"}
         ]
+
+    def test_a_global_list_op_reports_kind_list(
+        self, storage_root: Path, wixy_repo_root_with_global_list: Path
+    ) -> None:
+        """The drawer's readable list diff (added/removed/changed item lines
+        instead of a raw JSON dump) hinges on the kind reaching the client as
+        "list" — which only happens when the `@hours` bindings-map key is
+        reconciled with the op's `hours` path (decisions/00079)."""
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_with_global_list)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [
+                        {
+                            "file": "_global",
+                            "path": "hours",
+                            "value": [{"day": "Monday", "value": "9:00 – 17:00", "closed": False}],
+                        }
+                    ],
+                },
+            )
+            response = client.get("/api/admin/publish/preview")
+        assert response.status_code == 200
+        entries = response.json()["changes"]["_global"]
+        assert len(entries) == 1
+        assert entries[0]["key"] == "hours"
+        assert entries[0]["kind"] == "list"
 
     def test_no_draft_ops_is_an_empty_diff(self, storage_root: Path, wixy_repo_root: Path) -> None:
         app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
