@@ -38,11 +38,20 @@ function fakeWindow(
      * exercised — the default fake omits it and the shell capability-guards
      * it off. */
     withDocument?: boolean;
+    /** When set, the fake carries a `matchMedia` answering `(max-width: 720px)`
+     * with this state (flippable mid-test via `.set()` + the captured change
+     * listener) — exercises the shell's narrow-screen nav relocation. */
+    narrow?: { matches: boolean; notify?: () => void };
   } = {},
 ): Window {
   const listeners = new Map<string, Set<(e?: Event) => void>>();
   let hash = opts.initialHash ?? "";
   const docListeners = new Map<string, Set<() => void>>();
+  let narrowChangeListener: ((event: { matches: boolean }) => void) | null = null;
+  if (opts.narrow !== undefined) {
+    const narrow = opts.narrow;
+    narrow.notify = () => narrowChangeListener?.({ matches: narrow.matches });
+  }
   const win = {
     location: {
       get hash() {
@@ -71,6 +80,22 @@ function fakeWindow(
       return true;
     },
     confirm: () => true,
+    ...(opts.narrow === undefined
+      ? {}
+      : {
+          matchMedia: (query: string) => ({
+            media: query,
+            get matches() {
+              return opts.narrow?.matches ?? false;
+            },
+            addEventListener: (_type: string, listener: (event: { matches: boolean }) => void) => {
+              narrowChangeListener = listener;
+            },
+            removeEventListener: () => {
+              narrowChangeListener = null;
+            },
+          }),
+        }),
     ...(opts.withDocument === true
       ? {
           document: {
@@ -516,6 +541,62 @@ describe("mountShell", () => {
       win.location.hash = "#/pages";
       await Promise.resolve();
       expect(container.classList.contains("wx-shell-chrome-revealed")).toBe(false);
+    });
+
+    it("on a narrow screen the nav lives ABOVE the pinned slim edit bar, so the reveal shows the menu in the right place (decisions/00084)", async () => {
+      const api = fakeApi();
+      const win = fakeWindow({ narrow: { matches: true } });
+      const container = document.createElement("div");
+
+      mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+      await flushState(api);
+      win.location.hash = "#/edit/index";
+      await Promise.resolve();
+
+      const nav = container.querySelector(".wx-nav");
+      const host = container.querySelector(".wx-edit-bar-host");
+      expect(nav).not.toBeNull();
+      expect(host).not.toBeNull();
+      // a direct shell-chrome child, ordered before the slim bar's host — NOT
+      // buried inside .wx-body where it renders below the bar
+      expect(nav?.parentElement).toBe(container);
+      const order = [...(nav?.parentElement?.children ?? [])];
+      expect(order.indexOf(nav as Element)).toBeLessThan(order.indexOf(host as Element));
+    });
+
+    it("on a wide screen the nav stays the in-body sidebar (no relocation)", async () => {
+      const api = fakeApi();
+      const win = fakeWindow({ narrow: { matches: false } });
+      const container = document.createElement("div");
+
+      mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+      await flushState(api);
+
+      const nav = container.querySelector(".wx-nav");
+      expect(nav?.closest(".wx-body")).not.toBeNull();
+    });
+
+    it("crossing the 720px breakpoint re-places the nav live", async () => {
+      const api = fakeApi();
+      const narrow = { matches: false };
+      const win = fakeWindow({ narrow });
+      const container = document.createElement("div");
+
+      mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+      await flushState(api);
+      expect(container.querySelector(".wx-nav")?.closest(".wx-body")).not.toBeNull();
+
+      narrow.matches = true;
+      (narrow as { notify?: () => void }).notify?.();
+      const nav = container.querySelector(".wx-nav");
+      expect(nav?.closest(".wx-body")).toBeNull();
+      const order = [...(nav?.parentElement?.children ?? [])];
+      const host = container.querySelector(".wx-edit-bar-host");
+      expect(order.indexOf(nav as Element)).toBeLessThan(order.indexOf(host as Element));
+
+      narrow.matches = false;
+      (narrow as { notify?: () => void }).notify?.();
+      expect(container.querySelector(".wx-nav")?.closest(".wx-body")).not.toBeNull();
     });
   });
 

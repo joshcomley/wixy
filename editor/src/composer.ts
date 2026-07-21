@@ -12,6 +12,16 @@
 // caller MUST call refit() once the element is attached (and destroy() when
 // tearing it down). fit() then re-runs on every input, on setScale (the
 // counter-scale changes the width, so the text rewraps), and on window resize.
+//
+// Visual-viewport pinning (decisions/00084): `bottom: 0` alone anchors to the
+// LAYOUT viewport, which the mobile keyboard and pinch-zoom both detach from
+// what the user actually sees — the composer could "scroll off" and become
+// unrecoverable (operator 2026-07-21). The pin tracks the visual viewport
+// instead, and pairs with the counter-scale: pinned width = visual width ×
+// scale (the pin owns width in px whenever it's active; applyScale's % width
+// is the no-visualViewport fallback).
+
+import { pinToVisualViewport } from "./visualPin";
 
 export interface ComposerCallbacks {
   /** Fired on every keystroke with the current markdown source — the caller
@@ -44,13 +54,23 @@ export interface Composer {
    * attached — the composer is built detached, where scrollHeight is always 0. */
   refit: () => void;
   focus: () => void;
-  /** Remove the window resize listener. Call when tearing the composer down. */
+  /** Remove the window resize listener and release the visual-viewport pin.
+   * Call when tearing the composer down. */
   destroy: () => void;
 }
 
 const LINE_HEIGHT_PX = 20;
 const MAX_LINES = 5;
 const MAX_VH_FRACTION = 0.2;
+
+// Maximize/restore icons (decisions/00084): inline SVGs, not the ⤢/⤡ text
+// glyphs — those render as a teeny, faint hint of an icon in Android's system
+// font (operator: "the full screen icon is teeny tiny"). Feather's
+// maximize-2/minimize-2, stroke inherits the button's currentColor.
+const MAXIMIZE_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>';
+const RESTORE_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14h6v6"/><path d="M20 10h-6V4"/><path d="M14 10l7-7"/><path d="M3 14l7 7"/></svg>';
 
 /** Wrap the textarea's current selection in `before`/`after` markers (or drop
  * the markers at the caret when nothing is selected), preserving the undo
@@ -133,7 +153,8 @@ export function openComposer(options: ComposerOptions): Composer {
   const spacer = document.createElement("span");
   spacer.className = "wx-composer-spacer";
 
-  const maxBtn = toolbarButton("⤢", "Maximize editor", "wx-composer-max-toggle");
+  const maxBtn = toolbarButton("", "Maximize editor", "wx-composer-max-toggle");
+  maxBtn.innerHTML = MAXIMIZE_ICON; // static markup — safe
   maxBtn.setAttribute("aria-pressed", "false");
   const commitBtn = toolbarButton("✓", "Save (Ctrl+Enter)", "wx-composer-commit");
   const cancelBtn = toolbarButton("✕", "Cancel (Esc)", "wx-composer-cancel");
@@ -167,13 +188,24 @@ export function openComposer(options: ComposerOptions): Composer {
     textarea.style.overflowY = needed > cap ? "auto" : "hidden";
   }
 
-  // -- Scale -------------------------------------------------------------------
+  // -- Scale / visual-viewport pin ---------------------------------------------
+  // The pin anchors the root to the VISUAL viewport (decisions/00084) and owns
+  // its width whenever active; the % width in applyScale is the fallback for
+  // platforms without a visualViewport. onUpdate re-fits: a width change
+  // rewraps the text.
+
+  let currentScale = 1;
+  const pin = pinToVisualViewport(root, window, { widthScale: () => currentScale, onUpdate: () => fit() });
 
   function applyScale(scale: number): void {
-    const safe = scale > 0 ? scale : 1;
-    root.style.transform = `scale(${1 / safe})`;
+    currentScale = scale > 0 ? scale : 1;
+    root.style.transform = `scale(${1 / currentScale})`;
     root.style.transformOrigin = "bottom left";
-    root.style.width = `${100 * safe}%`;
+    if (pin.active) {
+      pin.update(); // sets width = visual width × scale, in px
+    } else {
+      root.style.width = `${100 * currentScale}%`;
+    }
     // The width just changed, so the text rewraps — re-fit. A no-op while
     // detached (the constructor's own call below) via fit()'s guard.
     fit();
@@ -187,8 +219,9 @@ export function openComposer(options: ComposerOptions): Composer {
     maximized = next;
     root.classList.toggle("wx-composer-max", next);
     maxBtn.setAttribute("aria-pressed", String(next));
-    maxBtn.textContent = next ? "⤡" : "⤢";
+    maxBtn.innerHTML = next ? RESTORE_ICON : MAXIMIZE_ICON; // static markup — safe
     maxBtn.title = next ? "Restore editor" : "Maximize editor";
+    maxBtn.setAttribute("aria-label", next ? "Restore editor" : "Maximize editor");
     if (next) {
       textarea.style.height = "";
       textarea.style.overflowY = "auto";
@@ -222,6 +255,9 @@ export function openComposer(options: ComposerOptions): Composer {
     setScale: applyScale,
     refit: fit,
     focus: () => textarea.focus(),
-    destroy: () => window.removeEventListener("resize", fit),
+    destroy: () => {
+      window.removeEventListener("resize", fit);
+      pin.release();
+    },
   };
 }

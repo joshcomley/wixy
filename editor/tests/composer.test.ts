@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openComposer, type ComposerCallbacks } from "../src/composer";
+import { installFakeVisualViewport, uninstallFakeVisualViewport } from "./fakeVisualViewport";
 
 afterEach(() => {
+  uninstallFakeVisualViewport();
   document.body.innerHTML = "";
 });
 
@@ -145,5 +147,47 @@ describe("openComposer", () => {
     composer.setScale(0.25);
     expect(composer.element.style.transform).toBe("scale(4)");
     expect(composer.element.style.width).toBe("25%");
+  });
+
+  it("the maximize toggle renders a real SVG icon, not a tiny text glyph (decisions/00084)", () => {
+    const { composer } = mount("seed");
+    const maxBtn = composer.element.querySelector(".wx-composer-max-toggle") as HTMLButtonElement;
+    expect(maxBtn.querySelector("svg")).not.toBeNull();
+    expect(maxBtn.getAttribute("aria-label")).toBe("Maximize editor");
+    const collapsed = maxBtn.innerHTML;
+    maxBtn.click();
+    expect(maxBtn.querySelector("svg")).not.toBeNull();
+    expect(maxBtn.innerHTML).not.toBe(collapsed);
+    expect(maxBtn.getAttribute("aria-label")).toBe("Restore editor");
+  });
+
+  describe("visual-viewport pinning (decisions/00084)", () => {
+    it("pins itself to the visual viewport bottom — keyboard/pinch can never scroll it off", () => {
+      const vv = installFakeVisualViewport({ width: 390, height: 500 });
+      const { composer } = mount("seed");
+      expect(composer.element.style.bottom).toBe(`${window.innerHeight - 500}px`);
+      expect(composer.element.style.left).toBe("0px");
+      expect(composer.element.style.width).toBe("390px");
+      vv.height = 600;
+      vv.fire("resize");
+      expect(composer.element.style.bottom).toBe(`${window.innerHeight - 600}px`);
+    });
+
+    it("the pinned width tracks the counter-scale (squished device simulation)", () => {
+      installFakeVisualViewport({ width: 400, height: 700 });
+      const { composer } = mount("seed", makeCallbacks(), 0.5);
+      expect(composer.element.style.width).toBe("200px");
+      composer.setScale(0.25);
+      expect(composer.element.style.width).toBe("100px");
+    });
+
+    it("destroy() releases the pin — no listener leak, inline styles restored", () => {
+      const vv = installFakeVisualViewport({ width: 390, height: 500 });
+      const { composer } = mount("seed");
+      composer.destroy();
+      vv.height = 700;
+      vv.fire("resize");
+      expect(composer.element.style.bottom).toBe("");
+    });
   });
 });

@@ -43,6 +43,25 @@ export function viewportScaleFor(wrapWidth: number, deviceWidth: number): number
   return Math.min(1, wrapWidth / deviceWidth);
 }
 
+/** The device the edit view opens in: follow the USER'S OWN form factor
+ * (decisions/00084 — operator 2026-07-21: "the default display should be what
+ * the user is on, auto detected"). The predecessor check (`innerWidth < 480`)
+ * read any phone reporting ≥480 CSS px (a real configuration — display-size
+ * settings, unusual DPRs) as "desktop always", and had no tablet answer at
+ * all. The coarse-pointer signal is what separates a big phone/small tablet
+ * from a desktop window of the same width; width alone decides for non-touch
+ * screens (a narrow desktop window previews as its closest small form factor). */
+export function initialDeviceFor(width: number, coarsePointer: boolean): Device {
+  if (width <= 0) return "desktop"; // unmeasurable (pre-layout, jsdom) — unchanged fallback
+  if (width < 600) return "mobile"; // any phone portrait; also a narrow desktop window
+  if (coarsePointer) {
+    if (width < 768) return "mobile"; // phone landscape, small foldables
+    if (width <= 1366) return "tablet"; // tablets up to iPad Pro landscape
+    return "desktop";
+  }
+  return width < 1024 ? "tablet" : "desktop";
+}
+
 export interface EditViewCoreDeps {
   api: AdminApi;
   opQueue: OpQueueLike;
@@ -303,9 +322,12 @@ export function mountEditView(page: string, deps: MountEditViewDeps): EditView {
   win.addEventListener("message", messageListener);
 
   iframe.src = `/admin/preview/${page}.html`;
-  // First device follows the ACTUAL screen: a phone opens in mobile view (its
-  // most useful 1:1 mode); roomier screens open desktop as before.
-  setDevice(win.innerWidth > 0 && win.innerWidth < 480 ? "mobile" : "desktop");
+  // First device follows the user's own form factor (decisions/00084): phone →
+  // mobile, tablet → tablet, desktop → desktop. matchMedia is capability-guarded
+  // the same way deps.win's other optional surfaces are.
+  const coarsePointer =
+    typeof win.matchMedia === "function" ? win.matchMedia("(pointer: coarse)").matches : false;
+  setDevice(initialDeviceFor(win.innerWidth, coarsePointer));
 
   return {
     element: root,
