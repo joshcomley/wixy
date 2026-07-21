@@ -296,3 +296,95 @@
   min-height: 0;
 }
 
+/* -- Structured control sheets (decisions/00077) --------------------------------
+   Same dark bottom-sheet shell as the composer; rows of day/time or
+   label/amount editors inside. */
+
+.wx-control-title {
+  font: 600 13px/1 system-ui, -apple-system, sans-serif;
+  letter-spacing: 0.02em;
+}
+
+.wx-control-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.wx-control-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wx-control-day {
+  flex: 0 0 4.8em;
+  font: 500 13px/1.3 system-ui, -apple-system, sans-serif;
+}
+
+.wx-control-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  font: 500 11px/1 system-ui, -apple-system, sans-serif;
+  color: rgba(255, 255, 255, 0.75);
+  cursor: pointer;
+}
+
+.wx-control-check input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  accent-color: var(--wx-brand-blue);
+  margin: 0;
+}
+
+.wx-control-time,
+.wx-control-text,
+.wx-price-label,
+.wx-price-amount {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: var(--wx-radius);
+  background: rgba(255, 255, 255, 0.07);
+  color: inherit;
+  font: 14px/1.4 system-ui, -apple-system, sans-serif;
+  padding: 6px 8px;
+  outline: none;
+}
+
+.wx-control-time:focus,
+.wx-control-text:focus,
+.wx-price-label:focus,
+.wx-price-amount:focus {
+  border-color: var(--wx-brand-blue);
+}
+
+/* Native time pickers render dark-on-dark by default on some mobile browsers. */
+.wx-control-time {
+  color-scheme: dark;
+}
+
+.wx-price-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wx-price-remove {
+  min-width: 30px !important;
+}
+
+.wx-price-add,
+.wx-control-mode-toggle {
+  align-self: flex-start;
+}
+
+.wx-price-freetext {
+  resize: vertical;
+}
+

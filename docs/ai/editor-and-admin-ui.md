@@ -113,6 +113,9 @@ text no longer has a popover); `composer.ts` (THE text editor: bottom-anchored s
 auto-growing textarea, B/I/link row, maximize, live markdown preview, decisions/00075);
 `markdownText.ts` (inline-markdown render + demote — hand-synced twin of
 `builder/markdown_inline.py`, locked by the shared fixture, Inv 20);
+`controls.ts` (structured control sheets — opening-hours whole-array editor and
+price-list row editor, opened instead of the composer when the clicked element
+carries `data-wx-control` in the template, decisions/00077);
 `navigation.ts` (internal-link interception).
 
 ## Build

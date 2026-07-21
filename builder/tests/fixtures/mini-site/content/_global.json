@@ -6,8 +6,31 @@
   "bookingUrl": "https://example.com/book",
   "footer": {
     "legal": [
-      { "label": "Privacy", "href": "/policies.html" },
-      { "label": "Terms", "href": "/policies.html#terms" }
+      {
+        "label": "Privacy",
+        "href": "/policies.html"
+      },
+      {
+        "label": "Terms",
+        "href": "/policies.html#terms"
+      }
     ]
-  }
+  },
+  "hours": [
+    {
+      "day": "Monday",
+      "value": "10:00 – 19:00",
+      "closed": false
+    },
+    {
+      "day": "Tuesday",
+      "value": "10:00 – 19:00",
+      "closed": false
+    },
+    {
+      "day": "Wednesday",
+      "value": "Closed",
+      "closed": true
+    }
+  ]
 }

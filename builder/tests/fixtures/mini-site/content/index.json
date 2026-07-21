@@ -2,7 +2,10 @@
   "meta": {
     "title": "Home — Fixture",
     "description": "A fixture home page for builder tests.",
-    "ogImage": { "src": "images/hero.jpg", "alt": "hero" },
+    "ogImage": {
+      "src": "images/hero.jpg",
+      "alt": "hero"
+    },
     "navLabel": "Home",
     "inNav": true,
     "navOrder": 10
@@ -10,7 +13,10 @@
   "hero": {
     "title": "Fixture Cottage",
     "tag": "A calm fixture tagline.",
-    "bg": { "src": "images/hero.jpg", "alt": "" },
+    "bg": {
+      "src": "images/hero.jpg",
+      "alt": ""
+    },
     "ctaHref": "/about.html",
     "ctaLabel": "Learn <strong>more</strong>",
     "showBadge": true,
@@ -21,16 +27,29 @@
   "showcase": {
     "items": [
       {
-        "img": { "src": "images/icon.jpg", "alt": "Item one" },
+        "img": {
+          "src": "images/icon.jpg",
+          "alt": "Item one"
+        },
         "title": "Item One",
         "body": "First item body.",
         "book": true,
         "bookHref": "/about.html#one",
         "enquireHref": "/about.html#enquire",
-        "tags": [{ "label": "Popular" }, { "label": "New" }]
+        "tags": [
+          {
+            "label": "Popular"
+          },
+          {
+            "label": "New"
+          }
+        ]
       },
       {
-        "img": { "src": "images/icon.jpg", "alt": "Item two" },
+        "img": {
+          "src": "images/icon.jpg",
+          "alt": "Item two"
+        },
         "title": "Item Two",
         "body": "Second item body.",
         "book": false,
@@ -39,5 +58,8 @@
         "tags": []
       }
     ]
+  },
+  "cta": {
+    "priceNote": "Full consult — £50 · Follow-up — £30"
   }
 }

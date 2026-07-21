@@ -584,6 +584,111 @@ describe("initOverlay", () => {
     });
   });
 
+  describe("structured controls (decisions/00077)", () => {
+    it("clicking a data-wx-control=price element opens the price sheet, not the composer", () => {
+      root.innerHTML = `<span data-wx="card.price" data-wx-control="price">Full Face — £330 · Three Areas — £220</span>`;
+      const el = root.querySelector("span") as HTMLElement;
+      const { teardown } = initFor("index", { page: "index", fields: [] });
+
+      el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+      expect(document.querySelector(".wx-control-sheet")).not.toBeNull();
+      // no PLAIN composer (the sheet's own free-text textarea shares the
+      // composer's input class for styling — distinguish on the shell class)
+      expect(document.querySelector(".wx-composer:not(.wx-control-sheet)")).toBeNull();
+      expect(document.querySelectorAll(".wx-price-rows .wx-control-row")).toHaveLength(2);
+      teardown();
+    });
+
+    it("committing the price sheet emits the serialized text as the op value", () => {
+      root.innerHTML = `<span data-wx="card.price" data-wx-control="price">Lips — £60</span>`;
+      const el = root.querySelector("span") as HTMLElement;
+      const { sent, teardown } = initFor("index", { page: "index", fields: [] });
+
+      el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      (document.querySelector(".wx-control-commit") as HTMLButtonElement).click();
+
+      expect(sent.at(-1)).toEqual({
+        wx: 1,
+        type: "op",
+        file: "index",
+        path: "card.price",
+        value: "Lips — £60",
+      });
+      teardown();
+    });
+
+    it("clicking a data-wx-control=opening-hours element opens the hours sheet and emits ONE whole-array op", () => {
+      root.innerHTML = `
+        <ul data-wx-list="@hours">
+          <li data-wx-list-item>
+            <span data-wx=".day">Monday</span>
+            <span data-wx-if=".closed" data-wx=".value" data-wx-control="opening-hours" data-wx-hidden="1">10:00 – 19:00</span>
+            <span data-wx-if="!.closed" data-wx=".value" data-wx-control="opening-hours">10:00 – 19:00</span>
+          </li>
+          <li data-wx-list-item>
+            <span data-wx=".day">Tuesday</span>
+            <span data-wx-if=".closed" data-wx=".value" data-wx-control="opening-hours" data-wx-hidden="1">Closed</span>
+            <span data-wx-if="!.closed" data-wx=".value" data-wx-control="opening-hours">Closed</span>
+          </li>
+        </ul>`;
+      const bindings: PageBindings = {
+        page: "index",
+        fields: [
+          {
+            key: "@hours",
+            kind: "list",
+            items: [
+              { key: ".day", kind: "text" },
+              { key: ".value", kind: "text" },
+              { key: ".closed", kind: "if" },
+            ],
+          },
+        ],
+      };
+      const { sent, teardown } = initFor("index", bindings);
+
+      const firstValue = root.querySelector('[data-wx-if="!.closed"][data-wx-control]') as HTMLElement;
+      firstValue.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+      const sheet = document.querySelector(".wx-control-sheet");
+      expect(sheet).not.toBeNull();
+      expect(sheet?.querySelectorAll(".wx-control-row")).toHaveLength(2);
+
+      // flip Tuesday's closed toggle before committing
+      const closedBoxes = sheet?.querySelectorAll(".wx-control-closed") ?? [];
+      (closedBoxes[1] as HTMLInputElement).checked = true;
+      (document.querySelector(".wx-control-commit") as HTMLButtonElement).click();
+
+      expect(sent.at(-1)).toEqual({
+        wx: 1,
+        type: "op",
+        file: "_global",
+        path: "hours",
+        value: [
+          { day: "Monday", value: "10:00 – 19:00", closed: false },
+          { day: "Tuesday", value: "Closed", closed: true },
+        ],
+      });
+      // and the preview DOM reflected the flip immediately
+      const tuesdayClosed = root.querySelectorAll('[data-wx-if=".closed"]')[1];
+      expect(tuesdayClosed?.hasAttribute("data-wx-hidden")).toBe(false);
+      teardown();
+    });
+
+    it("a plain text element still opens the composer, not a control", () => {
+      root.innerHTML = `<p data-wx="body">Plain</p>`;
+      const el = root.querySelector("p") as HTMLElement;
+      const { teardown } = initFor("index", { page: "index", fields: [] });
+
+      el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+      expect(document.querySelector(".wx-composer:not(.wx-control-sheet) .wx-composer-input")).not.toBeNull();
+      expect(document.querySelector(".wx-control-sheet")).toBeNull();
+      teardown();
+    });
+  });
+
   describe("internal/external link navigation", () => {
     it("intercepts a same-origin page link, notifies the shell, and rewrites the iframe to the preview equivalent", () => {
       root.innerHTML = `<nav><a href="/about.html">About</a></nav>`;

@@ -64,6 +64,12 @@ same merge).
   - Enter = newline, Ctrl+Enter or ✓ commits, Esc cancels (restores the pre-edit DOM);
   - live: keystrokes render the markdown (02 §5 amendment) into the element immediately;
     commit stores the markdown SOURCE as the `op` value.
+  - **structured controls** (decisions/00077): a text binding whose element carries
+    `data-wx-control="opening-hours"` or `data-wx-control="price"` in the template
+    opens a dedicated sheet instead — the hours sheet edits the whole list as
+    day/closed/times rows (one whole-array op); the price sheet edits the text as
+    label/amount rows. Both keep a free-text mode ("edit as plain text" / per-row
+    custom text), so authoring stays as unconstrained as before.
 - **Click an image binding** (`data-wx-img`/`data-wx-bg`) → "Replace image" button + alt
   input; Replace opens the shell's media dialog (§4). A dashed drop target also accepts a
   direct file drop onto the element.
