@@ -81,4 +81,18 @@ describe("isRichLiteContent", () => {
       isRichLiteContent(parse(`<p data-wx="x">Learn <strong>more</strong> today</p>`)),
     ).toBe(true);
   });
+
+  it("is false when the ONLY element child is an injected eye toggle (overlay chrome)", () => {
+    // Boot injects .wx-if-eye-toggle into every [data-wx-if] element; that chrome
+    // child must not reclassify a plain text binding as rich-lite (2026-07-21: it
+    // did, seeding the rich popover with the button markup itself — the chrome-leak
+    // incident, decisions/00073).
+    expect(
+      isRichLiteContent(
+        parse(
+          `<span data-wx="x" data-wx-if="!y"><button class="wx-if-eye-toggle" type="button">eye</button>plain</span>`,
+        ),
+      ),
+    ).toBe(false);
+  });
 });

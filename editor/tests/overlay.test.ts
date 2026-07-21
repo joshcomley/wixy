@@ -435,6 +435,91 @@ describe("initOverlay", () => {
     });
   });
 
+  describe("overlay chrome never leaks into content values", () => {
+    // The 2026-07-21 production incident (decisions/00073): boot injects a
+    // .wx-if-eye-toggle into every [data-wx-if] element — including elements that
+    // are ALSO text-bound (the ca hours/treatments templates) — and both the
+    // whole-array list read and the popover seed then carried the button's markup
+    // and its 👁️ label into committed draft values.
+    it("an item-scoped commit re-emitting the whole array excludes injected eye toggles", () => {
+      root.innerHTML = `
+        <ul data-wx-list="@hours">
+          <li data-wx-list-item>
+            <span data-wx=".day">Monday</span>
+            <span class="closed" data-wx-if=".closed" data-wx=".value" data-wx-hidden="1">10:00 – 19:00</span>
+            <span data-wx-if="!.closed" data-wx=".value">10:00 – 19:00</span>
+          </li>
+        </ul>`;
+      const bindings: PageBindings = {
+        page: "index",
+        fields: [
+          {
+            key: "@hours",
+            kind: "list",
+            items: [
+              { key: ".day", kind: "text" },
+              { key: ".value", kind: "text" },
+              { key: ".closed", kind: "if" },
+            ],
+          },
+        ],
+      };
+      const { sent, teardown } = initFor("index", bindings);
+      // Boot injected a toggle into BOTH data-wx-if spans.
+      expect(root.querySelectorAll(".wx-if-eye-toggle")).toHaveLength(2);
+
+      const day = root.querySelector('[data-wx=".day"]') as HTMLElement;
+      day.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      const input = document.querySelector(".wx-popover input") as HTMLInputElement;
+      input.value = "Mon";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+      const op = sent.at(-1);
+      const serialized = JSON.stringify(op);
+      expect(serialized).not.toContain("wx-if-eye-toggle");
+      expect(serialized).not.toContain("\u{1F441}");
+      expect(op).toEqual({
+        wx: 1,
+        type: "op",
+        file: "_global",
+        path: "hours",
+        value: [{ day: "Mon", value: "10:00 – 19:00", closed: false }],
+      });
+      teardown();
+    });
+
+    it("the text popover for an if-bound element is the PLAIN one, seeded without the toggle", () => {
+      root.innerHTML = `<span data-wx="hours.note" data-wx-if="!hours.hideNote">10:00 – 19:00</span>`;
+      const el = root.querySelector("span") as HTMLElement;
+      const { teardown } = initFor("index", { page: "index", fields: [] });
+      // Boot injected the toggle (element carries data-wx-if) — which must not
+      // reclassify the content as rich-lite nor enter the seed.
+      expect(el.querySelector(".wx-if-eye-toggle")).not.toBeNull();
+
+      el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+      const input = document.querySelector(".wx-popover input") as HTMLInputElement;
+      expect(input).not.toBeNull(); // plain input, not the rich contenteditable
+      expect(input.value).toBe("10:00 – 19:00");
+      teardown();
+    });
+
+    it("a text commit on an if-bound element keeps its eye toggle attached", () => {
+      root.innerHTML = `<span data-wx="hours.note" data-wx-if="!hours.hideNote">10:00 – 19:00</span>`;
+      const el = root.querySelector("span") as HTMLElement;
+      const { teardown } = initFor("index", { page: "index", fields: [] });
+
+      el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      const input = document.querySelector(".wx-popover input") as HTMLInputElement;
+      input.value = "11:00 – 20:00";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+      expect(el.textContent).toContain("11:00 – 20:00");
+      expect(el.querySelector(":scope > .wx-if-eye-toggle")).not.toBeNull();
+      teardown();
+    });
+  });
+
   describe("internal/external link navigation", () => {
     it("intercepts a same-origin page link, notifies the shell, and rewrites the iframe to the preview equivalent", () => {
       root.innerHTML = `<nav><a href="/about.html">About</a></nav>`;

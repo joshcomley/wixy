@@ -120,4 +120,33 @@ describe("readListValue / readItemValue", () => {
     ]);
     expect(result).toEqual({ title: "Only title" });
   });
+
+  it("excludes injected eye-toggle chrome (markup AND label text) from text values", () => {
+    // The 2026-07-21 production incident (decisions/00073): boot injects a
+    // .wx-if-eye-toggle button into every [data-wx-if] element — including spans
+    // that are ALSO text-bound (the ca hours/price templates) — and a whole-array
+    // read then committed the button's markup and its 👁️ label into the draft.
+    const container = parse(`
+      <ul data-wx-list="@hours">
+        <li data-wx-list-item>
+          <span data-wx=".day">Monday</span>
+          <span class="closed" data-wx-if=".closed" data-wx=".value" data-wx-hidden="1"><button type="button" class="wx-if-eye-toggle" aria-label="Show hidden section">👁️</button>10:00 – 19:00</span>
+          <span data-wx-if="!.closed" data-wx=".value"><button type="button" class="wx-if-eye-toggle" aria-label="Show hidden section">👁️</button>10:00 – 19:00</span>
+        </li>
+      </ul>
+    `);
+    const field: BindingField = {
+      key: "@hours",
+      kind: "list",
+      items: [
+        { key: ".day", kind: "text" },
+        { key: ".value", kind: "text" },
+        { key: ".closed", kind: "if" },
+      ],
+    };
+
+    expect(readListValue(container, field)).toEqual([
+      { day: "Monday", value: "10:00 – 19:00", closed: false },
+    ]);
+  });
 });

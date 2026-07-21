@@ -70,9 +70,17 @@ export function chipLabel(kind: BindingKind): string {
   }
 }
 
+/** Overlay chrome injected INTO content elements (today: the data-wx-if eye
+ * toggle's button — overlay.ts `ensureIfToggle`). Every value read/seed path
+ * excludes nodes matching this so editor chrome can never leak into committed
+ * content (the 2026-07-21 incident, decisions/00073). */
+export const OVERLAY_CHROME_SELECTOR = ".wx-if-eye-toggle";
+
 /** A text binding is "rich-lite" (spec/05 §2) when its current rendered content has
  * any element children (the `em`/`strong`/`a`/`span`/`br` allowlist, spec/02 §5) —
- * plain text alone gets the simple input/textarea popover instead. */
+ * plain text alone gets the simple input/textarea popover instead. Injected overlay
+ * chrome (an eye toggle inside an if-bound text element) is NOT content and never
+ * makes a binding rich-lite. */
 export function isRichLiteContent(element: Element): boolean {
-  return element.childElementCount > 0;
+  return Array.from(element.children).some((child) => !child.matches(OVERLAY_CHROME_SELECTOR));
 }
