@@ -75,7 +75,11 @@
 </script>
 <link rel="stylesheet" href="/admin/static/admin/admin.css">
 <style>
-  html, body { margin: 0; height: 100%; }
+  /* The root-scroll contract (decisions/00085), pre-paint half — only the
+     middle content ever scrolls; the root document never does (overflow +
+     overscroll), and chrome sizes to the VISIBLE viewport (dvh). Mirrored in
+     admin-ui/src/style.css for the JS-mounted shell — keep the two in sync. */
+  html, body { margin: 0; height: 100%; overflow: hidden; overflow: clip; overscroll-behavior: none; }
   body {
     font-family: system-ui, -apple-system, sans-serif;
     background: var(--wx-canvas, #eaedf3);
@@ -85,12 +89,13 @@
      paints before any fetch/JS runs). Scoped to a child wrapper, not #wx-shell
      itself, so it doesn't fight the real shell's own layout (admin-ui/src/
      style.css's .wx-shell) once main() replaces this wrapper's contents. */
-  #wx-shell { min-height: 100vh; }
+  #wx-shell { min-height: 100vh; min-height: 100dvh; }
   .wx-loading-wrap {
     display: flex;
     align-items: center;
     justify-content: center;
     min-height: 100vh;
+    min-height: 100dvh;
   }
   .wx-loading { opacity: .6; }
 </style>
