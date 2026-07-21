@@ -410,6 +410,25 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
 
   container.append(topbar, editBarHost, body, toastRegion);
 
+  // -- Nav placement (decisions/00083) ------------------------------------------
+  // Desktop keeps the nav inside .wx-body as the left sidebar. On narrow
+  // screens it relocates into the shell chrome BETWEEN the topbar and the
+  // pinned slim edit bar: inside .wx-body it would render BELOW the slim bar,
+  // which is exactly where the ▾ chrome reveal showed the menu ("the gap
+  // appears above but it is empty and the menu appears in the wrong place" —
+  // operator 2026-07-21). The same navEl moves between the two homes (its
+  // listeners travel with it); the stylesheet already styles it per-width, so
+  // relocation is the whole change.
+  const narrowMedia =
+    typeof win.matchMedia === "function" ? win.matchMedia("(max-width: 720px)") : null;
+  function placeNav(narrow: boolean): void {
+    if (narrow) container.insertBefore(navEl, editBarHost);
+    else body.insertBefore(navEl, main);
+  }
+  placeNav(narrowMedia?.matches ?? false);
+  const onNarrowChange = (event: MediaQueryListEvent): void => placeNav(event.matches);
+  narrowMedia?.addEventListener("change", onNarrowChange);
+
   // -- Nav --------------------------------------------------------------------
 
   function navButton(label: string, route: Route): HTMLButtonElement {
@@ -915,6 +934,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       if (chromeRevealTimer !== null) clearTimeout(chromeRevealTimer);
       win.removeEventListener("keydown", onSecondaryEscape);
       closeSecondary();
+      narrowMedia?.removeEventListener("change", onNarrowChange);
       activePanelTeardown?.();
       closeDrawer();
       thumbnailService.teardown();

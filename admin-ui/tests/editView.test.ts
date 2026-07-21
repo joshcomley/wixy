@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createEditViewCore, viewportScaleFor, type OpQueueLike } from "../src/editView";
+import { createEditViewCore, initialDeviceFor, viewportScaleFor, type OpQueueLike } from "../src/editView";
 import type { AdminApi, ContentResponse } from "../src/api";
 import type { PageBindings, ShellToOverlayMessage } from "../src/protocol";
 
@@ -143,5 +143,43 @@ describe("viewportScaleFor", () => {
 
   it("is 1 for a not-yet-laid-out wrap rather than collapsing to 0", () => {
     expect(viewportScaleFor(0, 1280)).toBe(1);
+  });
+});
+
+describe("initialDeviceFor (decisions/00083)", () => {
+  it("phones open in mobile view — including >480px CSS-width outliers", () => {
+    expect(initialDeviceFor(360, true)).toBe("mobile");
+    expect(initialDeviceFor(390, true)).toBe("mobile");
+    // the operator's own phone reports 487 CSS px (display-size setting) — the
+    // old `<480` check read it as "desktop always" (operator 2026-07-21)
+    expect(initialDeviceFor(487, true)).toBe("mobile");
+    expect(initialDeviceFor(599, true)).toBe("mobile");
+    // phone landscape / small foldables
+    expect(initialDeviceFor(740, true)).toBe("mobile");
+  });
+
+  it("tablets open in tablet view", () => {
+    expect(initialDeviceFor(768, true)).toBe("tablet");
+    expect(initialDeviceFor(820, true)).toBe("tablet");
+    expect(initialDeviceFor(1024, true)).toBe("tablet");
+    expect(initialDeviceFor(1366, true)).toBe("tablet"); // iPad Pro landscape
+  });
+
+  it("desktops and very large touch screens open in desktop view", () => {
+    expect(initialDeviceFor(1367, true)).toBe("desktop");
+    expect(initialDeviceFor(1280, false)).toBe("desktop");
+    expect(initialDeviceFor(1920, false)).toBe("desktop");
+  });
+
+  it("a narrow non-touch window previews as its closest small form factor", () => {
+    expect(initialDeviceFor(500, false)).toBe("mobile");
+    expect(initialDeviceFor(900, false)).toBe("tablet");
+    expect(initialDeviceFor(1023, false)).toBe("tablet");
+    expect(initialDeviceFor(1024, false)).toBe("desktop");
+  });
+
+  it("an unmeasurable width falls back to desktop (pre-layout, jsdom)", () => {
+    expect(initialDeviceFor(0, true)).toBe("desktop");
+    expect(initialDeviceFor(0, false)).toBe("desktop");
   });
 });

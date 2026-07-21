@@ -23,6 +23,7 @@ import { resolveInternalPageSlug, showToast } from "./navigation";
 import { directOpTarget, findOutermostList, isItemScopeKey } from "./opTargeting";
 import { buildImagePopover, buildLinkPopover, positionNear } from "./popovers";
 import type { BindingField, DraftOp, JsonValue, PageBindings } from "./protocol";
+import { ensureResizesContentMeta, pinToVisualViewport } from "./visualPin";
 
 // @nav is builder-computed and never generically list-editable (spec/02 §3;
 // decisions/00012 decision 8 flagged this for the editor to enforce).
@@ -39,6 +40,13 @@ function findField(bindings: PageBindings, key: string): BindingField | null {
 }
 
 export function initOverlay(win: Window = window): () => void {
+  // Keyboard contract for every fixed bottom sheet (decisions/00083): ask the
+  // browser to shrink the LAYOUT viewport when the on-screen keyboard opens,
+  // so `bottom: 0` chrome rides above it (the visual-viewport pin covers the
+  // engines that ignore this meta key). Only ever touches the PREVIEW document
+  // the overlay was injected into — never anything published.
+  ensureResizesContentMeta(document);
+
   let state: OverlayState | null = null;
   let closeActivePopover: (() => void) | null = null;
   let activeComposer: Composer | null = null;
@@ -195,7 +203,13 @@ export function initOverlay(win: Window = window): () => void {
       onCancel: closePopover,
     });
     document.body.appendChild(sheet);
-    closeActivePopover = () => sheet.remove();
+    // Same immovability contract as the composer (decisions/00083) — the pin
+    // releases when the sheet closes so no visualViewport listener leaks.
+    const pin = pinToVisualViewport(sheet, window);
+    closeActivePopover = () => {
+      pin.release();
+      sheet.remove();
+    };
   }
 
   function openHoursControl(target: DetectedBinding): void {
@@ -238,7 +252,13 @@ export function initOverlay(win: Window = window): () => void {
       onCancel: closePopover,
     });
     document.body.appendChild(sheet);
-    closeActivePopover = () => sheet.remove();
+    // Same immovability contract as the composer (decisions/00083) — the pin
+    // releases when the sheet closes so no visualViewport listener leaks.
+    const pin = pinToVisualViewport(sheet, window);
+    closeActivePopover = () => {
+      pin.release();
+      sheet.remove();
+    };
   }
 
   /** Reflect a committed hours array into the preview DOM immediately (the op

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initOverlay } from "../src/overlay";
 import type { OverlayToShellMessage, PageBindings } from "../src/protocol";
+import { installFakeVisualViewport, uninstallFakeVisualViewport } from "./fakeVisualViewport";
 
 interface FakeWindow {
   location: { origin: string; href: string };
@@ -66,8 +67,10 @@ describe("initOverlay", () => {
   });
 
   afterEach(() => {
+    uninstallFakeVisualViewport();
     root.remove();
     document.body.innerHTML = "";
+    document.head.querySelectorAll('meta[name="viewport"]').forEach((m) => m.remove());
   });
 
   it("sends ready to the shell immediately on startup", () => {
@@ -686,6 +689,43 @@ describe("initOverlay", () => {
       expect(document.querySelector(".wx-composer:not(.wx-control-sheet) .wx-composer-input")).not.toBeNull();
       expect(document.querySelector(".wx-control-sheet")).toBeNull();
       teardown();
+    });
+
+    it("an open sheet pins to the visual viewport and releases on close (decisions/00083)", () => {
+      root.innerHTML = `<span data-wx="card.price" data-wx-control="price">Lips — £60</span>`;
+      installFakeVisualViewport({ width: 390, height: 500 });
+      const { teardown } = initFor("index", { page: "index", fields: [] });
+      try {
+        const el = root.querySelector("span") as HTMLElement;
+        el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+        const sheet = document.querySelector(".wx-control-sheet") as HTMLElement;
+        expect(sheet).not.toBeNull();
+        expect(sheet.style.bottom).toBe(`${window.innerHeight - 500}px`);
+        expect(sheet.style.left).toBe("0px");
+
+        (sheet.querySelector(".wx-composer-cancel") as HTMLButtonElement).click();
+        expect(document.querySelector(".wx-control-sheet")).toBeNull();
+      } finally {
+        // teardown must run even when an assertion above fails — a skipped one
+        // leaves the overlay's delegated click listener attached and every
+        // later test's clicks get handled twice (the 2026-07-21 pollution).
+        teardown();
+      }
+    });
+  });
+
+  describe("visual viewport setup (decisions/00083)", () => {
+    it("startup adds interactive-widget=resizes-content to the page's viewport meta", () => {
+      const meta = document.createElement("meta");
+      meta.name = "viewport";
+      meta.content = "width=device-width, initial-scale=1";
+      document.head.appendChild(meta);
+      const { teardown } = initFor("index", { page: "index", fields: [] });
+      try {
+        expect(meta.content).toContain("interactive-widget=resizes-content");
+      } finally {
+        teardown();
+      }
     });
   });
 

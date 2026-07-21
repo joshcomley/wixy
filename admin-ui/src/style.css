@@ -154,6 +154,15 @@
 
 .wx-shell-chrome-revealed .wx-topbar {
   max-height: 140px;
+  /* The editing rule above set visibility:hidden and NO rule reset it — equal
+     specificity, so this later rule is what wins. Without it the reveal slid
+     the bar open as an EMPTY GAP (layout but no paint) while the menu showed
+     below the slim bar (operator 2026-07-21, decisions/00083). Flip instantly
+     (0s 0s, the base transition) so the content is visible DURING the slide —
+     the bar's overflow clip reveals it progressively. Closing still hides at
+     the slide's end via the editing rule's 0.25s-delayed flip. */
+  visibility: visible;
+  transition: max-height 0.25s ease, padding 0.25s ease, visibility 0s 0s;
 }
 
 .wx-shell-chrome-revealed .wx-nav {
