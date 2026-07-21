@@ -6,9 +6,13 @@
 // done` (or a failure state with the full error log inline — the draft stays
 // intact and the site untouched, spec/04 §5 step 6, so there's nothing to
 // reset client-side on failure beyond re-enabling the form).
+// decisions/00089: confirm also spins the drawer's own Publish button and fires
+// `onPublishStarted` synchronously so the SHELL's status-bar watch owns
+// run/completion feedback even if this drawer is closed mid-publish.
 
 import type { AdminApi, PublishJobData, PublishPreview, UpstreamCommit } from "./api";
 import { renderDiffGroups } from "./diffView";
+import { setButtonBusy, setButtonIdle } from "./spinnerButton";
 
 const DEFAULT_MESSAGE = "Content update via Wixy editor";
 
@@ -21,7 +25,16 @@ export interface PublishDrawerDeps {
   expectedRev: number;
   upstream: UpstreamCommit[];
   onClose: () => void;
-  onPublished: () => void;
+  onPublished: (version: number) => void;
+  /** Fired synchronously the moment a publish is kicked off (before any await)
+   * — the shell arms its own status-bar watch on it, so closing this drawer
+   * mid-publish never loses progress/completion feedback (decisions/00089). */
+  onPublishStarted?: () => void;
+  /** Fired when the publish POST settles in ANY outcome (ok / conflict /
+   * failed / network error — even mid-teardown) — the shell drops its
+   * in-flight bridge flag on it; crucially that includes the 409-conflict
+   * path, where no job ever starts server-side (decisions/00089). */
+  onPublishSettled?: () => void;
   /** Overridable for tests — a real `EventSource` needs neither jsdom support
    * nor a live server to verify the drawer's own rendering/state logic. */
   openStream?: (onUpdate: (job: PublishJobData) => void) => PublishStreamHandle;
@@ -203,16 +216,21 @@ export function mountPublishDrawer(deps: PublishDrawerDeps): PublishDrawer {
 
     function resetToIdle(): void {
       confirmButton.disabled = false;
+      setButtonIdle(confirmButton, "Publish");
       messageInput.disabled = false;
       progress.hidden = true;
     }
 
     confirmButton.addEventListener("click", () => {
       confirmButton.disabled = true;
+      setButtonBusy(confirmButton, "Publishing…");
       messageInput.disabled = true;
       errorBox.hidden = true;
       progress.hidden = false;
       progress.textContent = "Publishing… (pulling)";
+      // Before ANY await: the shell arms its status-bar watch from this, so
+      // the run's feedback no longer depends on this drawer staying open.
+      deps.onPublishStarted?.();
 
       streamHandle = openStream((job) => {
         if (cancelled) return;
@@ -226,8 +244,17 @@ export function mountPublishDrawer(deps: PublishDrawerDeps): PublishDrawer {
           streamHandle?.close();
           streamHandle = null;
           if (outcome.kind === "ok") {
+            // Terminal: the progress line carries the result; the confirm
+            // button leaves (a second click with a stale expectedRev is
+            // meaningless anyway). Drop the busy state FIRST — wx-button-busy's
+            // display:inline-flex would otherwise override the hidden
+            // attribute's display:none and the "Publishing…" button would
+            // linger next to "Published as version N." (caught by the e2e
+            // visual pass).
+            setButtonIdle(confirmButton, "Publish");
+            confirmButton.hidden = true;
             progress.textContent = `Published as version ${outcome.version}.`;
-            deps.onPublished();
+            deps.onPublished(outcome.version);
             return;
           }
           resetToIdle();
@@ -241,6 +268,11 @@ export function mountPublishDrawer(deps: PublishDrawerDeps): PublishDrawer {
           resetToIdle();
           errorBox.hidden = false;
           errorBox.textContent = error instanceof Error ? error.message : "Publish failed.";
+        })
+        .finally(() => {
+          // NOT cancelled-gated: the shell's in-flight bridge must drop even
+          // when this drawer was torn down mid-publish.
+          deps.onPublishSettled?.();
         });
     });
   }

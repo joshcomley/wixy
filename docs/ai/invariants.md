@@ -211,3 +211,31 @@ middle-still-scrolls guard). *Watch for:* anything new fixed-bottom reuses the
 the root; the preview document is intentionally NOT overflow-constrained (it is the
 middle that must scroll).
 
+### Inv 25 — Publish run/completion feedback is shell-owned, never drawer-owned
+The publish drawer may be closed mid-publish, a publish may start in another tab or
+from the AI assistant, and the page may be reloaded mid-job — so the admin SHELL
+(not the drawer) owns "a publish is running / it just went live". While
+`state.publishJob.isRunning` — or the `publishInFlight` bridge (set synchronously by
+the drawer's `onPublishStarted`, cleared by `onPublishSettled`, covering the
+confirm→POST race where the first poll could beat the job registering, incl. the
+409 path where NO job ever starts) — a shell watch (`ensurePublishWatch`/
+`publishWatchTick` in `shell.ts`) polls `/api/admin/state` every 2s, and
+`renderTopBar` turns the status bar into the progress surface: the Publish button
+swaps to `wx-button-busy` + `wx-spinner` ("Publishing…", full opacity) and the chip
+narrates the stage in layman wording (`PUBLISH_STAGE_LABELS`). The terminal job
+fires exactly ONE toast — "Published — version N is live." (6s, info) or "Publish
+failed — your draft changes are safe." (8s, error) — guarded twice:
+`announcedPublishVersion` dedupes the drawer's success path against the watch, and
+`publishWatchSawRunning` means a STALE terminal job from a previous publish (the
+server keeps the last job) is never announced. The drawer keeps its inline SSE
+stage detail and spins its own confirm button (`setButtonBusy` from `spinnerButton.
+ts`, shared), but completion feedback must never depend on the drawer staying open.
+*Enforced by:* `admin-ui/tests/shell.test.ts`'s "publish progress feedback"
+describe (busy affordance + stage narration, drawer-closed completion, exactly-once
+dedupe, stale-job guard, conflict bridge-drop, failure toast) and `publishDrawer.
+test.ts`'s onPublishStarted/busy-confirm tests. *Watch for:* any new publish
+trigger must set the bridge + fire `onPublishStarted` (or be discoverable via
+`publishJob.isRunning`); the drawer's confirm hides on success (a stale
+`expectedRev` makes a second click meaningless); toast lifetime params are the 3rd
+arg of `showTransientToast`.
+

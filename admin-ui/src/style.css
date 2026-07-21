@@ -282,6 +282,53 @@ html, body {
   opacity: 0.45;
 }
 
+/* -- Publish-in-progress affordance (decisions/00089) --------------------------
+   While a publish runs, its buttons (the status bar's Publish + the drawer's
+   confirm) swap their label for spinner + "Publishing…" and stay at FULL
+   opacity — a dim, static disabled button reads as "broken" on a phone during
+   a 30-60s publish. */
+.wx-button-busy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.wx-button-busy:disabled {
+  opacity: 1;
+  cursor: progress;
+}
+
+/* inline-flex above would otherwise beat the hidden attribute's UA
+   display:none — a busy button that gets hidden (the drawer's confirm on
+   publish success) must actually disappear. */
+.wx-button-busy[hidden] {
+  display: none;
+}
+
+.wx-spinner {
+  display: inline-block;
+  width: 0.85em;
+  height: 0.85em;
+  flex: none;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: wx-spin 0.8s linear infinite;
+}
+
+@keyframes wx-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wx-spinner {
+    animation-duration: 1.8s;
+  }
+}
+
 .wx-site-link {
   font: 600 0.8125rem/1 system-ui, sans-serif;
   color: var(--wx-brand-blue-text);

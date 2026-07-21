@@ -433,4 +433,71 @@ describe("mountPublishDrawer", () => {
 
     expect(close).toHaveBeenCalled();
   });
+
+  it("confirming spins the drawer's Publish button and notifies onPublishStarted immediately (decisions/00089)", async () => {
+    let resolvePublish: ((outcome: PublishOutcome) => void) | null = null;
+    const publish = vi.fn(
+      () => new Promise<PublishOutcome>((resolve) => { resolvePublish = resolve; }),
+    );
+    const onPublishStarted = vi.fn();
+    const drawer = mountPublishDrawer({
+      api: fakeApi({ publish }),
+      expectedRev: 0,
+      upstream: [],
+      onClose: vi.fn(),
+      onPublished: vi.fn(),
+      onPublishStarted,
+      openStream: noopStream,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const confirm = drawer.element.querySelector<HTMLButtonElement>(".wx-publish-confirm")!;
+    confirm.click();
+
+    // Synchronous with the click — the shell's status-bar watch must be armed
+    // before any await, so closing the drawer at any point still completes.
+    expect(onPublishStarted).toHaveBeenCalledOnce();
+    expect(confirm.disabled).toBe(true);
+    expect(confirm.querySelector(".wx-spinner")).not.toBeNull();
+    expect(confirm.textContent).toContain("Publishing…");
+
+    resolvePublish!({ kind: "ok", version: 7, sha: "a".repeat(40) });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Terminal state: the progress line carries the result; the confirm button
+    // leaves (a stale expectedRev makes a second click meaningless anyway).
+    expect(confirm.hidden).toBe(true);
+    expect(drawer.element.querySelector(".wx-publish-progress")?.textContent).toBe(
+      "Published as version 7.",
+    );
+  });
+
+  it("a failed publish restores the drawer's Publish button without the spinner", async () => {
+    const publish = vi.fn(
+      async (): Promise<PublishOutcome> => ({ kind: "failed", message: "git tag failed" }),
+    );
+    const drawer = mountPublishDrawer({
+      api: fakeApi({ publish }),
+      expectedRev: 0,
+      upstream: [],
+      onClose: vi.fn(),
+      onPublished: vi.fn(),
+      openStream: noopStream,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const confirm = drawer.element.querySelector<HTMLButtonElement>(".wx-publish-confirm")!;
+    confirm.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(confirm.disabled).toBe(false);
+    expect(confirm.querySelector(".wx-spinner")).toBeNull();
+    expect(confirm.textContent).toBe("Publish");
+  });
 });

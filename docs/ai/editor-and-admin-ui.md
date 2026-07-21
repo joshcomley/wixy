@@ -31,7 +31,14 @@ between them. Spec: [`spec/05-editor.md`](../../spec/05-editor.md). The wire typ
   The one piece of chrome edit view does NOT hide is the slim `.wx-statusbar` at the very
   top of the shell: the draft chip (left, opens the review drawer) and the Publish button
   (right), visible on every route (decisions/00083) — the chip no longer relocates into
-  the slim edit bar, and the topbar carries neither control.
+  the slim edit bar, and the topbar carries neither control. While a publish runs the
+  status bar doubles as the progress surface (decisions/00089, Inv 25): the Publish
+  button spins (`wx-button-busy` + `wx-spinner`) and the chip narrates the stage in
+  layman wording, driven by a shell-owned watch that polls `/api/admin/state` every 2s
+  while `publishJob.isRunning` — armed by the drawer's `onPublishStarted` or by any
+  state load finding a running job (reload-mid-publish, another tab/device) — and
+  announces the terminal job with exactly one version-guarded toast ("Published —
+  version N is live." / "Publish failed — your draft changes are safe.").
 - **Edit chrome on mobile (decisions/00084):** the edit view opens on the USER'S OWN form
   factor — `initialDeviceFor(width, coarsePointer)` in `editView.ts` (phone → mobile even
   when a phone reports ≥480 CSS px; tablet → tablet; a narrow desktop window previews as

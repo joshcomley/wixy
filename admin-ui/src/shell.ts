@@ -12,7 +12,7 @@
 // controller's `subscribe` drives both the topbar chrome AND (when mounted)
 // the Settings panel from the same source of truth.
 
-import { createApi, thumbnailUrl, type AdminApi, type StateResponse } from "./api";
+import { createApi, thumbnailUrl, type AdminApi, type PublishJobData, type PublishStage, type StateResponse } from "./api";
 import { createThumbnailService } from "./thumbnailService";
 import { mountChatPanel as mountChatPanelReal, type ChatPanel, type ChatPanelDeps } from "./chatPanel";
 import { mountEditView as mountEditViewReal, type EditView, type MountEditViewDeps } from "./editView";
@@ -28,6 +28,7 @@ import { captureScreenshot, copyBlobToClipboard, downloadBlob, flashScreen, scre
 import { clearLastRoute, loadLastRoute, saveLastRoute } from "./sessionState";
 import { mountSettingsPanel } from "./settingsPanel";
 import { formatBinding, initShortcuts, type ShortcutCommand } from "./shortcuts";
+import { setButtonBusy, setButtonIdle } from "./spinnerButton";
 import { mountThemePanel, type ThemePanel } from "./themePanel";
 import { initTheme, type ThemeMode } from "./theme";
 import { initThemeEditor } from "./themeEditor";
@@ -40,6 +41,30 @@ interface Drawer {
 
 const STATE_RETRY_MS = 5000;
 const TRANSIENT_TOAST_MS = 4000;
+// decisions/00089 — publish feedback: the watch's poll cadence while a publish
+// runs, and the longer toast lifetimes for the two terminal announcements (the
+// operator's "some notification when it's live" — too important to vanish in
+// the default 4s, and a failure must survive long enough to be read).
+const PUBLISH_POLL_MS = 2000;
+const PUBLISH_LIVE_TOAST_MS = 6000;
+const PUBLISH_FAIL_TOAST_MS = 8000;
+// Safety cap (~20 min at the 2s cadence): a genuinely wedged server job must
+// not be polled forever — the periodic revalidation re-arms the watch anyway.
+const PUBLISH_WATCH_MAX_POLLS = 600;
+
+/** Layman stage narration for the status bar while a publish runs — the
+ * operator watches the slim banner, not git jargon (decisions/00089, the same
+ * wording rule as decisions/00082's chip text). */
+const PUBLISH_STAGE_LABELS: Record<PublishStage, string> = {
+  pulling: "Getting the latest site…",
+  merging: "Applying your changes…",
+  committing: "Saving a new version…",
+  building: "Building the site…",
+  verifying: "Checking the site…",
+  swapping: "Taking it live…",
+  done: "Live.",
+  failed: "Publish failed.",
+};
 
 type MountEditViewFn = (page: string, deps: MountEditViewDeps) => EditView;
 type MountChatPanelFn = (conversation: string | null, deps: ChatPanelDeps) => ChatPanel;
@@ -417,6 +442,10 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
 
   const toastRegion = document.createElement("div");
   toastRegion.className = "wx-toast-region";
+  // Toasts are THE completion notification surface (publish-live included,
+  // decisions/00089) — an aria-live status region, so they're announced, not
+  // just painted.
+  toastRegion.setAttribute("role", "status");
 
   container.append(statusBar, topbar, editBarHost, body, toastRegion);
 
@@ -504,17 +533,37 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     const parts: string[] = [];
     if (opCount > 0) parts.push(opCount === 1 ? "1 unpublished change" : `${opCount} unpublished changes`);
     if (ahead > 0) parts.push(ahead === 1 ? "1 site update" : `${ahead} site updates`);
-    chipEl.textContent = parts.length === 0 ? "No unpublished changes" : parts.join(" · ");
     siteLink.href = `https://${state.project.domain}`;
     siteLink.hidden = false;
 
-    // spec/05 §5: "Publishes are serialized server-side; the UI disables
-    // Publish while one runs" — also true for the chip, the drawer's other
-    // trigger.
-    const publishing = state.publishJob?.isRunning === true;
-    publishButton.disabled = publishing;
-    chipEl.disabled = publishing;
-    publishButton.title = publishing ? "A publish is already running…" : "";
+    const job = state.publishJob;
+    if (publishInFlight || job?.isRunning === true) {
+      // spec/05 §5: "Publishes are serialized server-side; the UI disables
+      // Publish while one runs" — also true for the chip, the drawer's other
+      // trigger. decisions/00089: disabled alone read as "broken" on a phone
+      // with nothing happening for up to a minute — the button spins and the
+      // chip narrates the stage instead of just greying. `publishInFlight`
+      // bridges the gap between the drawer's confirm click and the POST
+      // registering the job server-side (the busy affordance appears
+      // synchronously with the click — fleet instant-feedback rule); the
+      // shell's watch covers reload-mid-publish and other-tab/device starts.
+      publishButton.disabled = true;
+      chipEl.disabled = true;
+      ensurePublishWatch();
+      if (!publishButton.classList.contains("wx-button-busy")) {
+        setButtonBusy(publishButton, "Publishing…");
+      }
+      publishButton.title = "Publishing — the site is being updated…";
+      chipEl.textContent = job?.isRunning === true ? PUBLISH_STAGE_LABELS[job.stage] : "Publishing…";
+      return;
+    }
+    publishButton.disabled = false;
+    chipEl.disabled = false;
+    if (publishButton.classList.contains("wx-button-busy")) {
+      setButtonIdle(publishButton, "Publish");
+    }
+    publishButton.title = "";
+    chipEl.textContent = parts.length === 0 ? "No unpublished changes" : parts.join(" · ");
   }
 
   // -- Toasts ---------------------------------------------------------------
@@ -531,13 +580,113 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     toastRegion.innerHTML = "";
   }
 
-  function showTransientToast(message: string, variant: "error" | "info" = "error"): void {
+  function showTransientToast(message: string, variant: "error" | "info" = "error", durationMs = TRANSIENT_TOAST_MS): void {
     const toast = document.createElement("div");
     toast.className =
       variant === "error" ? "wx-toast wx-toast-error wx-toast-transient" : "wx-toast wx-toast-transient";
     toast.textContent = message;
     toastRegion.appendChild(toast);
-    setTimeout(() => toast.remove(), TRANSIENT_TOAST_MS);
+    setTimeout(() => toast.remove(), durationMs);
+  }
+
+  // -- Publish progress watch (decisions/00089) -------------------------------
+  // The shell — not the drawer — owns "a publish is running / it just went
+  // live": the drawer may be closed mid-publish, the publish may have been
+  // started in another tab or by the AI assistant, or the page may have been
+  // reloaded mid-job. While `publishJob.isRunning` the watch polls state every
+  // PUBLISH_POLL_MS (renderTopBar spins the Publish button and narrates the
+  // stage in the chip) and on the terminal job fires exactly one toast —
+  // version-guarded so the drawer's own success path and this watch never
+  // double-announce.
+  //
+  // `publishInFlight` bridges the race between the drawer's confirm click and
+  // the POST registering the job server-side (the first poll could otherwise
+  // see "no job" and stop): set synchronously by onPublishStarted, cleared by
+  // onPublishSettled (the drawer's promise settling in ANY outcome — including
+  // a 409 that never started a job).
+  //
+  // Announcing is guarded against the STALE terminal job from a previous
+  // publish (the server keeps the last job on `app.state.publish_job`) two
+  // ways: `publishWatchSawRunning` (a job the watch itself observed running —
+  // the reload-mid-publish / other-tab shape) OR a terminal job whose id
+  // differs from the one the watch was armed with (the confirm-click shape —
+  // REQUIRED, not redundant: `/api/admin/state`'s git work queues behind the
+  // publish's own locks, so a 2s poll can BLOCK for the job's whole lifetime
+  // and only ever return it terminal — the e2e "closing the drawer
+  // mid-publish" found this).
+  let publishWatchTimer: ReturnType<typeof setTimeout> | null = null;
+  let publishWatchActive = false;
+  let publishWatchPolls = 0;
+  let publishWatchSawRunning = false;
+  let publishWatchArmedJobId: string | null = null;
+  let publishInFlight = false;
+  let announcedPublishVersion: number | null = null;
+
+  function ensurePublishWatch(): void {
+    if (publishWatchActive) return;
+    publishWatchActive = true;
+    publishWatchPolls = 0;
+    publishWatchSawRunning = false;
+    publishWatchArmedJobId = state?.publishJob?.id ?? null;
+    void publishWatchTick();
+  }
+
+  async function publishWatchTick(): Promise<void> {
+    try {
+      state = await api.getState();
+    } catch {
+      // A missed poll isn't independently actionable — stop watching; the
+      // periodic revalidation re-arms the watch if the job is still running.
+      publishWatchActive = false;
+      return;
+    }
+    renderTopBar();
+    const job = state.publishJob;
+    if (job?.isRunning === true) {
+      publishWatchSawRunning = true;
+    } else if (!publishInFlight) {
+      // Terminal (or vanished) and no in-flight POST still bridging: announce
+      // a job that provably belongs to THIS watch (seen running, or new since
+      // arming), never a previous publish's stale terminal record.
+      publishWatchActive = false;
+      if (
+        job !== null &&
+        (publishWatchSawRunning || job.id !== publishWatchArmedJobId)
+      ) {
+        announcePublishFinished(job);
+      }
+      return;
+    }
+    // Still running, or the confirm's POST hasn't registered the job yet.
+    if (publishWatchPolls >= PUBLISH_WATCH_MAX_POLLS) {
+      publishWatchActive = false;
+      return;
+    }
+    publishWatchPolls += 1;
+    publishWatchTimer = setTimeout(() => void publishWatchTick(), PUBLISH_POLL_MS);
+  }
+
+  function announcePublishSucceeded(version: number): void {
+    if (announcedPublishVersion === version) return;
+    announcedPublishVersion = version;
+    showTransientToast(`Published — version ${version} is live.`, "info", PUBLISH_LIVE_TOAST_MS);
+    // A publish changes what's LIVE — recapture every page (the draft's
+    // pixels just became the site's).
+    thumbnailService.refresh(state?.pages.map((p) => p.slug) ?? []);
+  }
+
+  function announcePublishFinished(job: PublishJobData): void {
+    if (job.stage === "done" && job.version !== null) {
+      announcePublishSucceeded(job.version);
+      return;
+    }
+    if (job.stage === "failed") {
+      showTransientToast(
+        "Publish failed — your draft changes are safe.",
+        "error",
+        PUBLISH_FAIL_TOAST_MS,
+      );
+    }
   }
 
   // -- Drawer -----------------------------------------------------------------
@@ -582,11 +731,23 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       expectedRev: state.draft.rev,
       upstream: state.upstream.aheadOfPublished,
       onClose: closeDrawer,
-      onPublished: () => {
+      onPublishStarted: () => {
+        // Bridge the gap until the POST registers the job (renderTopBar shows
+        // the busy affordance from THIS click, synchronously) and arm the
+        // watch — closing the drawer mid-publish keeps both alive.
+        publishInFlight = true;
+        renderTopBar();
+        ensurePublishWatch();
+      },
+      onPublishSettled: () => {
+        publishInFlight = false;
+        renderTopBar();
+      },
+      onPublished: (version) => {
         void refreshStateInBackground();
-        // A publish changes what's LIVE — recapture every page (the draft's
-        // pixels just became the site's).
-        thumbnailService.refresh(state?.pages.map((p) => p.slug) ?? []);
+        // Same terminal handling as the watch — version-guarded, so whichever
+        // of the two paths fires second is a no-op (decisions/00089).
+        announcePublishSucceeded(version);
       },
     });
     activeDrawer = drawer;
@@ -943,6 +1104,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       }
       if (stateRetryTimer !== null) clearTimeout(stateRetryTimer);
       if (chromeRevealTimer !== null) clearTimeout(chromeRevealTimer);
+      if (publishWatchTimer !== null) clearTimeout(publishWatchTimer);
       win.removeEventListener("keydown", onSecondaryEscape);
       closeSecondary();
       narrowMedia?.removeEventListener("change", onNarrowChange);
