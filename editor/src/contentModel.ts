@@ -14,29 +14,25 @@
 // preserves observable behavior is corrected for free on the next reload regardless.
 
 import { OVERLAY_CHROME_SELECTOR } from "./dom";
+import { demoteHtmlToMarkdown } from "./markdownText";
 import type { BindingField, JsonValue } from "./protocol";
 
 /** `el` cloned with every injected overlay-chrome node removed (the data-wx-if
  * eye toggle is inserted INTO content elements at boot, overlay.ts
  * `ensureIfToggle`). Reading values from the clone — never the live element —
  * is what keeps chrome markup/label text out of committed draft values
- * (decisions/00073). */
-function chromeFreeClone(el: Element): Element {
+ * (decisions/00073). Exported for the composer's demote-seed, which needs the
+ * element tree rather than a serialized string. */
+export function chromeFreeElement(el: Element): Element {
   const clone = el.cloneNode(true) as Element;
   clone.querySelectorAll(OVERLAY_CHROME_SELECTOR).forEach((node) => node.remove());
   return clone;
 }
 
-/** innerHTML of `el` minus overlay chrome — the only form of an element's HTML
- * that may cross into a committed value or an editor seed. */
-export function chromeFreeInnerHtml(el: Element): string {
-  return (chromeFreeClone(el) as HTMLElement).innerHTML;
-}
-
 /** textContent of `el` minus overlay chrome (the eye toggle's own 👁️ label is
  * part of its textContent, so plain-text reads need the strip too). */
 export function chromeFreeTextContent(el: Element): string {
-  return chromeFreeClone(el).textContent ?? "";
+  return chromeFreeElement(el).textContent ?? "";
 }
 
 const BG_URL_RE = /background-image\s*:\s*url\(([^)]*)\)/i;
@@ -98,7 +94,12 @@ function cssEscape(value: string): string {
 function readScalarValue(el: Element, kind: BindingField["kind"]): JsonValue {
   switch (kind) {
     case "text":
-      return chromeFreeInnerHtml(el);
+      // Text values are stored as markdown SOURCE (decisions/00075): the DOM
+      // shows the rendered form (the composer's live preview just wrote
+      // <strong>/<em>/<a> into this element), so reads demote back to source —
+      // otherwise an unrelated sibling edit would silently rewrite this field
+      // from `**x**` to `<strong>x</strong>` in the store.
+      return demoteHtmlToMarkdown(chromeFreeElement(el));
     case "href":
       return el.getAttribute("href") ?? "";
     case "img": {

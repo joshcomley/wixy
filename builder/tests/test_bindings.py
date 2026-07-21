@@ -100,6 +100,33 @@ class TestTextBinding:
         apply_bindings(body, ctx, mode="preview", file_label="test", sink=result)
         assert any(e.code == "not-clean" for e in result.errors)
 
+    def test_markdown_bold_italic_link_render(self) -> None:
+        """decisions/00075: text bindings render the inline-markdown subset at
+        build time (and the editor previews the identical render)."""
+        body = _body('<p data-wx="body">placeholder</p>')
+        ctx = ResolveContext(
+            page={"body": "A **bold** and *italic* with [a link](/x.html)"}, glob={}
+        )
+        apply_bindings(body, ctx, mode="publish", file_label="test")
+        html = str(_find(body, "p"))
+        assert "<strong>bold</strong>" in html
+        assert "<em>italic</em>" in html
+        assert '<a href="/x.html" rel="noopener noreferrer">a link</a>' in html
+
+    def test_markdown_newline_becomes_br(self) -> None:
+        body = _body('<p data-wx="body">placeholder</p>')
+        ctx = ResolveContext(page={"body": "line1\nline2"}, glob={})
+        apply_bindings(body, ctx, mode="publish", file_label="test")
+        assert "line1<br/>line2" in str(_find(body, "p"))
+
+    def test_markdown_unsafe_link_scheme_renders_as_literal_text(self) -> None:
+        body = _body('<p data-wx="body">placeholder</p>')
+        ctx = ResolveContext(page={"body": "[x](javascript:alert(1))"}, glob={})
+        apply_bindings(body, ctx, mode="publish", file_label="test")
+        html = str(_find(body, "p"))
+        assert "<a " not in html
+        assert "javascript:alert(1)" in html  # as inert text, not a link
+
 
 class TestImgBinding:
     def test_sets_src_and_alt(self) -> None:

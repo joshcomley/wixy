@@ -7,25 +7,20 @@
 // against a real rendered page — that needs a live browser, per this repo's own
 // "verify in a browser for UI changes" rule; flagged explicitly in decisions/00017.
 
-import { chromeFreeInnerHtml, chromeFreeTextContent, readListValue } from "./contentModel";
+import { chromeFreeElement, chromeFreeTextContent, readListValue } from "./contentModel";
+import { openComposer, type Composer } from "./composer";
 import {
   chipLabel,
   closestBoundElement,
   HOVER_TARGET_SELECTOR,
-  isRichLiteContent,
   type DetectedBinding,
 } from "./dom";
 import { applyListStructuralOp, type ListStructuralOp } from "./listOps";
+import { demoteHtmlToMarkdown, renderMarkdownInline } from "./markdownText";
 import { onShellMessage, sendToShell } from "./messaging";
 import { resolveInternalPageSlug, showToast } from "./navigation";
 import { directOpTarget, findOutermostList, isItemScopeKey } from "./opTargeting";
-import {
-  buildImagePopover,
-  buildLinkPopover,
-  buildPlainTextPopover,
-  buildRichLiteTextPopover,
-  positionNear,
-} from "./popovers";
+import { buildImagePopover, buildLinkPopover, positionNear } from "./popovers";
 import type { BindingField, DraftOp, JsonValue, PageBindings } from "./protocol";
 
 // @nav is builder-computed and never generically list-editable (spec/02 §3;
@@ -45,8 +40,13 @@ function findField(bindings: PageBindings, key: string): BindingField | null {
 export function initOverlay(win: Window = window): () => void {
   let state: OverlayState | null = null;
   let closeActivePopover: (() => void) | null = null;
+  let activeComposer: Composer | null = null;
   let hoverChip: HTMLElement | null = null;
   let hoveredEl: Element | null = null;
+  // Whole-iframe scale from the shell's device simulation (1 = unscaled). The
+  // composer counter-scales by this so it stays legible when the preview is
+  // shrunk (decisions/00075); updated by setDevice messages.
+  let viewportScale = 1;
   // The binding a "Replace image" click sent `mediaRequest` for (milestone 8
   // slice 3) — set right before asking the shell to open its media dialog,
   // consumed by the matching `applyOps` batch the shell echoes back once the
@@ -65,7 +65,9 @@ export function initOverlay(win: Window = window): () => void {
     switch (kind) {
       case "text":
         if (typeof value === "string") {
-          (el as HTMLElement).innerHTML = value;
+          // Values are markdown SOURCE (decisions/00075) — the DOM always
+          // carries the rendered form, exactly like the builder's output.
+          (el as HTMLElement).innerHTML = renderMarkdownInline(value);
           // innerHTML wipes any eye toggle this element carried (every child goes
           // with it) — re-attach so the element stays visibility-togglable without
           // waiting for a reload (decisions/00073).
@@ -129,6 +131,7 @@ export function initOverlay(win: Window = window): () => void {
   function closePopover(): void {
     closeActivePopover?.();
     closeActivePopover = null;
+    activeComposer = null;
   }
 
   function mountPopover(el: Element, popover: HTMLElement): void {
@@ -137,30 +140,38 @@ export function initOverlay(win: Window = window): () => void {
     closeActivePopover = () => popover.remove();
   }
 
-  function openTextPopover(target: DetectedBinding): void {
+  /** Text editing goes through the bottom-anchored composer (decisions/00075) —
+   * one surface for plain AND previously-"rich" content: the seed is demoted
+   * markdown from the element's rendered HTML, typing live-previews the
+   * rendered markdown into the element, commit stores the markdown source,
+   * cancel restores the exact pre-edit DOM. */
+  function openTextComposer(target: DetectedBinding): void {
     const el = target.element as HTMLElement;
-    if (isRichLiteContent(el)) {
-      const popover = buildRichLiteTextPopover(chromeFreeInnerHtml(el), {
-        onCommit: (html) => {
-          commitEdit(target, html);
+    const originalHtml = el.innerHTML;
+    const hadToggle = el.querySelector(":scope > .wx-if-eye-toggle") !== null;
+    const composer = openComposer({
+      seed: demoteHtmlToMarkdown(chromeFreeElement(el)),
+      scale: viewportScale,
+      callbacks: {
+        onPreview: (value) => {
+          el.innerHTML = renderMarkdownInline(value);
+          if (hadToggle || el.hasAttribute("data-wx-if")) ensureIfToggle(el);
+        },
+        onCommit: (value) => {
+          commitEdit(target, value);
           closePopover();
         },
-        onCancel: closePopover,
-      });
-      mountPopover(el, popover);
-      return;
-    }
-    // Both seeds go through the chrome-free readers: boot may have injected an
-    // eye toggle INTO this very element (any if-bound text binding), and its
-    // markup/label must never enter an edit's starting value (decisions/00073).
-    const popover = buildPlainTextPopover(chromeFreeTextContent(el), {
-      onCommit: (value) => {
-        commitEdit(target, value);
-        closePopover();
+        onCancel: () => {
+          el.innerHTML = originalHtml;
+          if (hadToggle || el.hasAttribute("data-wx-if")) ensureIfToggle(el);
+          closePopover();
+        },
       },
-      onCancel: closePopover,
     });
-    mountPopover(el, popover);
+    activeComposer = composer;
+    document.body.appendChild(composer.element);
+    closeActivePopover = () => composer.element.remove();
+    composer.focus();
   }
 
   function openLinkPopover(target: DetectedBinding): void {
@@ -211,7 +222,7 @@ export function initOverlay(win: Window = window): () => void {
     closePopover();
     switch (target.kind) {
       case "text":
-        openTextPopover(target);
+        openTextComposer(target);
         return;
       case "href":
         openLinkPopover(target);
@@ -571,8 +582,11 @@ export function initOverlay(win: Window = window): () => void {
         return;
       }
       case "setDevice":
-        // The shell resizes the iframe ELEMENT itself; there's nothing for the
-        // overlay's own in-frame DOM to do in response (decisions/00017).
+        // The shell resizes (and, under viewport simulation, scales) the iframe
+        // ELEMENT itself; the overlay only needs the scale so the composer can
+        // counter-scale and stay legible (decisions/00075). Absent = 1.
+        viewportScale = message.scale ?? 1;
+        activeComposer?.setScale(viewportScale);
         return;
       case "themeVars":
         applyThemeVars(message.vars);

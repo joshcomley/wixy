@@ -100,9 +100,14 @@ theme), `zoom.ts`, `fontScale.ts`, `settingsPanel.ts`, `shortcuts.ts`, `contrast
 -if` eye toggle, `mediaRequest`, shell handshake); `messaging.ts` (origin-checked postMessage);
 `opTargeting.ts` (`{file, path}` targeting; encodes "no dotted path indexes an array");
 `contentModel.ts` (reads current values back out of the live DOM — the overlay never receives
-content values, only shapes); `listOps.ts` (pure array transforms); `dom.ts` (binding
-discovery, precedence list→href→img→bg→text); `popovers.ts` (per-kind editors incl. rich-lite
-contenteditable); `navigation.ts` (internal-link interception).
+content values, only shapes; text reads are chrome-stripped and demoted to markdown source,
+Inv 23 + decisions/00075); `listOps.ts` (pure array transforms); `dom.ts` (binding
+discovery, precedence list→href→img→bg→text); `popovers.ts` (link + image editors only —
+text no longer has a popover); `composer.ts` (THE text editor: bottom-anchored sheet,
+auto-growing textarea, B/I/link row, maximize, live markdown preview, decisions/00075);
+`markdownText.ts` (inline-markdown render + demote — hand-synced twin of
+`builder/markdown_inline.py`, locked by the shared fixture, Inv 20);
+`navigation.ts` (internal-link interception).
 
 ## Build
 

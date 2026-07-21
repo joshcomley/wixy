@@ -56,12 +56,14 @@ same merge).
 - Hover on any bound element (`[data-wx], [data-wx-img], [data-wx-bg], [data-wx-href],
   [data-wx-list]`): outline (2px, brand blue, 4px radius) + a floating chip naming the kind
   ("Text", "Image", "Link", "List"). Bound elements get `cursor: pointer` in edit mode.
-- **Click a text binding** → inline popover anchored to the element:
-  - plain mode (headings/labels/prices — value has no markup): single input or autosizing
-    textarea; Enter commits, Esc cancels.
-  - rich-lite mode: contenteditable clone of the element styled as-is, mini-toolbar
-    **B / I / link / ↵** only (matching the 02 §5 allowlist), paste is plain-text-forced.
-  - live: keystrokes update the element immediately; commit emits the `op`.
+- **Click a text binding** → the **composer**: a bottom-anchored sheet (cmd-chat style,
+  decisions/00075 — supersedes the former inline plain/rich-lite popovers):
+  - functions row (**B / I / link** inserting markdown markers around the selection,
+    maximize to ~80vh for long text, ✓ save, ✕ cancel);
+  - auto-growing textarea capped at ~5 lines / ~20% viewport;
+  - Enter = newline, Ctrl+Enter or ✓ commits, Esc cancels (restores the pre-edit DOM);
+  - live: keystrokes render the markdown (02 §5 amendment) into the element immediately;
+    commit stores the markdown SOURCE as the `op` value.
 - **Click an image binding** (`data-wx-img`/`data-wx-bg`) → "Replace image" button + alt
   input; Replace opens the shell's media dialog (§4). A dashed drop target also accepts a
   direct file drop onto the element.

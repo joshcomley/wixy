@@ -1,80 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  buildImagePopover,
-  buildLinkPopover,
-  buildPlainTextPopover,
-  buildRichLiteTextPopover,
-  positionNear,
-} from "../src/popovers";
+import { buildImagePopover, buildLinkPopover, positionNear } from "../src/popovers";
 
 function fireKeydown(el: Element, key: string, extra: Partial<KeyboardEventInit> = {}): void {
   el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, ...extra }));
 }
-
-describe("buildPlainTextPopover", () => {
-  it("renders an input pre-filled with the current text", () => {
-    const el = buildPlainTextPopover("Hello", { onCommit: vi.fn(), onCancel: vi.fn() });
-    const input = el.querySelector("input");
-    expect(input?.value).toBe("Hello");
-  });
-
-  it("uses a textarea for long text", () => {
-    const long = "x".repeat(80);
-    const el = buildPlainTextPopover(long, { onCommit: vi.fn(), onCancel: vi.fn() });
-    expect(el.querySelector("textarea")).not.toBeNull();
-    expect(el.querySelector("input")).toBeNull();
-  });
-
-  it("commits the current value on Enter", () => {
-    const onCommit = vi.fn();
-    const el = buildPlainTextPopover("Original", { onCommit, onCancel: vi.fn() });
-    const input = el.querySelector("input");
-    if (input === null) throw new Error("expected an input");
-    input.value = "Edited";
-    fireKeydown(input, "Enter");
-    expect(onCommit).toHaveBeenCalledWith("Edited");
-  });
-
-  it("cancels on Escape without committing", () => {
-    const onCommit = vi.fn();
-    const onCancel = vi.fn();
-    const el = buildPlainTextPopover("Original", { onCommit, onCancel });
-    const input = el.querySelector("input");
-    if (input === null) throw new Error("expected an input");
-    fireKeydown(input, "Escape");
-    expect(onCancel).toHaveBeenCalled();
-    expect(onCommit).not.toHaveBeenCalled();
-  });
-});
-
-describe("buildRichLiteTextPopover", () => {
-  it("renders a contenteditable seeded with the current HTML", () => {
-    const el = buildRichLiteTextPopover("Learn <strong>more</strong>", {
-      onCommit: vi.fn(),
-      onCancel: vi.fn(),
-    });
-    const editable = el.querySelector('[contenteditable]');
-    expect(editable?.innerHTML).toBe("Learn <strong>more</strong>");
-  });
-
-  it("has exactly a Bold, Italic, and Link toolbar button", () => {
-    const el = buildRichLiteTextPopover("text", { onCommit: vi.fn(), onCancel: vi.fn() });
-    const labels = Array.from(el.querySelectorAll(".wx-popover-toolbar button")).map(
-      (b) => b.textContent,
-    );
-    expect(labels).toEqual(["B", "I", "Link"]);
-  });
-
-  it("commits the editable's current innerHTML on Enter", () => {
-    const onCommit = vi.fn();
-    const el = buildRichLiteTextPopover("text", { onCommit, onCancel: vi.fn() });
-    const editable = el.querySelector('[contenteditable]');
-    if (editable === null) throw new Error("expected contenteditable");
-    editable.innerHTML = "edited <em>text</em>";
-    fireKeydown(editable, "Enter");
-    expect(onCommit).toHaveBeenCalledWith("edited <em>text</em>");
-  });
-});
 
 describe("buildLinkPopover", () => {
   it("renders both a label and href input when a label is present", () => {

@@ -104,16 +104,16 @@ describe("initOverlay", () => {
   });
 
   describe("text editing", () => {
-    it("clicking a plain text binding opens a popover; committing applies the DOM and emits an op", () => {
+    it("clicking a text binding opens the composer; committing applies the DOM and emits an op", () => {
       root.innerHTML = `<h1 data-wx="hero.title">Original</h1>`;
       const h1 = root.querySelector("h1") as HTMLElement;
       const { sent, teardown } = initFor("index", { page: "index", fields: [] });
 
       h1.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-      const input = document.querySelector(".wx-popover input") as HTMLInputElement;
+      const input = document.querySelector(".wx-composer-input") as HTMLTextAreaElement;
       expect(input).not.toBeNull();
       input.value = "Edited";
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }));
 
       expect(h1.innerHTML).toBe("Edited");
       expect(sent.at(-1)).toEqual({
@@ -132,9 +132,9 @@ describe("initOverlay", () => {
       const { sent, teardown } = initFor("index", { page: "index", fields: [] });
 
       el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-      const input = document.querySelector(".wx-popover input") as HTMLInputElement;
+      const input = document.querySelector(".wx-composer-input") as HTMLTextAreaElement;
       input.value = "New Brand";
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }));
 
       expect(sent.at(-1)).toEqual({
         wx: 1,
@@ -146,19 +146,83 @@ describe("initOverlay", () => {
       teardown();
     });
 
+    it("typing in the composer live-previews rendered markdown without emitting an op", () => {
+      root.innerHTML = `<p data-wx="body">Original</p>`;
+      const p = root.querySelector("p") as HTMLElement;
+      const { sent, teardown } = initFor("index", { page: "index", fields: [] });
+
+      p.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      const input = document.querySelector(".wx-composer-input") as HTMLTextAreaElement;
+      input.value = "A **bold** preview";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+
+      // rendered into the page immediately, but nothing committed yet
+      expect(p.innerHTML).toBe("A <strong>bold</strong> preview");
+      expect(sent.filter((m) => m.type === "op")).toHaveLength(0);
+      teardown();
+    });
+
+    it("the composer seed demotes rendered allowlist html back to markdown source", () => {
+      root.innerHTML = `<p data-wx="body"><strong>Easy, free parking</strong> right<br>outside</p>`;
+      const p = root.querySelector("p") as HTMLElement;
+      const { teardown } = initFor("index", { page: "index", fields: [] });
+
+      p.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      const input = document.querySelector(".wx-composer-input") as HTMLTextAreaElement;
+      expect(input.value).toBe("**Easy, free parking** right\noutside");
+      teardown();
+    });
+
+    it("committing stores markdown SOURCE while the page shows the rendered form", () => {
+      root.innerHTML = `<p data-wx="body">Original</p>`;
+      const p = root.querySelector("p") as HTMLElement;
+      const { sent, teardown } = initFor("index", { page: "index", fields: [] });
+
+      p.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      const input = document.querySelector(".wx-composer-input") as HTMLTextAreaElement;
+      input.value = "A *calm* space";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }));
+
+      expect(p.innerHTML).toBe("A <em>calm</em> space");
+      expect(sent.at(-1)).toEqual({
+        wx: 1,
+        type: "op",
+        file: "index",
+        path: "body",
+        value: "A *calm* space",
+      });
+      teardown();
+    });
+
+    it("cancel restores the exact pre-edit DOM after live previews", () => {
+      root.innerHTML = `<p data-wx="body"><strong>Legacy</strong> html</p>`;
+      const p = root.querySelector("p") as HTMLElement;
+      const { sent, teardown } = initFor("index", { page: "index", fields: [] });
+
+      p.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      const input = document.querySelector(".wx-composer-input") as HTMLTextAreaElement;
+      input.value = "completely *different*";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+
+      expect(p.innerHTML).toBe("<strong>Legacy</strong> html");
+      expect(sent.filter((m) => m.type === "op")).toHaveLength(0);
+      teardown();
+    });
+
     it("escape cancels without emitting an op or changing the DOM", () => {
       root.innerHTML = `<h1 data-wx="hero.title">Original</h1>`;
       const h1 = root.querySelector("h1") as HTMLElement;
       const { sent, teardown } = initFor("index", { page: "index", fields: [] });
 
       h1.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-      const input = document.querySelector(".wx-popover input") as HTMLInputElement;
+      const input = document.querySelector(".wx-composer-input") as HTMLTextAreaElement;
       input.value = "Should not stick";
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
 
       expect(h1.innerHTML).toBe("Original");
       expect(sent.filter((m) => m.type === "op")).toHaveLength(0);
-      expect(document.querySelector(".wx-popover")).toBeNull();
+      expect(document.querySelector(".wx-composer")).toBeNull();
       teardown();
     });
   });
@@ -470,9 +534,9 @@ describe("initOverlay", () => {
 
       const day = root.querySelector('[data-wx=".day"]') as HTMLElement;
       day.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-      const input = document.querySelector(".wx-popover input") as HTMLInputElement;
+      const input = document.querySelector(".wx-composer-input") as HTMLTextAreaElement;
       input.value = "Mon";
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }));
 
       const op = sent.at(-1);
       const serialized = JSON.stringify(op);
@@ -488,18 +552,18 @@ describe("initOverlay", () => {
       teardown();
     });
 
-    it("the text popover for an if-bound element is the PLAIN one, seeded without the toggle", () => {
+    it("the composer for an if-bound element is seeded without the toggle", () => {
       root.innerHTML = `<span data-wx="hours.note" data-wx-if="!hours.hideNote">10:00 – 19:00</span>`;
       const el = root.querySelector("span") as HTMLElement;
       const { teardown } = initFor("index", { page: "index", fields: [] });
-      // Boot injected the toggle (element carries data-wx-if) — which must not
-      // reclassify the content as rich-lite nor enter the seed.
+      // Boot injected the toggle (element carries data-wx-if) — it must not
+      // enter the composer's seed.
       expect(el.querySelector(".wx-if-eye-toggle")).not.toBeNull();
 
       el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
 
-      const input = document.querySelector(".wx-popover input") as HTMLInputElement;
-      expect(input).not.toBeNull(); // plain input, not the rich contenteditable
+      const input = document.querySelector(".wx-composer-input") as HTMLTextAreaElement;
+      expect(input).not.toBeNull();
       expect(input.value).toBe("10:00 – 19:00");
       teardown();
     });
@@ -510,9 +574,9 @@ describe("initOverlay", () => {
       const { teardown } = initFor("index", { page: "index", fields: [] });
 
       el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-      const input = document.querySelector(".wx-popover input") as HTMLInputElement;
+      const input = document.querySelector(".wx-composer-input") as HTMLTextAreaElement;
       input.value = "11:00 – 20:00";
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }));
 
       expect(el.textContent).toContain("11:00 – 20:00");
       expect(el.querySelector(":scope > .wx-if-eye-toggle")).not.toBeNull();
@@ -597,9 +661,9 @@ describe("initOverlay", () => {
       const { sent, teardown } = initFor("index", showcaseBindings);
 
       firstTitle.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-      const input = document.querySelector(".wx-popover input") as HTMLInputElement;
+      const input = document.querySelector(".wx-composer-input") as HTMLTextAreaElement;
       input.value = "One Edited";
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }));
 
       expect(sent.at(-1)).toEqual({
         wx: 1,

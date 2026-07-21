@@ -31,9 +31,11 @@ export async function gotoEditAndWaitReady(page: Page, slug: string): Promise<vo
 export async function editTextField(page: Page, key: string, newValue: string): Promise<void> {
   const frame = page.frameLocator(".wx-preview-iframe");
   await frame.locator(`[data-wx="${key}"]`).click();
-  const input = frame.locator(".wx-popover input, .wx-popover textarea").first();
+  // The text composer (decisions/00075): Enter is a newline now — commit is
+  // Ctrl+Enter (or the ✓ button).
+  const input = frame.locator(".wx-composer-input");
   await input.fill(newValue);
-  await input.press("Enter");
+  await input.press("Control+Enter");
 }
 
 /** spec/08 §2: "Console errors anywhere in E2E = failure" — a real JS exception or

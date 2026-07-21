@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chipLabel, closestBoundElement, detectBinding, isRichLiteContent } from "../src/dom";
+import { chipLabel, closestBoundElement, detectBinding } from "../src/dom";
 
 function parse(html: string): Element {
   const template = document.createElement("template");
@@ -68,31 +68,5 @@ describe("chipLabel", () => {
     expect(chipLabel("text")).toBe("Text");
     expect(chipLabel("href")).toBe("Link");
     expect(chipLabel("list")).toBe("List");
-  });
-});
-
-describe("isRichLiteContent", () => {
-  it("is false for plain text content", () => {
-    expect(isRichLiteContent(parse(`<h1 data-wx="x">Plain title</h1>`))).toBe(false);
-  });
-
-  it("is true when the element has element children (e.g. an inline <strong>)", () => {
-    expect(
-      isRichLiteContent(parse(`<p data-wx="x">Learn <strong>more</strong> today</p>`)),
-    ).toBe(true);
-  });
-
-  it("is false when the ONLY element child is an injected eye toggle (overlay chrome)", () => {
-    // Boot injects .wx-if-eye-toggle into every [data-wx-if] element; that chrome
-    // child must not reclassify a plain text binding as rich-lite (2026-07-21: it
-    // did, seeding the rich popover with the button markup itself — the chrome-leak
-    // incident, decisions/00073).
-    expect(
-      isRichLiteContent(
-        parse(
-          `<span data-wx="x" data-wx-if="!y"><button class="wx-if-eye-toggle" type="button">eye</button>plain</span>`,
-        ),
-      ),
-    ).toBe(false);
   });
 });

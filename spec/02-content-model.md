@@ -184,6 +184,15 @@ Plain strings are valid values. The editor decides input mode per element: block
 bindings (`p`, list bodies) get the rich-lite mini-toolbar; heading/label/price bindings get
 a plain input (newlines and markup stripped).
 
+**Amendment (2026-07-21, decisions/00075):** values are now **inline-markdown source**
+that RENDERS to the rich-lite fragment above: `**bold**` → `strong`, `*italic*` → `em`,
+`[label](url)` → `a` (safe schemes only), newline → `br`. Legacy allowlist tags in
+source pass through verbatim; the subset is byte-parity between builder and editor
+(`builder/markdown_inline.py` ≡ `editor/src/markdownText.ts`, shared fixture). The
+sanitize allowlist and its enforcement points are unchanged (sanitize runs FIRST at
+build/write; markdown renders after). The per-element rich-lite/plain input split is
+replaced by ONE composer for all text (spec/05 §2).
+
 ## 6. Collections
 
 A `data-wx-list` container's array is edited as a unit (the draft overlay stores the whole

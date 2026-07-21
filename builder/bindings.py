@@ -22,6 +22,7 @@ from bs4 import BeautifulSoup, Tag
 from builder.content import dotted_get
 from builder.errors import BuildError, ValidationResult
 from builder.jsontypes import JsonObject, JsonValue
+from builder.markdown_inline import render_markdown_inline
 from builder.sanitize import sanitize_rich_lite
 
 ATTR_TEXT = "data-wx"
@@ -195,8 +196,15 @@ def _apply_text(
     if not found or not isinstance(value, str):
         _fail(sink, file_label, key, f"text binding '{key}' does not resolve to a string")
         return
-    clean = sanitize_rich_lite(value)
-    if sink is not None and clean != value:
+    # decisions/00075: the value is inline-markdown source — sanitized FIRST
+    # (injected markup removed, exactly as before markdown existed), then
+    # rendered (legacy allowlist tags pass through verbatim), so `**bold**` in
+    # content becomes <strong> in every output lane.
+    clean = render_markdown_inline(sanitize_rich_lite(value))
+    # ...but the validate "not-clean" rule still judges the SOURCE on its own:
+    # markdown (`**`, `[]()`) is nh3-clean text and must not be flagged — only
+    # markup the source itself can't carry (e.g. a <div>) is "not clean".
+    if sink is not None and sanitize_rich_lite(value) != value:
         sink.add(
             "not-clean",
             f"value for '{key}' is not already clean (sanitizes to a different string)",
