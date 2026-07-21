@@ -154,7 +154,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="capture and overwrite the baseline — RUN ONLY ON THE PINNED CI "
         "PLATFORM: screenshots embed platform font rasterization, so a baseline "
         "captured on any other OS fails every pixel check in CI (learned the "
-        "hard way, 2026-07-21: a Windows rebaseline failed all 9 pages at 2-100%)",
+        "hard way, 2026-07-21: a Windows rebaseline failed all nine pages)",
     )
     p_parity.add_argument(
         "--strict-screenshots",
