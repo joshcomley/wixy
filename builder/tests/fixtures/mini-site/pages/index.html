@@ -32,6 +32,10 @@
       </ul>
     </li>
   </ul>
+  <p>Consultation: <span data-wx="cta.priceNote" data-wx-control="price">Full consult — £50 · Follow-up — £30</span></p>
+  <ul class="hours" data-wx-list="@hours">
+    <li data-wx-list-item><span data-wx=".day">Day</span><span class="closed" data-wx-if=".closed" data-wx=".value" data-wx-control="opening-hours">Value</span><span data-wx-if="!.closed" data-wx=".value" data-wx-control="opening-hours">Value</span></li>
+  </ul>
 </main>
 <!-- wx:partial footer -->
 <!-- wx:partial booking-modal -->

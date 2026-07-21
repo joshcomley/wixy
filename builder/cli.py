@@ -149,7 +149,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--baseline", default=None, help="baseline dir (default: builder/tests/parity/baseline)"
     )
     p_parity.add_argument(
-        "--rebaseline", action="store_true", help="capture and overwrite the baseline"
+        "--rebaseline",
+        action="store_true",
+        help="capture and overwrite the baseline — RUN ONLY ON THE PINNED CI "
+        "PLATFORM: screenshots embed platform font rasterization, so a baseline "
+        "captured on any other OS fails every pixel check in CI (learned the "
+        "hard way, 2026-07-21: a Windows rebaseline failed all 9 pages at 2-100%)",
     )
     p_parity.add_argument(
         "--strict-screenshots",

@@ -9,6 +9,7 @@
 
 import { chromeFreeElement, chromeFreeTextContent, readListValue } from "./contentModel";
 import { openComposer, type Composer } from "./composer";
+import { buildHoursControl, buildPriceControl, type HoursRow } from "./controls";
 import {
   chipLabel,
   closestBoundElement,
@@ -174,6 +175,93 @@ export function initOverlay(win: Window = window): () => void {
     composer.focus();
   }
 
+  // -- Structured controls (decisions/00077) -----------------------------------
+  // A text binding whose element carries `data-wx-control` in the template
+  // opens a dedicated control instead of the composer.
+
+  function openPriceControl(target: DetectedBinding): void {
+    const el = target.element as HTMLElement;
+    const sheet = buildPriceControl(demoteHtmlToMarkdown(chromeFreeElement(el)), {
+      onCommit: (value) => {
+        commitEdit(target, value);
+        closePopover();
+      },
+      onCancel: closePopover,
+    });
+    document.body.appendChild(sheet);
+    closeActivePopover = () => sheet.remove();
+  }
+
+  function openHoursControl(target: DetectedBinding): void {
+    const listEl = target.element.closest("[data-wx-list]");
+    const key = listEl === null ? null : listEl.getAttribute("data-wx-list");
+    if (listEl === null || key === null || state === null) {
+      // Not inside a resolvable list — fall back to the plain composer rather
+      // than strand the click.
+      openTextComposer(target);
+      return;
+    }
+    const field = findField(state.bindings, key) ?? { key, kind: "list" as const };
+    const rows: HoursRow[] = readListValue(listEl, field).map((item) => {
+      const obj = (item ?? {}) as Record<string, JsonValue>;
+      return {
+        day: typeof obj["day"] === "string" ? obj["day"] : "",
+        value: typeof obj["value"] === "string" ? obj["value"] : "",
+        closed: obj["closed"] === true,
+      };
+    });
+    const sheet = buildHoursControl(rows, {
+      onCommit: (value) => {
+        applyHoursToDom(listEl, value);
+        const target2 = directOpTarget(key, currentPage());
+        sendToShell(
+          {
+            wx: 1,
+            type: "op",
+            file: target2.file,
+            path: target2.path,
+            // Fresh object literals, not the HoursRow[] passed through — TS only
+            // structurally matches a plain literal against JsonValue's indexed-
+            // object arm (same reasoning as the mediaRequest op below).
+            value: value.map((row) => ({ day: row.day, value: row.value, closed: row.closed })),
+          },
+          win,
+        );
+        closePopover();
+      },
+      onCancel: closePopover,
+    });
+    document.body.appendChild(sheet);
+    closeActivePopover = () => sheet.remove();
+  }
+
+  /** Reflect a committed hours array into the preview DOM immediately (the op
+   * itself travels the usual path; a reload would reconverge regardless). The
+   * ca template binds `.value` on BOTH an open and a closed variant span per
+   * item, gated by `data-wx-if` on `.closed` / `!.closed` — update both texts
+   * and flip each variant's hidden state, then re-attach the eye toggles the
+   * innerHTML writes destroyed. */
+  function applyHoursToDom(listEl: Element, rows: HoursRow[]): void {
+    const items = listEl.querySelectorAll(":scope > [data-wx-list-item]");
+    rows.forEach((row, index) => {
+      const item = items[index];
+      if (item === undefined) return;
+      item.querySelectorAll('[data-wx=".value"]').forEach((el) => {
+        (el as HTMLElement).innerHTML = renderMarkdownInline(row.value);
+        if (el.hasAttribute("data-wx-if")) ensureIfToggle(el);
+      });
+      const closedVariant = item.querySelector('[data-wx-if=".closed"]');
+      const openVariant = item.querySelector('[data-wx-if="!.closed"]');
+      if (row.closed) {
+        closedVariant?.removeAttribute("data-wx-hidden");
+        openVariant?.setAttribute("data-wx-hidden", "1");
+      } else {
+        closedVariant?.setAttribute("data-wx-hidden", "1");
+        openVariant?.removeAttribute("data-wx-hidden");
+      }
+    });
+  }
+
   function openLinkPopover(target: DetectedBinding): void {
     const el = target.element;
     const labelKey = el.getAttribute("data-wx");
@@ -221,9 +309,12 @@ export function initOverlay(win: Window = window): () => void {
   function openPopoverFor(target: DetectedBinding): void {
     closePopover();
     switch (target.kind) {
-      case "text":
-        openTextComposer(target);
-        return;
+      case "text": {
+        const control = target.element.getAttribute("data-wx-control");
+        if (control === "opening-hours") return openHoursControl(target);
+        if (control === "price") return openPriceControl(target);
+        return openTextComposer(target);
+      }
       case "href":
         openLinkPopover(target);
         return;
