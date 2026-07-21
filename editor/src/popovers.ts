@@ -2,11 +2,12 @@
 // framework) — each builder returns a detached element the caller positions and
 // mounts; callbacks fire on commit/cancel, the caller owns emitting the resulting op.
 //
-// Rich-lite's mini-toolbar is hand-rolled over the Selection/Range API rather than
-// `document.execCommand` — jsdom (this package's test environment) doesn't implement
-// `execCommand` at all, and a small, deterministic wrap/unwrap over Range is easier to
-// get right for the narrow 02 §5 allowlist (`strong`/`em`/`a`/`span`/`br`) than relying
-// on a deprecated, browser-inconsistent command API anyway.
+// TEXT bindings no longer get a popover at all: they open the bottom-anchored
+// composer (composer.ts, decisions/00075) — a chat-style sheet with a growing
+// textarea, formatting row and maximize mode, which superseded both the plain
+// input/textarea popover and the rich-lite contenteditable one (deleted here
+// with it; the wrapSelection Range helpers died too — markdown markers replaced
+// them). Link and image/background bindings keep the popovers below.
 
 const POPOVER_CLASS = "wx-popover";
 
@@ -43,142 +44,6 @@ function commitOnEnterCancelOnEsc(
       onCancel();
     }
   });
-}
-
-// ---------------------------------------------------------------------------
-// Text — plain mode
-// ---------------------------------------------------------------------------
-
-export interface TextPopoverCallbacks extends PopoverCallbacks {
-  onCommit: (value: string) => void;
-}
-
-/** Plain mode (spec/05 §2): "single input or autosizing textarea; Enter commits, Esc
- * cancels." A textarea is used once the current text is long or already
- * multi-line — a single-line input covers the common heading/label/price case. */
-export function buildPlainTextPopover(
-  currentText: string,
-  callbacks: TextPopoverCallbacks,
-): HTMLElement {
-  const container = baseContainer();
-  const useTextarea = currentText.length > 60 || currentText.includes("\n");
-  const input = document.createElement(useTextarea ? "textarea" : "input");
-  input.value = currentText;
-  container.appendChild(input);
-  commitOnEnterCancelOnEsc(input, () => callbacks.onCommit(input.value), callbacks.onCancel);
-  queueMicrotask(() => input.focus());
-  return container;
-}
-
-// ---------------------------------------------------------------------------
-// Text — rich-lite mode
-// ---------------------------------------------------------------------------
-
-export interface RichLitePopoverCallbacks extends PopoverCallbacks {
-  onCommit: (html: string) => void;
-}
-
-/** Pasted content becomes plain text only (spec/05 §2) — the wrap helpers below only
- * ever create `strong`/`em`/`a` elements themselves, matching the 02 §5 allowlist by
- * construction; the server's `sanitize_rich_lite` remains the authoritative enforcer
- * (02 §5: "enforced server-side on every draft write with a proper sanitizer"), this
- * is just never generating anything that would need stripping in the first place. */
-function plainTextFromClipboard(event: ClipboardEvent): string {
-  return event.clipboardData?.getData("text/plain") ?? "";
-}
-
-function wrapSelection(root: HTMLElement, tagName: "strong" | "em"): void {
-  const selection = root.ownerDocument.getSelection();
-  if (selection === null || selection.rangeCount === 0 || selection.isCollapsed) return;
-  const range = selection.getRangeAt(0);
-  if (!root.contains(range.commonAncestorContainer)) return;
-  const wrapper = root.ownerDocument.createElement(tagName);
-  wrapper.appendChild(range.extractContents());
-  range.insertNode(wrapper);
-  selection.removeAllRanges();
-}
-
-function wrapSelectionAsLink(root: HTMLElement, href: string): void {
-  const selection = root.ownerDocument.getSelection();
-  if (selection === null || selection.rangeCount === 0 || selection.isCollapsed) return;
-  const range = selection.getRangeAt(0);
-  if (!root.contains(range.commonAncestorContainer)) return;
-  const anchor = root.ownerDocument.createElement("a");
-  anchor.href = href;
-  anchor.rel = "noopener noreferrer";
-  anchor.appendChild(range.extractContents());
-  range.insertNode(anchor);
-  selection.removeAllRanges();
-}
-
-/** Rich-lite mode (spec/05 §2): "contenteditable clone of the element styled as-is,
- * mini-toolbar B / I / link / ↵ only." Building the actual "styled as-is" visual
- * clone (matching the live element's computed styles exactly) is left to slice 3's
- * real wiring/manual verification — this builds the functional contenteditable +
- * toolbar; a caller applies whatever positioning/styling context it has. */
-export function buildRichLiteTextPopover(
-  currentHtml: string,
-  callbacks: RichLitePopoverCallbacks,
-): HTMLElement {
-  const container = baseContainer();
-
-  const toolbar = document.createElement("div");
-  toolbar.className = "wx-popover-toolbar";
-  const boldBtn = document.createElement("button");
-  boldBtn.type = "button";
-  boldBtn.textContent = "B";
-  const italicBtn = document.createElement("button");
-  italicBtn.type = "button";
-  italicBtn.textContent = "I";
-  const linkBtn = document.createElement("button");
-  linkBtn.type = "button";
-  linkBtn.textContent = "Link";
-  toolbar.append(boldBtn, italicBtn, linkBtn);
-
-  const editable = document.createElement("div");
-  // Set the attribute directly rather than the `contentEditable` IDL property — more
-  // portable, and (found by testing) not every DOM implementation reflects the
-  // property setter back onto the attribute the same way a real browser does.
-  editable.setAttribute("contenteditable", "true");
-  editable.innerHTML = currentHtml;
-  editable.addEventListener("paste", (event) => {
-    event.preventDefault();
-    document.getSelection()?.getRangeAt(0)?.insertNode(document.createTextNode(plainTextFromClipboard(event)));
-  });
-  editable.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      callbacks.onCommit(editable.innerHTML);
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      callbacks.onCancel();
-    }
-  });
-
-  boldBtn.addEventListener("click", () => wrapSelection(editable, "strong"));
-  italicBtn.addEventListener("click", () => wrapSelection(editable, "em"));
-
-  const hrefRow = document.createElement("div");
-  hrefRow.className = "wx-popover-href-row";
-  hrefRow.hidden = true;
-  const hrefInput = document.createElement("input");
-  hrefInput.placeholder = "https://…";
-  const hrefApply = document.createElement("button");
-  hrefApply.type = "button";
-  hrefApply.textContent = "Apply";
-  hrefApply.addEventListener("click", () => {
-    wrapSelectionAsLink(editable, hrefInput.value);
-    hrefRow.hidden = true;
-  });
-  hrefRow.append(hrefInput, hrefApply);
-  linkBtn.addEventListener("click", () => {
-    hrefRow.hidden = false;
-    queueMicrotask(() => hrefInput.focus());
-  });
-
-  container.append(toolbar, editable, hrefRow);
-  queueMicrotask(() => editable.focus());
-  return container;
 }
 
 // ---------------------------------------------------------------------------

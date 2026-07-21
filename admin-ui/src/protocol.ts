@@ -1,6 +1,6 @@
 // The overlay <-> shell postMessage protocol (spec/05-editor.md §2, normative).
 //
-// This is a DELIBERATE DUPLICATE of `editor/src/protocol.ts` (decisions/00015 decision
+// This is a DELIBERATE DUPLICATE of `admin-ui/src/protocol.ts` (decisions/00015 decision
 // 2) — the two packages never import each other (they only ever talk across the iframe
 // boundary via `postMessage`), and a shared npm package for a handful of small message
 // shapes would be a new build concern for no real benefit. Keep both copies in sync by
@@ -66,6 +66,11 @@ export interface SetDeviceMessage {
   wx: 1;
   type: "setDevice";
   device: Device;
+  /** Whole-iframe scale the shell is applying for device simulation (1 = unscaled);
+   * optional for backwards compatibility with shells that predate viewport
+   * scaling — absent means "unknown", which the overlay treats as 1
+   * (decisions/00075). */
+  scale?: number;
 }
 
 export interface ThemeVarsMessage {
@@ -287,12 +292,22 @@ export function parseShellToOverlayMessage(data: unknown): ShellToOverlayMessage
         ? { wx: 1, type: "applyOps", ops }
         : null;
     }
-    case "setDevice":
-      return data["device"] === "desktop" ||
-        data["device"] === "tablet" ||
-        data["device"] === "mobile"
-        ? { wx: 1, type: "setDevice", device: data["device"] }
-        : null;
+    case "setDevice": {
+      if (
+        data["device"] !== "desktop" &&
+        data["device"] !== "tablet" &&
+        data["device"] !== "mobile"
+      ) {
+        return null;
+      }
+      if ("scale" in data && typeof data["scale"] !== "number") return null;
+      return {
+        wx: 1,
+        type: "setDevice",
+        device: data["device"],
+        ...("scale" in data && typeof data["scale"] === "number" ? { scale: data["scale"] } : {}),
+      };
+    }
     case "themeVars": {
       const vars = data["vars"];
       if (!isRecord(vars) || !Object.values(vars).every((v) => typeof v === "string")) {

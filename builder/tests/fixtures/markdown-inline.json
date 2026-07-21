@@ -1,0 +1,117 @@
+[
+  {
+    "name": "plain text passes through unchanged",
+    "source": "Hello world",
+    "expected": "Hello world"
+  },
+  {
+    "name": "bold",
+    "source": "A **bold** move",
+    "expected": "A <strong>bold</strong> move"
+  },
+  {
+    "name": "italic",
+    "source": "an *italic* word",
+    "expected": "an <em>italic</em> word"
+  },
+  {
+    "name": "bold then italic adjacency",
+    "source": "**b** *i*",
+    "expected": "<strong>b</strong> <em>i</em>"
+  },
+  {
+    "name": "multiple bolds in one string",
+    "source": "**a** and **b**",
+    "expected": "<strong>a</strong> and <strong>b</strong>"
+  },
+  {
+    "name": "bold with unicode punctuation",
+    "source": "**Botox®** results",
+    "expected": "<strong>Botox®</strong> results"
+  },
+  {
+    "name": "link http with escaped ampersand in query",
+    "source": "[book](https://x.test/a?b=1&c=2)",
+    "expected": "<a href=\"https://x.test/a?b=1&amp;c=2\" rel=\"noopener noreferrer\">book</a>"
+  },
+  {
+    "name": "link tel scheme",
+    "source": "[call](tel:+44800)",
+    "expected": "<a href=\"tel:+44800\" rel=\"noopener noreferrer\">call</a>"
+  },
+  {
+    "name": "link relative path",
+    "source": "[about](/about.html)",
+    "expected": "<a href=\"/about.html\" rel=\"noopener noreferrer\">about</a>"
+  },
+  {
+    "name": "link with unsafe scheme renders as literal text",
+    "source": "[x](javascript:alert(1))",
+    "expected": "[x](javascript:alert(1))"
+  },
+  {
+    "name": "internal newline becomes br",
+    "source": "line1\nline2",
+    "expected": "line1<br>line2"
+  },
+  {
+    "name": "leading and trailing newlines are stripped",
+    "source": "\ntext\n",
+    "expected": "text"
+  },
+  {
+    "name": "crlf normalizes before newline handling",
+    "source": "a\r\nb",
+    "expected": "a<br>b"
+  },
+  {
+    "name": "legacy strong tag passes through verbatim",
+    "source": "<strong>Easy, free parking</strong> right outside the clinic.",
+    "expected": "<strong>Easy, free parking</strong> right outside the clinic."
+  },
+  {
+    "name": "legacy br tag passes through verbatim",
+    "source": "8 Walton Cottage, Walton Road,<br>Hartlebury",
+    "expected": "8 Walton Cottage, Walton Road,<br>Hartlebury"
+  },
+  {
+    "name": "entities are preserved, not double-escaped",
+    "source": "Full Face — £330 &nbsp;·&nbsp; Three Areas — £220",
+    "expected": "Full Face — £330 &nbsp;·&nbsp; Three Areas — £220"
+  },
+  {
+    "name": "bare ampersand is escaped",
+    "source": "R&D",
+    "expected": "R&amp;D"
+  },
+  {
+    "name": "angle brackets are escaped",
+    "source": "1 < 2 and 3 > 2",
+    "expected": "1 &lt; 2 and 3 &gt; 2"
+  },
+  {
+    "name": "uppercase tags are not allowlist — escaped",
+    "source": "<STRONG>x</STRONG>",
+    "expected": "&lt;STRONG&gt;x&lt;/STRONG&gt;"
+  },
+  {
+    "name": "emphasis may span a legacy tag",
+    "source": "a *b<strong>c</strong>d* e",
+    "expected": "a <em>b<strong>c</strong>d</em> e"
+  },
+  {
+    "name": "single asterisk stays literal",
+    "source": "2 * 3",
+    "expected": "2 * 3"
+  },
+  {
+    "name": "unclosed bold stays literal",
+    "source": "**unclosed",
+    "expected": "**unclosed"
+  },
+  {
+    "name": "script tag content is escaped (sanitize removes at build)",
+    "source": "a <script>alert(1)</script> b",
+    "expected": "a &lt;script&gt;alert(1)&lt;/script&gt; b"
+  }
+]

@@ -47,9 +47,10 @@ test.describe("E2E 4: collection", () => {
     const newItem = items.nth(2);
     const titlePatch = waitForNextDraftPatchAccepted(page);
     await newItem.locator('[data-wx=".title"]').click();
-    const titleInput = frame.locator(".wx-popover input, .wx-popover textarea").first();
+    // The text composer (decisions/00075): Enter is a newline — commit is Ctrl+Enter.
+    const titleInput = frame.locator(".wx-composer-input");
     await titleInput.fill("New Treatment Card");
-    await titleInput.press("Enter");
+    await titleInput.press("Control+Enter");
     await titlePatch;
     await expect(newItem.locator('[data-wx=".title"]')).toHaveText("New Treatment Card");
 

@@ -156,7 +156,10 @@ Two pairs are deliberately duplicated and must be kept identical by hand:
 identical, decisions/00015); (b) `admin-ui/src/themeVars.ts` / `googleFonts.ts` are TS ports
 of `builder/theme.py:generate_theme_css` / `generate_fonts_url` and must produce byte-
 identical output to the server (so the theme panel previews without a round-trip;
-`googleFonts.test.ts` mirrors the Python tests).
+`googleFonts.test.ts` mirrors the Python tests). A third pair joined in decisions/00075:
+(c) `builder/markdown_inline.py` ≡ `editor/src/markdownText.ts` (inline-markdown render
+for text bindings) — locked by ONE shared fixture, `builder/tests/fixtures/
+markdown-inline.json`, which both pytest and vitest load.
 
 ### Inv 21 — Deploy scripts avoid two Windows footguns
 `launcher.py` runs the slot's venv as a **blocking `subprocess.run`**, never `os.execv` (on

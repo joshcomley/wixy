@@ -194,3 +194,105 @@
   border-radius: var(--wx-radius);
   box-shadow: var(--wx-shadow);
 }
+
+/* -- Text composer (decisions/00075) -------------------------------------------
+   Bottom-anchored sheet, cmd-chat style: functions row + auto-growing textarea
+   (JS caps it at ~5 lines / ~20vh; maximize lifts the cap). Deliberately dark
+   on every page theme so it reads as editing chrome, not page content.
+   transform/width are set inline by composer.ts for viewport counter-scaling. */
+
+.wx-composer {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  z-index: 2147483647;
+  background: var(--wx-ink);
+  color: #f4f6fa;
+  border-top: 1px solid #39415200;
+  box-shadow: 0 -6px 24px rgba(20, 24, 32, 0.35);
+  font: 14px/1.45 system-ui, -apple-system, sans-serif;
+}
+
+.wx-composer-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+}
+
+.wx-composer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wx-composer-spacer {
+  flex: 1;
+}
+
+.wx-composer button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: var(--wx-radius);
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  font: 600 13px/1 system-ui, -apple-system, sans-serif;
+  cursor: pointer;
+}
+
+.wx-composer button:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.wx-composer-fmt-bold {
+  font-weight: 700;
+}
+
+.wx-composer-fmt-italic {
+  font-style: italic;
+}
+
+.wx-composer-commit {
+  background: var(--wx-brand-blue) !important;
+  border-color: var(--wx-brand-blue) !important;
+  color: #fff !important;
+}
+
+.wx-composer-max-toggle[aria-pressed="true"] {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.wx-composer-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: var(--wx-radius);
+  background: rgba(255, 255, 255, 0.07);
+  color: inherit;
+  font: 15px/1.45 system-ui, -apple-system, sans-serif;
+  padding: 8px 10px;
+  resize: none;
+  outline: none;
+}
+
+.wx-composer-input:focus {
+  border-color: var(--wx-brand-blue);
+}
+
+/* Maximized: the sheet takes ~80% of the viewport height and the textarea
+   fills it, for long-form editing. */
+.wx-composer-max,
+.wx-composer-max .wx-composer-inner {
+  height: 80vh;
+}
+
+.wx-composer-max .wx-composer-input {
+  flex: 1;
+  min-height: 0;
+}
+

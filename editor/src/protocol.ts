@@ -66,6 +66,11 @@ export interface SetDeviceMessage {
   wx: 1;
   type: "setDevice";
   device: Device;
+  /** Whole-iframe scale the shell is applying for device simulation (1 = unscaled);
+   * optional for backwards compatibility with shells that predate viewport
+   * scaling — absent means "unknown", which the overlay treats as 1
+   * (decisions/00075). */
+  scale?: number;
 }
 
 export interface ThemeVarsMessage {
@@ -287,12 +292,22 @@ export function parseShellToOverlayMessage(data: unknown): ShellToOverlayMessage
         ? { wx: 1, type: "applyOps", ops }
         : null;
     }
-    case "setDevice":
-      return data["device"] === "desktop" ||
-        data["device"] === "tablet" ||
-        data["device"] === "mobile"
-        ? { wx: 1, type: "setDevice", device: data["device"] }
-        : null;
+    case "setDevice": {
+      if (
+        data["device"] !== "desktop" &&
+        data["device"] !== "tablet" &&
+        data["device"] !== "mobile"
+      ) {
+        return null;
+      }
+      if ("scale" in data && typeof data["scale"] !== "number") return null;
+      return {
+        wx: 1,
+        type: "setDevice",
+        device: data["device"],
+        ...("scale" in data && typeof data["scale"] === "number" ? { scale: data["scale"] } : {}),
+      };
+    }
     case "themeVars": {
       const vars = data["vars"];
       if (!isRecord(vars) || !Object.values(vars).every((v) => typeof v === "string")) {

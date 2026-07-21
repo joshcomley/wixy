@@ -247,8 +247,10 @@ Every message is `{ wx: 1, type: <string>, ... }` — `wx: 1` is the protocol-ve
 discriminator (`isWxEnvelope`).
 
 **Shell → overlay** (`ShellToOverlayMessage`): `init{page,bindings,draftRev}` ·
-`applyOps{ops:DraftOp[]}` · `setDevice{device:"desktop"|"tablet"|"mobile"}` ·
+`applyOps{ops:DraftOp[]}` · `setDevice{device:"desktop"|"tablet"|"mobile", scale?}` ·
 `themeVars{vars:Record<string,string>}` · `themeFonts{url}` · `select{key}`.
+(`setDevice.scale` is the whole-iframe viewport-simulation scale, optional and absent = 1;
+the composer counter-scales by it — decisions/00075.)
 
 **Overlay → shell** (`OverlayToShellMessage`): `ready{}` · `op{file,path,value}` ·
 `navigate{page}` · `selected{key,kind,rect}` · `mediaRequest{key}`.
