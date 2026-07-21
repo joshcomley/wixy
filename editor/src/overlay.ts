@@ -21,7 +21,7 @@ import { demoteHtmlToMarkdown, renderMarkdownInline } from "./markdownText";
 import { onShellMessage, sendToShell } from "./messaging";
 import { resolveInternalPageSlug, showToast } from "./navigation";
 import { directOpTarget, findOutermostList, isItemScopeKey } from "./opTargeting";
-import { buildImagePopover, buildLinkPopover, positionNear } from "./popovers";
+import { buildImagePopover, buildLinkPopover, positionInDocument, positionNear } from "./popovers";
 import type { BindingField, DraftOp, JsonValue, PageBindings } from "./protocol";
 import { ensureResizesContentMeta, pinToVisualViewport } from "./visualPin";
 
@@ -378,7 +378,9 @@ export function initOverlay(win: Window = window): () => void {
     hoverChip.className = "wx-hover-chip";
     hoverChip.textContent = chipLabel(bound.kind);
     document.body.appendChild(hoverChip);
-    positionNear(hoverChip, bound.element);
+    // Document-anchored: the chip is a LABEL for the element, so it rides the
+    // page on scroll exactly like the outline class does (decisions/00086).
+    positionInDocument(hoverChip, bound.element);
   }
 
   // -- List item toolbar (hover) ----------------------------------------------------------
@@ -438,7 +440,9 @@ export function initOverlay(win: Window = window): () => void {
     hoveredItem = item;
     itemToolbar = buildItemToolbar();
     document.body.appendChild(itemToolbar);
-    positionNear(itemToolbar, item);
+    // Document-anchored like the hover chip (decisions/00086) — it belongs to
+    // the item and must follow it when the page scrolls.
+    positionInDocument(itemToolbar, item);
   }
 
   function handlePointerOut(event: Event): void {

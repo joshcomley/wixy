@@ -37,6 +37,29 @@ export function positionNear(el: HTMLElement, anchor: Element): void {
   el.style.top = `${Math.round(top)}px`;
 }
 
+/** positionNear for CONTENT-anchored chrome (the hover chip, the list item
+ * toolbar — labels/affordances, not editors): coordinates in DOCUMENT space
+ * (position:absolute), so scrolling the page moves the chrome together with
+ * its anchor by construction — no scroll listeners, no drift, ever
+ * (decisions/00086; fixed-viewport pinning was the operator's "the text tag
+ * isn't anchored" report). Editing popovers keep positionNear's VIEWPORT
+ * anchoring: they're editor surfaces like the composer and must stay
+ * reachable, not ride the content. The flip guards the document's bottom edge
+ * instead of the viewport's: below-anchoring an element at the page's very
+ * bottom would EXTEND the scroll height, and chrome must never mutate layout
+ * metrics. jsdom has no layout (scrollHeight 0), so tests keep the
+ * below-anchor behavior there, same convention as positionNear. */
+export function positionInDocument(el: HTMLElement, anchor: Element): void {
+  const rect = anchor.getBoundingClientRect();
+  el.style.position = "absolute";
+  el.style.left = `${Math.round(rect.left + window.scrollX)}px`;
+  const below = rect.bottom + 4 + window.scrollY;
+  const height = el.offsetHeight;
+  const docBottom = document.documentElement.scrollHeight || Number.POSITIVE_INFINITY;
+  const top = below + height > docBottom ? Math.max(0, rect.top - height - 4 + window.scrollY) : below;
+  el.style.top = `${Math.round(top)}px`;
+}
+
 function commitOnEnterCancelOnEsc(
   input: HTMLInputElement | HTMLTextAreaElement,
   onCommit: () => void,

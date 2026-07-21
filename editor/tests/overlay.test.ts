@@ -71,6 +71,9 @@ describe("initOverlay", () => {
     root.remove();
     document.body.innerHTML = "";
     document.head.querySelectorAll('meta[name="viewport"]').forEach((m) => m.remove());
+    // Tests that stub scroll offsets (document-anchored chrome) reset them here.
+    Object.defineProperty(window, "scrollX", { value: 0, configurable: true, writable: true });
+    Object.defineProperty(window, "scrollY", { value: 0, configurable: true, writable: true });
   });
 
   it("sends ready to the shell immediately on startup", () => {
@@ -102,6 +105,29 @@ describe("initOverlay", () => {
 
       expect(ul.classList.contains("wx-hover-outline")).toBe(false);
       expect(document.querySelector(".wx-hover-chip")).toBeNull();
+      teardown();
+    });
+
+    it("anchors the chip in DOCUMENT coordinates so it scrolls with its element (decisions/00086)", () => {
+      root.innerHTML = `<h1 data-wx="hero.title">Title</h1>`;
+      const h1 = root.querySelector("h1") as HTMLElement;
+      // jsdom has no layout: stub the anchor's rect and the scroll offsets —
+      // the chip's whole job is to bake the CURRENT scroll into its coords so a
+      // LATER scroll moves it together with the element.
+      vi.spyOn(h1, "getBoundingClientRect").mockReturnValue({
+        left: 40, top: 200, bottom: 260, right: 300, width: 260, height: 60, x: 40, y: 200,
+        toJSON: () => ({}),
+      } as DOMRect);
+      Object.defineProperty(window, "scrollX", { value: 7, configurable: true, writable: true });
+      Object.defineProperty(window, "scrollY", { value: 500, configurable: true, writable: true });
+      const { teardown } = initFor("index", { page: "index", fields: [] });
+
+      h1.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+
+      const chip = document.querySelector(".wx-hover-chip") as HTMLElement;
+      expect(chip.style.position).toBe("absolute");
+      expect(chip.style.left).toBe("47px"); // rect.left 40 + scrollX 7
+      expect(chip.style.top).toBe("764px"); // rect.bottom 260 + 4 + scrollY 500
       teardown();
     });
   });

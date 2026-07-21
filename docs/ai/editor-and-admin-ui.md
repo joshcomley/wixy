@@ -142,7 +142,11 @@ theme), `zoom.ts`, `fontScale.ts`, `settingsPanel.ts`, `shortcuts.ts`, `contrast
 content values, only shapes; text reads are chrome-stripped and demoted to markdown source,
 Inv 23 + decisions/00075); `listOps.ts` (pure array transforms); `dom.ts` (binding
 discovery, precedence list→href→img→bg→text); `popovers.ts` (link + image editors only —
-text no longer has a popover); `composer.ts` (THE text editor: bottom-anchored sheet,
+text no longer has a popover; also the two anchoring helpers, and they must not be mixed
+(decisions/00086): `positionNear` = VIEWPORT anchoring for EDITOR surfaces — link/image
+popovers, like the composer, stay reachable; `positionInDocument` = DOCUMENT anchoring
+for CONTENT labels — the hover chip and list item toolbar ride the page on scroll,
+listener-free, or they detach from the element the moment the preview scrolls); `composer.ts` (THE text editor: bottom-anchored sheet,
 auto-growing textarea, B/I/link row, SVG maximize, live markdown preview, decisions/00075;
 auto-grow sizes only AFTER attach — caller must `refit()` post-`appendChild`, decisions/00079;
 pinned to the visual viewport — decisions/00084); `visualPin.ts` (the visual-viewport
