@@ -17,7 +17,7 @@ import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import anyio
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
@@ -836,7 +836,7 @@ def _build_publish_preview(
         "changes": {
             file_key: [entry for entry in entries] for file_key, entries in changes.items()
         },
-        "mediaChanges": media_changes,
+        "mediaChanges": cast(JsonObject, media_changes),
         # Total staged draft changes — content ops + staged page adds/deletes
         # (a staged page deletion produces no `changes` entries, so the review
         # drawer's nothing-to-publish rule can't count those, decisions/00071)
