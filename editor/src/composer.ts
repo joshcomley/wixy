@@ -20,6 +20,12 @@
 // instead, and pairs with the counter-scale: pinned width = visual width ×
 // scale (the pin owns width in px whenever it's active; applyScale's % width
 // is the no-visualViewport fallback).
+//
+// Draft recovery (decisions/00088): with a `draftKey`, every keystroke persists
+// to localStorage, so a reload mid-edit loses nothing; reopening with a stored
+// draft that differs from the seed shows an in-composer banner — "You were
+// editing this before" — with Restore (refills, re-previews) and Discard
+// (drops it). Commit and cancel both clear the draft.
 
 import { pinToVisualViewport } from "./visualPin";
 
@@ -42,6 +48,11 @@ export interface ComposerOptions {
   /** Extra buttons inserted at the START of the functions row (e.g. a
    * structured-control launcher for control-bound fields). */
   leadingActions?: HTMLElement[];
+  /** When set, the in-progress text persists to localStorage under this key on
+   * every input (decisions/00088 — reload-safe editing + the restore banner).
+   * The caller derives it from the binding identity (page + key + item index).
+   * Absent: no persistence, no banner (unit tests, non-text surfaces). */
+  draftKey?: string;
   callbacks: ComposerCallbacks;
 }
 
@@ -106,6 +117,55 @@ function toolbarButton(label: string, ariaLabel: string, cssClass: string): HTML
   return button;
 }
 
+// -- Draft recovery (decisions/00088) ------------------------------------------
+
+interface StoredDraft {
+  text: string;
+  updatedAt: number;
+}
+
+function draftStorageKey(key: string): string {
+  return `wx-composer-draft:${key}`;
+}
+
+function loadDraft(key: string): StoredDraft | null {
+  try {
+    const raw = window.localStorage.getItem(draftStorageKey(key));
+    if (raw === null) return null;
+    const parsed = JSON.parse(raw) as Partial<StoredDraft>;
+    if (typeof parsed.text !== "string" || typeof parsed.updatedAt !== "number") return null;
+    return { text: parsed.text, updatedAt: parsed.updatedAt };
+  } catch {
+    return null; // storage disabled/full/corrupt — recovery is best-effort
+  }
+}
+
+function saveDraft(key: string, text: string): void {
+  try {
+    window.localStorage.setItem(draftStorageKey(key), JSON.stringify({ text, updatedAt: Date.now() }));
+  } catch {
+    // best-effort only — editing must never break over a full/blocked store
+  }
+}
+
+function clearDraft(key: string): void {
+  try {
+    window.localStorage.removeItem(draftStorageKey(key));
+  } catch {
+    // best-effort only
+  }
+}
+
+/** "5 min ago" / "2 h ago" / "3 d ago" for the banner. */
+function ago(updatedAt: number, now: number): string {
+  const mins = Math.max(0, Math.round((now - updatedAt) / 60_000));
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} h ago`;
+  return `${Math.round(hours / 24)} d ago`;
+}
+
 export function openComposer(options: ComposerOptions): Composer {
   const { callbacks } = options;
 
@@ -163,6 +223,39 @@ export function openComposer(options: ComposerOptions): Composer {
   for (const extra of options.leadingActions ?? []) toolbar.prepend(extra);
   toolbar.append(spacer, maxBtn, commitBtn, cancelBtn);
   inner.append(toolbar, textarea);
+
+  // -- Draft recovery banner (decisions/00088) ----------------------------------
+  // A stored draft that differs from the seed means the last edit session ended
+  // without commit or cancel (a reload, a crash) — offer it back. Identical to
+  // the seed: nothing to recover, clear it silently.
+  const draftKey = options.draftKey;
+  if (draftKey !== undefined) {
+    const stored = loadDraft(draftKey);
+    if (stored !== null && stored.text !== options.seed) {
+      const banner = document.createElement("div");
+      banner.className = "wx-composer-draft-banner";
+      const label = document.createElement("span");
+      label.textContent = `You were editing this before (${ago(stored.updatedAt, Date.now())}). Restore what you typed?`;
+      const restoreBtn = toolbarButton("Restore", "Restore the previous draft", "wx-composer-draft-restore");
+      const discardBtn = toolbarButton("Discard", "Discard the previous draft", "wx-composer-draft-discard");
+      restoreBtn.addEventListener("click", () => {
+        textarea.value = stored.text;
+        // Through the input pipeline: live preview updates, auto-grow refits,
+        // and the draft re-saves (recovery never loses the text twice).
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+        banner.remove();
+        textarea.focus();
+      });
+      discardBtn.addEventListener("click", () => {
+        clearDraft(draftKey);
+        banner.remove();
+      });
+      banner.append(label, restoreBtn, discardBtn);
+      inner.insertBefore(banner, textarea);
+    } else if (stored !== null) {
+      clearDraft(draftKey);
+    }
+  }
 
   // -- Auto-grow (capped) -------------------------------------------------------
 
@@ -233,19 +326,31 @@ export function openComposer(options: ComposerOptions): Composer {
 
   textarea.addEventListener("input", () => {
     fit();
+    if (draftKey !== undefined) saveDraft(draftKey, textarea.value);
     callbacks.onPreview(textarea.value);
   });
+  // Commit and cancel BOTH clear the draft (decisions/00088): it exists only to
+  // outlive sessions that ended WITHOUT either. Wrapped once here so every one
+  // of the four exit paths (Ctrl+Enter, Esc, ✓, ✕) shares the clearing.
+  function doCommit(): void {
+    if (draftKey !== undefined) clearDraft(draftKey);
+    callbacks.onCommit(textarea.value);
+  }
+  function doCancel(): void {
+    if (draftKey !== undefined) clearDraft(draftKey);
+    callbacks.onCancel();
+  }
   textarea.addEventListener("keydown", (event: KeyboardEvent) => {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
-      callbacks.onCommit(textarea.value);
+      doCommit();
     } else if (event.key === "Escape") {
       event.preventDefault();
-      callbacks.onCancel();
+      doCancel();
     }
   });
-  commitBtn.addEventListener("click", () => callbacks.onCommit(textarea.value));
-  cancelBtn.addEventListener("click", () => callbacks.onCancel());
+  commitBtn.addEventListener("click", doCommit);
+  cancelBtn.addEventListener("click", doCancel);
 
   // Viewport resize changes the cap (20vh) and usually the width (rewrap).
   window.addEventListener("resize", fit);

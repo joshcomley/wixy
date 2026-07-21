@@ -223,6 +223,30 @@
   padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
 }
 
+/* The draft-recovery banner (decisions/00088): a slim notice row between the
+   toolbar and the textarea, same dark-sheet language. */
+.wx-composer-draft-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid rgba(111, 160, 245, 0.45);
+  border-radius: var(--wx-radius);
+  background: rgba(37, 99, 235, 0.18);
+  font: 500 12px/1.4 system-ui, -apple-system, sans-serif;
+}
+
+.wx-composer-draft-banner span {
+  flex: 1;
+  min-width: 0;
+}
+
+.wx-composer-draft-banner button {
+  flex: none;
+  min-height: 30px;
+  font-size: 12px;
+}
+
 .wx-composer-toolbar {
   display: flex;
   align-items: center;

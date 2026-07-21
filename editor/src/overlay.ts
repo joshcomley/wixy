@@ -154,6 +154,21 @@ export function initOverlay(win: Window = window): () => void {
    * markdown from the element's rendered HTML, typing live-previews the
    * rendered markdown into the element, commit stores the markdown source,
    * cancel restores the exact pre-edit DOM. */
+
+  /** The composer's draft-recovery key (decisions/00088): page + binding key,
+   * and for item-scope (`.`-prefixed) keys the item's index inside its
+   * innermost list too — otherwise every item of a list would share one draft. */
+  function composerDraftKey(target: DetectedBinding): string {
+    const page = state?.page ?? "unknown";
+    if (!isItemScopeKey(target.key)) return `${page}:${target.key}`;
+    const listEl = target.element.closest("[data-wx-list]");
+    const item = target.element.closest("[data-wx-list-item]");
+    const listKey = listEl?.getAttribute("data-wx-list") ?? "list";
+    const items = listEl === null ? [] : Array.from(listEl.querySelectorAll(":scope > [data-wx-list-item]"));
+    const index = item === null ? -1 : items.indexOf(item);
+    return `${page}:${listKey}[${index}]${target.key}`;
+  }
+
   function openTextComposer(target: DetectedBinding): void {
     const el = target.element as HTMLElement;
     const originalHtml = el.innerHTML;
@@ -161,6 +176,7 @@ export function initOverlay(win: Window = window): () => void {
     const composer = openComposer({
       seed: demoteHtmlToMarkdown(chromeFreeElement(el)),
       scale: viewportScale,
+      draftKey: composerDraftKey(target),
       callbacks: {
         onPreview: (value) => {
           el.innerHTML = renderMarkdownInline(value);
