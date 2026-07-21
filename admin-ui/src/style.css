@@ -102,10 +102,38 @@
   }
 }
 
+/* -- The root-scroll contract (decisions/00085) --------------------------------
+   The admin is an APP SHELL: only the middle content (`.wx-main`, the preview
+   iframe's own document) may scroll — the chrome (status bar, topbar, slim edit
+   bar, and with the iframe its pinned composer) must never move. This is the
+   guarantee behind the operator's "ONLY the content in the middle should
+   scroll" (2026-07-21, second report). overflow:hidden makes the root document
+   unscrollable in EVERY browser — no URL-bar pan, no scroll chaining out of
+   the preview iframe when the site page hits its end, no pull-to-refresh
+   mid-edit; the dvh sizing on .wx-shell below then keeps the shell exactly as
+   tall as the VISIBLE viewport so the bottom chrome isn't clipped while the
+   URL bar is up (100vh alone would leave it taller than the visible area, and
+   on some engines that overflow is itself a scrollable region). Mirrored in
+   admin_shell.html's inline pre-paint rule — keep the two in sync. */
+html, body {
+  /* hidden = no scrolling mechanism (gestures, wheel, URL-bar pan, keyboard);
+     clip (where supported) goes further — the element isn't a scroll container
+     AT ALL, so even a programmatic scrollTop assignment can't shift the
+     chrome. Engines without clip take hidden and are still gesture-safe. */
+  overflow: hidden;
+  overflow: clip;
+  overscroll-behavior: none;
+}
+
 .wx-shell {
   display: flex;
   flex-direction: column;
+  /* 100dvh = the DYNAMIC viewport height: tracks the mobile URL bar hiding/
+     showing (and the keyboard via interactive-widget=resizes-content), so the
+     shell is never taller than what's actually visible. 100vh stays first as
+     the fallback for engines without dynamic viewport units. decisions/00085. */
   height: 100vh;
+  height: 100dvh;
   font: 0.875rem/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
   color: var(--wx-ink);
   background: var(--wx-canvas);
@@ -656,9 +684,13 @@
   position: fixed;
   top: 0;
   right: 0;
-  bottom: 0;
-  width: 340px;
-  max-width: 90vw;
+  /* height (dvh), not bottom:0 — fixed positioning anchors to the LAYOUT
+     viewport, which on a phone with the URL bar shown extends below the
+     visible area; dvh keeps the drawer's bottom edge visible (same root cause
+     as the shell sizing, decisions/00085). */
+  height: 100vh;
+  height: 100dvh;
+  width: 340px;  max-width: 90vw;
   background: var(--wx-surface);
   border-left: 1px solid var(--wx-border);
   box-shadow: var(--wx-shadow);
@@ -1882,6 +1914,12 @@ div.wx-media-thumb {
   position: fixed;
   left: 50%;
   bottom: 20px;
+  /* Fixed bottom anchors to the LAYOUT viewport, which a phone's URL bar
+     pushes below the visible area — "Saved" toasts would render underneath
+     it. (100vh - 100dvh) is exactly that hidden strip (0 on desktop and on
+     engines without dvh, where this declaration is dropped and the 20px above
+     stands). decisions/00085. */
+  bottom: calc(20px + 100vh - 100dvh);
   transform: translateX(-50%);
   z-index: 600;
   display: flex;

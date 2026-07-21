@@ -44,6 +44,13 @@ between them. Spec: [`spec/05-editor.md`](../../spec/05-editor.md). The wire typ
   the topbar (`visibility: visible` — the hidden rule otherwise wins the tie and the bar
   opens as an empty gap) and, on ≤720px, relocates the nav between the topbar and the
   slim edit bar (`matchMedia` in `shell.ts`) so the menu reveals ABOVE the bar.
+- **Root no-scroll contract (decisions/00085, Inv 24):** the shell's root document can never
+  scroll at all — `html, body` carry `overflow: hidden; overflow: clip; overscroll-behavior:
+  none` (mirrored pre-paint in `admin_shell.html`), and the chrome sizes to the DYNAMIC
+  viewport (`.wx-shell` / `.wx-drawer` `100dvh` with the `100vh` fallback, toasts offset by
+  `100vh - 100dvh`). `100vh` had sized the shell to the LARGE mobile viewport, so a phone's
+  URL bar made the whole page scroll the bars off — 00084's composer pin was correct but rode
+  the scrolling iframe. Only `.wx-main` and the preview document scroll.
 
 ## The edit protocol
 

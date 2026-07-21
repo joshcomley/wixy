@@ -192,3 +192,22 @@ content (the 2026-07-21 incident: 👁️-and-button pollution staged in the pro
 draft, decisions/00073). Corollary: any code path that overwrites an if-bound
 element's `innerHTML` must re-attach its eye toggle (`ensureIfToggle`).
 
+### Inv 24 — The admin shell's root document never scrolls; chrome sizes to the dynamic viewport
+The admin is an app shell: ONLY the middle content (`.wx-main`, the preview iframe's
+own document) may scroll. `admin-ui/src/style.css` (and the mirrored pre-paint inline
+rule in `admin_shell.html`) sets `html, body { overflow: hidden; overflow: clip;
+overscroll-behavior: none; }` — no touch/wheel/keyboard pan, URL-bar pan, scroll
+chaining out of the preview iframe, pull-to-refresh, or (with `clip`) even a
+programmatic `scrollTop` can move the chrome. Fixed chrome sizes to the DYNAMIC
+viewport (`.wx-shell`, `.wx-drawer`: `height: 100vh; height: 100dvh`; the loading
+screen's mins; toasts at `bottom: calc(20px + 100vh - 100dvh)`), because `100vh` is
+the LARGE mobile viewport — with the URL bar shown it left the shell taller than the
+visible area and the whole page scrolled the bars off (the operator's second
+edit-chrome report, decisions/00085). *Enforced by:* `e2e/tests/mobile-edit-chrome.
+spec.ts`'s "shell root no-scroll" describe (forced-overflow shell attacked with a
+real wheel gesture AND programmatic scrolls; served-bundle dvh assertions;
+middle-still-scrolls guard). *Watch for:* anything new fixed-bottom reuses the
+`calc(… + 100vh - 100dvh)` offset pattern; panels scroll inside `.wx-main`, never
+the root; the preview document is intentionally NOT overflow-constrained (it is the
+middle that must scroll).
+
