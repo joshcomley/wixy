@@ -178,3 +178,14 @@ served document must go through `fingerprinted_url` too. *Enforced by:*
 `?uxer=`-gated Uxer compliance-bridge `import()` (AI-tooling-only surface, gitignored
 local build) — see decisions/00069's "what to watch for".
 
+### Inv 23 — Overlay chrome is stripped before any DOM value crosses into a draft op or editor seed
+The overlay injects chrome INTO content elements (today: the `data-wx-if` eye
+toggle, `OVERLAY_CHROME_SELECTOR` in `editor/src/dom.ts`). Any value read from the
+live DOM — whole-array list reconstruction, popover/composer seeds, link labels —
+must go through the chrome-free readers (`chromeFreeInnerHtml` /
+`chromeFreeTextContent` in `editor/src/contentModel.ts`), never raw
+`innerHTML`/`textContent`, or the chrome's markup and label land in committed
+content (the 2026-07-21 incident: 👁️-and-button pollution staged in the prod
+draft, decisions/00073). Corollary: any code path that overwrites an if-bound
+element's `innerHTML` must re-attach its eye toggle (`ensureIfToggle`).
+

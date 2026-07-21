@@ -7,7 +7,7 @@
 // against a real rendered page — that needs a live browser, per this repo's own
 // "verify in a browser for UI changes" rule; flagged explicitly in decisions/00017.
 
-import { readListValue } from "./contentModel";
+import { chromeFreeInnerHtml, chromeFreeTextContent, readListValue } from "./contentModel";
 import {
   chipLabel,
   closestBoundElement,
@@ -64,7 +64,13 @@ export function initOverlay(win: Window = window): () => void {
   ): void {
     switch (kind) {
       case "text":
-        if (typeof value === "string") (el as HTMLElement).innerHTML = value;
+        if (typeof value === "string") {
+          (el as HTMLElement).innerHTML = value;
+          // innerHTML wipes any eye toggle this element carried (every child goes
+          // with it) — re-attach so the element stays visibility-togglable without
+          // waiting for a reload (decisions/00073).
+          if (el.hasAttribute("data-wx-if")) ensureIfToggle(el);
+        }
         return;
       case "href":
         if (typeof value === "string") el.setAttribute("href", value);
@@ -134,7 +140,7 @@ export function initOverlay(win: Window = window): () => void {
   function openTextPopover(target: DetectedBinding): void {
     const el = target.element as HTMLElement;
     if (isRichLiteContent(el)) {
-      const popover = buildRichLiteTextPopover(el.innerHTML, {
+      const popover = buildRichLiteTextPopover(chromeFreeInnerHtml(el), {
         onCommit: (html) => {
           commitEdit(target, html);
           closePopover();
@@ -144,11 +150,10 @@ export function initOverlay(win: Window = window): () => void {
       mountPopover(el, popover);
       return;
     }
-    // textContent, not innerText: this branch only runs when isRichLiteContent(el) is
-    // false (no element children at all), so the two are equivalent here — and
-    // innerText isn't implemented in every DOM environment (e.g. jsdom, this
-    // package's own test environment) since it depends on real layout information.
-    const popover = buildPlainTextPopover(el.textContent ?? "", {
+    // Both seeds go through the chrome-free readers: boot may have injected an
+    // eye toggle INTO this very element (any if-bound text binding), and its
+    // markup/label must never enter an edit's starting value (decisions/00073).
+    const popover = buildPlainTextPopover(chromeFreeTextContent(el), {
       onCommit: (value) => {
         commitEdit(target, value);
         closePopover();
@@ -161,7 +166,7 @@ export function initOverlay(win: Window = window): () => void {
   function openLinkPopover(target: DetectedBinding): void {
     const el = target.element;
     const labelKey = el.getAttribute("data-wx");
-    const currentLabel = labelKey !== null ? (el.textContent ?? "") : null;
+    const currentLabel = labelKey !== null ? chromeFreeTextContent(el) : null;
     const popover = buildLinkPopover(el.getAttribute("href") ?? "", currentLabel, {
       onCommitHref: (href) => {
         commitEdit(target, href);
@@ -441,6 +446,9 @@ export function initOverlay(win: Window = window): () => void {
       // layout metrics" CSS rule (this is ordinary bound CONTENT, not chrome) —
       // it's replaced the instant the user actually edits the field.
       (el as HTMLElement).innerHTML = "&nbsp;";
+      // Blanking also wiped the eye toggle the clone carried over from its
+      // source item — re-attach (same reasoning as applyValueToElement).
+      if (el.hasAttribute("data-wx-if")) ensureIfToggle(el);
     });
     root.querySelectorAll("[data-wx-href]").forEach((el) => el.setAttribute("href", ""));
     root.querySelectorAll("[data-wx-img]").forEach((el) => {
