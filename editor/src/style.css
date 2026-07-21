@@ -267,7 +267,7 @@
   background: rgba(255, 255, 255, 0.22);
 }
 
-/* The maximize/restore SVG (decisions/00083) — sized to read clearly next to
+/* The maximize/restore SVG (decisions/00084) — sized to read clearly next to
    the B/I/link glyphs (the ⤢/⤡ text glyphs it replaced rendered teeny in
    Android's system font). */
 .wx-composer-max-toggle svg {

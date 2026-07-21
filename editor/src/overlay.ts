@@ -40,7 +40,7 @@ function findField(bindings: PageBindings, key: string): BindingField | null {
 }
 
 export function initOverlay(win: Window = window): () => void {
-  // Keyboard contract for every fixed bottom sheet (decisions/00083): ask the
+  // Keyboard contract for every fixed bottom sheet (decisions/00084): ask the
   // browser to shrink the LAYOUT viewport when the on-screen keyboard opens,
   // so `bottom: 0` chrome rides above it (the visual-viewport pin covers the
   // engines that ignore this meta key). Only ever touches the PREVIEW document
@@ -203,7 +203,7 @@ export function initOverlay(win: Window = window): () => void {
       onCancel: closePopover,
     });
     document.body.appendChild(sheet);
-    // Same immovability contract as the composer (decisions/00083) — the pin
+    // Same immovability contract as the composer (decisions/00084) — the pin
     // releases when the sheet closes so no visualViewport listener leaks.
     const pin = pinToVisualViewport(sheet, window);
     closeActivePopover = () => {
@@ -252,7 +252,7 @@ export function initOverlay(win: Window = window): () => void {
       onCancel: closePopover,
     });
     document.body.appendChild(sheet);
-    // Same immovability contract as the composer (decisions/00083) — the pin
+    // Same immovability contract as the composer (decisions/00084) — the pin
     // releases when the sheet closes so no visualViewport listener leaks.
     const pin = pinToVisualViewport(sheet, window);
     closeActivePopover = () => {

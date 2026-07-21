@@ -146,7 +146,7 @@ describe("viewportScaleFor", () => {
   });
 });
 
-describe("initialDeviceFor (decisions/00083)", () => {
+describe("initialDeviceFor (decisions/00084)", () => {
   it("phones open in mobile view — including >480px CSS-width outliers", () => {
     expect(initialDeviceFor(360, true)).toBe("mobile");
     expect(initialDeviceFor(390, true)).toBe("mobile");

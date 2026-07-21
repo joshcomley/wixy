@@ -1,5 +1,5 @@
 // Pinning fixed bottom chrome (the composer, structured-control sheets) to the
-// VISUAL viewport (decisions/00083).
+// VISUAL viewport (decisions/00084).
 //
 // `position: fixed; bottom: 0` anchors an element to the LAYOUT viewport. On a
 // phone two everyday gestures move the visible region away from that anchor:

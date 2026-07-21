@@ -13,7 +13,7 @@
 // tearing it down). fit() then re-runs on every input, on setScale (the
 // counter-scale changes the width, so the text rewraps), and on window resize.
 //
-// Visual-viewport pinning (decisions/00083): `bottom: 0` alone anchors to the
+// Visual-viewport pinning (decisions/00084): `bottom: 0` alone anchors to the
 // LAYOUT viewport, which the mobile keyboard and pinch-zoom both detach from
 // what the user actually sees — the composer could "scroll off" and become
 // unrecoverable (operator 2026-07-21). The pin tracks the visual viewport
@@ -63,7 +63,7 @@ const LINE_HEIGHT_PX = 20;
 const MAX_LINES = 5;
 const MAX_VH_FRACTION = 0.2;
 
-// Maximize/restore icons (decisions/00083): inline SVGs, not the ⤢/⤡ text
+// Maximize/restore icons (decisions/00084): inline SVGs, not the ⤢/⤡ text
 // glyphs — those render as a teeny, faint hint of an icon in Android's system
 // font (operator: "the full screen icon is teeny tiny"). Feather's
 // maximize-2/minimize-2, stroke inherits the button's currentColor.
@@ -189,7 +189,7 @@ export function openComposer(options: ComposerOptions): Composer {
   }
 
   // -- Scale / visual-viewport pin ---------------------------------------------
-  // The pin anchors the root to the VISUAL viewport (decisions/00083) and owns
+  // The pin anchors the root to the VISUAL viewport (decisions/00084) and owns
   // its width whenever active; the % width in applyScale is the fallback for
   // platforms without a visualViewport. onUpdate re-fits: a width change
   // rewraps the text.

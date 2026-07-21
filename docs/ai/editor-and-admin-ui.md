@@ -23,11 +23,15 @@ between them. Spec: [`spec/05-editor.md`](../../spec/05-editor.md). The wire typ
   device switcher's CSS width and `transform: scale()`d down when the wrap is narrower
   (squished tablet/desktop simulation, decisions/00076); the scale rides
   `setDevice.scale` so the overlay's composer can counter-scale. In edit view the shell
-  hides BOTH title bars (`wx-shell-editing`) behind a slim one-line edit bar (back icon,
+  hides the topbar + nav (`wx-shell-editing`) behind a slim one-line edit bar (back icon,
   device switcher left, Settings + a 10s chrome-reveal ▾ right) which the shell hands to
   `mountEditView` as `toolbarLeading`/`toolbarTrailing` and which pins into a
   `.wx-edit-bar-host` row in the shell's NON-scrolling chrome (`toolbarHost` dep,
   decisions/00082) — never the scrolling `.wx-main`, so it can't scroll out of reach.
+  The one piece of chrome edit view does NOT hide is the slim `.wx-statusbar` at the very
+  top of the shell: the draft chip (left, opens the review drawer) and the Publish button
+  (right), visible on every route (decisions/00083) — the chip no longer relocates into
+  the slim edit bar, and the topbar carries neither control.
 
 ## The edit protocol
 

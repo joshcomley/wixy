@@ -691,7 +691,7 @@ describe("initOverlay", () => {
       teardown();
     });
 
-    it("an open sheet pins to the visual viewport and releases on close (decisions/00083)", () => {
+    it("an open sheet pins to the visual viewport and releases on close (decisions/00084)", () => {
       root.innerHTML = `<span data-wx="card.price" data-wx-control="price">Lips — £60</span>`;
       installFakeVisualViewport({ width: 390, height: 500 });
       const { teardown } = initFor("index", { page: "index", fields: [] });
@@ -714,7 +714,7 @@ describe("initOverlay", () => {
     });
   });
 
-  describe("visual viewport setup (decisions/00083)", () => {
+  describe("visual viewport setup (decisions/00084)", () => {
     it("startup adds interactive-widget=resizes-content to the page's viewport meta", () => {
       const meta = document.createElement("meta");
       meta.name = "viewport";

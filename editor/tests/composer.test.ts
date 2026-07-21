@@ -149,7 +149,7 @@ describe("openComposer", () => {
     expect(composer.element.style.width).toBe("25%");
   });
 
-  it("the maximize toggle renders a real SVG icon, not a tiny text glyph (decisions/00083)", () => {
+  it("the maximize toggle renders a real SVG icon, not a tiny text glyph (decisions/00084)", () => {
     const { composer } = mount("seed");
     const maxBtn = composer.element.querySelector(".wx-composer-max-toggle") as HTMLButtonElement;
     expect(maxBtn.querySelector("svg")).not.toBeNull();
@@ -161,7 +161,7 @@ describe("openComposer", () => {
     expect(maxBtn.getAttribute("aria-label")).toBe("Restore editor");
   });
 
-  describe("visual-viewport pinning (decisions/00083)", () => {
+  describe("visual-viewport pinning (decisions/00084)", () => {
     it("pins itself to the visual viewport bottom — keyboard/pinch can never scroll it off", () => {
       const vv = installFakeVisualViewport({ width: 390, height: 500 });
       const { composer } = mount("seed");

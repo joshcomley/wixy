@@ -111,6 +111,39 @@
   background: var(--wx-canvas);
 }
 
+/* -- Status bar (decisions/00083) ---------------------------------------------
+   The slim, always-visible unpublished-changes bar: draft chip left, Publish
+   right. It sits above the topbar and is NOT part of the edit-view chrome
+   that hides/reveals — the operator's one constant "you have unpublished
+   work" surface, with the publish action always one tap away. */
+.wx-statusbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  flex: none;
+  background: var(--wx-surface);
+  border-bottom: 1px solid var(--wx-border);
+}
+
+.wx-statusbar .wx-draft-chip {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.wx-statusbar .wx-publish-button {
+  flex: none;
+  margin-left: auto;
+  /* The bar's 4px vertical padding would otherwise stretch the button to its
+     full row height — keep it chip-height instead. */
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
 /* -- Top bar ----------------------------------------------------------------- */
 
 .wx-topbar {
@@ -123,16 +156,16 @@
   background: var(--wx-surface);
   border-bottom: 1px solid var(--wx-border);
   /* Edit view hides the bar by sliding it shut (decisions/00076) — max-height
-     rather than a fixed negative margin so it works however many rows the bar
-     wraps to (≤720px can wrap for a long draft chip). */
+     rather than a fixed negative margin so it works however tall the bar is. */
   max-height: 140px;
   overflow: hidden;
   transition: max-height 0.25s ease, padding 0.25s ease, visibility 0s 0s;
 }
 
-/* Edit-view chrome (decisions/00076): both title bars hide so the preview owns
-   the screen; the ▾ reveal button in the slim edit bar slides them back down
-   for ten seconds (wx-shell-chrome-revealed). */
+/* Edit-view chrome (decisions/00076): the topbar and nav hide so the preview
+   owns the screen; the ▾ reveal button in the slim edit bar slides them back
+   down for ten seconds (wx-shell-chrome-revealed). The status bar above is
+   deliberately NOT part of this (decisions/00083). */
 .wx-shell-editing .wx-topbar {
   max-height: 0;
   /* min-height beats max-height in CSS (the ≤720px block sets min-height) —
@@ -157,7 +190,7 @@
   /* The editing rule above set visibility:hidden and NO rule reset it — equal
      specificity, so this later rule is what wins. Without it the reveal slid
      the bar open as an EMPTY GAP (layout but no paint) while the menu showed
-     below the slim bar (operator 2026-07-21, decisions/00083). Flip instantly
+     below the slim bar (operator 2026-07-21, decisions/00084). Flip instantly
      (0s 0s, the base transition) so the content is visible DURING the slide —
      the bar's overflow clip reveals it progressively. Closing still hides at
      the slide's end via the editing rule's 0.25s-delayed flip. */
@@ -2280,11 +2313,10 @@ div.wx-media-thumb {
   /* The ⋯ trigger exists only at this width (its base rule is display: none)
      — it tucks the five secondary control groups (zoom, font scale,
      screenshot, theme, settings) into a popover so the bar takes one row. */
-  /* ONE-row bar at this width: title (truncating as needed), draft chip,
-     Publish, ⋯ trigger. The site link lives in the popover (it's the least-
-     used control on a phone), and the paddings shrink so the row fits a
-     320px screen with a typical short chip; a long chip ("12 changes · 3
-     upstream commits") may still wrap the row as a last resort. */
+  /* ONE-row bar at this width: title (truncating as needed), ⋯ trigger. The
+     site link + zoom/font/screenshot/theme/settings live in the popover. The
+     draft chip and Publish button are NOT here — they moved to the status bar
+     (decisions/00083), which shrinks gracefully instead (the chip truncates). */
   .wx-topbar {
     gap: 8px;
   }
@@ -2303,13 +2335,12 @@ div.wx-media-thumb {
     display: none;
   }
 
-  .wx-draft-chip {
+  .wx-statusbar .wx-draft-chip {
     font-size: 0.6875rem;
     padding: 3px 8px;
-    white-space: nowrap;
   }
 
-  .wx-publish-button {
+  .wx-statusbar .wx-publish-button {
     padding: 8px 12px;
   }
 
@@ -2991,11 +3022,5 @@ div.wx-media-thumb {
   .wx-device-group button {
     font-size: 0.7rem;
     padding: 6px 5px;
-  }
-
-  /* At 320px the slim bar can't hold the chip too — hide it there; the ▾
-     reveal keeps publish one tap away. 361-420px keeps it (fits measured). */
-  .wx-device-toolbar .wx-draft-chip {
-    display: none;
   }
 }

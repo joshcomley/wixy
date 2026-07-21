@@ -1,15 +1,16 @@
-// The admin shell (spec/05-editor.md §1): top bar (project name, draft-status
-// chip, Publish button, "Site ▸" link) + left nav + main panel, hydrated from
-// `/api/admin/state` (fleet instant-render rule: the shell chrome below paints
-// synchronously in `mountShell`; panel content/data arrives async into
-// skeletons). Owns the ONE OpQueue for the whole session (spec/05 §2: "the shell
-// owns state") — panels never construct their own. Also owns every Uxer
-// session-persisted view control (theme.ts, zoom.ts, fontScale.ts,
-// shortcuts.ts) for the shell's lifetime — keyboard shortcuts are matched
-// centrally by shortcuts.ts (shell.ts just registers commands wired to each
-// controller's methods), and every controller's `subscribe` drives both the
-// topbar chrome AND (when mounted) the Settings panel from the same source
-// of truth.
+// The admin shell (spec/05-editor.md §1): the slim unpublished-changes STATUS
+// BAR (decisions/00083) at the very top — visible on every route, edit view
+// included — then the top bar (project name, "Site ▸" link + view controls),
+// left nav + main panel, hydrated from `/api/admin/state` (fleet instant-
+// render rule: the shell chrome below paints synchronously in `mountShell`;
+// panel content/data arrives async into skeletons). Owns the ONE OpQueue for
+// the whole session (spec/05 §2: "the shell owns state") — panels never
+// construct their own. Also owns every Uxer session-persisted view control
+// (theme.ts, zoom.ts, fontScale.ts, shortcuts.ts) for the shell's lifetime —
+// keyboard shortcuts are matched centrally by shortcuts.ts (shell.ts just
+// registers commands wired to each controller's methods), and every
+// controller's `subscribe` drives both the topbar chrome AND (when mounted)
+// the Settings panel from the same source of truth.
 
 import { createApi, thumbnailUrl, type AdminApi, type StateResponse } from "./api";
 import { createThumbnailService } from "./thumbnailService";
@@ -101,13 +102,15 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   container.innerHTML = "";
   container.className = "wx-shell";
 
-  const topbar = document.createElement("div");
-  topbar.className = "wx-topbar";
-  const titleEl = document.createElement("span");
-  titleEl.className = "wx-topbar-title";
-  titleEl.textContent = "Wixy";
-  const spacer = document.createElement("span");
-  spacer.className = "wx-topbar-spacer";
+  // -- Status bar (decisions/00083) ------------------------------------------
+  // The slim, always-visible unpublished-changes bar: the draft chip on the
+  // left (opens the review drawer), the Publish button on the right. It sits
+  // ABOVE the topbar and is deliberately NOT part of the edit-view chrome
+  // that hides/reveals — the one place you can always see and act on "you
+  // have unpublished work" is here, so there's no chip-relocation dance any
+  // more (the chip used to move into the slim edit bar while editing).
+  const statusBar = document.createElement("div");
+  statusBar.className = "wx-statusbar";
   const chipEl = document.createElement("button");
   chipEl.type = "button";
   chipEl.className = "wx-draft-chip";
@@ -119,6 +122,15 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   publishButton.textContent = "Publish";
   publishButton.disabled = true;
   publishButton.addEventListener("click", () => openPublishDrawer());
+  statusBar.append(chipEl, publishButton);
+
+  const topbar = document.createElement("div");
+  topbar.className = "wx-topbar";
+  const titleEl = document.createElement("span");
+  titleEl.className = "wx-topbar-title";
+  titleEl.textContent = "Wixy";
+  const spacer = document.createElement("span");
+  spacer.className = "wx-topbar-spacer";
   const siteLink = document.createElement("a");
   siteLink.className = "wx-site-link";
   siteLink.textContent = "Site ▸";
@@ -383,8 +395,6 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   topbar.append(
     titleEl,
     spacer,
-    chipEl,
-    publishButton,
     secondary,
     overflowButton,
   );
@@ -408,9 +418,9 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   const toastRegion = document.createElement("div");
   toastRegion.className = "wx-toast-region";
 
-  container.append(topbar, editBarHost, body, toastRegion);
+  container.append(statusBar, topbar, editBarHost, body, toastRegion);
 
-  // -- Nav placement (decisions/00083) ------------------------------------------
+  // -- Nav placement (decisions/00084) ------------------------------------------
   // Desktop keeps the nav inside .wx-body as the left sidebar. On narrow
   // screens it relocates into the shell chrome BETWEEN the topbar and the
   // pinned slim edit bar: inside .wx-body it would render BELOW the slim bar,
@@ -609,11 +619,6 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     // from under the user — a browser-tab switch used to close the publish
     // review that way (operator report 2026-07-21). Genuine route changes
     // close it in handleRoute instead.
-    // The draft chip lives in the slim edit bar during edit view; every other
-    // route gets it back in the topbar (its original slot, before Publish).
-    if (route.kind !== "edit" && chipEl.parentElement !== topbar) {
-      topbar.insertBefore(chipEl, publishButton);
-    }
 
     if (route.kind === "pages") {
       if (state === null) {
@@ -677,12 +682,11 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
         opQueue,
         win,
         onOverlayNavigated: (page) => navigateTo({ kind: "edit", page }, win),
-        // The draft chip moves INTO the slim bar while editing (decisions/00076):
-        // with the topbar hidden it's the only publish trigger on screen, and
-        // the change count is exactly what you want visible mid-edit. It moves
-        // back to the topbar on the next non-edit mount (see mountPanel).
+        // No publish chrome here: the draft chip + Publish button live in the
+        // always-visible status bar above (decisions/00083), so the slim bar
+        // keeps just navigation, device, page settings, and chrome reveal.
         toolbarLeading: [backButton],
-        toolbarTrailing: [chipEl, settingsButton, revealButton],
+        toolbarTrailing: [settingsButton, revealButton],
         // And the bar itself pins into the shell chrome (decisions/00082) —
         // never the scrolling main.
         toolbarHost: editBarHost,

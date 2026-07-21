@@ -30,6 +30,11 @@ test.describe("E2E 1: text edit", () => {
     await gotoEditAndWaitReady(page, "index");
     const frame = page.frameLocator(".wx-preview-iframe");
 
+    // The slim status bar (decisions/00083) — chip + Publish — is visible on
+    // EVERY route, edit view included (the topbar's own chrome hides here).
+    await expect(page.locator(".wx-statusbar")).toBeVisible();
+    await expect(page.locator(".wx-statusbar .wx-publish-button")).toBeVisible();
+
     const newTitle = "Published via E2E 1";
     const patchAccepted = waitForNextDraftPatchAccepted(page);
     await editTextField(page, "hero.title", newTitle);

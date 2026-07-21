@@ -44,7 +44,7 @@ export function viewportScaleFor(wrapWidth: number, deviceWidth: number): number
 }
 
 /** The device the edit view opens in: follow the USER'S OWN form factor
- * (decisions/00083 — operator 2026-07-21: "the default display should be what
+ * (decisions/00084 — operator 2026-07-21: "the default display should be what
  * the user is on, auto detected"). The predecessor check (`innerWidth < 480`)
  * read any phone reporting ≥480 CSS px (a real configuration — display-size
  * settings, unusual DPRs) as "desktop always", and had no tablet answer at
@@ -322,7 +322,7 @@ export function mountEditView(page: string, deps: MountEditViewDeps): EditView {
   win.addEventListener("message", messageListener);
 
   iframe.src = `/admin/preview/${page}.html`;
-  // First device follows the user's own form factor (decisions/00083): phone →
+  // First device follows the user's own form factor (decisions/00084): phone →
   // mobile, tablet → tablet, desktop → desktop. matchMedia is capability-guarded
   // the same way deps.win's other optional surfaces are.
   const coarsePointer =

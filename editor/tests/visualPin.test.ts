@@ -8,7 +8,7 @@ afterEach(() => {
   document.head.querySelectorAll('meta[name="viewport"]').forEach((m) => m.remove());
 });
 
-describe("pinToVisualViewport (decisions/00083)", () => {
+describe("pinToVisualViewport (decisions/00084)", () => {
   it("pins the element to the visual viewport's bottom edge (keyboard shrunk the viewport)", () => {
     installFakeVisualViewport({ width: 390, height: 500 });
     const el = document.createElement("div");
@@ -99,7 +99,7 @@ describe("pinToVisualViewport (decisions/00083)", () => {
   });
 });
 
-describe("ensureResizesContentMeta (decisions/00083)", () => {
+describe("ensureResizesContentMeta (decisions/00084)", () => {
   it("appends interactive-widget=resizes-content to an existing viewport meta", () => {
     const meta = document.createElement("meta");
     meta.name = "viewport";
