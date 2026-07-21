@@ -32,6 +32,18 @@ between them. Spec: [`spec/05-editor.md`](../../spec/05-editor.md). The wire typ
   top of the shell: the draft chip (left, opens the review drawer) and the Publish button
   (right), visible on every route (decisions/00083) — the chip no longer relocates into
   the slim edit bar, and the topbar carries neither control.
+- **Edit chrome on mobile (decisions/00084):** the edit view opens on the USER'S OWN form
+  factor — `initialDeviceFor(width, coarsePointer)` in `editView.ts` (phone → mobile even
+  when a phone reports ≥480 CSS px; tablet → tablet; a narrow desktop window previews as
+  its closest small form factor). Every fixed bottom sheet in the overlay (composer,
+  hours/price sheets) pins to the VISUAL viewport (`editor/src/visualPin.ts`) so the
+  on-screen keyboard and pinch-zoom can't scroll it off; the overlay also appends
+  `interactive-widget=resizes-content` to the preview document's viewport meta at startup
+  (never to anything published), and the admin shell's own meta locks user scaling
+  (`admin_shell.html`) so outer pinch can't pan chrome away. The ▾ chrome reveal repaints
+  the topbar (`visibility: visible` — the hidden rule otherwise wins the tie and the bar
+  opens as an empty gap) and, on ≤720px, relocates the nav between the topbar and the
+  slim edit bar (`matchMedia` in `shell.ts`) so the menu reveals ABOVE the bar.
 
 ## The edit protocol
 
@@ -124,9 +136,11 @@ content values, only shapes; text reads are chrome-stripped and demoted to markd
 Inv 23 + decisions/00075); `listOps.ts` (pure array transforms); `dom.ts` (binding
 discovery, precedence list→href→img→bg→text); `popovers.ts` (link + image editors only —
 text no longer has a popover); `composer.ts` (THE text editor: bottom-anchored sheet,
-auto-growing textarea, B/I/link row, maximize, live markdown preview, decisions/00075;
-auto-grow sizes only AFTER attach — caller must `refit()` post-`appendChild`, decisions/00079);
-`markdownText.ts` (inline-markdown render + demote — hand-synced twin of
+auto-growing textarea, B/I/link row, SVG maximize, live markdown preview, decisions/00075;
+auto-grow sizes only AFTER attach — caller must `refit()` post-`appendChild`, decisions/00079;
+pinned to the visual viewport — decisions/00084); `visualPin.ts` (the visual-viewport
+pin shared by the composer and the control sheets, plus the `interactive-widget` meta
+append); `markdownText.ts` (inline-markdown render + demote — hand-synced twin of
 `builder/markdown_inline.py`, locked by the shared fixture, Inv 20);
 `controls.ts` (structured control sheets — opening-hours whole-array editor and
 price-list row editor, opened instead of the composer when the clicked element
