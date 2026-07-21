@@ -15,8 +15,8 @@ from builder.config import MediaConfig, ProjectConfig
 from builder.jsontypes import JsonValue
 from wixy_server.checkout import ensure_checkout
 from wixy_server.ledger import read_ledger
-from wixy_server.media import stage_media_deletion
 from wixy_server.live_pointer import load_live_pointer
+from wixy_server.media import stage_media_deletion
 from wixy_server.overlay import (
     Overlay,
     OverlayOp,
@@ -330,7 +330,9 @@ class TestMediaStaging:
         (paths.draft_media_replace / "hero.jpg").write_bytes(b"replacement-bytes")
         save_overlay(paths.draft_overlay, _make_overlay({}))
 
-        result = run_publish(project, paths, message="replace", expected_rev=0, now=_TS, job=_new_job())
+        result = run_publish(
+            project, paths, message="replace", expected_rev=0, now=_TS, job=_new_job()
+        )
 
         assert result.version == 1
         assert (paths.repo / "images" / "hero.jpg").read_bytes() == b"replacement-bytes"
