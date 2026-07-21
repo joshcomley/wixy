@@ -20,7 +20,8 @@
   e2e admin-routing.spec.ts NEW (deep link no-hash, back/forward real history, legacy
   canonicalize, bare /admin) + all specs/helpers moved to paths.
 
-**Gates:** admin-ui vitest 476, tsc strict, pytest staticcache 22/22 (full suite: see PR),
-e2e admin-routing 4/4 (full suite: see PR).
+**Gates:** admin-ui vitest 476, tsc strict, mypy strict, ruff check+format, pytest 866,
+e2e 32/32, ad-hoc 14/14 at 390+320 dark. CI green on the PR.
 
-**PR:** (filled at ship) · **Decision:** decisions/00087
+**PR:** #120 (merged 2026-07-21; live on prod `a98e6e7`, slot green — deep links 200 +
+shell verified on prod, catch-all in the deployed slot) · **Decision:** decisions/00087
