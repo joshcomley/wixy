@@ -23,6 +23,8 @@ guards). e2e composer-recovery.spec.ts NEW: type → reload mid-edit → banner 
 refills → cancel clears → nothing offered; Discard keeps seed + sticks. Both RED-proven.
 Ad-hoc 10/10 at 390+320 dark; banner screenshot eyeballed.
 
-**Gates:** editor vitest 199, tsc strict; pytest + full e2e: see index line / PR.
+**Gates:** editor vitest 199, tsc strict, pytest 866, e2e 34/34, ad-hoc 10/10 at
+390+320 dark. CI green on the PR.
 
-**PR:** (filled at ship) · **Decision:** decisions/00088
+**PR:** #122 (merged 2026-07-21; live on prod `27345f0`, slot green — `wx-composer-draft:`
+marker verified in the deployed slot) · **Decision:** decisions/00088
