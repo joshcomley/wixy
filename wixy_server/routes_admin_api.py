@@ -23,6 +23,7 @@ import anyio
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.responses import Response
 
 from builder.bindings_map import bindings_map_to_dict, extract_bindings_map
 from builder.config import ProjectConfig
@@ -70,6 +71,7 @@ from wixy_server.publisher import PublishError, PublishJob, PublishResult, run_p
 from wixy_server.restore import RestoreError, RestoreResult, run_restore
 from wixy_server.site_source import build_site_source
 from wixy_server.storage import ProjectPaths
+from wixy_server.thumbnails import ThumbnailError, load_thumbnail, save_thumbnail
 from wixy_server.treelock import tree_lock
 from wixy_server.version_diff import binding_kind_lookup, build_version_diff, container_for
 from wixy_server.watcher import WatcherStatus
@@ -475,6 +477,34 @@ async def delete_media(name: str, request: Request) -> dict[str, bool]:
     except MediaReferencedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"deleted": True}
+
+
+# ---------------------------------------------------------------------------
+# GET + PUT /api/admin/pages/{slug}/thumbnail (decisions/00078)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/pages/{slug}/thumbnail")
+async def get_page_thumbnail(slug: str, request: Request) -> Response:
+    paths: ProjectPaths = request.app.state.paths
+    data = await anyio.to_thread.run_sync(load_thumbnail, paths.thumbnails_dir, slug)
+    if data is None:
+        raise HTTPException(status_code=404, detail=f"no thumbnail for '{slug}'")
+    # no-cache (not no-store): the client version-pins with ?v=<draftRev>, so a
+    # revalidation may revalidate cheaply — but a bare URL must never serve a
+    # stale capture from a heuristic cache (same rule as /admin, Inv 22).
+    return Response(content=data, media_type="image/jpeg", headers={"Cache-Control": "no-cache"})
+
+
+@router.put("/pages/{slug}/thumbnail")
+async def put_page_thumbnail(slug: str, request: Request) -> dict[str, bool]:
+    paths: ProjectPaths = request.app.state.paths
+    data = await request.body()
+    try:
+        await anyio.to_thread.run_sync(save_thumbnail, paths.thumbnails_dir, slug, data)
+    except ThumbnailError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------

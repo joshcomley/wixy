@@ -11,7 +11,8 @@
 // topbar chrome AND (when mounted) the Settings panel from the same source
 // of truth.
 
-import { createApi, type AdminApi, type StateResponse } from "./api";
+import { createApi, thumbnailUrl, type AdminApi, type StateResponse } from "./api";
+import { createThumbnailService } from "./thumbnailService";
 import { mountChatPanel as mountChatPanelReal, type ChatPanel, type ChatPanelDeps } from "./chatPanel";
 import { mountEditView as mountEditViewReal, type EditView, type MountEditViewDeps } from "./editView";
 import { initFontScale, type FontScaleController } from "./fontScale";
@@ -70,6 +71,32 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   const win = deps.win ?? window;
   const createEditView = deps.mountEditView ?? mountEditViewReal;
   const createChatPanel = deps.mountChatPanel ?? mountChatPanelReal;
+
+  // Page thumbnails (decisions/00078): captures happen client-side, serially;
+  // the triggers below keep them fresh (backfill on 404, after accepted ops,
+  // after publish/restore) without ever recapturing on a timer. A landed
+  // capture re-renders the pages panel when it's on screen (placeholder →
+  // thumbnail in real time).
+  const thumbnailService = createThumbnailService({
+    api,
+    win,
+    onCaptured: () => {
+      if (activeRoute?.kind === "pages") void refreshPagesPanel();
+    },
+  });
+
+  function refreshThumbnailsForOps(ops: { file: string }[]): void {
+    if (state === null) return;
+    const pages = state.pages;
+    if (ops.some((op) => op.file === "_global")) {
+      // A global edit (nav, hours, brand) can alter every page's pixels.
+      thumbnailService.refresh(pages.map((p) => p.slug));
+      return;
+    }
+    thumbnailService.refresh(
+      [...new Set(ops.map((op) => op.file))].filter((slug) => pages.some((p) => p.slug === slug)),
+    );
+  }
 
   container.innerHTML = "";
   container.className = "wx-shell";
@@ -516,6 +543,9 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       onClose: closeDrawer,
       onPublished: () => {
         void refreshStateInBackground();
+        // A publish changes what's LIVE — recapture every page (the draft's
+        // pixels just became the site's).
+        thumbnailService.refresh(state?.pages.map((p) => p.slug) ?? []);
       },
     });
     activeDrawer = drawer;
@@ -563,6 +593,8 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
           onChanged: () => {
             void refreshPagesPanel();
           },
+          thumbSrcFor: (slug) => thumbnailUrl(slug, state?.draft.rev ?? 0),
+          onThumbError: (slug) => thumbnailService.refresh([slug]),
         }),
       );
       return;
@@ -653,6 +685,10 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
         api,
         onDraftChanged: () => {
           void refreshStateInBackground();
+          // Reinstate/restore rewrites draft state — recapture everything so
+          // thumbnails track the reverted content (the "cancel reverts it"
+          // half of the operator's graceful-handling ask).
+          thumbnailService.refresh(state?.pages.map((p) => p.slug) ?? []);
         },
       });
       main.appendChild(panel.element);
@@ -751,6 +787,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
             activeEditView?.applyOps(ops);
             activeThemePanel?.onOpsAccepted(ops);
             void refreshStateInBackground();
+            refreshThumbnailsForOps(ops);
           },
           onError: () => showTransientToast("Couldn't save your last change — retrying…"),
         });
@@ -857,6 +894,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       closeSecondary();
       activePanelTeardown?.();
       closeDrawer();
+      thumbnailService.teardown();
       themeController.teardown();
       shortcutsController.teardown();
       themeEditorController.teardown();

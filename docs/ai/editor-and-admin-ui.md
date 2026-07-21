@@ -94,6 +94,8 @@ and for pages that no longer exist); `diffView.ts` (the shared old→new diff re
 review drawer and the history Changes view use — one component, one `.wx-diff-*` CSS block); `mediaPanel.ts` + `mediaDialog.ts` (library + picker);
 `chatPanel.ts` + `markdown.ts` (see [ai-chat.md](ai-chat.md)); `themePanel.ts` + `themeVars.ts`
 + `googleFonts.ts` + `googleFontsCatalog.ts` (site-theme editing with live preview);
+`thumbnailService.ts` (mobile-view page captures for the Pages panel — hidden 390px
+iframe + html2canvas, serial debounced queue, decisions/00078);
 `api.ts` (typed fetch: 10s timeout, 3 attempts, retries network+5xx only). The Uxer-adoption
 layer — `theme.ts`/`themeEditor.ts` (admin **chrome** dark/light/system, *not* the site
 theme), `zoom.ts`, `fontScale.ts`, `settingsPanel.ts`, `shortcuts.ts`, `contrast.ts`,

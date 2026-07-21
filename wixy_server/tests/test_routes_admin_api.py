@@ -729,6 +729,58 @@ class TestPatchDraftSanitize:
         assert _overlay_op_value(paths, "index:meta.title") == "A & <b>B</b>"
 
 
+def _tiny_jpeg() -> bytes:
+    img = Image.new("RGB", (8, 8), (30, 60, 90))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG")
+    return buf.getvalue()
+
+
+class TestPageThumbnails:
+    def test_get_is_404_when_absent(self, storage_root: Path, wixy_repo_root: Path) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/admin/pages/index/thumbnail")
+        assert response.status_code == 404
+
+    def test_put_then_get_round_trips_a_jpeg(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            put = client.put(
+                "/api/admin/pages/index/thumbnail",
+                content=_tiny_jpeg(),
+                headers={"Content-Type": "image/jpeg"},
+            )
+            assert put.status_code == 200
+            get = client.get("/api/admin/pages/index/thumbnail")
+        assert get.status_code == 200
+        assert get.headers["content-type"] == "image/jpeg"
+        assert get.headers["cache-control"] == "no-cache"
+        assert get.content.startswith(bytes([0xFF, 0xD8]))  # JPEG magic
+
+    def test_put_rejects_non_image_bytes(self, storage_root: Path, wixy_repo_root: Path) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.put(
+                "/api/admin/pages/index/thumbnail",
+                content=b"definitely not a jpeg",
+                headers={"Content-Type": "image/jpeg"},
+            )
+        assert response.status_code == 422
+
+    def test_put_rejects_oversize(self, storage_root: Path, wixy_repo_root: Path) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.put(
+                "/api/admin/pages/index/thumbnail",
+                content=bytes([0xFF]) * (2 * 1024 * 1024 + 1),
+                headers={"Content-Type": "image/jpeg"},
+            )
+        assert response.status_code == 422
+
+
 class TestDeleteDraft:
     def test_discards_all_ops_and_bumps_rev(self, storage_root: Path, wixy_repo_root: Path) -> None:
         app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)

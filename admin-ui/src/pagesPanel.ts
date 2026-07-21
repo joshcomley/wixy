@@ -32,6 +32,39 @@ export interface PagesPanelCallbacks {
    * refreshing state and re-rendering this panel with the new page list;
    * this component never re-fetches or re-renders itself. */
   onChanged: () => void;
+  /** Mobile-view thumbnail URL for a page (decisions/00078). Absent → no
+   * thumbnail cells (keeps tests and minimal embeds thumbnail-free). */
+  thumbSrcFor?: (slug: string) => string;
+  /** A thumbnail img failed to load (404 = never captured, or a stale broken
+   * file) — the caller queues a (re)capture for that page. */
+  onThumbError?: (slug: string) => void;
+}
+
+/** The leading thumbnail cell: an <img> that swaps to a plain placeholder
+ * block if the capture 404s (never captured yet — the caller's refresh queue
+ * is already working on it) or errors. */
+function renderThumbCell(
+  slug: string,
+  thumbSrcFor: (slug: string) => string,
+  onThumbError: ((slug: string) => void) | undefined,
+): HTMLTableCellElement {
+  const td = document.createElement("td");
+  td.className = "wx-pages-cell-thumb";
+  const img = document.createElement("img");
+  img.className = "wx-pages-thumb-img";
+  img.src = thumbSrcFor(slug);
+  img.alt = "";
+  img.loading = "lazy";
+  img.addEventListener("error", () => {
+    img.remove();
+    const placeholder = document.createElement("span");
+    placeholder.className = "wx-pages-thumb-placeholder";
+    placeholder.setAttribute("aria-hidden", "true");
+    td.appendChild(placeholder);
+    onThumbError?.(slug);
+  });
+  td.appendChild(img);
+  return td;
 }
 
 function renderDuplicateRow(
@@ -42,7 +75,7 @@ function renderDuplicateRow(
   const tr = document.createElement("tr");
   tr.className = "wx-pages-duplicate-row";
   const td = document.createElement("td");
-  td.colSpan = 6;
+  td.colSpan = callbacks.thumbSrcFor !== undefined ? 7 : 6;
   tr.appendChild(td);
 
   const row = document.createElement("div");
@@ -120,7 +153,7 @@ function renderDeleteConfirmRow(
   const tr = document.createElement("tr");
   tr.className = "wx-pages-delete-row";
   const td = document.createElement("td");
-  td.colSpan = 6;
+  td.colSpan = callbacks.thumbSrcFor !== undefined ? 7 : 6;
   tr.appendChild(td);
 
   const row = document.createElement("div");
@@ -199,7 +232,16 @@ export function renderPagesPanel(pages: PageSummary[], callbacks: PagesPanelCall
 
   const thead = document.createElement("thead");
   const headRow = document.createElement("tr");
-  for (const label of ["Nav label", "Title", "In nav", "Nav order", "Last modified", ""]) {
+  const columns = [
+    ...(callbacks.thumbSrcFor !== undefined ? [""] : []),
+    "Nav label",
+    "Title",
+    "In nav",
+    "Nav order",
+    "Last modified",
+    "",
+  ];
+  for (const label of columns) {
     const th = document.createElement("th");
     th.textContent = label;
     headRow.appendChild(th);
@@ -212,6 +254,10 @@ export function renderPagesPanel(pages: PageSummary[], callbacks: PagesPanelCall
     const row = document.createElement("tr");
     row.dataset["slug"] = page.slug;
     if (page.pendingDelete) row.classList.add("wx-pages-pending-delete");
+
+    if (callbacks.thumbSrcFor !== undefined) {
+      row.appendChild(renderThumbCell(page.slug, callbacks.thumbSrcFor, callbacks.onThumbError));
+    }
 
     // Per-cell classes + data-label attributes are what the narrow-viewport
     // stylesheet hooks onto to restack each row as a compact list item (label

@@ -64,6 +64,8 @@ Handler column is `file:func`. "Auth: CF" = gated by the admin middleware. Respo
 | GET | `publish/preview` | `get_publish_preview` | — | `{"changes":{<fileKey>:[{key,kind,old,new}]}, "opCount":int (content ops + staged page adds/deletes), "validate":{ok:bool,errors:[<err>]}}`; 503 |
 | GET | `publishes?limit=` | `get_publishes` | query `limit?` | `{"publishes":[{...LedgerEntry, "live":bool}]}` newest-first; 503 |
 | GET | `publishes/{version}/diff` | `get_publish_version_diff` | — | `{"version":int, "of":int\|null, "changes":{<fileKey>:[{key,kind,old,new}]}}` (publish-preview's `changes` shape; `of` = the previous ledger entry's version, the diff baseline); 503, 404 |
+| GET | `pages/{slug}/thumbnail` | `get_page_thumbnail` | — | `image/jpeg` bytes + `Cache-Control: no-cache` (client pins `?v=<draftRev>`); **404** (never captured) |
+| PUT | `pages/{slug}/thumbnail` | `put_page_thumbnail` | raw JPEG body (≤2MB, PIL-verified, re-encoded) | `{"ok": true}`; **422** (oversize/unreadable) |
 | POST | `restore` | `post_restore` | `{"version":int}` | `{"version":int, "sha":str, "of":int}`; **409** (running), 503, **422** (Restore) |
 | POST | `pages/duplicate` | `post_pages_duplicate` | `{"from":str, "slug":str, "navLabel":str, "expectedRev":int}` | `{"rev":int}`; 503, 409, 404, **422** (PageOp) |
 | POST | `pages/delete` | `post_pages_delete` | `{"slug":str, "expectedRev":int}` | `{"rev":int}`; 503, 409, 404 |

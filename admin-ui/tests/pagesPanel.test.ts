@@ -219,3 +219,29 @@ describe("renderPagesPanel", () => {
     expect(onChanged).toHaveBeenCalledOnce();
   });
 });
+
+describe("page thumbnails (decisions/00078)", () => {
+  it("renders a thumbnail cell per row when thumbSrcFor is provided", () => {
+    const el = renderPagesPanel(PAGES, callbacks({ thumbSrcFor: (slug) => `/thumb/${slug}.jpg` }));
+    const imgs = el.querySelectorAll(".wx-pages-thumb-img");
+    expect(imgs).toHaveLength(2);
+    expect((imgs[0] as HTMLImageElement).src).toContain("/thumb/index.jpg");
+  });
+
+  it("omits thumbnail cells when thumbSrcFor is absent", () => {
+    const el = renderPagesPanel(PAGES, callbacks());
+    expect(el.querySelectorAll(".wx-pages-thumb-img")).toHaveLength(0);
+  });
+
+  it("an image error swaps in a placeholder and reports the miss", () => {
+    const onThumbError = vi.fn();
+    const el = renderPagesPanel(
+      PAGES,
+      callbacks({ thumbSrcFor: (slug) => `/thumb/${slug}.jpg`, onThumbError }),
+    );
+    const firstImg = el.querySelector(".wx-pages-thumb-img") as HTMLImageElement;
+    firstImg.dispatchEvent(new Event("error"));
+    expect(el.querySelector(".wx-pages-thumb-placeholder")).not.toBeNull();
+    expect(onThumbError).toHaveBeenCalledWith("index");
+  });
+});
