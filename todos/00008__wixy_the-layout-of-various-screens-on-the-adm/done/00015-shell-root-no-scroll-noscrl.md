@@ -21,7 +21,8 @@ cut at the bottom. Cache ruled out (assets are `no-store` + fingerprinted, Inv 2
 - RED proven both ways on unfixed code (wheel gesture scrolled root; programmatic scroll moved
   chrome 120px); GREEN 12/12 spec; ad-hoc 22/22 checks at 390+320 dark; screenshots eyeballed.
 
-**Gates:** admin-ui vitest 463, editor vitest 191, tsc strict ×2, mypy strict, ruff — all green.
-pytest + full e2e: see index line / PR.
+**Gates:** admin-ui vitest 463, editor vitest 191, tsc strict ×2, mypy strict, ruff, pytest
+855 (1 documented flake, passed rerun), e2e 26/26 — all green. CI green on the PR.
 
-**PR:** (filled at ship) · **Decision:** decisions/00085
+**PR:** #116 (merged 2026-07-21; live on prod `2254f6a`, slot green — bundle + shell markers
+verified in the deployed slot) · **Decision:** decisions/00085 · **Invariant:** Inv 24
