@@ -34,6 +34,15 @@ export const DEVICE_LABELS: Record<Device, string> = {
   mobile: "Mobile",
 };
 
+/** The whole-iframe scale for device simulation: 1 when the wrap is at least as
+ * wide as the device, otherwise the shrink factor that makes the full device
+ * layout visible (squished) on a narrower screen (decisions/00076). Never 0 —
+ * a not-yet-laid-out wrap (jsdom, hidden mount) yields 1 rather than collapse. */
+export function viewportScaleFor(wrapWidth: number, deviceWidth: number): number {
+  if (wrapWidth <= 0) return 1;
+  return Math.min(1, wrapWidth / deviceWidth);
+}
+
 export interface EditViewCoreDeps {
   api: AdminApi;
   opQueue: OpQueueLike;
@@ -147,6 +156,18 @@ export interface MountEditViewDeps {
   opQueue: OpQueueLike;
   onOverlayNavigated: (page: string) => void;
   win?: Window;
+  /** Extra toolbar content the caller (shell) wants in the device toolbar's
+   * row — leading goes before the device buttons (e.g. a back button),
+   * trailing after the right-hand spacer (e.g. page settings, chrome reveal).
+   * Kept as opaque elements so editView stays free of shell concerns. */
+  toolbarLeading?: HTMLElement[];
+  toolbarTrailing?: HTMLElement[];
+  /** Fired each time the overlay inside the iframe (re)sends `ready` — i.e.
+   * after every (re)load, when it can actually receive messages again. The
+   * theme panel re-posts its live vars on this signal so a theme change made
+   * while the iframe was still loading (or mid-reload) isn't silently lost
+   * (the E2E-3 full-suite flake, decisions/00076). */
+  onOverlayReady?: () => void;
 }
 
 export function mountEditView(page: string, deps: MountEditViewDeps): EditView {
@@ -166,6 +187,18 @@ export function mountEditView(page: string, deps: MountEditViewDeps): EditView {
     buttons[device] = button;
     toolbar.appendChild(button);
   });
+  const deviceGroup = document.createElement("div");
+  deviceGroup.className = "wx-device-group";
+  (Object.keys(buttons) as Device[]).forEach((device) =>
+    deviceGroup.appendChild(buttons[device]),
+  );
+  toolbar.innerHTML = "";
+  for (const el of deps.toolbarLeading ?? []) toolbar.appendChild(el);
+  toolbar.appendChild(deviceGroup);
+  const toolbarSpacer = document.createElement("span");
+  toolbarSpacer.className = "wx-device-toolbar-spacer";
+  toolbar.appendChild(toolbarSpacer);
+  for (const el of deps.toolbarTrailing ?? []) toolbar.appendChild(el);
 
   const frameWrap = document.createElement("div");
   frameWrap.className = "wx-iframe-wrap";
@@ -180,13 +213,42 @@ export function mountEditView(page: string, deps: MountEditViewDeps): EditView {
     iframe.contentWindow?.postMessage(message, win.location.origin);
   }
 
+  // -- Device simulation -----------------------------------------------------
+  // The iframe element is sized to the DEVICE's CSS width and, when the wrap
+  // is narrower, transform-scaled down — so tablet/desktop previews on a phone
+  // show the whole squished layout rather than three identical widths
+  // (decisions/00076). The scale rides the setDevice message so overlay chrome
+  // (the composer) can counter-scale and stay legible.
+
+  let currentDevice: Device = "desktop";
+
+  function applyViewport(): void {
+    const wrapWidth = frameWrap.clientWidth || win.innerWidth;
+    const wrapHeight = frameWrap.clientHeight || win.innerHeight;
+    const deviceWidth = DEVICE_WIDTHS[currentDevice];
+    const scale = viewportScaleFor(wrapWidth, deviceWidth);
+    iframe.style.width = `${deviceWidth}px`;
+    iframe.style.height = `${Math.max(1, Math.round(wrapHeight / scale))}px`;
+    iframe.style.transform = scale === 1 ? "" : `scale(${scale})`;
+    // deviceWidth * scale == wrapWidth exactly when shrunk (fills the wrap);
+    // at scale 1 on a wider wrap, center the device frame as before.
+    iframe.style.marginLeft = `${Math.max(0, (wrapWidth - deviceWidth * scale) / 2)}px`;
+    postToOverlay({ wx: 1, type: "setDevice", device: currentDevice, scale });
+  }
+
   function setDevice(device: Device): void {
-    frameWrap.style.width = `${DEVICE_WIDTHS[device]}px`;
+    currentDevice = device;
     (Object.keys(buttons) as Device[]).forEach((key) => {
       buttons[key].classList.toggle("wx-device-active", key === device);
     });
-    postToOverlay({ wx: 1, type: "setDevice", device });
+    applyViewport();
   }
+
+  const resizeObserver =
+    typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(() => applyViewport())
+      : null;
+  resizeObserver?.observe(frameWrap);
 
   const core = createEditViewCore(page, {
     api: deps.api,
@@ -214,12 +276,18 @@ export function mountEditView(page: string, deps: MountEditViewDeps): EditView {
 
   const messageListener = (event: MessageEvent): void => {
     if (event.origin !== win.location.origin) return;
+    // The core parses/validates again on its side; this pre-check only picks
+    // out `ready` for the deps callback (a malformed payload yields no
+    // callback, which is correct).
+    if (parseOverlayToShellMessage(event.data)?.type === "ready") deps.onOverlayReady?.();
     core.handleMessage(event.data);
   };
   win.addEventListener("message", messageListener);
 
   iframe.src = `/admin/preview/${page}.html`;
-  setDevice("desktop");
+  // First device follows the ACTUAL screen: a phone opens in mobile view (its
+  // most useful 1:1 mode); roomier screens open desktop as before.
+  setDevice(win.innerWidth > 0 && win.innerWidth < 480 ? "mobile" : "desktop");
 
   return {
     element: root,
@@ -228,6 +296,7 @@ export function mountEditView(page: string, deps: MountEditViewDeps): EditView {
     postMessage: (message) => postToOverlay(message),
     teardown(): void {
       win.removeEventListener("message", messageListener);
+      resizeObserver?.disconnect();
     },
   };
 }

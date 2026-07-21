@@ -40,8 +40,9 @@ test.describe("E2E 6: AI lane (faked)", () => {
 
     // "publish drawer lists the upstream commit" — opened and closed again
     // (rather than confirming from here) so `publishAndWait` below opens a
-    // fresh drawer itself; `.wx-publish-button` toggles, it doesn't just open.
-    await page.click(".wx-publish-button");
+    // fresh drawer itself; the draft chip toggles, it doesn't just open (and
+    // it's the visible trigger in edit view — decisions/00076).
+    await page.click(".wx-draft-chip");
     await page.waitForSelector(".wx-publish-confirm");
     await expect(page.locator(".wx-diff-upstream")).toContainText("1 upstream commit");
     await expect(page.locator(".wx-diff-upstream")).toContainText("AI: AI Lane Change");

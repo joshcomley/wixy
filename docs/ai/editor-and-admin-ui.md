@@ -19,7 +19,13 @@ between them. Spec: [`spec/05-editor.md`](../../spec/05-editor.md). The wire typ
   `<iframe class="wx-preview-iframe">` pointed at the preview URL; the overlay runs inside it.
   Same origin on both sides (one FastAPI app), so `postMessage` targets `win.location.origin`,
   never `"*"`. The theme panel (`themePanel.ts`) reuses the same machinery with a second
-  embedded preview iframe for live theme preview.
+  embedded preview iframe for live theme preview. The iframe element is sized to the
+  device switcher's CSS width and `transform: scale()`d down when the wrap is narrower
+  (squished tablet/desktop simulation, decisions/00076); the scale rides
+  `setDevice.scale` so the overlay's composer can counter-scale. In edit view the shell
+  hides BOTH title bars (`wx-shell-editing`) behind a slim one-line edit bar (back icon,
+  device switcher left, Settings + a 10s chrome-reveal ▾ right); the shell hands those
+  buttons to `mountEditView` as `toolbarLeading`/`toolbarTrailing`.
 
 ## The edit protocol
 

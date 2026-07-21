@@ -118,10 +118,46 @@
   align-items: center;
   gap: 12px;
   padding: 0 16px;
-  height: 52px;
+  height: 44px;
   flex: none;
   background: var(--wx-surface);
   border-bottom: 1px solid var(--wx-border);
+  /* Edit view hides the bar by sliding it shut (decisions/00076) — max-height
+     rather than a fixed negative margin so it works however many rows the bar
+     wraps to (≤720px can wrap for a long draft chip). */
+  max-height: 140px;
+  overflow: hidden;
+  transition: max-height 0.25s ease, padding 0.25s ease, visibility 0s 0s;
+}
+
+/* Edit-view chrome (decisions/00076): both title bars hide so the preview owns
+   the screen; the ▾ reveal button in the slim edit bar slides them back down
+   for ten seconds (wx-shell-chrome-revealed). */
+.wx-shell-editing .wx-topbar {
+  max-height: 0;
+  /* min-height beats max-height in CSS (the ≤720px block sets min-height) —
+     without this the "hidden" bar would stay 52px tall on a phone. */
+  min-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-bottom-width: 0;
+  /* Clipped-invisible buttons would otherwise stay clickable/tabbable (an
+     overflow clip is NOT a hit-test boundary). Flips at the END of the slide
+     so the shut animation still shows; the base rule restores instantly. */
+  visibility: hidden;
+  transition: max-height 0.25s ease, padding 0.25s ease, visibility 0s 0.25s;
+}
+
+.wx-shell-editing .wx-nav {
+  display: none;
+}
+
+.wx-shell-chrome-revealed .wx-topbar {
+  max-height: 140px;
+}
+
+.wx-shell-chrome-revealed .wx-nav {
+  display: flex;
 }
 
 .wx-topbar-title {
@@ -453,11 +489,6 @@
   height: 100%;
 }
 
-.wx-edit-toolbar-row {
-  display: flex;
-  justify-content: flex-end;
-}
-
 .wx-page-settings-trigger {
   font: 600 0.75rem/1 system-ui, sans-serif;
   padding: 6px 12px;
@@ -475,19 +506,40 @@
   min-height: 0;
 }
 
+/* The slim one-line edit bar (decisions/00076): back button + device switcher
+   left-aligned, Settings + chrome-reveal right-aligned — fits one row on a
+   320px phone where the old two-row layout pushed Settings under the switcher. */
 .wx-device-toolbar {
   display: flex;
-  gap: 4px;
-  justify-content: center;
+  align-items: center;
+  gap: 6px;
 }
 
-.wx-device-toolbar button {
+.wx-device-group {
+  display: flex;
+  gap: 4px;
+}
+
+.wx-device-toolbar-spacer {
+  flex: 1;
+}
+
+.wx-device-toolbar button,
+.wx-edit-back,
+.wx-chrome-reveal {
   font: 600 0.75rem/1 system-ui, sans-serif;
   padding: 6px 12px;
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-border);
   background: var(--wx-surface);
   cursor: pointer;
+  white-space: nowrap;
+}
+
+.wx-edit-back,
+.wx-chrome-reveal {
+  min-width: 32px;
+  padding: 6px 8px;
 }
 
 .wx-device-toolbar button.wx-device-active {
@@ -496,22 +548,25 @@
   color: #fff;
 }
 
+/* Full-width wrap; the IFRAME inside is sized to the device width and
+   transform-scaled down by JS when the wrap is narrower (squished
+   tablet/desktop simulation, decisions/00076). */
 .wx-iframe-wrap {
-  margin: 0 auto;
-  width: 1280px;
-  max-width: 100%;
   flex: 1;
   min-height: 0;
   background: var(--wx-surface);
   border: 1px solid var(--wx-border);
   border-radius: var(--wx-radius);
   overflow: hidden;
-  transition: width 0.15s ease;
 }
 
 .wx-preview-iframe {
-  width: 100%;
+  display: block;
+  border: 0;
   height: 100%;
+  transform-origin: top left;
+  transition: transform 0.15s ease;
+}
   border: none;
   display: block;
 }
@@ -2666,5 +2721,57 @@ div.wx-media-thumb {
   .wx-settings-shortcut-rebind,
   .wx-settings-shortcut-toggle {
     min-height: 44px;
+  }
+}
+
+/* -- Ultra-narrow slim edit bar (≤420px) ----------------------------------------
+   Even the one-line bar overflows at ~320px ("Settings" + ▾ clip). Icon-ify the
+   Settings trigger (its aria-label still names it) and tighten the row's
+   paddings/gaps so 320px holds: back icon, three device buttons, ⚙, ▾. */
+@media (max-width: 420px) {
+  .wx-device-toolbar {
+    gap: 4px;
+  }
+
+  .wx-device-group {
+    gap: 2px;
+  }
+
+  .wx-device-toolbar button,
+  .wx-edit-back,
+  .wx-chrome-reveal {
+    padding: 6px 7px;
+  }
+
+  /* Needs the .wx-device-toolbar prefix: the slim bar's generic
+     `.wx-device-toolbar button { font: … }` rule (0,1,1) would otherwise
+     outrank a bare .wx-page-settings-trigger (0,1,0) for font-size too. */
+  .wx-device-toolbar .wx-page-settings-trigger {
+    font-size: 0;
+    padding: 6px 8px;
+  }
+
+  .wx-page-settings-trigger::before {
+    content: "⚙";
+    font-size: 0.8rem;
+  }
+
+  /* The main panel's 20px side padding eats 40px the slim bar needs at 320px —
+     reclaim it in edit view only (other panels keep their breathing room). */
+  .wx-shell-editing .wx-main {
+    padding: 10px 8px;
+  }
+}
+
+@media (max-width: 360px) {
+  .wx-device-group button {
+    font-size: 0.7rem;
+    padding: 6px 5px;
+  }
+
+  /* At 320px the slim bar can't hold the chip too — hide it there; the ▾
+     reveal keeps publish one tap away. 361-420px keeps it (fits measured). */
+  .wx-device-toolbar .wx-draft-chip {
+    display: none;
   }
 }
