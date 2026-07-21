@@ -91,6 +91,43 @@ describe("openComposer", () => {
     expect(textarea.style.overflowY).toBe("auto");
   });
 
+  it("refit() sizes the textarea to its content once attached (decisions/00079)", () => {
+    const { composer, textarea } = mount("seed");
+    Object.defineProperty(textarea, "scrollHeight", { value: 80, configurable: true });
+    composer.refit();
+    expect(textarea.style.height).toBe("80px");
+    expect(textarea.style.overflowY).toBe("hidden");
+  });
+
+  it("never sizes a DETACHED textarea (scrollHeight is 0 before attach — decisions/00079)", () => {
+    const composer = openComposer({ seed: "x", scale: 1, callbacks: makeCallbacks() });
+    const textarea = composer.element.querySelector("textarea") as HTMLTextAreaElement;
+    composer.refit();
+    expect(textarea.style.height).toBe(""); // not "0px" — the sliver bug
+  });
+
+  it("setScale re-fits (counter-scale changes the width, so wrapping changes)", () => {
+    const { composer, textarea } = mount("seed");
+    Object.defineProperty(textarea, "scrollHeight", { value: 64, configurable: true });
+    composer.setScale(0.5);
+    expect(textarea.style.height).toBe("64px");
+  });
+
+  it("re-fits on window resize; destroy() removes the listener", () => {
+    const { composer, textarea } = mount("seed");
+    const sh = { value: 72 };
+    Object.defineProperty(textarea, "scrollHeight", {
+      get: () => sh.value,
+      configurable: true,
+    });
+    window.dispatchEvent(new Event("resize"));
+    expect(textarea.style.height).toBe("72px");
+    sh.value = 48;
+    composer.destroy();
+    window.dispatchEvent(new Event("resize"));
+    expect(textarea.style.height).toBe("72px"); // unchanged after destroy
+  });
+
   it("maximize expands and restores, lifting the grow cap", () => {
     const { composer, textarea } = mount("long text");
     const maxBtn = composer.element.querySelector(".wx-composer-max-toggle") as HTMLButtonElement;

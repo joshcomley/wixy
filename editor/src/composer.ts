@@ -6,6 +6,12 @@
 // is smaller), Enter = newline with Ctrl+Enter / ✓ committing, and a maximize
 // mode (~80% of the viewport) for long-form text. Live preview fires on every
 // input so the page shows the markdown-rendered result as you type.
+//
+// Auto-grow lifecycle (decisions/00079): the composer is built DETACHED, where
+// scrollHeight is always 0, so no sizing can happen inside openComposer — the
+// caller MUST call refit() once the element is attached (and destroy() when
+// tearing it down). fit() then re-runs on every input, on setScale (the
+// counter-scale changes the width, so the text rewraps), and on window resize.
 
 export interface ComposerCallbacks {
   /** Fired on every keystroke with the current markdown source — the caller
@@ -31,9 +37,15 @@ export interface ComposerOptions {
 
 export interface Composer {
   element: HTMLElement;
-  /** Update the counter-scale (shell changed device mid-edit). */
+  /** Update the counter-scale (shell changed device mid-edit). Re-fits: the
+   * width changes, so the text rewraps. */
   setScale: (scale: number) => void;
+  /** (Re)size the textarea to its content. MUST be called once the element is
+   * attached — the composer is built detached, where scrollHeight is always 0. */
+  refit: () => void;
   focus: () => void;
+  /** Remove the window resize listener. Call when tearing the composer down. */
+  destroy: () => void;
 }
 
 const LINE_HEIGHT_PX = 20;
@@ -138,11 +150,21 @@ export function openComposer(options: ComposerOptions): Composer {
   }
 
   function fit(): void {
+    // Detached (or already torn down): scrollHeight is 0 without a layout box,
+    // so sizing here would collapse the textarea to a 0px sliver — the bug
+    // behind decisions/00079. A detached composer simply keeps its natural
+    // rows=1 height until the caller's post-attach refit().
+    if (!root.isConnected) return;
     if (root.classList.contains("wx-composer-max")) return;
     textarea.style.height = "auto";
     const cap = capPx();
-    textarea.style.height = `${Math.min(textarea.scrollHeight, cap)}px`;
-    textarea.style.overflowY = textarea.scrollHeight > cap ? "auto" : "hidden";
+    // scrollHeight measures content+padding, but `height` under border-box
+    // sets the BORDER box — add the borders back (offsetHeight - clientHeight)
+    // or the last line sits permanently ~2px clipped. The overflow decision
+    // uses the same `needed` figure so the two never disagree at the cap edge.
+    const needed = textarea.scrollHeight + (textarea.offsetHeight - textarea.clientHeight);
+    textarea.style.height = `${Math.min(needed, cap)}px`;
+    textarea.style.overflowY = needed > cap ? "auto" : "hidden";
   }
 
   // -- Scale -------------------------------------------------------------------
@@ -152,6 +174,9 @@ export function openComposer(options: ComposerOptions): Composer {
     root.style.transform = `scale(${1 / safe})`;
     root.style.transformOrigin = "bottom left";
     root.style.width = `${100 * safe}%`;
+    // The width just changed, so the text rewraps — re-fit. A no-op while
+    // detached (the constructor's own call below) via fit()'s guard.
+    fit();
   }
   applyScale(options.scale);
 
@@ -189,11 +214,14 @@ export function openComposer(options: ComposerOptions): Composer {
   commitBtn.addEventListener("click", () => callbacks.onCommit(textarea.value));
   cancelBtn.addEventListener("click", () => callbacks.onCancel());
 
-  fit();
+  // Viewport resize changes the cap (20vh) and usually the width (rewrap).
+  window.addEventListener("resize", fit);
 
   return {
     element: root,
     setScale: applyScale,
+    refit: fit,
     focus: () => textarea.focus(),
+    destroy: () => window.removeEventListener("resize", fit),
   };
 }
