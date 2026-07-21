@@ -798,6 +798,22 @@ class TestDeleteDraft:
         assert delete_response.json() == {"rev": 2}
         assert content_response.json()["content"]["hero"]["title"] == "Original Title"
 
+    def test_clears_staged_replace_and_delete_too(
+        self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
+    ) -> None:
+        """A draft discard takes ALL staged state (decisions/00079) — staged
+        media replacements/deletions must not survive a 'start over'."""
+        paths.draft_media_replace.mkdir(parents=True)
+        (paths.draft_media_replace / "hero.jpg").write_bytes(b"staged")
+        paths.draft_media_deleted_list.parent.mkdir(parents=True, exist_ok=True)
+        paths.draft_media_deleted_list.write_text('{"names": ["hero.jpg"]}', encoding="utf-8")
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.delete("/api/admin/draft")
+        assert response.status_code == 200
+        assert not (paths.draft_media_replace / "hero.jpg").exists()
+        assert not paths.draft_media_deleted_list.exists()
+
     def test_clears_staged_media(
         self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
     ) -> None:
@@ -991,17 +1007,89 @@ class TestDeleteMedia:
             response = client.delete("/api/admin/media/does-not-exist.jpg")
         assert response.status_code == 404
 
-    def test_404s_for_a_repo_image_deletion_is_out_of_scope_this_milestone(
-        self, storage_root: Path, wixy_repo_root: Path
+    def test_repo_image_delete_stages_for_publish(
+        self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
     ) -> None:
-        # decisions/00015 decision 3's exact reasoning applied to media: deleting
-        # an already-PUBLISHED repo image needs milestone 9's publish-time
-        # materialization contract, which doesn't exist yet — this route only
-        # ever looks in draft_media/, so a repo filename naturally 404s.
+        # decisions/00079 supersedes the milestone-8 deferral: a repo image's
+        # deletion now STAGES (git rm at the next publish) rather than 404ing —
+        # the file stays on disk and referenced until then.
         app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
         with TestClient(app) as client:
             response = client.delete("/api/admin/media/hero.jpg")
+            assert response.status_code == 200
+            assert response.json() == {"stagedDelete": True}
+            grid = client.get("/api/admin/media")
+        assert (paths.repo / "images" / "hero.jpg").exists()  # still there pre-publish
+        hero = next(item for item in grid.json()["media"] if item["name"] == "hero.jpg")
+        assert hero["stagedDelete"] is True
+
+    def test_repo_image_delete_unstage(self, storage_root: Path, wixy_repo_root: Path) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            client.delete("/api/admin/media/hero.jpg")
+            response = client.delete("/api/admin/media-deletion/hero.jpg")
+            assert response.status_code == 200
+            grid = client.get("/api/admin/media")
+        hero = next(item for item in grid.json()["media"] if item["name"] == "hero.jpg")
+        assert "stagedDelete" not in hero
+
+    def test_404s_for_an_unknown_deletion_name(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.delete("/api/admin/media/does-not-exist.jpg")
         assert response.status_code == 404
+
+    def test_replace_stages_and_grid_previews_the_staged_bytes(
+        self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.put(
+                "/api/admin/media/hero.jpg",
+                content=_tiny_jpeg(),
+                headers={"Content-Type": "image/jpeg"},
+            )
+            assert response.status_code == 200
+            body = response.json()
+            assert body["stagedReplace"] is True
+            assert body["url"] == "/admin/draft-media-replace/hero.jpg"
+            grid = client.get("/api/admin/media")
+            staged = client.get("/admin/draft-media-replace/hero.jpg")
+        assert (paths.draft_media_replace / "hero.jpg").exists()
+        hero = next(item for item in grid.json()["media"] if item["name"] == "hero.jpg")
+        assert hero["stagedReplace"] is True
+        assert hero["url"] == "/admin/draft-media-replace/hero.jpg"
+        assert staged.status_code == 200
+        assert staged.content.startswith(bytes([0xFF, 0xD8]))
+
+    def test_replace_404s_for_an_unknown_name(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.put(
+                "/api/admin/media/nope.jpg",
+                content=_tiny_jpeg(),
+                headers={"Content-Type": "image/jpeg"},
+            )
+        assert response.status_code == 404
+
+    def test_replace_unstage(self, storage_root: Path, wixy_repo_root: Path) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            client.put(
+                "/api/admin/media/hero.jpg",
+                content=_tiny_jpeg(),
+                headers={"Content-Type": "image/jpeg"},
+            )
+            response = client.delete("/api/admin/media-replace/hero.jpg")
+            assert response.status_code == 200
+            grid = client.get("/api/admin/media")
+        hero = next(item for item in grid.json()["media"] if item["name"] == "hero.jpg")
+        assert "stagedReplace" not in hero
+        assert hero["url"] == "/images/hero.jpg"
 
     def test_409s_for_a_referenced_staged_upload(
         self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
@@ -1160,6 +1248,30 @@ class TestPostPublish:
         assert "nothing to publish" in response.json()["detail"]
         # No no-op version was recorded: still just the bootstrap entry.
         assert [p["version"] for p in ledger] == [0]
+
+    def test_an_empty_draft_with_staged_media_publishes(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        """decisions/00079: a publish whose ONLY change is a staged media
+        replacement must not hit the nothing-to-publish 422 — the staged media
+        IS the change (found via E2E: the guard refused it)."""
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            put = client.put(
+                "/api/admin/media/hero.jpg",
+                content=_tiny_jpeg(),
+                headers={"Content-Type": "image/jpeg"},
+            )
+            assert put.status_code == 200
+            # preview FIRST (a successful publish applies and clears the staging)
+            preview = client.get("/api/admin/publish/preview").json()
+            response = client.post(
+                "/api/admin/publish",
+                json={"message": "media only", "expectedRev": _current_rev(client)},
+            )
+        assert preview["opCount"] == 1
+        assert preview["mediaChanges"] == {"replaced": ["hero.jpg"], "deleted": []}
+        assert response.status_code == 200, response.text
 
     def test_an_empty_draft_with_upstream_commits_pending_publishes(
         self, storage_root: Path, wixy_repo_root_bare: Path, tmp_path: Path
@@ -1422,6 +1534,7 @@ class TestGetPublishPreview:
         assert response.status_code == 200
         assert response.json() == {
             "changes": {},
+            "mediaChanges": {"replaced": [], "deleted": []},
             "opCount": 0,
             "validate": {"ok": True, "errors": []},
         }

@@ -15,16 +15,26 @@ export function mountMediaPanel(api: AdminApi, win?: Window): MediaPanel {
   const root = document.createElement("div");
   root.className = "wx-media-panel";
 
+  // One-line header (operator 2026-07-21: "the media subheader is far too
+  // tall, doesn't need to be over two lines") — title left, upload right; the
+  // grid's own toolbar button moves up here.
+  const headerRow = document.createElement("div");
+  headerRow.className = "wx-media-header-row";
   const heading = document.createElement("h2");
   heading.textContent = "Media";
-  root.appendChild(heading);
+  headerRow.appendChild(heading);
+  root.appendChild(headerRow);
 
   const hint = document.createElement("p");
   hint.className = "wx-pages-hint";
   hint.textContent = "Upload images here, or replace one directly from the editor.";
   root.appendChild(hint);
 
-  const grid: MediaGrid = renderMediaGrid({ api, ...(win !== undefined ? { win } : {}) });
+  const grid: MediaGrid = renderMediaGrid({
+    api,
+    ...(win !== undefined ? { win } : {}),
+    headerRow,
+  });
   root.appendChild(grid.element);
 
   return {

@@ -17,7 +17,7 @@ import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import anyio
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
@@ -50,8 +50,13 @@ from wixy_server.media import (
     MediaUploadError,
     delete_draft_media,
     image_dimensions,
+    media_staging,
     process_upload,
     scan_media_references,
+    stage_media_deletion,
+    stage_media_replacement,
+    unstage_media_deletion,
+    unstage_media_replacement,
 )
 from wixy_server.merged_content import merge_overlay
 from wixy_server.overlay import (
@@ -356,6 +361,15 @@ def _discard_draft(paths: ProjectPaths) -> int:
         for staged in paths.draft_media.iterdir():
             if staged.is_file():
                 staged.unlink()
+    # Staged media changes are draft state too (decisions/00079) — a discard
+    # must take staged replacements/deletions with it, or they'd silently
+    # apply at the next publish after the operator "started over".
+    if paths.draft_media_replace.is_dir():
+        for staged in paths.draft_media_replace.iterdir():
+            if staged.is_file():
+                staged.unlink()
+    if paths.draft_media_deleted_list.exists():
+        paths.draft_media_deleted_list.unlink()
     return new_overlay.rev
 
 
@@ -395,18 +409,40 @@ def _media_item(path: Path, url: str, source: str, references: dict[str, list[st
 
 def _list_media(project: ProjectConfig, paths: ProjectPaths) -> list[JsonValue]:
     references = scan_media_references(_merged_source(project, paths))
+    staging = media_staging(paths)
     items: list[JsonValue] = []
     images_dir = paths.repo / "images"
     if images_dir.is_dir():
         for entry in sorted(images_dir.iterdir(), key=lambda p: p.name):
             if entry.is_file():
-                items.append(_media_item(entry, f"/images/{entry.name}", "repo", references))
+                item = _media_item(entry, f"/images/{entry.name}", "repo", references)
+                # Staged states (decisions/00079): a replacement shows its new
+                # bytes immediately (the grid previews the staged file, not the
+                # published one); a staged deletion is dimmed client-side.
+                if entry.name in staging["replaced"]:
+                    staged_path = paths.draft_media_replace / entry.name
+                    item = {
+                        **item,
+                        "url": f"/admin/draft-media-replace/{entry.name}",
+                        "sizeBytes": staged_path.stat().st_size,
+                    }
+                    item["stagedReplace"] = True
+                if entry.name in staging["deleted"]:
+                    item["stagedDelete"] = True
+                items.append(item)
     if paths.draft_media.is_dir():
         for entry in sorted(paths.draft_media.iterdir(), key=lambda p: p.name):
             if entry.is_file():
-                items.append(
-                    _media_item(entry, f"/admin/draft-media/{entry.name}", "draft", references)
-                )
+                item = _media_item(entry, f"/admin/draft-media/{entry.name}", "draft", references)
+                if entry.name in staging["replaced"]:
+                    staged_path = paths.draft_media_replace / entry.name
+                    item = {
+                        **item,
+                        "url": f"/admin/draft-media-replace/{entry.name}",
+                        "sizeBytes": staged_path.stat().st_size,
+                    }
+                    item["stagedReplace"] = True
+                items.append(item)
     return items
 
 
@@ -455,27 +491,85 @@ async def upload_media(request: Request, file: Annotated[UploadFile, File()]) ->
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-def _delete_media(project: ProjectConfig, paths: ProjectPaths, name: str) -> None:
+def _delete_media(project: ProjectConfig, paths: ProjectPaths, name: str) -> JsonObject:
     references = scan_media_references(_merged_source(project, paths))
-    delete_draft_media(paths, name, references)
+    if (paths.draft_media / name).is_file():
+        delete_draft_media(paths, name, references)
+        return {"deleted": True}
+    # A repo image stages for deletion at the next publish (decisions/00079);
+    # unreferenced-only, exactly like the draft case.
+    stage_media_deletion(paths, name, references)
+    return {"stagedDelete": True}
 
 
 @router.delete("/media/{name}", response_model=None)
-async def delete_media(name: str, request: Request) -> dict[str, bool]:
+async def delete_media(name: str, request: Request) -> JsonObject:
     project: ProjectConfig = request.app.state.project
     paths: ProjectPaths = request.app.state.paths
 
-    def _delete() -> None:
-        _delete_media(project, paths, name)
+    def _delete() -> JsonObject:
+        return _delete_media(project, paths, name)
 
     try:
-        await anyio.to_thread.run_sync(_delete)
+        return await anyio.to_thread.run_sync(_delete)
     except CheckoutError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except MediaNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except MediaReferencedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# Media replace + repo deletion staging (decisions/00079)
+# ---------------------------------------------------------------------------
+
+
+@router.put("/media/{name}", response_model=None)
+async def replace_media(name: str, request: Request) -> JsonObject:
+    """Stage new bytes for an existing image (in-place replacement at publish —
+    every reference keeps working, decisions/00079)."""
+    project: ProjectConfig = request.app.state.project
+    paths: ProjectPaths = request.app.state.paths
+    data = await request.body()
+    content_type = request.headers.get("content-type", "")
+
+    def _stage() -> JsonObject:
+        processed = stage_media_replacement(paths, name, data, content_type, project.media)
+        return {
+            "name": name,
+            "url": f"/admin/draft-media-replace/{name}",
+            "sizeBytes": len(processed.content),
+            "width": processed.width,
+            "height": processed.height,
+            "stagedReplace": True,
+        }
+
+    try:
+        return await anyio.to_thread.run_sync(_stage)
+    except MediaNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except MediaUploadError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.delete("/media-replace/{name}", response_model=None)
+async def unstage_replace_media(name: str, request: Request) -> dict[str, bool]:
+    """Discard a staged replacement (change of mind before publish)."""
+    paths: ProjectPaths = request.app.state.paths
+    removed = await anyio.to_thread.run_sync(unstage_media_replacement, paths, name)
+    if not removed:
+        raise HTTPException(status_code=404, detail=f"no staged replacement for '{name}'")
+    return {"deleted": True}
+
+
+@router.delete("/media-deletion/{name}", response_model=None)
+async def unstage_media_deletion_route(name: str, request: Request) -> dict[str, bool]:
+    """Discard a staged repo-image deletion (change of mind before publish)."""
+    paths: ProjectPaths = request.app.state.paths
+    removed = await anyio.to_thread.run_sync(unstage_media_deletion, paths, name)
+    if not removed:
+        raise HTTPException(status_code=404, detail=f"no staged deletion for '{name}'")
     return {"deleted": True}
 
 
@@ -551,6 +645,9 @@ async def start_publish(body: PublishIn, request: Request) -> JsonObject:
             raise RevConflictError(body.expectedRev, overlay.rev)
         if overlay.ops or overlay.pages_added or overlay.pages_deleted:
             return  # something staged — always publishable
+        staging = media_staging(paths)
+        if staging["replaced"] or staging["deleted"]:
+            return  # staged media changes are publishable too (decisions/00079)
         pointer = load_live_pointer(paths)
         if pointer is None or not (paths.repo / ".git").exists():
             return
@@ -729,14 +826,26 @@ def _build_publish_preview(
         if not (e.code == "missing-image" and (e.file, e.key) in safe_image_keys)
     ]
 
+    # Staged media changes are publishable changes too (decisions/00079) —
+    # they produce no content ops, so without this a pure media-replacement
+    # publish reads as "Nothing to publish" (found via E2E: the drawer's guard
+    # disabled Publish over a staged replacement).
+    media_changes = media_staging(paths)
+
     return {
         "changes": {
             file_key: [entry for entry in entries] for file_key, entries in changes.items()
         },
+        "mediaChanges": cast(JsonObject, media_changes),
         # Total staged draft changes — content ops + staged page adds/deletes
         # (a staged page deletion produces no `changes` entries, so the review
-        # drawer's nothing-to-publish rule can't count those, decisions/00071).
-        "opCount": len(overlay.ops) + len(overlay.pages_added) + len(overlay.pages_deleted),
+        # drawer's nothing-to-publish rule can't count those, decisions/00071)
+        # + staged media replacements/deletions (decisions/00079).
+        "opCount": len(overlay.ops)
+        + len(overlay.pages_added)
+        + len(overlay.pages_deleted)
+        + len(media_changes["replaced"])
+        + len(media_changes["deleted"]),
         "validate": {
             "ok": not filtered_errors,
             "errors": [{k: v for k, v in e.to_dict().items()} for e in filtered_errors],
