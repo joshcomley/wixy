@@ -9,7 +9,7 @@ export async function gotoEditAndWaitReady(page: Page, slug: string): Promise<vo
   const contentFetch = page.waitForResponse(
     (res) => res.url().includes(`/api/admin/content/${slug}`) && res.request().method() === "GET",
   );
-  const target = `/admin#/edit/${slug}`;
+  const target = `/admin/edit/${slug}`;
   // A same-URL `goto` (including an IDENTICAL hash) is a browser no-op — no
   // navigation, no hashchange, so the SPA router never remounts the edit view
   // and the content fetch this function waits for never fires. A flow that

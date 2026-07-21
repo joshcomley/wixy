@@ -58,7 +58,7 @@ test.describe("E2E 6: AI lane (faked)", () => {
     // Bonus, per spec/04 §5's source-kind classification: a publish with zero
     // draft ops riding purely on an upstream commit is attributed to "AI", not
     // "editor" — the history panel's author column reflects it.
-    await page.goto("/admin#/history");
+    await page.goto("/admin/history");
     await expect(page.locator("table.wx-history-table")).toContainText("AI");
 
     expect(consoleErrors).toEqual([]);

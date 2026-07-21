@@ -44,7 +44,7 @@ test.describe("E2E 5: restore", () => {
     const beforeRestore = await page.request.get("/");
     expect(await beforeRestore.text()).toContain("Version Two Content");
 
-    await page.goto("/admin#/history");
+    await page.goto("/admin/history");
     const v1Row = page.locator(`tr[data-version="${v1}"]`);
     await expect(v1Row).toBeVisible();
     await v1Row.locator(".wx-history-restore").click();

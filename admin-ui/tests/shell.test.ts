@@ -46,6 +46,12 @@ function fakeWindow(
 ): Window {
   const listeners = new Map<string, Set<(e?: Event) => void>>();
   let hash = opts.initialHash ?? "";
+  // Path-routed admin (decisions/00087): the fake carries a real pathname +
+  // history. pushState/replaceState clear the hash like a real browser
+  // navigating to a hashless URL; they do NOT fire popstate (matches the
+  // browser), so tests drive route changes through `goTo` below, which mirrors
+  // router.ts's navigateTo exactly.
+  let pathname = "/admin";
   const docListeners = new Map<string, Set<() => void>>();
   let narrowChangeListener: ((event: { matches: boolean }) => void) | null = null;
   if (opts.narrow !== undefined) {
@@ -61,7 +67,20 @@ function fakeWindow(
         hash = value.startsWith("#") ? value : `#${value}`;
         listeners.get("hashchange")?.forEach((l) => l());
       },
+      get pathname() {
+        return pathname;
+      },
       origin: "https://wixy.test",
+    },
+    history: {
+      pushState: (_state: unknown, _title: string, url: string) => {
+        pathname = url;
+        hash = "";
+      },
+      replaceState: (_state: unknown, _title: string, url: string) => {
+        pathname = url;
+        hash = "";
+      },
     },
     localStorage: opts.storage ?? fakeStorage(),
     navigator: {
@@ -116,6 +135,13 @@ function fakeWindow(
       : {}),
   };
   return win as unknown as Window;
+}
+
+/** Drives a route change the way router.ts's navigateTo does (decisions/00087):
+ * pushState + an explicit popstate notification. */
+function goTo(win: Window, path: string): void {
+  win.history.pushState({}, "", path);
+  win.dispatchEvent(new Event("popstate"));
 }
 
 function fakeState(overrides: Partial<StateResponse> = {}): StateResponse {
@@ -323,7 +349,7 @@ describe("mountShell", () => {
     expect(rows).toHaveLength(2);
   });
 
-  it("clicking Edit navigates to #/edit/<slug> and mounts the edit view", async () => {
+  it("clicking Edit navigates to /admin/edit/<slug> and mounts the edit view", async () => {
     const api = fakeApi();
     const win = fakeWindow();
     const container = document.createElement("div");
@@ -334,7 +360,7 @@ describe("mountShell", () => {
 
     container.querySelectorAll<HTMLButtonElement>(".wx-pages-edit")[1]?.click();
 
-    expect(win.location.hash).toBe("#/edit/about");
+    expect(win.location.pathname).toBe("/admin/edit/about");
     expect(editView.mountedPages).toEqual(["about"]);
     expect(container.querySelector(".wx-edit-wrap")).not.toBeNull();
     // The Settings button lives in the slim edit bar, handed to the edit view
@@ -352,8 +378,8 @@ describe("mountShell", () => {
     mountShell(container, { api, win, mountEditView: editView.fn });
     await flushState(api);
 
-    win.location.hash = "#/edit/index";
-    win.location.hash = "#/edit/about";
+    goTo(win, "/admin/edit/index");
+    goTo(win, "/admin/edit/about");
 
     expect(editView.mountedPages).toEqual(["index"]);
     expect(editView.setPageCalls).toEqual(["about"]);
@@ -369,8 +395,8 @@ describe("mountShell", () => {
     mountShell(container, { api, win, mountEditView: editView.fn });
     await flushState(api);
 
-    win.location.hash = "#/edit/index";
-    win.location.hash = "#/pages";
+    goTo(win, "/admin/edit/index");
+    goTo(win, "/admin/pages");
 
     expect(editView.teardownCount).toBe(1);
     expect(container.querySelector(".wx-pages-table")).not.toBeNull();
@@ -386,10 +412,10 @@ describe("mountShell", () => {
       await flushState(api);
 
       expect(container.classList.contains("wx-shell-editing")).toBe(false);
-      win.location.hash = "#/edit/index";
+      goTo(win, "/admin/edit/index");
       await Promise.resolve();
       expect(container.classList.contains("wx-shell-editing")).toBe(true);
-      win.location.hash = "#/pages";
+      goTo(win, "/admin/pages");
       await Promise.resolve();
       expect(container.classList.contains("wx-shell-editing")).toBe(false);
     });
@@ -402,7 +428,7 @@ describe("mountShell", () => {
 
       mountShell(container, { api, win, mountEditView: editView.fn });
       await flushState(api);
-      win.location.hash = "#/edit/index";
+      goTo(win, "/admin/edit/index");
       await Promise.resolve();
 
       const deps = editView.lastDeps;
@@ -428,7 +454,7 @@ describe("mountShell", () => {
 
       mountShell(container, { api, win, mountEditView: editView.fn });
       await flushState(api);
-      win.location.hash = "#/edit/index";
+      goTo(win, "/admin/edit/index");
       await Promise.resolve();
 
       const host = container.querySelector(".wx-edit-bar-host");
@@ -441,7 +467,7 @@ describe("mountShell", () => {
       expect(toolbar?.closest(".wx-main")).toBeNull();
 
       // leaving edit view removes it from the host (no stale bar on other routes)
-      win.location.hash = "#/pages";
+      goTo(win, "/admin/pages");
       await Promise.resolve();
       expect(container.querySelector(".wx-device-toolbar")).toBeNull();
     });
@@ -457,12 +483,12 @@ describe("mountShell", () => {
       expect(chip?.closest(".wx-statusbar")).not.toBeNull();
       expect(chip?.closest(".wx-topbar")).toBeNull();
 
-      win.location.hash = "#/edit/index";
+      goTo(win, "/admin/edit/index");
       await Promise.resolve();
       expect(chip?.closest(".wx-statusbar")).not.toBeNull();
       expect(chip?.closest(".wx-device-toolbar")).toBeNull();
 
-      win.location.hash = "#/pages";
+      goTo(win, "/admin/pages");
       await Promise.resolve();
       expect(chip?.closest(".wx-statusbar")).not.toBeNull();
       expect(chip?.closest(".wx-topbar")).toBeNull();
@@ -491,11 +517,11 @@ describe("mountShell", () => {
 
       mountShell(container, { api, win, mountEditView: editView.fn });
       await flushState(api);
-      win.location.hash = "#/edit/index";
+      goTo(win, "/admin/edit/index");
       await Promise.resolve();
 
       editView.lastDeps?.toolbarLeading?.[0]?.click();
-      expect(win.location.hash).toBe("#/pages");
+      expect(win.location.pathname).toBe("/admin/pages");
     });
 
     it("the reveal button shows the chrome and it auto-hides after 10 seconds", async () => {
@@ -508,7 +534,7 @@ describe("mountShell", () => {
 
         mountShell(container, { api, win, mountEditView: editView.fn });
         await flushState(api);
-        win.location.hash = "#/edit/index";
+        goTo(win, "/admin/edit/index");
         await Promise.resolve();
 
         const reveal = editView.lastDeps?.toolbarTrailing?.[1];
@@ -533,12 +559,12 @@ describe("mountShell", () => {
 
       mountShell(container, { api, win, mountEditView: editView.fn });
       await flushState(api);
-      win.location.hash = "#/edit/index";
+      goTo(win, "/admin/edit/index");
       await Promise.resolve();
 
       editView.lastDeps?.toolbarTrailing?.[1]?.click();
       expect(container.classList.contains("wx-shell-chrome-revealed")).toBe(true);
-      win.location.hash = "#/pages";
+      goTo(win, "/admin/pages");
       await Promise.resolve();
       expect(container.classList.contains("wx-shell-chrome-revealed")).toBe(false);
     });
@@ -550,7 +576,7 @@ describe("mountShell", () => {
 
       mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
       await flushState(api);
-      win.location.hash = "#/edit/index";
+      goTo(win, "/admin/edit/index");
       await Promise.resolve();
 
       const nav = container.querySelector(".wx-nav");
@@ -600,7 +626,7 @@ describe("mountShell", () => {
     });
   });
 
-  it("#/chat mounts the real chat panel (list view), not a stub", async () => {
+  it("/admin/chat mounts the real chat panel (list view), not a stub", async () => {
     const api = fakeApi();
     const win = fakeWindow();
     const container = document.createElement("div");
@@ -608,7 +634,7 @@ describe("mountShell", () => {
     mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
     await flushState(api);
 
-    win.location.hash = "#/chat";
+    goTo(win, "/admin/chat");
     await Promise.resolve();
     await Promise.resolve();
 
@@ -617,7 +643,7 @@ describe("mountShell", () => {
     expect(api.getConversations).toHaveBeenCalled();
   });
 
-  it("#/chat/<conv> passes the conversation id through to the chat panel mount", async () => {
+  it("/admin/chat/<conv> passes the conversation id through to the chat panel mount", async () => {
     const api = fakeApi();
     const win = fakeWindow();
     const container = document.createElement("div");
@@ -631,7 +657,7 @@ describe("mountShell", () => {
     });
     await flushState(api);
 
-    win.location.hash = "#/chat/c1";
+    goTo(win, "/admin/chat/c1");
     await Promise.resolve();
     await Promise.resolve();
 
@@ -652,8 +678,8 @@ describe("mountShell", () => {
     });
     await flushState(api);
 
-    win.location.hash = "#/chat/c1";
-    win.location.hash = "#/pages";
+    goTo(win, "/admin/chat/c1");
+    goTo(win, "/admin/pages");
 
     expect(chatPanel.teardownCount).toBe(1);
   });
@@ -666,7 +692,7 @@ describe("mountShell", () => {
     mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
     await flushState(api);
 
-    win.location.hash = "#/history";
+    goTo(win, "/admin/history");
     await Promise.resolve();
     await Promise.resolve();
 
@@ -675,7 +701,7 @@ describe("mountShell", () => {
     expect(api.getPublishes).toHaveBeenCalled();
   });
 
-  it("#/media mounts the real media panel", async () => {
+  it("/admin/media mounts the real media panel", async () => {
     const api = fakeApi();
     const win = fakeWindow();
     const container = document.createElement("div");
@@ -683,7 +709,7 @@ describe("mountShell", () => {
     mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
     await flushState(api);
 
-    win.location.hash = "#/media";
+    goTo(win, "/admin/media");
     await Promise.resolve();
     await Promise.resolve();
 
@@ -691,7 +717,7 @@ describe("mountShell", () => {
     expect(container.querySelector(".wx-coming-soon")).toBeNull();
   });
 
-  it("#/theme mounts the real theme panel, reusing the injected mountEditView", async () => {
+  it("/admin/theme mounts the real theme panel, reusing the injected mountEditView", async () => {
     const api = fakeApi();
     const win = fakeWindow();
     const container = document.createElement("div");
@@ -700,7 +726,7 @@ describe("mountShell", () => {
     mountShell(container, { api, win, mountEditView: editView.fn });
     await flushState(api);
 
-    win.location.hash = "#/theme";
+    goTo(win, "/admin/theme");
     await Promise.resolve();
     await Promise.resolve();
 
@@ -709,7 +735,7 @@ describe("mountShell", () => {
     expect(editView.mountedPages).toEqual(["index"]);
   });
 
-  it("switching away from #/theme tears down its embedded preview iframe", async () => {
+  it("switching away from /admin/theme tears down its embedded preview iframe", async () => {
     const api = fakeApi();
     const win = fakeWindow();
     const container = document.createElement("div");
@@ -718,10 +744,10 @@ describe("mountShell", () => {
     mountShell(container, { api, win, mountEditView: editView.fn });
     await flushState(api);
 
-    win.location.hash = "#/theme";
+    goTo(win, "/admin/theme");
     await Promise.resolve();
     await Promise.resolve();
-    win.location.hash = "#/pages";
+    goTo(win, "/admin/pages");
 
     expect(editView.teardownCount).toBe(1);
   });
@@ -763,7 +789,7 @@ describe("mountShell", () => {
 
     mountShell(container, { api, win, mountEditView: editView.fn });
     await flushState(api);
-    win.location.hash = "#/edit/index";
+    goTo(win, "/admin/edit/index");
 
     // Drive the SAME OpQueue the shell constructed and handed to the edit view
     // (spec/05 §2: "the shell owns state") — this is how a real edit view's
@@ -849,7 +875,7 @@ describe("mountShell", () => {
 
     mountShell(container, { api, win, mountEditView: editView.fn });
     await flushState(api);
-    win.location.hash = "#/edit/index";
+    goTo(win, "/admin/edit/index");
     await Promise.resolve();
 
     // The Settings trigger is handed to the edit view's toolbar (decisions/00076) —
@@ -902,12 +928,12 @@ describe("mountShell", () => {
     await Promise.resolve();
     expect(container.querySelector(".wx-drawer-wide")).not.toBeNull();
 
-    win.location.hash = "#/history";
+    goTo(win, "/admin/history");
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(container.querySelector(".wx-drawer-wide")).toBeNull();
   });
 
-  it("the settings toggle navigates to #/settings and mounts the real settings panel", async () => {
+  it("the settings toggle navigates to /admin/settings and mounts the real settings panel", async () => {
     const api = fakeApi();
     const win = fakeWindow();
     const container = document.createElement("div");
@@ -918,12 +944,12 @@ describe("mountShell", () => {
     container.querySelector<HTMLButtonElement>(".wx-settings-toggle")?.click();
     await Promise.resolve();
 
-    expect(win.location.hash).toBe("#/settings");
+    expect(win.location.pathname).toBe("/admin/settings");
     expect(container.querySelector(".wx-settings-panel")).not.toBeNull();
     expect(container.querySelector(".wx-coming-soon")).toBeNull();
   });
 
-  it("#/settings/shortcuts mounts the Keyboard Shortcuts sub-page", async () => {
+  it("/admin/settings/shortcuts mounts the Keyboard Shortcuts sub-page", async () => {
     const api = fakeApi();
     const win = fakeWindow();
     const container = document.createElement("div");
@@ -931,7 +957,7 @@ describe("mountShell", () => {
     mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
     await flushState(api);
 
-    win.location.hash = "#/settings/shortcuts";
+    goTo(win, "/admin/settings/shortcuts");
     await Promise.resolve();
 
     expect(container.querySelector(".wx-settings-shortcuts")).not.toBeNull();
@@ -958,7 +984,7 @@ describe("mountShell", () => {
     const container1 = document.createElement("div");
     mountShell(container1, { api, win: win1, mountEditView: fakeMountEditView().fn });
     await flushState(api);
-    win1.location.hash = "#/media";
+    goTo(win1, "/admin/media");
     await Promise.resolve();
 
     // Fresh "reload": a new shell, same storage, no hash.
@@ -967,7 +993,7 @@ describe("mountShell", () => {
     mountShell(container2, { api, win: win2, mountEditView: fakeMountEditView().fn });
     await flushState(api);
 
-    expect(win2.location.hash).toBe("#/media");
+    expect(win2.location.pathname).toBe("/admin/media");
     expect(container2.querySelector(".wx-media-panel")).not.toBeNull();
 
     // A THIRD "reload" with an explicit deep-link hash must win over the
@@ -977,7 +1003,7 @@ describe("mountShell", () => {
     mountShell(container3, { api, win: win3, mountEditView: fakeMountEditView().fn });
     await flushState(api);
 
-    expect(win3.location.hash).toBe("#/history");
+    expect(win3.location.pathname).toBe("/admin/history");
     expect(container3.querySelector(".wx-history-panel")).not.toBeNull();
   });
 

@@ -25,7 +25,7 @@ interface FakeMessage {
 }
 
 function convIdFromUrl(url: string): string {
-  const match = /#\/chat\/([^/]+)$/.exec(url);
+  const match = /\/admin\/chat\/([^/]+)$/.exec(url);
   if (!match?.[1]) throw new Error(`expected a conversation id in the URL, got: ${url}`);
   return match[1];
 }
@@ -37,7 +37,7 @@ test.describe("E2E 7: chat UX", () => {
     const consoleErrors = trackConsoleErrors(page);
 
     // -- New conversation ---------------------------------------------------
-    await page.goto("/admin#/chat");
+    await page.goto("/admin/chat");
     await page.waitForSelector(".wx-chat-list-view");
     await expect(page.locator(".wx-chat-empty")).toBeVisible();
 
@@ -49,7 +49,7 @@ test.describe("E2E 7: chat UX", () => {
     await page.click(".wx-chat-compose-actions button");
     await createResponse;
 
-    await page.waitForURL(/#\/chat\/.+/);
+    await page.waitForURL(/\/admin\/chat\/.+/);
     const convId = convIdFromUrl(page.url());
 
     // -- Status dot transitions: pending (at creation) -> ready (once settled) --
@@ -70,7 +70,7 @@ test.describe("E2E 7: chat UX", () => {
     });
 
     await page.click(".wx-chat-list-title");
-    await page.waitForURL(/#\/chat\/.+/);
+    await page.waitForURL(/\/admin\/chat\/.+/);
 
     // The detail view's own live status strip (a SEPARATE signal from the
     // list dot above — decisions/00034 decision 2) also appears once ready.

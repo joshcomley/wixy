@@ -7,7 +7,7 @@ test.describe("page thumbnails", () => {
   test("the pages panel backfills and displays a mobile thumbnail", async ({ page, request }) => {
     const consoleErrors = trackConsoleErrors(page);
 
-    await page.goto("/admin#/pages");
+    await page.goto("/admin/pages");
     await expect(page.locator(".wx-pages-table")).toBeVisible();
 
     // Either a placeholder (never captured) or a real img (captured in a

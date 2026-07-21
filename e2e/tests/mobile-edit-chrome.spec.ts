@@ -118,7 +118,7 @@ test.describe("composer immovability (decisions/00084)", () => {
       });
       expect(gap, `composer must hug the visible bottom at ${width}px`).toBeLessThan(3);
       await page.frameLocator(".wx-preview-iframe").locator(".wx-composer-cancel").click();
-      await page.goto("/admin#/pages"); // reset route state for the next width
+      await page.goto("/admin/pages"); // reset route state for the next width
     }
   });
 

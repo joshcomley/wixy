@@ -177,6 +177,49 @@ class TestStaticMountCache:
         assert response.status_code == 200
         assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
 
+
+class TestAdminDeepLinks:
+    """SPA deep links (decisions/00087): the admin routes on PROPER PATHS now
+    (`/admin/edit/<page>`, `/admin/settings/appearance`, …), not hash fragments —
+    so every panel path must serve the same shell document (the client router
+    parses the path), while the real asset mounts keep winning their prefixes."""
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/admin/pages",
+            "/admin/edit/index",
+            "/admin/theme",
+            "/admin/media",
+            "/admin/chat",
+            "/admin/chat/conv-123",
+            "/admin/history",
+            "/admin/settings",
+            "/admin/settings/appearance",
+        ],
+    )
+    def test_deep_link_serves_the_shell(self, client: TestClient, path: str) -> None:
+        response = client.get(path)
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "no-cache"
+        assert '<div id="wx-shell">' in response.text
+
+    def test_deep_link_shell_assets_are_fingerprinted(self, client: TestClient) -> None:
+        """The Inv 22 invariant must hold on deep links too — same document, same
+        fingerprinting, or a hard refresh on a deep link could pull stale bundles."""
+        text = client.get("/admin/edit/index").text
+        refs = re.findall(r'(?:src|href)="(/admin/static/[^"]+)"', text)
+        assert refs, "expected the shell to reference at least one /admin/static asset"
+        assert all("?v=" in ref for ref in refs)
+
+    def test_mounts_still_win_over_the_deep_link_catch_all(self, client: TestClient) -> None:
+        """Registration order is the guard: /admin/static, /admin/guide and the
+        draft-media mounts resolve to their mounts, never to the shell."""
+        assert client.get("/admin/static/admin/admin.css?v=x").status_code == 200
+        guide = client.get("/admin/guide/")
+        assert guide.status_code == 200
+        assert '<div id="wx-shell">' not in guide.text
+
     def test_unfingerprinted_request_keeps_default_behaviour(self, client: TestClient) -> None:
         response = client.get("/admin/static/admin/admin.css")
         assert response.status_code == 200
