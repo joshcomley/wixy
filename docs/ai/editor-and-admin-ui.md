@@ -160,11 +160,13 @@ pinned to the visual viewport — decisions/00084; draft recovery — every keys
 persists to localStorage under the caller's per-binding `draftKey`, and reopening with a
 stored draft ≠ seed shows the Restore/Discard banner, so a reload mid-edit loses
 nothing — decisions/00088); `visualPin.ts` (the visual-viewport
-pin shared by the composer and the control sheets, plus the `interactive-widget` meta
+pin shared by the composer and the control sheets, the cover-mode pin for the
+full-screen Q&A editor (decisions/00090), plus the `interactive-widget` meta
 append); `markdownText.ts` (inline-markdown render + demote — hand-synced twin of
 `builder/markdown_inline.py`, locked by the shared fixture, Inv 20);
-`controls.ts` (structured control sheets — opening-hours whole-array editor and
-price-list row editor, opened instead of the composer when the clicked element
+`controls.ts` (structured control sheets — opening-hours whole-array editor,
+price-list row editor, and the FULL-SCREEN Q&A whole-list editor
+(decisions/00090), opened instead of the composer when the clicked element
 carries `data-wx-control` in the template, decisions/00077);
 `navigation.ts` (internal-link interception).
 

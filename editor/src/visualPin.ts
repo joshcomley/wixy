@@ -1,5 +1,6 @@
 // Pinning fixed bottom chrome (the composer, structured-control sheets) to the
-// VISUAL viewport (decisions/00084).
+// VISUAL viewport (decisions/00084) — and full-screen chrome likewise
+// (pinCoverToVisualViewport, decisions/00090).
 //
 // `position: fixed; bottom: 0` anchors an element to the LAYOUT viewport. On a
 // phone two everyday gestures move the visible region away from that anchor:
@@ -74,6 +75,54 @@ export function pinToVisualViewport(
       el.style.bottom = prior.bottom;
       el.style.left = prior.left;
       el.style.width = prior.width;
+    },
+  };
+}
+
+/** Pin a FULL-VIEWPORT surface to the visual viewport (decisions/00090) — the
+ * cover-mode twin of pinToVisualViewport, for the Q&A editor. Stylesheet
+ * `position: fixed; inset: 0` covers the LAYOUT viewport, which on iOS extends
+ * beneath the open keyboard (the sheet's lower rows unreachable) and under
+ * pinch-zoom is larger than the visible region. Cover-pinning re-anchors
+ * top/left/width/height to the visual rect on every resize/scroll, so the
+ * surface always exactly covers what's actually visible. */
+export function pinCoverToVisualViewport(el: HTMLElement, win: Window): VisualPin {
+  const vv = win.visualViewport;
+  if (vv === null || vv === undefined) {
+    return { active: false, update: () => {}, release: () => {} };
+  }
+
+  // Restored on release so the element falls back to exactly what it had
+  // before (stylesheet inset:0 — which already covers the layout viewport).
+  const prior = {
+    top: el.style.top,
+    left: el.style.left,
+    width: el.style.width,
+    height: el.style.height,
+  };
+
+  function update(): void {
+    if (vv === null || vv === undefined) return;
+    el.style.top = `${vv.offsetTop}px`;
+    el.style.left = `${vv.offsetLeft}px`;
+    el.style.width = `${vv.width}px`;
+    el.style.height = `${vv.height}px`;
+  }
+
+  vv.addEventListener("resize", update);
+  vv.addEventListener("scroll", update);
+  update();
+
+  return {
+    active: true,
+    update,
+    release: () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+      el.style.top = prior.top;
+      el.style.left = prior.left;
+      el.style.width = prior.width;
+      el.style.height = prior.height;
     },
   };
 }

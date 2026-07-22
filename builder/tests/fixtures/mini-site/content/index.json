@@ -61,5 +61,17 @@
   },
   "cta": {
     "priceNote": "Full consult — £50 · Follow-up — £30"
+  },
+  "faq": {
+    "items": [
+      {
+        "question": "Do I need a consultation first?",
+        "answer": "Yes — every journey begins with a free, no-obligation consultation."
+      },
+      {
+        "question": "How do I book?",
+        "answer": "Use the [Book Now](/contact.html) button anywhere on the site."
+      }
+    ]
   }
 }

@@ -37,6 +37,9 @@
   <ul class="hours" data-wx-list="@hours">
     <li data-wx-list-item><span data-wx=".day">Day</span><span class="closed" data-wx-if=".closed" data-wx=".value" data-wx-control="opening-hours">Value</span><span data-wx-if="!.closed" data-wx=".value" data-wx-control="opening-hours">Value</span></li>
   </ul>
+  <div class="faq" data-wx-list="faq.items">
+    <details data-wx-list-item><summary data-wx=".question" data-wx-control="qa">Question</summary><div class="fbody" data-wx=".answer" data-wx-control="qa">Answer</div></details>
+  </div>
 </main>
 <!-- wx:partial footer -->
 <!-- wx:partial booking-modal -->

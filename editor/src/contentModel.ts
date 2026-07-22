@@ -72,8 +72,9 @@ function readIfValue(el: Element): boolean {
  * fixture's nav/tag items) — `Element.querySelector` only searches DESCENDANTS, so a
  * self-bound root would otherwise never be found. Mirrors `builder.bindings._walk`'s
  * own control flow, which applies scalar bindings to the CURRENT element before ever
- * recursing into children. */
-function queryOwn(root: Element, selector: string): Element | null {
+ * recursing into children. Exported for overlay.ts's list-item DOM writes (the Q&A
+ * control's applyQaToDom), which must resolve item fields the same way. */
+export function queryOwn(root: Element, selector: string): Element | null {
   if (root.matches(selector)) return root;
   return root.querySelector(selector);
 }
