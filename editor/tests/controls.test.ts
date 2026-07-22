@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildHoursControl,
   buildPriceControl,
+  buildQaControl,
   parseHoursValue,
   parsePriceList,
   serializeHoursValue,
@@ -115,6 +116,117 @@ describe("buildHoursControl", () => {
     custom.dispatchEvent(new Event("change"));
     expect(text.hidden).toBe(false);
     expect(from.hidden).toBe(true);
+  });
+});
+
+describe("buildQaControl (decisions/00090)", () => {
+  it("renders one card per pair, full-screen, and commits the whole array", () => {
+    const onCommit = vi.fn();
+    const sheet = buildQaControl(
+      [
+        { question: "Do I need a consultation?", answer: "Yes — always free." },
+        { question: "How do I book?", answer: "Use the [Book Now](#) button." },
+      ],
+      { onCommit, onCancel: vi.fn() },
+    );
+    document.body.appendChild(sheet);
+
+    expect(sheet.classList.contains("wx-control-fullscreen")).toBe(true);
+    const rows = sheet.querySelectorAll(".wx-qa-row");
+    expect(rows).toHaveLength(2);
+    expect((rows[1]?.querySelector(".wx-qa-question") as HTMLInputElement).value).toBe(
+      "How do I book?",
+    );
+    expect((rows[1]?.querySelector(".wx-qa-answer") as HTMLTextAreaElement).value).toBe(
+      "Use the [Book Now](#) button.",
+    );
+
+    (sheet.querySelector(".wx-control-commit") as HTMLButtonElement).click();
+    expect(onCommit).toHaveBeenCalledWith([
+      { question: "Do I need a consultation?", answer: "Yes — always free." },
+      { question: "How do I book?", answer: "Use the [Book Now](#) button." },
+    ]);
+  });
+
+  it("add-row appends a blank card and its filled values commit in order", () => {
+    const onCommit = vi.fn();
+    const sheet = buildQaControl([{ question: "Q one", answer: "A one" }], {
+      onCommit,
+      onCancel: vi.fn(),
+    });
+    document.body.appendChild(sheet);
+
+    (sheet.querySelector(".wx-qa-add") as HTMLButtonElement).click();
+    const rows = sheet.querySelectorAll(".wx-qa-row");
+    expect(rows).toHaveLength(2);
+    (rows[1]?.querySelector(".wx-qa-question") as HTMLInputElement).value = "Q two";
+    (rows[1]?.querySelector(".wx-qa-answer") as HTMLTextAreaElement).value = "A two";
+
+    (sheet.querySelector(".wx-control-commit") as HTMLButtonElement).click();
+    expect(onCommit).toHaveBeenCalledWith([
+      { question: "Q one", answer: "A one" },
+      { question: "Q two", answer: "A two" },
+    ]);
+  });
+
+  it("remove-row drops that pair from the committed array (middle removal)", () => {
+    const onCommit = vi.fn();
+    const sheet = buildQaControl(
+      [
+        { question: "Q one", answer: "A one" },
+        { question: "Q two", answer: "A two" },
+        { question: "Q three", answer: "A three" },
+      ],
+      { onCommit, onCancel: vi.fn() },
+    );
+    document.body.appendChild(sheet);
+
+    const rows = sheet.querySelectorAll(".wx-qa-row");
+    (rows[1]?.querySelector(".wx-qa-remove") as HTMLButtonElement).click();
+    expect(sheet.querySelectorAll(".wx-qa-row")).toHaveLength(2);
+
+    (sheet.querySelector(".wx-control-commit") as HTMLButtonElement).click();
+    expect(onCommit).toHaveBeenCalledWith([
+      { question: "Q one", answer: "A one" },
+      { question: "Q three", answer: "A three" },
+    ]);
+  });
+
+  it("renumbers the visible Q labels after a removal", () => {
+    const sheet = buildQaControl(
+      [
+        { question: "Q one", answer: "A one" },
+        { question: "Q two", answer: "A two" },
+      ],
+      { onCommit: vi.fn(), onCancel: vi.fn() },
+    );
+    document.body.appendChild(sheet);
+    (sheet.querySelectorAll(".wx-qa-row")[0]?.querySelector(".wx-qa-remove") as HTMLButtonElement).click();
+    const labels = Array.from(sheet.querySelectorAll(".wx-qa-number")).map((n) => n.textContent);
+    expect(labels).toEqual(["Q1"]);
+  });
+
+  it("drops pairs left blank in BOTH fields on commit (no empty FAQ entries)", () => {
+    const onCommit = vi.fn();
+    const sheet = buildQaControl([{ question: "Q one", answer: "A one" }], {
+      onCommit,
+      onCancel: vi.fn(),
+    });
+    document.body.appendChild(sheet);
+    (sheet.querySelector(".wx-qa-add") as HTMLButtonElement).click(); // blank row, never filled
+
+    (sheet.querySelector(".wx-control-commit") as HTMLButtonElement).click();
+    expect(onCommit).toHaveBeenCalledWith([{ question: "Q one", answer: "A one" }]);
+  });
+
+  it("cancel fires onCancel without committing", () => {
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const sheet = buildQaControl([{ question: "Q", answer: "A" }], { onCommit, onCancel });
+    document.body.appendChild(sheet);
+    (sheet.querySelector(".wx-composer-cancel") as HTMLButtonElement).click();
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onCommit).not.toHaveBeenCalled();
   });
 });
 

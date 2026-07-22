@@ -7,9 +7,9 @@
 // against a real rendered page — that needs a live browser, per this repo's own
 // "verify in a browser for UI changes" rule; flagged explicitly in decisions/00017.
 
-import { chromeFreeElement, chromeFreeTextContent, readListValue } from "./contentModel";
+import { chromeFreeElement, chromeFreeTextContent, queryOwn, readListValue } from "./contentModel";
 import { openComposer, type Composer } from "./composer";
-import { buildHoursControl, buildPriceControl, type HoursRow } from "./controls";
+import { buildHoursControl, buildPriceControl, buildQaControl, type HoursRow, type QaItem } from "./controls";
 import {
   chipLabel,
   closestBoundElement,
@@ -23,7 +23,7 @@ import { resolveInternalPageSlug, showToast } from "./navigation";
 import { directOpTarget, findOutermostList, isItemScopeKey } from "./opTargeting";
 import { buildImagePopover, buildLinkPopover, positionInDocument, positionNear } from "./popovers";
 import type { BindingField, DraftOp, JsonValue, PageBindings } from "./protocol";
-import { ensureResizesContentMeta, pinToVisualViewport } from "./visualPin";
+import { ensureResizesContentMeta, pinCoverToVisualViewport, pinToVisualViewport } from "./visualPin";
 
 // @nav is builder-computed and never generically list-editable (spec/02 §3;
 // decisions/00012 decision 8 flagged this for the editor to enforce).
@@ -304,6 +304,94 @@ export function initOverlay(win: Window = window): () => void {
     });
   }
 
+  function openQaControl(target: DetectedBinding): void {
+    const listEl = target.element.closest("[data-wx-list]");
+    const key = listEl === null ? null : listEl.getAttribute("data-wx-list");
+    if (listEl === null || key === null || state === null) {
+      // Not inside a resolvable list — fall back to the plain composer rather
+      // than strand the click (same fallback as the hours control).
+      openTextComposer(target);
+      return;
+    }
+    const field = findField(state.bindings, key) ?? { key, kind: "list" as const };
+    // readListValue demotes rendered HTML back to markdown SOURCE (decisions/00075)
+    // — the rows edit source, exactly like the composer does.
+    const rows: QaItem[] = readListValue(listEl, field).map((item) => {
+      const obj = (item ?? {}) as Record<string, JsonValue>;
+      return {
+        question: typeof obj["question"] === "string" ? obj["question"] : "",
+        answer: typeof obj["answer"] === "string" ? obj["answer"] : "",
+      };
+    });
+    const sheet = buildQaControl(rows, {
+      onCommit: (value) => {
+        applyQaToDom(listEl, value);
+        const target2 = directOpTarget(key, currentPage());
+        sendToShell(
+          {
+            wx: 1,
+            type: "op",
+            file: target2.file,
+            path: target2.path,
+            // Fresh object literals, not the QaItem[] passed through — TS only
+            // structurally matches a plain literal against JsonValue's indexed-
+            // object arm (same reasoning as the hours control's op above).
+            value: value.map((row) => ({ question: row.question, answer: row.answer })),
+          },
+          win,
+        );
+        closePopover();
+      },
+      onCancel: closePopover,
+    });
+    document.body.appendChild(sheet);
+    // Full-screen — the COVER pin (decisions/00090), not the bottom-sheet pin:
+    // same release-on-close contract so no visualViewport listener leaks.
+    const pin = pinCoverToVisualViewport(sheet, window);
+    closeActivePopover = () => {
+      pin.release();
+      sheet.remove();
+    };
+  }
+
+  /** Reflect a committed Q&A array into the preview DOM immediately (same
+   * contract as applyHoursToDom). Positional overwrite: items are structurally
+   * identical, so after a middle removal each surviving item simply displays
+   * its new position's values — excess items are trimmed off the end and
+   * additions cloned from the first item's shape (the item toolbar's add does
+   * the same, decisions/00017). Values arrive as markdown source and render
+   * exactly like a composer commit would. */
+  function applyQaToDom(listEl: Element, rows: QaItem[]): void {
+    const existing = Array.from(listEl.querySelectorAll(":scope > [data-wx-list-item]"));
+    const template = existing[0];
+    if (template === undefined) return; // an empty list rendered no items — a reload reconverges
+    for (let index = existing.length - 1; index >= rows.length; index--) {
+      existing[index]?.remove();
+    }
+    const items = Array.from(listEl.querySelectorAll(":scope > [data-wx-list-item]"));
+    while (items.length < rows.length) {
+      // cloneNode of a detached node is fine — this also covers the
+      // committed-empty-then-trimmed-everything path (template was removed above).
+      const clone = template.cloneNode(true) as Element;
+      listEl.appendChild(clone);
+      items.push(clone);
+    }
+    rows.forEach((row, index) => {
+      const item = items[index];
+      if (item === undefined) return;
+      const writes: [string, string][] = [
+        [".question", row.question],
+        [".answer", row.answer],
+      ];
+      for (const [itemKey, value] of writes) {
+        const el = queryOwn(item, `[data-wx="${itemKey}"]`);
+        if (el === null) continue;
+        (el as HTMLElement).innerHTML = renderMarkdownInline(value);
+        if (el.hasAttribute("data-wx-if")) ensureIfToggle(el);
+      }
+    });
+  }
+
   function openLinkPopover(target: DetectedBinding): void {
     const el = target.element;
     const labelKey = el.getAttribute("data-wx");
@@ -355,6 +443,7 @@ export function initOverlay(win: Window = window): () => void {
         const control = target.element.getAttribute("data-wx-control");
         if (control === "opening-hours") return openHoursControl(target);
         if (control === "price") return openPriceControl(target);
+        if (control === "qa") return openQaControl(target);
         return openTextComposer(target);
       }
       case "href":

@@ -72,6 +72,9 @@ same merge).
     day/closed/times rows (one whole-array op); the price sheet edits the text as
     label/amount rows. Both keep a free-text mode ("edit as plain text" / per-row
     custom text), so authoring stays as unconstrained as before.
+    `data-wx-control="qa"` (decisions/00090) opens a FULL-SCREEN editor instead:
+    the whole Q&A list as question/answer cards with add/remove row (one
+    whole-array op), covering the preview viewport rather than bottom-anchored.
 - **Click an image binding** (`data-wx-img`/`data-wx-bg`) → "Replace image" button + alt
   input; Replace opens the shell's media dialog (§4). A dashed drop target also accepts a
   direct file drop onto the element.

@@ -4,9 +4,9 @@
 // flows through the build like every other data-wx-* attribute; the engine
 // reads it straight off the element at click time).
 //
-// Both controls are bottom sheets matching the composer's look, and both keep
-// the operator's escape hatch: a row can always drop to free text ("she can
-// still put her own text in there, just like now").
+// The hours/price controls are bottom sheets matching the composer's look, and
+// all controls keep the operator's escape hatch: free text always remains
+// possible ("she can still put her own text in there, just like now").
 //
 // - "opening-hours": edits the WHOLE hours array at once (7 day rows, each
 //   open/closed + from/to times OR a free-text value), emitting one op for the
@@ -14,6 +14,9 @@
 // - "price": edits one price text as {label, amount} rows (parsed on the
 //   em-dash and middle-dot separators); unparseable text drops to free-text
 //   mode rather than ever trapping the user in a structure that doesn't fit.
+// - "qa": edits the WHOLE Q&A array (rows of question input + answer
+//   textarea, add/remove row) in a FULL-SCREEN surface (decisions/00090) —
+//   a FAQ list is long-form content that outgrows a bottom sheet fast.
 
 export interface ControlCallbacks<T> {
   onCommit: (value: T) => void;
@@ -308,6 +311,108 @@ export function buildPriceControl(
       freeTextMode
         ? textArea.value
         : serializePriceList(rows.map((r) => ({ label: r.label.value, amount: r.amount.value }))),
+    );
+  });
+  cancelBtn.addEventListener("click", callbacks.onCancel);
+  return root;
+}
+
+// ---------------------------------------------------------------------------
+// qa (full-screen — decisions/00090)
+// ---------------------------------------------------------------------------
+
+export interface QaItem {
+  question: string;
+  answer: string;
+}
+
+/** Build the full-screen Q&A editor for a `data-wx-control="qa"` list: one
+ * card per question/answer pair (an input for the question, a textarea for
+ * the answer — answers are the long form), "+ Add question", per-card remove.
+ * The item shape ({question, answer}) is the control's contract, exactly like
+ * the hours control's {day, value, closed}; commit emits the whole array in
+ * row order, dropping pairs where BOTH fields were left blank (the price
+ * control's blank-row rule — an accidentally added empty row mustn't become
+ * an empty FAQ entry on the site). */
+export function buildQaControl(
+  items: QaItem[],
+  callbacks: ControlCallbacks<QaItem[]>,
+): HTMLElement {
+  const { root, body, commitBtn, cancelBtn } = sheetShell("Questions & answers");
+  root.classList.add("wx-control-fullscreen");
+
+  const addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.className = "wx-qa-add";
+  addBtn.textContent = "+ Add question";
+  body.appendChild(addBtn);
+
+  interface RowRefs {
+    question: HTMLInputElement;
+    answer: HTMLTextAreaElement;
+    row: HTMLDivElement;
+  }
+  const rows: RowRefs[] = [];
+
+  function renumber(): void {
+    rows.forEach((refs, index) => {
+      const number = refs.row.querySelector(".wx-qa-number");
+      if (number !== null) number.textContent = `Q${index + 1}`;
+    });
+  }
+
+  function addRow(question = "", answer = ""): void {
+    const number = document.createElement("span");
+    number.className = "wx-qa-number";
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "wx-qa-remove";
+    removeBtn.textContent = "✕";
+    removeBtn.title = "Remove this question";
+    removeBtn.setAttribute("aria-label", "Remove this question");
+    const head = document.createElement("div");
+    head.className = "wx-qa-row-head";
+    head.append(number, removeBtn);
+
+    const questionInput = labeledInput("wx-qa-question", question, "Question");
+    const answerArea = document.createElement("textarea");
+    answerArea.className = "wx-qa-answer";
+    answerArea.rows = 4;
+    answerArea.value = answer;
+    answerArea.placeholder = "Answer";
+
+    const row = document.createElement("div");
+    row.className = "wx-qa-row";
+    row.append(head, questionInput, answerArea);
+
+    const refs: RowRefs = { question: questionInput, answer: answerArea, row };
+    rows.push(refs);
+    removeBtn.addEventListener("click", () => {
+      const index = rows.indexOf(refs);
+      if (index !== -1) rows.splice(index, 1);
+      row.remove();
+      renumber();
+    });
+    body.insertBefore(row, addBtn);
+    renumber();
+  }
+
+  addBtn.addEventListener("click", () => {
+    addRow();
+    // A freshly added row starts empty — put the caret straight in its
+    // question field so keyboard flow isn't broken by the detour to the button.
+    rows.at(-1)?.question.focus();
+  });
+  items.forEach((item) => addRow(item.question, item.answer));
+
+  commitBtn.addEventListener("click", () => {
+    callbacks.onCommit(
+      rows
+        .map((refs) => ({
+          question: refs.question.value.trim(),
+          answer: refs.answer.value.trim(),
+        }))
+        .filter((item) => item.question !== "" || item.answer !== ""),
     );
   });
   cancelBtn.addEventListener("click", callbacks.onCancel);

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ensureResizesContentMeta, pinToVisualViewport } from "../src/visualPin";
+import { ensureResizesContentMeta, pinCoverToVisualViewport, pinToVisualViewport } from "../src/visualPin";
 import { installFakeVisualViewport, uninstallFakeVisualViewport } from "./fakeVisualViewport";
 
 afterEach(() => {
@@ -96,6 +96,68 @@ describe("pinToVisualViewport (decisions/00084)", () => {
       pin.release();
     }).not.toThrow();
     expect(el.style.bottom).toBe("");
+  });
+});
+
+describe("pinCoverToVisualViewport (decisions/00090)", () => {
+  it("covers the visual viewport exactly (keyboard shrunk it below the layout one)", () => {
+    installFakeVisualViewport({ width: 390, height: 500 });
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    const pin = pinCoverToVisualViewport(el, window);
+    expect(pin.active).toBe(true);
+    expect(el.style.top).toBe("0px");
+    expect(el.style.left).toBe("0px");
+    expect(el.style.width).toBe("390px");
+    expect(el.style.height).toBe("500px");
+  });
+
+  it("re-covers on visualViewport scroll (pinch-zoom panning)", () => {
+    const vv = installFakeVisualViewport({ width: 390, height: 500 });
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    pinCoverToVisualViewport(el, window);
+    vv.offsetTop = 120;
+    vv.offsetLeft = 30;
+    vv.fire("scroll");
+    expect(el.style.top).toBe("120px");
+    expect(el.style.left).toBe("30px");
+  });
+
+  it("re-covers on visualViewport resize (keyboard opening/closing)", () => {
+    const vv = installFakeVisualViewport({ width: 390, height: 500 });
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    pinCoverToVisualViewport(el, window);
+    vv.height = 700;
+    vv.fire("resize");
+    expect(el.style.height).toBe("700px");
+  });
+
+  it("release() removes the listeners and restores the element's prior inline styles", () => {
+    const vv = installFakeVisualViewport({ width: 390, height: 500 });
+    const el = document.createElement("div");
+    el.style.top = "3px";
+    document.body.appendChild(el);
+    const pin = pinCoverToVisualViewport(el, window);
+    expect(el.style.top).not.toBe("3px");
+    pin.release();
+    expect(el.style.top).toBe("3px");
+    expect(el.style.width).toBe("");
+    vv.fire("resize");
+    expect(el.style.top).toBe("3px"); // untouched after release
+  });
+
+  it("is an inert no-op without a visualViewport (older browsers, jsdom default)", () => {
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    const pin = pinCoverToVisualViewport(el, window);
+    expect(pin.active).toBe(false);
+    expect(() => {
+      pin.update();
+      pin.release();
+    }).not.toThrow();
+    expect(el.style.top).toBe("");
   });
 });
 

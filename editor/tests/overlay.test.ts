@@ -705,6 +705,194 @@ describe("initOverlay", () => {
       teardown();
     });
 
+    it("clicking a data-wx-control=qa element opens the FULL-SCREEN sheet with one card per pair, not the composer", () => {
+      root.innerHTML = `
+        <div data-wx-list="faq.items">
+          <details data-wx-list-item>
+            <summary data-wx=".question" data-wx-control="qa">Do I need a consultation first?</summary>
+            <div class="fbody" data-wx=".answer" data-wx-control="qa">Yes — always free.</div>
+          </details>
+          <details data-wx-list-item>
+            <summary data-wx=".question" data-wx-control="qa">How do I book?</summary>
+            <div class="fbody" data-wx=".answer" data-wx-control="qa">Use the <a href="/contact.html">Book Now</a> button.</div>
+          </details>
+        </div>`;
+      const bindings: PageBindings = {
+        page: "index",
+        fields: [
+          {
+            key: "faq.items",
+            kind: "list",
+            items: [
+              { key: ".question", kind: "text" },
+              { key: ".answer", kind: "text" },
+            ],
+          },
+        ],
+      };
+      const { teardown } = initFor("index", bindings);
+
+      const firstQuestion = root.querySelector('[data-wx=".question"]') as HTMLElement;
+      firstQuestion.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+      const sheet = document.querySelector(".wx-control-fullscreen");
+      expect(sheet).not.toBeNull();
+      // no PLAIN composer (distinguish on the shell class, as for the price sheet)
+      expect(document.querySelector(".wx-composer:not(.wx-control-sheet)")).toBeNull();
+      expect(sheet?.querySelectorAll(".wx-qa-row")).toHaveLength(2);
+      teardown();
+    });
+
+    it("committing the qa sheet (edit + middle removal) emits ONE whole-array op and reflects the DOM", () => {
+      root.innerHTML = `
+        <div data-wx-list="faq.items">
+          <details data-wx-list-item>
+            <summary data-wx=".question" data-wx-control="qa">Q one</summary>
+            <div class="fbody" data-wx=".answer" data-wx-control="qa">A one</div>
+          </details>
+          <details data-wx-list-item>
+            <summary data-wx=".question" data-wx-control="qa">Q two</summary>
+            <div class="fbody" data-wx=".answer" data-wx-control="qa">A two</div>
+          </details>
+          <details data-wx-list-item>
+            <summary data-wx=".question" data-wx-control="qa">Q three</summary>
+            <div class="fbody" data-wx=".answer" data-wx-control="qa">A three</div>
+          </details>
+        </div>`;
+      const bindings: PageBindings = {
+        page: "index",
+        fields: [
+          {
+            key: "faq.items",
+            kind: "list",
+            items: [
+              { key: ".question", kind: "text" },
+              { key: ".answer", kind: "text" },
+            ],
+          },
+        ],
+      };
+      const { sent, teardown } = initFor("index", bindings);
+
+      const firstQuestion = root.querySelector('[data-wx=".question"]') as HTMLElement;
+      firstQuestion.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+      const sheet = document.querySelector(".wx-control-fullscreen") as HTMLElement;
+      const rows = sheet.querySelectorAll(".wx-qa-row");
+      expect(rows).toHaveLength(3);
+      // edit the first pair's question and drop the middle pair
+      (rows[0]?.querySelector(".wx-qa-question") as HTMLInputElement).value = "Q one edited";
+      (rows[1]?.querySelector(".wx-qa-remove") as HTMLButtonElement).click();
+      (sheet.querySelector(".wx-control-commit") as HTMLButtonElement).click();
+
+      expect(sent.at(-1)).toEqual({
+        wx: 1,
+        type: "op",
+        file: "index",
+        path: "faq.items",
+        value: [
+          { question: "Q one edited", answer: "A one" },
+          { question: "Q three", answer: "A three" },
+        ],
+      });
+      // the preview DOM reflected the new array immediately: two items left,
+      // positionally overwritten (the middle pair is gone, not just hidden)
+      const items = root.querySelectorAll('[data-wx-list="faq.items"] > [data-wx-list-item]');
+      expect(items).toHaveLength(2);
+      expect(items[0]?.querySelector('[data-wx=".question"]')?.textContent).toBe("Q one edited");
+      expect(items[1]?.querySelector('[data-wx=".question"]')?.textContent).toBe("Q three");
+      teardown();
+    });
+
+    it("committing an ADDED qa pair emits it and clones a DOM item to show it", () => {
+      root.innerHTML = `
+        <div data-wx-list="faq.items">
+          <details data-wx-list-item>
+            <summary data-wx=".question" data-wx-control="qa">Q one</summary>
+            <div class="fbody" data-wx=".answer" data-wx-control="qa">A one</div>
+          </details>
+        </div>`;
+      const bindings: PageBindings = {
+        page: "index",
+        fields: [
+          {
+            key: "faq.items",
+            kind: "list",
+            items: [
+              { key: ".question", kind: "text" },
+              { key: ".answer", kind: "text" },
+            ],
+          },
+        ],
+      };
+      const { sent, teardown } = initFor("index", bindings);
+
+      const firstQuestion = root.querySelector('[data-wx=".question"]') as HTMLElement;
+      firstQuestion.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+      const sheet = document.querySelector(".wx-control-fullscreen") as HTMLElement;
+      (sheet.querySelector(".wx-qa-add") as HTMLButtonElement).click();
+      const rows = sheet.querySelectorAll(".wx-qa-row");
+      (rows[1]?.querySelector(".wx-qa-question") as HTMLInputElement).value = "Q two";
+      (rows[1]?.querySelector(".wx-qa-answer") as HTMLTextAreaElement).value = "A **two**";
+      (sheet.querySelector(".wx-control-commit") as HTMLButtonElement).click();
+
+      expect(sent.at(-1)).toEqual({
+        wx: 1,
+        type: "op",
+        file: "index",
+        path: "faq.items",
+        value: [
+          { question: "Q one", answer: "A one" },
+          { question: "Q two", answer: "A **two**" },
+        ],
+      });
+      const items = root.querySelectorAll('[data-wx-list="faq.items"] > [data-wx-list-item]');
+      expect(items).toHaveLength(2);
+      // markdown source renders into the cloned item exactly like a composer commit
+      expect(items[1]?.querySelector('[data-wx=".answer"]')?.innerHTML).toBe("A <strong>two</strong>");
+      teardown();
+    });
+
+    it("the qa sheet cover-pins to the visual viewport and releases on close (decisions/00090)", () => {
+      root.innerHTML = `
+        <div data-wx-list="faq.items">
+          <details data-wx-list-item>
+            <summary data-wx=".question" data-wx-control="qa">Q one</summary>
+            <div class="fbody" data-wx=".answer" data-wx-control="qa">A one</div>
+          </details>
+        </div>`;
+      const bindings: PageBindings = {
+        page: "index",
+        fields: [
+          {
+            key: "faq.items",
+            kind: "list",
+            items: [
+              { key: ".question", kind: "text" },
+              { key: ".answer", kind: "text" },
+            ],
+          },
+        ],
+      };
+      installFakeVisualViewport({ width: 390, height: 500 });
+      const { teardown } = initFor("index", bindings);
+      try {
+        const firstQuestion = root.querySelector('[data-wx=".question"]') as HTMLElement;
+        firstQuestion.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+        const sheet = document.querySelector(".wx-control-fullscreen") as HTMLElement;
+        expect(sheet).not.toBeNull();
+        expect(sheet.style.top).toBe("0px");
+        expect(sheet.style.width).toBe("390px");
+        expect(sheet.style.height).toBe("500px");
+
+        (sheet.querySelector(".wx-composer-cancel") as HTMLButtonElement).click();
+        expect(document.querySelector(".wx-control-fullscreen")).toBeNull();
+      } finally {
+        teardown();
+      }
+    });
+
     it("a plain text element still opens the composer, not a control", () => {
       root.innerHTML = `<p data-wx="body">Plain</p>`;
       const el = root.querySelector("p") as HTMLElement;

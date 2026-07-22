@@ -424,3 +424,89 @@
   resize: vertical;
 }
 
+/* -- Full-screen structured control (decisions/00090) ----------------------------
+   The Q&A editor covers the whole preview viewport: a FAQ list is long-form
+   content that outgrows a bottom sheet fast. Same dark shell language as the
+   composer/sheets. `.wx-composer` already pins left/bottom — adding top/right
+   makes it cover the LAYOUT viewport; visualPin.ts's cover pin then re-anchors
+   top/left/width/height inline to the VISUAL viewport on mobile. */
+
+.wx-control-fullscreen {
+  top: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.wx-control-fullscreen .wx-composer-inner {
+  flex: 1;
+  min-height: 0;
+}
+
+.wx-control-fullscreen .wx-control-body {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  gap: 10px;
+}
+
+.wx-qa-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--wx-radius);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.wx-qa-row-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wx-qa-number {
+  flex: 1;
+  font: 600 11px/1 system-ui, -apple-system, sans-serif;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.wx-qa-remove {
+  min-width: 30px !important;
+}
+
+.wx-qa-question,
+.wx-qa-answer {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: var(--wx-radius);
+  background: rgba(255, 255, 255, 0.07);
+  color: inherit;
+  font: 14px/1.45 system-ui, -apple-system, sans-serif;
+  padding: 8px 10px;
+  outline: none;
+}
+
+.wx-qa-question:focus,
+.wx-qa-answer:focus {
+  border-color: var(--wx-brand-blue);
+}
+
+.wx-qa-question {
+  font-weight: 600;
+}
+
+.wx-qa-answer {
+  resize: vertical;
+  min-height: 5.5em;
+}
+
+.wx-qa-add {
+  align-self: flex-start;
+}
+
