@@ -28,6 +28,24 @@ between them. Spec: [`spec/05-editor.md`](../../spec/05-editor.md). The wire typ
   `mountEditView` as `toolbarLeading`/`toolbarTrailing` and which pins into a
   `.wx-edit-bar-host` row in the shell's NON-scrolling chrome (`toolbarHost` dep,
   decisions/00082) — never the scrolling `.wx-main`, so it can't scroll out of reach.
+  A browse-mode toggle (an inline SVG mouse icon — not the 🖱️ emoji, which has no
+  glyph in this box's font stack, verified in real Chromium/Edge/Chrome alike;
+  `.wx-browse-mode-toggle`) sits right after the device group —
+  unlike back/Settings/chrome-reveal it's built INSIDE `mountEditView` itself, not handed
+  in via `toolbarLeading`/`toolbarTrailing`, since it drives the overlay directly
+  (`setBrowseMode` postMessage) the same way the device buttons drive `setDevice`
+  (decisions/00091). While on, the overlay suspends hover chrome/popovers/the item
+  toolbar/the `data-wx-if` eye toggle and every click just navigates (or is inert) like
+  the real site — letting an operator click through several pages to find the one they
+  want, then flip it back off and keep editing on whatever page they landed on, in the
+  SAME session (no reload, no lost draft state). State is a plain closure variable in
+  `mountEditView`, matching its lifetime exactly: it survives every in-session page
+  change the overlay itself drives (`reuseEditView` in shell.ts keeps the SAME `EditView`
+  alive across those), and resets to off the moment you leave edit mode entirely and a
+  fresh `mountEditView` call happens next time. A real iframe navigation destroys the
+  overlay's own JS state, so `init`'s optional `browseMode` field (default off) tells
+  each freshly-booted overlay which mode to start in, without a follow-up round trip
+  that could race a click on the just-loaded page.
   The one piece of chrome edit view does NOT hide is the slim `.wx-statusbar` at the very
   top of the shell: the draft chip (left, opens the review drawer) and the Publish button
   (right), visible on every route (decisions/00083) — the chip no longer relocates into
@@ -143,7 +161,9 @@ theme), `zoom.ts`, `fontScale.ts`, `settingsPanel.ts`, `shortcuts.ts`, `contrast
 ## editor modules (`editor/src/`)
 
 `overlay.ts` (coordinator: hover chrome, popover routing, op emission, list toolbar, `data-wx
--if` eye toggle, `mediaRequest`, shell handshake); `messaging.ts` (origin-checked postMessage);
+-if` eye toggle, `mediaRequest`, shell handshake, browse-mode gating (decisions/00091) — a
+`browseMode` flag mirrored from `init`/`setBrowseMode` that short-circuits hover chrome,
+click-to-edit, and the eye toggle in favor of plain navigation); `messaging.ts` (origin-checked postMessage);
 `opTargeting.ts` (`{file, path}` targeting; encodes "no dotted path indexes an array");
 `contentModel.ts` (reads current values back out of the live DOM — the overlay never receives
 content values, only shapes; text reads are chrome-stripped and demoted to markdown source,
@@ -168,7 +188,9 @@ append); `markdownText.ts` (inline-markdown render + demote — hand-synced twin
 price-list row editor, and the FULL-SCREEN Q&A whole-list editor
 (decisions/00090), opened instead of the composer when the clicked element
 carries `data-wx-control` in the template, decisions/00077);
-`navigation.ts` (internal-link interception).
+`navigation.ts` (internal-link interception — `resolveInternalPageSlug`/`handlePlainAnchorClick`
+in overlay.ts also drive browse-mode navigation unchanged; browse mode only widens WHICH
+clicks reach that path, from "unbound anchors only" to "every anchor", decisions/00091).
 
 ## Build
 

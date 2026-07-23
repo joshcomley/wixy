@@ -54,6 +54,13 @@ export interface InitMessage {
   page: string;
   bindings: PageBindings;
   draftRev: number;
+  /** Whether browse mode (spec/05 §2 amendment, decisions/00091) is currently on
+   * for this edit session. A real iframe navigation destroys the overlay's whole
+   * JS state, so a freshly-booted overlay needs to learn this on the very first
+   * message it can receive — folded into the handshake rather than a follow-up
+   * round-trip that could race a click. Optional/absent means off, so an `init`
+   * sender that predates this field still parses. */
+  browseMode?: boolean;
 }
 
 export interface ApplyOpsMessage {
@@ -96,13 +103,29 @@ export interface SelectMessage {
   key: string;
 }
 
+/** Toggle browse mode without a reload (spec/05 §2 amendment, decisions/00091):
+ * while on, the overlay suspends all editing chrome/interception, and every
+ * click either navigates (internal links, same target-resolution the overlay
+ * already applies to plain anchors) or is inert — exactly like browsing the
+ * real site. Lets an operator click through several pages, land on the one
+ * they actually want, then flip it back off and keep editing in the SAME
+ * session (no reload, no lost draft state). The toggle button lives in the
+ * shell's edit bar and owns the session-lifetime state; the overlay only ever
+ * mirrors what it's told, here and via `InitMessage.browseMode`. */
+export interface SetBrowseModeMessage {
+  wx: 1;
+  type: "setBrowseMode";
+  enabled: boolean;
+}
+
 export type ShellToOverlayMessage =
   | InitMessage
   | ApplyOpsMessage
   | SetDeviceMessage
   | ThemeVarsMessage
   | ThemeFontsMessage
-  | SelectMessage;
+  | SelectMessage
+  | SetBrowseModeMessage;
 
 // ---------------------------------------------------------------------------
 // overlay -> shell
@@ -278,12 +301,16 @@ export function parseShellToOverlayMessage(data: unknown): ShellToOverlayMessage
       ) {
         return null;
       }
+      if ("browseMode" in data && typeof data["browseMode"] !== "boolean") return null;
       return {
         wx: 1,
         type: "init",
         page: data["page"],
         bindings: data["bindings"],
         draftRev: data["draftRev"],
+        ...("browseMode" in data && typeof data["browseMode"] === "boolean"
+          ? { browseMode: data["browseMode"] }
+          : {}),
       };
     }
     case "applyOps": {
@@ -321,6 +348,10 @@ export function parseShellToOverlayMessage(data: unknown): ShellToOverlayMessage
         : null;
     case "select":
       return typeof data["key"] === "string" ? { wx: 1, type: "select", key: data["key"] } : null;
+    case "setBrowseMode":
+      return typeof data["enabled"] === "boolean"
+        ? { wx: 1, type: "setBrowseMode", enabled: data["enabled"] }
+        : null;
     default:
       return null;
   }

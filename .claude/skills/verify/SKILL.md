@@ -12,8 +12,12 @@ instead of a browser OTP login — no interactive login needed:
 
 ```python
 import json, httpx
+
 token = json.load(open(r"D:\Servers\Loom\Storage\cf_access_token.json", encoding="utf-8"))
-hdrs = {"CF-Access-Client-Id": token["client_id"], "CF-Access-Client-Secret": token["client_secret"]}
+hdrs = {
+    "CF-Access-Client-Id": token["client_id"],
+    "CF-Access-Client-Secret": token["client_secret"],
+}
 httpx.get("https://ca.cinnamons.uk/api/admin/state", headers=hdrs)  # -> 200
 ```
 

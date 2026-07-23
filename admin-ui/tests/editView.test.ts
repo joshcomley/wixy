@@ -28,6 +28,7 @@ function fakeQueue(rev = 0): OpQueueLike & { enqueued: unknown[] } {
 interface HarnessOverrides {
   api?: AdminApi;
   opQueue?: OpQueueLike & { enqueued: unknown[] };
+  browseMode?: () => boolean;
 }
 
 function harness(overrides: HarnessOverrides = {}) {
@@ -37,6 +38,7 @@ function harness(overrides: HarnessOverrides = {}) {
   const mediaRequests: string[] = [];
   const api = overrides.api ?? fakeApi();
   const opQueue = overrides.opQueue ?? fakeQueue();
+  const browseMode = overrides.browseMode ?? (() => false);
   const core = createEditViewCore("about", {
     api,
     opQueue,
@@ -44,6 +46,7 @@ function harness(overrides: HarnessOverrides = {}) {
     loadPage: (page) => loaded.push(page),
     onOverlayNavigated: (page) => navigated.push(page),
     onMediaRequest: (key) => mediaRequests.push(key),
+    browseMode,
   });
   return { core, sent, loaded, navigated, mediaRequests, api, opQueue };
 }
@@ -62,7 +65,24 @@ describe("createEditViewCore", () => {
     await Promise.resolve();
 
     expect(api.getContent).toHaveBeenCalledWith("about");
-    expect(sent).toEqual([{ wx: 1, type: "init", page: "about", bindings: BINDINGS, draftRev: 7 }]);
+    expect(sent).toEqual([
+      { wx: 1, type: "init", page: "about", bindings: BINDINGS, draftRev: 7, browseMode: false },
+    ]);
+  });
+
+  it("init reflects the CURRENT browseMode value, not a snapshot taken at construction (decisions/00091)", async () => {
+    let enabled = false;
+    const { core, sent, api } = harness({ browseMode: () => enabled });
+    enabled = true; // flips AFTER the core was built, e.g. the toggle was clicked before this load
+    core.handleMessage({ wx: 1, type: "ready" });
+
+    const getContentMock = api.getContent as ReturnType<typeof vi.fn>;
+    await getContentMock.mock.results[0]?.value;
+    await Promise.resolve();
+
+    expect(sent).toEqual([
+      { wx: 1, type: "init", page: "about", bindings: BINDINGS, draftRev: 0, browseMode: true },
+    ]);
   });
 
   it("enqueues an op message into the queue", () => {

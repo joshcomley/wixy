@@ -72,6 +72,17 @@
   display: flex;
 }
 
+/* -- Browse mode (decisions/00091) -------------------------------------------
+   Marker class the overlay puts on <html> while the shell's browse-mode toggle
+   is on. Hover outline/chip, the item toolbar, and popovers are all created on
+   demand by JS (gated there instead — see overlay.ts's `browseMode` checks);
+   the eye toggle is the one piece of editing chrome that sits in the DOM at
+   rest, so it needs an explicit CSS override here. Specificity must beat the
+   `[data-wx-if][data-wx-hidden] .wx-if-eye-toggle` rule above (0,3,0). */
+.wx-browse-mode [data-wx-if][data-wx-hidden] .wx-if-eye-toggle {
+  display: none;
+}
+
 /* -- Popovers ---------------------------------------------------------------
    Positioning (position:fixed, coordinates, z-index) is set inline by
    popovers.ts's baseContainer()/positionNear() — only visual chrome lives here. */

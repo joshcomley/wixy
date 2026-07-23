@@ -49,6 +49,55 @@ describe("parseShellToOverlayMessage", () => {
     expect(message).toBeNull();
   });
 
+  it("parses init with browseMode true", () => {
+    const message = parseShellToOverlayMessage({
+      wx: 1,
+      type: "init",
+      page: "index",
+      bindings: { page: "index", fields: [] },
+      draftRev: 0,
+      browseMode: true,
+    });
+    expect(message).toEqual({
+      wx: 1,
+      type: "init",
+      page: "index",
+      bindings: { page: "index", fields: [] },
+      draftRev: 0,
+      browseMode: true,
+    });
+  });
+
+  it("parses init without browseMode (stays absent, not defaulted to false — decisions/00091)", () => {
+    const parsed = parseShellToOverlayMessage({
+      wx: 1,
+      type: "init",
+      page: "index",
+      bindings: { page: "index", fields: [] },
+      draftRev: 0,
+    });
+    expect(parsed).toEqual({
+      wx: 1,
+      type: "init",
+      page: "index",
+      bindings: { page: "index", fields: [] },
+      draftRev: 0,
+    });
+    expect(parsed !== null && "browseMode" in parsed ? parsed.browseMode : "ABSENT").toBe("ABSENT");
+  });
+
+  it("rejects init with a non-boolean browseMode", () => {
+    const message = parseShellToOverlayMessage({
+      wx: 1,
+      type: "init",
+      page: "index",
+      bindings: { page: "index", fields: [] },
+      draftRev: 0,
+      browseMode: "yes",
+    });
+    expect(message).toBeNull();
+  });
+
   it("parses applyOps with both set and discard ops", () => {
     const message = parseShellToOverlayMessage({
       wx: 1,
@@ -127,6 +176,24 @@ describe("parseShellToOverlayMessage", () => {
       type: "select",
       key: "hero.title",
     });
+  });
+
+  it("parses setBrowseMode true and false", () => {
+    expect(parseShellToOverlayMessage({ wx: 1, type: "setBrowseMode", enabled: true })).toEqual({
+      wx: 1,
+      type: "setBrowseMode",
+      enabled: true,
+    });
+    expect(parseShellToOverlayMessage({ wx: 1, type: "setBrowseMode", enabled: false })).toEqual({
+      wx: 1,
+      type: "setBrowseMode",
+      enabled: false,
+    });
+  });
+
+  it("rejects setBrowseMode with a missing or non-boolean enabled", () => {
+    expect(parseShellToOverlayMessage({ wx: 1, type: "setBrowseMode" })).toBeNull();
+    expect(parseShellToOverlayMessage({ wx: 1, type: "setBrowseMode", enabled: "true" })).toBeNull();
   });
 
   it("returns null for a non-wx message", () => {
