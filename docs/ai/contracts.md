@@ -252,11 +252,18 @@ protocol file is **byte-identically duplicated** at `admin-ui/src/protocol.ts` a
 Every message is `{ wx: 1, type: <string>, ... }` — `wx: 1` is the protocol-version
 discriminator (`isWxEnvelope`).
 
-**Shell → overlay** (`ShellToOverlayMessage`): `init{page,bindings,draftRev}` ·
+**Shell → overlay** (`ShellToOverlayMessage`): `init{page,bindings,draftRev,browseMode?}` ·
 `applyOps{ops:DraftOp[]}` · `setDevice{device:"desktop"|"tablet"|"mobile", scale?}` ·
-`themeVars{vars:Record<string,string>}` · `themeFonts{url}` · `select{key}`.
+`themeVars{vars:Record<string,string>}` · `themeFonts{url}` · `select{key}` ·
+`setBrowseMode{enabled}`.
 (`setDevice.scale` is the whole-iframe viewport-simulation scale, optional and absent = 1;
-the composer counter-scales by it — decisions/00075.)
+the composer counter-scales by it — decisions/00075. `init.browseMode` is optional and
+absent = off, same convention — browse mode, decisions/00091: while on, the overlay
+suspends editing chrome/interception so every click just navigates or is inert, like
+browsing the real site. The shell's edit-bar toggle owns the session-lifetime value —
+`setBrowseMode` flips an already-loaded overlay live; `init.browseMode` carries the
+current value to whatever overlay boots next, since a real iframe navigation wipes all
+prior overlay JS state.)
 
 **Overlay → shell** (`OverlayToShellMessage`): `ready{}` · `op{file,path,value}` ·
 `navigate{page}` · `selected{key,kind,rect}` · `mediaRequest{key}`.

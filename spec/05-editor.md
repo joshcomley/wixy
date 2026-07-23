@@ -38,12 +38,26 @@ stays in edit mode: the overlay rewrites internal link clicks to the preview equ
 notifies the shell (URL hash + page dropdown follow along). External links are inert in
 edit mode (toast: "external link").
 
+**Browse mode** (decisions/00091): a mouse-icon toggle next to the device buttons lets an
+operator suspend click-to-edit entirely and just browse — every click either navigates
+(internal links, including bound ones that would otherwise open their popover) or is inert,
+exactly like the published site. Hover chrome, popovers, the list item toolbar, and the
+`data-wx-if` eye toggle are all suspended while it's on. The point is clicking through
+several pages to find the one you actually want without edit popovers getting in the way,
+then flipping it back off and continuing to edit — on whichever page you landed on — in the
+SAME session: no reload, no lost draft state. The toggle's state lives in the shell (the
+edit view already survives every in-session page change, `shell.ts`'s `reuseEditView` —
+decisions/00018) and is handed to each freshly-booted overlay via `init` — a real iframe
+navigation destroys the overlay's own JS state, so this can't be a follow-up round trip
+without risking a race against the very first click on the page that just loaded.
+
 ### Overlay ↔ shell protocol
 
 `postMessage` on a fixed channel (`{wx: 1, type, …}`), both directions, origin-checked:
 
-- shell → overlay: `init {page, bindings, draftRev}`, `applyOps {ops}` (echo after server
-  accept), `setDevice`, `themeVars {css vars map}` (live theme preview), `select {key}`.
+- shell → overlay: `init {page, bindings, draftRev, browseMode?}`, `applyOps {ops}` (echo
+  after server accept), `setDevice`, `themeVars {css vars map}` (live theme preview),
+  `select {key}`, `setBrowseMode {enabled}` (the browse-mode toggle, decisions/00091).
 - overlay → shell: `ready`, `op {file, path, value}` (an edit the user made),
   `navigate {page}`, `selected {key, kind, rect}`, `mediaRequest {key}` (image binding
   clicked — the shell opens the media dialog and answers with `applyOps`).

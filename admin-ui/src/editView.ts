@@ -17,6 +17,17 @@ import { parseOverlayToShellMessage, type DraftOp, type ShellToOverlayMessage } 
 
 export type Device = "desktop" | "tablet" | "mobile";
 
+// Browse-mode toggle icon (decisions/00091): an inline SVG (Feather's "mouse"),
+// not the 🖱️ emoji — real-browser verification (Chromium, Edge, AND Chrome, all
+// on the same Windows box) found Segoe UI Emoji has no glyph for U+1F5B1 there,
+// rendering as an unrecognizable shape while ⚙️/🌐 rendered fine right next to
+// it. Same fix this codebase already reached for the composer's maximize/
+// restore toggle (decisions/00084, composer.ts's MAXIMIZE_ICON) — stroke
+// inherits the button's currentColor so it recolors for free on the active
+// (white-on-blue) state.
+const MOUSE_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="6"/><line x1="12" y1="7" x2="12" y2="11"/></svg>';
+
 /** The narrow slice of `OpQueue` (opQueue.ts) this module actually uses — a
  * structural interface rather than the concrete class, so tests can pass a
  * plain fake without constructing a real queue (OpQueue's private fields would
@@ -79,6 +90,12 @@ export interface EditViewCoreDeps {
    * (may be item-scoped, e.g. ".img"); this core never resolves it further, same
    * "DOM-adjacent effects belong to the caller" boundary as `onOverlayNavigated`. */
   onMediaRequest: (key: string) => void;
+  /** Whether browse mode (spec/05 §2 amendment, decisions/00091) is currently on
+   * — read fresh on every `init` (a getter, not a snapshot) so a freshly-booted
+   * overlay (a real iframe navigation destroys its whole JS state) starts in
+   * the mode the user left it in, without an extra round-trip that could race
+   * a click on the just-loaded page. */
+  browseMode: () => boolean;
 }
 
 export interface EditViewCore {
@@ -106,6 +123,7 @@ export function createEditViewCore(initialPage: string, deps: EditViewCoreDeps):
           page: currentPage,
           bindings,
           draftRev: deps.opQueue.rev,
+          browseMode: deps.browseMode(),
         });
       })
       .catch(() => {
@@ -197,6 +215,13 @@ export interface MountEditViewDeps {
 
 export function mountEditView(page: string, deps: MountEditViewDeps): EditView {
   const win = deps.win ?? window;
+  // Browse mode (spec/05 §2 amendment, decisions/00091) — session-lifetime
+  // state owned HERE rather than inside createEditViewCore: this EditView
+  // instance persists across every in-session page change (shell.ts's
+  // `reuseEditView`), the exact span the toggle needs to survive, so a plain
+  // closure variable is enough. A fresh mountEditView call (leaving edit mode
+  // entirely) naturally resets it to off — no explicit reset needed.
+  let browseMode = false;
 
   const root = document.createElement("div");
   root.className = "wx-edit-view";
@@ -217,9 +242,27 @@ export function mountEditView(page: string, deps: MountEditViewDeps): EditView {
   (Object.keys(buttons) as Device[]).forEach((device) =>
     deviceGroup.appendChild(buttons[device]),
   );
+
+  // Browse-mode toggle (decisions/00091): sits next to the device group —
+  // both control how the iframe below behaves, distinct from the shell-level
+  // chrome (back/settings/reveal) the caller supplies via toolbarLeading/
+  // Trailing. `setBrowseMode` (defined below, after postToOverlay exists) is
+  // a hoisted function declaration, so referencing it here is safe even
+  // though its own definition comes later — the click that calls it can only
+  // ever fire after this whole function body has finished running once.
+  const browseModeButton = document.createElement("button");
+  browseModeButton.type = "button";
+  browseModeButton.className = "wx-browse-mode-toggle";
+  browseModeButton.innerHTML = MOUSE_ICON; // static markup — safe
+  browseModeButton.title = "Browse mode";
+  browseModeButton.setAttribute("aria-label", "Browse mode: off — tap to browse without editing");
+  browseModeButton.setAttribute("aria-pressed", "false");
+  browseModeButton.addEventListener("click", () => setBrowseMode(!browseMode));
+
   toolbar.innerHTML = "";
   for (const el of deps.toolbarLeading ?? []) toolbar.appendChild(el);
   toolbar.appendChild(deviceGroup);
+  toolbar.appendChild(browseModeButton);
   const toolbarSpacer = document.createElement("span");
   toolbarSpacer.className = "wx-device-toolbar-spacer";
   toolbar.appendChild(toolbarSpacer);
@@ -241,6 +284,20 @@ export function mountEditView(page: string, deps: MountEditViewDeps): EditView {
 
   function postToOverlay(message: ShellToOverlayMessage): void {
     iframe.contentWindow?.postMessage(message, win.location.origin);
+  }
+
+  /** Flips browse mode both live (an already-loaded overlay just gets told,
+   * no reload) and for the NEXT overlay boot (createEditViewCore's deps read
+   * this same closure via a getter, decisions/00091). */
+  function setBrowseMode(enabled: boolean): void {
+    browseMode = enabled;
+    browseModeButton.classList.toggle("wx-browse-mode-toggle-active", enabled);
+    browseModeButton.setAttribute("aria-pressed", String(enabled));
+    browseModeButton.setAttribute(
+      "aria-label",
+      enabled ? "Browse mode: on — tap to resume editing" : "Browse mode: off — tap to browse without editing",
+    );
+    postToOverlay({ wx: 1, type: "setBrowseMode", enabled });
   }
 
   // -- Device simulation -----------------------------------------------------
@@ -295,6 +352,7 @@ export function mountEditView(page: string, deps: MountEditViewDeps): EditView {
       iframe.src = `/admin/preview/${nextPage}.html`;
     },
     onOverlayNavigated: deps.onOverlayNavigated,
+    browseMode: () => browseMode,
     onMediaRequest: (key) => {
       openMediaDialog({ api: deps.api, win }, (value) => {
         // A fresh object literal, not `value` passed straight through: TS only

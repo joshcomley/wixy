@@ -683,7 +683,8 @@ html, body {
 
 .wx-device-toolbar button,
 .wx-edit-back,
-.wx-chrome-reveal {
+.wx-chrome-reveal,
+.wx-browse-mode-toggle {
   font: 600 0.75rem/1 system-ui, sans-serif;
   padding: 6px 12px;
   border-radius: var(--wx-radius);
@@ -694,12 +695,41 @@ html, body {
 }
 
 .wx-edit-back,
-.wx-chrome-reveal {
+.wx-chrome-reveal,
+.wx-browse-mode-toggle {
   min-width: 32px;
   padding: 6px 8px;
 }
 
+.wx-browse-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wx-browse-mode-toggle svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
 .wx-device-toolbar button.wx-device-active {
+  background: var(--wx-brand-blue);
+  border-color: var(--wx-brand-blue);
+  color: #fff;
+}
+
+/* Browse mode (decisions/00091): click-through-to-navigate toggle, next to the
+   device group. Active state mirrors .wx-device-active's brand-blue fill so
+   it reads as clearly "on" as the device buttons do. Compound selector
+   (both classes, not `.wx-browse-mode-toggle-active` alone) deliberately —
+   real-browser verification found that against the base `.wx-browse-mode-
+   toggle` rule above, an equal-specificity single-class override landed
+   AFTER it in the bundled+served stylesheet (confirmed via CDP, and via
+   `insertRule` appending straight to the live sheet's true last index) yet
+   still lost the cascade; a genuinely HIGHER-specificity compound selector
+   is the robust fix, not order-dependent. */
+.wx-browse-mode-toggle.wx-browse-mode-toggle-active {
   background: var(--wx-brand-blue);
   border-color: var(--wx-brand-blue);
   color: #fff;
@@ -3079,7 +3109,8 @@ div.wx-media-thumb {
 
   .wx-device-toolbar button,
   .wx-edit-back,
-  .wx-chrome-reveal {
+  .wx-chrome-reveal,
+  .wx-browse-mode-toggle {
     padding: 6px 7px;
   }
 

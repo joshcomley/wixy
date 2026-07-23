@@ -998,6 +998,161 @@ describe("initOverlay", () => {
     });
   });
 
+  describe("browse mode (decisions/00091)", () => {
+    it("once enabled via setBrowseMode, a bound link navigates instead of opening its popover", () => {
+      root.innerHTML = `<a data-wx-href="cta.href" href="/about.html">CTA</a>`;
+      const anchor = root.querySelector("a") as HTMLAnchorElement;
+      const { sent, fake, dispatchShellMessage, teardown } = initFor("index", { page: "index", fields: [] });
+
+      dispatchShellMessage({ wx: 1, type: "setBrowseMode", enabled: true });
+      anchor.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+      expect(document.querySelector(".wx-popover")).toBeNull();
+      expect(sent.at(-1)).toEqual({ wx: 1, type: "navigate", page: "about" });
+      expect(fake.location.href).toBe("/admin/preview/about.html");
+      teardown();
+    });
+
+    it("a fresh overlay boots straight into browse mode when init says so (a real navigation destroys prior JS state, so this can't be a follow-up round trip)", () => {
+      root.innerHTML = `<a data-wx-href="cta.href" href="/about.html">CTA</a>`;
+      const anchor = root.querySelector("a") as HTMLAnchorElement;
+      const harness = createHarness();
+      const teardown = harness.start();
+      harness.dispatchShellMessage({
+        wx: 1,
+        type: "init",
+        page: "index",
+        bindings: { page: "index", fields: [] },
+        draftRev: 0,
+        browseMode: true,
+      });
+
+      anchor.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+      expect(document.querySelector(".wx-popover")).toBeNull();
+      expect(harness.sent.at(-1)).toEqual({ wx: 1, type: "navigate", page: "about" });
+      teardown();
+    });
+
+    it("leaves a click on a bound non-link element inert — no popover, no op, exactly like browsing the real site", () => {
+      root.innerHTML = `<h1 data-wx="hero.title">Title</h1>`;
+      const h1 = root.querySelector("h1") as HTMLElement;
+      const { sent, dispatchShellMessage, teardown } = initFor("index", { page: "index", fields: [] });
+      dispatchShellMessage({ wx: 1, type: "setBrowseMode", enabled: true });
+
+      h1.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+      expect(document.querySelector(".wx-composer-input")).toBeNull();
+      expect(sent.some((m) => m.type === "op")).toBe(false);
+      teardown();
+    });
+
+    it("suppresses hover chrome (outline + chip)", () => {
+      root.innerHTML = `<h1 data-wx="hero.title">Title</h1>`;
+      const h1 = root.querySelector("h1") as HTMLElement;
+      const { dispatchShellMessage, teardown } = initFor("index", { page: "index", fields: [] });
+      dispatchShellMessage({ wx: 1, type: "setBrowseMode", enabled: true });
+
+      h1.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+
+      expect(h1.classList.contains("wx-hover-outline")).toBe(false);
+      expect(document.querySelector(".wx-hover-chip")).toBeNull();
+      teardown();
+    });
+
+    it("suppresses the list item toolbar", () => {
+      root.innerHTML = `
+        <ul data-wx-list="showcase.items">
+          <li data-wx-list-item><h3 data-wx=".title">One</h3></li>
+        </ul>`;
+      const item = root.querySelector("[data-wx-list-item]") as HTMLElement;
+      const { dispatchShellMessage, teardown } = initFor("index", {
+        page: "index",
+        fields: [{ key: "showcase.items", kind: "list", items: [{ key: ".title", kind: "text" }] }],
+      });
+      dispatchShellMessage({ wx: 1, type: "setBrowseMode", enabled: true });
+
+      item.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+
+      expect(document.querySelector(".wx-item-toolbar")).toBeNull();
+      teardown();
+    });
+
+    it("leaves the data-wx-if eye toggle inert while browsing", () => {
+      root.innerHTML = `
+        <section data-wx-if="hero.showBadge" data-wx-hidden="1">
+          <button class="wx-if-eye-toggle" type="button">eye</button>
+        </section>`;
+      const section = root.querySelector("section") as HTMLElement;
+      const { sent, dispatchShellMessage, teardown } = initFor("index", { page: "index", fields: [] });
+      dispatchShellMessage({ wx: 1, type: "setBrowseMode", enabled: true });
+
+      root
+        .querySelector(".wx-if-eye-toggle")
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      expect(section.hasAttribute("data-wx-hidden")).toBe(true);
+      expect(sent.some((m) => m.type === "op")).toBe(false);
+      teardown();
+    });
+
+    it("marks <html> with wx-browse-mode while on (the CSS hook for the eye toggle) and clears it when off", () => {
+      const { dispatchShellMessage, teardown } = initFor("index", { page: "index", fields: [] });
+
+      dispatchShellMessage({ wx: 1, type: "setBrowseMode", enabled: true });
+      expect(document.documentElement.classList.contains("wx-browse-mode")).toBe(true);
+
+      dispatchShellMessage({ wx: 1, type: "setBrowseMode", enabled: false });
+      expect(document.documentElement.classList.contains("wx-browse-mode")).toBe(false);
+      teardown();
+    });
+
+    it("turning browse mode on mid-session clears an already-open popover and hover chrome", () => {
+      root.innerHTML = `<h1 data-wx="hero.title">Title</h1><p data-wx="hero.tag">Tag</p>`;
+      const h1 = root.querySelector("h1") as HTMLElement;
+      const p = root.querySelector("p") as HTMLElement;
+      const { dispatchShellMessage, teardown } = initFor("index", { page: "index", fields: [] });
+
+      // Composer open on h1, AND hovering a different element's chip — both
+      // are edit-only chrome the shell's toggle button (outside the iframe)
+      // fires no mouseout/blur to clear on its own (decisions/00091).
+      h1.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      expect(document.querySelector(".wx-composer-input")).not.toBeNull();
+      p.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      expect(document.querySelector(".wx-hover-chip")).not.toBeNull();
+
+      dispatchShellMessage({ wx: 1, type: "setBrowseMode", enabled: true });
+
+      expect(document.querySelector(".wx-composer-input")).toBeNull();
+      expect(document.querySelector(".wx-hover-chip")).toBeNull();
+      expect(p.classList.contains("wx-hover-outline")).toBe(false);
+      teardown();
+    });
+
+    it("leaving browse mode restores normal click-to-edit on whatever page you land on", () => {
+      root.innerHTML = `<h1 data-wx="hero.title">Title</h1>`;
+      const h1 = root.querySelector("h1") as HTMLElement;
+      const { sent, dispatchShellMessage, teardown } = initFor("index", { page: "index", fields: [] });
+      dispatchShellMessage({ wx: 1, type: "setBrowseMode", enabled: true });
+      dispatchShellMessage({ wx: 1, type: "setBrowseMode", enabled: false });
+
+      h1.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      const input = document.querySelector(".wx-composer-input") as HTMLTextAreaElement;
+      expect(input).not.toBeNull();
+      input.value = "Edited after browsing";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }));
+
+      expect(sent.at(-1)).toEqual({
+        wx: 1,
+        type: "op",
+        file: "index",
+        path: "hero.title",
+        value: "Edited after browsing",
+      });
+      teardown();
+    });
+  });
+
   describe("list item structural editing", () => {
     const showcaseBindings: PageBindings = {
       page: "index",

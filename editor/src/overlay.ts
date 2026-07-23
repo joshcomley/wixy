@@ -61,6 +61,11 @@ export function initOverlay(win: Window = window): () => void {
   // consumed by the matching `applyOps` batch the shell echoes back once the
   // user picks/uploads or cancels (decisions/00022).
   let pendingMediaTarget: DetectedBinding | null = null;
+  // Browse mode (spec/05 §2 amendment, decisions/00091): while on, every click
+  // just navigates (or is inert) like the real site — no popovers, no hover
+  // chrome, no eye toggle. Mirrors the shell's `init.browseMode`/`setBrowseMode`
+  // messages; the shell owns the session-lifetime value, this is a read-only copy.
+  let browseMode = false;
 
   function currentPage(): string {
     return state?.page ?? "";
@@ -470,6 +475,7 @@ export function initOverlay(win: Window = window): () => void {
   }
 
   function handlePointerOver(event: Event): void {
+    if (browseMode) return; // no editing chrome while just browsing (decisions/00091)
     if (!(event.target instanceof Element)) return;
     handleItemToolbarHover(event.target);
     const bound = closestBoundElement(event.target);
@@ -568,6 +574,15 @@ export function initOverlay(win: Window = window): () => void {
     if (!(event.target instanceof Element)) return;
     if (event.target.closest(".wx-if-eye-toggle") !== null) return; // owned by handleIfToggleClick
 
+    // Browse mode (decisions/00091): skip binding detection entirely — a bound
+    // link still navigates (handlePlainAnchorClick doesn't care whether its
+    // anchor also carries data-wx-href), a bound non-link is simply inert,
+    // exactly like the real site.
+    if (browseMode) {
+      handlePlainAnchorClick(event, event.target);
+      return;
+    }
+
     const bound = closestBoundElement(event.target);
     if (bound !== null) {
       if (bound.kind === "list") return;
@@ -581,11 +596,13 @@ export function initOverlay(win: Window = window): () => void {
 
   // -- Internal/external link interception ----------------------------------------------------------
   //
-  // Only reached for anchors `closestBoundElement` didn't already claim — i.e. an
-  // anchor with no data-wx-href of its own (nav links, footer/header partial
-  // links, any plain content link outside the bindings system). A data-wx-href
-  // anchor is an EDITABLE binding (routed above into the link popover); this is
-  // for genuine browsing clicks (spec/05 §2).
+  // Two ways in: (1) normally, only for anchors `closestBoundElement` didn't
+  // already claim — i.e. an anchor with no data-wx-href of its own (nav links,
+  // footer/header partial links, any plain content link outside the bindings
+  // system). A data-wx-href anchor is an EDITABLE binding (routed above into
+  // the link popover) the rest of the time. (2) in browse mode (decisions/
+  // 00091), for EVERY anchor click regardless of binding — a bound link
+  // navigates just like an unbound one instead of opening its popover.
 
   function handlePlainAnchorClick(event: Event, target: Element): void {
     const anchor = target.closest("a[href]");
@@ -603,6 +620,14 @@ export function initOverlay(win: Window = window): () => void {
   // -- data-wx-if eye toggle ----------------------------------------------------------
 
   function handleIfToggleClick(event: Event): void {
+    // Belt-and-braces alongside the CSS hide (decisions/00091, style.css's
+    // `.wx-browse-mode ... .wx-if-eye-toggle { display: none }`): unlike hover
+    // chrome/the item toolbar/popovers (created on demand, so gating their
+    // creation is enough), the eye toggle is a real DOM node sitting inert in
+    // every hidden section at rest — a CSS regression alone would silently
+    // re-enable it, so click-routing owns the same invariant every other
+    // browse-mode entry point does.
+    if (browseMode) return;
     if (!(event.target instanceof Element)) return;
     const trigger = event.target.closest(".wx-if-eye-toggle");
     if (trigger === null) return;
@@ -772,10 +797,34 @@ export function initOverlay(win: Window = window): () => void {
     document.querySelector(selector)?.scrollIntoView({ block: "center" });
   }
 
+  /** Applies a browse-mode value to both the click-routing flag and a marker
+   * class on `<html>` — the ONLY thing CSS keys off it for (hiding the
+   * data-wx-if eye toggle, decisions/00091): every other piece of editing
+   * chrome (hover outline/chip, item toolbar, popovers) is JS-gated instead,
+   * since it's created on demand rather than sitting in the DOM at rest. */
+  function setBrowseModeState(enabled: boolean): void {
+    browseMode = enabled;
+    document.documentElement.classList.toggle("wx-browse-mode", enabled);
+  }
+
   const unsubscribeShell = onShellMessage((message) => {
     switch (message.type) {
       case "init":
         state = { page: message.page, bindings: message.bindings, draftRev: message.draftRev };
+        setBrowseModeState(message.browseMode ?? false);
+        return;
+      case "setBrowseMode":
+        setBrowseModeState(message.enabled);
+        // Entering browse mode mid-session must clear whatever editing chrome
+        // is already up — the shell's toggle button lives OUTSIDE the iframe,
+        // so clicking it fires no mouseout/blur inside this document to do it
+        // for us (decisions/00091). Leaving browse mode needs no equivalent
+        // step: nothing was left open while it was on.
+        if (browseMode) {
+          closePopover();
+          clearHoverChrome();
+          clearItemToolbar();
+        }
         return;
       case "applyOps": {
         // Normally just an echo-after-server-accept the overlay already applied
@@ -846,5 +895,10 @@ export function initOverlay(win: Window = window): () => void {
     clearHoverChrome();
     clearItemToolbar();
     closePopover();
+    // Undoes setBrowseModeState's one document-level mark (decisions/00091) —
+    // a real navigation would take the whole document with it regardless, but
+    // this keeps teardown a complete undo of everything this instance did to
+    // the shared document, not just its listeners.
+    document.documentElement.classList.remove("wx-browse-mode");
   };
 }
