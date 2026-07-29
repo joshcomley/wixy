@@ -20,7 +20,8 @@ against that document.
 
 ```
 POST http://127.0.0.1:9320/api/project/cottage-aesthetics-preview/new-chat
-{"prompt": "<PREAMBLE>\n\n---\n\n<user's first message>"}
+{"prompt": "<PREAMBLE>\n\n---\n\n<user's first message>",
+ "spawned_by_session_id": "", "model": "claude-sonnet-5"}
 ```
 
 - The project name is the **site repo clone's directory name** under cmd's
@@ -41,10 +42,23 @@ POST http://127.0.0.1:9320/api/project/cottage-aesthetics-preview/new-chat
   including the terminal `workspace_failed`/`cli_failed`) and surface those in the panel
   with a Retry (= create a fresh conversation). If the WS is unavailable, the 120 s
   timeout is the terminal signal.
-- Do NOT pass `model`/`effort` — omit for the cmd account defaults, so conversations
-  behave exactly like a hand-started cmd chat. Do not pass `workspace_anchor`/
-  `workspace_id`: every conversation gets its own worktree (cmd's native model; parallel
-  conversations can't trample each other's checkouts).
+- **`spawned_by_session_id: ""` is REQUIRED** — cmd rejects an omitted/null value with
+  a **400** (its `engine/spawn_lineage.py`, `required=True` since cmd's
+  decisions/00071: "parentage must be a conscious decision"). `""` is cmd's
+  "deliberately unparented, top-level chat" sentinel, which is what every Wixy
+  conversation is — started by the site owner in the admin panel, never subordinate
+  work spawned by another agent's session. Omitting it made every "New conversation"
+  fail as a user-visible 502 (`decisions/00092-chat-create-lineage-and-model`).
+- **Pass `model: "claude-sonnet-5"`** (operator decision, 2026-07-29). This supersedes
+  this spec's original "omit `model`/`effort` for the cmd account defaults": cmd now
+  defaults a fresh Claude chat to **Opus** (`engine/chats/model_select.py`'s
+  `DEFAULT_CLAUDE_MODEL`), so omitting the field no longer yields the intended tier.
+  Sonnet 5 also matches the standalone edition's own default
+  (`wixy_server/worker/runner.py::DEFAULT_MODEL`), so both editions run the
+  owner-facing assistant on the same model. `effort` is still omitted (account default).
+- Do not pass `workspace_anchor`/`workspace_id`: every conversation gets its own
+  worktree (cmd's native model; parallel conversations can't trample each other's
+  checkouts).
 
 ### The preamble (first message prefix, maintained as `wixy_server/templates/chat_preamble.md`)
 
