@@ -20,6 +20,7 @@ from wixy_server.cmdchat import (
     ProvisioningOutcome,
     SendResult,
 )
+from wixy_server.preamble import compose_prompt
 
 
 class AIBackendError(Exception):
@@ -112,7 +113,7 @@ class CmdAIBackend:
     async def create_conversation(
         self, preamble: str, first_message: str | None
     ) -> ConversationRef:
-        prompt = preamble if not first_message else f"{preamble}\n\n---\n\n{first_message}"
+        prompt = compose_prompt(preamble, first_message)
         try:
             result = await self._client.new_chat(self._cmd_project, prompt)
         except CmdChatError as exc:

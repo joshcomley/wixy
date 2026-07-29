@@ -223,6 +223,11 @@ Server-side the stream diffs the latest message batch against `sent_messages` (c
 `since=` filter), follows handover chains (adopts the leaf session, rewrites `chats.json`),
 and distinguishes brand-new-session transcript lag (quiet retry) from a real outage.
 
+**Messages are owner-filtered before emission** (`_owner_visible`, decisions/00093): the site
+preamble is stripped out of the first user message, and a preamble-only first message is not
+emitted at all — so the indices a client sees can skip `0`, and a `text` may be shorter than
+what cmd's own `/messages` returns for the same index. Upstream transcripts are unmodified.
+
 ## 5. Draft op contract (`DraftOp`)
 
 The unit of edit shared by the editor overlay, the admin shell, the `PATCH /api/admin/draft`
