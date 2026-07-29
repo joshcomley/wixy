@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -34,12 +34,11 @@ from wixy_server.chats import (
     update_session_id,
 )
 from wixy_server.cmdchat import ChatMessage, ChatStatus, FailedOutcome, ReadyOutcome
+from wixy_server.preamble import PREAMBLE_TEXT, strip_preamble
 from wixy_server.storage import ProjectPaths
 
 router = APIRouter(prefix="/api/admin/chat")
 
-_TEMPLATES_DIR = Path(__file__).parent / "templates"
-_PREAMBLE_TEXT = (_TEMPLATES_DIR / "chat_preamble.md").read_text(encoding="utf-8").strip()
 _TITLE_MAX_CHARS = 60
 
 
@@ -99,7 +98,7 @@ async def create_conversation(body: ConversationCreateIn, request: Request) -> J
     # separately) — CmdAIBackend combines them identically to what this route used
     # to do itself; a future backend may combine them differently.
     try:
-        result = await client.create_conversation(_PREAMBLE_TEXT, first_message)
+        result = await client.create_conversation(PREAMBLE_TEXT, first_message)
     except AIBackendError as exc:
         raise HTTPException(status_code=502, detail=f"couldn't reach cmd: {exc}") from exc
 
@@ -271,6 +270,34 @@ def _error_event(detail: str) -> JsonObject:
     return {"type": "error", "detail": detail}
 
 
+def _owner_visible(message: ChatMessage) -> ChatMessage | None:
+    """One transcript message as the site OWNER should see it, or `None` for one
+    they should never see at all (decisions/00093).
+
+    The only thing filtered today is the site-assistant preamble, which spec/06 §1
+    prepends to the create call's prompt and therefore lives inside the
+    conversation's first user message. It is this server's own plumbing — the
+    owner didn't write it, it leaks internal instructions and repo paths into a
+    non-developer's chat, and at ~1.4 KB it visually swamped the panel (a wall of
+    text above their actual message).
+
+    Filtered HERE, at the stream boundary, rather than in the panel: the UI is
+    backend-blind by design (spec/independence/05 §1), so "what the owner may see"
+    is a server decision, and doing it here covers both backends and any future
+    client at once. The transcript cmd/the worker holds is deliberately left
+    intact — the model still needs the preamble on every turn; only the rendering
+    of it is suppressed.
+    """
+    if message.role != "user" or message.kind != "text" or message.text is None:
+        return message
+    visible = strip_preamble(message.text)
+    if visible is None:
+        return None
+    if visible == message.text:
+        return message
+    return replace(message, text=visible)
+
+
 async def _wait_until_conversation_ready(
     runtime: dict[str, ChatRuntimeEntry], conv_id: str
 ) -> ChatRuntimeEntry | None:
@@ -377,7 +404,13 @@ async def _stream_events(
         # changed (e.g. a `truncated` preview later arriving in full) is an
         # update, and either way is forwarded — a bare newer-index check alone
         # would miss the latter.
-        for message in messages:
+        for raw_message in messages:
+            # Filtered before the diff so the cache holds exactly what was sent —
+            # comparing raw messages while emitting stripped ones would re-send
+            # the first message on every poll.
+            message = _owner_visible(raw_message)
+            if message is None:
+                continue
             if sent_messages.get(message.index) != message:
                 sent_messages[message.index] = message
                 yield _sse(_message_event(message))

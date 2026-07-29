@@ -27,6 +27,7 @@ from fastapi.responses import JSONResponse
 
 from builder.jsontypes import JsonObject
 from wixy_server.github import GitHubApiError, GitHubClient
+from wixy_server.preamble import compose_prompt
 from wixy_server.worker.agent_client import AgentSDKClientFactory
 from wixy_server.worker.runner import run_turn
 from wixy_server.worker.settings import WorkerSettings, load_worker_settings
@@ -65,11 +66,13 @@ def _now_iso() -> str:
 
 
 def _compose_prompt(preamble: str, first_message: str | None) -> str:
-    # Matches CmdAIBackend.create_conversation's own composition exactly (see
-    # wixy_server/ai/backend.py) — kept identical across both backends so a
-    # conversation looks the same to the model regardless of which one is
-    # driving it.
-    return preamble if not first_message else f"{preamble}\n\n---\n\n{first_message}"
+    # Shared with CmdAIBackend.create_conversation (wixy_server/preamble.py) so a
+    # conversation looks the same to the model regardless of which backend is
+    # driving it — and, more importantly, so the composition stays in lockstep
+    # with `strip_preamble`, which undoes it before the panel renders the first
+    # message (decisions/00093). That module is deliberately dependency-free, so
+    # importing it here doesn't pull main-process code into the worker.
+    return compose_prompt(preamble, first_message)
 
 
 def _compose_pr_title(title_hint: str) -> str:

@@ -2277,16 +2277,26 @@ div.wx-media-thumb {
   line-height: 1.5;
 }
 
+/* The owner's own messages are TINTED, not filled with the saturated brand
+   colour. A solid --wx-brand-blue fill (what this used to be) read as loud and
+   hard to read: it's the same colour as Publish, so a passive transcript entry
+   competed with the panel's primary action, and white-on-blue at 0.875rem is
+   lower-contrast body text than the rest of the admin UI. --wx-brand-blue-tint
+   is the design system's existing pairing for --wx-ink text and is defined in
+   both themes, so light and dark both stay legible. Author/role stays obvious
+   from the alignment plus the tint-vs-canvas difference. */
 .wx-chat-bubble-user {
   align-self: flex-end;
-  background: var(--wx-brand-blue);
-  color: #fff;
+  background: var(--wx-brand-blue-tint);
+  color: var(--wx-ink);
+  border: 1px solid var(--wx-border);
 }
 
 .wx-chat-bubble-assistant {
   align-self: flex-start;
   background: var(--wx-canvas);
   color: var(--wx-ink);
+  border: 1px solid var(--wx-border);
 }
 
 .wx-chat-bubble .wx-markdown p:first-child {

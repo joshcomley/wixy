@@ -25,6 +25,7 @@ from wixy_server.ai.backend import AIBackend, CmdAIBackend
 from wixy_server.app import create_app
 from wixy_server.chats import ChatConversation, ChatRuntimeEntry, add_chat, find_chat
 from wixy_server.cmdchat import CmdChatClient
+from wixy_server.preamble import PREAMBLE_TEXT, compose_prompt
 from wixy_server.routes_chat import StreamTiming, _stream_events
 from wixy_server.storage import project_paths
 from wixy_server.tests.fake_cmd import FakeCmdState, create_fake_cmd_app
@@ -692,6 +693,102 @@ class TestConversationStream:
 
         message_events = [e for e in events if e["type"] == "message"]
         assert [_message_payload(e)["text"] for e in message_events] == ["first", "second"]
+
+    @pytest.mark.asyncio
+    async def test_never_streams_the_internal_preamble_to_the_owner(
+        self,
+        tmp_path: Path,
+        ai_backend: AIBackend,
+        fake_cmd_state: FakeCmdState,
+        fast_stream_timing: StreamTiming,
+    ) -> None:
+        """decisions/00093: the site-assistant preamble rides inside the first
+        user message (spec/06 §1 composes it there), and the panel rendered it
+        verbatim — a ~1.4 KB wall of internal instructions and repo paths shown to
+        a non-developer, above their own words. The stream must emit only what the
+        owner wrote, while cmd's transcript keeps the full text for the model."""
+        session = fake_cmd_state.create_session("hi")
+        session.ready = True
+        session.messages = [
+            _fake_message(0, role="user", text=compose_prompt(PREAMBLE_TEXT, "Hi!")),
+            _fake_message(1, role="assistant", text="Hello — what shall we change?"),
+        ]
+        chats_path = tmp_path / "chats.json"
+        conv_id = _seed_conversation(chats_path, session.session_id)
+        runtime: dict[str, ChatRuntimeEntry] = {}
+
+        gen = _stream_events(
+            ai_backend, chats_path, runtime, conv_id, session.session_id, fast_stream_timing
+        )
+        events = await _collect_stream_events(gen, count=2)
+
+        texts = [_message_payload(e)["text"] for e in events if e["type"] == "message"]
+        assert texts == ["Hi!", "Hello — what shall we change?"]
+        # Not merely "shortened" — no fragment of the preamble may survive.
+        assert "site assistant" not in "".join(str(t) for t in texts)
+        # The upstream transcript is untouched: the model still gets the preamble.
+        assert PREAMBLE_TEXT in str(session.messages[0]["text"])
+
+    @pytest.mark.asyncio
+    async def test_preamble_only_first_message_is_not_streamed_at_all(
+        self,
+        tmp_path: Path,
+        ai_backend: AIBackend,
+        fake_cmd_state: FakeCmdState,
+        fast_stream_timing: StreamTiming,
+    ) -> None:
+        """ "New conversation" with no opening message: the first user message is
+        pure preamble, so it must be dropped entirely rather than rendered as an
+        empty bubble the owner never sent. The assistant's greeting still
+        arrives."""
+        session = fake_cmd_state.create_session("hi")
+        session.ready = True
+        session.messages = [
+            _fake_message(0, role="user", text=compose_prompt(PREAMBLE_TEXT, None)),
+            _fake_message(1, role="assistant", text="Hi! What would you like to change?"),
+        ]
+        chats_path = tmp_path / "chats.json"
+        conv_id = _seed_conversation(chats_path, session.session_id)
+        runtime: dict[str, ChatRuntimeEntry] = {}
+
+        gen = _stream_events(
+            ai_backend, chats_path, runtime, conv_id, session.session_id, fast_stream_timing
+        )
+        events = await _collect_stream_events(gen, count=1)
+
+        message_events = [e for e in events if e["type"] == "message"]
+        assert [_message_payload(e)["role"] for e in message_events] == ["assistant"]
+
+    @pytest.mark.asyncio
+    async def test_stripped_first_message_is_not_re_sent_on_every_poll(
+        self,
+        tmp_path: Path,
+        ai_backend: AIBackend,
+        fake_cmd_state: FakeCmdState,
+        fast_stream_timing: StreamTiming,
+    ) -> None:
+        """The already-sent cache must hold the STRIPPED message, not the raw one.
+        Caching the raw text while emitting the stripped text would make the diff
+        never match, re-sending the owner's first message on every poll tick."""
+        session = fake_cmd_state.create_session("hi")
+        session.ready = True
+        session.messages = [
+            _fake_message(0, role="user", text=compose_prompt(PREAMBLE_TEXT, "Hi!")),
+        ]
+        chats_path = tmp_path / "chats.json"
+        conv_id = _seed_conversation(chats_path, session.session_id)
+        runtime: dict[str, ChatRuntimeEntry] = {}
+
+        gen = _stream_events(
+            ai_backend, chats_path, runtime, conv_id, session.session_id, fast_stream_timing
+        )
+        # Two events = the one message + the one status event. A re-sending bug
+        # yields a second identical message event instead of just the status.
+        events = await _collect_stream_events(gen, count=2)
+
+        message_events = [e for e in events if e["type"] == "message"]
+        assert len(message_events) == 1
+        assert _message_payload(message_events[0])["text"] == "Hi!"
 
     @pytest.mark.asyncio
     async def test_hides_thinking_messages_by_default_but_includes_when_asked(

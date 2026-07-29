@@ -72,13 +72,20 @@ handover-follow mutation (adopt the chain's leaf as the live session).
 ## Chat routes (`routes_chat.py`, prefix `/api/admin/chat`)
 
 Route table + SSE event envelopes are in [contracts.md](contracts.md) §2, §4. Key behaviours:
-- **Create** builds the prompt as `<preamble>\n\n---\n\n<firstMessage>` (or preamble alone),
-  `new_chat`s, mints `conv_id = uuid4().hex`, persists, sets runtime `pending`, and spawns
-  `_track_readiness` on the app's background task group.
+- **Create** builds the prompt via `preamble.compose_prompt` →
+  `<preamble>\n\n---\n\n<firstMessage>` (or preamble alone), `new_chat`s, mints
+  `conv_id = uuid4().hex`, persists, sets runtime `pending`, and spawns `_track_readiness` on
+  the app's background task group.
 - **Stream** (`_stream_events`, SSE) is a server-side poll→fan-out: wait for readiness (via
   the shared tracker, not a second poller), then every `poll_interval_s` (default 1.2s)
   `get_status` + `get_messages` and diff against `sent_messages` (cmd has no `since=` filter),
-  emitting `message`/`status`/`error` events. **Handover-follow:** on a non-null
+  emitting `message`/`status`/`error` events. **Every message passes through
+  `_owner_visible` first** (decisions/00093): it strips the preamble out of the first user
+  message, and drops that message entirely when it's preamble-only (a conversation opened
+  with no opening message) — the owner must never see the engine's own prompt, while
+  cmd/the worker keep the full text because the model needs it. The strip runs **before** the
+  `sent_messages` diff, so the cache holds what was actually sent; diffing raw while emitting
+  stripped would re-send the first message every tick. **Handover-follow:** on a non-null
   `handover_state`, fetch the chain; if the leaf ≠ current session, `update_session_id`, switch
   to the leaf, reset diffing state, continue seamlessly. A `CmdChatError` within
   `transcript_grace_s` (15s) of ready → quiet retry (brand-new-session transcript lag); past
@@ -87,7 +94,15 @@ Route table + SSE event envelopes are in [contracts.md](contracts.md) §2, §4. 
 - **Send** carries an `idempotencyKey` (the UI generates it once per compose attempt and
   reuses it on retry, for server-side dedupe).
 
-## Preamble (`templates/chat_preamble.md`)
+## Preamble (`preamble.py` + `templates/chat_preamble.md`)
+
+`wixy_server/preamble.py` owns the whole contract — `PREAMBLE_TEXT`, the `SEPARATOR`,
+`compose_prompt` (used by **both** backends) and `strip_preamble` (used by the stream). Compose
+and strip must stay exact inverses, so they live in one dependency-free module rather than
+having the separator duplicated at three call sites; `test_preamble.py` pins the round trip and
+asserts the template has no `---` line of its own (which is what makes the separator a safe
+split token). **The preamble is never rendered to the owner** — see the Stream bullet above and
+decisions/00093.
 
 Prepended once at creation (<1.5 KB). Sets: identity (the site assistant for Cottage
 Aesthetics, working in a worktree of the *site* repo); audience (the **owner**, not a
