@@ -291,6 +291,34 @@ class TestCreateConversation:
         session = next(iter(fake_cmd_state.sessions.values()))
         assert session.cmd_project == "cottage-aesthetics-preview"
 
+    def test_create_succeeds_against_cmds_real_contract_on_sonnet_5(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        cmdchat_client: CmdChatClient,
+        fake_cmd_state: FakeCmdState,
+    ) -> None:
+        """The owner-visible regression this route once had: clicking Start in the
+        Chat panel returned "request failed with status 502"
+        (decisions/00092-chat-create-lineage-and-model). The 502 was this route
+        faithfully reporting a 400 from cmd — cmd requires
+        `spawned_by_session_id` on new-chat, and the create call wasn't sending
+        it. Driven end-to-end through the route (not the client) because the 502
+        is what the owner actually saw, and asserted alongside the pinned model
+        so the same request proves both halves of the create contract."""
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
+        )
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/chat/conversations", json={"firstMessage": "add an FAQ link"}
+            )
+
+        assert response.status_code == 200
+        session = next(iter(fake_cmd_state.sessions.values()))
+        assert session.spawned_by_session_id == ""
+        assert session.model == "claude-sonnet-5"
+
     def test_cmd_unreachable_returns_502(
         self,
         storage_root: Path,

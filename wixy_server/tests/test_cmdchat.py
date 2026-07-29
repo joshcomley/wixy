@@ -90,6 +90,30 @@ async def test_new_chat_returns_session() -> None:
 
 
 @pytest.mark.asyncio
+async def test_new_chat_states_unparented_lineage_and_pins_sonnet_5() -> None:
+    """The create call must send BOTH extra body fields cmd's own contract needs
+    (`decisions/00092-chat-create-lineage-and-model`):
+
+    - `spawned_by_session_id` — REQUIRED by cmd (omitted/null is a 400). Without
+      it every "New conversation" died as the owner-visible "request failed with
+      status 502" (`routes_chat.create_conversation` wraps any non-202 from cmd).
+    - `model` — cmd defaults a fresh Claude chat to Opus, so the Sonnet 5 this
+      product runs on has to be pinned explicitly, not inherited.
+
+    Asserted as literals, not against the module constants, so that a change to
+    either constant has to come here and be re-decided rather than silently
+    re-satisfying its own test."""
+    state = FakeCmdState()
+    app = create_fake_cmd_app(state)
+    async with _make_client(app) as client:
+        result = await client.new_chat("cottage-aesthetics-preview", "hello there")
+
+    session = state.sessions[result.session_id]
+    assert session.spawned_by_session_id == ""
+    assert session.model == "claude-sonnet-5"
+
+
+@pytest.mark.asyncio
 async def test_new_chat_unexpected_status_raises() -> None:
     state = FakeCmdState()
     state.new_chat_status_code = 500

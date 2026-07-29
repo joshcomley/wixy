@@ -34,6 +34,15 @@ class FakeSession:
     workspace_id: str | None
     prompt: str
     cmd_project: str = ""
+    model: str | None = None
+    """The `model` the create call asked for (`None` = field omitted) — tests
+    assert Wixy pins Sonnet 5 rather than inheriting cmd's own default (Opus).
+    """
+    spawned_by_session_id: str | None = None
+    """The raw `spawned_by_session_id` the create call sent. `""` is cmd's
+    "deliberately unparented" sentinel and is what Wixy must send; the handler
+    below rejects an omitted/null value with a 400 exactly as cmd does, so this
+    is never `None` for a session that actually got created."""
     ready: bool = False
     ready_after_polls: int = 0
     poll_count: int = 0
@@ -67,7 +76,14 @@ class FakeCmdState:
     otherwise configures to become ready quickly with zero per-session
     wiring."""
 
-    def create_session(self, prompt: str, *, cmd_project: str = "") -> FakeSession:
+    def create_session(
+        self,
+        prompt: str,
+        *,
+        cmd_project: str = "",
+        model: str | None = None,
+        spawned_by_session_id: str | None = None,
+    ) -> FakeSession:
         n = self.next_session_n
         self.next_session_n += 1
         session = FakeSession(
@@ -75,6 +91,8 @@ class FakeCmdState:
             workspace_id=f"ws-{n}",
             prompt=prompt,
             cmd_project=cmd_project,
+            model=model,
+            spawned_by_session_id=spawned_by_session_id,
             ready_after_polls=self.default_ready_after_polls,
         )
         self.sessions[session.session_id] = session
@@ -136,7 +154,27 @@ def create_fake_cmd_app(state: FakeCmdState | None = None) -> FastAPI:
             return Response(status_code=state.new_chat_status_code)
         body = await request.json()
         prompt = body.get("prompt", "") if isinstance(body, dict) else ""
-        session = state.create_session(prompt, cmd_project=project)
+        # cmd REQUIRES `spawned_by_session_id` (its engine/spawn_lineage.py,
+        # `required=True` since cmd decisions/00071): omitted or null is a 400,
+        # not a default. This fake enforces it because NOT enforcing it is
+        # precisely how the real bug shipped — the create call sent `{"prompt"}`
+        # alone, cmd 400'd, `routes_chat` turned that into the 502 the owner saw
+        # on "Start", and the whole suite stayed green against a fake that
+        # accepted anything. A test double that is laxer than the real service
+        # cannot catch contract drift, so this one mirrors the contract.
+        spawned_by_raw = body.get("spawned_by_session_id") if isinstance(body, dict) else None
+        if spawned_by_raw is None:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "spawned_by_session_id is required"},
+            )
+        model_raw = body.get("model") if isinstance(body, dict) else None
+        session = state.create_session(
+            prompt,
+            cmd_project=project,
+            model=model_raw if isinstance(model_raw, str) else None,
+            spawned_by_session_id=spawned_by_raw if isinstance(spawned_by_raw, str) else None,
+        )
         return JSONResponse(
             status_code=202,
             content={

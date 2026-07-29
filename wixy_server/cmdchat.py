@@ -53,6 +53,31 @@ DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_READINESS_TIMEOUT_S = 120.0
 DEFAULT_READINESS_POLL_INTERVAL_S = 2.0
 
+UNPARENTED_SPAWNED_BY = ""
+"""cmd's documented "deliberately unparented, top-level chat" sentinel for
+`new-chat`'s `spawned_by_session_id` field.
+
+That field is **required** by cmd (its own `engine/spawn_lineage.py`
+`normalize_spawned_by(..., required=True)`, per cmd decisions/00071): an
+omitted-or-null value is a **400**, deliberately — "parentage must be a
+conscious decision" — not a default. Every Wixy conversation is started by
+the site owner in the admin panel, so it is genuinely top-level and never
+subordinate work spawned by some other agent's session; `""` states that
+consciously. (Wixy has no cmd session id of its own to parent to in any
+case — it is a server, not a chat.)"""
+
+CHAT_MODEL = "claude-sonnet-5"
+"""The Claude model every Wixy conversation runs on (operator decision,
+2026-07-29 — `decisions/00092-chat-create-lineage-and-model/`).
+
+Passed explicitly rather than omitted: cmd defaults a fresh Claude chat to
+**Opus** (`engine/chats/model_select.py`'s `DEFAULT_CLAUDE_MODEL`), so
+"omit for the cmd account default" — what spec/06 §1 originally said —
+no longer yields the tier this product wants. Sonnet 5 also matches the
+standalone edition's own `wixy_server/worker/runner.py::DEFAULT_MODEL`, so
+both editions run the owner-facing assistant on the same model. `effort` is
+still deliberately omitted (cmd account default)."""
+
 WsConnector = Callable[[], AbstractAsyncContextManager[Any]]
 """A zero-arg callable returning an async-context-managed websocket connection
 (async-iterable over incoming frames) — the real default is a `websockets.connect(
@@ -283,7 +308,19 @@ class CmdChatClient:
 
     async def new_chat(self, cmd_project: str, prompt: str) -> NewChatResult:
         url = f"{self._portal_base_url}/api/project/{cmd_project}/new-chat"
-        response = await self._request("POST", url, json_body={"prompt": prompt})
+        response = await self._request(
+            "POST",
+            url,
+            json_body={
+                "prompt": prompt,
+                # Both fields are load-bearing, not optional decoration — see
+                # UNPARENTED_SPAWNED_BY (cmd 400s without it) and CHAT_MODEL
+                # (cmd's own default is Opus, not the Sonnet 5 this product
+                # wants) at the top of this module.
+                "spawned_by_session_id": UNPARENTED_SPAWNED_BY,
+                "model": CHAT_MODEL,
+            },
+        )
         if response.status_code != 202:
             raise CmdChatError(
                 f"new-chat for project '{cmd_project}' returned {response.status_code}: "

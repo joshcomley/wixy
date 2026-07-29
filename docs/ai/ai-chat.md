@@ -29,7 +29,7 @@ a silent hang). No auth/keys (localhost only).
 
 | Method | Call | Returns |
 |---|---|---|
-| `new_chat(cmd_project, prompt)` | `POST :9320/api/project/{cmd_project}/new-chat` (202) | `NewChatResult(session_id, workspace_id, pending_state)` |
+| `new_chat(cmd_project, prompt)` | `POST :9320/api/project/{cmd_project}/new-chat` (202) — body also carries `spawned_by_session_id: ""` (`UNPARENTED_SPAWNED_BY`) + `model: "claude-sonnet-5"` (`CHAT_MODEL`); see below | `NewChatResult(session_id, workspace_id, pending_state)` |
 | `send_message(session_id, text, idempotency_key)` | `POST :9320/api/session/{id}/send` (202) | `SendResult(buffered, pending_state)` |
 | `get_chain(session_id)` | `GET :9320/api/session/{id}/chain` | root→leaf handover chain |
 | `wait_until_ready(session_id)` | races a readiness poll (`GET :9320/api/session/{id}`, 404→200) vs `ws://…/ws/chat-pending` | `ReadyOutcome \| FailedOutcome(reason,…)` |
@@ -40,6 +40,23 @@ a silent hang). No auth/keys (localhost only).
 distinguishes a **`CmdChatError`** (cmd unreachable → propagates, UI shows offline banner)
 from a **`FailedOutcome`** (`workspace_failed`/`cli_failed`/`timeout` → provisioning failed).
 (`cmdchat.py:186` uses PEP 758 unparenthesized `except` — Inv 14.)
+
+**The create call's two non-obvious body fields** (`decisions/00092-chat-create-lineage-and-model`):
+
+- `spawned_by_session_id: ""` — **required by cmd**; omitted/null is a 400, not a default
+  (cmd's `engine/spawn_lineage.py`, its decisions/00071). `""` is cmd's "deliberately
+  unparented, top-level chat" sentinel — what every Wixy conversation is (owner-started in
+  the admin panel, never an agent's subordinate work). Omitting it made every "New
+  conversation" fail as the owner-visible `request failed with status 502`.
+- `model: "claude-sonnet-5"` — pinned, **not** inherited: cmd defaults a fresh Claude chat to
+  Opus, so spec/06's original "omit for the account default" no longer yields the intended
+  tier. Matches the standalone edition's `worker/runner.py::DEFAULT_MODEL`. `effort` is still
+  omitted (account default).
+
+Because these unit tests run against `tests/fake_cmd.py`, a cmd-side contract change is
+invisible until the live smoke test or production. **Mirror any such change in the fake
+first, then fix the caller** — the fake accepting anything is exactly how the 502 shipped
+green. The fake now 400s a create with no `spawned_by_session_id`, as cmd does.
 
 ## Conversations store (`chats.py`)
 
