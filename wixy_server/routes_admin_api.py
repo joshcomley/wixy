@@ -80,7 +80,9 @@ from wixy_server.overlay import (
     save_overlay,
 )
 from wixy_server.publisher import PublishError, PublishJob, PublishResult, run_publish
+from wixy_server.reports import ReportResult, submit_report
 from wixy_server.restore import RestoreError, RestoreResult, run_restore
+from wixy_server.settings import Settings
 from wixy_server.site_source import build_site_source
 from wixy_server.storage import ProjectPaths
 from wixy_server.thumbnails import ThumbnailError, load_thumbnail, save_thumbnail
@@ -876,6 +878,18 @@ def _build_publish_preview(
     # disabled Publish over a staged replacement).
     media_changes = media_staging(paths)
 
+    if not validate_result.ok:
+        # decisions/00095: a blocked owner shows up in the log even if she
+        # never presses Report — the operator shouldn't have to wait for a
+        # bundle to know publishing is currently stuck.
+        for error in validate_result.errors:
+            logger.warning(
+                "publish preview blocked: %s: %s (%s)",
+                error.file or "?",
+                error.message,
+                error.code,
+            )
+
     return {
         "changes": {
             file_key: [entry for entry in entries] for file_key, entries in changes.items()
@@ -950,6 +964,42 @@ async def post_draft_repair(body: DraftRepairIn, request: Request) -> JsonObject
             "errors": [{k: v for k, v in e.to_dict().items()} for e in result.validate.errors],
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# POST /api/admin/report (decisions/00095) — the review drawer's "Send a
+# report" button; also reachable after a failed publish.
+# ---------------------------------------------------------------------------
+
+
+class ReportIn(BaseModel):
+    context: str
+    note: str | None = None
+
+
+@router.post("/report", response_model=None)
+async def post_report(body: ReportIn, request: Request) -> JsonObject:
+    project: ProjectConfig = request.app.state.project
+    paths: ProjectPaths = request.app.state.paths
+    wixy_repo_root: Path = request.app.state.wixy_repo_root
+    settings: Settings = request.app.state.settings
+    publish_job: PublishJob | None = request.app.state.publish_job
+    now = datetime.now(UTC).isoformat()
+
+    def _run() -> ReportResult:
+        return submit_report(
+            project,
+            paths,
+            wixy_repo_root,
+            settings,
+            publish_job,
+            context=body.context,
+            note=body.note,
+            now=now,
+        )
+
+    result = await anyio.to_thread.run_sync(_run)
+    return {"saved": result.saved, "emailed": result.emailed}
 
 
 # ---------------------------------------------------------------------------

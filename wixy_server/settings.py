@@ -43,6 +43,14 @@ worker itself (a separate process/container, `wixy_server.worker.settings`) is
 NOT read from here — `AnthropicAIBackend` only needs the worker's base URL, never
 the worker's own secrets (`WIXY_AI_BOT_PAT`, `ANTHROPIC_API_KEY`), which reach the
 worker container's env directly and never this process's.
+
+decisions/00095 addition: `WIXY_REPORT_SMTP_HOST`/`_PORT`/`_USER`/`_PASSWORD` +
+`WIXY_REPORT_EMAIL_TO`/`_FROM` — the owner's "Send a report" button
+(`wixy_server.reports`). All optional; a report is always saved to disk
+regardless, email is a best-effort convenience notification only. On the
+fleet, these are populated in `Storage\\.env` from the fleet's own Gmail SMTP
+app-password credentials (an operational deploy step, not baked into this
+repo — see `decisions/00096`).
 """
 
 from __future__ import annotations
@@ -92,6 +100,12 @@ class Settings:
     engine_upstream: str
     engine_pat: str
     ai_backend: str
+    report_smtp_host: str
+    report_smtp_port: int
+    report_smtp_user: str
+    report_smtp_password: str
+    report_email_to: str
+    report_email_from: str
 
 
 def load_settings(storage_root: Path) -> Settings:
@@ -143,4 +157,14 @@ def load_settings(storage_root: Path) -> Settings:
         engine_upstream=_get("WIXY_ENGINE_UPSTREAM", "joshcomley/wixy"),
         engine_pat=_get("WIXY_ENGINE_PAT"),
         ai_backend=ai_backend,
+        # decisions/00095: the owner's "Send a report" escape hatch — all
+        # optional, same precedent as every other setting here. Email is a
+        # convenience notification only (wixy_server.reports always SAVES the
+        # bundle regardless); unset host+to simply means "don't email".
+        report_smtp_host=_get("WIXY_REPORT_SMTP_HOST"),
+        report_smtp_port=int(_get("WIXY_REPORT_SMTP_PORT", "587")),
+        report_smtp_user=_get("WIXY_REPORT_SMTP_USER"),
+        report_smtp_password=_get("WIXY_REPORT_SMTP_PASSWORD"),
+        report_email_to=_get("WIXY_REPORT_EMAIL_TO"),
+        report_email_from=_get("WIXY_REPORT_EMAIL_FROM"),
     )

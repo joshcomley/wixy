@@ -86,6 +86,14 @@ class ProjectPaths:
         return self.root / "thumbnails"
 
     @property
+    def reports_dir(self) -> Path:
+        """decisions/00095: the owner's "Send a report" diagnostic bundles —
+        `wixy_server.reports` creates this on first write (not in
+        `ensure_project_dirs`, unlike the always-needed dirs below — a
+        project that never hits a report never needs the directory)."""
+        return self.root / "reports"
+
+    @property
     def publish_lock(self) -> Path:
         return self.locks_dir / "publish.lock"
 

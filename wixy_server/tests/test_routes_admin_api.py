@@ -1921,6 +1921,31 @@ class TestPostDraftRepair:
         assert response.status_code == 409
 
 
+class TestPostReport:
+    """decisions/00095 — the review drawer's "Send a report" button. Full
+    bundle-shape and SMTP coverage lives in test_reports.py; this is
+    route-wiring only (no SMTP configured on the test app, so `emailed` is
+    always false here — that path is exercised directly against
+    wixy_server.reports)."""
+
+    def test_saves_a_report_and_reports_not_emailed_when_unconfigured(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/report", json={"context": "publish-blocked", "note": "it's stuck"}
+            )
+        assert response.status_code == 200
+        assert response.json() == {"saved": True, "emailed": False}
+
+    def test_note_is_optional(self, storage_root: Path, wixy_repo_root_bare: Path) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            response = client.post("/api/admin/report", json={"context": "publish-failed"})
+        assert response.status_code == 200
+
+
 class TestGetVersionAsset:
     def test_serves_an_archived_page_faithfully(
         self, storage_root: Path, wixy_repo_root_bare: Path
