@@ -239,3 +239,22 @@ trigger must set the bridge + fire `onPublishStarted` (or be discoverable via
 `expectedRev` makes a second click meaningless); toast lifetime params are the 3rd
 arg of `showTransientToast`.
 
+### Inv 26 — The draft overlay is structurally valid by construction
+Every `SetOp` a `PATCH /api/admin/draft` batch carries is normalized then structurally
+checked (`wixy_server/draft_validate.py`: `normalize_set_ops` → `check_structural`, against
+`builder/schemas/*.json` for every `COLLECTION_RULES` key plus the two nested special shapes)
+BEFORE `apply_patch` runs. A violation raises `DraftValidationError` → **422**, the whole
+batch rejected and the overlay left untouched — never a partial or structurally-broken write
+(the 2026-07-28 gallery incident: three collection items each missing a required field,
+decisions/00095). The check is deliberately STRUCTURAL only
+(type/required/properties/`additionalProperties`, `jsonschema_lite`'s `skip_pattern=True`) —
+a freshly-added, not-yet-filled-in list item (blank strings, no image picked yet) is a valid
+mid-edit draft state, not a violation. Pattern-level rules (e.g. a non-blank image `src`) are
+enforced separately and only at publish/repair time (`validate_merged_for_publish`, the full
+schema check) — see [contracts.md](contracts.md) §8.
+*Exception:* overlay data written BEFORE this gate existed, or a future gap in its
+`COLLECTION_RULES`/nested-shape coverage, isn't retroactively validated — this invariant
+covers writes going forward only. `POST /api/admin/draft/repair` (decisions/00095, 00096) is
+the deterministic recovery path for already-corrupted data, not a live-caught violation of
+this invariant.
+

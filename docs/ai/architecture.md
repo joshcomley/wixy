@@ -138,6 +138,8 @@ Deep dive: [builder.md](builder.md).
 | `checkout.py` | site-repo clone/fetch/ff-only manager (`ensure_checkout`, `run_git`) |
 | `overlay.py` | sparse draft-overlay store + PATCH algebra (`apply_patch`, `RevConflictError`) |
 | `merged_content.py` | `merge_overlay` — `content = checkout ⊕ overlay` |
+| `draft_validate.py` | the draft write gate — `normalize_set_ops` (silent corrections) → `check_structural` (draft-write time, no `pattern`) → `validate_merged_for_publish` (publish/repair time, full schema) — decisions/00095, Inv 26 |
+| `draft_repair.py` | deterministic "Fix it for me" self-heal for an already-corrupted draft (`run_repair`) — decisions/00095, 00096 |
 | `preview.py` | draft preview render + editor-asset injection |
 | `watcher.py` | 60s upstream fetch loop (`watch_upstream`, `fetch_once`) |
 | `publisher.py` | the serialized publish pipeline (`run_publish`, `PublishStage`) |
@@ -148,6 +150,7 @@ Deep dive: [builder.md](builder.md).
 | `media.py` | Pillow upload pipeline + reference scanning |
 | `cmdchat.py` | the single client to cmd (`CmdChatClient`) — all AI inference |
 | `chats.py` | conversation store (`chats.json`) |
+| `reports.py` | "Send a report" diagnostic bundle — save unconditional, email best-effort (`submit_report`) — decisions/00095, 00096 |
 | `bootstrap.py` | first-serve "publish zero" (idempotent) |
 | `routes_*.py` | route handlers (public, admin API, internal, preview, chat, version(s)) |
 

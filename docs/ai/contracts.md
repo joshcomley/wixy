@@ -54,15 +54,17 @@ Handler column is `file:func`. "Auth: CF" = gated by the admin middleware. Respo
 | GET | `state` | `routes_admin_api.py:get_state` | — | `{"project":{slug,name,domain}, "pages":[{slug,meta,lastModified,editable,pendingDelete}], "draft":{rev,opCount}, "live":{version,sha}\|null, "upstream":{aheadOfPublished:[{sha,subject,author,when}],fetchedAt}, "publishJob":{...}\|null, "chats":[<summary>]}`; 503 |
 | GET | `content/{page}` | `get_content` | — | `{"content": <JsonObject>, "bindings": <dict>}`; 503, 404 |
 | GET | `theme` | `get_theme` | — | `{"theme": <dict>}`; 503, 404 |
-| PATCH | `draft` | `patch_draft` | `{"expectedRev":int, "ops":[{file,path,value}\|{file,path,discard:true}]}` | `{"rev": int}`; 503, **409** (RevConflict) |
+| PATCH | `draft` | `patch_draft` | `{"expectedRev":int, "ops":[{file,path,value}\|{file,path,discard:true}]}` | `{"rev": int}`; 503, **409** (RevConflict), **422** (`DraftValidationError` — the batch is structurally invalid against `builder/schemas/*.json`, e.g. a collection item missing a required field; rejected whole, the overlay is left untouched — decisions/00095) |
 | DELETE | `draft` | `delete_draft` | — | `{"rev": int}`; 503 |
-| GET | `media` | `get_media` | — | `{"media":[{name,url,source,sizeBytes,width,height,references:[...], stagedReplace?,stagedDelete?}]}` (a staged replacement's `url` serves the staged bytes from `/admin/draft-media-replace/<name>`); 503 |
-| POST | `media` | `upload_media` | `multipart/form-data` field `file` | `{name,url,source:"draft",sizeBytes,width,height,references:[]}`; **422** (MediaUpload) |
+| POST | `draft/repair` | `post_draft_repair` | `{"expectedRev":int}` | `{"rev":int, "actions":[str], "validate":{"ok":bool,"errors":[<err>]}}`; 503, **409** (publish running, or RevConflict) — decisions/00095/00096, see §8 |
+| GET | `media` | `get_media` | — | `{"media":[{name,url,contentSrc,source,sizeBytes,width,height,references:[...], stagedReplace?,stagedDelete?}]}` (a staged replacement's `url` serves the staged bytes from `/admin/draft-media-replace/<name>`); 503 |
+| POST | `media` | `upload_media` | `multipart/form-data` field `file` | `{name,url,contentSrc,source:"draft",sizeBytes,width,height,references:[]}`; **422** (MediaUpload) |
 | DELETE | `media/{name}` | `delete_media` | — | `{"deleted": true}` (draft upload) OR `{"stagedDelete": true}` (repo image — staged for the next publish); 503, 404, **409** (referenced) |
-| PUT | `media/{name}` | `replace_media` | raw image body (≤15MB, PIL-verified, re-encoded per project media config) | `{name,url:"/admin/draft-media-replace/<name>",sizeBytes,width,height,stagedReplace:true}`; 404 (no such image), **422** (MediaUpload) |
+| PUT | `media/{name}` | `replace_media` | raw image body (≤15MB, PIL-verified, re-encoded per project media config) | `{name,url:"/admin/draft-media-replace/<name>",contentSrc,sizeBytes,width,height,stagedReplace:true}`; 404 (no such image), **422** (MediaUpload) |
 | DELETE | `media-replace/{name}` | `unstage_replace_media` | — | `{"deleted": true}`; 404 (nothing staged) |
 | DELETE | `media-deletion/{name}` | `unstage_media_deletion_route` | — | `{"deleted": true}`; 404 (nothing staged) |
-| POST | `publish` | `start_publish` | `{"message":str, "expectedRev":int}` | `{"version":int, "sha":str}`; **409** (running/RevConflict), **422** (nothing to publish: no staged changes AND no upstream commits pending), **502** (Publish/Checkout/Build) |
+| POST | `publish` | `start_publish` | `{"message":str, "expectedRev":int}` | `{"version":int, "sha":str}`; **409** (running/RevConflict), **422** (two distinct causes — a blocked draft: `validate_merged_for_publish` fails preflight, same check the review drawer previews, decisions/00095; OR nothing to publish: no staged changes AND no upstream commits pending), **502** (Publish/Checkout/Build) |
+| POST | `report` | `post_report` | `{"context":str, "note":str\|null}` | `{"saved":true, "emailed":bool}` — always 200; a report is never "lost" over an SMTP hiccup (decisions/00096), see §8 |
 | GET | `publish/stream` | `publish_stream` | — | **SSE**, see §4 |
 | GET | `publish/preview` | `get_publish_preview` | — | `{"changes":{<fileKey>:[{key,kind,old,new}]}, "opCount":int (content ops + staged page adds/deletes), "validate":{ok:bool,errors:[<err>]}}`; 503 |
 | GET | `publishes?limit=` | `get_publishes` | query `limit?` | `{"publishes":[{...LedgerEntry, "live":bool}]}` newest-first; 503 |
@@ -182,6 +184,7 @@ static mounts → **public last**.
 | `CheckoutError` (`checkout.py`) | 503 (inside publish it is **wrapped** as `PublishError("pulling")` → 502, not raw) |
 | `BuildError` (`builder/errors.py`) | 404 (content/theme/preview/pages) / 502 (publish) |
 | `RevConflictError` (`overlay.py`) | 409 |
+| `DraftValidationError` (`draft_validate.py`) | 422 (`PATCH draft` only — `exc.summary`; the fuller `exc.details` is logged, not returned) |
 | `MediaUploadError` / `MediaNotFoundError` / `MediaReferencedError` (`media.py`) | 422 / 404 / 409 |
 | `PublishError` (`publisher.py`) | 502 |
 | `RestoreError` (`restore.py`) | 422 (admin) / 503 (versions asset, version diff) |
@@ -298,3 +301,48 @@ preview) are in [editor-and-admin-ui.md](editor-and-admin-ui.md).
   (`build_site`, `validate_site`, `render_page`, `load_site_source`, `SiteSource`, `Theme`, …).
 - **`live_cmd` pytest marker** — the one test needing a real local cmd (9320/9321); excluded
   by the default `addopts` (`-m "not live_cmd"`), run explicitly during deploy verification.
+
+## 8. Draft write gate, repair & report (decisions/00095, 00096)
+
+Three layers close the gap the 2026-07-28 gallery publish-corruption incident exposed — a
+structurally-broken overlay op could be written, and a blocked publish surfaced as a raw
+error dump with no recovery path. `wixy_server/draft_validate.py` is the shared core all
+three read from.
+
+- **The write gate** (`draft_validate.normalize_set_ops` → `check_structural`, run inside
+  `_apply_draft_patch` before `apply_patch`): every `SetOp` in a `PATCH draft` batch is first
+  silently NORMALIZED (leading-slash repo-image src rewritten to the relative form **iff** the
+  file exists — `rewrite_leading_slash_src`; an nbsp-only text placeholder collapsed to `""` —
+  mirrors `editor/src/contentModel.ts`'s `normalizeEmptyText`), then checked
+  STRUCTURALLY — type/required/properties/`additionalProperties` against
+  `builder/schemas/*.json` for a `COLLECTION_RULES` key (plus `treatments.sections`' `cards`
+  and `_global.footer.*`, the two nested shapes `builder.validate` also special-cases) —
+  **deliberately without `pattern`** (`jsonschema_lite.validate_against_schema`'s new
+  `skip_pattern=True`), so a freshly-added, not-yet-filled-in list item is still a valid draft
+  state. A violation raises `DraftValidationError` (`summary` + `details: tuple[str,...]`);
+  the whole batch is rejected, the overlay untouched — never a partial write.
+- **Publish preflight** (`start_publish`'s `_preflight`, before a job/lock exists) and the
+  **review-drawer preview** (`GET publish/preview`) both call `draft_validate.
+  validate_merged_for_publish(merged, paths)` — the FULL schema check, `pattern` included
+  (`builder/schemas/gallery-slider.schema.json` / `gallery-tile.schema.json` require every
+  image `src` to match `.*\S.*`, i.e. non-blank — the one field the incident's gutted items
+  had gone fully empty). Same function, so "the drawer showed it as publishable" and "publish
+  preflight agrees" can never drift.
+- **`POST draft/repair`** (`draft_repair.run_repair`) — deterministic, no AI. Re-normalizes
+  every existing op, then for a `COLLECTION_RULES` op repairs item-by-item against the FULL
+  schema (fill missing required fields from the base checkout's same-index item; else replace
+  the item with base; else drop it if there's no base counterpart) — a repaired array that
+  ends up identical to base is DISCARDED as a whole op, not left as a same-valued `SetOp`
+  (Inv 6: a later real upstream edit to that key must still flow through). A non-collection op
+  whose image ref still doesn't resolve after normalize is discarded outright. Returns
+  `actions` — plain-English sentences built from the page's own `meta.navLabel` (never a raw
+  field name, Inv 1) — and re-runs `validate_merged_for_publish` so the caller knows whether
+  the draft is now actually publishable or still needs the owner's Report path.
+- **`POST report`** (`reports.submit_report`) — gathers the current validate result, the raw
+  overlay, the last publish job snapshot, the live pointer, the last 5 ledger entries,
+  upstream-ahead commits, and the engine sha into one bundle, saves it unconditionally to
+  `Storage/projects/<slug>/reports/<UTC yyyymmddTHHMMSSZ>.json`, and best-effort emails it
+  (stdlib `smtplib` STARTTLS, `WIXY_REPORT_SMTP_*`/`WIXY_REPORT_EMAIL_*` env vars) — a send
+  failure is logged and reported as `emailed: false`, never raised (the save already
+  happened). `context` is a short caller-supplied tag (e.g. `"publish-blocked"`,
+  `"publish-failed"`), not validated against an enum.
