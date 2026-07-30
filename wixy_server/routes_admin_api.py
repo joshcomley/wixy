@@ -394,11 +394,29 @@ def _merged_source(project: ProjectConfig, paths: ProjectPaths) -> SiteSource:
     return merge_overlay(source, overlay)
 
 
+def _content_src_for(name: str, source: str) -> str:
+    """The form a picked image must be STORED as in content JSON — distinct from
+    `url` (a display/thumbnail URL, always safe as-is for the admin UI's own pages
+    and, thanks to preview.py's `<base href="/">`, for the live-preview iframe too).
+    `images/<name>` (repo) matches every existing hand-authored content value
+    (`builder/validate.py`'s image-existence check resolves it against the project
+    root); `/admin/draft-media/<name>` (draft upload) is already the form the
+    publish pipeline's `_rewrite_draft_media_refs` expects to find and rewrite.
+    Root cause C of the 2026-07-28 gallery publish-corruption incident
+    (decisions/00095): the picker previously handed back `url` itself, so a picked
+    repo image was stored as `/images/<name>` (LEADING SLASH) — a form
+    `builder/validate.py`'s `(project_root / src).exists()` reports as missing
+    (pathlib discards `project_root` for an absolute-looking rhs) even though the
+    file is right there."""
+    return f"images/{name}" if source == "repo" else f"/admin/draft-media/{name}"
+
+
 def _media_item(path: Path, url: str, source: str, references: dict[str, list[str]]) -> JsonObject:
     dims = image_dimensions(path)
     return {
         "name": path.name,
         "url": url,
+        "contentSrc": _content_src_for(path.name, source),
         "source": source,
         "sizeBytes": path.stat().st_size,
         "width": dims[0] if dims is not None else None,
@@ -466,6 +484,7 @@ def _save_upload(
     return {
         "name": processed.filename,
         "url": f"/admin/draft-media/{processed.filename}",
+        "contentSrc": _content_src_for(processed.filename, "draft"),
         "source": "draft",
         "sizeBytes": len(processed.content),
         "width": processed.width,
@@ -535,10 +554,16 @@ async def replace_media(name: str, request: Request) -> JsonObject:
     content_type = request.headers.get("content-type", "")
 
     def _stage() -> JsonObject:
+        # The target predates this call (stage_media_replacement 404s otherwise) —
+        # its OWN source (repo vs draft upload) decides the reference form, same
+        # as _list_media/_media_item; a replacement never changes which one a name
+        # is.
+        source = "repo" if (paths.repo / "images" / name).is_file() else "draft"
         processed = stage_media_replacement(paths, name, data, content_type, project.media)
         return {
             "name": name,
             "url": f"/admin/draft-media-replace/{name}",
+            "contentSrc": _content_src_for(name, source),
             "sizeBytes": len(processed.content),
             "width": processed.width,
             "height": processed.height,

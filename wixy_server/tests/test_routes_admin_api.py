@@ -884,6 +884,11 @@ class TestGetMedia:
         assert response.status_code == 200
         item = _find_media(response.json()["media"], "hero.jpg")
         assert item["url"] == "/images/hero.jpg"
+        # decisions/00095: the CONTENT-JSON form (no leading slash) — distinct
+        # from the display `url` above. This is what a picker must hand back as
+        # a value, never `url` (root cause C of the 2026-07-28 gallery
+        # publish-corruption incident).
+        assert item["contentSrc"] == "images/hero.jpg"
         assert item["source"] == "repo"
         assert item["sizeBytes"] == len(b"fake-jpeg-bytes")
         assert item["width"] is None  # the fixture's own bytes aren't a real image
@@ -899,6 +904,10 @@ class TestGetMedia:
             response = client.get("/api/admin/media")
         item = _find_media(response.json()["media"], "abc12345-new.jpg")
         assert item["url"] == "/admin/draft-media/abc12345-new.jpg"
+        # For a draft upload, contentSrc and url are the SAME value — both are
+        # already the form the publish pipeline's _rewrite_draft_media_refs
+        # expects to find and rewrite.
+        assert item["contentSrc"] == "/admin/draft-media/abc12345-new.jpg"
         assert item["source"] == "draft"
 
     def test_reports_real_dimensions_for_a_real_image(
@@ -1098,12 +1107,16 @@ class TestDeleteMedia:
             body = response.json()
             assert body["stagedReplace"] is True
             assert body["url"] == "/admin/draft-media-replace/hero.jpg"
+            # A staged replacement doesn't change what NAME the image is
+            # referenced by — still images/hero.jpg (decisions/00095).
+            assert body["contentSrc"] == "images/hero.jpg"
             grid = client.get("/api/admin/media")
             staged = client.get("/admin/draft-media-replace/hero.jpg")
         assert (paths.draft_media_replace / "hero.jpg").exists()
         hero = next(item for item in grid.json()["media"] if item["name"] == "hero.jpg")
         assert hero["stagedReplace"] is True
         assert hero["url"] == "/admin/draft-media-replace/hero.jpg"
+        assert hero["contentSrc"] == "images/hero.jpg"
         assert staged.status_code == 200
         assert staged.content.startswith(bytes([0xFF, 0xD8]))
 

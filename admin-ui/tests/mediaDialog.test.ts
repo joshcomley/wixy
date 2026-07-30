@@ -51,6 +51,7 @@ function fakeWin(): Window {
 const REPO_ITEM: MediaItem = {
   name: "hero.jpg",
   url: "/images/hero.jpg",
+  contentSrc: "images/hero.jpg",
   source: "repo",
   sizeBytes: 204_800,
   width: 1200,
@@ -61,6 +62,7 @@ const REPO_ITEM: MediaItem = {
 const UNREFERENCED_DRAFT_ITEM: MediaItem = {
   name: "a1b2c3d4-new.jpg",
   url: "/admin/draft-media/a1b2c3d4-new.jpg",
+  contentSrc: "/admin/draft-media/a1b2c3d4-new.jpg",
   source: "draft",
   sizeBytes: 51_200,
   width: 600,
@@ -336,6 +338,27 @@ describe("renderMediaGrid (pick mode, onPick provided)", () => {
     });
   });
 
+  it("picking a REPO image sends contentSrc, never the display url (decisions/00095)", async () => {
+    // The exact regression this incident's root cause C fixed: url and
+    // contentSrc differ for a repo image (leading slash vs relative) — a picked
+    // repo image must be stored in the content-JSON form, not the display path.
+    const api = fakeApi({ getMedia: vi.fn(async () => [REPO_ITEM]) });
+    const onPick = vi.fn();
+    const grid = renderMediaGrid({ api, win: fakeWin(), onPick });
+    await flush();
+
+    grid.element.querySelector<HTMLButtonElement>(".wx-media-thumb")?.click();
+    const confirmButton = Array.from(grid.element.querySelectorAll("button")).find(
+      (b) => b.textContent === "Use this image",
+    );
+    confirmButton?.click();
+
+    expect(REPO_ITEM.url).not.toBe(REPO_ITEM.contentSrc); // sanity: they really differ
+    expect(onPick).toHaveBeenCalledWith(
+      expect.objectContaining({ src: "images/hero.jpg" }),
+    );
+  });
+
   it("Confirm is disabled on empty alt unless Decorative is checked, which then forces alt to empty", async () => {
     const api = fakeApi({ getMedia: vi.fn(async () => [UNREFERENCED_DRAFT_ITEM]) });
     const onPick = vi.fn();
@@ -360,7 +383,7 @@ describe("renderMediaGrid (pick mode, onPick provided)", () => {
     expect(confirmButton.disabled).toBe(false);
 
     confirmButton.click();
-    expect(onPick).toHaveBeenCalledWith({ src: UNREFERENCED_DRAFT_ITEM.url, alt: "" });
+    expect(onPick).toHaveBeenCalledWith({ src: UNREFERENCED_DRAFT_ITEM.contentSrc, alt: "" });
   });
 
   it("Back returns to the grid without picking", async () => {

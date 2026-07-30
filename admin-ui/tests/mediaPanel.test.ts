@@ -23,6 +23,7 @@ describe("mountMediaPanel", () => {
         {
           name: "hero.jpg",
           url: "/images/hero.jpg",
+          contentSrc: "images/hero.jpg",
           source: "repo" as const,
           sizeBytes: 100,
           width: 10,

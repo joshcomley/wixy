@@ -224,10 +224,21 @@ export interface ContentResponse {
  * present for a real file on disk; `references` lists the content keys (outermost
  * granularity) using it; `stagedReplace`/`stagedDelete` mark publish-pending
  * changes (decisions/00080) — a staged replacement's `url` already serves the
- * new bytes from the staging area. */
+ * new bytes from the staging area.
+ *
+ * `url` and `contentSrc` are deliberately different fields (decisions/00095):
+ * `url` is a DISPLAY path — always safe to drop into an `<img src>` on an admin-ui
+ * page or (thanks to preview.py's `<base href="/">`) inside the live-preview
+ * iframe. `contentSrc` is the form a picked image must be STORED as in content
+ * JSON — `images/<name>` for a repo image (what every hand-authored content value
+ * and `builder/validate.py`'s existence check expect), `/admin/draft-media/<name>`
+ * for a draft upload (already the form the publish pipeline rewrites). Picking
+ * `url` as a content value was root cause C of the 2026-07-28 gallery
+ * publish-corruption incident. */
 export interface MediaItem {
   name: string;
   url: string;
+  contentSrc: string;
   source: "repo" | "draft";
   sizeBytes: number;
   width: number | null;
