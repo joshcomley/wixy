@@ -1004,6 +1004,17 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
             refreshThumbnailsForOps(ops);
           },
           onError: () => showTransientToast("Couldn't save your last change — retrying…"),
+          // decisions/00095: the server permanently rejected this batch (the
+          // draft-write gate) — retrying is pointless, and the live preview's
+          // DOM may now disagree with the real draft (the rejected edit is
+          // still sitting there visually, un-saved). A calm, generic toast
+          // (never the technical detail — that's in the server log for the
+          // operator) plus a genuine reload reconverges the DOM with the
+          // server's actual state, exactly like any other hard reload does.
+          onRejected: () => {
+            showTransientToast("That change couldn't be saved — refreshing the page preview.");
+            if (activeRoute?.kind === "edit") activeEditView?.reload();
+          },
         });
       }
       renderTopBar();

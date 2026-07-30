@@ -112,6 +112,47 @@ describe("OpQueue", () => {
     expect(queue.pendingCount).toBe(0);
   });
 
+  it("drops (never re-queues) a batch the server structurally rejects (decisions/00095)", async () => {
+    const sendPatch = vi
+      .fn<(rev: number, ops: DraftOp[]) => Promise<PatchResult>>()
+      .mockResolvedValueOnce({ kind: "rejected", message: "doesn't match the expected shape" });
+    const onRejected = vi.fn();
+    const onAccepted = vi.fn();
+    const queue = new OpQueue(3, { sendPatch, fetchCurrentRev: vi.fn(), onRejected, onAccepted });
+
+    queue.enqueue(op("hero.title", "A"));
+    await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS);
+
+    // Unlike a 409 conflict, retrying a 422 can only loop forever — the batch
+    // must be gone, not sitting in the queue for the next flush to resend.
+    expect(queue.pendingCount).toBe(0);
+    expect(onRejected).toHaveBeenCalledWith(
+      [op("hero.title", "A")],
+      "doesn't match the expected shape",
+    );
+    expect(onAccepted).not.toHaveBeenCalled();
+    // The batch never actually landed — the rev the queue believes is live
+    // must not change.
+    expect(queue.rev).toBe(3);
+  });
+
+  it("a rejected batch does not block a later, independent batch from flushing", async () => {
+    const sendPatch = vi
+      .fn<(rev: number, ops: DraftOp[]) => Promise<PatchResult>>()
+      .mockResolvedValueOnce({ kind: "rejected", message: "bad shape" })
+      .mockResolvedValueOnce({ kind: "ok", rev: 1 });
+    const queue = new OpQueue(0, { sendPatch, fetchCurrentRev: vi.fn(), onRejected: vi.fn() });
+
+    queue.enqueue(op("hero.title", "A"));
+    await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS);
+    queue.enqueue(op("hero.tag", "B"));
+    await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS);
+
+    expect(sendPatch).toHaveBeenCalledTimes(2);
+    expect(sendPatch).toHaveBeenNthCalledWith(2, 0, [op("hero.tag", "B")]);
+    expect(queue.rev).toBe(1);
+  });
+
   it("flushNow sends immediately without waiting for the coalesce delay", async () => {
     const sendPatch = vi.fn(async (): Promise<PatchResult> => ({ kind: "ok", rev: 1 }));
     const queue = new OpQueue(0, { sendPatch, fetchCurrentRev: vi.fn() });

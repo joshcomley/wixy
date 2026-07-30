@@ -256,7 +256,13 @@ export interface ThemeData {
   fonts: Record<string, FontSpec>;
 }
 
-export type PatchResult = { kind: "ok"; rev: number } | { kind: "conflict" };
+/** `"rejected"` is the draft-write gate's 422 (decisions/00095) — a batch the
+ * server can never accept as-is, distinct from `"conflict"`'s 409 (a stale
+ * rev, fixed by refetching and retrying the SAME ops). */
+export type PatchResult =
+  | { kind: "ok"; rev: number }
+  | { kind: "conflict" }
+  | { kind: "rejected"; message: string };
 
 /** `POST .../messages`'s response — `buffered: true` while the conversation
  * is still provisioning (spec/06 §1: cmd buffers the send itself; the
@@ -447,6 +453,14 @@ export function createApi(): AdminApi {
         body: JSON.stringify({ expectedRev, ops }),
       });
       if (response.status === 409) return { kind: "conflict" };
+      if (response.status === 422) {
+        // The draft-write gate rejected this batch (decisions/00095) — not
+        // retryable, the opQueue drops it rather than looping forever.
+        return {
+          kind: "rejected",
+          message: await extractDetail(response, "that change couldn't be saved"),
+        };
+      }
       const body = await parseJson<{ rev: number }>(response);
       return { kind: "ok", rev: body.rev };
     },

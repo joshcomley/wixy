@@ -105,6 +105,13 @@ export interface EditViewCore {
    * right after `onOverlayNavigated` fires and the shell's own router re-enters
    * here in response to its own hash update. */
   setPage(page: string): void;
+  /** Force a genuine reload of the CURRENT page, unlike `setPage` (which
+   * no-ops when the target equals `currentPage`) — the opQueue's `onRejected`
+   * path needs exactly this: a rejected op means the live DOM may have
+   * diverged from the real draft, and the only honest fix is to re-fetch the
+   * server's actual rendering (spec/05 §2: "a hard iframe reload always
+   * reconverges — server render is the same merge"). */
+  reload(): void;
   readonly currentPage: string;
 }
 
@@ -165,6 +172,10 @@ export function createEditViewCore(initialPage: string, deps: EditViewCoreDeps):
       loadToken += 1;
       deps.loadPage(page);
     },
+    reload(): void {
+      loadToken += 1;
+      deps.loadPage(currentPage);
+    },
     get currentPage(): string {
       return currentPage;
     },
@@ -174,6 +185,9 @@ export function createEditViewCore(initialPage: string, deps: EditViewCoreDeps):
 export interface EditView {
   readonly element: HTMLElement;
   setPage(page: string): void;
+  /** See `EditViewCore.reload` — forces a genuine iframe reload of the
+   * current page. */
+  reload(): void;
   /** Forward a server-accepted batch to the overlay as `applyOps` (spec/05 §2:
    * "echo after server accept") — a no-op if this view has since been torn down
    * or navigated to a different iframe document; the overlay ignores stale
@@ -390,6 +404,7 @@ export function mountEditView(page: string, deps: MountEditViewDeps): EditView {
   return {
     element: root,
     setPage: (nextPage) => core.setPage(nextPage),
+    reload: () => core.reload(),
     applyOps: (ops) => postToOverlay({ wx: 1, type: "applyOps", ops }),
     postMessage: (message) => postToOverlay(message),
     teardown(): void {

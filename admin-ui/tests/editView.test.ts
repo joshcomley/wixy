@@ -126,6 +126,39 @@ describe("createEditViewCore", () => {
     expect(loaded).toEqual([]);
   });
 
+  it("reload always calls loadPage with the current page, unlike setPage", () => {
+    // The opQueue onRejected path (decisions/00095) needs exactly this: a
+    // rejected op means the live DOM may have diverged from the real draft,
+    // so a reload must never no-op just because the target is the same page.
+    const { core, loaded } = harness();
+    core.reload();
+    expect(loaded).toEqual(["about"]);
+    core.reload();
+    expect(loaded).toEqual(["about", "about"]);
+  });
+
+  it("reload supersedes an in-flight ready's content fetch, same as setPage", async () => {
+    const deferred: { resolve: (value: ContentResponse) => void } = {
+      resolve: () => {
+        throw new Error("resolve not yet assigned");
+      },
+    };
+    const contentPromise = new Promise<ContentResponse>((resolve) => {
+      deferred.resolve = resolve;
+    });
+    const api = fakeApi({ getContent: vi.fn(() => contentPromise) });
+    const { core, sent } = harness({ api });
+
+    core.handleMessage({ wx: 1, type: "ready" });
+    core.reload();
+
+    deferred.resolve({ content: {}, bindings: BINDINGS });
+    await contentPromise;
+    await Promise.resolve();
+
+    expect(sent).toEqual([]);
+  });
+
   it("a ready superseded by a later navigation before its content fetch resolves does not send a stale init", async () => {
     const deferred: { resolve: (value: ContentResponse) => void } = {
       resolve: () => {

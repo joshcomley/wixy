@@ -48,6 +48,7 @@ function fakeMountEditView(): {
     return {
       element: fake.element,
       setPage: () => {},
+      reload: () => {},
       applyOps: () => {},
       postMessage: (message) => fake.posted.push(message),
       teardown: () => {
