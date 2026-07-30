@@ -86,7 +86,13 @@ def _normalize_empty_text(value: str) -> str:
     return "" if _EMPTY_TEXT_RE.match(value) else value
 
 
-def _rewrite_leading_slash_src(src: str, repo_root: Path) -> str:
+def rewrite_leading_slash_src(src: str, repo_root: Path) -> str:
+    """`/images/<name>` -> `images/<name>` when that file genuinely exists,
+    else unchanged. Public (not `_`-prefixed): shared with
+    `wixy_server.publisher._rewrite_draft_media_refs`, which applies the same
+    rule at MATERIALIZE time — belt-and-braces for an overlay op that predates
+    this gate (or any future bug) reaching all the way to publish still
+    unnormalized."""
     match = _LEADING_SLASH_IMAGES_RE.match(src)
     if match is None:
         return src
@@ -101,7 +107,7 @@ def _normalize_value(value: JsonValue, repo_root: Path) -> JsonValue:
     if isinstance(value, dict):
         src = value.get("src")
         if isinstance(src, str) and set(value.keys()) <= _IMAGE_OBJECT_KEYS:
-            out: dict[str, JsonValue] = {**value, "src": _rewrite_leading_slash_src(src, repo_root)}
+            out: dict[str, JsonValue] = {**value, "src": rewrite_leading_slash_src(src, repo_root)}
             alt = value.get("alt")
             if isinstance(alt, str):
                 out["alt"] = _normalize_empty_text(alt)

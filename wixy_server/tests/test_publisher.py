@@ -470,6 +470,41 @@ class TestMediaMove:
         assert content["showcase"]["items"][0]["img"]["src"] == "images/efgh5678-item.jpg"
         assert (paths.repo / "images" / "efgh5678-item.jpg").exists()
 
+    def test_a_leading_slash_repo_image_ref_is_normalized_at_materialize(
+        self, project: ProjectConfig, paths: ProjectPaths
+    ) -> None:
+        """decisions/00095 belt-and-braces: the draft-write gate normalizes
+        this at PATCH time now, but materialize applies the same rule too —
+        for an overlay op that predates the gate, or any future bug that
+        still lets one through. `hero.jpg` is a real, already-published file
+        in the fixture (_write_site_files) — the exact "picked an EXISTING
+        repo image" shape that broke the live ogImage pick in the incident."""
+        save_overlay(
+            paths.draft_overlay,
+            _make_overlay({"index:hero.bg": {"src": "/images/hero.jpg", "alt": "Hero"}}),
+        )
+
+        run_publish(project, paths, message="fix ogImage", expected_rev=0, now=_TS, job=_new_job())
+
+        content = json.loads((paths.repo / "content" / "index.json").read_text(encoding="utf-8"))
+        assert content["hero"]["bg"]["src"] == "images/hero.jpg"
+
+    def test_a_leading_slash_ref_to_a_nonexistent_image_is_left_alone(
+        self, project: ProjectConfig, paths: ProjectPaths
+    ) -> None:
+        """Never invent a reference to a file that isn't there — this is a
+        real validate-time (missing-image) error to surface, not paper over,
+        and the unmodified `/images/...` form still fails that check the
+        exact same way it always did."""
+        save_overlay(
+            paths.draft_overlay,
+            _make_overlay({"index:hero.bg": {"src": "/images/nope.jpg", "alt": "x"}}),
+        )
+
+        with pytest.raises(PublishError) as exc_info:
+            run_publish(project, paths, message="bad", expected_rev=0, now=_TS, job=_new_job())
+        assert exc_info.value.stage == "merging"
+
     def test_a_validate_failure_leaves_the_staged_draft_file_in_place(
         self, project: ProjectConfig, paths: ProjectPaths
     ) -> None:

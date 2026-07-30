@@ -29,7 +29,7 @@ from starlette.responses import Response
 from builder.bindings_map import bindings_map_to_dict, extract_bindings_map
 from builder.config import ProjectConfig
 from builder.content import dotted_get, scan_image_refs
-from builder.errors import BuildError
+from builder.errors import BuildError, ValidationResult
 from builder.jsontypes import JsonObject, JsonValue
 from builder.render import SiteSource
 from builder.theme import theme_to_dict
@@ -688,6 +688,29 @@ async def start_publish(body: PublishIn, request: Request) -> JsonObject:
         overlay = load_overlay(paths.draft_overlay, default_base_sha=base_sha)
         if overlay.rev != body.expectedRev:
             raise RevConflictError(body.expectedRev, overlay.rev)
+
+        # decisions/00095: never even START the pipeline against a draft the
+        # owner's own review drawer would show as blocked — the exact same
+        # check GET publish/preview runs (_validate_merged_for_publish), so
+        # "looked publishable" and "is publishable" can never drift. Before
+        # this, a bad draft reached _materialize_locked's own validate_site
+        # call deep inside the pipeline and surfaced as a raw PublishError/502
+        # (the incident's own symptom) instead of this calm 422. Skipped
+        # entirely with no checkout yet, same reasoning as the nothing-to-
+        # publish guard below — deliberately NOT a fresh ensure_checkout
+        # first: this must see exactly what the drawer showed the owner, not
+        # a newer upstream state that might disagree with it.
+        if (paths.repo / ".git").exists():
+            source = build_site_source(project, paths.repo)
+            merged = merge_overlay(source, overlay)
+            if not _validate_merged_for_publish(merged, paths).ok:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "The site's content has a problem that needs fixing before it can publish."
+                    ),
+                )
+
         if overlay.ops or overlay.pages_added or overlay.pages_deleted:
             return  # something staged — always publishable
         staging = media_staging(paths)
@@ -845,6 +868,26 @@ def _staged_image_keys(source: SiteSource, paths: ProjectPaths) -> set[tuple[str
     return keys
 
 
+def _validate_merged_for_publish(merged: SiteSource, paths: ProjectPaths) -> ValidationResult:
+    """`validate_site`'s result with the staged-draft-upload false-positive
+    `missing-image` errors filtered out (`_staged_image_keys`) — shared by the
+    publish preview (`GET publish/preview`, the review drawer's own check) and
+    the publish preflight (`POST publish`'s `_preflight`, below) so the two
+    can never drift on what counts as "ready to publish" (decisions/00095:
+    before this, only the preview ran this check — a publish attempt against
+    known-bad content reached `_materialize_locked`'s `validate_site` call and
+    surfaced as a raw `PublishError`/502, not the calm blocked state the
+    drawer shows for the exact same problem)."""
+    validate_result = validate_site(merged, paths.repo)
+    safe_image_keys = _staged_image_keys(merged, paths)
+    filtered_errors = [
+        e
+        for e in validate_result.errors
+        if not (e.code == "missing-image" and (e.file, e.key) in safe_image_keys)
+    ]
+    return ValidationResult(errors=filtered_errors)
+
+
 def _build_publish_preview(
     project: ProjectConfig, paths: ProjectPaths, overlay: Overlay
 ) -> JsonObject:
@@ -863,13 +906,7 @@ def _build_publish_preview(
         entry: JsonObject = {"key": dotted_path, "kind": kind, "old": old_value, "new": op.value}
         changes.setdefault(file_key, []).append(entry)
 
-    validate_result = validate_site(merged, paths.repo)
-    safe_image_keys = _staged_image_keys(merged, paths)
-    filtered_errors = [
-        e
-        for e in validate_result.errors
-        if not (e.code == "missing-image" and (e.file, e.key) in safe_image_keys)
-    ]
+    validate_result = _validate_merged_for_publish(merged, paths)
 
     # Staged media changes are publishable changes too (decisions/00080) —
     # they produce no content ops, so without this a pure media-replacement
@@ -892,8 +929,8 @@ def _build_publish_preview(
         + len(media_changes["replaced"])
         + len(media_changes["deleted"]),
         "validate": {
-            "ok": not filtered_errors,
-            "errors": [{k: v for k, v in e.to_dict().items()} for e in filtered_errors],
+            "ok": validate_result.ok,
+            "errors": [{k: v for k, v in e.to_dict().items()} for e in validate_result.errors],
         },
     }
 

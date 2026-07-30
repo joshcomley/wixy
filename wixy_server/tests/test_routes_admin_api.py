@@ -1363,6 +1363,74 @@ class TestPostPublish:
         assert response.json()["version"] == 1
 
 
+class TestPostPublishPreflightValidate:
+    """decisions/00095: a publish attempt against a draft the review drawer
+    would already show as blocked must get the same calm 422 the drawer
+    shows, not reach _materialize_locked's own validate_site call deep
+    inside the pipeline (a raw PublishError/502 — the incident's own
+    symptom)."""
+
+    def test_a_missing_image_reference_blocks_publish_with_a_calm_422(
+        self, storage_root: Path, wixy_repo_root_with_image_binding: Path
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root_with_image_binding
+        )
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [
+                        {
+                            "file": "index",
+                            "path": "hero.bg",
+                            "value": {"src": "images/does-not-exist.jpg", "alt": "x"},
+                        }
+                    ],
+                },
+            )
+            # The review drawer would already show this as blocked.
+            preview = client.get("/api/admin/publish/preview").json()
+            response = client.post(
+                "/api/admin/publish",
+                json={"message": "test", "expectedRev": _current_rev(client)},
+            )
+            ledger = client.get("/api/admin/publishes").json()["publishes"]
+        assert preview["validate"]["ok"] is False
+        assert response.status_code == 422
+        assert response.json()["detail"] == (
+            "The site's content has a problem that needs fixing before it can publish."
+        )
+        # The pipeline never even started — no job, no ledger entry, draft intact.
+        assert [p["version"] for p in ledger] == [0]
+
+    def test_a_publishable_draft_the_preview_shows_ok_is_not_blocked(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        """'looked publishable' and 'is publishable' can never drift — a
+        preview reporting ok:true must mean the preflight lets it through.
+        A BARE origin (unlike wixy_repo_root_with_image_binding above, whose
+        non-bare origin can't receive the push a real publish needs — that
+        fixture exists for preview/validate-read tests only)."""
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [{"file": "index", "path": "hero.title", "value": "Real change"}],
+                },
+            )
+            preview = client.get("/api/admin/publish/preview").json()
+            response = client.post(
+                "/api/admin/publish",
+                json={"message": "test", "expectedRev": _current_rev(client)},
+            )
+        assert preview["validate"]["ok"] is True
+        assert response.status_code == 200
+
+
 class TestPublishStream:
     def test_with_no_job_emits_a_null_stage_event_and_closes(
         self, storage_root: Path, wixy_repo_root: Path
