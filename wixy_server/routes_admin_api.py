@@ -28,12 +28,11 @@ from starlette.responses import Response
 
 from builder.bindings_map import bindings_map_to_dict, extract_bindings_map
 from builder.config import ProjectConfig
-from builder.content import dotted_get, scan_image_refs
-from builder.errors import BuildError, ValidationResult
+from builder.content import dotted_get
+from builder.errors import BuildError
 from builder.jsontypes import JsonObject, JsonValue
 from builder.render import SiteSource
 from builder.theme import theme_to_dict
-from builder.validate import validate_site
 from wixy_server.chats import ChatConversation, ChatRuntimeEntry, conversation_summary, load_chats
 from wixy_server.checkout import (
     CheckoutError,
@@ -42,8 +41,14 @@ from wixy_server.checkout import (
     current_sha,
     ensure_checkout,
 )
+from wixy_server.draft_repair import RepairResult, run_repair
 from wixy_server.draft_sanitize import sanitize_set_ops
-from wixy_server.draft_validate import DraftValidationError, check_structural, normalize_set_ops
+from wixy_server.draft_validate import (
+    DraftValidationError,
+    check_structural,
+    normalize_set_ops,
+    validate_merged_for_publish,
+)
 from wixy_server.ledger import read_ledger
 from wixy_server.live_pointer import load_live_pointer
 from wixy_server.media import (
@@ -691,7 +696,7 @@ async def start_publish(body: PublishIn, request: Request) -> JsonObject:
 
         # decisions/00095: never even START the pipeline against a draft the
         # owner's own review drawer would show as blocked — the exact same
-        # check GET publish/preview runs (_validate_merged_for_publish), so
+        # check GET publish/preview runs (validate_merged_for_publish), so
         # "looked publishable" and "is publishable" can never drift. Before
         # this, a bad draft reached _materialize_locked's own validate_site
         # call deep inside the pipeline and surfaced as a raw PublishError/502
@@ -703,7 +708,7 @@ async def start_publish(body: PublishIn, request: Request) -> JsonObject:
         if (paths.repo / ".git").exists():
             source = build_site_source(project, paths.repo)
             merged = merge_overlay(source, overlay)
-            if not _validate_merged_for_publish(merged, paths).ok:
+            if not validate_merged_for_publish(merged, paths).ok:
                 raise HTTPException(
                     status_code=422,
                     detail=(
@@ -844,49 +849,6 @@ async def get_publish_version_diff(version: int, request: Request) -> JsonObject
 # draft diff + validate result, spec/05 §5's "review drawer")
 # ---------------------------------------------------------------------------
 
-_DRAFT_MEDIA_URL_PREFIX = "/admin/draft-media/"
-
-
-def _staged_image_keys(source: SiteSource, paths: ProjectPaths) -> set[tuple[str, str]]:
-    """`(file_label, dotted_key)` pairs whose image ref points at a currently
-    staged (not-yet-published) draft upload that genuinely exists on disk —
-    `validate_site`'s own image-existence check (`(project_root / src).
-    exists()`) always false-positives on these: `src` is `/admin/draft-media/
-    <name>` and an absolute-looking rhs wins pathlib's `/` operator, discarding
-    `project_root` entirely, even though the file is a perfectly legitimate
-    about-to-be-published upload. Mirrors `builder.validate._validate_images`'s
-    own traversal exactly, so its errors can be filtered by these same keys."""
-    all_content: dict[str, JsonObject] = {**source.page_contents, "_global": source.global_content}
-    keys: set[tuple[str, str]] = set()
-    for slug, content in all_content.items():
-        file_label = "content/_global.json" if slug == "_global" else f"content/{slug}.json"
-        for key_path, src in scan_image_refs(content):
-            if src.startswith(_DRAFT_MEDIA_URL_PREFIX):
-                name = src[len(_DRAFT_MEDIA_URL_PREFIX) :]
-                if (paths.draft_media / name).is_file():
-                    keys.add((file_label, key_path))
-    return keys
-
-
-def _validate_merged_for_publish(merged: SiteSource, paths: ProjectPaths) -> ValidationResult:
-    """`validate_site`'s result with the staged-draft-upload false-positive
-    `missing-image` errors filtered out (`_staged_image_keys`) — shared by the
-    publish preview (`GET publish/preview`, the review drawer's own check) and
-    the publish preflight (`POST publish`'s `_preflight`, below) so the two
-    can never drift on what counts as "ready to publish" (decisions/00095:
-    before this, only the preview ran this check — a publish attempt against
-    known-bad content reached `_materialize_locked`'s `validate_site` call and
-    surfaced as a raw `PublishError`/502, not the calm blocked state the
-    drawer shows for the exact same problem)."""
-    validate_result = validate_site(merged, paths.repo)
-    safe_image_keys = _staged_image_keys(merged, paths)
-    filtered_errors = [
-        e
-        for e in validate_result.errors
-        if not (e.code == "missing-image" and (e.file, e.key) in safe_image_keys)
-    ]
-    return ValidationResult(errors=filtered_errors)
-
 
 def _build_publish_preview(
     project: ProjectConfig, paths: ProjectPaths, overlay: Overlay
@@ -906,7 +868,7 @@ def _build_publish_preview(
         entry: JsonObject = {"key": dotted_path, "kind": kind, "old": old_value, "new": op.value}
         changes.setdefault(file_key, []).append(entry)
 
-    validate_result = _validate_merged_for_publish(merged, paths)
+    validate_result = validate_merged_for_publish(merged, paths)
 
     # Staged media changes are publishable changes too (decisions/00080) —
     # they produce no content ops, so without this a pure media-replacement
@@ -948,6 +910,46 @@ async def get_publish_preview(request: Request) -> JsonObject:
         return await anyio.to_thread.run_sync(_build)
     except CheckoutError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# POST /api/admin/draft/repair (decisions/00095) — the review drawer's
+# "Fix it for me" button when the blocked state shows.
+# ---------------------------------------------------------------------------
+
+
+class DraftRepairIn(BaseModel):
+    expectedRev: int
+
+
+@router.post("/draft/repair", response_model=None)
+async def post_draft_repair(body: DraftRepairIn, request: Request) -> JsonObject:
+    project: ProjectConfig = request.app.state.project
+    paths: ProjectPaths = request.app.state.paths
+    by = _current_author(request)
+    publish_job: PublishJob | None = request.app.state.publish_job
+    if publish_job is not None and publish_job.is_running:
+        raise HTTPException(status_code=409, detail="a publish is currently running")
+
+    now = datetime.now(UTC).isoformat()
+
+    def _run() -> RepairResult:
+        return run_repair(project, paths, expected_rev=body.expectedRev, by=by, now=now)
+
+    try:
+        result = await anyio.to_thread.run_sync(_run)
+    except CheckoutError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except RevConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "rev": result.rev,
+        "actions": list(result.actions),
+        "validate": {
+            "ok": result.validate.ok,
+            "errors": [{k: v for k, v in e.to_dict().items()} for e in result.validate.errors],
+        },
+    }
 
 
 # ---------------------------------------------------------------------------

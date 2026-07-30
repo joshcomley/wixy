@@ -1839,6 +1839,88 @@ class TestPostRestore:
         assert response.status_code == 409
 
 
+class TestPostDraftRepair:
+    """decisions/00095 — the review drawer's "Fix it for me" button. The
+    collection item-repair ALGORITHM has dedicated, isolated coverage in
+    test_draft_repair.py; these are route-wiring tests (auth/shape/guards)."""
+
+    def test_a_clean_draft_repairs_to_no_actions_and_stays_ok(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [{"file": "index", "path": "hero.title", "value": "A fine edit"}],
+                },
+            )
+            response = client.post(
+                "/api/admin/draft/repair", json={"expectedRev": _current_rev(client)}
+            )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["actions"] == []
+        assert body["validate"] == {"ok": True, "errors": []}
+        assert isinstance(body["rev"], int)
+
+    def test_an_unresolvable_image_ref_is_discarded_and_reported_as_an_action(
+        self, storage_root: Path, wixy_repo_root_with_image_binding: Path
+    ) -> None:
+        """A non-collection op (`hero.bg`) whose src can never resolve (no
+        leading slash even — normalize alone can't help) is discarded
+        outright, reverting the key to base — which IS valid, so the whole
+        draft ends up clean."""
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root_with_image_binding
+        )
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [
+                        {
+                            "file": "index",
+                            "path": "hero.bg",
+                            "value": {"src": "images/does-not-exist.jpg", "alt": "x"},
+                        }
+                    ],
+                },
+            )
+            assert client.get("/api/admin/publish/preview").json()["validate"]["ok"] is False
+            response = client.post(
+                "/api/admin/draft/repair", json={"expectedRev": _current_rev(client)}
+            )
+            preview_after = client.get("/api/admin/publish/preview").json()
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body["actions"]) == 1
+        assert body["validate"]["ok"] is True
+        assert preview_after["validate"]["ok"] is True
+        assert preview_after["changes"] == {}  # reverted to base — nothing staged anymore
+
+    def test_a_stale_expected_rev_is_409(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            response = client.post("/api/admin/draft/repair", json={"expectedRev": 99})
+        assert response.status_code == 409
+
+    def test_409s_while_a_publish_is_running(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            app.state.publish_job = PublishJob(id="already-running", stage="building")
+            response = client.post(
+                "/api/admin/draft/repair", json={"expectedRev": _current_rev(client)}
+            )
+        assert response.status_code == 409
+
+
 class TestGetVersionAsset:
     def test_serves_an_archived_page_faithfully(
         self, storage_root: Path, wixy_repo_root_bare: Path

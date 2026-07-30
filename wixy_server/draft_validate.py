@@ -42,16 +42,21 @@ import re
 from pathlib import Path
 
 from builder.collections import COLLECTION_RULES, FOOTER_KEY, TREATMENTS_SECTIONS_PATH
-from builder.content import load_json_object
+from builder.content import load_json_object, scan_image_refs
+from builder.errors import ValidationResult
 from builder.jsonschema_lite import validate_against_schema
 from builder.jsontypes import JsonObject, JsonValue
+from builder.render import SiteSource
+from builder.validate import validate_site
 from wixy_server.overlay import SetOp
+from wixy_server.storage import ProjectPaths
 
 _SCHEMAS_DIR = Path(__file__).parent.parent / "builder" / "schemas"
 _schema_cache: dict[str, JsonObject] = {}
+_DRAFT_MEDIA_URL_PREFIX = "/admin/draft-media/"
 
 
-def _load_schema(name: str) -> JsonObject:
+def load_schema(name: str) -> JsonObject:
     if name not in _schema_cache:
         _schema_cache[name] = load_json_object(_SCHEMAS_DIR / f"{name}.schema.json")
     return _schema_cache[name]
@@ -140,7 +145,7 @@ _COLLECTION_SCHEMA_BY_KEY: dict[tuple[str, str], str] = {
 def _structural_array_errors(value: JsonValue, schema_name: str, label: str) -> list[str]:
     if not isinstance(value, list):
         return [f"{label}: expected an array, got {type(value).__name__}"]
-    schema = _load_schema(schema_name)
+    schema = load_schema(schema_name)
     errors: list[str] = []
     for index, item in enumerate(value):
         errors.extend(
@@ -202,3 +207,55 @@ def check_structural(ops: list[SetOp]) -> None:
     named = sorted_paths[0] if len(sorted_paths) == 1 else "one of these changes"
     summary = f"{named} doesn't match the site's expected content structure."
     raise DraftValidationError(summary, details)
+
+
+# ---------------------------------------------------------------------------
+# Full-schema validate (publish preview + preflight + repair) — a THIRD tier,
+# above normalize/structural: the complete builder.validate.validate_site
+# result (every check, including `pattern`), with one server-only false
+# positive filtered out. Lives here (not routes_admin_api.py) so
+# wixy_server.draft_repair can reuse it too without importing the routes
+# module (which imports draft_repair — a cycle).
+# ---------------------------------------------------------------------------
+
+
+def staged_image_keys(source: SiteSource, paths: ProjectPaths) -> set[tuple[str, str]]:
+    """`(file_label, dotted_key)` pairs whose image ref points at a currently
+    staged (not-yet-published) draft upload that genuinely exists on disk —
+    `validate_site`'s own image-existence check (`(project_root / src).
+    exists()`) always false-positives on these: `src` is `/admin/draft-media/
+    <name>` and an absolute-looking rhs wins pathlib's `/` operator, discarding
+    `project_root` entirely, even though the file is a perfectly legitimate
+    about-to-be-published upload. Mirrors `builder.validate._validate_images`'s
+    own traversal exactly, so its errors can be filtered by these same keys."""
+    all_content: dict[str, JsonObject] = {**source.page_contents, "_global": source.global_content}
+    keys: set[tuple[str, str]] = set()
+    for slug, content in all_content.items():
+        file_label = "content/_global.json" if slug == "_global" else f"content/{slug}.json"
+        for key_path, src in scan_image_refs(content):
+            if src.startswith(_DRAFT_MEDIA_URL_PREFIX):
+                name = src[len(_DRAFT_MEDIA_URL_PREFIX) :]
+                if (paths.draft_media / name).is_file():
+                    keys.add((file_label, key_path))
+    return keys
+
+
+def validate_merged_for_publish(merged: SiteSource, paths: ProjectPaths) -> ValidationResult:
+    """`validate_site`'s result with the staged-draft-upload false-positive
+    `missing-image` errors filtered out (`staged_image_keys`) — shared by the
+    publish preview (`GET publish/preview`), the publish preflight (`POST
+    publish`'s `_preflight`), and `draft_repair.run_repair`'s own post-repair
+    check, so none of the three can ever drift on what counts as "ready to
+    publish" (decisions/00095: before this gate existed, only the preview ran
+    this check — a publish attempt against known-bad content reached
+    `_materialize_locked`'s `validate_site` call deep inside the pipeline and
+    surfaced as a raw `PublishError`/502, not the calm blocked state the
+    drawer shows for the exact same problem)."""
+    validate_result = validate_site(merged, paths.repo)
+    safe_image_keys = staged_image_keys(merged, paths)
+    filtered_errors = [
+        e
+        for e in validate_result.errors
+        if not (e.code == "missing-image" and (e.file, e.key) in safe_image_keys)
+    ]
+    return ValidationResult(errors=filtered_errors)
