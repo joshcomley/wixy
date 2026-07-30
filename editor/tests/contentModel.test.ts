@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BindingField } from "../src/protocol";
-import { readItemValue, readListValue } from "../src/contentModel";
+import { parseAttrSpec, readItemValue, readListValue } from "../src/contentModel";
 
 function parse(html: string): Element {
   const template = document.createElement("template");
@@ -147,6 +147,181 @@ describe("readListValue / readItemValue", () => {
 
     expect(readListValue(container, field)).toEqual([
       { day: "Monday", value: "10:00 – 19:00", closed: false },
+    ]);
+  });
+
+  // decisions/00095: the 2026-07-28 gallery publish-corruption incident's two root
+  // causes — an attr-kind item field silently dropped on every whole-array read
+  // (root cause A), and the "blank new item" DOM placeholder becoming real stored
+  // text on a subsequent read (root cause B).
+  describe("attr-kind item fields (root cause A)", () => {
+    const field: BindingField = {
+      key: "items",
+      kind: "list",
+      items: [
+        { key: ".title", kind: "text" },
+        { key: ".cat", kind: "attr", attr: "data-cat" },
+      ],
+    };
+
+    it("round-trips an attr binding declared on the list-item root itself", () => {
+      // The exact real-site shape: <figure data-wx-list-item data-wx-attr="data-cat:.cat">.
+      const container = parse(`
+        <div data-wx-list="items">
+          <figure data-wx-list-item data-wx-attr="data-cat:.cat" data-cat="lips">
+            <span data-wx=".title">Lip Enhancement</span>
+          </figure>
+        </div>
+      `);
+      expect(readListValue(container, field)).toEqual([
+        { title: "Lip Enhancement", cat: "lips" },
+      ]);
+    });
+
+    it("finds an attr binding declared on a descendant of the item root", () => {
+      const container = parse(`
+        <div data-wx-list="items">
+          <li data-wx-list-item>
+            <span data-wx=".title">Item</span>
+            <i data-wx-attr="data-cat:.cat" data-cat="cheeks"></i>
+          </li>
+        </div>
+      `);
+      expect(readListValue(container, field)).toEqual([{ title: "Item", cat: "cheeks" }]);
+    });
+
+    it("reads a missing attribute as an empty string, not a dropped key", () => {
+      // The spec is declared but the builder never set the attribute (shouldn't
+      // happen in real rendered output, but the read must stay total, not throw).
+      const container = parse(`
+        <div data-wx-list="items">
+          <li data-wx-list-item data-wx-attr="data-cat:.cat">
+            <span data-wx=".title">Item</span>
+          </li>
+        </div>
+      `);
+      expect(readListValue(container, field)).toEqual([{ title: "Item", cat: "" }]);
+    });
+
+    it("resolves the right pair out of a multi-pair data-wx-attr spec", () => {
+      const multiField: BindingField = {
+        key: "items",
+        kind: "list",
+        items: [
+          { key: ".x", kind: "attr", attr: "data-a" },
+          { key: ".y", kind: "attr", attr: "data-b" },
+        ],
+      };
+      const container = parse(`
+        <div data-wx-list="items">
+          <li data-wx-list-item data-wx-attr="data-a:.x,data-b:.y" data-a="one" data-b="two"></li>
+        </div>
+      `);
+      expect(readListValue(container, multiField)).toEqual([{ x: "one", y: "two" }]);
+    });
+  });
+
+  describe("nbsp placeholder normalization (root cause B)", () => {
+    const field: BindingField = {
+      key: "items",
+      kind: "list",
+      items: [{ key: ".title", kind: "text" }, { key: ".sub", kind: "text" }],
+    };
+
+    it("reads a never-filled-in nbsp placeholder as an empty string", () => {
+      // blankTextLikeFields writes innerHTML = "&nbsp;" (a real U+00A0 char after
+      // the browser parses it), not the empty string, so a click target remains.
+      const container = parse(`
+        <div data-wx-list="items">
+          <li data-wx-list-item>
+            <h3 data-wx=".title">&nbsp;</h3>
+            <p data-wx=".sub">&nbsp;</p>
+          </li>
+        </div>
+      `);
+      expect(readListValue(container, field)).toEqual([{ title: "", sub: "" }]);
+    });
+
+    it("treats the literal entity text the same as the decoded character", () => {
+      // Belt-and-braces: a value that already round-tripped through the server's
+      // nh3 sanitize pass (which re-serializes a bare NBSP as this literal text)
+      // must not be mistaken for real content either.
+      const el = parse(`<h3 data-wx="title">&amp;nbsp;</h3>`);
+      expect(readItemValue(el, [{ key: "title", kind: "text" }])).toEqual({ title: "" });
+    });
+
+    it("does not touch real text merely containing whitespace", () => {
+      const el = parse(`<h3 data-wx="title">  Lip Enhancement  </h3>`);
+      const { title } = readItemValue(el, [{ key: "title", kind: "text" }]) as { title: string };
+      expect(title.trim()).toBe("Lip Enhancement");
+    });
+  });
+
+  it("regression: a reconstructed gallery-slider-shaped item satisfies its required keys", () => {
+    // The exact shape builder/schemas/gallery-slider.schema.json requires
+    // (cat/title/sub/before/after) — a whole-array read of an untouched,
+    // fully-rendered item must never drop any of them.
+    const sliderField: BindingField = {
+      key: "gallery.sliders",
+      kind: "list",
+      items: [
+        { key: ".cat", kind: "attr", attr: "data-cat" },
+        { key: ".title", kind: "text" },
+        { key: ".sub", kind: "text" },
+        { key: ".before", kind: "img" },
+        { key: ".after", kind: "img" },
+      ],
+    };
+    const container = parse(`
+      <div data-wx-list="gallery.sliders">
+        <figure data-wx-list-item data-wx-attr="data-cat:.cat" data-cat="lips">
+          <img data-wx-img=".after" src="images/ba-lips-1-after.jpg" alt="Lip Enhancement — after">
+          <img data-wx-img=".before" src="images/ba-lips-1-before.jpg" alt="Lip Enhancement — before">
+          <figcaption><span data-wx=".title">Lip Enhancement</span><span data-wx=".sub">Dermal filler</span></figcaption>
+        </figure>
+      </div>
+    `);
+    const [item] = readListValue(container, sliderField);
+    expect(Object.keys(item as Record<string, unknown>).sort()).toEqual(
+      ["after", "before", "cat", "sub", "title"].sort(),
+    );
+    expect(item).toEqual({
+      cat: "lips",
+      title: "Lip Enhancement",
+      sub: "Dermal filler",
+      before: { src: "images/ba-lips-1-before.jpg", alt: "Lip Enhancement — before" },
+      after: { src: "images/ba-lips-1-after.jpg", alt: "Lip Enhancement — after" },
+    });
+  });
+});
+
+describe("parseAttrSpec", () => {
+  it("parses a single attr:key pair", () => {
+    expect(parseAttrSpec("data-cat:.cat")).toEqual([{ attrName: "data-cat", key: ".cat" }]);
+  });
+
+  it("parses multiple comma-separated pairs", () => {
+    expect(parseAttrSpec("data-a:.x,data-b:.y")).toEqual([
+      { attrName: "data-a", key: ".x" },
+      { attrName: "data-b", key: ".y" },
+    ]);
+  });
+
+  it("trims whitespace around each part", () => {
+    expect(parseAttrSpec(" data-cat : .cat , data-b : .y ")).toEqual([
+      { attrName: "data-cat", key: ".cat" },
+      { attrName: "data-b", key: ".y" },
+    ]);
+  });
+
+  it("splits only on the FIRST colon (a key may itself contain one)", () => {
+    expect(parseAttrSpec("data-x:@a:b")).toEqual([{ attrName: "data-x", key: "@a:b" }]);
+  });
+
+  it("yields null for a pair with no colon — mirrors builder.bindings.parse_attr_spec", () => {
+    expect(parseAttrSpec("no-colon-here,ok:realKey")).toEqual([
+      null,
+      { attrName: "ok", key: "realKey" },
     ]);
   });
 });
