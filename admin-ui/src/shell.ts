@@ -549,6 +549,10 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       // shell's watch covers reload-mid-publish and other-tab/device starts.
       publishButton.disabled = true;
       chipEl.disabled = true;
+      // Keep the banner highlighted while publishing (decisions/00094): the chip
+      // is narrating live stages, so this is the least appropriate moment for the
+      // bar to fade back to its quiet nothing-to-do styling.
+      statusBar.classList.add("wx-statusbar-pending");
       ensurePublishWatch();
       if (!publishButton.classList.contains("wx-button-busy")) {
         setButtonBusy(publishButton, "Publishing…");
@@ -564,6 +568,9 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     }
     publishButton.title = "";
     chipEl.textContent = parts.length === 0 ? "No unpublished changes" : parts.join(" · ");
+    // Prominent only when there's actually something to publish — see
+    // `.wx-statusbar-pending` in style.css for why it isn't always-on.
+    statusBar.classList.toggle("wx-statusbar-pending", parts.length > 0);
   }
 
   // -- Toasts ---------------------------------------------------------------

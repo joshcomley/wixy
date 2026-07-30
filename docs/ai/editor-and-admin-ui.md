@@ -46,10 +46,17 @@ between them. Spec: [`spec/05-editor.md`](../../spec/05-editor.md). The wire typ
   overlay's own JS state, so `init`'s optional `browseMode` field (default off) tells
   each freshly-booted overlay which mode to start in, without a follow-up round trip
   that could race a click on the just-loaded page.
-  The one piece of chrome edit view does NOT hide is the slim `.wx-statusbar` at the very
+  The one piece of chrome edit view does NOT hide is the `.wx-statusbar` at the very
   top of the shell: the draft chip (left, opens the review drawer) and the Publish button
   (right), visible on every route (decisions/00083) — the chip no longer relocates into
-  the slim edit bar, and the topbar carries neither control. While a publish runs the
+  the slim edit bar, and the topbar carries neither control. The chip is a plain **label**,
+  not a pill (its box was redundant inside the bar; Publish opens the same drawer, so it's a
+  convenience trigger). The bar takes `.wx-statusbar-pending` — tinted background + a
+  brand-blue rule — **only when there is something to publish** (draft ops or outside site
+  updates) or while a publish runs; with nothing pending it stays plain and its label goes
+  muted, so the prominence keeps its meaning (decisions/00094). The quiet styling is keyed
+  off that bar class, NOT the chip's `disabled` attribute — the chip is enabled when idle and
+  disabled mid-publish, which is the opposite of what the appearance needs. While a publish runs the
   status bar doubles as the progress surface (decisions/00089, Inv 25): the Publish
   button spins (`wx-button-busy` + `wx-spinner`) and the chip narrates the stage in
   layman wording, driven by a shell-owned watch that polls `/api/admin/state` every 2s

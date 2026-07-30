@@ -358,6 +358,62 @@ describe("mountShell", () => {
     );
   });
 
+  it("the status bar only goes prominent when there is something to publish (decisions/00094)", async () => {
+    const api = fakeApi({
+      getState: vi.fn(async () => fakeState({ draft: { rev: 0, opCount: 2 } })),
+    });
+    const win = fakeWindow();
+    const container = document.createElement("div");
+
+    mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+    await flushState(api);
+
+    expect(container.querySelector(".wx-statusbar")?.classList.contains("wx-statusbar-pending")).toBe(
+      true,
+    );
+  });
+
+  it("the status bar stays quiet with nothing to publish, so the banner keeps its meaning", async () => {
+    // The default fakeState has opCount 0 and no upstream commits — the chip reads
+    // "No unpublished changes", and an always-loud bar there would train the owner
+    // to ignore the one surface that has to get their attention.
+    const api = fakeApi();
+    const win = fakeWindow();
+    const container = document.createElement("div");
+
+    mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+    await flushState(api);
+
+    const statusBar = container.querySelector(".wx-statusbar");
+    expect(statusBar?.textContent).toContain("No unpublished changes");
+    expect(statusBar?.classList.contains("wx-statusbar-pending")).toBe(false);
+  });
+
+  it("outside site updates alone also make the bar prominent (nothing drafted locally)", async () => {
+    const api = fakeApi({
+      getState: vi.fn(async () =>
+        fakeState({
+          draft: { rev: 0, opCount: 0 },
+          upstream: {
+            aheadOfPublished: [
+              { sha: "a".repeat(40), subject: "assistant edit", author: "AI", when: "2026-01-01" },
+            ],
+            fetchedAt: null,
+          },
+        }),
+      ),
+    });
+    const win = fakeWindow();
+    const container = document.createElement("div");
+
+    mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+    await flushState(api);
+
+    expect(container.querySelector(".wx-statusbar")?.classList.contains("wx-statusbar-pending")).toBe(
+      true,
+    );
+  });
+
   it("defaults to the pages panel and lists fetched pages", async () => {
     const api = fakeApi();
     const win = fakeWindow();
