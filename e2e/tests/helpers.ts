@@ -113,7 +113,10 @@ export async function publishAndWait(page: Page): Promise<number> {
     const response = await publishResponse;
     if (response.status() === 200) {
       const body = (await response.json()) as { version: number };
-      await page.waitForSelector(".wx-publish-progress:has-text('Published as version')");
+      // decisions/00095: the drawer swaps its whole body to a terminal
+      // success state ("Your site is live." + "Version N") — no more inline
+      // progress text.
+      await page.waitForSelector(`.wx-publish-state-caption:has-text('Version ${body.version}')`);
       return body.version;
     }
     if (response.status() !== 409) {

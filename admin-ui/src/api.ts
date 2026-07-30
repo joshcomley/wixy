@@ -170,6 +170,24 @@ export type PublishOutcome =
   | { kind: "conflict"; message: string }
   | { kind: "failed"; message: string };
 
+/** `POST /api/admin/draft/repair`'s outcome (decisions/00095) — the review
+ * drawer's "Fix it for me" button. `actions` are the plain-English lines of
+ * what was actually changed (empty if nothing needed fixing); `validate` is
+ * the SAME full-check result `PublishPreview.validate` carries, so the
+ * drawer can tell in one response whether the repair fully unblocked
+ * publishing or the owner still needs to send a report. */
+export type RepairOutcome =
+  | { kind: "ok"; rev: number; actions: string[]; validate: { ok: boolean; errors: ValidateError[] } }
+  | { kind: "conflict"; message: string }
+  | { kind: "failed"; message: string };
+
+/** `POST /api/admin/report`'s outcome (decisions/00095) — a report is always
+ * SAVED server-side regardless (never a failure outcome to show the owner);
+ * `emailed` only distinguishes which confirmation toast the drawer shows. */
+export interface SendReportOutcome {
+  emailed: boolean;
+}
+
 /** `GET /api/admin/publishes`'s per-entry shape (spec/04 §6, `wixy_server.
  * ledger.LedgerEntry.to_dict()`) — a publish entry carries `message`/`source`/
  * `changed`; a restore entry carries `action`/`of` instead (never both). */
@@ -406,6 +424,8 @@ export interface AdminApi {  getState(): Promise<StateResponse>;
   getTheme(): Promise<ThemeData>;
   getPublishPreview(): Promise<PublishPreview>;
   publish(message: string, expectedRev: number): Promise<PublishOutcome>;
+  repairDraft(expectedRev: number): Promise<RepairOutcome>;
+  sendReport(context: string, note?: string): Promise<SendReportOutcome>;
   getPublishes(limit?: number): Promise<PublishesEntry[]>;
   getVersionDiff(version: number): Promise<VersionDiff>;
   restore(version: number): Promise<RestoreOutcome>;
@@ -543,6 +563,30 @@ export function createApi(): AdminApi {
       }
       const body = await parseJson<{ version: number; sha: string }>(response);
       return { kind: "ok", version: body.version, sha: body.sha };
+    },
+    async repairDraft(expectedRev) {
+      const response = await fetchWithRetry("/api/admin/draft/repair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedRev }),
+      });
+      if (response.status === 409) {
+        return { kind: "conflict", message: await extractDetail(response, "repair conflict") };
+      }
+      const body = await parseJson<{
+        rev: number;
+        actions: string[];
+        validate: { ok: boolean; errors: ValidateError[] };
+      }>(response);
+      return { kind: "ok", rev: body.rev, actions: body.actions, validate: body.validate };
+    },
+    async sendReport(context, note) {
+      const response = await fetchWithRetry("/api/admin/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(note !== undefined ? { context, note } : { context }),
+      });
+      return parseJson<SendReportOutcome>(response);
     },
     async getPublishes(limit) {
       const query = limit !== undefined ? `?limit=${limit}` : "";

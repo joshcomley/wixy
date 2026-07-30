@@ -1007,8 +1007,7 @@ html, body {
   color: var(--wx-danger-text);
 }
 
-.wx-diff-upstream,
-.wx-diff-validate {
+.wx-diff-upstream {
   font-size: 0.75rem;
   padding: 8px 10px;
   border-radius: var(--wx-radius);
@@ -1016,19 +1015,12 @@ html, body {
   border: 1px solid var(--wx-border);
 }
 
-.wx-diff-validate {
-  border-color: var(--wx-danger);
-  color: var(--wx-danger-text);
-}
-
-.wx-diff-upstream h4,
-.wx-diff-validate h4 {
+.wx-diff-upstream h4 {
   margin: 0 0 4px;
   font-size: 0.75rem;
 }
 
-.wx-diff-upstream ul,
-.wx-diff-validate ul {
+.wx-diff-upstream ul {
   margin: 0;
   padding-left: 18px;
 }
@@ -1037,24 +1029,6 @@ html, body {
   margin: 0 0 6px;
   color: var(--wx-muted);
   font-size: 0.75rem;
-}
-
-.wx-publish-progress {
-  font-size: 0.8125rem;
-  color: var(--wx-muted);
-}
-
-.wx-publish-error {
-  font: 0.75rem/1.4 ui-monospace, monospace;
-  color: var(--wx-danger-text);
-  background: var(--wx-canvas);
-  border: 1px solid var(--wx-danger);
-  border-radius: var(--wx-radius);
-  padding: 8px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  max-height: 200px;
-  overflow: auto;
 }
 
 .wx-publish-confirm {
@@ -1070,6 +1044,112 @@ html, body {
 .wx-publish-confirm:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+/* -- Publish blocked / running / success / failure states (decisions/00095) --
+   The drawer body swaps wholesale between these — never a raw validator
+   list or an inline error <pre>; the server's technical detail lives in the
+   log and the report bundle, not in front of the owner. */
+
+.wx-publish-blocked {
+  padding: 12px 14px;
+  border-radius: var(--wx-radius);
+  background: var(--wx-danger-tint);
+  border: 1px solid var(--wx-danger);
+}
+
+.wx-publish-blocked h4 {
+  margin: 0 0 6px;
+  color: var(--wx-danger-text);
+  font-size: 0.9375rem;
+}
+
+.wx-publish-blocked-body {
+  margin: 0 0 12px;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--wx-ink);
+}
+
+.wx-publish-blocked-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wx-publish-fix,
+.wx-publish-report {
+  font: 600 0.8125rem/1 system-ui, sans-serif;
+  padding: 8px 14px;
+  border-radius: var(--wx-radius);
+  cursor: pointer;
+}
+
+.wx-publish-fix {
+  border: 1px solid var(--wx-brand-blue);
+  background: var(--wx-brand-blue);
+  color: #fff;
+}
+
+.wx-publish-report {
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+}
+
+.wx-publish-report-emphasized {
+  border-color: var(--wx-danger);
+  color: var(--wx-danger-text);
+}
+
+.wx-publish-fix:disabled,
+.wx-publish-report:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.wx-publish-running,
+.wx-publish-success,
+.wx-publish-failure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 32px 16px;
+  text-align: center;
+}
+
+.wx-publish-state-spinner {
+  width: 2rem;
+  height: 2rem;
+  border-width: 3px;
+  color: var(--wx-brand-blue);
+}
+
+.wx-publish-state-icon {
+  font-size: 2rem;
+  line-height: 1;
+  color: var(--wx-brand-blue-text);
+}
+
+.wx-publish-state-heading {
+  margin: 0;
+  font: 600 1rem/1.3 system-ui, sans-serif;
+  color: var(--wx-ink);
+}
+
+.wx-publish-state-caption {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--wx-muted);
+}
+
+.wx-publish-failure .wx-publish-blocked-body {
+  color: var(--wx-muted);
+}
+
+.wx-publish-failure .wx-publish-blocked-actions {
+  justify-content: center;
 }
 
 /* -- Media grid + dialog (spec/05 §4) -------------------------------------------- */
