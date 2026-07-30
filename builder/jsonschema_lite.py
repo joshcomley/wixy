@@ -24,14 +24,27 @@ _TYPE_MAP: dict[str, type | tuple[type, ...]] = {
 }
 
 
-def validate_against_schema(value: JsonValue, schema: JsonObject, *, path: str = "$") -> list[str]:
-    """Return human-readable error strings (empty list = valid)."""
+def validate_against_schema(
+    value: JsonValue, schema: JsonObject, *, path: str = "$", skip_pattern: bool = False
+) -> list[str]:
+    """Return human-readable error strings (empty list = valid).
+
+    `skip_pattern` omits the `pattern` check everywhere in the tree — used by the
+    draft-write gate (`wixy_server/draft_validate.py`) to enforce shape (type/
+    required/properties/additionalProperties) without also enforcing content
+    constraints like "non-blank", so an in-progress edit (e.g. a freshly added,
+    not-yet-filled-in list item) stays a valid DRAFT state; full-schema
+    enforcement (including `pattern`) remains publish-time only, in
+    `builder.validate`, which never passes this flag.
+    """
     errors: list[str] = []
-    _check(value, schema, path, errors)
+    _check(value, schema, path, errors, skip_pattern=skip_pattern)
     return errors
 
 
-def _check(value: JsonValue, schema: JsonObject, path: str, errors: list[str]) -> None:
+def _check(
+    value: JsonValue, schema: JsonObject, path: str, errors: list[str], *, skip_pattern: bool
+) -> None:
     expected_type = schema.get("type")
     if isinstance(expected_type, str):
         py_type = _TYPE_MAP.get(expected_type)
@@ -47,7 +60,12 @@ def _check(value: JsonValue, schema: JsonObject, path: str, errors: list[str]) -
         errors.append(f"{path}: value {value!r} not in allowed set {enum!r}")
 
     pattern = schema.get("pattern")
-    if isinstance(pattern, str) and isinstance(value, str) and re.fullmatch(pattern, value) is None:
+    if (
+        not skip_pattern
+        and isinstance(pattern, str)
+        and isinstance(value, str)
+        and re.fullmatch(pattern, value) is None
+    ):
         errors.append(f"{path}: '{value}' does not match pattern {pattern!r}")
 
     if isinstance(value, dict):
@@ -61,7 +79,9 @@ def _check(value: JsonValue, schema: JsonObject, path: str, errors: list[str]) -
             for key, sub_value in value.items():
                 sub_schema = properties.get(key)
                 if isinstance(sub_schema, dict):
-                    _check(sub_value, sub_schema, f"{path}.{key}", errors)
+                    _check(
+                        sub_value, sub_schema, f"{path}.{key}", errors, skip_pattern=skip_pattern
+                    )
             if schema.get("additionalProperties") is False:
                 for key in value:
                     if key not in properties:
@@ -71,4 +91,4 @@ def _check(value: JsonValue, schema: JsonObject, path: str, errors: list[str]) -
         items_schema = schema.get("items")
         if isinstance(items_schema, dict):
             for index, item in enumerate(value):
-                _check(item, items_schema, f"{path}[{index}]", errors)
+                _check(item, items_schema, f"{path}[{index}]", errors, skip_pattern=skip_pattern)

@@ -718,16 +718,20 @@ class TestPatchDraftSanitize:
                             "file": "_global",
                             "path": "hours",
                             "value": [
-                                {"day": "Monday", "value": "10:00 <script>x</script>– 19:00"},
-                                {"day": "Tuesday", "value": "11:00 – 16:00"},
+                                {
+                                    "day": "Monday",
+                                    "value": "10:00 <script>x</script>– 19:00",
+                                    "closed": False,
+                                },
+                                {"day": "Tuesday", "value": "11:00 – 16:00", "closed": False},
                             ],
                         }
                     ],
                 },
             )
         assert _overlay_op_value(paths, "_global:hours") == [
-            {"day": "Monday", "value": "10:00 – 19:00"},
-            {"day": "Tuesday", "value": "11:00 – 16:00"},
+            {"day": "Monday", "value": "10:00 – 19:00", "closed": False},
+            {"day": "Tuesday", "value": "11:00 – 16:00", "closed": False},
         ]
 
     def test_nested_list_sanitizes_text_but_not_img_leaves(

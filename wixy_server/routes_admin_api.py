@@ -12,6 +12,7 @@ rename) live in `wixy_server/routes_chat.py`, not here.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import uuid
 from collections.abc import AsyncIterator
@@ -42,6 +43,7 @@ from wixy_server.checkout import (
     ensure_checkout,
 )
 from wixy_server.draft_sanitize import sanitize_set_ops
+from wixy_server.draft_validate import DraftValidationError, check_structural, normalize_set_ops
 from wixy_server.ledger import read_ledger
 from wixy_server.live_pointer import load_live_pointer
 from wixy_server.media import (
@@ -80,6 +82,8 @@ from wixy_server.thumbnails import ThumbnailError, load_thumbnail, save_thumbnai
 from wixy_server.treelock import tree_lock
 from wixy_server.version_diff import binding_kind_lookup, build_version_diff, container_for
 from wixy_server.watcher import WatcherStatus
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin")
 
@@ -325,7 +329,13 @@ def _apply_draft_patch(
         # string leaves pass through sanitize_rich_lite (decisions/00074).
         source = build_site_source(project, paths.repo)
         sanitized = sanitize_set_ops(source, set_ops)
-        ops = [sanitized.pop(0) if isinstance(op, SetOp) else op for op in ops]
+        # The draft-write gate (decisions/00095): normalize (silent, best-effort
+        # corrections) THEN structurally validate (raises DraftValidationError,
+        # caught by patch_draft below — the overlay must stay untouched on a
+        # violation, so this runs BEFORE apply_patch, never after).
+        normalized = normalize_set_ops(sanitized, paths.repo)
+        check_structural(normalized)
+        ops = [normalized.pop(0) if isinstance(op, SetOp) else op for op in ops]
     new_overlay = apply_patch(overlay, body.expectedRev, ops, by=by, now=now)
     save_overlay(paths.draft_overlay, new_overlay)
     return new_overlay.rev
@@ -350,6 +360,16 @@ async def patch_draft(body: DraftPatchIn, request: Request) -> dict[str, int]:
             status_code=409,
             detail=f"expected rev {exc.expected}, overlay is at rev {exc.actual}",
         ) from exc
+    except DraftValidationError as exc:
+        logger.warning(
+            "rejected draft PATCH (rev %d, %d ops) from %r: %s | %s",
+            body.expectedRev,
+            len(body.ops),
+            by,
+            exc.summary,
+            "; ".join(exc.details),
+        )
+        raise HTTPException(status_code=422, detail=exc.summary) from exc
     return {"rev": rev}
 
 
