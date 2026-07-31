@@ -12,7 +12,6 @@ import subprocess
 import time
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import NoReturn
 
@@ -459,7 +458,7 @@ class TestListConversations:
             not_working_yet = client.get("/api/admin/chat/conversations").json()["conversations"]
             assert not_working_yet[0]["working"] is False
 
-            session.status["activity"] = datetime.now(UTC).isoformat()
+            session.status["activity"] = "working"
             now_working = client.get("/api/admin/chat/conversations").json()["conversations"]
             assert now_working[0]["working"] is True
 
@@ -532,7 +531,7 @@ class TestStateChatsField:
                 return bool(listed) and listed[0]["status"] == "ready"
 
             _poll_until(_is_ready)
-            session.status["activity"] = datetime.now(UTC).isoformat()
+            session.status["activity"] = "working"
 
             # `/state` alone, before the dedicated list ever polls again,
             # never performs its own cmd check — conservatively `false`.

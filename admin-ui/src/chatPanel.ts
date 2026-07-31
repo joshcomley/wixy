@@ -46,10 +46,6 @@ export interface ChatPanel {
 
 const LIST_POLL_MS = 2000;
 const UPSTREAM_CHECK_THROTTLE_MS = 5000;
-/** How fresh `ChatStatusData.activity` must be to show "working" rather than
- * "idle" — generous relative to the stream's own 1.2s poll cadence so a
- * couple of missed ticks don't flicker the indicator. */
-const WORKING_FRESHNESS_MS = 10_000;
 
 function formatWhen(iso: string): string {
   const parsed = new Date(iso);
@@ -314,11 +310,17 @@ function renderMessageRow(message: ChatMessageData): HTMLElement {
   return row;
 }
 
-function activityState(status: ChatStatusData | null, now: () => number): "working" | "idle" {
-  if (status === null || status.activity === null) return "idle";
-  const parsed = new Date(status.activity).getTime();
-  if (Number.isNaN(parsed)) return "idle";
-  return now() - parsed < WORKING_FRESHNESS_MS ? "working" : "idle";
+/** `status.activity` is cmd's own tri-state enum ("working" | "idle" | "dead"),
+ * NOT a timestamp (spec/06-ai-chat.md: "prefer the `activity` field... over
+ * process liveness — ... working / idle / dead") — a plain equality check,
+ * not a freshness window. A prior version of this function parsed `activity`
+ * as a `Date` and compared elapsed time against a 10s window; since "working"/
+ * "idle" never parse as a valid date, that ALWAYS evaluated to idle regardless
+ * of cmd's real state — invisible to every test (the fake cmd server encoded
+ * the same wrong ISO-timestamp assumption), caught only by live verification
+ * against real cmd (decisions/00099). */
+function activityState(status: ChatStatusData | null): "working" | "idle" {
+  return status?.activity === "working" ? "working" : "idle";
 }
 
 function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
@@ -432,7 +434,6 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
    * (decisions/00097: without this, the banner can go quiet for a moment
    * right after Send, before the first status/tasks event lands). */
   let awaitingReply = false;
-  let workBannerTimer: number | null = null;
   let lastUpstreamCheckAt = 0;
   /** Generated once per compose ATTEMPT, not once per `send()` call — spec/06
    * §1: "Include the idempotency key so a UI retry can't double-send," §3:
@@ -458,16 +459,16 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
     thread.scrollTop = thread.scrollHeight;
   }
 
-  /** Working: any of — cmd's own activity is fresh, a send just went out
-   * and nothing's come back yet, or the latest task list has anything not
-   * yet `done` (decisions/00097 — three independent signals of the same
-   * underlying fact, each covering a gap the others miss: activity alone
-   * misses the instant right after Send; tasks alone misses a reply with
-   * no task block at all; awaitingReply alone would never clear if a task
-   * block never arrives). */
+  /** Working: any of — cmd itself reports "working" right now, a send just
+   * went out and nothing's come back yet, or the latest task list has
+   * anything not yet `done` (decisions/00097 — three independent signals of
+   * the same underlying fact, each covering a gap the others miss: activity
+   * alone misses the instant right after Send; tasks alone misses a reply
+   * with no task block at all; awaitingReply alone would never clear if a
+   * task block never arrives). */
   function isWorking(): boolean {
     return (
-      activityState(latestStatus, now) === "working" ||
+      activityState(latestStatus) === "working" ||
       awaitingReply ||
       (latestTasks !== null && latestTasks.some((t) => t.status !== "done"))
     );
@@ -622,7 +623,7 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
         // decisions/00097: a fresh round of work starts now — the OLD task
         // list (possibly showing "all done") is stale until a new block
         // arrives, and awaitingReply covers the gap until it (or a plain
-        // reply, or a fresh activity timestamp) does.
+        // reply, or cmd's own activity flipping to "working") does.
         awaitingReply = true;
         latestTasks = null;
         renderTaskCard();
@@ -675,17 +676,12 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
 
   loadTitle();
   connect();
-  // Re-render the work banner on a short interval too, so "working" ages
-  // back into "idle"/hidden even if no NEW status event arrives to trigger
-  // a re-render (activity freshness is time-relative, not event-driven).
-  workBannerTimer = setInterval(renderWorkBanner, 2000) as unknown as number;
 
   return {
     element: root,
     teardown(): void {
       cancelled = true;
       streamHandle?.close();
-      if (workBannerTimer !== null) clearInterval(workBannerTimer);
     },
   };
 }

@@ -1,10 +1,12 @@
-"""`wixy_server.chat_working.WorkingCache` (decisions/00097) — the conversation
-LIST's "is this actively working" signal, TTL-cached per conversation.
+"""`wixy_server.chat_working.WorkingCache` (decisions/00097, 00099) — the
+conversation LIST's "is this actively working" signal, TTL-cached per
+conversation. cmd's own `activity` field is a tri-state ENUM string
+("working" | "idle" | "dead"), never a timestamp (decisions/00099) — every
+fixture below sets it to one of those three literal strings, matching what
+the real `/sessions/<id>/status` endpoint actually returns.
 """
 
 from __future__ import annotations
-
-from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -28,23 +30,19 @@ def ai_backend(fake_cmd_state: FakeCmdState) -> AIBackend:
     return CmdAIBackend(client, cmd_project="")
 
 
-def _iso(dt: datetime) -> str:
-    return dt.isoformat()
-
-
 def _conv(conv_id: str, session_id: str) -> ChatConversation:
     return ChatConversation(
         conv_id=conv_id, session_id=session_id, title="t", created_at="2026-07-10T00:00:00Z"
     )
 
 
-class TestFreshness:
+class TestActivityState:
     @pytest.mark.asyncio
-    async def test_a_conversation_with_fresh_activity_is_working(
+    async def test_a_conversation_with_activity_working_is_working(
         self, fake_cmd_state: FakeCmdState, ai_backend: AIBackend
     ) -> None:
         session = fake_cmd_state.create_session("hi")
-        session.status["activity"] = _iso(datetime.now(UTC))
+        session.status["activity"] = "working"
         conv = _conv("c1", session.session_id)
 
         result = await WorkingCache().working_for(ai_backend, [conv])
@@ -52,11 +50,23 @@ class TestFreshness:
         assert result == {"c1": True}
 
     @pytest.mark.asyncio
-    async def test_a_conversation_with_stale_activity_is_not_working(
+    async def test_a_conversation_with_activity_idle_is_not_working(
         self, fake_cmd_state: FakeCmdState, ai_backend: AIBackend
     ) -> None:
         session = fake_cmd_state.create_session("hi")
-        session.status["activity"] = _iso(datetime.now(UTC) - timedelta(seconds=60))
+        session.status["activity"] = "idle"
+        conv = _conv("c1", session.session_id)
+
+        result = await WorkingCache().working_for(ai_backend, [conv])
+
+        assert result == {"c1": False}
+
+    @pytest.mark.asyncio
+    async def test_a_conversation_with_activity_dead_is_not_working(
+        self, fake_cmd_state: FakeCmdState, ai_backend: AIBackend
+    ) -> None:
+        session = fake_cmd_state.create_session("hi")
+        session.status["activity"] = "dead"
         conv = _conv("c1", session.session_id)
 
         result = await WorkingCache().working_for(ai_backend, [conv])
@@ -91,9 +101,9 @@ class TestFreshness:
         self, fake_cmd_state: FakeCmdState, ai_backend: AIBackend
     ) -> None:
         working_session = fake_cmd_state.create_session("hi")
-        working_session.status["activity"] = _iso(datetime.now(UTC))
+        working_session.status["activity"] = "working"
         idle_session = fake_cmd_state.create_session("hi")
-        idle_session.status["activity"] = _iso(datetime.now(UTC) - timedelta(minutes=5))
+        idle_session.status["activity"] = "idle"
 
         result = await WorkingCache().working_for(
             ai_backend,
@@ -112,12 +122,12 @@ class TestCaching:
         re-hit cmd, even though the underlying status has since changed —
         proving the cached value (not a fresh fetch) is what's returned."""
         session = fake_cmd_state.create_session("hi")
-        session.status["activity"] = _iso(datetime.now(UTC))
+        session.status["activity"] = "working"
         conv = _conv("c1", session.session_id)
         cache = WorkingCache()
 
         first = await cache.working_for(ai_backend, [conv])
-        session.status["activity"] = _iso(datetime.now(UTC) - timedelta(minutes=5))
+        session.status["activity"] = "idle"
         second = await cache.working_for(ai_backend, [conv])
 
         assert first == {"c1": True}
@@ -129,11 +139,11 @@ class TestCaching:
     ) -> None:
         cache = WorkingCache()
         session_a = fake_cmd_state.create_session("hi")
-        session_a.status["activity"] = _iso(datetime.now(UTC))
+        session_a.status["activity"] = "working"
         await cache.working_for(ai_backend, [_conv("a", session_a.session_id)])
 
         session_b = fake_cmd_state.create_session("hi")
-        session_b.status["activity"] = _iso(datetime.now(UTC))
+        session_b.status["activity"] = "working"
         result = await cache.working_for(
             ai_backend, [_conv("a", session_a.session_id), _conv("b", session_b.session_id)]
         )
@@ -166,16 +176,16 @@ class TestCachedWorkingFor:
     ) -> None:
         """Once `working_for` has populated an entry, `cached_working_for`
         relays that exact cached value even after the underlying cmd
-        session's activity has since gone stale -- proving it never
+        session's activity has since gone idle -- proving it never
         triggers a fresh check of its own (the whole reason `/api/admin/
         state` calls this one and not `working_for`, per `chat_working.py`'s
         module docstring)."""
         session = fake_cmd_state.create_session("hi")
-        session.status["activity"] = _iso(datetime.now(UTC))
+        session.status["activity"] = "working"
         conv = _conv("c1", session.session_id)
         cache = WorkingCache()
         await cache.working_for(ai_backend, [conv])
 
-        session.status["activity"] = _iso(datetime.now(UTC) - timedelta(minutes=5))
+        session.status["activity"] = "idle"
 
         assert cache.cached_working_for([conv]) == {"c1": True}

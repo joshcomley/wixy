@@ -375,8 +375,9 @@ def main() -> None:
 
     @app.post("/test/chat/set-activity", include_in_schema=False)
     async def _post_set_chat_activity(payload: dict[str, object]) -> dict[str, bool]:
-        """decisions/00097: scripts cmd's own `activity` timestamp on the fake
-        session — the list-view working pulse (`chat_working.WorkingCache`)
+        """decisions/00097, 00099: scripts cmd's own `activity` field on the
+        fake session — a tri-state ENUM ("working"/"idle"/"dead"), never a
+        timestamp. The list-view working pulse (`chat_working.WorkingCache`)
         is driven ENTIRELY by this field, independent of the wixy-tasks
         block content (`set-messages` above never touches it), so exercising
         the list-dot pulse through the real UI needs it settable too."""
