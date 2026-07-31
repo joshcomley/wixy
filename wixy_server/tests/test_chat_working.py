@@ -139,3 +139,43 @@ class TestCaching:
         )
 
         assert result == {"a": True, "b": True}
+
+
+class TestCachedWorkingFor:
+    """`cached_working_for` — the read-only twin `/api/admin/state` calls
+    (decisions/00097 addendum): it must never await or touch cmd, only
+    relay whatever `working_for` last cached."""
+
+    def test_a_never_checked_conversation_reads_false(self) -> None:
+        """No `working_for` call has ever populated the cache for this
+        conversation -- and this test passes no `AIBackend` and runs no
+        event loop at all, proving `cached_working_for` really can't be
+        awaiting or reaching for cmd."""
+        result = WorkingCache().cached_working_for([_conv("c1", "s1")])
+
+        assert result == {"c1": False}
+
+    def test_multiple_never_checked_conversations_all_default_false(self) -> None:
+        result = WorkingCache().cached_working_for([_conv("a", "s1"), _conv("b", "s2")])
+
+        assert result == {"a": False, "b": False}
+
+    @pytest.mark.asyncio
+    async def test_relays_whatever_working_for_last_cached_without_rechecking(
+        self, fake_cmd_state: FakeCmdState, ai_backend: AIBackend
+    ) -> None:
+        """Once `working_for` has populated an entry, `cached_working_for`
+        relays that exact cached value even after the underlying cmd
+        session's activity has since gone stale -- proving it never
+        triggers a fresh check of its own (the whole reason `/api/admin/
+        state` calls this one and not `working_for`, per `chat_working.py`'s
+        module docstring)."""
+        session = fake_cmd_state.create_session("hi")
+        session.status["activity"] = _iso(datetime.now(UTC))
+        conv = _conv("c1", session.session_id)
+        cache = WorkingCache()
+        await cache.working_for(ai_backend, [conv])
+
+        session.status["activity"] = _iso(datetime.now(UTC) - timedelta(minutes=5))
+
+        assert cache.cached_working_for([conv]) == {"c1": True}

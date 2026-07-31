@@ -135,6 +135,61 @@ attribute/property, needs an explicit `.foo[hidden] { display: none; }` rule —
 UA default is not enough once a class rule sets `display` at equal specificity.
 Vitest/jsdom cannot catch a violation of this rule; only a real-browser check can.
 
+## A latency regression this PR's own e2e coverage caught (real bug, real lesson)
+
+The first working draft of "the list-wide `working` flag is TTL-cached" (above) had
+BOTH call sites — `routes_chat.list_conversations` and `routes_admin_api.get_state`'s
+`_chats_snapshot` — calling the same `WorkingCache.working_for`, the LIVE-refreshing
+method, whenever a conversation's cache entry was stale. That's wrong specifically for
+`/api/admin/state`: it's the one endpoint nearly every admin panel depends on for its
+own instant render (CSS/RENDER doctrine), and `working_for` awaits a real
+`client.status()` call to cmd for every stale conversation.
+
+Measured, not theoretical (`e2e/tests/chat-ux.spec.ts`, which stops the fake cmd server
+mid-suite via `/test/chat/stop-fake-cmd` to exercise the chat-unreachable UI path):
+
+- **Unbounded**: once cmd was unreachable, every `/api/admin/state` call for the rest
+  of the suite paid `CmdChatClient`'s own patient default (10s timeout × 3 retries = up
+  to 30s) per stale conversation. 12 failed / 5.4 min, vs. a normal ~1.5 min / 38 passed
+  run.
+- **Bounded to `status_timeout_s = 2.0`** (a courtesy timeout specific to this
+  "conversation the owner probably isn't even looking at" check, independent of
+  `CmdChatClient`'s own stream-tuned patience): helped (3 failed / 2.3 min) but still
+  broke OTHER tests' timing assumptions that have nothing to do with chat —
+  `concurrent-editing.spec.ts`'s `opCount` race and `structured-controls.spec.ts`'s
+  publish rev-conflict retry budget both assume `/api/admin/state` answers
+  near-instantly, and the e2e suite reuses one server/storage per Playwright worker
+  across spec files, so one file's dead cmd session poisoned every later file's
+  `/state` latency in the same worker.
+- **The real fix**: split into two methods. `working_for` — live-refreshing, unchanged
+  — is now called ONLY by `routes_chat.list_conversations` (the dedicated list the
+  owner is actually looking at, already polled every 2s, where freshness is worth the
+  bounded cost). `cached_working_for` — new, read-only, plain synchronous, never awaits
+  anything — is what `routes_admin_api._chats_snapshot` calls instead. `/api/admin/
+  state` now adds ZERO latency from chat status, ever, regardless of whether cmd is
+  reachable.
+
+**The accepted trade-off**: `/state`'s `chats[].working` can be stale (up to
+`cache_ttl_s = 5.0`) or a conservative default `False` for a conversation the
+dedicated list hasn't looked at yet — a quiet, correct-by-default `False` rather than a
+guaranteed-live value. Both call sites still share the exact SAME `WorkingCache`
+instance (`app.state.chat_working_cache`), so this is staleness, never disagreement:
+once the list refreshes an entry, `/state` relays that identical cached value on its
+very next call, never re-derives or second-guesses it.
+`wixy_server/tests/test_routes_chat.py::TestStateChatsField::
+test_working_flows_through_the_same_shape_as_the_dedicated_list` was originally written
+against the single-tier design and asserted a stronger, no-longer-true guarantee
+(`/state` reflects live activity immediately, with no list poll in between); it was
+rewritten to prove the ACTUAL two-tier contract instead — conservative `False` before
+any list poll, identical-to-the-list once one has happened — rather than weakened or
+deleted, applying this codebase's "a failing test is a real bug, find the root cause"
+discipline to the test's own encoded assumption, not just the implementation.
+`chat_working.py`'s module docstring carries the full reasoning; `wixy_server/tests/
+test_chat_working.py::TestCachedWorkingFor` covers `cached_working_for` directly
+(a never-checked conversation defaults `False` with no event loop or `AIBackend` at
+all; a populated entry is relayed as-is even after the underlying activity has since
+gone stale, proving no recheck happens).
+
 ## What to watch for
 
 - **The preamble's example fence and `test_preamble.py`'s no-bare-`---`-line
@@ -164,3 +219,10 @@ Vitest/jsdom cannot catch a violation of this rule; only a real-browser check ca
   fixed-height box and nothing ever scrolls the task card out of view. If
   the thread's own scroll-container structure ever changes, re-check this
   assumption still holds.
+- **The e2e suite reuses one server/storage per Playwright worker across spec
+  files** — a spec that deliberately breaks something process-wide (stopping
+  the fake cmd server, as `chat-ux.spec.ts` does) can leak that broken state
+  into every OTHER spec file sharing the same worker, not just its own file.
+  That cross-file leak is why the latency regression above surfaced in
+  specs with nothing to do with chat. Worth remembering before adding
+  another spec that intentionally breaks a shared dependency.

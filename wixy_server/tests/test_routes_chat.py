@@ -505,10 +505,19 @@ class TestStateChatsField:
         cmdchat_client: CmdChatClient,
         fake_cmd_state: FakeCmdState,
     ) -> None:
-        """`chats.conversation_summary`'s own docstring: `/state`'s `chats`
-        snapshot and `GET .../conversations` must never drift apart — proven
-        here by asserting the SAME fresh-activity conversation reads
-        `working: true` through `/state` too, not just the dedicated list."""
+        """`chat_working.py`'s module docstring: `/state` never triggers its
+        own live cmd check (that field comes from the read-only
+        `cached_working_for`) — ONLY the dedicated `GET .../conversations`
+        list ever refreshes the shared `WorkingCache` (`working_for`). Two
+        things must both hold: (1) before the list has ever looked, `/state`
+        conservatively reads `working: false` even though the underlying
+        cmd session genuinely is active — the accepted trade-off, not a live
+        check in disguise; (2) once the list HAS refreshed the cache, `/state`
+        reads the exact same cached value — both call sites share the one
+        `app.state.chat_working_cache` instance
+        (`chats.conversation_summary`'s "never drift apart" wire-shape
+        promise), so a value the list learned is never re-derived or
+        second-guessed by `/state`, just relayed."""
         app = create_app(
             storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
         )
@@ -524,6 +533,20 @@ class TestStateChatsField:
 
             _poll_until(_is_ready)
             session.status["activity"] = datetime.now(UTC).isoformat()
+
+            # `/state` alone, before the dedicated list ever polls again,
+            # never performs its own cmd check — conservatively `false`.
+            stale_state = client.get("/api/admin/state").json()
+            assert stale_state["chats"][0]["working"] is False
+
+            # The dedicated list's own poll is the only thing that refreshes
+            # the shared cache...
+            listed = client.get("/api/admin/chat/conversations").json()["conversations"]
+            assert listed[0]["working"] is True
+
+            # ...and `/state` now relays that SAME cached value without
+            # re-checking — proof the two call sites share one cache rather
+            # than ever drifting into disagreeing answers.
             state = client.get("/api/admin/state").json()
 
         assert state["chats"][0]["working"] is True
