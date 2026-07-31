@@ -400,6 +400,112 @@ class TestGetState:
         assert state_response.json()["draft"] == {"rev": 1, "opCount": 1}
 
 
+class TestGetStateAdminSections:
+    """decisions/00098: `/api/admin/state`'s `adminSections` field is a plain
+    camelCase mirror of `builder.config.ProjectConfig.admin_sections` — not
+    covered by `TestGetState` above, which uses the shared `wixy_repo_root`
+    fixture's registry (no `adminSections` key at all)."""
+
+    def _wixy_repo_root_with_admin_sections(self, tmp_path: Path, repo: Path) -> Path:
+        root = tmp_path / "wixy-repo-admin-sections"
+        (root / "projects").mkdir(parents=True)
+        (root / "projects" / "test.json").write_text(
+            json.dumps(
+                {
+                    "slug": "test",
+                    "name": "Test",
+                    "repo": str(repo),
+                    "defaultBranch": "main",
+                    "cmdProject": "test",
+                    "domain": "test.example.invalid",
+                    "locale": "en-GB",
+                    "indexable": False,
+                    "media": {"maxLongSidePx": 2000, "jpegQuality": 85},
+                    "adminSections": [
+                        {
+                            "id": "before-after",
+                            "navLabel": "Before & After",
+                            "title": "Before & After",
+                            "description": "Drag to reorder.",
+                            "page": "gallery",
+                            "collections": [
+                                {
+                                    "path": "gallery.sliders",
+                                    "label": "Drag-to-compare photos",
+                                    "itemNoun": "photo pair",
+                                    "schema": "gallery-slider",
+                                    "fields": [
+                                        {"key": "before", "kind": "image", "label": "Before photo"},
+                                        {
+                                            "key": "cat",
+                                            "kind": "choice",
+                                            "label": "Category",
+                                            "options": [{"value": "lips", "label": "Lips"}],
+                                        },
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return root
+
+    def test_configured_sections_appear_in_state(
+        self, storage_root: Path, tmp_path: Path, origin_repo: Path
+    ) -> None:
+        wixy_repo_root = self._wixy_repo_root_with_admin_sections(tmp_path, origin_repo)
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/admin/state")
+
+        assert response.json()["adminSections"] == [
+            {
+                "id": "before-after",
+                "navLabel": "Before & After",
+                "title": "Before & After",
+                "description": "Drag to reorder.",
+                "page": "gallery",
+                "collections": [
+                    {
+                        "path": "gallery.sliders",
+                        "label": "Drag-to-compare photos",
+                        "itemNoun": "photo pair",
+                        "schema": "gallery-slider",
+                        "fields": [
+                            {
+                                "key": "before",
+                                "kind": "image",
+                                "label": "Before photo",
+                                "options": [],
+                            },
+                            {
+                                "key": "cat",
+                                "kind": "choice",
+                                "label": "Category",
+                                "options": [{"value": "lips", "label": "Lips"}],
+                            },
+                        ],
+                    }
+                ],
+            }
+        ]
+
+    def test_no_adminSections_in_the_registry_reads_as_an_empty_list(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        """`wixy_repo_root`'s shared registry fixture has no `adminSections`
+        key at all — the field must still be present and an empty list, not
+        absent (every client-side consumer can rely on the key existing)."""
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/admin/state")
+
+        assert response.json()["adminSections"] == []
+
+
 class TestGetContent:
     def test_returns_merged_content_and_bindings(
         self, storage_root: Path, wixy_repo_root: Path

@@ -93,6 +93,31 @@ section's `cards` → `treatment-card`) and `_global.json`'s `footer.*` (every l
 bool≠number/integer guard — decisions/00002; stay within the subset or checks silently
 no-op).
 
+## Admin sections (`builder/config.py`, decisions/00098)
+
+`ProjectConfig.admin_sections: tuple[AdminSection, ...]` — a SEPARATE, per-project-configurable
+registry from `COLLECTION_RULES` above, easy to conflate since both ultimately point at the same
+`builder/schemas/*.schema.json` files. `COLLECTION_RULES` says "this content path must satisfy
+this schema" (the write gate, decisions/00095 — applies to every write to that path, regardless
+of which UI made it); `admin_sections` says "this content path also gets a DEDICATED admin nav
+entry + management screen" (`admin-ui/src/sectionPanel.ts`) — a strict subset: `gallery.sliders`/
+`gallery.tiles` have both (`ca.json`'s one `adminSections` entry); `_global.hours`,
+`index.treatments.cards`, `treatments.rx.items`, `reviews.reviews.items` have a `COLLECTION_RULES`
+entry (write-gate enforced) but no dedicated screen — still editable via the INLINE overlay's own
+item toolbar only.
+
+`AdminSection {id, nav_label, title, description, page, collections}` → `AdminCollection {path,
+label, item_noun, schema, fields}` → `AdminField {key, kind: AdminFieldKind, label, options}`
+(`AdminFieldKind = Literal["image", "text", "choice"]`) → `AdminFieldOption {value, label}` — all
+frozen dataclasses, all optional-collection defaults `()`. `load_project_config` parses
+`adminSections` LENIENTLY, mirroring the rest of this loader's defensive style: a section/
+collection/field/option missing a required key, or a field with an unrecognized `kind`, is
+individually skipped (`logger.warning`) rather than failing the whole project config load — one
+malformed registry entry can never take down the site. Serialized camelCase into `GET
+/api/admin/state`'s `adminSections` field by `routes_admin_api.py:_admin_sections_snapshot` — see
+[contracts.md](contracts.md) §2 and [editor-and-admin-ui.md](editor-and-admin-ui.md)'s
+`sectionPanel.ts` entry for the client side.
+
 ## Bindings map (`builder/bindings_map.py`)
 
 `extract_bindings_map(source, slug) → PageBindings` walks the **raw template, structure only,

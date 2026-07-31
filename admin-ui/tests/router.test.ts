@@ -96,6 +96,11 @@ describe("sameRoute", () => {
     expect(sameRoute({ kind: "settings", page: "general" }, { kind: "settings", page: "shortcuts" })).toBe(false);
   });
 
+  it("compares the id for section routes", () => {
+    expect(sameRoute({ kind: "section", id: "before-after" }, { kind: "section", id: "before-after" })).toBe(true);
+    expect(sameRoute({ kind: "section", id: "before-after" }, { kind: "section", id: "other" })).toBe(false);
+  });
+
   it("is false across different kinds", () => {
     expect(sameRoute({ kind: "pages" }, { kind: "theme" })).toBe(false);
   });
@@ -140,6 +145,12 @@ describe("parsePath", () => {
   it("falls back to pages for an unrecognized path", () => {
     expect(parsePath("/admin/nonsense")).toEqual({ kind: "pages" });
   });
+
+  it("parses /admin/section/<id> — the id is whatever the registry declares, opaque to the router", () => {
+    expect(parsePath("/admin/section/before-after")).toEqual({ kind: "section", id: "before-after" });
+    expect(parsePath("/admin/section")).toEqual({ kind: "pages" });
+    expect(parsePath("/admin/section/")).toEqual({ kind: "pages" });
+  });
 });
 
 describe("routeToPath", () => {
@@ -158,6 +169,7 @@ describe("routeToPath", () => {
       { kind: "settings", page: "engine" },
       { kind: "settings", page: "ai" },
       { kind: "settings", page: "system" },
+      { kind: "section", id: "before-after" },
     ];
     for (const route of routes) {
       expect(parsePath(routeToPath(route))).toEqual(route);

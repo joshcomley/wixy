@@ -2658,12 +2658,294 @@ div.wx-media-thumb {
   text-decoration: underline;
 }
 
+/* -- Section panel (registry-configured admin sections, decisions/00098) -------
+   e.g. the Before & After photo-pair editor: `ca.json`'s `adminSections` config
+   drives everything here — no site literals, so this styling has to read
+   sensibly for both a two-image collection (sliders) and a one-image collection
+   (tiles) without knowing which in advance. */
+
+.wx-section-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wx-section-title {
+  margin: 0 0 4px;
+  font-size: 1.125rem;
+}
+
+.wx-section-description {
+  margin: 0 0 16px;
+  color: var(--wx-muted);
+  font-size: 0.8125rem;
+}
+
+.wx-section-collection {
+  margin-bottom: 28px;
+}
+
+.wx-section-collection-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.wx-section-collection-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.wx-section-empty {
+  color: var(--wx-muted);
+  font-size: 0.8125rem;
+  padding: 16px 0;
+}
+
+.wx-section-footer-note {
+  margin-top: 8px;
+  color: var(--wx-muted);
+  font-size: 0.75rem;
+}
+
+.wx-section-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+.wx-section-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  padding: 12px;
+  background: var(--wx-surface);
+}
+
+.wx-section-card-dragging {
+  opacity: 0.5;
+}
+
+.wx-section-drop-indicator {
+  grid-column: 1 / -1;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--wx-brand-blue);
+}
+
+.wx-section-drag-handle {
+  align-self: flex-start;
+  min-width: 44px;
+  min-height: 32px;
+  padding: 4px 12px;
+  border: none;
+  background: none;
+  color: var(--wx-muted);
+  font-size: 1.125rem;
+  line-height: 1;
+  cursor: grab;
+  touch-action: none;
+}
+
+.wx-section-drag-handle:active {
+  cursor: grabbing;
+}
+
+.wx-section-card-images {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 8px;
+}
+
+.wx-section-image-slot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wx-section-image-thumb,
+.wx-section-image-placeholder {
+  width: 100%;
+  aspect-ratio: 4/3;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.wx-section-image-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--wx-border);
+  background: var(--wx-canvas);
+  color: var(--wx-muted);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.wx-section-image-tag {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  font: 600 0.625rem/1 system-ui, sans-serif;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--wx-solid-dark);
+  color: var(--wx-solid-dark-text);
+}
+
+.wx-section-image-change {
+  font: 600 0.6875rem/1 system-ui, sans-serif;
+  padding: 6px 8px;
+  min-height: 30px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  cursor: pointer;
+}
+
+.wx-section-card-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wx-section-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.8125rem;
+}
+
+.wx-section-field-label {
+  color: var(--wx-muted);
+  font-size: 0.6875rem;
+}
+
+.wx-section-field-input,
+.wx-section-field-select {
+  font: inherit;
+  padding: 7px 8px;
+  min-height: 36px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-canvas);
+  color: var(--wx-ink);
+}
+
+.wx-section-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wx-section-move-button {
+  min-width: 36px;
+  min-height: 36px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  cursor: pointer;
+}
+
+.wx-section-move-button:disabled {
+  color: var(--wx-muted);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.wx-section-delete-button {
+  margin-left: auto;
+  font: 600 0.75rem/1 system-ui, sans-serif;
+  padding: 8px 10px;
+  min-height: 36px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  color: var(--wx-danger-text);
+  cursor: pointer;
+}
+
+.wx-section-add-button {
+  flex-shrink: 0;
+}
+
+/* Guided add flow — its OWN backdrop/dialog box classes (NOT a reuse of
+   `.wx-media-dialog-backdrop`/`.wx-media-dialog` — this flow opens the real
+   media dialog on top of itself mid-flow, so sharing a class made the two
+   indistinguishable to any selector; a real E2E strict-mode-violation this
+   suite's own coverage caught), same visual recipe, plus `.wx-drawer-header`/
+   `.wx-drawer-close` (genuinely shared, no ambiguity risk there) and its own
+   step-content classes. */
+
+.wx-section-add-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 24, 32, 0.45);
+  z-index: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wx-section-add-dialog {
+  width: 480px;
+  max-width: 92vw;
+  max-height: 85vh;
+  overflow: auto;
+  background: var(--wx-surface);
+  border-radius: var(--wx-radius);
+  box-shadow: var(--wx-shadow);
+  padding: 0 16px 16px;
+}
+
+.wx-section-add-progress {
+  margin: 0 0 12px;
+  color: var(--wx-muted);
+  font-size: 0.75rem;
+}
+
+.wx-section-add-preview {
+  display: block;
+  width: 100%;
+  max-height: 240px;
+  object-fit: contain;
+  margin-bottom: 12px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-canvas);
+}
+
+.wx-section-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.wx-section-add-nav {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 /* -- Responsive (mobile/narrow viewport) ----------------------------------------
    Everything above is desktop-first; this is the one breakpoint that reflows the
    shell for phone-width viewports (the operator's own real use case). Touch
    target sizing follows Uxer's targets convention (touch: 44px minimum). */
 
 @media (max-width: 720px) {
+  /* Section panel card grid: 2-up desktop -> 1-up mobile (spec 3c). */
+  .wx-section-card-grid {
+    grid-template-columns: 1fr;
+  }
+
   .wx-topbar {
     flex-wrap: wrap;
     height: auto;

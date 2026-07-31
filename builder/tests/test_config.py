@@ -1,0 +1,276 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from builder.config import (
+    AdminCollection,
+    AdminField,
+    AdminFieldOption,
+    AdminSection,
+    load_project_config,
+)
+
+_MINIMAL_PROJECT: dict[str, object] = {
+    "slug": "ca",
+    "name": "Cottage Aesthetics",
+    "repo": "https://github.com/example/ca-site.git",
+    "defaultBranch": "main",
+    "cmdProject": "ca",
+    "domain": "ca.cinnamons.uk",
+    "locale": "en-GB",
+    "indexable": True,
+}
+
+
+def _write(tmp_path: Path, data: dict[str, object]) -> Path:
+    path = tmp_path / "project.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
+class TestAdminSectionsAbsent:
+    def test_no_adminSections_key_defaults_to_empty_tuple(self, tmp_path: Path) -> None:
+        config = load_project_config(_write(tmp_path, dict(_MINIMAL_PROJECT)))
+
+        assert config.admin_sections == ()
+
+    def test_a_non_list_adminSections_value_defaults_to_empty_tuple(self, tmp_path: Path) -> None:
+        data = dict(_MINIMAL_PROJECT)
+        data["adminSections"] = "not a list"
+
+        config = load_project_config(_write(tmp_path, data))
+
+        assert config.admin_sections == ()
+
+
+class TestAdminSectionsWellFormed:
+    def test_a_full_section_parses_every_field(self, tmp_path: Path) -> None:
+        data = dict(_MINIMAL_PROJECT)
+        data["adminSections"] = [
+            {
+                "id": "before-after",
+                "navLabel": "Before & After",
+                "title": "Before & After",
+                "description": "Drag to reorder.",
+                "page": "gallery",
+                "collections": [
+                    {
+                        "path": "gallery.sliders",
+                        "label": "Drag-to-compare photos",
+                        "itemNoun": "photo pair",
+                        "schema": "gallery-slider",
+                        "fields": [
+                            {"key": "before", "kind": "image", "label": "Before photo"},
+                            {"key": "title", "kind": "text", "label": "Treatment name"},
+                            {
+                                "key": "cat",
+                                "kind": "choice",
+                                "label": "Category",
+                                "options": [
+                                    {"value": "lips", "label": "Lips"},
+                                    {"value": "cheeks", "label": "Cheeks"},
+                                ],
+                            },
+                        ],
+                    }
+                ],
+            }
+        ]
+
+        config = load_project_config(_write(tmp_path, data))
+
+        assert config.admin_sections == (
+            AdminSection(
+                id="before-after",
+                nav_label="Before & After",
+                title="Before & After",
+                description="Drag to reorder.",
+                page="gallery",
+                collections=(
+                    AdminCollection(
+                        path="gallery.sliders",
+                        label="Drag-to-compare photos",
+                        item_noun="photo pair",
+                        schema="gallery-slider",
+                        fields=(
+                            AdminField(key="before", kind="image", label="Before photo"),
+                            AdminField(key="title", kind="text", label="Treatment name"),
+                            AdminField(
+                                key="cat",
+                                kind="choice",
+                                label="Category",
+                                options=(
+                                    AdminFieldOption(value="lips", label="Lips"),
+                                    AdminFieldOption(value="cheeks", label="Cheeks"),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+    def test_a_field_with_no_options_key_defaults_to_empty_tuple(self, tmp_path: Path) -> None:
+        data = dict(_MINIMAL_PROJECT)
+        data["adminSections"] = [
+            {
+                "id": "s",
+                "navLabel": "S",
+                "title": "S",
+                "description": "d",
+                "page": "p",
+                "collections": [
+                    {
+                        "path": "p.items",
+                        "label": "Items",
+                        "itemNoun": "item",
+                        "schema": "sch",
+                        "fields": [{"key": "title", "kind": "text", "label": "Title"}],
+                    }
+                ],
+            }
+        ]
+
+        config = load_project_config(_write(tmp_path, data))
+
+        field = config.admin_sections[0].collections[0].fields[0]
+        assert field.options == ()
+
+    def test_a_section_with_no_collections_key_defaults_to_empty_tuple(
+        self, tmp_path: Path
+    ) -> None:
+        data = dict(_MINIMAL_PROJECT)
+        data["adminSections"] = [
+            {"id": "s", "navLabel": "S", "title": "S", "description": "d", "page": "p"}
+        ]
+
+        config = load_project_config(_write(tmp_path, data))
+
+        assert config.admin_sections[0].collections == ()
+
+    def test_multiple_sections_all_parse_in_order(self, tmp_path: Path) -> None:
+        data = dict(_MINIMAL_PROJECT)
+        data["adminSections"] = [
+            {"id": "a", "navLabel": "A", "title": "A", "description": "d", "page": "p"},
+            {"id": "b", "navLabel": "B", "title": "B", "description": "d", "page": "p"},
+        ]
+
+        config = load_project_config(_write(tmp_path, data))
+
+        assert [s.id for s in config.admin_sections] == ["a", "b"]
+
+
+class TestAdminSectionsLenientParsing:
+    """Inv 1 / spec 3a: "missing/malformed section -> skip with a warning" —
+    one bad entry never takes down the whole project config load."""
+
+    def test_a_section_missing_a_required_field_is_skipped(self, tmp_path: Path) -> None:
+        data = dict(_MINIMAL_PROJECT)
+        data["adminSections"] = [
+            {"id": "bad", "navLabel": "Bad", "title": "Bad", "description": "d"},  # no "page"
+            {"id": "good", "navLabel": "Good", "title": "Good", "description": "d", "page": "p"},
+        ]
+
+        config = load_project_config(_write(tmp_path, data))
+
+        assert [s.id for s in config.admin_sections] == ["good"]
+
+    def test_a_section_that_is_not_an_object_is_skipped(self, tmp_path: Path) -> None:
+        data = dict(_MINIMAL_PROJECT)
+        data["adminSections"] = ["not an object"]
+
+        config = load_project_config(_write(tmp_path, data))
+
+        assert config.admin_sections == ()
+
+    def test_a_collection_missing_a_required_field_is_skipped_not_the_section(
+        self, tmp_path: Path
+    ) -> None:
+        data = dict(_MINIMAL_PROJECT)
+        data["adminSections"] = [
+            {
+                "id": "s",
+                "navLabel": "S",
+                "title": "S",
+                "description": "d",
+                "page": "p",
+                "collections": [
+                    {"path": "p.bad", "label": "Bad"},  # no itemNoun/schema
+                    {"path": "p.good", "label": "Good", "itemNoun": "item", "schema": "sch"},
+                ],
+            }
+        ]
+
+        config = load_project_config(_write(tmp_path, data))
+
+        assert [c.path for c in config.admin_sections[0].collections] == ["p.good"]
+
+    def test_a_field_with_an_unknown_kind_is_skipped_not_the_collection(
+        self, tmp_path: Path
+    ) -> None:
+        data = dict(_MINIMAL_PROJECT)
+        data["adminSections"] = [
+            {
+                "id": "s",
+                "navLabel": "S",
+                "title": "S",
+                "description": "d",
+                "page": "p",
+                "collections": [
+                    {
+                        "path": "p.items",
+                        "label": "Items",
+                        "itemNoun": "item",
+                        "schema": "sch",
+                        "fields": [
+                            {"key": "bad", "kind": "video", "label": "Bad"},
+                            {"key": "good", "kind": "text", "label": "Good"},
+                        ],
+                    }
+                ],
+            }
+        ]
+
+        config = load_project_config(_write(tmp_path, data))
+
+        keys = [f.key for f in config.admin_sections[0].collections[0].fields]
+        assert keys == ["good"]
+
+    def test_an_option_missing_a_required_field_is_skipped_not_the_field(
+        self, tmp_path: Path
+    ) -> None:
+        data = dict(_MINIMAL_PROJECT)
+        data["adminSections"] = [
+            {
+                "id": "s",
+                "navLabel": "S",
+                "title": "S",
+                "description": "d",
+                "page": "p",
+                "collections": [
+                    {
+                        "path": "p.items",
+                        "label": "Items",
+                        "itemNoun": "item",
+                        "schema": "sch",
+                        "fields": [
+                            {
+                                "key": "cat",
+                                "kind": "choice",
+                                "label": "Category",
+                                "options": [
+                                    {"value": "lips"},  # no label
+                                    {"value": "cheeks", "label": "Cheeks"},
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+
+        config = load_project_config(_write(tmp_path, data))
+
+        field = config.admin_sections[0].collections[0].fields[0]
+        assert [o.value for o in field.options] == ["cheeks"]

@@ -7,5 +7,58 @@
   "domain": "ca.cinnamons.uk",
   "locale": "en-GB",
   "indexable": false,
-  "media": { "maxLongSidePx": 2000, "jpegQuality": 85 }
+  "media": { "maxLongSidePx": 2000, "jpegQuality": 85 },
+  "adminSections": [
+    {
+      "id": "before-after",
+      "navLabel": "Before & After",
+      "title": "Before & After",
+      "description": "The photos on your Before & After page. Drag to reorder — changes go live when you press Publish.",
+      "page": "gallery",
+      "collections": [
+        {
+          "path": "gallery.sliders",
+          "label": "Drag-to-compare photos",
+          "itemNoun": "photo pair",
+          "schema": "gallery-slider",
+          "fields": [
+            { "key": "before", "kind": "image", "label": "Before photo" },
+            { "key": "after", "kind": "image", "label": "After photo" },
+            { "key": "title", "kind": "text", "label": "Treatment name" },
+            { "key": "sub", "kind": "text", "label": "Treatment type" },
+            {
+              "key": "cat",
+              "kind": "choice",
+              "label": "Category",
+              "options": [
+                { "value": "lips", "label": "Lips" },
+                { "value": "cheeks", "label": "Cheeks" },
+                { "value": "chin", "label": "Chin & Jaw" }
+              ]
+            }
+          ]
+        },
+        {
+          "path": "gallery.tiles",
+          "label": "Tap-to-zoom photos",
+          "itemNoun": "photo",
+          "schema": "gallery-tile",
+          "fields": [
+            { "key": "img", "kind": "image", "label": "Photo" },
+            { "key": "title", "kind": "text", "label": "Caption" },
+            {
+              "key": "cat",
+              "kind": "choice",
+              "label": "Category",
+              "options": [
+                { "value": "lips", "label": "Lips" },
+                { "value": "cheeks", "label": "Cheeks" },
+                { "value": "chin", "label": "Chin & Jaw" }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
 }

@@ -117,7 +117,7 @@ The **normative** contract for all of this is
 | `sanitize.py` | `sanitize_rich_lite` over `nh3` (allowlisted rich-lite HTML) |
 | `sitemap.py` | `generate_robots_txt`, `generate_sitemap_xml` |
 | `collections.py` | the fixed collection-key → schema table (`COLLECTION_RULES`) |
-| `config.py` | `ProjectConfig`, `load_project_config` (the `projects/*.json` registry) |
+| `config.py` | `ProjectConfig`, `load_project_config` (the `projects/*.json` registry); `AdminSection`/`AdminCollection`/`AdminField`/`AdminFieldOption` — the registry-configured admin-section screens, decisions/00098 |
 | `errors.py` | `BuildError` (fatal) vs `ValidationError`/`ValidationResult` (collected) |
 | `jsonschema_lite.py` | dependency-free JSON-Schema subset validator |
 | `cli.py` / `__main__.py` | `python -m builder {validate,build,serve,parity}` |

@@ -1,0 +1,332 @@
+import { describe, expect, it, vi } from "vitest";
+import type { AdminApi, AdminSection, ContentResponse, MediaItem } from "../src/api";
+import type { OpQueueLike } from "../src/editView";
+import { mountSectionPanel } from "../src/sectionPanel";
+
+const SLIDER_SECTION: AdminSection = {
+  id: "before-after",
+  navLabel: "Before & After",
+  title: "Before & After",
+  description: "Drag to reorder.",
+  page: "gallery",
+  collections: [
+    {
+      path: "gallery.sliders",
+      label: "Drag-to-compare photos",
+      itemNoun: "photo pair",
+      schema: "gallery-slider",
+      fields: [
+        { key: "before", kind: "image", label: "Before photo", options: [] },
+        { key: "after", kind: "image", label: "After photo", options: [] },
+        { key: "title", kind: "text", label: "Treatment name", options: [] },
+        { key: "sub", kind: "text", label: "Treatment type", options: [] },
+        {
+          key: "cat",
+          kind: "choice",
+          label: "Category",
+          options: [
+            { value: "lips", label: "Lips" },
+            { value: "cheeks", label: "Cheeks" },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+const TILE_SECTION: AdminSection = {
+  id: "before-after",
+  navLabel: "Before & After",
+  title: "Before & After",
+  description: "Drag to reorder.",
+  page: "gallery",
+  collections: [
+    {
+      path: "gallery.tiles",
+      label: "Tap-to-zoom photos",
+      itemNoun: "photo",
+      schema: "gallery-tile",
+      fields: [
+        { key: "img", kind: "image", label: "Photo", options: [] },
+        { key: "title", kind: "text", label: "Caption", options: [] },
+        {
+          key: "cat",
+          kind: "choice",
+          label: "Category",
+          options: [{ value: "lips", label: "Lips" }],
+        },
+      ],
+    },
+  ],
+};
+
+function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
+  return {
+    getState: vi.fn(),
+    getContent: vi.fn(async (): Promise<ContentResponse> => ({ content: {}, bindings: { page: "gallery", fields: [] } })),
+    patchDraft: vi.fn(),
+    discardDraft: vi.fn(),
+    getMedia: vi.fn(async (): Promise<MediaItem[]> => []),
+    uploadMedia: vi.fn(),
+    deleteMedia: vi.fn(),
+    ...overrides,
+  } as AdminApi;
+}
+
+function fakeQueue(): OpQueueLike & { enqueued: unknown[] } {
+  const enqueued: unknown[] = [];
+  return { rev: 0, enqueued, enqueue: (op) => enqueued.push(op) };
+}
+
+function fakeWindow(opts: { confirmReturns?: boolean } = {}): Window {
+  const target = new EventTarget();
+  return {
+    addEventListener: target.addEventListener.bind(target),
+    removeEventListener: target.removeEventListener.bind(target),
+    dispatchEvent: target.dispatchEvent.bind(target),
+    confirm: () => opts.confirmReturns ?? true,
+  } as unknown as Window;
+}
+
+async function flush(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+const SLIDER_ITEM = {
+  before: { src: "images/b1.jpg", alt: "Before" },
+  after: { src: "images/a1.jpg", alt: "After" },
+  title: "Filler",
+  sub: "Lip filler",
+  cat: "lips",
+};
+
+describe("mountSectionPanel", () => {
+  it("shows Loading… before content resolves, then renders the collection", async () => {
+    const api = fakeApi();
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue: fakeQueue() });
+    expect(panel.element.textContent).toContain("Loading…");
+
+    await flush();
+
+    expect(panel.element.querySelector(".wx-section-collection")).not.toBeNull();
+    expect(panel.element.querySelector(".wx-section-title")?.textContent).toBe("Before & After");
+  });
+
+  it("shows the empty state when the collection's array is missing entirely", async () => {
+    const api = fakeApi();
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue: fakeQueue() });
+    await flush();
+
+    expect(panel.element.querySelector(".wx-section-empty")?.textContent).toBe(
+      "No photo pairs yet — add your first photo pair.",
+    );
+  });
+
+  it("renders one card per item in the collection's array", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { sliders: [SLIDER_ITEM, SLIDER_ITEM] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue: fakeQueue() });
+    await flush();
+
+    expect(panel.element.querySelectorAll(".wx-section-card")).toHaveLength(2);
+  });
+
+  it("editing a text field commits the whole array on blur", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { sliders: [SLIDER_ITEM] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const opQueue = fakeQueue();
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue });
+    await flush();
+
+    const titleInput = panel.element.querySelector<HTMLInputElement>(".wx-section-field-input");
+    expect(titleInput).not.toBeNull();
+    if (titleInput === null) throw new Error("no title input");
+    titleInput.value = "Renamed";
+    titleInput.dispatchEvent(new Event("blur"));
+
+    expect(opQueue.enqueued).toEqual([
+      { file: "gallery", path: "gallery.sliders", value: [{ ...SLIDER_ITEM, title: "Renamed" }] },
+    ]);
+  });
+
+  it("blurring a text field with an unchanged value does not enqueue anything", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { sliders: [SLIDER_ITEM] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const opQueue = fakeQueue();
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue });
+    await flush();
+
+    const titleInput = panel.element.querySelector<HTMLInputElement>(".wx-section-field-input");
+    titleInput?.dispatchEvent(new Event("blur"));
+
+    expect(opQueue.enqueued).toEqual([]);
+  });
+
+  it("changing a choice field commits the whole array immediately", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { sliders: [SLIDER_ITEM] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const opQueue = fakeQueue();
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue });
+    await flush();
+
+    const select = panel.element.querySelector<HTMLSelectElement>(".wx-section-field-select");
+    expect(select).not.toBeNull();
+    if (select === null) throw new Error("no select");
+    select.value = "cheeks";
+    select.dispatchEvent(new Event("change"));
+
+    expect(opQueue.enqueued).toEqual([
+      { file: "gallery", path: "gallery.sliders", value: [{ ...SLIDER_ITEM, cat: "cheeks" }] },
+    ]);
+  });
+
+  it("the up/down buttons commit the reordered whole array, disabled at the boundaries", async () => {
+    const second = { ...SLIDER_ITEM, title: "Second" };
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { sliders: [SLIDER_ITEM, second] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const opQueue = fakeQueue();
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue });
+    await flush();
+
+    const cards = panel.element.querySelectorAll(".wx-section-card");
+    const firstUp = cards[0]?.querySelector<HTMLButtonElement>('[aria-label="Move up"]');
+    const firstDown = cards[0]?.querySelector<HTMLButtonElement>('[aria-label="Move down"]');
+    const lastDown = cards[1]?.querySelector<HTMLButtonElement>('[aria-label="Move down"]');
+    expect(firstUp?.disabled).toBe(true);
+    expect(lastDown?.disabled).toBe(true);
+
+    firstDown?.click();
+
+    expect(opQueue.enqueued).toEqual([
+      { file: "gallery", path: "gallery.sliders", value: [second, SLIDER_ITEM] },
+    ]);
+  });
+
+  it("Remove asks for confirmation and only commits the array without that item when confirmed", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { sliders: [SLIDER_ITEM] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const opQueue = fakeQueue();
+    const declineWin = fakeWindow({ confirmReturns: false });
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue, win: declineWin });
+    await flush();
+
+    panel.element.querySelector<HTMLButtonElement>(".wx-section-delete-button")?.click();
+    expect(opQueue.enqueued).toEqual([]);
+  });
+
+  it("Remove commits the array without that item once confirmed", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { sliders: [SLIDER_ITEM] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const opQueue = fakeQueue();
+    const confirmWin = fakeWindow({ confirmReturns: true });
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue, win: confirmWin });
+    await flush();
+
+    panel.element.querySelector<HTMLButtonElement>(".wx-section-delete-button")?.click();
+    expect(opQueue.enqueued).toEqual([{ file: "gallery", path: "gallery.sliders", value: [] }]);
+  });
+
+  it("the guided add flow gates Save until the photo and title are both filled, then appends the item", async () => {
+    const pickedItem: MediaItem = {
+      name: "cheek.jpg",
+      url: "/images/cheek.jpg",
+      contentSrc: "images/cheek.jpg",
+      source: "repo",
+      sizeBytes: 1024,
+      width: 800,
+      height: 600,
+      references: [],
+    };
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: {},
+        bindings: { page: "gallery", fields: [] },
+      })),
+      getMedia: vi.fn(async () => [pickedItem]),
+    });
+    const opQueue = fakeQueue();
+    const panel = mountSectionPanel(TILE_SECTION, { api, opQueue, win: fakeWindow() });
+    await flush();
+
+    panel.element
+      .querySelector<HTMLButtonElement>(".wx-section-add-button")
+      ?.click();
+    const dialog = panel.element.querySelector(".wx-section-add-dialog");
+    expect(dialog).not.toBeNull();
+
+    const findButton = (text: string): HTMLButtonElement | undefined =>
+      Array.from(dialog?.querySelectorAll("button") ?? []).find((b) => b.textContent === text);
+
+    // Step 1: no photo yet -> Next is disabled.
+    expect(findButton("Next")?.disabled).toBe(true);
+
+    findButton("Choose Photo")?.click();
+    await flush();
+    const mediaDialog = document.querySelector(".wx-media-dialog-backdrop");
+    expect(mediaDialog).not.toBeNull();
+    mediaDialog?.querySelector<HTMLButtonElement>(".wx-media-thumb")?.click();
+    const useThisImage = Array.from(mediaDialog?.querySelectorAll("button") ?? []).find(
+      (b) => b.textContent === "Use this image",
+    );
+    useThisImage?.click();
+
+    // Photo picked -> Next now enabled; advance to the form step.
+    expect(findButton("Next")?.disabled).toBe(false);
+    findButton("Next")?.click();
+
+    // Form step: Save disabled until the title is filled.
+    expect(findButton("Save")?.disabled).toBe(true);
+    const titleInput = dialog?.querySelector<HTMLInputElement>("input[type='text']");
+    expect(titleInput).not.toBeNull();
+    if (titleInput === null || titleInput === undefined) throw new Error("no title input");
+    titleInput.value = "Cheek filler";
+    titleInput.dispatchEvent(new Event("input"));
+    expect(findButton("Save")?.disabled).toBe(false);
+
+    findButton("Save")?.click();
+
+    expect(opQueue.enqueued).toEqual([
+      {
+        file: "gallery",
+        path: "gallery.tiles",
+        value: [
+          {
+            img: { src: "images/cheek.jpg", alt: "Cheek" },
+            title: "Cheek filler",
+            cat: "lips",
+          },
+        ],
+      },
+    ]);
+    expect(panel.element.querySelector(".wx-section-add-dialog")).toBeNull();
+  });
+});

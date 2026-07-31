@@ -163,8 +163,8 @@ One `OpQueue` per session (owned by `shell.ts`); panels take only the `OpQueueLi
 
 `shell.ts` (chrome + state + the OpQueue + a 60s revalidation loop that reloads on an
 `/api/version` commit change unless mid-edit; same-route panel re-renders from that loop
-never close an open drawer — only genuine route changes do, decisions/00081); `router.ts` (hash routes: pages/edit/theme/
-media/chat/history/settings); `pagesPanel.ts` + `pageSettingsDrawer.ts` (`meta.*` editing);
+never close an open drawer — only genuine route changes do, decisions/00081); `router.ts` (path routes, decisions/00087: pages/edit/theme/
+media/chat/history/settings/section); `pagesPanel.ts` + `pageSettingsDrawer.ts` (`meta.*` editing);
 `publishDrawer.ts` (review diff + `POST /api/admin/publish` + SSE progress; disables Publish
 with a "Nothing to publish" hint when the preview's `opCount` is 0 AND no upstream commits are
 pending — decisions/00071; layman wording throughout: the chip reads "N unpublished changes ·
@@ -205,6 +205,44 @@ layer — `theme.ts`/`themeEditor.ts` (admin **chrome** dark/light/system, *not*
 theme), `zoom.ts`, `fontScale.ts`, `settingsPanel.ts`, `shortcuts.ts`, `contrast.ts`,
 `screenshot.ts` — is separate from the published-site theme (easy to conflate; decisions/
 00045–00050).
+
+**`sectionPanel.ts` + `sectionPanelModel.ts`** (decisions/00098) — the registry-configured
+admin section editor (`state.adminSections`, Inv 1: no site literals in this module or
+anywhere else in the engine — `ca.json`'s `adminSections` array is the only place "Before &
+After"/`gallery.sliders`/`gallery.tiles` are spelled out). `shell.ts` renders one nav button
+per `state.adminSections[]` entry dynamically (inserted right after Edit via
+`editNavItem.after(...)`, re-synced whenever the section list changes on a state reload —
+unlike `NAV_ROUTES`, which is static) and mounts `mountSectionPanel(section, {api, opQueue,
+win?})` for route `{kind:"section", id}`; an unknown `id` (a stale deep link, or a section
+removed from the registry) falls back to the pages panel. The panel owns its own fetch
+(`api.getContent(section.page)`, mirroring `mediaPanel.ts`'s "owns its own lifecycle"
+`mountXPanel` shape rather than `pagesPanel.ts`'s `renderXPanel(data, callbacks)` one — a
+collection's ARRAY VALUES live in page content, not `StateResponse`, only its config does)
+and treats each `AdminCollection`'s array as one indivisible unit: every add/edit/reorder/
+delete writes the WHOLE array as one `opQueue.enqueue({file, path, value})` op (the standard
+collection rule this codebase already applies elsewhere), never a partial patch. Per item:
+an `image`-kind field opens the shared `mediaDialog.ts` picker (writes `{src, alt}` —
+`contentSrc`, never a served `url`, per decisions/00095's fix); a `text`-kind field is a
+plain input, committed on blur/Enter, entity-decoded for display
+(`sectionPanelModel.decodeCommonEntities`) since the value is stored PLAIN and the builder's
+BeautifulSoup render pass re-escapes it at serialization time (the same convention
+`contentModel.ts`'s `.textContent`-based reads already rely on); a `choice`-kind field is a
+`<select>` from `field.options`, committed on change. Reordering has BOTH a pointer-based
+drag (a drop-indicator line, commit-on-release) AND ↑/↓ buttons emitting the identical
+whole-array op — a deliberate addition on top of decisions/00017's earlier "buttons only"
+simplification for the INLINE overlay's own item toolbar, kept here as the fallback/
+accessibility path while this dedicated screen adds real drag for "her pride" polish
+(spec 3c). The guided **add** flow is a linear wizard — one step per `image`-kind field (in
+field order), then a final form step for the rest — generalizing the brief's literal
+"step 1 Before, step 2 After, step 3 form" to however many image fields a collection
+actually declares (one for `gallery.tiles`, two for `gallery.sliders`); Save stays disabled
+until `sectionPanelModel.isNewItemComplete` (every image field picked, and the field
+literally named `title`, if present, non-blank) — a new item is always born schema-valid,
+never a half-filled placeholder landing in the array. `sectionPanelModel.ts` is the pure,
+DOM-free half (dotted-path content reads, array reorder/delete/update, the add-flow
+completeness gate, entity decoding) — unit-tested directly; `sectionPanel.test.ts` covers
+the thin DOM binding on top (kept deliberately DOM-light per spec 3c — the pointer-drag
+interaction itself is real-browser e2e territory, not jsdom's).
 
 ## editor modules (`editor/src/`)
 

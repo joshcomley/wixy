@@ -23,6 +23,7 @@ function fakeState(overrides: { pages?: string[]; rev?: number } = {}): StateRes
     upstream: { aheadOfPublished: [], fetchedAt: null },
     publishJob: null,
     chats: [],
+    adminSections: [],
   };
 }
 
