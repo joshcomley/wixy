@@ -33,6 +33,7 @@ from builder.errors import BuildError
 from builder.jsontypes import JsonObject, JsonValue
 from builder.render import SiteSource
 from builder.theme import theme_to_dict
+from wixy_server.ai.backend import AIBackend
 from wixy_server.chat_working import WorkingCache
 from wixy_server.chats import (
     ChatConversation,
@@ -217,6 +218,7 @@ def _build_state(
     publish_job: PublishJob | None,
     chat_runtime: dict[str, ChatRuntimeEntry],
     working_cache: WorkingCache,
+    chat_attachments_supported: bool,
 ) -> JsonObject:
     # Tree READ under the process-wide tree lock: without it, a state snapshot
     # racing the watcher's fast-forward or a publish's materialize/reset can see
@@ -224,7 +226,13 @@ def _build_state(
     # shell then caches (Edit-button latch incident, 2026-07-19; treelock.py).
     with tree_lock():
         return _build_state_locked(
-            project, paths, watcher_status, publish_job, chat_runtime, working_cache
+            project,
+            paths,
+            watcher_status,
+            publish_job,
+            chat_runtime,
+            working_cache,
+            chat_attachments_supported,
         )
 
 
@@ -235,6 +243,7 @@ def _build_state_locked(
     publish_job: PublishJob | None,
     chat_runtime: dict[str, ChatRuntimeEntry],
     working_cache: WorkingCache,
+    chat_attachments_supported: bool,
 ) -> JsonObject:
     source = build_site_source(project, paths.repo)
     overlay = _load_overlay_for(paths)
@@ -283,6 +292,7 @@ def _build_state_locked(
         "publishJob": _publish_job_to_dict(publish_job) if publish_job is not None else None,
         "chats": _chats_snapshot(paths, chat_runtime, working_cache),
         "adminSections": _admin_sections_snapshot(project),
+        "chatAttachmentsSupported": chat_attachments_supported,
     }
 
 
@@ -294,10 +304,18 @@ async def get_state(request: Request) -> JsonObject:
     publish_job: PublishJob | None = request.app.state.publish_job
     chat_runtime: dict[str, ChatRuntimeEntry] = request.app.state.chat_runtime
     working_cache: WorkingCache = request.app.state.chat_working_cache
+    ai_backend: AIBackend = request.app.state.ai_backend
 
     try:
         return await anyio.to_thread.run_sync(
-            _build_state, project, paths, watcher_status, publish_job, chat_runtime, working_cache
+            _build_state,
+            project,
+            paths,
+            watcher_status,
+            publish_job,
+            chat_runtime,
+            working_cache,
+            ai_backend.supports_attachments,
         )
     except CheckoutError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

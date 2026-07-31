@@ -31,6 +31,7 @@ function fakeState(overrides: Partial<StateResponse> = {}): StateResponse {
     publishJob: null,
     chats: [],
     adminSections: [],
+    chatAttachmentsSupported: false,
     ...overrides,
   };
 }
@@ -54,6 +55,7 @@ function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
     createConversation: vi.fn(async () => fakeConversation({ status: "pending" })),
     getConversations: vi.fn(async () => []),
     sendMessage: vi.fn(async () => ({ accepted: true, buffered: false })),
+    uploadChatAttachment: vi.fn(async () => ({ attachmentId: "att-1", width: 640, height: 480 })),
     renameConversation: vi.fn(async () => fakeConversation({ title: "renamed" })),
     ...overrides,
   } as AdminApi;
@@ -418,7 +420,7 @@ describe("mountChatPanel — conversation view", () => {
     panel.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")?.click();
     await flush();
 
-    expect(sendMessage).toHaveBeenCalledWith("c1", "hello there", "c1:test-uuid");
+    expect(sendMessage).toHaveBeenCalledWith("c1", "hello there", "c1:test-uuid", []);
     expect(textarea?.value).toBe("");
     panel.teardown();
   });
@@ -443,7 +445,7 @@ describe("mountChatPanel — conversation view", () => {
       new KeyboardEvent("keydown", { key: "Enter", shiftKey: false, bubbles: true, cancelable: true }),
     );
     await flush();
-    expect(sendMessage).toHaveBeenCalledWith("c1", "plain enter text", "c1:test-uuid");
+    expect(sendMessage).toHaveBeenCalledWith("c1", "plain enter text", "c1:test-uuid", []);
     panel.teardown();
   });
 
@@ -488,22 +490,269 @@ describe("mountChatPanel — conversation view", () => {
     if (textarea) textarea.value = "first attempt";
     sendButton?.click();
     await flush();
-    expect(sendMessage).toHaveBeenNthCalledWith(1, "c1", "first attempt", "c1:uuid-1");
+    expect(sendMessage).toHaveBeenNthCalledWith(1, "c1", "first attempt", "c1:uuid-1", []);
 
     // Retrying the SAME failed message must reuse the SAME key (spec/06 3:
     // "manual retry with the same idempotency key") -- not mint a new one.
     if (textarea) textarea.value = "first attempt";
     sendButton?.click();
     await flush();
-    expect(sendMessage).toHaveBeenNthCalledWith(2, "c1", "first attempt", "c1:uuid-1");
+    expect(sendMessage).toHaveBeenNthCalledWith(2, "c1", "first attempt", "c1:uuid-1", []);
 
     // A genuinely new message composed after a SUCCESSFUL send gets a fresh key.
     if (textarea) textarea.value = "second message";
     sendButton?.click();
     await flush();
-    expect(sendMessage).toHaveBeenNthCalledWith(3, "c1", "second message", "c1:uuid-2");
+    expect(sendMessage).toHaveBeenNthCalledWith(3, "c1", "second message", "c1:uuid-2", []);
 
     panel.teardown();
+  });
+
+  describe("image attachments (decisions/00103)", () => {
+    function pngFile(name = "photo.png"): File {
+      return new File([new Uint8Array([1, 2, 3])], name, { type: "image/png" });
+    }
+
+    it("the attach button stays hidden when the backend doesn't support attachments", async () => {
+      const api = fakeApi({ getState: vi.fn(async () => fakeState({ chatAttachmentsSupported: false })) });
+      const stream = fakeStreamController();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      expect(panel.element.querySelector<HTMLElement>(".wx-chat-attach-button")?.hidden).toBe(true);
+      panel.teardown();
+    });
+
+    it("the attach button appears once the backend's support is confirmed", async () => {
+      const api = fakeApi({ getState: vi.fn(async () => fakeState({ chatAttachmentsSupported: true })) });
+      const stream = fakeStreamController();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      expect(panel.element.querySelector<HTMLElement>(".wx-chat-attach-button")?.hidden).toBe(false);
+      panel.teardown();
+    });
+
+    it("picking a file via the attach input uploads it and renders a chip", async () => {
+      const uploadChatAttachment = vi.fn(async () => ({ attachmentId: "att-1", width: 640, height: 480 }));
+      const api = fakeApi({
+        getState: vi.fn(async () => fakeState({ chatAttachmentsSupported: true })),
+        uploadChatAttachment,
+      });
+      const stream = fakeStreamController();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      const file = pngFile();
+      const fileInput = panel.element.querySelector<HTMLInputElement>('input[type="file"]');
+      expect(fileInput).not.toBeNull();
+      if (fileInput === null) throw new Error("expected a file input");
+      Object.defineProperty(fileInput, "files", { value: [file], configurable: true });
+      fileInput.dispatchEvent(new Event("change"));
+      await flush();
+
+      expect(uploadChatAttachment).toHaveBeenCalledWith("c1", file);
+      const chips = panel.element.querySelectorAll(".wx-chat-attachment-chip");
+      expect(chips).toHaveLength(1);
+      expect(panel.element.querySelector<HTMLElement>(".wx-chat-attachment-row")?.hidden).toBe(false);
+      panel.teardown();
+    });
+
+    it("pasting an image into the composer uploads it instead of inserting text", async () => {
+      const uploadChatAttachment = vi.fn(async () => ({ attachmentId: "att-2", width: 100, height: 100 }));
+      const api = fakeApi({
+        getState: vi.fn(async () => fakeState({ chatAttachmentsSupported: true })),
+        uploadChatAttachment,
+      });
+      const stream = fakeStreamController();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      const file = pngFile("pasted.png");
+      const textarea = panel.element.querySelector<HTMLTextAreaElement>(".wx-chat-composer-input");
+      const pasteEvent = Object.assign(new Event("paste", { cancelable: true }), {
+        clipboardData: { items: [{ kind: "file", type: "image/png", getAsFile: () => file }] },
+      });
+      textarea?.dispatchEvent(pasteEvent);
+      await flush();
+
+      expect(uploadChatAttachment).toHaveBeenCalledWith("c1", file);
+      expect(panel.element.querySelectorAll(".wx-chat-attachment-chip")).toHaveLength(1);
+      panel.teardown();
+    });
+
+    it("a text paste with no image data is left alone", async () => {
+      const uploadChatAttachment = vi.fn();
+      const api = fakeApi({
+        getState: vi.fn(async () => fakeState({ chatAttachmentsSupported: true })),
+        uploadChatAttachment,
+      });
+      const stream = fakeStreamController();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      const textarea = panel.element.querySelector<HTMLTextAreaElement>(".wx-chat-composer-input");
+      const pasteEvent = Object.assign(new Event("paste", { cancelable: true }), {
+        clipboardData: { items: [{ kind: "string", type: "text/plain", getAsFile: () => null }] },
+      });
+      textarea?.dispatchEvent(pasteEvent);
+      await flush();
+
+      expect(uploadChatAttachment).not.toHaveBeenCalled();
+      panel.teardown();
+    });
+
+    it("dropping a file onto the composer uploads it", async () => {
+      const uploadChatAttachment = vi.fn(async () => ({ attachmentId: "att-3", width: 50, height: 50 }));
+      const api = fakeApi({
+        getState: vi.fn(async () => fakeState({ chatAttachmentsSupported: true })),
+        uploadChatAttachment,
+      });
+      const stream = fakeStreamController();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      const file = pngFile("dropped.png");
+      const composer = panel.element.querySelector(".wx-chat-composer");
+      const dropEvent = Object.assign(new Event("drop"), { dataTransfer: { files: [file] } });
+      composer?.dispatchEvent(dropEvent);
+      await flush();
+
+      expect(uploadChatAttachment).toHaveBeenCalledWith("c1", file);
+      panel.teardown();
+    });
+
+    it("Send is disabled while an attachment is still uploading, and re-enabled once it resolves", async () => {
+      let resolveUpload!: (value: { attachmentId: string; width: number; height: number }) => void;
+      const uploadChatAttachment = vi.fn(
+        () => new Promise<{ attachmentId: string; width: number; height: number }>((resolve) => {
+          resolveUpload = resolve;
+        }),
+      );
+      const api = fakeApi({
+        getState: vi.fn(async () => fakeState({ chatAttachmentsSupported: true })),
+        uploadChatAttachment,
+      });
+      const stream = fakeStreamController();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      const fileInput = panel.element.querySelector<HTMLInputElement>('input[type="file"]');
+      if (fileInput === null) throw new Error("expected a file input");
+      Object.defineProperty(fileInput, "files", { value: [pngFile()], configurable: true });
+      fileInput.dispatchEvent(new Event("change"));
+      await flush();
+
+      const sendButton = panel.element.querySelector<HTMLButtonElement>(".wx-chat-send-button");
+      expect(sendButton?.disabled).toBe(true);
+
+      resolveUpload({ attachmentId: "att-4", width: 10, height: 10 });
+      await flush();
+      expect(sendButton?.disabled).toBe(false);
+      panel.teardown();
+    });
+
+    it("a failed upload drops the chip and shows an error, without blocking further sends", async () => {
+      const uploadChatAttachment = vi.fn(async () => {
+        throw new Error("image exceeds the 5MB limit");
+      });
+      const api = fakeApi({
+        getState: vi.fn(async () => fakeState({ chatAttachmentsSupported: true })),
+        uploadChatAttachment,
+      });
+      const stream = fakeStreamController();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      const fileInput = panel.element.querySelector<HTMLInputElement>('input[type="file"]');
+      if (fileInput === null) throw new Error("expected a file input");
+      Object.defineProperty(fileInput, "files", { value: [pngFile()], configurable: true });
+      fileInput.dispatchEvent(new Event("change"));
+      await flush();
+
+      expect(panel.element.querySelectorAll(".wx-chat-attachment-chip")).toHaveLength(0);
+      const error = panel.element.querySelector<HTMLElement>(".wx-chat-composer-error");
+      expect(error?.hidden).toBe(false);
+      expect(error?.textContent).toBe("image exceeds the 5MB limit");
+      expect(panel.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")?.disabled).toBe(false);
+      panel.teardown();
+    });
+
+    it("removing a pending attachment via its chip drops it before send", async () => {
+      const uploadChatAttachment = vi.fn(async () => ({ attachmentId: "att-5", width: 20, height: 20 }));
+      const api = fakeApi({
+        getState: vi.fn(async () => fakeState({ chatAttachmentsSupported: true })),
+        uploadChatAttachment,
+      });
+      const stream = fakeStreamController();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      const fileInput = panel.element.querySelector<HTMLInputElement>('input[type="file"]');
+      if (fileInput === null) throw new Error("expected a file input");
+      Object.defineProperty(fileInput, "files", { value: [pngFile()], configurable: true });
+      fileInput.dispatchEvent(new Event("change"));
+      await flush();
+      expect(panel.element.querySelectorAll(".wx-chat-attachment-chip")).toHaveLength(1);
+
+      panel.element.querySelector<HTMLButtonElement>(".wx-chat-attachment-remove")?.click();
+      expect(panel.element.querySelectorAll(".wx-chat-attachment-chip")).toHaveLength(0);
+      expect(panel.element.querySelector<HTMLElement>(".wx-chat-attachment-row")?.hidden).toBe(true);
+      panel.teardown();
+    });
+
+    it("send includes the uploaded attachment ids and clears the chips after a successful send", async () => {
+      const uploadChatAttachment = vi.fn(async () => ({ attachmentId: "att-6", width: 30, height: 30 }));
+      const sendMessage = vi.fn(async () => ({ accepted: true, buffered: false }));
+      const api = fakeApi({
+        getState: vi.fn(async () => fakeState({ chatAttachmentsSupported: true })),
+        uploadChatAttachment,
+        sendMessage,
+      });
+      const stream = fakeStreamController();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      const fileInput = panel.element.querySelector<HTMLInputElement>('input[type="file"]');
+      if (fileInput === null) throw new Error("expected a file input");
+      Object.defineProperty(fileInput, "files", { value: [pngFile()], configurable: true });
+      fileInput.dispatchEvent(new Event("change"));
+      await flush();
+
+      panel.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")?.click();
+      await flush();
+
+      expect(sendMessage).toHaveBeenCalledWith("c1", "", "c1:test-uuid", ["att-6"]);
+      expect(panel.element.querySelectorAll(".wx-chat-attachment-chip")).toHaveLength(0);
+      panel.teardown();
+    });
+
+    it("an image-only send (no text) is allowed once an attachment is staged", async () => {
+      const uploadChatAttachment = vi.fn(async () => ({ attachmentId: "att-7", width: 30, height: 30 }));
+      const sendMessage = vi.fn(async () => ({ accepted: true, buffered: false }));
+      const api = fakeApi({
+        getState: vi.fn(async () => fakeState({ chatAttachmentsSupported: true })),
+        uploadChatAttachment,
+        sendMessage,
+      });
+      const stream = fakeStreamController();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      const fileInput = panel.element.querySelector<HTMLInputElement>('input[type="file"]');
+      if (fileInput === null) throw new Error("expected a file input");
+      Object.defineProperty(fileInput, "files", { value: [pngFile()], configurable: true });
+      fileInput.dispatchEvent(new Event("change"));
+      await flush();
+
+      // No text typed at all -- with zero attachments this would be a no-op
+      // (the early-return guard in send()); with one staged, it must go through.
+      panel.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")?.click();
+      await flush();
+
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      panel.teardown();
+    });
   });
 
   it("rename prompts, calls the API, and updates the shown title", async () => {

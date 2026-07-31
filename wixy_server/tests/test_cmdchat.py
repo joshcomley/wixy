@@ -14,6 +14,7 @@ unpatched would make these "hermetic" tests silently depend on host state.
 
 from __future__ import annotations
 
+import base64
 import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -221,6 +222,86 @@ async def test_send_message_5xx_raises_structured_error() -> None:
     async with _make_client(app) as client:
         with pytest.raises(CmdChatError):
             await client.send_message(session.session_id, "do the thing", "conv1:msg1")
+
+
+@pytest.mark.asyncio
+async def test_send_message_with_no_attachments_omits_the_field_entirely() -> None:
+    """decisions/00103: a plain text send's wire body must be byte-identical
+    to before this feature existed — no `attachments: []` noise cmd's own
+    request-shape assertions (or a future stricter cmd version) might reject."""
+    state = FakeCmdState()
+    session = state.create_session("hi")
+    app = create_fake_cmd_app(state)
+    async with _make_client(app) as client:
+        await client.send_message(session.session_id, "hi", "conv1:msg1")
+
+    assert session.last_send_body is not None
+    assert "attachments" not in session.last_send_body
+
+
+@pytest.mark.asyncio
+async def test_send_message_with_attachments_includes_the_kind_and_upload_id() -> None:
+    state = FakeCmdState()
+    session = state.create_session("hi")
+    app = create_fake_cmd_app(state)
+    async with _make_client(app) as client:
+        await client.send_message(
+            session.session_id,
+            "look at this",
+            "conv1:msg1",
+            attachment_ids=["upload-1", "upload-2"],
+        )
+
+    assert session.last_send_body is not None
+    assert session.last_send_body["attachments"] == [
+        {"kind": "image", "upload_id": "upload-1"},
+        {"kind": "image", "upload_id": "upload-2"},
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Attachments (decisions/00103)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_upload_attachment_returns_the_converted_dimensions() -> None:
+    state = FakeCmdState()
+    state.upload_converted_dims = (320, 240)
+    app = create_fake_cmd_app(state)
+    async with _make_client(app) as client:
+        result = await client.upload_attachment(b"fake-bytes", "photo.png", "image/png")
+
+    assert result.upload_id == "upload-1"
+    assert result.width == 320
+    assert result.height == 240
+
+
+@pytest.mark.asyncio
+async def test_upload_attachment_sends_base64_encoded_bytes_and_session_id() -> None:
+    state = FakeCmdState()
+    app = create_fake_cmd_app(state)
+    async with _make_client(app) as client:
+        result = await client.upload_attachment(
+            b"\x01\x02\x03", "photo.png", "image/png", session_id="sess-1"
+        )
+
+    staged = state.uploads[result.upload_id]
+    assert staged["kind"] == "image"
+    assert staged["name"] == "photo.png"
+    assert staged["media_type"] == "image/png"
+    assert staged["session_id"] == "sess-1"
+    assert base64.b64decode(staged["bytes_b64"]) == b"\x01\x02\x03"  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_upload_attachment_error_raises_structured_error() -> None:
+    state = FakeCmdState()
+    state.upload_status_code = 413
+    app = create_fake_cmd_app(state)
+    async with _make_client(app) as client:
+        with pytest.raises(CmdChatError):
+            await client.upload_attachment(b"too-big", "photo.png", "image/png")
 
 
 # ---------------------------------------------------------------------------

@@ -17,6 +17,12 @@ matching `wixy`'s own convention).
 concept at all (05 §1) — `status()` always reports `handover_state=None`, and
 `get_chain` is never called by `routes_chat.py` as a result (see `AIBackend`'s own
 docstring: "may leave this unimplemented").
+
+`supports_attachments = False` (decisions/00103): the worker has no image-attachment
+mechanism of its own yet, and building one is milestone-6 work, which this repo's own
+CLAUDE.md marks security-gated (peer review required before merge) — deliberately not
+built here. `upload_attachment` is never called as a result, same "may leave this
+unimplemented" convention as `get_chain` above.
 """
 
 from __future__ import annotations
@@ -36,6 +42,7 @@ from wixy_server.cmdchat import (
     ProvisioningOutcome,
     ReadyOutcome,
     SendResult,
+    UploadResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -69,6 +76,7 @@ DEFAULT_MAX_ATTEMPTS = 3
 
 class AnthropicAIBackend:
     supports_handover_chains = False
+    supports_attachments = False
 
     def __init__(
         self,
@@ -138,7 +146,16 @@ class AnthropicAIBackend:
             raise AIBackendError(f"create_conversation response malformed: {body!r}")
         return ConversationRef(id=conv_id)
 
-    async def send(self, conv_ref: ConversationRef, text: str, idempotency_key: str) -> SendResult:
+    async def send(
+        self,
+        conv_ref: ConversationRef,
+        text: str,
+        idempotency_key: str,
+        *,
+        attachment_ids: list[str] | None = None,
+    ) -> SendResult:
+        # attachment_ids is always None here: supports_attachments is False, so
+        # routes_chat.py never passes one through (see module docstring).
         response = await self._request(
             "POST",
             f"/conversations/{conv_ref.id}/messages",
@@ -224,6 +241,12 @@ class AnthropicAIBackend:
     async def get_chain(self, conv_ref: ConversationRef) -> list[str]:
         # Never called: supports_handover_chains is False (see module docstring).
         raise AIBackendError("the anthropic backend has no handover-chain concept")
+
+    async def upload_attachment(
+        self, conv_ref: ConversationRef, data: bytes, filename: str, media_type: str
+    ) -> UploadResult:
+        # Never called: supports_attachments is False (see module docstring).
+        raise AIBackendError("the anthropic backend does not support attachments yet")
 
     async def get_budget_status(self) -> BudgetStatus:
         response = await self._request("GET", "/budget")

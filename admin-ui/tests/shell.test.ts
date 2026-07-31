@@ -190,6 +190,7 @@ function fakeState(overrides: Partial<StateResponse> = {}): StateResponse {
     publishJob: null,
     chats: [],
     adminSections: [],
+    chatAttachmentsSupported: false,
     ...overrides,
   };
 }
