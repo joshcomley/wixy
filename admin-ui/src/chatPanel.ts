@@ -4,7 +4,7 @@
 // conversation id as a different route) — this module owns no hash-routing of its
 // own, just "render whichever one view the current conversation id calls for."
 //
-// Scope notes (decide-small-things-yourself calls, see decisions/NNNNN):
+// Scope notes (decide-small-things-yourself calls, see decisions/00097):
 // - The list view's status dot reflects `ConversationSummary.status` (pending/
 //   ready/failed) only — NOT a live working/idle indicator. spec/06 §1 says the
 //   list shows status "from the poll cache," which would need a cross-stream
@@ -21,6 +21,7 @@ import type {
   AdminApi,
   ChatMessageData,
   ChatStatusData,
+  ChatTaskData,
   ConversationStreamEvent,
   ConversationSummary,
 } from "./api";
@@ -69,7 +70,10 @@ function statusLabel(summary: ConversationSummary): string {
 function statusDotClass(summary: ConversationSummary): string {
   if (summary.status === "pending") return "wx-chat-dot-pending";
   if (summary.status === "failed") return "wx-chat-dot-failed";
-  return "wx-chat-dot-ready";
+  // decisions/00097: a second, independent signal layered on the ready dot —
+  // still green (it's ready), but pulsing while the assistant is actively
+  // working on it, so the owner can tell without opening the conversation.
+  return summary.working ? "wx-chat-dot-ready wx-chat-dot-working" : "wx-chat-dot-ready";
 }
 
 // ---------------------------------------------------------------------------
@@ -197,6 +201,11 @@ function mountConversationList(deps: ChatPanelDeps): ChatPanel {
         const note = document.createElement("span");
         note.className = "wx-chat-list-note";
         note.textContent = ` — ${statusLabel(summary)}`;
+        titleCell.appendChild(note);
+      } else if (summary.working) {
+        const note = document.createElement("span");
+        note.className = "wx-chat-list-note wx-chat-list-note-working";
+        note.textContent = " — working…";
         titleCell.appendChild(note);
       }
       row.appendChild(titleCell);
@@ -341,6 +350,16 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
   header.append(backLink, titleEl, renameButton);
   root.appendChild(header);
 
+  // decisions/00097: the prominent work banner replaces the old small
+  // statusStrip — "directly under the conversation header" so it's
+  // impossible to miss, `aria-live="polite"` so a screen reader announces
+  // state changes without interrupting whatever the owner is doing.
+  const workBanner = document.createElement("div");
+  workBanner.className = "wx-chat-work-banner";
+  workBanner.setAttribute("aria-live", "polite");
+  workBanner.hidden = true;
+  root.appendChild(workBanner);
+
   const banner = document.createElement("p");
   banner.className = "wx-chat-banner";
   banner.textContent =
@@ -364,10 +383,13 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
   });
   root.appendChild(previewChip);
 
-  const statusStrip = document.createElement("div");
-  statusStrip.className = "wx-chat-status-strip";
-  statusStrip.hidden = true;
-  root.appendChild(statusStrip);
+  // Sits directly above the thread (which scrolls internally, decisions/
+  // NNNNN) so it stays visible while messages scroll past underneath it,
+  // without needing its own sticky positioning.
+  const taskCard = document.createElement("div");
+  taskCard.className = "wx-chat-tasks";
+  taskCard.hidden = true;
+  root.appendChild(taskCard);
 
   const reasoningToggle = document.createElement("button");
   reasoningToggle.type = "button";
@@ -402,7 +424,15 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
   let includeThinking = false;
   const messagesByIndex = new Map<number, ChatMessageData>();
   let latestStatus: ChatStatusData | null = null;
-  let statusStripTimer: number | null = null;
+  let latestTasks: ChatTaskData[] | null = null;
+  /** Set the instant a send() succeeds, cleared the moment a non-user
+   * message arrives — covers the gap between "the owner just sent
+   * something" and "the assistant's own activity timestamp (or a task
+   * block) first shows it working," which `activityState` alone can't see
+   * (decisions/00097: without this, the banner can go quiet for a moment
+   * right after Send, before the first status/tasks event lands). */
+  let awaitingReply = false;
+  let workBannerTimer: number | null = null;
   let lastUpstreamCheckAt = 0;
   /** Generated once per compose ATTEMPT, not once per `send()` call — spec/06
    * §1: "Include the idempotency key so a UI retry can't double-send," §3:
@@ -428,15 +458,86 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
     thread.scrollTop = thread.scrollHeight;
   }
 
-  function renderStatusStrip(): void {
-    if (latestStatus === null) {
-      statusStrip.hidden = true;
+  /** Working: any of — cmd's own activity is fresh, a send just went out
+   * and nothing's come back yet, or the latest task list has anything not
+   * yet `done` (decisions/00097 — three independent signals of the same
+   * underlying fact, each covering a gap the others miss: activity alone
+   * misses the instant right after Send; tasks alone misses a reply with
+   * no task block at all; awaitingReply alone would never clear if a task
+   * block never arrives). */
+  function isWorking(): boolean {
+    return (
+      activityState(latestStatus, now) === "working" ||
+      awaitingReply ||
+      (latestTasks !== null && latestTasks.some((t) => t.status !== "done"))
+    );
+  }
+
+  function renderWorkBanner(): void {
+    const working = isWorking();
+    const allDone = !working && latestTasks !== null && latestTasks.every((t) => t.status === "done");
+
+    if (working) {
+      workBanner.hidden = false;
+      workBanner.className = "wx-chat-work-banner wx-chat-work-banner-working";
+      workBanner.innerHTML = "";
+      const spinner = document.createElement("span");
+      spinner.className = "wx-spinner";
+      spinner.setAttribute("aria-hidden", "true");
+      const label = document.createElement("span");
+      label.textContent = latestTasks !== null ? "Working on your tasks…" : "Thinking…";
+      workBanner.append(spinner, label);
       return;
     }
-    statusStrip.hidden = false;
-    const state = activityState(latestStatus, now);
-    statusStrip.textContent = state === "working" ? "Assistant is working…" : "Idle";
-    statusStrip.className = `wx-chat-status-strip wx-chat-status-${state}`;
+    if (allDone) {
+      workBanner.hidden = false;
+      workBanner.className = "wx-chat-work-banner wx-chat-work-banner-done";
+      workBanner.innerHTML = "";
+      const icon = document.createElement("span");
+      icon.setAttribute("aria-hidden", "true");
+      icon.textContent = "✓";
+      const label = document.createElement("span");
+      label.textContent = "All tasks completed — review the changes in Edit, then press Publish.";
+      workBanner.append(icon, label);
+      return;
+    }
+    workBanner.hidden = true;
+  }
+
+  function renderTaskRow(task: ChatTaskData): HTMLElement {
+    const row = document.createElement("li");
+    row.className = `wx-chat-task wx-chat-task-${task.status}`;
+    const icon = document.createElement("span");
+    icon.setAttribute("aria-hidden", "true");
+    if (task.status === "doing") {
+      icon.className = "wx-spinner wx-chat-task-icon";
+    } else {
+      icon.className = "wx-chat-task-icon";
+      icon.textContent = task.status === "done" ? "✓" : "○";
+    }
+    const label = document.createElement("span");
+    label.className = "wx-chat-task-label";
+    label.textContent = task.label;
+    row.append(icon, label);
+    return row;
+  }
+
+  function renderTaskCard(): void {
+    if (latestTasks === null || latestTasks.length === 0) {
+      taskCard.hidden = true;
+      return;
+    }
+    taskCard.hidden = false;
+    taskCard.innerHTML = "";
+    const doneCount = latestTasks.filter((t) => t.status === "done").length;
+    const header = document.createElement("p");
+    header.className = "wx-chat-tasks-header";
+    header.textContent = `Tasks · ${doneCount} of ${latestTasks.length} done`;
+    taskCard.appendChild(header);
+    const list = document.createElement("ul");
+    list.className = "wx-chat-tasks-list";
+    for (const task of latestTasks) list.appendChild(renderTaskRow(task));
+    taskCard.appendChild(list);
   }
 
   function maybeCheckUpstream(): void {
@@ -460,13 +561,24 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
       offlineBanner.hidden = true;
       messagesByIndex.set(event.message.index, event.message);
       renderThread();
-      if (event.message.role !== "user") maybeCheckUpstream();
+      if (event.message.role !== "user") {
+        awaitingReply = false;
+        maybeCheckUpstream();
+      }
+      renderWorkBanner();
       return;
     }
     if (event.type === "status") {
       offlineBanner.hidden = true;
       latestStatus = event.status;
-      renderStatusStrip();
+      renderWorkBanner();
+      return;
+    }
+    if (event.type === "tasks") {
+      offlineBanner.hidden = true;
+      latestTasks = event.tasks;
+      renderTaskCard();
+      renderWorkBanner();
       return;
     }
     // "error" — spec/06 §3: offline banner, auto-retry (the server side
@@ -507,6 +619,14 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
         pendingIdempotencyKey = null;
         composerInput.value = "";
         resetToIdleComposer();
+        // decisions/00097: a fresh round of work starts now — the OLD task
+        // list (possibly showing "all done") is stale until a new block
+        // arrives, and awaitingReply covers the gap until it (or a plain
+        // reply, or a fresh activity timestamp) does.
+        awaitingReply = true;
+        latestTasks = null;
+        renderTaskCard();
+        renderWorkBanner();
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -555,17 +675,17 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
 
   loadTitle();
   connect();
-  // Re-render the status strip on a short interval too, so "working" ages
-  // back into "idle" even if no NEW status event arrives to trigger a
-  // re-render (activity freshness is time-relative, not event-driven).
-  statusStripTimer = setInterval(renderStatusStrip, 2000) as unknown as number;
+  // Re-render the work banner on a short interval too, so "working" ages
+  // back into "idle"/hidden even if no NEW status event arrives to trigger
+  // a re-render (activity freshness is time-relative, not event-driven).
+  workBannerTimer = setInterval(renderWorkBanner, 2000) as unknown as number;
 
   return {
     element: root,
     teardown(): void {
       cancelled = true;
       streamHandle?.close();
-      if (statusStripTimer !== null) clearInterval(statusStripTimer);
+      if (workBannerTimer !== null) clearInterval(workBannerTimer);
     },
   };
 }

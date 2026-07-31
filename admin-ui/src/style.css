@@ -2283,6 +2283,11 @@ div.wx-media-thumb {
   color: var(--wx-muted);
 }
 
+.wx-chat-list-note-working {
+  color: var(--wx-brand-blue-text);
+  font-weight: 600;
+}
+
 .wx-chat-list-when {
   color: var(--wx-muted);
   white-space: nowrap;
@@ -2297,6 +2302,26 @@ div.wx-media-thumb {
 
 .wx-chat-dot-ready {
   background: #16a34a;
+}
+
+.wx-chat-dot-working {
+  animation: wx-chat-dot-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes wx-chat-dot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wx-chat-dot-working {
+    animation: none;
+  }
 }
 
 .wx-chat-dot-pending {
@@ -2362,15 +2387,112 @@ div.wx-media-thumb {
   cursor: pointer;
 }
 
-.wx-chat-status-strip {
-  font-size: 0.75rem;
-  color: var(--wx-muted);
+/* decisions/00097: the prominent work banner + task card replace the old
+   small status-strip text — impossible to miss, matching the publish
+   drawer's own running/success visual language (`.wx-publish-state-*`). */
+.wx-chat-work-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--wx-radius);
+  margin-bottom: 8px;
+  font: 600 0.875rem/1.3 system-ui, sans-serif;
+}
+
+/* Matches .wx-button-busy[hidden] / .wx-media-grid[hidden]'s existing
+   convention: `[hidden]` and a bare class selector are equal specificity,
+   and author rules win ties over the UA stylesheet, so the unconditional
+   `display: flex` above would otherwise silently defeat `workBanner.hidden
+   = true` (attribute present, but ignored — the element stays flex-
+   rendered). This higher-specificity override is what actually hides it —
+   caught by e2e (chat-ux.spec.ts), where the banner rendered as an
+   empty-but-visible flex box the whole time. */
+.wx-chat-work-banner[hidden] {
+  display: none;
+}
+
+.wx-chat-work-banner-working {
+  background: var(--wx-brand-blue-tint);
+  color: var(--wx-ink);
+}
+
+.wx-chat-work-banner-working .wx-spinner {
+  color: var(--wx-brand-blue);
+}
+
+.wx-chat-work-banner-done {
+  background: var(--wx-brand-blue-tint);
+  color: var(--wx-ink);
+}
+
+.wx-chat-work-banner-done span:first-child {
+  font-size: 1.125rem;
+  line-height: 1;
+  color: var(--wx-brand-blue-text);
+}
+
+.wx-chat-tasks {
+  background: var(--wx-canvas);
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  padding: 10px 14px;
   margin-bottom: 8px;
 }
 
-.wx-chat-status-working {
+.wx-chat-tasks-header {
+  margin: 0 0 6px;
+  font: 600 0.75rem/1.3 system-ui, sans-serif;
+  color: var(--wx-muted);
+}
+
+.wx-chat-tasks-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wx-chat-task {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8125rem;
+}
+
+.wx-chat-task-icon {
+  flex: none;
+  width: 1em;
+  text-align: center;
+  line-height: 1;
+}
+
+.wx-chat-task-done .wx-chat-task-icon {
   color: var(--wx-brand-blue-text);
+}
+
+.wx-chat-task-done .wx-chat-task-label {
+  color: var(--wx-muted);
+  text-decoration: line-through;
+}
+
+.wx-chat-task-doing .wx-chat-task-icon {
+  color: var(--wx-brand-blue);
+}
+
+.wx-chat-task-doing .wx-chat-task-label {
+  color: var(--wx-ink);
   font-weight: 600;
+}
+
+.wx-chat-task-pending .wx-chat-task-icon {
+  color: var(--wx-muted);
+}
+
+.wx-chat-task-pending .wx-chat-task-label {
+  color: var(--wx-muted);
 }
 
 .wx-chat-thread {

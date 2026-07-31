@@ -22,12 +22,15 @@ from pydantic import BaseModel
 
 from builder.jsontypes import JsonObject
 from wixy_server.ai.backend import AIBackend, AIBackendError, ConversationRef
+from wixy_server.chat_tasks import TaskItem, extract_tasks
+from wixy_server.chat_working import WorkingCache
 from wixy_server.chats import (
     ChatConversation,
     ChatNotFoundError,
     ChatRuntimeEntry,
     add_chat,
     conversation_summary,
+    effective_status,
     find_chat,
     load_chats,
     rename_chat,
@@ -133,14 +136,23 @@ async def create_conversation(body: ConversationCreateIn, request: Request) -> J
 async def list_conversations(request: Request) -> JsonObject:
     paths: ProjectPaths = request.app.state.paths
     runtime: dict[str, ChatRuntimeEntry] = request.app.state.chat_runtime
+    client: AIBackend = request.app.state.ai_backend
+    working_cache: WorkingCache = request.app.state.chat_working_cache
 
     def _load() -> list[ChatConversation]:
         return load_chats(paths.chats_json)
 
     conversations = await anyio.to_thread.run_sync(_load)
     newest_first = list(reversed(conversations))
+    # "Working" only means anything for a conversation past provisioning —
+    # a pending/failed one has no live cmd status worth polling.
+    ready = [c for c in newest_first if effective_status(runtime.get(c.conv_id)) == "ready"]
+    working = await working_cache.working_for(client, ready)
     return {
-        "conversations": [conversation_summary(c, runtime.get(c.conv_id)) for c in newest_first]
+        "conversations": [
+            conversation_summary(c, runtime.get(c.conv_id), working=working.get(c.conv_id, False))
+            for c in newest_first
+        ]
     }
 
 
@@ -266,6 +278,14 @@ def _status_event(status: ChatStatus) -> JsonObject:
     }
 
 
+def _tasks_event(tasks: list[TaskItem], message_index: int) -> JsonObject:
+    return {
+        "type": "tasks",
+        "tasks": [{"label": t.label, "status": t.status} for t in tasks],
+        "messageIndex": message_index,
+    }
+
+
 def _error_event(detail: str) -> JsonObject:
     return {"type": "error", "detail": detail}
 
@@ -353,6 +373,7 @@ async def _stream_events(
     current_session_id = session_id
     sent_messages: dict[int, ChatMessage] = {}
     last_status: ChatStatus | None = None
+    last_tasks_sent: list[TaskItem] | None = None
     ready_since = anyio.current_time()
 
     while True:
@@ -411,9 +432,30 @@ async def _stream_events(
             message = _owner_visible(raw_message)
             if message is None:
                 continue
+            # wixy-tasks extraction runs AFTER _owner_visible (that function's
+            # own docstring order: strip what must never be seen at all,
+            # THEN extract structured protocol from what remains) and BEFORE
+            # the sent_messages diff, for the same reason the preamble strip
+            # runs before it — the cache must hold exactly the cleaned text
+            # that was actually sent, or a re-poll with an unchanged block
+            # would look like a content change forever.
+            tasks: list[TaskItem] | None = None
+            if message.role == "assistant" and message.kind == "text" and message.text is not None:
+                cleaned_text, tasks = extract_tasks(message.text)
+                if cleaned_text != message.text:
+                    message = replace(message, text=cleaned_text)
             if sent_messages.get(message.index) != message:
                 sent_messages[message.index] = message
                 yield _sse(_message_event(message))
+            # Gated on the TASKS changing, not the message changing: a model
+            # that re-emits the block with an updated status but byte-
+            # identical surrounding prose produces no message-event delta at
+            # all (the cleaned text is unchanged either way), so this must be
+            # its own independent diff or a real progress update would never
+            # reach the owner.
+            if tasks is not None and tasks != last_tasks_sent:
+                last_tasks_sent = tasks
+                yield _sse(_tasks_event(tasks, message.index))
 
         if status != last_status:
             last_status = status

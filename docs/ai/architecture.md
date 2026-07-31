@@ -150,6 +150,8 @@ Deep dive: [builder.md](builder.md).
 | `media.py` | Pillow upload pipeline + reference scanning |
 | `cmdchat.py` | the single client to cmd (`CmdChatClient`) — all AI inference |
 | `chats.py` | conversation store (`chats.json`) |
+| `chat_tasks.py` | the `wixy-tasks` fenced-block protocol — extract + strip (`extract_tasks`) — decisions/00097 |
+| `chat_working.py` | live "is this conversation actively working" flag, TTL-cached (`WorkingCache`) — decisions/00097 |
 | `reports.py` | "Send a report" diagnostic bundle — save unconditional, email best-effort (`submit_report`) — decisions/00095, 00096 |
 | `bootstrap.py` | first-serve "publish zero" (idempotent) |
 | `routes_*.py` | route handlers (public, admin API, internal, preview, chat, version(s)) |

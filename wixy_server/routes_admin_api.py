@@ -33,7 +33,13 @@ from builder.errors import BuildError
 from builder.jsontypes import JsonObject, JsonValue
 from builder.render import SiteSource
 from builder.theme import theme_to_dict
-from wixy_server.chats import ChatConversation, ChatRuntimeEntry, conversation_summary, load_chats
+from wixy_server.chat_working import WorkingCache
+from wixy_server.chats import (
+    ChatConversation,
+    ChatRuntimeEntry,
+    conversation_summary,
+    load_chats,
+)
 from wixy_server.checkout import (
     CheckoutError,
     UpstreamCommit,
@@ -147,11 +153,22 @@ def _publish_job_to_dict(job: PublishJob) -> JsonObject:
 
 
 def _chats_snapshot(
-    paths: ProjectPaths, chat_runtime: dict[str, ChatRuntimeEntry]
+    paths: ProjectPaths, chat_runtime: dict[str, ChatRuntimeEntry], working_cache: WorkingCache
 ) -> list[JsonValue]:
     conversations: list[ChatConversation] = load_chats(paths.chats_json)
     newest_first = list(reversed(conversations))
-    return [conversation_summary(c, chat_runtime.get(c.conv_id)) for c in newest_first]
+    # `cached_working_for` is read-only (never awaits, never touches cmd) —
+    # deliberately, since this runs on the worker thread `_build_state`
+    # dispatches to, and `/api/admin/state` must never trigger a live cmd
+    # check itself (decisions/00097's `chat_working.py` docstring: a slow or
+    # dead cmd must never slow down the one endpoint nearly every admin
+    # panel depends on for its own instant render). The dedicated
+    # conversation list is the only caller that refreshes this cache.
+    working = working_cache.cached_working_for(newest_first)
+    return [
+        conversation_summary(c, chat_runtime.get(c.conv_id), working=working.get(c.conv_id, False))
+        for c in newest_first
+    ]
 
 
 def _build_state(
@@ -160,13 +177,16 @@ def _build_state(
     watcher_status: WatcherStatus,
     publish_job: PublishJob | None,
     chat_runtime: dict[str, ChatRuntimeEntry],
+    working_cache: WorkingCache,
 ) -> JsonObject:
     # Tree READ under the process-wide tree lock: without it, a state snapshot
     # racing the watcher's fast-forward or a publish's materialize/reset can see
     # templates mid-replacement and report `editable: false` — which the admin
     # shell then caches (Edit-button latch incident, 2026-07-19; treelock.py).
     with tree_lock():
-        return _build_state_locked(project, paths, watcher_status, publish_job, chat_runtime)
+        return _build_state_locked(
+            project, paths, watcher_status, publish_job, chat_runtime, working_cache
+        )
 
 
 def _build_state_locked(
@@ -175,6 +195,7 @@ def _build_state_locked(
     watcher_status: WatcherStatus,
     publish_job: PublishJob | None,
     chat_runtime: dict[str, ChatRuntimeEntry],
+    working_cache: WorkingCache,
 ) -> JsonObject:
     source = build_site_source(project, paths.repo)
     overlay = _load_overlay_for(paths)
@@ -221,7 +242,7 @@ def _build_state_locked(
         "live": live,
         "upstream": upstream,
         "publishJob": _publish_job_to_dict(publish_job) if publish_job is not None else None,
-        "chats": _chats_snapshot(paths, chat_runtime),
+        "chats": _chats_snapshot(paths, chat_runtime, working_cache),
     }
 
 
@@ -232,9 +253,11 @@ async def get_state(request: Request) -> JsonObject:
     watcher_status: WatcherStatus = request.app.state.watcher_status
     publish_job: PublishJob | None = request.app.state.publish_job
     chat_runtime: dict[str, ChatRuntimeEntry] = request.app.state.chat_runtime
+    working_cache: WorkingCache = request.app.state.chat_working_cache
+
     try:
         return await anyio.to_thread.run_sync(
-            _build_state, project, paths, watcher_status, publish_job, chat_runtime
+            _build_state, project, paths, watcher_status, publish_job, chat_runtime, working_cache
         )
     except CheckoutError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
