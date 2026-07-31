@@ -78,6 +78,47 @@ def _poll_until(
     raise AssertionError(f"condition not met within {timeout_s}s")
 
 
+_GIT_TIMEOUT_S = 15.0
+"""`_poll_until`'s 3.0s default is tuned for a fast in-memory state check — too
+tight for `TestWorkspaceIntegration`'s real subprocess git clone/commit/push
+(and, for the bad-repo-url test, a real network round-trip), which measured
+up to ~2s with ZERO contention in a serial local run and can plausibly exceed
+3s under pytest-xdist's parallel workers competing for CPU/process-spawn/disk
+I/O — confirmed by a real CI failure on `test_second_turn_pushes_more_commits_
+without_a_second_pr` (decisions/00106) that a serial local re-run of the same
+test could not reproduce. 15s gives real headroom for a genuinely slow but
+still-working operation without masking an actually-broken one."""
+
+
+def _poll_transcript_texts(
+    tmp_path: Path, conv_id: str, *, expected_count: int, timeout_s: float = 3.0
+) -> list[str]:
+    """Polls the transcript FILE directly until it holds exactly
+    `expected_count` lines — never the API's in-memory message view followed
+    by a fixed sleep. `write_transcript` rewrites the whole file in
+    `_run_and_track`'s `finally` (`wixy_server/worker/app.py`), which runs
+    strictly AFTER `conv.append` already made a turn's messages visible via
+    the API (`run_turn` appends deep inside, well before that `finally`
+    fires) — so a poll-the-API-then-`time.sleep(0.1)`-and-hope pattern is a
+    real race, not a formality; it can and did lose on a loaded/shared CI
+    runner. No risk of reading a torn write either way: `write_transcript`
+    replaces the file atomically (tmp file + `os.replace`, its own
+    docstring), so a reader only ever sees the old-complete or new-complete
+    content, never a partial line — polling for the expected line count is
+    exactly the "wait for the real observable" fix, not a workaround."""
+    path = transcript_path(tmp_path / "transcripts", conv_id)
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if path.exists():
+            lines = path.read_text(encoding="utf-8").splitlines()
+            if len(lines) == expected_count:
+                return [json.loads(line)["text"] for line in lines]
+        time.sleep(0.02)
+    raise AssertionError(
+        f"transcript for {conv_id} never reached {expected_count} lines within {timeout_s}s"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Real-git workspace integration helpers (spec/independence/05 §2, §4) — a
 # genuine bare repo standing in for github.com, mirroring `test_publisher.py`'s
@@ -485,18 +526,18 @@ class TestWorkspaceIntegration:
             def _ready() -> bool:
                 return bool(client.get(f"/conversations/{conv_id}/status").json()["ready"])
 
-            _poll_until(_ready)
+            _poll_until(_ready, timeout_s=_GIT_TIMEOUT_S)
 
             def _has_assistant_reply() -> bool:
                 body = client.get(f"/conversations/{conv_id}/messages").json()
                 return any(m["role"] == "assistant" for m in body["messages"])
 
-            _poll_until(_has_assistant_reply)
+            _poll_until(_has_assistant_reply, timeout_s=_GIT_TIMEOUT_S)
 
             def _pr_opened() -> bool:
                 return len(github_state.pull_request_calls) > 0
 
-            _poll_until(_pr_opened)
+            _poll_until(_pr_opened, timeout_s=_GIT_TIMEOUT_S)
             status = client.get(f"/conversations/{conv_id}/status").json()
 
         # The branch actually landed on "origin" (the real bare repo).
@@ -554,7 +595,7 @@ class TestWorkspaceIntegration:
                 json={"preamble": "you are a site editor", "firstMessage": "first change"},
             )
             conv_id = create.json()["convId"]
-            _poll_until(lambda: len(github_state.pull_request_calls) > 0)
+            _poll_until(lambda: len(github_state.pull_request_calls) > 0, timeout_s=_GIT_TIMEOUT_S)
 
             client.post(
                 f"/conversations/{conv_id}/messages",
@@ -565,7 +606,7 @@ class TestWorkspaceIntegration:
                 body = client.get(f"/conversations/{conv_id}/messages").json()
                 return any(m.get("text") == "Second update done." for m in body["messages"])
 
-            _poll_until(_second_reply)
+            _poll_until(_second_reply, timeout_s=_GIT_TIMEOUT_S)
             # Give the post-turn push a moment to complete (no PR-count change
             # to poll on for the "stayed at one" case).
             time.sleep(0.2)
@@ -605,7 +646,7 @@ class TestWorkspaceIntegration:
                 body = client.get(f"/conversations/{conv_id}/messages").json()
                 return any(m["role"] == "assistant" for m in body["messages"])
 
-            _poll_until(_has_assistant_reply)
+            _poll_until(_has_assistant_reply, timeout_s=_GIT_TIMEOUT_S)
             time.sleep(0.2)  # let any (wrongly) pending push/PR settle
 
         assert github_state.pull_request_calls == []
@@ -642,7 +683,7 @@ class TestWorkspaceIntegration:
                 body = client.get(f"/conversations/{conv_id}/status").json()
                 return bool(body["failureReason"] is not None)
 
-            _poll_until(_failed)
+            _poll_until(_failed, timeout_s=_GIT_TIMEOUT_S)
             status = client.get(f"/conversations/{conv_id}/status").json()
             messages = client.get(f"/conversations/{conv_id}/messages").json()["messages"]
 
@@ -675,14 +716,9 @@ class TestTranscriptPersistence:
                 return any(m["role"] == "assistant" for m in body["messages"])
 
             _poll_until(_has_assistant_reply)
-            time.sleep(0.1)  # the finally-block write races the poll by a beat
+            texts = _poll_transcript_texts(tmp_path, conv_id, expected_count=2)
 
-        path = transcript_path(tmp_path / "transcripts", conv_id)
-        assert path.exists()
-        lines = path.read_text(encoding="utf-8").splitlines()
-        assert len(lines) == 2  # the user message + the assistant's reply
-        assert json.loads(lines[0])["text"] == "fix the typo"
-        assert json.loads(lines[1])["text"] == "Sure, I'll help with that."
+        assert texts == ["fix the typo", "Sure, I'll help with that."]
 
     def test_transcript_survives_an_agent_run_failure(self, tmp_path: Path) -> None:
         episodes = [ScriptedEpisode(raises=ConnectionError("CLI subprocess died"))]
@@ -700,12 +736,9 @@ class TestTranscriptPersistence:
                 return bool(body["failureReason"] is not None)
 
             _poll_until(_failed)
-            time.sleep(0.1)
+            texts = _poll_transcript_texts(tmp_path, conv_id, expected_count=1)
 
-        path = transcript_path(tmp_path / "transcripts", conv_id)
-        assert path.exists()
-        lines = path.read_text(encoding="utf-8").splitlines()
-        assert json.loads(lines[0])["text"] == "go"
+        assert texts == ["go"]
 
     def test_second_turn_rewrites_the_transcript_with_both_turns(self, tmp_path: Path) -> None:
         episodes = [_text_episode("first reply"), _text_episode("second reply")]
@@ -734,9 +767,6 @@ class TestTranscriptPersistence:
                 return any(m.get("text") == "second reply" for m in body["messages"])
 
             _poll_until(_second_reply)
-            time.sleep(0.1)
+            texts = _poll_transcript_texts(tmp_path, conv_id, expected_count=4)
 
-        path = transcript_path(tmp_path / "transcripts", conv_id)
-        lines = path.read_text(encoding="utf-8").splitlines()
-        texts = [json.loads(line)["text"] for line in lines]
         assert texts == ["first message", "first reply", "second message", "second reply"]
