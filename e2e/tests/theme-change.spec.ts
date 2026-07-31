@@ -55,7 +55,7 @@ test.describe("E2E 3: theme change", () => {
     await page.waitForFunction(() => {
       const iframe = document.querySelector("iframe.wx-preview-iframe") as HTMLIFrameElement | null;
       const doc = iframe?.contentDocument;
-      return doc?.documentElement.style.getPropertyValue("--cream").trim() === "#00AA33";
+      return doc?.documentElement?.style.getPropertyValue("--cream").trim() === "#00AA33";
     });
     await creamPatch;
 
@@ -71,7 +71,7 @@ test.describe("E2E 3: theme change", () => {
     await page.waitForFunction(() => {
       const iframe = document.querySelector("iframe.wx-preview-iframe") as HTMLIFrameElement | null;
       const doc = iframe?.contentDocument;
-      const varValue = doc?.documentElement.style.getPropertyValue("--font-serif").trim();
+      const varValue = doc?.documentElement?.style.getPropertyValue("--font-serif").trim();
       return varValue?.includes("Playfair Display") ?? false;
     });
     await fontPatch;
@@ -151,7 +151,7 @@ test.describe("E2E 3: theme change", () => {
       (expected) => {
         const iframe = document.querySelector("iframe.wx-preview-iframe") as HTMLIFrameElement | null;
         const doc = iframe?.contentDocument;
-        return doc?.documentElement.style.getPropertyValue("--cream").trim() === expected;
+        return doc?.documentElement?.style.getPropertyValue("--cream").trim() === expected;
       },
       originalCream,
     );
