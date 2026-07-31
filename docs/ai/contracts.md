@@ -82,10 +82,12 @@ Handler column is `file:func`. "Auth: CF" = gated by the admin middleware. Respo
 
 `<conversation summary>` = `{convId, title, createdAt, status, failureReason, failureMessage,
 working}` (`chats.py:conversation_summary`; `status ∈ pending|ready|failed`). `working`
-(decisions/00097, 00099) is a live "is the assistant actively working on this right now"
-flag — TTL-cached (~5s, `chat_working.WorkingCache`) from the same cmd `activity == "working"`
-check the open conversation's own stream-driven UI uses (`activity` is cmd's own tri-state
-enum, never a timestamp); always `false` for a `pending`/`failed` conversation
+(decisions/00097, 00099, 00100) is a live "is the assistant actively working on this right
+now" flag — TTL-cached (~5s, `chat_working.WorkingCache`) from the same cmd `activity ==
+"active"` check the open conversation's own stream-driven UI uses (`activity` is cmd's own
+enum — `"active"|"idle"|"done"|"unknown"`, a session-store mtime-age threshold computed by
+`engine/chats/session_introspect.py:_activity`, never a timestamp wixy parses itself);
+always `false` for a `pending`/`failed` conversation
 (never polled — only a `ready` one has a live cmd status worth checking). **Freshness differs
 by call site**: `GET chat/conversations` actively refreshes stale entries (bounded 2s per
 batch, regardless of cmd's own patience); `GET state`'s `chats` field reads the SAME cache

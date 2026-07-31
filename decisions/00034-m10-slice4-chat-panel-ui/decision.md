@@ -55,12 +55,18 @@ signal. "Working" = `ChatStatus.activity` timestamp within the last 10s
 cadence so a couple of missed ticks don't flicker the indicator.
 
 > **Correction (decisions/00099):** the "`activity` timestamp within the last
-> 10s" premise above is WRONG — `activity` is cmd's own tri-state ENUM string
-> ("working" | "idle" | "dead"), never a timestamp. This slice's real-browser
-> verification (below) never caught it because it ran against `FakeCmdServer`,
-> which encoded the identical wrong assumption — only live verification
-> against REAL cmd surfaced it, five milestones later. See decisions/00099
-> for the full incident and fix.
+> 10s" premise above is WRONG — `activity` is cmd's own ENUM string, never a
+> timestamp. This slice's real-browser verification (below) never caught it
+> because it ran against `FakeCmdServer`, which encoded the identical wrong
+> assumption — only live verification against REAL cmd surfaced it, five
+> milestones later. See decisions/00099 for the full incident and fix.
+>
+> **Second correction (decisions/00100):** decisions/00099's own fix guessed
+> the enum values wrong too — it's NOT `"working" | "idle" | "dead"`. The
+> real values (confirmed by direct live query) are `"active" | "idle" |
+> "done" | "unknown"`; the "is working" literal is `"active"`. See
+> decisions/00100 for how a SECOND round of live verification caught this
+> after the first round's own fix still shipped a wrong assumption.
 
 ## Decision 3: `includeThinking` reconnects the existing stream; no new
 endpoint

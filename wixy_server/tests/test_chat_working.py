@@ -1,9 +1,12 @@
-"""`wixy_server.chat_working.WorkingCache` (decisions/00097, 00099) — the
-conversation LIST's "is this actively working" signal, TTL-cached per
-conversation. cmd's own `activity` field is a tri-state ENUM string
-("working" | "idle" | "dead"), never a timestamp (decisions/00099) — every
-fixture below sets it to one of those three literal strings, matching what
-the real `/sessions/<id>/status` endpoint actually returns.
+"""`wixy_server.chat_working.WorkingCache` (decisions/00097, 00099, 00100) —
+the conversation LIST's "is this actively working" signal, TTL-cached per
+conversation. cmd's own `activity` field is an ENUM string ("active" | "idle"
+| "done" | "unknown"), never a timestamp (decisions/00099) — every fixture
+below sets it to one of those literal strings, matching what the real
+`/sessions/<id>/status` endpoint actually returns (decisions/00100 corrected
+an intermediate version of this module/these fixtures that used "working" as
+the active-literal — a guess from spec prose, never confirmed against real
+cmd; the true value is "active").
 """
 
 from __future__ import annotations
@@ -38,11 +41,11 @@ def _conv(conv_id: str, session_id: str) -> ChatConversation:
 
 class TestActivityState:
     @pytest.mark.asyncio
-    async def test_a_conversation_with_activity_working_is_working(
+    async def test_a_conversation_with_activity_active_is_working(
         self, fake_cmd_state: FakeCmdState, ai_backend: AIBackend
     ) -> None:
         session = fake_cmd_state.create_session("hi")
-        session.status["activity"] = "working"
+        session.status["activity"] = "active"
         conv = _conv("c1", session.session_id)
 
         result = await WorkingCache().working_for(ai_backend, [conv])
@@ -62,11 +65,11 @@ class TestActivityState:
         assert result == {"c1": False}
 
     @pytest.mark.asyncio
-    async def test_a_conversation_with_activity_dead_is_not_working(
+    async def test_a_conversation_with_activity_done_is_not_working(
         self, fake_cmd_state: FakeCmdState, ai_backend: AIBackend
     ) -> None:
         session = fake_cmd_state.create_session("hi")
-        session.status["activity"] = "dead"
+        session.status["activity"] = "done"
         conv = _conv("c1", session.session_id)
 
         result = await WorkingCache().working_for(ai_backend, [conv])
@@ -101,7 +104,7 @@ class TestActivityState:
         self, fake_cmd_state: FakeCmdState, ai_backend: AIBackend
     ) -> None:
         working_session = fake_cmd_state.create_session("hi")
-        working_session.status["activity"] = "working"
+        working_session.status["activity"] = "active"
         idle_session = fake_cmd_state.create_session("hi")
         idle_session.status["activity"] = "idle"
 
@@ -122,7 +125,7 @@ class TestCaching:
         re-hit cmd, even though the underlying status has since changed —
         proving the cached value (not a fresh fetch) is what's returned."""
         session = fake_cmd_state.create_session("hi")
-        session.status["activity"] = "working"
+        session.status["activity"] = "active"
         conv = _conv("c1", session.session_id)
         cache = WorkingCache()
 
@@ -139,11 +142,11 @@ class TestCaching:
     ) -> None:
         cache = WorkingCache()
         session_a = fake_cmd_state.create_session("hi")
-        session_a.status["activity"] = "working"
+        session_a.status["activity"] = "active"
         await cache.working_for(ai_backend, [_conv("a", session_a.session_id)])
 
         session_b = fake_cmd_state.create_session("hi")
-        session_b.status["activity"] = "working"
+        session_b.status["activity"] = "active"
         result = await cache.working_for(
             ai_backend, [_conv("a", session_a.session_id), _conv("b", session_b.session_id)]
         )
@@ -181,7 +184,7 @@ class TestCachedWorkingFor:
         state` calls this one and not `working_for`, per `chat_working.py`'s
         module docstring)."""
         session = fake_cmd_state.create_session("hi")
-        session.status["activity"] = "working"
+        session.status["activity"] = "active"
         conv = _conv("c1", session.session_id)
         cache = WorkingCache()
         await cache.working_for(ai_backend, [conv])

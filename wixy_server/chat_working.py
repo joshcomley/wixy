@@ -1,23 +1,37 @@
 """Whether a conversation's assistant is actively working right now — the
 signal the conversation LIST (and `/api/admin/state`'s `chats` snapshot) uses
 to pulse a row, so the site owner can tell a conversation is busy without
-having to open it (decisions/00097, 00099).
+having to open it (decisions/00097, 00099, 00100).
 
 Distinct from `chats.ChatRuntimeEntry.status` (pending/ready/failed — about
 PROVISIONING a brand-new conversation) — this is about the ongoing back-and-
 forth on an already-ready conversation, the same "working" fact the OPEN
 conversation's own status strip already shows
 (`admin-ui/src/chatPanel.ts:activityState`). Both read the IDENTICAL signal:
-cmd's own `activity` field is a tri-state ENUM string ("working" | "idle" |
-"dead", spec/06-ai-chat.md §"Status dot from `/status`"), never a timestamp —
-`working` is a plain `activity == "working"` equality check, nothing time-
-relative that the two sides could ever drift out of lockstep on. (Decisions/
-00099 corrected an earlier version of this module that wrongly parsed
-`activity` via `datetime.fromisoformat` and compared elapsed time against a
-freshness window — since "working"/"idle" never parse as a valid datetime,
-that ALWAYS evaluated `False` regardless of cmd's real state, invisible to
-every test because the fake cmd server encoded the identical wrong
-assumption; caught only by live verification against real cmd.)
+cmd's own `activity` field, computed server-side from a session store's mtime
+age (`engine/chats/session_introspect.py:_activity`, thresholds
+`SESSION_ACTIVE_SECS=8`/`SESSION_IDLE_SECS=600` in `engine/sessions.py`) —
+a FOUR-value string enum, `"active" | "idle" | "done" | "unknown"`, never a
+timestamp. `working` is a plain `activity == "active"` equality check,
+nothing time-relative that the two sides could ever drift out of lockstep
+on. (Decisions/00099 corrected an earlier version of this module that
+wrongly parsed `activity` via `datetime.fromisoformat` and compared elapsed
+time against a freshness window — since none of the real enum strings parse
+as a valid datetime, that ALWAYS evaluated `False` regardless of cmd's real
+state, invisible to every test because the fake cmd server encoded the
+identical wrong assumption; caught only by live verification against real
+cmd. Decisions/00100 then corrected 00099 ITSELF: 00099 fixed the parsing
+(enum vs. timestamp) but guessed the wrong literal — `"working"` — for the
+"is active" value, going only off `spec/06-ai-chat.md`'s prose ("working /
+idle / dead") and a single live sample that happened to read `"idle"`,
+without ever independently confirming what the string looks like WHILE
+genuinely active. cmd's actual enum is `"active"/"idle"/"done"/"unknown"` —
+`"working"` is a literal `process.liveness` uses, a DIFFERENT field this
+module deliberately does not read (spec/06 explicitly says prefer `activity`
+over process liveness). Caught only by a second round of direct, time-
+correlated live polling against cmd's own `/status` endpoint alongside
+wixy's — see decisions/00100 for the full account and general lesson about
+re-verifying a fix's own assumptions, not just its parsing logic.)
 
 TTL-cached per conversation (`_CACHE_TTL_S`) on `app.state` so the list's own
 2s poll doesn't turn into one `client.status()` call to cmd per conversation
@@ -69,9 +83,10 @@ milliseconds, so 2s is generous slack, not a tight budget."""
 
 
 def _is_working(activity: str | None) -> bool:
-    """cmd's own tri-state enum, not a timestamp — see this module's own
-    docstring for the bug this correction fixed (decisions/00099)."""
-    return activity == "working"
+    """cmd's own enum, not a timestamp — see this module's own docstring for
+    the two-stage bug this correction fixed (decisions/00099, then 00100:
+    `"active"` is the real "is-working" literal, not `"working"`)."""
+    return activity == "active"
 
 
 @dataclass

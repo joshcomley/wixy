@@ -106,3 +106,31 @@ Both sides now do a plain string-equality check instead of parsing anything as t
   decisions/00034's real-browser pass), and survived unnoticed for five milestones
   specifically because nobody had queried real cmd's `/status` response directly and
   compared it, character for character, against what the parsing code assumed.
+
+## Correction (decisions/00100): the enum values above are WRONG
+
+The very next live-verification pass (re-checking THIS fix, immediately after deploy)
+found that **`"working" | "idle" | "dead"` — the specific literal enum values this
+decision names throughout, including in the "what to watch for" bullet directly above —
+is itself wrong.** Direct confirmation against cmd's own source
+(`engine/chats/session_introspect.py:_activity`) shows the real enum is `"active" | "idle"
+| "done" | "unknown"`. `"working"` is never a value `activity` takes; it's a literal the
+separate `process.liveness` field uses, which this decision's own evidence (the `curl`
+output quoted under "What happened" above: `"process": {"liveness": "working", ...},
+"activity": "idle"`) already showed side-by-side without drawing the right conclusion —
+`"working"` was sitting right there as `process.liveness`'s value, one key over from
+`activity`, and got attributed to the wrong field.
+
+**Root cause of THIS decision's own mistake**: `spec/06-ai-chat.md`'s prose ("working /
+idle / dead") was taken as a literal quote of cmd's wire values, and the one live sample
+gathered here happened to read `activity: "idle"` — never independently confirmed what
+the string looks like WHILE genuinely active, because the investigation stopped as soon
+as "it's an enum, not a timestamp" was confirmed. That was necessary but not sufficient:
+getting the KIND of check right (equality, not parsing) still shipped with the WRONG
+literal, so `_is_working`/`activityState` continued to always evaluate false in
+production — the exact same class of externally-invisible failure this decision itself
+describes, just one layer deeper. See decisions/00100 for the full second incident: how
+it was caught (two independent live runs, ~90-120s each, directly polling cmd's real
+`/status` endpoint time-correlated against wixy's own — not just re-trusting this
+decision's fix), the corrected fix, and the general lesson about re-verifying a fix's OWN
+assumptions rather than stopping at "the bug class is now understood."
