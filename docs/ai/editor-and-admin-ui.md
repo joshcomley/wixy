@@ -222,7 +222,11 @@ and treats each `AdminCollection`'s array as one indivisible unit: every add/edi
 delete writes the WHOLE array as one `opQueue.enqueue({file, path, value})` op (the standard
 collection rule this codebase already applies elsewhere), never a partial patch. Per item:
 an `image`-kind field opens the shared `mediaDialog.ts` picker (writes `{src, alt}` —
-`contentSrc`, never a served `url`, per decisions/00095's fix); a `text`-kind field is a
+`contentSrc`, never a served `url`, per decisions/00095's fix). Displaying that stored
+value back as a thumbnail/preview `<img>` — outside the live-preview iframe, which alone
+gets a real `<base href="/">` — must run it through `mediaDialog.contentSrcToDisplayUrl`
+first (decisions/00102: both the card thumbnail and the add-flow preview shipped without
+this and rendered as broken images in production for every existing item). A `text`-kind field is a
 plain input, committed on blur/Enter, entity-decoded for display
 (`sectionPanelModel.decodeCommonEntities`) since the value is stored PLAIN and the builder's
 BeautifulSoup render pass re-escapes it at serialization time (the same convention
