@@ -12,6 +12,7 @@ import subprocess
 import time
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import NoReturn
 
@@ -23,6 +24,7 @@ from fastapi.testclient import TestClient
 from builder.jsontypes import JsonObject
 from wixy_server.ai.backend import AIBackend, CmdAIBackend
 from wixy_server.app import create_app
+from wixy_server.chat_working import WorkingCache
 from wixy_server.chats import ChatConversation, ChatRuntimeEntry, add_chat, find_chat
 from wixy_server.cmdchat import CmdChatClient
 from wixy_server.preamble import PREAMBLE_TEXT, compose_prompt
@@ -425,6 +427,42 @@ class TestListConversations:
             listed = client.get("/api/admin/chat/conversations").json()["conversations"]
             assert listed[0]["failureReason"] == "timeout"
 
+    def test_working_reflects_fresh_cmd_activity(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        cmdchat_client: CmdChatClient,
+        fake_cmd_state: FakeCmdState,
+    ) -> None:
+        """decisions/00097: the list row pulses from the SAME `activity`
+        freshness signal the open conversation's own status strip uses —
+        proven here at the route layer (not chat_working's own unit tests)
+        so the whole app.state wiring (WorkingCache instantiated, ai_backend
+        threaded through) is what's actually exercised."""
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
+        )
+        # TTL 0: this test's whole point is observing a change immediately
+        # after mutating the fake's activity, not waiting out (or racing) the
+        # real 5s cache.
+        app.state.chat_working_cache = WorkingCache(cache_ttl_s=0.0)
+        with TestClient(app) as client:
+            client.post("/api/admin/chat/conversations", json={"firstMessage": "hi"})
+            session = next(iter(fake_cmd_state.sessions.values()))
+            session.ready_after_polls = 1
+
+            def _is_ready() -> bool:
+                listed = client.get("/api/admin/chat/conversations").json()["conversations"]
+                return bool(listed) and listed[0]["status"] == "ready"
+
+            _poll_until(_is_ready)
+            not_working_yet = client.get("/api/admin/chat/conversations").json()["conversations"]
+            assert not_working_yet[0]["working"] is False
+
+            session.status["activity"] = datetime.now(UTC).isoformat()
+            now_working = client.get("/api/admin/chat/conversations").json()["conversations"]
+            assert now_working[0]["working"] is True
+
 
 class TestStateChatsField:
     def test_state_reflects_created_conversations(
@@ -458,6 +496,37 @@ class TestStateChatsField:
         assert state["chats"][0]["convId"] == created["convId"]
         assert state["chats"][0]["title"] == "hi"
         assert state["chats"][0]["status"] == "pending"
+        assert state["chats"][0]["working"] is False
+
+    def test_working_flows_through_the_same_shape_as_the_dedicated_list(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        cmdchat_client: CmdChatClient,
+        fake_cmd_state: FakeCmdState,
+    ) -> None:
+        """`chats.conversation_summary`'s own docstring: `/state`'s `chats`
+        snapshot and `GET .../conversations` must never drift apart — proven
+        here by asserting the SAME fresh-activity conversation reads
+        `working: true` through `/state` too, not just the dedicated list."""
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
+        )
+        app.state.chat_working_cache = WorkingCache(cache_ttl_s=0.0)
+        with TestClient(app) as client:
+            client.post("/api/admin/chat/conversations", json={"firstMessage": "hi"})
+            session = next(iter(fake_cmd_state.sessions.values()))
+            session.ready_after_polls = 1
+
+            def _is_ready() -> bool:
+                listed = client.get("/api/admin/chat/conversations").json()["conversations"]
+                return bool(listed) and listed[0]["status"] == "ready"
+
+            _poll_until(_is_ready)
+            session.status["activity"] = datetime.now(UTC).isoformat()
+            state = client.get("/api/admin/state").json()
+
+        assert state["chats"][0]["working"] is True
 
 
 def _create(client: TestClient, first_message: str | None = None) -> dict[str, object]:
@@ -1019,3 +1088,200 @@ class TestConversationStream:
         )
         assert stored is not None
         assert stored.session_id == "sess-successor"
+
+
+class TestTaskEvents:
+    """The `wixy-tasks` fenced-block protocol (decisions/00097) — extraction
+    is a plain function (`chat_tasks.extract_tasks`, its own unit tests), so
+    this class only proves the STREAM wiring: stripped from the visible
+    text, emitted as a `tasks` event, and re-emitted independently of the
+    message-event dedup when only the embedded statuses change.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_valid_block_is_stripped_and_emitted_as_a_tasks_event(
+        self,
+        tmp_path: Path,
+        ai_backend: AIBackend,
+        fake_cmd_state: FakeCmdState,
+        fast_stream_timing: StreamTiming,
+    ) -> None:
+        session = fake_cmd_state.create_session("hi")
+        session.ready = True
+        session.messages = [
+            _fake_message(
+                0,
+                role="assistant",
+                text=(
+                    "I'll add the FAQ link now.\n\n"
+                    '```wixy-tasks\n{"tasks": [{"label": "Add FAQ link", "status": "doing"}]}\n```'
+                ),
+            ),
+        ]
+        chats_path = tmp_path / "chats.json"
+        conv_id = _seed_conversation(chats_path, session.session_id)
+        runtime: dict[str, ChatRuntimeEntry] = {}
+
+        gen = _stream_events(
+            ai_backend, chats_path, runtime, conv_id, session.session_id, fast_stream_timing
+        )
+        events = await _collect_stream_events(gen, count=2)
+
+        message_events = [e for e in events if e["type"] == "message"]
+        assert _message_payload(message_events[0])["text"] == "I'll add the FAQ link now."
+        tasks_events = [e for e in events if e["type"] == "tasks"]
+        assert len(tasks_events) == 1
+        assert tasks_events[0]["tasks"] == [{"label": "Add FAQ link", "status": "doing"}]
+        assert tasks_events[0]["messageIndex"] == 0
+
+    @pytest.mark.asyncio
+    async def test_a_message_without_a_task_block_emits_no_tasks_event(
+        self,
+        tmp_path: Path,
+        ai_backend: AIBackend,
+        fake_cmd_state: FakeCmdState,
+        fast_stream_timing: StreamTiming,
+    ) -> None:
+        session = fake_cmd_state.create_session("hi")
+        session.ready = True
+        session.messages = [_fake_message(0, role="assistant", text="Just a normal reply.")]
+        chats_path = tmp_path / "chats.json"
+        conv_id = _seed_conversation(chats_path, session.session_id)
+        runtime: dict[str, ChatRuntimeEntry] = {}
+
+        gen = _stream_events(
+            ai_backend, chats_path, runtime, conv_id, session.session_id, fast_stream_timing
+        )
+        events = await _collect_stream_events(gen, count=1)
+
+        assert [e["type"] for e in events] == ["message"]
+
+    @pytest.mark.asyncio
+    async def test_a_malformed_block_is_stripped_but_emits_no_tasks_event(
+        self,
+        tmp_path: Path,
+        ai_backend: AIBackend,
+        fake_cmd_state: FakeCmdState,
+        fast_stream_timing: StreamTiming,
+    ) -> None:
+        session = fake_cmd_state.create_session("hi")
+        session.ready = True
+        session.messages = [
+            _fake_message(
+                0, role="assistant", text="Working on it.\n\n```wixy-tasks\nnot json\n```"
+            ),
+        ]
+        chats_path = tmp_path / "chats.json"
+        conv_id = _seed_conversation(chats_path, session.session_id)
+        runtime: dict[str, ChatRuntimeEntry] = {}
+
+        gen = _stream_events(
+            ai_backend, chats_path, runtime, conv_id, session.session_id, fast_stream_timing
+        )
+        events = await _collect_stream_events(gen, count=1)
+
+        assert [e["type"] for e in events] == ["message"]
+        assert _message_payload(events[0])["text"] == "Working on it."
+
+    @pytest.mark.asyncio
+    async def test_a_status_only_change_still_fires_a_new_tasks_event(
+        self,
+        tmp_path: Path,
+        ai_backend: AIBackend,
+        fake_cmd_state: FakeCmdState,
+        fast_stream_timing: StreamTiming,
+    ) -> None:
+        """The visible prose is byte-identical across both polls (only the
+        embedded status changes) — proves the tasks event is gated on the
+        TASKS changing, independently of the message-event dedup, which
+        would otherwise never re-fire here at all (routes_chat.py's own note
+        on why this must be a separate diff)."""
+        session = fake_cmd_state.create_session("hi")
+        session.ready = True
+        session.messages = [
+            _fake_message(
+                0,
+                role="assistant",
+                text=(
+                    "Working on it.\n\n"
+                    '```wixy-tasks\n{"tasks": [{"label": "Add FAQ link", "status": "doing"}]}\n```'
+                ),
+            ),
+        ]
+        chats_path = tmp_path / "chats.json"
+        conv_id = _seed_conversation(chats_path, session.session_id)
+        runtime: dict[str, ChatRuntimeEntry] = {}
+
+        gen = _stream_events(
+            ai_backend, chats_path, runtime, conv_id, session.session_id, fast_stream_timing
+        )
+        try:
+            with anyio.fail_after(5.0):
+                # Tick 1 yields THREE events from its one fetch: the message,
+                # the tasks event, and (per test_resends_a_message_whose_
+                # content_later_changes's own precedent) a trailing status
+                # event too, since status also differs from the initial
+                # `None`. All three must be drained before mutating, or the
+                # mutation lands mid-tick and the next anext() just observes
+                # tick 1's own trailing status event instead of a fresh tick.
+                first_event = _decode_sse_line(await anext(gen))
+                second_event = _decode_sse_line(await anext(gen))
+                third_event = _decode_sse_line(await anext(gen))
+                session.messages = [
+                    _fake_message(
+                        0,
+                        role="assistant",
+                        text=(
+                            "Working on it.\n\n"
+                            "```wixy-tasks\n"
+                            '{"tasks": [{"label": "Add FAQ link", "status": "done"}]}\n'
+                            "```"
+                        ),
+                    ),
+                ]
+                # Tick 2: the cleaned text is IDENTICAL to tick 1's ("Working
+                # on it." either way) and the status is unchanged too, so
+                # neither a message nor a status event fires this time — the
+                # very next event must be the tasks event.
+                fourth_event = _decode_sse_line(await anext(gen))
+        finally:
+            await gen.aclose()
+
+        assert first_event["type"] == "message"
+        assert second_event["type"] == "tasks"
+        assert second_event["tasks"] == [{"label": "Add FAQ link", "status": "doing"}]
+        assert third_event["type"] == "status"
+        assert fourth_event["type"] == "tasks"
+        assert fourth_event["tasks"] == [{"label": "Add FAQ link", "status": "done"}]
+
+    @pytest.mark.asyncio
+    async def test_the_task_block_is_never_visible_in_a_user_message(
+        self,
+        tmp_path: Path,
+        ai_backend: AIBackend,
+        fake_cmd_state: FakeCmdState,
+        fast_stream_timing: StreamTiming,
+    ) -> None:
+        """Extraction only ever runs on assistant text — a literal
+        ```wixy-tasks fence the OWNER happened to type (quoting the docs,
+        say) must pass through untouched, never parsed as protocol."""
+        session = fake_cmd_state.create_session("hi")
+        session.ready = True
+        session.messages = [
+            _fake_message(
+                0,
+                role="user",
+                text='why does the assistant show ```wixy-tasks\n{"tasks": []}\n``` blocks?',
+            ),
+        ]
+        chats_path = tmp_path / "chats.json"
+        conv_id = _seed_conversation(chats_path, session.session_id)
+        runtime: dict[str, ChatRuntimeEntry] = {}
+
+        gen = _stream_events(
+            ai_backend, chats_path, runtime, conv_id, session.session_id, fast_stream_timing
+        )
+        events = await _collect_stream_events(gen, count=1)
+
+        assert [e["type"] for e in events] == ["message"]
+        assert "wixy-tasks" in str(_message_payload(events[0])["text"])

@@ -109,7 +109,14 @@ export interface SystemStatus {
 
 /** `wixy_server.chats.conversation_summary`'s exact shape (spec/06 §1) — the
  * shared wire type both `GET/POST /api/admin/chat/conversations` and
- * `GET /api/admin/state`'s `chats` field return. */
+ * `GET /api/admin/state`'s `chats` field return.
+ *
+ * `working` (decisions/00097) is a live "is the assistant actively working
+ * on this conversation right now" flag, distinct from `status` (which is
+ * about PROVISIONING — pending/ready/failed, not the ongoing back-and-forth
+ * on an already-ready conversation). Server-computed and TTL-cached
+ * (`chat_working.WorkingCache`) from the same cmd `activity` freshness rule
+ * the open conversation's own status strip uses client-side. */
 export interface ConversationSummary {
   convId: string;
   title: string;
@@ -117,6 +124,7 @@ export interface ConversationSummary {
   status: "pending" | "ready" | "failed";
   failureReason: string | null;
   failureMessage: string | null;
+  working: boolean;
 }
 
 export interface StateResponse {
@@ -312,15 +320,29 @@ export interface ChatStatusData {
   handoverState: string | null;
 }
 
+/** One task in a `tasks` stream event (decisions/00097 — the `wixy-tasks`
+ * fenced-block protocol, `wixy_server/chat_tasks.py:TaskItem`). */
+export interface ChatTaskData {
+  label: string;
+  status: "pending" | "doing" | "done";
+}
+
 /** `GET .../stream`'s SSE envelope (spec/06 §1: "server-sent message, status,
  * error events") — a plain `data:` event carrying a `type` discriminator
  * (matches `publishDrawer.ts`'s existing convention on this codebase's one
  * other SSE endpoint; also sidesteps `EventSource`'s special-cased `error`
  * event NAME, which would otherwise collide with the connection-level
- * `onerror` callback). */
+ * `onerror` callback).
+ *
+ * `tasks` (decisions/00097) carries the LATEST `wixy-tasks` block an
+ * assistant text message embedded, already stripped out of that message's
+ * own `text` server-side — `messageIndex` is which message it came from,
+ * for reference only (the panel keeps just the latest tasks array, not a
+ * per-message history of them). */
 export type ConversationStreamEvent =
   | { type: "message"; message: ChatMessageData }
   | { type: "status"; status: ChatStatusData }
+  | { type: "tasks"; tasks: ChatTaskData[]; messageIndex: number }
   | { type: "error"; detail: string };
 
 const TIMEOUT_MS = 10_000;

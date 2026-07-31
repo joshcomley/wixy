@@ -33,7 +33,15 @@ from builder.errors import BuildError
 from builder.jsontypes import JsonObject, JsonValue
 from builder.render import SiteSource
 from builder.theme import theme_to_dict
-from wixy_server.chats import ChatConversation, ChatRuntimeEntry, conversation_summary, load_chats
+from wixy_server.ai.backend import AIBackend
+from wixy_server.chat_working import WorkingCache
+from wixy_server.chats import (
+    ChatConversation,
+    ChatRuntimeEntry,
+    conversation_summary,
+    effective_status,
+    load_chats,
+)
 from wixy_server.checkout import (
     CheckoutError,
     UpstreamCommit,
@@ -147,11 +155,14 @@ def _publish_job_to_dict(job: PublishJob) -> JsonObject:
 
 
 def _chats_snapshot(
-    paths: ProjectPaths, chat_runtime: dict[str, ChatRuntimeEntry]
+    paths: ProjectPaths, chat_runtime: dict[str, ChatRuntimeEntry], working: dict[str, bool]
 ) -> list[JsonValue]:
     conversations: list[ChatConversation] = load_chats(paths.chats_json)
     newest_first = list(reversed(conversations))
-    return [conversation_summary(c, chat_runtime.get(c.conv_id)) for c in newest_first]
+    return [
+        conversation_summary(c, chat_runtime.get(c.conv_id), working=working.get(c.conv_id, False))
+        for c in newest_first
+    ]
 
 
 def _build_state(
@@ -160,13 +171,16 @@ def _build_state(
     watcher_status: WatcherStatus,
     publish_job: PublishJob | None,
     chat_runtime: dict[str, ChatRuntimeEntry],
+    chats_working: dict[str, bool],
 ) -> JsonObject:
     # Tree READ under the process-wide tree lock: without it, a state snapshot
     # racing the watcher's fast-forward or a publish's materialize/reset can see
     # templates mid-replacement and report `editable: false` — which the admin
     # shell then caches (Edit-button latch incident, 2026-07-19; treelock.py).
     with tree_lock():
-        return _build_state_locked(project, paths, watcher_status, publish_job, chat_runtime)
+        return _build_state_locked(
+            project, paths, watcher_status, publish_job, chat_runtime, chats_working
+        )
 
 
 def _build_state_locked(
@@ -175,6 +189,7 @@ def _build_state_locked(
     watcher_status: WatcherStatus,
     publish_job: PublishJob | None,
     chat_runtime: dict[str, ChatRuntimeEntry],
+    chats_working: dict[str, bool],
 ) -> JsonObject:
     source = build_site_source(project, paths.repo)
     overlay = _load_overlay_for(paths)
@@ -221,7 +236,7 @@ def _build_state_locked(
         "live": live,
         "upstream": upstream,
         "publishJob": _publish_job_to_dict(publish_job) if publish_job is not None else None,
-        "chats": _chats_snapshot(paths, chat_runtime),
+        "chats": _chats_snapshot(paths, chat_runtime, chats_working),
     }
 
 
@@ -232,9 +247,19 @@ async def get_state(request: Request) -> JsonObject:
     watcher_status: WatcherStatus = request.app.state.watcher_status
     publish_job: PublishJob | None = request.app.state.publish_job
     chat_runtime: dict[str, ChatRuntimeEntry] = request.app.state.chat_runtime
+    ai_backend: AIBackend = request.app.state.ai_backend
+    working_cache: WorkingCache = request.app.state.chat_working_cache
+
+    def _load_conversations() -> list[ChatConversation]:
+        return load_chats(paths.chats_json)
+
+    conversations = await anyio.to_thread.run_sync(_load_conversations)
+    ready = [c for c in conversations if effective_status(chat_runtime.get(c.conv_id)) == "ready"]
+    chats_working = await working_cache.working_for(ai_backend, ready)
+
     try:
         return await anyio.to_thread.run_sync(
-            _build_state, project, paths, watcher_status, publish_job, chat_runtime
+            _build_state, project, paths, watcher_status, publish_job, chat_runtime, chats_working
         )
     except CheckoutError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

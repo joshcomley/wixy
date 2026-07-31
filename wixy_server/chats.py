@@ -157,10 +157,33 @@ class ChatRuntimeEntry:
 _READY = ChatRuntimeEntry(status="ready")
 
 
-def conversation_summary(conv: ChatConversation, runtime: ChatRuntimeEntry | None) -> JsonObject:
+def effective_status(runtime: ChatRuntimeEntry | None) -> ChatStatus:
+    """A conversation absent from the runtime map reads as `"ready"`
+    (decisions/00032) — the one place this convention is spelled out, so
+    every caller that needs to know "is this conversation past provisioning"
+    (e.g. `chat_working.WorkingCache`'s callers deciding which conversations
+    are even eligible to poll for a live status) agrees with what
+    `conversation_summary` itself would report, instead of each re-deriving
+    the same `runtime is None -> ready` rule and risking one of them
+    drifting (the exact duplicated-contract failure mode decisions/00092
+    already hit once for the preamble separator)."""
+    return runtime.status if runtime is not None else _READY.status
+
+
+def conversation_summary(
+    conv: ChatConversation, runtime: ChatRuntimeEntry | None, *, working: bool = False
+) -> JsonObject:
     """The wire shape both `routes_chat.py` (dedicated list/create) and
     `routes_admin_api._build_state` (the `chats` snapshot, spec/04 §8) return —
-    kept in one place so the two call sites can never drift apart."""
+    kept in one place so the two call sites can never drift apart.
+
+    `working` (decisions/00097) is a live "is the assistant actively working
+    on this conversation right now" flag — computed by `chat_working.
+    WorkingCache` (an async, TTL-cached cmd status check) and passed in by
+    the caller rather than looked up here, since this function stays a plain
+    synchronous dict-builder with no I/O of its own. Defaults `False` so a
+    caller that hasn't been updated to pass it still returns a valid,
+    conservative shape rather than erroring."""
     entry = runtime if runtime is not None else _READY
     return {
         "convId": conv.conv_id,
@@ -169,4 +192,5 @@ def conversation_summary(conv: ChatConversation, runtime: ChatRuntimeEntry | Non
         "status": entry.status,
         "failureReason": entry.failure_reason,
         "failureMessage": entry.failure_message,
+        "working": working,
     }

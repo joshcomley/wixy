@@ -16,6 +16,7 @@ function fakeConversation(overrides: Partial<ConversationSummary> = {}): Convers
     status: "ready",
     failureReason: null,
     failureMessage: null,
+    working: false,
     ...overrides,
   };
 }
@@ -135,6 +136,17 @@ function messageEvent(index: number, overrides: Partial<ChatMessageData> = {}): 
   };
 }
 
+function statusEvent(activity: string | null): ConversationStreamEvent {
+  return { type: "status", status: { activity, processKind: "cli", handoverState: null } };
+}
+
+function tasksEvent(
+  tasks: Array<{ label: string; status: "pending" | "doing" | "done" }>,
+  messageIndex = 0,
+): ConversationStreamEvent {
+  return { type: "tasks", tasks, messageIndex };
+}
+
 async function flush(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
@@ -164,6 +176,26 @@ describe("mountChatPanel — list view", () => {
     expect(rows).toHaveLength(2);
     expect(rows[0]?.querySelector(".wx-chat-list-title")?.textContent).toBe("first");
     expect(rows[1]?.querySelector(".wx-chat-list-note")?.textContent).toMatch(/starting/i);
+    panel.teardown();
+  });
+
+  it("a working ready conversation pulses its dot and notes it in the title", async () => {
+    const api = fakeApi({
+      getConversations: vi.fn(async () => [
+        fakeConversation({ convId: "c1", title: "idle one", status: "ready", working: false }),
+        fakeConversation({ convId: "c2", title: "busy one", status: "ready", working: true }),
+      ]),
+    });
+    const panel = mountChatPanel(null, { api, win: fakeWindow() });
+    await flush();
+
+    const rows = panel.element.querySelectorAll(".wx-chat-list-row");
+    expect(rows[0]?.querySelector(".wx-chat-dot")?.className).toBe("wx-chat-dot wx-chat-dot-ready");
+    expect(rows[0]?.querySelector(".wx-chat-list-note")).toBeNull();
+    expect(rows[1]?.querySelector(".wx-chat-dot")?.className).toBe(
+      "wx-chat-dot wx-chat-dot-ready wx-chat-dot-working",
+    );
+    expect(rows[1]?.querySelector(".wx-chat-list-note")?.textContent).toMatch(/working/i);
     panel.teardown();
   });
 
@@ -548,5 +580,170 @@ describe("mountChatPanel — conversation view", () => {
 
     panel.teardown();
     expect(stream.closeCalls).toBe(1);
+  });
+
+  describe("the work banner and task card (decisions/00097)", () => {
+    it("is hidden with no activity, no tasks, and nothing awaiting reply", async () => {
+      const stream = fakeStreamController();
+      const api = fakeApi();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      expect(panel.element.querySelector<HTMLElement>(".wx-chat-work-banner")?.hidden).toBe(true);
+      panel.teardown();
+    });
+
+    it("shows a generic working state from fresh cmd activity alone (no task block yet)", async () => {
+      const stream = fakeStreamController();
+      const api = fakeApi();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      stream.emit(statusEvent(new Date().toISOString()));
+
+      const banner = panel.element.querySelector<HTMLElement>(".wx-chat-work-banner");
+      expect(banner?.hidden).toBe(false);
+      expect(banner?.className).toContain("wx-chat-work-banner-working");
+      expect(banner?.textContent).toMatch(/thinking/i);
+      panel.teardown();
+    });
+
+    it("names the task list once one exists, and hides the generic wording", async () => {
+      const stream = fakeStreamController();
+      const api = fakeApi();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      stream.emit(tasksEvent([{ label: "Add the FAQ link", status: "doing" }]));
+
+      const banner = panel.element.querySelector<HTMLElement>(".wx-chat-work-banner");
+      expect(banner?.hidden).toBe(false);
+      expect(banner?.textContent).toMatch(/working on your tasks/i);
+      panel.teardown();
+    });
+
+    it("renders the task card with a done count and a spinner icon for the doing task", async () => {
+      const stream = fakeStreamController();
+      const api = fakeApi();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      stream.emit(
+        tasksEvent([
+          { label: "Read the current menu", status: "done" },
+          { label: "Add the FAQ link", status: "doing" },
+          { label: "Check the preview", status: "pending" },
+        ]),
+      );
+
+      const card = panel.element.querySelector<HTMLElement>(".wx-chat-tasks");
+      expect(card?.hidden).toBe(false);
+      expect(card?.querySelector(".wx-chat-tasks-header")?.textContent).toBe("Tasks · 1 of 3 done");
+      const rows = card?.querySelectorAll(".wx-chat-task") ?? [];
+      expect(rows).toHaveLength(3);
+      expect(rows[0]?.className).toContain("wx-chat-task-done");
+      expect(rows[1]?.className).toContain("wx-chat-task-doing");
+      expect(rows[1]?.querySelector(".wx-spinner")).not.toBeNull();
+      expect(rows[2]?.className).toContain("wx-chat-task-pending");
+      panel.teardown();
+    });
+
+    it("shows the all-done state once every task is done and activity has gone quiet", async () => {
+      const stream = fakeStreamController();
+      const api = fakeApi();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      stream.emit(tasksEvent([{ label: "Add the FAQ link", status: "done" }]));
+
+      const banner = panel.element.querySelector<HTMLElement>(".wx-chat-work-banner");
+      expect(banner?.hidden).toBe(false);
+      expect(banner?.className).toContain("wx-chat-work-banner-done");
+      expect(banner?.textContent).toMatch(/all tasks completed/i);
+      panel.teardown();
+    });
+
+    it("re-emitting the block with an updated status keeps the banner in the working state", async () => {
+      const stream = fakeStreamController();
+      const api = fakeApi();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      stream.emit(tasksEvent([{ label: "Add the FAQ link", status: "doing" }]));
+      let banner = panel.element.querySelector<HTMLElement>(".wx-chat-work-banner");
+      expect(banner?.className).toContain("wx-chat-work-banner-working");
+
+      stream.emit(tasksEvent([{ label: "Add the FAQ link", status: "done" }]));
+      banner = panel.element.querySelector<HTMLElement>(".wx-chat-work-banner");
+      expect(banner?.className).toContain("wx-chat-work-banner-done");
+      panel.teardown();
+    });
+
+    it("awaitingReply covers the gap between a successful send and the first stream event", async () => {
+      const sendMessage = vi.fn(async () => ({ accepted: true, buffered: false }));
+      const api = fakeApi({ sendMessage });
+      const stream = fakeStreamController();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      const textarea = panel.element.querySelector<HTMLTextAreaElement>(".wx-chat-composer-input");
+      if (textarea) textarea.value = "please fix the hero title";
+      panel.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")?.click();
+      await flush();
+
+      // Nothing from the stream yet (no status/tasks/message) — awaitingReply
+      // alone is what's carrying the working state here.
+      let banner = panel.element.querySelector<HTMLElement>(".wx-chat-work-banner");
+      expect(banner?.hidden).toBe(false);
+      expect(banner?.textContent).toMatch(/thinking/i);
+
+      // The assistant's own reply lands — awaitingReply must clear so a
+      // later quiet period doesn't keep the banner stuck on "working"
+      // forever.
+      stream.emit(messageEvent(1, { role: "assistant", text: "Done." }));
+      banner = panel.element.querySelector<HTMLElement>(".wx-chat-work-banner");
+      expect(banner?.hidden).toBe(true);
+      panel.teardown();
+    });
+
+    it("sending a new message after all-done clears the stale task card and dismisses the banner state", async () => {
+      const sendMessage = vi.fn(async () => ({ accepted: true, buffered: false }));
+      const api = fakeApi({ sendMessage });
+      const stream = fakeStreamController();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      stream.emit(tasksEvent([{ label: "Add the FAQ link", status: "done" }]));
+      expect(
+        panel.element.querySelector<HTMLElement>(".wx-chat-work-banner")?.className,
+      ).toContain("wx-chat-work-banner-done");
+
+      const textarea = panel.element.querySelector<HTMLTextAreaElement>(".wx-chat-composer-input");
+      if (textarea) textarea.value = "now change the footer too";
+      panel.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")?.click();
+      await flush();
+
+      expect(panel.element.querySelector<HTMLElement>(".wx-chat-tasks")?.hidden).toBe(true);
+      const banner = panel.element.querySelector<HTMLElement>(".wx-chat-work-banner");
+      expect(banner?.className).toContain("wx-chat-work-banner-working");
+      expect(banner?.textContent).toMatch(/thinking/i);
+      panel.teardown();
+    });
+
+    it("ages a working state back to hidden on the periodic re-render once activity goes stale", async () => {
+      const stream = fakeStreamController();
+      const api = fakeApi();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      stream.emit(statusEvent(new Date().toISOString()));
+      expect(panel.element.querySelector<HTMLElement>(".wx-chat-work-banner")?.hidden).toBe(false);
+
+      // No new event arrives — only the periodic re-render can notice
+      // freshness has expired (WORKING_FRESHNESS_MS = 10s).
+      await vi.advanceTimersByTimeAsync(11_000);
+      expect(panel.element.querySelector<HTMLElement>(".wx-chat-work-banner")?.hidden).toBe(true);
+      panel.teardown();
+    });
   });
 });

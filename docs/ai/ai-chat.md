@@ -64,10 +64,19 @@ green. The fake now 400s a create with no `spawned_by_session_id`, as cmd does.
 createdAt}]}`, camelCase, oldest-first, written atomically. Only durable identity is
 persisted — **not** live status. Transient status lives in `app.state.chat_runtime`
 (`ChatRuntimeEntry(status, failure_reason?, failure_message?)`); a conversation absent from
-that map reads as `ready` (decisions/00032). `conversation_summary(conv, runtime)` →
-`{convId, title, createdAt, status, failureReason, failureMessage}` is the one wire shape used
-by both the chat routes and `/api/admin/state`'s `chats` snapshot. `update_session_id` is the
-handover-follow mutation (adopt the chain's leaf as the live session).
+that map reads as `ready` (decisions/00032, `chats.effective_status`). `conversation_summary(conv,
+runtime, *, working=False)` → `{convId, title, createdAt, status, failureReason, failureMessage,
+working}` is the one wire shape used by both the chat routes and `/api/admin/state`'s `chats`
+snapshot. `update_session_id` is the handover-follow mutation (adopt the chain's leaf as the
+live session).
+
+`working` (decisions/00097, `chat_working.WorkingCache`) is computed OUTSIDE this module — it
+needs a live async `client.status()` call, which `conversation_summary` (a plain sync dict-
+builder) deliberately doesn't make itself. Both call sites (`routes_chat.list_conversations`,
+`routes_admin_api.get_state`) independently: load the conversation list, filter to `effective_
+status(...) == "ready"` (a pending/failed conversation is never polled), call `WorkingCache.
+working_for(client, ready)`, and pass the resulting `conv_id -> bool` map into `conversation_
+summary`'s `working` kwarg per conversation.
 
 ## Chat routes (`routes_chat.py`, prefix `/api/admin/chat`)
 
@@ -79,18 +88,25 @@ Route table + SSE event envelopes are in [contracts.md](contracts.md) §2, §4. 
 - **Stream** (`_stream_events`, SSE) is a server-side poll→fan-out: wait for readiness (via
   the shared tracker, not a second poller), then every `poll_interval_s` (default 1.2s)
   `get_status` + `get_messages` and diff against `sent_messages` (cmd has no `since=` filter),
-  emitting `message`/`status`/`error` events. **Every message passes through
+  emitting `message`/`status`/`tasks`/`error` events. **Every message passes through
   `_owner_visible` first** (decisions/00093): it strips the preamble out of the first user
   message, and drops that message entirely when it's preamble-only (a conversation opened
   with no opening message) — the owner must never see the engine's own prompt, while
-  cmd/the worker keep the full text because the model needs it. The strip runs **before** the
-  `sent_messages` diff, so the cache holds what was actually sent; diffing raw while emitting
-  stripped would re-send the first message every tick. **Handover-follow:** on a non-null
-  `handover_state`, fetch the chain; if the leaf ≠ current session, `update_session_id`, switch
-  to the leaf, reset diffing state, continue seamlessly. A `CmdChatError` within
-  `transcript_grace_s` (15s) of ready → quiet retry (brand-new-session transcript lag); past
-  that → `error` event + back off at `offline_retry_s` (10s). Timing is overridable via
-  `app.state.chat_stream_timing` so tests don't wait real seconds.
+  cmd/the worker keep the full text because the model needs it. **Then, for an assistant `text`
+  message, `chat_tasks.extract_tasks` runs** (decisions/00097) — strips any `wixy-tasks` fenced
+  block out of the text (the owner never sees raw protocol JSON either) and returns the block's
+  parsed tasks, if any. Both strips run **before** the `sent_messages` diff, so the cache holds
+  exactly the cleaned text that was actually sent; diffing raw while emitting cleaned would
+  re-send the message every tick. The `tasks` event is gated on a SEPARATE diff (the latest
+  parsed tasks vs. the last ones sent) — a re-emitted block whose only change is a task status
+  can leave the cleaned surrounding text byte-identical to what was already sent, so tying
+  `tasks` emission to the message-event dedup would silently swallow real progress updates.
+  **Handover-follow:** on a non-null `handover_state`, fetch the chain; if the leaf ≠ current
+  session, `update_session_id`, switch to the leaf, reset diffing state (incl. the last-sent
+  tasks), continue seamlessly. A `CmdChatError` within `transcript_grace_s` (15s) of ready →
+  quiet retry (brand-new-session transcript lag); past that → `error` event + back off at
+  `offline_retry_s` (10s). Timing is overridable via `app.state.chat_stream_timing` so tests
+  don't wait real seconds.
 - **Send** carries an `idempotencyKey` (the UI generates it once per compose attempt and
   reuses it on retry, for server-side dedupe).
 
@@ -106,25 +122,69 @@ decisions/00093.
 
 Prepended once at creation (<1.5 KB). Sets: identity (the site assistant for Cottage
 Aesthetics, working in a worktree of the *site* repo); audience (the **owner**, not a
-developer → plain language, restate vague asks then act); "read the repo's `CLAUDE.md`
-first"; a routing map (copy/images → `content/`+`images/`; layout/pages → `pages/`+
-`partials/`; look-and-feel → `theme/theme.json`); the quality gate (`python -m builder
-validate` + tests before shipping); ship discipline (branch → PR → merge; **never publish** —
-merging only updates the draft; tell the owner to press Publish); and a scope fence (requests
-about the wixy *engine itself* are out of scope — note them for the operator).
+developer → plain language, restate vague asks then act); **"showing your progress"**
+(decisions/00097, see below); "read the repo's `CLAUDE.md` first"; a routing map (copy/images →
+`content/`+`images/`; layout/pages → `pages/`+`partials/`; look-and-feel → `theme/theme.json`);
+the quality gate (`python -m builder validate` + tests before shipping); ship discipline
+(branch → PR → merge; **never publish** — merging only updates the draft; tell the owner to
+press Publish); and a scope fence (requests about the wixy *engine itself* are out of scope —
+note them for the operator).
+
+## Task-list protocol (`chat_tasks.py` + the preamble's "Showing your progress" section)
+
+decisions/00097: the owner's only signal that the assistant was doing anything used to be a
+small "Assistant is working…" strip driven by cmd's raw activity timestamp — no sense of WHAT
+it was doing or how far along. The preamble now instructs the model: on any request that
+involves real work, reply with one short plain sentence of intent, then a fenced code block
+whose info string is exactly `wixy-tasks` containing ONLY JSON
+`{"tasks":[{"label":str,"status":"pending"|"doing"|"done"}]}` (2–7 tasks, stable labels across
+re-emissions, the WHOLE block re-sent with updated statuses every time progress changes,
+final reply's block has every task `"done"`). The instruction text itself contains a literal
+example of the fence — deliberately safe, since `strip_preamble` removes the ENTIRE preamble
+as one byte-exact prefix (decisions/00093), so an example fence embedded inside it can never
+leak as if it were the model's own live block.
+
+`wixy_server/chat_tasks.py:extract_tasks(text) -> (cleaned_text, tasks | None)` finds every
+` ```wixy-tasks ` fenced block (tolerant of leading indentation and CRLF), strips all of them
+from the text regardless of validity (a malformed block is still internal protocol noise), and
+returns the LAST block's tasks if at least one parsed cleanly (non-empty, well-formed labels,
+a valid status literal) — a multi-block message (the model narrating between two updates in
+one reply) resolves to whichever block came last. Only ever run against `role == "assistant"`,
+`kind == "text"` messages in `_stream_events` — a literal ` ```wixy-tasks ` fence the OWNER
+happens to type (quoting the docs, say) is never touched, since extraction never runs on a
+user message.
 
 ## Chat panel UI (`admin-ui/src/chatPanel.ts`)
 
 `mountChatPanel(conversation, deps)` → list view (`#/chat`, polls `getConversations` every 2s,
-status dot per `ConversationSummary.status`) or detail view (`#/chat/<conv>`). Detail opens a
-browser `EventSource` on the stream route (`api.ts:openConversationStream`); `message` events
-render markdown bubbles (`markdown.ts`, `createElement`/`textContent` only — never
-`innerHTML`), collapse contiguous tool runs into a "⚙ n actions" group, and filter `thinking`
-unless the reasoning toggle is on (which reconnects the stream with `?includeThinking=true`).
-An `error` event shows the offline banner (the server already auto-retries). Non-user messages
-trigger a throttled upstream check that toggles the "Preview updated — review changes" chip.
-Send generates the idempotency key once per attempt (reused on a failed retry). **Handover is
-fully server-side** — the UI just surfaces `handoverState`.
+status dot per `ConversationSummary.status`, PLUS a `wx-chat-dot-working` pulse + a muted "—
+working…" title note when `ConversationSummary.working` is true — decisions/00097, so the
+owner can tell a conversation is busy without opening it) or detail view (`#/chat/<conv>`).
+Detail opens a browser `EventSource` on the stream route (`api.ts:openConversationStream`);
+`message` events render markdown bubbles (`markdown.ts`, `createElement`/`textContent` only —
+never `innerHTML`), collapse contiguous tool runs into a "⚙ n actions" group, and filter
+`thinking` unless the reasoning toggle is on (which reconnects the stream with
+`?includeThinking=true`). An `error` event shows the offline banner (the server already
+auto-retries). Non-user messages trigger a throttled upstream check that toggles the "Preview
+updated — review changes" chip. Send generates the idempotency key once per attempt (reused on
+a failed retry). **Handover is fully server-side** — the UI just surfaces `handoverState`.
+
+**The work banner + task card** (decisions/00097) replace the old small status-strip text.
+`isWorking()` is true on any of three independent signals, each covering a gap the others
+miss: cmd's own `activity` freshness (`activityState`, unchanged — `WORKING_FRESHNESS_MS =
+10_000`, must stay in lockstep with `chat_working.py`'s own `_FRESHNESS_S`), a local
+`awaitingReply` flag (set the instant `send()` succeeds, cleared the moment any non-user
+message arrives — covers the gap right after Send, before cmd's own activity or a task block
+shows anything), or the latest `tasks` event having anything not yet `done`. While working:
+`.wx-chat-work-banner-working`, a spinner, "Working on your tasks…" (once a task block has
+ever arrived) or "Thinking…" (before one has). Once NOT working and the latest tasks are all
+`done`: `.wx-chat-work-banner-done`, a checkmark, "All tasks completed — review the changes in
+Edit, then press Publish." — this state (and the stale task card) is explicitly cleared the
+moment the owner sends a NEW message (a fresh round of work invalidates the old, fully-done
+list). The task card (`.wx-chat-tasks`, sits directly above the internally-scrolling thread so
+it stays visible without needing its own sticky positioning) renders "Tasks · N of M done" plus
+one row per task — a spinner icon for `doing`, `✓` for `done` (label struck through, muted),
+a hollow circle for `pending`.
 
 ## Config & test doubles
 

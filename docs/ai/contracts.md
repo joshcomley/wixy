@@ -80,8 +80,12 @@ Handler column is `file:func`. "Auth: CF" = gated by the admin middleware. Respo
 | POST | `chat/conversations/{id}/rename` | `rename_conversation` | `{"title":str}` | `<conversation summary>`; 404 |
 | GET | `chat/conversations/{id}/stream?includeThinking=` | `conversation_stream` | query `includeThinking?` | **SSE**, see §4; 404 |
 
-`<conversation summary>` = `{convId, title, createdAt, status, failureReason, failureMessage}`
-(`chats.py:conversation_summary`; `status ∈ pending|ready|failed`).
+`<conversation summary>` = `{convId, title, createdAt, status, failureReason, failureMessage,
+working}` (`chats.py:conversation_summary`; `status ∈ pending|ready|failed`). `working` (decisions/
+NNNNN) is a live "is the assistant actively working on this right now" flag — TTL-cached
+(~5s, `chat_working.WorkingCache`) from the same cmd `activity`-freshness rule the open
+conversation's own stream-driven UI uses; always `false` for a `pending`/`failed` conversation
+(never polled — only a `ready` one has a live cmd status worth checking).
 
 `state.pages[].editable` = `(source.pages_dir / "<slug>.html").exists()` — a page is editable
 iff its template is on disk, so a duplicated-but-unpublished page (staged only in the overlay)
@@ -216,10 +220,20 @@ running. `stage ∈ pulling|merging|committing|building|verifying|swapping|done|
 > progress feed for the same job.
 
 **Chat** — `GET /api/admin/chat/conversations/{id}/stream?includeThinking=<bool>`
-(`routes_chat.py:_stream_events`). Three event kinds (discriminated by `type`):
+(`routes_chat.py:_stream_events`). Four event kinds (discriminated by `type`):
 - `{"type":"message","message":{index,role,kind,text,timestamp,toolName,truncated}}` —
   `kind ∈ text|tool_use|tool_result|thinking|error`; `thinking` omitted unless `includeThinking=true`.
+  An assistant `text` message's `text` has any `wixy-tasks` fenced block already stripped out
+  (decisions/00097) — the owner's bubble never shows raw protocol JSON.
 - `{"type":"status","status":{activity,processKind,handoverState}}` — emitted only on change.
+- `{"type":"tasks","tasks":[{label,status}],"messageIndex":int}` (decisions/00097) — the LATEST
+  `wixy-tasks` block an assistant text message embedded, `status ∈ pending|doing|done`. Emitted
+  independently of the `message` event for the same poll tick — gated on the TASKS changing,
+  not the surrounding text (a re-emitted block with only a status change can leave the cleaned
+  message text byte-identical to what was already sent, so this needs its own diff or a real
+  progress update would never reach the client). The client keeps only the latest tasks array,
+  not a history — a reconnect naturally replays whichever `tasks` event was most recently
+  current.
 - `{"type":"error","detail":...}` — cmd unreachable past the transcript grace window.
 
 Server-side the stream diffs the latest message batch against `sent_messages` (cmd has no
