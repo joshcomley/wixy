@@ -310,17 +310,29 @@ function renderMessageRow(message: ChatMessageData): HTMLElement {
   return row;
 }
 
-/** `status.activity` is cmd's own tri-state enum ("working" | "idle" | "dead"),
- * NOT a timestamp (spec/06-ai-chat.md: "prefer the `activity` field... over
- * process liveness — ... working / idle / dead") — a plain equality check,
- * not a freshness window. A prior version of this function parsed `activity`
- * as a `Date` and compared elapsed time against a 10s window; since "working"/
- * "idle" never parse as a valid date, that ALWAYS evaluated to idle regardless
- * of cmd's real state — invisible to every test (the fake cmd server encoded
- * the same wrong ISO-timestamp assumption), caught only by live verification
- * against real cmd (decisions/00099). */
+/** `status.activity` is cmd's own enum ("active" | "idle" | "done" | "unknown",
+ * `engine/chats/session_introspect.py:_activity` — a session-store mtime-age
+ * threshold, NOT a timestamp wixy parses itself (spec/06-ai-chat.md: "prefer
+ * the `activity` field... over process liveness"). A plain equality check,
+ * not a freshness window. Two corrections shipped here, in sequence
+ * (decisions/00099, then 00100):
+ * 1. A prior version of this function parsed `activity` as a `Date` and
+ *    compared elapsed time against a 10s window; since none of the real enum
+ *    strings parse as a valid date, that ALWAYS evaluated to idle regardless
+ *    of cmd's real state — invisible to every test (the fake cmd server
+ *    encoded the same wrong ISO-timestamp assumption), caught only by live
+ *    verification against real cmd (decisions/00099).
+ * 2. That fix compared `activity === "working"` — the right KIND of check,
+ *    but the wrong literal, guessed from spec prose ("working / idle / dead")
+ *    and a single live sample that happened to read "idle", never confirmed
+ *    against a genuinely active moment. cmd never sends "working" as an
+ *    `activity` value — that string belongs to the DIFFERENT `process.
+ *    liveness` field this module deliberately doesn't read. Caught only by a
+ *    second round of live verification that polled cmd's real `/status`
+ *    endpoint directly, time-correlated against wixy's own response, across
+ *    a real ~30s active window (decisions/00100). */
 function activityState(status: ChatStatusData | null): "working" | "idle" {
-  return status?.activity === "working" ? "working" : "idle";
+  return status?.activity === "active" ? "working" : "idle";
 }
 
 function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {

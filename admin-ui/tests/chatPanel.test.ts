@@ -600,7 +600,7 @@ describe("mountChatPanel — conversation view", () => {
       const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
       await flush();
 
-      stream.emit(statusEvent("working"));
+      stream.emit(statusEvent("active"));
 
       const banner = panel.element.querySelector<HTMLElement>(".wx-chat-work-banner");
       expect(banner?.hidden).toBe(false);
@@ -732,8 +732,10 @@ describe("mountChatPanel — conversation view", () => {
     });
 
     it("hides the working state the instant a new status event reports cmd has gone idle", async () => {
-      // decisions/00099: `activity` is cmd's own tri-state ENUM ("working" |
-      // "idle" | "dead"), not a timestamp — there is no freshness window to
+      // decisions/00099: `activity` is cmd's own ENUM ("active" | "idle" |
+      // "done" | "unknown", decisions/00100 — an earlier version of this
+      // fix used "working" here, a guess from spec prose never confirmed
+      // against real cmd), not a timestamp — there is no freshness window to
       // age out on a timer any more; the banner reacts the moment a fresh
       // status event says "idle" (spec/06 §1's stream already polls cmd
       // every 1.2s and pushes a diffed event on every real change).
@@ -742,7 +744,7 @@ describe("mountChatPanel — conversation view", () => {
       const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
       await flush();
 
-      stream.emit(statusEvent("working"));
+      stream.emit(statusEvent("active"));
       expect(panel.element.querySelector<HTMLElement>(".wx-chat-work-banner")?.hidden).toBe(false);
 
       stream.emit(statusEvent("idle"));

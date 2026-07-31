@@ -183,10 +183,7 @@ a failed retry). **Handover is fully server-side** — the UI just surfaces `han
 
 **The work banner + task card** (decisions/00097) replace the old small status-strip text.
 `isWorking()` is true on any of three independent signals, each covering a gap the others
-miss: cmd's own `activity` field being exactly `"working"` (`activityState` — a tri-state
-ENUM string, "working" | "idle" | "dead", NOT a timestamp; decisions/00099 corrected an
-earlier version of this function that wrongly parsed it as a `Date` and compared elapsed
-time against a freshness window, which always evaluated false against real cmd), a local
+miss: cmd's own `activity` field being exactly `"active"` (`activityState`), a local
 `awaitingReply` flag (set the instant `send()` succeeds, cleared the moment any non-user
 message arrives — covers the gap right after Send, before cmd's own activity or a task block
 shows anything), or the latest `tasks` event having anything not yet `done`. While working:
@@ -199,6 +196,21 @@ list). The task card (`.wx-chat-tasks`, sits directly above the internally-scrol
 it stays visible without needing its own sticky positioning) renders "Tasks · N of M done" plus
 one row per task — a spinner icon for `doing`, `✓` for `done` (label struck through, muted),
 a hollow circle for `pending`.
+
+**`activityState`'s `activity` check** reads cmd's own ENUM string — `"active" | "idle" |
+"done" | "unknown"` (`engine/chats/session_introspect.py:_activity`, a session-store
+mtime-age threshold: `<=8s` active, `<=600s` idle, else done), NOT a timestamp. Two
+corrections shipped here, in sequence. Decisions/00099 fixed an earlier version of this
+function that wrongly parsed `activity` as a `Date` and compared elapsed time against a
+freshness window — always evaluated false against real cmd, since none of the real enum
+strings parse as a date. Decisions/00100 then fixed 00099 itself: that fix compared
+`activity` against the literal `"working"`, a guess taken from spec prose ("working / idle
+/ dead") and a single live sample that happened to read `"idle"`, never confirmed against a
+genuinely active moment — cmd's `activity` field never actually sends `"working"`; that
+literal belongs to the separate `process.liveness` field this check deliberately doesn't
+read. Only a second round of live verification — polling cmd's real `/status` endpoint
+directly and time-correlating it against wixy's own response across a real ~30s active
+window — caught the second bug.
 
 ## Config & test doubles
 

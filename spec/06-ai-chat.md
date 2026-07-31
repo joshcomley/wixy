@@ -124,7 +124,12 @@ one collapsed "⚙ n actions" row (expandable, monospace); `thinking` hidden beh
 `include_thinking` — thinking is lazily fetched with `include_thinking=true` only when
 the toggle opens); `error` → red system row. Status dot from `/status`: prefer the
 `activity` field (store mtime) over process liveness — `process.kind: "none"` does NOT
-mean dead (dispatch/VS-Code chats run outside Cmd-Chats): working / idle / dead.
+mean dead (dispatch/VS-Code chats run outside Cmd-Chats). **Correction (decisions/00100,
+supersedes this line's original "working / idle / dead"):** the real literal values are
+`active` / `idle` / `done` / `unknown` (`engine/chats/session_introspect.py:_activity`) —
+confirmed by direct, live querying of cmd's own `/status` endpoint, not assumed from this
+prose. `working`/`dead` are not values `activity` ever takes; `working` is a literal the
+separate `process.liveness` field uses instead.
 
 ### Titles, list, resume
 
