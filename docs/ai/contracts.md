@@ -82,9 +82,10 @@ Handler column is `file:func`. "Auth: CF" = gated by the admin middleware. Respo
 
 `<conversation summary>` = `{convId, title, createdAt, status, failureReason, failureMessage,
 working}` (`chats.py:conversation_summary`; `status ∈ pending|ready|failed`). `working`
-(decisions/00097) is a live "is the assistant actively working on this right now" flag — TTL-
-cached (~5s, `chat_working.WorkingCache`) from the same cmd `activity`-freshness rule the open
-conversation's own stream-driven UI uses; always `false` for a `pending`/`failed` conversation
+(decisions/00097, 00099) is a live "is the assistant actively working on this right now"
+flag — TTL-cached (~5s, `chat_working.WorkingCache`) from the same cmd `activity == "working"`
+check the open conversation's own stream-driven UI uses (`activity` is cmd's own tri-state
+enum, never a timestamp); always `false` for a `pending`/`failed` conversation
 (never polled — only a `ready` one has a live cmd status worth checking). **Freshness differs
 by call site**: `GET chat/conversations` actively refreshes stale entries (bounded 2s per
 batch, regardless of cmd's own patience); `GET state`'s `chats` field reads the SAME cache

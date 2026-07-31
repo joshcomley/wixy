@@ -1,17 +1,23 @@
 """Whether a conversation's assistant is actively working right now — the
 signal the conversation LIST (and `/api/admin/state`'s `chats` snapshot) uses
 to pulse a row, so the site owner can tell a conversation is busy without
-having to open it (decisions/00097).
+having to open it (decisions/00097, 00099).
 
 Distinct from `chats.ChatRuntimeEntry.status` (pending/ready/failed — about
 PROVISIONING a brand-new conversation) — this is about the ongoing back-and-
 forth on an already-ready conversation, the same "working" fact the OPEN
 conversation's own status strip already shows
-(`admin-ui/src/chatPanel.ts:activityState`, `WORKING_FRESHNESS_MS = 10_000`).
-`_FRESHNESS_S` below must stay in lockstep with that constant — both decide
-"is this conversation working" from the same cmd `activity` timestamp, and a
-list row disagreeing with the open conversation's own strip about the same
-fact would be a visible bug, not just an inconsistency.
+(`admin-ui/src/chatPanel.ts:activityState`). Both read the IDENTICAL signal:
+cmd's own `activity` field is a tri-state ENUM string ("working" | "idle" |
+"dead", spec/06-ai-chat.md §"Status dot from `/status`"), never a timestamp —
+`working` is a plain `activity == "working"` equality check, nothing time-
+relative that the two sides could ever drift out of lockstep on. (Decisions/
+00099 corrected an earlier version of this module that wrongly parsed
+`activity` via `datetime.fromisoformat` and compared elapsed time against a
+freshness window — since "working"/"idle" never parse as a valid datetime,
+that ALWAYS evaluated `False` regardless of cmd's real state, invisible to
+every test because the fake cmd server encoded the identical wrong
+assumption; caught only by live verification against real cmd.)
 
 TTL-cached per conversation (`_CACHE_TTL_S`) on `app.state` so the list's own
 2s poll doesn't turn into one `client.status()` call to cmd per conversation
@@ -45,14 +51,12 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 
 import anyio
 
 from wixy_server.ai.backend import AIBackend, AIBackendError, ConversationRef
 from wixy_server.chats import ChatConversation
 
-_FRESHNESS_S = 10.0
 _CACHE_TTL_S = 5.0
 _STATUS_TIMEOUT_S = 2.0
 """How long `working_for` waits for ANY ONE `client.status()` call before
@@ -64,16 +68,10 @@ looking at; a real, healthy, same-box cmd answers in low tens of
 milliseconds, so 2s is generous slack, not a tight budget."""
 
 
-def _is_fresh(activity: str | None, now: datetime) -> bool:
-    if activity is None:
-        return False
-    try:
-        parsed = datetime.fromisoformat(activity)
-    except ValueError:
-        return False
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return (now - parsed).total_seconds() < _FRESHNESS_S
+def _is_working(activity: str | None) -> bool:
+    """cmd's own tri-state enum, not a timestamp — see this module's own
+    docstring for the bug this correction fixed (decisions/00099)."""
+    return activity == "working"
 
 
 @dataclass
@@ -119,7 +117,7 @@ class WorkingCache:
             try:
                 with anyio.move_on_after(self.status_timeout_s):
                     status = await client.status(ConversationRef(id=conv.session_id))
-                    working = _is_fresh(status.activity, datetime.now(UTC))
+                    working = _is_working(status.activity)
             except AIBackendError:
                 # cmd unreachable for this one conversation — never blocking
                 # state (matches EngineStatusCache's own fallback reasoning):

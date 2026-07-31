@@ -54,6 +54,14 @@ signal. "Working" = `ChatStatus.activity` timestamp within the last 10s
 (`WORKING_FRESHNESS_MS`) — generous relative to the stream's 1.2s poll
 cadence so a couple of missed ticks don't flicker the indicator.
 
+> **Correction (decisions/00099):** the "`activity` timestamp within the last
+> 10s" premise above is WRONG — `activity` is cmd's own tri-state ENUM string
+> ("working" | "idle" | "dead"), never a timestamp. This slice's real-browser
+> verification (below) never caught it because it ran against `FakeCmdServer`,
+> which encoded the identical wrong assumption — only live verification
+> against REAL cmd surfaced it, five milestones later. See decisions/00099
+> for the full incident and fix.
+
 ## Decision 3: `includeThinking` reconnects the existing stream; no new
 endpoint
 

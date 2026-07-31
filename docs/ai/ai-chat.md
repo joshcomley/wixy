@@ -145,7 +145,7 @@ note them for the operator).
 ## Task-list protocol (`chat_tasks.py` + the preamble's "Showing your progress" section)
 
 decisions/00097: the owner's only signal that the assistant was doing anything used to be a
-small "Assistant is working…" strip driven by cmd's raw activity timestamp — no sense of WHAT
+small "Assistant is working…" strip driven by cmd's raw `activity` field — no sense of WHAT
 it was doing or how far along. The preamble now instructs the model: on any request that
 involves real work, reply with one short plain sentence of intent, then a fenced code block
 whose info string is exactly `wixy-tasks` containing ONLY JSON
@@ -183,8 +183,10 @@ a failed retry). **Handover is fully server-side** — the UI just surfaces `han
 
 **The work banner + task card** (decisions/00097) replace the old small status-strip text.
 `isWorking()` is true on any of three independent signals, each covering a gap the others
-miss: cmd's own `activity` freshness (`activityState`, unchanged — `WORKING_FRESHNESS_MS =
-10_000`, must stay in lockstep with `chat_working.py`'s own `_FRESHNESS_S`), a local
+miss: cmd's own `activity` field being exactly `"working"` (`activityState` — a tri-state
+ENUM string, "working" | "idle" | "dead", NOT a timestamp; decisions/00099 corrected an
+earlier version of this function that wrongly parsed it as a `Date` and compared elapsed
+time against a freshness window, which always evaluated false against real cmd), a local
 `awaitingReply` flag (set the instant `send()` succeeds, cleared the moment any non-user
 message arrives — covers the gap right after Send, before cmd's own activity or a task block
 shows anything), or the latest `tasks` event having anything not yet `done`. While working:

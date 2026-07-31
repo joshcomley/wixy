@@ -119,17 +119,18 @@ test.describe("E2E 7: chat UX", () => {
 
     // The list view's own row pulse is a SEPARATE, server-cached signal
     // (decisions/00097's WorkingCache) driven purely by cmd's own `activity`
-    // timestamp — NOT by the task-block content the detail view just used,
-    // so it needs its own scripted fact to observe through the real UI.
+    // field — a tri-state ENUM ("working"/"idle"/"dead", decisions/00099),
+    // NOT a timestamp — NOT by the task-block content the detail view just
+    // used, so it needs its own scripted fact to observe through the real UI.
     await page.request.post("/test/chat/set-activity", {
-      data: { convId, activity: new Date().toISOString() },
+      data: { convId, activity: "working" },
     });
     await page.click(".wx-chat-back-link");
     await expect(page.locator(".wx-chat-dot").first()).toHaveClass(/wx-chat-dot-working/, {
       timeout: 10_000,
     });
     await expect(page.locator(".wx-chat-list-note")).toContainText("working");
-    await page.request.post("/test/chat/set-activity", { data: { convId, activity: null } });
+    await page.request.post("/test/chat/set-activity", { data: { convId, activity: "idle" } });
 
     await page.click(".wx-chat-list-title");
     await page.waitForURL(/\/admin\/chat\/.+/);

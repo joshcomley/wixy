@@ -594,13 +594,13 @@ describe("mountChatPanel — conversation view", () => {
       panel.teardown();
     });
 
-    it("shows a generic working state from fresh cmd activity alone (no task block yet)", async () => {
+    it("shows a generic working state from cmd's own activity alone (no task block yet)", async () => {
       const stream = fakeStreamController();
       const api = fakeApi();
       const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
       await flush();
 
-      stream.emit(statusEvent(new Date().toISOString()));
+      stream.emit(statusEvent("working"));
 
       const banner = panel.element.querySelector<HTMLElement>(".wx-chat-work-banner");
       expect(banner?.hidden).toBe(false);
@@ -731,18 +731,21 @@ describe("mountChatPanel — conversation view", () => {
       panel.teardown();
     });
 
-    it("ages a working state back to hidden on the periodic re-render once activity goes stale", async () => {
+    it("hides the working state the instant a new status event reports cmd has gone idle", async () => {
+      // decisions/00099: `activity` is cmd's own tri-state ENUM ("working" |
+      // "idle" | "dead"), not a timestamp — there is no freshness window to
+      // age out on a timer any more; the banner reacts the moment a fresh
+      // status event says "idle" (spec/06 §1's stream already polls cmd
+      // every 1.2s and pushes a diffed event on every real change).
       const stream = fakeStreamController();
       const api = fakeApi();
       const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
       await flush();
 
-      stream.emit(statusEvent(new Date().toISOString()));
+      stream.emit(statusEvent("working"));
       expect(panel.element.querySelector<HTMLElement>(".wx-chat-work-banner")?.hidden).toBe(false);
 
-      // No new event arrives — only the periodic re-render can notice
-      // freshness has expired (WORKING_FRESHNESS_MS = 10s).
-      await vi.advanceTimersByTimeAsync(11_000);
+      stream.emit(statusEvent("idle"));
       expect(panel.element.querySelector<HTMLElement>(".wx-chat-work-banner")?.hidden).toBe(true);
       panel.teardown();
     });
