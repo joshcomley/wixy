@@ -136,6 +136,43 @@ describe("mountSectionPanel", () => {
     expect(panel.element.querySelectorAll(".wx-section-card")).toHaveLength(2);
   });
 
+  it("renders a card's picked-image thumbnails as loadable admin-origin URLs, not the raw content-form src", async () => {
+    // A real bug, live-reported: `img.src = picked.src` used the CONTENT-JSON
+    // form verbatim (`images/b1.jpg`, decisions/00095 — what builder/validate.py
+    // expects a repo image's src to look like), which resolves against
+    // whatever admin route happens to be current (e.g. `/admin/section/
+    // gallery/images/b1.jpg` — 404) instead of the site root, exactly the
+    // failure mode `mediaDialog.ts:contentSrcToDisplayUrl`'s own docstring
+    // warns about. Every existing card-rendering test asserted card COUNT or
+    // op-queue behavior, never a thumbnail's actual `src` attribute — this is
+    // the coverage gap that let it ship. Draft-media form (already an
+    // absolute path) must pass through unchanged; repo form must gain a
+    // leading slash.
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: {
+          gallery: {
+            sliders: [
+              {
+                ...SLIDER_ITEM,
+                before: { src: "images/b1.jpg", alt: "Before" },
+                after: { src: "/admin/draft-media/staged-a1.jpg", alt: "After" },
+              },
+            ],
+          },
+        },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue: fakeQueue() });
+    await flush();
+
+    const thumbs = panel.element.querySelectorAll<HTMLImageElement>(".wx-section-image-thumb");
+    expect(thumbs).toHaveLength(2);
+    expect(thumbs[0]?.getAttribute("src")).toBe("/images/b1.jpg");
+    expect(thumbs[1]?.getAttribute("src")).toBe("/admin/draft-media/staged-a1.jpg");
+  });
+
   it("editing a text field commits the whole array on blur", async () => {
     const api = fakeApi({
       getContent: vi.fn(async () => ({
@@ -298,6 +335,13 @@ describe("mountSectionPanel", () => {
       (b) => b.textContent === "Use this image",
     );
     useThisImage?.click();
+
+    // Photo picked -> the step re-renders with a preview. Same live bug as the
+    // card thumbnail's own regression test above: this must be a loadable
+    // admin-origin URL (`/images/cheek.jpg`), never the raw content-form src
+    // (`images/cheek.jpg`) `onPick` stores.
+    const preview = dialog?.querySelector<HTMLImageElement>(".wx-section-add-preview");
+    expect(preview?.getAttribute("src")).toBe("/images/cheek.jpg");
 
     // Photo picked -> Next now enabled; advance to the form step.
     expect(findButton("Next")?.disabled).toBe(false);

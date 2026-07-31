@@ -109,6 +109,19 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     await expect(cards).toHaveCount(1);
     await expect(cards.first().locator(".wx-section-field-input").first()).toHaveValue("Lip Filler");
 
+    // The card list's own thumbnail render (renderImageSlot) is a REAL bug
+    // this suite never caught: `img.src` was set from the raw content-JSON
+    // src ("images/<hash>.jpg", no leading slash) instead of running it
+    // through mediaDialog.ts's contentSrcToDisplayUrl() -- broken on any
+    // non-root admin route (`/admin/section/<id>`), which is every real
+    // route this panel is ever loaded from. `naturalWidth > 0` proves the
+    // browser actually fetched and decoded the image, not just that an
+    // <img> tag with SOME src exists in the DOM.
+    for (const thumb of await cards.first().locator(".wx-section-image-thumb").all()) {
+      await expect(thumb).toHaveJSProperty("complete", true);
+      expect(await thumb.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBeGreaterThan(0);
+    }
+
     // -- Pair #2: pick already-uploaded / pre-existing media, no re-upload --
     await slidersCollection.locator(".wx-section-add-button").click();
     await expect(addDialog).toBeVisible();

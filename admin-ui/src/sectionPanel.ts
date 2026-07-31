@@ -9,7 +9,7 @@
 
 import type { AdminApi, AdminCollection, AdminField, AdminSection } from "./api";
 import type { OpQueueLike } from "./editView";
-import { openMediaDialog, type MediaPickValue } from "./mediaDialog";
+import { contentSrcToDisplayUrl, openMediaDialog, type MediaPickValue } from "./mediaDialog";
 import {
   appendItem,
   blankItem,
@@ -96,7 +96,7 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     if (picked !== null) {
       const img = document.createElement("img");
       img.className = "wx-section-image-thumb";
-      img.src = picked.src;
+      img.src = contentSrcToDisplayUrl(picked.src);
       img.alt = picked.alt;
       slot.appendChild(img);
     } else {
@@ -383,7 +383,7 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
       if (picked !== null) {
         const preview = document.createElement("img");
         preview.className = "wx-section-add-preview";
-        preview.src = picked.src;
+        preview.src = contentSrcToDisplayUrl(picked.src);
         preview.alt = picked.alt;
         dialog.appendChild(preview);
       }
