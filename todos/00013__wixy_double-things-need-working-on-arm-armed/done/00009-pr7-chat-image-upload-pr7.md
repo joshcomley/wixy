@@ -66,6 +66,45 @@ Findings:
   real image to a real conversation, confirm the model can actually describe what's in
   it — not just that the upload/send calls succeeded).
 
+## Outcome — DONE 2026-07-31
+Merged as PR #138 (github.com/joshcomley/wixy), merge commit `ebdeb597bacfe0b69911c9c58
+2d8fba45c1e1ed0`. Implementation matched the design sketch above closely, with one
+scope narrowing made deliberately during implementation: v1 ships attachments on the
+open-conversation composer (`/send`) only, NOT the new-conversation first-message flow
+(`new-chat`) — that endpoint's own attachment wire shape wasn't confirmed with full
+confidence during research, so rather than guess, it was left for a future extension.
+
+Full gate green: ruff, mypy, bare pytest (1001 passed, +22 new), admin-ui typecheck +
+583 vitest (+11 new) + build (no drift), full e2e (40/40). Decisions: `decisions/00103-
+chat-image-attachments/`.
+
+**Three unrelated pre-existing test-timing races were found and fixed along the way**
+(surfaced by this PR's own full-suite gate, none caused by this PR's code, none
+dismissed as "flaky"):
+- `theme-change.spec.ts`'s live-preview `waitForFunction` predicates could throw on a
+  transient null `documentElement` during a real iframe navigation, aborting the wait
+  instead of retrying — fixed with null-safe optional chaining (decisions/00104).
+- `test_worker_app.py::TestTranscriptPersistence` polled the API's in-memory state then
+  slept a flat 0.1s before reading the transcript file — a genuinely unbounded race
+  against a background-thread file write, which failed for real on CI's shared runner.
+  Fixed by polling the transcript file's actual content directly (decisions/00105).
+- `test_worker_app.py::TestWorkspaceIntegration`'s real git-subprocess tests shared the
+  same 3.0s timeout as fast in-memory checks elsewhere in the file — too tight under
+  pytest-xdist's 4-way parallel contention, confirmed failing locally. Fixed with a
+  15s override for the whole class (decisions/00106).
+
+**Live-verified CONFIRMED on production** — the single most important step, and the one
+genuinely unconfirmed assumption from research. A real headed-browser session
+(Playwright, chrome channel, CF Access headers) created a real conversation on
+`ca.cinnamons.uk`, uploaded a distinctive locally-generated test image (a specific
+purple/teal/yellow composition plus exact embedded caption text) through the real
+composer UI, and asked the model to describe it. The real reply matched every detail
+exactly — colors, shapes, positions, AND a verbatim character-for-character read of the
+embedded text — conclusive proof the send resolves to cmd's `stream-json` method and
+delivers a genuine vision content block, not a text-footer fallback. No follow-up fix
+needed; this was the one thing that could have made "tests pass, feature silently
+broken" happen again (as it did twice earlier this session, PR4→PR5 and PR6) and it
+didn't.
+
 ## Status
-Research phase done; design sketched above; implementation not yet started (paused
-mid-research by the Before & After thumbnail bug report, PR6/00008 — resume here).
+DONE — shipped, gated, and live-verified. See Outcome above.

@@ -94,18 +94,48 @@ confirmed-via-research v1 limitation, not a bug wixy introduced and not somethin
 around: cmd's read-side genuinely doesn't expose it, so there is nothing for wixy to
 surface differently. A future fix would need to land in cmd itself.
 
+## Live verification outcome (CONFIRMED — 2026-07-31, post-merge)
+
+The one genuinely unconfirmed assumption at implementation time — cmd's own docs state an
+attachment only becomes a real vision content block if the send resolves to
+`method=="stream-json"`; a send routed instead to `dispatch`/`writeconsole`/`sendkeys`
+downgrades to a text-footer `@<path> (WxH)` mention relying on the model's own Read tool,
+not a native image block — is now **CONFIRMED TRUE**, settled by a real headed-browser
+verification against production (`ca.cinnamons.uk`, merge commit `ebdeb597bacfe0b699
+11c9c582d8fba45c1e1ed0`), not assumed from research.
+
+Method: created a real conversation via the actual admin UI, uploaded a locally-generated,
+distinctive test image (solid purple background, a teal circle, a yellow five-point star,
+and the exact caption text `"TOKEN-WIXY-PR7-QUOKKA-42"` — chosen specifically so a correct
+description could not plausibly be a coincidence or a hallucination) through the real
+composer, and asked the model to describe it. The real reply:
+
+> "The image has a solid purple/violet background. It contains two shapes: a teal
+> (blue-green) filled circle in the upper-left area, and a yellow five-pointed star roughly
+> centered-right. Below the image, on a white strip, is black text reading exactly:
+> 'TOKEN-WIXY-PR7-QUOKKA-42'"
+
+Every detail matches exactly — background color, both shapes' colors AND positions, and a
+verbatim, character-for-character read of embedded text. This is definitive: a
+text-footer-only fallback (filename + WxH, no pixel access) could not produce an exact
+transcription of text baked into the image. Wixy's conversation flavor (subscription
+bucket, `model: "claude-sonnet-5"`, never dispatched to a visible window) resolves to
+`stream-json` as expected — no follow-up fix needed, this assumption is closed.
+
+(Aside, not a bug: the FIRST message of this same verification — a message explicitly
+telling the model "this is an automated test, just reply 'ready' and wait" — was correctly
+met with skepticism: the model noted it could find no `decisions/00103` in the repo it
+actually operates in and no instruction to treat "ready" as a blind trigger, and declined
+to comply until given real context, making no site changes. This is expected, not a defect
+— the AI chat agent's working tree is the SITE repo (Cottage Aesthetics), which has no
+visibility into the wixy ENGINE repo's own `decisions/` folder, so a message alluding to
+engine-internal decision numbers was always going to read as unverifiable to it. It did not
+block or degrade the actual image-attachment turn that followed once real content was
+presented — a good, calibrated example of the assistant resisting a "comply now, content
+later" framing while still engaging normally once given something real to look at.)
+
 ## What to watch for
 
-- **The one genuinely unconfirmed assumption**: cmd's own docs state an attachment only
-  becomes a real vision content block if the send resolves to `method=="stream-json"`; a
-  send routed instead to `dispatch`/`writeconsole`/`sendkeys` downgrades to a text-footer
-  `@<path> (WxH)` mention relying on the model's own Read tool, not a native image block.
-  Wixy's conversations use the subscription bucket + `model: "claude-sonnet-5"`, which
-  SHOULD resolve to `stream-json` (matching how every other programmatically-spawned,
-  never-dispatched-to-a-visible-window chat on this fleet behaves) — but this was an
-  assumption at implementation time, settled only by live production verification (see
-  this decision's own follow-up verification, or a later correction entry if it turned out
-  wrong).
 - `bucket="credit"` + attachments is rejected by cmd (400); non-Claude "foreign" providers
   other than gemini reject attachments outright. Not relevant to wixy's own conversations
   today (subscription bucket, Claude), but relevant if the model/bucket ever changes.
