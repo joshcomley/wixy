@@ -29,5 +29,27 @@ mypy --strict, ruff, bare pytest, npm typecheck/test/build (admin-ui + editor, c
 bundles), e2e green. PR merged, Slots deployed (confirm via `/api/version`), live 422/repair
 smoke-tested per brief's cross-cutting verification step 6.
 
+## Outcome — DONE 2026-07-31
+Merged as PR #132 (github.com/joshcomley/wixy), merge commit `db1b7b3`. All cross-cutting
+verification green: ruff check/format, mypy --strict, bare pytest (932 passed), admin-ui
+(typecheck + 509 vitest + build), editor (typecheck + 241 vitest + build), full e2e suite
+(38/38). Two extra fixes found during verification, beyond the brief:
+- The 1g admin-ui bundle rebuild had been missed by an auto-snapshot commit (source
+  changed, `wixy_server/static/admin/*` hadn't been rebuilt) — caught because every
+  publish-involving e2e spec hung 30s waiting for the new drawer's success caption; fixed
+  by rebuilding + committing the bundle (commit `cfac0b7`).
+- `editor/src/contentModel.ts`'s working-tree copy had picked up CRLF line endings mid-
+  session (invisible to `git status` — decisions/00016's `.gitattributes` normalizes the
+  committed blob, not necessarily an already-checked-out working file); esbuild reads
+  straight off disk, so the locally-built `editor.js.map` embedded different
+  `sourcesContent` than CI's fresh Ubuntu checkout would — a real CI bundle-drift failure
+  on PR #132's first run. Fixed by delete+recheckout to force git's `eol=lf` filter to
+  actually run, then rebuilt (commit `35e4c5b`).
+Brief's literal `"pattern": "\\S"` corrected to `".*\\S.*"` (documented in
+decisions/00095) — `re.fullmatch` semantics meant the literal spec would reject every
+real, non-single-character image src.
+Decisions: `decisions/00095-gallery-publish-corruption-and-write-gate/`,
+`decisions/00096-draft-self-heal-and-owner-report/`.
+
 ## Links
 Brief section "WORKSTREAM 1 (PR 1)".
