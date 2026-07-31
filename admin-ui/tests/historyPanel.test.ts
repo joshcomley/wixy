@@ -24,6 +24,7 @@ function fakeState(overrides: { pages?: string[]; rev?: number } = {}): StateRes
     publishJob: null,
     chats: [],
     adminSections: [],
+    chatAttachmentsSupported: false,
   };
 }
 

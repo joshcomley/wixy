@@ -417,6 +417,13 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
   thread.textContent = "Loading…";
   root.appendChild(thread);
 
+  // decisions/00103: pending image attachments, staged via upload before the
+  // owner presses Send — a chip per attachment (local preview + cmd's own
+  // converted dims once known), independent of composerInput's own text.
+  const attachmentRow = document.createElement("div");
+  attachmentRow.className = "wx-chat-attachment-row";
+  attachmentRow.hidden = true;
+
   const composer = document.createElement("div");
   composer.className = "wx-chat-composer";
   const composerInput = document.createElement("textarea");
@@ -426,12 +433,24 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
   const composerError = document.createElement("span");
   composerError.className = "wx-chat-composer-error";
   composerError.hidden = true;
+  const attachButton = document.createElement("button");
+  attachButton.type = "button";
+  attachButton.className = "wx-chat-attach-button";
+  attachButton.textContent = "📎";
+  attachButton.setAttribute("aria-label", "Attach an image");
+  attachButton.hidden = true; // shown once chatAttachmentsSupported resolves true
+  const attachInput = document.createElement("input");
+  attachInput.type = "file";
+  attachInput.accept = "image/*";
+  attachInput.multiple = true;
+  attachInput.hidden = true;
+  attachButton.addEventListener("click", () => attachInput.click());
   const sendButton = document.createElement("button");
   sendButton.type = "button";
   sendButton.className = "wx-chat-send-button";
   sendButton.textContent = "Send";
-  composer.append(composerInput, sendButton, composerError);
-  root.appendChild(composer);
+  composer.append(attachButton, attachInput, composerInput, sendButton, composerError);
+  root.append(attachmentRow, composer);
 
   let cancelled = false;
   let streamHandle: ConversationStreamHandle | null = null;
@@ -453,6 +472,19 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
    * successful send, so a failed attempt's retry click reuses this same key
    * instead of minting a new one (which would defeat the whole point). */
   let pendingIdempotencyKey: string | null = null;
+  /** decisions/00103: images staged for the NEXT send, in attach order.
+   * `attachmentId` is `null` while the upload is still in flight — Send stays
+   * disabled until every pending attachment has either resolved to an id or
+   * been removed (a failed upload's chip is dropped, never silently sent
+   * without the image the owner thinks is attached). */
+  interface PendingAttachment {
+    localId: string;
+    file: File;
+    previewUrl: string;
+    attachmentId: string | null;
+    uploading: boolean;
+  }
+  let pendingAttachments: PendingAttachment[] = [];
 
   function renderThread(): void {
     thread.innerHTML = "";
@@ -612,25 +644,132 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
     connect();
   });
 
+  function anyAttachmentUploading(): boolean {
+    return pendingAttachments.some((a) => a.uploading);
+  }
+
+  function renderAttachmentRow(): void {
+    attachmentRow.innerHTML = "";
+    attachmentRow.hidden = pendingAttachments.length === 0;
+    for (const attachment of pendingAttachments) {
+      const chip = document.createElement("div");
+      chip.className = "wx-chat-attachment-chip";
+      const thumb = document.createElement("img");
+      thumb.className = "wx-chat-attachment-thumb";
+      thumb.src = attachment.previewUrl;
+      thumb.alt = "";
+      chip.appendChild(thumb);
+      if (attachment.uploading) {
+        const spinner = document.createElement("span");
+        spinner.className = "wx-spinner wx-chat-attachment-spinner";
+        spinner.setAttribute("aria-hidden", "true");
+        chip.appendChild(spinner);
+      }
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.className = "wx-chat-attachment-remove";
+      removeButton.textContent = "✕";
+      removeButton.setAttribute("aria-label", "Remove this image");
+      removeButton.addEventListener("click", () => removeAttachment(attachment.localId));
+      chip.appendChild(removeButton);
+      attachmentRow.appendChild(chip);
+    }
+    sendButton.disabled = anyAttachmentUploading();
+  }
+
+  function removeAttachment(localId: string): void {
+    const found = pendingAttachments.find((a) => a.localId === localId);
+    if (found !== undefined) URL.revokeObjectURL(found.previewUrl);
+    pendingAttachments = pendingAttachments.filter((a) => a.localId !== localId);
+    renderAttachmentRow();
+  }
+
+  function uploadAndAttach(file: File): void {
+    if (!file.type.startsWith("image/")) return;
+    const localId = cryptoRandomId(win);
+    const previewUrl = URL.createObjectURL(file);
+    pendingAttachments = [
+      ...pendingAttachments,
+      { localId, file, previewUrl, attachmentId: null, uploading: true },
+    ];
+    renderAttachmentRow();
+    api
+      .uploadChatAttachment(convId, file)
+      .then((result) => {
+        if (cancelled) return;
+        pendingAttachments = pendingAttachments.map((a) =>
+          a.localId === localId ? { ...a, attachmentId: result.attachmentId, uploading: false } : a,
+        );
+        renderAttachmentRow();
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        // A failed upload never sends silently without the image the owner
+        // thinks is attached — drop the chip and surface why.
+        removeAttachment(localId);
+        composerError.hidden = false;
+        composerError.textContent =
+          error instanceof Error ? error.message : "Couldn't attach that image — try again.";
+      });
+  }
+
+  function handleFileList(files: FileList | null): void {
+    if (files === null) return;
+    for (const file of Array.from(files)) uploadAndAttach(file);
+  }
+
+  attachInput.addEventListener("change", () => {
+    handleFileList(attachInput.files);
+    attachInput.value = "";
+  });
+  composerInput.addEventListener("paste", (evt) => {
+    const items = evt.clipboardData?.items;
+    if (items === undefined) return;
+    const imageFiles = Array.from(items)
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null);
+    if (imageFiles.length === 0) return;
+    // Only intercept the paste when it's actually image data — a text paste
+    // must still land in the textarea normally.
+    evt.preventDefault();
+    for (const file of imageFiles) uploadAndAttach(file);
+  });
+  composer.addEventListener("dragover", (evt) => {
+    evt.preventDefault();
+  });
+  composer.addEventListener("drop", (evt) => {
+    evt.preventDefault();
+    handleFileList(evt.dataTransfer?.files ?? null);
+  });
+
   function resetToIdleComposer(): void {
-    sendButton.disabled = false;
+    sendButton.disabled = anyAttachmentUploading();
     composerInput.disabled = false;
   }
 
   function send(): void {
     const text = composerInput.value.trim();
-    if (text === "") return;
+    if (text === "" && pendingAttachments.length === 0) return;
+    if (anyAttachmentUploading()) return;
     sendButton.disabled = true;
     composerInput.disabled = true;
     composerError.hidden = true;
     pendingIdempotencyKey ??= `${convId}:${cryptoRandomId(win)}`;
     const idempotencyKey = pendingIdempotencyKey;
+    const attachmentIds = pendingAttachments
+      .map((a) => a.attachmentId)
+      .filter((id): id is string => id !== null);
+    const sentAttachments = pendingAttachments;
     api
-      .sendMessage(convId, text, idempotencyKey)
+      .sendMessage(convId, text, idempotencyKey, attachmentIds)
       .then(() => {
         if (cancelled) return;
         pendingIdempotencyKey = null;
         composerInput.value = "";
+        for (const attachment of sentAttachments) URL.revokeObjectURL(attachment.previewUrl);
+        pendingAttachments = [];
+        renderAttachmentRow();
         resetToIdleComposer();
         // decisions/00097: a fresh round of work starts now — the OLD task
         // list (possibly showing "all done") is stale until a new block
@@ -686,6 +825,21 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
       });
   });
 
+  // decisions/00103: a static, one-time check — unlike `maybeCheckUpstream`'s
+  // repeated throttled polling, whether the active backend supports
+  // attachments never changes mid-conversation. The attach button starts
+  // hidden (safe default: never offer an affordance that would 422) and is
+  // only ever revealed, never hidden again once shown.
+  api
+    .getState()
+    .then((state) => {
+      if (cancelled || !state.chatAttachmentsSupported) return;
+      attachButton.hidden = false;
+    })
+    .catch(() => {
+      // Best-effort — the attach button just stays hidden.
+    });
+
   loadTitle();
   connect();
 
@@ -694,6 +848,7 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
     teardown(): void {
       cancelled = true;
       streamHandle?.close();
+      for (const attachment of pendingAttachments) URL.revokeObjectURL(attachment.previewUrl);
     },
   };
 }

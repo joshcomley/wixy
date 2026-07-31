@@ -182,6 +182,12 @@ export interface StateResponse {
   publishJob: PublishJobData | null;
   chats: ConversationSummary[];
   adminSections: AdminSection[];
+  /** Whether the active AI backend supports image attachments (decisions/
+   * 00103) — the chat composer's attach affordance is hidden entirely when
+   * this is false rather than letting the owner attach something that will
+   * 422 on send. `CmdAIBackend` (fleet, the default) is true; the standalone/
+   * anthropic backend is false until its own milestone-6-gated work lands. */
+  chatAttachmentsSupported: boolean;
 }
 
 /** One changed overlay key (`GET /api/admin/publish/preview`'s per-entry
@@ -342,6 +348,17 @@ export interface SendMessageResult {
   buffered: boolean;
 }
 
+/** `POST .../attachments`'s response (decisions/00103) — `width`/`height` are
+ * cmd's OWN converted-image dimensions (after its resize-to-1568/WEBP
+ * pipeline), the right numbers for a composer preview caption, not the
+ * original upload's. Staged for a later `sendMessage(..., attachmentIds)`
+ * call; not itself part of a send. */
+export interface ChatAttachment {
+  attachmentId: string;
+  width: number | null;
+  height: number | null;
+}
+
 /** `GET .../stream`'s per-event `message` payload (spec/06 §1's decoded
  * `/messages` shape, camelCased). */
 export interface ChatMessageData {
@@ -499,7 +516,13 @@ export interface AdminApi {  getState(): Promise<StateResponse>;
   deletePage(slug: string, expectedRev: number): Promise<PageOpOutcome>;
   createConversation(firstMessage?: string): Promise<ConversationSummary>;
   getConversations(): Promise<ConversationSummary[]>;
-  sendMessage(convId: string, text: string, idempotencyKey: string): Promise<SendMessageResult>;
+  sendMessage(
+    convId: string,
+    text: string,
+    idempotencyKey: string,
+    attachmentIds?: string[],
+  ): Promise<SendMessageResult>;
+  uploadChatAttachment(convId: string, file: File): Promise<ChatAttachment>;
   renameConversation(convId: string, title: string): Promise<ConversationSummary>;
   getEngineStatus(): Promise<EngineStatus>;
   triggerEngineUpdate(): Promise<{ triggered: true }>;
@@ -717,16 +740,29 @@ export function createApi(): AdminApi {
       );
       return body.conversations;
     },
-    async sendMessage(convId, text, idempotencyKey) {
+    async sendMessage(convId, text, idempotencyKey, attachmentIds) {
       const response = await fetchWithRetry(
         `/api/admin/chat/conversations/${encodeURIComponent(convId)}/messages`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text, idempotencyKey }),
+          body: JSON.stringify({
+            text,
+            idempotencyKey,
+            ...(attachmentIds !== undefined ? { attachmentIds } : {}),
+          }),
         },
       );
       return parseJson<SendMessageResult>(response);
+    },
+    async uploadChatAttachment(convId, file) {
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetchWithRetry(
+        `/api/admin/chat/conversations/${encodeURIComponent(convId)}/attachments`,
+        { method: "POST", body: formData },
+      );
+      return parseJson<ChatAttachment>(response);
     },
     async renameConversation(convId, title) {
       const response = await fetchWithRetry(

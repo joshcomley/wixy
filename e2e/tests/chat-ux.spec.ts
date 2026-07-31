@@ -212,6 +212,36 @@ test.describe("E2E 7: chat UX", () => {
     await expect(page.locator(".wx-chat-tool-details")).toContainText("Edit content/index.json");
     await expect(page.locator(".wx-chat-tool-details")).toContainText("[tool_result] ok");
 
+    // -- Image attachment: real upload -> chip -> send (decisions/00103) ----
+    // The attach button only appears once GET /api/admin/state's
+    // chatAttachmentsSupported resolves true (the fake cmd backend via
+    // CmdAIBackend, same as production's fleet edition) — a real network
+    // round-trip, so it isn't necessarily painted the instant the page loads.
+    await expect(page.locator(".wx-chat-attach-button")).toBeVisible({ timeout: 10_000 });
+    const uploadResponse = page.waitForResponse(
+      (res) => res.url().includes(`/chat/conversations/${convId}/attachments`) && res.request().method() === "POST",
+    );
+    await page.locator('.wx-chat-composer input[type="file"]').setInputFiles("fixtures/tiny-second-image.jpg");
+    const uploaded = await uploadResponse;
+    expect(uploaded.status()).toBe(200);
+    const uploadedBody = (await uploaded.json()) as { attachmentId: string };
+
+    await expect(page.locator(".wx-chat-attachment-chip")).toHaveCount(1);
+    await expect(page.locator(".wx-chat-send-button")).toBeEnabled();
+
+    await page.fill(".wx-chat-composer-input", "what's in this photo?");
+    const attachedSendRequest = page.waitForRequest(
+      (req) => req.url().includes(`/chat/conversations/${convId}/messages`) && req.method() === "POST",
+    );
+    await page.click(".wx-chat-send-button");
+    const attachedSent = await attachedSendRequest;
+    const attachedBody = attachedSent.postDataJSON() as { attachmentIds: string[] };
+    expect(attachedBody.attachmentIds).toEqual([uploadedBody.attachmentId]);
+
+    // The chip row clears once the send that referenced it succeeds.
+    await expect(page.locator(".wx-chat-attachment-chip")).toHaveCount(0);
+    await expect(page.locator(".wx-chat-composer-input")).toHaveValue("");
+
     // -- Send-retry on an injected 502 (spec/06 §3) --------------------------
     await page.request.post("/test/chat/set-send-status", { data: { convId, statusCode: 502 } });
 

@@ -61,6 +61,11 @@ class FakeSession:
     """`idempotency_key -> send call count` — tests assert a retried send with the
     SAME key was only ever accepted once by inspecting this, matching spec/06 §1's
     "Include the idempotency key so a UI retry can't double-send.\""""
+    last_send_body: JsonObject | None = None
+    """decisions/00103: the exact JSON body the most recent `/send` call carried —
+    lets a test assert on the `attachments` field (present with the right
+    `{kind, upload_id}` shape, or absent entirely for a plain text send) without
+    a bespoke request-capturing middleware."""
 
 
 @dataclass
@@ -69,6 +74,17 @@ class FakeCmdState:
     next_session_n: int = 1
     new_chat_status_code: int = 202
     default_ready_after_polls: int = 0
+    uploads: dict[str, JsonObject] = field(default_factory=dict)
+    """decisions/00103: staged `POST /api/uploads` bodies, keyed by the fake's
+    own issued `id` — recorded (not just accepted) so a test can assert on
+    exactly what bytes/media_type a real `upload_attachment` call sent."""
+    next_upload_n: int = 1
+    upload_status_code: int = 201
+    upload_converted_dims: tuple[int, int] = (100, 100)
+    """cmd's own resize-to-1568/WEBP pipeline runs on real bytes this fake
+    never actually decodes — a canned `(width, height)` a test can override
+    when it cares about the specific value threaded back through
+    `UploadResult`/`ChatAttachment`."""
     """Applied to every newly-created session's own `ready_after_polls` —
     unit tests default this to 0 (never auto-ready; the test sets `.ready`/
     `.ready_after_polls` explicitly per session, per scenario), while a
@@ -212,11 +228,39 @@ def create_fake_cmd_app(state: FakeCmdState | None = None) -> FastAPI:
         if session.send_status_code != 202:
             return Response(status_code=session.send_status_code)
         body = await request.json()
+        session.last_send_body = body if isinstance(body, dict) else None
         idem_key = body.get("idempotency_key") if isinstance(body, dict) else None
         if isinstance(idem_key, str):
             session.idempotency_seen[idem_key] = session.idempotency_seen.get(idem_key, 0) + 1
         return JSONResponse(
             status_code=202, content={"accepted": True, "buffered": session.send_buffered}
+        )
+
+    @app.post("/api/uploads")
+    async def uploads(request: Request) -> Response:
+        if state.upload_status_code != 201:
+            return Response(status_code=state.upload_status_code)
+        body = await request.json()
+        n = state.next_upload_n
+        state.next_upload_n += 1
+        upload_id = f"upload-{n}"
+        state.uploads[upload_id] = body if isinstance(body, dict) else {}
+        width, height = state.upload_converted_dims
+        media_type = body.get("media_type") if isinstance(body, dict) else None
+        return JSONResponse(
+            status_code=201,
+            content={
+                "id": upload_id,
+                "kind": body.get("kind") if isinstance(body, dict) else None,
+                "original": {"size": 0, "media_type": media_type},
+                "converted": {
+                    "size": 0,
+                    "media_type": "image/webp",
+                    "width": width,
+                    "height": height,
+                },
+                "processing_ms": 1,
+            },
         )
 
     @app.get("/sessions/{session_id}/messages")

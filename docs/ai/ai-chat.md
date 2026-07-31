@@ -122,6 +122,57 @@ Route table + SSE event envelopes are in [contracts.md](contracts.md) §2, §4. 
 - **Send** carries an `idempotencyKey` (the UI generates it once per compose attempt and
   reuses it on retry, for server-side dedupe).
 
+## Attachments (decisions/00103)
+
+The composer lets the owner attach images to a message (paste, drag-drop, or the 📎
+button) — e.g. "what do you see in this photo?" against a real treatment picture. **cmd
+does the compression, wixy does not**: cmd's own `POST :9320/api/uploads` resizes to a
+1568px longest edge (LANCZOS, aspect-preserved) and re-encodes as WEBP q85 server-side —
+the same pipeline cmd's own web chat UI relies on. Wixy's job is a thin pre-flight guard
+(`chat_attachments.validate_attachment`: 5MB cap, `image/{png,jpeg,gif,webp}` only,
+Pillow-readable — all matching cmd's own accepted set exactly) plus wiring the two-step
+reference flow through:
+
+1. `CmdChatClient.upload_attachment(data, filename, media_type, session_id=...)` →
+   `POST :9320/api/uploads` `{kind:"image", name, media_type, bytes_b64, session_id}` → cmd's
+   201 `{id, converted:{width,height,...}}` → `UploadResult(upload_id, width, height)`.
+   `width`/`height` are the CONVERTED dims (what the model will actually see), the right
+   numbers for a composer preview caption — not the original upload's.
+2. `CmdChatClient.send_message(..., attachment_ids=[...])` adds `attachments:
+   [{kind:"image", upload_id}]` to the existing `/send` body, **only when non-empty** — an
+   ordinary text-only send has byte-identical wire shape to before this feature. `text` may
+   be blank when at least one attachment is staged (image-only sends are allowed).
+
+**Capability-gated, not universal**: `AIBackend.supports_attachments` (mirrors the existing
+`supports_handover_chains` flag) — `True` for `CmdAIBackend`, `False` for
+`AnthropicAIBackend` (the standalone/milestone-6 backend has no attachment mechanism of its
+own, and milestone 6 is security-gated per this repo's CLAUDE.md — deliberately not built
+here). `routes_chat.py` 422s rather than silently dropping an attachment against an
+unsupporting backend, for both `send_message` and the new `POST .../attachments` upload
+route. The frontend reads `StateResponse.chatAttachmentsSupported` once at conversation-view
+mount to decide whether to show the 📎 button at all — never lets the owner attach
+something that can't be sent.
+
+**v1 scope is the open-conversation composer only** (`/send`) — NOT the "New conversation"
+first-message flow (`new-chat`). cmd's `new-chat` endpoint's own attachment wire shape
+appeared, in research, to differ from `/send`'s (missing the `kind` field) and was never
+confirmed with full confidence, so this was deliberately left out rather than guessed at.
+
+**Accepted limitation**: cmd's own `GET :9321/sessions/{id}/messages` (the read/transcript
+endpoint the stream polls) has no attachment field on decoded messages at all — a
+historical image-only message reloads as blank/empty text. This is cmd's own read-side gap,
+confirmed via direct research, not something wixy can build around client-side.
+
+**The one assumption settled only by live verification, not by tests**: cmd's docs state an
+attachment only becomes a real vision content block when the send resolves to
+`method=="stream-json"`; other routing methods downgrade to a text-footer path mention the
+model may only weakly engage with. Wixy's conversations (subscription bucket, `model:
+"claude-sonnet-5"`, never dispatched to a visible window) are expected to resolve to
+`stream-json` — this is exactly the class of assumption this session's own chat-activity-enum
+saga (decisions/00099→00101) showed tests alone cannot settle, so it is confirmed (or
+corrected) by live production verification, not asserted here from research alone; see
+decisions/00103 for the outcome.
+
 ## Preamble (`preamble.py` + `templates/chat_preamble.md`)
 
 `wixy_server/preamble.py` owns the whole contract — `PREAMBLE_TEXT`, the `SEPARATOR`,

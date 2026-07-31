@@ -94,6 +94,50 @@ and a send while the chat is still provisioning is buffered by cmd (202 with
 On 5xx: surface "couldn't deliver — retry" on the message bubble (the composer keeps the
 text); do not blind-retry non-connect errors.
 
+### Attachments (decisions/00103) — open-conversation composer only
+
+The owner can attach images to a message (paste, drag-drop, or an explicit picker) — e.g.
+"what do you see in this photo?" against a real treatment photo. **cmd does the image
+compression, wixy does not**: cmd's own `POST /api/uploads` resizes to a 1568px longest
+edge and re-encodes as WEBP q85 server-side, the same pipeline its own web chat UI relies
+on — wixy would only be duplicating that work by re-implementing it.
+
+```
+POST http://127.0.0.1:9320/api/uploads
+{"kind": "image", "name": "<filename>", "media_type": "<mime>", "bytes_b64": "<base64>",
+ "session_id": "<session_id>"}
+→ 201 {"id": "<upload_id>", "original": {...}, "converted": {"width": int, "height": int, ...}}
+```
+
+then, on the actual send:
+
+```
+POST http://127.0.0.1:9320/api/session/<session_id>/send
+{"text": "<message>", "idempotency_key": "...",
+ "attachments": [{"kind": "image", "upload_id": "<upload_id>"}]}
+```
+
+`attachments` is included only when at least one image is staged — an ordinary text send's
+wire shape is unchanged. `text` may be blank when an attachment is present (image-only
+sends are allowed). Wixy validates size (≤5MB, matching cmd's own cap) and content-type
+(`image/{png,jpeg,gif,webp}`) before ever calling cmd, so a bad upload 422s immediately
+rather than round-tripping to cmd for its own rejection.
+
+**v1 scope is deliberately narrow**: only the open-conversation composer (`/send`) carries
+attachments. The "New conversation" first-message flow (`new-chat`) does not — cmd's
+`new-chat` endpoint's own attachment wire shape wasn't confirmed with full confidence
+during this feature's research (it appeared to differ from `/send`'s), so rather than guess,
+this was left for a future extension to confirm and build properly.
+
+**Capability-gated**: not every `AIBackend` implementation supports attachments (the
+standalone/anthropic backend, milestone 6, does not yet — see that milestone's own spec).
+A conversation whose backend doesn't support attachments 422s rather than silently
+accepting and dropping one.
+
+**Known limitation**: cmd's own `/messages` read endpoint (below) has no attachment field
+at all — an image-only historical message reloads with blank/empty text. This is cmd's own
+read-side gap, not something wixy's client can work around.
+
 ### Read (transcript + live updates)
 
 Initial load + pagination:
@@ -170,6 +214,7 @@ The agent ships to the site repo `main`; the owner's draft preview renders
 | cmd down (connect refused on 9320/9321) | Chat panel shows a single offline banner ("assistant offline — cmd isn't running") + auto-retry every 10 s; the rest of the admin is unaffected. |
 | new-chat 202 but provisioning fails (`workspace_failed`/`cli_failed`) | Conversation row shows the failure reason + Retry (new create). Log full response server-side. |
 | Send 502 / non-delivery | Bubble-level error + manual retry with the same idempotency key. |
+| Attachment upload rejected (oversized/wrong-type/unreadable, or cmd itself rejects it) | 422/502 on the upload call; the composer drops that attachment's chip and shows an error, without blocking the rest of the compose or any other staged attachment. |
 | Session handed over | Detect via 9321 `/status` `handover_state` (or transcript stall after an accepted send) → `GET /api/session/<id>/chain` → adopt the leaf id (see §1). |
 | Agent merged a broken change (can't happen via PR checks, but belt-and-braces) | Publish's `builder validate` + build gate fails → publish aborts, draft intact, error shown; fix via chat or revert PR. |
 | Transcript store temporarily missing (brand-new session) | Treat as "starting…" until first messages appear (bounded by the 120 s readiness timeout). |

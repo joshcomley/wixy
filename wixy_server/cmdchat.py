@@ -30,6 +30,7 @@ gracefully to pure polling — this is spec'd behavior, not a fallback of last r
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from collections.abc import AsyncIterator, Callable
@@ -101,6 +102,20 @@ class NewChatResult:
 class SendResult:
     buffered: bool
     pending_state: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class UploadResult:
+    """`POST /api/uploads`'s response (cmd docs/ai/contracts.md) — cmd stages the
+    bytes, resizes+re-encodes `kind="image"` uploads server-side (longest edge
+    1568px, WEBP q85), and hands back an opaque `upload_id` a later `send_message`
+    references. `width`/`height` are the CONVERTED image's dimensions (what the
+    model will actually see, not the original upload) — the right numbers for a
+    UI preview caption."""
+
+    upload_id: str
+    width: int | None
+    height: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -367,20 +382,68 @@ class CmdChatClient:
             raise CmdChatError(f"chain response malformed: {body!r}")
         return chain
 
-    async def send_message(self, session_id: str, text: str, idempotency_key: str) -> SendResult:
+    async def send_message(
+        self,
+        session_id: str,
+        text: str,
+        idempotency_key: str,
+        *,
+        attachment_ids: list[str] | None = None,
+    ) -> SendResult:
+        body: JsonObject = {"text": text, "idempotency_key": idempotency_key}
+        if attachment_ids:
+            # cmd's own wire shape (docs/ai/contracts.md): a list of {kind,
+            # upload_id} references, resolved server-side to the bytes an
+            # earlier upload_attachment() call already staged+converted —
+            # never bytes on the send call itself.
+            body["attachments"] = [{"kind": "image", "upload_id": uid} for uid in attachment_ids]
         url = f"{self._portal_base_url}/api/session/{session_id}/send"
-        response = await self._request(
-            "POST", url, json_body={"text": text, "idempotency_key": idempotency_key}
-        )
+        response = await self._request("POST", url, json_body=body)
         if response.status_code != 202:
             raise CmdChatError(
                 f"send to {session_id} returned {response.status_code}: {response.text[:500]}"
             )
-        body = _json_object(response)
-        pending_state = body.get("pending_state")
+        response_body = _json_object(response)
+        pending_state = response_body.get("pending_state")
         return SendResult(
-            buffered=bool(body.get("buffered", False)),
+            buffered=bool(response_body.get("buffered", False)),
             pending_state=pending_state if isinstance(pending_state, str) else None,
+        )
+
+    async def upload_attachment(
+        self, data: bytes, filename: str, media_type: str, *, session_id: str | None = None
+    ) -> UploadResult:
+        """Stage one image for a future `send_message(attachment_ids=...)` call
+        (cmd docs/ai/contracts.md `POST /api/uploads`) — cmd does the actual
+        resize/re-encode server-side; this client never touches Pillow for chat
+        attachments (unlike `wixy_server/media.py`'s own SITE-image pipeline,
+        a genuinely separate concern). `session_id` is an ownership hint for
+        cmd's own janitor, not required for the upload to succeed."""
+        json_body: JsonObject = {
+            "kind": "image",
+            "name": filename,
+            "media_type": media_type,
+            "bytes_b64": base64.b64encode(data).decode("ascii"),
+        }
+        if session_id is not None:
+            json_body["session_id"] = session_id
+        url = f"{self._portal_base_url}/api/uploads"
+        response = await self._request("POST", url, json_body=json_body)
+        if response.status_code != 201:
+            raise CmdChatError(
+                f"upload to {url} returned {response.status_code}: {response.text[:500]}"
+            )
+        body = _json_object(response)
+        upload_id = body.get("id")
+        if not isinstance(upload_id, str):
+            raise CmdChatError(f"upload response missing id: {body!r}")
+        converted = body.get("converted")
+        width = converted.get("width") if isinstance(converted, dict) else None
+        height = converted.get("height") if isinstance(converted, dict) else None
+        return UploadResult(
+            upload_id=upload_id,
+            width=width if isinstance(width, int) else None,
+            height=height if isinstance(height, int) else None,
         )
 
     async def watch_pending(self) -> AsyncIterator[PendingEvent]:

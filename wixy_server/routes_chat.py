@@ -13,15 +13,17 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Annotated
 
 import anyio
 from anyio.abc import TaskGroup
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from builder.jsontypes import JsonObject
 from wixy_server.ai.backend import AIBackend, AIBackendError, ConversationRef
+from wixy_server.chat_attachments import AttachmentError, validate_attachment
 from wixy_server.chat_tasks import TaskItem, extract_tasks
 from wixy_server.chat_working import WorkingCache
 from wixy_server.chats import (
@@ -164,6 +166,7 @@ async def list_conversations(request: Request) -> JsonObject:
 class SendMessageIn(BaseModel):
     text: str
     idempotencyKey: str
+    attachmentIds: list[str] = []
 
 
 @router.post("/conversations/{conv_id}/messages", response_model=None)
@@ -178,9 +181,20 @@ async def send_message(conv_id: str, body: SendMessageIn, request: Request) -> J
     if conversation is None:
         raise HTTPException(status_code=404, detail=f"no conversation with id '{conv_id}'")
 
+    if body.attachmentIds and not client.supports_attachments:
+        # Never silently drop an attachment the owner thinks was sent (the
+        # same "explicit unsupported, not a silent gap" posture decisions/
+        # 00101 already established for this exact backend/capability split).
+        raise HTTPException(
+            status_code=422, detail="this conversation's backend doesn't support image attachments"
+        )
+
     try:
         result = await client.send(
-            ConversationRef(id=conversation.session_id), body.text, body.idempotencyKey
+            ConversationRef(id=conversation.session_id),
+            body.text,
+            body.idempotencyKey,
+            attachment_ids=body.attachmentIds or None,
         )
     except AIBackendError as exc:
         # spec/06 §3: "Send 502 / non-delivery -> Bubble-level error + manual
@@ -190,6 +204,53 @@ async def send_message(conv_id: str, body: SendMessageIn, request: Request) -> J
         raise HTTPException(status_code=502, detail=f"couldn't deliver: {exc}") from exc
 
     return {"accepted": True, "buffered": result.buffered}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/admin/chat/conversations/{id}/attachments
+# ---------------------------------------------------------------------------
+
+
+@router.post("/conversations/{conv_id}/attachments", response_model=None)
+async def upload_attachment(
+    conv_id: str, request: Request, file: Annotated[UploadFile, File()]
+) -> JsonObject:
+    """Stages one image for a later `send_message(attachmentIds=[...])` call —
+    NOT itself part of a send. cmd does the actual resize/re-encode (decisions/
+    00103); this route's own job is the size/type/readability guard
+    (`chat_attachments.validate_attachment`) that turns a bad upload into an
+    immediate, clear 422 instead of a round-trip to cmd for its own 413/400."""
+    paths: ProjectPaths = request.app.state.paths
+    client: AIBackend = request.app.state.ai_backend
+
+    def _find() -> ChatConversation | None:
+        return find_chat(paths.chats_json, conv_id)
+
+    conversation = await anyio.to_thread.run_sync(_find)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail=f"no conversation with id '{conv_id}'")
+
+    if not client.supports_attachments:
+        raise HTTPException(
+            status_code=422, detail="this conversation's backend doesn't support image attachments"
+        )
+
+    data = await file.read()
+    content_type = file.content_type or ""
+    try:
+        validate_attachment(data, content_type)
+    except AttachmentError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    filename = file.filename or "attachment"
+    try:
+        result = await client.upload_attachment(
+            ConversationRef(id=conversation.session_id), data, filename, content_type
+        )
+    except AIBackendError as exc:
+        raise HTTPException(status_code=502, detail=f"couldn't upload: {exc}") from exc
+
+    return {"attachmentId": result.upload_id, "width": result.width, "height": result.height}
 
 
 # ---------------------------------------------------------------------------

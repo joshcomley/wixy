@@ -339,6 +339,68 @@ class TestSendMessage:
 
         assert response.status_code == 502
 
+    def test_attachment_ids_against_a_backend_without_support_422s(
+        self, storage_root: Path, wixy_repo_root: Path, anthropic_backend: AnthropicAIBackend
+    ) -> None:
+        """decisions/00103: `AnthropicAIBackend.supports_attachments = False` —
+        a send carrying attachmentIds must be REJECTED before ever reaching
+        `client.send`, never silently delivered as a text-only message the
+        owner would wrongly believe included the image."""
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, ai_backend=anthropic_backend
+        )
+        with TestClient(app) as client:
+            conv = _create(client, "hi")
+            response = client.post(
+                f"/api/admin/chat/conversations/{conv['convId']}/messages",
+                json={
+                    "text": "look at this",
+                    "idempotencyKey": "conv1:msg3",
+                    "attachmentIds": ["some-upload-id"],
+                },
+            )
+
+        assert response.status_code == 422
+
+    def test_no_attachment_ids_against_a_backend_without_support_still_sends(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        anthropic_backend: AnthropicAIBackend,
+        fake_worker_state: FakeWorkerState,
+    ) -> None:
+        """A plain send with an empty/omitted attachmentIds must be entirely
+        unaffected by `supports_attachments` — that flag only gates an
+        ACTUAL attachment, never ordinary text-only chat."""
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, ai_backend=anthropic_backend
+        )
+        with TestClient(app) as client:
+            conv = _create(client, "hi")
+            response = client.post(
+                f"/api/admin/chat/conversations/{conv['convId']}/messages",
+                json={"text": "hello", "idempotencyKey": "conv1:msg4"},
+            )
+
+        assert response.status_code == 200
+
+
+class TestUploadAttachment:
+    def test_against_a_backend_without_support_422s(
+        self, storage_root: Path, wixy_repo_root: Path, anthropic_backend: AnthropicAIBackend
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, ai_backend=anthropic_backend
+        )
+        with TestClient(app) as client:
+            conv = _create(client, "hi")
+            response = client.post(
+                f"/api/admin/chat/conversations/{conv['convId']}/attachments",
+                files={"file": ("photo.png", b"\x89PNG\r\n", "image/png")},
+            )
+
+        assert response.status_code == 422
+
 
 class TestConversationStream:
     def test_unknown_conversation_404s(

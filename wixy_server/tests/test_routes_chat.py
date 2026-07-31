@@ -7,6 +7,8 @@ send, rename, and the SSE stream's poll->fan-out + handover-follow).
 
 from __future__ import annotations
 
+import base64
+import io
 import json
 import subprocess
 import time
@@ -19,6 +21,7 @@ import anyio
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from builder.jsontypes import JsonObject
 from wixy_server.ai.backend import AIBackend, CmdAIBackend
@@ -559,6 +562,12 @@ def _create(client: TestClient, first_message: str | None = None) -> dict[str, o
     return result
 
 
+def _make_png_bytes(size: tuple[int, int] = (10, 10)) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", size, "red").save(buf, format="PNG")
+    return buf.getvalue()
+
+
 class TestSendMessage:
     def test_accepted_returns_buffered_flag(
         self,
@@ -658,6 +667,173 @@ class TestSendMessage:
             response = client.post(
                 f"/api/admin/chat/conversations/{conv['convId']}/messages",
                 json={"text": "hello", "idempotencyKey": "conv1:msg2"},
+            )
+
+        assert response.status_code == 502
+
+    def test_attachment_ids_are_forwarded_to_cmd_as_kind_and_upload_id(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        cmdchat_client: CmdChatClient,
+        fake_cmd_state: FakeCmdState,
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
+        )
+        with TestClient(app) as client:
+            conv = _create(client, "hi")
+            response = client.post(
+                f"/api/admin/chat/conversations/{conv['convId']}/messages",
+                json={
+                    "text": "look at this",
+                    "idempotencyKey": "conv1:msg3",
+                    "attachmentIds": ["upload-1"],
+                },
+            )
+            session = next(iter(fake_cmd_state.sessions.values()))
+
+        assert response.status_code == 200
+        assert session.last_send_body is not None
+        assert session.last_send_body["attachments"] == [{"kind": "image", "upload_id": "upload-1"}]
+
+    def test_omitting_attachment_ids_sends_no_attachments_field(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        cmdchat_client: CmdChatClient,
+        fake_cmd_state: FakeCmdState,
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
+        )
+        with TestClient(app) as client:
+            conv = _create(client, "hi")
+            client.post(
+                f"/api/admin/chat/conversations/{conv['convId']}/messages",
+                json={"text": "plain text", "idempotencyKey": "conv1:msg4"},
+            )
+            session = next(iter(fake_cmd_state.sessions.values()))
+
+        assert session.last_send_body is not None
+        assert "attachments" not in session.last_send_body
+
+
+class TestUploadAttachment:
+    def test_uploads_a_real_image_and_returns_the_converted_dimensions(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        cmdchat_client: CmdChatClient,
+        fake_cmd_state: FakeCmdState,
+    ) -> None:
+        fake_cmd_state.upload_converted_dims = (200, 150)
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
+        )
+        with TestClient(app) as client:
+            conv = _create(client, "hi")
+            response = client.post(
+                f"/api/admin/chat/conversations/{conv['convId']}/attachments",
+                files={"file": ("photo.png", _make_png_bytes(), "image/png")},
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["attachmentId"] == "upload-1"
+        assert body["width"] == 200
+        assert body["height"] == 150
+
+    def test_forwards_the_bytes_and_media_type_to_cmd(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        cmdchat_client: CmdChatClient,
+        fake_cmd_state: FakeCmdState,
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
+        )
+        png_bytes = _make_png_bytes()
+        with TestClient(app) as client:
+            conv = _create(client, "hi")
+            response = client.post(
+                f"/api/admin/chat/conversations/{conv['convId']}/attachments",
+                files={"file": ("photo.png", png_bytes, "image/png")},
+            )
+
+        upload_id = response.json()["attachmentId"]
+        staged = fake_cmd_state.uploads[upload_id]
+        assert staged["kind"] == "image"
+        assert staged["media_type"] == "image/png"
+        assert base64.b64decode(staged["bytes_b64"]) == png_bytes  # type: ignore[arg-type]
+
+    def test_unknown_conversation_404s(
+        self, storage_root: Path, wixy_repo_root: Path, cmdchat_client: CmdChatClient
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
+        )
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/chat/conversations/does-not-exist/attachments",
+                files={"file": ("photo.png", _make_png_bytes(), "image/png")},
+            )
+
+        assert response.status_code == 404
+
+    def test_oversized_file_422s_before_ever_reaching_cmd(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        cmdchat_client: CmdChatClient,
+        fake_cmd_state: FakeCmdState,
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
+        )
+        oversized = b"x" * (5 * 1024 * 1024 + 1)
+        with TestClient(app) as client:
+            conv = _create(client, "hi")
+            response = client.post(
+                f"/api/admin/chat/conversations/{conv['convId']}/attachments",
+                files={"file": ("big.png", oversized, "image/png")},
+            )
+
+        assert response.status_code == 422
+        assert fake_cmd_state.uploads == {}  # never reached cmd at all
+
+    def test_unsupported_content_type_422s(
+        self, storage_root: Path, wixy_repo_root: Path, cmdchat_client: CmdChatClient
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
+        )
+        with TestClient(app) as client:
+            conv = _create(client, "hi")
+            response = client.post(
+                f"/api/admin/chat/conversations/{conv['convId']}/attachments",
+                files={"file": ("doc.pdf", b"%PDF-1.4", "application/pdf")},
+            )
+
+        assert response.status_code == 422
+
+    def test_cmd_error_returns_502(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        cmdchat_client: CmdChatClient,
+        fake_cmd_state: FakeCmdState,
+    ) -> None:
+        fake_cmd_state.upload_status_code = 413
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
+        )
+        with TestClient(app) as client:
+            conv = _create(client, "hi")
+            response = client.post(
+                f"/api/admin/chat/conversations/{conv['convId']}/attachments",
+                files={"file": ("photo.png", _make_png_bytes(), "image/png")},
             )
 
         assert response.status_code == 502

@@ -51,7 +51,7 @@ Handler column is `file:func`. "Auth: CF" = gated by the admin middleware. Respo
 
 | Method | Path | Handler | Request | Response |
 |---|---|---|---|---|
-| GET | `state` | `routes_admin_api.py:get_state` | — | `{"project":{slug,name,domain}, "pages":[{slug,meta,lastModified,editable,pendingDelete}], "draft":{rev,opCount}, "live":{version,sha}\|null, "upstream":{aheadOfPublished:[{sha,subject,author,when}],fetchedAt}, "publishJob":{...}\|null, "chats":[<summary>], "adminSections":[<admin section>]}`; 503 |
+| GET | `state` | `routes_admin_api.py:get_state` | — | `{"project":{slug,name,domain}, "pages":[{slug,meta,lastModified,editable,pendingDelete}], "draft":{rev,opCount}, "live":{version,sha}\|null, "upstream":{aheadOfPublished:[{sha,subject,author,when}],fetchedAt}, "publishJob":{...}\|null, "chats":[<summary>], "adminSections":[<admin section>], "chatAttachmentsSupported":bool}`; 503 |
 | GET | `content/{page}` | `get_content` | — | `{"content": <JsonObject>, "bindings": <dict>}`; 503, 404 |
 | GET | `theme` | `get_theme` | — | `{"theme": <dict>}`; 503, 404 |
 | PATCH | `draft` | `patch_draft` | `{"expectedRev":int, "ops":[{file,path,value}\|{file,path,discard:true}]}` | `{"rev": int}`; 503, **409** (RevConflict), **422** (`DraftValidationError` — the batch is structurally invalid against `builder/schemas/*.json`, e.g. a collection item missing a required field; rejected whole, the overlay is left untouched — decisions/00095) |
@@ -76,7 +76,8 @@ Handler column is `file:func`. "Auth: CF" = gated by the admin middleware. Respo
 | POST | `pages/delete` | `post_pages_delete` | `{"slug":str, "expectedRev":int}` | `{"rev":int}`; 503, 409, 404 |
 | POST | `chat/conversations` | `routes_chat.py:create_conversation` | `{"firstMessage":str\|null}` | `<conversation summary>`; **502** (CmdChat) |
 | GET | `chat/conversations` | `list_conversations` | — | `{"conversations":[<summary>]}` newest-first |
-| POST | `chat/conversations/{id}/messages` | `send_message` | `{"text":str, "idempotencyKey":str}` | `{"accepted":true, "buffered":bool}`; 404, 502 |
+| POST | `chat/conversations/{id}/messages` | `send_message` | `{"text":str, "idempotencyKey":str, "attachmentIds":[str]}` (`attachmentIds` optional, default `[]`) | `{"accepted":true, "buffered":bool}`; 404, **422** (non-empty `attachmentIds` against a backend with `supports_attachments=False`), 502 |
+| POST | `chat/conversations/{id}/attachments` | `upload_attachment` | `multipart/form-data` field `file` (image, ≤5MB) | `{"attachmentId":str, "width":int\|null, "height":int\|null}` (`width`/`height` are cmd's own CONVERTED-image dims, not the original upload's); 404, **422** (backend unsupported, or `AttachmentError` — oversize/wrong-type/unreadable), **502** (`AIBackendError` — cmd upload failed) |
 | POST | `chat/conversations/{id}/rename` | `rename_conversation` | `{"title":str}` | `<conversation summary>`; 404 |
 | GET | `chat/conversations/{id}/stream?includeThinking=` | `conversation_stream` | query `includeThinking?` | **SSE**, see §4; 404 |
 
@@ -92,6 +93,12 @@ always `false` for a `pending`/`failed` conversation
 by call site**: `GET chat/conversations` actively refreshes stale entries (bounded 2s per
 batch, regardless of cmd's own patience); `GET state`'s `chats` field reads the SAME cache
 read-only (never triggers a refresh, zero added latency) — see [ai-chat.md](ai-chat.md).
+
+`state.chatAttachmentsSupported` (decisions/00103) mirrors `app.state.ai_backend.
+supports_attachments` — a cheap, non-I/O bool read (no live cmd call), gating whether the
+chat composer's attach affordance renders at all. `true` for `CmdAIBackend` (the fleet
+edition, the only one live at `ca.cinnamons.uk`); `false` for `AnthropicAIBackend`
+(standalone/milestone 6, no attachment mechanism of its own yet).
 
 `<admin section>` = `{id, navLabel, title, description, page, collections:[<admin
 collection>]}`; `<admin collection>` = `{path, label, itemNoun, schema, fields:[<admin
@@ -212,6 +219,7 @@ static mounts → **public last**.
 | `PageOpError` | 422 |
 | `CmdChatError` (`cmdchat.py`) | 502 |
 | `ChatNotFoundError` (`chats.py`) | 404 |
+| `AttachmentError` (`chat_attachments.py`) | 422 |
 | publish already running | 409 (raised directly) |
 
 Validation errors from the builder are surfaced verbatim: `ValidationError.to_dict()` =

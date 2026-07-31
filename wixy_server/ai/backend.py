@@ -19,6 +19,7 @@ from wixy_server.cmdchat import (
     CmdChatError,
     ProvisioningOutcome,
     SendResult,
+    UploadResult,
 )
 from wixy_server.preamble import compose_prompt
 
@@ -53,18 +54,41 @@ class AIBackend(Protocol):
     implement. `supports_handover_chains` is the spec's own named example
     capability flag: the `anthropic` backend (milestone 6) has no fleet
     handover concept at all, so `routes_chat.py` checks this before ever
-    calling `get_chain`.
+    calling `get_chain`. `supports_attachments` is the same pattern applied to
+    chat image attachments (decisions/00103): `CmdAIBackend` implements it in
+    full; the standalone/`anthropic` backend's own worker has no attachment
+    mechanism of its own yet, and milestone 6 is security-gated (this repo's
+    own CLAUDE.md — peer review required before merge), so it stays `False`
+    rather than getting a rushed implementation here. `routes_chat.py` checks
+    the flag before ever calling `upload_attachment` and 422s a would-be
+    attachment against a backend that doesn't support it, rather than
+    silently dropping it.
     """
 
     supports_handover_chains: bool
+    supports_attachments: bool
 
     async def create_conversation(
         self, preamble: str, first_message: str | None
     ) -> ConversationRef: ...
 
     async def send(
-        self, conv_ref: ConversationRef, text: str, idempotency_key: str
+        self,
+        conv_ref: ConversationRef,
+        text: str,
+        idempotency_key: str,
+        *,
+        attachment_ids: list[str] | None = None,
     ) -> SendResult: ...
+
+    async def upload_attachment(
+        self, conv_ref: ConversationRef, data: bytes, filename: str, media_type: str
+    ) -> UploadResult:
+        """Only ever called when `supports_attachments` is `True` — a backend
+        that sets the flag `False` may leave this unimplemented (raising is
+        fine; `routes_chat.py` never reaches it, mirroring `get_chain`'s own
+        `supports_handover_chains`-gated convention above)."""
+        ...
 
     async def read(
         self,
@@ -105,6 +129,7 @@ class CmdAIBackend:
     `CmdChatError` translated to the backend-agnostic `AIBackendError`."""
 
     supports_handover_chains = True
+    supports_attachments = True
 
     def __init__(self, client: CmdChatClient, *, cmd_project: str) -> None:
         self._client = client
@@ -120,9 +145,28 @@ class CmdAIBackend:
             raise AIBackendError(str(exc)) from exc
         return ConversationRef(id=result.session_id)
 
-    async def send(self, conv_ref: ConversationRef, text: str, idempotency_key: str) -> SendResult:
+    async def send(
+        self,
+        conv_ref: ConversationRef,
+        text: str,
+        idempotency_key: str,
+        *,
+        attachment_ids: list[str] | None = None,
+    ) -> SendResult:
         try:
-            return await self._client.send_message(conv_ref.id, text, idempotency_key)
+            return await self._client.send_message(
+                conv_ref.id, text, idempotency_key, attachment_ids=attachment_ids
+            )
+        except CmdChatError as exc:
+            raise AIBackendError(str(exc)) from exc
+
+    async def upload_attachment(
+        self, conv_ref: ConversationRef, data: bytes, filename: str, media_type: str
+    ) -> UploadResult:
+        try:
+            return await self._client.upload_attachment(
+                data, filename, media_type, session_id=conv_ref.id
+            )
         except CmdChatError as exc:
             raise AIBackendError(str(exc)) from exc
 
