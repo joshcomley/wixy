@@ -9,10 +9,15 @@ import type { DraftOp } from "./protocol";
 
 export const DEFAULT_COALESCE_MS = 300;
 
-export type PatchResult = { kind: "ok"; rev: number } | { kind: "conflict" };
+export type PatchResult =
+  | { kind: "ok"; rev: number }
+  | { kind: "conflict" }
+  | { kind: "rejected"; message: string };
 
 export interface OpQueueCallbacks {
-  /** PATCH /api/admin/draft — resolves "ok" on 200, "conflict" on 409. Any other
+  /** PATCH /api/admin/draft — resolves "ok" on 200, "conflict" on 409, "rejected"
+   * on 422 (decisions/00095: the draft-write gate found a structural problem —
+   * this batch can never succeed by retrying, unlike a conflict). Any OTHER
    * failure (network error, 5xx) should reject the promise. */
   sendPatch: (expectedRev: number, ops: DraftOp[]) => Promise<PatchResult>;
   /** Re-read the overlay's current rev (e.g. from GET /api/admin/state) after a 409,
@@ -24,6 +29,12 @@ export interface OpQueueCallbacks {
   /** Called when `sendPatch`/`fetchCurrentRev` rejects — the batch is kept queued and
    * retried on the next flush. */
   onError?: (error: unknown) => void;
+  /** Called when the server permanently rejects a batch (422 — decisions/00095).
+   * The batch is DROPPED, not re-queued: unlike a conflict or a transient
+   * network/5xx error, retrying an op the write gate found structurally
+   * invalid can only loop forever. The caller (shell.ts) tells the owner and
+   * reloads the preview so the live DOM reconverges with the real draft. */
+  onRejected?: (ops: DraftOp[], message: string) => void;
 }
 
 /** Injectable in place of the real `setTimeout`/`clearTimeout` so tests can control
@@ -107,6 +118,14 @@ export class OpQueue {
           if (result.kind === "ok") {
             this.currentRev = result.rev;
             this.callbacks.onAccepted?.(batch, result.rev);
+          } else if (result.kind === "rejected") {
+            // Dropped, not re-queued (unlike "conflict" below) — a batch the
+            // write gate found structurally invalid will fail the same way
+            // every retry, so re-queuing it is an infinite loop, not a retry
+            // (decisions/00095). currentRev is untouched: this batch never
+            // actually landed, so the rev the queue believes is live didn't
+            // change.
+            this.callbacks.onRejected?.(batch, result.message);
           } else {
             this.currentRev = await this.callbacks.fetchCurrentRev();
             this.pending = [...batch, ...this.pending];

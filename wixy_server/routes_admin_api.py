@@ -12,6 +12,7 @@ rename) live in `wixy_server/routes_chat.py`, not here.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import uuid
 from collections.abc import AsyncIterator
@@ -27,12 +28,11 @@ from starlette.responses import Response
 
 from builder.bindings_map import bindings_map_to_dict, extract_bindings_map
 from builder.config import ProjectConfig
-from builder.content import dotted_get, scan_image_refs
+from builder.content import dotted_get
 from builder.errors import BuildError
 from builder.jsontypes import JsonObject, JsonValue
 from builder.render import SiteSource
 from builder.theme import theme_to_dict
-from builder.validate import validate_site
 from wixy_server.chats import ChatConversation, ChatRuntimeEntry, conversation_summary, load_chats
 from wixy_server.checkout import (
     CheckoutError,
@@ -41,7 +41,14 @@ from wixy_server.checkout import (
     current_sha,
     ensure_checkout,
 )
+from wixy_server.draft_repair import RepairResult, run_repair
 from wixy_server.draft_sanitize import sanitize_set_ops
+from wixy_server.draft_validate import (
+    DraftValidationError,
+    check_structural,
+    normalize_set_ops,
+    validate_merged_for_publish,
+)
 from wixy_server.ledger import read_ledger
 from wixy_server.live_pointer import load_live_pointer
 from wixy_server.media import (
@@ -73,13 +80,17 @@ from wixy_server.overlay import (
     save_overlay,
 )
 from wixy_server.publisher import PublishError, PublishJob, PublishResult, run_publish
+from wixy_server.reports import ReportResult, submit_report
 from wixy_server.restore import RestoreError, RestoreResult, run_restore
+from wixy_server.settings import Settings
 from wixy_server.site_source import build_site_source
 from wixy_server.storage import ProjectPaths
 from wixy_server.thumbnails import ThumbnailError, load_thumbnail, save_thumbnail
 from wixy_server.treelock import tree_lock
 from wixy_server.version_diff import binding_kind_lookup, build_version_diff, container_for
 from wixy_server.watcher import WatcherStatus
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin")
 
@@ -325,7 +336,13 @@ def _apply_draft_patch(
         # string leaves pass through sanitize_rich_lite (decisions/00074).
         source = build_site_source(project, paths.repo)
         sanitized = sanitize_set_ops(source, set_ops)
-        ops = [sanitized.pop(0) if isinstance(op, SetOp) else op for op in ops]
+        # The draft-write gate (decisions/00095): normalize (silent, best-effort
+        # corrections) THEN structurally validate (raises DraftValidationError,
+        # caught by patch_draft below — the overlay must stay untouched on a
+        # violation, so this runs BEFORE apply_patch, never after).
+        normalized = normalize_set_ops(sanitized, paths.repo)
+        check_structural(normalized)
+        ops = [normalized.pop(0) if isinstance(op, SetOp) else op for op in ops]
     new_overlay = apply_patch(overlay, body.expectedRev, ops, by=by, now=now)
     save_overlay(paths.draft_overlay, new_overlay)
     return new_overlay.rev
@@ -350,6 +367,16 @@ async def patch_draft(body: DraftPatchIn, request: Request) -> dict[str, int]:
             status_code=409,
             detail=f"expected rev {exc.expected}, overlay is at rev {exc.actual}",
         ) from exc
+    except DraftValidationError as exc:
+        logger.warning(
+            "rejected draft PATCH (rev %d, %d ops) from %r: %s | %s",
+            body.expectedRev,
+            len(body.ops),
+            by,
+            exc.summary,
+            "; ".join(exc.details),
+        )
+        raise HTTPException(status_code=422, detail=exc.summary) from exc
     return {"rev": rev}
 
 
@@ -394,11 +421,29 @@ def _merged_source(project: ProjectConfig, paths: ProjectPaths) -> SiteSource:
     return merge_overlay(source, overlay)
 
 
+def _content_src_for(name: str, source: str) -> str:
+    """The form a picked image must be STORED as in content JSON — distinct from
+    `url` (a display/thumbnail URL, always safe as-is for the admin UI's own pages
+    and, thanks to preview.py's `<base href="/">`, for the live-preview iframe too).
+    `images/<name>` (repo) matches every existing hand-authored content value
+    (`builder/validate.py`'s image-existence check resolves it against the project
+    root); `/admin/draft-media/<name>` (draft upload) is already the form the
+    publish pipeline's `_rewrite_draft_media_refs` expects to find and rewrite.
+    Root cause C of the 2026-07-28 gallery publish-corruption incident
+    (decisions/00095): the picker previously handed back `url` itself, so a picked
+    repo image was stored as `/images/<name>` (LEADING SLASH) — a form
+    `builder/validate.py`'s `(project_root / src).exists()` reports as missing
+    (pathlib discards `project_root` for an absolute-looking rhs) even though the
+    file is right there."""
+    return f"images/{name}" if source == "repo" else f"/admin/draft-media/{name}"
+
+
 def _media_item(path: Path, url: str, source: str, references: dict[str, list[str]]) -> JsonObject:
     dims = image_dimensions(path)
     return {
         "name": path.name,
         "url": url,
+        "contentSrc": _content_src_for(path.name, source),
         "source": source,
         "sizeBytes": path.stat().st_size,
         "width": dims[0] if dims is not None else None,
@@ -466,6 +511,7 @@ def _save_upload(
     return {
         "name": processed.filename,
         "url": f"/admin/draft-media/{processed.filename}",
+        "contentSrc": _content_src_for(processed.filename, "draft"),
         "source": "draft",
         "sizeBytes": len(processed.content),
         "width": processed.width,
@@ -535,10 +581,16 @@ async def replace_media(name: str, request: Request) -> JsonObject:
     content_type = request.headers.get("content-type", "")
 
     def _stage() -> JsonObject:
+        # The target predates this call (stage_media_replacement 404s otherwise) —
+        # its OWN source (repo vs draft upload) decides the reference form, same
+        # as _list_media/_media_item; a replacement never changes which one a name
+        # is.
+        source = "repo" if (paths.repo / "images" / name).is_file() else "draft"
         processed = stage_media_replacement(paths, name, data, content_type, project.media)
         return {
             "name": name,
             "url": f"/admin/draft-media-replace/{name}",
+            "contentSrc": _content_src_for(name, source),
             "sizeBytes": len(processed.content),
             "width": processed.width,
             "height": processed.height,
@@ -643,6 +695,29 @@ async def start_publish(body: PublishIn, request: Request) -> JsonObject:
         overlay = load_overlay(paths.draft_overlay, default_base_sha=base_sha)
         if overlay.rev != body.expectedRev:
             raise RevConflictError(body.expectedRev, overlay.rev)
+
+        # decisions/00095: never even START the pipeline against a draft the
+        # owner's own review drawer would show as blocked — the exact same
+        # check GET publish/preview runs (validate_merged_for_publish), so
+        # "looked publishable" and "is publishable" can never drift. Before
+        # this, a bad draft reached _materialize_locked's own validate_site
+        # call deep inside the pipeline and surfaced as a raw PublishError/502
+        # (the incident's own symptom) instead of this calm 422. Skipped
+        # entirely with no checkout yet, same reasoning as the nothing-to-
+        # publish guard below — deliberately NOT a fresh ensure_checkout
+        # first: this must see exactly what the drawer showed the owner, not
+        # a newer upstream state that might disagree with it.
+        if (paths.repo / ".git").exists():
+            source = build_site_source(project, paths.repo)
+            merged = merge_overlay(source, overlay)
+            if not validate_merged_for_publish(merged, paths).ok:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "The site's content has a problem that needs fixing before it can publish."
+                    ),
+                )
+
         if overlay.ops or overlay.pages_added or overlay.pages_deleted:
             return  # something staged — always publishable
         staging = media_staging(paths)
@@ -776,29 +851,6 @@ async def get_publish_version_diff(version: int, request: Request) -> JsonObject
 # draft diff + validate result, spec/05 §5's "review drawer")
 # ---------------------------------------------------------------------------
 
-_DRAFT_MEDIA_URL_PREFIX = "/admin/draft-media/"
-
-
-def _staged_image_keys(source: SiteSource, paths: ProjectPaths) -> set[tuple[str, str]]:
-    """`(file_label, dotted_key)` pairs whose image ref points at a currently
-    staged (not-yet-published) draft upload that genuinely exists on disk —
-    `validate_site`'s own image-existence check (`(project_root / src).
-    exists()`) always false-positives on these: `src` is `/admin/draft-media/
-    <name>` and an absolute-looking rhs wins pathlib's `/` operator, discarding
-    `project_root` entirely, even though the file is a perfectly legitimate
-    about-to-be-published upload. Mirrors `builder.validate._validate_images`'s
-    own traversal exactly, so its errors can be filtered by these same keys."""
-    all_content: dict[str, JsonObject] = {**source.page_contents, "_global": source.global_content}
-    keys: set[tuple[str, str]] = set()
-    for slug, content in all_content.items():
-        file_label = "content/_global.json" if slug == "_global" else f"content/{slug}.json"
-        for key_path, src in scan_image_refs(content):
-            if src.startswith(_DRAFT_MEDIA_URL_PREFIX):
-                name = src[len(_DRAFT_MEDIA_URL_PREFIX) :]
-                if (paths.draft_media / name).is_file():
-                    keys.add((file_label, key_path))
-    return keys
-
 
 def _build_publish_preview(
     project: ProjectConfig, paths: ProjectPaths, overlay: Overlay
@@ -818,19 +870,25 @@ def _build_publish_preview(
         entry: JsonObject = {"key": dotted_path, "kind": kind, "old": old_value, "new": op.value}
         changes.setdefault(file_key, []).append(entry)
 
-    validate_result = validate_site(merged, paths.repo)
-    safe_image_keys = _staged_image_keys(merged, paths)
-    filtered_errors = [
-        e
-        for e in validate_result.errors
-        if not (e.code == "missing-image" and (e.file, e.key) in safe_image_keys)
-    ]
+    validate_result = validate_merged_for_publish(merged, paths)
 
     # Staged media changes are publishable changes too (decisions/00080) —
     # they produce no content ops, so without this a pure media-replacement
     # publish reads as "Nothing to publish" (found via E2E: the drawer's guard
     # disabled Publish over a staged replacement).
     media_changes = media_staging(paths)
+
+    if not validate_result.ok:
+        # decisions/00095: a blocked owner shows up in the log even if she
+        # never presses Report — the operator shouldn't have to wait for a
+        # bundle to know publishing is currently stuck.
+        for error in validate_result.errors:
+            logger.warning(
+                "publish preview blocked: %s: %s (%s)",
+                error.file or "?",
+                error.message,
+                error.code,
+            )
 
     return {
         "changes": {
@@ -847,8 +905,8 @@ def _build_publish_preview(
         + len(media_changes["replaced"])
         + len(media_changes["deleted"]),
         "validate": {
-            "ok": not filtered_errors,
-            "errors": [{k: v for k, v in e.to_dict().items()} for e in filtered_errors],
+            "ok": validate_result.ok,
+            "errors": [{k: v for k, v in e.to_dict().items()} for e in validate_result.errors],
         },
     }
 
@@ -866,6 +924,82 @@ async def get_publish_preview(request: Request) -> JsonObject:
         return await anyio.to_thread.run_sync(_build)
     except CheckoutError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# POST /api/admin/draft/repair (decisions/00095) — the review drawer's
+# "Fix it for me" button when the blocked state shows.
+# ---------------------------------------------------------------------------
+
+
+class DraftRepairIn(BaseModel):
+    expectedRev: int
+
+
+@router.post("/draft/repair", response_model=None)
+async def post_draft_repair(body: DraftRepairIn, request: Request) -> JsonObject:
+    project: ProjectConfig = request.app.state.project
+    paths: ProjectPaths = request.app.state.paths
+    by = _current_author(request)
+    publish_job: PublishJob | None = request.app.state.publish_job
+    if publish_job is not None and publish_job.is_running:
+        raise HTTPException(status_code=409, detail="a publish is currently running")
+
+    now = datetime.now(UTC).isoformat()
+
+    def _run() -> RepairResult:
+        return run_repair(project, paths, expected_rev=body.expectedRev, by=by, now=now)
+
+    try:
+        result = await anyio.to_thread.run_sync(_run)
+    except CheckoutError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except RevConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "rev": result.rev,
+        "actions": list(result.actions),
+        "validate": {
+            "ok": result.validate.ok,
+            "errors": [{k: v for k, v in e.to_dict().items()} for e in result.validate.errors],
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# POST /api/admin/report (decisions/00095) — the review drawer's "Send a
+# report" button; also reachable after a failed publish.
+# ---------------------------------------------------------------------------
+
+
+class ReportIn(BaseModel):
+    context: str
+    note: str | None = None
+
+
+@router.post("/report", response_model=None)
+async def post_report(body: ReportIn, request: Request) -> JsonObject:
+    project: ProjectConfig = request.app.state.project
+    paths: ProjectPaths = request.app.state.paths
+    wixy_repo_root: Path = request.app.state.wixy_repo_root
+    settings: Settings = request.app.state.settings
+    publish_job: PublishJob | None = request.app.state.publish_job
+    now = datetime.now(UTC).isoformat()
+
+    def _run() -> ReportResult:
+        return submit_report(
+            project,
+            paths,
+            wixy_repo_root,
+            settings,
+            publish_job,
+            context=body.context,
+            note=body.note,
+            now=now,
+        )
+
+    result = await anyio.to_thread.run_sync(_run)
+    return {"saved": result.saved, "emailed": result.emailed}
 
 
 # ---------------------------------------------------------------------------

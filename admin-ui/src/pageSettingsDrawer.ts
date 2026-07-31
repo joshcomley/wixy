@@ -10,7 +10,7 @@
 
 import type { AdminApi } from "./api";
 import type { OpQueueLike } from "./editView";
-import { openMediaDialog } from "./mediaDialog";
+import { contentSrcToDisplayUrl, openMediaDialog } from "./mediaDialog";
 import type { JsonValue } from "./protocol";
 
 export interface PageSettingsDeps {
@@ -144,7 +144,10 @@ export function mountPageSettingsDrawer(page: string, deps: PageSettingsDeps): P
       preview.innerHTML = "";
       if (current !== null) {
         const img = document.createElement("img");
-        img.src = current.src;
+        // This preview renders in the admin shell's own DOM, not inside the
+        // live-preview iframe — current.src is the content-JSON form (relative
+        // for a repo image), which has no <base href> to re-anchor it here.
+        img.src = contentSrcToDisplayUrl(current.src);
         img.alt = current.alt;
         preview.appendChild(img);
       } else {

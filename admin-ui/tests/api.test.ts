@@ -53,6 +53,7 @@ describe("createApi", () => {
     const item = {
       name: "hero.jpg",
       url: "/images/hero.jpg",
+      contentSrc: "images/hero.jpg",
       source: "repo",
       sizeBytes: 2048,
       width: 800,
@@ -68,6 +69,7 @@ describe("createApi", () => {
     const created = {
       name: "a1b2c3d4-photo.jpg",
       url: "/admin/draft-media/a1b2c3d4-photo.jpg",
+      contentSrc: "/admin/draft-media/a1b2c3d4-photo.jpg",
       source: "draft",
       sizeBytes: 512,
       width: 400,

@@ -12,7 +12,7 @@
 // controller's `subscribe` drives both the topbar chrome AND (when mounted)
 // the Settings panel from the same source of truth.
 
-import { createApi, thumbnailUrl, type AdminApi, type PublishJobData, type PublishStage, type StateResponse } from "./api";
+import { createApi, thumbnailUrl, type AdminApi, type PublishJobData, type StateResponse } from "./api";
 import { createThumbnailService } from "./thumbnailService";
 import { mountChatPanel as mountChatPanelReal, type ChatPanel, type ChatPanelDeps } from "./chatPanel";
 import { mountEditView as mountEditViewReal, type EditView, type MountEditViewDeps } from "./editView";
@@ -23,6 +23,7 @@ import { OpQueue } from "./opQueue";
 import { mountPageSettingsDrawer } from "./pageSettingsDrawer";
 import { renderPagesPanel } from "./pagesPanel";
 import { mountPublishDrawer } from "./publishDrawer";
+import { PUBLISH_STAGE_LABELS } from "./publishStages";
 import { canonicalizeUrl, currentRoute, navigateTo, onRouteChange, type Route } from "./router";
 import { captureScreenshot, copyBlobToClipboard, downloadBlob, flashScreen, screenshotFilename } from "./screenshot";
 import { clearLastRoute, loadLastRoute, saveLastRoute } from "./sessionState";
@@ -51,20 +52,6 @@ const PUBLISH_FAIL_TOAST_MS = 8000;
 // Safety cap (~20 min at the 2s cadence): a genuinely wedged server job must
 // not be polled forever — the periodic revalidation re-arms the watch anyway.
 const PUBLISH_WATCH_MAX_POLLS = 600;
-
-/** Layman stage narration for the status bar while a publish runs — the
- * operator watches the slim banner, not git jargon (decisions/00089, the same
- * wording rule as decisions/00082's chip text). */
-const PUBLISH_STAGE_LABELS: Record<PublishStage, string> = {
-  pulling: "Getting the latest site…",
-  merging: "Applying your changes…",
-  committing: "Saving a new version…",
-  building: "Building the site…",
-  verifying: "Checking the site…",
-  swapping: "Taking it live…",
-  done: "Live.",
-  failed: "Publish failed.",
-};
 
 type MountEditViewFn = (page: string, deps: MountEditViewDeps) => EditView;
 type MountChatPanelFn = (conversation: string | null, deps: ChatPanelDeps) => ChatPanel;
@@ -756,6 +743,10 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
         // of the two paths fires second is a no-op (decisions/00089).
         announcePublishSucceeded(version);
       },
+      // decisions/00095: the Fix-it-for-me / Send-a-report confirmations
+      // reuse the shell's own toast surface rather than the drawer inventing
+      // a second one.
+      onToast: (message, variant) => showTransientToast(message, variant),
     });
     activeDrawer = drawer;
     activeDrawerKind = "publish";
@@ -1004,6 +995,17 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
             refreshThumbnailsForOps(ops);
           },
           onError: () => showTransientToast("Couldn't save your last change — retrying…"),
+          // decisions/00095: the server permanently rejected this batch (the
+          // draft-write gate) — retrying is pointless, and the live preview's
+          // DOM may now disagree with the real draft (the rejected edit is
+          // still sitting there visually, un-saved). A calm, generic toast
+          // (never the technical detail — that's in the server log for the
+          // operator) plus a genuine reload reconverges the DOM with the
+          // server's actual state, exactly like any other hard reload does.
+          onRejected: () => {
+            showTransientToast("That change couldn't be saved — refreshing the page preview.");
+            if (activeRoute?.kind === "edit") activeEditView?.reload();
+          },
         });
       }
       renderTopBar();

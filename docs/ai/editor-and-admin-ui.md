@@ -104,7 +104,22 @@ directions are origin-checked and runtime-validated after crossing the boundary
    - **Item-scope key (`.`-prefixed):** apply to DOM, walk to the outermost `[data-wx-list]`
      (`findOutermostList`), reconstruct that list's **whole array** from the DOM
      (`readListValue`), emit **one op targeting the outermost list key** with the entire array
-     (there is no valid overlay path inside an array).
+     (there is no valid overlay path inside an array). `readItemValue` (`contentModel.ts`)
+     dispatches per `field.kind`: an `"attr"` field reads through `readAttrValue`, which
+     queries `[data-wx-attr]` (the element the target attribute is actually set on, not the
+     list-item root — `builder/bindings.py:_apply_attrs` sets it on the SAME element carrying
+     `data-wx-attr="attrName:key[,attr2:key2]"`, parsed by `parseAttrSpec`) and returns that
+     element's own `getAttribute(attrName)`. Every scalar text read also passes through
+     `normalizeEmptyText` (collapses a lone `\s`-only string — which already matches a real
+     NBSP — or the literal `&nbsp;` entity text to `""`), so the "blank new item" placeholder
+     `overlay.ts`'s add-item flow writes (`innerHTML = "&nbsp;"`, needed so a truly empty
+     text element stays clickable) can never itself be read back as real content on a LATER
+     structural op. Both gaps were root causes A and B of the 2026-07-28 gallery
+     publish-corruption incident (decisions/00095) — before this, an attr-kind item field was
+     silently OMITTED from the reconstructed array (not set to `""`, just absent — exactly
+     "missing required property"), and a freshly-added item's untouched placeholder became the
+     literal 6-character string `"&nbsp;"` once it round-tripped through the server's nh3
+     sanitize pass.
    - **Structural list edits** (toolbar ↑↓✚⧉✖): `listOps.applyListStructuralOp` transforms
      the array; emit the whole new array as one op (`add` clones item[0] with strings blanked).
 3. **Up:** `messaging.sendToShell` → `parent.postMessage(msg, origin)`.
@@ -129,10 +144,18 @@ One `OpQueue` per session (owned by `shell.ts`); panels take only the `OpQueueLi
 - **Ordering:** strict FIFO; ops enqueued during an in-flight request are picked up next
   iteration in order.
 - **Optimistic concurrency via `rev`:** `sendPatch(currentRev, batch)` → `{kind:"ok", rev}` |
-  `{kind:"conflict"}`. **ok** → advance `currentRev`, `onAccepted(batch, rev)`. **409** →
-  re-fetch `/api/admin/state` draft.rev, **re-queue the batch at the front**, retry
-  immediately (no extra delay). **network/5xx** → re-queue at front, `onError`, break (kept
-  for next flush; shell shows "Couldn't save… retrying").
+  `{kind:"conflict"}` | `{kind:"rejected", message}`. **ok** → advance `currentRev`,
+  `onAccepted(batch, rev)`. **409** → re-fetch `/api/admin/state` draft.rev, **re-queue the
+  batch at the front**, retry immediately (no extra delay). **422** (`kind:"rejected"` — the
+  server's draft-write gate, decisions/00095, found the batch structurally invalid) → the
+  batch is **dropped, never re-queued** (unlike a conflict, retrying the exact same invalid
+  op can only loop forever) and `onRejected(batch, message)` fires; `shell.ts` shows a calm,
+  generic toast ("That change couldn't be saved — refreshing the page preview.") and calls
+  `activeEditView?.reload()` if the current route is the edit view — a real reload, since the
+  live preview DOM may still be showing the rejected edit (applied optimistically, never
+  actually saved) and a reload is the same reconvergence mechanism any other hard refresh
+  uses. **network/5xx** → re-queue at front, `onError`, break (kept for next flush; shell
+  shows "Couldn't save… retrying").
 - **`flushNow()`** flushes immediately (before navigating away). A 409 is expected and handled
   here — `api.ts` never blind-retries a 4xx.
 
@@ -146,7 +169,25 @@ media/chat/history/settings); `pagesPanel.ts` + `pageSettingsDrawer.ts` (`meta.*
 with a "Nothing to publish" hint when the preview's `opCount` is 0 AND no upstream commits are
 pending — decisions/00071; layman wording throughout: the chip reads "N unpublished changes ·
 M site updates", the upstream section is "updates made outside the editor" with a plain-English
-explainer — decisions/00081); `historyPanel.ts`
+explainer — decisions/00081; **five mutually-exclusive body states** (decisions/00095), each a
+full `body.innerHTML = ""` swap, never a partial patch: **blocked** (`renderBlocked` — the
+publish preview's `validate.ok === false`; "Publishing is paused" + calm body text, "Fix it for
+me" → `POST draft/repair` → re-fetches the preview on full success or swaps to a
+still-blocked message + an emphasized "Send a report" on partial, and "Send a report" →
+`POST report` — no raw validator text ever rendered, no Publish button at all while blocked)
+· **reviewable** (`renderReviewable` — the pre-existing diff+confirm UI, unchanged except the
+old inline error box is gone since a blocked draft never reaches this state) · **running**
+(`renderRunning`, entered synchronously on confirm click, before any await — spinner +
+"Publishing your site…" + a stage caption fed by the SSE stream, same `PUBLISH_STAGE_LABELS`
+wording the status bar uses) · **success** (`renderSuccess(version)` — a checkmark, "Your site
+is live.", "Version N") · **failure** (`renderFailure` — "Publishing didn't work this time." +
+"Nothing changed on your live site, and your edits are safe." + "Try again"/"Send a report",
+no raw error detail). `currentRev` is a mutable local that advances past `deps.expectedRev`
+after a successful in-drawer repair, so a follow-up repair or the eventual publish always
+targets the latest known rev. The `onPublishStarted`/`onPublishSettled` shell bridge
+(Inv 25) fires at the exact same points as before this rewrite — confirm still calls
+`onPublishStarted` synchronously and `onPublishSettled` in a `.finally()` regardless of
+outcome or whether the drawer was torn down first); `historyPanel.ts`
 (ledger + typed-confirm restore + a per-row **Changes** expander showing the version's old→new
 key diff from `GET /api/admin/publishes/{n}/diff`, each row with a **Reinstate** button that
 PATCHes the shown old value back into the current draft — hidden for added-in-that-version keys

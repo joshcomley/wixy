@@ -170,6 +170,24 @@ export type PublishOutcome =
   | { kind: "conflict"; message: string }
   | { kind: "failed"; message: string };
 
+/** `POST /api/admin/draft/repair`'s outcome (decisions/00095) — the review
+ * drawer's "Fix it for me" button. `actions` are the plain-English lines of
+ * what was actually changed (empty if nothing needed fixing); `validate` is
+ * the SAME full-check result `PublishPreview.validate` carries, so the
+ * drawer can tell in one response whether the repair fully unblocked
+ * publishing or the owner still needs to send a report. */
+export type RepairOutcome =
+  | { kind: "ok"; rev: number; actions: string[]; validate: { ok: boolean; errors: ValidateError[] } }
+  | { kind: "conflict"; message: string }
+  | { kind: "failed"; message: string };
+
+/** `POST /api/admin/report`'s outcome (decisions/00095) — a report is always
+ * SAVED server-side regardless (never a failure outcome to show the owner);
+ * `emailed` only distinguishes which confirmation toast the drawer shows. */
+export interface SendReportOutcome {
+  emailed: boolean;
+}
+
 /** `GET /api/admin/publishes`'s per-entry shape (spec/04 §6, `wixy_server.
  * ledger.LedgerEntry.to_dict()`) — a publish entry carries `message`/`source`/
  * `changed`; a restore entry carries `action`/`of` instead (never both). */
@@ -224,10 +242,21 @@ export interface ContentResponse {
  * present for a real file on disk; `references` lists the content keys (outermost
  * granularity) using it; `stagedReplace`/`stagedDelete` mark publish-pending
  * changes (decisions/00080) — a staged replacement's `url` already serves the
- * new bytes from the staging area. */
+ * new bytes from the staging area.
+ *
+ * `url` and `contentSrc` are deliberately different fields (decisions/00095):
+ * `url` is a DISPLAY path — always safe to drop into an `<img src>` on an admin-ui
+ * page or (thanks to preview.py's `<base href="/">`) inside the live-preview
+ * iframe. `contentSrc` is the form a picked image must be STORED as in content
+ * JSON — `images/<name>` for a repo image (what every hand-authored content value
+ * and `builder/validate.py`'s existence check expect), `/admin/draft-media/<name>`
+ * for a draft upload (already the form the publish pipeline rewrites). Picking
+ * `url` as a content value was root cause C of the 2026-07-28 gallery
+ * publish-corruption incident. */
 export interface MediaItem {
   name: string;
   url: string;
+  contentSrc: string;
   source: "repo" | "draft";
   sizeBytes: number;
   width: number | null;
@@ -245,7 +274,13 @@ export interface ThemeData {
   fonts: Record<string, FontSpec>;
 }
 
-export type PatchResult = { kind: "ok"; rev: number } | { kind: "conflict" };
+/** `"rejected"` is the draft-write gate's 422 (decisions/00095) — a batch the
+ * server can never accept as-is, distinct from `"conflict"`'s 409 (a stale
+ * rev, fixed by refetching and retrying the SAME ops). */
+export type PatchResult =
+  | { kind: "ok"; rev: number }
+  | { kind: "conflict" }
+  | { kind: "rejected"; message: string };
 
 /** `POST .../messages`'s response — `buffered: true` while the conversation
  * is still provisioning (spec/06 §1: cmd buffers the send itself; the
@@ -389,6 +424,8 @@ export interface AdminApi {  getState(): Promise<StateResponse>;
   getTheme(): Promise<ThemeData>;
   getPublishPreview(): Promise<PublishPreview>;
   publish(message: string, expectedRev: number): Promise<PublishOutcome>;
+  repairDraft(expectedRev: number): Promise<RepairOutcome>;
+  sendReport(context: string, note?: string): Promise<SendReportOutcome>;
   getPublishes(limit?: number): Promise<PublishesEntry[]>;
   getVersionDiff(version: number): Promise<VersionDiff>;
   restore(version: number): Promise<RestoreOutcome>;
@@ -436,6 +473,14 @@ export function createApi(): AdminApi {
         body: JSON.stringify({ expectedRev, ops }),
       });
       if (response.status === 409) return { kind: "conflict" };
+      if (response.status === 422) {
+        // The draft-write gate rejected this batch (decisions/00095) — not
+        // retryable, the opQueue drops it rather than looping forever.
+        return {
+          kind: "rejected",
+          message: await extractDetail(response, "that change couldn't be saved"),
+        };
+      }
       const body = await parseJson<{ rev: number }>(response);
       return { kind: "ok", rev: body.rev };
     },
@@ -518,6 +563,30 @@ export function createApi(): AdminApi {
       }
       const body = await parseJson<{ version: number; sha: string }>(response);
       return { kind: "ok", version: body.version, sha: body.sha };
+    },
+    async repairDraft(expectedRev) {
+      const response = await fetchWithRetry("/api/admin/draft/repair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedRev }),
+      });
+      if (response.status === 409) {
+        return { kind: "conflict", message: await extractDetail(response, "repair conflict") };
+      }
+      const body = await parseJson<{
+        rev: number;
+        actions: string[];
+        validate: { ok: boolean; errors: ValidateError[] };
+      }>(response);
+      return { kind: "ok", rev: body.rev, actions: body.actions, validate: body.validate };
+    },
+    async sendReport(context, note) {
+      const response = await fetchWithRetry("/api/admin/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(note !== undefined ? { context, note } : { context }),
+      });
+      return parseJson<SendReportOutcome>(response);
     },
     async getPublishes(limit) {
       const query = limit !== undefined ? `?limit=${limit}` : "";

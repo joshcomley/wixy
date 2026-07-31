@@ -10,13 +10,19 @@
     "before": {
       "type": "object",
       "required": ["src", "alt"],
-      "properties": { "src": { "type": "string" }, "alt": { "type": "string" } },
+      "properties": {
+        "src": { "type": "string", "pattern": ".*\\S.*" },
+        "alt": { "type": "string" }
+      },
       "additionalProperties": false
     },
     "after": {
       "type": "object",
       "required": ["src", "alt"],
-      "properties": { "src": { "type": "string" }, "alt": { "type": "string" } },
+      "properties": {
+        "src": { "type": "string", "pattern": ".*\\S.*" },
+        "alt": { "type": "string" }
+      },
       "additionalProperties": false
     }
   },

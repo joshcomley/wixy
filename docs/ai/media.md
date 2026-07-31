@@ -18,6 +18,21 @@ code is `wixy_server/media.py`; the content-model rules are
   `data-wx-bg` value). While staged, `src` is `/admin/draft-media/<name>`; publish rewrites it
   to `images/<name>`.
 
+**`url` vs `contentSrc` (decisions/00095):** every media API response (`GET media`, `POST
+media`, `PUT media/{name}`) carries BOTH fields, and they are not interchangeable. `url` is a
+**display** form — always root-relative (`/images/<name>` or `/admin/draft-media/<name>`),
+correct for an `<img src>` on an admin-ui page and, thanks to `preview.py`'s injected `<base
+href="/">`, for the live-preview iframe too. `contentSrc` (`routes_admin_api.py:
+_content_src_for`) is the form a picked image must be STORED as in content JSON: `images/
+<name>` for a repo image (no leading slash — the only form `builder/validate.py`'s
+`(project_root / src).exists()` resolves correctly; pathlib's `/` silently discards the left
+operand for an absolute-looking right side) or `/admin/draft-media/<name>` for a draft upload
+(already the form `_rewrite_draft_media_refs` expects at publish). The media picker
+(`admin-ui/src/mediaDialog.ts`) writes `contentSrc` into the draft op — never `url` — since a
+picker-driven pick previously stored the display form and broke `builder/validate.py`'s
+existence check on every repo image pick (root cause C of the 2026-07-28 gallery
+publish-corruption incident).
+
 ## Upload processing (`media.py:process_upload`)
 
 `process_upload(data, original_filename, content_type, config: MediaConfig) → ProcessedUpload`

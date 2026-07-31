@@ -77,11 +77,27 @@ class TestIndexPageAgainstRealFixture:
             (".img", "img"),
             (".title", "text"),
             (".body", "text"),
+            (".cat", "attr"),
             (".book", "if"),
             (".bookHref", "href"),
             (".enquireHref", "href"),
             (".tags", "list"),
         }
+
+    def test_showcase_item_attr_kind_records_target_attribute(
+        self, mini_site_source: SiteSource
+    ) -> None:
+        """An attr binding on a LIST ITEM's own root element (not just page-scope
+        `<body>`, as `test_attr_kind_records_target_attribute` above covers) — the
+        exact shape `gallery.sliders`/`gallery.tiles` use in the real Cottage
+        Aesthetics site and the root cause of the 2026-07-28 publish-corruption
+        incident (decisions/00095): the editor's whole-array DOM read-back silently
+        dropped every item-scoped attr field."""
+        mapping = extract_bindings_map(mini_site_source, "index")
+        showcase = _field(mapping.fields, "showcase.items", "list")
+        assert showcase.items is not None
+        field = _field(showcase.items, ".cat", "attr")
+        assert field.attr_name == "data-cat"
 
     def test_book_key_deduped_across_negated_and_plain_if(
         self, mini_site_source: SiteSource

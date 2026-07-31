@@ -4,7 +4,7 @@ The write side of the server: how a draft becomes a live, immutable build; how r
 back; how the ledger records history. Read side is
 [serving-and-overlay.md](serving-and-overlay.md). Spec:
 [`spec/04-server.md`](../../spec/04-server.md) §5–6. Numbered guarantees:
-[invariants.md](invariants.md) 7, 11, 16, 17, 18.
+[invariants.md](invariants.md) 7, 11, 16, 17, 18, 26.
 
 ## Publish (`publisher.py:run_publish`)
 
@@ -18,15 +18,33 @@ HTTP call is **synchronous**: `start_publish` stores the job at `app.state.publi
 Stages (`PublishStage`): `pulling → merging → committing → building → verifying → swapping →
 done | failed`.
 
-**Preflight** (before any lock): `current_sha(paths.repo)` → `default_base_sha`;
-`load_overlay(...)`; if `overlay.rev != expected_rev` → `RevConflictError` immediately (→409,
-job never "started"). Then create `locks/publish.lock` (removed in `finally`).
+**Route-level preflight** (`routes_admin_api.py:start_publish`'s own `_preflight`, BEFORE
+`run_publish` is called and before any job exists — distinct from the pipeline preflight
+below): rev check (stale `expectedRev` → 409) → **blocked-draft validate** (decisions/00095):
+if a checkout exists, `validate_merged_for_publish(merged, paths)` — the same full-schema
+check `GET publish/preview` runs — must be `ok`, else **422**
+`"The site's content has a problem that needs fixing before it can publish."`, so a draft the
+review drawer would show as blocked never even reaches `run_publish`'s own `_materialize_
+locked` → `validate_site` call deep in the pipeline (which is where the incident's raw
+`PublishError`/502 actually surfaced) → nothing-to-publish check (decisions/00071: no draft
+ops/staged media AND no upstream commits ahead → 422). Only once all three pass does
+`start_publish` create the job and call `run_publish`.
+
+**Pipeline preflight** (`publisher.py:run_publish`, before any lock): `current_sha(paths.repo)`
+→ `default_base_sha`; `load_overlay(...)`; if `overlay.rev != expected_rev` →
+`RevConflictError` immediately (→409, job never "started"). Then create `locks/publish.lock`
+(removed in `finally`). This rev check is a second, narrower layer — defense in depth for the
+same race the route-level preflight above already covers for the one real caller.
 
 1. **pulling** — `load_live_pointer` → `previous_pointer`; `ensure_checkout`
    (CheckoutError → `PublishError("pulling")`); compute `has_upstream_commits`.
 2. **merging** — `_materialize` under `tree_lock()`: apply overlay ops onto `content/*.json`
    + `theme/theme.json` (canonical rewrite; `_rewrite_draft_media_refs` maps
-   `/admin/draft-media/<name>` → `images/<name>`); apply page ops (`git rm` deleted, `git add`
+   `/admin/draft-media/<name>` → `images/<name>`, and — belt-and-braces, decisions/00095 —
+   also runs `draft_validate.rewrite_leading_slash_src` on every remaining `src`, so a
+   leading-slash repo-image ref that predates the draft-write gate, or slips past a future
+   gap in it, still gets normalized here rather than reaching `builder validate` broken);
+   apply page ops (`git rm` deleted, `git add`
    duplicated templates from `draft/pages/`); **copy** referenced staged media into `images/`
    + `git add`; `build_site_source` + `validate_site`. On `BuildError` or a not-ok validate →
    `_reset_hard(HEAD)` (`git reset --hard` + `git clean -fd`) + `PublishError("merging")`.

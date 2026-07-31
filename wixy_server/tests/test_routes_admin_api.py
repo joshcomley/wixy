@@ -718,16 +718,20 @@ class TestPatchDraftSanitize:
                             "file": "_global",
                             "path": "hours",
                             "value": [
-                                {"day": "Monday", "value": "10:00 <script>x</script>– 19:00"},
-                                {"day": "Tuesday", "value": "11:00 – 16:00"},
+                                {
+                                    "day": "Monday",
+                                    "value": "10:00 <script>x</script>– 19:00",
+                                    "closed": False,
+                                },
+                                {"day": "Tuesday", "value": "11:00 – 16:00", "closed": False},
                             ],
                         }
                     ],
                 },
             )
         assert _overlay_op_value(paths, "_global:hours") == [
-            {"day": "Monday", "value": "10:00 – 19:00"},
-            {"day": "Tuesday", "value": "11:00 – 16:00"},
+            {"day": "Monday", "value": "10:00 – 19:00", "closed": False},
+            {"day": "Tuesday", "value": "11:00 – 16:00", "closed": False},
         ]
 
     def test_nested_list_sanitizes_text_but_not_img_leaves(
@@ -884,6 +888,11 @@ class TestGetMedia:
         assert response.status_code == 200
         item = _find_media(response.json()["media"], "hero.jpg")
         assert item["url"] == "/images/hero.jpg"
+        # decisions/00095: the CONTENT-JSON form (no leading slash) — distinct
+        # from the display `url` above. This is what a picker must hand back as
+        # a value, never `url` (root cause C of the 2026-07-28 gallery
+        # publish-corruption incident).
+        assert item["contentSrc"] == "images/hero.jpg"
         assert item["source"] == "repo"
         assert item["sizeBytes"] == len(b"fake-jpeg-bytes")
         assert item["width"] is None  # the fixture's own bytes aren't a real image
@@ -899,6 +908,10 @@ class TestGetMedia:
             response = client.get("/api/admin/media")
         item = _find_media(response.json()["media"], "abc12345-new.jpg")
         assert item["url"] == "/admin/draft-media/abc12345-new.jpg"
+        # For a draft upload, contentSrc and url are the SAME value — both are
+        # already the form the publish pipeline's _rewrite_draft_media_refs
+        # expects to find and rewrite.
+        assert item["contentSrc"] == "/admin/draft-media/abc12345-new.jpg"
         assert item["source"] == "draft"
 
     def test_reports_real_dimensions_for_a_real_image(
@@ -1098,12 +1111,16 @@ class TestDeleteMedia:
             body = response.json()
             assert body["stagedReplace"] is True
             assert body["url"] == "/admin/draft-media-replace/hero.jpg"
+            # A staged replacement doesn't change what NAME the image is
+            # referenced by — still images/hero.jpg (decisions/00095).
+            assert body["contentSrc"] == "images/hero.jpg"
             grid = client.get("/api/admin/media")
             staged = client.get("/admin/draft-media-replace/hero.jpg")
         assert (paths.draft_media_replace / "hero.jpg").exists()
         hero = next(item for item in grid.json()["media"] if item["name"] == "hero.jpg")
         assert hero["stagedReplace"] is True
         assert hero["url"] == "/admin/draft-media-replace/hero.jpg"
+        assert hero["contentSrc"] == "images/hero.jpg"
         assert staged.status_code == 200
         assert staged.content.startswith(bytes([0xFF, 0xD8]))
 
@@ -1344,6 +1361,74 @@ class TestPostPublish:
             )
         assert response.status_code == 200
         assert response.json()["version"] == 1
+
+
+class TestPostPublishPreflightValidate:
+    """decisions/00095: a publish attempt against a draft the review drawer
+    would already show as blocked must get the same calm 422 the drawer
+    shows, not reach _materialize_locked's own validate_site call deep
+    inside the pipeline (a raw PublishError/502 — the incident's own
+    symptom)."""
+
+    def test_a_missing_image_reference_blocks_publish_with_a_calm_422(
+        self, storage_root: Path, wixy_repo_root_with_image_binding: Path
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root_with_image_binding
+        )
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [
+                        {
+                            "file": "index",
+                            "path": "hero.bg",
+                            "value": {"src": "images/does-not-exist.jpg", "alt": "x"},
+                        }
+                    ],
+                },
+            )
+            # The review drawer would already show this as blocked.
+            preview = client.get("/api/admin/publish/preview").json()
+            response = client.post(
+                "/api/admin/publish",
+                json={"message": "test", "expectedRev": _current_rev(client)},
+            )
+            ledger = client.get("/api/admin/publishes").json()["publishes"]
+        assert preview["validate"]["ok"] is False
+        assert response.status_code == 422
+        assert response.json()["detail"] == (
+            "The site's content has a problem that needs fixing before it can publish."
+        )
+        # The pipeline never even started — no job, no ledger entry, draft intact.
+        assert [p["version"] for p in ledger] == [0]
+
+    def test_a_publishable_draft_the_preview_shows_ok_is_not_blocked(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        """'looked publishable' and 'is publishable' can never drift — a
+        preview reporting ok:true must mean the preflight lets it through.
+        A BARE origin (unlike wixy_repo_root_with_image_binding above, whose
+        non-bare origin can't receive the push a real publish needs — that
+        fixture exists for preview/validate-read tests only)."""
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [{"file": "index", "path": "hero.title", "value": "Real change"}],
+                },
+            )
+            preview = client.get("/api/admin/publish/preview").json()
+            response = client.post(
+                "/api/admin/publish",
+                json={"message": "test", "expectedRev": _current_rev(client)},
+            )
+        assert preview["validate"]["ok"] is True
+        assert response.status_code == 200
 
 
 class TestPublishStream:
@@ -1752,6 +1837,113 @@ class TestPostRestore:
             app.state.publish_job = PublishJob(id="already-running", stage="building")
             response = client.post("/api/admin/restore", json={"version": 1})
         assert response.status_code == 409
+
+
+class TestPostDraftRepair:
+    """decisions/00095 — the review drawer's "Fix it for me" button. The
+    collection item-repair ALGORITHM has dedicated, isolated coverage in
+    test_draft_repair.py; these are route-wiring tests (auth/shape/guards)."""
+
+    def test_a_clean_draft_repairs_to_no_actions_and_stays_ok(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [{"file": "index", "path": "hero.title", "value": "A fine edit"}],
+                },
+            )
+            response = client.post(
+                "/api/admin/draft/repair", json={"expectedRev": _current_rev(client)}
+            )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["actions"] == []
+        assert body["validate"] == {"ok": True, "errors": []}
+        assert isinstance(body["rev"], int)
+
+    def test_an_unresolvable_image_ref_is_discarded_and_reported_as_an_action(
+        self, storage_root: Path, wixy_repo_root_with_image_binding: Path
+    ) -> None:
+        """A non-collection op (`hero.bg`) whose src can never resolve (no
+        leading slash even — normalize alone can't help) is discarded
+        outright, reverting the key to base — which IS valid, so the whole
+        draft ends up clean."""
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root_with_image_binding
+        )
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": _current_rev(client),
+                    "ops": [
+                        {
+                            "file": "index",
+                            "path": "hero.bg",
+                            "value": {"src": "images/does-not-exist.jpg", "alt": "x"},
+                        }
+                    ],
+                },
+            )
+            assert client.get("/api/admin/publish/preview").json()["validate"]["ok"] is False
+            response = client.post(
+                "/api/admin/draft/repair", json={"expectedRev": _current_rev(client)}
+            )
+            preview_after = client.get("/api/admin/publish/preview").json()
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body["actions"]) == 1
+        assert body["validate"]["ok"] is True
+        assert preview_after["validate"]["ok"] is True
+        assert preview_after["changes"] == {}  # reverted to base — nothing staged anymore
+
+    def test_a_stale_expected_rev_is_409(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            response = client.post("/api/admin/draft/repair", json={"expectedRev": 99})
+        assert response.status_code == 409
+
+    def test_409s_while_a_publish_is_running(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            app.state.publish_job = PublishJob(id="already-running", stage="building")
+            response = client.post(
+                "/api/admin/draft/repair", json={"expectedRev": _current_rev(client)}
+            )
+        assert response.status_code == 409
+
+
+class TestPostReport:
+    """decisions/00095 — the review drawer's "Send a report" button. Full
+    bundle-shape and SMTP coverage lives in test_reports.py; this is
+    route-wiring only (no SMTP configured on the test app, so `emailed` is
+    always false here — that path is exercised directly against
+    wixy_server.reports)."""
+
+    def test_saves_a_report_and_reports_not_emailed_when_unconfigured(
+        self, storage_root: Path, wixy_repo_root_bare: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/report", json={"context": "publish-blocked", "note": "it's stuck"}
+            )
+        assert response.status_code == 200
+        assert response.json() == {"saved": True, "emailed": False}
+
+    def test_note_is_optional(self, storage_root: Path, wixy_repo_root_bare: Path) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_bare)
+        with TestClient(app) as client:
+            response = client.post("/api/admin/report", json={"context": "publish-failed"})
+        assert response.status_code == 200
 
 
 class TestGetVersionAsset:

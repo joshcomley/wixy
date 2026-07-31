@@ -51,11 +51,12 @@ test.describe("publish progress feedback (decisions/00089)", () => {
     await page.waitForTimeout(2600);
     await expect(page.locator(".wx-toast").filter({ hasText: "is live." })).toHaveCount(1);
 
-    // The drawer's confirm is REALLY gone (wx-button-busy's inline-flex once
-    // kept it visible next to "Published as version N." — the hidden attribute
-    // loses to a display rule without the [hidden] guard).
+    // decisions/00095: a terminal publish swaps the WHOLE drawer body to a
+    // clean success state — the confirm button is gone outright (not merely
+    // [hidden]), replaced by "Your site is live." + the version caption.
     await expect(page.locator(".wx-publish-confirm")).toBeHidden();
-    await expect(page.locator(".wx-publish-progress")).toHaveText(`Published as version ${body.version}.`);
+    await expect(page.locator(".wx-publish-state-heading")).toHaveText("Your site is live.");
+    await expect(page.locator(".wx-publish-state-caption")).toHaveText(`Version ${body.version}`);
 
     // The bar is restored once the toast's job is terminal.
     await expect(page.locator(".wx-statusbar .wx-publish-button .wx-spinner")).toHaveCount(0);

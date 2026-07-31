@@ -238,6 +238,7 @@ function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
 interface FakeEditViewHandle {
   mountedPages: string[];
   setPageCalls: string[];
+  reloadCount: number;
   teardownCount: number;
   applyOpsCalls: DraftOp[][];
   lastDeps: MountEditViewDeps | null;
@@ -248,6 +249,7 @@ function fakeMountEditView(): FakeEditViewHandle {
   const handle: FakeEditViewHandle = {
     mountedPages: [],
     setPageCalls: [],
+    reloadCount: 0,
     teardownCount: 0,
     applyOpsCalls: [],
     lastDeps: null,
@@ -271,6 +273,9 @@ function fakeMountEditView(): FakeEditViewHandle {
       return {
         element,
         setPage: (p) => handle.setPageCalls.push(p),
+        reload: () => {
+          handle.reloadCount += 1;
+        },
         applyOps: (ops) => handle.applyOpsCalls.push(ops),
         postMessage: () => {},
         teardown: () => {
@@ -886,6 +891,49 @@ describe("mountShell", () => {
     }
 
     expect(editView.applyOpsCalls).toEqual([[{ file: "index", path: "hero.title", value: "New" }]]);
+  });
+
+  it("a rejected (422) PATCH batch toasts a calm message and reloads the edit view (decisions/00095)", async () => {
+    const api = fakeApi({
+      patchDraft: vi.fn(async () => ({
+        kind: "rejected" as const,
+        message: "gallery:gallery.sliders doesn't match the site's expected content structure.",
+      })),
+    });
+    const win = fakeWindow();
+    const container = document.createElement("div");
+    const editView = fakeMountEditView();
+
+    mountShell(container, { api, win, mountEditView: editView.fn });
+    await flushState(api);
+    goTo(win, "/admin/edit/index");
+
+    const opQueue = editView.lastDeps?.opQueue;
+    if (opQueue === undefined) throw new Error("edit view was not mounted with an opQueue");
+
+    vi.useFakeTimers();
+    try {
+      opQueue.enqueue({ file: "gallery", path: "gallery.sliders", value: [] });
+      // Advance just past the 300ms coalesce delay, NOT vi.runAllTimersAsync —
+      // that would also fire the toast's own ~4s auto-dismiss timer before
+      // this test gets a chance to inspect it.
+      await vi.advanceTimersByTimeAsync(300);
+      await Promise.resolve();
+      await Promise.resolve();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // A calm, GENERIC toast — never the server's technical detail (that's for
+    // the operator's logs, decisions/00095).
+    const toast = container.querySelector(".wx-toast-transient");
+    expect(toast?.textContent).toBe("That change couldn't be saved — refreshing the page preview.");
+    expect(toast?.textContent).not.toContain("gallery.sliders");
+    // The edit view genuinely reloads — the rejected edit is still sitting in
+    // the live DOM, unsaved, and only a real reload reconverges it.
+    expect(editView.reloadCount).toBe(1);
+    // Never forwarded to applyOps — the batch never landed server-side.
+    expect(editView.applyOpsCalls).toEqual([]);
   });
 
   it("clicking the Publish button opens the publish drawer", async () => {

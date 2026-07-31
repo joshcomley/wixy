@@ -59,6 +59,7 @@ from builder.render import SiteSource
 from builder.validate import validate_site
 from wixy_server.checkout import CheckoutError, commits_ahead, current_sha, ensure_checkout
 from wixy_server.checkout import run_git as run_git  # re-exported: tests patch it via this module
+from wixy_server.draft_validate import rewrite_leading_slash_src
 from wixy_server.ledger import LedgerEntry, PublishSource, append_ledger, next_version, read_ledger
 from wixy_server.live_pointer import LivePointer, load_live_pointer, save_live_pointer
 from wixy_server.media import load_deletion_list, scan_media_references
@@ -227,22 +228,26 @@ def _content_file_for(paths: ProjectPaths, file_key: str) -> Path:
     return paths.repo / "content" / f"{file_key}.json"
 
 
-def _rewrite_draft_media_refs(value: JsonValue) -> JsonValue:
+def _rewrite_draft_media_refs(value: JsonValue, repo_root: Path) -> JsonValue:
     """Recursively rewrites any `{src, alt}`-shaped value whose `src` points at a
     staged draft upload to its published `images/<name>` form — the exact shape
     `scan_image_refs` (builder/content.py) and `scan_media_references`
     (wixy_server/media.py) already key off, walked here to TRANSFORM rather than
-    just find."""
+    just find. Also normalizes a leading-slash repo-image ref
+    (`draft_validate.rewrite_leading_slash_src`, decisions/00095) — belt-and-
+    braces at materialize time for an overlay op that predates the draft-write
+    gate, or any future bug, reaching this far still unnormalized."""
     if isinstance(value, dict):
         src = value.get("src")
         if isinstance(src, str) and isinstance(value.get("alt"), str):
             if src.startswith(_DRAFT_MEDIA_URL_PREFIX):
                 name = src[len(_DRAFT_MEDIA_URL_PREFIX) :]
                 return {**value, "src": f"images/{name}"}
-            return value
-        return {key: _rewrite_draft_media_refs(sub) for key, sub in value.items()}
+            rewritten = rewrite_leading_slash_src(src, repo_root)
+            return {**value, "src": rewritten} if rewritten != src else value
+        return {key: _rewrite_draft_media_refs(sub, repo_root) for key, sub in value.items()}
     if isinstance(value, list):
-        return [_rewrite_draft_media_refs(item) for item in value]
+        return [_rewrite_draft_media_refs(item, repo_root) for item in value]
     return value
 
 
@@ -285,7 +290,7 @@ def _apply_ops_to_file(
         return  # pre-migration-step-4 project with no theme.json yet (decisions/00004)
     data = load_json_object(target) if target.exists() else {}
     for dotted_path, value in path_values.items():
-        dotted_set(data, dotted_path, _rewrite_draft_media_refs(value))
+        dotted_set(data, dotted_path, _rewrite_draft_media_refs(value, paths.repo))
     atomic_write_json(target, data)
 
 

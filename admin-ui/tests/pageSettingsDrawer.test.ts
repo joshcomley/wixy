@@ -109,6 +109,35 @@ describe("mountPageSettingsDrawer", () => {
     ]);
   });
 
+  it("the initial ogImage preview is display-safe (leading slash) though content stores it relative", async () => {
+    // This drawer renders in the admin shell's own DOM, not the live-preview
+    // iframe — a bare relative src (the correct, canonical CONTENT form —
+    // decisions/00095) has no <base href> to re-anchor it here, so the preview
+    // img must convert it for display.
+    const api = fakeApi({
+      getContent: vi.fn(
+        async (): Promise<ContentResponse> => ({
+          content: {
+            meta: {
+              title: "About",
+              navLabel: "About",
+              inNav: true,
+              navOrder: 20,
+              ogImage: { src: "images/hero.jpg", alt: "Hero" },
+            },
+          },
+          bindings: { page: "about", fields: [] },
+        }),
+      ),
+    });
+    const drawer = mountPageSettingsDrawer("about", { api, opQueue: fakeQueue(), onClose: vi.fn() });
+    await (api.getContent as ReturnType<typeof vi.fn>).mock.results[0]?.value;
+    await Promise.resolve();
+
+    const img = drawer.element.querySelector<HTMLImageElement>(".wx-og-image-preview img");
+    expect(img?.getAttribute("src")).toBe("/images/hero.jpg");
+  });
+
   it("the close button calls onClose", () => {
     const onClose = vi.fn();
     const drawer = mountPageSettingsDrawer("about", { api: fakeApi(), opQueue: fakeQueue(), onClose });
@@ -130,6 +159,7 @@ describe("mountPageSettingsDrawer", () => {
     const item: MediaItem = {
       name: "hero.jpg",
       url: "/images/hero.jpg",
+      contentSrc: "images/hero.jpg",
       source: "repo",
       sizeBytes: 1024,
       width: 800,
@@ -159,8 +189,10 @@ describe("mountPageSettingsDrawer", () => {
     );
     confirmButton?.click();
 
+    // The content form (no leading slash), NOT the display url — decisions/00095,
+    // the exact ogImage half of the 2026-07-28 gallery publish-corruption incident.
     expect(opQueue.enqueued).toEqual([
-      { file: "about", path: "meta.ogImage", value: { src: "/images/hero.jpg", alt: "Hero" } },
+      { file: "about", path: "meta.ogImage", value: { src: "images/hero.jpg", alt: "Hero" } },
     ]);
     expect(drawer.element.querySelector(".wx-og-image-preview img")).not.toBeNull();
     expect(document.querySelector(".wx-media-dialog-backdrop")).toBeNull();

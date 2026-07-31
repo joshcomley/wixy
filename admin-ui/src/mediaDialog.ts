@@ -23,6 +23,20 @@ export interface MediaPickValue {
   alt: string;
 }
 
+/** A picked `MediaPickValue.src` (the content-JSON form, e.g. `images/hero.jpg` —
+ * decisions/00095) as a safe `<img src>` for a preview rendered OUTSIDE the live
+ * preview iframe (an admin-ui drawer/panel's own DOM) — that document carries no
+ * `<base href="/">` (preview.py injects one only into `/admin/preview/*.html`), so
+ * a bare relative path resolves against whatever admin route happens to be
+ * current (e.g. `/admin/edit/about/images/hero.jpg` — broken) instead of the site
+ * root. A repo-form src has no leading slash and needs one added; a draft-upload
+ * src (`/admin/draft-media/<name>`) is already an absolute path and passes
+ * through unchanged — together these reconstruct exactly the `url` the server's
+ * `/api/admin/media` would have reported for the same file. */
+export function contentSrcToDisplayUrl(src: string): string {
+  return src.startsWith("/") ? src : `/${src}`;
+}
+
 const HASH8_PREFIX = /^[0-9a-f]{8}-/;
 const EXTENSION = /\.[a-zA-Z0-9]+$/;
 
@@ -149,7 +163,12 @@ export function renderMediaGrid(deps: MediaGridDeps): MediaGrid {
     refreshConfirmEnabled();
 
     confirmButton.addEventListener("click", () => {
-      onPick({ src: item.url, alt: decorativeBox.checked ? "" : altInput.value.trim() });
+      // contentSrc, NEVER url — a picked image's stored value must be the
+      // content-JSON form, not the display path (decisions/00095: this was root
+      // cause C of the 2026-07-28 gallery publish-corruption incident, where a
+      // picked repo image was stored as `/images/<name>` and validate.py's
+      // path-existence check reported it missing).
+      onPick({ src: item.contentSrc, alt: decorativeBox.checked ? "" : altInput.value.trim() });
     });
     backButton.addEventListener("click", () => {
       altStep.hidden = true;

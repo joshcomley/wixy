@@ -79,6 +79,73 @@ export function queryOwn(root: Element, selector: string): Element | null {
   return root.querySelector(selector);
 }
 
+/** Every element within `root` (self first, then descendants in document order)
+ * matching `selector` — the "find all candidates" counterpart to `queryOwn`. */
+function queryOwnAll(root: Element, selector: string): Element[] {
+  const own = root.matches(selector) ? [root] : [];
+  return [...own, ...Array.from(root.querySelectorAll(selector))];
+}
+
+/** Parses a `data-wx-attr` spec (`"attr:key[,attr2:key2]"`) into `(attrName, key)`
+ * pairs — mirrors `builder/bindings.py:parse_attr_spec` exactly (comma-separated
+ * pairs, split on the FIRST colon, whitespace-trimmed; a pair with no colon is
+ * malformed and yields `null` in its slot). Kept in sync with the Python original by
+ * a unit test asserting matching results on the same cases, not a byte-shared
+ * fixture (Inv 20's other hand-synced pairs have one; this one doesn't need it — the
+ * grammar is a few characters wide and the Python side is the only place it's
+ * authored). */
+export function parseAttrSpec(spec: string): Array<{ attrName: string; key: string } | null> {
+  return spec.split(",").map((raw) => {
+    const pair = raw.trim();
+    const colon = pair.indexOf(":");
+    if (colon === -1) return null;
+    return { attrName: pair.slice(0, colon).trim(), key: pair.slice(colon + 1).trim() };
+  });
+}
+
+/** Read an attr-kind field's current value: `builder/bindings.py:_apply_attrs` sets
+ * the target HTML attribute on the SAME element that carries `data-wx-attr`, so this
+ * finds the element within `root` (self first) whose spec declares `field.key` and
+ * reads that attribute back — never `readScalarValue`'s selector-based lookup, which
+ * only knows how to find elements by a binding's OWN `data-wx-*` attribute name and
+ * has no way to express "carries a data-wx-attr spec mentioning this key" (root cause
+ * of the 2026-07-28 gallery publish-corruption incident, decisions/00095: a whole-
+ * array reconstruction silently dropped every attr-kind item field, e.g. `.cat`). */
+function readAttrValue(root: Element, field: BindingField): string {
+  for (const el of queryOwnAll(root, "[data-wx-attr]")) {
+    const spec = el.getAttribute("data-wx-attr") ?? "";
+    const match = parseAttrSpec(spec).find((pair) => pair !== null && pair.key === field.key);
+    if (match !== undefined && match !== null) {
+      return el.getAttribute(field.attr ?? match.attrName) ?? "";
+    }
+  }
+  return "";
+}
+
+// JS regex `\s` already matches U+00A0 (NBSP is a Unicode whitespace character per
+// the ECMAScript spec) — so a plain whitespace run covers the raw-character case.
+// The entity below is the OTHER shape the same placeholder can take: nh3 (the
+// server-side rich-lite sanitizer) re-serializes a bare U+00A0 as the literal
+// 6-character entity `&nbsp;` (verified empirically: nh3.clean on a bare U+00A0
+// returns `"&nbsp;"`) — a value that round-tripped through a sanitize pass carries
+// that entity text, not the raw character. Both forms, and any mixture of them,
+// count as "not really typed" for the purposes below.
+const EMPTY_TEXT_RE = /^(?:\s|&nbsp;)*$/;
+
+/** Collapses a demoted text value back to `""` when it's only whitespace/U+00A0/
+ * literal `&nbsp;` entities — the click-target placeholder `overlay.ts:
+ * blankTextLikeFields` writes into a freshly added/duplicated list item
+ * (`innerHTML = "&nbsp;"`, so the item stays a real, clickable element instead of a
+ * zero-height one) is real DOM content, not a value the owner ever typed. Without
+ * this, any list read that happens to include a not-yet-filled-in item (every
+ * structural op re-reads the WHOLE list from the DOM) stores the placeholder as if
+ * it were real text — root cause B of the 2026-07-28 incident, decisions/00095. The
+ * DOM-side placeholder itself is intentional and untouched; this only stops it from
+ * crossing into a draft op. */
+function normalizeEmptyText(value: string): string {
+  return EMPTY_TEXT_RE.test(value) ? "" : value;
+}
+
 function fieldSelector(field: BindingField, attr: "data-wx" | "data-wx-img" | "data-wx-href" | "data-wx-bg" | "data-wx-list" | "data-wx-if"): string {
   return `[${attr}="${cssEscape(field.key)}"]`;
 }
@@ -99,8 +166,10 @@ function readScalarValue(el: Element, kind: BindingField["kind"]): JsonValue {
       // shows the rendered form (the composer's live preview just wrote
       // <strong>/<em>/<a> into this element), so reads demote back to source —
       // otherwise an unrelated sibling edit would silently rewrite this field
-      // from `**x**` to `<strong>x</strong>` in the store.
-      return demoteHtmlToMarkdown(chromeFreeElement(el));
+      // from `**x**` to `<strong>x</strong>` in the store. normalizeEmptyText
+      // cancels the click-target placeholder (see its doc comment) — never a
+      // value the owner actually typed.
+      return normalizeEmptyText(demoteHtmlToMarkdown(chromeFreeElement(el)));
     case "href":
       return el.getAttribute("href") ?? "";
     case "img": {
@@ -115,8 +184,12 @@ function readScalarValue(el: Element, kind: BindingField["kind"]): JsonValue {
     case "if":
       return readIfValue(el);
     case "attr":
-      // Not hover-targetable / not reconstructed as a list-item field — spec/05 §2
-      // reaches attribute bindings only via the page-settings drawer, never inline.
+      // Unreachable in practice: readItemValue routes "attr" through readAttrValue
+      // instead (a data-wx-attr spec never sits on the same selector this function's
+      // caller resolves an "attr" field's element by — see readAttrValue's doc
+      // comment). A page-scope attr field (e.g. `<body data-wx-attr="…:@bookingUrl">`)
+      // isn't hover-targetable either (spec/05 §2 reaches it via the page-settings
+      // drawer only) and never reaches this path. Kept for switch exhaustiveness.
       return null;
     case "list":
       return []; // callers needing a list's value use readListValue, not this path
@@ -133,6 +206,13 @@ export function readItemValue(itemRoot: Element, fields: readonly BindingField[]
     if (field.kind === "list") {
       const container = queryOwn(itemRoot, fieldSelector(field, "data-wx-list"));
       result[bareKey] = container !== null ? readListValue(container, field) : [];
+      continue;
+    }
+    if (field.kind === "attr") {
+      // data-wx-attr never matches fieldSelector's own data-wx/data-wx-* selectors
+      // (it's a DIFFERENT attribute carrying a "attr:key" spec, not the field's key
+      // directly) — readAttrValue is the dedicated lookup for this kind.
+      result[bareKey] = readAttrValue(itemRoot, field);
       continue;
     }
     const attr =
