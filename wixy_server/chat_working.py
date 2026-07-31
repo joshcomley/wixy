@@ -18,6 +18,27 @@ TTL-cached per conversation (`_CACHE_TTL_S`) on `app.state` so the list's own
 per poll tick — mirrors `routes_engine.EngineStatusCache`'s "one process-
 lifetime cache slot, refreshed lazily on read, `time.monotonic()` for
 staleness" convention, generalized here to one entry per conversation.
+
+Every `client.status()` call is bounded by `_STATUS_TIMEOUT_S`, independent
+of `CmdChatClient`'s own much more patient default (10s timeout x 3 retries
+= up to 30s per call). But even a BOUNDED few seconds is too much to add to
+`/api/admin/state` — a critical-path endpoint nearly every admin panel
+depends on for its own instant render (CSS/RENDER doctrine) — so only ONE
+caller ever triggers a live refresh: `working_for` (used by the dedicated
+`GET .../conversations`, polled every 2s while the owner is actually
+looking at the chat list — freshness matters there and the cost is
+scoped to that screen). `/api/admin/state`'s own `chats` snapshot instead
+calls the read-only `cached_working_for`, which NEVER awaits anything —
+zero added latency, always. Its data goes stale only if nobody has viewed
+the chat list in the last `cache_ttl_s`, which is an acceptable trade-off
+(a quiet, correct-by-default `False`) for a field every OTHER panel's load
+would otherwise pay for. Measured, not theoretical: an E2E run surfaced
+first the UNBOUNDED version (2026-07-31, up to 30s per stale conversation
+once its cmd session went away mid-suite) and then, after bounding it,
+STILL surfaced that even a bounded couple of seconds shared across every
+`/api/admin/state` call was enough to break unrelated tests' own timing
+assumptions (a concurrent-edit race, a publish rev-conflict retry budget) —
+this two-tier split is the fix that actually held.
 """
 
 from __future__ import annotations
@@ -33,6 +54,14 @@ from wixy_server.chats import ChatConversation
 
 _FRESHNESS_S = 10.0
 _CACHE_TTL_S = 5.0
+_STATUS_TIMEOUT_S = 2.0
+"""How long `working_for` waits for ANY ONE `client.status()` call before
+giving up on it — deliberately much shorter than `CmdChatClient`'s own
+10s-timeout/3-retry default (which is tuned for the chat STREAM, where
+patience is correct — the owner is actively watching that one conversation).
+This is a courtesy check for conversations the owner ISN'T necessarily even
+looking at; a real, healthy, same-box cmd answers in low tens of
+milliseconds, so 2s is generous slack, not a tight budget."""
 
 
 def _is_fresh(activity: str | None, now: datetime) -> bool:
@@ -61,27 +90,41 @@ class WorkingCache:
 
     _entries: dict[str, tuple[bool, float]] = field(default_factory=dict)
     cache_ttl_s: float = _CACHE_TTL_S
+    status_timeout_s: float = _STATUS_TIMEOUT_S
+
+    def cached_working_for(self, conversations: list[ChatConversation]) -> dict[str, bool]:
+        """The read-only twin of `working_for` — returns whatever is
+        CURRENTLY cached for each conversation (default `False` for one
+        never checked) and never awaits anything, so calling this costs
+        nothing. For `/api/admin/state` only; see this module's own
+        docstring for why that endpoint must never trigger a live check."""
+        return {c.conv_id: self._entries.get(c.conv_id, (False, 0.0))[0] for c in conversations}
 
     async def working_for(
         self, client: AIBackend, conversations: list[ChatConversation]
     ) -> dict[str, bool]:
-        """Returns `conv_id -> working` for every conversation passed in.
-        Only entries whose cache is missing or stale trigger a real
-        `client.status()` call, fetched concurrently — a fresh conversation
-        the caller polls every 2s costs at most one real cmd call per
-        `cache_ttl_s`, not one per poll."""
+        """Returns `conv_id -> working` for every conversation passed in,
+        refreshing whatever's missing or stale with a real `client.status()`
+        call, fetched concurrently — a fresh conversation the caller polls
+        every 2s costs at most one real cmd call per `cache_ttl_s`, not one
+        per poll. The WHOLE batch resolves within `status_timeout_s`
+        regardless of how many conversations are stale (concurrent, not
+        sequential) or how unresponsive cmd is. For the dedicated
+        conversation list ONLY — see this module's own docstring."""
         now_monotonic = time.monotonic()
         stale = [c for c in conversations if self._is_stale(c.conv_id, now_monotonic)]
 
         async def _refresh(conv: ChatConversation) -> None:
+            working = False
             try:
-                status = await client.status(ConversationRef(id=conv.session_id))
-                working = _is_fresh(status.activity, datetime.now(UTC))
+                with anyio.move_on_after(self.status_timeout_s):
+                    status = await client.status(ConversationRef(id=conv.session_id))
+                    working = _is_fresh(status.activity, datetime.now(UTC))
             except AIBackendError:
                 # cmd unreachable for this one conversation — never blocking
                 # state (matches EngineStatusCache's own fallback reasoning):
                 # read as "not working" rather than failing the whole list.
-                working = False
+                pass
             self._entries[conv.conv_id] = (working, now_monotonic)
 
         if stale:

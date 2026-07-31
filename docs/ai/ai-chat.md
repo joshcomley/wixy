@@ -72,11 +72,23 @@ live session).
 
 `working` (decisions/00097, `chat_working.WorkingCache`) is computed OUTSIDE this module — it
 needs a live async `client.status()` call, which `conversation_summary` (a plain sync dict-
-builder) deliberately doesn't make itself. Both call sites (`routes_chat.list_conversations`,
-`routes_admin_api.get_state`) independently: load the conversation list, filter to `effective_
-status(...) == "ready"` (a pending/failed conversation is never polled), call `WorkingCache.
-working_for(client, ready)`, and pass the resulting `conv_id -> bool` map into `conversation_
-summary`'s `working` kwarg per conversation.
+builder) deliberately doesn't make itself. The two call sites deliberately do NOT treat this
+symmetrically — see `chat_working.py`'s own docstring for the full reasoning, measured against
+a real regression, not merely designed defensively:
+- `routes_chat.list_conversations` (the dedicated, owner-facing chat list, polled every 2s only
+  while that screen is open): loads the conversation list, filters to `effective_status(...) ==
+  "ready"` (a pending/failed conversation is never polled), and calls `WorkingCache.working_for
+  (client, ready)` — this DOES trigger a live, TTL-cached `client.status()` refresh for stale
+  entries, bounded per-call by `chat_working._STATUS_TIMEOUT_S` (2s) regardless of how patient
+  `CmdChatClient`'s own defaults are (10s × 3 retries — tuned for the open chat STREAM, not this
+  courtesy check).
+- `routes_admin_api._chats_snapshot` (part of `/api/admin/state`, the critical-path endpoint
+  nearly every admin panel depends on for its own instant render): calls the read-only
+  `WorkingCache.cached_working_for(conversations)` instead — returns whatever's ALREADY cached,
+  never awaits anything, zero added latency. This endpoint's copy of `working` can be up to
+  `cache_ttl_s` (5s) stale, or a default `false` if nobody has viewed the chat list recently;
+  that staleness is the accepted trade-off for never letting a slow-or-dead cmd add latency to
+  a page load that has nothing to do with chat.
 
 ## Chat routes (`routes_chat.py`, prefix `/api/admin/chat`)
 

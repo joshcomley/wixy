@@ -72,9 +72,87 @@ test.describe("E2E 7: chat UX", () => {
     await page.click(".wx-chat-list-title");
     await page.waitForURL(/\/admin\/chat\/.+/);
 
-    // The detail view's own live status strip (a SEPARATE signal from the
-    // list dot above — decisions/00034 decision 2) also appears once ready.
-    await page.waitForSelector(".wx-chat-status-strip:not([hidden])", { timeout: 10_000 });
+    // decisions/00097: the detail view's work banner is a SEPARATE signal
+    // from the list dot above (decisions/00034 decision 2) — but unlike the
+    // old always-shown status strip, it stays hidden with nothing actionable
+    // to report (no fresh activity, no send in flight, no open task list).
+    await expect(page.locator(".wx-chat-work-banner")).toBeHidden();
+
+    // -- Scripted fake reply with a wixy-tasks block (decisions/00097) ------
+    const taskMessages: FakeMessage[] = [
+      {
+        index: 0,
+        role: "user",
+        kind: "text",
+        text: "please make the hero title warmer",
+        timestamp: "2026-07-10T00:00:00Z",
+        tool_name: null,
+        truncated: false,
+      },
+      {
+        index: 1,
+        role: "assistant",
+        kind: "text",
+        text:
+          "I'll warm up the hero title now.\n\n" +
+          '```wixy-tasks\n{"tasks": [{"label": "Warm up the hero title", "status": "doing"}]}\n```',
+        timestamp: "2026-07-10T00:00:01Z",
+        tool_name: null,
+        truncated: false,
+      },
+    ];
+    const setTaskMessagesResponse = await page.request.post("/test/chat/set-messages", {
+      data: { convId, messages: taskMessages },
+    });
+    expect(setTaskMessagesResponse.status()).toBe(200);
+
+    // The raw block never reaches the bubble — only the plain sentence does.
+    await expect(page.locator(".wx-chat-bubble-assistant")).toContainText(
+      "I'll warm up the hero title now.",
+    );
+    await expect(page.locator(".wx-chat-bubble-assistant")).not.toContainText("wixy-tasks");
+
+    await expect(page.locator(".wx-chat-work-banner")).toBeVisible();
+    await expect(page.locator(".wx-chat-work-banner")).toContainText("Working on your tasks");
+    await expect(page.locator(".wx-chat-tasks-header")).toHaveText("Tasks · 0 of 1 done");
+    await expect(page.locator(".wx-chat-task")).toContainText("Warm up the hero title");
+
+    // The list view's own row pulse is a SEPARATE, server-cached signal
+    // (decisions/00097's WorkingCache) driven purely by cmd's own `activity`
+    // timestamp — NOT by the task-block content the detail view just used,
+    // so it needs its own scripted fact to observe through the real UI.
+    await page.request.post("/test/chat/set-activity", {
+      data: { convId, activity: new Date().toISOString() },
+    });
+    await page.click(".wx-chat-back-link");
+    await expect(page.locator(".wx-chat-dot").first()).toHaveClass(/wx-chat-dot-working/, {
+      timeout: 10_000,
+    });
+    await expect(page.locator(".wx-chat-list-note")).toContainText("working");
+    await page.request.post("/test/chat/set-activity", { data: { convId, activity: null } });
+
+    await page.click(".wx-chat-list-title");
+    await page.waitForURL(/\/admin\/chat\/.+/);
+
+    // Marking the task done clears the working state and shows all-done.
+    const doneMessages: FakeMessage[] = [
+      taskMessages[0] as FakeMessage,
+      {
+        index: 1,
+        role: "assistant",
+        kind: "text",
+        text:
+          "Done — the hero title is warmer now.\n\n" +
+          '```wixy-tasks\n{"tasks": [{"label": "Warm up the hero title", "status": "done"}]}\n```',
+        timestamp: "2026-07-10T00:00:02Z",
+        tool_name: null,
+        truncated: false,
+      },
+    ];
+    await page.request.post("/test/chat/set-messages", { data: { convId, messages: doneMessages } });
+    await expect(page.locator(".wx-chat-work-banner")).toContainText("All tasks completed", {
+      timeout: 10_000,
+    });
 
     // -- Scripted fake reply incl. a collapsed tool-activity row -------------
     const scriptedMessages: FakeMessage[] = [

@@ -81,11 +81,14 @@ Handler column is `file:func`. "Auth: CF" = gated by the admin middleware. Respo
 | GET | `chat/conversations/{id}/stream?includeThinking=` | `conversation_stream` | query `includeThinking?` | **SSE**, see §4; 404 |
 
 `<conversation summary>` = `{convId, title, createdAt, status, failureReason, failureMessage,
-working}` (`chats.py:conversation_summary`; `status ∈ pending|ready|failed`). `working` (decisions/
-NNNNN) is a live "is the assistant actively working on this right now" flag — TTL-cached
-(~5s, `chat_working.WorkingCache`) from the same cmd `activity`-freshness rule the open
+working}` (`chats.py:conversation_summary`; `status ∈ pending|ready|failed`). `working`
+(decisions/00097) is a live "is the assistant actively working on this right now" flag — TTL-
+cached (~5s, `chat_working.WorkingCache`) from the same cmd `activity`-freshness rule the open
 conversation's own stream-driven UI uses; always `false` for a `pending`/`failed` conversation
-(never polled — only a `ready` one has a live cmd status worth checking).
+(never polled — only a `ready` one has a live cmd status worth checking). **Freshness differs
+by call site**: `GET chat/conversations` actively refreshes stale entries (bounded 2s per
+batch, regardless of cmd's own patience); `GET state`'s `chats` field reads the SAME cache
+read-only (never triggers a refresh, zero added latency) — see [ai-chat.md](ai-chat.md).
 
 `state.pages[].editable` = `(source.pages_dir / "<slug>.html").exists()` — a page is editable
 iff its template is on disk, so a duplicated-but-unpublished page (staged only in the overlay)

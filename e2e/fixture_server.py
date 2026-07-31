@@ -255,6 +255,27 @@ def main() -> None:
 
         return {"ok": await anyio.to_thread.run_sync(_apply)}
 
+    @app.post("/test/chat/set-activity", include_in_schema=False)
+    async def _post_set_chat_activity(payload: dict[str, object]) -> dict[str, bool]:
+        """decisions/00097: scripts cmd's own `activity` timestamp on the fake
+        session — the list-view working pulse (`chat_working.WorkingCache`)
+        is driven ENTIRELY by this field, independent of the wixy-tasks
+        block content (`set-messages` above never touches it), so exercising
+        the list-dot pulse through the real UI needs it settable too."""
+        conv_id = payload["convId"]
+        assert isinstance(conv_id, str)
+        activity = payload["activity"]
+        assert activity is None or isinstance(activity, str)
+
+        def _apply() -> bool:
+            session = _find_fake_session(conv_id)
+            if session is None:
+                return False
+            session.status["activity"] = activity  # type: ignore[attr-defined]
+            return True
+
+        return {"ok": await anyio.to_thread.run_sync(_apply)}
+
     @app.post("/test/chat/set-send-status", include_in_schema=False)
     async def _post_set_send_status(payload: dict[str, object]) -> dict[str, bool]:
         """E2E 7's send-retry-on-502 leg (spec/06 §3): the test sets a bad

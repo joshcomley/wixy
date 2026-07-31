@@ -108,6 +108,33 @@ the identical "absent-from-runtime-means-ready" rule — the exact duplicated-
 contract failure mode decisions/00092 already hit once for the preamble
 separator, caught here before it could recur a second time.
 
+## A CSS footgun this PR's own e2e coverage caught (real bug, real lesson)
+
+`.wx-chat-work-banner`'s first draft set `display: flex` unconditionally, toggled
+hidden/shown purely via `workBanner.hidden = true/false` (the DOM `hidden`
+property/attribute). This is broken: `[hidden]`'s UA-stylesheet rule and a bare
+class selector are EQUAL CSS specificity, and author stylesheets win ties over the
+UA stylesheet — so the class rule's unconditional `display: flex` silently
+overrides the browser's default `[hidden] { display: none }`. The attribute is
+genuinely present (`el.outerHTML` shows `hidden=""`, confirmed by direct
+inspection) but has NO EFFECT — the element stays flex-rendered, visible, the
+whole time. Every vitest assertion (`expect(banner.hidden).toBe(true)`) passed
+throughout, because jsdom checks the PROPERTY, not computed rendering — this class
+of bug is invisible to unit tests by construction and was caught ONLY by the real-
+browser e2e scenario this PR added to `chat-ux.spec.ts`. Fixed to match this
+codebase's own pre-existing convention (`.wx-button-busy[hidden]`, `.wx-media-
+grid[hidden]` — both already had it right): keep the base `display: flex` but add
+a higher-specificity `.wx-chat-work-banner[hidden] { display: none; }` override,
+rather than a `:not([hidden])` rewrite of the base rule (equivalent effect, but
+matching the established pattern rather than introducing a second idiom for the
+same problem).
+
+**The general rule this confirms**: any element given a non-`none` `display` in
+author CSS, whose JS-side visibility is controlled by the `hidden`
+attribute/property, needs an explicit `.foo[hidden] { display: none; }` rule — the
+UA default is not enough once a class rule sets `display` at equal specificity.
+Vitest/jsdom cannot catch a violation of this rule; only a real-browser check can.
+
 ## What to watch for
 
 - **The preamble's example fence and `test_preamble.py`'s no-bare-`---`-line

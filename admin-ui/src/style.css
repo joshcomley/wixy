@@ -2400,6 +2400,18 @@ div.wx-media-thumb {
   font: 600 0.875rem/1.3 system-ui, sans-serif;
 }
 
+/* Matches .wx-button-busy[hidden] / .wx-media-grid[hidden]'s existing
+   convention: `[hidden]` and a bare class selector are equal specificity,
+   and author rules win ties over the UA stylesheet, so the unconditional
+   `display: flex` above would otherwise silently defeat `workBanner.hidden
+   = true` (attribute present, but ignored — the element stays flex-
+   rendered). This higher-specificity override is what actually hides it —
+   caught by e2e (chat-ux.spec.ts), where the banner rendered as an
+   empty-but-visible flex box the whole time. */
+.wx-chat-work-banner[hidden] {
+  display: none;
+}
+
 .wx-chat-work-banner-working {
   background: var(--wx-brand-blue-tint);
   color: var(--wx-ink);
