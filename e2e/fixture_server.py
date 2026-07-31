@@ -64,6 +64,67 @@ def _git(args: list[str], cwd: Path) -> None:
     )
 
 
+_GALLERY_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>placeholder</title>
+<link rel="stylesheet" href="site.css">
+</head>
+<body data-page="gallery">
+<!-- wx:partial header -->
+<main>
+  <ul class="sliders" data-wx-list="gallery.sliders">
+    <li data-wx-list-item data-wx-attr="data-cat:.cat">
+      <img data-wx-img=".before" src="" alt="">
+      <img data-wx-img=".after" src="" alt="">
+      <h3 data-wx=".title">Title</h3>
+      <p data-wx=".sub">Sub</p>
+    </li>
+  </ul>
+  <ul class="tiles" data-wx-list="gallery.tiles">
+    <li data-wx-list-item data-wx-attr="data-cat:.cat">
+      <img data-wx-img=".img" src="" alt="">
+      <h3 data-wx=".title">Title</h3>
+    </li>
+  </ul>
+</main>
+<!-- wx:partial footer -->
+<!-- wx:partial booking-modal -->
+</body>
+</html>
+"""
+
+_GALLERY_JSON = """{
+  "meta": {
+    "title": "Gallery",
+    "description": "Before and after photos.",
+    "navLabel": "Gallery",
+    "inNav": true,
+    "navOrder": 30
+  },
+  "gallery": {
+    "sliders": [],
+    "tiles": []
+  }
+}
+"""
+
+
+def _write_gallery_page(seed: Path) -> None:
+    """Adds a `gallery` page + `content/gallery.json` to the E2E fixture's OWN
+    seed clone (never the shared `builder/tests/fixtures/mini-site` the Python
+    unit suite also trusts — adding a page there would ripple into every test
+    asserting an exact page count/slug set) — decisions/00098's section panel
+    e2e coverage needs a REAL page using the SAME `gallery.sliders`/
+    `gallery.tiles` collection paths + schemas `builder.collections.
+    COLLECTION_RULES` already registers (from PR 1), so the write gate and
+    publish-time schema validation are exercised for real, not faked."""
+    (seed / "pages" / "gallery.html").write_text(_GALLERY_HTML, encoding="utf-8")
+    (seed / "content" / "gallery.json").write_text(_GALLERY_JSON, encoding="utf-8")
+
+
 def _build_site_origin(tmp_root: Path) -> Path:
     """A genuine BARE repo (spec/08 §1, mirroring wixy_server/tests/test_publisher.py's
     own `bare_origin` fixture) — pushed to from a scratch seed clone, never a working
@@ -78,12 +139,68 @@ def _build_site_origin(tmp_root: Path) -> Path:
     seed = tmp_root / "site-origin-seed"
     _git(["clone", str(bare), str(seed)], tmp_root)
     shutil.copytree(MINI_SITE_FIXTURE, seed, dirs_exist_ok=True)
+    _write_gallery_page(seed)
     _git(["config", "user.email", "e2e@example.invalid"], seed)
     _git(["config", "user.name", "E2E Fixture"], seed)
     _git(["add", "."], seed)
     _git(["commit", "-m", "initial fixture site"], seed)
     _git(["push", "origin", "main"], seed)
     return bare
+
+
+_ADMIN_SECTIONS = json.dumps(
+    [
+        {
+            "id": "before-after",
+            "navLabel": "Before & After",
+            "title": "Before & After",
+            "description": "Drag to reorder — changes go live when you press Publish.",
+            "page": "gallery",
+            "collections": [
+                {
+                    "path": "gallery.sliders",
+                    "label": "Drag-to-compare photos",
+                    "itemNoun": "photo pair",
+                    "schema": "gallery-slider",
+                    "fields": [
+                        {"key": "before", "kind": "image", "label": "Before photo"},
+                        {"key": "after", "kind": "image", "label": "After photo"},
+                        {"key": "title", "kind": "text", "label": "Treatment name"},
+                        {"key": "sub", "kind": "text", "label": "Treatment type"},
+                        {
+                            "key": "cat",
+                            "kind": "choice",
+                            "label": "Category",
+                            "options": [
+                                {"value": "lips", "label": "Lips"},
+                                {"value": "cheeks", "label": "Cheeks"},
+                            ],
+                        },
+                    ],
+                },
+                {
+                    "path": "gallery.tiles",
+                    "label": "Tap-to-zoom photos",
+                    "itemNoun": "photo",
+                    "schema": "gallery-tile",
+                    "fields": [
+                        {"key": "img", "kind": "image", "label": "Photo"},
+                        {"key": "title", "kind": "text", "label": "Caption"},
+                        {
+                            "key": "cat",
+                            "kind": "choice",
+                            "label": "Category",
+                            "options": [
+                                {"value": "lips", "label": "Lips"},
+                                {"value": "cheeks", "label": "Cheeks"},
+                            ],
+                        },
+                    ],
+                },
+            ],
+        }
+    ]
+)
 
 
 def _write_project_registry(tmp_root: Path, site_origin: Path) -> Path:
@@ -95,7 +212,8 @@ def _write_project_registry(tmp_root: Path, site_origin: Path) -> Path:
             f'"repo": "{site_origin.as_posix()}", "defaultBranch": "main", '
             '"cmdProject": "e2e", "domain": "e2e.example.invalid", '
             '"locale": "en-GB", "indexable": false, '
-            '"media": {"maxLongSidePx": 2000, "jpegQuality": 85}}'
+            '"media": {"maxLongSidePx": 2000, "jpegQuality": 85}, '
+            f'"adminSections": {_ADMIN_SECTIONS}}}'
         ),
         encoding="utf-8",
     )

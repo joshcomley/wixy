@@ -25,6 +25,7 @@ import { renderPagesPanel } from "./pagesPanel";
 import { mountPublishDrawer } from "./publishDrawer";
 import { PUBLISH_STAGE_LABELS } from "./publishStages";
 import { canonicalizeUrl, currentRoute, navigateTo, onRouteChange, type Route } from "./router";
+import { mountSectionPanel } from "./sectionPanel";
 import { captureScreenshot, copyBlobToClipboard, downloadBlob, flashScreen, screenshotFilename } from "./screenshot";
 import { clearLastRoute, loadLastRoute, saveLastRoute } from "./sessionState";
 import { mountSettingsPanel } from "./settingsPanel";
@@ -496,9 +497,39 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     navEl.appendChild(navButton(item.label, item.route));
   }
 
+  // -- Registry-configured section nav (decisions/00098) ----------------------
+  // `state.adminSections` isn't known until the first `/api/admin/state` load
+  // (unlike NAV_ROUTES above, which is static), so these buttons are inserted
+  // once state arrives and re-synced on every subsequent load — placed right
+  // after Edit / before Theme (spec 3b), via `editNavItem.after(...)` rather
+  // than a fixed insertion index, so the static items after it are pushed
+  // along automatically regardless of how many sections exist.
+  let renderedSectionIds: string[] = [];
+
+  function renderSectionNav(): void {
+    const sections = state?.adminSections ?? [];
+    const ids = sections.map((s) => s.id);
+    const unchanged =
+      ids.length === renderedSectionIds.length && ids.every((id, i) => id === renderedSectionIds[i]);
+    if (unchanged) return;
+    navEl.querySelectorAll<HTMLElement>("[data-section-id]").forEach((el) => el.remove());
+    const buttons = sections.map((section) => {
+      const button = navButton(section.navLabel, { kind: "section", id: section.id });
+      button.dataset["sectionId"] = section.id;
+      return button;
+    });
+    editNavItem.after(...buttons);
+    renderedSectionIds = ids;
+  }
+
   function setActiveNavItem(route: Route): void {
     navEl.querySelectorAll<HTMLElement>(".wx-nav-item").forEach((el) => {
-      el.classList.toggle("wx-nav-active", el.dataset["routeKind"] === route.kind);
+      const sectionId = el.dataset["sectionId"];
+      const active =
+        sectionId !== undefined
+          ? route.kind === "section" && route.id === sectionId
+          : el.dataset["routeKind"] === route.kind;
+      el.classList.toggle("wx-nav-active", active);
     });
     if (route.kind === "edit") lastEditPage = route.page;
     editNavItem.textContent = route.kind === "edit" ? `Edit: ${route.page}` : "Edit";
@@ -509,6 +540,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
 
   function renderTopBar(): void {
     updateEditNavItem();
+    renderSectionNav();
     if (state === null) return;
     titleEl.textContent = `Wixy · ${state.project.name}`;
     const opCount = state.draft.opCount;
@@ -900,6 +932,26 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
 
     if (route.kind === "chat") {
       const panel = createChatPanel(route.conversation, { api, win });
+      main.appendChild(panel.element);
+      activePanelTeardown = () => panel.teardown();
+      return;
+    }
+
+    if (route.kind === "section") {
+      if (opQueue === null || state === null) {
+        main.textContent = "Loading…";
+        return;
+      }
+      // Unknown id (a stale deep link, or a section removed from the
+      // registry since) falls back to the pages panel — the same
+      // graceful-degradation shape `parsePath`'s own unrecognized-route
+      // fallback uses, rather than a dead-end blank screen.
+      const section = state.adminSections.find((s) => s.id === route.id);
+      if (section === undefined) {
+        mountPanel({ kind: "pages" });
+        return;
+      }
+      const panel = mountSectionPanel(section, { api, opQueue, win });
       main.appendChild(panel.element);
       activePanelTeardown = () => panel.teardown();
       return;

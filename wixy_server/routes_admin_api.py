@@ -171,6 +171,45 @@ def _chats_snapshot(
     ]
 
 
+def _admin_sections_snapshot(project: ProjectConfig) -> list[JsonValue]:
+    """Registry-driven admin nav + management screens (Inv 1, decisions/
+    00098) — camelCase mirror of `builder.config.AdminSection` and its
+    nested dataclasses, the same "plain dict literals off the config
+    dataclass" shape as `pages` above, so the client never needs its own
+    parallel copy of what a section/collection/field looks like."""
+    return [
+        {
+            "id": section.id,
+            "navLabel": section.nav_label,
+            "title": section.title,
+            "description": section.description,
+            "page": section.page,
+            "collections": [
+                {
+                    "path": collection.path,
+                    "label": collection.label,
+                    "itemNoun": collection.item_noun,
+                    "schema": collection.schema,
+                    "fields": [
+                        {
+                            "key": field.key,
+                            "kind": field.kind,
+                            "label": field.label,
+                            "options": [
+                                {"value": option.value, "label": option.label}
+                                for option in field.options
+                            ],
+                        }
+                        for field in collection.fields
+                    ],
+                }
+                for collection in section.collections
+            ],
+        }
+        for section in project.admin_sections
+    ]
+
+
 def _build_state(
     project: ProjectConfig,
     paths: ProjectPaths,
@@ -243,6 +282,7 @@ def _build_state_locked(
         "upstream": upstream,
         "publishJob": _publish_job_to_dict(publish_job) if publish_job is not None else None,
         "chats": _chats_snapshot(paths, chat_runtime, working_cache),
+        "adminSections": _admin_sections_snapshot(project),
     }
 
 

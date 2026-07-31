@@ -8,8 +8,11 @@
 // always-exists-but-degrades-gracefully shape as "engine"),
 // "/admin/settings/system" (spec/independence/06 §3 — backup age/disk usage/last
 // publish/engine version, meaningful on BOTH editions, unlike "engine"/"ai"
-// above). Every path serves the same shell document
-// (`wixy_server.app.get_admin_shell_deep_link`) and this module parses it.
+// above), "/admin/section/<id>" (decisions/00098 — a registry-configured admin
+// section, e.g. "before-after"; `id` is whatever `state.adminSections[].id`
+// declares, never a literal known to this module). Every path serves the same
+// shell document (`wixy_server.app.get_admin_shell_deep_link`) and this module
+// parses it.
 //
 // History: until decisions/00087 these were HASH fragments ("#/pages", …) — "no
 // History-API routing, the whole admin is a single served document". Proper
@@ -27,7 +30,8 @@ export type Route =
   | { kind: "media" }
   | { kind: "chat"; conversation: string | null }
   | { kind: "history" }
-  | { kind: "settings"; page: SettingsPage };
+  | { kind: "settings"; page: SettingsPage }
+  | { kind: "section"; id: string };
 
 export const DEFAULT_ROUTE: Route = { kind: "pages" };
 
@@ -67,6 +71,8 @@ function routeFromSegments(segments: string[]): Route {
                     ? "system"
                     : "general",
       };
+    case "section":
+      return second !== undefined ? { kind: "section", id: second } : DEFAULT_ROUTE;
     default:
       return DEFAULT_ROUTE;
   }
@@ -105,6 +111,8 @@ function segmentsFor(route: Route): string[] {
       return ["history"];
     case "settings":
       return route.page === "general" ? ["settings"] : ["settings", route.page];
+    case "section":
+      return ["section", route.id];
   }
 }
 
@@ -126,6 +134,7 @@ export function sameRoute(a: Route, b: Route): boolean {
   if (a.kind === "edit" && b.kind === "edit") return a.page === b.page;
   if (a.kind === "chat" && b.kind === "chat") return a.conversation === b.conversation;
   if (a.kind === "settings" && b.kind === "settings") return a.page === b.page;
+  if (a.kind === "section" && b.kind === "section") return a.id === b.id;
   return true;
 }
 

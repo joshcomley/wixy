@@ -30,6 +30,7 @@ function fakeState(overrides: Partial<StateResponse> = {}): StateResponse {
     upstream: { aheadOfPublished: [], fetchedAt: null },
     publishJob: null,
     chats: [],
+    adminSections: [],
     ...overrides,
   };
 }

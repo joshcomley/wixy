@@ -127,6 +127,49 @@ export interface ConversationSummary {
   working: boolean;
 }
 
+/** A `choice`-kind `AdminField`'s one selectable value — mirrors
+ * `builder.config.AdminFieldOption` exactly (decisions/00098). */
+export interface AdminFieldOption {
+  value: string;
+  label: string;
+}
+
+/** One editable property of a collection item — mirrors
+ * `builder.config.AdminField`. `kind` picks the panel control: `image` opens
+ * the media picker, `text` renders an inline input, `choice` renders a
+ * `<select>` from `options` (empty for the other two kinds). */
+export interface AdminField {
+  key: string;
+  kind: "image" | "text" | "choice";
+  label: string;
+  options: AdminFieldOption[];
+}
+
+/** A single array in the section's page content the panel manages as a
+ * whole — mirrors `builder.config.AdminCollection`. `path` is its dotted
+ * content path (e.g. `gallery.sliders`); `schema` names the
+ * `builder/schemas/<schema>.schema.json` a new item must satisfy. */
+export interface AdminCollection {
+  path: string;
+  label: string;
+  itemNoun: string;
+  schema: string;
+  fields: AdminField[];
+}
+
+/** One registry-configured admin nav entry + management screen (Inv 1 — no
+ * site literals in engine code; mirrors `builder.config.AdminSection`
+ * exactly, decisions/00098). The engine renders whatever sections
+ * `state.adminSections` lists; `id` is opaque to the router/shell. */
+export interface AdminSection {
+  id: string;
+  navLabel: string;
+  title: string;
+  description: string;
+  page: string;
+  collections: AdminCollection[];
+}
+
 export interface StateResponse {
   project: { slug: string; name: string; domain: string };
   pages: PageSummary[];
@@ -138,6 +181,7 @@ export interface StateResponse {
   };
   publishJob: PublishJobData | null;
   chats: ConversationSummary[];
+  adminSections: AdminSection[];
 }
 
 /** One changed overlay key (`GET /api/admin/publish/preview`'s per-entry

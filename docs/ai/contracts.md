@@ -51,7 +51,7 @@ Handler column is `file:func`. "Auth: CF" = gated by the admin middleware. Respo
 
 | Method | Path | Handler | Request | Response |
 |---|---|---|---|---|
-| GET | `state` | `routes_admin_api.py:get_state` | — | `{"project":{slug,name,domain}, "pages":[{slug,meta,lastModified,editable,pendingDelete}], "draft":{rev,opCount}, "live":{version,sha}\|null, "upstream":{aheadOfPublished:[{sha,subject,author,when}],fetchedAt}, "publishJob":{...}\|null, "chats":[<summary>]}`; 503 |
+| GET | `state` | `routes_admin_api.py:get_state` | — | `{"project":{slug,name,domain}, "pages":[{slug,meta,lastModified,editable,pendingDelete}], "draft":{rev,opCount}, "live":{version,sha}\|null, "upstream":{aheadOfPublished:[{sha,subject,author,when}],fetchedAt}, "publishJob":{...}\|null, "chats":[<summary>], "adminSections":[<admin section>]}`; 503 |
 | GET | `content/{page}` | `get_content` | — | `{"content": <JsonObject>, "bindings": <dict>}`; 503, 404 |
 | GET | `theme` | `get_theme` | — | `{"theme": <dict>}`; 503, 404 |
 | PATCH | `draft` | `patch_draft` | `{"expectedRev":int, "ops":[{file,path,value}\|{file,path,discard:true}]}` | `{"rev": int}`; 503, **409** (RevConflict), **422** (`DraftValidationError` — the batch is structurally invalid against `builder/schemas/*.json`, e.g. a collection item missing a required field; rejected whole, the overlay is left untouched — decisions/00095) |
@@ -89,6 +89,17 @@ conversation's own stream-driven UI uses; always `false` for a `pending`/`failed
 by call site**: `GET chat/conversations` actively refreshes stale entries (bounded 2s per
 batch, regardless of cmd's own patience); `GET state`'s `chats` field reads the SAME cache
 read-only (never triggers a refresh, zero added latency) — see [ai-chat.md](ai-chat.md).
+
+`<admin section>` = `{id, navLabel, title, description, page, collections:[<admin
+collection>]}`; `<admin collection>` = `{path, label, itemNoun, schema, fields:[<admin
+field>]}`; `<admin field>` = `{key, kind:"image"\|"text"\|"choice", label,
+options:[{value,label}]}` (decisions/00098) — a plain camelCase mirror of
+`builder.config.ProjectConfig.admin_sections`
+(`routes_admin_api.py:_admin_sections_snapshot`), registry-driven (Inv 1: no site literals
+in engine code — `ca.json`'s `adminSections` array declares the actual "Before & After"
+section; an empty registry reads as `[]`, never absent). Drives `admin-ui`'s dynamically
+rendered nav entries + `sectionPanel.ts`'s management screen for each declared section —
+see [editor-and-admin-ui.md](editor-and-admin-ui.md).
 
 `state.pages[].editable` = `(source.pages_dir / "<slug>.html").exists()` — a page is editable
 iff its template is on disk, so a duplicated-but-unpublished page (staged only in the overlay)
