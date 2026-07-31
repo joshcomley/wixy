@@ -54,20 +54,28 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     await slidersCollection.locator(".wx-section-add-button").click();
     await expect(addDialog).toBeVisible();
 
-    // The fixture's media library starts with exactly 2 repo images (hero.jpg,
-    // icon.jpg) — deterministic, so every count below is a fixed expectation,
-    // not a `.count()` snapshot (which doesn't auto-wait, and races the
-    // dialog's own async `getMedia()` fetch on first open). `_list_media`
-    // (routes_admin_api.py) appends "repo" items first, THEN "draft"
-    // (uploaded) items strictly after, regardless of name — so a fresh
-    // upload is always the grid's last thumb.
+    // Never assume an exact starting count: the e2e suite reuses ONE
+    // server/storage per Playwright worker across every spec file in it
+    // (decisions/00097's addendum first documented this), and an earlier
+    // spec's own upload/replace can leave residual `draft_media/` files this
+    // dialog's grid also lists, on top of the fixture's 2 repo images
+    // (hero.jpg, icon.jpg). `waitForStableThumbCount` first waits for the
+    // grid to be non-empty (`toHaveCount` auto-retries — proves the dialog's
+    // own async `getMedia()` fetch has resolved at least once, unlike a bare
+    // `.count()` snapshot, which doesn't wait and can race that fetch), THEN
+    // takes a `.count()` reading — safe at that point, since the fetch
+    // already settled and the grid renders in one paint, not incrementally.
     const mediaThumbs = mediaDialog.locator(".wx-media-thumb");
+    async function waitForStableThumbCount(): Promise<number> {
+      await expect(mediaThumbs.first()).toBeVisible();
+      return mediaThumbs.count();
+    }
 
     await addDialog.getByRole("button", { name: "Choose Before photo" }).click();
     await expect(mediaDialog).toBeVisible();
-    await expect(mediaThumbs).toHaveCount(2);
+    let thumbCountBefore = await waitForStableThumbCount();
     await mediaDialog.locator('input[type="file"]').setInputFiles("fixtures/oversized-exif-rotated.jpg");
-    await expect(mediaThumbs).toHaveCount(3);
+    await expect(mediaThumbs).toHaveCount(thumbCountBefore + 1);
     await mediaThumbs.last().click();
     await mediaDialog.getByRole("button", { name: "Use this image" }).click();
     await expect(mediaDialog).toBeHidden();
@@ -75,12 +83,17 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
 
     await addDialog.getByRole("button", { name: "Choose After photo" }).click();
     await expect(mediaDialog).toBeVisible();
-    await expect(mediaThumbs).toHaveCount(3);
-    // A second, distinct upload (same source bytes — the fixture only has one
-    // binary image — but a fresh hashed filename, a genuinely separate media
-    // item, matching "upload two images" rather than reusing the first pick).
-    await mediaDialog.locator('input[type="file"]').setInputFiles("fixtures/oversized-exif-rotated.jpg");
-    await expect(mediaThumbs).toHaveCount(4);
+    // A second, genuinely DISTINCT upload — `process_upload` (wixy_server/
+    // media.py) hashes the FINAL RE-ENCODED bytes to name the staged file,
+    // deliberately so re-uploading the exact same image dedupes to the same
+    // staged file rather than accumulating copies; reusing
+    // oversized-exif-rotated.jpg here would land on the SAME hashed filename
+    // as the Before pick above and never produce one more thumbnail. A
+    // second, distinct fixture image is required to exercise two real
+    // uploads.
+    thumbCountBefore = await waitForStableThumbCount();
+    await mediaDialog.locator('input[type="file"]').setInputFiles("fixtures/tiny-second-image.jpg");
+    await expect(mediaThumbs).toHaveCount(thumbCountBefore + 1);
     await mediaThumbs.last().click();
     await mediaDialog.getByRole("button", { name: "Use this image" }).click();
     await expect(mediaDialog).toBeHidden();
