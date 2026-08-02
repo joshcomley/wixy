@@ -59,7 +59,15 @@ between them. Spec: [`spec/05-editor.md`](../../spec/05-editor.md). The wire typ
   the latest version now?") — never a changelog — and only its confirm reloads
   (`win.location.reload()` after `beforeReload` flushes the OpQueue; a flush that
   re-queued ops — the shell's `opSaveFailed` flag, set by the queue's `onError` — BLOCKS
-  the reload with a calm note instead of silently losing them). Nothing reloads the page
+  the reload with a calm note instead of silently losing them). The update dialog also
+  carries a "What's new in this version:" bullet list (decisions/00112) — the
+  `Release-note:` commit trailers of exactly the commits she'd advance past, fetched
+  from `/api/version/notes?since=<her pinned sha>` (prefetched when the glow appears;
+  a "Loading what's new…" line fills in place if she's faster). These lines are
+  DOCTRINE, not polish: every commit message carries one plain-English trailer for her
+  ("General bug fixes and improvements." when nothing is user-visible), CI's
+  `release-note` job enforces it, and the server substitutes the generic line for any
+  range that comes up empty. Nothing reloads the page
   on its own: the pre-00109 behaviour (auto-reload outside edit view, a toast inside it)
   is gone because she may be mid-edit. A rollback deploy quiets the badge again. The chip
   is a plain **label**, not a pill (its box was redundant inside the bar; Publish opens

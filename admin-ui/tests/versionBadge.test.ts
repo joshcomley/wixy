@@ -12,6 +12,9 @@ function fakeWin(): { win: Window; reload: ReturnType<typeof vi.fn> } {
   return { win: { location: { reload } } as unknown as Window, reload };
 }
 
+/** The default notes feed for tests that don't exercise it (decisions/00112). */
+const NO_NOTES = async (): Promise<string[] | null> => null;
+
 async function flushMicro(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -28,6 +31,7 @@ describe("versionBadge", () => {
     const { win } = fakeWin();
     const badge = mountVersionBadge({
       fetchVersion: async () => ({ shaFull: "a".repeat(40), count: 158 }),
+      fetchNotes: NO_NOTES,
       win,
     });
     expect(badge.element.hidden).toBe(true);
@@ -44,6 +48,7 @@ describe("versionBadge", () => {
     const { win } = fakeWin();
     const badge = mountVersionBadge({
       fetchVersion: async () => ({ shaFull: "a".repeat(40), count: null }),
+      fetchNotes: NO_NOTES,
       win,
     });
     await badge.check();
@@ -54,7 +59,7 @@ describe("versionBadge", () => {
   it("glows `v old → v new` when a deploy lands past the loaded page", async () => {
     const { win } = fakeWin();
     let current: ServerVersion = { shaFull: "a".repeat(40), count: 158 };
-    const badge = mountVersionBadge({ fetchVersion: async () => current, win });
+    const badge = mountVersionBadge({ fetchVersion: async () => current, fetchNotes: NO_NOTES, win });
     await badge.check();
 
     current = { shaFull: "b".repeat(40), count: 159 };
@@ -69,7 +74,7 @@ describe("versionBadge", () => {
     const { win } = fakeWin();
     const loaded: ServerVersion = { shaFull: "a".repeat(40), count: 158 };
     let current = loaded;
-    const badge = mountVersionBadge({ fetchVersion: async () => current, win });
+    const badge = mountVersionBadge({ fetchVersion: async () => current, fetchNotes: NO_NOTES, win });
     await badge.check();
     current = { shaFull: "b".repeat(40), count: 159 };
     await badge.check();
@@ -88,7 +93,7 @@ describe("versionBadge", () => {
       shaFull: "a".repeat(40),
       count: 158,
     });
-    const badge = mountVersionBadge({ fetchVersion: () => behaviour(), win });
+    const badge = mountVersionBadge({ fetchVersion: () => behaviour(), fetchNotes: NO_NOTES, win });
     await badge.check();
     expect(badge.element.textContent).toBe("v158");
 
@@ -108,6 +113,7 @@ describe("versionBadge", () => {
     const { win, reload } = fakeWin();
     const badge = mountVersionBadge({
       fetchVersion: async () => ({ shaFull: "a".repeat(40), count: 158 }),
+      fetchNotes: NO_NOTES,
       win,
     });
     await badge.check();
@@ -127,7 +133,7 @@ describe("versionBadge", () => {
     const { win, reload } = fakeWin();
     let current: ServerVersion = { shaFull: "a".repeat(40), count: 158 };
     const beforeReload = vi.fn();
-    const badge = mountVersionBadge({ fetchVersion: async () => current, win, beforeReload });
+    const badge = mountVersionBadge({ fetchVersion: async () => current, fetchNotes: NO_NOTES, win, beforeReload });
     await badge.check();
     current = { shaFull: "b".repeat(40), count: 159 };
     await badge.check();
@@ -158,6 +164,7 @@ describe("versionBadge", () => {
     let failFlush = true;
     const badge = mountVersionBadge({
       fetchVersion: async () => current,
+      fetchNotes: NO_NOTES,
       win,
       beforeReload: () => {
         if (failFlush) throw new Error("patch never landed");
@@ -187,6 +194,7 @@ describe("versionBadge", () => {
     const { win } = fakeWin();
     const badge = mountVersionBadge({
       fetchVersion: async () => ({ shaFull: "a".repeat(40), count: 158 }),
+      fetchNotes: NO_NOTES,
       win,
     });
     await badge.check();
@@ -202,5 +210,87 @@ describe("versionBadge", () => {
     openDialog(badge);
     badge.teardown();
     expect(document.querySelector(".wx-version-backdrop")).toBeNull();
+  });
+
+  it("the update popup lists the What's-new lines — plain English, never a changelog (decisions/00112)", async () => {
+    const { win } = fakeWin();
+    let current: ServerVersion = { shaFull: "a".repeat(40), count: 158 };
+    const seenSince: Array<string | null> = [];
+    const badge = mountVersionBadge({
+      fetchVersion: async () => current,
+      fetchNotes: async (since) => {
+        seenSince.push(since);
+        return [
+          "The update popup tells you what changed in plain English.",
+          "General bug fixes and improvements.",
+        ];
+      },
+      win,
+    });
+    await badge.check();
+    current = { shaFull: "b".repeat(40), count: 159 };
+    await badge.check();
+
+    const backdrop = openDialog(badge);
+    // The range is pinned to the LOADED page's sha — "what changed since the
+    // version she's running", not since whenever.
+    expect(seenSince).toEqual(["a".repeat(40)]);
+    expect(backdrop.textContent).toContain("What's new in this version:");
+    const items = backdrop.querySelectorAll(".wx-version-notes li");
+    expect(items).toHaveLength(2);
+    expect(items[0]?.textContent).toBe("The update popup tells you what changed in plain English.");
+    expect(items[1]?.textContent).toBe("General bug fixes and improvements.");
+    // No git detail anywhere — this surface is the site owner's.
+    expect(backdrop.textContent).not.toMatch(/[0-9a-f]{40}/);
+    badge.teardown();
+  });
+
+  it("a failed notes fetch still leaves a truthful popup (the generic line, not a blank)", async () => {
+    const { win } = fakeWin();
+    let current: ServerVersion = { shaFull: "a".repeat(40), count: 158 };
+    const badge = mountVersionBadge({
+      fetchVersion: async () => current,
+      fetchNotes: async () => null,
+      win,
+    });
+    await badge.check();
+    current = { shaFull: "b".repeat(40), count: 159 };
+    await badge.check();
+
+    const backdrop = openDialog(badge);
+    const items = backdrop.querySelectorAll(".wx-version-notes li");
+    expect(items).toHaveLength(1);
+    expect(items[0]?.textContent).toBe("General bug fixes and improvements.");
+    badge.teardown();
+  });
+
+  it("a dialog opened before the notes land shows a loading line, then fills in place", async () => {
+    const { win } = fakeWin();
+    let current: ServerVersion = { shaFull: "a".repeat(40), count: 158 };
+    // Assigned synchronously by the promise executor the first time the badge
+    // fetches notes (at the glow) — the no-op seed keeps TS's narrowing honest.
+    let resolveNotes: (notes: string[]) => void = () => {};
+    const badge = mountVersionBadge({
+      fetchVersion: async () => current,
+      fetchNotes: () =>
+        new Promise<string[]>((resolve) => {
+          resolveNotes = resolve;
+        }),
+      win,
+    });
+    await badge.check();
+    current = { shaFull: "b".repeat(40), count: 159 };
+    await badge.check();
+
+    const backdrop = openDialog(badge);
+    expect(backdrop.querySelector(".wx-version-notes-loading")?.textContent).toBe(
+      "Loading what's new…",
+    );
+
+    resolveNotes(["The update popup tells you what changed in plain English."]);
+    await flushMicro();
+    expect(backdrop.querySelector(".wx-version-notes-loading")).toBeNull();
+    expect(backdrop.querySelectorAll(".wx-version-notes li")).toHaveLength(1);
+    badge.teardown();
   });
 });

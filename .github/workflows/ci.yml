@@ -26,6 +26,31 @@ jobs:
       - name: pytest (fixed -n 4, never auto)
         run: pytest
 
+  # decisions/00112: every commit carries a `Release-note:` trailer — the update
+  # popup's "What's new in this version" list is harvested from exactly these
+  # trailers, so a missing one = a deploy with nothing to tell the owner. PR-
+  # only (main's own merge commits are exempt; the range they introduce was
+  # already checked here); merge commits inside the PR are exempt too.
+  release-note:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch the base branch
+        run: git fetch --no-tags origin "+refs/heads/${GITHUB_BASE_REF}:refs/remotes/origin/${GITHUB_BASE_REF}"
+      - name: Every PR commit carries a Release-note trailer
+        run: |
+          missing=0
+          for sha in $(git rev-list --no-merges "origin/${GITHUB_BASE_REF}..HEAD"); do
+            if ! git log -1 --format=%B "$sha" | grep -qi '^release-note[[:space:]]*:'; then
+              echo "::error::commit $sha has no Release-note trailer (see CLAUDE.md — every commit needs one; use 'Release-note: General bug fixes and improvements.' when nothing is user-visible)"
+              missing=1
+            fi
+          done
+          exit $missing
+
   # spec/independence/07 §3: "Every external URL in the guide verified live
   # at build time." Builds fresh (not from committed output) so the drift
   # check catches a stale commit, then link-checks the fresh build against

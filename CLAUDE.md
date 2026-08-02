@@ -88,6 +88,14 @@ npx playwright test
   and commit the output alongside the source change.
 - Tests parallelize via pytest-xdist with the fixed `-n 4` cap in `pyproject.toml`'s
   `addopts` — never pass `-n auto`.
+- **Every commit message carries a `Release-note:` trailer** (decisions/00112): ONE
+  plain-English sentence the site owner can read in the admin's update popup — no
+  filenames, no PR numbers, no jargon. If the change has nothing user-visible, write
+  exactly `Release-note: General bug fixes and improvements.` This is not optional
+  polish: the update popup's "What's new in this version" list is harvested from
+  these trailers by `/api/version/notes`, and CI's `release-note` job fails any PR
+  with a non-merge commit missing one. A multi-commit PR may repeat the same
+  trailer on each commit (the harvest dedupes).
 - Never author code in `D:\Servers\Wixy\` (that's the deployment target, a Slots
   blue/green checkout) — this repo is the source; see the global
   `D:\Servers\CLAUDE.md` worktree-guard rule. Branch here, PR, merge to `main`; Slots
