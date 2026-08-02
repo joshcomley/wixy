@@ -481,6 +481,20 @@ describe("mountShell", () => {
     expect(publishButton?.disabled).toBe(true);
   });
 
+  it("the Publish button starts hidden at construction — no hide-on-load layout jump", async () => {
+    // The initial synchronous paint must already be the quiet state: showing
+    // the button pre-state and hiding it when loadState lands shifts the whole
+    // page down-then-up (it raced the mobile popover geometry E2E).
+    const api = fakeApi();
+    const container = document.createElement("div");
+    mountShell(container, { api, win: fakeWindow(), mountEditView: fakeMountEditView().fn });
+    // BEFORE any state lands (no flushState yet):
+    expect(container.querySelector<HTMLButtonElement>(".wx-publish-button")?.hidden).toBe(true);
+    await flushState(api);
+    // …and a clean state keeps it hidden.
+    expect(container.querySelector<HTMLButtonElement>(".wx-publish-button")?.hidden).toBe(true);
+  });
+
   it("defaults to the pages panel and lists fetched pages", async () => {
     const api = fakeApi();
     const win = fakeWindow();

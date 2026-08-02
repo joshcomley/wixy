@@ -136,6 +136,12 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   publishButton.className = "wx-publish-button";
   publishButton.textContent = "Publish";
   publishButton.disabled = true;
+  // Start hidden (the quiet default, decisions/00108): the button is useless
+  // before the first state load anyway, and painting it visible-then-hiding
+  // it made the whole page jump when loadState landed (the bar collapsing
+  // mid-layout raced the mobile popover geometry E2E). renderTopBar reveals
+  // it the moment state says there's something to publish.
+  publishButton.hidden = true;
   publishButton.addEventListener("click", () => openPublishDrawer());
   statusBar.append(chipEl, publishButton);
 
@@ -937,7 +943,11 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     }
 
     if (route.kind === "media") {
-      const panel = mountMediaPanel(api, win);
+      // Staged replacements/deletions change the publishable opCount — the
+      // status bar (and its Publish-button visibility, decisions/00108) must
+      // re-read state after any staging mutation, not wait for the 60s
+      // revalidation.
+      const panel = mountMediaPanel(api, win, () => void refreshStateInBackground());
       main.appendChild(panel.element);
       activePanelTeardown = () => panel.teardown();
       return;

@@ -58,8 +58,17 @@ between them. Spec: [`spec/05-editor.md`](../../spec/05-editor.md). The wire typ
   Publish button also HIDES (`hidden`) and the bar collapses to a narrow strip
   (`.wx-statusbar:not(.wx-statusbar-pending)` drops the vertical padding that framed the
   button) — with the chip already saying "No unpublished changes", the button is dead
-  chrome (operator, 2026-08-02, decisions/00108). A RUNNING publish forces the button
-  visible even if a state snapshot already reads clean, since it's the progress surface. The quiet styling is keyed
+  chrome (operator, 2026-08-02, decisions/00108). The button is hidden from CONSTRUCTION
+  (the quiet default), not just hidden on first state load — painting it visible-then-
+  hiding made the page jump mid-layout. A RUNNING publish forces the button
+  visible even if a state snapshot already reads clean, since it's the progress surface.
+  Two load-bearing consequences: the STATE endpoint's `draft.opCount` counts every
+  publishable kind (same formula as the preview — decisions/00071/00080's staged page
+  adds/deletes and staged media replacements/deletions produce no overlay ops), and any
+  publishable mutation that isn't a draft PATCH must fire a shell state refresh — the
+  media panel does this via the grid's `onChanged` dep (wired to
+  `refreshStateInBackground`), or a staged replacement would leave the bar stale
+  (button hidden) until the 60s revalidation. The quiet styling is keyed
   off that bar class, NOT the chip's `disabled` attribute — the chip is enabled when idle and
   disabled mid-publish, which is the opposite of what the appearance needs. While a publish runs the
   status bar doubles as the progress surface (decisions/00089, Inv 25): the Publish

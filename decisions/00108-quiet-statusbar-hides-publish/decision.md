@@ -37,14 +37,49 @@ pure cost. Keeping a disabled button instead was rejected: a permanently
 greyed control reads as "broken" (the same reasoning as decisions/00089), and
 it can't deliver the narrow strip.
 
+## Two latent bugs this exposed (fixed in the same change)
+
+Hiding the button on `opCount === 0` made two pre-existing undercounts
+FUNCTIONAL (they were cosmetic while the button was always there) — the
+media-edit E2E caught the first immediately:
+
+1. **`/api/admin/state`'s `draft.opCount` counted only `overlay.ops`.** Staged
+   page adds/deletes and staged media replacements/deletions produce no ops,
+   so the chip read "No unpublished changes" over genuinely publishable work —
+   and with the button hidden, a staged media replacement became unpublishable
+   from the bar. The publish PREVIEW's opCount already had the right formula
+   (decisions/00071/00080); state now uses the same one (content ops + staged
+   page adds/deletes + staged media replacements/deletions).
+2. **The media panel never refreshed shell state.** Staging a replacement
+   isn't a draft PATCH, so no `refreshStateInBackground` fired and the bar
+   stayed stale until the 60s revalidation. `mediaDialog`'s grid deps gained
+   `onChanged` (fired by the detail sheet's `act()`, grid delete, and
+   uploads); `mountMediaPanel` passes it through; the shell wires it to
+   `refreshStateInBackground`.
+
 ## What to watch for
 
 - `hidden`, not removal: the element stays in the DOM (the
   chip-left/button-right structure test is unchanged), and `.wx-button-busy`'s
   `display: inline-flex` would beat the UA `[hidden]` rule — hence the explicit
   `.wx-publish-button[hidden] { display: none }`.
+- **The button starts hidden at construction, not just after the first state
+  load.** The initial synchronous paint must already be the quiet state:
+  painting it visible and hiding it when loadState landed made the whole page
+  jump down-then-up mid-layout (and raced the mobile popover geometry E2E,
+  which measures the ⋯ trigger box pre-click and the popover box post-click —
+  a state load landing BETWEEN the two measurements moved the page 25px and
+  failed the assertion on Windows font metrics; CI's faster state load masked
+  it). The quiet strip is the correct default look anyway — the button is
+  useless before state loads.
+- A page DUPLICATE counts as 2 by design (decisions/00024 stages a PageAdd +
+  a navLabel SET op) — the state's opCount deliberately matches the preview's
+  established formula rather than deduplicating.
 - The e2e pin for "Publish button visible" moved to AFTER an edit lands: with a
   shared fixture server, pre-edit visibility depends on other files' leftover
   upstream commits, so it's not pinnable either way.
 - Playwright `toHaveText`/`toHaveCount` still pass on the hidden button
   post-publish; only `toBeVisible` would care.
+- Any FUTURE publishable mutation that isn't a draft PATCH must fire the
+  shell's state refresh (via a panel `onChanged`) or the bar lies for up to
+  60s — the media panel is the template.
