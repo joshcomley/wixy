@@ -28,7 +28,7 @@ opening the live site. At the status bar's far left, a tiny **version badge** sh
 engine's `v N` (first-parent commit count); when a deploy lands past the loaded page it
 glows green (`v old → v new`, the fleet's `ver` look), and tapping it opens a themed
 "load the latest version?" confirmation — never a changelog, never an automatic reload,
-since she may be mid-edit (decisions/00108). Navigation is client-side routing on proper paths — `/admin/pages`,
+since she may be mid-edit (decisions/00109). Navigation is client-side routing on proper paths — `/admin/pages`,
 `/admin/edit/<page>`, `/admin/theme`, `/admin/media`, `/admin/chat`, `/admin/chat/<conv>`,
 `/admin/history` (decisions/00087: every panel path serves the same shell; legacy `#/…`
 links canonicalize and keep working).

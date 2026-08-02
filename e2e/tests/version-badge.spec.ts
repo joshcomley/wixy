@@ -1,4 +1,4 @@
-// E2E for decisions/00108 — the status-bar version badge: a quiet `v N` pinned
+// E2E for decisions/00109 — the status-bar version badge: a quiet `v N` pinned
 // at page load, the green glow once a deploy lands past the loaded page, and
 // the themed confirm that gates the reload (never automatic, never a changelog
 // — this surface is the site owner's).
@@ -6,7 +6,7 @@
 import { expect, test } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
 
-test.describe("version badge (decisions/00108)", () => {
+test.describe("version badge (decisions/00109)", () => {
   test("pins v N, glows on deploy, and reloads only after the confirm", async ({ page }) => {
     const errors = trackConsoleErrors(page);
 

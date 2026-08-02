@@ -51,7 +51,7 @@
   --wx-danger-tint: #fef2f2;
   /* Same fill/text split as danger (decisions/00049): --wx-success-text must
      clear AA as TEXT on surface/canvas — #1a7f37 is 4.65 on --wx-surface. The
-     version badge's update glow uses these (decisions/00108). */
+     version badge's update glow uses these (decisions/00109). */
   --wx-success-text: #1a7f37;
   --wx-success-tint: #e4f2e8;
   --wx-solid-dark: #1e2430;
@@ -181,6 +181,19 @@ html, body {
   border-bottom: 2px solid var(--wx-brand-blue);
 }
 
+/* Quiet state (operator, 2026-08-02): with nothing to publish the bar is only
+   a one-line "No unpublished changes" note — the Publish button hides
+   (shell.ts), so the taller padding that framed that tap target is pointless
+   and the bar collapses to a narrow strip. Only the vertical padding shrinks;
+   the horizontal stays in step with the pending bar (and its phone override
+   below) so the label doesn't jump sideways on a state change. The `:not()`
+   gives this rule the specificity to also beat the phone media query's
+   padding, keeping the strip narrow there too. */
+.wx-statusbar:not(.wx-statusbar-pending) {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
 .wx-statusbar .wx-draft-chip {
   flex: 1;
   min-width: 0;
@@ -199,7 +212,7 @@ html, body {
      stretching to the row height. */
 }
 
-/* -- Version badge (decisions/00108) ------------------------------------------
+/* -- Version badge (decisions/00109) ------------------------------------------
    The tiny engine-version number at the FAR LEFT of the status bar: a muted
    `v N` while up to date — deliberately small and quiet so it never competes
    with the draft chip it sits beside. Once a deploy lands past the loaded
@@ -241,7 +254,7 @@ html, body {
   }
 }
 
-/* The badge's tap surface (decisions/00108): a small themed confirmation —
+/* The badge's tap surface (decisions/00109): a small themed confirmation —
    "Would you like to load the latest version?" — not a changelog. Its own
    backdrop/dialog classes (the section add-flow precedent: NOT a reuse of
    .wx-media-dialog-backdrop). */
@@ -451,6 +464,12 @@ html, body {
 .wx-publish-button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+/* Hidden when there's nothing to publish (shell.ts). The explicit rule beats
+   `.wx-button-busy`'s `display: inline-flex` should the two ever coincide. */
+.wx-publish-button[hidden] {
+  display: none;
 }
 
 /* -- Publish-in-progress affordance (decisions/00089) --------------------------

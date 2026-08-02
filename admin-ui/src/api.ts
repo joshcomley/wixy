@@ -492,7 +492,7 @@ export function thumbnailUrl(slug: string, rev: number): string {
   return `/api/admin/pages/${encodeURIComponent(slug)}/thumbnail?v=${rev}`;
 }
 
-/** The engine's own version identity from `/api/version` (decisions/00108):
+/** The engine's own version identity from `/api/version` (decisions/00109):
  * `shaFull` detects "a deploy landed since this page loaded"; `count` is the
  * human-facing `v N` number the status-bar badge shows (first-parent count of
  * HEAD, baked as `WIXY_ENGINE_VERSION` on image builds). Either can be null on
@@ -548,7 +548,7 @@ export function createApi(): AdminApi {
     },
 
     /** The server's deployed engine version (unauthenticated `/api/version`) — used
-     * by the status-bar version badge (decisions/00108) to pin what THIS page is
+     * by the status-bar version badge (decisions/00109) to pin what THIS page is
      * running and to flag when a Slots deploy has landed past it. */
     async getServerVersion(): Promise<ServerVersion | null> {
       try {

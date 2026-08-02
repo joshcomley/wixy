@@ -25,7 +25,7 @@ confirmation matters because she may be mid-edit.
   `e2e/tests/version-badge.spec.ts`. Full gates green: vitest 594, pytest 1005,
   typecheck, ruff, mypy, e2e.
 - Docs: contracts.md `/api/version` row, editor-and-admin-ui.md, spec/05 §1,
-  spec/independence 01+03 (`WIXY_ENGINE_VERSION`), decisions/00108, ANSWERS.md Q-002.
+  spec/independence 01+03 (`WIXY_ENGINE_VERSION`), decisions/00109, ANSWERS.md Q-003.
 
 ## State
 

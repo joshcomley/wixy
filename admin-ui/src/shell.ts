@@ -122,10 +122,12 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   // ABOVE the topbar and is deliberately NOT part of the edit-view chrome
   // that hides/reveals — the one place you can always see and act on "you
   // have unpublished work" is here, so there's no chip-relocation dance any
-  // more (the chip used to move into the slim edit bar while editing).
+  // more (the chip used to move into the slim edit bar while editing). With
+  // nothing to publish the button hides and the bar collapses to a narrow
+  // "No unpublished changes" strip (renderTopBar + style.css).
   const statusBar = document.createElement("div");
   statusBar.className = "wx-statusbar";
-  // The version badge (decisions/00108) pins at the FAR LEFT of this bar — a
+  // The version badge (decisions/00109) pins at the FAR LEFT of this bar — a
   // tiny muted `v N` while up to date, the fleet's green glow once a deploy
   // lands past this page; tapping it asks before reloading (she may be
   // mid-edit). Its check() is driven by the revalidation loop below, plus one
@@ -152,6 +154,12 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   publishButton.className = "wx-publish-button";
   publishButton.textContent = "Publish";
   publishButton.disabled = true;
+  // Start hidden (the quiet default, decisions/00108): the button is useless
+  // before the first state load anyway, and painting it visible-then-hiding
+  // it made the whole page jump when loadState landed (the bar collapsing
+  // mid-layout raced the mobile popover geometry E2E). renderTopBar reveals
+  // it the moment state says there's something to publish.
+  publishButton.hidden = true;
   publishButton.addEventListener("click", () => openPublishDrawer());
   statusBar.append(versionBadge.element, chipEl, publishButton);
 
@@ -605,6 +613,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       // registering the job server-side (the busy affordance appears
       // synchronously with the click — fleet instant-feedback rule); the
       // shell's watch covers reload-mid-publish and other-tab/device starts.
+      publishButton.hidden = false; // a running publish keeps its progress surface even if a snapshot already reads clean
       publishButton.disabled = true;
       chipEl.disabled = true;
       // Keep the banner highlighted while publishing (decisions/00094): the chip
@@ -626,6 +635,11 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     }
     publishButton.title = "";
     chipEl.textContent = parts.length === 0 ? "No unpublished changes" : parts.join(" · ");
+    // Nothing to publish → no Publish button (operator, 2026-08-02): with the
+    // chip already reading "No unpublished changes" the button is dead chrome,
+    // and its absence is what lets the bar collapse to a narrow strip (see
+    // `.wx-statusbar:not(.wx-statusbar-pending)` in style.css).
+    publishButton.hidden = parts.length === 0;
     // Prominent only when there's actually something to publish — see
     // `.wx-statusbar-pending` in style.css for why it isn't always-on.
     statusBar.classList.toggle("wx-statusbar-pending", parts.length > 0);
@@ -830,7 +844,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   let opQueue: OpQueue | null = null;
   // Set by the OpQueue's onError, cleared by its onAccepted — the version
   // badge's beforeReload (above) reads it to BLOCK a confirmed reload that
-  // would silently drop a batch the server never acknowledged (decisions/00108).
+  // would silently drop a batch the server never acknowledged (decisions/00109).
   let opSaveFailed = false;
   let activeEditView: EditView | null = null;
   let activeThemePanel: ThemePanel | null = null;
@@ -951,7 +965,11 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     }
 
     if (route.kind === "media") {
-      const panel = mountMediaPanel(api, win);
+      // Staged replacements/deletions change the publishable opCount — the
+      // status bar (and its Publish-button visibility, decisions/00108) must
+      // re-read state after any staging mutation, not wait for the 60s
+      // revalidation.
+      const panel = mountMediaPanel(api, win, () => void refreshStateInBackground());
       main.appendChild(panel.element);
       activePanelTeardown = () => panel.teardown();
       return;
@@ -1147,7 +1165,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   // the fresh snapshot (it has no typing state to lose — same rationale as
   // refreshPagesPanel); and the version badge re-checks the engine version —
   // a deploy past this page turns it into the green glow, and the RELOAD only
-  // ever happens after her explicit "Load latest version" tap (decisions/00108:
+  // ever happens after her explicit "Load latest version" tap (decisions/00109:
   // she may be mid-edit, so nothing ever yanks the page away on its own).
 
   const REVALIDATE_MS = 60_000;

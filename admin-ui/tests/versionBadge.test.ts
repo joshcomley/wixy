@@ -1,4 +1,4 @@
-// Tests for the status-bar version badge (decisions/00108): pin-on-first-check,
+// Tests for the status-bar version badge (decisions/00109): pin-on-first-check,
 // the green-glow update state, and the themed confirm/cancel dialog. The
 // module under test uses the global `document` (jsdom provides it); `win` is a
 // minimal fake so the confirmed reload is observable without jsdom navigation.

@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           # Full history so the engine's `v N` number (first-parent count of
-          # HEAD, decisions/00108) can be computed and baked into the image.
+          # HEAD, decisions/00109) can be computed and baked into the image.
           fetch-depth: 0
 
       - name: Log in to GHCR

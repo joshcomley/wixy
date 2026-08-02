@@ -201,7 +201,7 @@ class TestBakedEngineSha:
 
 
 class TestEngineVersionCount:
-    """decisions/00108: `commit.count` — the engine's human-facing `v N` number
+    """decisions/00109: `commit.count` — the engine's human-facing `v N` number
     (first-parent count of HEAD), which the admin shell's version badge pins and
     polls. Baked `WIXY_ENGINE_VERSION` wins (image builds have no `.git`); a
     gitless root degrades to null, never a 500."""

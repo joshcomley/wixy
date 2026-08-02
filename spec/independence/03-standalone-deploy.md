@@ -13,7 +13,7 @@ droplet. Same image serves both editions (`WIXY_EDITION`); fleet deploy untouche
 - **Build args baked at build time**: `WIXY_ENGINE_SHA`, `WIXY_SYNC_BASE` —
   `/api/version` prefers these envs and falls back to git (REQUIRED change: today it
   shells `git rev-parse` and would 500 in a gitless image). `WIXY_ENGINE_VERSION`
-  (decisions/00108) bakes the `v N` display number the same way, for the same reason.
+  (decisions/00109) bakes the `v N` display number the same way, for the same reason.
 - Publish: GH Action on main merge → `ghcr.io/<owner>/wixy:latest` + `:sha`. Package
   visibility **PUBLIC** (01 §5 d7) — droplet pull and Watchtower need no registry auth.
 

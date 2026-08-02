@@ -1,4 +1,4 @@
-// The deploy-awareness version badge (decisions/00108) — the client-facing,
+// The deploy-awareness version badge (decisions/00109) — the client-facing,
 // deliberately-simple variant of the fleet's `ver` pattern (Aim.Mcp.Common
 // code/ver-mcp): a tiny muted `v N` at the far left of the always-visible
 // status bar while up to date; the canonical green glow (`v old → v new`) once

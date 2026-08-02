@@ -15,7 +15,7 @@ FROM python:3.14-slim
 # context; the publish workflow always passes real values.
 ARG WIXY_ENGINE_SHA=""
 ARG WIXY_SYNC_BASE=""
-# The engine's `v N` display number (decisions/00108), baked alongside the sha —
+# The engine's `v N` display number (decisions/00109), baked alongside the sha —
 # the pip-installed image has no `.git` to count from at runtime.
 ARG WIXY_ENGINE_VERSION=""
 ENV WIXY_ENGINE_SHA=${WIXY_ENGINE_SHA} \

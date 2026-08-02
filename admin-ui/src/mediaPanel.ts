@@ -11,7 +11,7 @@ export interface MediaPanel {
   teardown(): void;
 }
 
-export function mountMediaPanel(api: AdminApi, win?: Window): MediaPanel {
+export function mountMediaPanel(api: AdminApi, win?: Window, onChanged?: () => void): MediaPanel {
   const root = document.createElement("div");
   root.className = "wx-media-panel";
 
@@ -34,6 +34,7 @@ export function mountMediaPanel(api: AdminApi, win?: Window): MediaPanel {
     api,
     ...(win !== undefined ? { win } : {}),
     headerRow,
+    ...(onChanged !== undefined ? { onChanged } : {}),
   });
   root.appendChild(grid.element);
 

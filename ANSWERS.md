@@ -4,7 +4,7 @@ One `## Q-NNN` section per question the operator actually asked, newest first, n
 deleted. Answer FIRST, in plain English, before any detail. Status: 🟢 ANSWERED /
 🟡 PARTIAL / 🔴 OPEN / ⚫ OBSOLETE.
 
-## Q-002 — "When Purdy is using Wixie, it doesn't tell her if the version she's looking at is out of date…"
+## Q-003 — "When Purdy is using Wixie, it doesn't tell her if the version she's looking at is out of date…"
 
 > *"When Purdy is using Wixie, it doesn't tell her if the version she's looking at is
 > out of date. So we need a very simple version of OPVir that just pops up in the same
@@ -37,9 +37,47 @@ vanished and never came back. Both are gone — the glowing badge stays until sh
 Measured/verified 2026-08-02: unit tests for the badge's every state (quiet, glow,
 confirm, cancel, save-blocked), a full end-to-end test in a real browser that watches
 a deploy land and walks the tap → confirm → reload flow, and the whole suite green
-(594 UI unit tests, 1005 server tests, full browser suite). Shipped as decisions/00108.
+(594 UI unit tests, 1005 server tests, full browser suite). Shipped as decisions/00109.
 
-- STATUS: 🟢 ANSWERED (decisions/00108)
+- STATUS: 🟢 ANSWERED (decisions/00109)
+
+## Q-002 — "Currently, when there are no unpublished changes, it still has a publish button…"
+
+> *"Currently, when there are no unpublished changes, it still has a publish button.
+> So that can just hide when there are no changes to publish, because that strip at
+> the top says "no unpublished changes," so you don't need it.*
+>
+> *In fact, when there are no unpublished changes, let's just make it a very narrow
+> strip that says "no unpublished changes." It doesn't need to have the same height
+> as it does right now."* (2026-08-02)
+
+**Answer: done, and confirmed working on the live website. When there is nothing to
+publish, the bar at the top of the admin is now a thin one-line strip that just says
+"No unpublished changes" — no Publish button. The moment you change something, the
+bar grows back to its full height and the Publish button reappears.**
+
+More detail:
+
+- The thin strip is 29 pixels tall, down from 53 — about half the height.
+- The button is hidden, not greyed out — a permanently greyed button would look
+  broken.
+- If a publish is actually running, the button stays on screen no matter what,
+  because that is where the progress is shown.
+- One hidden bug was found and fixed along the way: the "how many changes" counter
+  used to miss certain kinds of change (swapping or deleting a picture, adding or
+  removing a page). With the button hidden, that miscounting would have made those
+  changes impossible to publish, so the counter now counts every kind of change.
+
+Measured/verified 2026-08-02 (evening), on the live site (ca.cinnamons.uk/admin) in
+a real browser after the release went out: with nothing pending, the bar measured
+29 pixels with no Publish button; I made one throwaway edit and the bar grew to 53
+pixels with the Publish button back; I discarded that edit and it returned to the
+thin strip. The live site was left exactly as found — nothing published, nothing
+left over. Checked at normal computer-screen width; phones keep the thin strip too,
+covered by the test suite. All tests pass: 1002 Python, 589 admin unit, 41
+end-to-end.
+
+- STATUS: 🟢 ANSWERED (shipped in PR #140, decisions/00108; verified live 2026-08-02)
 
 ## Q-001 — "I tap the burger menu, nothing appears. If that burger menu genuinely doesn't have anything in it…"
 

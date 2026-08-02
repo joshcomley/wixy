@@ -50,7 +50,7 @@ between them. Spec: [`spec/05-editor.md`](../../spec/05-editor.md). The wire typ
   top of the shell: the draft chip (left, opens the review drawer) and the Publish button
   (right), visible on every route (decisions/00083) — the chip no longer relocates into
   the slim edit bar, and the topbar carries neither control. At the bar's FAR LEFT sits
-  the **version badge** (`versionBadge.ts`, decisions/00108) — the owner-facing, no-git-
+  the **version badge** (`versionBadge.ts`, decisions/00109) — the owner-facing, no-git-
   history variant of the fleet's `ver` pattern: a tiny muted `v N` (the engine's first-
   parent commit count from `/api/version`'s `commit.count`, pinned to the loaded page on
   the first check) while up to date; the fleet's canonical green glow (`v old → v new`,
@@ -60,13 +60,27 @@ between them. Spec: [`spec/05-editor.md`](../../spec/05-editor.md). The wire typ
   (`win.location.reload()` after `beforeReload` flushes the OpQueue; a flush that
   re-queued ops — the shell's `opSaveFailed` flag, set by the queue's `onError` — BLOCKS
   the reload with a calm note instead of silently losing them). Nothing reloads the page
-  on its own: the pre-00108 behaviour (auto-reload outside edit view, a toast inside it)
+  on its own: the pre-00109 behaviour (auto-reload outside edit view, a toast inside it)
   is gone because she may be mid-edit. A rollback deploy quiets the badge again. The chip
   is a plain **label**, not a pill (its box was redundant inside the bar; Publish opens
   the same drawer, so it's a convenience trigger). The bar takes `.wx-statusbar-pending` — tinted background + a
   brand-blue rule — **only when there is something to publish** (draft ops or outside site
   updates) or while a publish runs; with nothing pending it stays plain and its label goes
-  muted, so the prominence keeps its meaning (decisions/00094). The quiet styling is keyed
+  muted, so the prominence keeps its meaning (decisions/00094). In that quiet state the
+  Publish button also HIDES (`hidden`) and the bar collapses to a narrow strip
+  (`.wx-statusbar:not(.wx-statusbar-pending)` drops the vertical padding that framed the
+  button) — with the chip already saying "No unpublished changes", the button is dead
+  chrome (operator, 2026-08-02, decisions/00108). The button is hidden from CONSTRUCTION
+  (the quiet default), not just hidden on first state load — painting it visible-then-
+  hiding made the page jump mid-layout. A RUNNING publish forces the button
+  visible even if a state snapshot already reads clean, since it's the progress surface.
+  Two load-bearing consequences: the STATE endpoint's `draft.opCount` counts every
+  publishable kind (same formula as the preview — decisions/00071/00080's staged page
+  adds/deletes and staged media replacements/deletions produce no overlay ops), and any
+  publishable mutation that isn't a draft PATCH must fire a shell state refresh — the
+  media panel does this via the grid's `onChanged` dep (wired to
+  `refreshStateInBackground`), or a staged replacement would leave the bar stale
+  (button hidden) until the 60s revalidation. The quiet styling is keyed
   off that bar class, NOT the chip's `disabled` attribute — the chip is enabled when idle and
   disabled mid-publish, which is the opposite of what the appearance needs. While a publish runs the
   status bar doubles as the progress surface (decisions/00089, Inv 25): the Publish
@@ -185,7 +199,7 @@ One `OpQueue` per session (owned by `shell.ts`); panels take only the `OpQueueLi
 
 `shell.ts` (chrome + state + the OpQueue + a 60s revalidation loop that drives the
 version badge's `check()` — a deploy turns the badge into its green glow; the reload
-itself only ever comes from her confirm tap, decisions/00108; same-route panel
+itself only ever comes from her confirm tap, decisions/00109; same-route panel
 re-renders from that loop never close an open drawer — only genuine route changes do,
 decisions/00081); `versionBadge.ts` (the status bar's deploy-awareness badge + its
 themed reload-confirmation dialog — detailed in the status-bar paragraph above);

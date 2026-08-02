@@ -32,8 +32,11 @@ test.describe("E2E 1: text edit", () => {
 
     // The slim status bar (decisions/00083) — chip + Publish — is visible on
     // EVERY route, edit view included (the topbar's own chrome hides here).
+    // The Publish button itself only appears once there IS something to
+    // publish (operator, 2026-08-02) — asserted below, after the edit lands.
+    // (Whether it's visible HERE depends on other files' leftover upstream
+    // commits — see the chip comment below — so no pre-edit pin either way.)
     await expect(page.locator(".wx-statusbar")).toBeVisible();
-    await expect(page.locator(".wx-statusbar .wx-publish-button")).toBeVisible();
 
     const newTitle = "Published via E2E 1";
     const patchAccepted = waitForNextDraftPatchAccepted(page);
@@ -51,6 +54,9 @@ test.describe("E2E 1: text edit", () => {
     // live pointer BACKWARD relative to the checkout's HEAD on purpose, and
     // E2E 6's own upstream commit only clears once ITS publish runs).
     await expect(page.locator(".wx-draft-chip")).toContainText("1 unpublished change");
+
+    // With a change pending, the Publish button is there to act on it.
+    await expect(page.locator(".wx-statusbar .wx-publish-button")).toBeVisible();
 
     const version = await publishAndWait(page);
 

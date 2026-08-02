@@ -12,7 +12,7 @@ and must never turn a missing repo into a 500 (the M2 finding this exists to fix
 the fleet, where `.git` always exists, `WIXY_ENGINE_SHA` stays unset and behavior is
 unchanged (git fallback always succeeds, exactly as it does today).
 
-`commit.count` (decisions/00108) is the engine's human-facing `v N` display number —
+`commit.count` (decisions/00109) is the engine's human-facing `v N` display number —
 the first-parent commit count of HEAD, the same number the fleet's `ver` badge
 pattern shows (one increment per merge to main, so the owner watches it climb release
 by release rather than per commit). The admin shell's version badge pins it at page
