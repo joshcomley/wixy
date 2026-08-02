@@ -134,6 +134,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   // immediate call to pin the loaded page's version.
   const versionBadge = mountVersionBadge({
     fetchVersion: () => api.getServerVersion(),
+    fetchNotes: (since) => api.getVersionNotes(since),
     win,
     beforeReload: async () => {
       await opQueue?.flushNow();

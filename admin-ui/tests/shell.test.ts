@@ -203,6 +203,7 @@ function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
   return {
     getState: vi.fn(async () => fakeState()),
     getServerVersion: vi.fn(async () => null),
+    getVersionNotes: vi.fn(async () => null),
     getContent: vi.fn(async () => ({ content: {}, bindings: { page: "index", fields: [] } })),
     patchDraft: vi.fn(async () => ({ kind: "ok" as const, rev: 1 })),
     discardDraft: vi.fn(async () => ({ rev: 0 })),
@@ -1510,6 +1511,10 @@ describe("mountShell", () => {
     const backdrop = document.querySelector(".wx-version-backdrop");
     expect(backdrop?.textContent).toContain("A new version of Wixy is ready");
     expect(backdrop?.textContent).toContain("Would you like to load the latest version now?");
+    // The What's-new list (decisions/00112): the fake notes feed fails, so
+    // the badge falls back to the generic line rather than a blank or a changelog.
+    expect(backdrop?.textContent).toContain("What's new in this version:");
+    expect(backdrop?.textContent).toContain("General bug fixes and improvements.");
     backdrop!.querySelector<HTMLButtonElement>(".wx-version-dialog-confirm")!.click();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(reloadSpy).toHaveBeenCalledTimes(1);

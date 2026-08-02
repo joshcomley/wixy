@@ -266,6 +266,110 @@ class TestEngineVersionCount:
         assert response.json()["commit"]["count"] is None
 
 
+class TestVersionNotes:
+    """decisions/00112: `/api/version/notes` — the badge popup's "What's new"
+    feed, harvested from `Release-note:` commit trailers. Deduped, chronological,
+    never a 500, never empty (the generic line is the floor)."""
+
+    @staticmethod
+    def _commit(repo: Path, filename: str, message: str) -> str:
+        (repo / filename).write_text(f"{filename}\n", encoding="utf-8")
+        _git(["add", "."], repo)
+        _git(["commit", "-m", message], repo)
+        return _git(["rev-parse", "HEAD"], repo).stdout.strip()
+
+    def test_trailers_collected_deduped_and_chronological(
+        self, tmp_path: Path, wixy_repo_root: Path
+    ) -> None:
+        first = self._commit(
+            wixy_repo_root,
+            "a.txt",
+            "feat: one\n\nRelease-note: The update popup tells you what changed.",
+        )
+        # A second commit repeating the SAME note (multi-commit PR shape) collapses.
+        self._commit(
+            wixy_repo_root,
+            "b.txt",
+            "feat: two\n\nRelease-note: The update popup tells you what changed.",
+        )
+        self._commit(
+            wixy_repo_root,
+            "c.txt",
+            "fix: three\n\nRelease-note: General bug fixes and improvements.",
+        )
+        app = create_app(storage_root=tmp_path / "storage", wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/version/notes", params={"since": first})
+        assert response.status_code == 200
+        assert response.json()["notes"] == [
+            "The update popup tells you what changed.",
+            "General bug fixes and improvements.",
+        ]
+
+    def test_no_trailers_in_range_falls_back_to_the_generic_line(
+        self, tmp_path: Path, wixy_repo_root: Path
+    ) -> None:
+        # The fixture repo's commits carry no trailers — pre-doctrine history.
+        head = _git(["rev-parse", "HEAD"], wixy_repo_root).stdout.strip()
+        app = create_app(storage_root=tmp_path / "storage", wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/version/notes", params={"since": head})
+        assert response.status_code == 200
+        assert response.json()["notes"] == ["General bug fixes and improvements."]
+
+    def test_unknown_since_uses_recent_history_not_500(
+        self, tmp_path: Path, wixy_repo_root: Path
+    ) -> None:
+        self._commit(
+            wixy_repo_root,
+            "a.txt",
+            "feat: one\n\nRelease-note: The update popup tells you what changed.",
+        )
+        app = create_app(storage_root=tmp_path / "storage", wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            # Hex-shaped but not a commit in this repo.
+            response = client.get("/api/version/notes", params={"since": "deadbeef"})
+        assert response.status_code == 200
+        assert "The update popup tells you what changed." in response.json()["notes"]
+
+    def test_malformed_since_is_ignored_not_injected(
+        self, tmp_path: Path, wixy_repo_root: Path
+    ) -> None:
+        app = create_app(storage_root=tmp_path / "storage", wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/version/notes", params={"since": "--help;x"})
+        assert response.status_code == 200
+        assert response.json()["notes"] == ["General bug fixes and improvements."]
+
+    def test_gitless_repo_root_returns_the_generic_line(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("WIXY_ENGINE_VERSION", raising=False)
+        gitless_root = tmp_path / "gitless-wixy-repo"
+        (gitless_root / "projects").mkdir(parents=True)
+        (gitless_root / "projects" / "test.json").write_text(
+            json.dumps(
+                {
+                    "slug": "test",
+                    "name": "test",
+                    "repo": "https://example.invalid/unused.git",
+                    "defaultBranch": "main",
+                    "cmdProject": "test",
+                    "domain": "test.example.invalid",
+                    "locale": "en-GB",
+                    "indexable": False,
+                    "media": {"maxLongSidePx": 2000, "jpegQuality": 85},
+                }
+            ),
+            encoding="utf-8",
+        )
+        app = create_app(storage_root=tmp_path / "storage", wixy_repo_root=gitless_root)
+        with TestClient(app) as client:
+            response = client.get("/api/version/notes")
+        assert response.status_code == 200
+        assert response.json()["notes"] == ["General bug fixes and improvements."]
+
+
 class TestSyncBase:
     """spec/independence/04: `syncBase` — her fork's last-synced-from upstream commit,
     a baked build-arg env only; null on the fleet edition (not a fork)."""

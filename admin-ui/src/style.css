@@ -295,6 +295,30 @@ html, body {
   font-size: 0.8125rem;
 }
 
+/* The "What's new" list (decisions/00112): plain-English release lines, kept
+   visually quieter than the question itself — the confirm is the action. */
+.wx-version-notes-heading {
+  margin: 2px 0 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--wx-muted);
+}
+
+.wx-version-notes {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.875rem;
+}
+
+.wx-version-notes .wx-version-notes-loading {
+  list-style: none;
+  margin-left: -18px;
+  color: var(--wx-muted);
+}
+
 .wx-version-dialog-actions {
   display: flex;
   justify-content: flex-end;

@@ -22,6 +22,19 @@ test.describe("version badge (decisions/00109)", () => {
     await page.route("**/api/version", (route) =>
       route.fulfill({ contentType: "application/json", body: JSON.stringify(versionPayload) }),
     );
+    // The "What's new" feed (decisions/00112): plain-English release lines the
+    // popup lists — never the git history behind them.
+    await page.route("**/api/version/notes*", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          notes: [
+            "The update popup tells you what changed in plain English.",
+            "General bug fixes and improvements.",
+          ],
+        }),
+      }),
+    );
 
     await page.goto("/admin/pages");
     const badge = page.locator(".wx-version-badge");
@@ -37,12 +50,18 @@ test.describe("version badge (decisions/00109)", () => {
     await expect(badge).toHaveClass(/wx-version-update-available/);
     expect(page.url()).toContain("/admin/pages"); // still right where she was
 
-    // Tap → the themed confirmation, not a changelog. "Not now" dismisses and
-    // the glow stays (it's still waiting for her).
+    // Tap → the themed confirmation with its plain-English What's-new list —
+    // and nothing that smells like git (no shas, no commit subjects).
     await badge.click();
     const dialog = page.locator(".wx-version-dialog");
     await expect(dialog).toContainText("A new version of Wixy is ready");
     await expect(dialog).toContainText("Would you like to load the latest version now?");
+    await expect(dialog).toContainText("What's new in this version:");
+    await expect(dialog.locator(".wx-version-notes li")).toHaveText([
+      "The update popup tells you what changed in plain English.",
+      "General bug fixes and improvements.",
+    ]);
+    await expect(dialog).not.toContainText(/[0-9a-f]{40}/);
     await dialog.getByRole("button", { name: "Not now" }).click();
     await expect(page.locator(".wx-version-backdrop")).toHaveCount(0);
     await expect(badge).toHaveClass(/wx-version-update-available/);

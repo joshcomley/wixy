@@ -46,6 +46,7 @@ Handler column is `file:func`. "Auth: CF" = gated by the admin middleware. Respo
 | GET | `/healthz` | `routes_internal.py:get_healthz` | none | `{"ready": true}` (delegates to `get_ready`; same CF-edge 404) |
 | POST | `/internal/warmup` | `routes_internal.py:post_warmup` | none | `{"warm": true}`; **503** on `CheckoutError`; 404 CF-edge |
 | GET | `/api/version` | `routes_version.py:get_version` | **none (public by design)** | `{"commit": {"sha_full": "<engine HEAD sha>"\|null, "count": <int\|null>}, "slot": <str\|null>, "version": <int\|null>, "edition": "fleet"\|"standalone", "syncBase": <str\|null>}` — `commit.count` (decisions/00109) is the engine's `v N` display number (first-parent count of HEAD; baked `WIXY_ENGINE_VERSION` preferred, git fallback, null on a gitless image); `version` is the SITE's live pointer, unrelated |
+| GET | `/api/version/notes?since=<sha>` | `routes_version.py:get_version_notes` | **none (public by design)** | `{"notes": [<plain-English line>, …]}` (decisions/00112) — the update popup's "What's new": `Release-note:` trailers from `<since>..HEAD`, deduped, chronological, ≤8; `since` hex-validated (anything else ignored → recent history), unknown `since` → recent history, no trailers/gitless → `["General bug fixes and improvements."]`; never a changelog, never a 500 |
 
 ### Admin API (`/api/admin/*`, all Auth: CF)
 

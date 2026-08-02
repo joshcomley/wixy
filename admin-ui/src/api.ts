@@ -532,6 +532,7 @@ export interface ServerVersion {
 
 export interface AdminApi {  getState(): Promise<StateResponse>;
   getServerVersion(): Promise<ServerVersion | null>;
+  getVersionNotes(since: string | null): Promise<string[] | null>;
   getContent(page: string): Promise<ContentResponse>;
   patchDraft(expectedRev: number, ops: DraftOp[]): Promise<PatchResult>;
   discardDraft(): Promise<{ rev: number }>;
@@ -594,6 +595,23 @@ export function createApi(): AdminApi {
           shaFull: version.commit?.sha_full ?? null,
           count: version.commit?.count ?? null,
         };
+      } catch {
+        return null;
+      }
+    },
+
+    /** The user-facing "what's new" lines for the update popup (decisions/00112):
+     * `Release-note:` trailers harvested from the commits between `since` and the
+     * server's HEAD. The server dedupes, orders chronologically, and substitutes
+     * the generic fallback line — null here only means "couldn't fetch at all". */
+    async getVersionNotes(since: string | null): Promise<string[] | null> {
+      try {
+        const body = await parseJson<{ notes?: string[] }>(
+          await fetchWithRetry(
+            `/api/version/notes${since !== null ? `?since=${encodeURIComponent(since)}` : ""}`,
+          ),
+        );
+        return Array.isArray(body.notes) ? body.notes : null;
       } catch {
         return null;
       }

@@ -21,6 +21,11 @@ export interface VersionBadgeDeps {
    * "couldn't find out" (network down, gitless image), which always leaves the
    * badge exactly as it was. */
   fetchVersion: () => Promise<ServerVersion | null>;
+  /** The "What's new" lines for the update popup (decisions/00112), fetched
+   * with the LOADED page's sha so the range is exactly "what changed since the
+   * version she's running". `null` = couldn't fetch; the popup still shows the
+   * generic line rather than nothing. */
+  fetchNotes: (since: string | null) => Promise<string[] | null>;
   win: Window;
   /** Runs before the confirmed reload (the shell flushes the OpQueue here).
    * A THROW blocks the reload — the dialog says so and stays open. */
@@ -36,6 +41,11 @@ export interface VersionBadge {
   teardown(): void;
 }
 
+/** Display fallback when the notes fetch itself fails (the server already
+ * substitutes this line for empty history; this is only for "couldn't ask").
+ * Keep in sync with `RELEASE_NOTES_FALLBACK` in `wixy_server/routes_version.py`. */
+const NOTES_FALLBACK = "General bug fixes and improvements.";
+
 export function mountVersionBadge(deps: VersionBadgeDeps): VersionBadge {
   const badge = document.createElement("button");
   badge.type = "button";
@@ -48,6 +58,8 @@ export function mountVersionBadge(deps: VersionBadgeDeps): VersionBadge {
 
   let loaded: ServerVersion | null = null;
   let latest: ServerVersion | null = null;
+  let notes: string[] | null = null;
+  let notesListEl: HTMLUListElement | null = null;
   let backdrop: HTMLElement | null = null;
 
   function render(): void {
@@ -95,6 +107,10 @@ export function mountVersionBadge(deps: VersionBadgeDeps): VersionBadge {
       current.shaFull !== loaded.shaFull
     ) {
       latest = current;
+      // Prefetch the "What's new" lines now (the glow may sit for minutes
+      // before she taps) so the popup opens with them already in hand.
+      notes = null;
+      void loadNotes();
     } else if (current.shaFull !== null && current.shaFull === loaded.shaFull) {
       latest = null; // a rollback deploy landed — go quiet again
     }
@@ -102,9 +118,33 @@ export function mountVersionBadge(deps: VersionBadgeDeps): VersionBadge {
     render();
   }
 
+  async function loadNotes(): Promise<void> {
+    const result = await deps.fetchNotes(loaded?.shaFull ?? null);
+    notes = result ?? [NOTES_FALLBACK];
+    // If the dialog is open and still showing its loading line, fill it in.
+    if (notesListEl !== null) renderNotesInto(notesListEl);
+  }
+
+  function renderNotesInto(list: HTMLUListElement): void {
+    list.innerHTML = "";
+    if (notes === null) {
+      const loading = document.createElement("li");
+      loading.className = "wx-version-notes-loading";
+      loading.textContent = "Loading what's new…";
+      list.appendChild(loading);
+      return;
+    }
+    for (const note of notes) {
+      const item = document.createElement("li");
+      item.textContent = note;
+      list.appendChild(item);
+    }
+  }
+
   function closeDialog(): void {
     backdrop?.remove();
     backdrop = null;
+    notesListEl = null;
     document.removeEventListener("keydown", onDialogKeydown);
     badge.focus();
   }
@@ -133,6 +173,20 @@ export function mountVersionBadge(deps: VersionBadgeDeps): VersionBadge {
     if (updating) {
       title.textContent = "A new version of Wixy is ready";
       body.textContent = "Would you like to load the latest version now?";
+
+      // The "What's new" list (decisions/00112): the Release-note trailers of
+      // exactly the commits she'd advance past — plain English, never a
+      // changelog. Prefetched when the glow appeared; a loading line until
+      // then (loadNotes fills it in place if it lands while she's reading).
+      const notesHeading = document.createElement("p");
+      notesHeading.className = "wx-version-notes-heading";
+      notesHeading.textContent = "What's new in this version:";
+      const notesList = document.createElement("ul");
+      notesList.className = "wx-version-notes";
+      notesListEl = notesList;
+      renderNotesInto(notesList);
+      if (notes === null) void loadNotes(); // belt-and-braces (prefetch raced)
+
       const note = document.createElement("p");
       note.className = "wx-version-dialog-note";
       note.textContent = "Anything you've already changed is saved and will still be there.";
@@ -170,7 +224,7 @@ export function mountVersionBadge(deps: VersionBadgeDeps): VersionBadge {
         })();
       });
       actions.append(cancelButton, confirmButton);
-      dialog.append(title, body, note, actions);
+      dialog.append(title, body, notesHeading, notesList, note, actions);
       confirmButton.focus();
     } else {
       title.textContent = "Wixy is up to date";

@@ -4,6 +4,44 @@ One `## Q-NNN` section per question the operator actually asked, newest first, n
 deleted. Answer FIRST, in plain English, before any detail. Status: 🟢 ANSWERED /
 🟡 PARTIAL / 🔴 OPEN / ⚫ OBSOLETE.
 
+## Q-006 — "…we want to add in the update a brief, very user-friendly release change list of what's new in this version…"
+
+> *"So now what we want to do is we want to add in the update a brief, very
+> user-friendly release change list of what's new in this version. So it's not the
+> full Git comment history, and that means that anything going forward, any changes
+> to Wixie, needs a very user-friendly description of what it is. And if it's just
+> bug fixes and things, then it just says that. General bug fixes, something like
+> that. So that means updating the doctrine for Wixie so that any git commits also
+> have with it in the description the user-friendly release info sentence. And that
+> is what gets shown when there's a new version."* (2026-08-02)
+
+**Answer: done. When the version number glows green and Purdy taps it, the popup now
+shows a short "What's new in this version" list in plain English — one line per
+change, written for her, never the git history. Every Wixy change from now on must
+carry that plain-English sentence inside its commit message (a new binding rule for
+everyone who works on Wixy, and the computer double-checks it on every change — a
+missing sentence fails the build). If a change is nothing she can see, the sentence
+is simply "General bug fixes and improvements."**
+
+How it works in plain English: every time a change is made to Wixy, the person (or
+computer) making it writes one ordinary sentence about it — like "The update popup
+tells you what changed in plain English." Those sentences travel with the change.
+When her page notices a new version has arrived, it asks for exactly the sentences
+belonging to the versions she missed, and lists them as a few bullets in the popup,
+above the "Load latest version" button. If somehow there are no sentences to show
+(for example a change made before this rule existed), the popup falls back to
+"General bug fixes and improvements." so it never shows her a blank or programmer
+gibberish.
+
+Measured/verified 2026-08-02: the sentence-collecting is covered by new server tests
+(collecting, de-duplicating, ordering, every fallback), the popup list by new unit
+tests and the full browser test (which also proves no git shas ever appear), and the
+whole suite is green. Verified live on ca.cinnamons.uk: this very change carried the
+sentence "The update popup tells you what changed in plain English." — the first
+real entry she'll see.
+
+- STATUS: 🟢 ANSWERED (shipped in PR #146, decisions/00112; verified live 2026-08-02)
+
 ## Q-005 — "So the one I just added, the lips are in different positions and I can't see how I can move the image so they match up like the others? Do I just ask the chat?"
 
 > *"So the one I just added, the lips are in different positions and I can't see how I
