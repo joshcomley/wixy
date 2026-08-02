@@ -1,0 +1,13 @@
+[
+  {"type": "goto", "url": "https://ca.cinnamons.uk/admin/pages"},
+  {"type": "wait_for", "selector": ".wx-version-badge", "state": "visible", "timeout": 15000},
+  {"type": "evaluate", "js": "(() => { const b = document.querySelector('.wx-version-badge'); return { pinned: b?.textContent, glow: b?.classList.contains('wx-version-update-available') }; })()"},
+  {"type": "wait_for", "selector": ".wx-version-badge.wx-version-update-available", "state": "visible", "timeout": 1500000},
+  {"type": "evaluate", "js": "(() => { const b = document.querySelector('.wx-version-badge'); return { glowingText: b?.textContent }; })()"},
+  {"type": "screenshot", "out": "D:/Servers/Cmd/Storage/clones/wixy__worktrees/00017__wixy_when-purdy-is-using-wixie-it-doesn-t-tel/.scratch/live-glow-strip.png", "selector": ".wx-statusbar"},
+  {"type": "click", "selector": ".wx-version-badge"},
+  {"type": "wait_for", "selector": ".wx-version-dialog", "state": "visible", "timeout": 10000},
+  {"type": "evaluate", "js": "(() => { const d = document.querySelector('.wx-version-dialog'); return { dialogText: d?.textContent?.replace(/\\s+/g, ' ').trim(), bullets: [...(d?.querySelectorAll('.wx-version-notes li') ?? [])].map(li => li.textContent) }; })()"},
+  {"type": "screenshot", "out": "D:/Servers/Cmd/Storage/clones/wixy__worktrees/00017__wixy_when-purdy-is-using-wixie-it-doesn-t-tel/.scratch/live-glow-dialog.png", "selector": ".wx-version-backdrop"},
+  {"type": "click", "selector": ".wx-version-dialog-cancel"}
+]
