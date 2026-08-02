@@ -61,7 +61,9 @@ ca.cinnamons.uk = STAGING                   her droplet (DO LON1, ~£9.50/mo)
    sourced from **baked build args** (`WIXY_ENGINE_SHA`, `WIXY_SYNC_BASE`) with git
    fallback, because the pip-installed image has no `.git` and the current
    git-shelling implementation would 500 (M2 finding — this is a required code
-   change, not an option).
+   change, not an option). The engine's human-facing `v N` number (first-parent
+   count of HEAD, shown by the admin's version badge — decisions/00108) follows the
+   same pattern via `WIXY_ENGINE_VERSION`.
 
 ## 3. Git identity & credentials on her side
 

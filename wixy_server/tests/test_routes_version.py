@@ -200,6 +200,72 @@ class TestBakedEngineSha:
         assert response.json()["commit"]["sha_full"] == engine_sha
 
 
+class TestEngineVersionCount:
+    """decisions/00108: `commit.count` — the engine's human-facing `v N` number
+    (first-parent count of HEAD), which the admin shell's version badge pins and
+    polls. Baked `WIXY_ENGINE_VERSION` wins (image builds have no `.git`); a
+    gitless root degrades to null, never a 500."""
+
+    def test_reports_first_parent_count(self, tmp_path: Path, wixy_repo_root: Path) -> None:
+        expected = int(
+            _git(["rev-list", "--first-parent", "--count", "HEAD"], wixy_repo_root).stdout.strip()
+        )
+        app = create_app(storage_root=tmp_path / "storage", wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/version")
+        assert response.status_code == 200
+        assert response.json()["commit"]["count"] == expected
+
+    def test_baked_version_wins_over_git(
+        self, tmp_path: Path, wixy_repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WIXY_ENGINE_VERSION", "4242")
+        app = create_app(storage_root=tmp_path / "storage", wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/version")
+        assert response.json()["commit"]["count"] == 4242
+
+    def test_unparseable_baked_version_degrades_to_null(
+        self, tmp_path: Path, wixy_repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WIXY_ENGINE_VERSION", "not-a-number")
+        app = create_app(storage_root=tmp_path / "storage", wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/version")
+        assert response.status_code == 200
+        assert response.json()["commit"]["count"] is None
+
+    def test_gitless_repo_root_returns_null_count_not_500(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Same M2 lesson as the sha: a pip-installed image has no `.git` — the
+        badge's number simply goes absent."""
+        monkeypatch.delenv("WIXY_ENGINE_VERSION", raising=False)
+        gitless_root = tmp_path / "gitless-wixy-repo"
+        (gitless_root / "projects").mkdir(parents=True)
+        (gitless_root / "projects" / "test.json").write_text(
+            json.dumps(
+                {
+                    "slug": "test",
+                    "name": "test",
+                    "repo": "https://example.invalid/unused.git",
+                    "defaultBranch": "main",
+                    "cmdProject": "test",
+                    "domain": "test.example.invalid",
+                    "locale": "en-GB",
+                    "indexable": False,
+                    "media": {"maxLongSidePx": 2000, "jpegQuality": 85},
+                }
+            ),
+            encoding="utf-8",
+        )
+        app = create_app(storage_root=tmp_path / "storage", wixy_repo_root=gitless_root)
+        with TestClient(app) as client:
+            response = client.get("/api/version")
+        assert response.status_code == 200
+        assert response.json()["commit"]["count"] is None
+
+
 class TestSyncBase:
     """spec/independence/04: `syncBase` — her fork's last-synced-from upstream commit,
     a baked build-arg env only; null on the fleet edition (not a fork)."""

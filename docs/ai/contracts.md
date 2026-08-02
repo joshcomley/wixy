@@ -45,7 +45,7 @@ Handler column is `file:func`. "Auth: CF" = gated by the admin middleware. Respo
 | GET | `/internal/ready` | `routes_internal.py:get_ready` | none | `{"ready": true}` — **404 (no body)** if a `Cf-Ray`/`Cf-Connecting-Ip` header is present |
 | GET | `/healthz` | `routes_internal.py:get_healthz` | none | `{"ready": true}` (delegates to `get_ready`; same CF-edge 404) |
 | POST | `/internal/warmup` | `routes_internal.py:post_warmup` | none | `{"warm": true}`; **503** on `CheckoutError`; 404 CF-edge |
-| GET | `/api/version` | `routes_version.py:get_version` | **none (public by design)** | `{"commit": {"sha_full": "<engine HEAD sha>"}, "slot": <str\|null>, "version": <int\|null>}` |
+| GET | `/api/version` | `routes_version.py:get_version` | **none (public by design)** | `{"commit": {"sha_full": "<engine HEAD sha>"\|null, "count": <int\|null>}, "slot": <str\|null>, "version": <int\|null>, "edition": "fleet"\|"standalone", "syncBase": <str\|null>}` — `commit.count` (decisions/00108) is the engine's `v N` display number (first-parent count of HEAD; baked `WIXY_ENGINE_VERSION` preferred, git fallback, null on a gitless image); `version` is the SITE's live pointer, unrelated |
 
 ### Admin API (`/api/admin/*`, all Auth: CF)
 
