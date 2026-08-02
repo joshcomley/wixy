@@ -212,8 +212,8 @@ html, body {
    deliberately NOT part of this (decisions/00083). */
 .wx-shell-editing .wx-topbar {
   max-height: 0;
-  /* min-height beats max-height in CSS (the ≤720px block sets min-height) —
-     without this the "hidden" bar would stay 52px tall on a phone. */
+  /* min-height beats max-height in CSS — without this, any future min-height
+     on the bar would keep the "hidden" bar tall while it slides shut. */
   min-height: 0;
   padding-top: 0;
   padding-bottom: 0;
@@ -262,6 +262,14 @@ html, body {
    media query), which is also where the trigger appears at all. */
 .wx-topbar-secondary {
   display: contents;
+}
+
+/* The narrow-viewport nav row (decisions/00107): holds the relocated tab
+   strip + the ⋯ trigger + the popover below ~720px, replacing the topbar
+   there. Hidden on wide viewports (its children live in the topbar/sidebar
+   instead — placeChrome in shell.ts moves them across the breakpoint). */
+.wx-navrow {
+  display: none;
 }
 
 .wx-topbar-overflow {
@@ -3015,39 +3023,92 @@ div.wx-media-thumb {
     grid-template-columns: 1fr;
   }
 
+  /* The topbar is GONE at this width (decisions/00107): the "Wixy · name"
+     banner cost a full row on a phone for a title the owner doesn't need, and
+     the bar's own `overflow: hidden` (there for the desktop edit-view slide)
+     clipped the ⋯ popover to invisibility — "I tap the burger menu, nothing
+     appears" (operator 2026-08-02). Its controls move into the nav row below. */
   .wx-topbar {
-    flex-wrap: wrap;
-    height: auto;
-    min-height: 52px;
-    padding: 8px 12px;
-    row-gap: 6px;
-    /* Anchors the secondary-controls popover to the bar. */
+    display: none;
+  }
+
+  /* The nav row replaces it: the tab strip scrolls horizontally while the ⋯
+     trigger stays pinned at the right OUTSIDE the scroll (a trigger that
+     scrolls away with the tabs is a trigger you lose). The row — not the nav —
+     carries the bottom border so it spans the trigger too, and it anchors the
+     popover: position: relative with NO overflow clip, which is exactly why
+     the popover shows now. */
+  .wx-navrow {
+    display: flex;
+    align-items: stretch;
+    flex: none;
     position: relative;
+    border-bottom: 1px solid var(--wx-border);
+    background: var(--wx-surface);
+  }
+
+  .wx-navrow .wx-nav {
+    flex: 1 1 auto;
+    min-width: 0;
+    border-bottom: none;
+  }
+
+  .wx-navrow .wx-topbar-overflow {
+    flex: none;
+    align-self: center;
+    margin-right: 8px;
+  }
+
+  /* Edit view hides the row with the tabs (parity with the old topbar); the
+     ▾ chrome reveal shows it again — the revealed rule must come AFTER the
+     editing one (equal specificity, later wins). */
+  .wx-shell-editing .wx-navrow {
+    display: none;
+  }
+
+  .wx-shell-chrome-revealed .wx-navrow {
+    display: flex;
   }
 
   /* The ⋯ trigger exists only at this width (its base rule is display: none)
-     — it tucks the five secondary control groups (zoom, font scale,
-     screenshot, theme, settings) into a popover so the bar takes one row. */
-  /* ONE-row bar at this width: title (truncating as needed), ⋯ trigger. The
-     site link + zoom/font/screenshot/theme/settings live in the popover. The
-     draft chip and Publish button are NOT here — they moved to the status bar
-     (decisions/00083), which shrinks gracefully instead (the chip truncates). */
-  .wx-topbar {
-    gap: 8px;
+     — it tucks the five secondary control groups (site link, zoom, font
+     scale, screenshot, theme, settings) into a popover so the chrome stays
+     one row. The draft chip and Publish button are NOT here — they live in
+     the status bar (decisions/00083), which shrinks gracefully instead (the
+     chip truncates). */
+  .wx-topbar-overflow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    font: 600 1rem/1 system-ui, sans-serif;
+    padding: 6px 10px;
+    border-radius: var(--wx-radius);
+    border: 1px solid var(--wx-border);
+    background: var(--wx-surface);
+    color: var(--wx-ink);
+    cursor: pointer;
   }
 
-  /* flex-wrap decides line breaks on HYPOTHETICAL (unshrunk) main sizes, so a
-     nowrap title whose content is 135px wraps the ⋯ trigger to a second row
-     even though it would shrink after the fact. A small flex-basis keeps the
-     wrap calculation at 60px while grow lets the title use whatever slack
-     the row actually has (and the empty spacer is redundant now). */
-  .wx-topbar-title {
-    min-width: 0;
-    flex: 1 1 60px;
-  }
-
-  .wx-topbar-spacer {
+  .wx-topbar-secondary {
+    position: absolute;
+    top: 100%;
+    right: 8px;
+    z-index: 60;
     display: none;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 200px;
+    padding: 12px;
+    background: var(--wx-surface);
+    border: 1px solid var(--wx-border);
+    border-radius: var(--wx-radius);
+    box-shadow: var(--wx-shadow);
+  }
+
+  .wx-topbar-secondary.wx-topbar-secondary-open {
+    display: flex;
   }
 
   /* Only a small step down from the desktop 0.875rem — this is the banner's
@@ -3153,19 +3214,14 @@ div.wx-media-thumb {
     min-height: 44px;
   }
 
-  .wx-topbar-title {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 100%;
-  }
-
   /* Body stacks: horizontal nav strip on top, main content below, instead of
      the desktop side-by-side sidebar (which has no room on a phone). */
   .wx-body {
     flex-direction: column;
   }
 
+  /* The tab strip: scrolls horizontally inside the nav row (the row carries
+     the bottom border and keeps the ⋯ trigger out of the scroll). */
   .wx-nav {
     width: auto;
     flex-direction: row;

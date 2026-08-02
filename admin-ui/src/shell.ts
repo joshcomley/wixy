@@ -357,11 +357,14 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   // The site link + zoom/font-scale/screenshot/theme/settings controls are
   // wrapped in one container that is `display: contents` on wide viewports
   // (its children lay out as direct topbar items exactly as before) and a
-  // hidden popover below ~720px, toggled by the ⋯ trigger — so the top bar
-  // stays one row on a phone while every control remains reachable (see
-  // style.css's `.wx-topbar-secondary` rules). The site link keeps its own
-  // text label (it's not an icon); the icon buttons spell theirs out via
-  // their aria-labels in the popover.
+  // hidden popover below ~720px, toggled by the ⋯ trigger. At that width the
+  // topbar itself is GONE (decisions/00107) and both trigger and popover live
+  // in the nav row instead (see placeChrome below): the trigger pins to the
+  // right of the scrolling tab strip, and the popover anchors to the row —
+  // which, unlike the topbar, has NO overflow clip, so the popover actually
+  // shows (the topbar's edit-view slide clip is what hid it). The site link
+  // keeps its own text label (it's not an icon); the icon buttons spell
+  // theirs out via their aria-labels in the popover.
   const secondary = document.createElement("div");
   secondary.className = "wx-topbar-secondary";
   secondary.append(siteLink, zoomGroup, fontScaleGroup, screenshotButton, themeToggle, settingsToggle);
@@ -428,6 +431,14 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   const editBarHost = document.createElement("div");
   editBarHost.className = "wx-edit-bar-host";
 
+  // The narrow-viewport nav row (decisions/00107): replaces the topbar below
+  // ~720px — holds the scrolling tab strip with the ⋯ trigger pinned at its
+  // right and anchors the secondary-controls popover. Always in the chrome
+  // (hidden on wide viewports); placeChrome moves navEl/the trigger/popover
+  // in and out of it across the breakpoint.
+  const navRow = document.createElement("div");
+  navRow.className = "wx-navrow";
+
   const toastRegion = document.createElement("div");
   toastRegion.className = "wx-toast-region";
   // Toasts are THE completion notification surface (publish-live included,
@@ -435,25 +446,35 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   // just painted.
   toastRegion.setAttribute("role", "status");
 
-  container.append(statusBar, topbar, editBarHost, body, toastRegion);
+  container.append(statusBar, topbar, navRow, editBarHost, body, toastRegion);
 
-  // -- Nav placement (decisions/00084) ------------------------------------------
-  // Desktop keeps the nav inside .wx-body as the left sidebar. On narrow
-  // screens it relocates into the shell chrome BETWEEN the topbar and the
-  // pinned slim edit bar: inside .wx-body it would render BELOW the slim bar,
-  // which is exactly where the ▾ chrome reveal showed the menu ("the gap
-  // appears above but it is empty and the menu appears in the wrong place" —
-  // operator 2026-07-21). The same navEl moves between the two homes (its
-  // listeners travel with it); the stylesheet already styles it per-width, so
-  // relocation is the whole change.
+  // -- Nav placement (decisions/00084, decisions/00107) -------------------------
+  // Desktop keeps the nav inside .wx-body as the left sidebar, and the ⋯
+  // trigger + popover in the topbar. On narrow screens the topbar is gone
+  // entirely (00107: the title banner cost a full row for nothing, and its
+  // overflow clip swallowed the popover) and the nav relocates into the
+  // shell chrome BETWEEN the (hidden) topbar and the pinned slim edit bar:
+  // inside .wx-body it would render BELOW the slim bar, which is exactly
+  // where the ▾ chrome reveal showed the menu ("the gap appears above but it
+  // is empty and the menu appears in the wrong place" — operator 2026-07-21).
+  // The narrow home is .wx-navrow: the tab strip scrolls while the ⋯ trigger
+  // stays pinned to its right, and the row anchors the popover. The same
+  // elements move between the two homes (their listeners travel with them);
+  // the stylesheet styles them per-width, so relocation is the whole change.
   const narrowMedia =
     typeof win.matchMedia === "function" ? win.matchMedia("(max-width: 720px)") : null;
-  function placeNav(narrow: boolean): void {
-    if (narrow) container.insertBefore(navEl, editBarHost);
-    else body.insertBefore(navEl, main);
+  function placeChrome(narrow: boolean): void {
+    // A breakpoint cross with the popover open would strand it in the other
+    // home with a stale aria-expanded — closing is idempotent.
+    closeSecondary();
+    if (narrow) navRow.append(navEl, overflowButton, secondary);
+    else {
+      topbar.append(secondary, overflowButton);
+      body.insertBefore(navEl, main);
+    }
   }
-  placeNav(narrowMedia?.matches ?? false);
-  const onNarrowChange = (event: MediaQueryListEvent): void => placeNav(event.matches);
+  placeChrome(narrowMedia?.matches ?? false);
+  const onNarrowChange = (event: MediaQueryListEvent): void => placeChrome(event.matches);
   narrowMedia?.addEventListener("change", onNarrowChange);
 
   // -- Nav --------------------------------------------------------------------
