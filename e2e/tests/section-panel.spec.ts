@@ -179,6 +179,118 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     expect(consoleErrors).toEqual([]);
   });
 
+  test("align a photo pair: drag + micro nudge, save, publish — the live page serves the baked aligned photo", async ({
+    page,
+  }) => {
+    // The journey Purdi asked for (decisions/00111): she added a pair whose
+    // two photos don't line up; she must be able to fix that herself. Real
+    // canvas, real bake, real upload pipeline, real publish — no mocks.
+    const consoleErrors = trackConsoleErrors(page);
+
+    await gotoSectionAndWaitReady(page, "before-after", "gallery");
+
+    const slidersCollection = page.locator(".wx-section-collection", { hasText: "Drag-to-compare photos" });
+    const addDialog = page.locator(".wx-section-add-dialog");
+    const mediaDialog = page.locator(".wx-media-dialog-backdrop");
+    const mediaThumbs = mediaDialog.locator(".wx-media-thumb");
+    async function waitForStableThumbCount(): Promise<number> {
+      await expect(mediaThumbs.first()).toBeVisible();
+      return mediaThumbs.count();
+    }
+
+    // The suite shares ONE fixture server across spec files and this journey
+    // runs after the main one, which PUBLISHED two pairs — the collection is
+    // NOT empty here. Never assert an absolute count; my pair appends last.
+    const cards = slidersCollection.locator(".wx-section-card");
+    const countBefore = await cards.count();
+
+    // -- One pair, two genuinely distinct uploads (the content-hash dedupe in
+    // process_upload makes a same-file reuse land on the same staged name).
+    await slidersCollection.locator(".wx-section-add-button").click();
+    await expect(addDialog).toBeVisible();
+    await addDialog.getByRole("button", { name: "Choose Before photo" }).click();
+    await expect(mediaDialog).toBeVisible();
+    let thumbCountBefore = await waitForStableThumbCount();
+    await mediaDialog.locator('input[type="file"]').setInputFiles("fixtures/oversized-exif-rotated.jpg");
+    await expect(mediaThumbs).toHaveCount(thumbCountBefore + 1);
+    await mediaThumbs.last().click();
+    await mediaDialog.getByRole("button", { name: "Use this image" }).click();
+    await expect(mediaDialog).toBeHidden();
+    await addDialog.getByRole("button", { name: "Next" }).click();
+
+    await addDialog.getByRole("button", { name: "Choose After photo" }).click();
+    await expect(mediaDialog).toBeVisible();
+    thumbCountBefore = await waitForStableThumbCount();
+    await mediaDialog.locator('input[type="file"]').setInputFiles("fixtures/tiny-second-image.jpg");
+    await expect(mediaThumbs).toHaveCount(thumbCountBefore + 1);
+    await mediaThumbs.last().click();
+    await mediaDialog.getByRole("button", { name: "Use this image" }).click();
+    await expect(mediaDialog).toBeHidden();
+    await addDialog.getByRole("button", { name: "Next" }).click();
+
+    await addDialog.locator("input[type='text']").first().fill("Alignment Test Pair");
+    let patchAccepted = waitForNextDraftPatchAccepted(page);
+    await addDialog.getByRole("button", { name: "Save" }).click();
+    await patchAccepted;
+
+    await expect(cards).toHaveCount(countBefore + 1);
+    const myCard = cards.nth(countBefore);
+    const afterThumb = myCard.locator(".wx-section-image-thumb").nth(1);
+    const originalAfterSrc = await afterThumb.getAttribute("src");
+
+    // -- Open the aligner from the card --------------------------------------
+    await myCard.getByRole("button", { name: "Line up photos" }).click();
+    const alignDialog = page.locator(".wx-align-dialog");
+    await expect(alignDialog).toBeVisible();
+    // Both photos must actually load before anything can work.
+    await expect(alignDialog.locator(".wx-align-canvas-note")).toBeHidden();
+
+    const saveButton = alignDialog.getByRole("button", { name: "Save aligned photo" });
+    await expect(saveButton).toBeDisabled(); // nothing adjusted yet
+
+    // Drag the photo with the "finger" (mouse-driven pointer events — the
+    // same pointerdown/move/up stream a touch produces).
+    const canvas = alignDialog.locator(".wx-align-canvas");
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+    if (box === null) throw new Error("no canvas box");
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 30, box.y + box.height / 2 + 12, { steps: 6 });
+    await page.mouse.up();
+    await expect(saveButton).toBeEnabled();
+
+    // Then the micro pad for the fine adjustment (the operator's explicit ask).
+    await alignDialog.getByRole("button", { name: "Nudge left" }).click();
+
+    // Save: bake on the canvas, upload through the real media pipeline, and
+    // the panel commits the whole array with the new photo. (No "Saving…"
+    // busy-text assertion here: on localhost the whole bake→upload→commit
+    // chain can complete within one Playwright tick, closing the dialog
+    // before any post-click read — the dialog's close IS the success signal.)
+    patchAccepted = waitForNextDraftPatchAccepted(page);
+    await saveButton.click();
+    await patchAccepted;
+    await expect(alignDialog).toBeHidden();
+
+    // The card's after photo is now a NEW staged upload (the original stays
+    // in the media library, unused but hers).
+    const alignedSrc = await afterThumb.getAttribute("src");
+    expect(alignedSrc).not.toBe(originalAfterSrc);
+    expect(alignedSrc).toMatch(/^\/admin\/draft-media\/[0-9a-f]{8}-.*-aligned\.jpg$/);
+    await expect(afterThumb).toHaveJSProperty("complete", true);
+    expect(await afterThumb.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBeGreaterThan(0);
+
+    // -- Publish: the live page serves the baked, aligned photo ---------------
+    await publishAndWait(page);
+    const liveResponse = await page.request.get("/gallery.html");
+    expect(liveResponse.status()).toBe(200);
+    const liveHtml = await liveResponse.text();
+    expect(liveHtml).toMatch(/src="images\/[0-9a-f]{8}-[^"]*-aligned\.jpg"/);
+
+    expect(consoleErrors).toEqual([]);
+  });
+
   test("an intentionally-broken sliders array is rejected by the write gate (422), draft rev unchanged", async ({
     request,
   }) => {

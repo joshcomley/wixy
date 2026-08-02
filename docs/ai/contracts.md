@@ -103,8 +103,11 @@ edition, the only one live at `ca.cinnamons.uk`); `false` for `AnthropicAIBacken
 (standalone/milestone 6, no attachment mechanism of its own yet).
 
 `<admin section>` = `{id, navLabel, title, description, page, collections:[<admin
-collection>]}`; `<admin collection>` = `{path, label, itemNoun, schema, fields:[<admin
-field>]}`; `<admin field>` = `{key, kind:"image"\|"text"\|"choice", label,
+collection>]}`; `<admin collection>` = `{path, label, itemNoun, schema, alignAspect,
+fields:[<admin field>]}` — `alignAspect` is `{w, h} | null` (from the registry's
+optional `"alignAspect": "W:H"`); when non-null AND the collection has ≥2 `image`
+fields, the section panel offers the before/after aligner on its cards and in its add
+flow (decisions/00111); `<admin field>` = `{key, kind:"image"\|"text"\|"choice", label,
 options:[{value,label}]}` (decisions/00098) — a plain camelCase mirror of
 `builder.config.ProjectConfig.admin_sections`
 (`routes_admin_api.py:_admin_sections_snapshot`), registry-driven (Inv 1: no site literals

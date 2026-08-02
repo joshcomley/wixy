@@ -288,6 +288,28 @@ completeness gate, entity decoding) — unit-tested directly; `sectionPanel.test
 the thin DOM binding on top (kept deliberately DOM-light per spec 3c — the pointer-drag
 interaction itself is real-browser e2e territory, not jsdom's).
 
+**The before/after aligner** (`alignerDialog.ts` + the pure `alignerModel.ts`,
+decisions/00111) — a collection whose registry entry sets `alignAspect: "W:H"` AND
+declares ≥2 `image` fields gets a **"Line up photos"** button on each fully-picked card
+and in the add flow's form step. The full-screen canvas dialog lets the owner drag a
+photo with a finger (pointer events, `touch-action: none`), pinch or slider-zoom, tilt
+(±0.25° micro buttons, clamped ±10°), and nudge with a micro arrow pad (long-press
+repeat), in a Blend (onion-skin) or Split (the live widget's wipe) view, with a Move
+toggle picking which side the controls drive. On save each adjusted side is **baked on
+an offscreen canvas at the frame's exact aspect (1920-wide), uploaded through the
+ordinary `api.uploadMedia` pipeline, and swapped into the item's `{src, alt}`** (alt
+preserved, original upload left in the library) — the site's template/schema/publish
+path is untouched, and what she sees in the dialog is pixel-identical to what publishes
+(identity transform = `object-fit: cover` at the same aspect). The one rule the model
+enforces: the drawn image always covers the whole canvas (a gap would bake as a
+border) — every gesture is coverage-clamped by bisection, with two deliberate
+auto-compensations (`withPanCompensated`/`withRotationCompensated`) that pay for an
+edge-breaking nudge or tilt with a tiny auto-zoom so no button ever feels dead. Unit
+tests cover the geometry + wiring (jsdom has no canvas — painting is guarded and
+`loadImage` is an injectable dep; the panel stubs the dialog via `SectionPanelDeps.
+openAligner`); the real drag→bake→publish journey is e2e in
+`section-panel.spec.ts`.
+
 ## editor modules (`editor/src/`)
 
 `overlay.ts` (coordinator: hover chrome, popover routing, op emission, list toolbar, `data-wx

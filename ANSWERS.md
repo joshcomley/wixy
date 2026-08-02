@@ -4,6 +4,43 @@ One `## Q-NNN` section per question the operator actually asked, newest first, n
 deleted. Answer FIRST, in plain English, before any detail. Status: 🟢 ANSWERED /
 🟡 PARTIAL / 🔴 OPEN / ⚫ OBSOLETE.
 
+## Q-005 — "So the one I just added, the lips are in different positions and I can't see how I can move the image so they match up like the others? Do I just ask the chat?"
+
+> *"So the one I just added, the lips are in different positions and I can't see how I
+> can move the image so they match up like the others? Do I just ask the chat? I'm sorry,
+> I'm going to drive you mad asking stupid questions"* (Purdi, 2026-08-02, after adding a
+> new before & after photo pair)
+
+**Answer: you don't need to ask the chat — and it wasn't a stupid question. There was
+genuinely no way to move the photos; the button just didn't exist. Now it does: on the
+Before & After screen, every photo pair has a "Line up photos" button (it's also offered
+at the end of adding a new pair). Tap it, then drag the photo with one finger until the
+features sit on top of each other, pinch or use the Zoom slider to resize, use
+Straighten for any tilt, and finish with the little arrow buttons for tiny nudges. Press
+"Save aligned photo", then Publish as normal.**
+
+What it looks like while you work: the photo you're moving floats see-through on top of
+the other one (the "Blend" view), so you can see the lips line up exactly. The "Split"
+view shows the familiar drag-to-compare wipe instead, so you can check the finished
+result before saving. The "Move" buttons at the top choose which of the two photos
+you're adjusting — usually the After one.
+
+Two things that are safe to know:
+
+- **Your original photos are never changed.** Saving makes a brand-new photo in your
+  media library and swaps it into the pair. If you ever want to start completely over,
+  just pick the original photo again and line it up fresh.
+- **You can't crop anything off by accident.** The tool never lets an edge of blank
+  background sneak in — if you move or tilt too far, it gently zooms the photo a touch
+  to keep the frame full.
+
+Measured/verified 2026-08-02: the whole journey was exercised for real in a real browser
+(add a pair → Line up photos → drag + a micro nudge → Save → Publish → the live page
+serving the new aligned photo), alongside 38 new unit tests for the moving/zooming maths
+and the buttons. Nothing about how you add, reorder, or publish pairs changed.
+
+- STATUS: 🟢 ANSWERED (shipped in PR #145, decisions/00111)
+
 ## Q-004 — "…it scrolls to the end of the chat with you. That might be happening, I'm not sure but check that it does and it doesn't overflow."
 
 > *"So we need a revamp of the chat experience in Wixy so that it's a full-screen
@@ -41,7 +78,7 @@ button, photo attach-on-start, thumbnails, and the full-size viewer), then verif
 live on ca.cinnamons.uk after deploy.
 
 - STATUS: 🟢 ANSWERED (shipped in PR #143, decisions/00110)
-=======
+
 ## Q-003 — "When Purdy is using Wixie, it doesn't tell her if the version she's looking at is out of date…"
 
 > *"When Purdy is using Wixie, it doesn't tell her if the version she's looking at is

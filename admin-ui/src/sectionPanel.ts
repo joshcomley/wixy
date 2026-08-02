@@ -9,6 +9,7 @@
 
 import type { AdminApi, AdminCollection, AdminField, AdminSection } from "./api";
 import type { OpQueueLike } from "./editView";
+import { openAlignerDialog, type AlignerResult } from "./alignerDialog";
 import { contentSrcToDisplayUrl, openMediaDialog, type MediaPickValue } from "./mediaDialog";
 import {
   appendItem,
@@ -35,11 +36,16 @@ export interface SectionPanelDeps {
   api: AdminApi;
   opQueue: OpQueueLike;
   win?: Window;
+  /** Test seam for the aligner (decisions/00111): the dialog paints on a
+   * real canvas, which jsdom doesn't have — panel tests stub this and drive
+   * its `respond` callback directly. Production always uses the real one. */
+  openAligner?: typeof openAlignerDialog;
 }
 
 export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps): SectionPanel {
   const win = deps.win ?? window;
   const { api, opQueue } = deps;
+  const openAligner = deps.openAligner ?? openAlignerDialog;
   let destroyed = false;
 
   const element = document.createElement("div");
@@ -80,6 +86,86 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     collectionState.set(collection.path, items);
     opQueue.enqueue({ file: section.page, path: collection.path, value: items });
     renderCollectionBody(collection);
+  }
+
+  // -- The before/after aligner (decisions/00111) ---------------------------
+  // Offered only where it makes sense: the registry gave the collection an
+  // `alignAspect` (the frame its pairs display in) AND it declares ≥2 image
+  // fields. The aligner bakes adjusted photo(s) into NEW uploads and hands
+  // back replacement `{src, alt}`s; the item keeps its other fields, and the
+  // whole array commits as one op like every other panel edit.
+
+  function alignImageFields(collection: AdminCollection): [AdminField, AdminField] | null {
+    if (collection.alignAspect === null) return null;
+    const imageFields = collection.fields.filter((f) => f.kind === "image");
+    const first = imageFields[0];
+    const second = imageFields[1];
+    if (first === undefined || second === undefined) return null;
+    return [first, second];
+  }
+
+  function openAlignerForSides(
+    collection: AdminCollection,
+    fields: [AdminField, AdminField],
+    firstValue: { src: string; alt: string },
+    secondValue: { src: string; alt: string },
+    onResult: (result: AlignerResult) => void,
+  ): void {
+    const aspect = collection.alignAspect;
+    if (aspect === null) return;
+    openAligner(
+      { api, win },
+      {
+        first: { key: fields[0].key, label: fields[0].label, src: firstValue.src, alt: firstValue.alt },
+        second: { key: fields[1].key, label: fields[1].label, src: secondValue.src, alt: secondValue.alt },
+        aspectW: aspect.w,
+        aspectH: aspect.h,
+      },
+      (result) => {
+        if (result === null || destroyed) return;
+        onResult(result);
+      },
+    );
+  }
+
+  function openAlignerForItem(collection: AdminCollection, item: SectionItem, index: number): void {
+    const fields = alignImageFields(collection);
+    if (fields === null) return;
+    const firstValue = imageFieldValue(item, fields[0].key);
+    const secondValue = imageFieldValue(item, fields[1].key);
+    if (firstValue === null || secondValue === null) return;
+    openAlignerForSides(collection, fields, firstValue, secondValue, (result) => {
+      const items = itemsFor(collection);
+      const current = items[index];
+      if (current === undefined) return;
+      let next = current;
+      if (result.first !== undefined) next = { ...next, [fields[0].key]: result.first };
+      if (result.second !== undefined) next = { ...next, [fields[1].key]: result.second };
+      commit(
+        collection,
+        items.map((it, i) => (i === index ? next : it)),
+      );
+    });
+  }
+
+  function renderAlignButton(onClick: () => void): HTMLElement {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "wx-section-align-button";
+    button.textContent = "Line up photos";
+    button.title = "Move, zoom or straighten one photo so it matches the other";
+    button.addEventListener("click", onClick);
+    return button;
+  }
+
+  function renderCardAlignButton(collection: AdminCollection, item: SectionItem, index: number): HTMLElement | null {
+    const fields = alignImageFields(collection);
+    if (fields === null) return null;
+    // Both photos must be picked first — with one missing there's nothing to
+    // line up against, and a dead button is worse than no button.
+    if (imageFieldValue(item, fields[0].key) === null) return null;
+    if (imageFieldValue(item, fields[1].key) === null) return null;
+    return renderAlignButton(() => openAlignerForItem(collection, item, index));
   }
 
   // -- Card rendering -----------------------------------------------------
@@ -213,6 +299,8 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     const actions = document.createElement("div");
     actions.className = "wx-section-card-actions";
 
+    const alignButton = renderCardAlignButton(collection, item, index);
+
     const upButton = document.createElement("button");
     upButton.type = "button";
     upButton.className = "wx-section-move-button";
@@ -241,6 +329,7 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
       commit(collection, deleteItemAt(itemsFor(collection), index));
     });
 
+    if (alignButton !== null) actions.append(alignButton);
     actions.append(upButton, downButton, deleteButton);
     card.append(handle, images, fields, actions);
     return card;
@@ -436,6 +525,26 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
         form.appendChild(row);
       }
       dialog.appendChild(form);
+
+      // The exact moment Purdi hit the wall (2026-08-02): she had JUST added
+      // a pair and couldn't make the two photos match. Offer the aligner
+      // right here in the add flow too — the result simply becomes the new
+      // item's photo(s), before the item is ever saved.
+      const alignFields = alignImageFields(collection);
+      if (alignFields !== null) {
+        const firstValue = imageFieldValue(draft, alignFields[0].key);
+        const secondValue = imageFieldValue(draft, alignFields[1].key);
+        if (firstValue !== null && secondValue !== null) {
+          dialog.appendChild(
+            renderAlignButton(() => {
+              openAlignerForSides(collection, alignFields, firstValue, secondValue, (result) => {
+                if (result.first !== undefined) draft = { ...draft, [alignFields[0].key]: result.first };
+                if (result.second !== undefined) draft = { ...draft, [alignFields[1].key]: result.second };
+              });
+            }),
+          );
+        }
+      }
 
       const nav = document.createElement("div");
       nav.className = "wx-section-add-nav";

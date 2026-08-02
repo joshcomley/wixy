@@ -21,6 +21,7 @@
           "label": "Drag-to-compare photos",
           "itemNoun": "photo pair",
           "schema": "gallery-slider",
+          "alignAspect": "640:360",
           "fields": [
             { "key": "before", "kind": "image", "label": "Before photo" },
             { "key": "after", "kind": "image", "label": "After photo" },

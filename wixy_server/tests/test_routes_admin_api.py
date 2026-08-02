@@ -477,6 +477,7 @@ class TestGetStateAdminSections:
                                     "label": "Drag-to-compare photos",
                                     "itemNoun": "photo pair",
                                     "schema": "gallery-slider",
+                                    "alignAspect": "640:360",
                                     "fields": [
                                         {"key": "before", "kind": "image", "label": "Before photo"},
                                         {
@@ -517,6 +518,7 @@ class TestGetStateAdminSections:
                         "label": "Drag-to-compare photos",
                         "itemNoun": "photo pair",
                         "schema": "gallery-slider",
+                        "alignAspect": {"w": 640, "h": 360},
                         "fields": [
                             {
                                 "key": "before",
