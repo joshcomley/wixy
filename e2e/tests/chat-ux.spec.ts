@@ -429,7 +429,10 @@ test.describe("E2E 7: chat UX", () => {
     expect(atBottom).toBe(true);
 
     // -- decisions/00110: the composer auto-grows with long input -------------
+    // decisions/00113: the EMPTY composer is a single line (~36px) — a two-row
+    // floor read as "very tall for no reason before anything's been typed in".
     const before = await page.locator(".wx-chat-composer-input").evaluate((el) => (el as HTMLElement).offsetHeight);
+    expect(before).toBeLessThanOrEqual(48);
     await page.fill(".wx-chat-composer-input", "line one\nline two\nline three\nline four\nline five\nline six");
     const after = await page.locator(".wx-chat-composer-input").evaluate((el) => (el as HTMLElement).offsetHeight);
     expect(after).toBeGreaterThan(before);
@@ -438,6 +441,29 @@ test.describe("E2E 7: chat UX", () => {
     const capped = await page.locator(".wx-chat-composer-input").evaluate((el) => (el as HTMLElement).offsetHeight);
     expect(capped).toBeLessThanOrEqual(200);
     await page.fill(".wx-chat-composer-input", "");
+    // Empty again → snaps back to the single-line floor.
+    const emptied = await page.locator(".wx-chat-composer-input").evaluate((el) => (el as HTMLElement).offsetHeight);
+    expect(emptied).toBeLessThanOrEqual(48);
+
+    // -- decisions/00113: header + chrome cleanup ------------------------------
+    // Substantial back arrow (no text), pencil rename, NO reasoning toggle,
+    // NO static "changes land in your draft preview" explainer, and a FLAT
+    // composer (no outer card) — all visible/measurable in the real browser.
+    await expect(page.locator(".wx-chat-back-link")).toHaveText("←");
+    await expect(page.locator(".wx-chat-back-link")).toHaveAttribute("aria-label", "All conversations");
+    const backBox = await page.locator(".wx-chat-back-link").boundingBox();
+    expect(backBox!.height).toBeGreaterThanOrEqual(40);
+    await expect(page.locator(".wx-chat-rename-button")).toHaveText("✎");
+    await expect(page.locator(".wx-chat-rename-button")).toHaveAttribute("aria-label", "Rename conversation");
+    await expect(page.locator(".wx-chat-reasoning-toggle")).toHaveCount(0);
+    await expect(page.locator(".wx-chat-banner")).toHaveCount(0);
+    const inputRowStyles = await page.locator(".wx-chatc-input-row").evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { background: cs.backgroundColor, border: cs.borderTopWidth };
+    });
+    // Transparent row — the flat CMD-style layout (buttons | input | button).
+    expect(["rgba(0, 0, 0, 0)", "transparent"]).toContain(inputRowStyles.background);
+    expect(inputRowStyles.border).toBe("0px");
 
     // -- decisions/00110: attachments in the NEW-conversation flow ------------
     // The operator's exact complaint: "when you start a chat, you can't attach

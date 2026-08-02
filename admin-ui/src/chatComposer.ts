@@ -82,7 +82,9 @@ export interface ChatComposer {
 }
 
 const MAX_TEXTAREA_HEIGHT_PX = 180;
-const MIN_TEXTAREA_HEIGHT_PX = 44;
+const MIN_TEXTAREA_HEIGHT_PX = 36;
+const EMPTY_TEXTAREA_ROWS = 1;
+const BUSY_TEXTAREA_ROWS = 2;
 
 function cryptoRandomId(win: Window): string {
   const cryptoObj = win.crypto;
@@ -125,7 +127,11 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
   const textarea = document.createElement("textarea");
   textarea.className = isCompose ? "wx-chat-compose-input" : "wx-chat-composer-input";
   textarea.placeholder = options.placeholder;
-  textarea.rows = 2;
+  // decisions/00113: ONE line when empty — the 00110 floor (44px/2 rows) read
+  // "very tall for no reason before anything's been typed in" (operator
+  // feedback). Grows to 2 rows the moment there's content, and to the 180px
+  // cap beyond that.
+  textarea.rows = EMPTY_TEXTAREA_ROWS;
 
   const submitButton = document.createElement("button");
   submitButton.type = "button";
@@ -167,17 +173,27 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
   let tornDown = false;
 
   // -- Auto-grow -------------------------------------------------------------
-  // Native path: `field-sizing: content` (Chrome/Edge 123+, Firefox 132+,
-  // Safari 18.4+) grows the textarea with its content purely in CSS, clamped
-  // by the stylesheet's min/max-height. Fallback: the classic scrollHeight
-  // dance — guarded so jsdom (scrollHeight 0) just sits at the floor.
-  const nativeAutogrow =
-    typeof CSS !== "undefined" && CSS.supports("field-sizing", "content");
-  if (!nativeAutogrow) {
-    textarea.style.boxSizing = "border-box";
-  }
+  // The scrollHeight dance, UNCONDITIONALLY — no `field-sizing: content`.
+  // Measured live (not theorised): this engine generation gives ANY
+  // field-sizing textarea an intrinsic TWO-row floor (≈52px) that nothing
+  // escapes — not rows=1, not an explicit inline height, not max-height, not
+  // the property's own `border-box` value from JS (read-only — silently
+  // ignored), not even a class `border-box !important`. A single-line empty
+  // composer (the whole point of the 00113 "not tall for no reason" fix) is
+  // impossible with field-sizing active, so we size by hand — one proven
+  // path, exactly what older engines get too, no dual-path drift.
+  textarea.style.boxSizing = "border-box";
   function autogrow(): void {
-    if (nativeAutogrow) return;
+    const empty = textarea.value === "";
+    textarea.classList.toggle("wx-chat-input-empty", empty);
+    textarea.rows = empty ? EMPTY_TEXTAREA_ROWS : BUSY_TEXTAREA_ROWS;
+    if (empty) {
+      // Pinned by the `.wx-chat-input-empty` rule (36px) — nothing to
+      // measure (scrollHeight 0 would collapse it to nothing).
+      textarea.style.height = "";
+      textarea.style.overflowY = "";
+      return;
+    }
     textarea.style.height = "0px";
     const next = Math.min(
       Math.max(textarea.scrollHeight, MIN_TEXTAREA_HEIGHT_PX),
