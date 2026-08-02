@@ -191,17 +191,30 @@ describe("mountChatComposer", () => {
     composer.teardown();
   });
 
-  it("the jsdom auto-grow fallback pins the textarea to its floor height", () => {
-    // jsdom has no `field-sizing: content` support and scrollHeight is always
-    // 0, so the fallback path must clamp to the floor rather than collapsing
-    // the textarea to nothing.
+  it("the empty state is pinned to one line via the max-height class, in both paths", () => {
+    // decisions/00113: the empty composer is a SINGLE line — pinned by the
+    // `.wx-chat-input-empty` max-height class (field-sizing: content
+    // overrides an inline height but honors a max-height clamp). jsdom has
+    // no field-sizing support, so the fallback path is exercised here; the
+    // class toggle itself is path-independent.
     const composer = mountChatComposer(makeOptions());
     const textarea = composer.element.querySelector("textarea")!;
+    expect(textarea.classList.contains("wx-chat-input-empty")).toBe(true);
+    expect(textarea.rows).toBe(1);
+
     textarea.value = "line one\nline two\nline three";
     textarea.dispatchEvent(new Event("input"));
+    expect(textarea.classList.contains("wx-chat-input-empty")).toBe(false);
+    expect(textarea.rows).toBe(2);
     const height = parseInt(textarea.style.height || "0", 10);
-    expect(height).toBeGreaterThanOrEqual(44);
+    expect(height).toBeGreaterThanOrEqual(36);
     expect(height).toBeLessThanOrEqual(180);
+
+    // Empty again → back to the pinned one-line floor.
+    textarea.value = "";
+    textarea.dispatchEvent(new Event("input"));
+    expect(textarea.classList.contains("wx-chat-input-empty")).toBe(true);
+    expect(textarea.rows).toBe(1);
     composer.teardown();
   });
 });

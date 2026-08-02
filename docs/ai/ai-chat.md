@@ -255,29 +255,40 @@ working…" title note when `ConversationSummary.working` is true — decisions/
 owner can tell a conversation is busy without opening it) or detail view (`#/chat/<conv>`).
 Detail opens a browser `EventSource` on the stream route (`api.ts:openConversationStream`);
 `message` events render markdown bubbles (`markdown.ts`, `createElement`/`textContent` only —
-never `innerHTML`), collapse contiguous tool runs into a "⚙ n actions" group, and filter
-`thinking` unless the reasoning toggle is on (which reconnects the stream with
-`?includeThinking=true`). An `error` event shows the offline banner (the server already
-auto-retries). Non-user messages trigger a throttled upstream check that toggles the "Preview
-updated — review changes" chip. Send generates the idempotency key once per attempt (reused on
-a failed retry). **Handover is fully server-side** — the UI just surfaces `handoverState`.
+never `innerHTML`), collapse contiguous tool runs into a "⚙ n actions" group, and ALWAYS
+filter `thinking` (decisions/00113: the "Show reasoning" toggle is gone — the owner never
+needs the model's chain-of-thought; the stream's optional `includeThinking` param remains,
+unsurfaced). An `error` event shows the offline banner (the server already
+auto-retries). Non-user messages trigger a throttled upstream check that toggles the
+deep-linked "Preview updated — review changes" chip. Send generates the idempotency key
+once per attempt (reused on a failed retry). **Handover is fully server-side** — the UI just
+surfaces `handoverState`.
 
-**The layout (decisions/00110)** — the conversation view is a full-height flex column inside
-`.wx-main`: header (which also carries the reasoning toggle) and the dynamic banners/task
-card are `flex:none`, ONLY the thread scrolls (`flex:1; min-height:0`), and the composer is
-the pinned last child — no `60vh` thread cap, no `.wx-main` scrolling, no
+**The layout (decisions/00110, chrome tuned 00113)** — the conversation view is a full-height
+flex column inside `.wx-main`: the header (a substantial back-arrow button, the title, a
+pencil rename button — no "All conversations" text, no reasoning toggle) and the dynamic
+banners/task card are `flex:none`, ONLY the thread scrolls (`flex:1; min-height:0`), and the
+composer is the pinned last child — no `60vh` thread cap, no `.wx-main` scrolling, no
 double-scroll, and `env(safe-area-inset-bottom)` keeps the composer clear of the phone's
 system bar. The thread STICKS to the bottom only while the owner is at the bottom (48px
 hysteresis) — scrolled up reading history + new arrivals = a "↓ New messages" jump pill;
-late-loading attachment images re-stick on their `load` event.
+late-loading attachment images re-stick on their `load` event. The static "changes land in
+your draft preview" explainer is gone (00113); the Preview-updated chip now deep-links —
+exactly one page in the publish preview's changes → that page's Edit view, anything else →
+the Pages list (generalising the original decisions/00097 always-to-pages note).
 
 **The shared composer (`chatComposer.ts`)** backs BOTH the list view's "New conversation"
 box and the open conversation's composer (a `mode` switch keeps every legacy class hook the
-tests/e2e select): auto-growing textarea (native `field-sizing: content` with a 44–180px
-scrollHeight fallback; 16px on ≤720px so focusing never read-zooms), 📎/paste/drag-drop
-image staging with spinner chips, submit gated on no-upload-in-flight, Enter/Shift+Enter,
-and `allowEmptySubmit` for the list view's "start with nothing" case. The list view stages
-uploads session-lessly (`api.stageChatUpload`) and passes the ids to `createConversation`.
+tests/e2e select): a FLAT row — 📎 | input | Send, no outer card (00113) — with an
+auto-growing textarea, 📎/paste/drag-drop image staging with spinner chips, submit gated on
+no-upload-in-flight, Enter/Shift+Enter, and `allowEmptySubmit` for the list view's "start
+with nothing" case. The list view stages uploads session-lessly (`api.stageChatUpload`) and
+passes the ids to `createConversation`. The auto-grow is the classic scrollHeight dance
+**unconditionally** (00113 — `field-sizing: content` gives this engine generation an
+intrinsic TWO-row empty floor ≈52px that nothing escapes, including a read-only-JS
+`border-box` and class `border-box !important`; a single-line empty composer is impossible
+with it active). Empty = one line (36px, `.wx-chat-input-empty`); content grows 2 rows →
+the 180px cap; 16px font on ≤720px so focusing never read-zooms.
 
 **The optimistic echo (decisions/00110)** — a send paints instantly as a dimmed
 `wx-chat-echo` bubble ("sending…", thumbnails from the same bytes-proxy URLs the server
