@@ -27,6 +27,15 @@ from fastapi.responses import JSONResponse
 
 from builder.jsontypes import JsonObject
 
+DEFAULT_UPLOAD_BYTES = (
+    b"RIFF8\x00\x00\x00WEBPVP8 ,\x00\x00\x00\x90\x01\x00\x9d\x01*\x08\x00\x08\x00"
+    b"\x01@&%\xa0\x02t\xba\x00\x03\x98\x00\xfe\xeev\x7f\xfe\xa0\xcf\xfc\x83?\xf2\x0c"
+    b"\xfdT\xbfjQ\x05%l\x00\x00"
+)
+"""A real 8x8 WEBP (Pillow-generated) served by the fake's
+`GET /api/uploads/{id}/bytes` — genuine decodable bytes so a browser `<img>`
+pointed at wixy's bytes proxy actually loads in E2E (decisions/00110)."""
+
 
 @dataclass
 class FakeSession:
@@ -66,6 +75,10 @@ class FakeSession:
     lets a test assert on the `attachments` field (present with the right
     `{kind, upload_id}` shape, or absent entirely for a plain text send) without
     a bespoke request-capturing middleware."""
+    create_attachments: list[JsonObject] | None = None
+    """decisions/00110: the `attachments` list the new-chat call carried (None =
+    field omitted) — cmd's own new-chat route folds these into the first turn
+    (its `_stage_new_chat_attachments`), and tests assert wixy forwards them."""
 
 
 @dataclass
@@ -91,6 +104,11 @@ class FakeCmdState:
     fixture driving a real UI end-to-end (E2E 7) wants every session it never
     otherwise configures to become ready quickly with zero per-session
     wiring."""
+    upload_bytes: dict[str, tuple[bytes, str]] = field(default_factory=dict)
+    """decisions/00110: the bytes `GET /api/uploads/{id}/bytes` serves per id
+    (content, media_type) — overridable per test; an id with no entry but a
+    staged upload gets the canned `DEFAULT_UPLOAD_BYTES` (a real 1x1 WEBP, so
+    browser `<img>` tags genuinely load in E2E)."""
 
     def create_session(
         self,
@@ -185,12 +203,29 @@ def create_fake_cmd_app(state: FakeCmdState | None = None) -> FastAPI:
                 content={"error": "spawned_by_session_id is required"},
             )
         model_raw = body.get("model") if isinstance(body, dict) else None
+        attachments_raw = body.get("attachments") if isinstance(body, dict) else None
+        # cmd's `_stage_new_chat_attachments` 404s an unknown `upload_id` —
+        # mirrored here for the same reason the `spawned_by_session_id` 400
+        # above is: a double laxer than the real service cannot catch drift.
+        if isinstance(attachments_raw, list):
+            for idx, entry in enumerate(attachments_raw):
+                upload_id = entry.get("upload_id") if isinstance(entry, dict) else None
+                if not isinstance(upload_id, str) or upload_id not in state.uploads:
+                    return JSONResponse(
+                        status_code=404,
+                        content={
+                            "error": f"unknown upload_id {upload_id!r}",
+                            "rejected_index": idx,
+                        },
+                    )
         session = state.create_session(
             prompt,
             cmd_project=project,
             model=model_raw if isinstance(model_raw, str) else None,
             spawned_by_session_id=spawned_by_raw if isinstance(spawned_by_raw, str) else None,
         )
+        if isinstance(attachments_raw, list):
+            session.create_attachments = [a for a in attachments_raw if isinstance(a, dict)]
         return JSONResponse(
             status_code=202,
             content={
@@ -229,6 +264,20 @@ def create_fake_cmd_app(state: FakeCmdState | None = None) -> FastAPI:
             return Response(status_code=session.send_status_code)
         body = await request.json()
         session.last_send_body = body if isinstance(body, dict) else None
+        # cmd's `_resolve_upload_ids_to_blocks` 404s an unknown `upload_id`,
+        # same contract as the new-chat staging above.
+        attachments_raw = body.get("attachments") if isinstance(body, dict) else None
+        if isinstance(attachments_raw, list):
+            for idx, entry in enumerate(attachments_raw):
+                upload_id = entry.get("upload_id") if isinstance(entry, dict) else None
+                if not isinstance(upload_id, str) or upload_id not in state.uploads:
+                    return JSONResponse(
+                        status_code=404,
+                        content={
+                            "error": f"unknown upload_id {upload_id!r}",
+                            "rejected_index": idx,
+                        },
+                    )
         idem_key = body.get("idempotency_key") if isinstance(body, dict) else None
         if isinstance(idem_key, str):
             session.idempotency_seen[idem_key] = session.idempotency_seen.get(idem_key, 0) + 1
@@ -262,6 +311,18 @@ def create_fake_cmd_app(state: FakeCmdState | None = None) -> FastAPI:
                 "processing_ms": 1,
             },
         )
+
+    @app.get("/api/uploads/{upload_id}/bytes")
+    async def upload_bytes_route(upload_id: str) -> Response:
+        """decisions/00110: mirrors cmd's own inline-bytes endpoint (the one
+        cmd's chat UI uses for previews and wixy's proxy route forwards). 404
+        for an id the fake never staged, exactly as cmd's row-lookup does."""
+        if upload_id not in state.uploads:
+            return Response(status_code=404)
+        content, media_type = state.upload_bytes.get(
+            upload_id, (DEFAULT_UPLOAD_BYTES, "image/webp")
+        )
+        return Response(content=content, media_type=media_type)
 
     @app.get("/sessions/{session_id}/messages")
     async def get_messages(

@@ -25,6 +25,7 @@ from wixy_server.ai.anthropic_backend import AnthropicAIBackend
 from wixy_server.ai.backend import AIBackend, CmdAIBackend
 from wixy_server.auth import JwksCache, build_admin_auth_middleware, jwks_url
 from wixy_server.bootstrap import bootstrap_if_needed
+from wixy_server.chat_sends import ChatSendsCache
 from wixy_server.chat_working import WorkingCache
 from wixy_server.chats import ChatRuntimeEntry
 from wixy_server.cmdchat import CmdChatClient
@@ -230,6 +231,7 @@ def create_app(
     app.state.chat_runtime = chat_runtime
     app.state.chat_stream_timing = stream_timing
     app.state.chat_working_cache = WorkingCache()
+    app.state.chat_sends = ChatSendsCache(paths.chat_sends_json)
     app.state.github_client = gh_client
     app.state.redirects = load_redirects()
     app.state.engine_status_cache = EngineStatusCache()

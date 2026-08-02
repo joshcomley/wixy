@@ -36,7 +36,7 @@ export interface SectionPanelDeps {
   api: AdminApi;
   opQueue: OpQueueLike;
   win?: Window;
-  /** Test seam for the aligner (decisions/00110): the dialog paints on a
+  /** Test seam for the aligner (decisions/00111): the dialog paints on a
    * real canvas, which jsdom doesn't have — panel tests stub this and drive
    * its `respond` callback directly. Production always uses the real one. */
   openAligner?: typeof openAlignerDialog;
@@ -88,7 +88,7 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     renderCollectionBody(collection);
   }
 
-  // -- The before/after aligner (decisions/00110) ---------------------------
+  // -- The before/after aligner (decisions/00111) ---------------------------
   // Offered only where it makes sense: the registry gave the collection an
   // `alignAspect` (the frame its pairs display in) AND it declares ≥2 image
   // fields. The aligner bakes adjusted photo(s) into NEW uploads and hands

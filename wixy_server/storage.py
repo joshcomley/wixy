@@ -78,6 +78,13 @@ class ProjectPaths:
         return self.root / "chats.json"
 
     @property
+    def chat_sends_json(self) -> Path:
+        """decisions/00110: the chat attachment send log (`chat_sends.py`) —
+        what wixy sent with attachments, so stream-json-routed sends (which
+        leave no trace in cmd's read-back) still render their thumbnails."""
+        return self.root / "chat-sends.json"
+
+    @property
     def locks_dir(self) -> Path:
         return self.root / "locks"
 

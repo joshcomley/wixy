@@ -1,4 +1,4 @@
-// Pure, DOM-free math for the before/after aligner (decisions/00110) — the
+// Pure, DOM-free math for the before/after aligner (decisions/00111) — the
 // transform model, coverage rules, and clamping behind `alignerDialog.ts`,
 // kept separate so the geometry is unit-testable with vitest without a canvas
 // (mirrors the `sectionPanelModel.ts` / `opQueue.ts` "framework-free core"

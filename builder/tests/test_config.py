@@ -300,7 +300,7 @@ def _section_with_collection(collection: dict[str, object]) -> dict[str, object]
 
 
 class TestAlignAspectParsing:
-    """decisions/00110: a collection's optional `alignAspect` "W:H" feeds the
+    """decisions/00111: a collection's optional `alignAspect` "W:H" feeds the
     before/after aligner's frame — absent or malformed must read as None
     (aligner simply not offered), never crash the whole config load."""
 

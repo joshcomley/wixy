@@ -289,7 +289,7 @@ the thin DOM binding on top (kept deliberately DOM-light per spec 3c — the poi
 interaction itself is real-browser e2e territory, not jsdom's).
 
 **The before/after aligner** (`alignerDialog.ts` + the pure `alignerModel.ts`,
-decisions/00110) — a collection whose registry entry sets `alignAspect: "W:H"` AND
+decisions/00111) — a collection whose registry entry sets `alignAspect: "W:H"` AND
 declares ≥2 `image` fields gets a **"Line up photos"** button on each fully-picked card
 and in the add flow's form step. The full-screen canvas dialog lets the owner drag a
 photo with a finger (pointer events, `touch-action: none`), pinch or slider-zoom, tilt
