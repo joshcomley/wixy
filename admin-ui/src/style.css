@@ -170,6 +170,19 @@ html, body {
   border-bottom: 2px solid var(--wx-brand-blue);
 }
 
+/* Quiet state (operator, 2026-08-02): with nothing to publish the bar is only
+   a one-line "No unpublished changes" note — the Publish button hides
+   (shell.ts), so the taller padding that framed that tap target is pointless
+   and the bar collapses to a narrow strip. Only the vertical padding shrinks;
+   the horizontal stays in step with the pending bar (and its phone override
+   below) so the label doesn't jump sideways on a state change. The `:not()`
+   gives this rule the specificity to also beat the phone media query's
+   padding, keeping the strip narrow there too. */
+.wx-statusbar:not(.wx-statusbar-pending) {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
 .wx-statusbar .wx-draft-chip {
   flex: 1;
   min-width: 0;
@@ -325,6 +338,12 @@ html, body {
 .wx-publish-button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+/* Hidden when there's nothing to publish (shell.ts). The explicit rule beats
+   `.wx-button-busy`'s `display: inline-flex` should the two ever coincide. */
+.wx-publish-button[hidden] {
+  display: none;
 }
 
 /* -- Publish-in-progress affordance (decisions/00089) --------------------------
@@ -3012,7 +3031,7 @@ div.wx-media-thumb {
   margin-top: 12px;
 }
 
-/* -- The before/after aligner (decisions/00108) -------------------------------
+/* -- The before/after aligner (decisions/00109) -------------------------------
    Its OWN `.wx-align-*` classes — never `.wx-media-dialog-*`/`.wx-section-add-*`
    (the aligner opens ON TOP of the add flow, and the media dialog can stack on
    top of that; shared classes made stacked dialogs indistinguishable to
@@ -3232,7 +3251,7 @@ div.wx-media-thumb {
   min-height: 40px;
 }
 
-/* The card / add-flow entry point (decisions/00108). */
+/* The card / add-flow entry point (decisions/00109). */
 
 .wx-section-align-button {
   font: 600 0.75rem/1 system-ui, sans-serif;

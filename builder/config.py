@@ -52,7 +52,7 @@ class AdminCollection:
     satisfy (spec: 3a). `align_aspect` is the optional `(w, h)` of the frame a
     two-image item is displayed in (from the registry's `alignAspect` "W:H")
     — when present and the collection has ≥2 `image` fields, the panel offers
-    the before/after aligner for its cards (decisions/00108)."""
+    the before/after aligner for its cards (decisions/00109)."""
 
     path: str
     label: str
@@ -135,7 +135,7 @@ def _parse_admin_fields(raw: JsonValue) -> tuple[AdminField, ...]:
 
 def _parse_align_aspect(raw: JsonValue) -> tuple[int, int] | None:
     """The optional `alignAspect` "W:H" on a collection (e.g. "640:360" — the
-    frame its photo pairs are displayed in, for the aligner, decisions/00108).
+    frame its photo pairs are displayed in, for the aligner, decisions/00109).
     Malformed reads as None (aligner simply not offered) with a warning, the
     same skip-don't-crash posture as the other adminSections parsing."""
     if raw is None:

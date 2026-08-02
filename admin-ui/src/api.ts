@@ -152,7 +152,7 @@ export interface AdminField {
  * `alignAspect` is the frame a two-image item is displayed in (from the
  * registry's `alignAspect` "W:H", `null` when unset) — when present and the
  * collection has ≥2 `image` fields, the panel offers the before/after
- * aligner on its cards (decisions/00108). */
+ * aligner on its cards (decisions/00109). */
 export interface AdminCollection {
   path: string;
   label: string;

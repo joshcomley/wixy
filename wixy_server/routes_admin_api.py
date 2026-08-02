@@ -288,10 +288,24 @@ def _build_state_locked(
         ),
     }
 
+    # opCount must cover EVERY publishable kind, not just content ops —
+    # staged page adds/deletes and staged media replacements/deletions produce
+    # no overlay.ops, and the status bar's chip + Publish-button visibility
+    # (decisions/00108) read this count. Same formula as the publish preview's
+    # opCount below (decisions/00071/00080).
+    media_changes = media_staging(paths)
+
     return {
         "project": {"slug": project.slug, "name": project.name, "domain": project.domain},
         "pages": pages,
-        "draft": {"rev": overlay.rev, "opCount": len(overlay.ops)},
+        "draft": {
+            "rev": overlay.rev,
+            "opCount": len(overlay.ops)
+            + len(overlay.pages_added)
+            + len(overlay.pages_deleted)
+            + len(media_changes["replaced"])
+            + len(media_changes["deleted"]),
+        },
         "live": live,
         "upstream": upstream,
         "publishJob": _publish_job_to_dict(publish_job) if publish_job is not None else None,

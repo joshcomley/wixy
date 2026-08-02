@@ -182,7 +182,7 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
   test("align a photo pair: drag + micro nudge, save, publish — the live page serves the baked aligned photo", async ({
     page,
   }) => {
-    // The journey Purdi asked for (decisions/00108): she added a pair whose
+    // The journey Purdi asked for (decisions/00109): she added a pair whose
     // two photos don't line up; she must be able to fix that herself. Real
     // canvas, real bake, real upload pipeline, real publish — no mocks.
     const consoleErrors = trackConsoleErrors(page);

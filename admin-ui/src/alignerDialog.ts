@@ -1,4 +1,4 @@
-// The before/after ALIGNER (decisions/00108) — a full-screen canvas dialog
+// The before/after ALIGNER (decisions/00109) — a full-screen canvas dialog
 // that lets the owner line up a photo pair herself: drag with a finger to
 // move, pinch (or the zoom slider) to resize, tilt buttons to straighten, and
 // a micro pad of arrows for the final sub-pixel nudges. Born from Purdi's

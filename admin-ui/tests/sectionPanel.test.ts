@@ -378,7 +378,7 @@ describe("mountSectionPanel", () => {
   });
 });
 
-describe("mountSectionPanel — the before/after aligner (decisions/00108)", () => {
+describe("mountSectionPanel — the before/after aligner (decisions/00109)", () => {
   function slidersApi(item: typeof SLIDER_ITEM = SLIDER_ITEM): AdminApi {
     return fakeApi({
       getContent: vi.fn(async () => ({

@@ -399,6 +399,49 @@ class TestGetState:
             state_response = client.get("/api/admin/state")
         assert state_response.json()["draft"] == {"rev": 1, "opCount": 1}
 
+    def test_draft_op_count_covers_staged_page_and_media_changes(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        """The status bar's "N unpublished changes" chip AND its Publish-button
+        visibility (decisions/00108) both read THIS count — so it must cover
+        every publishable kind, the way the preview's opCount already does
+        (decisions/00071/00080): staged page adds/deletes and staged media
+        replacements/deletions produce NO overlay.ops, and counting only ops
+        read "No unpublished changes" + hid the Publish button over a staged
+        media replacement (found via the media-edit E2E)."""
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            assert client.get("/api/admin/state").json()["draft"]["opCount"] == 0
+            # Staged media replacement (hero.jpg is the fixture's one image).
+            replace = client.put(
+                "/api/admin/media/hero.jpg",
+                content=_tiny_jpeg(),
+                headers={"Content-Type": "image/jpeg"},
+            )
+            assert replace.status_code == 200
+            assert client.get("/api/admin/state").json()["draft"]["opCount"] == 1
+            # Staged page addition — a duplicate stages TWO records by design
+            # (decisions/00024): the PageAdd + the navLabel SET op, and the
+            # preview's opCount counts both, so this count must too.
+            duplicate = client.post(
+                "/api/admin/pages/duplicate",
+                json={
+                    "from": "index",
+                    "slug": "index-copy",
+                    "navLabel": "Copy",
+                    "expectedRev": _current_rev(client),
+                },
+            )
+            assert duplicate.status_code == 200
+            assert client.get("/api/admin/state").json()["draft"]["opCount"] == 3
+            # Staged page deletion.
+            delete = client.post(
+                "/api/admin/pages/delete",
+                json={"slug": "about", "expectedRev": _current_rev(client)},
+            )
+            assert delete.status_code == 200
+            assert client.get("/api/admin/state").json()["draft"]["opCount"] == 4
+
 
 class TestGetStateAdminSections:
     """decisions/00098: `/api/admin/state`'s `adminSections` field is a plain

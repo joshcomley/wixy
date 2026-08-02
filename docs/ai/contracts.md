@@ -51,7 +51,7 @@ Handler column is `file:func`. "Auth: CF" = gated by the admin middleware. Respo
 
 | Method | Path | Handler | Request | Response |
 |---|---|---|---|---|
-| GET | `state` | `routes_admin_api.py:get_state` | — | `{"project":{slug,name,domain}, "pages":[{slug,meta,lastModified,editable,pendingDelete}], "draft":{rev,opCount}, "live":{version,sha}\|null, "upstream":{aheadOfPublished:[{sha,subject,author,when}],fetchedAt}, "publishJob":{...}\|null, "chats":[<summary>], "adminSections":[<admin section>], "chatAttachmentsSupported":bool}`; 503 |
+| GET | `state` | `routes_admin_api.py:get_state` | — | `{"project":{slug,name,domain}, "pages":[{slug,meta,lastModified,editable,pendingDelete}], "draft":{rev,opCount (SAME formula as publish/preview's — content ops + staged page adds/deletes + staged media replacements/deletions, decisions/00108)}, "live":{version,sha}\|null, "upstream":{aheadOfPublished:[{sha,subject,author,when}],fetchedAt}, "publishJob":{...}\|null, "chats":[<summary>], "adminSections":[<admin section>], "chatAttachmentsSupported":bool}`; 503 |
 | GET | `content/{page}` | `get_content` | — | `{"content": <JsonObject>, "bindings": <dict>}`; 503, 404 |
 | GET | `theme` | `get_theme` | — | `{"theme": <dict>}`; 503, 404 |
 | PATCH | `draft` | `patch_draft` | `{"expectedRev":int, "ops":[{file,path,value}\|{file,path,discard:true}]}` | `{"rev": int}`; 503, **409** (RevConflict), **422** (`DraftValidationError` — the batch is structurally invalid against `builder/schemas/*.json`, e.g. a collection item missing a required field; rejected whole, the overlay is left untouched — decisions/00095) |
@@ -105,7 +105,7 @@ collection>]}`; `<admin collection>` = `{path, label, itemNoun, schema, alignAsp
 fields:[<admin field>]}` — `alignAspect` is `{w, h} | null` (from the registry's
 optional `"alignAspect": "W:H"`); when non-null AND the collection has ≥2 `image`
 fields, the section panel offers the before/after aligner on its cards and in its add
-flow (decisions/00108); `<admin field>` = `{key, kind:"image"\|"text"\|"choice", label,
+flow (decisions/00109); `<admin field>` = `{key, kind:"image"\|"text"\|"choice", label,
 options:[{value,label}]}` (decisions/00098) — a plain camelCase mirror of
 `builder.config.ProjectConfig.admin_sections`
 (`routes_admin_api.py:_admin_sections_snapshot`), registry-driven (Inv 1: no site literals
