@@ -39,7 +39,7 @@ Measured/verified 2026-08-02: the whole journey was exercised for real in a real
 serving the new aligned photo), alongside 38 new unit tests for the moving/zooming maths
 and the buttons. Nothing about how you add, reorder, or publish pairs changed.
 
-- STATUS: 🟢 ANSWERED (shipped in this change, decisions/00109)
+- STATUS: 🟢 ANSWERED (shipped in PR #145, decisions/00109)
 
 ## Q-002 — "Currently, when there are no unpublished changes, it still has a publish button…"
 
