@@ -683,19 +683,28 @@ class TestSendMessage:
         )
         with TestClient(app) as client:
             conv = _create(client, "hi")
+            # Stage the upload first — real cmd (and now the fake, mirroring
+            # its `_resolve_upload_ids_to_blocks`) 404s a send referencing an
+            # id it never staged.
+            upload = client.post(
+                f"/api/admin/chat/conversations/{conv['convId']}/attachments",
+                files={"file": ("a.png", _make_png_bytes(), "image/png")},
+            )
+            assert upload.status_code == 200
+            upload_id = upload.json()["attachmentId"]
             response = client.post(
                 f"/api/admin/chat/conversations/{conv['convId']}/messages",
                 json={
                     "text": "look at this",
                     "idempotencyKey": "conv1:msg3",
-                    "attachmentIds": ["upload-1"],
+                    "attachmentIds": [upload_id],
                 },
             )
             session = next(iter(fake_cmd_state.sessions.values()))
 
         assert response.status_code == 200
         assert session.last_send_body is not None
-        assert session.last_send_body["attachments"] == [{"kind": "image", "upload_id": "upload-1"}]
+        assert session.last_send_body["attachments"] == [{"kind": "image", "upload_id": upload_id}]
 
     def test_omitting_attachment_ids_sends_no_attachments_field(
         self,
@@ -1483,3 +1492,273 @@ class TestTaskEvents:
 
         assert [e["type"] for e in events] == ["message"]
         assert "wixy-tasks" in str(_message_payload(events[0])["text"])
+
+
+# ---------------------------------------------------------------------------
+# decisions/00110 — attachments everywhere: create flow, session-less uploads,
+# the bytes proxy, and stream decoration from the send log
+# ---------------------------------------------------------------------------
+
+
+class TestCreateConversationWithAttachments:
+    def test_create_forwards_attachment_ids_and_logs_the_send(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        cmdchat_client: CmdChatClient,
+        fake_cmd_state: FakeCmdState,
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
+        )
+        with TestClient(app) as client:
+            # Stage the upload session-lessly first — the "New conversation"
+            # compose's flow, since no conversation exists to scope it to yet.
+            upload = client.post(
+                "/api/admin/chat/uploads",
+                files={"file": ("photo.png", _make_png_bytes(), "image/png")},
+            )
+            assert upload.status_code == 200
+            upload_id = upload.json()["attachmentId"]
+
+            response = client.post(
+                "/api/admin/chat/conversations",
+                json={"firstMessage": "what is this?", "attachmentIds": [upload_id]},
+            )
+            assert response.status_code == 200
+            conv = response.json()
+
+            # cmd's new-chat received the attachments for the first turn...
+            session = next(iter(fake_cmd_state.sessions.values()))
+            assert session.create_attachments == [{"kind": "image", "upload_id": upload_id}]
+            assert session.prompt == compose_prompt(PREAMBLE_TEXT, "what is this?")
+            # ...and the title still derives from the first message.
+            assert conv["title"] == "what is this?"
+
+        # ...and wixy logged the send (full composed prompt, decoder-stripped)
+        # so the stream can re-decorate cmd's block-dropping read-back.
+        from wixy_server.chat_sends import load_sends
+
+        sends_path = project_paths(storage_root, "test").chat_sends_json
+        sends = load_sends(sends_path)
+        assert len(sends) == 1
+        assert sends[0].text == compose_prompt(PREAMBLE_TEXT, "what is this?").strip()
+        assert [a.upload_id for a in sends[0].attachments] == [upload_id]
+
+    def test_create_with_attachments_against_an_unsupporting_backend_422s(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        from wixy_server.ai.anthropic_backend import AnthropicAIBackend
+
+        backend = AnthropicAIBackend(transport=httpx.ASGITransport(app=create_fake_cmd_app()))
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, ai_backend=backend
+        )
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/chat/conversations",
+                json={"firstMessage": "hi", "attachmentIds": ["some-id"]},
+            )
+        assert response.status_code == 422
+
+
+class TestUnscopedUpload:
+    def test_stages_an_image_without_a_conversation(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        cmdchat_client: CmdChatClient,
+        fake_cmd_state: FakeCmdState,
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
+        )
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/chat/uploads",
+                files={"file": ("photo.png", _make_png_bytes(), "image/png")},
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["attachmentId"] in fake_cmd_state.uploads
+        # No session id hint — the upload is unscoped by design (cmd treats it
+        # as an optional janitor hint only).
+        assert "session_id" not in fake_cmd_state.uploads[body["attachmentId"]]
+
+    def test_invalid_image_422s(
+        self, storage_root: Path, wixy_repo_root: Path, cmdchat_client: CmdChatClient
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
+        )
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/chat/uploads",
+                files={"file": ("doc.pdf", b"%PDF-1.4", "application/pdf")},
+            )
+        assert response.status_code == 422
+
+
+class TestUploadBytesProxy:
+    def test_serves_the_converted_bytes_with_an_immutable_cache_header(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        cmdchat_client: CmdChatClient,
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
+        )
+        with TestClient(app) as client:
+            upload = client.post(
+                "/api/admin/chat/uploads",
+                files={"file": ("photo.png", _make_png_bytes(), "image/png")},
+            )
+            upload_id = upload.json()["attachmentId"]
+            response = client.get(f"/api/admin/chat/uploads/{upload_id}/bytes")
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("image/webp")
+        assert response.content.startswith(b"RIFF")
+        assert "immutable" in response.headers["cache-control"]
+
+    def test_an_unknown_id_404s(
+        self, storage_root: Path, wixy_repo_root: Path, cmdchat_client: CmdChatClient
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, cmdchat_client=cmdchat_client
+        )
+        with TestClient(app) as client:
+            response = client.get("/api/admin/chat/uploads/no-such-id/bytes")
+        assert response.status_code == 404
+
+
+class TestStreamAttachmentDecoration:
+    @pytest.mark.asyncio
+    async def test_a_send_logged_by_send_message_decorates_its_read_back(
+        self,
+        tmp_path: Path,
+        ai_backend: AIBackend,
+        fake_cmd_state: FakeCmdState,
+        fast_stream_timing: StreamTiming,
+    ) -> None:
+        """The stream-json case: cmd's read-back of an image send has NO trace
+        of the image (the decoder drops image blocks) — the stream must
+        re-attach it from wixy's own send log."""
+        from wixy_server.chat_attachments import ChatAttachmentRef
+        from wixy_server.chat_sends import ChatSend, ChatSendsCache
+
+        session = fake_cmd_state.create_session("hi")
+        session.ready = True
+        session.messages = [
+            _fake_message(0, role="user", text="look at this"),
+            _fake_message(1, role="assistant", text="a purple square"),
+        ]
+        chats_path = tmp_path / "chats.json"
+        conv_id = _seed_conversation(chats_path, session.session_id)
+        runtime: dict[str, ChatRuntimeEntry] = {}
+        sends = ChatSendsCache(tmp_path / "chat-sends.json")
+        sends.record(
+            ChatSend(
+                conv_id=conv_id,
+                text="look at this",
+                sent_at="2026-08-02T00:00:00+00:00",
+                attachments=(ChatAttachmentRef(upload_id="u1"),),
+            )
+        )
+
+        gen = _stream_events(
+            ai_backend, chats_path, runtime, conv_id, session.session_id, fast_stream_timing, sends
+        )
+        events = await _collect_stream_events(gen, count=2)
+
+        first = _message_payload(events[0])
+        assert first["text"] == "look at this"
+        assert first["attachments"] == [
+            {"uploadId": "u1", "name": None, "width": None, "height": None}
+        ]
+        # A plain text message's envelope stays attachment-free (byte-shape
+        # unchanged from before this feature).
+        assert "attachments" not in _message_payload(events[1])
+
+    @pytest.mark.asyncio
+    async def test_an_image_only_first_message_survives_the_preamble_strip(
+        self,
+        tmp_path: Path,
+        ai_backend: AIBackend,
+        fake_cmd_state: FakeCmdState,
+        fast_stream_timing: StreamTiming,
+    ) -> None:
+        """The owner started the conversation with JUST a photo: the first
+        read-back message is preamble-only text + image blocks. Decorated
+        from the create-time send record, `_owner_visible` must keep it (as
+        text=None, thumbnails-only) rather than dropping it as preamble."""
+        from wixy_server.chat_attachments import ChatAttachmentRef
+        from wixy_server.chat_sends import ChatSend, ChatSendsCache
+
+        preamble_only = compose_prompt(PREAMBLE_TEXT, None).strip()
+        session = fake_cmd_state.create_session("hi")
+        session.ready = True
+        session.messages = [_fake_message(0, role="user", text=preamble_only)]
+        chats_path = tmp_path / "chats.json"
+        conv_id = _seed_conversation(chats_path, session.session_id)
+        runtime: dict[str, ChatRuntimeEntry] = {}
+        sends = ChatSendsCache(tmp_path / "chat-sends.json")
+        sends.record(
+            ChatSend(
+                conv_id=conv_id,
+                text=preamble_only,
+                sent_at="2026-08-02T00:00:00+00:00",
+                attachments=(ChatAttachmentRef(upload_id="u9"),),
+            )
+        )
+
+        gen = _stream_events(
+            ai_backend, chats_path, runtime, conv_id, session.session_id, fast_stream_timing, sends
+        )
+        events = await _collect_stream_events(gen, count=1)
+
+        payload = _message_payload(events[0])
+        assert payload["text"] is None
+        assert payload["attachments"] == [
+            {"uploadId": "u9", "name": None, "width": None, "height": None}
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_footer_carrying_message_is_decorated_by_the_client_not_the_log(
+        self,
+        tmp_path: Path,
+        ai_backend: AIBackend,
+        fake_cmd_state: FakeCmdState,
+        fast_stream_timing: StreamTiming,
+    ) -> None:
+        """The driver-path case: the footer in the text is parsed by the cmd
+        CLIENT (footer strip + refs with dims), the log stays out of it — and
+        the owner never sees the raw path."""
+        session = fake_cmd_state.create_session("hi")
+        session.ready = True
+        session.messages = [
+            _fake_message(
+                0,
+                role="user",
+                text=(
+                    "what do you see?\n\nAttachments:\n"
+                    "@C:\\Users\\josh\\.claude\\cmd-uploads\\abc123\\converted.webp (800x600)"
+                ),
+            ),
+        ]
+        chats_path = tmp_path / "chats.json"
+        conv_id = _seed_conversation(chats_path, session.session_id)
+        runtime: dict[str, ChatRuntimeEntry] = {}
+
+        gen = _stream_events(
+            ai_backend, chats_path, runtime, conv_id, session.session_id, fast_stream_timing
+        )
+        events = await _collect_stream_events(gen, count=1)
+
+        payload = _message_payload(events[0])
+        assert payload["text"] == "what do you see?"
+        assert payload["attachments"] == [
+            {"uploadId": "abc123", "name": "converted.webp", "width": 800, "height": 600}
+        ]

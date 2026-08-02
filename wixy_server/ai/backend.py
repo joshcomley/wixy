@@ -17,8 +17,10 @@ from wixy_server.cmdchat import (
     ChatStatus,
     CmdChatClient,
     CmdChatError,
+    CmdChatStatusError,
     ProvisioningOutcome,
     SendResult,
+    UploadBytes,
     UploadResult,
 )
 from wixy_server.preamble import compose_prompt
@@ -30,6 +32,13 @@ class AIBackendError(Exception):
     preamble: "structured errors surfaced to the UI, never a silent hang"), but
     backend-agnostic, so `routes_chat.py`'s `except` clauses don't need to know
     which concrete backend is active."""
+
+
+class UploadNotFoundError(AIBackendError):
+    """`fetch_upload_bytes` against an upload id the backend genuinely doesn't
+    have (cmd's own 404/410, decisions/00110) — distinct from a transport-level
+    failure so the bytes-proxy route mirrors a 404 to the browser instead of a
+    misleading 502."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,8 +78,16 @@ class AIBackend(Protocol):
     supports_attachments: bool
 
     async def create_conversation(
-        self, preamble: str, first_message: str | None
-    ) -> ConversationRef: ...
+        self, preamble: str, first_message: str | None, *, attachment_ids: list[str] | None = None
+    ) -> ConversationRef:
+        """`attachment_ids` (decisions/00110) references uploads already staged
+        via `upload_attachment` — only ever non-empty when
+        `supports_attachments` is `True` (routes_chat.py 422s otherwise, same
+        gate as `send`). The backend folds them into the conversation's first
+        turn alongside `first_message` (cmd: its new-chat route's own
+        `attachments` field, drained into stream-json image blocks by the
+        workspace provisioner)."""
+        ...
 
     async def send(
         self,
@@ -82,12 +99,25 @@ class AIBackend(Protocol):
     ) -> SendResult: ...
 
     async def upload_attachment(
-        self, conv_ref: ConversationRef, data: bytes, filename: str, media_type: str
+        self, conv_ref: ConversationRef | None, data: bytes, filename: str, media_type: str
     ) -> UploadResult:
         """Only ever called when `supports_attachments` is `True` — a backend
         that sets the flag `False` may leave this unimplemented (raising is
         fine; `routes_chat.py` never reaches it, mirroring `get_chain`'s own
-        `supports_handover_chains`-gated convention above)."""
+        `supports_handover_chains`-gated convention above).
+
+        `conv_ref` is `None` for a pre-conversation stage (decisions/00110 —
+        the "New conversation" compose, where no conversation exists yet);
+        cmd treats the session id as an optional ownership hint for its own
+        janitor, so an unscoped upload is fully supported."""
+        ...
+
+    async def fetch_upload_bytes(self, upload_id: str) -> UploadBytes:
+        """The served (converted) bytes for one staged upload — the backbone
+        of attachment thumbnails in the transcript (decisions/00110). Only
+        ever called when `supports_attachments` is `True`, same gating
+        convention as `upload_attachment`. Raises `UploadNotFoundError` for a
+        genuinely-unknown/expired id (mirrored to the browser as 404)."""
         ...
 
     async def read(
@@ -136,11 +166,13 @@ class CmdAIBackend:
         self._cmd_project = cmd_project
 
     async def create_conversation(
-        self, preamble: str, first_message: str | None
+        self, preamble: str, first_message: str | None, *, attachment_ids: list[str] | None = None
     ) -> ConversationRef:
         prompt = compose_prompt(preamble, first_message)
         try:
-            result = await self._client.new_chat(self._cmd_project, prompt)
+            result = await self._client.new_chat(
+                self._cmd_project, prompt, attachment_ids=attachment_ids
+            )
         except CmdChatError as exc:
             raise AIBackendError(str(exc)) from exc
         return ConversationRef(id=result.session_id)
@@ -161,12 +193,22 @@ class CmdAIBackend:
             raise AIBackendError(str(exc)) from exc
 
     async def upload_attachment(
-        self, conv_ref: ConversationRef, data: bytes, filename: str, media_type: str
+        self, conv_ref: ConversationRef | None, data: bytes, filename: str, media_type: str
     ) -> UploadResult:
         try:
             return await self._client.upload_attachment(
-                data, filename, media_type, session_id=conv_ref.id
+                data, filename, media_type, session_id=conv_ref.id if conv_ref is not None else None
             )
+        except CmdChatError as exc:
+            raise AIBackendError(str(exc)) from exc
+
+    async def fetch_upload_bytes(self, upload_id: str) -> UploadBytes:
+        try:
+            return await self._client.get_upload_bytes(upload_id)
+        except CmdChatStatusError as exc:
+            if exc.status_code in (404, 410):
+                raise UploadNotFoundError(str(exc)) from exc
+            raise AIBackendError(str(exc)) from exc
         except CmdChatError as exc:
             raise AIBackendError(str(exc)) from exc
 

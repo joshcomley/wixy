@@ -74,10 +74,12 @@ Handler column is `file:func`. "Auth: CF" = gated by the admin middleware. Respo
 | POST | `restore` | `post_restore` | `{"version":int}` | `{"version":int, "sha":str, "of":int}`; **409** (running), 503, **422** (Restore) |
 | POST | `pages/duplicate` | `post_pages_duplicate` | `{"from":str, "slug":str, "navLabel":str, "expectedRev":int}` | `{"rev":int}`; 503, 409, 404, **422** (PageOp) |
 | POST | `pages/delete` | `post_pages_delete` | `{"slug":str, "expectedRev":int}` | `{"rev":int}`; 503, 409, 404 |
-| POST | `chat/conversations` | `routes_chat.py:create_conversation` | `{"firstMessage":str\|null}` | `<conversation summary>`; **502** (CmdChat) |
+| POST | `chat/conversations` | `routes_chat.py:create_conversation` | `{"firstMessage":str\|null, "attachmentIds":[str]}` (`attachmentIds` optional, default `[]` — staged beforehand via `POST chat/uploads`; decisions/00110) | `<conversation summary>`; **422** (non-empty `attachmentIds` against a backend with `supports_attachments=False`), **502** (CmdChat) |
 | GET | `chat/conversations` | `list_conversations` | — | `{"conversations":[<summary>]}` newest-first |
 | POST | `chat/conversations/{id}/messages` | `send_message` | `{"text":str, "idempotencyKey":str, "attachmentIds":[str]}` (`attachmentIds` optional, default `[]`) | `{"accepted":true, "buffered":bool}`; 404, **422** (non-empty `attachmentIds` against a backend with `supports_attachments=False`), 502 |
 | POST | `chat/conversations/{id}/attachments` | `upload_attachment` | `multipart/form-data` field `file` (image, ≤5MB) | `{"attachmentId":str, "width":int\|null, "height":int\|null}` (`width`/`height` are cmd's own CONVERTED-image dims, not the original upload's); 404, **422** (backend unsupported, or `AttachmentError` — oversize/wrong-type/unreadable), **502** (`AIBackendError` — cmd upload failed) |
+| POST | `chat/uploads` | `upload_attachment_unscoped` | same multipart shape as the scoped route | same response shape — the session-less stage for the "New conversation" compose (no conversation exists yet; cmd treats the session id as an optional janitor hint only). **422** (backend unsupported, or `AttachmentError`), **502** |
+| GET | `chat/uploads/{upload_id}/bytes` | `get_upload_bytes` | — | the upload's served (converted) bytes, proxied from cmd's own `GET /api/uploads/{id}/bytes` — what the transcript's thumbnails/lightbox point at (decisions/00110). `Cache-Control: private, max-age=31536000, immutable` (bytes never change after the upload-time conversion); **404** (unknown/expired id, mirroring cmd's own 404/410 via `UploadNotFoundError`), **422** (backend unsupported), **502** |
 | POST | `chat/conversations/{id}/rename` | `rename_conversation` | `{"title":str}` | `<conversation summary>`; 404 |
 | GET | `chat/conversations/{id}/stream?includeThinking=` | `conversation_stream` | query `includeThinking?` | **SSE**, see §4; 404 |
 
@@ -250,6 +252,15 @@ running. `stage ∈ pulling|merging|committing|building|verifying|swapping|done|
   `kind ∈ text|tool_use|tool_result|thinking|error`; `thinking` omitted unless `includeThinking=true`.
   An assistant `text` message's `text` has any `wixy-tasks` fenced block already stripped out
   (decisions/00097) — the owner's bubble never shows raw protocol JSON.
+  **`attachments` (decisions/00110)**: a user message carrying images adds
+  `"attachments":[{uploadId,name,width,height}]` (present only when non-empty — a plain
+  message's envelope is byte-identical to before this feature). Recovered server-side
+  two redundant ways: cmd's driver-path `Attachments:` footer (parsed out of the text —
+  the owner never sees raw machine paths) and wixy's own send log (`chat-sends.json`,
+  covering stream-json sends whose image blocks cmd's decoder drops). Bytes via
+  `GET chat/uploads/{uploadId}/bytes` (§2). A preamble-only first message that carries
+  attachments (an image-only conversation start) is emitted with `text:null` rather
+  than dropped — the bubble renders thumbnails-only.
 - `{"type":"status","status":{activity,processKind,handoverState}}` — emitted only on change.
 - `{"type":"tasks","tasks":[{label,status}],"messageIndex":int}` (decisions/00097) — the LATEST
   `wixy-tasks` block an assistant text message embedded, `status ∈ pending|doing|done`. Emitted
@@ -267,8 +278,10 @@ and distinguishes brand-new-session transcript lag (quiet retry) from a real out
 
 **Messages are owner-filtered before emission** (`_owner_visible`, decisions/00093): the site
 preamble is stripped out of the first user message, and a preamble-only first message is not
-emitted at all — so the indices a client sees can skip `0`, and a `text` may be shorter than
-what cmd's own `/messages` returns for the same index. Upstream transcripts are unmodified.
+emitted at all — unless it carries attachments (decisions/00110: an image-only first message
+survives as `text:null` + `attachments`, thumbnails-only). So the indices a client sees can
+skip `0`, and a `text` may be shorter than what cmd's own `/messages` returns for the same
+index. Upstream transcripts are unmodified.
 
 ## 5. Draft op contract (`DraftOp`)
 

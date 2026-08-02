@@ -17,13 +17,23 @@ from typing import Annotated
 
 import anyio
 from anyio.abc import TaskGroup
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from builder.jsontypes import JsonObject
-from wixy_server.ai.backend import AIBackend, AIBackendError, ConversationRef
-from wixy_server.chat_attachments import AttachmentError, validate_attachment
+from wixy_server.ai.backend import (
+    AIBackend,
+    AIBackendError,
+    ConversationRef,
+    UploadNotFoundError,
+)
+from wixy_server.chat_attachments import (
+    AttachmentError,
+    ChatAttachmentRef,
+    validate_attachment,
+)
+from wixy_server.chat_sends import ChatSend, ChatSendsCache, decorate_messages
 from wixy_server.chat_tasks import TaskItem, extract_tasks
 from wixy_server.chat_working import WorkingCache
 from wixy_server.chats import (
@@ -39,7 +49,7 @@ from wixy_server.chats import (
     update_session_id,
 )
 from wixy_server.cmdchat import ChatMessage, ChatStatus, FailedOutcome, ReadyOutcome
-from wixy_server.preamble import PREAMBLE_TEXT, strip_preamble
+from wixy_server.preamble import PREAMBLE_TEXT, compose_prompt, strip_preamble
 from wixy_server.storage import ProjectPaths
 
 router = APIRouter(prefix="/api/admin/chat")
@@ -87,6 +97,13 @@ async def _track_readiness(
 
 class ConversationCreateIn(BaseModel):
     firstMessage: str | None = None
+    """decisions/00110: images to attach to the FIRST turn — upload ids staged
+    beforehand via `POST /api/admin/chat/uploads` (the session-less variant of
+    the per-conversation upload route, since no conversation exists yet).
+    cmd's own new-chat route folds them into the first turn as real stream-
+    json image blocks (its `_stage_new_chat_attachments` → the workspace
+    provisioner's `content_blocks` drain)."""
+    attachmentIds: list[str] = []
 
 
 @router.post("/conversations", response_model=None)
@@ -95,15 +112,24 @@ async def create_conversation(body: ConversationCreateIn, request: Request) -> J
     client: AIBackend = request.app.state.ai_backend
     runtime: dict[str, ChatRuntimeEntry] = request.app.state.chat_runtime
     background: TaskGroup = request.app.state.background_tasks
+    sends: ChatSendsCache = request.app.state.chat_sends
 
     first_message = body.firstMessage
+    if body.attachmentIds and not client.supports_attachments:
+        # Same "explicit unsupported, never silently dropped" gate as
+        # `send_message` and the upload routes (decisions/00103, 00110).
+        raise HTTPException(
+            status_code=422, detail="this conversation's backend doesn't support image attachments"
+        )
     # spec/06 §1's create-time body ("<PREAMBLE>\n\n---\n\n<first message>", or
     # the preamble alone with no opening message) is now the BACKEND's own job
     # (spec/independence/05 §1: create_conversation takes preamble + first_message
     # separately) — CmdAIBackend combines them identically to what this route used
     # to do itself; a future backend may combine them differently.
     try:
-        result = await client.create_conversation(PREAMBLE_TEXT, first_message)
+        result = await client.create_conversation(
+            PREAMBLE_TEXT, first_message, attachment_ids=body.attachmentIds or None
+        )
     except AIBackendError as exc:
         raise HTTPException(status_code=502, detail=f"couldn't reach cmd: {exc}") from exc
 
@@ -120,10 +146,32 @@ async def create_conversation(body: ConversationCreateIn, request: Request) -> J
         created_at=datetime.now(UTC).isoformat(),
     )
 
+    send_record: ChatSend | None = None
+    if body.attachmentIds:
+        # decisions/00110: cmd folds the attachments into the first turn as
+        # image content blocks, which cmd's decoder DROPS on read-back (no
+        # footer, no trace) — log the send so the stream can re-decorate
+        # the first message from wixy's own record. The match text is the
+        # FULL composed prompt (preamble included): that's the text the
+        # first read-back user message carries before `_owner_visible`
+        # strips the preamble downstream. STRIPPED, because cmd's decoder
+        # strips each text block on read-back — the record must be stored
+        # in the exact form the read-back will have.
+        send_record = ChatSend(
+            conv_id=conv_id,
+            text=compose_prompt(PREAMBLE_TEXT, first_message).strip(),
+            sent_at=conversation.created_at,
+            attachments=tuple(ChatAttachmentRef(upload_id=uid) for uid in body.attachmentIds),
+        )
+
     def _persist() -> None:
         add_chat(paths.chats_json, conversation)
+        if send_record is not None:
+            sends.record(send_record)
 
     await anyio.to_thread.run_sync(_persist)
+    if send_record is not None:
+        sends.note(send_record)
     runtime[conv_id] = ChatRuntimeEntry(status="pending")
 
     async def _track() -> None:
@@ -173,6 +221,7 @@ class SendMessageIn(BaseModel):
 async def send_message(conv_id: str, body: SendMessageIn, request: Request) -> JsonObject:
     paths: ProjectPaths = request.app.state.paths
     client: AIBackend = request.app.state.ai_backend
+    sends: ChatSendsCache = request.app.state.chat_sends
 
     def _find() -> ChatConversation | None:
         return find_chat(paths.chats_json, conv_id)
@@ -202,6 +251,31 @@ async def send_message(conv_id: str, body: SendMessageIn, request: Request) -> J
         # text and reuses the SAME idempotencyKey on its own retry; wixy's job
         # here is just to surface a real 502, never to blind-retry a send itself.
         raise HTTPException(status_code=502, detail=f"couldn't deliver: {exc}") from exc
+
+    if body.attachmentIds:
+        # decisions/00110: if cmd routed this send to stream-json (a real
+        # image block, no footer), cmd's read-back carries no trace of the
+        # attachment — log it so the stream re-decorates from wixy's own
+        # record. A driver-routed send leaves its `Attachments:` footer in
+        # the text instead, which the cmd client's footer parser recovers —
+        # the log simply never matches (the footer-parsed message already
+        # has attachments and is skipped by `decorate_messages`), so logging
+        # unconditionally is correct for BOTH routings.
+        send_record = ChatSend(
+            conv_id=conv_id,
+            # Stripped, matching the exact form cmd's decoder produces on
+            # read-back (it strips each text block) so the stream's text
+            # match hits (see chat_sends.py's contract).
+            text=body.text.strip(),
+            sent_at=datetime.now(UTC).isoformat(),
+            attachments=tuple(ChatAttachmentRef(upload_id=uid) for uid in body.attachmentIds),
+        )
+
+        def _persist_send() -> None:
+            sends.record(send_record)
+
+        await anyio.to_thread.run_sync(_persist_send)
+        sends.note(send_record)
 
     return {"accepted": True, "buffered": result.buffered}
 
@@ -251,6 +325,73 @@ async def upload_attachment(
         raise HTTPException(status_code=502, detail=f"couldn't upload: {exc}") from exc
 
     return {"attachmentId": result.upload_id, "width": result.width, "height": result.height}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/admin/chat/uploads (session-less stage, decisions/00110)
+# GET  /api/admin/chat/uploads/{upload_id}/bytes (thumbnail/full-image proxy)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/uploads", response_model=None)
+async def upload_attachment_unscoped(
+    request: Request, file: Annotated[UploadFile, File()]
+) -> JsonObject:
+    """The "New conversation" compose's upload route — identical validation and
+    response shape to the per-conversation route above, but unscoped: no
+    conversation exists to key the upload to yet (the owner is still composing
+    the FIRST message). cmd's own `/api/uploads` treats the session id as an
+    optional ownership hint for its janitor (its new-chat compose stages
+    uploads the same way), so the id minted here is referenced by a later
+    `create_conversation(attachmentIds=[...])` exactly like a scoped one."""
+    client: AIBackend = request.app.state.ai_backend
+    if not client.supports_attachments:
+        raise HTTPException(
+            status_code=422, detail="this conversation's backend doesn't support image attachments"
+        )
+
+    data = await file.read()
+    content_type = file.content_type or ""
+    try:
+        validate_attachment(data, content_type)
+    except AttachmentError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    filename = file.filename or "attachment"
+    try:
+        result = await client.upload_attachment(None, data, filename, content_type)
+    except AIBackendError as exc:
+        raise HTTPException(status_code=502, detail=f"couldn't upload: {exc}") from exc
+
+    return {"attachmentId": result.upload_id, "width": result.width, "height": result.height}
+
+
+@router.get("/uploads/{upload_id}/bytes", response_model=None)
+async def get_upload_bytes(upload_id: str, request: Request) -> Response:
+    """Proxy cmd's own `GET /api/uploads/{id}/bytes` through the admin origin —
+    the transcript's attachment thumbnails/lightbox point here (decisions/
+    00110); the browser must never see cmd's localhost-only surface. The
+    served bytes are immutable (cmd converts once, at upload), so the response
+    is cacheable forever; an unknown or janitor-swept id mirrors cmd's own
+    404/410 rather than flattening to a 502."""
+    client: AIBackend = request.app.state.ai_backend
+    if not client.supports_attachments:
+        raise HTTPException(
+            status_code=422, detail="this conversation's backend doesn't support image attachments"
+        )
+    try:
+        result = await client.fetch_upload_bytes(upload_id)
+    except UploadNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail="that upload doesn't exist (or expired)"
+        ) from exc
+    except AIBackendError as exc:
+        raise HTTPException(status_code=502, detail=f"couldn't fetch the upload: {exc}") from exc
+    return Response(
+        content=result.content,
+        media_type=result.media_type,
+        headers={"Cache-Control": "private, max-age=31536000, immutable"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -314,18 +455,30 @@ def _sse(payload: JsonObject) -> str:
 
 
 def _message_event(message: ChatMessage) -> JsonObject:
-    return {
-        "type": "message",
-        "message": {
-            "index": message.index,
-            "role": message.role,
-            "kind": message.kind,
-            "text": message.text,
-            "timestamp": message.timestamp,
-            "toolName": message.tool_name,
-            "truncated": message.truncated,
-        },
+    message_payload: JsonObject = {
+        "index": message.index,
+        "role": message.role,
+        "kind": message.kind,
+        "text": message.text,
+        "timestamp": message.timestamp,
+        "toolName": message.tool_name,
+        "truncated": message.truncated,
     }
+    if message.attachments:
+        # decisions/00110: image refs for the transcript's thumbnail grid —
+        # present only when non-empty so a plain text message's envelope is
+        # byte-identical to before this feature (same convention as
+        # `send_message`'s `attachments` field).
+        message_payload["attachments"] = [
+            {
+                "uploadId": ref.upload_id,
+                "name": ref.name,
+                "width": ref.width,
+                "height": ref.height,
+            }
+            for ref in message.attachments
+        ]
+    return {"type": "message", "message": message_payload}
 
 
 def _status_event(status: ChatStatus) -> JsonObject:
@@ -373,6 +526,13 @@ def _owner_visible(message: ChatMessage) -> ChatMessage | None:
         return message
     visible = strip_preamble(message.text)
     if visible is None:
+        # decisions/00110: a preamble-only message that CARRIES attachments
+        # (an image-only first message — the owner started the conversation
+        # with just a photo) must survive: the prose was all preamble, but
+        # the images are the owner's own content. Emit it with `text=None`
+        # so the bubble renders as thumbnails-only.
+        if message.attachments:
+            return replace(message, text=None)
         return None
     if visible == message.text:
         return message
@@ -407,6 +567,7 @@ async def _stream_events(
     conv_id: str,
     session_id: str,
     timing: StreamTiming,
+    chat_sends: ChatSendsCache | None = None,
     *,
     include_thinking: bool = False,
 ) -> AsyncGenerator[str]:
@@ -480,6 +641,21 @@ async def _stream_events(
             await anyio.sleep(timing.offline_retry_s)
             continue
 
+        # decisions/00110: re-attach anything wixy itself sent that cmd's
+        # read-back can't carry (a stream-json-routed send leaves no trace —
+        # see chat_sends.py's docstring). Runs on the RAW messages, BEFORE
+        # `_owner_visible`: the create-time send record matches on the full
+        # composed prompt, preamble included, and a preamble-only message that
+        # thereby gains attachments must then SURVIVE the strip (an image-only
+        # first message — `_owner_visible` keeps those deliberately).
+        # Driver-routed sends need nothing here: the cmd client's footer
+        # parser already decorated them, and `decorate_messages` skips any
+        # message that already has attachments. `None` (tests that predate
+        # the send log and never record) simply decorates nothing — the
+        # footer-parse half of the coverage works regardless.
+        sends = chat_sends.for_conversation(conv_id) if chat_sends is not None else []
+        messages = decorate_messages(messages, sends)
+
         # "polls /messages (new-since-index)" (spec/06 §1) — cmd's own API has
         # no `since=` filter, so wixy fetches the latest batch every tick and
         # diffs it itself: an unseen index is new, a seen index whose content
@@ -533,6 +709,7 @@ async def conversation_stream(
     client: AIBackend = request.app.state.ai_backend
     runtime: dict[str, ChatRuntimeEntry] = request.app.state.chat_runtime
     timing: StreamTiming = request.app.state.chat_stream_timing
+    sends: ChatSendsCache = request.app.state.chat_sends
 
     def _find() -> ChatConversation | None:
         return find_chat(paths.chats_json, conv_id)
@@ -549,6 +726,7 @@ async def conversation_stream(
             conv_id,
             conversation.session_id,
             timing,
+            sends,
             include_thinking=includeThinking,
         ):
             yield payload

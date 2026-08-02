@@ -359,8 +359,30 @@ export interface ChatAttachment {
   height: number | null;
 }
 
+/** One image attached to a transcript message (decisions/00110) — recovered
+ * server-side either from cmd's driver-path `Attachments:` footer or from
+ * wixy's own send log (for stream-json sends, whose image blocks cmd's
+ * decoder drops on read-back). Bytes come from wixy's own proxy route
+ * (`chatUploadBytesUrl`), never from cmd's localhost surface directly. */
+export interface ChatAttachmentRefData {
+  uploadId: string;
+  name: string | null;
+  width: number | null;
+  height: number | null;
+}
+
+/** The URL a transcript attachment's bytes are served from (decisions/00110)
+ * — wixy's own admin-origin proxy of cmd's `/api/uploads/{id}/bytes`, so the
+ * browser never sees cmd's localhost-only surface. The bytes are immutable
+ * (converted once, at upload), so the URL needs no cache-busting. */
+export function chatUploadBytesUrl(uploadId: string): string {
+  return `/api/admin/chat/uploads/${encodeURIComponent(uploadId)}/bytes`;
+}
+
 /** `GET .../stream`'s per-event `message` payload (spec/06 §1's decoded
- * `/messages` shape, camelCased). */
+ * `/messages` shape, camelCased). `attachments` is present only when the
+ * message carries images (decisions/00110) — a plain text message's envelope
+ * is byte-identical to before that feature. */
 export interface ChatMessageData {
   index: number;
   role: string;
@@ -369,6 +391,7 @@ export interface ChatMessageData {
   timestamp: string;
   toolName: string | null;
   truncated: boolean;
+  attachments?: ChatAttachmentRefData[];
 }
 
 /** `GET .../stream`'s per-event `status` payload — `processKind`/
@@ -524,7 +547,10 @@ export interface AdminApi {  getState(): Promise<StateResponse>;
   restore(version: number): Promise<RestoreOutcome>;
   duplicatePage(fromSlug: string, slug: string, navLabel: string, expectedRev: number): Promise<PageOpOutcome>;
   deletePage(slug: string, expectedRev: number): Promise<PageOpOutcome>;
-  createConversation(firstMessage?: string): Promise<ConversationSummary>;
+  createConversation(
+    firstMessage?: string,
+    attachmentIds?: string[],
+  ): Promise<ConversationSummary>;
   getConversations(): Promise<ConversationSummary[]>;
   sendMessage(
     convId: string,
@@ -533,6 +559,10 @@ export interface AdminApi {  getState(): Promise<StateResponse>;
     attachmentIds?: string[],
   ): Promise<SendMessageResult>;
   uploadChatAttachment(convId: string, file: File): Promise<ChatAttachment>;
+  /** Session-less variant for the "New conversation" compose (decisions/
+   * 00110) — no conversation exists to scope the upload to yet; cmd treats
+   * the session id as an optional janitor hint only. */
+  stageChatUpload(file: File): Promise<ChatAttachment>;
   renameConversation(convId: string, title: string): Promise<ConversationSummary>;
   getEngineStatus(): Promise<EngineStatus>;
   triggerEngineUpdate(): Promise<{ triggered: true }>;
@@ -739,11 +769,17 @@ export function createApi(): AdminApi {
       }
       return { ok: true };
     },
-    async createConversation(firstMessage) {
+    async createConversation(firstMessage, attachmentIds) {
       const response = await fetchWithRetry("/api/admin/chat/conversations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(firstMessage !== undefined ? { firstMessage } : {}),
+        body: JSON.stringify({
+          ...(firstMessage !== undefined ? { firstMessage } : {}),
+          // decisions/00110: images for the FIRST turn (staged via
+          // stageChatUpload beforehand) — cmd's new-chat folds them into the
+          // opening message as real image blocks.
+          ...(attachmentIds !== undefined && attachmentIds.length > 0 ? { attachmentIds } : {}),
+        }),
       });
       return parseJson<ConversationSummary>(response);
     },
@@ -775,6 +811,15 @@ export function createApi(): AdminApi {
         `/api/admin/chat/conversations/${encodeURIComponent(convId)}/attachments`,
         { method: "POST", body: formData },
       );
+      return parseJson<ChatAttachment>(response);
+    },
+    async stageChatUpload(file) {
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetchWithRetry("/api/admin/chat/uploads", {
+        method: "POST",
+        body: formData,
+      });
       return parseJson<ChatAttachment>(response);
     },
     async renameConversation(convId, title) {

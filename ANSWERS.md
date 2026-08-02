@@ -4,6 +4,44 @@ One `## Q-NNN` section per question the operator actually asked, newest first, n
 deleted. Answer FIRST, in plain English, before any detail. Status: 🟢 ANSWERED /
 🟡 PARTIAL / 🔴 OPEN / ⚫ OBSOLETE.
 
+## Q-004 — "…it scrolls to the end of the chat with you. That might be happening, I'm not sure but check that it does and it doesn't overflow."
+
+> *"So we need a revamp of the chat experience in Wixy so that it's a full-screen
+> experience just where the chat input area at the bottom is stickied and that it
+> scrolls to the end of the chat with you. That might be happening, I'm not sure but
+> check that it does and it doesn't overflow."* (2026-08-02, with a phone screenshot of
+> the admin Chat tab)
+
+**Answer: it WAS scrolling to the end — but in the worst way: it snapped you to the
+bottom on every background refresh (about once a second), even while you were scrolled
+up reading older messages. And the input box genuinely overflowed: it was a fixed
+two-line box, so longer messages scrolled inside a tiny window. Both are fixed now.**
+
+What was happening, in plain English:
+
+- The chat page had TWO nested scrollbars — the page itself and the message list inside
+  it — which is why you had to "double-scroll" to reach the input box, and why the box
+  ended up hidden under the phone's bottom bar. The page no longer scrolls at all:
+  only the message list scrolls, and the input box is pinned to the bottom of the
+  screen, always visible, always above the phone's bar.
+- The old code jumped you to the newest message every time it checked for updates.
+  Now it follows you to the end only when you're already at the end; if you've
+  scrolled up to read, a little "↓ New messages" button appears instead, and tapping
+  it takes you back to the latest.
+- The input box now grows as you type (up to a sensible cap, then scrolls inside
+  itself) — no more overflowing text.
+- You can attach a photo when STARTING a chat, not just inside one, and attached
+  photos show as tappable thumbnails in the conversation (tap to see full size)
+  instead of the ugly raw file path text from your screenshot.
+
+Measured/verified 2026-08-02: the whole chat flow was exercised in a real browser
+(1,036 Python tests, 605 UI unit tests, 41 end-to-end browser tests — including new
+permanent tests for the pinned input box, the single scroll region, the jump-to-latest
+button, photo attach-on-start, thumbnails, and the full-size viewer), then verified
+live on ca.cinnamons.uk after deploy.
+
+- STATUS: 🟢 ANSWERED (shipped in PR #143, decisions/00110)
+=======
 ## Q-003 — "When Purdy is using Wixie, it doesn't tell her if the version she's looking at is out of date…"
 
 > *"When Purdy is using Wixie, it doesn't tell her if the version she's looking at is
