@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { mountShell } from "../src/shell";
 import type { Shell } from "../src/shell";
-import type { AdminApi, PublishJobData, PublishOutcome, StateResponse } from "../src/api";
+import type { AdminApi, PublishJobData, PublishOutcome, ServerVersion, StateResponse } from "../src/api";
 import type { ChatPanel, ChatPanelDeps } from "../src/chatPanel";
 import type { EditView, MountEditViewDeps } from "../src/editView";
 import type { DraftOp } from "../src/protocol";
@@ -79,20 +79,24 @@ function fakeWindow(
     const narrow = opts.narrow;
     narrow.notify = () => narrowChangeListener?.({ matches: narrow.matches });
   }
-  const win = {
-    location: {
-      get hash() {
-        return hash;
-      },
-      set hash(value: string) {
-        hash = value.startsWith("#") ? value : `#${value}`;
-        listeners.get("hashchange")?.forEach((l) => l());
-      },
-      get pathname() {
-        return pathname;
-      },
-      origin: "https://wixy.test",
+  // The version badge's confirmed reload (decisions/00109) lands here — a real
+  // method on the fake location so tests can `vi.spyOn(win.location, "reload")`.
+  const location = {
+    get hash() {
+      return hash;
     },
+    set hash(value: string) {
+      hash = value.startsWith("#") ? value : `#${value}`;
+      listeners.get("hashchange")?.forEach((l) => l());
+    },
+    get pathname() {
+      return pathname;
+    },
+    origin: "https://wixy.test",
+    reload: () => {},
+  };
+  const win = {
+    location,
     history: {
       pushState: (_state: unknown, _title: string, url: string) => {
         pathname = url;
@@ -198,6 +202,7 @@ function fakeState(overrides: Partial<StateResponse> = {}): StateResponse {
 function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
   return {
     getState: vi.fn(async () => fakeState()),
+    getServerVersion: vi.fn(async () => null),
     getContent: vi.fn(async () => ({ content: {}, bindings: { page: "index", fields: [] } })),
     patchDraft: vi.fn(async () => ({ kind: "ok" as const, rev: 1 })),
     discardDraft: vi.fn(async () => ({ rev: 0 })),
@@ -663,8 +668,10 @@ describe("mountShell", () => {
       const statusBar = container.querySelector(".wx-statusbar");
       expect(statusBar).not.toBeNull();
       expect(container.firstElementChild).toBe(statusBar); // above the topbar
+      // The version badge pins at the FAR LEFT (decisions/00109), then the
+      // chip, then Publish.
       const children = Array.from(statusBar?.children ?? []).map((el) => el.className);
-      expect(children).toEqual(["wx-draft-chip", "wx-publish-button"]);
+      expect(children).toEqual(["wx-version-badge", "wx-draft-chip", "wx-publish-button"]);
     });
 
     it("the slim-bar back button navigates to the pages list", async () => {
@@ -1452,7 +1459,7 @@ describe("mountShell", () => {
     // visibility revalidation re-renders the mounted pages panel from the
     // fresh snapshot — a same-route re-render, not a navigation — so it must
     // not close the drawer (decisions/00082).
-    const api = fakeApi({ getServerCommit: vi.fn(async () => null) } as Partial<AdminApi>);
+    const api = fakeApi({ getServerVersion: vi.fn(async () => null) });
     const win = fakeWindow({ withDocument: true });
     const container = document.createElement("div");
 
@@ -1468,7 +1475,44 @@ describe("mountShell", () => {
     await flushState(api);
 
     expect(container.querySelector(".wx-drawer-wide")).not.toBeNull();
-    expect(api.getServerCommit).toHaveBeenCalled(); // the revalidation genuinely ran
+    expect(api.getServerVersion).toHaveBeenCalled(); // the revalidation genuinely ran
+  });
+
+  it("pins the engine version at the status bar's far left, glows after a deploy, and reloads ONLY via the confirm (decisions/00109)", async () => {
+    let current: ServerVersion = { shaFull: "a".repeat(40), count: 158 };
+    const api = fakeApi({ getServerVersion: vi.fn(async () => current) });
+    const win = fakeWindow({ withDocument: true });
+    const reloadSpy = vi.spyOn(win.location, "reload");
+    const container = document.createElement("div");
+
+    mountShell(container, { api, win });
+    await flushState(api);
+    await new Promise((resolve) => setTimeout(resolve, 0)); // drain the badge's initial pin
+
+    const statusBar = container.querySelector(".wx-statusbar")!;
+    const badge = statusBar.querySelector<HTMLButtonElement>(".wx-version-badge")!;
+    expect(statusBar.firstElementChild).toBe(badge); // the far-left spot per the ask
+    expect(badge.textContent).toBe("v158");
+    expect(badge.classList.contains("wx-version-update-available")).toBe(false);
+
+    // A Slots deploy lands: the next visibility revalidation turns the badge
+    // into the green glow — and crucially does NOT reload the page on its own
+    // (she may be mid-edit; the old auto-reload is gone).
+    current = { shaFull: "b".repeat(40), count: 159 };
+    win.document.dispatchEvent(new Event("visibilitychange"));
+    await new Promise((resolve) => setTimeout(resolve, 0)); // drain revalidate's awaits
+    expect(badge.classList.contains("wx-version-update-available")).toBe(true);
+    expect(badge.textContent).toBe("v158 → v159");
+    expect(reloadSpy).not.toHaveBeenCalled();
+
+    // Tap → the themed confirmation (no git history); confirm → the reload.
+    badge.click();
+    const backdrop = document.querySelector(".wx-version-backdrop");
+    expect(backdrop?.textContent).toContain("A new version of Wixy is ready");
+    expect(backdrop?.textContent).toContain("Would you like to load the latest version now?");
+    backdrop!.querySelector<HTMLButtonElement>(".wx-version-dialog-confirm")!.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(reloadSpy).toHaveBeenCalledTimes(1);
   });
 
   it("still closes the publish drawer on a genuine route change", async () => {
