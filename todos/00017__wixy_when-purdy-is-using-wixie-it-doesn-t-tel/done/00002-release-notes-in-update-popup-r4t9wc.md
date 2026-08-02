@@ -23,7 +23,7 @@ shows.
 
 ## State
 
-Shipped via PR (see git log) — merged to main; Slots deploys. The FIRST live glow
+Shipped in PR #146 — merged to main; Slots deploys. E2E ops note (found mid-verification): parallel wixy workspaces collide on the e2e suite's fixed port 8799 — set WIXY_E2E_PORT per run (config + fixture both read it). The FIRST live glow
 after this deploy is itself self-describing: this PR's commits carry
 `Release-note: The update popup tells you what changed in plain English.` — the first
 real line she'll ever see in the list.
