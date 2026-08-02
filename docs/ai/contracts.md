@@ -45,7 +45,7 @@ Handler column is `file:func`. "Auth: CF" = gated by the admin middleware. Respo
 | GET | `/internal/ready` | `routes_internal.py:get_ready` | none | `{"ready": true}` — **404 (no body)** if a `Cf-Ray`/`Cf-Connecting-Ip` header is present |
 | GET | `/healthz` | `routes_internal.py:get_healthz` | none | `{"ready": true}` (delegates to `get_ready`; same CF-edge 404) |
 | POST | `/internal/warmup` | `routes_internal.py:post_warmup` | none | `{"warm": true}`; **503** on `CheckoutError`; 404 CF-edge |
-| GET | `/api/version` | `routes_version.py:get_version` | **none (public by design)** | `{"commit": {"sha_full": "<engine HEAD sha>"}, "slot": <str\|null>, "version": <int\|null>}` |
+| GET | `/api/version` | `routes_version.py:get_version` | **none (public by design)** | `{"commit": {"sha_full": "<engine HEAD sha>"\|null, "count": <int\|null>}, "slot": <str\|null>, "version": <int\|null>, "edition": "fleet"\|"standalone", "syncBase": <str\|null>}` — `commit.count` (decisions/00109) is the engine's `v N` display number (first-parent count of HEAD; baked `WIXY_ENGINE_VERSION` preferred, git fallback, null on a gitless image); `version` is the SITE's live pointer, unrelated |
 
 ### Admin API (`/api/admin/*`, all Auth: CF)
 
@@ -105,7 +105,7 @@ collection>]}`; `<admin collection>` = `{path, label, itemNoun, schema, alignAsp
 fields:[<admin field>]}` — `alignAspect` is `{w, h} | null` (from the registry's
 optional `"alignAspect": "W:H"`); when non-null AND the collection has ≥2 `image`
 fields, the section panel offers the before/after aligner on its cards and in its add
-flow (decisions/00109); `<admin field>` = `{key, kind:"image"\|"text"\|"choice", label,
+flow (decisions/00110); `<admin field>` = `{key, kind:"image"\|"text"\|"choice", label,
 options:[{value,label}]}` (decisions/00098) — a plain camelCase mirror of
 `builder.config.ProjectConfig.admin_sections`
 (`routes_admin_api.py:_admin_sections_snapshot`), registry-driven (Inv 1: no site literals

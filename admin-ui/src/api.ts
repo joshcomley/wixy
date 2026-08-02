@@ -152,7 +152,7 @@ export interface AdminField {
  * `alignAspect` is the frame a two-image item is displayed in (from the
  * registry's `alignAspect` "W:H", `null` when unset) — when present and the
  * collection has ≥2 `image` fields, the panel offers the before/after
- * aligner on its cards (decisions/00109). */
+ * aligner on its cards (decisions/00110). */
 export interface AdminCollection {
   path: string;
   label: string;
@@ -497,8 +497,18 @@ export function thumbnailUrl(slug: string, rev: number): string {
   return `/api/admin/pages/${encodeURIComponent(slug)}/thumbnail?v=${rev}`;
 }
 
+/** The engine's own version identity from `/api/version` (decisions/00109):
+ * `shaFull` detects "a deploy landed since this page loaded"; `count` is the
+ * human-facing `v N` number the status-bar badge shows (first-parent count of
+ * HEAD, baked as `WIXY_ENGINE_VERSION` on image builds). Either can be null on
+ * a gitless/pip-installed image. */
+export interface ServerVersion {
+  shaFull: string | null;
+  count: number | null;
+}
+
 export interface AdminApi {  getState(): Promise<StateResponse>;
-  getServerCommit(): Promise<string | null>;
+  getServerVersion(): Promise<ServerVersion | null>;
   getContent(page: string): Promise<ContentResponse>;
   patchDraft(expectedRev: number, ops: DraftOp[]): Promise<PatchResult>;
   discardDraft(): Promise<{ rev: number }>;
@@ -542,15 +552,18 @@ export function createApi(): AdminApi {
       return parseJson<StateResponse>(await fetchWithRetry("/api/admin/state"));
     },
 
-    /** The server's deployed commit (unauthenticated `/api/version`) — used by the
-     * shell's revalidation loop to detect a Slots deploy under a long-lived tab
-     * (Edit-button latch incident, 2026-07-19: stale tabs must self-heal). */
-    async getServerCommit(): Promise<string | null> {
+    /** The server's deployed engine version (unauthenticated `/api/version`) — used
+     * by the status-bar version badge (decisions/00109) to pin what THIS page is
+     * running and to flag when a Slots deploy has landed past it. */
+    async getServerVersion(): Promise<ServerVersion | null> {
       try {
-        const version = await parseJson<{ commit?: { sha_full?: string } }>(
-          await fetchWithRetry("/api/version"),
-        );
-        return version.commit?.sha_full ?? null;
+        const version = await parseJson<{
+          commit?: { sha_full?: string | null; count?: number | null };
+        }>(await fetchWithRetry("/api/version"));
+        return {
+          shaFull: version.commit?.sha_full ?? null,
+          count: version.commit?.count ?? null,
+        };
       } catch {
         return null;
       }
