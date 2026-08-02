@@ -121,7 +121,9 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   // ABOVE the topbar and is deliberately NOT part of the edit-view chrome
   // that hides/reveals — the one place you can always see and act on "you
   // have unpublished work" is here, so there's no chip-relocation dance any
-  // more (the chip used to move into the slim edit bar while editing).
+  // more (the chip used to move into the slim edit bar while editing). With
+  // nothing to publish the button hides and the bar collapses to a narrow
+  // "No unpublished changes" strip (renderTopBar + style.css).
   const statusBar = document.createElement("div");
   statusBar.className = "wx-statusbar";
   const chipEl = document.createElement("button");
@@ -587,6 +589,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       // registering the job server-side (the busy affordance appears
       // synchronously with the click — fleet instant-feedback rule); the
       // shell's watch covers reload-mid-publish and other-tab/device starts.
+      publishButton.hidden = false; // a running publish keeps its progress surface even if a snapshot already reads clean
       publishButton.disabled = true;
       chipEl.disabled = true;
       // Keep the banner highlighted while publishing (decisions/00094): the chip
@@ -608,6 +611,11 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     }
     publishButton.title = "";
     chipEl.textContent = parts.length === 0 ? "No unpublished changes" : parts.join(" · ");
+    // Nothing to publish → no Publish button (operator, 2026-08-02): with the
+    // chip already reading "No unpublished changes" the button is dead chrome,
+    // and its absence is what lets the bar collapse to a narrow strip (see
+    // `.wx-statusbar:not(.wx-statusbar-pending)` in style.css).
+    publishButton.hidden = parts.length === 0;
     // Prominent only when there's actually something to publish — see
     // `.wx-statusbar-pending` in style.css for why it isn't always-on.
     statusBar.classList.toggle("wx-statusbar-pending", parts.length > 0);

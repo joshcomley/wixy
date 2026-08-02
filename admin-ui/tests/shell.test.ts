@@ -421,6 +421,66 @@ describe("mountShell", () => {
     );
   });
 
+  it("the Publish button hides with nothing to publish and appears with unpublished changes", async () => {
+    // Operator, 2026-08-02: with the chip already saying "No unpublished
+    // changes" the button is dead chrome; hiding it also lets the bar collapse
+    // to a narrow strip.
+    const clean = fakeApi();
+    const cleanContainer = document.createElement("div");
+    mountShell(cleanContainer, { api: clean, win: fakeWindow(), mountEditView: fakeMountEditView().fn });
+    await flushState(clean);
+    const hiddenButton = cleanContainer.querySelector<HTMLButtonElement>(".wx-publish-button");
+    expect(hiddenButton?.hidden).toBe(true);
+
+    const dirty = fakeApi({
+      getState: vi.fn(async () => fakeState({ draft: { rev: 1, opCount: 2 } })),
+    });
+    const dirtyContainer = document.createElement("div");
+    mountShell(dirtyContainer, { api: dirty, win: fakeWindow(), mountEditView: fakeMountEditView().fn });
+    await flushState(dirty);
+    const shownButton = dirtyContainer.querySelector<HTMLButtonElement>(".wx-publish-button");
+    expect(shownButton?.hidden).toBe(false);
+    expect(shownButton?.disabled).toBe(false);
+  });
+
+  it("outside site updates alone keep the Publish button visible", async () => {
+    // A publish takes those live too, so the action must stay offered even
+    // with an empty local draft.
+    const api = fakeApi({
+      getState: vi.fn(async () =>
+        fakeState({
+          upstream: {
+            aheadOfPublished: [
+              { sha: "a".repeat(40), subject: "assistant edit", author: "AI", when: "2026-01-01" },
+            ],
+            fetchedAt: null,
+          },
+        }),
+      ),
+    });
+    const container = document.createElement("div");
+    mountShell(container, { api, win: fakeWindow(), mountEditView: fakeMountEditView().fn });
+    await flushState(api);
+
+    expect(container.querySelector<HTMLButtonElement>(".wx-publish-button")?.hidden).toBe(false);
+  });
+
+  it("a running publish keeps the button visible even when the snapshot already reads clean", async () => {
+    // The button is the publish's progress surface (decisions/00089) — it must
+    // not vanish mid-publish if a state poll reports opCount 0 before the job
+    // goes terminal.
+    const api = fakeApi({
+      getState: vi.fn(async () => fakeState({ publishJob: runningJob("building") })),
+    });
+    const container = document.createElement("div");
+    mountShell(container, { api, win: fakeWindow(), mountEditView: fakeMountEditView().fn });
+    await flushState(api);
+
+    const publishButton = container.querySelector<HTMLButtonElement>(".wx-publish-button");
+    expect(publishButton?.hidden).toBe(false);
+    expect(publishButton?.disabled).toBe(true);
+  });
+
   it("defaults to the pages panel and lists fetched pages", async () => {
     const api = fakeApi();
     const win = fakeWindow();

@@ -54,7 +54,12 @@ between them. Spec: [`spec/05-editor.md`](../../spec/05-editor.md). The wire typ
   convenience trigger). The bar takes `.wx-statusbar-pending` — tinted background + a
   brand-blue rule — **only when there is something to publish** (draft ops or outside site
   updates) or while a publish runs; with nothing pending it stays plain and its label goes
-  muted, so the prominence keeps its meaning (decisions/00094). The quiet styling is keyed
+  muted, so the prominence keeps its meaning (decisions/00094). In that quiet state the
+  Publish button also HIDES (`hidden`) and the bar collapses to a narrow strip
+  (`.wx-statusbar:not(.wx-statusbar-pending)` drops the vertical padding that framed the
+  button) — with the chip already saying "No unpublished changes", the button is dead
+  chrome (operator, 2026-08-02, decisions/00108). A RUNNING publish forces the button
+  visible even if a state snapshot already reads clean, since it's the progress surface. The quiet styling is keyed
   off that bar class, NOT the chip's `disabled` attribute — the chip is enabled when idle and
   disabled mid-publish, which is the opposite of what the appearance needs. While a publish runs the
   status bar doubles as the progress surface (decisions/00089, Inv 25): the Publish
