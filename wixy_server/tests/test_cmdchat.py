@@ -29,6 +29,7 @@ from fastapi import FastAPI
 from wixy_server.cmdchat import (
     CmdChatClient,
     CmdChatError,
+    CmdChatStatusError,
     FailedOutcome,
     ReadyOutcome,
     WsConnector,
@@ -245,17 +246,23 @@ async def test_send_message_with_attachments_includes_the_kind_and_upload_id() -
     session = state.create_session("hi")
     app = create_fake_cmd_app(state)
     async with _make_client(app) as client:
+        # Stage the uploads first — real cmd (and now the fake, mirroring its
+        # `_resolve_upload_ids_to_blocks`) 404s a send referencing an id it
+        # never staged, so a send with attachments is always preceded by the
+        # uploads in production too.
+        first = await client.upload_attachment(b"\x89PNGfake", "a.png", "image/png")
+        second = await client.upload_attachment(b"\x89PNGfake", "b.png", "image/png")
         await client.send_message(
             session.session_id,
             "look at this",
             "conv1:msg1",
-            attachment_ids=["upload-1", "upload-2"],
+            attachment_ids=[first.upload_id, second.upload_id],
         )
 
     assert session.last_send_body is not None
     assert session.last_send_body["attachments"] == [
-        {"kind": "image", "upload_id": "upload-1"},
-        {"kind": "image", "upload_id": "upload-2"},
+        {"kind": "image", "upload_id": first.upload_id},
+        {"kind": "image", "upload_id": second.upload_id},
     ]
 
 
@@ -552,3 +559,106 @@ async def test_live_cmd_round_trip() -> None:
                 break
             await anyio.sleep(2.0)
         assert found, "no assistant reply containing 'pong' arrived within 120s"
+
+
+# ---------------------------------------------------------------------------
+# decisions/00108 — new-chat attachments, the footer strip, and upload bytes
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_new_chat_with_attachments_forwards_the_upload_ids() -> None:
+    """cmd's own new-chat route folds `attachments` into the first turn (its
+    `_stage_new_chat_attachments`, drained into stream-json image blocks by
+    the workspace provisioner) — the mechanism the "New conversation" compose
+    hangs off. The fake mirrors cmd's 404 for an unstaged id, so stage first."""
+    state = FakeCmdState()
+    app = create_fake_cmd_app(state)
+    async with _make_client(app) as client:
+        upload = await client.upload_attachment(b"\x89PNGfake", "a.png", "image/png")
+        result = await client.new_chat(
+            "cottage-aesthetics-preview", "what is this?", attachment_ids=[upload.upload_id]
+        )
+
+    session = state.sessions[result.session_id]
+    assert session.create_attachments == [{"kind": "image", "upload_id": upload.upload_id}]
+
+
+@pytest.mark.asyncio
+async def test_new_chat_without_attachments_omits_the_field() -> None:
+    state = FakeCmdState()
+    app = create_fake_cmd_app(state)
+    async with _make_client(app) as client:
+        result = await client.new_chat("cottage-aesthetics-preview", "plain")
+
+    assert state.sessions[result.session_id].create_attachments is None
+
+
+@pytest.mark.asyncio
+async def test_get_messages_strips_the_driver_footer_into_structured_attachments() -> None:
+    """A send cmd routed to a DRIVER method embeds its `Attachments:` footer in
+    the message text itself — that raw path text is exactly what used to
+    render in the owner's bubble (the 2026-08-02 report). `get_messages`
+    recovers the refs and removes the footer, mirroring what cmd's own UI
+    does with the same footer."""
+    state = FakeCmdState()
+    session = state.create_session("hi")
+    session.messages = [
+        {
+            "index": 0,
+            "role": "user",
+            "kind": "text",
+            "text": (
+                "what do you see?\n\nAttachments:\n"
+                "@C:\\Users\\josh\\.claude\\cmd-uploads\\abc123\\converted.webp (800x600)"
+            ),
+            "timestamp": "2026-08-02T00:00:00Z",
+            "tool_name": None,
+            "truncated": False,
+        },
+        {
+            "index": 1,
+            "role": "assistant",
+            "kind": "text",
+            "text": "a purple square",
+            "timestamp": "2026-08-02T00:00:01Z",
+            "tool_name": None,
+            "truncated": False,
+        },
+    ]
+    app = create_fake_cmd_app(state)
+    async with _make_client(app) as client:
+        messages = await client.get_messages(session.session_id)
+
+    assert messages[0].text == "what do you see?"
+    assert len(messages[0].attachments) == 1
+    ref = messages[0].attachments[0]
+    assert ref.upload_id == "abc123"
+    assert ref.width == 800
+    assert ref.height == 600
+    # Assistant text never carries the footer parse (it only ever runs on
+    # user text messages, same as cmd's own renderer).
+    assert messages[1].attachments == ()
+
+
+@pytest.mark.asyncio
+async def test_get_upload_bytes_returns_content_and_media_type() -> None:
+    state = FakeCmdState()
+    app = create_fake_cmd_app(state)
+    async with _make_client(app) as client:
+        upload = await client.upload_attachment(b"\x89PNGfake", "a.png", "image/png")
+        result = await client.get_upload_bytes(upload.upload_id)
+
+    assert result.media_type == "image/webp"
+    assert result.content.startswith(b"RIFF")  # the fake's canned WEBP
+
+
+@pytest.mark.asyncio
+async def test_get_upload_bytes_unknown_id_raises_a_status_error_with_the_code() -> None:
+    state = FakeCmdState()
+    app = create_fake_cmd_app(state)
+    async with _make_client(app) as client:
+        with pytest.raises(CmdChatStatusError) as excinfo:
+            await client.get_upload_bytes("no-such-upload")
+
+    assert excinfo.value.status_code == 404

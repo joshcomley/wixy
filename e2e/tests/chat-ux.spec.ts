@@ -34,6 +34,10 @@ test.describe("E2E 7: chat UX", () => {
   test("new conversation, scripted replies with a tool row, status dot transitions, send-retry on 502, and the offline banner", async ({
     page,
   }) => {
+    // decisions/00108 roughly doubled this flow's legs (echo, thumbnails +
+    // lightbox, layout invariants, jump pill, auto-grow, new-conversation
+    // attachments) — the default 30s test timeout is genuinely too short now.
+    test.setTimeout(120_000);
     const consoleErrors = trackConsoleErrors(page);
 
     // -- New conversation ---------------------------------------------------
@@ -271,7 +275,213 @@ test.describe("E2E 7: chat UX", () => {
     await expect(page.locator(".wx-chat-composer-error")).toBeHidden();
     await expect(page.locator(".wx-chat-composer-input")).toHaveValue("");
 
+    // -- decisions/00108: the echo paints instantly, then reconciles ---------
+    await page.fill(".wx-chat-composer-input", "and make it cosier too");
+    await page.click(".wx-chat-send-button");
+    // The echo is visible IMMEDIATELY (dimmed, "sending…") — before the next
+    // stream tick could possibly have delivered the server copy. (The earlier
+    // legs' sends also still have echoes: this fake never streams those user
+    // turns back, so only their 30s expiry would clear them — the point here
+    // is THIS send's echo.)
+    const echo = page.locator(".wx-chat-echo", { hasText: "and make it cosier too" });
+    await expect(echo).toBeVisible();
+    await expect(echo).toContainText("sending…");
+    // Stream back ALL the user turns this fake never echoed (the two earlier
+    // sends' too) — every outstanding echo reconciles away, leaving the later
+    // legs with a clean, server-driven thread.
+    const echoReconcileMessages: FakeMessage[] = [
+      ...scriptedMessages,
+      {
+        index: 4,
+        role: "user",
+        kind: "text",
+        text: "what's in this photo?",
+        timestamp: "2026-07-10T00:00:04Z",
+        tool_name: null,
+        truncated: false,
+      },
+      {
+        index: 5,
+        role: "user",
+        kind: "text",
+        text: "thanks, one more tweak please",
+        timestamp: "2026-07-10T00:00:05Z",
+        tool_name: null,
+        truncated: false,
+      },
+      {
+        index: 6,
+        role: "user",
+        kind: "text",
+        text: "and make it cosier too",
+        timestamp: "2026-07-10T00:00:06Z",
+        tool_name: null,
+        truncated: false,
+      },
+    ];
+    await page.request.post("/test/chat/set-messages", { data: { convId, messages: echoReconcileMessages } });
+    // The server copy replaces the echo — one real bubble, no echoes left.
+    await expect(echo).toHaveCount(0, { timeout: 10_000 });
+    await expect(page.locator(".wx-chat-echo")).toHaveCount(0);
+    await expect(
+      page.locator(".wx-chat-bubble-user", { hasText: "and make it cosier too" }),
+    ).toHaveCount(1);
+
+    // -- decisions/00108: footer-text attachments render as thumbnails --------
+    // A driver-routed send leaves cmd's `Attachments:` footer in the read-back
+    // text — that raw machine path is what the operator saw rendered as prose.
+    // It must now be stripped server-side and render as a thumbnail from
+    // wixy's bytes proxy (the fake serves real WEBP bytes through it).
+    const footerMessages: FakeMessage[] = [
+      ...echoReconcileMessages,
+      {
+        index: 7,
+        role: "user",
+        kind: "text",
+        text:
+          "what do you see in this one?\n\nAttachments:\n" +
+          `@C:\\Users\\josh\\.claude\\cmd-uploads\\${uploadedBody.attachmentId}\\converted.webp (640x480)`,
+        timestamp: "2026-07-10T00:00:07Z",
+        tool_name: null,
+        truncated: false,
+      },
+    ];
+    await page.request.post("/test/chat/set-messages", { data: { convId, messages: footerMessages } });
+    const footerBubble = page.locator(".wx-chat-bubble-user").last();
+    await expect(footerBubble).toContainText("what do you see in this one?", { timeout: 10_000 });
+    await expect(footerBubble).not.toContainText("Attachments:");
+    await expect(footerBubble).not.toContainText("cmd-uploads");
+    const thumb = footerBubble.locator(".wx-chat-att-thumb img");
+    await expect(thumb).toHaveCount(1);
+    await expect(thumb).toHaveAttribute("src", new RegExp(`/api/admin/chat/uploads/${uploadedBody.attachmentId}/bytes`));
+    // The proxied bytes really load (the fake serves a genuine 8x8 WEBP).
+    await expect(thumb).toHaveJSProperty("naturalWidth", 8, { timeout: 10_000 });
+
+    // Tap → lightbox with the full image; ✕ closes it again.
+    await footerBubble.locator(".wx-chat-att-thumb").click();
+    await expect(page.locator(".wx-chat-lightbox")).toBeVisible();
+    await expect(page.locator(".wx-chat-lightbox img")).toHaveAttribute(
+      "src",
+      new RegExp(`/api/admin/chat/uploads/${uploadedBody.attachmentId}/bytes`),
+    );
+    await page.click(".wx-chat-lightbox-close");
+    await expect(page.locator(".wx-chat-lightbox")).toHaveCount(0);
+
+    // -- decisions/00108: layout invariants — one scroll region, pinned composer
+    // Fill the thread well past overflowing so the scroll behavior is real.
+    const longMessages: FakeMessage[] = Array.from({ length: 40 }, (_, i) => ({
+      index: i,
+      role: i % 2 === 0 ? "user" : "assistant",
+      kind: "text",
+      text: `filler message number ${i} — enough text to make the thread genuinely tall enough to overflow`,
+      timestamp: `2026-07-10T00:01:${String(i).padStart(2, "0")}Z`,
+      tool_name: null,
+      truncated: false,
+    }));
+    await page.request.post("/test/chat/set-messages", { data: { convId, messages: longMessages } });
+    await expect(page.locator(".wx-chat-bubble").last()).toContainText("filler message number 39", { timeout: 10_000 });
+
+    // The THREAD scrolls internally; the shell's main region does NOT (that
+    // was the double-scroll). The composer is fully on-screen without any
+    // scrolling — the whole point of the pinned layout.
+    const metrics = await page.evaluate(() => {
+      const thread = document.querySelector<HTMLElement>(".wx-chat-thread")!;
+      const main = document.querySelector<HTMLElement>(".wx-main")!;
+      const composer = document.querySelector<HTMLElement>(".wx-chat-composer")!;
+      const rect = composer.getBoundingClientRect();
+      return {
+        threadScrollable: thread.scrollHeight > thread.clientHeight + 1,
+        mainScrolls: main.scrollHeight > main.clientHeight + 1,
+        composerTop: rect.top,
+        composerBottom: rect.bottom,
+        viewportHeight: window.innerHeight,
+      };
+    });
+    expect(metrics.threadScrollable).toBe(true);
+    expect(metrics.mainScrolls).toBe(false);
+    expect(metrics.composerTop).toBeGreaterThanOrEqual(0);
+    expect(metrics.composerBottom).toBeLessThanOrEqual(metrics.viewportHeight);
+
+    // Scrolled up reading history, a new arrival surfaces the jump pill —
+    // never yanks you down; clicking it lands you back at the newest message.
+    await page.locator(".wx-chat-thread").evaluate((el) => el.scrollTo(0, 0));
+    const oneMore: FakeMessage[] = [
+      ...longMessages,
+      {
+        index: 40,
+        role: "assistant",
+        kind: "text",
+        text: "one more late arrival",
+        timestamp: "2026-07-10T00:02:00Z",
+        tool_name: null,
+        truncated: false,
+      },
+    ];
+    await page.request.post("/test/chat/set-messages", { data: { convId, messages: oneMore } });
+    await expect(page.locator(".wx-chat-jump-pill")).toBeVisible({ timeout: 10_000 });
+    const stillUpTop = await page.locator(".wx-chat-thread").evaluate((el) => el.scrollTop);
+    expect(stillUpTop).toBeLessThan(50);
+    await page.click(".wx-chat-jump-pill");
+    await expect(page.locator(".wx-chat-bubble").last()).toContainText("one more late arrival");
+    const atBottom = await page.locator(".wx-chat-thread").evaluate(
+      (el) => el.scrollTop + el.clientHeight >= el.scrollHeight - 2,
+    );
+    expect(atBottom).toBe(true);
+
+    // -- decisions/00108: the composer auto-grows with long input -------------
+    const before = await page.locator(".wx-chat-composer-input").evaluate((el) => (el as HTMLElement).offsetHeight);
+    await page.fill(".wx-chat-composer-input", "line one\nline two\nline three\nline four\nline five\nline six");
+    const after = await page.locator(".wx-chat-composer-input").evaluate((el) => (el as HTMLElement).offsetHeight);
+    expect(after).toBeGreaterThan(before);
+    // …and never beyond the cap (180px content + padding), with internal
+    // scrolling past it.
+    const capped = await page.locator(".wx-chat-composer-input").evaluate((el) => (el as HTMLElement).offsetHeight);
+    expect(capped).toBeLessThanOrEqual(200);
+    await page.fill(".wx-chat-composer-input", "");
+
+    // -- decisions/00108: attachments in the NEW-conversation flow ------------
+    // The operator's exact complaint: "when you start a chat, you can't attach
+    // an image." The shared composer backs the list view's compose box too.
+    await page.click(".wx-chat-back-link");
+    await page.waitForSelector(".wx-chat-list-view");
+    await page.click(".wx-chat-new-button");
+    await expect(page.locator(".wx-chat-compose-box .wx-chat-attach-button")).toBeVisible({ timeout: 10_000 });
+    await page.locator('.wx-chat-compose-box input[type="file"]').setInputFiles("fixtures/tiny-second-image.jpg");
+    await expect(page.locator(".wx-chat-compose-box .wx-chat-attachment-chip")).toHaveCount(1);
+    await page.fill(".wx-chat-compose-input", "please describe this photo");
+    const secondCreate = page.waitForRequest(
+      (req) => req.url().endsWith("/api/admin/chat/conversations") && req.method() === "POST",
+    );
+    await page.click(".wx-chat-compose-actions button");
+    const secondCreateBody = (await secondCreate).postDataJSON() as { firstMessage?: string; attachmentIds?: string[] };
+    expect(secondCreateBody.firstMessage).toBe("please describe this photo");
+    expect(secondCreateBody.attachmentIds).toHaveLength(1);
+    await page.waitForURL(/\/admin\/chat\/.+/);
+    // And the new conversation keeps the pinned-composer layout (it is, after
+    // all, the same view).
+    const secondMetrics = await page.evaluate(() => {
+      const composer = document.querySelector<HTMLElement>(".wx-chat-composer")!;
+      const rect = composer.getBoundingClientRect();
+      return { bottom: rect.bottom, viewportHeight: window.innerHeight };
+    });
+    expect(secondMetrics.bottom).toBeLessThanOrEqual(secondMetrics.viewportHeight);
+
+    // Back into the FIRST conversation for the offline leg (its messages are
+    // the scripted ones; the fake cmd is shared). The fresh second
+    // conversation (still provisioning, title unreadable) is row 1, so the
+    // original conversation is the SECOND row — never a title-text match,
+    // which would race its own readiness poll.
+    await page.click(".wx-chat-back-link");
+    await page.waitForSelector(".wx-chat-list-view");
+    await page.locator(".wx-chat-list-row").nth(1).locator(".wx-chat-list-title").click();
+    await page.waitForURL(new RegExp(`/admin/chat/${convId}$`));
+
     // -- Offline banner on fake-cmd stop (spec/06 §3) ------------------------
+    // The offline banner surfaces only on a genuine POLL failure — hidden
+    // while the stream is healthy (this conversation's scripted messages have
+    // been flowing the whole time, so hidden here is a real assertion, not a
+    // default state).
+    await expect(page.locator(".wx-chat-bubble").first()).toBeVisible({ timeout: 10_000 });
     await expect(page.locator(".wx-chat-offline-banner")).toBeHidden();
     await page.request.post("/test/chat/stop-fake-cmd");
     await page.waitForSelector(".wx-chat-offline-banner:not([hidden])", { timeout: 15_000 });

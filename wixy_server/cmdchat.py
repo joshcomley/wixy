@@ -43,6 +43,7 @@ import httpx
 from websockets.asyncio.client import connect as websockets_connect
 
 from builder.jsontypes import JsonObject
+from wixy_server.chat_attachments import ChatAttachmentRef, extract_attachment_footer
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,17 @@ class CmdChatError(Exception):
     error surfaced to the UI (spec/06 §1 preamble), never a silent hang."""
 
 
+class CmdChatStatusError(CmdChatError):
+    """A cmdchat call that cmd itself answered with a non-success STATUS — carries
+    the status code so a caller can mirror a genuine upstream 404/410 as the same
+    code (the upload-bytes proxy, decisions/00108) instead of flattening every
+    failure into a 502."""
+
+    def __init__(self, message: str, *, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
 @dataclass(frozen=True, slots=True)
 class NewChatResult:
     session_id: str
@@ -122,7 +134,15 @@ class UploadResult:
 class ChatMessage:
     """One decoded conversation-level message (spec/06 §1's `/messages` shape) —
     already decoded by cmd; this is a straight passthrough, "no raw-JSONL parsing
-    in Wixy"."""
+    in Wixy".
+
+    `attachments` (decisions/00108): images the message carries, as upload-id refs.
+    Populated by `get_messages` itself when cmd's driver-send path left its
+    `Attachments:` footer in the text (the footer is stripped OUT of `text` at
+    the same time — the owner never sees raw machine paths). A send that
+    resolved to stream-json instead leaves NO trace in cmd's decoded text at
+    all (the decoder drops image content blocks) — those are decorated from
+    wixy's own send log downstream (`chat_sends`), not here."""
 
     index: int
     role: str
@@ -131,6 +151,17 @@ class ChatMessage:
     timestamp: str
     tool_name: str | None
     truncated: bool
+    attachments: tuple[ChatAttachmentRef, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class UploadBytes:
+    """`GET /api/uploads/{id}/bytes`'s payload (decisions/00108) — the converted
+    image bytes cmd serves for inline rendering, plus the media type to serve
+    them with through wixy's own proxy route."""
+
+    content: bytes
+    media_type: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,7 +223,13 @@ def _json_object(response: httpx.Response) -> JsonObject:
 def _message_from_dict(data: object) -> ChatMessage | None:
     """Defensive parse — an unrecognized/malformed entry is skipped, not fatal
     (matches `wixy_server.ledger`'s own `_entry_from_dict` convention), since one
-    bad message shouldn't blank the whole transcript."""
+    bad message shouldn't blank the whole transcript.
+
+    A user text message additionally passes through `extract_attachment_footer`
+    (decisions/00108): when cmd's driver-send path embedded its `Attachments:`
+    footer in the text, the refs come out as structured `attachments` and the
+    footer leaves the visible text — the exact cmd-ism this client exists to
+    contain, so nothing downstream has to know the footer format."""
     if not isinstance(data, dict):
         return None
     index = data.get("index")
@@ -205,14 +242,20 @@ def _message_from_dict(data: object) -> ChatMessage | None:
         return None
     text = data.get("text")
     tool_name = data.get("tool_name")
+    clean_text = text if isinstance(text, str) else None
+    attachments: tuple[ChatAttachmentRef, ...] = ()
+    if role == "user" and kind == "text" and clean_text is not None:
+        clean_text, found = extract_attachment_footer(clean_text)
+        attachments = tuple(found)
     return ChatMessage(
         index=index,
         role=role,
         kind=kind,
-        text=text if isinstance(text, str) else None,
+        text=clean_text,
         timestamp=timestamp,
         tool_name=tool_name if isinstance(tool_name, str) else None,
         truncated=bool(data.get("truncated", False)),
+        attachments=attachments,
     )
 
 
@@ -321,21 +364,32 @@ class CmdChatClient:
 
     # -- Portal (9320): lifecycle -------------------------------------------------
 
-    async def new_chat(self, cmd_project: str, prompt: str) -> NewChatResult:
+    async def new_chat(
+        self, cmd_project: str, prompt: str, *, attachment_ids: list[str] | None = None
+    ) -> NewChatResult:
         url = f"{self._portal_base_url}/api/project/{cmd_project}/new-chat"
-        response = await self._request(
-            "POST",
-            url,
-            json_body={
-                "prompt": prompt,
-                # Both fields are load-bearing, not optional decoration — see
-                # UNPARENTED_SPAWNED_BY (cmd 400s without it) and CHAT_MODEL
-                # (cmd's own default is Opus, not the Sonnet 5 this product
-                # wants) at the top of this module.
-                "spawned_by_session_id": UNPARENTED_SPAWNED_BY,
-                "model": CHAT_MODEL,
-            },
-        )
+        json_body: JsonObject = {
+            "prompt": prompt,
+            # Both fields are load-bearing, not optional decoration — see
+            # UNPARENTED_SPAWNED_BY (cmd 400s without it) and CHAT_MODEL
+            # (cmd's own default is Opus, not the Sonnet 5 this product
+            # wants) at the top of this module.
+            "spawned_by_session_id": UNPARENTED_SPAWNED_BY,
+            "model": CHAT_MODEL,
+        }
+        if attachment_ids:
+            # decisions/00108: cmd's new-chat route explicitly accepts
+            # `attachments` (its route docstring: "attachments[] mirrors the
+            # per-session send route's shape: each entry is {upload_id}
+            # referencing a row previously created via POST /api/uploads" —
+            # confirmed against its `_stage_new_chat_attachments`, which reads
+            # only `upload_id` and tolerates the extra `kind` key, so the
+            # /send shape is sent verbatim). The provisioner drains them into
+            # real stream-json image content blocks on the first turn.
+            json_body["attachments"] = [
+                {"kind": "image", "upload_id": uid} for uid in attachment_ids
+            ]
+        response = await self._request("POST", url, json_body=json_body)
         if response.status_code != 202:
             raise CmdChatError(
                 f"new-chat for project '{cmd_project}' returned {response.status_code}: "
@@ -445,6 +499,25 @@ class CmdChatClient:
             width=width if isinstance(width, int) else None,
             height=height if isinstance(height, int) else None,
         )
+
+    async def get_upload_bytes(self, upload_id: str) -> UploadBytes:
+        """Fetch an upload's served bytes (decisions/00108) — cmd's own
+        `GET /api/uploads/{id}/bytes` (the converted WEBP for images), which
+        cmd's own chat UI uses for inline previews. Wixy never exposes cmd's
+        localhost surface to the browser; `routes_chat.py` proxies through
+        this call instead. A genuine upstream 404/410 is raised as
+        `CmdChatStatusError` with the code preserved so the proxy can mirror
+        it; anything else is the usual `CmdChatError`."""
+        url = f"{self._portal_base_url}/api/uploads/{upload_id}/bytes"
+        response = await self._request("GET", url)
+        if response.status_code != 200:
+            raise CmdChatStatusError(
+                f"GET upload bytes for {upload_id} returned {response.status_code}: "
+                f"{response.text[:500]}",
+                status_code=response.status_code,
+            )
+        media_type = response.headers.get("content-type", "image/webp")
+        return UploadBytes(content=response.content, media_type=media_type)
 
     async def watch_pending(self) -> AsyncIterator[PendingEvent]:
         """Best-effort subscription to `/ws/chat-pending` — yields transition

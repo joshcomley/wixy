@@ -267,7 +267,7 @@ describe("mountChatPanel — list view", () => {
     startButton?.click();
     await flush();
 
-    expect(createConversation).toHaveBeenCalledWith(undefined);
+    expect(createConversation).toHaveBeenCalledWith(undefined, undefined);
     expect(win.location.pathname).toBe("/admin/chat/new1");
     panel.teardown();
   });
@@ -285,7 +285,7 @@ describe("mountChatPanel — list view", () => {
     panel.element.querySelector<HTMLButtonElement>(".wx-chat-compose-actions button")?.click();
     await flush();
 
-    expect(createConversation).toHaveBeenCalledWith("please fix the hero title");
+    expect(createConversation).toHaveBeenCalledWith("please fix the hero title", undefined);
     panel.teardown();
   });
 
@@ -998,6 +998,262 @@ describe("mountChatPanel — conversation view", () => {
 
       stream.emit(statusEvent("idle"));
       expect(panel.element.querySelector<HTMLElement>(".wx-chat-work-banner")?.hidden).toBe(true);
+      panel.teardown();
+    });
+  });
+});
+
+describe("mountChatPanel — decisions/00108 chat experience", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  describe("the optimistic echo", () => {
+    it("a sent message paints instantly as a dimmed 'sending…' bubble, replaced when the server copy arrives", async () => {
+      const sendMessage = vi.fn(async () => ({ accepted: true, buffered: false }));
+      const api = fakeApi({ sendMessage });
+      const stream = fakeStreamController();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      const textarea = panel.element.querySelector<HTMLTextAreaElement>(".wx-chat-composer-input");
+      if (textarea) textarea.value = "make the hero warmer";
+      panel.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")?.click();
+      await flush();
+
+      // The echo is there IMMEDIATELY — before any stream event.
+      const echo = panel.element.querySelector<HTMLElement>(".wx-chat-echo");
+      expect(echo).not.toBeNull();
+      expect(echo?.textContent).toContain("make the hero warmer");
+      expect(echo?.textContent).toContain("sending…");
+
+      // The server copy streams in — the echo is reconciled away, leaving the
+      // one real bubble.
+      stream.emit(messageEvent(0, { role: "user", text: "make the hero warmer" }));
+      expect(panel.element.querySelector(".wx-chat-echo")).toBeNull();
+      const userBubbles = panel.element.querySelectorAll(".wx-chat-bubble-user");
+      expect(userBubbles).toHaveLength(1);
+      panel.teardown();
+    });
+
+    it("a failed send removes the echo but keeps the composer text for the retry", async () => {
+      const sendMessage = vi.fn(async () => {
+        throw new Error("couldn't deliver: timeout");
+      });
+      const api = fakeApi({ sendMessage });
+      const stream = fakeStreamController();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      const textarea = panel.element.querySelector<HTMLTextAreaElement>(".wx-chat-composer-input");
+      if (textarea) textarea.value = "please try";
+      panel.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")?.click();
+      await flush();
+
+      expect(panel.element.querySelector(".wx-chat-echo")).toBeNull();
+      expect(textarea?.value).toBe("please try");
+      expect(panel.element.querySelector<HTMLElement>(".wx-chat-composer-error")?.hidden).toBe(false);
+      panel.teardown();
+    });
+
+    it("an echo that no server message matches expires rather than duplicating forever", async () => {
+      const sendMessage = vi.fn(async () => ({ accepted: true, buffered: false }));
+      const api = fakeApi({ sendMessage });
+      const stream = fakeStreamController();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      const textarea = panel.element.querySelector<HTMLTextAreaElement>(".wx-chat-composer-input");
+      if (textarea) textarea.value = "lost message";
+      panel.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")?.click();
+      await flush();
+      expect(panel.element.querySelector(".wx-chat-echo")).not.toBeNull();
+
+      // 31s with no matching server copy (fake timers) + any render trigger.
+      await vi.advanceTimersByTimeAsync(31_000);
+      stream.emit(messageEvent(0, { role: "assistant", text: "something else" }));
+      expect(panel.element.querySelector(".wx-chat-echo")).toBeNull();
+      panel.teardown();
+    });
+  });
+
+  describe("transcript attachment thumbnails", () => {
+    it("a message carrying attachments renders thumbs from the bytes proxy, never the raw path", async () => {
+      const api = fakeApi();
+      const stream = fakeStreamController();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      stream.emit(
+        messageEvent(0, {
+          role: "user",
+          text: "what do you see?",
+          attachments: [{ uploadId: "u-1", name: "converted.webp", width: 800, height: 600 }],
+        }),
+      );
+
+      const bubble = panel.element.querySelector<HTMLElement>(".wx-chat-bubble-user");
+      expect(bubble?.textContent).toContain("what do you see?");
+      const thumb = bubble?.querySelector<HTMLImageElement>(".wx-chat-att-thumb img");
+      expect(thumb?.src).toContain("/api/admin/chat/uploads/u-1/bytes");
+      panel.teardown();
+    });
+
+    it("tapping a thumb opens the lightbox; backdrop, ✕, and Esc each close it", async () => {
+      const api = fakeApi();
+      const stream = fakeStreamController();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      stream.emit(
+        messageEvent(0, {
+          role: "user",
+          text: "see this",
+          attachments: [{ uploadId: "u-2", name: "converted.webp", width: 10, height: 10 }],
+        }),
+      );
+
+      const thumbButton = panel.element.querySelector<HTMLButtonElement>(".wx-chat-att-thumb");
+      expect(thumbButton).not.toBeNull();
+
+      // Open.
+      thumbButton?.click();
+      let lightbox = document.body.querySelector<HTMLElement>(".wx-chat-lightbox");
+      expect(lightbox).not.toBeNull();
+      expect(lightbox?.querySelector("img")?.src).toContain("/api/admin/chat/uploads/u-2/bytes");
+
+      // Esc closes.
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+      expect(document.body.querySelector(".wx-chat-lightbox")).toBeNull();
+
+      // Re-open; the close button closes.
+      thumbButton?.click();
+      lightbox = document.body.querySelector<HTMLElement>(".wx-chat-lightbox");
+      expect(lightbox).not.toBeNull();
+      lightbox?.querySelector<HTMLButtonElement>(".wx-chat-lightbox-close")?.click();
+      expect(document.body.querySelector(".wx-chat-lightbox")).toBeNull();
+
+      // Re-open; a backdrop click closes (a click on the image does not).
+      thumbButton?.click();
+      lightbox = document.body.querySelector<HTMLElement>(".wx-chat-lightbox");
+      lightbox?.querySelector("img")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(document.body.querySelector(".wx-chat-lightbox")).not.toBeNull();
+      lightbox?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(document.body.querySelector(".wx-chat-lightbox")).toBeNull();
+      panel.teardown();
+    });
+
+    it("teardown closes an open lightbox", async () => {
+      const api = fakeApi();
+      const stream = fakeStreamController();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      stream.emit(
+        messageEvent(0, {
+          role: "user",
+          text: "x",
+          attachments: [{ uploadId: "u-3", name: null, width: null, height: null }],
+        }),
+      );
+      panel.element.querySelector<HTMLButtonElement>(".wx-chat-att-thumb")?.click();
+      expect(document.body.querySelector(".wx-chat-lightbox")).not.toBeNull();
+
+      panel.teardown();
+      expect(document.body.querySelector(".wx-chat-lightbox")).toBeNull();
+    });
+  });
+
+  describe("the list view's New conversation box (shared composer)", () => {
+    it("attaches an image before starting and forwards the ids on create", async () => {
+      const stageChatUpload = vi.fn(async () => ({ attachmentId: "att-new-1", width: 10, height: 10 }));
+      const createConversation = vi.fn(async () => fakeConversation({ convId: "new9" }));
+      const api = fakeApi({
+        getState: vi.fn(async () => fakeState({ chatAttachmentsSupported: true })),
+        stageChatUpload,
+        createConversation,
+      });
+      const panel = mountChatPanel(null, { api, win: fakeWindow() });
+      await flush();
+
+      panel.element.querySelector<HTMLButtonElement>(".wx-chat-new-button")?.click();
+      await flush(); // getState resolves -> attach button appears
+
+      const attachButton = panel.element.querySelector<HTMLElement>(".wx-chat-attach-button");
+      expect(attachButton?.hidden).toBe(false);
+
+      const fileInput = panel.element.querySelector<HTMLInputElement>('.wx-chat-compose-box input[type="file"]');
+      expect(fileInput).not.toBeNull();
+      const file = new File([new Uint8Array([1, 2, 3])], "photo.png", { type: "image/png" });
+      Object.defineProperty(fileInput!, "files", { value: [file], configurable: true });
+      fileInput!.dispatchEvent(new Event("change"));
+      await flush();
+
+      expect(stageChatUpload).toHaveBeenCalledWith(file);
+      expect(panel.element.querySelectorAll(".wx-chat-attachment-chip")).toHaveLength(1);
+
+      const textarea = panel.element.querySelector<HTMLTextAreaElement>(".wx-chat-compose-input");
+      if (textarea) textarea.value = "what is in this photo?";
+      panel.element.querySelector<HTMLButtonElement>(".wx-chat-compose-actions button")?.click();
+      await flush();
+
+      expect(createConversation).toHaveBeenCalledWith("what is in this photo?", ["att-new-1"]);
+      panel.teardown();
+    });
+
+    it("an image-only start (no text) creates with attachments and no first message", async () => {
+      const stageChatUpload = vi.fn(async () => ({ attachmentId: "att-new-2", width: 10, height: 10 }));
+      const createConversation = vi.fn(async () => fakeConversation({ convId: "new10" }));
+      const api = fakeApi({
+        getState: vi.fn(async () => fakeState({ chatAttachmentsSupported: true })),
+        stageChatUpload,
+        createConversation,
+      });
+      const panel = mountChatPanel(null, { api, win: fakeWindow() });
+      await flush();
+
+      panel.element.querySelector<HTMLButtonElement>(".wx-chat-new-button")?.click();
+      await flush();
+
+      const fileInput = panel.element.querySelector<HTMLInputElement>('.wx-chat-compose-box input[type="file"]');
+      const file = new File([new Uint8Array([1, 2, 3])], "photo.png", { type: "image/png" });
+      Object.defineProperty(fileInput!, "files", { value: [file], configurable: true });
+      fileInput!.dispatchEvent(new Event("change"));
+      await flush();
+
+      panel.element.querySelector<HTMLButtonElement>(".wx-chat-compose-actions button")?.click();
+      await flush();
+
+      expect(createConversation).toHaveBeenCalledWith(undefined, ["att-new-2"]);
+      panel.teardown();
+    });
+  });
+
+  describe("the thread's empty state", () => {
+    it("reads as starting-up while the conversation is still provisioning", async () => {
+      const api = fakeApi({
+        getConversations: vi.fn(async () => [fakeConversation({ convId: "c1", status: "pending" })]),
+      });
+      const stream = fakeStreamController();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      expect(panel.element.querySelector(".wx-chat-thread")?.textContent).toMatch(/starting your conversation/i);
+      panel.teardown();
+    });
+
+    it("invites the first message once ready", async () => {
+      const api = fakeApi({
+        getConversations: vi.fn(async () => [fakeConversation({ convId: "c1", status: "ready" })]),
+      });
+      const stream = fakeStreamController();
+      const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+      await flush();
+
+      expect(panel.element.querySelector(".wx-chat-thread")?.textContent).toMatch(/no messages yet/i);
       panel.teardown();
     });
   });

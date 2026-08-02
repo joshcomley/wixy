@@ -209,7 +209,15 @@ real wheel gesture AND programmatic scrolls; served-bundle dvh assertions;
 middle-still-scrolls guard). *Watch for:* anything new fixed-bottom reuses the
 `calc(… + 100vh - 100dvh)` offset pattern; panels scroll inside `.wx-main`, never
 the root; the preview document is intentionally NOT overflow-constrained (it is the
-middle that must scroll).
+middle that must scroll). *Corollary (decisions/00108):* inside `.wx-main`, a
+full-height interactive panel (the chat conversation view) is itself a flex column
+(`height: 100%`) with exactly ONE scroll region — the chat thread (`flex: 1;
+min-height: 0; overflow-y: auto`) — while its composer is pinned by layout
+(`flex: none` + `env(safe-area-inset-bottom)`), never by `position: sticky` and never
+reachable only by scrolling `.wx-main`. The pre-00108 stacked layout (a
+`max-height: 60vh` thread inside a scrolling `.wx-main`) was the "double-scroll" the
+operator reported; e2e (`chat-ux.spec.ts`'s layout-invariants leg) asserts the thread
+scrolls, `.wx-main` does not, and the composer is fully on-screen.
 
 ### Inv 25 — Publish run/completion feedback is shell-owned, never drawer-owned
 The publish drawer may be closed mid-publish, a publish may start in another tab or

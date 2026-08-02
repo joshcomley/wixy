@@ -42,6 +42,7 @@ from wixy_server.cmdchat import (
     ProvisioningOutcome,
     ReadyOutcome,
     SendResult,
+    UploadBytes,
     UploadResult,
 )
 
@@ -129,8 +130,10 @@ class AnthropicAIBackend:
         ) from last_error
 
     async def create_conversation(
-        self, preamble: str, first_message: str | None
+        self, preamble: str, first_message: str | None, *, attachment_ids: list[str] | None = None
     ) -> ConversationRef:
+        # attachment_ids is always None here: supports_attachments is False, so
+        # routes_chat.py never passes one through (see module docstring).
         response = await self._request(
             "POST",
             "/conversations",
@@ -243,8 +246,12 @@ class AnthropicAIBackend:
         raise AIBackendError("the anthropic backend has no handover-chain concept")
 
     async def upload_attachment(
-        self, conv_ref: ConversationRef, data: bytes, filename: str, media_type: str
+        self, conv_ref: ConversationRef | None, data: bytes, filename: str, media_type: str
     ) -> UploadResult:
+        # Never called: supports_attachments is False (see module docstring).
+        raise AIBackendError("the anthropic backend does not support attachments yet")
+
+    async def fetch_upload_bytes(self, upload_id: str) -> UploadBytes:
         # Never called: supports_attachments is False (see module docstring).
         raise AIBackendError("the anthropic backend does not support attachments yet")
 

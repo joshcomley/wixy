@@ -122,7 +122,7 @@ Route table + SSE event envelopes are in [contracts.md](contracts.md) §2, §4. 
 - **Send** carries an `idempotencyKey` (the UI generates it once per compose attempt and
   reuses it on retry, for server-side dedupe).
 
-## Attachments (decisions/00103)
+## Attachments (decisions/00103, extended 00108)
 
 The composer lets the owner attach images to a message (paste, drag-drop, or the 📎
 button) — e.g. "what do you see in this photo?" against a real treatment picture. **cmd
@@ -137,41 +137,71 @@ reference flow through:
    `POST :9320/api/uploads` `{kind:"image", name, media_type, bytes_b64, session_id}` → cmd's
    201 `{id, converted:{width,height,...}}` → `UploadResult(upload_id, width, height)`.
    `width`/`height` are the CONVERTED dims (what the model will actually see), the right
-   numbers for a composer preview caption — not the original upload's.
+   numbers for a composer preview caption — not the original upload's. `session_id` is an
+   optional janitor hint: the "New conversation" compose stages session-lessly through
+   `POST /api/admin/chat/uploads` (decisions/00108), exactly like cmd's own new-chat
+   compose.
 2. `CmdChatClient.send_message(..., attachment_ids=[...])` adds `attachments:
    [{kind:"image", upload_id}]` to the existing `/send` body, **only when non-empty** — an
    ordinary text-only send has byte-identical wire shape to before this feature. `text` may
    be blank when at least one attachment is staged (image-only sends are allowed).
+3. `CmdChatClient.new_chat(..., attachment_ids=[...])` (decisions/00108) adds the SAME
+   `{kind:"image", upload_id}` entries to the new-chat body — cmd's route docstring says
+   "attachments[] mirrors the per-session send route's shape: each entry is {upload_id}"
+   and its `_stage_new_chat_attachments` reads only `upload_id` (the extra `kind` key is
+   tolerated), and the workspace provisioner drains them into real stream-json image
+   blocks on the first turn. This is the confirmation 00103 lacked when it scoped
+   attachments to `/send` only.
 
 **Capability-gated, not universal**: `AIBackend.supports_attachments` (mirrors the existing
 `supports_handover_chains` flag) — `True` for `CmdAIBackend`, `False` for
 `AnthropicAIBackend` (the standalone/milestone-6 backend has no attachment mechanism of its
 own, and milestone 6 is security-gated per this repo's CLAUDE.md — deliberately not built
 here). `routes_chat.py` 422s rather than silently dropping an attachment against an
-unsupporting backend, for both `send_message` and the new `POST .../attachments` upload
-route. The frontend reads `StateResponse.chatAttachmentsSupported` once at conversation-view
-mount to decide whether to show the 📎 button at all — never lets the owner attach
-something that can't be sent.
+unsupporting backend, for `send_message`, `create_conversation`, and both upload routes.
+The frontend reads `StateResponse.chatAttachmentsSupported` once at composer mount to
+decide whether to show the 📎 button at all — never lets the owner attach something that
+can't be sent.
 
-**v1 scope is the open-conversation composer only** (`/send`) — NOT the "New conversation"
-first-message flow (`new-chat`). cmd's `new-chat` endpoint's own attachment wire shape
-appeared, in research, to differ from `/send`'s (missing the `kind` field) and was never
-confirmed with full confidence, so this was deliberately left out rather than guessed at.
+**Thumbnails in the transcript (decisions/00108)** — cmd's read side has no structured
+attachment field, and production sends with attachments resolve to cmd's DRIVER methods
+(wixy passes no explicit `method`; cmd's auto-resolver picks), which embed a raw
+`Attachments:\n@<abspath> (WxH)` footer IN the message text. That footer used to render
+verbatim as bubble prose (the 2026-08-02 operator report). Two redundant, fully
+wixy-side recovery mechanisms now cover both routings:
 
-**Accepted limitation**: cmd's own `GET :9321/sessions/{id}/messages` (the read/transcript
-endpoint the stream polls) has no attachment field on decoded messages at all — a
-historical image-only message reloads as blank/empty text. This is cmd's own read-side gap,
-confirmed via direct research, not something wixy can build around client-side.
+- **Footer parse** — `chat_attachments.extract_attachment_footer` mirrors cmd's OWN
+  `src/ts/render/attachment-mentions.ts` contract exactly (same footer regex, same
+  cmd-uploads path-sentinel strictness, same whole-footer strip, dims from the `(WxH)`
+  suffix). It runs INSIDE `CmdChatClient.get_messages` so the cmd-ism stays contained:
+  `ChatMessage.text` arrives pre-stripped, `ChatMessage.attachments` carries the refs.
+  Covers driver-path sends INCLUDING pre-feature history.
+- **Send log** — `chat_sends.py` (`Storage/projects/<slug>/chat-sends.json`, capped at
+  200): every attachment-carrying create and `/send` is recorded (text stored
+  decoder-stripped). A stream-json-routed send leaves NO trace in cmd's read-back (the
+  decoder drops image blocks), so `_stream_events` re-decorates matching user messages
+  via `decorate_messages` — exact-text matching, duplicates paired by ordinal FROM THE
+  END (stable across re-polls/reconnects/restarts), already-decorated messages never
+  stomped. Decoration runs BEFORE `_owner_visible`, and the create-time record matches
+  on the FULL composed prompt — so an image-only first message (preamble-only text +
+  image blocks) gains attachments first and then SURVIVES the preamble strip
+  (`_owner_visible` keeps it, emitted as `text: null`, thumbnails-only).
+
+The bytes themselves come from cmd's own `GET :9320/api/uploads/{id}/bytes` (serves the
+converted WEBP inline — the same endpoint cmd's chat UI previews with), proxied through
+`GET /api/admin/chat/uploads/{upload_id}/bytes` (`UploadNotFoundError` → 404, mirror of
+cmd's 404/410; `Cache-Control: immutable`) so the browser never sees cmd's localhost
+surface. `AIBackend.fetch_upload_bytes` is the gated capability behind it.
 
 **The one assumption settled only by live verification, not by tests**: cmd's docs state an
 attachment only becomes a real vision content block when the send resolves to
 `method=="stream-json"`; other routing methods downgrade to a text-footer path mention the
-model may only weakly engage with. Wixy's conversations (subscription bucket, `model:
-"claude-sonnet-5"`, never dispatched to a visible window) are expected to resolve to
-`stream-json` — this is exactly the class of assumption this session's own chat-activity-enum
-saga (decisions/00099→00101) showed tests alone cannot settle, so it is confirmed (or
-corrected) by live production verification, not asserted here from research alone; see
-decisions/00103 for the outcome.
+model may only weakly engage with (its Read tool ingests the path). Wixy's conversations
+(subscription bucket, `model: "claude-sonnet-5"`, never dispatched to a visible window)
+were verified live (00103) to produce exact image understanding; the footer-path nuance is
+why BOTH thumbnail-recovery mechanisms above exist, and if a transcript ever stops showing
+thumbnails, the thing to check is which of the two mechanisms stopped matching — not
+whether the feature works at all.
 
 ## Preamble (`preamble.py` + `templates/chat_preamble.md`)
 
@@ -217,7 +247,7 @@ one reply) resolves to whichever block came last. Only ever run against `role ==
 happens to type (quoting the docs, say) is never touched, since extraction never runs on a
 user message.
 
-## Chat panel UI (`admin-ui/src/chatPanel.ts`)
+## Chat panel UI (`admin-ui/src/chatPanel.ts` + `chatComposer.ts`)
 
 `mountChatPanel(conversation, deps)` → list view (`#/chat`, polls `getConversations` every 2s,
 status dot per `ConversationSummary.status`, PLUS a `wx-chat-dot-working` pulse + a muted "—
@@ -231,6 +261,35 @@ never `innerHTML`), collapse contiguous tool runs into a "⚙ n actions" group, 
 auto-retries). Non-user messages trigger a throttled upstream check that toggles the "Preview
 updated — review changes" chip. Send generates the idempotency key once per attempt (reused on
 a failed retry). **Handover is fully server-side** — the UI just surfaces `handoverState`.
+
+**The layout (decisions/00108)** — the conversation view is a full-height flex column inside
+`.wx-main`: header (which also carries the reasoning toggle) and the dynamic banners/task
+card are `flex:none`, ONLY the thread scrolls (`flex:1; min-height:0`), and the composer is
+the pinned last child — no `60vh` thread cap, no `.wx-main` scrolling, no
+double-scroll, and `env(safe-area-inset-bottom)` keeps the composer clear of the phone's
+system bar. The thread STICKS to the bottom only while the owner is at the bottom (48px
+hysteresis) — scrolled up reading history + new arrivals = a "↓ New messages" jump pill;
+late-loading attachment images re-stick on their `load` event.
+
+**The shared composer (`chatComposer.ts`)** backs BOTH the list view's "New conversation"
+box and the open conversation's composer (a `mode` switch keeps every legacy class hook the
+tests/e2e select): auto-growing textarea (native `field-sizing: content` with a 44–180px
+scrollHeight fallback; 16px on ≤720px so focusing never read-zooms), 📎/paste/drag-drop
+image staging with spinner chips, submit gated on no-upload-in-flight, Enter/Shift+Enter,
+and `allowEmptySubmit` for the list view's "start with nothing" case. The list view stages
+uploads session-lessly (`api.stageChatUpload`) and passes the ids to `createConversation`.
+
+**The optimistic echo (decisions/00108)** — a send paints instantly as a dimmed
+`wx-chat-echo` bubble ("sending…", thumbnails from the same bytes-proxy URLs the server
+copy will use), reconciled FIFO by exact text as server copies stream in, removed on send
+failure (composer keeps text + chips for the same-idempotency-key retry), expired after 30s
+unmatched so nothing duplicates forever.
+
+**Transcript attachments (decisions/00108)** — a message event's `attachments` (see the
+Attachments section above for how the server recovers them) renders as a 120px thumbnail
+grid inside the bubble, sourced from wixy's bytes-proxy route; tapping one opens a lightbox
+(backdrop/✕/Esc close, focus restored). The raw `Attachments: @C:\...` footer text never
+reaches the screen (stripped server-side).
 
 **The work banner + task card** (decisions/00097) replace the old small status-strip text.
 `isWorking()` is true on any of three independent signals, each covering a gap the others
