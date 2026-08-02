@@ -1,6 +1,10 @@
 import { defineConfig } from "@playwright/test";
 
-const PORT = 8799;
+// 8799 by default; override with WIXY_E2E_PORT when another session on the
+// same box is running this suite at the same time (two runs collide on the
+// one fixed port — found live 2026-08-02). fixture_server.py reads the same
+// variable, so the spawned server and the tests always agree.
+const PORT = Number(process.env.WIXY_E2E_PORT ?? "8799");
 
 // The interpreter to launch fixture_server.py with. Defaults to "python3" (correct
 // on CI's ubuntu-latest runner after actions/setup-python — verified there is no

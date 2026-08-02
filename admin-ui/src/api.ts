@@ -148,12 +148,17 @@ export interface AdminField {
 /** A single array in the section's page content the panel manages as a
  * whole — mirrors `builder.config.AdminCollection`. `path` is its dotted
  * content path (e.g. `gallery.sliders`); `schema` names the
- * `builder/schemas/<schema>.schema.json` a new item must satisfy. */
+ * `builder/schemas/<schema>.schema.json` a new item must satisfy.
+ * `alignAspect` is the frame a two-image item is displayed in (from the
+ * registry's `alignAspect` "W:H", `null` when unset) — when present and the
+ * collection has ≥2 `image` fields, the panel offers the before/after
+ * aligner on its cards (decisions/00108). */
 export interface AdminCollection {
   path: string;
   label: string;
   itemNoun: string;
   schema: string;
+  alignAspect: { w: number; h: number } | null;
   fields: AdminField[];
 }
 

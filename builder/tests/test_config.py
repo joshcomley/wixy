@@ -274,3 +274,59 @@ class TestAdminSectionsLenientParsing:
 
         field = config.admin_sections[0].collections[0].fields[0]
         assert [o.value for o in field.options] == ["cheeks"]
+
+
+def _section_with_collection(collection: dict[str, object]) -> dict[str, object]:
+    data = dict(_MINIMAL_PROJECT)
+    data["adminSections"] = [
+        {
+            "id": "s",
+            "navLabel": "S",
+            "title": "S",
+            "description": "d",
+            "page": "p",
+            "collections": [
+                {
+                    "path": "p.items",
+                    "label": "Items",
+                    "itemNoun": "item",
+                    "schema": "s",
+                    **collection,
+                }
+            ],
+        }
+    ]
+    return data
+
+
+class TestAlignAspectParsing:
+    """decisions/00108: a collection's optional `alignAspect` "W:H" feeds the
+    before/after aligner's frame — absent or malformed must read as None
+    (aligner simply not offered), never crash the whole config load."""
+
+    def test_absent_alignAspect_reads_as_none(self, tmp_path: Path) -> None:
+        config = load_project_config(_write(tmp_path, _section_with_collection({})))
+
+        assert config.admin_sections[0].collections[0].align_aspect is None
+
+    def test_a_well_formed_aspect_parses_to_a_width_height_tuple(self, tmp_path: Path) -> None:
+        config = load_project_config(
+            _write(tmp_path, _section_with_collection({"alignAspect": "640:360"}))
+        )
+
+        assert config.admin_sections[0].collections[0].align_aspect == (640, 360)
+
+    def test_malformed_aspects_read_as_none(self, tmp_path: Path) -> None:
+        for bad in ("640", "640x360", "a:b", "640:", ":360", "640:360:1", "-640:360", "0:360"):
+            data = _section_with_collection({"alignAspect": bad})
+
+            config = load_project_config(_write(tmp_path, data))
+
+            assert config.admin_sections[0].collections[0].align_aspect is None, bad
+
+    def test_a_non_string_aspect_reads_as_none(self, tmp_path: Path) -> None:
+        config = load_project_config(
+            _write(tmp_path, _section_with_collection({"alignAspect": 640}))
+        )
+
+        assert config.admin_sections[0].collections[0].align_aspect is None

@@ -13,8 +13,12 @@ that local repo (git clone from a local path — no network, per spec/08 §1's "
 hit the real network" rule). Publishes ONE initial build before starting so the
 preview route's own asset URLs resolve instead of 503ing (decisions/00018 — a fresh
 install with no live.json yet is correct-but-noisy for what E2E flows actually test).
-Then runs `wixy_server.app.create_app` via uvicorn on a fixed port
-`playwright.config.ts`'s `webServer.url` health-checks.
+Then runs `wixy_server.app.create_app` via uvicorn on the port
+`playwright.config.ts`'s `webServer.url` health-checks — 8799 by default,
+overridable via `WIXY_E2E_PORT` so two agent sessions on the same box can run
+the suite in parallel instead of colliding on the one fixed port (found live
+2026-08-02: a second session's run kept failing with "already used" while a
+first was mid-suite).
 
 Usage: python fixture_server.py
 """
@@ -35,7 +39,7 @@ import anyio
 E2E_DIR = Path(__file__).resolve().parent
 WIXY_REPO_ROOT = E2E_DIR.parent
 MINI_SITE_FIXTURE = WIXY_REPO_ROOT / "builder" / "tests" / "fixtures" / "mini-site"
-PORT = 8799
+PORT = int(os.environ.get("WIXY_E2E_PORT", "8799"))
 
 sys.path.insert(0, str(WIXY_REPO_ROOT))
 
@@ -162,6 +166,7 @@ _ADMIN_SECTIONS = json.dumps(
                     "label": "Drag-to-compare photos",
                     "itemNoun": "photo pair",
                     "schema": "gallery-slider",
+                    "alignAspect": "640:360",
                     "fields": [
                         {"key": "before", "kind": "image", "label": "Before photo"},
                         {"key": "after", "kind": "image", "label": "After photo"},

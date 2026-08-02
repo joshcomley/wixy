@@ -3012,6 +3012,245 @@ div.wx-media-thumb {
   margin-top: 12px;
 }
 
+/* -- The before/after aligner (decisions/00108) -------------------------------
+   Its OWN `.wx-align-*` classes — never `.wx-media-dialog-*`/`.wx-section-add-*`
+   (the aligner opens ON TOP of the add flow, and the media dialog can stack on
+   top of that; shared classes made stacked dialogs indistinguishable to
+   selectors once before). z-index one layer above the add-flow backdrop. */
+
+.wx-align-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 24, 32, 0.55);
+  z-index: 710;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wx-align-dialog {
+  width: 640px;
+  max-width: 96vw;
+  max-height: 94vh;
+  max-height: 94dvh;
+  overflow: auto;
+  background: var(--wx-surface);
+  border-radius: var(--wx-radius);
+  box-shadow: var(--wx-shadow);
+  padding: 0 16px 16px;
+}
+
+/* The `hidden` attribute must always win inside this dialog: several classes
+   below set display:flex/grid, which as AUTHOR rules beat the UA stylesheet's
+   `[hidden] { display: none }` — without this guard the "Loading photos…"
+   note stays painted over the canvas forever and both mode slider-rows show
+   at once (a real E2E catch, 2026-08-02). */
+.wx-align-dialog [hidden] {
+  display: none !important;
+}
+
+.wx-align-hint {
+  margin: 0 0 10px;
+  color: var(--wx-muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.wx-align-canvas-wrap {
+  position: relative;
+  width: 100%;
+  border-radius: var(--wx-radius);
+  overflow: hidden;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-canvas);
+}
+
+.wx-align-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  /* The whole point: HER fingers drive the photo — the browser must not eat
+     the gesture as a scroll/pinch of the page underneath. */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
+}
+
+.wx-align-canvas:active {
+  cursor: grabbing;
+}
+
+.wx-align-canvas-note {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--wx-muted);
+  font-size: 0.8125rem;
+  text-align: center;
+  padding: 12px;
+  pointer-events: none;
+}
+
+.wx-align-chip {
+  position: absolute;
+  top: 8px;
+  font: 600 0.625rem/1 system-ui, sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(20, 24, 32, 0.55);
+  color: #fff;
+  pointer-events: none;
+  opacity: 0.75;
+}
+
+.wx-align-chip-first {
+  left: 8px;
+}
+
+.wx-align-chip-second {
+  right: 8px;
+}
+
+.wx-align-chip-active {
+  opacity: 1;
+  background: var(--wx-brand-blue);
+}
+
+.wx-align-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.wx-align-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wx-align-row-label {
+  flex: none;
+  width: 76px;
+  color: var(--wx-muted);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.wx-align-seg {
+  display: flex;
+  flex: 1;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  overflow: hidden;
+}
+
+.wx-align-seg-button {
+  flex: 1;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 0;
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font: 600 0.75rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.wx-align-seg-button + .wx-align-seg-button {
+  border-left: 1px solid var(--wx-border);
+}
+
+.wx-align-seg-button-active {
+  background: var(--wx-brand-blue);
+  color: #fff;
+}
+
+.wx-align-slider {
+  flex: 1;
+  min-height: 36px;
+  accent-color: var(--wx-brand-blue);
+}
+
+.wx-align-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 44px);
+  gap: 4px;
+  justify-content: center;
+}
+
+.wx-align-pad-button {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font-size: 1.125rem;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.wx-align-pad-button:active {
+  background: var(--wx-canvas);
+}
+
+.wx-align-tilt-readout {
+  min-width: 44px;
+  text-align: center;
+  color: var(--wx-muted);
+  font: 600 0.75rem/1 system-ui, sans-serif;
+}
+
+.wx-align-error {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-canvas);
+  color: var(--wx-danger-text);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.wx-align-save-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.wx-align-save-row .wx-publish-button {
+  min-height: 40px;
+}
+
+/* The card / add-flow entry point (decisions/00108). */
+
+.wx-section-align-button {
+  font: 600 0.75rem/1 system-ui, sans-serif;
+  padding: 8px 10px;
+  min-height: 36px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  cursor: pointer;
+}
+
+.wx-section-add-dialog > .wx-section-align-button {
+  margin: 4px 0 0;
+  margin-right: 0;
+  align-self: flex-start;
+}
+
 /* -- Responsive (mobile/narrow viewport) ----------------------------------------
    Everything above is desktop-first; this is the one breakpoint that reflows the
    shell for phone-width viewports (the operator's own real use case). Touch

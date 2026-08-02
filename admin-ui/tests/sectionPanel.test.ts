@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AdminApi, AdminSection, ContentResponse, MediaItem } from "../src/api";
+import type { AlignerRequest, AlignerResult } from "../src/alignerDialog";
 import type { OpQueueLike } from "../src/editView";
 import { mountSectionPanel } from "../src/sectionPanel";
 
@@ -15,6 +16,7 @@ const SLIDER_SECTION: AdminSection = {
       label: "Drag-to-compare photos",
       itemNoun: "photo pair",
       schema: "gallery-slider",
+      alignAspect: { w: 640, h: 360 },
       fields: [
         { key: "before", kind: "image", label: "Before photo", options: [] },
         { key: "after", kind: "image", label: "After photo", options: [] },
@@ -46,6 +48,7 @@ const TILE_SECTION: AdminSection = {
       label: "Tap-to-zoom photos",
       itemNoun: "photo",
       schema: "gallery-tile",
+      alignAspect: null,
       fields: [
         { key: "img", kind: "image", label: "Photo", options: [] },
         { key: "title", kind: "text", label: "Caption", options: [] },
@@ -372,5 +375,186 @@ describe("mountSectionPanel", () => {
       },
     ]);
     expect(panel.element.querySelector(".wx-section-add-dialog")).toBeNull();
+  });
+});
+
+describe("mountSectionPanel — the before/after aligner (decisions/00108)", () => {
+  function slidersApi(item: typeof SLIDER_ITEM = SLIDER_ITEM): AdminApi {
+    return fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { sliders: [item] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+  }
+
+  /** A stub for the canvas dialog (jsdom has no canvas): captures the request
+   * and hands the test the `respond` callback to drive directly. */
+  function stubAligner() {
+    const calls: AlignerRequest[] = [];
+    let respond: ((result: AlignerResult | null) => void) | null = null;
+    const stub = (_deps: unknown, request: AlignerRequest, cb: (r: AlignerResult | null) => void): void => {
+      calls.push(request);
+      respond = cb;
+    };
+    return { calls, fire: (r: AlignerResult | null) => respond?.(r), stub };
+  }
+
+  it("a fully-picked pair card gets a Line up photos button", async () => {
+    const panel = mountSectionPanel(SLIDER_SECTION, { api: slidersApi(), opQueue: fakeQueue() });
+    await flush();
+    const button = panel.element.querySelector(".wx-section-align-button");
+    expect(button?.textContent).toBe("Line up photos");
+  });
+
+  it("no alignAspect (or only one image field) means no button", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: {
+          gallery: { tiles: [{ img: { src: "images/t1.jpg", alt: "t" }, title: "T", cat: "lips" }] },
+        },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const panel = mountSectionPanel(TILE_SECTION, { api, opQueue: fakeQueue() });
+    await flush();
+    expect(panel.element.querySelector(".wx-section-align-button")).toBeNull();
+  });
+
+  it("a pair with a photo still missing gets no button (nothing to line up against)", async () => {
+    const halfPicked = { ...SLIDER_ITEM, after: { src: "", alt: "" } };
+    const panel = mountSectionPanel(SLIDER_SECTION, { api: slidersApi(halfPicked), opQueue: fakeQueue() });
+    await flush();
+    expect(panel.element.querySelector(".wx-section-align-button")).toBeNull();
+  });
+
+  it("clicking opens the aligner with the pair's photos + the registry frame aspect", async () => {
+    const { calls, stub } = stubAligner();
+    const panel = mountSectionPanel(SLIDER_SECTION, {
+      api: slidersApi(),
+      opQueue: fakeQueue(),
+      openAligner: stub,
+    });
+    await flush();
+    panel.element.querySelector<HTMLButtonElement>(".wx-section-align-button")?.click();
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({
+      first: { key: "before", label: "Before photo", src: "images/b1.jpg", alt: "Before" },
+      second: { key: "after", label: "After photo", src: "images/a1.jpg", alt: "After" },
+      aspectW: 640,
+      aspectH: 360,
+    });
+  });
+
+  it("a saved alignment commits the whole array with the baked photo(s) swapped in, alt preserved", async () => {
+    const opQueue = fakeQueue();
+    const { fire, stub } = stubAligner();
+    const panel = mountSectionPanel(SLIDER_SECTION, {
+      api: slidersApi(),
+      opQueue,
+      openAligner: stub,
+    });
+    await flush();
+    panel.element.querySelector<HTMLButtonElement>(".wx-section-align-button")?.click();
+    fire({ second: { src: "images/eee555ff-lips-after-aligned.jpg", alt: "After" } });
+
+    expect(opQueue.enqueued).toEqual([
+      {
+        file: "gallery",
+        path: "gallery.sliders",
+        value: [{ ...SLIDER_ITEM, after: { src: "images/eee555ff-lips-after-aligned.jpg", alt: "After" } }],
+      },
+    ]);
+  });
+
+  it("a cancelled aligner commits nothing", async () => {
+    const opQueue = fakeQueue();
+    const { fire, stub } = stubAligner();
+    const panel = mountSectionPanel(SLIDER_SECTION, {
+      api: slidersApi(),
+      opQueue,
+      openAligner: stub,
+    });
+    await flush();
+    panel.element.querySelector<HTMLButtonElement>(".wx-section-align-button")?.click();
+    fire(null);
+    expect(opQueue.enqueued).toEqual([]);
+  });
+
+  it("the add flow offers the aligner on its form step, and the result becomes the new item's photo", async () => {
+    const beforeItem: MediaItem = {
+      name: "b1.jpg",
+      url: "/images/b1.jpg",
+      contentSrc: "images/b1.jpg",
+      source: "repo",
+      sizeBytes: 1024,
+      width: 800,
+      height: 600,
+      references: [],
+    };
+    const afterItem: MediaItem = { ...beforeItem, name: "a1.jpg", url: "/images/a1.jpg", contentSrc: "images/a1.jpg" };
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({ content: {}, bindings: { page: "gallery", fields: [] } })),
+      getMedia: vi.fn(async () => [beforeItem, afterItem]),
+    });
+    const opQueue = fakeQueue();
+    const { fire, stub } = stubAligner();
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue, win: fakeWindow(), openAligner: stub });
+    await flush();
+
+    panel.element.querySelector<HTMLButtonElement>(".wx-section-add-button")?.click();
+    const dialog = panel.element.querySelector(".wx-section-add-dialog");
+    const findButton = (text: string): HTMLButtonElement | undefined =>
+      Array.from(dialog?.querySelectorAll("button") ?? []).find((b) => b.textContent === text);
+    const pickFromMediaDialog = async (name: string): Promise<void> => {
+      const mediaDialog = document.querySelector(".wx-media-dialog-backdrop");
+      const thumb = Array.from(mediaDialog?.querySelectorAll<HTMLButtonElement>(".wx-media-thumb") ?? []).find(
+        (t) => t.querySelector("img")?.getAttribute("src") === `/images/${name}`,
+      );
+      thumb?.click();
+      await flush();
+      Array.from(mediaDialog?.querySelectorAll("button") ?? [])
+        .find((b) => b.textContent === "Use this image")
+        ?.click();
+      await flush();
+    };
+
+    findButton("Choose Before photo")?.click();
+    await flush();
+    await pickFromMediaDialog("b1.jpg");
+    findButton("Next")?.click();
+    findButton("Choose After photo")?.click();
+    await flush();
+    await pickFromMediaDialog("a1.jpg");
+    findButton("Next")?.click();
+
+    // Form step: the aligner button is there; using it swaps the draft's after
+    // photo (the real aligner echoes the side's original alt — "A1" here from
+    // the media pick's filename guess — which the stored item must keep).
+    findButton("Line up photos")?.click();
+    fire({ second: { src: "images/fff666aa-a1-aligned.jpg", alt: "A1" } });
+
+    const titleInput = dialog?.querySelector<HTMLInputElement>("input[type='text']");
+    if (titleInput === null || titleInput === undefined) throw new Error("no title input");
+    titleInput.value = "Lip filler";
+    titleInput.dispatchEvent(new Event("input"));
+    findButton("Save")?.click();
+
+    expect(opQueue.enqueued).toEqual([
+      {
+        file: "gallery",
+        path: "gallery.sliders",
+        value: [
+          {
+            before: { src: "images/b1.jpg", alt: "B1" },
+            after: { src: "images/fff666aa-a1-aligned.jpg", alt: "A1" },
+            title: "Lip filler",
+            sub: "",
+            cat: "lips",
+          },
+        ],
+      },
+    ]);
   });
 });

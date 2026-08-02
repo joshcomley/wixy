@@ -49,13 +49,17 @@ class AdminCollection:
     """A single array in the section's page content the panel manages as a
     whole — `path` is its dotted content path (e.g. `gallery.sliders`),
     `schema` names the `builder/schemas/<schema>.schema.json` a new item must
-    satisfy (spec: 3a)."""
+    satisfy (spec: 3a). `align_aspect` is the optional `(w, h)` of the frame a
+    two-image item is displayed in (from the registry's `alignAspect` "W:H")
+    — when present and the collection has ≥2 `image` fields, the panel offers
+    the before/after aligner for its cards (decisions/00108)."""
 
     path: str
     label: str
     item_noun: str
     schema: str
     fields: tuple[AdminField, ...] = ()
+    align_aspect: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +133,31 @@ def _parse_admin_fields(raw: JsonValue) -> tuple[AdminField, ...]:
     return tuple(fields)
 
 
+def _parse_align_aspect(raw: JsonValue) -> tuple[int, int] | None:
+    """The optional `alignAspect` "W:H" on a collection (e.g. "640:360" — the
+    frame its photo pairs are displayed in, for the aligner, decisions/00108).
+    Malformed reads as None (aligner simply not offered) with a warning, the
+    same skip-don't-crash posture as the other adminSections parsing."""
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        logger.warning("adminSections: ignoring non-string alignAspect: %r", raw)
+        return None
+    parts = raw.split(":")
+    if len(parts) != 2:
+        logger.warning("adminSections: ignoring malformed alignAspect (want 'W:H'): %r", raw)
+        return None
+    try:
+        width, height = int(parts[0]), int(parts[1])
+    except ValueError:
+        logger.warning("adminSections: ignoring non-numeric alignAspect: %r", raw)
+        return None
+    if width <= 0 or height <= 0:
+        logger.warning("adminSections: ignoring non-positive alignAspect: %r", raw)
+        return None
+    return (width, height)
+
+
 def _parse_admin_collection(raw: JsonValue) -> AdminCollection | None:
     if not isinstance(raw, dict):
         return None
@@ -144,6 +173,7 @@ def _parse_admin_collection(raw: JsonValue) -> AdminCollection | None:
         item_noun=item_noun,
         schema=schema,
         fields=_parse_admin_fields(raw.get("fields", [])),
+        align_aspect=_parse_align_aspect(raw.get("alignAspect")),
     )
 
 
