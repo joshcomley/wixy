@@ -97,7 +97,7 @@ async def _track_readiness(
 
 class ConversationCreateIn(BaseModel):
     firstMessage: str | None = None
-    """decisions/00108: images to attach to the FIRST turn — upload ids staged
+    """decisions/00110: images to attach to the FIRST turn — upload ids staged
     beforehand via `POST /api/admin/chat/uploads` (the session-less variant of
     the per-conversation upload route, since no conversation exists yet).
     cmd's own new-chat route folds them into the first turn as real stream-
@@ -117,7 +117,7 @@ async def create_conversation(body: ConversationCreateIn, request: Request) -> J
     first_message = body.firstMessage
     if body.attachmentIds and not client.supports_attachments:
         # Same "explicit unsupported, never silently dropped" gate as
-        # `send_message` and the upload routes (decisions/00103, 00108).
+        # `send_message` and the upload routes (decisions/00103, 00110).
         raise HTTPException(
             status_code=422, detail="this conversation's backend doesn't support image attachments"
         )
@@ -148,7 +148,7 @@ async def create_conversation(body: ConversationCreateIn, request: Request) -> J
 
     send_record: ChatSend | None = None
     if body.attachmentIds:
-        # decisions/00108: cmd folds the attachments into the first turn as
+        # decisions/00110: cmd folds the attachments into the first turn as
         # image content blocks, which cmd's decoder DROPS on read-back (no
         # footer, no trace) — log the send so the stream can re-decorate
         # the first message from wixy's own record. The match text is the
@@ -253,7 +253,7 @@ async def send_message(conv_id: str, body: SendMessageIn, request: Request) -> J
         raise HTTPException(status_code=502, detail=f"couldn't deliver: {exc}") from exc
 
     if body.attachmentIds:
-        # decisions/00108: if cmd routed this send to stream-json (a real
+        # decisions/00110: if cmd routed this send to stream-json (a real
         # image block, no footer), cmd's read-back carries no trace of the
         # attachment — log it so the stream re-decorates from wixy's own
         # record. A driver-routed send leaves its `Attachments:` footer in
@@ -328,7 +328,7 @@ async def upload_attachment(
 
 
 # ---------------------------------------------------------------------------
-# POST /api/admin/chat/uploads (session-less stage, decisions/00108)
+# POST /api/admin/chat/uploads (session-less stage, decisions/00110)
 # GET  /api/admin/chat/uploads/{upload_id}/bytes (thumbnail/full-image proxy)
 # ---------------------------------------------------------------------------
 
@@ -370,7 +370,7 @@ async def upload_attachment_unscoped(
 async def get_upload_bytes(upload_id: str, request: Request) -> Response:
     """Proxy cmd's own `GET /api/uploads/{id}/bytes` through the admin origin —
     the transcript's attachment thumbnails/lightbox point here (decisions/
-    00108); the browser must never see cmd's localhost-only surface. The
+    00110); the browser must never see cmd's localhost-only surface. The
     served bytes are immutable (cmd converts once, at upload), so the response
     is cacheable forever; an unknown or janitor-swept id mirrors cmd's own
     404/410 rather than flattening to a 502."""
@@ -465,7 +465,7 @@ def _message_event(message: ChatMessage) -> JsonObject:
         "truncated": message.truncated,
     }
     if message.attachments:
-        # decisions/00108: image refs for the transcript's thumbnail grid —
+        # decisions/00110: image refs for the transcript's thumbnail grid —
         # present only when non-empty so a plain text message's envelope is
         # byte-identical to before this feature (same convention as
         # `send_message`'s `attachments` field).
@@ -526,7 +526,7 @@ def _owner_visible(message: ChatMessage) -> ChatMessage | None:
         return message
     visible = strip_preamble(message.text)
     if visible is None:
-        # decisions/00108: a preamble-only message that CARRIES attachments
+        # decisions/00110: a preamble-only message that CARRIES attachments
         # (an image-only first message — the owner started the conversation
         # with just a photo) must survive: the prose was all preamble, but
         # the images are the owner's own content. Emit it with `text=None`
@@ -641,7 +641,7 @@ async def _stream_events(
             await anyio.sleep(timing.offline_retry_s)
             continue
 
-        # decisions/00108: re-attach anything wixy itself sent that cmd's
+        # decisions/00110: re-attach anything wixy itself sent that cmd's
         # read-back can't carry (a stream-json-routed send leaves no trace —
         # see chat_sends.py's docstring). Runs on the RAW messages, BEFORE
         # `_owner_visible`: the create-time send record matches on the full

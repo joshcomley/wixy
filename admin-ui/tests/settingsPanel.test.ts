@@ -16,7 +16,7 @@ import { initZoom } from "../src/zoom";
 function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
   return {
     getState: vi.fn(),
-    getServerCommit: vi.fn(),
+    getServerVersion: vi.fn(),
     getContent: vi.fn(),
     patchDraft: vi.fn(),
     discardDraft: vi.fn(),

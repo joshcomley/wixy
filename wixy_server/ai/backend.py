@@ -36,7 +36,7 @@ class AIBackendError(Exception):
 
 class UploadNotFoundError(AIBackendError):
     """`fetch_upload_bytes` against an upload id the backend genuinely doesn't
-    have (cmd's own 404/410, decisions/00108) — distinct from a transport-level
+    have (cmd's own 404/410, decisions/00110) — distinct from a transport-level
     failure so the bytes-proxy route mirrors a 404 to the browser instead of a
     misleading 502."""
 
@@ -80,7 +80,7 @@ class AIBackend(Protocol):
     async def create_conversation(
         self, preamble: str, first_message: str | None, *, attachment_ids: list[str] | None = None
     ) -> ConversationRef:
-        """`attachment_ids` (decisions/00108) references uploads already staged
+        """`attachment_ids` (decisions/00110) references uploads already staged
         via `upload_attachment` — only ever non-empty when
         `supports_attachments` is `True` (routes_chat.py 422s otherwise, same
         gate as `send`). The backend folds them into the conversation's first
@@ -106,7 +106,7 @@ class AIBackend(Protocol):
         fine; `routes_chat.py` never reaches it, mirroring `get_chain`'s own
         `supports_handover_chains`-gated convention above).
 
-        `conv_ref` is `None` for a pre-conversation stage (decisions/00108 —
+        `conv_ref` is `None` for a pre-conversation stage (decisions/00110 —
         the "New conversation" compose, where no conversation exists yet);
         cmd treats the session id as an optional ownership hint for its own
         janitor, so an unscoped upload is fully supported."""
@@ -114,7 +114,7 @@ class AIBackend(Protocol):
 
     async def fetch_upload_bytes(self, upload_id: str) -> UploadBytes:
         """The served (converted) bytes for one staged upload — the backbone
-        of attachment thumbnails in the transcript (decisions/00108). Only
+        of attachment thumbnails in the transcript (decisions/00110). Only
         ever called when `supports_attachments` is `True`, same gating
         convention as `upload_attachment`. Raises `UploadNotFoundError` for a
         genuinely-unknown/expired id (mirrored to the browser as 404)."""

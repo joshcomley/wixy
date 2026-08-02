@@ -4,7 +4,7 @@
 // conversation id as a different route) — this module owns no hash-routing of its
 // own, just "render whichever one view the current conversation id calls for."
 //
-// decisions/00108 (the 2026-08-02 "chat experience" revamp):
+// decisions/00110 (the 2026-08-02 "chat experience" revamp):
 // - The conversation view is a FULL-HEIGHT flex column inside `.wx-main`: the
 //   header/banners/task card are fixed, ONLY the thread scrolls, and the
 //   composer is pinned at the bottom by layout (never `position: sticky`,
@@ -69,7 +69,7 @@ export interface ChatPanel {
 const LIST_POLL_MS = 2000;
 const UPSTREAM_CHECK_THROTTLE_MS = 5000;
 /** How far from the thread's bottom (px) still counts as "at the bottom" —
- * the stick-to-bottom latch's hysteresis (decisions/00108). */
+ * the stick-to-bottom latch's hysteresis (decisions/00110). */
 const BOTTOM_STICK_THRESHOLD_PX = 48;
 /** An optimistic echo that no server message matched within this window is
  * dropped — by then the real bubble has surely streamed in (or the send
@@ -124,7 +124,7 @@ function mountConversationList(deps: ChatPanelDeps): ChatPanel {
   header.append(heading, newButton);
   root.appendChild(header);
 
-  // decisions/00108: the "New conversation" box is the SHARED composer now —
+  // decisions/00110: the "New conversation" box is the SHARED composer now —
   // same auto-growing input, same image attachments as the open conversation
   // (previously impossible here — the operator's report). Its root keeps the
   // legacy `.wx-chat-compose-box` class; shown/hidden via `hidden` as before.
@@ -357,7 +357,7 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
   const titleEl = document.createElement("span");
   titleEl.className = "wx-chat-conversation-title";
   titleEl.textContent = "Loading…";
-  // decisions/00108: the reasoning toggle moved into the header row (it used
+  // decisions/00110: the reasoning toggle moved into the header row (it used
   // to eat a full row of the stacked layout — vertical space the thread now
   // owns).
   const reasoningToggle = document.createElement("button");
@@ -406,7 +406,7 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
   root.appendChild(previewChip);
 
   // Sits directly above the thread (which is now the view's ONLY scroll
-  // region, decisions/00108) so it stays visible while messages scroll past
+  // region, decisions/00110) so it stays visible while messages scroll past
   // underneath it, without needing its own sticky positioning.
   const taskCard = document.createElement("div");
   taskCard.className = "wx-chat-tasks";
@@ -458,12 +458,12 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
    * successful send, so a failed attempt's retry click reuses this same key
    * instead of minting a new one (which would defeat the whole point). */
   let pendingIdempotencyKey: string | null = null;
-  /** decisions/00108: the stick-to-bottom latch — true while the owner is at
+  /** decisions/00110: the stick-to-bottom latch — true while the owner is at
    * (or near) the thread's end, so polls snap the newest message into view;
    * false once they've scrolled up to read, so the same polls never yank
    * them away from what they're reading (the jump pill offers the way back). */
   let stickToBottom = true;
-  /** decisions/00108: optimistic echoes of what the owner just sent, painted
+  /** decisions/00110: optimistic echoes of what the owner just sent, painted
    * the instant Send fires (cmd's own UI does the same with its
    * OptimisticAttachment). Reconciled FIFO by exact text as the server
    * copies stream in; expired after ECHO_EXPIRY_MS unmatched. Thumbnails

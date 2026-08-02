@@ -48,7 +48,7 @@ def validate_attachment(data: bytes, content_type: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# The ``Attachments:`` footer (decisions/00108)
+# The ``Attachments:`` footer (decisions/00110)
 # ---------------------------------------------------------------------------
 #
 # cmd's own send route appends a trailing footer to the user's prompt text when

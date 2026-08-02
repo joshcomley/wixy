@@ -34,6 +34,7 @@ import { setButtonBusy, setButtonIdle } from "./spinnerButton";
 import { mountThemePanel, type ThemePanel } from "./themePanel";
 import { initTheme, type ThemeMode } from "./theme";
 import { initThemeEditor } from "./themeEditor";
+import { mountVersionBadge } from "./versionBadge";
 import { initZoom } from "./zoom";
 
 interface Drawer {
@@ -121,9 +122,28 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   // ABOVE the topbar and is deliberately NOT part of the edit-view chrome
   // that hides/reveals — the one place you can always see and act on "you
   // have unpublished work" is here, so there's no chip-relocation dance any
-  // more (the chip used to move into the slim edit bar while editing).
+  // more (the chip used to move into the slim edit bar while editing). With
+  // nothing to publish the button hides and the bar collapses to a narrow
+  // "No unpublished changes" strip (renderTopBar + style.css).
   const statusBar = document.createElement("div");
   statusBar.className = "wx-statusbar";
+  // The version badge (decisions/00109) pins at the FAR LEFT of this bar — a
+  // tiny muted `v N` while up to date, the fleet's green glow once a deploy
+  // lands past this page; tapping it asks before reloading (she may be
+  // mid-edit). Its check() is driven by the revalidation loop below, plus one
+  // immediate call to pin the loaded page's version.
+  const versionBadge = mountVersionBadge({
+    fetchVersion: () => api.getServerVersion(),
+    win,
+    beforeReload: async () => {
+      await opQueue?.flushNow();
+      if (opSaveFailed) {
+        // The flush re-queued the batch (network/5xx) — reloading now would
+        // lose it. The badge's dialog says so and stays open instead.
+        throw new Error("pending edits did not reach the server");
+      }
+    },
+  });
   const chipEl = document.createElement("button");
   chipEl.type = "button";
   chipEl.className = "wx-draft-chip";
@@ -134,8 +154,14 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   publishButton.className = "wx-publish-button";
   publishButton.textContent = "Publish";
   publishButton.disabled = true;
+  // Start hidden (the quiet default, decisions/00108): the button is useless
+  // before the first state load anyway, and painting it visible-then-hiding
+  // it made the whole page jump when loadState landed (the bar collapsing
+  // mid-layout raced the mobile popover geometry E2E). renderTopBar reveals
+  // it the moment state says there's something to publish.
+  publishButton.hidden = true;
   publishButton.addEventListener("click", () => openPublishDrawer());
-  statusBar.append(chipEl, publishButton);
+  statusBar.append(versionBadge.element, chipEl, publishButton);
 
   const topbar = document.createElement("div");
   topbar.className = "wx-topbar";
@@ -587,6 +613,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       // registering the job server-side (the busy affordance appears
       // synchronously with the click — fleet instant-feedback rule); the
       // shell's watch covers reload-mid-publish and other-tab/device starts.
+      publishButton.hidden = false; // a running publish keeps its progress surface even if a snapshot already reads clean
       publishButton.disabled = true;
       chipEl.disabled = true;
       // Keep the banner highlighted while publishing (decisions/00094): the chip
@@ -608,6 +635,11 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     }
     publishButton.title = "";
     chipEl.textContent = parts.length === 0 ? "No unpublished changes" : parts.join(" · ");
+    // Nothing to publish → no Publish button (operator, 2026-08-02): with the
+    // chip already reading "No unpublished changes" the button is dead chrome,
+    // and its absence is what lets the bar collapse to a narrow strip (see
+    // `.wx-statusbar:not(.wx-statusbar-pending)` in style.css).
+    publishButton.hidden = parts.length === 0;
     // Prominent only when there's actually something to publish — see
     // `.wx-statusbar-pending` in style.css for why it isn't always-on.
     statusBar.classList.toggle("wx-statusbar-pending", parts.length > 0);
@@ -810,6 +842,10 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
 
   let state: StateResponse | null = null;
   let opQueue: OpQueue | null = null;
+  // Set by the OpQueue's onError, cleared by its onAccepted — the version
+  // badge's beforeReload (above) reads it to BLOCK a confirmed reload that
+  // would silently drop a batch the server never acknowledged (decisions/00109).
+  let opSaveFailed = false;
   let activeEditView: EditView | null = null;
   let activeThemePanel: ThemePanel | null = null;
   let activeRoute: Route | null = null;
@@ -929,7 +965,11 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     }
 
     if (route.kind === "media") {
-      const panel = mountMediaPanel(api, win);
+      // Staged replacements/deletions change the publishable opCount — the
+      // status bar (and its Publish-button visibility, decisions/00108) must
+      // re-read state after any staging mutation, not wait for the 60s
+      // revalidation.
+      const panel = mountMediaPanel(api, win, () => void refreshStateInBackground());
       main.appendChild(panel.element);
       activePanelTeardown = () => panel.teardown();
       return;
@@ -1062,12 +1102,16 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
           sendPatch: (expectedRev, ops) => api.patchDraft(expectedRev, ops),
           fetchCurrentRev: async () => (await api.getState()).draft.rev,
           onAccepted: (ops) => {
+            opSaveFailed = false;
             activeEditView?.applyOps(ops);
             activeThemePanel?.onOpsAccepted(ops);
             void refreshStateInBackground();
             refreshThumbnailsForOps(ops);
           },
-          onError: () => showTransientToast("Couldn't save your last change — retrying…"),
+          onError: () => {
+            opSaveFailed = true;
+            showTransientToast("Couldn't save your last change — retrying…");
+          },
           // decisions/00095: the server permanently rejected this batch (the
           // draft-write gate) — retrying is pointless, and the live preview's
           // DOM may now disagree with the real draft (the rejected edit is
@@ -1119,28 +1163,16 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   // Now: while the tab is visible, state revalidates every REVALIDATE_MS and
   // whenever the tab regains visibility; a mounted pages panel re-renders from
   // the fresh snapshot (it has no typing state to lose — same rationale as
-  // refreshPagesPanel); and a server deploy (commit change on /api/version)
-  // reloads the shell outside the edit view (inside it, a toast asks instead —
-  // never yank a live editing iframe out from under a keystroke).
+  // refreshPagesPanel); and the version badge re-checks the engine version —
+  // a deploy past this page turns it into the green glow, and the RELOAD only
+  // ever happens after her explicit "Load latest version" tap (decisions/00109:
+  // she may be mid-edit, so nothing ever yanks the page away on its own).
 
   const REVALIDATE_MS = 60_000;
-  let knownServerCommit: string | null = null;
 
   async function revalidate(): Promise<void> {
     if (win.document.visibilityState !== "visible") return;
-    const commit = await api.getServerCommit();
-    if (commit !== null) {
-      if (knownServerCommit === null) {
-        knownServerCommit = commit;
-      } else if (commit !== knownServerCommit) {
-        if (activeRoute?.kind !== "edit") {
-          win.location.reload();
-          return;
-        }
-        showTransientToast("Wixy was updated — reload the page when you're done here");
-        knownServerCommit = commit;
-      }
-    }
+    await versionBadge.check();
     await refreshStateInBackground();
     if (activeRoute?.kind === "pages") mountPanel(activeRoute);
   }
@@ -1176,6 +1208,9 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
 
   const unsubscribeRoute = onRouteChange(handleRoute, win);
   void loadState();
+  // Pin the loaded page's engine version right away (the badge's "this is what
+  // you're running" baseline) rather than waiting for the first 60s tick.
+  void versionBadge.check();
 
   return {
     teardown(): void {
@@ -1192,6 +1227,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       narrowMedia?.removeEventListener("change", onNarrowChange);
       activePanelTeardown?.();
       closeDrawer();
+      versionBadge.teardown();
       thumbnailService.teardown();
       themeController.teardown();
       shortcutsController.teardown();

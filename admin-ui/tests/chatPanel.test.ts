@@ -1003,7 +1003,7 @@ describe("mountChatPanel — conversation view", () => {
   });
 });
 
-describe("mountChatPanel — decisions/00108 chat experience", () => {
+describe("mountChatPanel — decisions/00110 chat experience", () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });

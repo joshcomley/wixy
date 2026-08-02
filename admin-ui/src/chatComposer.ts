@@ -1,4 +1,4 @@
-// The shared chat composer (decisions/00108) — ONE component backing both the
+// The shared chat composer (decisions/00110) — ONE component backing both the
 // "New conversation" box on `#/chat` (mode "compose") and the always-visible
 // composer pinned at the bottom of `#/chat/<conv>` (mode "composer"). Before
 // this component the two flows were separate implementations, and only the

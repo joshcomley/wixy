@@ -63,7 +63,7 @@ class TestValidateAttachment:
 
 
 class TestExtractAttachmentFooter:
-    """decisions/00108: `extract_attachment_footer` — the exact mirror of cmd's
+    """decisions/00110: `extract_attachment_footer` — the exact mirror of cmd's
     own `src/ts/render/attachment-mentions.ts` (the parser cmd's own chat UI
     uses to turn the driver-send `Attachments:` footer back into previews).
     The cases below are cmd's own documented contract: the footer shape, the

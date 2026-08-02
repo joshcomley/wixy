@@ -1495,7 +1495,7 @@ class TestTaskEvents:
 
 
 # ---------------------------------------------------------------------------
-# decisions/00108 — attachments everywhere: create flow, session-less uploads,
+# decisions/00110 — attachments everywhere: create flow, session-less uploads,
 # the bytes proxy, and stream decoration from the send log
 # ---------------------------------------------------------------------------
 
@@ -1721,7 +1721,9 @@ class TestStreamAttachmentDecoration:
 
         payload = _message_payload(events[0])
         assert payload["text"] is None
-        assert payload["attachments"][0]["uploadId"] == "u9"
+        assert payload["attachments"] == [
+            {"uploadId": "u9", "name": None, "width": None, "height": None}
+        ]
 
     @pytest.mark.asyncio
     async def test_a_footer_carrying_message_is_decorated_by_the_client_not_the_log(

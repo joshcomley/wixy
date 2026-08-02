@@ -1,4 +1,4 @@
-"""Chat attachment SEND LOG (decisions/00108) — `Storage/projects/<slug>/chat-sends.json`.
+"""Chat attachment SEND LOG (decisions/00110) — `Storage/projects/<slug>/chat-sends.json`.
 
 Why this exists: cmd's decoded-messages read API has no structured attachment
 field (decisions/00103's accepted limitation). A send that resolved to a

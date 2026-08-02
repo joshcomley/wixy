@@ -45,13 +45,13 @@ Handler column is `file:func`. "Auth: CF" = gated by the admin middleware. Respo
 | GET | `/internal/ready` | `routes_internal.py:get_ready` | none | `{"ready": true}` — **404 (no body)** if a `Cf-Ray`/`Cf-Connecting-Ip` header is present |
 | GET | `/healthz` | `routes_internal.py:get_healthz` | none | `{"ready": true}` (delegates to `get_ready`; same CF-edge 404) |
 | POST | `/internal/warmup` | `routes_internal.py:post_warmup` | none | `{"warm": true}`; **503** on `CheckoutError`; 404 CF-edge |
-| GET | `/api/version` | `routes_version.py:get_version` | **none (public by design)** | `{"commit": {"sha_full": "<engine HEAD sha>"}, "slot": <str\|null>, "version": <int\|null>}` |
+| GET | `/api/version` | `routes_version.py:get_version` | **none (public by design)** | `{"commit": {"sha_full": "<engine HEAD sha>"\|null, "count": <int\|null>}, "slot": <str\|null>, "version": <int\|null>, "edition": "fleet"\|"standalone", "syncBase": <str\|null>}` — `commit.count` (decisions/00109) is the engine's `v N` display number (first-parent count of HEAD; baked `WIXY_ENGINE_VERSION` preferred, git fallback, null on a gitless image); `version` is the SITE's live pointer, unrelated |
 
 ### Admin API (`/api/admin/*`, all Auth: CF)
 
 | Method | Path | Handler | Request | Response |
 |---|---|---|---|---|
-| GET | `state` | `routes_admin_api.py:get_state` | — | `{"project":{slug,name,domain}, "pages":[{slug,meta,lastModified,editable,pendingDelete}], "draft":{rev,opCount}, "live":{version,sha}\|null, "upstream":{aheadOfPublished:[{sha,subject,author,when}],fetchedAt}, "publishJob":{...}\|null, "chats":[<summary>], "adminSections":[<admin section>], "chatAttachmentsSupported":bool}`; 503 |
+| GET | `state` | `routes_admin_api.py:get_state` | — | `{"project":{slug,name,domain}, "pages":[{slug,meta,lastModified,editable,pendingDelete}], "draft":{rev,opCount (SAME formula as publish/preview's — content ops + staged page adds/deletes + staged media replacements/deletions, decisions/00108)}, "live":{version,sha}\|null, "upstream":{aheadOfPublished:[{sha,subject,author,when}],fetchedAt}, "publishJob":{...}\|null, "chats":[<summary>], "adminSections":[<admin section>], "chatAttachmentsSupported":bool}`; 503 |
 | GET | `content/{page}` | `get_content` | — | `{"content": <JsonObject>, "bindings": <dict>}`; 503, 404 |
 | GET | `theme` | `get_theme` | — | `{"theme": <dict>}`; 503, 404 |
 | PATCH | `draft` | `patch_draft` | `{"expectedRev":int, "ops":[{file,path,value}\|{file,path,discard:true}]}` | `{"rev": int}`; 503, **409** (RevConflict), **422** (`DraftValidationError` — the batch is structurally invalid against `builder/schemas/*.json`, e.g. a collection item missing a required field; rejected whole, the overlay is left untouched — decisions/00095) |
@@ -74,12 +74,12 @@ Handler column is `file:func`. "Auth: CF" = gated by the admin middleware. Respo
 | POST | `restore` | `post_restore` | `{"version":int}` | `{"version":int, "sha":str, "of":int}`; **409** (running), 503, **422** (Restore) |
 | POST | `pages/duplicate` | `post_pages_duplicate` | `{"from":str, "slug":str, "navLabel":str, "expectedRev":int}` | `{"rev":int}`; 503, 409, 404, **422** (PageOp) |
 | POST | `pages/delete` | `post_pages_delete` | `{"slug":str, "expectedRev":int}` | `{"rev":int}`; 503, 409, 404 |
-| POST | `chat/conversations` | `routes_chat.py:create_conversation` | `{"firstMessage":str\|null, "attachmentIds":[str]}` (`attachmentIds` optional, default `[]` — staged beforehand via `POST chat/uploads`; decisions/00108) | `<conversation summary>`; **422** (non-empty `attachmentIds` against a backend with `supports_attachments=False`), **502** (CmdChat) |
+| POST | `chat/conversations` | `routes_chat.py:create_conversation` | `{"firstMessage":str\|null, "attachmentIds":[str]}` (`attachmentIds` optional, default `[]` — staged beforehand via `POST chat/uploads`; decisions/00110) | `<conversation summary>`; **422** (non-empty `attachmentIds` against a backend with `supports_attachments=False`), **502** (CmdChat) |
 | GET | `chat/conversations` | `list_conversations` | — | `{"conversations":[<summary>]}` newest-first |
 | POST | `chat/conversations/{id}/messages` | `send_message` | `{"text":str, "idempotencyKey":str, "attachmentIds":[str]}` (`attachmentIds` optional, default `[]`) | `{"accepted":true, "buffered":bool}`; 404, **422** (non-empty `attachmentIds` against a backend with `supports_attachments=False`), 502 |
 | POST | `chat/conversations/{id}/attachments` | `upload_attachment` | `multipart/form-data` field `file` (image, ≤5MB) | `{"attachmentId":str, "width":int\|null, "height":int\|null}` (`width`/`height` are cmd's own CONVERTED-image dims, not the original upload's); 404, **422** (backend unsupported, or `AttachmentError` — oversize/wrong-type/unreadable), **502** (`AIBackendError` — cmd upload failed) |
 | POST | `chat/uploads` | `upload_attachment_unscoped` | same multipart shape as the scoped route | same response shape — the session-less stage for the "New conversation" compose (no conversation exists yet; cmd treats the session id as an optional janitor hint only). **422** (backend unsupported, or `AttachmentError`), **502** |
-| GET | `chat/uploads/{upload_id}/bytes` | `get_upload_bytes` | — | the upload's served (converted) bytes, proxied from cmd's own `GET /api/uploads/{id}/bytes` — what the transcript's thumbnails/lightbox point at (decisions/00108). `Cache-Control: private, max-age=31536000, immutable` (bytes never change after the upload-time conversion); **404** (unknown/expired id, mirroring cmd's own 404/410 via `UploadNotFoundError`), **422** (backend unsupported), **502** |
+| GET | `chat/uploads/{upload_id}/bytes` | `get_upload_bytes` | — | the upload's served (converted) bytes, proxied from cmd's own `GET /api/uploads/{id}/bytes` — what the transcript's thumbnails/lightbox point at (decisions/00110). `Cache-Control: private, max-age=31536000, immutable` (bytes never change after the upload-time conversion); **404** (unknown/expired id, mirroring cmd's own 404/410 via `UploadNotFoundError`), **422** (backend unsupported), **502** |
 | POST | `chat/conversations/{id}/rename` | `rename_conversation` | `{"title":str}` | `<conversation summary>`; 404 |
 | GET | `chat/conversations/{id}/stream?includeThinking=` | `conversation_stream` | query `includeThinking?` | **SSE**, see §4; 404 |
 
@@ -252,7 +252,7 @@ running. `stage ∈ pulling|merging|committing|building|verifying|swapping|done|
   `kind ∈ text|tool_use|tool_result|thinking|error`; `thinking` omitted unless `includeThinking=true`.
   An assistant `text` message's `text` has any `wixy-tasks` fenced block already stripped out
   (decisions/00097) — the owner's bubble never shows raw protocol JSON.
-  **`attachments` (decisions/00108)**: a user message carrying images adds
+  **`attachments` (decisions/00110)**: a user message carrying images adds
   `"attachments":[{uploadId,name,width,height}]` (present only when non-empty — a plain
   message's envelope is byte-identical to before this feature). Recovered server-side
   two redundant ways: cmd's driver-path `Attachments:` footer (parsed out of the text —
@@ -278,7 +278,7 @@ and distinguishes brand-new-session transcript lag (quiet retry) from a real out
 
 **Messages are owner-filtered before emission** (`_owner_visible`, decisions/00093): the site
 preamble is stripped out of the first user message, and a preamble-only first message is not
-emitted at all — unless it carries attachments (decisions/00108: an image-only first message
+emitted at all — unless it carries attachments (decisions/00110: an image-only first message
 survives as `text:null` + `attachments`, thumbnails-only). So the indices a client sees can
 skip `0`, and a `text` may be shorter than what cmd's own `/messages` returns for the same
 index. Upstream transcripts are unmodified.

@@ -34,7 +34,7 @@ DEFAULT_UPLOAD_BYTES = (
 )
 """A real 8x8 WEBP (Pillow-generated) served by the fake's
 `GET /api/uploads/{id}/bytes` — genuine decodable bytes so a browser `<img>`
-pointed at wixy's bytes proxy actually loads in E2E (decisions/00108)."""
+pointed at wixy's bytes proxy actually loads in E2E (decisions/00110)."""
 
 
 @dataclass
@@ -76,7 +76,7 @@ class FakeSession:
     `{kind, upload_id}` shape, or absent entirely for a plain text send) without
     a bespoke request-capturing middleware."""
     create_attachments: list[JsonObject] | None = None
-    """decisions/00108: the `attachments` list the new-chat call carried (None =
+    """decisions/00110: the `attachments` list the new-chat call carried (None =
     field omitted) — cmd's own new-chat route folds these into the first turn
     (its `_stage_new_chat_attachments`), and tests assert wixy forwards them."""
 
@@ -105,7 +105,7 @@ class FakeCmdState:
     otherwise configures to become ready quickly with zero per-session
     wiring."""
     upload_bytes: dict[str, tuple[bytes, str]] = field(default_factory=dict)
-    """decisions/00108: the bytes `GET /api/uploads/{id}/bytes` serves per id
+    """decisions/00110: the bytes `GET /api/uploads/{id}/bytes` serves per id
     (content, media_type) — overridable per test; an id with no entry but a
     staged upload gets the canned `DEFAULT_UPLOAD_BYTES` (a real 1x1 WEBP, so
     browser `<img>` tags genuinely load in E2E)."""
@@ -314,7 +314,7 @@ def create_fake_cmd_app(state: FakeCmdState | None = None) -> FastAPI:
 
     @app.get("/api/uploads/{upload_id}/bytes")
     async def upload_bytes_route(upload_id: str) -> Response:
-        """decisions/00108: mirrors cmd's own inline-bytes endpoint (the one
+        """decisions/00110: mirrors cmd's own inline-bytes endpoint (the one
         cmd's chat UI uses for previews and wixy's proxy route forwards). 404
         for an id the fake never staged, exactly as cmd's row-lookup does."""
         if upload_id not in state.uploads:

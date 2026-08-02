@@ -122,7 +122,7 @@ Route table + SSE event envelopes are in [contracts.md](contracts.md) §2, §4. 
 - **Send** carries an `idempotencyKey` (the UI generates it once per compose attempt and
   reuses it on retry, for server-side dedupe).
 
-## Attachments (decisions/00103, extended 00108)
+## Attachments (decisions/00103, extended 00110)
 
 The composer lets the owner attach images to a message (paste, drag-drop, or the 📎
 button) — e.g. "what do you see in this photo?" against a real treatment picture. **cmd
@@ -139,13 +139,13 @@ reference flow through:
    `width`/`height` are the CONVERTED dims (what the model will actually see), the right
    numbers for a composer preview caption — not the original upload's. `session_id` is an
    optional janitor hint: the "New conversation" compose stages session-lessly through
-   `POST /api/admin/chat/uploads` (decisions/00108), exactly like cmd's own new-chat
+   `POST /api/admin/chat/uploads` (decisions/00110), exactly like cmd's own new-chat
    compose.
 2. `CmdChatClient.send_message(..., attachment_ids=[...])` adds `attachments:
    [{kind:"image", upload_id}]` to the existing `/send` body, **only when non-empty** — an
    ordinary text-only send has byte-identical wire shape to before this feature. `text` may
    be blank when at least one attachment is staged (image-only sends are allowed).
-3. `CmdChatClient.new_chat(..., attachment_ids=[...])` (decisions/00108) adds the SAME
+3. `CmdChatClient.new_chat(..., attachment_ids=[...])` (decisions/00110) adds the SAME
    `{kind:"image", upload_id}` entries to the new-chat body — cmd's route docstring says
    "attachments[] mirrors the per-session send route's shape: each entry is {upload_id}"
    and its `_stage_new_chat_attachments` reads only `upload_id` (the extra `kind` key is
@@ -163,7 +163,7 @@ The frontend reads `StateResponse.chatAttachmentsSupported` once at composer mou
 decide whether to show the 📎 button at all — never lets the owner attach something that
 can't be sent.
 
-**Thumbnails in the transcript (decisions/00108)** — cmd's read side has no structured
+**Thumbnails in the transcript (decisions/00110)** — cmd's read side has no structured
 attachment field, and production sends with attachments resolve to cmd's DRIVER methods
 (wixy passes no explicit `method`; cmd's auto-resolver picks), which embed a raw
 `Attachments:\n@<abspath> (WxH)` footer IN the message text. That footer used to render
@@ -262,7 +262,7 @@ auto-retries). Non-user messages trigger a throttled upstream check that toggles
 updated — review changes" chip. Send generates the idempotency key once per attempt (reused on
 a failed retry). **Handover is fully server-side** — the UI just surfaces `handoverState`.
 
-**The layout (decisions/00108)** — the conversation view is a full-height flex column inside
+**The layout (decisions/00110)** — the conversation view is a full-height flex column inside
 `.wx-main`: header (which also carries the reasoning toggle) and the dynamic banners/task
 card are `flex:none`, ONLY the thread scrolls (`flex:1; min-height:0`), and the composer is
 the pinned last child — no `60vh` thread cap, no `.wx-main` scrolling, no
@@ -279,13 +279,13 @@ image staging with spinner chips, submit gated on no-upload-in-flight, Enter/Shi
 and `allowEmptySubmit` for the list view's "start with nothing" case. The list view stages
 uploads session-lessly (`api.stageChatUpload`) and passes the ids to `createConversation`.
 
-**The optimistic echo (decisions/00108)** — a send paints instantly as a dimmed
+**The optimistic echo (decisions/00110)** — a send paints instantly as a dimmed
 `wx-chat-echo` bubble ("sending…", thumbnails from the same bytes-proxy URLs the server
 copy will use), reconciled FIFO by exact text as server copies stream in, removed on send
 failure (composer keeps text + chips for the same-idempotency-key retry), expired after 30s
 unmatched so nothing duplicates forever.
 
-**Transcript attachments (decisions/00108)** — a message event's `attachments` (see the
+**Transcript attachments (decisions/00110)** — a message event's `attachments` (see the
 Attachments section above for how the server recovers them) renders as a 120px thumbnail
 grid inside the bubble, sourced from wixy's bytes-proxy route; tapping one opens a lightbox
 (backdrop/✕/Esc close, focus restored). The raw `Attachments: @C:\...` footer text never

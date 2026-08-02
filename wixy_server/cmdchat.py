@@ -95,7 +95,7 @@ class CmdChatError(Exception):
 class CmdChatStatusError(CmdChatError):
     """A cmdchat call that cmd itself answered with a non-success STATUS — carries
     the status code so a caller can mirror a genuine upstream 404/410 as the same
-    code (the upload-bytes proxy, decisions/00108) instead of flattening every
+    code (the upload-bytes proxy, decisions/00110) instead of flattening every
     failure into a 502."""
 
     def __init__(self, message: str, *, status_code: int) -> None:
@@ -136,7 +136,7 @@ class ChatMessage:
     already decoded by cmd; this is a straight passthrough, "no raw-JSONL parsing
     in Wixy".
 
-    `attachments` (decisions/00108): images the message carries, as upload-id refs.
+    `attachments` (decisions/00110): images the message carries, as upload-id refs.
     Populated by `get_messages` itself when cmd's driver-send path left its
     `Attachments:` footer in the text (the footer is stripped OUT of `text` at
     the same time — the owner never sees raw machine paths). A send that
@@ -156,7 +156,7 @@ class ChatMessage:
 
 @dataclass(frozen=True, slots=True)
 class UploadBytes:
-    """`GET /api/uploads/{id}/bytes`'s payload (decisions/00108) — the converted
+    """`GET /api/uploads/{id}/bytes`'s payload (decisions/00110) — the converted
     image bytes cmd serves for inline rendering, plus the media type to serve
     them with through wixy's own proxy route."""
 
@@ -226,7 +226,7 @@ def _message_from_dict(data: object) -> ChatMessage | None:
     bad message shouldn't blank the whole transcript.
 
     A user text message additionally passes through `extract_attachment_footer`
-    (decisions/00108): when cmd's driver-send path embedded its `Attachments:`
+    (decisions/00110): when cmd's driver-send path embedded its `Attachments:`
     footer in the text, the refs come out as structured `attachments` and the
     footer leaves the visible text — the exact cmd-ism this client exists to
     contain, so nothing downstream has to know the footer format."""
@@ -378,7 +378,7 @@ class CmdChatClient:
             "model": CHAT_MODEL,
         }
         if attachment_ids:
-            # decisions/00108: cmd's new-chat route explicitly accepts
+            # decisions/00110: cmd's new-chat route explicitly accepts
             # `attachments` (its route docstring: "attachments[] mirrors the
             # per-session send route's shape: each entry is {upload_id}
             # referencing a row previously created via POST /api/uploads" —
@@ -501,7 +501,7 @@ class CmdChatClient:
         )
 
     async def get_upload_bytes(self, upload_id: str) -> UploadBytes:
-        """Fetch an upload's served bytes (decisions/00108) — cmd's own
+        """Fetch an upload's served bytes (decisions/00110) — cmd's own
         `GET /api/uploads/{id}/bytes` (the converted WEBP for images), which
         cmd's own chat UI uses for inline previews. Wixy never exposes cmd's
         localhost surface to the browser; `routes_chat.py` proxies through

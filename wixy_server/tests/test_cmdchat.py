@@ -562,7 +562,7 @@ async def test_live_cmd_round_trip() -> None:
 
 
 # ---------------------------------------------------------------------------
-# decisions/00108 — new-chat attachments, the footer strip, and upload bytes
+# decisions/00110 — new-chat attachments, the footer strip, and upload bytes
 # ---------------------------------------------------------------------------
 
 

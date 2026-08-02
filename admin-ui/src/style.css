@@ -49,6 +49,11 @@
   --wx-danger: #b91c1c;
   --wx-danger-text: #b91c1c;
   --wx-danger-tint: #fef2f2;
+  /* Same fill/text split as danger (decisions/00049): --wx-success-text must
+     clear AA as TEXT on surface/canvas — #1a7f37 is 4.65 on --wx-surface. The
+     version badge's update glow uses these (decisions/00109). */
+  --wx-success-text: #1a7f37;
+  --wx-success-tint: #e4f2e8;
   --wx-solid-dark: #1e2430;
   --wx-solid-dark-text: #e2e6ec;
   --wx-inline-code-bg: rgba(0, 0, 0, 0.08);
@@ -70,6 +75,10 @@
   --wx-danger: #cf3a3a;
   --wx-danger-text: #f87171;
   --wx-danger-tint: #3a1e1e;
+  /* #3fb950 is 6.6 on --wx-surface (dark) — the fleet ver pattern's canonical
+     glow green, kept literal so every project's update badge reads identically. */
+  --wx-success-text: #3fb950;
+  --wx-success-tint: #1d3326;
   --wx-solid-dark: #0d0f14;
   --wx-solid-dark-text: #e2e6ec;
   --wx-inline-code-bg: rgba(255, 255, 255, 0.12);
@@ -95,6 +104,8 @@
     --wx-danger: #cf3a3a;
     --wx-danger-text: #f87171;
     --wx-danger-tint: #3a1e1e;
+    --wx-success-text: #3fb950;
+    --wx-success-tint: #1d3326;
     --wx-solid-dark: #0d0f14;
     --wx-solid-dark-text: #e2e6ec;
     --wx-inline-code-bg: rgba(255, 255, 255, 0.12);
@@ -170,6 +181,19 @@ html, body {
   border-bottom: 2px solid var(--wx-brand-blue);
 }
 
+/* Quiet state (operator, 2026-08-02): with nothing to publish the bar is only
+   a one-line "No unpublished changes" note — the Publish button hides
+   (shell.ts), so the taller padding that framed that tap target is pointless
+   and the bar collapses to a narrow strip. Only the vertical padding shrinks;
+   the horizontal stays in step with the pending bar (and its phone override
+   below) so the label doesn't jump sideways on a state change. The `:not()`
+   gives this rule the specificity to also beat the phone media query's
+   padding, keeping the strip narrow there too. */
+.wx-statusbar:not(.wx-statusbar-pending) {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
 .wx-statusbar .wx-draft-chip {
   flex: 1;
   min-width: 0;
@@ -186,6 +210,121 @@ html, body {
      match the old chip's height; in the taller banner that read as an
      undersized tap target, and `align-items: center` already stops it
      stretching to the row height. */
+}
+
+/* -- Version badge (decisions/00109) ------------------------------------------
+   The tiny engine-version number at the FAR LEFT of the status bar: a muted
+   `v N` while up to date — deliberately small and quiet so it never competes
+   with the draft chip it sits beside. Once a deploy lands past the loaded
+   page it becomes the fleet's canonical green glow (the `ver` pattern's
+   .version-update-available look, AA-tuned per theme) reading `v old → v new`;
+   tapping it opens the reload confirmation below (never a git history — this
+   surface is the site owner's). */
+.wx-version-badge {
+  flex: none;
+  font: 500 0.72rem/1.2 system-ui, sans-serif;
+  color: var(--wx-muted);
+  opacity: 0.75;
+  padding: 3px 6px;
+  border: none;
+  border-radius: var(--wx-radius);
+  background: none;
+  cursor: pointer;
+  transition: opacity 0.4s ease, color 0.4s ease, background 0.4s ease;
+}
+
+.wx-version-badge:hover {
+  opacity: 1;
+}
+
+.wx-version-badge.wx-version-update-available {
+  opacity: 1;
+  font-weight: 600;
+  color: var(--wx-success-text);
+  background: var(--wx-success-tint);
+  animation: wx-version-glow 2s ease-in-out infinite;
+}
+
+@keyframes wx-version-glow {
+  0%, 100% {
+    box-shadow: 0 0 4px rgba(63, 185, 80, 0.25), 0 0 8px rgba(63, 185, 80, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 8px rgba(63, 185, 80, 0.4), 0 0 16px rgba(63, 185, 80, 0.25);
+  }
+}
+
+/* The badge's tap surface (decisions/00109): a small themed confirmation —
+   "Would you like to load the latest version?" — not a changelog. Its own
+   backdrop/dialog classes (the section add-flow precedent: NOT a reuse of
+   .wx-media-dialog-backdrop). */
+.wx-version-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 24, 32, 0.45);
+  z-index: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.wx-version-dialog {
+  width: 380px;
+  max-width: 92vw;
+  background: var(--wx-surface);
+  border-radius: var(--wx-radius);
+  box-shadow: var(--wx-shadow);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wx-version-dialog h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.wx-version-dialog p {
+  margin: 0;
+}
+
+.wx-version-dialog-note {
+  color: var(--wx-muted);
+  font-size: 0.8125rem;
+}
+
+.wx-version-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.wx-version-dialog-confirm {
+  font: 600 0.8125rem/1 system-ui, sans-serif;
+  padding: 8px 14px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-brand-blue);
+  background: var(--wx-brand-blue);
+  color: #fff;
+  cursor: pointer;
+}
+
+.wx-version-dialog-confirm:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.wx-version-dialog-cancel {
+  font: 600 0.8125rem/1 system-ui, sans-serif;
+  padding: 8px 14px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  cursor: pointer;
 }
 
 /* -- Top bar ----------------------------------------------------------------- */
@@ -325,6 +464,12 @@ html, body {
 .wx-publish-button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+/* Hidden when there's nothing to publish (shell.ts). The explicit rule beats
+   `.wx-button-busy`'s `display: inline-flex` should the two ever coincide. */
+.wx-publish-button[hidden] {
+  display: none;
 }
 
 /* -- Publish-in-progress affordance (decisions/00089) --------------------------
@@ -2223,7 +2368,7 @@ div.wx-media-thumb {
   border-radius: var(--wx-radius);
 }
 
-/* decisions/00108: the shared composer (admin-ui/src/chatComposer.ts). The
+/* decisions/00110: the shared composer (admin-ui/src/chatComposer.ts). The
    input CARD is the bordered, focusable surface; the textarea inside it is
    borderless and AUTO-GROWS with its content — native `field-sizing:
    content` where supported (clamped by the min/max-height here), a JS
@@ -2546,7 +2691,7 @@ div.wx-media-thumb {
   color: var(--wx-muted);
 }
 
-/* decisions/00108: the conversation view is a FULL-HEIGHT flex column inside
+/* decisions/00110: the conversation view is a FULL-HEIGHT flex column inside
    .wx-main — the old stacked layout let .wx-main scroll around a
    `max-height: 60vh` thread (the "double-scroll" the operator reported
    2026-08-02, with the composer stranded below the fold and under the
@@ -2698,7 +2843,7 @@ div.wx-media-thumb {
 }
 
 .wx-chat-composer {
-  /* decisions/00108: the composer is the shared chatComposer.ts component —
+  /* decisions/00110: the composer is the shared chatComposer.ts component —
    * a column of (attachment chips, input card, error). The layout classes
    * live on `.wx-chatc`/`.wx-chatc-input-row` below; this rule exists only
    * so the legacy class alone never renders unstyled. */
@@ -2794,7 +2939,7 @@ div.wx-media-thumb {
   cursor: pointer;
 }
 
-/* decisions/00108: attachments IN THE TRANSCRIPT — a thumbnail grid inside
+/* decisions/00110: attachments IN THE TRANSCRIPT — a thumbnail grid inside
    the bubble (bytes proxied from cmd through wixy's own route), tap to
    expand in the lightbox below. Replaces the raw `Attachments: @C:\...`
    footer text that used to render as prose (stripped server-side now). */
@@ -2863,7 +3008,7 @@ div.wx-media-thumb {
   cursor: pointer;
 }
 
-/* decisions/00108: the optimistic local echo — painted the instant Send
+/* decisions/00110: the optimistic local echo — painted the instant Send
    fires, dimmed with a "sending…" caption until the server copy streams in
    and replaces it (reconciled FIFO by exact text). */
 .wx-chat-echo {
@@ -3826,7 +3971,7 @@ div.wx-media-thumb {
     white-space: nowrap;
   }
 
-  /* decisions/00108 mobile chat polish: bubbles breathe wider, the composer
+  /* decisions/00110 mobile chat polish: bubbles breathe wider, the composer
      textarea goes to 16px so focusing it never triggers the browser's
      read-zoom, the header (which now carries the reasoning toggle too) may
      wrap, and transcript thumbs shrink a touch. */

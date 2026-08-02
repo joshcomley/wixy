@@ -359,7 +359,7 @@ export interface ChatAttachment {
   height: number | null;
 }
 
-/** One image attached to a transcript message (decisions/00108) — recovered
+/** One image attached to a transcript message (decisions/00110) — recovered
  * server-side either from cmd's driver-path `Attachments:` footer or from
  * wixy's own send log (for stream-json sends, whose image blocks cmd's
  * decoder drops on read-back). Bytes come from wixy's own proxy route
@@ -371,7 +371,7 @@ export interface ChatAttachmentRefData {
   height: number | null;
 }
 
-/** The URL a transcript attachment's bytes are served from (decisions/00108)
+/** The URL a transcript attachment's bytes are served from (decisions/00110)
  * — wixy's own admin-origin proxy of cmd's `/api/uploads/{id}/bytes`, so the
  * browser never sees cmd's localhost-only surface. The bytes are immutable
  * (converted once, at upload), so the URL needs no cache-busting. */
@@ -381,7 +381,7 @@ export function chatUploadBytesUrl(uploadId: string): string {
 
 /** `GET .../stream`'s per-event `message` payload (spec/06 §1's decoded
  * `/messages` shape, camelCased). `attachments` is present only when the
- * message carries images (decisions/00108) — a plain text message's envelope
+ * message carries images (decisions/00110) — a plain text message's envelope
  * is byte-identical to before that feature. */
 export interface ChatMessageData {
   index: number;
@@ -515,8 +515,18 @@ export function thumbnailUrl(slug: string, rev: number): string {
   return `/api/admin/pages/${encodeURIComponent(slug)}/thumbnail?v=${rev}`;
 }
 
+/** The engine's own version identity from `/api/version` (decisions/00109):
+ * `shaFull` detects "a deploy landed since this page loaded"; `count` is the
+ * human-facing `v N` number the status-bar badge shows (first-parent count of
+ * HEAD, baked as `WIXY_ENGINE_VERSION` on image builds). Either can be null on
+ * a gitless/pip-installed image. */
+export interface ServerVersion {
+  shaFull: string | null;
+  count: number | null;
+}
+
 export interface AdminApi {  getState(): Promise<StateResponse>;
-  getServerCommit(): Promise<string | null>;
+  getServerVersion(): Promise<ServerVersion | null>;
   getContent(page: string): Promise<ContentResponse>;
   patchDraft(expectedRev: number, ops: DraftOp[]): Promise<PatchResult>;
   discardDraft(): Promise<{ rev: number }>;
@@ -550,7 +560,7 @@ export interface AdminApi {  getState(): Promise<StateResponse>;
   ): Promise<SendMessageResult>;
   uploadChatAttachment(convId: string, file: File): Promise<ChatAttachment>;
   /** Session-less variant for the "New conversation" compose (decisions/
-   * 00108) — no conversation exists to scope the upload to yet; cmd treats
+   * 00110) — no conversation exists to scope the upload to yet; cmd treats
    * the session id as an optional janitor hint only. */
   stageChatUpload(file: File): Promise<ChatAttachment>;
   renameConversation(convId: string, title: string): Promise<ConversationSummary>;
@@ -567,15 +577,18 @@ export function createApi(): AdminApi {
       return parseJson<StateResponse>(await fetchWithRetry("/api/admin/state"));
     },
 
-    /** The server's deployed commit (unauthenticated `/api/version`) — used by the
-     * shell's revalidation loop to detect a Slots deploy under a long-lived tab
-     * (Edit-button latch incident, 2026-07-19: stale tabs must self-heal). */
-    async getServerCommit(): Promise<string | null> {
+    /** The server's deployed engine version (unauthenticated `/api/version`) — used
+     * by the status-bar version badge (decisions/00109) to pin what THIS page is
+     * running and to flag when a Slots deploy has landed past it. */
+    async getServerVersion(): Promise<ServerVersion | null> {
       try {
-        const version = await parseJson<{ commit?: { sha_full?: string } }>(
-          await fetchWithRetry("/api/version"),
-        );
-        return version.commit?.sha_full ?? null;
+        const version = await parseJson<{
+          commit?: { sha_full?: string | null; count?: number | null };
+        }>(await fetchWithRetry("/api/version"));
+        return {
+          shaFull: version.commit?.sha_full ?? null,
+          count: version.commit?.count ?? null,
+        };
       } catch {
         return null;
       }
@@ -762,7 +775,7 @@ export function createApi(): AdminApi {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...(firstMessage !== undefined ? { firstMessage } : {}),
-          // decisions/00108: images for the FIRST turn (staged via
+          // decisions/00110: images for the FIRST turn (staged via
           // stageChatUpload beforehand) — cmd's new-chat folds them into the
           // opening message as real image blocks.
           ...(attachmentIds !== undefined && attachmentIds.length > 0 ? { attachmentIds } : {}),

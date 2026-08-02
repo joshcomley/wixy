@@ -34,7 +34,7 @@ test.describe("E2E 7: chat UX", () => {
   test("new conversation, scripted replies with a tool row, status dot transitions, send-retry on 502, and the offline banner", async ({
     page,
   }) => {
-    // decisions/00108 roughly doubled this flow's legs (echo, thumbnails +
+    // decisions/00110 roughly doubled this flow's legs (echo, thumbnails +
     // lightbox, layout invariants, jump pill, auto-grow, new-conversation
     // attachments) — the default 30s test timeout is genuinely too short now.
     test.setTimeout(120_000);
@@ -275,7 +275,7 @@ test.describe("E2E 7: chat UX", () => {
     await expect(page.locator(".wx-chat-composer-error")).toBeHidden();
     await expect(page.locator(".wx-chat-composer-input")).toHaveValue("");
 
-    // -- decisions/00108: the echo paints instantly, then reconciles ---------
+    // -- decisions/00110: the echo paints instantly, then reconciles ---------
     await page.fill(".wx-chat-composer-input", "and make it cosier too");
     await page.click(".wx-chat-send-button");
     // The echo is visible IMMEDIATELY (dimmed, "sending…") — before the next
@@ -327,7 +327,7 @@ test.describe("E2E 7: chat UX", () => {
       page.locator(".wx-chat-bubble-user", { hasText: "and make it cosier too" }),
     ).toHaveCount(1);
 
-    // -- decisions/00108: footer-text attachments render as thumbnails --------
+    // -- decisions/00110: footer-text attachments render as thumbnails --------
     // A driver-routed send leaves cmd's `Attachments:` footer in the read-back
     // text — that raw machine path is what the operator saw rendered as prose.
     // It must now be stripped server-side and render as a thumbnail from
@@ -367,7 +367,7 @@ test.describe("E2E 7: chat UX", () => {
     await page.click(".wx-chat-lightbox-close");
     await expect(page.locator(".wx-chat-lightbox")).toHaveCount(0);
 
-    // -- decisions/00108: layout invariants — one scroll region, pinned composer
+    // -- decisions/00110: layout invariants — one scroll region, pinned composer
     // Fill the thread well past overflowing so the scroll behavior is real.
     const longMessages: FakeMessage[] = Array.from({ length: 40 }, (_, i) => ({
       index: i,
@@ -428,7 +428,7 @@ test.describe("E2E 7: chat UX", () => {
     );
     expect(atBottom).toBe(true);
 
-    // -- decisions/00108: the composer auto-grows with long input -------------
+    // -- decisions/00110: the composer auto-grows with long input -------------
     const before = await page.locator(".wx-chat-composer-input").evaluate((el) => (el as HTMLElement).offsetHeight);
     await page.fill(".wx-chat-composer-input", "line one\nline two\nline three\nline four\nline five\nline six");
     const after = await page.locator(".wx-chat-composer-input").evaluate((el) => (el as HTMLElement).offsetHeight);
@@ -439,7 +439,7 @@ test.describe("E2E 7: chat UX", () => {
     expect(capped).toBeLessThanOrEqual(200);
     await page.fill(".wx-chat-composer-input", "");
 
-    // -- decisions/00108: attachments in the NEW-conversation flow ------------
+    // -- decisions/00110: attachments in the NEW-conversation flow ------------
     // The operator's exact complaint: "when you start a chat, you can't attach
     // an image." The shared composer backs the list view's compose box too.
     await page.click(".wx-chat-back-link");

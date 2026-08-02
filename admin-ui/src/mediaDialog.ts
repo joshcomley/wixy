@@ -69,6 +69,10 @@ export interface MediaGridDeps {
    * one-line header) instead of a separate toolbar line (operator 2026-07-21:
    * "the media subheader is far too tall"). */
   headerRow?: HTMLElement;
+  /** Fired after any successful mutation (upload, replace, delete, unstage) so
+   * the shell can re-pull state — staged replacements/deletions change the
+   * publishable opCount (decisions/00108), which the status bar reads. */
+  onChanged?: () => void;
 }
 
 export interface MediaGrid {
@@ -276,6 +280,7 @@ export function renderMediaGrid(deps: MediaGridDeps): MediaGrid {
         await fn();
         await refresh();
         close();
+        deps.onChanged?.();
       } catch (error) {
         win.alert(error instanceof Error ? error.message : "That didn't work — please try again.");
       }
@@ -417,20 +422,24 @@ export function renderMediaGrid(deps: MediaGridDeps): MediaGrid {
     try {
       await deps.api.deleteMedia(item.name);
       await refresh();
+      deps.onChanged?.();
     } catch (error) {
       win.alert(error instanceof Error ? error.message : `Couldn't delete "${item.name}".`);
     }
   }
 
   async function uploadFiles(files: FileList): Promise<void> {
+    let uploaded = 0;
     for (const file of Array.from(files)) {
       try {
         await deps.api.uploadMedia(file);
+        uploaded += 1;
       } catch (error) {
         win.alert(error instanceof Error ? error.message : `Couldn't upload "${file.name}".`);
       }
     }
     await refresh();
+    if (uploaded > 0) deps.onChanged?.();
   }
 
   fileInput.addEventListener("change", () => {

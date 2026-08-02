@@ -1,4 +1,4 @@
-"""decisions/00108: `wixy_server.chat_sends` — the attachment send log that
+"""decisions/00110: `wixy_server.chat_sends` — the attachment send log that
 closes cmd's read-side gap (a stream-json-routed send leaves no trace in the
 decoded transcript, so wixy decorates the read-back from its own record of
 what it sent)."""
