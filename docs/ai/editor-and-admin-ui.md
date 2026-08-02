@@ -74,8 +74,18 @@ between them. Spec: [`spec/05-editor.md`](../../spec/05-editor.md). The wire typ
   (never to anything published), and the admin shell's own meta locks user scaling
   (`admin_shell.html`) so outer pinch can't pan chrome away. The ▾ chrome reveal repaints
   the topbar (`visibility: visible` — the hidden rule otherwise wins the tie and the bar
-  opens as an empty gap) and, on ≤720px, relocates the nav between the topbar and the
-  slim edit bar (`matchMedia` in `shell.ts`) so the menu reveals ABOVE the bar.
+  opens as an empty gap) and, on ≤720px, relocates the nav between the (hidden) topbar and
+  the slim edit bar (`matchMedia` in `shell.ts`) so the menu reveals ABOVE the bar.
+- **Mobile chrome (decisions/00107):** at ≤720px the topbar is GONE (`display: none`) —
+  the "Wixy · name" banner cost a full phone row, and its `overflow: hidden` (needed for
+  the desktop slide) clipped the ⋯ popover to invisibility ("I tap the burger menu,
+  nothing appears", operator 2026-08-02). In its place a `.wx-navrow` chrome row holds the
+  scrolling tab strip with the ⋯ trigger pinned at its right OUTSIDE the scroll, and
+  anchors the secondary-controls popover (`position: relative`, no overflow clip — the
+  row must NEVER gain one, or the popover vanishes again). `placeChrome` in `shell.ts`
+  moves navEl + trigger + popover between the row (narrow) and the topbar (wide); edit
+  view hides the row with the tabs and the ▾ reveal shows it, trigger included. Desktop
+  is untouched.
 - **Root no-scroll contract (decisions/00085, Inv 24):** the shell's root document can never
   scroll at all — `html, body` carry `overflow: hidden; overflow: clip; overscroll-behavior:
   none` (mirrored pre-paint in `admin_shell.html`), and the chrome sizes to the DYNAMIC

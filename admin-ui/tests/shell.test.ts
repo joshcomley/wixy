@@ -653,7 +653,7 @@ describe("mountShell", () => {
       expect(container.classList.contains("wx-shell-chrome-revealed")).toBe(false);
     });
 
-    it("on a narrow screen the nav lives ABOVE the pinned slim edit bar, so the reveal shows the menu in the right place (decisions/00084)", async () => {
+    it("on a narrow screen the nav row (tabs + ⋯) lives ABOVE the pinned slim edit bar, so the reveal shows the menu in the right place (decisions/00084, 00107)", async () => {
       const api = fakeApi();
       const win = fakeWindow({ narrow: { matches: true } });
       const container = document.createElement("div");
@@ -664,17 +664,26 @@ describe("mountShell", () => {
       await Promise.resolve();
 
       const nav = container.querySelector(".wx-nav");
+      const navRow = container.querySelector(".wx-navrow");
       const host = container.querySelector(".wx-edit-bar-host");
       expect(nav).not.toBeNull();
+      expect(navRow).not.toBeNull();
       expect(host).not.toBeNull();
-      // a direct shell-chrome child, ordered before the slim bar's host — NOT
-      // buried inside .wx-body where it renders below the bar
-      expect(nav?.parentElement).toBe(container);
-      const order = [...(nav?.parentElement?.children ?? [])];
-      expect(order.indexOf(nav as Element)).toBeLessThan(order.indexOf(host as Element));
+      // the nav lives INSIDE the nav row, and the row is a direct shell-chrome
+      // child ordered before the slim bar's host — NOT buried inside .wx-body
+      // where it renders below the bar
+      expect(nav?.parentElement).toBe(navRow);
+      expect(navRow?.parentElement).toBe(container);
+      const order = [...container.children];
+      expect(order.indexOf(navRow as Element)).toBeLessThan(order.indexOf(host as Element));
+      // …and the row also carries the ⋯ trigger + its popover (decisions/00107:
+      // the topbar is gone at this width, so the controls move here)
+      expect(navRow?.querySelector(".wx-topbar-overflow")).not.toBeNull();
+      expect(navRow?.querySelector(".wx-topbar-secondary")).not.toBeNull();
+      expect(container.querySelector(".wx-topbar .wx-topbar-overflow")).toBeNull();
     });
 
-    it("on a wide screen the nav stays the in-body sidebar (no relocation)", async () => {
+    it("on a wide screen the nav stays the in-body sidebar and the ⋯ controls stay in the topbar (no relocation)", async () => {
       const api = fakeApi();
       const win = fakeWindow({ narrow: { matches: false } });
       const container = document.createElement("div");
@@ -684,9 +693,12 @@ describe("mountShell", () => {
 
       const nav = container.querySelector(".wx-nav");
       expect(nav?.closest(".wx-body")).not.toBeNull();
+      expect(container.querySelector(".wx-topbar .wx-topbar-overflow")).not.toBeNull();
+      expect(container.querySelector(".wx-topbar .wx-topbar-secondary")).not.toBeNull();
+      expect(container.querySelector(".wx-navrow")?.children.length).toBe(0);
     });
 
-    it("crossing the 720px breakpoint re-places the nav live", async () => {
+    it("crossing the 720px breakpoint re-places the nav and the ⋯ controls live", async () => {
       const api = fakeApi();
       const narrow = { matches: false };
       const win = fakeWindow({ narrow });
@@ -699,14 +711,20 @@ describe("mountShell", () => {
       narrow.matches = true;
       (narrow as { notify?: () => void }).notify?.();
       const nav = container.querySelector(".wx-nav");
+      const navRow = container.querySelector(".wx-navrow");
       expect(nav?.closest(".wx-body")).toBeNull();
-      const order = [...(nav?.parentElement?.children ?? [])];
+      expect(nav?.parentElement).toBe(navRow);
+      const order = [...container.children];
       const host = container.querySelector(".wx-edit-bar-host");
-      expect(order.indexOf(nav as Element)).toBeLessThan(order.indexOf(host as Element));
+      expect(order.indexOf(navRow as Element)).toBeLessThan(order.indexOf(host as Element));
+      expect(navRow?.querySelector(".wx-topbar-overflow")).not.toBeNull();
+      expect(navRow?.querySelector(".wx-topbar-secondary")).not.toBeNull();
 
       narrow.matches = false;
       (narrow as { notify?: () => void }).notify?.();
       expect(container.querySelector(".wx-nav")?.closest(".wx-body")).not.toBeNull();
+      expect(container.querySelector(".wx-topbar .wx-topbar-overflow")).not.toBeNull();
+      expect(container.querySelector(".wx-topbar .wx-topbar-secondary")).not.toBeNull();
     });
   });
 
@@ -1519,11 +1537,12 @@ describe("mountShell", () => {
 });
 
 describe("mountShell — topbar overflow menu (narrow viewports)", () => {
-  /** The narrow-viewport stylesheet collapses the topbar's secondary controls
-   * (zoom, font scale, screenshot, theme, settings) into a popover behind the
-   * ⋯ trigger; these tests pin the behavior, not the pixels. The container is
-   * attached to document.body so clicks bubble to the document the way they
-   * do live (the outside-click listener is document-level). */
+  /** The narrow-viewport stylesheet moves the secondary controls (site link,
+   * zoom, font scale, screenshot, theme, settings) into a popover behind the
+   * ⋯ trigger, which pins to the right of the nav row's scrolling tab strip
+   * (decisions/00107); these tests pin the behavior, not the pixels. The
+   * container is attached to document.body so clicks bubble to the document
+   * the way they do live (the outside-click listener is document-level). */
 
   function mountWithOverflow(): {
     container: HTMLElement;
@@ -1588,6 +1607,40 @@ describe("mountShell — topbar overflow menu (narrow viewports)", () => {
     trigger.click();
     expect(secondary.classList.contains("wx-topbar-secondary-open")).toBe(true);
     win.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(secondary.classList.contains("wx-topbar-secondary-open")).toBe(false);
+
+    shell.teardown();
+    container.remove();
+  });
+
+  it("on a narrow screen the trigger + popover live in the nav row and still toggle (decisions/00107)", async () => {
+    const api = fakeApi();
+    const win = fakeWindow({ narrow: { matches: true } });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const shell = mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+    await Promise.resolve();
+
+    const navRow = container.querySelector(".wx-navrow")!;
+    const secondary = navRow.querySelector<HTMLElement>(".wx-topbar-secondary")!;
+    const trigger = navRow.querySelector<HTMLButtonElement>(".wx-topbar-overflow")!;
+    expect(secondary).not.toBeNull();
+    expect(trigger).not.toBeNull();
+    for (const sel of [
+      ".wx-site-link",
+      ".wx-zoom-controls",
+      ".wx-font-scale-controls",
+      ".wx-screenshot-button",
+      ".wx-theme-toggle",
+      ".wx-settings-toggle",
+    ]) {
+      expect(secondary.querySelector(sel), sel).not.toBeNull();
+    }
+
+    trigger.click();
+    expect(secondary.classList.contains("wx-topbar-secondary-open")).toBe(true);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    trigger.click();
     expect(secondary.classList.contains("wx-topbar-secondary-open")).toBe(false);
 
     shell.teardown();

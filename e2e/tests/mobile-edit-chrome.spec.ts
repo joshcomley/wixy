@@ -1,10 +1,13 @@
-// E2E for decisions/00083+00084 — the 2026-07-21 mobile edit-chrome round:
+// E2E for decisions/00083+00084+00107 — the mobile edit-chrome rounds:
 // 1. The edit view opens on the USER'S OWN form factor (00084): phone →
 //    mobile (even >480px CSS-width outliers), tablet → tablet, desktop →
 //    desktop. Was: `<480px ? mobile : desktop` — "defaults to desktop always".
-// 2. The ▾ chrome reveal shows the menu BETWEEN the topbar and the pinned
-//    slim bar (00084) — it used to slide an EMPTY gap open above while the
-//    menu appeared below the slim bar.
+// 2. The ▾ chrome reveal shows the nav row (tabs + ⋯) BETWEEN the status bar
+//    and the pinned slim bar (00084/00107) — it used to slide an EMPTY gap
+//    open above while the menu appeared below the slim bar. Since 00107 the
+//    topbar banner is gone entirely at phone widths (its overflow clip had
+//    swallowed the ⋯ popover — "I tap the burger menu, nothing appears"),
+//    and the ⋯ trigger pins to the right of the tab strip.
 // 3. The composer is pinned to the VISUAL viewport (00084) — page scroll,
 //    keyboard, and pinch can never scroll it off irrecoverably; the outer
 //    shell ignores pinch-zoom entirely (app chrome, "rock solid, immovable").
@@ -46,37 +49,82 @@ test.describe("device auto-detect (decisions/00084)", () => {
   }
 });
 
-test.describe("chrome reveal placement (decisions/00084)", () => {
-  test("the menu reveals between the topbar and the pinned slim bar, with the topbar painted", async ({ page }) => {
+test.describe("chrome reveal placement (decisions/00084, 00107)", () => {
+  test("the nav row reveals between the status bar and the pinned slim bar, and the topbar banner is gone", async ({ page }) => {
     const errors = trackConsoleErrors(page);
     await page.setViewportSize({ width: 390, height: 844 });
     await gotoEditAndWaitReady(page, "index");
+
+    // decisions/00107: the "Wixy · name" banner never shows at phone widths.
+    const topbarDisplay = await page.evaluate(
+      () => getComputedStyle(document.querySelector(".wx-topbar") as Element).display,
+    );
+    expect(topbarDisplay, "topbar banner must be gone at phone widths").toBe("none");
+
     await page.locator(".wx-chrome-reveal").click();
-    await page.waitForTimeout(700); // let the slide finish
+    await page.waitForTimeout(700); // let the reveal settle
 
     const rects = await page.evaluate(() => {
       const r = (sel: string) => {
         const el = document.querySelector(sel);
         if (el === null) return null;
         const b = el.getBoundingClientRect();
-        return { top: b.top, bottom: b.bottom };
+        return { top: b.top, bottom: b.bottom, height: b.height };
       };
-      const title = document.querySelector(".wx-topbar-title");
+      const overflow = document.querySelector(".wx-topbar-overflow");
+      const overflowBox = overflow?.getBoundingClientRect() ?? null;
       return {
-        topbar: r(".wx-topbar"),
+        statusbar: r(".wx-statusbar"),
+        navRow: r(".wx-navrow"),
         nav: r(".wx-nav"),
         host: r(".wx-edit-bar-host"),
-        topbarVisibility: getComputedStyle(document.querySelector(".wx-topbar") as Element).visibility,
-        titleVisible:
-          title !== null &&
-          getComputedStyle(title).visibility === "visible" &&
-          title.getBoundingClientRect().height > 0,
+        navRowDisplay: getComputedStyle(document.querySelector(".wx-navrow") as Element).display,
+        overflowVisible: overflowBox !== null && overflowBox.height > 0 && overflowBox.width > 0,
+        overflowInRow: overflow?.closest(".wx-navrow") !== null,
       };
     });
-    expect(rects.titleVisible, "topbar must paint, not slide open as an empty gap").toBe(true);
-    expect(rects.topbarVisibility).toBe("visible");
-    expect(rects.nav!.top).toBeGreaterThanOrEqual(rects.topbar!.bottom - 1);
+    expect(rects.navRowDisplay, "the reveal must show the nav row").toBe("flex");
+    expect(rects.navRow!.height, "the revealed nav row must paint, not open as an empty gap").toBeGreaterThan(0);
+    expect(rects.nav!.top).toBeGreaterThanOrEqual(rects.statusbar!.bottom - 1);
     expect(rects.nav!.bottom).toBeLessThanOrEqual(rects.host!.top + 1);
+    expect(rects.overflowInRow, "the ⋯ trigger lives in the nav row now").toBe(true);
+    expect(rects.overflowVisible, "the ⋯ trigger must be visible in the revealed row").toBe(true);
+    expect(errors).toEqual([]);
+  });
+
+  test("tapping the ⋯ trigger on a phone actually OPENS a visible popover (00107 regression)", async ({ page }) => {
+    const errors = trackConsoleErrors(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/admin/pages");
+    const trigger = page.locator(".wx-topbar-overflow");
+    await trigger.waitFor({ state: "visible" });
+
+    // The trigger pins to the right of the tab strip — visible WITHOUT any
+    // horizontal scrolling of the nav.
+    const triggerBox = (await trigger.boundingBox())!;
+    expect(triggerBox.x + triggerBox.width).toBeLessThanOrEqual(390);
+
+    await trigger.click();
+    const popover = page.locator(".wx-topbar-secondary.wx-topbar-secondary-open");
+    await popover.waitFor({ state: "visible" });
+    const box = (await popover.boundingBox())!;
+    // It renders BELOW the nav row, fully on screen — the old topbar-anchored
+    // popover was clipped to zero visibility by the bar's overflow: hidden.
+    expect(box.height, "popover must paint real height").toBeGreaterThan(100);
+    expect(box.y).toBeGreaterThanOrEqual(triggerBox.y + triggerBox.height - 1);
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(390);
+    // …and every control group is in it (the menu is NOT empty).
+    for (const sel of [
+      ".wx-site-link",
+      ".wx-zoom-controls",
+      ".wx-font-scale-controls",
+      ".wx-screenshot-button",
+      ".wx-theme-toggle",
+      ".wx-settings-toggle",
+    ]) {
+      await expect(popover.locator(sel), sel).toBeVisible();
+    }
     expect(errors).toEqual([]);
   });
 });
