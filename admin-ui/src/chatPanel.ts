@@ -33,9 +33,12 @@
 //   own status strip DOES show live working/idle, driven by that conversation's
 //   own open stream, which is the clearly-specified, unambiguous part of spec/06
 //   §1's UI mapping.
-// - The "Preview updated" chip (spec/05 §6) links to `#/pages`, not a specific
-//   page — commit metadata alone (sha/subject/author/when) doesn't attribute
-//   which page(s) changed, and guessing wrong would be worse than a neutral link.
+// - The "Preview updated" chip (spec/05 §6) deep-links (decisions/00113):
+//   the publish preview's page-grouped changes attribute the edit — one page
+//   → that page's Edit view; anything else (multi-page, `_global`/theme) →
+//   the pages list, the neutral fallback. (The original decisions/00097
+//   always-links-to-pages note stood while commit metadata alone couldn't
+//   attribute pages.)
 
 import type {
   AdminApi,
@@ -45,11 +48,12 @@ import type {
   ChatTaskData,
   ConversationStreamEvent,
   ConversationSummary,
+  PublishPreview,
 } from "./api";
 import { chatUploadBytesUrl, openConversationStream, type ConversationStreamHandle } from "./api";
 import { mountChatComposer } from "./chatComposer";
 import { renderMarkdown } from "./markdown";
-import { navigateTo, routeToPath } from "./router";
+import { navigateTo, routeToPath, type Route } from "./router";
 
 export interface ChatPanelDeps {
   api: AdminApi;
@@ -346,10 +350,14 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
 
   const header = document.createElement("div");
   header.className = "wx-chat-conversation-header";
+  // decisions/00113: a substantial back ARROW, no "All conversations" text —
+  // a full 44px touch target instead of a text link.
   const backLink = document.createElement("a");
   backLink.href = "#";
   backLink.className = "wx-chat-back-link";
-  backLink.textContent = "← All conversations";
+  backLink.textContent = "←";
+  backLink.setAttribute("aria-label", "All conversations");
+  backLink.title = "All conversations";
   backLink.addEventListener("click", (evt) => {
     evt.preventDefault();
     navigateTo({ kind: "chat", conversation: null }, win);
@@ -357,19 +365,17 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
   const titleEl = document.createElement("span");
   titleEl.className = "wx-chat-conversation-title";
   titleEl.textContent = "Loading…";
-  // decisions/00110: the reasoning toggle moved into the header row (it used
-  // to eat a full row of the stacked layout — vertical space the thread now
-  // owns).
-  const reasoningToggle = document.createElement("button");
-  reasoningToggle.type = "button";
-  reasoningToggle.className = "wx-chat-reasoning-toggle";
-  reasoningToggle.textContent = "Show reasoning";
-  reasoningToggle.setAttribute("aria-pressed", "false");
+  // decisions/00113: Rename is a pencil icon (title + aria-label keep the
+  // word for screen readers and hover); the "Show reasoning" toggle is GONE
+  // entirely — the owner never needs the model's chain-of-thought, and the
+  // stream already defaults to excluding thinking messages.
   const renameButton = document.createElement("button");
   renameButton.type = "button";
   renameButton.className = "wx-chat-rename-button";
-  renameButton.textContent = "Rename";
-  header.append(backLink, titleEl, reasoningToggle, renameButton);
+  renameButton.textContent = "✎";
+  renameButton.title = "Rename conversation";
+  renameButton.setAttribute("aria-label", "Rename conversation");
+  header.append(backLink, titleEl, renameButton);
   root.appendChild(header);
 
   // decisions/00097: the prominent work banner replaces the old small
@@ -382,18 +388,16 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
   workBanner.hidden = true;
   root.appendChild(workBanner);
 
-  const banner = document.createElement("p");
-  banner.className = "wx-chat-banner";
-  banner.textContent =
-    "Changes the assistant ships land in your draft preview — review them in Edit, then press Publish.";
-  root.appendChild(banner);
-
   const offlineBanner = document.createElement("div");
   offlineBanner.className = "wx-chat-offline-banner";
   offlineBanner.textContent = "Assistant offline — cmd isn't running. Retrying…";
   offlineBanner.hidden = true;
   root.appendChild(offlineBanner);
 
+  // decisions/00113: the static "changes land in your draft preview"
+  // explainer paragraph is GONE — the chip itself now carries the action:
+  // deep-linked to the changed page (or the pages list when the change
+  // spans pages, decisions/00097's neutral-link convention generalised).
   const previewChip = document.createElement("a");
   previewChip.className = "wx-chat-preview-chip";
   previewChip.textContent = "Preview updated — review changes";
@@ -401,7 +405,7 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
   previewChip.hidden = true;
   previewChip.addEventListener("click", (evt) => {
     evt.preventDefault();
-    navigateTo({ kind: "pages" }, win);
+    navigateTo(previewChipTarget, win);
   });
   root.appendChild(previewChip);
 
@@ -440,7 +444,6 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
 
   let cancelled = false;
   let streamHandle: ConversationStreamHandle | null = null;
-  let includeThinking = false;
   const messagesByIndex = new Map<number, ChatMessageData>();
   let latestStatus: ChatStatusData | null = null;
   let latestTasks: ChatTaskData[] | null = null;
@@ -480,6 +483,11 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
    * so echo bookkeeping can never perturb the idempotency-key sequence
    * (the only consumer of randomness the send path should have). */
   let echoCounter = 0;
+  /** decisions/00113: where the Preview-updated chip navigates — refreshed
+   * whenever the upstream check runs: the single changed page's Edit view,
+   * or the pages list when the change isn't attributable to exactly one page
+   * (multi-page edits, `_global`/theme keys, or an unknown shape). */
+  let previewChipTarget: Route = { kind: "pages" };
   /** Whether the conversation is still provisioning (drives the thread's
    * friendlier empty state — after typing a first message and pressing
    * Start, "No messages yet." reads as broken while cmd spins up). */
@@ -621,7 +629,9 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
     const wasStuck = stickToBottom;
     thread.innerHTML = "";
     const messages = Array.from(messagesByIndex.values())
-      .filter((m) => includeThinking || m.kind !== "thinking")
+      // decisions/00113: thinking messages never render in the owner UI —
+      // the "Show reasoning" toggle is gone, so they always filter out.
+      .filter((m) => m.kind !== "thinking")
       .sort((a, b) => a.index - b.index);
     if (messages.length === 0 && pendingEchoes.length === 0) {
       thread.textContent = conversationPending
@@ -728,15 +738,38 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
     const nowMs = now();
     if (nowMs - lastUpstreamCheckAt < UPSTREAM_CHECK_THROTTLE_MS) return;
     lastUpstreamCheckAt = nowMs;
+    let hadCommits = false;
     api
       .getState()
       .then((state) => {
-        if (cancelled) return;
-        previewChip.hidden = state.upstream.aheadOfPublished.length === 0;
+        if (cancelled) return null;
+        hadCommits = state.upstream.aheadOfPublished.length > 0;
+        previewChip.hidden = !hadCommits;
+        if (!hadCommits) return null;
+        // decisions/00113: deep-link the chip — the publish preview's
+        // page-grouped changes tell us exactly which page(s) the assistant's
+        // edits touch, which the commit metadata alone never could (the
+        // original decisions/00097 limitation). One page → that page's Edit
+        // view; anything else → the pages list.
+        return api.getPublishPreview();
+      })
+      .then((preview) => {
+        if (cancelled || preview === null || preview === undefined) return;
+        previewChipTarget = chipTargetFromPreview(preview);
+        previewChip.href = routeToPath(previewChipTarget);
       })
       .catch(() => {
-        // Best-effort — the chip just stays as it was.
+        // Best-effort — the chip just stays as it was (hidden, or linked to
+        // the pages list from a previous successful check).
       });
+  }
+
+  /** decisions/00113: exactly one REAL page in the change set → that page's
+   * Edit view; anything else (multiple pages, only `_global`/`theme` keys, an
+   * empty set) → the pages list, the neutral fallback. */
+  function chipTargetFromPreview(preview: PublishPreview): Route {
+    const pages = Object.keys(preview.changes).filter((key) => key !== "_global" && key !== "theme");
+    return pages.length === 1 ? { kind: "edit", page: pages[0] as string } : { kind: "pages" };
   }
 
   function handleStreamEvent(event: ConversationStreamEvent): void {
@@ -782,16 +815,8 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
 
   function connect(): void {
     streamHandle?.close();
-    streamHandle = openStream(convId, handleStreamEvent, includeThinking);
+    streamHandle = openStream(convId, handleStreamEvent);
   }
-
-  reasoningToggle.addEventListener("click", () => {
-    includeThinking = !includeThinking;
-    reasoningToggle.setAttribute("aria-pressed", String(includeThinking));
-    reasoningToggle.textContent = includeThinking ? "Hide reasoning" : "Show reasoning";
-    renderThread();
-    connect();
-  });
 
   function send(): void {
     const text = composer.text();

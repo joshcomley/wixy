@@ -2392,12 +2392,13 @@ div.wx-media-thumb {
   border-radius: var(--wx-radius);
 }
 
-/* decisions/00110: the shared composer (admin-ui/src/chatComposer.ts). The
-   input CARD is the bordered, focusable surface; the textarea inside it is
-   borderless and AUTO-GROWS with its content — native `field-sizing:
-   content` where supported (clamped by the min/max-height here), a JS
-   scrollHeight fallback elsewhere (same clamp values), so typed text can
-   never overflow a fixed two-row box again (the 2026-08-02 report). */
+/* decisions/00110, tuned 00113: the shared composer (admin-ui/src/
+   chatComposer.ts). The textarea AUTO-GROWS with its content — native
+   `field-sizing: content` where supported (clamped by the min/max-height
+   here), a JS scrollHeight fallback elsewhere (same clamp values), so typed
+   text can never overflow a fixed two-row box again (the 2026-08-02 report).
+   00113: the empty state is a single line (36px) — a two-row floor read as
+   "very tall for no reason before anything's been typed in". */
 .wx-chatc {
   display: flex;
   flex-direction: column;
@@ -2412,18 +2413,17 @@ div.wx-media-thumb {
   display: none;
 }
 
+/* decisions/00113: FLAT row, no outer card — "like CMD": attach button left,
+   input middle, send right. The textarea carries its own quiet border; the
+   two buttons flank it. (00110's bordered .wx-chatc-input-row card is gone.)
+   `align-items: center`, NOT flex-end: with buttons and input both 36px at
+   rest, flex-end would STRETCH the empty textarea to the tallest sibling's
+   height (measured 52px in the real browser — exactly the "tall for no
+   reason" look 00113 exists to kill). */
 .wx-chatc-input-row {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 8px;
-  background: var(--wx-surface);
-  border: 1px solid var(--wx-border);
-  border-radius: calc(var(--wx-radius) + 4px);
-  padding: 6px 8px;
-}
-
-.wx-chatc-input-row:focus-within {
-  border-color: var(--wx-brand-blue);
 }
 
 .wx-chat-compose-input,
@@ -2431,17 +2431,35 @@ div.wx-media-thumb {
   flex: 1;
   min-width: 0;
   font: 0.875rem/1.45 system-ui, sans-serif;
-  padding: 8px 6px;
-  border: none;
-  background: transparent;
+  padding: 7px 10px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
   color: var(--wx-ink);
-  border-radius: var(--wx-radius);
+  border-radius: calc(var(--wx-radius) + 2px);
   resize: none;
-  field-sizing: content;
-  min-height: 44px;
+  min-height: 36px;
   max-height: 180px;
   overflow-y: auto;
   outline: none;
+}
+
+/* decisions/00113: the EMPTY floor — one line (36px). No `field-sizing:
+   content` anywhere (it gives this engine an intrinsic TWO-row floor
+   ≈52px nothing escapes — see chatComposer.ts); the composer auto-grows by
+   hand via scrollHeight. This class pins the empty state, and its
+   `field-sizing: border-box` is a deliberate belt-and-braces override in
+   case the property is ever reintroduced on the base rule. */
+.wx-chat-input-empty {
+  field-sizing: border-box;
+  height: 36px;
+  min-height: 36px;
+  max-height: 36px;
+  overflow-y: hidden;
+}
+
+.wx-chat-compose-input:focus,
+.wx-chat-composer-input:focus {
+  border-color: var(--wx-brand-blue);
 }
 
 .wx-chat-compose-actions {
@@ -2559,14 +2577,24 @@ div.wx-media-thumb {
   margin-bottom: 8px;
 }
 
+/* decisions/00113: a substantial back ARROW — a real 44px touch target, no
+   text label (aria-label/title carry "All conversations" for a11y + hover). */
 .wx-chat-back-link {
-  color: var(--wx-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--wx-radius);
+  color: var(--wx-ink);
   text-decoration: none;
-  font-size: 0.8125rem;
+  font-size: 1.375rem;
+  line-height: 1;
 }
 
 .wx-chat-back-link:hover {
-  text-decoration: underline;
+  background: var(--wx-surface);
+  text-decoration: none;
 }
 
 .wx-chat-conversation-title {
@@ -2575,6 +2603,9 @@ div.wx-media-thumb {
   flex: 1;
 }
 
+/* decisions/00113: the static "changes land in your draft preview" explainer
+   is gone (the Preview-updated chip itself now deep-links instead). The class
+   stays for any stale reference, unused. */
 .wx-chat-banner {
   font-size: 0.75rem;
   color: var(--wx-muted);
@@ -2876,8 +2907,8 @@ div.wx-media-thumb {
 
 .wx-chat-send-button {
   font: 600 0.8125rem/1 system-ui, sans-serif;
-  padding: 9px 16px;
-  min-height: 40px;
+  padding: 8px 16px;
+  min-height: 36px;
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-brand-blue);
   background: var(--wx-brand-blue);
@@ -2896,13 +2927,13 @@ div.wx-media-thumb {
    attach button matching the send button's row, both hidden entirely rather
    than disabled when the active backend doesn't support attachments. */
 .wx-chat-attach-button {
-  font-size: 1.125rem;
+  font-size: 1rem;
   line-height: 1;
   padding: 8px 10px;
-  min-height: 40px;
+  min-height: 36px;
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-border);
-  background: var(--wx-canvas);
+  background: var(--wx-surface);
   color: var(--wx-ink);
   cursor: pointer;
   flex: none;
@@ -3360,7 +3391,7 @@ div.wx-media-thumb {
   margin-top: 12px;
 }
 
-/* -- The before/after aligner (decisions/00111) -------------------------------
+/* -- The before/after aligner (decisions/00113) -------------------------------
    Its OWN `.wx-align-*` classes — never `.wx-media-dialog-*`/`.wx-section-add-*`
    (the aligner opens ON TOP of the add flow, and the media dialog can stack on
    top of that; shared classes made stacked dialogs indistinguishable to
@@ -3580,7 +3611,7 @@ div.wx-media-thumb {
   min-height: 40px;
 }
 
-/* The card / add-flow entry point (decisions/00111). */
+/* The card / add-flow entry point (decisions/00113). */
 
 .wx-section-align-button {
   font: 600 0.75rem/1 system-ui, sans-serif;

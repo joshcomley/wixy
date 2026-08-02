@@ -755,6 +755,39 @@ describe("mountChatPanel — conversation view", () => {
     });
   });
 
+  it("the header is icon-only: substantial back arrow, pencil rename, no reasoning toggle (decisions/00113)", async () => {
+    const api = fakeApi();
+    const stream = fakeStreamController();
+    const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+    await flush();
+
+    const back = panel.element.querySelector<HTMLAnchorElement>(".wx-chat-back-link");
+    expect(back?.textContent).toBe("←");
+    expect(back?.getAttribute("aria-label")).toBe("All conversations");
+
+    const rename = panel.element.querySelector<HTMLButtonElement>(".wx-chat-rename-button");
+    expect(rename?.textContent).toBe("✎");
+    expect(rename?.getAttribute("aria-label")).toBe("Rename conversation");
+
+    // The "Show reasoning" toggle is gone entirely — and thinking messages
+    // always filter out, with no way to reveal them.
+    expect(panel.element.querySelector(".wx-chat-reasoning-toggle")).toBeNull();
+    stream.emit(messageEvent(0, { kind: "thinking", text: "pondering" }));
+    expect(panel.element.querySelectorAll(".wx-chat-bubble")).toHaveLength(0);
+    panel.teardown();
+  });
+
+  it("the static 'changes land in your draft preview' explainer is gone (decisions/00113)", async () => {
+    const api = fakeApi();
+    const stream = fakeStreamController();
+    const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+    await flush();
+
+    expect(panel.element.querySelector(".wx-chat-banner")).toBeNull();
+    expect(panel.element.textContent).not.toContain("Changes the assistant ships");
+    panel.teardown();
+  });
+
   it("rename prompts, calls the API, and updates the shown title", async () => {
     const renameConversation = vi.fn(async () => fakeConversation({ title: "new title" }));
     const api = fakeApi({ renameConversation });
@@ -768,24 +801,6 @@ describe("mountChatPanel — conversation view", () => {
 
     expect(renameConversation).toHaveBeenCalledWith("c1", "new title");
     expect(panel.element.querySelector(".wx-chat-conversation-title")?.textContent).toBe("new title");
-    panel.teardown();
-  });
-
-  it("the show-reasoning toggle reconnects the stream with includeThinking and reveals thinking messages", async () => {
-    const stream = fakeStreamController();
-    const api = fakeApi();
-    const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
-    await flush();
-
-    stream.emit(messageEvent(0, { kind: "thinking", text: "pondering" }));
-    expect(panel.element.querySelectorAll(".wx-chat-bubble")).toHaveLength(0);
-
-    panel.element.querySelector<HTMLButtonElement>(".wx-chat-reasoning-toggle")?.click();
-    expect(stream.connectCalls.at(-1)).toEqual({ convId: "c1", includeThinking: true });
-    expect(stream.closeCalls).toBe(1);
-
-    stream.emit(messageEvent(0, { kind: "thinking", text: "pondering" }));
-    expect(panel.element.querySelectorAll(".wx-chat-bubble")).toHaveLength(1);
     panel.teardown();
   });
 
@@ -804,6 +819,88 @@ describe("mountChatPanel — conversation view", () => {
 
     expect(getState).toHaveBeenCalled();
     expect(panel.element.querySelector<HTMLElement>(".wx-chat-preview-chip")?.hidden).toBe(false);
+    panel.teardown();
+  });
+
+  it("the chip deep-links to the single changed page's Edit view (decisions/00113)", async () => {
+    const getState = vi.fn(async () => fakeState({ upstream: { aheadOfPublished: [
+      { sha: "a".repeat(40), subject: "AI: tweak copy", author: "agent", when: "2026-07-10T00:00:00Z" },
+    ], fetchedAt: "2026-07-10T00:00:00Z" } }));
+    const getPublishPreview = vi.fn(async () => ({
+      changes: {
+        index: [{ key: "hero.title", kind: "text", old: "a", new: "b" }],
+      },
+      mediaChanges: { replaced: [], deleted: [] },
+      opCount: 1,
+      validate: { ok: true, errors: [] },
+    }));
+    const api = fakeApi({ getState, getPublishPreview });
+    const stream = fakeStreamController();
+    const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+    await flush();
+
+    stream.emit(messageEvent(0, { role: "assistant", text: "shipped it" }));
+    await flush();
+    await flush(); // the preview fetch lands a tick after the state fetch
+
+    const chip = panel.element.querySelector<HTMLAnchorElement>(".wx-chat-preview-chip");
+    expect(chip?.hidden).toBe(false);
+    expect(getPublishPreview).toHaveBeenCalled();
+    expect(chip?.href).toContain("/admin/edit/index");
+    panel.teardown();
+  });
+
+  it("the chip falls back to the pages list for a multi-page change", async () => {
+    const getState = vi.fn(async () => fakeState({ upstream: { aheadOfPublished: [
+      { sha: "a".repeat(40), subject: "AI: tweak copy", author: "agent", when: "2026-07-10T00:00:00Z" },
+    ], fetchedAt: "2026-07-10T00:00:00Z" } }));
+    const getPublishPreview = vi.fn(async () => ({
+      changes: {
+        index: [{ key: "hero.title", kind: "text", old: "a", new: "b" }],
+        contact: [{ key: "intro", kind: "text", old: "c", new: "d" }],
+      },
+      mediaChanges: { replaced: [], deleted: [] },
+      opCount: 2,
+      validate: { ok: true, errors: [] },
+    }));
+    const api = fakeApi({ getState, getPublishPreview });
+    const stream = fakeStreamController();
+    const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+    await flush();
+
+    stream.emit(messageEvent(0, { role: "assistant", text: "shipped it" }));
+    await flush();
+    await flush();
+
+    const chip = panel.element.querySelector<HTMLAnchorElement>(".wx-chat-preview-chip");
+    expect(chip?.href).toContain("/admin/pages");
+    panel.teardown();
+  });
+
+  it("the chip treats _global/theme-only changes as un-attributable (pages list)", async () => {
+    const getState = vi.fn(async () => fakeState({ upstream: { aheadOfPublished: [
+      { sha: "a".repeat(40), subject: "AI: tweak copy", author: "agent", when: "2026-07-10T00:00:00Z" },
+    ], fetchedAt: "2026-07-10T00:00:00Z" } }));
+    const getPublishPreview = vi.fn(async () => ({
+      changes: {
+        _global: [{ key: "nav", kind: "text", old: "a", new: "b" }],
+        theme: [{ key: "colors.ink", kind: "theme", old: "#000", new: "#111" }],
+      },
+      mediaChanges: { replaced: [], deleted: [] },
+      opCount: 2,
+      validate: { ok: true, errors: [] },
+    }));
+    const api = fakeApi({ getState, getPublishPreview });
+    const stream = fakeStreamController();
+    const panel = mountChatPanel("c1", { api, win: fakeWindow(), openStream: stream.openStream });
+    await flush();
+
+    stream.emit(messageEvent(0, { role: "assistant", text: "shipped it" }));
+    await flush();
+    await flush();
+
+    const chip = panel.element.querySelector<HTMLAnchorElement>(".wx-chat-preview-chip");
+    expect(chip?.href).toContain("/admin/pages");
     panel.teardown();
   });
 
