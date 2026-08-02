@@ -37,9 +37,14 @@ vanished and never came back. Both are gone — the glowing badge stays until sh
 Measured/verified 2026-08-02: unit tests for the badge's every state (quiet, glow,
 confirm, cancel, save-blocked), a full end-to-end test in a real browser that watches
 a deploy land and walks the tap → confirm → reload flow, and the whole suite green
-(594 UI unit tests, 1005 server tests, full browser suite). Shipped as decisions/00109.
+(599 UI unit tests, 1006 server tests, 42 browser tests). Then **verified live** on
+ca.cinnamons.uk/admin after the release went out: the strip reads "v161 · No
+unpublished changes" with the badge at the far left, and tapping it pops "Wixy is up
+to date — You're using the latest version (v161)." The glow itself only appears when
+an update lands while she's looking — covered by the browser test; she'll see it for
+real the next time Wixy updates while her page is open.
 
-- STATUS: 🟢 ANSWERED (decisions/00109)
+- STATUS: 🟢 ANSWERED (shipped in PR #142, decisions/00109; verified live 2026-08-02)
 
 ## Q-002 — "Currently, when there are no unpublished changes, it still has a publish button…"
 
