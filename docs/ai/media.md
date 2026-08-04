@@ -18,6 +18,17 @@ code is `wixy_server/media.py`; the content-model rules are
   `data-wx-bg` value). While staged, `src` is `/admin/draft-media/<name>`; publish rewrites it
   to `images/<name>`.
 
+**A publish CONSUMES a staged upload (decisions/00115).** `publisher._materialize_locked`
+copies it into `images/`, rewrites the srcs, and then deletes `draft/media/<name>` — so
+`/admin/draft-media/<name>` is a dead URL the moment that publish lands, and any client
+holding a pre-publish copy of the content is holding dead refs. Two defences, both required:
+the mounted section panel re-reads on publish (`sectionPanel.refresh()`, wired in
+`shell.ts:announcePublishSucceeded`), and the write gate re-points an already-published
+upload on the way in — `draft_validate.rewrite_published_draft_media_src` maps
+`/admin/draft-media/<name>` → `images/<name>` **only** when the staged copy is gone AND
+`images/<name>` exists, so a still-staged upload is untouched and a name resolving nowhere
+stays put as the real `missing-image` it is.
+
 **`url` vs `contentSrc` (decisions/00095):** every media API response (`GET media`, `POST
 media`, `PUT media/{name}`) carries BOTH fields, and they are not interchangeable. `url` is a
 **display** form — always root-relative (`/images/<name>` or `/admin/draft-media/<name>`),

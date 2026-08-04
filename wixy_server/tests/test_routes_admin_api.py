@@ -726,6 +726,37 @@ class TestPatchDraft:
             response = client2.get("/api/admin/content/index")
         assert response.json()["content"]["hero"]["title"] == "Persisted"
 
+    def test_an_already_published_draft_media_src_is_normalized_on_the_way_in(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        """decisions/00115 — a client holding a pre-publish array re-sends srcs
+        whose staged copies a publish already consumed. The write gate re-points
+        them at the published `images/<name>` (which IS on disk), so a draft can
+        never be persisted blocked on an upload that actually published fine."""
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": 0,
+                    "ops": [
+                        {
+                            "file": "index",
+                            "path": "meta.ogImage",
+                            # hero.jpg exists in the repo's images/, nothing is
+                            # staged under draft/media — the post-publish shape.
+                            "value": {"src": "/admin/draft-media/hero.jpg", "alt": "Hero"},
+                        }
+                    ],
+                },
+            )
+            assert response.status_code == 200
+            content = client.get("/api/admin/content/index")
+        assert content.json()["content"]["meta"]["ogImage"] == {
+            "src": "images/hero.jpg",
+            "alt": "Hero",
+        }
+
 
 _HOURS_HTML = """<!DOCTYPE html>
 <html><head><title>placeholder</title></head>

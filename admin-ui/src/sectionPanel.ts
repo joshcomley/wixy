@@ -29,6 +29,14 @@ import {
 
 export interface SectionPanel {
   element: HTMLElement;
+  /** Re-read this section's content from the server and re-render, replacing
+   * the in-memory working copy (decisions/00115). The shell calls this after
+   * anything that rewrites the draft BEHIND the panel — a publish (which
+   * re-points every staged upload at its published `images/<name>` and deletes
+   * the staged file) or a draft repair. Without it the panel's array keeps
+   * pre-publish `/admin/draft-media/` srcs whose files are gone, and the very
+   * next edit writes them all back as one op, blocking the next publish. */
+  refresh(): void;
   teardown(): void;
 }
 
@@ -676,11 +684,54 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
       renderCollectionBody(collection);
     }
   }
+
+  // -- Refreshing behind the owner's back (decisions/00115) -----------------
+  // A re-read is only safe when it can't discard something she is part-way
+  // through: text fields commit on BLUR, so a re-render mid-typing would throw
+  // away the characters typed so far, and the op queue coalesces at 300 ms, so
+  // re-reading before it flushes would read back the pre-edit value.
+
+  function isEditingInPanel(): boolean {
+    const active = element.ownerDocument.activeElement;
+    if (active === null || !element.contains(active)) return false;
+    return ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName);
+  }
+
+  let refreshPending = false;
+
+  async function refreshFromServer(): Promise<void> {
+    await opQueue.flushNow();
+    if (destroyed) return;
+    await load();
+  }
+
+  function requestRefresh(): void {
+    if (destroyed) return;
+    if (isEditingInPanel()) {
+      refreshPending = true; // deferred to the focusout below, never dropped
+      return;
+    }
+    refreshPending = false;
+    void refreshFromServer();
+  }
+
+  element.addEventListener("focusout", () => {
+    if (!refreshPending) return;
+    // A timeout so the blur handler's own commit has enqueued first, and so
+    // focus moving between two fields inside the panel doesn't count as done.
+    win.setTimeout(() => {
+      if (destroyed || !refreshPending || isEditingInPanel()) return;
+      refreshPending = false;
+      void refreshFromServer();
+    }, 0);
+  });
+
   body.textContent = "Loading…";
   void load();
 
   return {
     element,
+    refresh: requestRefresh,
     teardown(): void {
       destroyed = true;
     },

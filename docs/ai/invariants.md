@@ -266,3 +266,19 @@ covers writes going forward only. `POST /api/admin/draft/repair` (decisions/0009
 the deterministic recovery path for already-corrupted data, not a live-caught violation of
 this invariant.
 
+### Inv 27 — A published staged upload is never left as a dead draft ref
+A publish CONSUMES the staged uploads it references: `publisher._materialize_locked` copies
+`draft/media/<name>` into the repo as `images/<name>`, rewrites the srcs, and deletes the
+staged copy — so `/admin/draft-media/<name>` dies at that moment, and any client still holding
+the pre-publish content is holding dead refs (decisions/00115). Two independent defences, both
+required, neither sufficient alone: (a) the mounted section panel re-reads its collection on
+publish and on repair (`SectionPanel.refresh()`, wired in `shell.ts`), so it never re-sends a
+pre-publish array; (b) `normalize_set_ops` re-points an already-published upload on the way in
+(`rewrite_published_draft_media_src`) — **only** when the staged copy is gone AND
+`images/<name>` genuinely exists, so a still-staged upload is untouched and a name that
+resolves nowhere stays put as the real `missing-image` error it is.
+*Exception:* a src that resolves NOWHERE is deliberately left alone by (b) — surfacing as a
+publish-preview `missing-image` and repaired at the item level by `POST draft/repair` (which
+falls the item back to its last published version), never silently rewritten to a file that
+doesn't exist.
+

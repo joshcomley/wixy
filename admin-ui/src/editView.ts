@@ -36,6 +36,11 @@ const MOUSE_ICON =
 export interface OpQueueLike {
   readonly rev: number;
   enqueue(op: DraftOp): void;
+  /** Send any queued ops NOW, bypassing the coalescing delay. A panel that
+   * re-reads its content from the server must await this first, or a value the
+   * owner typed moments ago (queued, not yet sent) reads back as the old one
+   * (decisions/00115). */
+  flushNow(): Promise<void>;
 }
 
 export const DEVICE_WIDTHS: Record<Device, number> = { desktop: 1280, tablet: 820, mobile: 390 };

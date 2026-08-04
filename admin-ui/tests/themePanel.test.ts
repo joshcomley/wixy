@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AdminApi, ThemeData } from "../src/api";
-import type { EditView, MountEditViewDeps } from "../src/editView";
+import type { EditView, MountEditViewDeps, OpQueueLike } from "../src/editView";
 import type { DraftOp, ShellToOverlayMessage } from "../src/protocol";
 import { mountThemePanel } from "../src/themePanel";
 
@@ -59,9 +59,12 @@ function fakeMountEditView(): {
   return { fn, views, pages };
 }
 
-function fakeOpQueue(): { queue: { rev: number; enqueue: (op: DraftOp) => void }; ops: DraftOp[] } {
+function fakeOpQueue(): { queue: OpQueueLike; ops: DraftOp[] } {
   const ops: DraftOp[] = [];
-  return { queue: { rev: 0, enqueue: (op: DraftOp) => ops.push(op) }, ops };
+  return {
+    queue: { rev: 0, enqueue: (op: DraftOp) => ops.push(op), flushNow: async () => {} },
+    ops,
+  };
 }
 
 async function flush(): Promise<void> {

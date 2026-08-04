@@ -22,6 +22,7 @@ function fakeQueue(rev = 0): OpQueueLike & { enqueued: unknown[] } {
     rev,
     enqueued,
     enqueue: (op) => enqueued.push(op),
+    flushNow: async () => {},
   };
 }
 

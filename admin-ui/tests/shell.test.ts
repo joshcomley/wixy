@@ -27,6 +27,29 @@ function runningJob(stage: PublishJobData["stage"]): PublishJobData {
   return { id: "job-1", stage, log: [], version: null, error: null, isRunning: true };
 }
 
+/** A registry-configured section (the real Before & After screen's shape) — the
+ * one panel that keeps a content array in memory while mounted. */
+const BEFORE_AFTER_SECTION = {
+  id: "before-after",
+  navLabel: "Before & After",
+  title: "Before & After",
+  description: "Drag to reorder.",
+  page: "gallery",
+  collections: [
+    {
+      path: "gallery.sliders",
+      label: "Drag-to-compare photos",
+      itemNoun: "photo pair",
+      schema: "gallery-slider",
+      alignAspect: { w: 640, h: 360 },
+      fields: [
+        { key: "before", kind: "image" as const, label: "Before photo", options: [] },
+        { key: "after", kind: "image" as const, label: "After photo", options: [] },
+      ],
+    },
+  ],
+};
+
 function fakeStorage(): Storage {
   const store = new Map<string, string>();
   return {
@@ -1183,6 +1206,41 @@ describe("mountShell", () => {
         await flushMicro();
         const toasts = [...container.querySelectorAll(".wx-toast")].map((el) => el.textContent);
         expect(toasts).toEqual(["Published — version 7 is live."]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("a completed publish makes the mounted section panel re-read its content (decisions/00115)", async () => {
+      vi.useFakeTimers();
+      try {
+        // The publish rewrote every staged upload's src to its published form
+        // and deleted the staged file. A panel still holding the pre-publish
+        // array would write those dead srcs back on her next edit and block the
+        // NEXT publish — so a completed publish has to force a re-read.
+        let job: PublishJobData | null = runningJob("building");
+        const api = fakeApi({
+          getState: vi.fn(async () =>
+            fakeState({ publishJob: job, adminSections: [BEFORE_AFTER_SECTION] }),
+          ),
+        });
+        const win = fakeWindow();
+        const container = document.createElement("div");
+
+        mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+        await flushMicro();
+        goTo(win, "/admin/section/before-after");
+        await flushMicro();
+
+        const getContent = api.getContent as ReturnType<typeof vi.fn>;
+        const readsBeforePublish = getContent.mock.calls.length;
+        expect(readsBeforePublish).toBeGreaterThan(0); // the panel's own initial load
+
+        job = { id: "job-1", stage: "done", log: [], version: 3, error: null, isRunning: false };
+        await vi.advanceTimersByTimeAsync(2000); // the watch's poll cadence
+        await flushMicro();
+
+        expect(getContent.mock.calls.length).toBeGreaterThan(readsBeforePublish);
       } finally {
         vi.useRealTimers();
       }
