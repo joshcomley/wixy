@@ -45,6 +45,7 @@ needs the owner's Report path, not an auto-heal.
 from __future__ import annotations
 
 import copy
+import re
 from dataclasses import dataclass
 
 from builder.collections import COLLECTION_RULES
@@ -84,6 +85,28 @@ class RepairResult:
     validate: ValidationResult
 
 
+# Mirrors `admin-ui/src/sectionPanelModel.ts`'s `decodeCommonEntities` exactly —
+# a content string may carry literal entity text (`meta.navLabel` on the live
+# site is stored as "Before &amp; After"), and these action strings are read by
+# the SITE OWNER in a toast, where a raw `&amp;` is just wrong. Decode on
+# display, never re-encode on save, so both paths converge on the same plain
+# form (decisions/00095's contentModel.ts precedent).
+_ENTITY_RE = re.compile(r"&(amp|lt|gt|quot|apos|#39|nbsp);")
+_ENTITY_MAP = {
+    "amp": "&",
+    "lt": "<",
+    "gt": ">",
+    "quot": '"',
+    "apos": "'",
+    "#39": "'",
+    "nbsp": " ",
+}
+
+
+def decode_common_entities(text: str) -> str:
+    return _ENTITY_RE.sub(lambda m: _ENTITY_MAP.get(m.group(1), m.group(0)), text)
+
+
 def _page_label(base_page_contents: dict[str, JsonObject], file_key: str) -> str:
     """A plain-English name for an op's `file` key, for owner-readable action
     strings — never a site-specific literal (Inv 1): derived from the base
@@ -98,7 +121,7 @@ def _page_label(base_page_contents: dict[str, JsonObject], file_key: str) -> str
         if isinstance(meta, dict):
             nav_label = meta.get("navLabel")
             if isinstance(nav_label, str) and nav_label:
-                return f"'{nav_label}' page"
+                return f"'{decode_common_entities(nav_label)}' page"
     return f"'{file_key}' page"
 
 
