@@ -268,44 +268,46 @@ def test_a_real_process_kill_mid_publish_leaves_live_ledger_and_draft_untouched(
         publish_thread = threading.Thread(target=_fire_publish, daemon=True)
         publish_thread.start()
 
-        # Poll as tightly as possible for the job to become observably running,
-        # then kill IMMEDIATELY — `job.stage` is set to "pulling" as literally
-        # the first statement inside `run_publish`, before any git/file I/O, so
-        # this reliably lands well before "swapping" (step 5, spec/04 §5) even
-        # on a slow box; the assertion below turns a late kill into a loud
-        # failure instead of a silent false pass.
-        observed_stage: str | None = None
-        deadline = time.monotonic() + 10.0
-        with httpx.Client(base_url=base_url, timeout=2.0) as poll_client:
-            while time.monotonic() < deadline:
-                try:
-                    state_resp = poll_client.get("/api/admin/state")
-                except httpx.HTTPError:
-                    continue
-                if state_resp.status_code != 200:
-                    continue
-                job = state_resp.json().get("publishJob")
-                if job is not None and job.get("isRunning"):
-                    observed_stage = job.get("stage")
-                    break
+        # Wait for the publish to be genuinely IN FLIGHT, then kill immediately.
+        #
+        # Watched on the FILESYSTEM, never by polling `/api/admin/state`
+        # (decisions/00116). `run_publish` writes `locks/publish.lock` as the
+        # statement immediately before `job.stage = "pulling"` and removes it in
+        # its `finally`, so that file exists for the ENTIRE pipeline and is a
+        # non-sampling signal. The old HTTP poll was a sampling race that could
+        # miss the whole publish: `/api/admin/state` takes `tree_lock()`, which
+        # `_materialize_locked` holds for much of the very window this test is
+        # trying to observe, so every poll issued during materialize BLOCKS and
+        # can return only after the job has already gone terminal — observed
+        # failing exactly that way under the full suite's `-n 4` load
+        # ("never observed the publish job actually running"). Watching the lock
+        # also stops this loop competing with the server it is racing.
+        deadline = time.monotonic() + 30.0
+        publish_in_flight = False
+        while time.monotonic() < deadline:
+            if paths.publish_lock.exists():
+                publish_in_flight = True
+                break
+            time.sleep(0.002)
 
         proc.kill()
         proc.wait(timeout=10)
         publish_thread.join(timeout=10)
 
-        assert observed_stage is not None, (
-            "never observed the publish job actually running — the kill couldn't "
-            "have interrupted anything, this run proves nothing"
-        )
-        assert observed_stage not in ("swapping", "done"), (
-            f"kill landed too late (stage={observed_stage!r}) to test the "
-            "steps-1-4 guarantee — rerun"
+        assert publish_in_flight, (
+            "never observed a publish in flight (locks/publish.lock never appeared) "
+            "— the kill couldn't have interrupted anything, this run proves nothing"
         )
 
         post_live = _read_or_none(paths.live_json)
         post_ledger = _read_or_none(paths.publishes_jsonl)
         post_overlay = paths.draft_overlay.read_bytes()
 
+        # These three ALSO catch a kill that somehow landed after "swapping"
+        # (step 5) — the lock appears within milliseconds of the publish starting
+        # and swapping is the far side of a real fetch/commit/push/build, so a
+        # late kill would mean something is very wrong, and it would fail here
+        # loudly rather than pass silently.
         assert post_live == pre_live, "live.json changed despite a kill before 'swapping'"
         assert post_ledger == pre_ledger, "the ledger changed despite a kill before 'swapping'"
         assert post_overlay == pre_overlay, "the draft overlay changed despite the kill"
