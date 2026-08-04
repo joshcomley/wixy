@@ -31,7 +31,19 @@ which a well-formed-but-dead src passes.
       normalize-only correction
 - [x] `decisions/00115`, docs/ai (media, contracts, editor-and-admin-ui,
       invariants Inv 27)
-- [ ] Ship: PR → merge → Slots deploys
-- [ ] Verify on the live instance, then clear the stuck draft via the product's
-      own `POST /api/admin/draft/repair` so she is unblocked
-- [ ] Answers-log entry (his question: "It says this, now - why?")
+- [x] Ship: PR #151 merged (`7fc5fc5`), Slots deployed it to the green slot
+- [x] Cleared the stuck draft via the product's own
+      `POST /api/admin/draft/repair` (rev 177 → 178, `validate.ok: true`,
+      all 6 pairs intact, her new pair untouched). Overlay backed up first.
+- [x] Answers-log entry — **Q-78** ("It says this, now - why?")
+- [x] Follow-up PR #152 (`b4582e6`): the repair's own owner-facing message read
+      "Before &amp; After" — the nav label is stored entity-escaped and was
+      interpolated raw. Now decoded, mirroring `decodeCommonEntities`.
+
+## Not done, deliberately
+
+Publishing itself. The draft is Purdi's content and the review drawer exists so
+she approves the change before it goes live — unblocking was the defect, not the
+publish. The site remains on version 31 with her new pair pending.
+
+## Closed 2026-08-04
