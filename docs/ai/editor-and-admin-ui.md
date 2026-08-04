@@ -220,17 +220,33 @@ M site updates", the upstream section is "updates made outside the editor" with 
 explainer — decisions/00081; **five mutually-exclusive body states** (decisions/00095), each a
 full `body.innerHTML = ""` swap, never a partial patch: **blocked** (`renderBlocked` — the
 publish preview's `validate.ok === false`; "Publishing is paused" + calm body text, "Fix it for
-me" → `POST draft/repair` → re-fetches the preview on full success or swaps to a
-still-blocked message + an emphasized "Send a report" on partial, and "Send a report" →
+me" → `POST draft/repair` → re-fetches the preview on full success or, on a PARTIAL fix,
+swaps to a still-blocked message and **auto-sends** the report (decisions/00114 — a dead end
+the owner can't act on doesn't also wait on her pressing a button), and "Send a report" →
 `POST report` — no raw validator text ever rendered, no Publish button at all while blocked)
 · **reviewable** (`renderReviewable` — the pre-existing diff+confirm UI, unchanged except the
 old inline error box is gone since a blocked draft never reaches this state) · **running**
 (`renderRunning`, entered synchronously on confirm click, before any await — spinner +
 "Publishing your site…" + a stage caption fed by the SSE stream, same `PUBLISH_STAGE_LABELS`
 wording the status bar uses) · **success** (`renderSuccess(version)` — a checkmark, "Your site
-is live.", "Version N") · **failure** (`renderFailure` — "Publishing didn't work this time." +
-"Nothing changed on your live site, and your edits are safe." + "Try again"/"Send a report",
-no raw error detail). `currentRev` is a mutable local that advances past `deps.expectedRev`
+is live.", "Version N") · **failure** (`renderFailure(reason)` — "Publishing didn't work this
+time." + "Nothing changed on your live site, and your edits are safe." + "Try again", the
+report **auto-sent** with `reason` as its note and a plain-English status line; the manual
+"Send a report" button appears only if that automatic send failed — no raw error detail).
+
+**Which of success/failure it lands on comes from the publish JOB, never from the POST's HTTP
+status (decisions/00114).** A successful publish once rendered the failure state because the
+POST was aborted at the blanket 10s timeout, blindly retried, and answered `409`. Now:
+`publish`/`restore` use `LONG_RUNNING_POLICY` (one attempt, 10-min backstop) in `api.ts`, and
+the drawer settles through one idempotent `settleSuccess`/`settleFailure` pair reached by
+whichever arrives first — the SSE stream's terminal event (`done`/`failed`), the POST
+resolving `ok`, or `reconcile()` polling `GET state`'s `publishJob` whenever the POST resolves
+anything else (including a throw). A job still `isRunning` KEEPS the running state; failure
+needs real evidence (job `failed`, no job, or the server unreachable). `priorJobId` (passed by
+the shell) makes the previous publish's parked terminal job unreadable as this one's outcome —
+the drawer-side twin of the watch's `publishWatchArmedJobId`.
+
+`currentRev` is a mutable local that advances past `deps.expectedRev`
 after a successful in-drawer repair, so a follow-up repair or the eventual publish always
 targets the latest known rev. The `onPublishStarted`/`onPublishSettled` shell bridge
 (Inv 25) fires at the exact same points as before this rewrite — confirm still calls

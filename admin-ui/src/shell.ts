@@ -810,6 +810,10 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       api,
       expectedRev: state.draft.rev,
       upstream: state.upstream.aheadOfPublished,
+      // The job already on the server right now, so the drawer can tell this
+      // publish's outcome from the previous one's leftover terminal record —
+      // the same guard this shell's own watch arms (decisions/00114, 00089).
+      priorJobId: state.publishJob?.id ?? null,
       onClose: closeDrawer,
       onPublishStarted: () => {
         // Bridge the gap until the POST registers the job (renderTopBar shows

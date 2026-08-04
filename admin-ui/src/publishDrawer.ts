@@ -14,12 +14,21 @@
 // self-heal endpoint; "Send a report" is the escape hatch when that isn't
 // enough. Confirming a publish swaps the WHOLE drawer body through running/
 // success/failure states — never an inline spinner + a raw error `<pre>`.
+//
+// decisions/00114: the PUBLISH JOB is the source of truth for "did it
+// publish?" — never the POST's own HTTP outcome. The POST can be lost, or
+// answered 409, long after the server has already committed, pushed, built
+// and swapped; that is exactly how a fully successful publish once rendered
+// "Publishing didn't work this time." (2026-08-03, version 29). And when a
+// publish really is a dead end, the diagnostic report SENDS ITSELF — being
+// stuck shouldn't also depend on the owner choosing to report it.
 
 import type {
   AdminApi,
   PublishJobData,
   PublishPreview,
   RepairOutcome,
+  SendReportOutcome,
   UpstreamCommit,
 } from "./api";
 import { renderDiffGroups } from "./diffView";
@@ -52,6 +61,12 @@ export interface PublishDrawerDeps {
    * injected rather than a direct shell.ts import, so this module stays
    * shell-agnostic and unit-testable without a real toast region. */
   onToast?: (message: string, variant?: "error" | "info") => void;
+  /** The publish job id already on the server when this drawer opened, if any
+   * (decisions/00114). The server keeps the LAST job on `app.state.publish_job`
+   * indefinitely, so a terminal snapshot carrying THIS id belongs to a previous
+   * publish and must never be read as this one's outcome — the same guard the
+   * shell watch arms itself with (`publishWatchArmedJobId`, decisions/00089). */
+  priorJobId?: string | null;
   /** Overridable for tests — a real `EventSource` needs neither jsdom support
    * nor a live server to verify the drawer's own rendering/state logic. */
   openStream?: (onUpdate: (job: PublishJobData) => void) => PublishStreamHandle;
@@ -136,8 +151,17 @@ const BLOCKED_MESSAGE =
   "Some recent changes have a technical problem, so publishing is paused. " +
   "You can fix this automatically, or send a report to your developer. Your live site is unaffected.";
 const BLOCKED_MESSAGE_AFTER_PARTIAL_FIX =
-  "We couldn't fix everything automatically — please send a report.";
+  "We couldn't fix everything automatically, so we've sent the details to your developer.";
 const FAILURE_BODY = "Nothing changed on your live site, and your edits are safe.";
+// decisions/00114 — the automatic diagnostic send, in the owner's language:
+// what it's doing, then what it did. She is never asked to do anything with it.
+const REPORT_SENDING = "Letting your developer know…";
+const REPORT_SENT = "Your developer has been told what went wrong.";
+// Reconciling a publish whose POST didn't come back, against the job itself:
+// the same 2s cadence the shell's watch polls at, capped well past any real
+// publish (~10 min) so even a wedged job resolves to something actionable.
+const RECONCILE_POLL_MS = 2000;
+const RECONCILE_MAX_POLLS = 300;
 
 export function mountPublishDrawer(deps: PublishDrawerDeps): PublishDrawer {
   const openStream = deps.openStream ?? defaultOpenStream;
@@ -166,6 +190,13 @@ export function mountPublishDrawer(deps: PublishDrawerDeps): PublishDrawer {
 
   let cancelled = false;
   let streamHandle: PublishStreamHandle | null = null;
+  // decisions/00114 — this attempt's terminal state has been decided. Every
+  // path that can decide it (the stream's terminal event, the POST resolving
+  // ok, the reconcile poll) goes through settleSuccess/settleFailure, so
+  // whichever arrives first wins and the others are no-ops.
+  let settled = false;
+  let reconcilePolls = 0;
+  let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
   // May advance past deps.expectedRev after a successful in-drawer repair —
   // every subsequent server call (another repair, the eventual publish) must
   // use the LATEST known rev, not the one this drawer opened with.
@@ -256,10 +287,22 @@ export function mountPublishDrawer(deps: PublishDrawerDeps): PublishDrawer {
         return;
       }
       // Still blocked — the deterministic repair couldn't fully clear it
-      // (e.g. a template/binding problem from an upstream commit).
+      // (e.g. a template/binding problem from an upstream commit). That is a
+      // dead end for the owner, so the report goes out by itself here too
+      // (decisions/00114) rather than asking her to press for it.
       message.textContent = BLOCKED_MESSAGE_AFTER_PARTIAL_FIX;
-      resetFixButton();
-      reportButton.classList.add("wx-publish-report-emphasized");
+      fixButton.remove();
+      reportButton.remove();
+      const status = document.createElement("p");
+      status.className = "wx-publish-report-status";
+      status.textContent = REPORT_SENDING;
+      panel.appendChild(status);
+      void autoReport(
+        "publish-validate",
+        outcome.validate.errors.map((e) => `${e.code}: ${e.message}`).join("; ") || null,
+        status,
+        actions,
+      );
     }
 
     function resetFixButton(): void {
@@ -272,15 +315,25 @@ export function mountPublishDrawer(deps: PublishDrawerDeps): PublishDrawer {
     // known-bad content would just 422 (the calm preflight rejection).
   }
 
+  /** The `note` is omitted entirely when there's nothing technical to attach,
+   * rather than sent as an empty one — a report bundle's note field means "the
+   * caller had something to say about this". */
+  function sendReportWithReason(context: string, reason?: string | null): Promise<SendReportOutcome> {
+    return reason != null && reason !== ""
+      ? deps.api.sendReport(context, reason)
+      : deps.api.sendReport(context);
+  }
+
   async function handleReport(
     context: string,
     triggerButton: HTMLButtonElement,
     idleLabel: string,
+    reason?: string | null,
   ): Promise<void> {
     triggerButton.disabled = true;
     setButtonBusy(triggerButton, "Sending…");
     try {
-      const outcome = await deps.api.sendReport(context);
+      const outcome = await sendReportWithReason(context, reason);
       if (cancelled) return;
       onToast(
         outcome.emailed ? "Report sent to your developer." : "Report saved for your developer.",
@@ -347,31 +400,42 @@ export function mountPublishDrawer(deps: PublishDrawerDeps): PublishDrawer {
       // the run's feedback no longer depends on this drawer staying open
       // (decisions/00089, Inv 25).
       deps.onPublishStarted?.();
+      settled = false;
+      reconcilePolls = 0;
       renderRunning();
 
+      // The stream both narrates the stage AND carries the job's terminal
+      // state — reading only the former was half the 2026-08-03 defect
+      // (decisions/00114).
       streamHandle = openStream((job) => {
-        if (cancelled) return;
+        if (cancelled || settled || isPriorJob(job)) return;
+        if (job.stage === "done" && job.version !== null) {
+          settleSuccess(job.version);
+          return;
+        }
+        if (job.stage === "failed") {
+          settleFailure(job.error);
+          return;
+        }
         setStageCaption(PUBLISH_STAGE_LABELS[job.stage]);
       });
 
       deps.api
         .publish(messageInput.value, currentRev)
         .then((outcome) => {
-          if (cancelled) return;
-          streamHandle?.close();
-          streamHandle = null;
           if (outcome.kind === "ok") {
-            renderSuccess(outcome.version);
-            deps.onPublished(outcome.version);
+            settleSuccess(outcome.version);
             return;
           }
-          renderFailure();
+          // NOT proof of failure. A 409 is precisely what the server answers
+          // when this publish already ran (the draft it named is spent) or is
+          // still running — ask the job what actually happened.
+          void reconcile(outcome.message);
         })
-        .catch(() => {
-          if (cancelled) return;
-          streamHandle?.close();
-          streamHandle = null;
-          renderFailure();
+        .catch((error: unknown) => {
+          // A dropped or timed-out request says nothing about the server's
+          // work, which carries on regardless of who is still listening.
+          void reconcile(error instanceof Error ? error.message : null);
         })
         .finally(() => {
           // NOT cancelled-gated: the shell's in-flight bridge must drop even
@@ -379,6 +443,79 @@ export function mountPublishDrawer(deps: PublishDrawerDeps): PublishDrawer {
           deps.onPublishSettled?.();
         });
     });
+  }
+
+  // -- Outcome resolution (decisions/00114) ------------------------------------
+
+  /** A terminal snapshot of the job that was already on the server when this
+   * drawer opened is a PREVIOUS publish's record, not this one's outcome. */
+  function isPriorJob(job: PublishJobData): boolean {
+    return deps.priorJobId != null && job.id === deps.priorJobId;
+  }
+
+  function stopReconcile(): void {
+    if (reconcileTimer !== null) {
+      clearTimeout(reconcileTimer);
+      reconcileTimer = null;
+    }
+  }
+
+  function settleSuccess(version: number): void {
+    if (settled || cancelled) return;
+    settled = true;
+    stopReconcile();
+    streamHandle?.close();
+    streamHandle = null;
+    renderSuccess(version);
+    // The shell's own announcement is version-guarded, so whichever of the two
+    // fires second is a no-op (decisions/00089).
+    deps.onPublished(version);
+  }
+
+  function settleFailure(reason: string | null): void {
+    if (settled || cancelled) return;
+    settled = true;
+    stopReconcile();
+    streamHandle?.close();
+    streamHandle = null;
+    renderFailure(reason);
+  }
+
+  /** Ask the server what the JOB did, whenever the POST itself didn't say `ok`.
+   * `done` → this publish succeeded even though its answer never came back;
+   * `failed` → a real failure; still running → decide nothing yet and poll
+   * (the stream usually beats this, but the blip that lost the POST can have
+   * taken the stream with it). No job at all, or the server is unreachable →
+   * failure is the honest answer. `reason` is the technical detail for the
+   * report bundle; the owner never sees it. */
+  async function reconcile(reason: string | null): Promise<void> {
+    if (cancelled || settled) return;
+    let job: PublishJobData | null;
+    try {
+      job = (await deps.api.getState()).publishJob;
+    } catch {
+      settleFailure(reason);
+      return;
+    }
+    if (cancelled || settled) return;
+    if (job === null || isPriorJob(job)) {
+      settleFailure(reason);
+      return;
+    }
+    if (job.stage === "done" && job.version !== null) {
+      settleSuccess(job.version);
+      return;
+    }
+    if (job.stage === "failed") {
+      settleFailure(job.error ?? reason);
+      return;
+    }
+    if (reconcilePolls >= RECONCILE_MAX_POLLS) {
+      settleFailure(reason);
+      return;
+    }
+    reconcilePolls += 1;
+    reconcileTimer = setTimeout(() => void reconcile(reason), RECONCILE_POLL_MS);
   }
 
   // -- Running / success / failure states --------------------------------------
@@ -428,7 +565,7 @@ export function mountPublishDrawer(deps: PublishDrawerDeps): PublishDrawer {
     body.appendChild(wrap);
   }
 
-  function renderFailure(): void {
+  function renderFailure(reason: string | null): void {
     body.innerHTML = "";
     stageCaption = null;
     const wrap = document.createElement("div");
@@ -449,17 +586,46 @@ export function mountPublishDrawer(deps: PublishDrawerDeps): PublishDrawer {
     retryButton.addEventListener("click", () => {
       void refetchAndRender();
     });
-    const reportButton = document.createElement("button");
-    reportButton.type = "button";
-    reportButton.className = "wx-publish-report";
-    reportButton.textContent = "Send a report";
-    reportButton.addEventListener("click", () => {
-      void handleReport("publish-failed", reportButton, "Send a report");
-    });
-    actions.append(retryButton, reportButton);
+    actions.append(retryButton);
 
-    wrap.append(failureHeading, failureBody, actions);
+    const status = document.createElement("p");
+    status.className = "wx-publish-report-status";
+    status.textContent = REPORT_SENDING;
+
+    wrap.append(failureHeading, failureBody, actions, status);
     body.appendChild(wrap);
+
+    // decisions/00114 — no button press required: a failed publish is a dead
+    // end the owner can do nothing about, so the diagnostic goes out by itself.
+    void autoReport("publish-failed", reason, status, actions);
+  }
+
+  /** Send the same bundle "Send a report" sends, unprompted, with the technical
+   * reason attached as the note (for the operator — the owner never sees it).
+   * If it can't get through, the manual button appears as the fallback so a
+   * report is never silently lost; it is never something to nag her about. */
+  async function autoReport(
+    context: string,
+    reason: string | null,
+    status: HTMLElement,
+    actions: HTMLElement,
+  ): Promise<void> {
+    try {
+      await sendReportWithReason(context, reason);
+      if (cancelled) return;
+      status.textContent = REPORT_SENT;
+    } catch {
+      if (cancelled) return;
+      status.textContent = "";
+      const reportButton = document.createElement("button");
+      reportButton.type = "button";
+      reportButton.className = "wx-publish-report wx-publish-report-emphasized";
+      reportButton.textContent = "Send a report";
+      reportButton.addEventListener("click", () => {
+        void handleReport(context, reportButton, "Send a report", reason);
+      });
+      actions.appendChild(reportButton);
+    }
   }
 
   deps.api
@@ -477,6 +643,7 @@ export function mountPublishDrawer(deps: PublishDrawerDeps): PublishDrawer {
     element: root,
     teardown(): void {
       cancelled = true;
+      stopReconcile();
       streamHandle?.close();
     },
   };

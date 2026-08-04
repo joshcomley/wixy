@@ -6,12 +6,48 @@ import type {
   PublishPreview,
   RepairOutcome,
   SendReportOutcome,
+  StateResponse,
 } from "../src/api";
-import { mountPublishDrawer, type PublishStreamHandle } from "../src/publishDrawer";
+import {
+  mountPublishDrawer,
+  type PublishDrawer,
+  type PublishDrawerDeps,
+  type PublishStreamHandle,
+} from "../src/publishDrawer";
+
+/** A `GET /api/admin/state` snapshot whose only interesting field is the
+ * `publishJob` the drawer's reconcile reads (decisions/00114) — `null` is "no
+ * job on the server at all", the shape that means an unresolved publish really
+ * did fail. */
+function stateWithJob(job: PublishJobData | null): StateResponse {
+  return {
+    project: { slug: "ca", name: "Cottage Aesthetics", domain: "ca.example" },
+    pages: [],
+    draft: { rev: 5, opCount: 1 },
+    live: { version: 28, sha: "c".repeat(40) },
+    upstream: { aheadOfPublished: [], fetchedAt: null },
+    publishJob: job,
+    chats: [],
+    adminSections: [],
+    chatAttachmentsSupported: true,
+  };
+}
+
+function jobData(overrides: Partial<PublishJobData> = {}): PublishJobData {
+  return {
+    id: "job-current",
+    stage: "done",
+    log: [],
+    version: 29,
+    error: null,
+    isRunning: false,
+    ...overrides,
+  };
+}
 
 function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
   return {
-    getState: vi.fn(),
+    getState: vi.fn(async () => stateWithJob(null)),
     getContent: vi.fn(),
     patchDraft: vi.fn(),
     discardDraft: vi.fn(),
@@ -412,7 +448,7 @@ describe("mountPublishDrawer — blocked state (decisions/00095)", () => {
     expect(publish).toHaveBeenCalledWith("Content update via Wixy editor", 5);
   });
 
-  it("Fix it for me: a partial fix keeps the drawer blocked with an updated message and emphasized Report", async () => {
+  it("Fix it for me: a partial fix keeps the drawer blocked and sends the report BY ITSELF (decisions/00114)", async () => {
     const repairDraft = vi.fn(
       async (): Promise<RepairOutcome> => ({
         kind: "ok",
@@ -424,8 +460,13 @@ describe("mountPublishDrawer — blocked state (decisions/00095)", () => {
         },
       }),
     );
+    const sendReport = vi.fn(async (): Promise<SendReportOutcome> => ({ emailed: true }));
     const drawer = mountPublishDrawer({
-      api: fakeApi({ getPublishPreview: vi.fn(async () => BLOCKED_PREVIEW), repairDraft }),
+      api: fakeApi({
+        getPublishPreview: vi.fn(async () => BLOCKED_PREVIEW),
+        repairDraft,
+        sendReport,
+      }),
       expectedRev: 3,
       upstream: [],
       onClose: vi.fn(),
@@ -441,14 +482,19 @@ describe("mountPublishDrawer — blocked state (decisions/00095)", () => {
     expect(drawer.element.querySelector(".wx-publish-blocked-body")?.textContent).toContain(
       "couldn't fix everything automatically",
     );
-    expect(drawer.element.querySelector(".wx-publish-report")?.classList.contains(
-      "wx-publish-report-emphasized",
-    )).toBe(true);
-    // Still never the raw validator text.
+    // The report went out unprompted, carrying the validator detail as its note.
+    expect(sendReport).toHaveBeenCalledWith(
+      "publish-validate",
+      "binding-error: some upstream template problem",
+    );
+    expect(drawer.element.querySelector(".wx-publish-report-status")?.textContent).toBe(
+      "Your developer has been told what went wrong.",
+    );
+    // Nothing left for her to press — this is a dead end, not a choice.
+    expect(drawer.element.querySelector(".wx-publish-report")).toBeNull();
+    expect(drawer.element.querySelector(".wx-publish-fix")).toBeNull();
+    // Still never the raw validator text in front of the owner.
     expect(drawer.element.textContent).not.toContain("some upstream template problem");
-    // The Fix button is usable again (not stuck spinning).
-    const fixButton = drawer.element.querySelector<HTMLButtonElement>(".wx-publish-fix");
-    expect(fixButton?.disabled).toBe(false);
   });
 
   it("Fix it for me: a repair conflict/failure toasts an error and re-enables the buttons", async () => {
@@ -648,9 +694,11 @@ describe("mountPublishDrawer — publish running/success/failure states", () => 
     expect(drawer.element.textContent).not.toContain("overlay is at rev 6");
   });
 
-  it("a failed (502) outcome shows the calm failure state with Try again + Send a report", async () => {
+  it("a failed (502) outcome shows the calm failure state and sends the report BY ITSELF (decisions/00114)", async () => {
+    const sendReport = vi.fn(async (): Promise<SendReportOutcome> => ({ emailed: true }));
     const api = fakeApi({
       publish: vi.fn(async () => ({ kind: "failed" as const, message: "git tag failed: some git stderr" })),
+      sendReport,
     });
     const drawer = mountPublishDrawer({
       api,
@@ -665,13 +713,46 @@ describe("mountPublishDrawer — publish running/success/failure states", () => 
     drawer.element.querySelector<HTMLButtonElement>(".wx-publish-confirm")?.click();
     await flush();
     await flush();
+    await flush();
 
     expect(drawer.element.querySelector(".wx-publish-blocked-body")?.textContent).toContain(
       "your edits are safe",
     );
     expect(drawer.element.textContent).not.toContain("git tag failed");
     expect(drawer.element.querySelector(".wx-publish-fix")?.textContent).toBe("Try again");
-    expect(drawer.element.querySelector(".wx-publish-report")).not.toBeNull();
+    // No button press needed — the diagnostic went out with the technical
+    // reason attached as its note, and she's told so in her own language.
+    expect(sendReport).toHaveBeenCalledWith("publish-failed", "git tag failed: some git stderr");
+    expect(drawer.element.querySelector(".wx-publish-report-status")?.textContent).toBe(
+      "Your developer has been told what went wrong.",
+    );
+    expect(drawer.element.querySelector(".wx-publish-report")).toBeNull();
+  });
+
+  it("the automatic report falling over leaves a manual Send a report button (decisions/00114)", async () => {
+    const api = fakeApi({
+      publish: vi.fn(async () => ({ kind: "failed" as const, message: "boom" })),
+      sendReport: vi.fn(async (): Promise<SendReportOutcome> => {
+        throw new Error("offline");
+      }),
+    });
+    const drawer = mountPublishDrawer({
+      api,
+      expectedRev: 0,
+      upstream: [],
+      onClose: vi.fn(),
+      onPublished: vi.fn(),
+      openStream: noopStream,
+    });
+    await flush();
+
+    drawer.element.querySelector<HTMLButtonElement>(".wx-publish-confirm")?.click();
+    await flush();
+    await flush();
+    await flush();
+
+    expect(drawer.element.querySelector(".wx-publish-report")?.textContent).toBe("Send a report");
+    expect(drawer.element.querySelector(".wx-publish-report-status")?.textContent).toBe("");
   });
 
   it("Try again (after a failure) re-fetches the preview and returns to the reviewable state", async () => {
@@ -774,5 +855,205 @@ describe("mountPublishDrawer — publish running/success/failure states", () => 
     drawer.teardown();
 
     expect(close).toHaveBeenCalled();
+  });
+});
+
+// The 2026-08-03 incident (decisions/00114): Purdi published from a phone, the
+// site went live as version 29 — and the drawer said "Publishing didn't work
+// this time." The POST had been aborted at the old blanket 10s timeout and
+// blindly re-sent; the server answered the second one 409 and the drawer read
+// THAT as the outcome. The publish JOB is the source of truth, not the POST.
+describe("mountPublishDrawer — the outcome comes from the JOB, not the POST (decisions/00114)", () => {
+  function mountAndConfirm(
+    api: AdminApi,
+    extra: {
+      priorJobId?: string | null;
+      onPublished?: (version: number) => void;
+      openStream?: PublishDrawerDeps["openStream"];
+    } = {},
+  ): PublishDrawer {
+    return mountPublishDrawer({
+      api,
+      expectedRev: 5,
+      upstream: [],
+      onClose: vi.fn(),
+      onPublished: extra.onPublished ?? vi.fn(),
+      openStream: extra.openStream ?? noopStream,
+      ...(extra.priorJobId !== undefined ? { priorJobId: extra.priorJobId } : {}),
+    });
+  }
+
+  /** A hand-driven stand-in for the SSE stream — `emit` pushes a job snapshot
+   * into the drawer exactly as `EventSource` would. Held on an object so TS
+   * doesn't narrow it to `null` (it's only ever assigned inside the callback). */
+  function fakeStream(): {
+    open: NonNullable<PublishDrawerDeps["openStream"]>;
+    emit: (job: PublishJobData) => void;
+  } {
+    const holder: { onUpdate: ((job: PublishJobData) => void) | null } = { onUpdate: null };
+    return {
+      open: (onUpdate) => {
+        holder.onUpdate = onUpdate;
+        return { close: () => {} };
+      },
+      emit: (job) => holder.onUpdate?.(job),
+    };
+  }
+
+  it("a 409 whose job actually reached done shows SUCCESS, not the failure state", async () => {
+    const onPublished = vi.fn();
+    const api = fakeApi({
+      publish: vi.fn(async () => ({
+        kind: "conflict" as const,
+        message: "expected rev 165, overlay is at rev 166",
+      })),
+      getState: vi.fn(async () => stateWithJob(jobData({ id: "job-29", version: 29 }))),
+    });
+    const drawer = mountAndConfirm(api, { priorJobId: "job-28", onPublished });
+    await flush();
+
+    drawer.element.querySelector<HTMLButtonElement>(".wx-publish-confirm")?.click();
+    await flush();
+    await flush();
+    await flush();
+
+    expect(drawer.element.querySelector(".wx-publish-failure")).toBeNull();
+    expect(drawer.element.querySelector(".wx-publish-state-heading")?.textContent).toBe(
+      "Your site is live.",
+    );
+    expect(drawer.element.querySelector(".wx-publish-state-caption")?.textContent).toBe("Version 29");
+    expect(onPublished).toHaveBeenCalledWith(29);
+  });
+
+  it("a POST lost to the network whose job reached done also shows SUCCESS", async () => {
+    const api = fakeApi({
+      publish: vi.fn(async () => {
+        throw new Error("The operation was aborted");
+      }),
+      getState: vi.fn(async () => stateWithJob(jobData({ id: "job-30", version: 30 }))),
+    });
+    const drawer = mountAndConfirm(api, { priorJobId: null });
+    await flush();
+
+    drawer.element.querySelector<HTMLButtonElement>(".wx-publish-confirm")?.click();
+    await flush();
+    await flush();
+    await flush();
+
+    expect(drawer.element.querySelector(".wx-publish-state-heading")?.textContent).toBe(
+      "Your site is live.",
+    );
+  });
+
+  it("a PREVIOUS publish's leftover done job is never read as this one's success", async () => {
+    const onPublished = vi.fn();
+    const api = fakeApi({
+      publish: vi.fn(async () => ({ kind: "conflict" as const, message: "a publish is already running" })),
+      // The server keeps the last job forever — this is the one that was
+      // already there when the drawer opened, so it proves nothing.
+      getState: vi.fn(async () => stateWithJob(jobData({ id: "job-28", version: 28 }))),
+    });
+    const drawer = mountAndConfirm(api, { priorJobId: "job-28", onPublished });
+    await flush();
+
+    drawer.element.querySelector<HTMLButtonElement>(".wx-publish-confirm")?.click();
+    await flush();
+    await flush();
+    await flush();
+
+    expect(drawer.element.querySelector(".wx-publish-failure")).not.toBeNull();
+    expect(onPublished).not.toHaveBeenCalled();
+  });
+
+  it("a job still running keeps the running state — an unresolved POST is not a failure", async () => {
+    const api = fakeApi({
+      publish: vi.fn(async () => ({ kind: "conflict" as const, message: "a publish is already running" })),
+      getState: vi.fn(async () =>
+        stateWithJob(jobData({ id: "job-31", stage: "building", version: null, isRunning: true })),
+      ),
+    });
+    const drawer = mountAndConfirm(api, { priorJobId: null });
+    await flush();
+
+    drawer.element.querySelector<HTMLButtonElement>(".wx-publish-confirm")?.click();
+    await flush();
+    await flush();
+    await flush();
+
+    expect(drawer.element.querySelector(".wx-publish-running")).not.toBeNull();
+    expect(drawer.element.querySelector(".wx-publish-failure")).toBeNull();
+    drawer.teardown(); // stops the reconcile poll
+  });
+
+  it("the stream's terminal done event settles the drawer even if the POST never resolves", async () => {
+    const stream = fakeStream();
+    const onPublished = vi.fn();
+    const api = fakeApi({
+      publish: vi.fn(() => new Promise<never>(() => {})), // never settles
+    });
+    const drawer = mountAndConfirm(api, {
+      priorJobId: "job-28",
+      onPublished,
+      openStream: stream.open,
+    });
+    await flush();
+
+    drawer.element.querySelector<HTMLButtonElement>(".wx-publish-confirm")?.click();
+    await flush();
+    stream.emit(jobData({ id: "job-29", stage: "building", version: null, isRunning: true }));
+    expect(drawer.element.querySelector(".wx-publish-state-caption")?.textContent).toBe(
+      "Building the site…",
+    );
+
+    stream.emit(jobData({ id: "job-29", version: 29 }));
+    await flush();
+
+    expect(drawer.element.querySelector(".wx-publish-state-heading")?.textContent).toBe(
+      "Your site is live.",
+    );
+    expect(onPublished).toHaveBeenCalledWith(29);
+  });
+
+  it("the stream's terminal failed event settles the drawer into the failure state", async () => {
+    const stream = fakeStream();
+    const sendReport = vi.fn(async (): Promise<SendReportOutcome> => ({ emailed: true }));
+    const api = fakeApi({ publish: vi.fn(() => new Promise<never>(() => {})), sendReport });
+    const drawer = mountAndConfirm(api, {
+      priorJobId: null,
+      openStream: stream.open,
+    });
+    await flush();
+
+    drawer.element.querySelector<HTMLButtonElement>(".wx-publish-confirm")?.click();
+    await flush();
+    stream.emit(jobData({ id: "job-32", stage: "failed", version: null, error: "push rejected" }));
+    await flush();
+    await flush();
+
+    expect(drawer.element.querySelector(".wx-publish-failure")).not.toBeNull();
+    expect(drawer.element.textContent).not.toContain("push rejected");
+    expect(sendReport).toHaveBeenCalledWith("publish-failed", "push rejected");
+  });
+
+  it("the stream's leftover terminal event from a PREVIOUS publish is ignored", async () => {
+    const stream = fakeStream();
+    const onPublished = vi.fn();
+    const api = fakeApi({ publish: vi.fn(() => new Promise<never>(() => {})) });
+    const drawer = mountAndConfirm(api, {
+      priorJobId: "job-28",
+      onPublished,
+      openStream: stream.open,
+    });
+    await flush();
+
+    drawer.element.querySelector<HTMLButtonElement>(".wx-publish-confirm")?.click();
+    await flush();
+    // The server's still-parked record of the LAST publish, delivered the
+    // instant the stream opens — before this publish's own job exists.
+    stream.emit(jobData({ id: "job-28", version: 28 }));
+    await flush();
+
+    expect(drawer.element.querySelector(".wx-publish-running")).not.toBeNull();
+    expect(onPublished).not.toHaveBeenCalled();
   });
 });
