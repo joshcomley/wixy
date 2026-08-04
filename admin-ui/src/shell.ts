@@ -25,7 +25,7 @@ import { renderPagesPanel } from "./pagesPanel";
 import { mountPublishDrawer } from "./publishDrawer";
 import { PUBLISH_STAGE_LABELS } from "./publishStages";
 import { canonicalizeUrl, currentRoute, navigateTo, onRouteChange, type Route } from "./router";
-import { mountSectionPanel } from "./sectionPanel";
+import { mountSectionPanel, type SectionPanel } from "./sectionPanel";
 import { captureScreenshot, copyBlobToClipboard, downloadBlob, flashScreen, screenshotFilename } from "./screenshot";
 import { clearLastRoute, loadLastRoute, saveLastRoute } from "./sessionState";
 import { mountSettingsPanel } from "./settingsPanel";
@@ -753,6 +753,12 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     // A publish changes what's LIVE — recapture every page (the draft's
     // pixels just became the site's).
     thumbnailService.refresh(state?.pages.map((p) => p.slug) ?? []);
+    // ...and it rewrote every staged upload's src to its published form while
+    // deleting the staged file, so a section panel still holding the
+    // pre-publish array must re-read before its next edit writes those dead
+    // `/admin/draft-media/` srcs back (decisions/00115). Version-guarded above,
+    // so this runs exactly once per publish however it was observed.
+    activeSectionPanel?.refresh();
   }
 
   function announcePublishFinished(job: PublishJobData): void {
@@ -837,6 +843,10 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       // reuse the shell's own toast surface rather than the drawer inventing
       // a second one.
       onToast: (message, variant) => showTransientToast(message, variant),
+      onDraftRepaired: () => {
+        void refreshStateInBackground();
+        activeSectionPanel?.refresh();
+      },
     });
     activeDrawer = drawer;
     activeDrawerKind = "publish";
@@ -853,6 +863,12 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   let opSaveFailed = false;
   let activeEditView: EditView | null = null;
   let activeThemePanel: ThemePanel | null = null;
+  // The mounted registry-configured section panel, if any (decisions/00115) —
+  // it keeps its collection array in memory as the source of truth while
+  // mounted, so anything that rewrites the draft behind it (a publish, a draft
+  // repair) has to tell it to re-read, or its next edit writes the pre-rewrite
+  // array back and blocks the following publish.
+  let activeSectionPanel: SectionPanel | null = null;
   let activeRoute: Route | null = null;
   let activePanelTeardown: (() => void) | null = null;
   let stateRetryTimer: number | null = null;
@@ -1019,7 +1035,11 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       }
       const panel = mountSectionPanel(section, { api, opQueue, win });
       main.appendChild(panel.element);
-      activePanelTeardown = () => panel.teardown();
+      activeSectionPanel = panel;
+      activePanelTeardown = () => {
+        activeSectionPanel = null;
+        panel.teardown();
+      };
       return;
     }
 

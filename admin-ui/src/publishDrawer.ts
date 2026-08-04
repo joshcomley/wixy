@@ -61,6 +61,11 @@ export interface PublishDrawerDeps {
    * injected rather than a direct shell.ts import, so this module stays
    * shell-agnostic and unit-testable without a real toast region. */
   onToast?: (message: string, variant?: "error" | "info") => void;
+  /** A repair landed — the draft has been rewritten under whatever is mounted
+   * behind this drawer (items restored from the published version, image srcs
+   * re-pointed). Fires on ANY repair the server accepted, including a partial
+   * one that left the draft still blocked (decisions/00115). */
+  onDraftRepaired?: () => void;
   /** The publish job id already on the server when this drawer opened, if any
    * (decisions/00114). The server keeps the LAST job on `app.state.publish_job`
    * indefinitely, so a terminal snapshot carrying THIS id belongs to a previous
@@ -276,6 +281,7 @@ export function mountPublishDrawer(deps: PublishDrawerDeps): PublishDrawer {
         return;
       }
       currentRev = outcome.rev;
+      deps.onDraftRepaired?.();
       if (outcome.validate.ok) {
         onToast(
           outcome.actions.length > 0

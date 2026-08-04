@@ -440,7 +440,7 @@ def _apply_draft_patch(
         # corrections) THEN structurally validate (raises DraftValidationError,
         # caught by patch_draft below — the overlay must stay untouched on a
         # violation, so this runs BEFORE apply_patch, never after).
-        normalized = normalize_set_ops(sanitized, paths.repo)
+        normalized = normalize_set_ops(sanitized, paths)
         check_structural(normalized)
         ops = [normalized.pop(0) if isinstance(op, SetOp) else op for op in ops]
     new_overlay = apply_patch(overlay, body.expectedRev, ops, by=by, now=now)

@@ -284,7 +284,20 @@ removed from the registry) falls back to the pages panel. The panel owns its own
 collection's ARRAY VALUES live in page content, not `StateResponse`, only its config does)
 and treats each `AdminCollection`'s array as one indivisible unit: every add/edit/reorder/
 delete writes the WHOLE array as one `opQueue.enqueue({file, path, value})` op (the standard
-collection rule this codebase already applies elsewhere), never a partial patch. Per item:
+collection rule this codebase already applies elsewhere), never a partial patch.
+
+**Because the panel is that array's source of truth while mounted, anything that rewrites the
+draft BEHIND it must tell it to re-read** (`SectionPanel.refresh()`, decisions/00115) — a
+publish (which re-points every staged upload at `images/<name>` and deletes the staged file)
+and a `POST draft/repair`. `shell.ts` holds the mounted panel in `activeSectionPanel` and
+calls `refresh()` from `announcePublishSucceeded` (the one version-guarded terminal path both
+the drawer callback and the shell's own watch funnel through) and from the publish drawer's
+`onDraftRepaired`. Without it the panel keeps the PRE-publish array and its next edit writes
+those now-dead `/admin/draft-media/` srcs straight back, blocking the following publish — the
+2026-08-03 production incident. `refresh()` never destroys work in progress: it awaits
+`opQueue.flushNow()` first (text fields commit on BLUR, the queue coalesces at 300 ms, so an
+early re-read would read back the pre-edit value), and while a field inside the panel holds
+focus it defers to `focusout` rather than re-rendering under the owner's cursor. Per item:
 an `image`-kind field opens the shared `mediaDialog.ts` picker (writes `{src, alt}` —
 `contentSrc`, never a served `url`, per decisions/00095's fix). Displaying that stored
 value back as a thumbnail/preview `<img>` — outside the live-preview iframe, which alone

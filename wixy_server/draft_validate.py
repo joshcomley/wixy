@@ -19,11 +19,15 @@ Two passes, always in this order, both called from
    exists on disk (the same "content form" `wixy_server.routes_admin_api.
    _content_src_for` now hands the media picker directly, so this is a belt-
    and-braces net for any OTHER path that could still produce the old form —
-   a hand-authored PATCH, a future bug); a whole-value nbsp-only string (a raw
-   U+00A0, the literal `&nbsp;` entity nh3's sanitize pass re-serializes it as,
-   or any mixture) collapses to `""` — mirrors `editor/src/contentModel.ts:
-   normalizeEmptyText` exactly, as a backstop for the same click-target
-   placeholder if it ever reaches the server unnormalized.
+   a hand-authored PATCH, a future bug); an ALREADY-PUBLISHED staged upload
+   (`/admin/draft-media/<name>` whose staged copy is gone but whose
+   `images/<name>` exists — `rewrite_published_draft_media_src`,
+   decisions/00115) rewrites to that published form; a whole-value nbsp-only
+   string (a raw U+00A0, the literal `&nbsp;` entity nh3's sanitize pass
+   re-serializes it as, or any mixture) collapses to `""` — mirrors
+   `editor/src/contentModel.ts:normalizeEmptyText` exactly, as a backstop for
+   the same click-target placeholder if it ever reaches the server
+   unnormalized.
 2. **Structural validate** (`check_structural`) — for every op whose
    `(file, path)` is a known collection (`COLLECTION_RULES`, plus the
    `treatments.sections` and `_global.footer.*` shapes `builder.validate`
@@ -108,28 +112,60 @@ def rewrite_leading_slash_src(src: str, repo_root: Path) -> str:
     return f"images/{name}" if (repo_root / "images" / name).is_file() else src
 
 
-def _normalize_value(value: JsonValue, repo_root: Path) -> JsonValue:
+def rewrite_published_draft_media_src(src: str, paths: ProjectPaths) -> str:
+    """`/admin/draft-media/<name>` -> `images/<name>` once that upload has been
+    PUBLISHED, else unchanged (decisions/00115).
+
+    A staged upload lives at `draft/media/<name>` and is referenced as
+    `/admin/draft-media/<name>` until a publish copies it into the repo as
+    `images/<name>` and deletes the staged copy (`publisher._materialize_
+    locked`). A client holding a pre-publish copy of a collection array (the
+    section panel keeps the array in memory while mounted) writes those now-dead
+    `/admin/draft-media/` srcs back into the draft on its next edit — the exact
+    2026-08-03 production shape, which blocks publishing on two `missing-image`
+    errors that no amount of owner action clears.
+
+    The rewrite is only ever applied when BOTH halves are certain: the staged
+    copy is gone (so this can't hijack a legitimately-still-staged upload) AND
+    `images/<name>` genuinely exists (the same "never invent a reference" rule
+    `rewrite_leading_slash_src` follows — a name that resolves nowhere stays put
+    and surfaces as the real `missing-image` error it is)."""
+    if not src.startswith(_DRAFT_MEDIA_URL_PREFIX):
+        return src
+    name = src[len(_DRAFT_MEDIA_URL_PREFIX) :]
+    if (paths.draft_media / name).is_file():
+        return src  # still staged — a perfectly valid about-to-be-published ref
+    return f"images/{name}" if (paths.repo / "images" / name).is_file() else src
+
+
+def _normalize_src(src: str, paths: ProjectPaths) -> str:
+    if src.startswith(_DRAFT_MEDIA_URL_PREFIX):
+        return rewrite_published_draft_media_src(src, paths)
+    return rewrite_leading_slash_src(src, paths.repo)
+
+
+def _normalize_value(value: JsonValue, paths: ProjectPaths) -> JsonValue:
     if isinstance(value, dict):
         src = value.get("src")
         if isinstance(src, str) and set(value.keys()) <= _IMAGE_OBJECT_KEYS:
-            out: dict[str, JsonValue] = {**value, "src": rewrite_leading_slash_src(src, repo_root)}
+            out: dict[str, JsonValue] = {**value, "src": _normalize_src(src, paths)}
             alt = value.get("alt")
             if isinstance(alt, str):
                 out["alt"] = _normalize_empty_text(alt)
             return out
-        return {key: _normalize_value(sub, repo_root) for key, sub in value.items()}
+        return {key: _normalize_value(sub, paths) for key, sub in value.items()}
     if isinstance(value, list):
-        return [_normalize_value(item, repo_root) for item in value]
+        return [_normalize_value(item, paths) for item in value]
     if isinstance(value, str):
         return _normalize_empty_text(value)
     return value
 
 
-def normalize_set_ops(ops: list[SetOp], repo_root: Path) -> list[SetOp]:
+def normalize_set_ops(ops: list[SetOp], paths: ProjectPaths) -> list[SetOp]:
     """Best-effort corrections applied to every op's value — never raises,
     never drops an op."""
     return [
-        SetOp(file=op.file, path=op.path, value=_normalize_value(op.value, repo_root)) for op in ops
+        SetOp(file=op.file, path=op.path, value=_normalize_value(op.value, paths)) for op in ops
     ]
 
 

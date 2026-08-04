@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AdminApi, AdminSection, ContentResponse, MediaItem } from "../src/api";
 import type { AlignerRequest, AlignerResult } from "../src/alignerDialog";
 import type { OpQueueLike } from "../src/editView";
+import type { DraftOp } from "../src/protocol";
 import { mountSectionPanel } from "../src/sectionPanel";
 
 const SLIDER_SECTION: AdminSection = {
@@ -76,9 +77,18 @@ function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
   } as AdminApi;
 }
 
-function fakeQueue(): OpQueueLike & { enqueued: unknown[] } {
+function fakeQueue(): OpQueueLike & { enqueued: unknown[]; flushes: number } {
   const enqueued: unknown[] = [];
-  return { rev: 0, enqueued, enqueue: (op) => enqueued.push(op) };
+  const queue = {
+    rev: 0,
+    enqueued,
+    flushes: 0,
+    enqueue: (op: DraftOp) => enqueued.push(op),
+    flushNow: async (): Promise<void> => {
+      queue.flushes += 1;
+    },
+  };
+  return queue;
 }
 
 function fakeWindow(opts: { confirmReturns?: boolean } = {}): Window {
@@ -556,5 +566,96 @@ describe("mountSectionPanel — the before/after aligner (decisions/00111)", () 
         ],
       },
     ]);
+  });
+
+  describe("refresh (decisions/00115)", () => {
+    /** The publish-time shape: the panel loaded while the pair was a staged
+     * upload; the publish then re-pointed it at `images/<name>` and deleted the
+     * staged file. Whatever the panel writes NEXT has to carry the new src. */
+    function apiWithStagedThenPublished(): AdminApi {
+      let src = "/admin/draft-media/abc12345-a1.jpg";
+      const api = fakeApi({
+        getContent: vi.fn(async (): Promise<ContentResponse> => ({
+          content: { gallery: { sliders: [{ ...SLIDER_ITEM, after: { src, alt: "After" } }] } },
+          bindings: { page: "gallery", fields: [] },
+        })),
+      });
+      return Object.assign(api, {
+        publish: (): void => {
+          src = "images/abc12345-a1.jpg";
+        },
+      });
+    }
+
+    it("re-reads the collection so the next edit carries the published src, not the dead staged one", async () => {
+      const api = apiWithStagedThenPublished();
+      const opQueue = fakeQueue();
+      const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue });
+      await flush();
+
+      (api as unknown as { publish: () => void }).publish();
+      panel.refresh();
+      await flush();
+      await flush();
+
+      const titleInput = panel.element.querySelector<HTMLInputElement>(".wx-section-field-input")!;
+      titleInput.value = "Retitled";
+      titleInput.dispatchEvent(new Event("blur"));
+
+      expect(opQueue.enqueued).toEqual([
+        {
+          file: "gallery",
+          path: "gallery.sliders",
+          value: [
+            {
+              ...SLIDER_ITEM,
+              after: { src: "images/abc12345-a1.jpg", alt: "After" },
+              title: "Retitled",
+            },
+          ],
+        },
+      ]);
+    });
+
+    it("flushes queued ops before re-reading, so a just-typed value isn't read back stale", async () => {
+      const api = apiWithStagedThenPublished();
+      const opQueue = fakeQueue();
+      const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue });
+      await flush();
+
+      panel.refresh();
+      await flush();
+
+      expect(opQueue.flushes).toBe(1);
+    });
+
+    it("defers the re-read while a field has focus, so it never eats what she is typing", async () => {
+      const api = apiWithStagedThenPublished();
+      const opQueue = fakeQueue();
+      const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue });
+      await flush();
+      document.body.appendChild(panel.element);
+      try {
+        const titleInput = panel.element.querySelector<HTMLInputElement>(".wx-section-field-input")!;
+        titleInput.focus();
+        const readsBefore = (api.getContent as ReturnType<typeof vi.fn>).mock.calls.length;
+
+        panel.refresh();
+        await flush();
+
+        expect((api.getContent as ReturnType<typeof vi.fn>).mock.calls.length).toBe(readsBefore);
+        expect(opQueue.flushes).toBe(0);
+
+        titleInput.blur(); // focusout — the deferred re-read runs now
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        await flush();
+
+        expect((api.getContent as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(
+          readsBefore,
+        );
+      } finally {
+        panel.element.remove();
+      }
+    });
   });
 });

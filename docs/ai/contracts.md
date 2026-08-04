@@ -368,7 +368,10 @@ three read from.
 - **The write gate** (`draft_validate.normalize_set_ops` → `check_structural`, run inside
   `_apply_draft_patch` before `apply_patch`): every `SetOp` in a `PATCH draft` batch is first
   silently NORMALIZED (leading-slash repo-image src rewritten to the relative form **iff** the
-  file exists — `rewrite_leading_slash_src`; an nbsp-only text placeholder collapsed to `""` —
+  file exists — `rewrite_leading_slash_src`; an ALREADY-PUBLISHED staged upload re-pointed
+  `/admin/draft-media/<name>` → `images/<name>` **iff** the staged copy is gone and
+  `images/<name>` exists — `rewrite_published_draft_media_src`, decisions/00115; an nbsp-only
+  text placeholder collapsed to `""` —
   mirrors `editor/src/contentModel.ts`'s `normalizeEmptyText`), then checked
   STRUCTURALLY — type/required/properties/`additionalProperties` against
   `builder/schemas/*.json` for a `COLLECTION_RULES` key (plus `treatments.sections`' `cards`
@@ -386,11 +389,15 @@ three read from.
   preflight agrees" can never drift.
 - **`POST draft/repair`** (`draft_repair.run_repair`) — deterministic, no AI. Re-normalizes
   every existing op, then for a `COLLECTION_RULES` op repairs item-by-item against the FULL
-  schema (fill missing required fields from the base checkout's same-index item; else replace
-  the item with base; else drop it if there's no base counterpart) — a repaired array that
-  ends up identical to base is DISCARDED as a whole op, not left as a same-valued `SetOp`
-  (Inv 6: a later real upstream edit to that key must still flow through). A non-collection op
-  whose image ref still doesn't resolve after normalize is discarded outright. Returns
+  schema **and against whether each image ref actually resolves to a file** (decisions/00115 —
+  a well-formed src pointing at nothing passes every schema check, and is exactly what blocks
+  a publish): fill missing required fields from the base checkout's same-index item; else
+  replace the item with base; else drop it if there's no base counterpart — a repaired array
+  that ends up identical to base is DISCARDED as a whole op, not left as a same-valued `SetOp`
+  (Inv 6: a later real upstream edit to that key must still flow through). An op that
+  normalize ALONE corrected is still written back (the pre-00115 code skipped it when no item
+  needed repairing, so a repair could report success having changed nothing). A non-collection
+  op whose image ref still doesn't resolve after normalize is discarded outright. Returns
   `actions` — plain-English sentences built from the page's own `meta.navLabel` (never a raw
   field name, Inv 1) — and re-runs `validate_merged_for_publish` so the caller knows whether
   the draft is now actually publishable or still needs the owner's Report path.

@@ -275,6 +275,92 @@ class TestItemWithNoBaseCounterpart:
         assert any("Fixed some content" in a for a in result.actions)
 
 
+class TestStaleDraftMediaAfterPublish:
+    """decisions/00115 — the 2026-08-03 production block. A publish copies a
+    staged upload into the repo as `images/<name>` and DELETES the staged copy;
+    a client still holding the pre-publish array writes those now-dead
+    `/admin/draft-media/<name>` srcs back into the draft on its next edit. The
+    items are structurally perfect, so the pre-00115 schema-only repair changed
+    nothing and the owner was stuck with no action left that could help."""
+
+    def _stale_published_pair(self) -> JsonObject:
+        return {
+            **_BASE_SLIDERS[0],
+            "before": {"src": "/admin/draft-media/ba-lips-1-before.jpg", "alt": "before"},
+            "after": {"src": "/admin/draft-media/ba-lips-1-after.jpg", "alt": "after"},
+        }
+
+    def _staged_new_pair(self, paths: ProjectPaths) -> JsonObject:
+        for name in ("abc12345-new-before.jpg", "abc12345-new-after.jpg"):
+            (paths.draft_media / name).write_bytes(b"fake-jpeg-bytes")
+        return {
+            "cat": "lips",
+            "title": "A Genuinely New Pair",
+            "sub": "Dermal filler",
+            "before": {"src": "/admin/draft-media/abc12345-new-before.jpg", "alt": "before"},
+            "after": {"src": "/admin/draft-media/abc12345-new-after.jpg", "alt": "after"},
+        }
+
+    def test_a_published_upload_is_re_pointed_and_the_new_pair_survives(
+        self, project: ProjectConfig, paths: ProjectPaths
+    ) -> None:
+        _save_overlay(
+            paths,
+            {
+                "gallery:gallery.sliders": [
+                    self._stale_published_pair(),
+                    _BASE_SLIDERS[1],
+                    _BASE_SLIDERS[2],
+                    self._staged_new_pair(paths),
+                ]
+            },
+        )
+
+        result = run_repair(project, paths, expected_rev=0, by="editor", now=_TS)
+
+        assert result.validate.ok is True
+        overlay_after = json.loads(paths.draft_overlay.read_text(encoding="utf-8"))
+        kept = overlay_after["ops"]["gallery:gallery.sliders"]["value"]
+        # The already-published pair now points at its published copy...
+        assert kept[0]["before"]["src"] == "images/ba-lips-1-before.jpg"
+        assert kept[0]["after"]["src"] == "images/ba-lips-1-after.jpg"
+        # ...and the owner's genuinely-new, still-staged pair is untouched.
+        assert kept[3]["title"] == "A Genuinely New Pair"
+        assert kept[3]["before"]["src"] == "/admin/draft-media/abc12345-new-before.jpg"
+        assert any("image link" in a for a in result.actions)
+
+    def test_an_image_that_resolves_nowhere_falls_back_to_the_published_item(
+        self, project: ProjectConfig, paths: ProjectPaths
+    ) -> None:
+        """No staged copy AND no published copy — nothing to re-point at, so the
+        item reverts to its last published version rather than blocking forever
+        (a well-formed src is schema-valid, so only the image-resolution half of
+        the item check can catch this)."""
+        vanished: JsonObject = {
+            **_BASE_SLIDERS[0],
+            "before": {"src": "/admin/draft-media/deadbeef-gone.jpg", "alt": "before"},
+        }
+        _save_overlay(
+            paths,
+            {
+                "gallery:gallery.sliders": [
+                    vanished,
+                    _BASE_SLIDERS[1],
+                    _BASE_SLIDERS[2],
+                    self._staged_new_pair(paths),
+                ]
+            },
+        )
+
+        result = run_repair(project, paths, expected_rev=0, by="editor", now=_TS)
+
+        assert result.validate.ok is True
+        overlay_after = json.loads(paths.draft_overlay.read_text(encoding="utf-8"))
+        kept = overlay_after["ops"]["gallery:gallery.sliders"]["value"]
+        assert kept[0] == _BASE_SLIDERS[0]
+        assert kept[3]["title"] == "A Genuinely New Pair"
+
+
 class TestUpstreamCausedErrorSurvivesRepair:
     def test_a_template_binding_error_not_overlay_fixable_reports_ok_false(
         self, project: ProjectConfig, paths: ProjectPaths

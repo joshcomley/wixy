@@ -11,14 +11,19 @@ state. Entirely deterministic, no AI in the loop:
    shape the 2026-07-28 incident hit, `gallery.sliders`/`gallery.tiles`),
    each item is checked against the FULL schema (unlike the write gate's
    structural-only check, this includes `pattern` — repair aims to produce
-   something actually PUBLISHABLE): a failing item first tries filling its
-   MISSING required fields from the base checkout's same-index item (no
-   overlay applied); if still invalid, the whole item is replaced with that
-   base item; an item with no base counterpart at all (added beyond the
-   base array's length) is dropped. If the repaired array ends up identical
-   to base, the whole op is DISCARDED (an overlay entry identical to base is
-   noise — and critically, unlike leaving a same-valued SetOp in place, a
-   discard lets a LATER upstream change to that key flow through, Inv 6).
+   something actually PUBLISHABLE) AND for image refs that actually resolve
+   (decisions/00115 — a well-formed src pointing at a file that isn't there
+   passes every schema check ever written, yet is precisely what blocks a
+   publish): a failing item first tries filling its MISSING required fields
+   from the base checkout's same-index item (no overlay applied); if still
+   invalid, the whole item is replaced with that base item; an item with no
+   base counterpart at all (added beyond the base array's length) is dropped.
+   If the repaired array ends up identical to base, the whole op is DISCARDED
+   (an overlay entry identical to base is noise — and critically, unlike
+   leaving a same-valued SetOp in place, a discard lets a LATER upstream
+   change to that key flow through, Inv 6). An op that step 1's normalize
+   alone corrected is written back too — never silently dropped on the way
+   out because no ITEM needed repairing.
 3. A non-collection op (e.g. `meta.ogImage`) whose image ref still doesn't
    resolve to a real file after normalize is discarded outright — the same
    "never invent a reference" rule normalize itself follows for the
@@ -115,13 +120,24 @@ def _fill_missing_required(item: JsonValue, base_item: JsonValue, schema: JsonOb
 
 
 def _repair_collection_items(
-    current_items: list[JsonValue], base_items: list[JsonValue], schema: JsonObject
+    current_items: list[JsonValue],
+    base_items: list[JsonValue],
+    schema: JsonObject,
+    paths: ProjectPaths,
 ) -> tuple[list[JsonValue], bool]:
-    """Returns `(repaired_items, any_item_changed)`."""
+    """Returns `(repaired_items, any_item_changed)`. An item is "good" only if it
+    is BOTH fully schema-valid and free of image refs that don't resolve to a
+    real file (decisions/00115) — the second half is what makes repair able to
+    clear a blocked draft whose items are structurally perfect but point at
+    photos that aren't there."""
+
+    def good(item: JsonValue) -> bool:
+        return _is_fully_valid(item, schema) and not _has_unresolvable_image_ref(item, paths)
+
     repaired: list[JsonValue] = []
     changed = False
     for index, item in enumerate(current_items):
-        if _is_fully_valid(item, schema):
+        if good(item):
             repaired.append(item)
             continue
         base_item = base_items[index] if index < len(base_items) else None
@@ -129,7 +145,7 @@ def _repair_collection_items(
             changed = True  # dropped — no base counterpart to fall back to
             continue
         patched = _fill_missing_required(item, base_item, schema)
-        if _is_fully_valid(patched, schema):
+        if good(patched):
             repaired.append(patched)
         else:
             repaired.append(copy.deepcopy(base_item))
@@ -159,6 +175,29 @@ def _has_unresolvable_image_ref(value: JsonValue, paths: ProjectPaths) -> bool:
     if isinstance(value, list):
         return any(_has_unresolvable_image_ref(item, paths) for item in value)
     return False
+
+
+def _image_srcs(value: JsonValue) -> list[str]:
+    """Every `{src, alt}` src inside a value, in traversal order — used only to
+    tell WHICH kind of normalize-only correction happened, so the owner-facing
+    action sentence says "image link" when an image link is what changed and
+    doesn't when it isn't."""
+    found: list[str] = []
+
+    def walk(node: JsonValue) -> None:
+        if isinstance(node, dict):
+            src = node.get("src")
+            if isinstance(src, str) and set(node.keys()) <= {"src", "alt"}:
+                found.append(src)
+                return
+            for sub in node.values():
+                walk(sub)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(value)
+    return found
 
 
 def _base_container(
@@ -191,7 +230,7 @@ def _run_repair_locked(
             for key, op in overlay.ops.items()
             if ":" in key
         ],
-        paths.repo,
+        paths,
     )
 
     actions: list[str] = []
@@ -210,16 +249,29 @@ def _run_repair_locked(
             base_items = base_value if isinstance(base_value, list) else []
             current_items = op.value if isinstance(op.value, list) else []
             repaired_items, any_changed = _repair_collection_items(
-                current_items, base_items, schema
+                current_items, base_items, schema, paths
             )
-            if not any_changed:
+            # `op.value` is the NORMALIZED value; `original_value` is what's on
+            # disk. Normalize alone fixing every problem (the published-upload
+            # src rewrite, decisions/00115) still has to be written back — the
+            # pre-00115 `if not any_changed: continue` dropped it on the floor
+            # and left the draft blocked with nothing left to try.
+            normalized_only = op.value != original_value
+            if not any_changed and not normalized_only:
                 continue  # already fully valid — leave this op untouched
             if repaired_items == base_items:
                 patch_ops.append(DiscardOp(file=op.file, path=op.path))
                 actions.append(f"Restored the {label} to its last published version.")
             else:
                 patch_ops.append(SetOp(file=op.file, path=op.path, value=repaired_items))
-                actions.append(f"Fixed some content in the {label}.")
+                image_link_only = not any_changed and _image_srcs(op.value) != _image_srcs(
+                    original_value
+                )
+                actions.append(
+                    f"Fixed a broken image link on the {label}."
+                    if image_link_only
+                    else f"Fixed some content in the {label}."
+                )
             continue
 
         if _has_unresolvable_image_ref(op.value, paths):
