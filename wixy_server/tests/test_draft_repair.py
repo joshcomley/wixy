@@ -380,6 +380,32 @@ class TestUpstreamCausedErrorSurvivesRepair:
         assert result.validate.ok is False
 
 
+class TestOwnerFacingActionText:
+    def test_a_nav_label_carrying_entity_text_reads_as_plain_english(
+        self, project: ProjectConfig, paths: ProjectPaths
+    ) -> None:
+        """Live `content/gallery.json` stores `"navLabel": "Before &amp; After"`,
+        and these action sentences go straight into a toast the SITE OWNER reads
+        — she must never see a raw `&amp;` (observed in production 2026-08-04,
+        from the very repair that unblocked her draft)."""
+        gallery = paths.repo / "content" / "gallery.json"
+        content = json.loads(gallery.read_text(encoding="utf-8"))
+        content["meta"]["navLabel"] = "Before &amp; After"
+        gallery.write_text(json.dumps(content), encoding="utf-8")
+        _git(["add", "."], paths.repo)
+        _git(["commit", "-m", "entity-escaped navLabel"], paths.repo)
+        missing_cat: JsonObject = {k: v for k, v in _BASE_SLIDERS[0].items() if k != "cat"}
+        _save_overlay(
+            paths,
+            {"gallery:gallery.sliders": [missing_cat, _BASE_SLIDERS[1], _BASE_SLIDERS[2]]},
+        )
+
+        result = run_repair(project, paths, expected_rev=0, by="editor", now=_TS)
+
+        assert any("'Before & After' page" in action for action in result.actions)
+        assert not any("&amp;" in action for action in result.actions)
+
+
 class TestRevConflict:
     def test_a_stale_expected_rev_raises_rev_conflict_error(
         self, project: ProjectConfig, paths: ProjectPaths
