@@ -1329,6 +1329,18 @@ html, body {
   justify-content: center;
 }
 
+/* The automatic diagnostic send (decisions/00114) — a quiet line of reassurance
+   under the actions, never something that competes with "Try again". */
+.wx-publish-report-status {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--wx-muted);
+}
+
+.wx-publish-report-status:empty {
+  display: none;
+}
+
 /* -- Media grid + dialog (spec/05 §4) -------------------------------------------- */
 
 .wx-media-panel h2 {

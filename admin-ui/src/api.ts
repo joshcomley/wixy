@@ -437,6 +437,23 @@ export type ConversationStreamEvent =
 const TIMEOUT_MS = 10_000;
 const MAX_ATTEMPTS = 3;
 const RETRY_BASE_MS = 500;
+// decisions/00114 — publish and restore are LONG-RUNNING and NOT idempotent:
+// each one fetches from GitHub, commits, pushes, rebuilds the site and swaps
+// the live pointer, which routinely outruns the 10s budget above on a phone
+// connection. Aborting one at 10s and blindly re-POSTing it is what made a
+// SUCCESSFUL publish report itself as a failure (2026-08-03, version 29): the
+// retry hit the server's 409 guard and the drawer read that as the outcome.
+// So these two get exactly ONE attempt and a backstop timeout far beyond any
+// real run — their true outcome is resolved from the publish JOB, not here.
+const LONG_TIMEOUT_MS = 600_000;
+
+interface FetchPolicy {
+  timeoutMs: number;
+  maxAttempts: number;
+}
+
+const DEFAULT_POLICY: FetchPolicy = { timeoutMs: TIMEOUT_MS, maxAttempts: MAX_ATTEMPTS };
+const LONG_RUNNING_POLICY: FetchPolicy = { timeoutMs: LONG_TIMEOUT_MS, maxAttempts: 1 };
 
 export class ApiError extends Error {
   readonly status: number | undefined;
@@ -455,15 +472,23 @@ function delay(ms: number): Promise<void> {
 /** spec/05 §7's fetch discipline: a 10s timeout per attempt, up to 3 attempts
  * with a linear backoff. Retries network failures and 5xx only — a 4xx is the
  * server's considered answer (e.g. PATCH /draft's 409 is an expected outcome the
- * OpQueue itself handles, never something blind retrying would resolve). */
-async function fetchWithRetry(input: string, init?: RequestInit): Promise<Response> {
+ * OpQueue itself handles, never something blind retrying would resolve).
+ *
+ * `policy` overrides that per call for the endpoints the discipline does NOT
+ * fit (decisions/00114) — see `LONG_RUNNING_POLICY`. Blind retry is only ever
+ * safe on an idempotent request; every caller left on the default is one. */
+async function fetchWithRetry(
+  input: string,
+  init?: RequestInit,
+  policy: FetchPolicy = DEFAULT_POLICY,
+): Promise<Response> {
   let lastError: unknown;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+  for (let attempt = 1; attempt <= policy.maxAttempts; attempt++) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), policy.timeoutMs);
     try {
       const response = await fetch(input, { ...init, signal: controller.signal });
-      if (response.status >= 500 && attempt < MAX_ATTEMPTS) {
+      if (response.status >= 500 && attempt < policy.maxAttempts) {
         lastError = new ApiError(`${input} -> ${response.status}`, response.status);
         continue;
       }
@@ -473,7 +498,7 @@ async function fetchWithRetry(input: string, init?: RequestInit): Promise<Respon
     } finally {
       clearTimeout(timer);
     }
-    if (attempt < MAX_ATTEMPTS) await delay(RETRY_BASE_MS * attempt);
+    if (attempt < policy.maxAttempts) await delay(RETRY_BASE_MS * attempt);
   }
   throw lastError instanceof Error ? lastError : new ApiError("request failed");
 }
@@ -701,11 +726,15 @@ export function createApi(): AdminApi {
       return parseJson<PublishPreview>(await fetchWithRetry("/api/admin/publish/preview"));
     },
     async publish(message, expectedRev) {
-      const response = await fetchWithRetry("/api/admin/publish", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, expectedRev }),
-      });
+      const response = await fetchWithRetry(
+        "/api/admin/publish",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message, expectedRev }),
+        },
+        LONG_RUNNING_POLICY,
+      );
       if (response.status === 409) {
         return { kind: "conflict", message: await extractDetail(response, "publish conflict") };
       }
@@ -756,11 +785,15 @@ export function createApi(): AdminApi {
       );
     },
     async restore(version) {
-      const response = await fetchWithRetry("/api/admin/restore", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ version }),
-      });
+      const response = await fetchWithRetry(
+        "/api/admin/restore",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ version }),
+        },
+        LONG_RUNNING_POLICY,
+      );
       if (response.status === 409) {
         return { kind: "conflict", message: await extractDetail(response, "restore conflict") };
       }
