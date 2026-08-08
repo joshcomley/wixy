@@ -60,19 +60,27 @@ export function trackConsoleErrors(page: Page): string[] {
  * returning the new rev — the OpQueue's 300ms coalesce + network round trip is
  * real time a test must not race ahead of before checking server-side state (or,
  * for a discard, before the panel's own post-accept refetch has had a chance to
- * re-render). */
-export function waitForNextDraftPatchAccepted(page: Page): Promise<number> {
-  return page
-    .waitForResponse(
-      (res) => res.url().endsWith("/api/admin/draft") && res.request().method() === "PATCH",
-    )
-    .then(async (res) => {
-      if (res.status() !== 200) {
-        throw new Error(`expected PATCH /api/admin/draft to 200, got ${res.status()}`);
-      }
-      const body = (await res.json()) as { rev: number };
-      return body.rev;
-    });
+ * re-render). A 409 is transparently retried BY THE OPQUEUE ITSELF
+ * (`admin-ui/src/opQueue.ts`'s `flush()`: re-fetch the current rev, replay the
+ * same batch immediately, no extra delay) — invisible to the caller in the
+ * common case, but a real client rev can go stale right after any OTHER
+ * rev-bumping event the queue didn't cause itself (e.g. a publish, which clears
+ * the overlay), so a test chaining an edit immediately after one of those can
+ * observe the first PATCH attempt landing a 409 before the queue's own retry
+ * lands the real 200. Skip those transparently rather than failing on them —
+ * this is expected queue behavior, not a bug the test should catch. */
+export async function waitForNextDraftPatchAccepted(page: Page): Promise<number> {
+  for (;;) {
+    const res = await page.waitForResponse(
+      (r) => r.url().endsWith("/api/admin/draft") && r.request().method() === "PATCH",
+    );
+    if (res.status() === 409) continue;
+    if (res.status() !== 200) {
+      throw new Error(`expected PATCH /api/admin/draft to 200, got ${res.status()}`);
+    }
+    const body = (await res.json()) as { rev: number };
+    return body.rev;
+  }
 }
 
 const PUBLISH_CONFLICT_RETRY_LIMIT = 5;

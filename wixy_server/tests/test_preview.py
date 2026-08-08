@@ -87,6 +87,27 @@ class TestRenderPreviewPage:
         assert "Should stay, hidden" in html
         assert 'data-wx-hidden="1"' in html
 
+    def test_hidden_list_item_marked_in_preview_html(
+        self, tmp_path: Path, project: ProjectConfig
+    ) -> None:
+        """A collection item with `visible: false` must still render in preview
+        mode (so the editor can reach it), marked `data-wx-item-hidden="1"`."""
+        source = _write_source(
+            tmp_path,
+            project,
+            '<ul data-wx-list="items"><li data-wx-list-item data-wx=".label">placeholder</li></ul>',
+            {
+                "meta": {},
+                "items": [{"label": "Hidden one", "visible": False}, {"label": "Shown one"}],
+            },
+        )
+        html = render_preview_page(source, "index")
+        soup = BeautifulSoup(html, "html5lib")
+        items = soup.find_all("li")
+        assert [i.get_text() for i in items] == ["Hidden one", "Shown one"]
+        assert items[0].get("data-wx-item-hidden") == "1"
+        assert items[1].get("data-wx-item-hidden") is None
+
     def test_editor_stylesheet_injected_in_head(
         self, tmp_path: Path, project: ProjectConfig
     ) -> None:

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from builder.jsontypes import JsonObject
+from builder.jsontypes import JsonObject, JsonValue
 from wixy_server.draft_validate import DraftValidationError, check_structural, normalize_set_ops
 from wixy_server.overlay import SetOp
 from wixy_server.storage import ProjectPaths, ensure_project_dirs, project_paths
@@ -172,7 +172,7 @@ class TestNormalizeSetOps:
 
 
 class TestCheckStructural:
-    def _slider(self, **overrides: JsonObject | str) -> JsonObject:
+    def _slider(self, **overrides: JsonValue) -> JsonObject:
         base: JsonObject = {
             "cat": "lips",
             "title": "Lip Enhancement",
@@ -280,6 +280,19 @@ class TestCheckStructural:
             )
         ]
         check_structural(ops)  # does not raise
+
+    def test_accepts_an_item_with_visible_false(self) -> None:
+        ops = [SetOp(file="gallery", path="gallery.sliders", value=[self._slider(visible=False)])]
+        check_structural(ops)  # does not raise
+
+    def test_accepts_an_item_with_visible_true(self) -> None:
+        ops = [SetOp(file="gallery", path="gallery.sliders", value=[self._slider(visible=True)])]
+        check_structural(ops)  # does not raise
+
+    def test_rejects_a_non_boolean_visible_value(self) -> None:
+        ops = [SetOp(file="gallery", path="gallery.sliders", value=[self._slider(visible="yes")])]
+        with pytest.raises(DraftValidationError):
+            check_structural(ops)
 
     def test_a_batch_with_one_bad_op_among_good_ones_still_raises(self) -> None:
         bad_slider = self._slider()

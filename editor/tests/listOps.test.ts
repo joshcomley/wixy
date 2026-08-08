@@ -20,12 +20,31 @@ describe("applyListStructuralOp", () => {
     expect(applyListStructuralOp([], { kind: "add" })).toEqual([{}]);
   });
 
+  it("add strips a hidden item[0]'s visible key -- a new item is always born shown", () => {
+    const hiddenFirst: JsonValue[] = [{ title: "One", visible: false }, { title: "Two" }];
+    const result = applyListStructuralOp(hiddenFirst, { kind: "add" });
+    expect(result).toHaveLength(3);
+    expect(result[2]).toEqual({ title: "" });
+    expect("visible" in (result[2] as Record<string, unknown>)).toBe(false);
+    // the source item's own visible: false is untouched
+    expect(result[0]).toEqual({ title: "One", visible: false });
+  });
+
   it("duplicate inserts a deep copy right after the source item", () => {
     const result = applyListStructuralOp(items, { kind: "duplicate", index: 0 });
     expect(result).toHaveLength(3);
     expect(result[1]).toEqual(items[0]);
     expect(result[1]).not.toBe(items[0]); // must be a real copy, not the same reference
     expect(result[2]).toEqual(items[1]);
+  });
+
+  it("duplicate KEEPS a hidden source item's visible: false -- the copy stays hidden too", () => {
+    const hidden: JsonValue[] = [{ title: "One", visible: false }];
+    const result = applyListStructuralOp(hidden, { kind: "duplicate", index: 0 });
+    expect(result).toEqual([
+      { title: "One", visible: false },
+      { title: "One", visible: false },
+    ]);
   });
 
   it("moveUp swaps with the previous item", () => {

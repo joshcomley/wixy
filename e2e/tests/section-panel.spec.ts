@@ -14,8 +14,24 @@
 // suite already covers that; this just confirms the SAME 1c gate rejects a
 // structurally-invalid write through this new panel's content path too).
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { publishAndWait, trackConsoleErrors, waitForNextDraftPatchAccepted } from "./helpers";
+
+/** Finds the `.wx-section-card` whose title input's current VALUE is `title`.
+ * `Locator.filter({ hasText })` matches textContent (or a form control's
+ * accessible NAME, from its `<label>`) — never an `<input>`'s value, so it
+ * can't find a card by its title text (Playwright's own guidance: prefer
+ * `inputValue()` for form controls over textContent-based matching). */
+async function findCardByTitle(collection: Locator, title: string): Promise<Locator> {
+  const cards = collection.locator(".wx-section-card");
+  const count = await cards.count();
+  for (let i = 0; i < count; i++) {
+    const candidate = cards.nth(i);
+    const value = await candidate.locator(".wx-section-field-input").first().inputValue();
+    if (value === title) return candidate;
+  }
+  throw new Error(`no .wx-section-card found with title "${title}"`);
+}
 
 async function gotoSectionAndWaitReady(page: Page, sectionId: string, pageSlug: string): Promise<void> {
   const contentFetch = page.waitForResponse(
@@ -43,8 +59,13 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     await gotoSectionAndWaitReady(page, "before-after", "gallery");
 
     const slidersCollection = page.locator(".wx-section-collection", { hasText: "Drag-to-compare photos" });
-    await expect(slidersCollection.locator(".wx-section-empty")).toHaveText(
-      "No photo pairs yet — add your first photo pair.",
+    // The fixture seeds sliders with one HIDDEN pair (fixture_server.py's
+    // "Hidden Pair", visible: false — see the PR 1 toggle tests below), so the
+    // empty-state message is exercised via the tiles collection instead,
+    // which genuinely starts empty.
+    const tilesCollection = page.locator(".wx-section-collection", { hasText: "Tap-to-zoom photos" });
+    await expect(tilesCollection.locator(".wx-section-empty")).toHaveText(
+      "No photos yet — add your first photo.",
     );
 
     const addDialog = page.locator(".wx-section-add-dialog");
@@ -105,9 +126,11 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     await patchAccepted;
     await expect(addDialog).toBeHidden();
 
+    // Index 0 is always the fixture's pre-seeded "Hidden Pair" (born first in
+    // the array); everything this journey adds lands after it.
     const cards = slidersCollection.locator(".wx-section-card");
-    await expect(cards).toHaveCount(1);
-    await expect(cards.first().locator(".wx-section-field-input").first()).toHaveValue("Lip Filler");
+    await expect(cards).toHaveCount(2);
+    await expect(cards.nth(1).locator(".wx-section-field-input").first()).toHaveValue("Lip Filler");
 
     // The card list's own thumbnail render (renderImageSlot) is a REAL bug
     // this suite never caught: `img.src` was set from the raw content-JSON
@@ -117,7 +140,7 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     // route this panel is ever loaded from. `naturalWidth > 0` proves the
     // browser actually fetched and decoded the image, not just that an
     // <img> tag with SOME src exists in the DOM.
-    for (const thumb of await cards.first().locator(".wx-section-image-thumb").all()) {
+    for (const thumb of await cards.nth(1).locator(".wx-section-image-thumb").all()) {
       await expect(thumb).toHaveJSProperty("complete", true);
       expect(await thumb.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBeGreaterThan(0);
     }
@@ -142,11 +165,11 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     await addDialog.getByRole("button", { name: "Save" }).click();
     await patchAccepted;
 
-    await expect(cards).toHaveCount(2);
-    await expect(cards.nth(1).locator(".wx-section-field-input").first()).toHaveValue("Cheek Filler");
+    await expect(cards).toHaveCount(3);
+    await expect(cards.nth(2).locator(".wx-section-field-input").first()).toHaveValue("Cheek Filler");
 
     // -- retitle pair #1 -------------------------------------------------------
-    const firstTitleInput = cards.first().locator(".wx-section-field-input").first();
+    const firstTitleInput = cards.nth(1).locator(".wx-section-field-input").first();
     patchAccepted = waitForNextDraftPatchAccepted(page);
     await firstTitleInput.fill("Lip Filler (Updated)");
     await firstTitleInput.blur();
@@ -155,10 +178,10 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
 
     // -- reorder via buttons: move pair #2 up -> [Cheek Filler, Lip Filler] --
     patchAccepted = waitForNextDraftPatchAccepted(page);
-    await cards.nth(1).getByRole("button", { name: "Move up" }).click();
+    await cards.nth(2).getByRole("button", { name: "Move up" }).click();
     await patchAccepted;
-    await expect(cards.first().locator(".wx-section-field-input").first()).toHaveValue("Cheek Filler");
-    await expect(cards.nth(1).locator(".wx-section-field-input").first()).toHaveValue("Lip Filler (Updated)");
+    await expect(cards.nth(1).locator(".wx-section-field-input").first()).toHaveValue("Cheek Filler");
+    await expect(cards.nth(2).locator(".wx-section-field-input").first()).toHaveValue("Lip Filler (Updated)");
 
     await publishAndWait(page);
 
@@ -175,6 +198,9 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     expect(liveHtml.indexOf("Cheek Filler")).toBeLessThan(liveHtml.indexOf("Lip Filler (Updated)"));
     expect(liveHtml).toMatch(/data-cat="lips"/);
     expect(liveHtml).toMatch(/src="images\/[^"]+\.jpe?g"/);
+    // The fixture's pre-seeded hidden pair must stay off the public page
+    // through this whole unrelated add/reorder/publish journey.
+    expect(liveHtml).not.toContain("Hidden Pair");
 
     expect(consoleErrors).toEqual([]);
   });
@@ -330,5 +356,104 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
       draft: { rev: number };
     };
     expect(stateAfter.draft.rev).toBe(stateBefore.draft.rev);
+  });
+
+  test("a sliders array with visible: false on an item is ACCEPTED by the write gate (PR 1)", async ({
+    request,
+  }) => {
+    // Companion to the 422 test above: `visible` is now a schema-legal
+    // property (builder/schemas/gallery-slider.schema.json), so an otherwise
+    // well-formed item carrying it must NOT be rejected by the structural
+    // draft-write gate.
+    const stateBefore = (await (await request.get("/api/admin/state")).json()) as {
+      draft: { rev: number };
+    };
+
+    const response = await request.patch("/api/admin/draft", {
+      data: {
+        expectedRev: stateBefore.draft.rev,
+        ops: [
+          {
+            file: "gallery",
+            path: "gallery.sliders",
+            value: [
+              {
+                cat: "lips",
+                title: "x",
+                sub: "x",
+                before: { src: "images/hero.jpg", alt: "x" },
+                after: { src: "images/hero.jpg", alt: "x" },
+                visible: false,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(response.status()).toBe(200);
+  });
+
+  test("PR 1: toggling Show on site for a hidden pair publishes it live; toggling off removes it again", async ({
+    page,
+  }) => {
+    const consoleErrors = trackConsoleErrors(page);
+
+    await gotoSectionAndWaitReady(page, "before-after", "gallery");
+    const slidersCollection = page.locator(".wx-section-collection", { hasText: "Drag-to-compare photos" });
+    const hiddenCard = await findCardByTitle(slidersCollection, "Hidden Pair");
+    await expect(hiddenCard).toBeVisible();
+    await expect(hiddenCard).toHaveClass(/wx-section-card-hidden/);
+    await expect(hiddenCard.locator(".wx-section-hidden-chip")).toHaveText("Hidden");
+    const toggle = hiddenCard.locator(".wx-section-toggle-input");
+    await expect(toggle).not.toBeChecked();
+
+    // Baseline: it has never been published visible, so it's absent from the
+    // live page from the very start.
+    let liveHtml = await (await page.request.get("/gallery.html")).text();
+    expect(liveHtml).not.toContain("Hidden Pair");
+
+    // -- switch ON, publish, and it appears live -----------------------------
+    let patchAccepted = waitForNextDraftPatchAccepted(page);
+    await toggle.check();
+    await patchAccepted;
+    await expect(hiddenCard).not.toHaveClass(/wx-section-card-hidden/);
+    await expect(hiddenCard.locator(".wx-section-hidden-chip")).toHaveCount(0);
+
+    // A publish success re-reads the mounted panel's collection in the
+    // background (`SectionPanel.refresh()`, decisions/00115) — its OWN `GET
+    // /api/admin/content/gallery` fetch. Wait for that specific request to
+    // land before the next edit: `toBeChecked()` alone doesn't prove
+    // anything here (this item is already checked either side of the
+    // refresh), and a still-in-flight refresh, if it resolves AFTER the next
+    // edit's optimistic render, clobbers the DOM back to what it fetched
+    // before that edit ever happened.
+    const refreshFetched = page.waitForResponse(
+      (res) =>
+        res.url().includes("/api/admin/content/gallery") && res.request().method() === "GET",
+    );
+    await publishAndWait(page);
+    await refreshFetched;
+    liveHtml = await (await page.request.get("/gallery.html")).text();
+    expect(liveHtml).toContain("Hidden Pair");
+
+    // publishAndWait leaves the drawer open on its success state (every OTHER
+    // caller either publishes once, or navigates between two calls —
+    // restore.spec.ts's own re-navigation happens to close it); a second call
+    // in the same test needs it closed first or the drawer intercepts the
+    // status bar's Publish button.
+    await page.click(".wx-drawer-close");
+
+    // -- switch back OFF, publish, and it's gone again -----------------------
+    patchAccepted = waitForNextDraftPatchAccepted(page);
+    await toggle.uncheck();
+    await patchAccepted;
+    await expect(hiddenCard).toHaveClass(/wx-section-card-hidden/);
+
+    await publishAndWait(page);
+    liveHtml = await (await page.request.get("/gallery.html")).text();
+    expect(liveHtml).not.toContain("Hidden Pair");
+
+    expect(consoleErrors).toEqual([]);
   });
 });

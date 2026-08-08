@@ -32,6 +32,7 @@ const SLIDER_SECTION: AdminSection = {
             { value: "cheeks", label: "Cheeks" },
           ],
         },
+        { key: "visible", kind: "toggle", label: "Show on site", options: [] },
       ],
     },
   ],
@@ -59,6 +60,7 @@ const TILE_SECTION: AdminSection = {
           label: "Category",
           options: [{ value: "lips", label: "Lips" }],
         },
+        { key: "visible", kind: "toggle", label: "Show on site", options: [] },
       ],
     },
   ],
@@ -385,6 +387,194 @@ describe("mountSectionPanel", () => {
       },
     ]);
     expect(panel.element.querySelector(".wx-section-add-dialog")).toBeNull();
+  });
+});
+
+describe("mountSectionPanel — the visible toggle (Show on site)", () => {
+  it("a shown item's toggle is checked by default and the card carries no hidden styling", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { sliders: [SLIDER_ITEM] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue: fakeQueue() });
+    await flush();
+
+    const toggle = panel.element.querySelector<HTMLInputElement>(".wx-section-toggle-input");
+    expect(toggle?.checked).toBe(true);
+    expect(panel.element.querySelector(".wx-section-card-hidden")).toBeNull();
+    expect(panel.element.querySelector(".wx-section-hidden-chip")).toBeNull();
+  });
+
+  it("an item with visible:false renders unchecked, dimmed, with a Hidden chip", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { sliders: [{ ...SLIDER_ITEM, visible: false }] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue: fakeQueue() });
+    await flush();
+
+    const toggle = panel.element.querySelector<HTMLInputElement>(".wx-section-toggle-input");
+    expect(toggle?.checked).toBe(false);
+    expect(panel.element.querySelector(".wx-section-card-hidden")).not.toBeNull();
+    expect(panel.element.querySelector(".wx-section-hidden-chip")?.textContent).toBe("Hidden");
+  });
+
+  it("unchecking the toggle commits the whole array with visible:false on exactly that item", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { sliders: [SLIDER_ITEM] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const opQueue = fakeQueue();
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue });
+    await flush();
+
+    const toggle = panel.element.querySelector<HTMLInputElement>(".wx-section-toggle-input");
+    expect(toggle).not.toBeNull();
+    if (toggle === null) throw new Error("no toggle input");
+    toggle.checked = false;
+    toggle.dispatchEvent(new Event("change"));
+
+    expect(opQueue.enqueued).toEqual([
+      { file: "gallery", path: "gallery.sliders", value: [{ ...SLIDER_ITEM, visible: false }] },
+    ]);
+  });
+
+  it("re-checking an already-hidden item commits the array with the key REMOVED, not set true", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { sliders: [{ ...SLIDER_ITEM, visible: false }] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const opQueue = fakeQueue();
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue });
+    await flush();
+
+    const toggle = panel.element.querySelector<HTMLInputElement>(".wx-section-toggle-input");
+    expect(toggle).not.toBeNull();
+    if (toggle === null) throw new Error("no toggle input");
+    toggle.checked = true;
+    toggle.dispatchEvent(new Event("change"));
+
+    expect(opQueue.enqueued).toEqual([
+      { file: "gallery", path: "gallery.sliders", value: [SLIDER_ITEM] },
+    ]);
+    const [op] = opQueue.enqueued as Array<{ value: Array<Record<string, unknown>> }>;
+    expect(op !== undefined && "visible" in (op.value[0] ?? {})).toBe(false);
+  });
+
+  it("the guided add flow's new item defaults to shown (toggle checked, no key written)", async () => {
+    const pickedItem: MediaItem = {
+      name: "cheek.jpg",
+      url: "/images/cheek.jpg",
+      contentSrc: "images/cheek.jpg",
+      source: "repo",
+      sizeBytes: 1024,
+      width: 800,
+      height: 600,
+      references: [],
+    };
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({ content: {}, bindings: { page: "gallery", fields: [] } })),
+      getMedia: vi.fn(async () => [pickedItem]),
+    });
+    const opQueue = fakeQueue();
+    const panel = mountSectionPanel(TILE_SECTION, { api, opQueue, win: fakeWindow() });
+    await flush();
+
+    panel.element.querySelector<HTMLButtonElement>(".wx-section-add-button")?.click();
+    const dialog = panel.element.querySelector(".wx-section-add-dialog");
+    const findButton = (text: string): HTMLButtonElement | undefined =>
+      Array.from(dialog?.querySelectorAll("button") ?? []).find((b) => b.textContent === text);
+
+    findButton("Choose Photo")?.click();
+    await flush();
+    const mediaDialog = document.querySelector(".wx-media-dialog-backdrop");
+    mediaDialog?.querySelector<HTMLButtonElement>(".wx-media-thumb")?.click();
+    Array.from(mediaDialog?.querySelectorAll("button") ?? [])
+      .find((b) => b.textContent === "Use this image")
+      ?.click();
+    findButton("Next")?.click();
+
+    // Form step: the toggle is present and checked by default.
+    const toggle = dialog?.querySelector<HTMLInputElement>(".wx-section-toggle-input");
+    expect(toggle?.checked).toBe(true);
+
+    const titleInput = dialog?.querySelector<HTMLInputElement>("input[type='text']");
+    if (titleInput === null || titleInput === undefined) throw new Error("no title input");
+    titleInput.value = "Cheek filler";
+    titleInput.dispatchEvent(new Event("input"));
+    findButton("Save")?.click();
+
+    const [op] = opQueue.enqueued as Array<{ value: Array<Record<string, unknown>> }>;
+    if (op === undefined) throw new Error("no op enqueued");
+    expect("visible" in (op.value[0] ?? {})).toBe(false);
+  });
+
+  it("unchecking the toggle in the add flow before Save writes visible:false on the new item", async () => {
+    const pickedItem: MediaItem = {
+      name: "cheek.jpg",
+      url: "/images/cheek.jpg",
+      contentSrc: "images/cheek.jpg",
+      source: "repo",
+      sizeBytes: 1024,
+      width: 800,
+      height: 600,
+      references: [],
+    };
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({ content: {}, bindings: { page: "gallery", fields: [] } })),
+      getMedia: vi.fn(async () => [pickedItem]),
+    });
+    const opQueue = fakeQueue();
+    const panel = mountSectionPanel(TILE_SECTION, { api, opQueue, win: fakeWindow() });
+    await flush();
+
+    panel.element.querySelector<HTMLButtonElement>(".wx-section-add-button")?.click();
+    const dialog = panel.element.querySelector(".wx-section-add-dialog");
+    const findButton = (text: string): HTMLButtonElement | undefined =>
+      Array.from(dialog?.querySelectorAll("button") ?? []).find((b) => b.textContent === text);
+
+    findButton("Choose Photo")?.click();
+    await flush();
+    const mediaDialog = document.querySelector(".wx-media-dialog-backdrop");
+    mediaDialog?.querySelector<HTMLButtonElement>(".wx-media-thumb")?.click();
+    Array.from(mediaDialog?.querySelectorAll("button") ?? [])
+      .find((b) => b.textContent === "Use this image")
+      ?.click();
+    findButton("Next")?.click();
+
+    const toggle = dialog?.querySelector<HTMLInputElement>(".wx-section-toggle-input");
+    if (toggle === null || toggle === undefined) throw new Error("no toggle input");
+    toggle.checked = false;
+    toggle.dispatchEvent(new Event("change"));
+
+    const titleInput = dialog?.querySelector<HTMLInputElement>("input[type='text']");
+    if (titleInput === null || titleInput === undefined) throw new Error("no title input");
+    titleInput.value = "Cheek filler";
+    titleInput.dispatchEvent(new Event("input"));
+    findButton("Save")?.click();
+
+    expect(opQueue.enqueued).toEqual([
+      {
+        file: "gallery",
+        path: "gallery.tiles",
+        value: [
+          {
+            img: { src: "images/cheek.jpg", alt: "Cheek" },
+            title: "Cheek filler",
+            cat: "lips",
+            visible: false,
+          },
+        ],
+      },
+    ]);
   });
 });
 

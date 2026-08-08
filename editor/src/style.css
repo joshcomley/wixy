@@ -83,6 +83,36 @@
   display: none;
 }
 
+/* -- Hidden list items (visible: false) --------------------------------------
+   Preview-mode marker for a hidden collection item — mirrors builder/
+   bindings.py's ATTR_ITEM_HIDDEN / contentModel.ts's ATTR_ITEM_HIDDEN
+   constant (Inv 20). The badge is a CSS-only ::after, deliberately NOT an
+   injected DOM node — that would have to join OVERLAY_CHROME_SELECTOR in
+   dom.ts (Inv 23) to keep it out of read-back values; a pseudo-element
+   sidesteps that entirely, since it's never part of the DOM tree. Opacity +
+   absolute positioning only — chrome never mutates layout metrics. */
+
+[data-wx-item-hidden] {
+  opacity: 0.4;
+  position: relative;
+}
+
+[data-wx-item-hidden]::after {
+  content: "Hidden";
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 2147483644;
+  padding: 2px 6px;
+  border-radius: var(--wx-radius);
+  background: var(--wx-ink);
+  color: var(--wx-surface);
+  font: 600 10px/1.4 system-ui, -apple-system, sans-serif;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
 /* -- Popovers ---------------------------------------------------------------
    Positioning (position:fixed, coordinates, z-index) is set inline by
    popovers.ts's baseContainer()/positionNear() — only visual chrome lives here. */

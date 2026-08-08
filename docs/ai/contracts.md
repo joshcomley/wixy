@@ -108,8 +108,9 @@ collection>]}`; `<admin collection>` = `{path, label, itemNoun, schema, alignAsp
 fields:[<admin field>]}` — `alignAspect` is `{w, h} | null` (from the registry's
 optional `"alignAspect": "W:H"`); when non-null AND the collection has ≥2 `image`
 fields, the section panel offers the before/after aligner on its cards and in its add
-flow (decisions/00111); `<admin field>` = `{key, kind:"image"\|"text"\|"choice", label,
-options:[{value,label}]}` (decisions/00098) — a plain camelCase mirror of
+flow (decisions/00111); `<admin field>` = `{key, kind:"image"\|"text"\|"choice"\|"toggle", label,
+options:[{value,label}]}` (decisions/00098; `toggle` added decisions/00117 — an on/off switch,
+`options` empty) — a plain camelCase mirror of
 `builder.config.ProjectConfig.admin_sections`
 (`routes_admin_api.py:_admin_sections_snapshot`), registry-driven (Inv 1: no site literals
 in engine code — `ca.json`'s `adminSections` array declares the actual "Before & After"
@@ -304,6 +305,11 @@ array (`dotted_get`/`dotted_set` descend dicts only). Overlay wins per key; any 
 key flows through from `origin/main` (so AI-lane upstream edits appear in the draft). See
 [`spec/02-content-model.md`](../../spec/02-content-model.md) §8 and
 [serving-and-overlay.md](serving-and-overlay.md).
+
+A collection item MAY carry an optional `visible: boolean` (Inv 28, decisions/00117) —
+absent/`true` = shown, `false` = hidden from the public build but still present (marked) in
+the draft preview. Canonical form: the key exists ONLY when `false`; a whole-array op that
+re-shows an item must omit the key rather than send `true`.
 
 ## 6. Browser↔iframe postMessage protocol
 

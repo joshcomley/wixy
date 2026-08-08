@@ -293,6 +293,30 @@ describe("readListValue / readItemValue", () => {
       after: { src: "images/ba-lips-1-after.jpg", alt: "Lip Enhancement — after" },
     });
   });
+
+  it("a hidden item (marked data-wx-item-hidden) round-trips visible: false; an unmarked item carries no key at all", () => {
+    // Preview-mode marker for `visible: false` (builder/bindings.py's
+    // ATTR_ITEM_HIDDEN) — without this, every whole-array read-back would
+    // silently un-hide the item, the same incident class as decisions/00095's
+    // `.cat` attr-drop above.
+    const field: BindingField = {
+      key: "items",
+      kind: "list",
+      items: [{ key: ".title", kind: "text" }],
+    };
+    const container = parse(`
+      <ul data-wx-list="items">
+        <li data-wx-list-item data-wx-item-hidden="1"><span data-wx=".title">Hidden one</span></li>
+        <li data-wx-list-item><span data-wx=".title">Shown one</span></li>
+      </ul>
+    `);
+
+    const result = readListValue(container, field);
+
+    expect(result).toEqual([{ title: "Hidden one", visible: false }, { title: "Shown one" }]);
+    expect(Object.keys(result[0] as Record<string, unknown>).sort()).toEqual(["title", "visible"]);
+    expect(Object.keys(result[1] as Record<string, unknown>).sort()).toEqual(["title"]);
+  });
 });
 
 describe("parseAttrSpec", () => {

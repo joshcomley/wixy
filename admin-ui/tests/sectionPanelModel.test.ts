@@ -12,6 +12,7 @@ import {
   moveItemDown,
   moveItemTo,
   moveItemUp,
+  removeItemField,
   textFieldValue,
   updateItemField,
   type SectionItem,
@@ -144,6 +145,42 @@ describe("updateItemField", () => {
     const result = updateItemField(items, 1, "title", "B2");
     expect(result[0]).toEqual(items[0]);
     expect(result[1]?.["title"]).toBe("B2");
+  });
+
+  it("preserves an unrelated unknown key (e.g. visible) untouched", () => {
+    const items = [item({ title: "A", visible: false })];
+    const result = updateItemField(items, 0, "sub", "New sub");
+    expect(result[0]?.["visible"]).toBe(false);
+    expect(result[0]?.["sub"]).toBe("New sub");
+  });
+});
+
+describe("removeItemField", () => {
+  it("drops the key entirely from the targeted item", () => {
+    const items = [item({ title: "A", visible: false })];
+    const result = removeItemField(items, 0, "visible");
+    expect("visible" in (result[0] ?? {})).toBe(false);
+  });
+
+  it("leaves other items and other keys on the same item untouched", () => {
+    const items = [item({ title: "A", visible: false }), item({ title: "B", visible: false })];
+    const result = removeItemField(items, 0, "visible");
+    expect(result[0]?.["title"]).toBe("A");
+    expect("visible" in (result[0] ?? {})).toBe(false);
+    expect(result[1]?.["visible"]).toBe(false);
+  });
+
+  it("is a no-op when the key is already absent", () => {
+    const items = [item({ title: "A" })];
+    const result = removeItemField(items, 0, "visible");
+    expect(result[0]).toEqual(items[0]);
+  });
+
+  it("never mutates the input array or item", () => {
+    const original = item({ title: "A", visible: false });
+    const items = [original];
+    removeItemField(items, 0, "visible");
+    expect(original["visible"]).toBe(false);
   });
 });
 

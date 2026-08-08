@@ -109,7 +109,16 @@ _GALLERY_JSON = """{
     "navOrder": 30
   },
   "gallery": {
-    "sliders": [],
+    "sliders": [
+      {
+        "before": { "src": "images/hero.jpg", "alt": "Before" },
+        "after": { "src": "images/icon.jpg", "alt": "After" },
+        "title": "Hidden Pair",
+        "sub": "Seed",
+        "cat": "lips",
+        "visible": false
+      }
+    ],
     "tiles": []
   }
 }
@@ -181,6 +190,7 @@ _ADMIN_SECTIONS = json.dumps(
                                 {"value": "cheeks", "label": "Cheeks"},
                             ],
                         },
+                        {"key": "visible", "kind": "toggle", "label": "Show on site"},
                     ],
                 },
                 {
@@ -200,6 +210,7 @@ _ADMIN_SECTIONS = json.dumps(
                                 {"value": "cheeks", "label": "Cheeks"},
                             ],
                         },
+                        {"key": "visible", "kind": "toggle", "label": "Show on site"},
                     ],
                 },
             ],

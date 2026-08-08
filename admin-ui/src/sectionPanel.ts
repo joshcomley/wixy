@@ -22,6 +22,7 @@ import {
   moveItemDown,
   moveItemUp,
   moveItemTo,
+  removeItemField,
   textFieldValue,
   updateItemField,
   type SectionItem,
@@ -279,10 +280,45 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     return wrap;
   }
 
+  /** `visible` items convention (docs/ai/invariants.md, sibling of Inv 10):
+   * absent/`true` = shown, `false` = hidden from the public site but still
+   * fully editable here, dimmed with a "Hidden" chip so it's obvious at a
+   * glance which imports are still switched off. */
+  function renderToggleField(
+    collection: AdminCollection,
+    field: AdminField,
+    item: SectionItem,
+    index: number,
+  ): HTMLElement {
+    const wrap = document.createElement("label");
+    wrap.className = "wx-section-field wx-section-field-toggle";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.className = "wx-section-toggle-input";
+    input.checked = item[field.key] !== false;
+    input.addEventListener("change", () => {
+      if (destroyed) return;
+      const current = itemsFor(collection);
+      commit(
+        collection,
+        input.checked
+          ? removeItemField(current, index, field.key)
+          : updateItemField(current, index, field.key, false),
+      );
+    });
+    const labelText = document.createElement("span");
+    labelText.className = "wx-section-toggle-label";
+    labelText.textContent = field.label;
+    wrap.append(input, labelText);
+    return wrap;
+  }
+
   function renderCard(collection: AdminCollection, item: SectionItem, index: number, count: number): HTMLElement {
     const card = document.createElement("div");
     card.className = "wx-section-card";
     card.dataset["index"] = String(index);
+    const hidden = item["visible"] === false;
+    if (hidden) card.classList.add("wx-section-card-hidden");
 
     const handle = document.createElement("button");
     handle.type = "button";
@@ -302,6 +338,7 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     for (const field of collection.fields) {
       if (field.kind === "text") fields.appendChild(renderTextField(collection, field, item, index));
       if (field.kind === "choice") fields.appendChild(renderChoiceField(collection, field, item, index));
+      if (field.kind === "toggle") fields.appendChild(renderToggleField(collection, field, item, index));
     }
 
     const actions = document.createElement("div");
@@ -339,6 +376,13 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
 
     if (alignButton !== null) actions.append(alignButton);
     actions.append(upButton, downButton, deleteButton);
+
+    if (hidden) {
+      const chip = document.createElement("span");
+      chip.className = "wx-section-hidden-chip";
+      chip.textContent = "Hidden";
+      card.appendChild(chip);
+    }
     card.append(handle, images, fields, actions);
     return card;
   }
@@ -529,7 +573,10 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
       form.className = "wx-section-add-form";
       for (const field of collection.fields) {
         if (field.kind === "image") continue;
-        const row = field.kind === "text" ? renderTextInputRow(field) : renderChoiceInputRow(field);
+        let row: HTMLElement;
+        if (field.kind === "text") row = renderTextInputRow(field);
+        else if (field.kind === "choice") row = renderChoiceInputRow(field);
+        else row = renderToggleInputRow(field);
         form.appendChild(row);
       }
       dialog.appendChild(form);
@@ -620,6 +667,32 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
           refreshSaveEnabled();
         });
         wrap.append(labelText, select);
+        return wrap;
+      }
+
+      // A new item is born SHOWN (blankItem seeds no key for a toggle field,
+      // and absent means visible) — the switch here starts checked/on, and
+      // only writes a key at all if she flips it off before saving.
+      function renderToggleInputRow(field: AdminField): HTMLElement {
+        const wrap = document.createElement("label");
+        wrap.className = "wx-section-field wx-section-field-toggle";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.className = "wx-section-toggle-input";
+        input.checked = draft[field.key] !== false;
+        input.addEventListener("change", () => {
+          if (input.checked) {
+            const { [field.key]: _removed, ...rest } = draft;
+            draft = rest;
+          } else {
+            draft = { ...draft, [field.key]: false };
+          }
+          refreshSaveEnabled();
+        });
+        const labelText = document.createElement("span");
+        labelText.className = "wx-section-toggle-label";
+        labelText.textContent = field.label;
+        wrap.append(input, labelText);
         return wrap;
       }
     }

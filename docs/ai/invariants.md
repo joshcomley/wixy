@@ -159,7 +159,10 @@ identical output to the server (so the theme panel previews without a round-trip
 `googleFonts.test.ts` mirrors the Python tests). A third pair joined in decisions/00075:
 (c) `builder/markdown_inline.py` ≡ `editor/src/markdownText.ts` (inline-markdown render
 for text bindings) — locked by ONE shared fixture, `builder/tests/fixtures/
-markdown-inline.json`, which both pytest and vitest load.
+markdown-inline.json`, which both pytest and vitest load. A fourth pair joined in
+decisions/00117: (d) `builder/bindings.py`'s `ATTR_ITEM_HIDDEN` (`"data-wx-item-hidden"`) ≡
+`editor/src/contentModel.ts`'s `ATTR_ITEM_HIDDEN` — the preview-mode marker attribute a hidden
+collection item carries, taught to the editor's whole-array DOM read-back (Inv 28).
 
 ### Inv 21 — Deploy scripts avoid two Windows footguns
 `launcher.py` runs the slot's venv as a **blocking `subprocess.run`**, never `os.execv` (on
@@ -264,7 +267,10 @@ schema check) — see [contracts.md](contracts.md) §8.
 `COLLECTION_RULES`/nested-shape coverage, isn't retroactively validated — this invariant
 covers writes going forward only. `POST /api/admin/draft/repair` (decisions/00095, 00096) is
 the deterministic recovery path for already-corrupted data, not a live-caught violation of
-this invariant.
+this invariant. *Note:* `visible` (Inv 28) is a schema-legal optional boolean on every
+collection item's schema (`builder/schemas/gallery-slider.schema.json`/`gallery-tile.schema.json`)
+— an item carrying `visible: false`/`true` passes this gate like any other well-typed field; a
+non-boolean value is what the gate correctly rejects.
 
 ### Inv 27 — A published staged upload is never left as a dead draft ref
 A publish CONSUMES the staged uploads it references: `publisher._materialize_locked` copies
@@ -281,4 +287,25 @@ resolves nowhere stays put as the real `missing-image` error it is.
 publish-preview `missing-image` and repaired at the item level by `POST draft/repair` (which
 falls the item back to its last published version), never silently rewritten to a file that
 doesn't exist.
+
+### Inv 28 — Collection items: `visible: false` hides; absent/`true` shows (sibling of Inv 10)
+An optional boolean `visible` on any collection list item (`builder/bindings.py:_expand_list`):
+absent or `true` = shown (byte-identical to pre-existing behavior — the convention is opt-in
+and additive); only an explicit `false` hides it. Mirrors Inv 10's publish/preview asymmetry
+exactly: **publish** drops the item entirely (never cloned, walked, or appended — it never
+reaches the built HTML); **preview** keeps it, marks the clone `data-wx-item-hidden="1"`
+(`ATTR_ITEM_HIDDEN`), and still walks/validates its bindings, so a currently-hidden item's
+broken binding is still caught by `validate` even though it no longer fails a `build`.
+Deliberately NOT built on top of `data-wx-if`: `_expand_list` appends a list-item clone AFTER
+`_walk` returns, so a publish-mode `el.extract()` on the still-detached clone would be undone
+by the append, and `_evaluate_if` hard-fails on a missing key — both verified dead ends
+(decisions/00117). **Canonical storage form: the key exists ONLY when `false`** — both write
+paths (the admin-ui toggle, `sectionPanel.ts`'s `renderToggleField`/`removeItemField`, and the
+editor overlay's whole-array read-back, `contentModel.ts:readListValue`) omit the key rather
+than writing `true`, keeping the two convergent.
+*Enforced by:* `builder/tests/test_bindings.py::TestListItemVisible`,
+`wixy_server/tests/test_preview.py`/`test_draft_validate.py`, `admin-ui/tests/sectionPanel.test.ts`/
+`sectionPanelModel.test.ts`, `editor/tests/contentModel.test.ts`/`listOps.test.ts`/
+`overlay.test.ts`, and `e2e/tests/section-panel.spec.ts`/`collection-edit.spec.ts`.
+*Exception:* none — this asymmetry is intentional, mirroring Inv 10's own "no carve-out" note.
 
