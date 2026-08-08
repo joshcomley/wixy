@@ -93,6 +93,13 @@ section's `cards` → `treatment-card`) and `_global.json`'s `footer.*` (every l
 bool≠number/integer guard — decisions/00002; stay within the subset or checks silently
 no-op).
 
+Any collection item schema may declare an OPTIONAL `"visible": {"type": "boolean"}` property
+(never `required`) — the item-level show/hide convention `_expand_list` (`bindings.py`)
+implements: absent/`true` = shown, `false` = hides the item from a publish build while keeping
+it reachable, marked, in preview (Inv 28). This is engine-generic — any project may opt a
+collection's admin fields into a `"kind": "toggle"` field bound to `visible` (`ca.json`'s
+`gallery.sliders`/`gallery.tiles` do, decisions/00117) without any change to this module.
+
 ## Admin sections (`builder/config.py`, decisions/00098)
 
 `ProjectConfig.admin_sections: tuple[AdminSection, ...]` — a SEPARATE, per-project-configurable
@@ -108,8 +115,9 @@ item toolbar only.
 
 `AdminSection {id, nav_label, title, description, page, collections}` → `AdminCollection {path,
 label, item_noun, schema, fields}` → `AdminField {key, kind: AdminFieldKind, label, options}`
-(`AdminFieldKind = Literal["image", "text", "choice"]`) → `AdminFieldOption {value, label}` — all
-frozen dataclasses, all optional-collection defaults `()`. `load_project_config` parses
+(`AdminFieldKind = Literal["image", "text", "choice", "toggle"]` — `toggle` renders an on/off
+switch, decisions/00117; `options` stays empty for every kind but `choice`) → `AdminFieldOption
+{value, label}` — all frozen dataclasses, all optional-collection defaults `()`. `load_project_config` parses
 `adminSections` LENIENTLY, mirroring the rest of this loader's defensive style: a section/
 collection/field/option missing a required key, or a field with an unrecognized `kind`, is
 individually skipped (`logger.warning`) rather than failing the whole project config load — one

@@ -67,6 +67,23 @@ Computes `content = checkout ⊕ overlay` and is used by both preview and publis
    so a staged-for-deletion page keeps rendering in the draft.
 5. Returns `dataclasses.replace(source, …)`.
 
+## Item-level visibility (`visible: false`, Inv 28)
+
+A second, independent hidden-content marker alongside `data-wx-if`/`data-wx-hidden`
+([invariants.md](invariants.md) Inv 10): a collection item's `visible: false`
+(`builder/bindings.py:_expand_list`) is dropped entirely
+from a **publish** build, but kept — marked `data-wx-item-hidden="1"` (`ATTR_ITEM_HIDDEN`) — in
+**preview**, same asymmetry, same reasoning (the editor needs to reach it; `validate` needs to
+still check its bindings). This is a genuinely separate mechanism from `data-wx-if`/
+`data-wx-hidden`: `data-wx-if` conditionally renders one bound element/subtree from a page- or
+item-scoped boolean expression; `visible` is a per-item convention on a *collection list item's
+own object*, with no expression to evaluate — just `item.get("visible") is False`. Both reach
+the editor the same way (a preview-mode-only DOM attribute the overlay reads back), but they are
+independent: an item can carry `data-wx-if`-bound content internally AND be a hidden collection
+item at the same time, and the two markers never collide (`data-wx-hidden` sits on whichever
+element carries `data-wx-if`; `data-wx-item-hidden` sits on the item's own root,
+`[data-wx-list-item]`).
+
 ## Preview render + editor injection (`preview.py`)
 
 `GET /admin/preview/{page}.html` → `render_preview_page`: `build_site_source` +

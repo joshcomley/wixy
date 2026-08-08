@@ -325,6 +325,18 @@ completeness gate, entity decoding) — unit-tested directly; `sectionPanel.test
 the thin DOM binding on top (kept deliberately DOM-light per spec 3c — the pointer-drag
 interaction itself is real-browser e2e territory, not jsdom's).
 
+**The `visible` toggle ("Show on site", decisions/00117, Inv 28)** — a `"kind": "toggle"`
+`AdminField` renders `renderToggleField` (beside `renderChoiceField`): a checkbox row read as
+`item[field.key] !== false`; unchecking `commit`s `updateItemField(…, field.key, false)`,
+re-checking `commit`s `removeItemField(…, field.key)` (`sectionPanelModel.ts`) — the key exists
+only when `false`, never `true`, matching the builder's own convention exactly. The guided
+add-flow's form step dispatches on `field.kind` with an explicit three-way switch (a `toggle`
+field used to fall through a text/choice ternary into an empty `<select>` — decisions/00117
+fixed the trap before it shipped); its own toggle row starts checked (a new item is born
+shown) and writes a key only if she unchecks it before Save. A card whose item currently has
+`visible: false` gets a `wx-section-card-hidden` class (~0.55 opacity) plus a small "Hidden"
+chip, so which imports are still switched off from the public site is obvious at a glance.
+
 **The before/after aligner** (`alignerDialog.ts` + the pure `alignerModel.ts`,
 decisions/00111) — a collection whose registry entry sets `alignAspect: "W:H"` AND
 declares ≥2 `image` fields gets a **"Line up photos"** button on each fully-picked card
@@ -356,7 +368,20 @@ click-to-edit, and the eye toggle in favor of plain navigation); `messaging.ts` 
 `opTargeting.ts` (`{file, path}` targeting; encodes "no dotted path indexes an array");
 `contentModel.ts` (reads current values back out of the live DOM — the overlay never receives
 content values, only shapes; text reads are chrome-stripped and demoted to markdown source,
-Inv 23 + decisions/00075); `listOps.ts` (pure array transforms); `dom.ts` (binding
+Inv 23 + decisions/00075; `readListValue` also writes `visible: false` back onto a
+reconstructed item whose DOM root carries `data-wx-item-hidden="1"` — the preview-mode marker
+for a hidden collection item, Inv 28/decisions/00117 — so a structural edit to ANY OTHER item
+in the same list can never silently un-hide it, the same incident class as decisions/00095's
+`.cat` attr-drop); `listOps.ts` (pure array transforms — its "add" op strips a cloned
+item[0]'s `visible` key so a new item is always born shown, even from a hidden first item;
+"duplicate" deliberately keeps it, since a duplicate of a hidden item should stay hidden too;
+`overlay.ts`'s DOM-side "add" clone strips the same attribute from the live element, keeping
+the DOM and the emitted array convergent — visually, a `[data-wx-item-hidden]` element in the
+live preview iframe is dimmed (40% opacity) with a small "Hidden" badge, a CSS-only `::after`
+pseudo-element in `editor/src/style.css` — deliberately NOT an injected DOM node, which would
+have to join `OVERLAY_CHROME_SELECTOR` in `dom.ts` (Inv 23) to stay out of read-back values; a
+pseudo-element sidesteps that requirement entirely, since it's never part of the DOM tree);
+`dom.ts` (binding
 discovery, precedence list→href→img→bg→text); `popovers.ts` (link + image editors only —
 text no longer has a popover; also the two anchoring helpers, and they must not be mixed
 (decisions/00086): `positionNear` = VIEWPORT anchoring for EDITOR surfaces — link/image

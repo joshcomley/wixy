@@ -40,11 +40,12 @@ during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/
 
 | File | Covers |
 |---|---|
-| `test_bindings.py` / `test_bindings_map.py` | `data-wx-*` resolution (publish vs preview, list expansion, `if`) / the static binding-map extractor |
+| `test_bindings.py` / `test_bindings_map.py` | `data-wx-*` resolution (publish vs preview, list expansion, `if`, the `visible: false` item convention — `TestListItemVisible`, Inv 28) / the static binding-map extractor |
 | `test_render.py` / `test_build.py` | per-page render; full build + determinism (`hash_output_tree`) + self-check |
 | `test_validate.py` | every validate code path; missing-key/image/schema/theme errors |
 | `test_content.py` / `test_theme.py` / `test_nav.py` | dotted paths + canonical JSON; theme dict round-trip + CSS/fonts URL; nav derivation |
 | `test_sanitize.py` / `test_jsonschema_lite.py` | rich-lite allowlist; the JSON-Schema subset (incl. bool≠number guard) |
+| `test_config.py` | `ProjectConfig`/`adminSections` parsing — lenient skip-on-malformed, `AdminFieldKind` (incl. `toggle`), `alignAspect` parsing |
 | `test_cli.py` | the four subcommands, exit codes, `--json` |
 | `test_partial_migration_state.py` | the partially-migrated tolerance (Inv 5) |
 | `tests/parity/test_parity.py` | rendered parity vs the **CA-site** `baseline/` (captured from the real Cottage Aesthetics build, **not** the mini-site; regenerated only via `capture-baseline.yml`). Screenshot advisory unless `--strict`; text/link/style exact. Uses module-scoped fixtures. |
@@ -62,7 +63,8 @@ during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/
 | `test_publisher.py` / `test_kill_during_publish.py` | the full pipeline; a **real OS-process kill** mid-publish + recovery (decisions/00030) |
 | `test_restore.py` | restore diff → overlay, page-set reconciliation, worktree cleanup |
 | `test_media.py` | upload pipeline (EXIF strip, dedupe, SVG/size reject), reference scan, delete guards |
-| `test_preview.py` | draft preview render + editor injection |
+| `test_preview.py` | draft preview render + editor injection, incl. the hidden-item `data-wx-item-hidden` marker (Inv 28) |
+| `test_draft_validate.py` | the draft-write gate — `normalize_set_ops` (leading-slash/nbsp/published-draft-media rewrites) + `check_structural` (incl. `visible: false`/`true` accepted, non-boolean rejected) |
 | `test_cmdchat.py` / `test_chats.py` | the cmd client (vs `fake_cmd`); conversation store |
 | `test_routes_*.py` | HTTP surface per router (admin_api / chat / public / internal / version) |
 
@@ -75,7 +77,12 @@ during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/
   server byte-for-byte (Inv 20).
 - `e2e/tests/*.spec.ts` — full-stack flows against a real wixy app wired to a fake cmd
   (`e2e/fixture_server.py`): `text-edit`, `image-replace`, `theme-change`, `collection-edit`,
-  `concurrent-editing`, `restore`, `ai-lane`, `chat-ux`.
+  `concurrent-editing`, `restore`, `ai-lane`, `chat-ux`, `section-panel` (decisions/00098's
+  registry-configured Before & After editor, incl. the `visible` toggle — publish/un-publish
+  round trip and the write gate accepting `visible: false`, decisions/00117). The gallery
+  fixture (`fixture_server.py`'s `_GALLERY_JSON`) seeds one HIDDEN slider pair ("Hidden Pair")
+  so both files have a real hidden item to exercise without touching the shared mini-site
+  fixture's `showcase.items` (whose item count several other specs assert exactly).
 
 ## Named fixtures
 
