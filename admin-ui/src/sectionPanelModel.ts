@@ -81,6 +81,19 @@ export function updateItemField(
   return items.map((item, i) => (i === index ? { ...item, [key]: value } : item));
 }
 
+/** Drops `key` entirely from one item — used by the `visible` toggle's "on"
+ * state, whose canonical stored form is "key absent" rather than `true`
+ * (mirrors the builder's `item.get("visible") is False` convention: only an
+ * explicit `false` means anything, so re-showing an item removes the key
+ * rather than writing `true`). */
+export function removeItemField(items: SectionItem[], index: number, key: string): SectionItem[] {
+  return items.map((item, i) => {
+    if (i !== index) return item;
+    const { [key]: _removed, ...rest } = item;
+    return rest;
+  });
+}
+
 export function appendItem(items: SectionItem[], item: SectionItem): SectionItem[] {
   return [...items, item];
 }

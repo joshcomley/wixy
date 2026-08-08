@@ -276,6 +276,36 @@ class TestAdminSectionsLenientParsing:
         assert [o.value for o in field.options] == ["cheeks"]
 
 
+class TestToggleFieldKind:
+    def test_a_toggle_kind_field_parses(self, tmp_path: Path) -> None:
+        data = dict(_MINIMAL_PROJECT)
+        data["adminSections"] = [
+            {
+                "id": "s",
+                "navLabel": "S",
+                "title": "S",
+                "description": "d",
+                "page": "p",
+                "collections": [
+                    {
+                        "path": "p.items",
+                        "label": "Items",
+                        "itemNoun": "item",
+                        "schema": "sch",
+                        "fields": [
+                            {"key": "visible", "kind": "toggle", "label": "Show on site"},
+                        ],
+                    }
+                ],
+            }
+        ]
+
+        config = load_project_config(_write(tmp_path, data))
+
+        field = config.admin_sections[0].collections[0].fields[0]
+        assert field == AdminField(key="visible", kind="toggle", label="Show on site")
+
+
 def _section_with_collection(collection: dict[str, object]) -> dict[str, object]:
     data = dict(_MINIMAL_PROJECT)
     data["adminSections"] = [
