@@ -7,7 +7,13 @@
 // against a real rendered page — that needs a live browser, per this repo's own
 // "verify in a browser for UI changes" rule; flagged explicitly in decisions/00017.
 
-import { chromeFreeElement, chromeFreeTextContent, queryOwn, readListValue } from "./contentModel";
+import {
+  ATTR_ITEM_HIDDEN,
+  chromeFreeElement,
+  chromeFreeTextContent,
+  queryOwn,
+  readListValue,
+} from "./contentModel";
 import { openComposer, type Composer } from "./composer";
 import { buildHoursControl, buildPriceControl, buildQaControl, type HoursRow, type QaItem } from "./controls";
 import {
@@ -690,6 +696,12 @@ export function initOverlay(win: Window = window): () => void {
         if (first === null) return; // no DOM template to clone from — decisions/00017
         const clone = first.cloneNode(true) as Element;
         blankTextLikeFields(clone);
+        // A new item is always born SHOWN, even cloned from a hidden item[0]
+        // (pairs with listOps.ts's "add" stripping `visible` from the array
+        // value) — otherwise the live DOM would render the new card dimmed
+        // while the array just sent to the server has no `visible: false` on
+        // it, a divergence that only self-heals on the next reload.
+        clone.removeAttribute(ATTR_ITEM_HIDDEN);
         listEl.appendChild(clone);
         return;
       }

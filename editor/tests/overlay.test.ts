@@ -1283,6 +1283,36 @@ describe("initOverlay", () => {
       const newTitle = root.querySelectorAll('[data-wx=".title"]')[2] as HTMLElement;
       expect(newTitle.textContent).toBe(" ");
     });
+
+    it("REGRESSION: a structural op over a list containing a hidden item preserves its visible: false", () => {
+      // Same incident class as decisions/00095's `.cat` attr-drop: preview-mode
+      // HTML renders a hidden item marked data-wx-item-hidden (builder/
+      // bindings.py), and EVERY structural toolbar op re-reads the WHOLE list
+      // from the DOM (contentModel.ts:readListValue) before re-emitting it.
+      // Without the marker being taught to that read-back, this would silently
+      // strip `visible: false` and un-hide the item the moment ANY OTHER item
+      // in the same list is reordered/deleted/added/duplicated.
+      root.innerHTML = `
+        <ul data-wx-list="showcase.items">
+          <li data-wx-list-item data-wx-item-hidden="1"><h3 data-wx=".title">One</h3></li>
+          <li data-wx-list-item><h3 data-wx=".title">Two</h3></li>
+        </ul>`;
+      const secondItem = root.querySelectorAll("[data-wx-list-item]")[1] as HTMLElement;
+      const { sent, teardown } = initFor("index", showcaseBindings);
+
+      secondItem.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      document
+        .querySelector('[data-wx-toolbar-action="moveUp"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      const last = sent.at(-1);
+      expect(last?.type).toBe("op");
+      expect(last && "value" in last ? last.value : undefined).toEqual([
+        { title: "Two" },
+        { title: "One", visible: false },
+      ]);
+      teardown();
+    });
   });
 
   describe("shell messages", () => {

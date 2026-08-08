@@ -40,7 +40,18 @@ export function applyListStructuralOp(
   switch (op.kind) {
     case "add": {
       const first = items[0];
-      return [...items, first !== undefined ? blankStrings(first) : {}];
+      if (first === undefined) return [...items, {}];
+      const blanked = blankStrings(first);
+      // A new item is always born SHOWN, even when cloned from a hidden
+      // item[0] — `blankStrings` copies booleans (incl. `visible: false`)
+      // verbatim, so that key needs an explicit strip here (unlike
+      // "duplicate" below, which deliberately keeps it: duplicating a hidden
+      // item stays hidden).
+      if (blanked === null || typeof blanked !== "object" || Array.isArray(blanked)) {
+        return [...items, blanked];
+      }
+      const { visible: _visible, ...rest } = blanked;
+      return [...items, rest];
     }
     case "duplicate": {
       const source = items[op.index];

@@ -233,6 +233,15 @@ export function readItemValue(itemRoot: Element, fields: readonly BindingField[]
   return result;
 }
 
+/** Preview-mode marker for a `visible: false` list item — mirrors
+ * `builder/bindings.py`'s `ATTR_ITEM_HIDDEN` exactly, a hand-synced pair
+ * (Inv 20). The item is otherwise rendered/walked normally (so the editor can
+ * still reach it and its bindings still resolve); this is what tells the
+ * whole-array DOM read-back below to write `visible: false` back into the
+ * reconstructed item, rather than silently un-hiding it. Exported so
+ * `listOps.ts` and `overlay.ts` share the exact same string. */
+export const ATTR_ITEM_HIDDEN = "data-wx-item-hidden";
+
 /** Read every current item under a `data-wx-list` container, in document order —
  * the "whole array" a structural list edit (add/reorder/delete) must re-emit
  * (spec/02 §6/§8's collection rule). */
@@ -240,7 +249,9 @@ export function readListValue(container: Element, field: BindingField): JsonValu
   const items = container.querySelectorAll(":scope > [data-wx-list-item]");
   const values: JsonValue[] = [];
   for (const item of Array.from(items)) {
-    values.push(readItemValue(item, field.items ?? []));
+    const value = readItemValue(item, field.items ?? []) as Record<string, JsonValue>;
+    if (item.hasAttribute(ATTR_ITEM_HIDDEN)) value["visible"] = false;
+    values.push(value);
   }
   return values;
 }
