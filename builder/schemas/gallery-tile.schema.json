@@ -14,7 +14,8 @@
         "alt": { "type": "string" }
       },
       "additionalProperties": false
-    }
+    },
+    "visible": { "type": "boolean" }
   },
   "additionalProperties": false
 }

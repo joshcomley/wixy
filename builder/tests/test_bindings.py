@@ -293,3 +293,67 @@ class TestListBinding:
         ctx = ResolveContext(page={"items": "not-a-list"}, glob={})
         with pytest.raises(BuildError):
             apply_bindings(body, ctx, mode="publish", file_label="test")
+
+
+class TestListItemVisible:
+    """The `visible` item convention: absent/true = shown, `False` = hidden.
+    Publish drops a hidden item entirely; preview keeps it, marked, so the
+    editor can still reach it (Inv 10 sibling — docs/ai/invariants.md)."""
+
+    _HTML = '<ul data-wx-list="items"><li data-wx-list-item data-wx=".label">placeholder</li></ul>'
+
+    def test_publish_mode_drops_hidden_item(self) -> None:
+        body = _body(self._HTML)
+        ctx = ResolveContext(
+            page={"items": [{"label": "A", "visible": False}, {"label": "B"}]}, glob={}
+        )
+        apply_bindings(body, ctx, mode="publish", file_label="test")
+        items = _find(body, "ul").find_all("li")
+        assert [str(i.string) for i in items] == ["B"]
+
+    def test_publish_mode_keeps_item_absent_key_and_true(self) -> None:
+        body = _body(self._HTML)
+        ctx = ResolveContext(
+            page={"items": [{"label": "A"}, {"label": "B", "visible": True}]}, glob={}
+        )
+        apply_bindings(body, ctx, mode="publish", file_label="test")
+        items = _find(body, "ul").find_all("li")
+        assert [str(i.string) for i in items] == ["A", "B"]
+
+    def test_publish_mode_output_identical_with_no_visible_keys_present(self) -> None:
+        # Determinism (Inv 4): content with no `visible` keys at all must render
+        # byte-identical to before this feature existed.
+        body_a = _body(self._HTML)
+        body_b = _body(self._HTML)
+        ctx = ResolveContext(page={"items": [{"label": "A"}, {"label": "B"}]}, glob={})
+        apply_bindings(body_a, ctx, mode="publish", file_label="test")
+        apply_bindings(body_b, ctx, mode="publish", file_label="test")
+        assert str(body_a) == str(body_b)
+        assert "data-wx-item-hidden" not in str(body_a)
+
+    def test_preview_mode_keeps_hidden_item_marked(self) -> None:
+        body = _body(self._HTML)
+        ctx = ResolveContext(
+            page={"items": [{"label": "A", "visible": False}, {"label": "B"}]}, glob={}
+        )
+        apply_bindings(body, ctx, mode="preview", file_label="test")
+        items = _find(body, "ul").find_all("li")
+        assert [str(i.string) for i in items] == ["A", "B"]
+        assert items[0]["data-wx-item-hidden"] == "1"
+        assert not items[1].has_attr("data-wx-item-hidden")
+
+    def test_preview_mode_still_walks_and_validates_hidden_item_bindings(self) -> None:
+        body = _body(self._HTML)
+        ctx = ResolveContext(page={"items": [{"visible": False}]}, glob={})  # missing .label
+        result = ValidationResult()
+        apply_bindings(body, ctx, mode="preview", file_label="test", sink=result)
+        assert not result.ok
+        assert result.errors[0].key == ".label"
+
+    def test_junk_visible_value_is_not_treated_as_hidden(self) -> None:
+        # Only `is False` hides — truthiness would silently misbehave on junk data.
+        body = _body(self._HTML)
+        ctx = ResolveContext(page={"items": [{"label": "A", "visible": "no"}]}, glob={})
+        apply_bindings(body, ctx, mode="publish", file_label="test")
+        items = _find(body, "ul").find_all("li")
+        assert [str(i.string) for i in items] == ["A"]

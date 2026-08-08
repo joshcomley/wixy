@@ -34,6 +34,7 @@ ATTR_LIST = "data-wx-list"
 ATTR_LIST_ITEM = "data-wx-list-item"
 ATTR_IF = "data-wx-if"
 ATTR_HIDDEN = "data-wx-hidden"
+ATTR_ITEM_HIDDEN = "data-wx-item-hidden"
 
 Mode = Literal["publish", "preview"]
 
@@ -159,8 +160,17 @@ def _expand_list(
                 f"list item {index} of '{list_key}' is not an object",
             )
             continue
+        # An item's `visible` key is absent-or-true = shown; only `False` hides it.
+        # publish drops the item entirely (never cloned/walked/appended); preview
+        # keeps it so the editor can still reach it, marked so the overlay's DOM
+        # read-back can tell it apart (Inv 10 sibling — docs/ai/invariants.md).
+        hidden = item_value.get("visible") is False
+        if hidden and mode == "publish":
+            continue
         clone = copy.deepcopy(template_source)
         item_ctx = replace(ctx, item=item_value)
+        if hidden:
+            clone[ATTR_ITEM_HIDDEN] = "1"
         _walk(clone, item_ctx, mode=mode, file_label=file_label, sink=sink)
         container.append(clone)
 
