@@ -1620,6 +1620,28 @@ describe("mountSectionPanel — dynamic choice options via optionsFrom (decision
     ]);
   });
 
+  it("decodes HTML entities in a source item's label for display (stored pre-escaped, decisions/00075)", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: {
+          gallery: {
+            categories: [{ value: "chin", label: "Chin &amp; Jaw" }],
+            sliders: [SLIDER_ITEM],
+          },
+        },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const panel = mountSectionPanel(CATEGORIES_AND_SLIDERS_SECTION, { api, opQueue: fakeQueue() });
+    await flush();
+
+    const select = panel.element.querySelectorAll<HTMLSelectElement>(".wx-section-field-select")[0];
+    if (select === undefined) throw new Error("no choice select");
+    expect(Array.from(select.options).map((o) => [o.value, o.textContent])).toEqual([
+      ["chin", "Chin & Jaw"],
+    ]);
+  });
+
   it("reflects an UNSAVED edit to the categories collection immediately (staged, not just saved)", async () => {
     const api = fakeApi({
       getContent: vi.fn(async () => ({

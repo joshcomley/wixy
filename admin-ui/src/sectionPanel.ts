@@ -223,7 +223,15 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     if (field.optionsFrom === null) return field.options;
     const sourceItems = collectionState.get(field.optionsFrom) ?? [];
     return sourceItems
-      .map((item) => ({ value: textFieldValue(item, "value"), label: textFieldValue(item, "label") }))
+      .map((item) => ({
+        value: textFieldValue(item, "value"),
+        // `label` is stored pre-escaped, render-ready HTML source (same
+        // convention as any other text field, decisions/00075) — decode it
+        // for display here same as `renderTextField` does, or an ampersand/
+        // quote in a category name would show up literally as `&amp;`/`&quot;`
+        // in this dropdown instead of the character it represents.
+        label: decodeCommonEntities(textFieldValue(item, "label")),
+      }))
       .filter((option) => option.value !== "");
   }
 
