@@ -38,12 +38,32 @@ class AdminField:
     property name, `kind` picks the panel control (`image` -> media picker,
     `text` -> inline input, `choice` -> a `<select>` from `options`, `toggle`
     -> an on/off switch, `url` -> an inline input with an "Open" link
-    alongside it once a value is present)."""
+    alongside it once a value is present).
+
+    A `choice` field's selectable values come from EITHER the static
+    `options` tuple (the original mechanism) OR, when `options_source` names
+    another collection's dotted path (decisions/00124), from that
+    collection's OWN current items at render time — each item's own `value`/
+    `label` fields become one option. This lets a project make the choice
+    SET itself admin-editable (e.g. a gallery's category list) by declaring
+    it as an ordinary managed collection, rather than a registry literal only
+    a developer can change. `options_source` takes priority when both are
+    present; a field should only ever declare one or the other.
+
+    `required` (decisions/00124) gates whether the "Save" button in the
+    add-new-item wizard stays disabled while this field is blank
+    (`sectionPanelModel.isNewItemComplete`) — defaults `False` so every
+    EXISTING field's behavior is unchanged unless a project's registry opts
+    it in explicitly. Replaces an earlier hardcoded "a field named `title`
+    is required" special case (an Inv 1 violation this fixes rather than
+    keeps)."""
 
     key: str
     kind: AdminFieldKind
     label: str
     options: tuple[AdminFieldOption, ...] = ()
+    options_source: str | None = None
+    required: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,8 +137,14 @@ def _parse_admin_field(raw: JsonValue) -> AdminField | None:
     kind = raw.get("kind")
     if key is None or label is None or kind not in _ADMIN_FIELD_KINDS:
         return None
+    options_source_raw = raw.get("optionsFrom")
     return AdminField(
-        key=key, kind=kind, label=label, options=_parse_admin_field_options(raw.get("options", []))
+        key=key,
+        kind=kind,
+        label=label,
+        options=_parse_admin_field_options(raw.get("options", [])),
+        options_source=options_source_raw if isinstance(options_source_raw, str) else None,
+        required=raw.get("required") is True,
     )
 
 

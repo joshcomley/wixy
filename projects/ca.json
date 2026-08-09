@@ -17,6 +17,21 @@
       "page": "gallery",
       "collections": [
         {
+          "path": "gallery.categories",
+          "label": "Category names",
+          "itemNoun": "category",
+          "schema": "gallery-category",
+          "fields": [
+            {
+              "key": "value",
+              "kind": "text",
+              "label": "Internal key (short, e.g. \"lips\") — avoid changing this once photos use it",
+              "required": true
+            },
+            { "key": "label", "kind": "text", "label": "Display name shown on your site", "required": true }
+          ]
+        },
+        {
           "path": "gallery.sliders",
           "label": "Drag-to-compare photos",
           "itemNoun": "photo pair",
@@ -25,19 +40,9 @@
           "fields": [
             { "key": "before", "kind": "image", "label": "Before photo" },
             { "key": "after", "kind": "image", "label": "After photo" },
-            { "key": "title", "kind": "text", "label": "Treatment name" },
+            { "key": "title", "kind": "text", "label": "Treatment name", "required": true },
             { "key": "sub", "kind": "text", "label": "Treatment type" },
-            {
-              "key": "cat",
-              "kind": "choice",
-              "label": "Category",
-              "options": [
-                { "value": "lips", "label": "Lips" },
-                { "value": "cheeks", "label": "Cheeks" },
-                { "value": "chin", "label": "Chin & Jaw" },
-                { "value": "eyes", "label": "Eyes & Brows" }
-              ]
-            },
+            { "key": "cat", "kind": "choice", "label": "Category", "optionsFrom": "gallery.categories" },
             { "key": "sourceUrl", "kind": "url", "label": "Original post link (optional)" },
             { "key": "visible", "kind": "toggle", "label": "Show on site" }
           ]
@@ -49,18 +54,8 @@
           "schema": "gallery-tile",
           "fields": [
             { "key": "img", "kind": "image", "label": "Photo" },
-            { "key": "title", "kind": "text", "label": "Caption" },
-            {
-              "key": "cat",
-              "kind": "choice",
-              "label": "Category",
-              "options": [
-                { "value": "lips", "label": "Lips" },
-                { "value": "cheeks", "label": "Cheeks" },
-                { "value": "chin", "label": "Chin & Jaw" },
-                { "value": "eyes", "label": "Eyes & Brows" }
-              ]
-            },
+            { "key": "title", "kind": "text", "label": "Caption", "required": true },
+            { "key": "cat", "kind": "choice", "label": "Category", "optionsFrom": "gallery.categories" },
             { "key": "visible", "kind": "toggle", "label": "Show on site" }
           ]
         }

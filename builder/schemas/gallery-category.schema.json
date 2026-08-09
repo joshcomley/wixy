@@ -1,0 +1,11 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "before/after gallery category (decisions/00124)",
+  "type": "object",
+  "required": ["value", "label"],
+  "properties": {
+    "value": { "type": "string", "pattern": ".*\\S.*" },
+    "label": { "type": "string", "pattern": ".*\\S.*" }
+  },
+  "additionalProperties": false
+}

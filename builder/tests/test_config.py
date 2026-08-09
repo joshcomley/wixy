@@ -276,7 +276,7 @@ class TestAdminSectionsLenientParsing:
         assert [o.value for o in field.options] == ["cheeks"]
 
 
-class TestToggleFieldKind:
+class TestFieldKindAndCapabilities:
     def test_a_toggle_kind_field_parses(self, tmp_path: Path) -> None:
         data = dict(_MINIMAL_PROJECT)
         data["adminSections"] = [
@@ -332,6 +332,96 @@ class TestToggleFieldKind:
 
         field = config.admin_sections[0].collections[0].fields[0]
         assert field == AdminField(key="sourceUrl", kind="url", label="Original post link")
+
+    def test_a_choice_field_with_options_from_parses(self, tmp_path: Path) -> None:
+        """decisions/00124: a choice field's options can come from another
+        collection's live content instead of a static `options` array."""
+        data = dict(_MINIMAL_PROJECT)
+        data["adminSections"] = [
+            {
+                "id": "s",
+                "navLabel": "S",
+                "title": "S",
+                "description": "d",
+                "page": "p",
+                "collections": [
+                    {
+                        "path": "p.items",
+                        "label": "Items",
+                        "itemNoun": "item",
+                        "schema": "sch",
+                        "fields": [
+                            {
+                                "key": "cat",
+                                "kind": "choice",
+                                "label": "Category",
+                                "optionsFrom": "p.cats",
+                            },
+                        ],
+                    }
+                ],
+            }
+        ]
+
+        config = load_project_config(_write(tmp_path, data))
+
+        field = config.admin_sections[0].collections[0].fields[0]
+        assert field == AdminField(
+            key="cat", kind="choice", label="Category", options_source="p.cats"
+        )
+
+    def test_a_required_field_parses(self, tmp_path: Path) -> None:
+        data = dict(_MINIMAL_PROJECT)
+        data["adminSections"] = [
+            {
+                "id": "s",
+                "navLabel": "S",
+                "title": "S",
+                "description": "d",
+                "page": "p",
+                "collections": [
+                    {
+                        "path": "p.items",
+                        "label": "Items",
+                        "itemNoun": "item",
+                        "schema": "sch",
+                        "fields": [
+                            {"key": "title", "kind": "text", "label": "Name", "required": True},
+                        ],
+                    }
+                ],
+            }
+        ]
+
+        config = load_project_config(_write(tmp_path, data))
+
+        field = config.admin_sections[0].collections[0].fields[0]
+        assert field == AdminField(key="title", kind="text", label="Name", required=True)
+
+    def test_required_defaults_false(self, tmp_path: Path) -> None:
+        data = dict(_MINIMAL_PROJECT)
+        data["adminSections"] = [
+            {
+                "id": "s",
+                "navLabel": "S",
+                "title": "S",
+                "description": "d",
+                "page": "p",
+                "collections": [
+                    {
+                        "path": "p.items",
+                        "label": "Items",
+                        "itemNoun": "item",
+                        "schema": "sch",
+                        "fields": [{"key": "sub", "kind": "text", "label": "Sub"}],
+                    }
+                ],
+            }
+        ]
+
+        config = load_project_config(_write(tmp_path, data))
+
+        assert config.admin_sections[0].collections[0].fields[0].required is False
 
 
 def _section_with_collection(collection: dict[str, object]) -> dict[str, object]:
