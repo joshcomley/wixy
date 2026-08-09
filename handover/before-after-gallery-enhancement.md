@@ -1,3 +1,10 @@
+> ⚠️ **STALE — SUPERSEDED. DO NOT ACT ON THIS DOCUMENT WITHOUT CHECKING.** <!-- HANDOVER-SUPERSEDED-STAMP -->
+> A newer handover — `2608091744-wixy-before-after-legibility-pr1-cleared.md` — was written in this directory on 2026-08-09, so this document is almost certainly spent.
+> If you were just handed this file, STOP and re-orient from the newest handover here, your
+> project's orientation docs, and `origin/main` before doing any work it asks for.
+> (Stamped automatically by the handover skill. Evidence is recency, not proof of execution —
+> if you can show this document is still live, delete this banner.)
+
 # Handover Brief — Cottage Aesthetics: Before & After gallery (full-size, high-impact)
 
 ## The task (operator's request)
