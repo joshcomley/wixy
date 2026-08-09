@@ -6,19 +6,33 @@
 // callbacks)` shape — a section's collection VALUES live in page content, not
 // in `StateResponse`, so this mirrors `mediaPanel.ts`'s `mountXPanel(api,
 // win)` "owns its own lifecycle" precedent instead.
+//
+// Staged-save model (decisions/00118): unlike the rest of the admin (which
+// auto-saves every edit through the shared `OpQueue`), this panel holds edits
+// LOCALLY (`collectionState`) until she presses Save. `savedState` is the
+// last-known-saved-or-loaded snapshot; the difference between the two is
+// "dirty". This is a deliberate divergence, scoped to this panel only — it's
+// her primary surface, and the one she asked to be made legible: edit ->
+// (visibly unsaved) -> Save -> "ready to publish" -> Publish, with Undo/
+// Discard available at both the local and the draft stage.
 
 import type { AdminApi, AdminCollection, AdminField, AdminSection } from "./api";
 import type { OpQueueLike } from "./editView";
 import { openAlignerDialog, type AlignerResult } from "./alignerDialog";
 import { contentSrcToDisplayUrl, openMediaDialog, type MediaPickValue } from "./mediaDialog";
+import { setButtonBusy, setButtonIdle } from "./spinnerButton";
 import {
   appendItem,
   blankItem,
+  cloneItems,
   decodeCommonEntities,
   deleteItemAt,
+  fieldDirty,
   imageFieldValue,
   isNewItemComplete,
+  itemDirty,
   itemsAt,
+  itemsEqual,
   moveItemDown,
   moveItemUp,
   moveItemTo,
@@ -34,10 +48,14 @@ export interface SectionPanel {
    * the in-memory working copy (decisions/00115). The shell calls this after
    * anything that rewrites the draft BEHIND the panel — a publish (which
    * re-points every staged upload at its published `images/<name>` and deletes
-   * the staged file) or a draft repair. Without it the panel's array keeps
-   * pre-publish `/admin/draft-media/` srcs whose files are gone, and the very
-   * next edit writes them all back as one op, blocking the next publish. */
+   * the staged file) or a draft repair. Deferred while she's mid-edit or has
+   * unsaved local changes (decisions/00118) — a re-read would otherwise
+   * throw away typing, or unsaved staged edits she hasn't pressed Save on. */
   refresh(): void;
+  /** Whether any collection has local edits not yet written to the draft
+   * (decisions/00118's staged-save model) — the shell checks this before a
+   * route change / tab close so nothing is silently lost. */
+  hasUnsavedChanges(): boolean;
   teardown(): void;
 }
 
@@ -49,7 +67,22 @@ export interface SectionPanelDeps {
    * real canvas, which jsdom doesn't have — panel tests stub this and drive
    * its `respond` callback directly. Production always uses the real one. */
   openAligner?: typeof openAlignerDialog;
+  /** Ask the shell to open the publish review drawer (decisions/00118) — the
+   * panel never re-implements publish itself (Inv 25: publish progress/
+   * completion feedback is shell-owned). Wired in shell.ts's section-route
+   * mount to `openPublishDrawer()`. */
+  onRequestPublish?: () => void;
+  /** Tell the shell to re-read `/api/admin/state` after this panel changes
+   * the draft OUTSIDE the normal `opQueue` path — today, only "Discard all
+   * changes" (`api.discardDraft()` is a plain DELETE, not an op the shared
+   * queue's `onAccepted` hook would otherwise notice), so the global status
+   * bar's chip reflects the now-empty draft immediately rather than waiting
+   * for the next 60s revalidation. */
+  onDraftChanged?: () => void;
 }
+
+const MAX_UNDO_SNAPSHOTS = 50;
+const SAVE_STATUS_CLEAR_MS = 2500;
 
 export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps): SectionPanel {
   const win = deps.win ?? window;
@@ -70,31 +103,282 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
   descEl.textContent = section.description;
   header.append(titleEl, descEl);
 
+  // -- "Ready to publish" banner (decisions/00118) ---------------------------
+  // Reflects the DRAFT (server) state — what's already saved and queued,
+  // reconciling with the shell's own status-bar chip (both read the same
+  // `state.draft.opCount`). Distinct from the save bar below, which reflects
+  // LOCAL unsaved edits: "unsaved" and "ready to publish" are deliberately
+  // two different, clearly separated ideas (the exact confusion she reported).
+
+  const readyBanner = document.createElement("div");
+  readyBanner.className = "wx-section-ready-banner";
+  readyBanner.hidden = true;
+  const readyBannerText = document.createElement("span");
+  readyBannerText.className = "wx-section-ready-banner-text";
+  const publishFromBannerButton = document.createElement("button");
+  publishFromBannerButton.type = "button";
+  publishFromBannerButton.className = "wx-publish-button";
+  publishFromBannerButton.textContent = "Publish";
+  publishFromBannerButton.addEventListener("click", () => void onPublishClick());
+  const discardAllButton = document.createElement("button");
+  discardAllButton.type = "button";
+  discardAllButton.className = "wx-section-discard-all-button";
+  discardAllButton.textContent = "Discard all changes";
+  discardAllButton.addEventListener("click", () => void discardAll());
+  readyBanner.append(readyBannerText, publishFromBannerButton, discardAllButton);
+
   const body = document.createElement("div");
   body.className = "wx-section-body";
 
-  const footer = document.createElement("p");
-  footer.className = "wx-section-footer-note";
-  footer.textContent = "Changes here are drafts until you press Publish.";
+  // -- Sticky Save bar (decisions/00118) --------------------------------------
+  // Reflects LOCAL unsaved edits — hidden while the panel is clean. Sticky to
+  // the bottom of the panel so it's reachable without hunting for it on a
+  // phone; `.wx-main` gets matching bottom padding (style.css) so it never
+  // overlaps the last card.
 
-  element.append(header, body, footer);
+  const saveBar = document.createElement("div");
+  saveBar.className = "wx-section-save-bar";
+  saveBar.hidden = true;
+  const saveBarText = document.createElement("span");
+  saveBarText.className = "wx-section-save-bar-text";
+  saveBarText.textContent = "You have unsaved changes";
+  const saveBarStatus = document.createElement("span");
+  saveBarStatus.className = "wx-section-save-bar-status";
+  const undoButton = document.createElement("button");
+  undoButton.type = "button";
+  undoButton.className = "wx-section-undo-button";
+  undoButton.textContent = "Undo last";
+  undoButton.addEventListener("click", () => undoLast());
+  const discardUnsavedButton = document.createElement("button");
+  discardUnsavedButton.type = "button";
+  discardUnsavedButton.className = "wx-section-discard-unsaved-button";
+  discardUnsavedButton.textContent = "Discard unsaved";
+  discardUnsavedButton.addEventListener("click", () => discardUnsaved());
+  const saveButton = document.createElement("button");
+  saveButton.type = "button";
+  saveButton.className = "wx-publish-button wx-section-save-button";
+  saveButton.textContent = "Save";
+  saveButton.addEventListener("click", () => void saveNow());
+  // A dedicated group for the buttons (rather than making them direct flex
+  // children of the bar) so they stay put as a right-aligned cluster when
+  // Undo conditionally hides — an auto-margin on an individual button would
+  // otherwise need to migrate to whichever button is currently first-visible.
+  const saveBarActions = document.createElement("div");
+  saveBarActions.className = "wx-section-save-bar-actions";
+  saveBarActions.append(undoButton, discardUnsavedButton, saveButton);
+  saveBar.append(saveBarText, saveBarStatus, saveBarActions);
+
+  element.append(header, readyBanner, body, saveBar);
 
   // The panel's own working copy of each collection's array while mounted
   // (spec 3c: "the panel state — the panel is the array's source of truth
-  // while mounted"); every mutation writes the WHOLE array as one op and the
-  // shell's shared `opQueue.onAccepted` callback (wired once in shell.ts,
-  // not here) refreshes the draft chip/status bar exactly like any edit.
+  // while mounted"). `savedState` is the last snapshot the SERVER accepted
+  // (or, before any edit, what `load()` just read) — the two together define
+  // "dirty" (decisions/00118). Neither map needs deep-cloning on every read:
+  // every pure helper in sectionPanelModel.ts returns a NEW array/object
+  // rather than mutating in place, so a reference captured into `savedState`
+  // is never retroactively changed by a later edit.
   const collectionState = new Map<string, SectionItem[]>();
+  const savedState = new Map<string, SectionItem[]>();
   const collectionBodies = new Map<string, HTMLElement>();
+
+  /** A single panel-wide stack of pre-mutation snapshots (bounded), not one
+   * per collection — "Undo last" means "undo what I just did", regardless of
+   * which collection it touched, matching how she described the ask. */
+  const undoStack: Array<{ path: string; items: SectionItem[] }> = [];
+
+  let saving = false;
+  let draftOpCount = 0;
 
   function itemsFor(collection: AdminCollection): SectionItem[] {
     return collectionState.get(collection.path) ?? [];
   }
 
-  function commit(collection: AdminCollection, items: SectionItem[]): void {
+  function isCollectionDirty(collection: AdminCollection): boolean {
+    return !itemsEqual(itemsFor(collection), savedState.get(collection.path) ?? []);
+  }
+
+  function isDirty(): boolean {
+    return section.collections.some((collection) => isCollectionDirty(collection));
+  }
+
+  function pushUndoSnapshot(path: string, items: SectionItem[]): void {
+    undoStack.push({ path, items });
+    if (undoStack.length > MAX_UNDO_SNAPSHOTS) undoStack.shift();
+  }
+
+  /** Stages an edit into the local working copy — everything `commit` used to
+   * do EXCEPT writing to the server (decisions/00118). The whole array is
+   * still the unit of change (Inv 6); only the MOMENT it reaches the draft
+   * has moved, from "every edit" to "when she presses Save". */
+  function stageLocal(collection: AdminCollection, items: SectionItem[]): void {
+    pushUndoSnapshot(collection.path, itemsFor(collection));
     collectionState.set(collection.path, items);
-    opQueue.enqueue({ file: section.page, path: collection.path, value: items });
     renderCollectionBody(collection);
+    refreshSaveBar();
+  }
+
+  function undoLast(): void {
+    const last = undoStack.pop();
+    if (last === undefined) return;
+    collectionState.set(last.path, last.items);
+    const collection = section.collections.find((c) => c.path === last.path);
+    if (collection !== undefined) renderCollectionBody(collection);
+    refreshSaveBar();
+    maybeRunPendingRefresh();
+  }
+
+  function discardUnsaved(): void {
+    const ok = win.confirm("Discard your unsaved changes? This can't be undone.");
+    if (!ok) return;
+    for (const collection of section.collections) {
+      collectionState.set(collection.path, cloneItems(savedState.get(collection.path) ?? []));
+      renderCollectionBody(collection);
+    }
+    undoStack.length = 0;
+    refreshSaveBar();
+    maybeRunPendingRefresh();
+  }
+
+  function refreshSaveBar(): void {
+    const dirty = isDirty();
+    saveBar.hidden = !dirty;
+    undoButton.hidden = undoStack.length === 0;
+    if (!saving) saveButton.disabled = !dirty;
+  }
+
+  /** Only re-runs a deferred `refresh()` once it's actually safe — i.e. once
+   * she's no longer mid-edit AND no longer dirty (decisions/00115, 00118). */
+  function maybeRunPendingRefresh(): void {
+    if (!refreshPending || destroyed || isEditingInPanel() || isDirty()) return;
+    refreshPending = false;
+    void refreshFromServer();
+  }
+
+  /** Writes every dirty collection to the draft in one PATCH batch, via the
+   * SAME `opQueue.enqueue` chokepoint every other edit in this codebase uses
+   * (Inv 6 unchanged) — Save just chooses WHEN that write happens, instead of
+   * it happening on every field commit. `OpQueueLike` exposes no success/
+   * failure signal beyond `rev` (the panel can't see the shell's onAccepted/
+   * onError/onRejected — those are shell-owned), so a successful write is
+   * detected by `rev` advancing past what it was before the flush: both
+   * failure modes (a network error, which re-queues the batch for a later
+   * retry, and a 422 rejection, which drops it) leave `rev` untouched
+   * (opQueue.ts) — either way Save must stay available and nothing here may
+   * be marked clean. The shell's own toasts already surface WHY a save
+   * failed; this panel doesn't need to duplicate that detail. */
+  async function saveNow(): Promise<void> {
+    if (destroyed || saving || !isDirty()) return;
+    saving = true;
+    setButtonBusy(saveButton, "Saving…");
+    undoButton.disabled = true;
+    discardUnsavedButton.disabled = true;
+    saveBarStatus.textContent = "";
+    saveBarStatus.classList.remove("wx-section-save-bar-status-error", "wx-section-save-bar-status-ok");
+
+    const revBefore = opQueue.rev;
+    for (const collection of section.collections) {
+      if (isCollectionDirty(collection)) {
+        opQueue.enqueue({ file: section.page, path: collection.path, value: itemsFor(collection) });
+      }
+    }
+    await opQueue.flushNow();
+
+    saving = false;
+    if (destroyed) return;
+    setButtonIdle(saveButton, "Save");
+    undoButton.disabled = false;
+    discardUnsavedButton.disabled = false;
+
+    const succeeded = opQueue.rev !== revBefore;
+    if (succeeded) {
+      for (const collection of section.collections) {
+        savedState.set(collection.path, cloneItems(itemsFor(collection)));
+        // Re-render so per-field/per-card "unsaved" markers (computed against
+        // `savedState` at render time) clear now that they're saved — nothing
+        // else re-renders a card on a successful Save.
+        renderCollectionBody(collection);
+      }
+      undoStack.length = 0;
+      saveBarStatus.textContent = "Saved. Ready to publish.";
+      saveBarStatus.classList.add("wx-section-save-bar-status-ok");
+      // Capability-guarded (unit-test fakes of `win` may omit timers, matching
+      // shell.ts's own convention) — production always has a real `setTimeout`.
+      if (typeof win.setTimeout === "function") {
+        win.setTimeout(() => {
+          if (destroyed) return;
+          saveBarStatus.textContent = "";
+          saveBarStatus.classList.remove("wx-section-save-bar-status-ok");
+        }, SAVE_STATUS_CLEAR_MS);
+      }
+      void refreshDraftState();
+      maybeRunPendingRefresh();
+    } else {
+      saveBarStatus.textContent = "Couldn't save — check your connection and try Save again.";
+      saveBarStatus.classList.add("wx-section-save-bar-status-error");
+    }
+    refreshSaveBar();
+  }
+
+  /** Auto-saves before opening the publish drawer (decisions/00118) — fewer
+   * taps than making her Save separately first, and the drawer must preview a
+   * COMPLETE draft. On a save failure this stays put with the save bar's own
+   * error showing rather than opening a drawer that can't see her latest
+   * edits. */
+  async function onPublishClick(): Promise<void> {
+    if (destroyed) return;
+    if (isDirty()) {
+      await saveNow();
+      if (destroyed || isDirty()) return;
+    }
+    deps.onRequestPublish?.();
+  }
+
+  let discardingAll = false;
+
+  async function discardAll(): Promise<void> {
+    // `win.confirm` blocks the main thread in a real browser, so a second
+    // click can't land while it's open — but the network round-trip AFTER
+    // confirming isn't blocking, so a double-click there could otherwise fire
+    // two overlapping discards.
+    if (destroyed || discardingAll) return;
+    const ok = win.confirm(
+      "Discard ALL your changes and go back to what's on your site now? This can't be undone.",
+    );
+    if (!ok || destroyed) return;
+    discardingAll = true;
+    discardAllButton.disabled = true;
+    try {
+      await api.discardDraft();
+      if (destroyed) return;
+      undoStack.length = 0;
+      await load();
+      deps.onDraftChanged?.();
+    } finally {
+      discardingAll = false;
+      discardAllButton.disabled = false;
+    }
+  }
+
+  async function refreshDraftState(): Promise<void> {
+    try {
+      const state = await api.getState();
+      if (destroyed) return;
+      draftOpCount = state.draft.opCount;
+    } catch {
+      // Best-effort — the global status bar already surfaces connectivity
+      // issues; a missed read here just means the banner is stale until the
+      // next successful one.
+    }
+    renderReadyBanner();
+  }
+
+  function renderReadyBanner(): void {
+    const show = draftOpCount > 0;
+    readyBanner.hidden = !show;
+    if (!show) return;
+    readyBannerText.textContent =
+      draftOpCount === 1 ? "1 change ready to publish" : `${draftOpCount} changes ready to publish`;
   }
 
   // -- The before/after aligner (decisions/00111) ---------------------------
@@ -102,7 +386,7 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
   // `alignAspect` (the frame its pairs display in) AND it declares ≥2 image
   // fields. The aligner bakes adjusted photo(s) into NEW uploads and hands
   // back replacement `{src, alt}`s; the item keeps its other fields, and the
-  // whole array commits as one op like every other panel edit.
+  // whole array stages as one local edit like every other panel edit.
 
   function alignImageFields(collection: AdminCollection): [AdminField, AdminField] | null {
     if (collection.alignAspect === null) return null;
@@ -150,7 +434,7 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
       let next = current;
       if (result.first !== undefined) next = { ...next, [fields[0].key]: result.first };
       if (result.second !== undefined) next = { ...next, [fields[1].key]: result.second };
-      commit(
+      stageLocal(
         collection,
         items.map((it, i) => (i === index ? next : it)),
       );
@@ -212,7 +496,7 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
       openMediaDialog({ api, win }, (value: MediaPickValue | null) => {
         if (value === null || destroyed) return;
         const items = itemsFor(collection);
-        commit(
+        stageLocal(
           collection,
           updateItemField(items, index, field.key, { src: value.src, alt: value.alt }),
         );
@@ -236,12 +520,15 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     const input = document.createElement("input");
     input.type = "text";
     input.className = "wx-section-field-input";
+    if (fieldDirty(itemsFor(collection), savedState.get(collection.path) ?? [], index, field.key)) {
+      input.classList.add("wx-field-dirty");
+    }
     input.value = decodeCommonEntities(textFieldValue(item, field.key));
     const commitValue = (): void => {
       if (destroyed) return;
       const current = itemsFor(collection);
       if (textFieldValue(current[index] ?? {}, field.key) === input.value) return;
-      commit(collection, updateItemField(current, index, field.key, input.value));
+      stageLocal(collection, updateItemField(current, index, field.key, input.value));
     };
     input.addEventListener("blur", commitValue);
     input.addEventListener("keydown", (evt) => {
@@ -264,6 +551,9 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     labelText.textContent = field.label;
     const select = document.createElement("select");
     select.className = "wx-section-field-select";
+    if (fieldDirty(itemsFor(collection), savedState.get(collection.path) ?? [], index, field.key)) {
+      select.classList.add("wx-field-dirty");
+    }
     for (const option of field.options) {
       const optionEl = document.createElement("option");
       optionEl.value = option.value;
@@ -274,7 +564,7 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     select.addEventListener("change", () => {
       if (destroyed) return;
       const current = itemsFor(collection);
-      commit(collection, updateItemField(current, index, field.key, select.value));
+      stageLocal(collection, updateItemField(current, index, field.key, select.value));
     });
     wrap.append(labelText, select);
     return wrap;
@@ -299,7 +589,7 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     input.addEventListener("change", () => {
       if (destroyed) return;
       const current = itemsFor(collection);
-      commit(
+      stageLocal(
         collection,
         input.checked
           ? removeItemField(current, index, field.key)
@@ -319,6 +609,9 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     card.dataset["index"] = String(index);
     const hidden = item["visible"] === false;
     if (hidden) card.classList.add("wx-section-card-hidden");
+    const saved = savedState.get(collection.path) ?? [];
+    const dirty = itemDirty(itemsFor(collection), saved, index);
+    if (dirty) card.classList.add("wx-section-card-dirty");
 
     const handle = document.createElement("button");
     handle.type = "button";
@@ -352,7 +645,7 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     upButton.textContent = "↑";
     upButton.setAttribute("aria-label", "Move up");
     upButton.disabled = index === 0;
-    upButton.addEventListener("click", () => commit(collection, moveItemUp(itemsFor(collection), index)));
+    upButton.addEventListener("click", () => stageLocal(collection, moveItemUp(itemsFor(collection), index)));
 
     const downButton = document.createElement("button");
     downButton.type = "button";
@@ -360,7 +653,7 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     downButton.textContent = "↓";
     downButton.setAttribute("aria-label", "Move down");
     downButton.disabled = index === count - 1;
-    downButton.addEventListener("click", () => commit(collection, moveItemDown(itemsFor(collection), index)));
+    downButton.addEventListener("click", () => stageLocal(collection, moveItemDown(itemsFor(collection), index)));
 
     const deleteButton = document.createElement("button");
     deleteButton.type = "button";
@@ -368,10 +661,10 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     deleteButton.textContent = "Remove";
     deleteButton.addEventListener("click", () => {
       const ok = win.confirm(
-        `Remove this ${collection.itemNoun}? You can undo by discarding your draft changes.`,
+        `Remove this ${collection.itemNoun}? You can undo with "Undo last" until you Save, or "Discard unsaved" to drop every change since your last Save.`,
       );
       if (!ok) return;
-      commit(collection, deleteItemAt(itemsFor(collection), index));
+      stageLocal(collection, deleteItemAt(itemsFor(collection), index));
     });
 
     if (alignButton !== null) actions.append(alignButton);
@@ -382,6 +675,12 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
       chip.className = "wx-section-hidden-chip";
       chip.textContent = "Hidden";
       card.appendChild(chip);
+    }
+    if (dirty) {
+      const unsavedBadge = document.createElement("span");
+      unsavedBadge.className = "wx-section-unsaved-badge";
+      unsavedBadge.textContent = "Unsaved";
+      card.appendChild(unsavedBadge);
     }
     card.append(handle, images, fields, actions);
     return card;
@@ -437,7 +736,7 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
         // in the right final slot (moveItemTo splices the source out first).
         const adjusted = dropIndex > startIndex ? dropIndex - 1 : dropIndex;
         if (adjusted !== startIndex) {
-          commit(collection, moveItemTo(itemsFor(collection), startIndex, adjusted));
+          stageLocal(collection, moveItemTo(itemsFor(collection), startIndex, adjusted));
         }
       };
 
@@ -454,6 +753,9 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
   // `gallery.sliders`), so the flow never hardcodes a specific collection's
   // shape. Save stays disabled until `isNewItemComplete` — a new item is
   // always born schema-valid, never a half-filled placeholder in the array.
+  // Its own "Save" finishes the WIZARD (stages the finished item locally,
+  // decisions/00118) — a SEPARATE step from the panel-level Save bar, which
+  // is what actually writes it to the draft.
 
   function openAddFlow(collection: AdminCollection): void {
     const imageFields = collection.fields.filter((f) => f.kind === "image");
@@ -621,7 +923,7 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
       saveButton.disabled = !isNewItemComplete(collection.fields, draft);
       saveButton.addEventListener("click", () => {
         if (destroyed) return;
-        commit(collection, appendItem(itemsFor(collection), draft));
+        stageLocal(collection, appendItem(itemsFor(collection), draft));
         close();
       });
       nav.appendChild(saveButton);
@@ -745,10 +1047,13 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
   }
 
   async function load(): Promise<void> {
-    const content = await api.getContent(section.page);
+    const [content] = await Promise.all([api.getContent(section.page), refreshDraftState()]);
     for (const collection of section.collections) {
-      collectionState.set(collection.path, itemsAt(content.content, collection.path));
+      const items = itemsAt(content.content, collection.path);
+      collectionState.set(collection.path, items);
+      savedState.set(collection.path, cloneItems(items));
     }
+    undoStack.length = 0;
     if (destroyed) return;
     body.innerHTML = "";
     collectionBodies.clear();
@@ -756,13 +1061,18 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
       body.appendChild(renderCollectionSection(collection));
       renderCollectionBody(collection);
     }
+    refreshSaveBar();
   }
 
-  // -- Refreshing behind the owner's back (decisions/00115) -----------------
+  // -- Refreshing behind the owner's back (decisions/00115, 00118) ----------
   // A re-read is only safe when it can't discard something she is part-way
   // through: text fields commit on BLUR, so a re-render mid-typing would throw
   // away the characters typed so far, and the op queue coalesces at 300 ms, so
-  // re-reading before it flushes would read back the pre-edit value.
+  // re-reading before it flushes would read back the pre-edit value. Under the
+  // staged-save model an even more common case is local edits she simply
+  // hasn't pressed Save on yet — those must never be silently discarded by a
+  // refresh triggered from elsewhere (another tab/device publishing, or an
+  // AI-lane repair), so a refresh also defers while the panel is dirty.
 
   function isEditingInPanel(): boolean {
     const active = element.ownerDocument.activeElement;
@@ -780,8 +1090,8 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
 
   function requestRefresh(): void {
     if (destroyed) return;
-    if (isEditingInPanel()) {
-      refreshPending = true; // deferred to the focusout below, never dropped
+    if (isEditingInPanel() || isDirty()) {
+      refreshPending = true; // deferred to focusout / the next safe moment, never dropped
       return;
     }
     refreshPending = false;
@@ -793,11 +1103,22 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     // A timeout so the blur handler's own commit has enqueued first, and so
     // focus moving between two fields inside the panel doesn't count as done.
     win.setTimeout(() => {
-      if (destroyed || !refreshPending || isEditingInPanel()) return;
-      refreshPending = false;
-      void refreshFromServer();
+      if (destroyed || !refreshPending) return;
+      maybeRunPendingRefresh();
     }, 0);
   });
+
+  // -- Unsaved-work guard (decisions/00118) ----------------------------------
+  // A real browser tab close/reload with unsaved local edits must prompt —
+  // the in-app route-change guard (shell.ts's handleRoute) covers navigating
+  // to another admin panel; this covers leaving the page/tab entirely.
+
+  function onBeforeUnload(event: BeforeUnloadEvent): void {
+    if (!isDirty()) return;
+    event.preventDefault();
+    event.returnValue = "";
+  }
+  win.addEventListener("beforeunload", onBeforeUnload as EventListener);
 
   body.textContent = "Loading…";
   void load();
@@ -805,8 +1126,10 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
   return {
     element,
     refresh: requestRefresh,
+    hasUnsavedChanges: () => isDirty(),
     teardown(): void {
       destroyed = true;
+      win.removeEventListener("beforeunload", onBeforeUnload as EventListener);
     },
   };
 }

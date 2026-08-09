@@ -24,7 +24,7 @@ import { mountPageSettingsDrawer } from "./pageSettingsDrawer";
 import { renderPagesPanel } from "./pagesPanel";
 import { mountPublishDrawer } from "./publishDrawer";
 import { PUBLISH_STAGE_LABELS } from "./publishStages";
-import { canonicalizeUrl, currentRoute, navigateTo, onRouteChange, type Route } from "./router";
+import { canonicalizeUrl, currentRoute, navigateTo, onRouteChange, routeToPath, sameRoute, type Route } from "./router";
 import { mountSectionPanel, type SectionPanel } from "./sectionPanel";
 import { captureScreenshot, copyBlobToClipboard, downloadBlob, flashScreen, screenshotFilename } from "./screenshot";
 import { clearLastRoute, loadLastRoute, saveLastRoute } from "./sessionState";
@@ -124,7 +124,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   // have unpublished work" is here, so there's no chip-relocation dance any
   // more (the chip used to move into the slim edit bar while editing). With
   // nothing to publish the button hides and the bar collapses to a narrow
-  // "No unpublished changes" strip (renderTopBar + style.css).
+  // "Nothing to publish" strip (renderTopBar + style.css).
   const statusBar = document.createElement("div");
   statusBar.className = "wx-statusbar";
   // The version badge (decisions/00109) pins at the FAR LEFT of this bar — a
@@ -593,12 +593,14 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     titleEl.textContent = `Wixy · ${state.project.name}`;
     const opCount = state.draft.opCount;
     const ahead = state.upstream.aheadOfPublished.length;
-    // Layman wording (decisions/00082): no git jargon. "Unpublished changes"
-    // are edits made in this editor not yet on the live site; "site updates"
-    // are changes made OUTSIDE the editor (the AI assistant, a merged pull
-    // request) that a publish will also take live — the drawer explains both.
+    // Layman wording (decisions/00082, reworded decisions/00118 to match the
+    // section panel's own "ready to publish" banner): no git jargon. A
+    // "change ready to publish" is an edit made in this editor already saved
+    // to the draft, not yet on the live site; "site updates" are changes made
+    // OUTSIDE the editor (the AI assistant, a merged pull request) that a
+    // publish will also take live — the drawer explains both.
     const parts: string[] = [];
-    if (opCount > 0) parts.push(opCount === 1 ? "1 unpublished change" : `${opCount} unpublished changes`);
+    if (opCount > 0) parts.push(opCount === 1 ? "1 change ready to publish" : `${opCount} changes ready to publish`);
     if (ahead > 0) parts.push(ahead === 1 ? "1 site update" : `${ahead} site updates`);
     siteLink.href = `https://${state.project.domain}`;
     siteLink.hidden = false;
@@ -635,9 +637,9 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       setButtonIdle(publishButton, "Publish");
     }
     publishButton.title = "";
-    chipEl.textContent = parts.length === 0 ? "No unpublished changes" : parts.join(" · ");
+    chipEl.textContent = parts.length === 0 ? "Nothing to publish" : parts.join(" · ");
     // Nothing to publish → no Publish button (operator, 2026-08-02): with the
-    // chip already reading "No unpublished changes" the button is dead chrome,
+    // chip already reading "Nothing to publish" the button is dead chrome,
     // and its absence is what lets the bar collapse to a narrow strip (see
     // `.wx-statusbar:not(.wx-statusbar-pending)` in style.css).
     publishButton.hidden = parts.length === 0;
@@ -1033,7 +1035,13 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
         mountPanel({ kind: "pages" });
         return;
       }
-      const panel = mountSectionPanel(section, { api, opQueue, win });
+      const panel = mountSectionPanel(section, {
+        api,
+        opQueue,
+        win,
+        onRequestPublish: () => openPublishDrawer(),
+        onDraftChanged: () => void refreshStateInBackground(),
+      });
       main.appendChild(panel.element);
       activeSectionPanel = panel;
       activePanelTeardown = () => {
@@ -1093,7 +1101,26 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     setChromeRevealed(!container.classList.contains("wx-shell-chrome-revealed"), button);
   }
 
+  /** Unsaved-work navigation guard (decisions/00118): leaving the section
+   * panel's route with local edits she hasn't pressed Save on must prompt,
+   * the same as a tab close (the panel's own `beforeunload` listener). By the
+   * time `handleRoute` runs the URL has already changed (pushState fires no
+   * popstate of its own — router.ts's `navigateTo` dispatches one manually,
+   * and a real back/forward already moved the browser's own history entry),
+   * so declining rewrites the address bar back to where she still is rather
+   * than leaving it pointing somewhere the panel never actually navigated to. */
+  function guardUnsavedSectionNavigation(route: Route): boolean {
+    const previousRoute = activeRoute;
+    if (previousRoute === null || sameRoute(previousRoute, route)) return true;
+    if (previousRoute.kind !== "section" || activeSectionPanel?.hasUnsavedChanges() !== true) return true;
+    const proceed = win.confirm("You have unsaved changes on this page. Leave without saving them?");
+    if (proceed) return true;
+    win.history.pushState({}, "", routeToPath(previousRoute));
+    return false;
+  }
+
   function handleRoute(route: Route): void {
+    if (!guardUnsavedSectionNavigation(route)) return;
     const reuseEditView =
       activeRoute?.kind === "edit" && route.kind === "edit" && activeEditView !== null;
     activeRoute = route;

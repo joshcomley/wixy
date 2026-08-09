@@ -6,13 +6,20 @@
 // COLLECTION_RULES` registers in production (from PR 1) — so the write gate,
 // publish pipeline, and rendering are all exercised for real here, not faked.
 //
+// decisions/00118: this panel now holds edits LOCALLY until an explicit Save
+// (staged-save model) — an edit no longer PATCHes the draft by itself, so
+// every journey below inserts a `saveSectionPanel` step wherever the
+// pre-decisions/00118 version waited on the PATCH directly.
+//
 // Full owner journey: add a photo pair (uploading two images through the
 // guided dialog), add a second pair (picking already-uploaded media), retitle,
-// reorder via the ↑/↓ buttons, publish, and assert the built output. Plus the
-// publish-blocked write-gate journey (brief explicitly allows skipping the
+// reorder via the ↑/↓ buttons, Save, publish, and assert the built output. Plus
+// the publish-blocked write-gate journey (brief explicitly allows skipping the
 // drawer-blocked -> Fix-it-for-me -> publishable UI combo here — PR 1's own
 // suite already covers that; this just confirms the SAME 1c gate rejects a
-// structurally-invalid write through this new panel's content path too).
+// structurally-invalid write through this new panel's content path too), and
+// the staged-save UX itself (unsaved -> Save -> ready to publish -> Publish;
+// Undo/Discard at both stages).
 
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { publishAndWait, trackConsoleErrors, waitForNextDraftPatchAccepted } from "./helpers";
@@ -21,16 +28,36 @@ import { publishAndWait, trackConsoleErrors, waitForNextDraftPatchAccepted } fro
  * `Locator.filter({ hasText })` matches textContent (or a form control's
  * accessible NAME, from its `<label>`) — never an `<input>`'s value, so it
  * can't find a card by its title text (Playwright's own guidance: prefer
- * `inputValue()` for form controls over textContent-based matching). */
+ * `inputValue()` for form controls over textContent-based matching).
+ *
+ * Polls via `expect(...).toPass()` rather than a one-shot count+scan
+ * (decisions/00118): the panel's `load()` now fetches `/api/admin/content`
+ * AND `/api/admin/state` concurrently (the ready-to-publish banner's
+ * opCount), so the card grid can still read "Loading…" for a beat after
+ * `gotoSectionAndWaitReady`'s own content-fetch wait resolves — a bare
+ * `.count()` read right then can race ahead of the render. */
 async function findCardByTitle(collection: Locator, title: string): Promise<Locator> {
   const cards = collection.locator(".wx-section-card");
+  await expect(async () => {
+    const count = await cards.count();
+    let found = false;
+    for (let i = 0; i < count; i++) {
+      const value = await cards.nth(i).locator(".wx-section-field-input").first().inputValue();
+      if (value === title) {
+        found = true;
+        break;
+      }
+    }
+    expect(found, `no .wx-section-card found with title "${title}"`).toBe(true);
+  }).toPass({ timeout: 5000 });
+
   const count = await cards.count();
   for (let i = 0; i < count; i++) {
     const candidate = cards.nth(i);
     const value = await candidate.locator(".wx-section-field-input").first().inputValue();
     if (value === title) return candidate;
   }
-  throw new Error(`no .wx-section-card found with title "${title}"`);
+  throw new Error(`no .wx-section-card found with title "${title}" (unreachable — toPass already confirmed it)`);
 }
 
 async function gotoSectionAndWaitReady(page: Page, sectionId: string, pageSlug: string): Promise<void> {
@@ -46,12 +73,23 @@ async function gotoSectionAndWaitReady(page: Page, sectionId: string, pageSlug: 
   await contentFetch;
 }
 
+/** Clicks the panel-level Save bar's Save button (decisions/00118) — distinct
+ * from the guided add-flow's / aligner's OWN "Save" buttons, which only
+ * finish that dialog and stage the result locally; this is what actually
+ * writes the whole array to the draft via the shared `OpQueue`, the same
+ * `PATCH /api/admin/draft` every other admin edit ultimately goes through. */
+async function saveSectionPanel(page: Page): Promise<void> {
+  const patchAccepted = waitForNextDraftPatchAccepted(page);
+  await page.click(".wx-section-save-button");
+  await patchAccepted;
+}
+
 test.describe("E2E: registry-configured section editor (Before & After)", () => {
   test.beforeEach(async ({ request }) => {
     await request.delete("/api/admin/draft");
   });
 
-  test("add a photo pair (uploading two images), add a second (picking existing media), retitle, reorder via buttons, publish, and the output reflects it", async ({
+  test("add a photo pair (uploading two images), add a second (picking existing media), retitle, reorder via buttons, Save, publish, and the output reflects it", async ({
     page,
   }) => {
     const consoleErrors = trackConsoleErrors(page);
@@ -70,6 +108,8 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
 
     const addDialog = page.locator(".wx-section-add-dialog");
     const mediaDialog = page.locator(".wx-media-dialog-backdrop");
+    const saveBar = page.locator(".wx-section-save-bar");
+    const saveButton = page.locator(".wx-section-save-button");
 
     // -- Pair #1: upload two images through the guided dialog ----------------
     await slidersCollection.locator(".wx-section-add-button").click();
@@ -121,16 +161,21 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     await addDialog.getByRole("button", { name: "Next" }).click();
 
     await addDialog.locator("input[type='text']").first().fill("Lip Filler");
-    let patchAccepted = waitForNextDraftPatchAccepted(page);
+    // The wizard's OWN Save only finishes the item and stages it locally
+    // (decisions/00118) — no PATCH yet, and the panel-level Save bar appears.
     await addDialog.getByRole("button", { name: "Save" }).click();
-    await patchAccepted;
     await expect(addDialog).toBeHidden();
+    await expect(saveBar).toBeVisible();
+    await expect(saveButton).toBeEnabled();
 
     // Index 0 is always the fixture's pre-seeded "Hidden Pair" (born first in
-    // the array); everything this journey adds lands after it.
+    // the array); everything this journey adds lands after it. This is a
+    // pure DOM/local-state check — it doesn't need the panel-level Save yet.
     const cards = slidersCollection.locator(".wx-section-card");
     await expect(cards).toHaveCount(2);
     await expect(cards.nth(1).locator(".wx-section-field-input").first()).toHaveValue("Lip Filler");
+    await expect(cards.nth(1)).toHaveClass(/wx-section-card-dirty/);
+    await expect(cards.nth(1).locator(".wx-section-unsaved-badge")).toHaveText("Unsaved");
 
     // The card list's own thumbnail render (renderImageSlot) is a REAL bug
     // this suite never caught: `img.src` was set from the raw content-JSON
@@ -161,27 +206,29 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     await addDialog.getByRole("button", { name: "Next" }).click();
 
     await addDialog.locator("input[type='text']").first().fill("Cheek Filler");
-    patchAccepted = waitForNextDraftPatchAccepted(page);
     await addDialog.getByRole("button", { name: "Save" }).click();
-    await patchAccepted;
+    await expect(addDialog).toBeHidden();
 
     await expect(cards).toHaveCount(3);
     await expect(cards.nth(2).locator(".wx-section-field-input").first()).toHaveValue("Cheek Filler");
 
-    // -- retitle pair #1 -------------------------------------------------------
+    // -- retitle pair #1 (still local — batching several edits before the
+    // one Save that ships them all is exactly the point of the new model) --
     const firstTitleInput = cards.nth(1).locator(".wx-section-field-input").first();
-    patchAccepted = waitForNextDraftPatchAccepted(page);
     await firstTitleInput.fill("Lip Filler (Updated)");
     await firstTitleInput.blur();
-    await patchAccepted;
     await expect(firstTitleInput).toHaveValue("Lip Filler (Updated)");
 
     // -- reorder via buttons: move pair #2 up -> [Cheek Filler, Lip Filler] --
-    patchAccepted = waitForNextDraftPatchAccepted(page);
     await cards.nth(2).getByRole("button", { name: "Move up" }).click();
-    await patchAccepted;
     await expect(cards.nth(1).locator(".wx-section-field-input").first()).toHaveValue("Cheek Filler");
     await expect(cards.nth(2).locator(".wx-section-field-input").first()).toHaveValue("Lip Filler (Updated)");
+
+    // -- Save: everything above ships as ONE batch, then "ready to publish" --
+    await saveSectionPanel(page);
+    await expect(saveBar).toBeHidden();
+    await expect(page.locator(".wx-section-ready-banner")).toBeVisible();
+    await expect(page.locator(".wx-section-ready-banner-text")).toContainText("ready to publish");
 
     await publishAndWait(page);
 
@@ -227,7 +274,13 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     // The suite shares ONE fixture server across spec files and this journey
     // runs after the main one, which PUBLISHED two pairs — the collection is
     // NOT empty here. Never assert an absolute count; my pair appends last.
+    // Wait for the first card to actually paint before reading `.count()`
+    // (decisions/00118: `load()` now also awaits a concurrent `/api/admin/
+    // state` fetch for the ready-to-publish banner, so the grid can still
+    // read "Loading…" for a beat after `gotoSectionAndWaitReady` returns —
+    // a bare, non-retrying `.count()` right then can read 0).
     const cards = slidersCollection.locator(".wx-section-card");
+    await expect(cards.first()).toBeVisible();
     const countBefore = await cards.count();
 
     // -- One pair, two genuinely distinct uploads (the content-hash dedupe in
@@ -255,9 +308,8 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     await addDialog.getByRole("button", { name: "Next" }).click();
 
     await addDialog.locator("input[type='text']").first().fill("Alignment Test Pair");
-    let patchAccepted = waitForNextDraftPatchAccepted(page);
     await addDialog.getByRole("button", { name: "Save" }).click();
-    await patchAccepted;
+    await expect(addDialog).toBeHidden();
 
     await expect(cards).toHaveCount(countBefore + 1);
     const myCard = cards.nth(countBefore);
@@ -271,8 +323,8 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     // Both photos must actually load before anything can work.
     await expect(alignDialog.locator(".wx-align-canvas-note")).toBeHidden();
 
-    const saveButton = alignDialog.getByRole("button", { name: "Save aligned photo" });
-    await expect(saveButton).toBeDisabled(); // nothing adjusted yet
+    const alignSaveButton = alignDialog.getByRole("button", { name: "Save aligned photo" });
+    await expect(alignSaveButton).toBeDisabled(); // nothing adjusted yet
 
     // Drag the photo with the "finger" (mouse-driven pointer events — the
     // same pointerdown/move/up stream a touch produces).
@@ -284,30 +336,31 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     await page.mouse.down();
     await page.mouse.move(box.x + box.width / 2 + 30, box.y + box.height / 2 + 12, { steps: 6 });
     await page.mouse.up();
-    await expect(saveButton).toBeEnabled();
+    await expect(alignSaveButton).toBeEnabled();
 
     // Then the micro pad for the fine adjustment (the operator's explicit ask).
     await alignDialog.getByRole("button", { name: "Nudge left" }).click();
 
     // Save: bake on the canvas, upload through the real media pipeline, and
-    // the panel commits the whole array with the new photo. (No "Saving…"
-    // busy-text assertion here: on localhost the whole bake→upload→commit
-    // chain can complete within one Playwright tick, closing the dialog
-    // before any post-click read — the dialog's close IS the success signal.)
-    patchAccepted = waitForNextDraftPatchAccepted(page);
-    await saveButton.click();
-    await patchAccepted;
+    // the panel STAGES the whole array with the new photo locally
+    // (decisions/00118 — no PATCH yet). (No "Saving…" busy-text assertion
+    // here: on localhost the whole bake→upload→stage chain can complete
+    // within one Playwright tick, closing the dialog before any post-click
+    // read — the dialog's close IS the completion signal.)
+    await alignSaveButton.click();
     await expect(alignDialog).toBeHidden();
 
     // The card's after photo is now a NEW staged upload (the original stays
-    // in the media library, unused but hers).
+    // in the media library, unused but hers) — a local DOM read, no save
+    // needed yet.
     const alignedSrc = await afterThumb.getAttribute("src");
     expect(alignedSrc).not.toBe(originalAfterSrc);
     expect(alignedSrc).toMatch(/^\/admin\/draft-media\/[0-9a-f]{8}-.*-aligned\.jpg$/);
     await expect(afterThumb).toHaveJSProperty("complete", true);
     expect(await afterThumb.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBeGreaterThan(0);
 
-    // -- Publish: the live page serves the baked, aligned photo ---------------
+    // -- Save, then publish: the live page serves the baked, aligned photo --
+    await saveSectionPanel(page);
     await publishAndWait(page);
     const liveResponse = await page.request.get("/gallery.html");
     expect(liveResponse.status()).toBe(200);
@@ -330,6 +383,9 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     // deliberately SKIPS `pattern` (a blank `src` is a valid in-progress draft
     // state, only caught at PUBLISH-preflight time, decisions/00095), so a
     // missing key — not a blank string — is what a draft-time PATCH rejects.
+    // This test drives the SERVER's write gate directly (Playwright's API
+    // request context, not the admin UI) — decisions/00118's staged-save
+    // model is a client-side concern and doesn't change this contract.
     const response = await request.patch("/api/admin/draft", {
       data: {
         expectedRev: stateBefore.draft.rev,
@@ -394,7 +450,7 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     expect(response.status()).toBe(200);
   });
 
-  test("PR 1: toggling Show on site for a hidden pair publishes it live; toggling off removes it again", async ({
+  test("PR 1: toggling Show on site for a hidden pair, Saving, and publishing makes it live; toggling off and publishing removes it again", async ({
     page,
   }) => {
     const consoleErrors = trackConsoleErrors(page);
@@ -413,12 +469,13 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     let liveHtml = await (await page.request.get("/gallery.html")).text();
     expect(liveHtml).not.toContain("Hidden Pair");
 
-    // -- switch ON, publish, and it appears live -----------------------------
-    let patchAccepted = waitForNextDraftPatchAccepted(page);
+    // -- switch ON, Save, publish, and it appears live -----------------------
     await toggle.check();
-    await patchAccepted;
     await expect(hiddenCard).not.toHaveClass(/wx-section-card-hidden/);
     await expect(hiddenCard.locator(".wx-section-hidden-chip")).toHaveCount(0);
+    await expect(page.locator(".wx-section-save-bar")).toBeVisible();
+
+    await saveSectionPanel(page);
 
     // A publish success re-reads the mounted panel's collection in the
     // background (`SectionPanel.refresh()`, decisions/00115) — its OWN `GET
@@ -444,16 +501,217 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     // status bar's Publish button.
     await page.click(".wx-drawer-close");
 
-    // -- switch back OFF, publish, and it's gone again -----------------------
-    patchAccepted = waitForNextDraftPatchAccepted(page);
+    // -- switch back OFF, Save, publish, and it's gone again -----------------
     await toggle.uncheck();
-    await patchAccepted;
     await expect(hiddenCard).toHaveClass(/wx-section-card-hidden/);
+    await saveSectionPanel(page);
 
     await publishAndWait(page);
     liveHtml = await (await page.request.get("/gallery.html")).text();
     expect(liveHtml).not.toContain("Hidden Pair");
 
     expect(consoleErrors).toEqual([]);
+  });
+});
+
+test.describe("E2E: section editor staged-save model (decisions/00118)", () => {
+  test.beforeEach(async ({ request }) => {
+    await request.delete("/api/admin/draft");
+  });
+
+  test("edit -> visibly unsaved, Save enables -> Save -> ready to publish -> Publish; the shell chip matches", async ({
+    page,
+  }) => {
+    // Uses a FRESH, disposable tile (never the shared "Hidden Pair" slider
+    // fixture item other tests in this file also rely on by title) — this
+    // journey PUBLISHES for real, which is a permanent mutation on the
+    // fixture server every other spec in the SAME run shares.
+    const consoleErrors = trackConsoleErrors(page);
+    await gotoSectionAndWaitReady(page, "before-after", "gallery");
+
+    const saveButton = page.locator(".wx-section-save-button");
+    const saveBar = page.locator(".wx-section-save-bar");
+    const readyBanner = page.locator(".wx-section-ready-banner");
+    const chip = page.locator(".wx-draft-chip");
+
+    // Clean start: no Save bar, Save disabled, chip quiet.
+    await expect(saveBar).toBeHidden();
+    await expect(saveButton).toBeDisabled();
+    await expect(chip).toHaveText("Nothing to publish");
+
+    const tilesCollection = page.locator(".wx-section-collection", { hasText: "Tap-to-zoom photos" });
+    const addDialog = page.locator(".wx-section-add-dialog");
+    const mediaDialog = page.locator(".wx-media-dialog-backdrop");
+    await tilesCollection.locator(".wx-section-add-button").click();
+    await expect(addDialog).toBeVisible();
+    await addDialog.getByRole("button", { name: "Choose Photo" }).click();
+    await expect(mediaDialog).toBeVisible();
+    await mediaDialog.locator(".wx-media-thumb").first().click();
+    await mediaDialog.getByRole("button", { name: "Use this image" }).click();
+    // Photo picked -> the image step re-renders with a preview + an enabled
+    // "Next"; it does NOT auto-advance to the form step.
+    await addDialog.getByRole("button", { name: "Next" }).click();
+    await addDialog.locator("input[type='text']").first().fill("Staged Save Journey Tile");
+    // The wizard's own Save only finishes the item and stages it locally
+    // (decisions/00118) — the panel is ALREADY dirty the moment it closes.
+    await addDialog.getByRole("button", { name: "Save" }).click();
+    await expect(addDialog).toBeHidden();
+
+    const card = await findCardByTitle(tilesCollection, "Staged Save Journey Tile");
+    const titleInput = card.locator(".wx-section-field-input").first();
+
+    // Visibly unsaved.
+    await expect(saveBar).toBeVisible();
+    await expect(saveButton).toBeEnabled();
+    await expect(card).toHaveClass(/wx-section-card-dirty/);
+    await expect(card.locator(".wx-section-unsaved-badge")).toHaveText("Unsaved");
+
+    // A second local edit, batched into the SAME Save.
+    await titleInput.fill("Staged Save Journey Tile (Retitled)");
+    await titleInput.blur();
+    await expect(titleInput).toHaveClass(/wx-field-dirty/);
+
+    // Save -> ready to publish, and the global chip agrees.
+    await saveSectionPanel(page);
+    await expect(saveBar).toBeHidden();
+    await expect(readyBanner).toBeVisible();
+    await expect(readyBanner.locator(".wx-section-ready-banner-text")).toContainText(
+      "ready to publish",
+    );
+    await expect(chip).toContainText("ready to publish");
+    const retitledInput = card.locator(".wx-section-field-input").first();
+    await expect(retitledInput).not.toHaveClass(/wx-field-dirty/);
+    await expect(retitledInput).toHaveValue("Staged Save Journey Tile (Retitled)");
+
+    // Publish from the panel's own banner (auto-saves anything unsaved first
+    // — nothing is here, but this exercises the panel's own trigger, not just
+    // the global status bar).
+    await readyBanner.getByRole("button", { name: "Publish" }).click();
+    await page.waitForSelector(".wx-publish-confirm");
+    const publishResponse = page.waitForResponse(
+      (res) => res.url().endsWith("/api/admin/publish") && res.request().method() === "POST",
+    );
+    await page.click(".wx-publish-confirm");
+    await publishResponse;
+    await page.waitForSelector(".wx-publish-state-caption:has-text('Version')");
+
+    expect(consoleErrors).toEqual([]);
+  });
+
+  test("Undo last reverts a local edit without writing anything, and the save bar clears", async ({
+    page,
+  }) => {
+    await gotoSectionAndWaitReady(page, "before-after", "gallery");
+    const slidersCollection = page.locator(".wx-section-collection", { hasText: "Drag-to-compare photos" });
+    const hiddenCard = await findCardByTitle(slidersCollection, "Hidden Pair");
+    const titleInput = hiddenCard.locator(".wx-section-field-input").first();
+
+    await titleInput.fill("Oops Wrong Title");
+    await titleInput.blur();
+    await expect(page.locator(".wx-section-save-bar")).toBeVisible();
+
+    await page.click(".wx-section-undo-button");
+
+    await expect(page.locator(".wx-section-save-bar")).toBeHidden();
+    await expect(hiddenCard.locator(".wx-section-field-input").first()).toHaveValue("Hidden Pair");
+
+    const stateAfter = (await (await page.request.get("/api/admin/state")).json()) as {
+      draft: { opCount: number };
+    };
+    expect(stateAfter.draft.opCount).toBe(0);
+  });
+
+  test("Discard unsaved reverts every local edit back to the last-saved state, with confirmation", async ({
+    page,
+  }) => {
+    await gotoSectionAndWaitReady(page, "before-after", "gallery");
+    const slidersCollection = page.locator(".wx-section-collection", { hasText: "Drag-to-compare photos" });
+    const hiddenCard = await findCardByTitle(slidersCollection, "Hidden Pair");
+    const titleInput = hiddenCard.locator(".wx-section-field-input").first();
+
+    await titleInput.fill("Oops Wrong Title");
+    await titleInput.blur();
+    await expect(page.locator(".wx-section-save-bar")).toBeVisible();
+
+    page.once("dialog", (dialog) => void dialog.accept());
+    await page.click(".wx-section-discard-unsaved-button");
+
+    await expect(page.locator(".wx-section-save-bar")).toBeHidden();
+    await expect(hiddenCard.locator(".wx-section-field-input").first()).toHaveValue("Hidden Pair");
+  });
+
+  test("Discard all changes wipes a SAVED (but not yet published) draft back to zero, with confirmation", async ({
+    page,
+  }) => {
+    await gotoSectionAndWaitReady(page, "before-after", "gallery");
+    const slidersCollection = page.locator(".wx-section-collection", { hasText: "Drag-to-compare photos" });
+    const hiddenCard = await findCardByTitle(slidersCollection, "Hidden Pair");
+    const titleInput = hiddenCard.locator(".wx-section-field-input").first();
+
+    await titleInput.fill("About To Be Discarded");
+    await titleInput.blur();
+    await saveSectionPanel(page);
+
+    await expect(page.locator(".wx-section-ready-banner")).toBeVisible();
+    const stateAfterSave = (await (await page.request.get("/api/admin/state")).json()) as {
+      draft: { opCount: number };
+    };
+    expect(stateAfterSave.draft.opCount).toBeGreaterThan(0);
+
+    page.once("dialog", (dialog) => void dialog.accept());
+    await page.click(".wx-section-discard-all-button");
+    await expect(page.locator(".wx-section-ready-banner")).toBeHidden();
+
+    const stateAfterDiscard = (await (await page.request.get("/api/admin/state")).json()) as {
+      draft: { opCount: number };
+    };
+    expect(stateAfterDiscard.draft.opCount).toBe(0);
+    await expect(page.locator(".wx-draft-chip")).toHaveText("Nothing to publish");
+    // Reverted, not deleted — the seeded item is back to its original title.
+    const revertedCard = await findCardByTitle(slidersCollection, "Hidden Pair");
+    await expect(revertedCard).toBeVisible();
+  });
+
+  test("navigating away (in-app nav) with unsaved edits prompts; declining keeps her on the section with the edit intact", async ({
+    page,
+  }) => {
+    // A real `page.goto()` would exercise the browser's native beforeunload
+    // dialog instead (a different, notoriously flaky-under-automation code
+    // path) — this targets the IN-APP SPA route guard (shell.ts's
+    // `handleRoute`), so it drives navigation the same way a real click on
+    // the nav bar does: `navigateTo()` -> `popstate`.
+    await gotoSectionAndWaitReady(page, "before-after", "gallery");
+    const slidersCollection = page.locator(".wx-section-collection", { hasText: "Drag-to-compare photos" });
+    const hiddenCard = await findCardByTitle(slidersCollection, "Hidden Pair");
+    const titleInput = hiddenCard.locator(".wx-section-field-input").first();
+
+    await titleInput.fill("Don't Lose Me");
+    await titleInput.blur();
+
+    page.once("dialog", (dialog) => void dialog.dismiss());
+    await page.click('.wx-nav-item[data-route-kind="pages"]');
+
+    // Declined -> still on the section route, edit intact, URL unchanged.
+    await expect(page.locator(".wx-section-panel")).toBeVisible();
+    await expect(page.locator(".wx-section-field-input").first()).toHaveValue("Don't Lose Me");
+    expect(page.url()).toContain("/admin/section/before-after");
+  });
+
+  test("navigating away (in-app nav) with unsaved edits, once confirmed, leaves the section route", async ({
+    page,
+  }) => {
+    await gotoSectionAndWaitReady(page, "before-after", "gallery");
+    const slidersCollection = page.locator(".wx-section-collection", { hasText: "Drag-to-compare photos" });
+    const hiddenCard = await findCardByTitle(slidersCollection, "Hidden Pair");
+    const titleInput = hiddenCard.locator(".wx-section-field-input").first();
+
+    await titleInput.fill("Leaving Anyway");
+    await titleInput.blur();
+
+    page.once("dialog", (dialog) => void dialog.accept());
+    await page.click('.wx-nav-item[data-route-kind="pages"]');
+
+    await expect(page.locator(".wx-pages-panel")).toBeVisible();
+    expect(page.url()).toContain("/admin/pages");
   });
 });

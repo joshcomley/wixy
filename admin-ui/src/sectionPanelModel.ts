@@ -45,6 +45,76 @@ export function itemsAt(content: Record<string, JsonValue>, path: string): Secti
   );
 }
 
+// -- Value equality & dirty-tracking (decisions/00118's staged-save model) --
+// The panel now holds edits locally (`collectionState`) until she presses
+// Save, alongside a `savedState` snapshot of what the server last accepted.
+// "Dirty" is deep VALUE equality, not reference equality — editing a field
+// back to its original value must read as clean again (typing something,
+// changing your mind, and typing it back is not a "change"), and a snapshot
+// never needs cloning to stay safe: every mutator in this module already
+// returns a new array/object rather than mutating in place, so a reference
+// captured into `savedState` is never retroactively altered by a later edit.
+
+/** Structural equality over a JSON-value tree — key ORDER-independent (an
+ * object with the same keys/values in a different insertion order is equal),
+ * unlike a `JSON.stringify` comparison. */
+export function jsonValueEqual(a: JsonValue, b: JsonValue): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((value, index) => jsonValueEqual(value, b[index] as JsonValue));
+  }
+  if (typeof a === "object" && typeof b === "object") {
+    const aRecord = a as Record<string, JsonValue>;
+    const bRecord = b as Record<string, JsonValue>;
+    const aKeys = Object.keys(aRecord);
+    const bKeys = Object.keys(bRecord);
+    if (aKeys.length !== bKeys.length) return false;
+    return aKeys.every((key) => key in bRecord && jsonValueEqual(aRecord[key] as JsonValue, bRecord[key] as JsonValue));
+  }
+  return false;
+}
+
+/** Whole-array deep equality — the panel's per-collection dirty check
+ * (`current` vs the last-saved snapshot). */
+export function itemsEqual(a: SectionItem[], b: SectionItem[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((item, index) => jsonValueEqual(item, b[index] as SectionItem));
+}
+
+/** A defensive deep copy for populating `savedState` — cheap for these
+ * small photo-gallery arrays, and removes any doubt about a snapshot ever
+ * being retroactively mutated, even if a future edit path stops following
+ * this module's "never mutate, always return new" convention. */
+export function cloneItems(items: SectionItem[]): SectionItem[] {
+  return JSON.parse(JSON.stringify(items)) as SectionItem[];
+}
+
+/** Whether the item at `index` differs from its counterpart in `saved` at
+ * the SAME index — the card-level "Unsaved" marker. An index past the end
+ * of `saved` (a newly added, not-yet-saved item) always reads as dirty; an
+ * index past the end of `current` (removed since the last save) reads as
+ * clean here — deletion's own dirty signal is the array-length difference
+ * `itemsEqual` already catches at the collection level. */
+export function itemDirty(current: SectionItem[], saved: SectionItem[], index: number): boolean {
+  const savedItem = saved[index];
+  if (savedItem === undefined) return true;
+  const currentItem = current[index];
+  if (currentItem === undefined) return false;
+  return !jsonValueEqual(currentItem, savedItem);
+}
+
+/** Whether one field of the item at `index` differs from its saved
+ * counterpart — drives the per-input "edited" look. A missing key on
+ * either side reads as `null` so "field never set" and "field explicitly
+ * null" compare equal, matching every other reader in this module. */
+export function fieldDirty(current: SectionItem[], saved: SectionItem[], index: number, key: string): boolean {
+  const currentValue = current[index]?.[key] ?? null;
+  const savedValue = saved[index]?.[key] ?? null;
+  return !jsonValueEqual(currentValue, savedValue);
+}
+
 export function moveItemUp(items: SectionItem[], index: number): SectionItem[] {
   return moveItemTo(items, index, index - 1);
 }
