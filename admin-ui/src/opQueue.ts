@@ -14,6 +14,18 @@ export type PatchResult =
   | { kind: "conflict" }
   | { kind: "rejected"; message: string };
 
+/** The real, per-batch fate of an `enqueueTracked` op — `accepted: true` only
+ * once a PATCH actually landed (200), never inferred from a side-effect like
+ * `rev` advancing (decisions/00119: a 409-refetch immediately followed by a
+ * network error also advances `rev` via `fetchCurrentRev`, without the batch
+ * landing — the gap decisions/00118's `saveNow()` originally papered over). */
+export type EnqueueOutcome = { accepted: true; rev: number } | { accepted: false };
+
+interface PendingEntry {
+  op: DraftOp;
+  onSettle: ((outcome: EnqueueOutcome) => void) | null;
+}
+
 export interface OpQueueCallbacks {
   /** PATCH /api/admin/draft — resolves "ok" on 200, "conflict" on 409, "rejected"
    * on 422 (decisions/00095: the draft-write gate found a structural problem —
@@ -51,7 +63,7 @@ const realScheduler: Scheduler = {
 };
 
 export class OpQueue {
-  private pending: DraftOp[] = [];
+  private pending: PendingEntry[] = [];
   private currentRev: number;
   private timer: number | null = null;
   private flushing = false;
@@ -80,8 +92,23 @@ export class OpQueue {
   }
 
   enqueue(op: DraftOp): void {
-    this.pending.push(op);
+    this.pending.push({ op, onSettle: null });
     this.maybeScheduleFlush();
+  }
+
+  /** Like `enqueue`, but resolves once THIS op's batch is either accepted or
+   * this flush attempt gives up on it (a network/5xx error, or a permanent
+   * 422 rejection) — bounded to the SAME attempt `flushNow()` triggers, never
+   * left waiting on a future automatic background retry, so a caller
+   * awaiting this gets an answer on the same timeline it would from a single
+   * `flushNow()` call today, not an indefinitely-deferred one. Use this
+   * instead of `enqueue` + comparing `rev` before/after when the caller
+   * actually needs to know whether the write landed. */
+  enqueueTracked(op: DraftOp): Promise<EnqueueOutcome> {
+    return new Promise((resolve) => {
+      this.pending.push({ op, onSettle: resolve });
+      this.maybeScheduleFlush();
+    });
   }
 
   private maybeScheduleFlush(): void {
@@ -113,11 +140,14 @@ export class OpQueue {
       while (this.pending.length > 0) {
         const batch = this.pending;
         this.pending = [];
+        const ops = batch.map((entry) => entry.op);
         try {
-          const result = await this.callbacks.sendPatch(this.currentRev, batch);
+          const result = await this.callbacks.sendPatch(this.currentRev, ops);
           if (result.kind === "ok") {
             this.currentRev = result.rev;
-            this.callbacks.onAccepted?.(batch, result.rev);
+            this.callbacks.onAccepted?.(ops, result.rev);
+            const rev = result.rev;
+            batch.forEach((entry) => entry.onSettle?.({ accepted: true, rev }));
           } else if (result.kind === "rejected") {
             // Dropped, not re-queued (unlike "conflict" below) — a batch the
             // write gate found structurally invalid will fail the same way
@@ -125,7 +155,8 @@ export class OpQueue {
             // (decisions/00095). currentRev is untouched: this batch never
             // actually landed, so the rev the queue believes is live didn't
             // change.
-            this.callbacks.onRejected?.(batch, result.message);
+            this.callbacks.onRejected?.(ops, result.message);
+            batch.forEach((entry) => entry.onSettle?.({ accepted: false }));
           } else {
             this.currentRev = await this.callbacks.fetchCurrentRev();
             this.pending = [...batch, ...this.pending];
@@ -133,6 +164,15 @@ export class OpQueue {
         } catch (error) {
           this.pending = [...batch, ...this.pending];
           this.callbacks.onError?.(error);
+          // This attempt gives up on `batch` (a future automatic retry will
+          // still pick it up via `maybeScheduleFlush` below, unchanged) — but
+          // a tracked caller must not hang waiting for that eventual retry,
+          // so settle it as "not accepted" now and detach the resolver so
+          // the eventual retry's own settle (if any) is a harmless no-op.
+          batch.forEach((entry) => {
+            entry.onSettle?.({ accepted: false });
+            entry.onSettle = null;
+          });
           break;
         }
       }

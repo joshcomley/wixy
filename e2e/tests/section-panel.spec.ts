@@ -450,7 +450,7 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     expect(response.status()).toBe(200);
   });
 
-  test("PR 1: toggling Show on site for a hidden pair, Saving, and publishing makes it live; toggling off and publishing removes it again", async ({
+  test("PR 2: toggling the Show-on-site header switch for a hidden pair, Saving, and publishing makes it live; toggling off and publishing removes it again", async ({
     page,
   }) => {
     const consoleErrors = trackConsoleErrors(page);
@@ -460,8 +460,13 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     const hiddenCard = await findCardByTitle(slidersCollection, "Hidden Pair");
     await expect(hiddenCard).toBeVisible();
     await expect(hiddenCard).toHaveClass(/wx-section-card-hidden/);
-    await expect(hiddenCard.locator(".wx-section-hidden-chip")).toHaveText("Hidden");
-    const toggle = hiddenCard.locator(".wx-section-toggle-input");
+    await expect(hiddenCard.locator(".wx-section-visibility-text")).toHaveText(
+      "Hidden — not on your site yet. Turn on to add it.",
+    );
+    // The old small pill is gone entirely (decisions/00119) — the header bar's
+    // plain wording above replaces it.
+    await expect(hiddenCard.locator(".wx-section-hidden-chip")).toHaveCount(0);
+    const toggle = hiddenCard.locator(".wx-switch-input");
     await expect(toggle).not.toBeChecked();
 
     // Baseline: it has never been published visible, so it's absent from the
@@ -472,7 +477,7 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     // -- switch ON, Save, publish, and it appears live -----------------------
     await toggle.check();
     await expect(hiddenCard).not.toHaveClass(/wx-section-card-hidden/);
-    await expect(hiddenCard.locator(".wx-section-hidden-chip")).toHaveCount(0);
+    await expect(hiddenCard.locator(".wx-section-visibility-text")).toHaveText("Shown on your site");
     await expect(page.locator(".wx-section-save-bar")).toBeVisible();
 
     await saveSectionPanel(page);
@@ -511,6 +516,55 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     expect(liveHtml).not.toContain("Hidden Pair");
 
     expect(consoleErrors).toEqual([]);
+  });
+
+  test("PR 3: the inline before/after preview drags to compare, and tap-to-enlarge opens a bigger read-only version", async ({
+    page,
+  }) => {
+    const consoleErrors = trackConsoleErrors(page);
+    await gotoSectionAndWaitReady(page, "before-after", "gallery");
+    const slidersCollection = page.locator(".wx-section-collection", { hasText: "Drag-to-compare photos" });
+    // "Hidden Pair" has both a before and an after photo (fixture seed) —
+    // read/drag-only here, never published, so reusing it is safe (matches
+    // the other read-only journeys in this file, e.g. Undo/Discard above).
+    const card = await findCardByTitle(slidersCollection, "Hidden Pair");
+
+    const preview = card.locator(".wx-before-after");
+    await expect(preview).toBeVisible();
+    const range = preview.locator(".wx-before-after-range");
+    const before = preview.locator(".wx-before-after-before");
+    // Exact clip-path string formatting is already precisely covered by the
+    // unit suite (beforeAfterSlider.test.ts, a deterministic jsdom
+    // environment) — this just proves the real browser wiring (drag ->
+    // input event -> visible clip change) works end to end.
+    await expect(before).toHaveCSS("clip-path", /50%/);
+
+    await range.evaluate((el: HTMLInputElement) => {
+      el.value = "80";
+      el.dispatchEvent(new Event("input"));
+    });
+    await expect(before).toHaveCSS("clip-path", /20%/);
+    await expect(range).toHaveValue("80");
+
+    // Tap-to-enlarge: a SEPARATE, independently-draggable larger instance in
+    // a modal — no editing controls. (The aligner, "Line up photos", is a
+    // completely separate button/flow this never touches — decisions/00119;
+    // its own drag/save/publish journey is covered by the test above.)
+    await card.locator(".wx-section-before-after-expand").click();
+    const modal = page.locator(".wx-before-after-modal-backdrop");
+    await expect(modal).toBeVisible();
+    await expect(modal.locator(".wx-before-after")).toHaveCount(1);
+
+    await page.keyboard.press("Escape");
+    await expect(modal).toBeHidden();
+
+    expect(consoleErrors).toEqual([]);
+  });
+
+  test("PR 3: a tile (single image field) never gets a fabricated before/after preview", async ({ page }) => {
+    await gotoSectionAndWaitReady(page, "before-after", "gallery");
+    const tilesCollection = page.locator(".wx-section-collection", { hasText: "Tap-to-zoom photos" });
+    await expect(tilesCollection.locator(".wx-before-after")).toHaveCount(0);
   });
 });
 
@@ -713,5 +767,70 @@ test.describe("E2E: section editor staged-save model (decisions/00118)", () => {
 
     await expect(page.locator(".wx-pages-panel")).toBeVisible();
     expect(page.url()).toContain("/admin/pages");
+  });
+
+  test("PR 2: Turn all off then Turn all on (with confirmation) bulk-toggles every item in a collection", async ({
+    page,
+  }) => {
+    // Two FRESH disposable tiles (never "Hidden Pair" or any other test's own
+    // published items) — draft-only for the whole test (stage + Save, never
+    // Publish), so the describe block's `beforeEach` (`DELETE /api/admin/
+    // draft`) leaves nothing behind regardless of run order (the lesson from
+    // the OTHER staged-save tests above, which safely reuse "Hidden Pair" the
+    // same way).
+    await gotoSectionAndWaitReady(page, "before-after", "gallery");
+    const tilesCollection = page.locator(".wx-section-collection", { hasText: "Tap-to-zoom photos" });
+    const addDialog = page.locator(".wx-section-add-dialog");
+    const mediaDialog = page.locator(".wx-media-dialog-backdrop");
+
+    async function addTile(title: string): Promise<void> {
+      await tilesCollection.locator(".wx-section-add-button").click();
+      await expect(addDialog).toBeVisible();
+      await addDialog.getByRole("button", { name: "Choose Photo" }).click();
+      await expect(mediaDialog).toBeVisible();
+      await mediaDialog.locator(".wx-media-thumb").first().click();
+      await mediaDialog.getByRole("button", { name: "Use this image" }).click();
+      await addDialog.getByRole("button", { name: "Next" }).click();
+      await addDialog.locator("input[type='text']").first().fill(title);
+      await addDialog.getByRole("button", { name: "Save" }).click();
+      await expect(addDialog).toBeHidden();
+    }
+
+    await addTile("Turn All Test A");
+    await addTile("Turn All Test B");
+    const cardA = await findCardByTitle(tilesCollection, "Turn All Test A");
+    const cardB = await findCardByTitle(tilesCollection, "Turn All Test B");
+
+    // Both born shown (decisions/00118's wizard default, unchanged by PR2).
+    await expect(cardA.locator(".wx-switch-input")).toBeChecked();
+    await expect(cardB.locator(".wx-switch-input")).toBeChecked();
+
+    page.once("dialog", (dialog) => void dialog.accept());
+    await tilesCollection.getByRole("button", { name: "Turn all off" }).click();
+
+    await expect(cardA.locator(".wx-switch-input")).not.toBeChecked();
+    await expect(cardB.locator(".wx-switch-input")).not.toBeChecked();
+    await expect(cardA).toHaveClass(/wx-section-card-hidden/);
+    await expect(cardB).toHaveClass(/wx-section-card-hidden/);
+    await expect(cardA.locator(".wx-section-visibility-text")).toHaveText(
+      "Hidden — not on your site yet. Turn on to add it.",
+    );
+
+    page.once("dialog", (dialog) => void dialog.accept());
+    await tilesCollection.getByRole("button", { name: "Turn all on" }).click();
+
+    await expect(cardA.locator(".wx-switch-input")).toBeChecked();
+    await expect(cardB.locator(".wx-switch-input")).toBeChecked();
+    await expect(cardA).not.toHaveClass(/wx-section-card-hidden/);
+    await expect(cardB).not.toHaveClass(/wx-section-card-hidden/);
+    await expect(cardA.locator(".wx-section-visibility-text")).toHaveText("Shown on your site");
+
+    // Declining leaves everything exactly as it was.
+    page.once("dialog", (dialog) => void dialog.dismiss());
+    await tilesCollection.getByRole("button", { name: "Turn all off" }).click();
+    await expect(cardA.locator(".wx-switch-input")).toBeChecked();
+    await expect(cardB.locator(".wx-switch-input")).toBeChecked();
+
+    await saveSectionPanel(page);
   });
 });

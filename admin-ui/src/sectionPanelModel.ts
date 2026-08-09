@@ -168,6 +168,23 @@ export function appendItem(items: SectionItem[], item: SectionItem): SectionItem
   return [...items, item];
 }
 
+/** Shows every item at once — the collection-header "Turn all on" button's
+ * pure logic (decisions/00119). Drops `key` from every item (mirrors
+ * `removeItemField`'s "on" convention: absent means shown), rather than
+ * writing `true` — same reasoning, applied to the whole array in one pass. */
+export function showAllItems(items: SectionItem[], key: string): SectionItem[] {
+  return items.map((item) => {
+    const { [key]: _removed, ...rest } = item;
+    return rest;
+  });
+}
+
+/** Hides every item at once — "Turn all off"'s pure logic (decisions/00119).
+ * Symmetric with `showAllItems`: writes `key: false` on every item. */
+export function hideAllItems(items: SectionItem[], key: string): SectionItem[] {
+  return items.map((item) => ({ ...item, [key]: false }));
+}
+
 /** A picked image field's `{src, alt}` — or `null` if the field is unset or
  * malformed (e.g. a hand-edited draft), read defensively rather than
  * throwing so one bad item never breaks the whole card list. */
