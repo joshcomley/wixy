@@ -151,6 +151,32 @@ class TestHrefBinding:
         apply_bindings(body, ctx, mode="publish", file_label="test")
         assert _find(body, "a")["href"] == "/about.html"
 
+    def test_javascript_scheme_raises_in_build_mode(self) -> None:
+        """decisions/00121: a freely-editable field bound via data-wx-href (e.g.
+        gallery.sliders.sourceUrl) must never let a javascript: value reach the
+        public page as a live href -- publish fails loudly instead."""
+        body = _body('<a data-wx-href="cta">x</a>')
+        ctx = ResolveContext(page={"cta": "javascript:alert(1)"}, glob={})
+        with pytest.raises(BuildError):
+            apply_bindings(body, ctx, mode="publish", file_label="test")
+
+    def test_javascript_scheme_collects_in_validate_mode(self) -> None:
+        body = _body('<a data-wx-href="cta">x</a>')
+        ctx = ResolveContext(page={"cta": "javascript:alert(1)"}, glob={})
+        result = ValidationResult()
+        apply_bindings(body, ctx, mode="preview", file_label="test", sink=result)
+        assert not result.ok
+        assert result.errors[0].key == "cta"
+
+    @pytest.mark.parametrize(
+        "href", ["https://example.com", "mailto:a@b.com", "tel:0123", "#anchor"]
+    )
+    def test_other_safe_schemes_pass(self, href: str) -> None:
+        body = _body('<a data-wx-href="cta">x</a>')
+        ctx = ResolveContext(page={"cta": href}, glob={})
+        apply_bindings(body, ctx, mode="publish", file_label="test")
+        assert _find(body, "a")["href"] == href
+
 
 class TestBgBinding:
     def test_writes_inline_style(self) -> None:

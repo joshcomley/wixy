@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from builder.sanitize import is_already_clean, sanitize_rich_lite
+from builder.sanitize import is_already_clean, is_safe_href, sanitize_rich_lite
 
 
 class TestAllowlist:
@@ -66,6 +66,42 @@ class TestHrefSchemes:
     def test_data_scheme_stripped(self) -> None:
         out = sanitize_rich_lite('<a href="data:text/html,evil">x</a>')
         assert "data:" not in out
+
+
+class TestIsSafeHref:
+    """decisions/00121: `data-wx-href` bindings (bindings.py) have no sanitizer of
+    their own between the raw content value and the rendered `<a href>` -- `is_safe_href`
+    is the gate that closes that, reusing this module's own nh3 scheme allowlist."""
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "https://example.com",
+            "http://example.com",
+            "mailto:a@b.com",
+            "tel:0123",
+            "relative/page.html",
+            "/relative/page.html",
+            "#anchor",
+            "",
+        ],
+    )
+    def test_allowed_values(self, value: str) -> None:
+        assert is_safe_href(value) is True
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "javascript:alert(1)",
+            "JaVaScRiPt:alert(1)",
+            "  javascript:alert(1)",
+            "java\tscript:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "vbscript:msgbox(1)",
+        ],
+    )
+    def test_disallowed_values(self, value: str) -> None:
+        assert is_safe_href(value) is False
 
 
 class TestIdempotence:

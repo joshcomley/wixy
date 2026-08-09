@@ -11,6 +11,8 @@ same bar as editor input.
 
 from __future__ import annotations
 
+import html
+
 import nh3
 
 _TAGS = {"a", "em", "strong", "br", "span"}
@@ -44,3 +46,20 @@ def sanitize_rich_lite(html: str) -> str:
 def is_already_clean(html: str) -> bool:
     """True iff `html` sanitizes to itself (spec/02 §10's validate rule)."""
     return sanitize_rich_lite(html) == html
+
+
+def is_safe_href(value: str) -> bool:
+    """True iff `value` would survive `nh3`'s own href-scheme filtering unchanged --
+    the same http(s)/mailto/tel/relative bar `sanitize_rich_lite` holds free-text link
+    values to (decisions/00121), reused here so ANY `data-wx-href` binding gets nh3's
+    WHATWG-correct scheme parsing (leading whitespace, embedded control characters,
+    mixed case all handled) rather than a hand-rolled check a crafted value could
+    bypass. `value` is escaped before probing so it can never break out of the probe's
+    own `href="..."` attribute and be mistaken for markup."""
+    probe = nh3.clean(
+        f'<a href="{html.escape(value, quote=True)}"></a>',
+        tags={"a"},
+        attributes={"a": {"href"}},
+        url_schemes=_URL_SCHEMES,
+    )
+    return ' href="' in probe

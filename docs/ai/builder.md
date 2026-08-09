@@ -147,6 +147,8 @@ cannot drift. Format is **PROVISIONAL** — read decisions/00012 before changing
 - **Sanitize** (`sanitize.py`): `sanitize_rich_lite` over `nh3` — tags `a/em/strong/br/span`,
   `class` only `js-book`, schemes http(s)/mailto/tel; idempotent; applied on every draft
   write and every text render; `is_already_clean` backs the `not-clean` validate code.
+  `is_safe_href` reuses the same `nh3`/scheme-allowlist machinery as a standalone check —
+  `bindings.py:_apply_href` calls it on every `data-wx-href` value (Inv 29, decisions/00123).
 - **Sitemap** (`sitemap.py`): `generate_robots_txt` (Disallow-all when not indexable) +
   `generate_sitemap_xml` (sorted slugs). Indexability gates whether `sitemap.xml` is written.
 

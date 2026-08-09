@@ -309,3 +309,18 @@ than writing `true`, keeping the two convergent.
 `overlay.test.ts`, and `e2e/tests/section-panel.spec.ts`/`collection-edit.spec.ts`.
 *Exception:* none — this asymmetry is intentional, mirroring Inv 10's own "no carve-out" note.
 
+### Inv 29 — Every `data-wx-href` value must resolve to an allowed URL scheme
+`builder/bindings.py:_apply_href` rejects (build) / records (validate) any value whose scheme
+isn't `http`/`https`/`mailto`/`tel`, or that isn't schemeless (a relative path, `#fragment`,
+or empty string) — `builder/sanitize.py:is_safe_href`, reusing `sanitize_rich_lite`'s own
+`nh3`-backed `_URL_SCHEMES` allowlist so scheme parsing (leading whitespace, embedded control
+characters, mixed case — all real bypass classes) matches what `nh3` already does for rich-
+text `href` values, not a weaker hand-rolled check. Applies to EVERY `data-wx-href` binding
+(contact page tel/mailto, nav items, social links, `gallery.sliders.sourceUrl`) — a generic
+render-layer guard, not a per-field special case (decisions/00123).
+*Enforced by:* `builder/tests/test_bindings.py::TestHrefBinding`,
+`builder/tests/test_sanitize.py::TestIsSafeHref`.
+*Exception:* none — an admin-side display guard (e.g. `renderUrlField`'s `/^https?:\/\//i`,
+decisions/00120) is a UX convenience only and must never be treated as the safety boundary;
+this invariant is enforced at render time regardless of what any admin control shows.
+
