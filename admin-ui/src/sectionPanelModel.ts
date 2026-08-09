@@ -3,7 +3,7 @@
 // unit-testable with vitest without mounting real DOM (mirrors opQueue.ts's
 // "framework-free core, unit-testable without a real iframe" convention).
 
-import type { AdminField } from "./api";
+import type { AdminField, AdminFieldOption } from "./api";
 import type { JsonValue } from "./protocol";
 
 export type SectionItem = Record<string, JsonValue>;
@@ -206,33 +206,42 @@ export function textFieldValue(item: SectionItem, key: string): string {
 }
 
 /** The guided add flow's Save gate (spec 3c): every `image` field must carry
- * a non-blank src, and the field literally named "title" (if the collection
- * has one) must be non-blank text — the one text field the brief singles
- * out as required. Other text/choice fields (`sub`, `cat`) never block
- * Save — `cat` always starts pre-filled from the first option, so it's
- * never genuinely blank in practice. */
+ * a non-blank src, and every field the registry marks `required` (decisions/
+ * 00124 — e.g. a slider's "Treatment name", a category's "value"/"label")
+ * must be non-blank text. Replaces an earlier hardcoded "a field literally
+ * named `title` is required" special case (an Inv 1 violation — behavior
+ * driven by a field's KEY rather than its declared properties). Other text/
+ * choice fields (`sub`, `cat`) never block Save unless marked `required` —
+ * `cat` always starts pre-filled from a real option (`blankItem` below), so
+ * it's never genuinely blank in practice regardless. */
 export function isNewItemComplete(fields: readonly AdminField[], item: SectionItem): boolean {
   for (const field of fields) {
     if (field.kind === "image" && imageFieldValue(item, field.key) === null) return false;
-    if (field.key === "title" && textFieldValue(item, field.key).trim() === "") return false;
+    if (field.required && textFieldValue(item, field.key).trim() === "") return false;
   }
   return true;
 }
 
 /** A brand-new item's starting shape: text/url/choice fields get an explicit
  * default (choice pre-fills the first option per spec 3c: "category
- * defaults to the first option"); an image field gets NO key at all until a
+ * defaults to the first option" — `resolveOptions` lets the caller supply a
+ * `choice` field's LIVE options when it declares `optionsFrom`, decisions/
+ * 00124; defaults to the field's static `options` array, exactly today's
+ * behavior, for every field that doesn't); an image field gets NO key at all until a
  * photo is actually picked, so `imageFieldValue` correctly reads it as
  * "unset" rather than needing a second blank-src special case. `url` MUST
  * get the same explicit `""` default as `text` (never left absent) — a
  * template that conditionally shows a link via `data-wx-if=".key"` raises a
  * hard `BuildError` on a genuinely MISSING key (found:false), unlike an
  * empty string (found:true, falsy) which is the whole point of that guard. */
-export function blankItem(fields: readonly AdminField[]): SectionItem {
+export function blankItem(
+  fields: readonly AdminField[],
+  resolveOptions: (field: AdminField) => readonly AdminFieldOption[] = (field) => field.options,
+): SectionItem {
   const item: SectionItem = {};
   for (const field of fields) {
     if (field.kind === "choice") {
-      item[field.key] = field.options[0]?.value ?? "";
+      item[field.key] = resolveOptions(field)[0]?.value ?? "";
     } else if (field.kind === "text" || field.kind === "url") {
       item[field.key] = "";
     }

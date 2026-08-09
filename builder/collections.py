@@ -32,6 +32,7 @@ COLLECTION_RULES: tuple[CollectionRule, ...] = (
     CollectionRule(page="treatments", path="rx.items", schema="rx-item"),
     CollectionRule(page="gallery", path="gallery.sliders", schema="gallery-slider"),
     CollectionRule(page="gallery", path="gallery.tiles", schema="gallery-tile"),
+    CollectionRule(page="gallery", path="gallery.categories", schema="gallery-category"),
     CollectionRule(page="reviews", path="reviews.items", schema="reviews-item"),
 )
 

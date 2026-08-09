@@ -205,6 +205,8 @@ def _admin_sections_snapshot(project: ProjectConfig) -> list[JsonValue]:
                                 {"value": option.value, "label": option.label}
                                 for option in field.options
                             ],
+                            "optionsFrom": field.options_source,
+                            "required": field.required,
                         }
                         for field in collection.fields
                     ],

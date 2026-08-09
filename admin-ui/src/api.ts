@@ -139,12 +139,24 @@ export interface AdminFieldOption {
  * the media picker, `text` renders an inline input, `choice` renders a
  * `<select>` from `options`, `toggle` renders an on/off switch, `url`
  * renders an inline input with an "Open" link alongside it once a value is
- * present (`options` empty for every kind but `choice`). */
+ * present (`options` empty for every kind but `choice`).
+ *
+ * A `choice` field's select options come from EITHER the static `options`
+ * array OR, when `optionsFrom` names another collection's dotted path
+ * (decisions/00124), that collection's OWN current items — each item's
+ * `value`/`label` fields become one option, kept live as she edits that
+ * collection (staged changes included, not just what's saved). `optionsFrom`
+ * takes priority over `options` when both are present.
+ *
+ * `required` gates the add-new-item wizard's "Save" button
+ * (`isNewItemComplete`) — blank while true and the field is empty. */
 export interface AdminField {
   key: string;
   kind: "image" | "text" | "choice" | "toggle" | "url";
   label: string;
   options: AdminFieldOption[];
+  optionsFrom: string | null;
+  required: boolean;
 }
 
 /** A single array in the section's page content the panel manages as a
