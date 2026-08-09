@@ -34,7 +34,8 @@
               "options": [
                 { "value": "lips", "label": "Lips" },
                 { "value": "cheeks", "label": "Cheeks" },
-                { "value": "chin", "label": "Chin & Jaw" }
+                { "value": "chin", "label": "Chin & Jaw" },
+                { "value": "eyes", "label": "Eyes & Brows" }
               ]
             },
             { "key": "visible", "kind": "toggle", "label": "Show on site" }
@@ -55,7 +56,8 @@
               "options": [
                 { "value": "lips", "label": "Lips" },
                 { "value": "cheeks", "label": "Cheeks" },
-                { "value": "chin", "label": "Chin & Jaw" }
+                { "value": "chin", "label": "Chin & Jaw" },
+                { "value": "eyes", "label": "Eyes & Brows" }
               ]
             },
             { "key": "visible", "kind": "toggle", "label": "Show on site" }
