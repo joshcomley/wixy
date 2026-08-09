@@ -86,5 +86,7 @@ jobs:
           git commit -m "chore(parity): recapture baseline on the pinned CI platform (ubuntu-latest)
 
           Captured from cottage-aesthetics-preview@${{ inputs.ca_ref }} by this workflow
-          (spec/03-site-migration.md §5 point 1's platform policy)."
+          (spec/03-site-migration.md §5 point 1's platform policy).
+
+          Release-note: General bug fixes and improvements."
           git push origin HEAD:${{ github.ref_name }}
