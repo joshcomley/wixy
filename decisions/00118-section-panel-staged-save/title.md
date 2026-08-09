@@ -1,0 +1,1 @@
+The Before & After editor now holds edits locally until an explicit Save, with a "ready to publish" banner, Undo/Discard at both stages, and a route-change guard — a deliberate divergence from the rest of the admin, which keeps auto-save.

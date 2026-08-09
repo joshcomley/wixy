@@ -3,12 +3,17 @@ import type { AdminField } from "../src/api";
 import {
   appendItem,
   blankItem,
+  cloneItems,
   decodeCommonEntities,
   deleteItemAt,
   dottedGet,
+  fieldDirty,
   imageFieldValue,
   isNewItemComplete,
+  itemDirty,
   itemsAt,
+  itemsEqual,
+  jsonValueEqual,
   moveItemDown,
   moveItemTo,
   moveItemUp,
@@ -79,6 +84,111 @@ describe("itemsAt", () => {
   it("drops non-object entries rather than crashing on a malformed draft", () => {
     const content = { gallery: { sliders: [item(), "garbage", 42, null, [1, 2]] } };
     expect(itemsAt(content, "gallery.sliders")).toEqual([item()]);
+  });
+});
+
+describe("jsonValueEqual", () => {
+  it("is true for identical primitives and false across types", () => {
+    expect(jsonValueEqual("a", "a")).toBe(true);
+    expect(jsonValueEqual(1, 1)).toBe(true);
+    expect(jsonValueEqual(true, true)).toBe(true);
+    expect(jsonValueEqual(null, null)).toBe(true);
+    expect(jsonValueEqual("1", 1)).toBe(false);
+    expect(jsonValueEqual(null, false)).toBe(false);
+  });
+
+  it("compares objects by key/value, independent of key order", () => {
+    expect(jsonValueEqual({ src: "a.jpg", alt: "A" }, { alt: "A", src: "a.jpg" })).toBe(true);
+  });
+
+  it("is false when a key's value differs or a key is missing on either side", () => {
+    expect(jsonValueEqual({ src: "a.jpg" }, { src: "b.jpg" })).toBe(false);
+    expect(jsonValueEqual({ src: "a.jpg" }, { src: "a.jpg", alt: "A" })).toBe(false);
+  });
+
+  it("compares arrays element-wise, order-sensitive, length-sensitive", () => {
+    expect(jsonValueEqual([1, 2], [1, 2])).toBe(true);
+    expect(jsonValueEqual([1, 2], [2, 1])).toBe(false);
+    expect(jsonValueEqual([1, 2], [1, 2, 3])).toBe(false);
+  });
+
+  it("recurses through nested objects/arrays (an item's own shape)", () => {
+    const a = item({ before: { src: "b.jpg", alt: "Before" } });
+    const b = item({ before: { src: "b.jpg", alt: "Before" } });
+    const c = item({ before: { src: "b.jpg", alt: "Different" } });
+    expect(jsonValueEqual(a, b)).toBe(true);
+    expect(jsonValueEqual(a, c)).toBe(false);
+  });
+});
+
+describe("itemsEqual", () => {
+  it("is true for two value-identical arrays even with fresh object references", () => {
+    expect(itemsEqual([item()], [item()])).toBe(true);
+  });
+
+  it("is false when lengths differ", () => {
+    expect(itemsEqual([item()], [item(), item()])).toBe(false);
+  });
+
+  it("is false when any item at the same index differs", () => {
+    expect(itemsEqual([item({ title: "A" })], [item({ title: "B" })])).toBe(false);
+  });
+});
+
+describe("cloneItems", () => {
+  it("produces a value-equal but reference-distinct copy", () => {
+    const original = [item()];
+    const copy = cloneItems(original);
+    expect(copy).toEqual(original);
+    expect(copy).not.toBe(original);
+    expect(copy[0]).not.toBe(original[0]);
+  });
+
+  it("a later mutation of the source array never affects the clone (savedState safety)", () => {
+    const original = [item({ title: "A" })];
+    const copy = cloneItems(original);
+    original[0] = { ...(original[0] as SectionItem), title: "Changed" };
+    expect(copy[0]?.["title"]).toBe("A");
+  });
+});
+
+describe("itemDirty", () => {
+  const saved = [item({ title: "A" }), item({ title: "B" })];
+
+  it("is false when the item at that index is value-identical to saved", () => {
+    expect(itemDirty([item({ title: "A" }), item({ title: "B" })], saved, 0)).toBe(false);
+  });
+
+  it("is true when the item at that index differs from saved", () => {
+    expect(itemDirty([item({ title: "Edited" }), item({ title: "B" })], saved, 0)).toBe(true);
+  });
+
+  it("is true for an index past the end of saved (a newly staged item)", () => {
+    expect(itemDirty([...saved, item({ title: "New" })], saved, 2)).toBe(true);
+  });
+
+  it("is false for an index past the end of current (removed since save — the collection-level check owns that signal)", () => {
+    expect(itemDirty([item({ title: "A" })], saved, 1)).toBe(false);
+  });
+});
+
+describe("fieldDirty", () => {
+  const saved = [item({ title: "A", sub: "Lip filler" })];
+
+  it("is false when the field's value is unchanged", () => {
+    expect(fieldDirty([item({ title: "A", sub: "Lip filler" })], saved, 0, "title")).toBe(false);
+  });
+
+  it("is true when the field's value differs", () => {
+    expect(fieldDirty([item({ title: "A2", sub: "Lip filler" })], saved, 0, "title")).toBe(true);
+  });
+
+  it("does not flag a field OTHER than the one that changed", () => {
+    expect(fieldDirty([item({ title: "A2", sub: "Lip filler" })], saved, 0, "sub")).toBe(false);
+  });
+
+  it("treats a missing key on either side as null (no false-dirty for absent optional fields)", () => {
+    expect(fieldDirty([{ title: "A" }], [{ title: "A" }], 0, "visible")).toBe(false);
   });
 });
 

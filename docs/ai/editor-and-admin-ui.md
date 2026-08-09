@@ -77,7 +77,7 @@ between them. Spec: [`spec/05-editor.md`](../../spec/05-editor.md). The wire typ
   muted, so the prominence keeps its meaning (decisions/00094). In that quiet state the
   Publish button also HIDES (`hidden`) and the bar collapses to a narrow strip
   (`.wx-statusbar:not(.wx-statusbar-pending)` drops the vertical padding that framed the
-  button) — with the chip already saying "No unpublished changes", the button is dead
+  button) — with the chip already saying "Nothing to publish", the button is dead
   chrome (operator, 2026-08-02, decisions/00108). The button is hidden from CONSTRUCTION
   (the quiet default), not just hidden on first state load — painting it visible-then-
   hiding made the page jump mid-layout. A RUNNING publish forces the button
@@ -215,8 +215,10 @@ themed reload-confirmation dialog — detailed in the status-bar paragraph above
 media/chat/history/settings/section); `pagesPanel.ts` + `pageSettingsDrawer.ts` (`meta.*` editing);
 `publishDrawer.ts` (review diff + `POST /api/admin/publish` + SSE progress; disables Publish
 with a "Nothing to publish" hint when the preview's `opCount` is 0 AND no upstream commits are
-pending — decisions/00071; layman wording throughout: the chip reads "N unpublished changes ·
-M site updates", the upstream section is "updates made outside the editor" with a plain-English
+pending — decisions/00071; layman wording throughout: the chip reads "N changes ready to publish ·
+M site updates" (decisions/00118 reworded this from "N unpublished changes" to match the section
+panel's own "ready to publish" banner — both read the same `state.draft.opCount`), the upstream
+section is "updates made outside the editor" with a plain-English
 explainer — decisions/00081; **five mutually-exclusive body states** (decisions/00095), each a
 full `body.innerHTML = ""` swap, never a partial patch: **blocked** (`renderBlocked` — the
 publish preview's `validate.ok === false`; "Publishing is paused" + calm body text, "Fix it for
@@ -277,14 +279,41 @@ After"/`gallery.sliders`/`gallery.tiles` are spelled out). `shell.ts` renders on
 per `state.adminSections[]` entry dynamically (inserted right after Edit via
 `editNavItem.after(...)`, re-synced whenever the section list changes on a state reload —
 unlike `NAV_ROUTES`, which is static) and mounts `mountSectionPanel(section, {api, opQueue,
-win?})` for route `{kind:"section", id}`; an unknown `id` (a stale deep link, or a section
-removed from the registry) falls back to the pages panel. The panel owns its own fetch
-(`api.getContent(section.page)`, mirroring `mediaPanel.ts`'s "owns its own lifecycle"
-`mountXPanel` shape rather than `pagesPanel.ts`'s `renderXPanel(data, callbacks)` one — a
-collection's ARRAY VALUES live in page content, not `StateResponse`, only its config does)
-and treats each `AdminCollection`'s array as one indivisible unit: every add/edit/reorder/
-delete writes the WHOLE array as one `opQueue.enqueue({file, path, value})` op (the standard
-collection rule this codebase already applies elsewhere), never a partial patch.
+win?, openAligner?, onRequestPublish?, onDraftChanged?})` for route `{kind:"section", id}`
+(the last two deps are decisions/00118's staged-save wiring, below); an unknown `id` (a stale
+deep link, or a section removed from the registry) falls back to the pages panel. The panel
+owns its own fetch (`api.getContent(section.page)`, mirroring `mediaPanel.ts`'s "owns its own
+lifecycle" `mountXPanel` shape rather than `pagesPanel.ts`'s `renderXPanel(data, callbacks)`
+one — a collection's ARRAY VALUES live in page content, not `StateResponse`, only its config
+does) and treats each `AdminCollection`'s array as one indivisible unit: every add/edit/
+reorder/delete stages the WHOLE array locally (`stageLocal`, decisions/00118), and an explicit
+Save writes it as one `opQueue.enqueue({file, path, value})` op per dirty collection (the
+standard collection rule this codebase already applies elsewhere) — never a partial patch,
+and never automatically on every edit the way the rest of the admin works (below).
+
+**Staged save (decisions/00118)** — unlike every other admin surface (auto-save via the
+shared `OpQueue`, 300ms coalesce), THIS panel holds edits locally against a `savedState`
+snapshot (deep-equal via `sectionPanelModel.itemsEqual`/`jsonValueEqual`, not
+reference-equal — editing a field back to its original value reads as clean again) until she
+presses **Save**. Three visible stages: **unsaved** — a `wx-field-dirty` class on a changed
+input/select, a `wx-section-unsaved-badge` on a changed card, and a sticky bottom
+`.wx-section-save-bar` (Save / **Undo last**, a panel-wide bounded stack of pre-mutation
+snapshots, purely local / **Discard unsaved**, reverts every collection to `savedState`,
+confirmed); **ready to publish** — once Save succeeds (detected by `opQueue.rev` advancing
+across the `flushNow()` call, since `OpQueueLike` exposes no richer success/failure signal —
+both a network-retry and a 422 drop leave `rev` untouched), a `.wx-section-ready-banner` at
+the TOP of the panel reads the same `state.draft.opCount` the shell's status-bar chip does
+(reworded to match: "N changes ready to publish"), with **Publish** (auto-saves any new
+dirty edits first, then calls `deps.onRequestPublish`, wired to `shell.ts`'s
+`openPublishDrawer()` — the panel never re-implements publish itself, Inv 25) and **Discard
+all changes** (confirmed, calls the previously-unwired `api.discardDraft()`, then re-`load()`s
+a clean panel and calls `deps.onDraftChanged` so the shell's own chip clears too); **published**
+— the existing drawer/pipeline, unchanged. Two guards against losing local work: `shell.ts`'s
+`handleRoute` prompts (and reverts the address bar on decline) before leaving the section
+route while `activeSectionPanel.hasUnsavedChanges()`; the panel's own `beforeunload` listener
+(added on mount, removed on `teardown()`, capability-guarded like `shell.ts`'s own timer/
+document checks) covers a real tab close/reload. See decisions/00118 for the full rationale,
+including why this panel diverges from auto-save at all.
 
 **Because the panel is that array's source of truth while mounted, anything that rewrites the
 draft BEHIND it must tell it to re-read** (`SectionPanel.refresh()`, decisions/00115) — a
@@ -295,22 +324,27 @@ the drawer callback and the shell's own watch funnel through) and from the publi
 `onDraftRepaired`. Without it the panel keeps the PRE-publish array and its next edit writes
 those now-dead `/admin/draft-media/` srcs straight back, blocking the following publish — the
 2026-08-03 production incident. `refresh()` never destroys work in progress: it awaits
-`opQueue.flushNow()` first (text fields commit on BLUR, the queue coalesces at 300 ms, so an
-early re-read would read back the pre-edit value), and while a field inside the panel holds
-focus it defers to `focusout` rather than re-rendering under the owner's cursor. Per item:
+`opQueue.flushNow()` first (a Save batches everything staged into one PATCH, and the queue
+itself still coalesces at 300ms, so an early re-read could otherwise land between enqueue and
+flush), defers to `focusout` while a field inside the panel holds focus, and — decisions/
+00118 — ALSO defers while the panel is dirty (any local edit not yet Saved), re-attempting
+once she saves, undoes, or discards; in practice a `refresh()` almost never lands on a dirty
+panel (Publish auto-saves first), but this covers the race where another tab/device/the AI
+assistant triggers one while she's mid-edit here. Per item:
 an `image`-kind field opens the shared `mediaDialog.ts` picker (writes `{src, alt}` —
 `contentSrc`, never a served `url`, per decisions/00095's fix). Displaying that stored
 value back as a thumbnail/preview `<img>` — outside the live-preview iframe, which alone
 gets a real `<base href="/">` — must run it through `mediaDialog.contentSrcToDisplayUrl`
 first (decisions/00102: both the card thumbnail and the add-flow preview shipped without
 this and rendered as broken images in production for every existing item). A `text`-kind field is a
-plain input, committed on blur/Enter, entity-decoded for display
+plain input, staged locally on blur/Enter (decisions/00118 — not written to the draft until
+Save), entity-decoded for display
 (`sectionPanelModel.decodeCommonEntities`) since the value is stored PLAIN and the builder's
 BeautifulSoup render pass re-escapes it at serialization time (the same convention
 `contentModel.ts`'s `.textContent`-based reads already rely on); a `choice`-kind field is a
-`<select>` from `field.options`, committed on change. Reordering has BOTH a pointer-based
-drag (a drop-indicator line, commit-on-release) AND ↑/↓ buttons emitting the identical
-whole-array op — a deliberate addition on top of decisions/00017's earlier "buttons only"
+`<select>` from `field.options`, staged on change. Reordering has BOTH a pointer-based
+drag (a drop-indicator line, stage-on-release) AND ↑/↓ buttons emitting the identical
+whole-array stage — a deliberate addition on top of decisions/00017's earlier "buttons only"
 simplification for the INLINE overlay's own item toolbar, kept here as the fallback/
 accessibility path while this dedicated screen adds real drag for "her pride" polish
 (spec 3c). The guided **add** flow is a linear wizard — one step per `image`-kind field (in

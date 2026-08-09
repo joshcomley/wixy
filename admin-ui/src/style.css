@@ -170,8 +170,8 @@ html, body {
    a real banner: a tinted band with a brand-blue rule under it, tying it to the
    Publish button it sits beside.
 
-   Deliberately state-driven rather than always-loud: a bar shouting "No
-   unpublished changes" would train the owner to tune out the one surface that
+   Deliberately state-driven rather than always-loud: a bar shouting "Nothing
+   to publish" would train the owner to tune out the one surface that
    must get their attention, so with nothing to publish it drops back to the
    plain surface colour (and its label goes muted — see .wx-draft-chip below).
    The class is also applied while a publish RUNS, since the bar is narrating
@@ -182,7 +182,7 @@ html, body {
 }
 
 /* Quiet state (operator, 2026-08-02): with nothing to publish the bar is only
-   a one-line "No unpublished changes" note — the Publish button hides
+   a one-line "Nothing to publish" note — the Publish button hides
    (shell.ts), so the taller padding that framed that tap target is pointless
    and the bar collapses to a narrow strip. Only the vertical padding shrinks;
    the horizontal stays in step with the pending bar (and its phone override
@@ -3678,6 +3678,166 @@ div.wx-media-thumb {
   align-self: flex-start;
 }
 
+/* -- Staged save / dirty / ready-to-publish (decisions/00118) ------------------
+   The section panel's own deferred-save model, deliberately different from the
+   rest of the admin (which auto-saves): edit -> (visibly unsaved) -> Save ->
+   "ready to publish" -> Publish, with Undo/Discard at both stages. Two
+   DISTINCT, separately-styled surfaces on purpose, so "unsaved" and "ready to
+   publish" never read as the same idea (the exact confusion she reported):
+   the ready banner (top, blue — the DRAFT/server state, matches the shell's
+   own `.wx-statusbar-pending` tint) and the save bar (bottom, neutral surface
+   — LOCAL unsaved edits). */
+
+.wx-section-ready-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-brand-blue);
+  background: var(--wx-brand-blue-tint);
+}
+
+.wx-section-ready-banner[hidden] {
+  display: none;
+}
+
+.wx-section-ready-banner-text {
+  flex: 1;
+  min-width: 160px;
+  font: 600 0.875rem/1.3 system-ui, sans-serif;
+  color: var(--wx-ink);
+}
+
+.wx-section-discard-all-button {
+  font: 600 0.75rem/1 system-ui, sans-serif;
+  padding: 8px 10px;
+  min-height: 36px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  color: var(--wx-danger-text);
+  cursor: pointer;
+}
+
+/* Sticky to the bottom of `.wx-main` (the shell's one scrolling region, Inv
+   24) — always reachable without hunting for it on a phone. Laid out
+   normally until scrolled to (Inv-24-safe: sticky never creates a second
+   scroll region or moves outside `.wx-main`), so it never overlaps a card —
+   it just occupies its own row at the end of the flow like any block. */
+.wx-section-save-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  box-shadow: var(--wx-shadow);
+}
+
+.wx-section-save-bar[hidden] {
+  display: none;
+}
+
+.wx-section-save-bar-text {
+  flex: 1 1 100%;
+  font: 600 0.8125rem/1.3 system-ui, sans-serif;
+  color: var(--wx-ink);
+}
+
+.wx-section-save-bar-status {
+  flex: 1 1 100%;
+  font-size: 0.75rem;
+  color: var(--wx-muted);
+}
+
+/* Empty (no active status message) collapses to nothing — the alternative,
+   an always-present blank line, made the buttons hop vertically the instant
+   a "Saved." message appeared/cleared, which read as flaky rather than calm. */
+.wx-section-save-bar-status:empty {
+  display: none;
+}
+
+.wx-section-save-bar-status-ok {
+  color: var(--wx-success-text);
+}
+
+.wx-section-save-bar-status-error {
+  color: var(--wx-danger-text);
+}
+
+.wx-section-save-bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.wx-section-undo-button,
+.wx-section-discard-unsaved-button {
+  font: 600 0.75rem/1 system-ui, sans-serif;
+  padding: 8px 10px;
+  min-height: 36px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  cursor: pointer;
+}
+
+.wx-section-undo-button[hidden] {
+  display: none;
+}
+
+.wx-section-discard-unsaved-button {
+  color: var(--wx-danger-text);
+}
+
+.wx-section-undo-button:disabled,
+.wx-section-discard-unsaved-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.wx-section-save-button {
+  min-height: 40px;
+}
+
+/* A changed field's "edited" look (spec: "doesn't become an edited-looking
+   box") — a left accent border + a faint tint, echoing the brand-blue the
+   ready banner and the shell's own pending status bar already use for
+   "something changed here". Clears the instant Save re-renders the card. */
+.wx-field-dirty {
+  border-color: var(--wx-brand-blue) !important;
+  background: var(--wx-brand-blue-tint) !important;
+  box-shadow: inset 3px 0 0 var(--wx-brand-blue);
+}
+
+/* A dirty CARD (any field changed since the last Save) gets a small marker in
+   its header row, alongside — never instead of — the "Hidden" chip; the two
+   are independent facts about an item and can both be true at once. */
+.wx-section-card-dirty {
+  border-color: var(--wx-brand-blue);
+}
+
+.wx-section-unsaved-badge {
+  align-self: flex-start;
+  font: 600 0.625rem/1 system-ui, sans-serif;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--wx-brand-blue);
+  color: #fff;
+}
+
 /* -- Responsive (mobile/narrow viewport) ----------------------------------------
    Everything above is desktop-first; this is the one breakpoint that reflows the
    shell for phone-width viewports (the operator's own real use case). Touch
@@ -4442,6 +4602,28 @@ div.wx-media-thumb {
   .wx-settings-button-group button,
   .wx-settings-shortcut-rebind,
   .wx-settings-shortcut-toggle {
+    min-height: 44px;
+  }
+
+  /* Ready banner + save bar (decisions/00118): the button group goes full
+     width and stacks its own buttons so every tap target stays at least
+     44px tall on a phone, rather than three cramped buttons in one row. */
+  .wx-section-ready-banner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .wx-section-ready-banner button {
+    min-height: 44px;
+  }
+
+  .wx-section-save-bar-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .wx-section-save-bar-actions button {
+    flex: 1 1 auto;
     min-height: 44px;
   }
 }

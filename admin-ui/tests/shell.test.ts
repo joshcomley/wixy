@@ -365,10 +365,10 @@ describe("mountShell", () => {
 
     await flushState(api);
     expect(container.querySelector(".wx-topbar-title")?.textContent).toBe("Wixy · Cottage Aesthetics");
-    expect(container.querySelector(".wx-draft-chip")?.textContent).toBe("No unpublished changes");
+    expect(container.querySelector(".wx-draft-chip")?.textContent).toBe("Nothing to publish");
   });
 
-  it("the chip counts unpublished changes and outside site updates in layman wording", async () => {
+  it("the chip counts changes ready to publish and outside site updates in layman wording", async () => {
     const api = fakeApi({
       getState: vi.fn(async () =>
         fakeState({
@@ -390,7 +390,7 @@ describe("mountShell", () => {
     await flushState(api);
 
     expect(container.querySelector(".wx-draft-chip")?.textContent).toBe(
-      "6 unpublished changes · 2 site updates",
+      "6 changes ready to publish · 2 site updates",
     );
   });
 
@@ -411,7 +411,7 @@ describe("mountShell", () => {
 
   it("the status bar stays quiet with nothing to publish, so the banner keeps its meaning", async () => {
     // The default fakeState has opCount 0 and no upstream commits — the chip reads
-    // "No unpublished changes", and an always-loud bar there would train the owner
+    // "Nothing to publish", and an always-loud bar there would train the owner
     // to ignore the one surface that has to get their attention.
     const api = fakeApi();
     const win = fakeWindow();
@@ -421,7 +421,7 @@ describe("mountShell", () => {
     await flushState(api);
 
     const statusBar = container.querySelector(".wx-statusbar");
-    expect(statusBar?.textContent).toContain("No unpublished changes");
+    expect(statusBar?.textContent).toContain("Nothing to publish");
     expect(statusBar?.classList.contains("wx-statusbar-pending")).toBe(false);
   });
 
@@ -450,9 +450,9 @@ describe("mountShell", () => {
     );
   });
 
-  it("the Publish button hides with nothing to publish and appears with unpublished changes", async () => {
-    // Operator, 2026-08-02: with the chip already saying "No unpublished
-    // changes" the button is dead chrome; hiding it also lets the bar collapse
+  it("the Publish button hides with nothing to publish and appears with changes ready to publish", async () => {
+    // Operator, 2026-08-02: with the chip already saying "Nothing to
+    // publish" the button is dead chrome; hiding it also lets the bar collapse
     // to a narrow strip.
     const clean = fakeApi();
     const cleanContainer = document.createElement("div");
@@ -1152,7 +1152,7 @@ describe("mountShell", () => {
         expect(publishButton.querySelector(".wx-spinner")).toBeNull();
         expect(publishButton.textContent).toBe("Publish");
         expect(publishButton.disabled).toBe(false);
-        expect(chip.textContent).toBe("No unpublished changes");
+        expect(chip.textContent).toBe("Nothing to publish");
       } finally {
         vi.useRealTimers();
       }
@@ -1244,6 +1244,98 @@ describe("mountShell", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it("declining the unsaved-changes prompt keeps her on the section route and reverts the address bar (decisions/00118)", async () => {
+      const api = fakeApi({
+        getState: vi.fn(async () => fakeState({ adminSections: [BEFORE_AFTER_SECTION] })),
+        getContent: vi.fn(async () => ({
+          content: {
+            gallery: {
+              sliders: [{ before: { src: "images/b.jpg", alt: "B" }, after: { src: "images/a.jpg", alt: "A" } }],
+            },
+          },
+          bindings: { page: "gallery", fields: [] },
+        })),
+      });
+      const win = fakeWindow();
+      // Sequenced: the FIRST confirm is the "Remove" button's own (must
+      // succeed, so the panel actually goes dirty); the SECOND is the route
+      // guard this test targets, which must decline.
+      let confirmCalls = 0;
+      win.confirm = () => {
+        confirmCalls += 1;
+        return confirmCalls === 1;
+      };
+      const container = document.createElement("div");
+
+      mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+      await flushMicro();
+      goTo(win, "/admin/section/before-after");
+      await flushMicro();
+
+      // Stage a local edit (Remove) so the mounted panel is genuinely dirty.
+      container.querySelector<HTMLButtonElement>(".wx-section-delete-button")?.click();
+      expect(container.querySelector(".wx-section-card")).toBeNull();
+
+      goTo(win, "/admin/pages");
+      await flushMicro();
+
+      expect(container.querySelector(".wx-section-panel")).not.toBeNull();
+      expect(container.querySelector(".wx-pages-panel")).toBeNull();
+      expect(win.location.pathname).toBe("/admin/section/before-after");
+      // The panel itself is untouched — still holding the staged delete.
+      expect(container.querySelector(".wx-section-card")).toBeNull();
+    });
+
+    it("confirming the unsaved-changes prompt lets her leave the section route", async () => {
+      const api = fakeApi({
+        getState: vi.fn(async () => fakeState({ adminSections: [BEFORE_AFTER_SECTION] })),
+        getContent: vi.fn(async () => ({
+          content: {
+            gallery: {
+              sliders: [{ before: { src: "images/b.jpg", alt: "B" }, after: { src: "images/a.jpg", alt: "A" } }],
+            },
+          },
+          bindings: { page: "gallery", fields: [] },
+        })),
+      });
+      const win = fakeWindow(); // default confirm() => true
+      const container = document.createElement("div");
+
+      mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+      await flushMicro();
+      goTo(win, "/admin/section/before-after");
+      await flushMicro();
+
+      container.querySelector<HTMLButtonElement>(".wx-section-delete-button")?.click();
+
+      goTo(win, "/admin/pages");
+      await flushMicro();
+
+      expect(container.querySelector(".wx-section-panel")).toBeNull();
+      expect(win.location.pathname).toBe("/admin/pages");
+    });
+
+    it("navigating away from a CLEAN section panel never prompts", async () => {
+      const api = fakeApi({
+        getState: vi.fn(async () => fakeState({ adminSections: [BEFORE_AFTER_SECTION] })),
+      });
+      const win = fakeWindow();
+      win.confirm = () => {
+        throw new Error("confirm should never be called for a clean panel");
+      };
+      const container = document.createElement("div");
+
+      mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+      await flushMicro();
+      goTo(win, "/admin/section/before-after");
+      await flushMicro();
+
+      goTo(win, "/admin/pages");
+      await flushMicro();
+
+      expect(win.location.pathname).toBe("/admin/pages");
     });
 
     it("a drawer-open success announces exactly once across the drawer and watch paths", async () => {
@@ -1481,7 +1573,7 @@ describe("mountShell", () => {
         expect(publishButton.querySelector(".wx-spinner")).toBeNull();
         expect(publishButton.textContent).toBe("Publish");
         expect(publishButton.disabled).toBe(false);
-        expect(container.querySelector(".wx-draft-chip")?.textContent).toBe("No unpublished changes");
+        expect(container.querySelector(".wx-draft-chip")?.textContent).toBe("Nothing to publish");
       } finally {
         vi.useRealTimers();
       }

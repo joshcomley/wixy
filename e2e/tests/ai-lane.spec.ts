@@ -34,8 +34,9 @@ test.describe("E2E 6: AI lane (faked)", () => {
     await gotoEditAndWaitReady(page, "index");
 
     // "draft preview banner appears" — the draft-status chip surfaces upstream
-    // commits (shell.ts's renderTopBar: "N unpublished change(s)", plus "· M site
-    // update(s)" once there are any — layman wording, decisions/00081).
+    // commits (shell.ts's renderTopBar: "N change(s) ready to publish", plus "· M
+    // site update(s)" once there are any — layman wording, decisions/00081,
+    // reworded decisions/00118).
     await expect(page.locator(".wx-draft-chip")).toHaveText("1 site update");
 
     // "publish drawer lists the upstream commit" — opened and closed again

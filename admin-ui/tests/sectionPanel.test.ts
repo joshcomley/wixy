@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AdminApi, AdminSection, ContentResponse, MediaItem } from "../src/api";
+import type { AdminApi, AdminSection, ContentResponse, MediaItem, StateResponse } from "../src/api";
 import type { AlignerRequest, AlignerResult } from "../src/alignerDialog";
 import type { OpQueueLike } from "../src/editView";
 import type { DraftOp } from "../src/protocol";
@@ -68,10 +68,10 @@ const TILE_SECTION: AdminSection = {
 
 function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
   return {
-    getState: vi.fn(),
+    getState: vi.fn(async () => ({ draft: { rev: 0, opCount: 0 } }) as StateResponse),
     getContent: vi.fn(async (): Promise<ContentResponse> => ({ content: {}, bindings: { page: "gallery", fields: [] } })),
     patchDraft: vi.fn(),
-    discardDraft: vi.fn(),
+    discardDraft: vi.fn(async () => ({ rev: 1 })),
     getMedia: vi.fn(async (): Promise<MediaItem[]> => []),
     uploadMedia: vi.fn(),
     deleteMedia: vi.fn(),
@@ -79,15 +79,30 @@ function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
   } as AdminApi;
 }
 
-function fakeQueue(): OpQueueLike & { enqueued: unknown[]; flushes: number } {
+/** A faithful-enough fake of `OpQueue` (opQueue.ts) for the staged-save model
+ * (decisions/00118): `enqueue` only stages into `pending`; `flushNow` is what
+ * moves `pending` into `enqueued` (the assertion surface every existing test
+ * uses) AND advances `rev` — exactly the "rev advanced = the batch landed"
+ * signal `sectionPanel.ts`'s `saveNow` reads, since `OpQueueLike` exposes no
+ * richer success/failure signal. Setting `failFlushes` simulates BOTH a real
+ * failure mode (a network error that re-queues the batch, or a 422 that drops
+ * it) — both leave `rev` untouched, which is the only distinction the panel
+ * can observe. */
+function fakeQueue(): OpQueueLike & { enqueued: unknown[]; flushes: number; failFlushes: boolean } {
   const enqueued: unknown[] = [];
+  let pending: DraftOp[] = [];
   const queue = {
     rev: 0,
     enqueued,
     flushes: 0,
-    enqueue: (op: DraftOp) => enqueued.push(op),
+    failFlushes: false,
+    enqueue: (op: DraftOp) => pending.push(op),
     flushNow: async (): Promise<void> => {
       queue.flushes += 1;
+      if (queue.failFlushes || pending.length === 0) return;
+      enqueued.push(...pending);
+      pending = [];
+      queue.rev += 1;
     },
   };
   return queue;
@@ -104,8 +119,20 @@ function fakeWindow(opts: { confirmReturns?: boolean } = {}): Window {
 }
 
 async function flush(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
+  // 4 ticks (`load()`'s `Promise.all([getContent, refreshDraftState])` adds a
+  // hop over the pre-decisions/00118 2-tick margin) — cheap to over-provision;
+  // an already-settled promise's `await` just continues immediately.
+  for (let i = 0; i < 4; i++) await Promise.resolve();
+}
+
+/** Clicks the panel-level Save bar's Save button (decisions/00118) — distinct
+ * from the guided add-flow's OWN "Save" button, which only finishes the
+ * wizard and stages the new item locally; this is what actually writes the
+ * whole array to the draft via `opQueue`. */
+function clickSave(panel: { element: HTMLElement }): void {
+  const button = panel.element.querySelector<HTMLButtonElement>(".wx-section-save-button");
+  if (button === null) throw new Error("no Save button");
+  button.click();
 }
 
 const SLIDER_ITEM = {
@@ -188,7 +215,7 @@ describe("mountSectionPanel", () => {
     expect(thumbs[1]?.getAttribute("src")).toBe("/admin/draft-media/staged-a1.jpg");
   });
 
-  it("editing a text field commits the whole array on blur", async () => {
+  it("editing a text field stages it locally on blur (no enqueue) — Save then writes the whole array", async () => {
     const api = fakeApi({
       getContent: vi.fn(async () => ({
         content: { gallery: { sliders: [SLIDER_ITEM] } },
@@ -205,9 +232,27 @@ describe("mountSectionPanel", () => {
     titleInput.value = "Renamed";
     titleInput.dispatchEvent(new Event("blur"));
 
+    // Staged, not yet written — the whole point of decisions/00118's model.
+    // Staging re-renders the card (so the new value/dirty state paints), so
+    // re-query rather than reuse the pre-blur node the rebuild discarded.
+    expect(opQueue.enqueued).toEqual([]);
+    const titleInputAfterStage = panel.element.querySelector<HTMLInputElement>(".wx-section-field-input");
+    expect(titleInputAfterStage?.classList.contains("wx-field-dirty")).toBe(true);
+    const saveButton = panel.element.querySelector<HTMLButtonElement>(".wx-section-save-button");
+    expect(saveButton?.disabled).toBe(false);
+    expect(panel.element.querySelector(".wx-section-save-bar")?.hasAttribute("hidden")).toBe(false);
+
+    clickSave(panel);
+    await flush();
+
     expect(opQueue.enqueued).toEqual([
       { file: "gallery", path: "gallery.sliders", value: [{ ...SLIDER_ITEM, title: "Renamed" }] },
     ]);
+    // A successful Save re-renders the card (so the dirty marker clears) —
+    // re-query rather than reuse the pre-Save node, which the rebuild discards.
+    const titleInputAfterSave = panel.element.querySelector<HTMLInputElement>(".wx-section-field-input");
+    expect(titleInputAfterSave?.classList.contains("wx-field-dirty")).toBe(false);
+    expect(saveButton?.disabled).toBe(true);
   });
 
   it("blurring a text field with an unchanged value does not enqueue anything", async () => {
@@ -225,9 +270,11 @@ describe("mountSectionPanel", () => {
     titleInput?.dispatchEvent(new Event("blur"));
 
     expect(opQueue.enqueued).toEqual([]);
+    expect(panel.element.querySelector(".wx-section-save-bar")?.hasAttribute("hidden")).toBe(true);
+    expect(panel.hasUnsavedChanges()).toBe(false);
   });
 
-  it("changing a choice field commits the whole array immediately", async () => {
+  it("changing a choice field stages it locally, then Save writes the whole array", async () => {
     const api = fakeApi({
       getContent: vi.fn(async () => ({
         content: { gallery: { sliders: [SLIDER_ITEM] } },
@@ -244,12 +291,16 @@ describe("mountSectionPanel", () => {
     select.value = "cheeks";
     select.dispatchEvent(new Event("change"));
 
+    expect(opQueue.enqueued).toEqual([]);
+    clickSave(panel);
+    await flush();
+
     expect(opQueue.enqueued).toEqual([
       { file: "gallery", path: "gallery.sliders", value: [{ ...SLIDER_ITEM, cat: "cheeks" }] },
     ]);
   });
 
-  it("the up/down buttons commit the reordered whole array, disabled at the boundaries", async () => {
+  it("the up/down buttons stage the reordered whole array, disabled at the boundaries", async () => {
     const second = { ...SLIDER_ITEM, title: "Second" };
     const api = fakeApi({
       getContent: vi.fn(async () => ({
@@ -270,12 +321,17 @@ describe("mountSectionPanel", () => {
 
     firstDown?.click();
 
+    expect(opQueue.enqueued).toEqual([]);
+    expect(panel.hasUnsavedChanges()).toBe(true);
+    clickSave(panel);
+    await flush();
+
     expect(opQueue.enqueued).toEqual([
       { file: "gallery", path: "gallery.sliders", value: [second, SLIDER_ITEM] },
     ]);
   });
 
-  it("Remove asks for confirmation and only commits the array without that item when confirmed", async () => {
+  it("Remove asks for confirmation and leaves everything untouched when declined", async () => {
     const api = fakeApi({
       getContent: vi.fn(async () => ({
         content: { gallery: { sliders: [SLIDER_ITEM] } },
@@ -288,10 +344,12 @@ describe("mountSectionPanel", () => {
     await flush();
 
     panel.element.querySelector<HTMLButtonElement>(".wx-section-delete-button")?.click();
+    expect(panel.element.querySelectorAll(".wx-section-card")).toHaveLength(1);
+    expect(panel.hasUnsavedChanges()).toBe(false);
     expect(opQueue.enqueued).toEqual([]);
   });
 
-  it("Remove commits the array without that item once confirmed", async () => {
+  it("Remove stages the array without that item once confirmed; Save then writes it", async () => {
     const api = fakeApi({
       getContent: vi.fn(async () => ({
         content: { gallery: { sliders: [SLIDER_ITEM] } },
@@ -304,6 +362,12 @@ describe("mountSectionPanel", () => {
     await flush();
 
     panel.element.querySelector<HTMLButtonElement>(".wx-section-delete-button")?.click();
+    expect(panel.element.querySelectorAll(".wx-section-card")).toHaveLength(0);
+    expect(opQueue.enqueued).toEqual([]);
+
+    clickSave(panel);
+    await flush();
+
     expect(opQueue.enqueued).toEqual([{ file: "gallery", path: "gallery.sliders", value: [] }]);
   });
 
@@ -373,6 +437,16 @@ describe("mountSectionPanel", () => {
 
     findButton("Save")?.click();
 
+    // The wizard's own Save only finishes the ITEM and stages it locally
+    // (decisions/00118) — it doesn't reach the draft until the panel-level
+    // Save bar is pressed, same as any other edit in this panel.
+    expect(panel.element.querySelector(".wx-section-add-dialog")).toBeNull();
+    expect(opQueue.enqueued).toEqual([]);
+    expect(panel.hasUnsavedChanges()).toBe(true);
+
+    clickSave(panel);
+    await flush();
+
     expect(opQueue.enqueued).toEqual([
       {
         file: "gallery",
@@ -386,7 +460,6 @@ describe("mountSectionPanel", () => {
         ],
       },
     ]);
-    expect(panel.element.querySelector(".wx-section-add-dialog")).toBeNull();
   });
 });
 
@@ -423,7 +496,7 @@ describe("mountSectionPanel — the visible toggle (Show on site)", () => {
     expect(panel.element.querySelector(".wx-section-hidden-chip")?.textContent).toBe("Hidden");
   });
 
-  it("unchecking the toggle commits the whole array with visible:false on exactly that item", async () => {
+  it("unchecking the toggle stages visible:false on exactly that item; Save then writes it", async () => {
     const api = fakeApi({
       getContent: vi.fn(async () => ({
         content: { gallery: { sliders: [SLIDER_ITEM] } },
@@ -440,12 +513,16 @@ describe("mountSectionPanel — the visible toggle (Show on site)", () => {
     toggle.checked = false;
     toggle.dispatchEvent(new Event("change"));
 
+    expect(opQueue.enqueued).toEqual([]);
+    clickSave(panel);
+    await flush();
+
     expect(opQueue.enqueued).toEqual([
       { file: "gallery", path: "gallery.sliders", value: [{ ...SLIDER_ITEM, visible: false }] },
     ]);
   });
 
-  it("re-checking an already-hidden item commits the array with the key REMOVED, not set true", async () => {
+  it("re-checking an already-hidden item stages the array with the key REMOVED, not set true", async () => {
     const api = fakeApi({
       getContent: vi.fn(async () => ({
         content: { gallery: { sliders: [{ ...SLIDER_ITEM, visible: false }] } },
@@ -461,6 +538,8 @@ describe("mountSectionPanel — the visible toggle (Show on site)", () => {
     if (toggle === null) throw new Error("no toggle input");
     toggle.checked = true;
     toggle.dispatchEvent(new Event("change"));
+    clickSave(panel);
+    await flush();
 
     expect(opQueue.enqueued).toEqual([
       { file: "gallery", path: "gallery.sliders", value: [SLIDER_ITEM] },
@@ -511,6 +590,8 @@ describe("mountSectionPanel — the visible toggle (Show on site)", () => {
     titleInput.value = "Cheek filler";
     titleInput.dispatchEvent(new Event("input"));
     findButton("Save")?.click();
+    clickSave(panel);
+    await flush();
 
     const [op] = opQueue.enqueued as Array<{ value: Array<Record<string, unknown>> }>;
     if (op === undefined) throw new Error("no op enqueued");
@@ -560,6 +641,8 @@ describe("mountSectionPanel — the visible toggle (Show on site)", () => {
     titleInput.value = "Cheek filler";
     titleInput.dispatchEvent(new Event("input"));
     findButton("Save")?.click();
+    clickSave(panel);
+    await flush();
 
     expect(opQueue.enqueued).toEqual([
       {
@@ -647,7 +730,7 @@ describe("mountSectionPanel — the before/after aligner (decisions/00111)", () 
     });
   });
 
-  it("a saved alignment commits the whole array with the baked photo(s) swapped in, alt preserved", async () => {
+  it("a saved alignment stages the whole array with the baked photo(s) swapped in; Save writes it, alt preserved", async () => {
     const opQueue = fakeQueue();
     const { fire, stub } = stubAligner();
     const panel = mountSectionPanel(SLIDER_SECTION, {
@@ -659,6 +742,10 @@ describe("mountSectionPanel — the before/after aligner (decisions/00111)", () 
     panel.element.querySelector<HTMLButtonElement>(".wx-section-align-button")?.click();
     fire({ second: { src: "images/eee555ff-lips-after-aligned.jpg", alt: "After" } });
 
+    expect(opQueue.enqueued).toEqual([]);
+    clickSave(panel);
+    await flush();
+
     expect(opQueue.enqueued).toEqual([
       {
         file: "gallery",
@@ -668,7 +755,7 @@ describe("mountSectionPanel — the before/after aligner (decisions/00111)", () 
     ]);
   });
 
-  it("a cancelled aligner commits nothing", async () => {
+  it("a cancelled aligner stages nothing", async () => {
     const opQueue = fakeQueue();
     const { fire, stub } = stubAligner();
     const panel = mountSectionPanel(SLIDER_SECTION, {
@@ -679,6 +766,7 @@ describe("mountSectionPanel — the before/after aligner (decisions/00111)", () 
     await flush();
     panel.element.querySelector<HTMLButtonElement>(".wx-section-align-button")?.click();
     fire(null);
+    expect(panel.hasUnsavedChanges()).toBe(false);
     expect(opQueue.enqueued).toEqual([]);
   });
 
@@ -740,6 +828,8 @@ describe("mountSectionPanel — the before/after aligner (decisions/00111)", () 
     titleInput.value = "Lip filler";
     titleInput.dispatchEvent(new Event("input"));
     findButton("Save")?.click();
+    clickSave(panel);
+    await flush();
 
     expect(opQueue.enqueued).toEqual([
       {
@@ -791,6 +881,8 @@ describe("mountSectionPanel — the before/after aligner (decisions/00111)", () 
       const titleInput = panel.element.querySelector<HTMLInputElement>(".wx-section-field-input")!;
       titleInput.value = "Retitled";
       titleInput.dispatchEvent(new Event("blur"));
+      clickSave(panel);
+      await flush();
 
       expect(opQueue.enqueued).toEqual([
         {
@@ -847,5 +939,348 @@ describe("mountSectionPanel — the before/after aligner (decisions/00111)", () 
         panel.element.remove();
       }
     });
+  });
+});
+
+describe("mountSectionPanel — staged save, undo, discard, publish (decisions/00118)", () => {
+  function sliderApi(overrides: Partial<AdminApi> = {}): AdminApi {
+    return fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { sliders: [SLIDER_ITEM] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+      ...overrides,
+    });
+  }
+
+  it("Save is disabled with nothing to save, and the save bar stays hidden", async () => {
+    const panel = mountSectionPanel(SLIDER_SECTION, { api: sliderApi(), opQueue: fakeQueue() });
+    await flush();
+
+    expect(panel.hasUnsavedChanges()).toBe(false);
+    expect(panel.element.querySelector<HTMLButtonElement>(".wx-section-save-button")?.disabled).toBe(true);
+    expect(panel.element.querySelector(".wx-section-save-bar")?.hasAttribute("hidden")).toBe(true);
+  });
+
+  it("Undo last reverts the most recent local edit, with nothing enqueued", async () => {
+    const opQueue = fakeQueue();
+    const panel = mountSectionPanel(SLIDER_SECTION, { api: sliderApi(), opQueue });
+    await flush();
+
+    const titleInput = panel.element.querySelector<HTMLInputElement>(".wx-section-field-input")!;
+    titleInput.value = "Renamed";
+    titleInput.dispatchEvent(new Event("blur"));
+    expect(panel.hasUnsavedChanges()).toBe(true);
+
+    const undoButton = panel.element.querySelector<HTMLButtonElement>(".wx-section-undo-button");
+    expect(undoButton?.hidden).toBe(false);
+    undoButton?.click();
+
+    expect(panel.hasUnsavedChanges()).toBe(false);
+    expect(opQueue.enqueued).toEqual([]);
+    const titleInputAfterUndo = panel.element.querySelector<HTMLInputElement>(".wx-section-field-input");
+    expect(titleInputAfterUndo?.value).toBe(SLIDER_ITEM.title);
+    expect(panel.element.querySelector(".wx-section-save-bar")?.hasAttribute("hidden")).toBe(true);
+  });
+
+  it("Undo last steps back through several edits one at a time", async () => {
+    const opQueue = fakeQueue();
+    const panel = mountSectionPanel(SLIDER_SECTION, { api: sliderApi(), opQueue });
+    await flush();
+
+    const firstEdit = (value: string): void => {
+      const input = panel.element.querySelector<HTMLInputElement>(".wx-section-field-input")!;
+      input.value = value;
+      input.dispatchEvent(new Event("blur"));
+    };
+    firstEdit("Edit one");
+    firstEdit("Edit two");
+    const undoButton = panel.element.querySelector<HTMLButtonElement>(".wx-section-undo-button")!;
+
+    undoButton.click();
+    expect(panel.element.querySelector<HTMLInputElement>(".wx-section-field-input")?.value).toBe(
+      "Edit one",
+    );
+    expect(panel.hasUnsavedChanges()).toBe(true); // still one edit ahead of saved
+
+    undoButton.click();
+    expect(panel.element.querySelector<HTMLInputElement>(".wx-section-field-input")?.value).toBe(
+      SLIDER_ITEM.title,
+    );
+    expect(panel.hasUnsavedChanges()).toBe(false);
+    expect(opQueue.enqueued).toEqual([]);
+  });
+
+  it("Discard unsaved asks for confirmation, and declining leaves the edit in place", async () => {
+    const opQueue = fakeQueue();
+    const win = fakeWindow({ confirmReturns: false });
+    const panel = mountSectionPanel(SLIDER_SECTION, { api: sliderApi(), opQueue, win });
+    await flush();
+
+    const titleInput = panel.element.querySelector<HTMLInputElement>(".wx-section-field-input")!;
+    titleInput.value = "Renamed";
+    titleInput.dispatchEvent(new Event("blur"));
+
+    panel.element.querySelector<HTMLButtonElement>(".wx-section-discard-unsaved-button")?.click();
+
+    expect(panel.hasUnsavedChanges()).toBe(true);
+    expect(panel.element.querySelector<HTMLInputElement>(".wx-section-field-input")?.value).toBe(
+      "Renamed",
+    );
+  });
+
+  it("Discard unsaved, once confirmed, reverts every collection to the last-saved state with no enqueue", async () => {
+    const opQueue = fakeQueue();
+    const win = fakeWindow({ confirmReturns: true });
+    const panel = mountSectionPanel(SLIDER_SECTION, { api: sliderApi(), opQueue, win });
+    await flush();
+
+    const titleInput = panel.element.querySelector<HTMLInputElement>(".wx-section-field-input")!;
+    titleInput.value = "Renamed";
+    titleInput.dispatchEvent(new Event("blur"));
+
+    panel.element.querySelector<HTMLButtonElement>(".wx-section-discard-unsaved-button")?.click();
+
+    expect(panel.hasUnsavedChanges()).toBe(false);
+    expect(opQueue.enqueued).toEqual([]);
+    expect(panel.element.querySelector<HTMLInputElement>(".wx-section-field-input")?.value).toBe(
+      SLIDER_ITEM.title,
+    );
+    expect(panel.element.querySelector(".wx-section-save-bar")?.hasAttribute("hidden")).toBe(true);
+  });
+
+  it("the ready-to-publish banner reflects the draft's opCount, hidden at zero", async () => {
+    const api = sliderApi({ getState: vi.fn(async () => ({ draft: { rev: 0, opCount: 0 } }) as StateResponse) });
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue: fakeQueue() });
+    await flush();
+
+    expect(panel.element.querySelector(".wx-section-ready-banner")?.hasAttribute("hidden")).toBe(true);
+  });
+
+  it("Save writes the draft, then the ready-to-publish banner updates from the new opCount", async () => {
+    let opCount = 0;
+    const api = sliderApi({ getState: vi.fn(async () => ({ draft: { rev: 0, opCount } }) as StateResponse) });
+    const opQueue = fakeQueue();
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue });
+    await flush();
+    expect(panel.element.querySelector(".wx-section-ready-banner")?.hasAttribute("hidden")).toBe(true);
+
+    opCount = 1; // what the server would report once this Save lands
+    const titleInput = panel.element.querySelector<HTMLInputElement>(".wx-section-field-input")!;
+    titleInput.value = "Renamed";
+    titleInput.dispatchEvent(new Event("blur"));
+    clickSave(panel);
+    await flush();
+
+    const banner = panel.element.querySelector(".wx-section-ready-banner");
+    expect(banner?.hasAttribute("hidden")).toBe(false);
+    expect(panel.element.querySelector(".wx-section-ready-banner-text")?.textContent).toBe(
+      "1 change ready to publish",
+    );
+  });
+
+  it("a failed Save (rev doesn't advance) keeps the panel dirty, shows an error, and Save stays enabled", async () => {
+    const opQueue = fakeQueue();
+    opQueue.failFlushes = true;
+    const panel = mountSectionPanel(SLIDER_SECTION, { api: sliderApi(), opQueue });
+    await flush();
+
+    const titleInput = panel.element.querySelector<HTMLInputElement>(".wx-section-field-input")!;
+    titleInput.value = "Renamed";
+    titleInput.dispatchEvent(new Event("blur"));
+    clickSave(panel);
+    await flush();
+
+    expect(panel.hasUnsavedChanges()).toBe(true);
+    const saveButton = panel.element.querySelector<HTMLButtonElement>(".wx-section-save-button");
+    expect(saveButton?.disabled).toBe(false);
+    expect(panel.element.querySelector(".wx-section-save-bar-status")?.textContent).toMatch(
+      /couldn.t save/i,
+    );
+    // Recovers on a later successful attempt without needing a remount.
+    opQueue.failFlushes = false;
+    clickSave(panel);
+    await flush();
+    expect(panel.hasUnsavedChanges()).toBe(false);
+  });
+
+  it("Publish auto-saves dirty edits first, then asks the shell to open the drawer", async () => {
+    const api = sliderApi({ getState: vi.fn(async () => ({ draft: { rev: 0, opCount: 1 } }) as StateResponse) });
+    const opQueue = fakeQueue();
+    let requested = 0;
+    const panel = mountSectionPanel(SLIDER_SECTION, {
+      api,
+      opQueue,
+      onRequestPublish: () => {
+        requested += 1;
+      },
+    });
+    await flush();
+
+    const titleInput = panel.element.querySelector<HTMLInputElement>(".wx-section-field-input")!;
+    titleInput.value = "Renamed";
+    titleInput.dispatchEvent(new Event("blur"));
+    expect(panel.hasUnsavedChanges()).toBe(true);
+
+    panel.element
+      .querySelector<HTMLButtonElement>(".wx-section-ready-banner .wx-publish-button")
+      ?.click();
+    await flush();
+
+    expect(opQueue.enqueued).toEqual([
+      { file: "gallery", path: "gallery.sliders", value: [{ ...SLIDER_ITEM, title: "Renamed" }] },
+    ]);
+    expect(panel.hasUnsavedChanges()).toBe(false);
+    expect(requested).toBe(1);
+  });
+
+  it("Publish with nothing unsaved skips the save step and asks the shell to open the drawer directly", async () => {
+    const api = sliderApi({ getState: vi.fn(async () => ({ draft: { rev: 0, opCount: 1 } }) as StateResponse) });
+    const opQueue = fakeQueue();
+    let requested = 0;
+    const panel = mountSectionPanel(SLIDER_SECTION, {
+      api,
+      opQueue,
+      onRequestPublish: () => {
+        requested += 1;
+      },
+    });
+    await flush();
+
+    panel.element
+      .querySelector<HTMLButtonElement>(".wx-section-ready-banner .wx-publish-button")
+      ?.click();
+    await flush();
+
+    expect(opQueue.flushes).toBe(0);
+    expect(requested).toBe(1);
+  });
+
+  it("Publish stays put on a save failure — the shell is never asked to open the drawer", async () => {
+    const api = sliderApi({ getState: vi.fn(async () => ({ draft: { rev: 0, opCount: 1 } }) as StateResponse) });
+    const opQueue = fakeQueue();
+    opQueue.failFlushes = true;
+    let requested = 0;
+    const panel = mountSectionPanel(SLIDER_SECTION, {
+      api,
+      opQueue,
+      onRequestPublish: () => {
+        requested += 1;
+      },
+    });
+    await flush();
+
+    const titleInput = panel.element.querySelector<HTMLInputElement>(".wx-section-field-input")!;
+    titleInput.value = "Renamed";
+    titleInput.dispatchEvent(new Event("blur"));
+
+    panel.element
+      .querySelector<HTMLButtonElement>(".wx-section-ready-banner .wx-publish-button")
+      ?.click();
+    await flush();
+
+    expect(requested).toBe(0);
+    expect(panel.hasUnsavedChanges()).toBe(true);
+  });
+
+  it("Discard all changes asks for confirmation, and declining leaves the draft untouched", async () => {
+    const api = sliderApi({ getState: vi.fn(async () => ({ draft: { rev: 0, opCount: 1 } }) as StateResponse) });
+    const win = fakeWindow({ confirmReturns: false });
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue: fakeQueue(), win });
+    await flush();
+
+    panel.element.querySelector<HTMLButtonElement>(".wx-section-discard-all-button")?.click();
+    await flush();
+
+    expect(api.discardDraft).not.toHaveBeenCalled();
+    expect(panel.element.querySelectorAll(".wx-section-card")).toHaveLength(1);
+  });
+
+  it("Discard all changes, once confirmed, calls api.discardDraft, reloads a clean panel, and notifies the shell", async () => {
+    let discarded = false;
+    const api = sliderApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { sliders: discarded ? [] : [SLIDER_ITEM] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+      getState: vi.fn(async () => ({ draft: { rev: discarded ? 2 : 1, opCount: discarded ? 0 : 1 } }) as StateResponse),
+      discardDraft: vi.fn(async () => {
+        discarded = true;
+        return { rev: 2 };
+      }),
+    });
+    const win = fakeWindow({ confirmReturns: true });
+    let draftChangedCalls = 0;
+    const panel = mountSectionPanel(SLIDER_SECTION, {
+      api,
+      opQueue: fakeQueue(),
+      win,
+      onDraftChanged: () => {
+        draftChangedCalls += 1;
+      },
+    });
+    await flush();
+    expect(panel.element.querySelector(".wx-section-ready-banner")?.hasAttribute("hidden")).toBe(false);
+
+    panel.element.querySelector<HTMLButtonElement>(".wx-section-discard-all-button")?.click();
+    await flush();
+
+    expect(api.discardDraft).toHaveBeenCalledTimes(1);
+    expect(draftChangedCalls).toBe(1);
+    expect(panel.element.querySelectorAll(".wx-section-card")).toHaveLength(0);
+    expect(panel.element.querySelector(".wx-section-ready-banner")?.hasAttribute("hidden")).toBe(true);
+  });
+
+  it("Discard all changes disables the button and ignores a second click while the network round-trip is in flight", async () => {
+    let resolveDiscard: (() => void) | undefined;
+    const api = sliderApi({
+      getState: vi.fn(async () => ({ draft: { rev: 0, opCount: 1 } }) as StateResponse),
+      discardDraft: vi.fn(
+        () =>
+          new Promise<{ rev: number }>((resolve) => {
+            resolveDiscard = () => resolve({ rev: 1 });
+          }),
+      ),
+    });
+    const win = fakeWindow({ confirmReturns: true });
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue: fakeQueue(), win });
+    await flush();
+
+    const discardAllButton = panel.element.querySelector<HTMLButtonElement>(".wx-section-discard-all-button");
+    discardAllButton?.click();
+    await flush();
+    expect(discardAllButton?.disabled).toBe(true);
+
+    discardAllButton?.click(); // still in flight — must not fire a second confirm/discard
+    await flush();
+    expect(api.discardDraft).toHaveBeenCalledTimes(1);
+
+    resolveDiscard?.();
+    await flush();
+    expect(discardAllButton?.disabled).toBe(false);
+  });
+
+  it("prompts before a tab close/reload while dirty, via beforeunload; not while clean", async () => {
+    const opQueue = fakeQueue();
+    const win = fakeWindow();
+    const panel = mountSectionPanel(SLIDER_SECTION, { api: sliderApi(), opQueue, win });
+    await flush();
+
+    const cleanEvent = new Event("beforeunload", { cancelable: true });
+    win.dispatchEvent(cleanEvent);
+    expect(cleanEvent.defaultPrevented).toBe(false);
+
+    const titleInput = panel.element.querySelector<HTMLInputElement>(".wx-section-field-input")!;
+    titleInput.value = "Renamed";
+    titleInput.dispatchEvent(new Event("blur"));
+
+    const dirtyEvent = new Event("beforeunload", { cancelable: true });
+    win.dispatchEvent(dirtyEvent);
+    expect(dirtyEvent.defaultPrevented).toBe(true);
+
+    panel.teardown();
+    const afterTeardownEvent = new Event("beforeunload", { cancelable: true });
+    win.dispatchEvent(afterTeardownEvent);
+    expect(afterTeardownEvent.defaultPrevented).toBe(false);
   });
 });
