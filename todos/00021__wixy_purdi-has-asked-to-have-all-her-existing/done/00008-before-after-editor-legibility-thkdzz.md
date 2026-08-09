@@ -82,3 +82,72 @@ FINAL HANDOFF, not treated as a code defect.
 
 Next: commit, push, open PR, FINAL HANDOFF to planner for PR1 alone per the two-round plan;
 wait for clearance before merging or starting PR2/PR3.
+
+## PR1 shipped (2026-08-09, continuation session)
+
+Planner cleared PR1 (0 critical/0 high) with one non-blocking MEDIUM follow-up: `saveNow()`'s
+`opQueue.rev` success-inference has a real false-positive gap (a 409-refetch immediately
+followed by a network error also advances `rev` without the batch landing) — planner's
+explicit recommendation was to fix it as part of PR2 rather than respin PR1. Before merging,
+a stray automated "snapshot: WIP before Claude session" bot commit was found on the branch
+(touching only an unrelated, already-superseded handover doc — zero implementation impact),
+which broke the release-note CI check and technically drifted off the cleared SHA. Rather than
+force-push (blocked by this box's git safety hooks; the safer remedy they suggest — "resolve
+via a fresh PR" — was used instead), the exact cleared tree was pushed as a new branch/PR #161
+(byte-identical candidate `7e4df733...`) and #159 closed in its favor; the incidental commit
+was preserved properly via its own tiny PR #160. Merged (merge commit `ea751c6c...`), Slots
+deploy verified live, POST-RELEASE DONE REPORT sent.
+
+## PR2 + PR3 shipped together (2026-08-09, same session)
+
+Implemented both per the specs above, in one PR (#162, candidate `87ca220f6fdd1f891b65f28c95bca1127af9a286`) —
+combined because the changes ended up too interleaved in shared files (`sectionPanel.ts`,
+`style.css`, `sectionPanel.test.ts`) to cleanly split into two commits. Folded PR1's MEDIUM
+follow-up into PR2 as planned: `OpQueue.enqueueTracked()`, an additive method giving
+`saveNow()` a real per-batch accepted signal instead of the `rev`-comparison inference.
+`decisions/00119-visibility-switch-and-tracked-save/` covers full rationale for both PRs.
+
+A real bug was self-caught during e2e verification (not by the planner): `.wx-switch-track`/
+`.wx-switch-thumb` need `pointer-events: none` or they paint over and silently swallow every
+click on the real checkbox underneath — shipped past a fully-green `npm test` (jsdom doesn't
+enforce real paint/stacking order) and only failed a real-browser Playwright `.check()`.
+Root-caused and fixed before shipping; documented as a general lesson in decisions/00119 for
+any future custom control built the same way.
+
+Local e2e runs on this shared/loaded hub box showed transient failures across two full-suite
+runs (aligner test, collection-edit, structured-controls, restore.spec.ts) — none touching any
+file this PR changed; each was re-run in isolation and passed clean, confirming box contention
+(worsened once by running vitest concurrently with e2e, corrected on the second run) rather
+than regressions — matches this project's own documented "full-suite-only flake is a box-level
+resource-contention characteristic." CI (a dedicated uncontended runner) was green throughout.
+
+Planner cleared PR2+PR3 (0 critical/0 high, 3 LOW self-review findings all agreed non-blocking:
+no double-open guard on the enlarge button — matches existing precedent; `itemNounPlural()`'s
+naive pluralization — inert for today's real nouns; Turn-all-OFF's decline path isn't
+unit-tested while Turn-all-ON's is — shipped as-cleared per the planner's explicit sanction
+rather than respinning for a trivial 4th test). Merged (merge commit `c09395b3...`), Slots
+deploy verified live.
+
+## Final live verification (task #10) + mission complete
+
+Drove a real headed Chrome browser at 390px width (Purdi's phone) against the REAL production
+site (`ca.cinnamons.uk/admin/section/before-after`, CF Access service token) — 21/21 automated
+checks passed: edit/unsaved/Save-enables/Undo, the new switch toggling + wording, Turn all on
+staging every card, the inline before/after preview dragging + tap-to-enlarge modal, all
+visually confirmed via screenshot too.
+
+**Deviation, flagged explicitly rather than silently worked around**: did NOT perform the
+planned "publish a trivial real change + restore" step. On navigating to production I found a
+genuine PRE-EXISTING pending draft change (opCount:1, rev 221) that predates this session and
+isn't mine — real in-progress work (Purdi's, most likely, or possibly an AI-lane conversation's)
+sitting unpublished. Publishing anything right now would have shipped that too, which isn't a
+call I have the context or authority to make. Never clicked Discard-all/Save/Publish for any
+test edit; added a hard Playwright network-guard aborting any write to `/api/admin/draft` or
+`/api/admin/publish` as a belt-and-braces measure; verified everything via Undo-last/
+Discard-unsaved (local-only, never touches the server) instead; confirmed the pending change
+was still exactly `{rev: 221, opCount: 1}`, untouched, at the end. Surfaced this to the planner
+as something worth Purdi/the operator's attention next time either is in the admin — not urgent,
+just noting an unpublished change exists that nobody has actioned.
+
+Final POST-RELEASE DONE REPORT covering the complete 3-PR arc sent to the planner. **Task
+complete — all 3 PRs merged, deployed, live-verified. No open items on this task.**
