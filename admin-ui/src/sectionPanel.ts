@@ -16,7 +16,7 @@
 // (visibly unsaved) -> Save -> "ready to publish" -> Publish, with Undo/
 // Discard available at both the local and the draft stage.
 
-import type { AdminApi, AdminCollection, AdminField, AdminSection } from "./api";
+import type { AdminApi, AdminCollection, AdminField, AdminFieldOption, AdminSection } from "./api";
 import { openAlignerDialog, type AlignerResult } from "./alignerDialog";
 import { renderBeforeAfter } from "./beforeAfterSlider";
 import { contentSrcToDisplayUrl, openMediaDialog, type MediaPickValue } from "./mediaDialog";
@@ -210,6 +210,37 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     return collectionState.get(collection.path) ?? [];
   }
 
+  /** A `choice` field's selectable options (decisions/00124) — `optionsFrom`
+   * (a live, admin-managed collection elsewhere on this same page, e.g. a
+   * gallery's category list) takes priority over the static `options` array
+   * when both are present. Reads `collectionState` directly rather than
+   * `itemsFor` (which wants a full `AdminCollection`, not just a path) — the
+   * referenced collection is always one this panel already loaded alongside
+   * every other collection on the page (`load()`'s single `getContent` call
+   * covers the whole section), so this reflects her UNSAVED edits to it too,
+   * not just what's on the server. */
+  function resolveChoiceOptions(field: AdminField): AdminFieldOption[] {
+    if (field.optionsFrom === null) return field.options;
+    const sourceItems = collectionState.get(field.optionsFrom) ?? [];
+    return sourceItems
+      .map((item) => ({ value: textFieldValue(item, "value"), label: textFieldValue(item, "label") }))
+      .filter((option) => option.value !== "");
+  }
+
+  /** Other collections in this section whose `choice` fields source their
+   * options FROM `collection` (decisions/00124) — e.g. `gallery.sliders`
+   * depends on `gallery.categories`. `stageLocal`/`undoLast`/`discardUnsaved`
+   * re-render these too whenever `collection` itself changes, so a renamed
+   * or newly-added category shows up in every photo's dropdown immediately,
+   * not just the next time something else happens to re-render that card. */
+  function dependentCollectionsOf(collection: AdminCollection): AdminCollection[] {
+    return section.collections.filter(
+      (other) =>
+        other.path !== collection.path &&
+        other.fields.some((field) => field.optionsFrom === collection.path),
+    );
+  }
+
   function isCollectionDirty(collection: AdminCollection): boolean {
     return !itemsEqual(itemsFor(collection), savedState.get(collection.path) ?? []);
   }
@@ -231,6 +262,7 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     pushUndoSnapshot(collection.path, itemsFor(collection));
     collectionState.set(collection.path, items);
     renderCollectionBody(collection);
+    for (const dependent of dependentCollectionsOf(collection)) renderCollectionBody(dependent);
     refreshSaveBar();
   }
 
@@ -239,7 +271,10 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     if (last === undefined) return;
     collectionState.set(last.path, last.items);
     const collection = section.collections.find((c) => c.path === last.path);
-    if (collection !== undefined) renderCollectionBody(collection);
+    if (collection !== undefined) {
+      renderCollectionBody(collection);
+      for (const dependent of dependentCollectionsOf(collection)) renderCollectionBody(dependent);
+    }
     refreshSaveBar();
     maybeRunPendingRefresh();
   }
@@ -625,7 +660,7 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     if (fieldDirty(itemsFor(collection), savedState.get(collection.path) ?? [], index, field.key)) {
       select.classList.add("wx-field-dirty");
     }
-    for (const option of field.options) {
+    for (const option of resolveChoiceOptions(field)) {
       const optionEl = document.createElement("option");
       optionEl.value = option.value;
       optionEl.textContent = option.label;
@@ -937,7 +972,7 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
 
   function openAddFlow(collection: AdminCollection): void {
     const imageFields = collection.fields.filter((f) => f.kind === "image");
-    let draft = blankItem(collection.fields);
+    let draft = blankItem(collection.fields, resolveChoiceOptions);
     let stepIndex = 0; // 0..imageFields.length-1 are photo steps; the last step is the form.
     const totalSteps = imageFields.length + 1;
 
@@ -1138,7 +1173,7 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
         labelText.className = "wx-section-field-label";
         labelText.textContent = field.label;
         const select = document.createElement("select");
-        for (const option of field.options) {
+        for (const option of resolveChoiceOptions(field)) {
           const optionEl = document.createElement("option");
           optionEl.value = option.value;
           optionEl.textContent = option.label;

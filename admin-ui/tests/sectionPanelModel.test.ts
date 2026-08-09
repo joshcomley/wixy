@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AdminField } from "../src/api";
+import type { AdminField, AdminFieldOption } from "../src/api";
 import {
   appendItem,
   blankItem,
@@ -23,10 +23,38 @@ import {
   type SectionItem,
 } from "../src/sectionPanelModel";
 
-const BEFORE_FIELD: AdminField = { key: "before", kind: "image", label: "Before photo", options: [] };
-const AFTER_FIELD: AdminField = { key: "after", kind: "image", label: "After photo", options: [] };
-const TITLE_FIELD: AdminField = { key: "title", kind: "text", label: "Treatment name", options: [] };
-const SUB_FIELD: AdminField = { key: "sub", kind: "text", label: "Treatment type", options: [] };
+const BEFORE_FIELD: AdminField = {
+  key: "before",
+  kind: "image",
+  label: "Before photo",
+  options: [],
+  optionsFrom: null,
+  required: false,
+};
+const AFTER_FIELD: AdminField = {
+  key: "after",
+  kind: "image",
+  label: "After photo",
+  options: [],
+  optionsFrom: null,
+  required: false,
+};
+const TITLE_FIELD: AdminField = {
+  key: "title",
+  kind: "text",
+  label: "Treatment name",
+  options: [],
+  optionsFrom: null,
+  required: true,
+};
+const SUB_FIELD: AdminField = {
+  key: "sub",
+  kind: "text",
+  label: "Treatment type",
+  options: [],
+  optionsFrom: null,
+  required: false,
+};
 const CAT_FIELD: AdminField = {
   key: "cat",
   kind: "choice",
@@ -35,6 +63,8 @@ const CAT_FIELD: AdminField = {
     { value: "lips", label: "Lips" },
     { value: "cheeks", label: "Cheeks" },
   ],
+  optionsFrom: null,
+  required: false,
 };
 const SLIDER_FIELDS: AdminField[] = [BEFORE_FIELD, AFTER_FIELD, TITLE_FIELD, SUB_FIELD, CAT_FIELD];
 
@@ -355,7 +385,7 @@ describe("isNewItemComplete (the guided-add Save gate)", () => {
 
   it("a single-image collection (tiles-shaped) only requires that one image + title", () => {
     const tileFields = [
-      { key: "img", kind: "image" as const, label: "Photo", options: [] },
+      { key: "img", kind: "image" as const, label: "Photo", options: [], optionsFrom: null, required: false },
       TITLE_FIELD,
       CAT_FIELD,
     ];
@@ -384,6 +414,40 @@ describe("blankItem", () => {
 
   it("a fresh blank item is never already complete", () => {
     expect(isNewItemComplete(SLIDER_FIELDS, blankItem(SLIDER_FIELDS))).toBe(false);
+  });
+
+  it("an optionsFrom choice field defaults to the resolver's FIRST option, not blank (decisions/00124)", () => {
+    const dynamicCatField: AdminField = {
+      key: "cat",
+      kind: "choice",
+      label: "Category",
+      options: [], // deliberately empty -- optionsFrom fields carry no static options
+      optionsFrom: "gallery.categories",
+      required: false,
+    };
+    const resolveOptions = (): AdminFieldOption[] => [
+      { value: "chin", label: "Chin & Jaw" },
+      { value: "lips", label: "Lips" },
+    ];
+
+    expect(blankItem([dynamicCatField], resolveOptions)["cat"]).toBe("chin");
+  });
+
+  it("an optionsFrom choice field falls back to empty string when the resolver has nothing yet", () => {
+    const dynamicCatField: AdminField = {
+      key: "cat",
+      kind: "choice",
+      label: "Category",
+      options: [],
+      optionsFrom: "gallery.categories",
+      required: false,
+    };
+
+    expect(blankItem([dynamicCatField], () => [])["cat"]).toBe("");
+  });
+
+  it("without a resolver argument, falls back to the field's static options (unchanged default behavior)", () => {
+    expect(blankItem(SLIDER_FIELDS)["cat"]).toBe("lips");
   });
 });
 

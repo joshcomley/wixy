@@ -19,10 +19,10 @@ const SLIDER_SECTION: AdminSection = {
       schema: "gallery-slider",
       alignAspect: { w: 640, h: 360 },
       fields: [
-        { key: "before", kind: "image", label: "Before photo", options: [] },
-        { key: "after", kind: "image", label: "After photo", options: [] },
-        { key: "title", kind: "text", label: "Treatment name", options: [] },
-        { key: "sub", kind: "text", label: "Treatment type", options: [] },
+        { key: "before", kind: "image", label: "Before photo", options: [], optionsFrom: null, required: false },
+        { key: "after", kind: "image", label: "After photo", options: [], optionsFrom: null, required: false },
+        { key: "title", kind: "text", label: "Treatment name", options: [], optionsFrom: null, required: true },
+        { key: "sub", kind: "text", label: "Treatment type", options: [], optionsFrom: null, required: false },
         {
           key: "cat",
           kind: "choice",
@@ -31,9 +31,11 @@ const SLIDER_SECTION: AdminSection = {
             { value: "lips", label: "Lips" },
             { value: "cheeks", label: "Cheeks" },
           ],
+          optionsFrom: null,
+          required: false,
         },
-        { key: "sourceUrl", kind: "url", label: "Original post link", options: [] },
-        { key: "visible", kind: "toggle", label: "Show on site", options: [] },
+        { key: "sourceUrl", kind: "url", label: "Original post link", options: [], optionsFrom: null, required: false },
+        { key: "visible", kind: "toggle", label: "Show on site", options: [], optionsFrom: null, required: false },
       ],
     },
   ],
@@ -53,15 +55,63 @@ const TILE_SECTION: AdminSection = {
       schema: "gallery-tile",
       alignAspect: null,
       fields: [
-        { key: "img", kind: "image", label: "Photo", options: [] },
-        { key: "title", kind: "text", label: "Caption", options: [] },
+        { key: "img", kind: "image", label: "Photo", options: [], optionsFrom: null, required: false },
+        { key: "title", kind: "text", label: "Caption", options: [], optionsFrom: null, required: true },
         {
           key: "cat",
           kind: "choice",
           label: "Category",
           options: [{ value: "lips", label: "Lips" }],
+          optionsFrom: null,
+          required: false,
         },
-        { key: "visible", kind: "toggle", label: "Show on site", options: [] },
+        { key: "visible", kind: "toggle", label: "Show on site", options: [], optionsFrom: null, required: false },
+      ],
+    },
+  ],
+};
+
+/** Mirrors the REAL `ca.json` registry shape (decisions/00124): `cat` sources
+ * its options from the sibling `gallery.categories` collection, not a static
+ * list — both collections live on the same page/section, matching how
+ * `sectionPanel.ts` loads every collection on the page in one `load()`. */
+const CATEGORIES_AND_SLIDERS_SECTION: AdminSection = {
+  id: "before-after",
+  navLabel: "Before & After",
+  title: "Before & After",
+  description: "Drag to reorder.",
+  page: "gallery",
+  collections: [
+    {
+      path: "gallery.categories",
+      label: "Category names",
+      itemNoun: "category",
+      schema: "gallery-category",
+      alignAspect: null,
+      fields: [
+        { key: "value", kind: "text", label: "Internal key", options: [], optionsFrom: null, required: true },
+        { key: "label", kind: "text", label: "Display name", options: [], optionsFrom: null, required: true },
+      ],
+    },
+    {
+      path: "gallery.sliders",
+      label: "Drag-to-compare photos",
+      itemNoun: "photo pair",
+      schema: "gallery-slider",
+      alignAspect: { w: 640, h: 360 },
+      fields: [
+        { key: "before", kind: "image", label: "Before photo", options: [], optionsFrom: null, required: false },
+        { key: "after", kind: "image", label: "After photo", options: [], optionsFrom: null, required: false },
+        { key: "title", kind: "text", label: "Treatment name", options: [], optionsFrom: null, required: true },
+        {
+          key: "cat",
+          kind: "choice",
+          label: "Category",
+          options: [],
+          optionsFrom: "gallery.categories",
+          required: false,
+        },
+        { key: "visible", kind: "toggle", label: "Show on site", options: [], optionsFrom: null, required: false },
       ],
     },
   ],
@@ -1537,5 +1587,98 @@ describe("mountSectionPanel — the url field kind (source link)", () => {
         value: [{ ...SLIDER_ITEM, sourceUrl: "https://www.facebook.com/photo/?fbid=123" }],
       },
     ]);
+  });
+});
+
+describe("mountSectionPanel — dynamic choice options via optionsFrom (decisions/00124)", () => {
+  it("a choice field's <select> lists the options collection's items, not a static list", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: {
+          gallery: {
+            categories: [
+              { value: "lips", label: "Lips" },
+              { value: "cheeks", label: "Cheeks" },
+            ],
+            sliders: [SLIDER_ITEM],
+          },
+        },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const panel = mountSectionPanel(CATEGORIES_AND_SLIDERS_SECTION, { api, opQueue: fakeQueue() });
+    await flush();
+
+    // Two "wx-section-collection" blocks now render (categories, then sliders)
+    // — the choice <select> lives in the SECOND one's one card.
+    const select = panel.element.querySelectorAll<HTMLSelectElement>(".wx-section-field-select")[0];
+    if (select === undefined) throw new Error("no choice select");
+    const optionTexts = Array.from(select.options).map((o) => [o.value, o.textContent]);
+    expect(optionTexts).toEqual([
+      ["lips", "Lips"],
+      ["cheeks", "Cheeks"],
+    ]);
+  });
+
+  it("reflects an UNSAVED edit to the categories collection immediately (staged, not just saved)", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: {
+          gallery: { categories: [{ value: "lips", label: "Lips" }], sliders: [SLIDER_ITEM] },
+        },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const panel = mountSectionPanel(CATEGORIES_AND_SLIDERS_SECTION, { api, opQueue: fakeQueue() });
+    await flush();
+
+    // Rename "Lips" -> "Lip Treatments" in the categories card, WITHOUT saving.
+    const labelInput = panel.element.querySelectorAll<HTMLInputElement>(".wx-section-field-input")[1];
+    if (labelInput === undefined) throw new Error("no label input");
+    labelInput.value = "Lip Treatments";
+    labelInput.dispatchEvent(new Event("blur"));
+    await flush();
+
+    const select = panel.element.querySelectorAll<HTMLSelectElement>(".wx-section-field-select")[0];
+    if (select === undefined) throw new Error("no choice select");
+    expect(Array.from(select.options).map((o) => o.textContent)).toEqual(["Lip Treatments"]);
+  });
+
+  // A new SLIDER item's `cat` defaulting to the first LIVE category (not
+  // blank, now that a static `field.options[0]` no longer exists for an
+  // optionsFrom field) is covered directly at the `blankItem()` unit level
+  // in sectionPanelModel.test.ts — driving it through this wizard would also
+  // require navigating gallery.sliders' two image-picking steps first, real
+  // complexity for a check that's really about blankItem()'s own logic.
+
+  it("the add-category wizard's Save stays disabled until both required fields are filled", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { categories: [], sliders: [] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const panel = mountSectionPanel(CATEGORIES_AND_SLIDERS_SECTION, { api, opQueue: fakeQueue() });
+    await flush();
+
+    panel.element.querySelectorAll<HTMLButtonElement>(".wx-section-add-button")[0]?.click();
+    await flush();
+
+    const saveButton = panel.element.querySelector<HTMLButtonElement>(".wx-section-add-form ~ .wx-section-add-nav .wx-publish-button");
+    expect(saveButton?.disabled).toBe(true);
+
+    const [valueInput, labelInput] = Array.from(
+      panel.element.querySelectorAll<HTMLInputElement>(".wx-section-add-form input[type='text']"),
+    );
+    expect(valueInput).toBeDefined();
+    expect(labelInput).toBeDefined();
+    if (valueInput === undefined || labelInput === undefined) throw new Error("missing wizard inputs");
+    valueInput.value = "botox";
+    valueInput.dispatchEvent(new Event("input"));
+    expect(saveButton?.disabled).toBe(true); // label still blank
+
+    labelInput.value = "Botox";
+    labelInput.dispatchEvent(new Event("input"));
+    expect(saveButton?.disabled).toBe(false);
   });
 });

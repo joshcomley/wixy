@@ -108,15 +108,26 @@ collection>]}`; `<admin collection>` = `{path, label, itemNoun, schema, alignAsp
 fields:[<admin field>]}` — `alignAspect` is `{w, h} | null` (from the registry's
 optional `"alignAspect": "W:H"`); when non-null AND the collection has ≥2 `image`
 fields, the section panel offers the before/after aligner on its cards and in its add
-flow (decisions/00111); `<admin field>` = `{key, kind:"image"\|"text"\|"choice"\|"toggle", label,
-options:[{value,label}]}` (decisions/00098; `toggle` added decisions/00117 — an on/off switch,
-`options` empty) — a plain camelCase mirror of
+flow (decisions/00111); `<admin field>` = `{key, kind:"image"\|"text"\|"choice"\|"toggle"\|"url",
+label, options:[{value,label}], optionsFrom:string\|null, required:bool}` (decisions/00098;
+`toggle` added decisions/00117; `url` added decisions/00120 — same plain-input UI as `text`
+plus an "Open ↗" link once the value looks like a real URL; `optionsFrom`/`required` added
+decisions/00124) — a plain camelCase mirror of
 `builder.config.ProjectConfig.admin_sections`
 (`routes_admin_api.py:_admin_sections_snapshot`), registry-driven (Inv 1: no site literals
 in engine code — `ca.json`'s `adminSections` array declares the actual "Before & After"
 section; an empty registry reads as `[]`, never absent). Drives `admin-ui`'s dynamically
 rendered nav entries + `sectionPanel.ts`'s management screen for each declared section —
 see [editor-and-admin-ui.md](editor-and-admin-ui.md).
+
+For a `choice`-kind field, `optionsFrom` (non-null) names another collection's dotted
+path (e.g. `gallery.categories`) whose OWN current items supply the selectable options at
+render time (each item's `value`/`label` text fields become one option), taking priority
+over the static `options` array when both are present — this is what lets a project make a
+choice set itself admin-editable (a category list) instead of a registry literal only a
+developer can change (decisions/00124). `required` (default `false`) gates whether the
+add-new-item wizard's Save button stays disabled while that field is blank
+(`sectionPanelModel.isNewItemComplete`) — see [editor-and-admin-ui.md](editor-and-admin-ui.md).
 
 `state.pages[].editable` = `(source.pages_dir / "<slug>.html").exists()` — a page is editable
 iff its template is on disk, so a duplicated-but-unpublished page (staged only in the overlay)
