@@ -3572,6 +3572,32 @@ div.wx-media-thumb {
   color: var(--wx-ink);
 }
 
+/* A `url`-kind field (e.g. a link back to the social post a before/after
+   photo was imported from) — the plain input plus an "Open" link that only
+   ever appears once the value looks like a real http(s) URL. */
+.wx-section-field-url-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wx-section-field-url-row .wx-section-field-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wx-section-field-url-open {
+  flex-shrink: 0;
+  font: 600 0.75rem/1 system-ui, sans-serif;
+  color: var(--wx-brand-blue-text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.wx-section-field-url-open:hover {
+  text-decoration: underline;
+}
+
 .wx-section-field-toggle {
   flex-direction: row;
   align-items: center;

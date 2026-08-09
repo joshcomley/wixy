@@ -1,0 +1,1 @@
+A new `url` admin field kind gives before/after gallery items an optional link back to the original Instagram/Facebook post, backfilled for 67 of the 74 currently-imported entries from the existing import manifest; the other 7 were never tracked imports at all (verified via git archaeology, not guessed).

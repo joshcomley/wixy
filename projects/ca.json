@@ -38,6 +38,7 @@
                 { "value": "eyes", "label": "Eyes & Brows" }
               ]
             },
+            { "key": "sourceUrl", "kind": "text", "label": "Original post link (optional)" },
             { "key": "visible", "kind": "toggle", "label": "Show on site" }
           ]
         },
