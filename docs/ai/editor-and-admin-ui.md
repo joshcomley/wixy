@@ -356,7 +356,11 @@ plain input, staged locally on blur/Enter (decisions/00118 — not written to th
 Save), entity-decoded for display
 (`sectionPanelModel.decodeCommonEntities`) since the value is stored PLAIN and the builder's
 BeautifulSoup render pass re-escapes it at serialization time (the same convention
-`contentModel.ts`'s `.textContent`-based reads already rely on); a `choice`-kind field is a
+`contentModel.ts`'s `.textContent`-based reads already rely on); a `url`-kind field
+(decisions/00120) is the same plain input PLUS a small "Open ↗" link next to it once the
+current value looks like a real `http(s)://` URL (`renderUrlField` — never a clickable
+`href` for anything else, defensively, since the value round-trips through free text she
+can type/paste anything into); a `choice`-kind field is a
 `<select>` from `field.options`, staged on change. Reordering has BOTH a pointer-based
 drag (a drop-indicator line, stage-on-release) AND ↑/↓ buttons emitting the identical
 whole-array stage — a deliberate addition on top of decisions/00017's earlier "buttons only"
@@ -400,9 +404,13 @@ prominently the control renders moved, and it stages via `stageLocal` like every
 (decisions/00118 — never auto-saves). A card whose item currently has `visible: false` also
 keeps the existing `wx-section-card-hidden` class (~0.55 opacity) as a secondary whole-card cue,
 driven by the same `item["visible"] === false` check. The guided add-flow's form step
-dispatches on `field.kind` with an explicit three-way switch (a `toggle` field used to fall
-through a text/choice ternary into an empty `<select>` — decisions/00117 fixed the trap before
-it shipped) — its own toggle row (`renderToggleInputRow`, a SEPARATE code path from
+dispatches on `field.kind` with an explicit switch (a `toggle` field used to fall through a
+text/choice ternary into an empty `<select>` — decisions/00117 fixed the trap before it
+shipped; decisions/00120 hit the SAME class of trap adding `url` and fixed it the same way —
+EVERY new kind needs an explicit branch here, never rely on the trailing `else`
+un-audited). `url` reuses the plain text row in the wizard (identical UI need during
+creation — only the main card view's `renderUrlField` adds the "Open" link, for reviewing an
+already-saved value) — its own toggle row (`renderToggleInputRow`, a SEPARATE code path from
 `renderVisibilityBar`, untouched by decisions/00119) still starts checked (a new item is born
 shown) and writes a key only if she unchecks it before Save.
 

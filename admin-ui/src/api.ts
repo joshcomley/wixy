@@ -137,11 +137,12 @@ export interface AdminFieldOption {
 /** One editable property of a collection item — mirrors
  * `builder.config.AdminField`. `kind` picks the panel control: `image` opens
  * the media picker, `text` renders an inline input, `choice` renders a
- * `<select>` from `options`, `toggle` renders an on/off switch (`options`
- * empty for the non-`choice` kinds). */
+ * `<select>` from `options`, `toggle` renders an on/off switch, `url`
+ * renders an inline input with an "Open" link alongside it once a value is
+ * present (`options` empty for every kind but `choice`). */
 export interface AdminField {
   key: string;
-  kind: "image" | "text" | "choice" | "toggle";
+  kind: "image" | "text" | "choice" | "toggle" | "url";
   label: string;
   options: AdminFieldOption[];
 }

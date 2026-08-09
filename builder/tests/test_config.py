@@ -305,6 +305,34 @@ class TestToggleFieldKind:
         field = config.admin_sections[0].collections[0].fields[0]
         assert field == AdminField(key="visible", kind="toggle", label="Show on site")
 
+    def test_a_url_kind_field_parses(self, tmp_path: Path) -> None:
+        data = dict(_MINIMAL_PROJECT)
+        data["adminSections"] = [
+            {
+                "id": "s",
+                "navLabel": "S",
+                "title": "S",
+                "description": "d",
+                "page": "p",
+                "collections": [
+                    {
+                        "path": "p.items",
+                        "label": "Items",
+                        "itemNoun": "item",
+                        "schema": "sch",
+                        "fields": [
+                            {"key": "sourceUrl", "kind": "url", "label": "Original post link"},
+                        ],
+                    }
+                ],
+            }
+        ]
+
+        config = load_project_config(_write(tmp_path, data))
+
+        field = config.admin_sections[0].collections[0].fields[0]
+        assert field == AdminField(key="sourceUrl", kind="url", label="Original post link")
+
 
 def _section_with_collection(collection: dict[str, object]) -> dict[str, object]:
     data = dict(_MINIMAL_PROJECT)

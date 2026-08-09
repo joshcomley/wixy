@@ -219,17 +219,21 @@ export function isNewItemComplete(fields: readonly AdminField[], item: SectionIt
   return true;
 }
 
-/** A brand-new item's starting shape: text/choice fields get an explicit
+/** A brand-new item's starting shape: text/url/choice fields get an explicit
  * default (choice pre-fills the first option per spec 3c: "category
  * defaults to the first option"); an image field gets NO key at all until a
  * photo is actually picked, so `imageFieldValue` correctly reads it as
- * "unset" rather than needing a second blank-src special case. */
+ * "unset" rather than needing a second blank-src special case. `url` MUST
+ * get the same explicit `""` default as `text` (never left absent) — a
+ * template that conditionally shows a link via `data-wx-if=".key"` raises a
+ * hard `BuildError` on a genuinely MISSING key (found:false), unlike an
+ * empty string (found:true, falsy) which is the whole point of that guard. */
 export function blankItem(fields: readonly AdminField[]): SectionItem {
   const item: SectionItem = {};
   for (const field of fields) {
     if (field.kind === "choice") {
       item[field.key] = field.options[0]?.value ?? "";
-    } else if (field.kind === "text") {
+    } else if (field.kind === "text" || field.kind === "url") {
       item[field.key] = "";
     }
   }

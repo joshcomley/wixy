@@ -556,6 +556,59 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     return wrap;
   }
 
+  /** Like `renderTextField`, plus an "Open ↗" link alongside the input once
+   * it holds a value — for a field that's really an external URL (e.g. a
+   * link back to the social post a before/after photo was imported from).
+   * Only `http(s)://` values get a real, clickable `href` (defensive: this
+   * value round-trips through a plain text input she can type/paste
+   * anything into — a `javascript:` URL must never become a clickable
+   * anchor). Reflects the value as of the last commit/re-render, same as
+   * every other dirty-marker in this file — not live per-keystroke. */
+  function renderUrlField(
+    collection: AdminCollection,
+    field: AdminField,
+    item: SectionItem,
+    index: number,
+  ): HTMLElement {
+    const wrap = document.createElement("label");
+    wrap.className = "wx-section-field";
+    const labelText = document.createElement("span");
+    labelText.className = "wx-section-field-label";
+    labelText.textContent = field.label;
+    const row = document.createElement("div");
+    row.className = "wx-section-field-url-row";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "wx-section-field-input";
+    if (fieldDirty(itemsFor(collection), savedState.get(collection.path) ?? [], index, field.key)) {
+      input.classList.add("wx-field-dirty");
+    }
+    const currentValue = decodeCommonEntities(textFieldValue(item, field.key)).trim();
+    input.value = currentValue;
+    const commitValue = (): void => {
+      if (destroyed) return;
+      const current = itemsFor(collection);
+      if (textFieldValue(current[index] ?? {}, field.key) === input.value) return;
+      stageLocal(collection, updateItemField(current, index, field.key, input.value));
+    };
+    input.addEventListener("blur", commitValue);
+    input.addEventListener("keydown", (evt) => {
+      if (evt.key === "Enter") input.blur();
+    });
+    row.appendChild(input);
+    if (/^https?:\/\//i.test(currentValue)) {
+      const openLink = document.createElement("a");
+      openLink.className = "wx-section-field-url-open";
+      openLink.href = currentValue;
+      openLink.target = "_blank";
+      openLink.rel = "noopener noreferrer";
+      openLink.textContent = "Open ↗";
+      row.appendChild(openLink);
+    }
+    wrap.append(labelText, row);
+    return wrap;
+  }
+
   function renderChoiceField(
     collection: AdminCollection,
     field: AdminField,
@@ -754,6 +807,7 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     fields.className = "wx-section-card-fields";
     for (const field of collection.fields) {
       if (field.kind === "text") fields.appendChild(renderTextField(collection, field, item, index));
+      if (field.kind === "url") fields.appendChild(renderUrlField(collection, field, item, index));
       if (field.kind === "choice") fields.appendChild(renderChoiceField(collection, field, item, index));
     }
 
@@ -1000,7 +1054,10 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
       for (const field of collection.fields) {
         if (field.kind === "image") continue;
         let row: HTMLElement;
-        if (field.kind === "text") row = renderTextInputRow(field);
+        // `url` reuses the plain text row here (identical UI need during
+        // creation) — only the main card view's `renderUrlField` adds the
+        // "Open" link, for reviewing an already-saved value.
+        if (field.kind === "text" || field.kind === "url") row = renderTextInputRow(field);
         else if (field.kind === "choice") row = renderChoiceInputRow(field);
         else row = renderToggleInputRow(field);
         form.appendChild(row);

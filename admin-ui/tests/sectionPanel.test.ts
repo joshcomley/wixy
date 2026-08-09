@@ -32,6 +32,7 @@ const SLIDER_SECTION: AdminSection = {
             { value: "cheeks", label: "Cheeks" },
           ],
         },
+        { key: "sourceUrl", kind: "url", label: "Original post link", options: [] },
         { key: "visible", kind: "toggle", label: "Show on site", options: [] },
       ],
     },
@@ -1456,5 +1457,84 @@ describe("mountSectionPanel — inline before/after preview (decisions/00119)", 
 
     win.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     expect(panel.element.querySelector(".wx-before-after-modal-backdrop")).toBeNull();
+  });
+});
+
+describe("mountSectionPanel — the url field kind (source link)", () => {
+  it("renders the input with the current value and no Open link when empty", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { sliders: [SLIDER_ITEM] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue: fakeQueue() });
+    await flush();
+
+    const inputs = panel.element.querySelectorAll<HTMLInputElement>(".wx-section-field-url-row .wx-section-field-input");
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]?.value).toBe("");
+    expect(panel.element.querySelector(".wx-section-field-url-open")).toBeNull();
+  });
+
+  it("shows a clickable Open link for an http(s) value", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: {
+          gallery: { sliders: [{ ...SLIDER_ITEM, sourceUrl: "https://www.instagram.com/p/DWe6pThiNZI/" }] },
+        },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue: fakeQueue() });
+    await flush();
+
+    const openLink = panel.element.querySelector<HTMLAnchorElement>(".wx-section-field-url-open");
+    expect(openLink).not.toBeNull();
+    expect(openLink?.getAttribute("href")).toBe("https://www.instagram.com/p/DWe6pThiNZI/");
+    expect(openLink?.target).toBe("_blank");
+    expect(openLink?.rel).toContain("noopener");
+  });
+
+  it("never renders a clickable Open link for a non-http(s) value (defensive against javascript: URLs)", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { sliders: [{ ...SLIDER_ITEM, sourceUrl: "javascript:alert(1)" }] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue: fakeQueue() });
+    await flush();
+
+    expect(panel.element.querySelector(".wx-section-field-url-open")).toBeNull();
+  });
+
+  it("editing the field and blurring stages the new value; Save then writes it", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { sliders: [SLIDER_ITEM] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const opQueue = fakeQueue();
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue });
+    await flush();
+
+    const input = panel.element.querySelector<HTMLInputElement>(".wx-section-field-url-row .wx-section-field-input");
+    expect(input).not.toBeNull();
+    if (input === null) throw new Error("no url input");
+    input.value = "https://www.facebook.com/photo/?fbid=123";
+    input.dispatchEvent(new Event("blur"));
+
+    clickSave(panel);
+    await flush();
+
+    expect(opQueue.enqueued).toEqual([
+      {
+        file: "gallery",
+        path: "gallery.sliders",
+        value: [{ ...SLIDER_ITEM, sourceUrl: "https://www.facebook.com/photo/?fbid=123" }],
+      },
+    ]);
   });
 });

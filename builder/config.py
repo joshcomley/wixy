@@ -19,9 +19,9 @@ class MediaConfig:
     jpeg_quality: int
 
 
-AdminFieldKind = Literal["image", "text", "choice", "toggle"]
+AdminFieldKind = Literal["image", "text", "choice", "toggle", "url"]
 
-_ADMIN_FIELD_KINDS: tuple[AdminFieldKind, ...] = ("image", "text", "choice", "toggle")
+_ADMIN_FIELD_KINDS: tuple[AdminFieldKind, ...] = ("image", "text", "choice", "toggle", "url")
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +37,8 @@ class AdminField:
     """One editable property of a collection item — `key` is the item's JSON
     property name, `kind` picks the panel control (`image` -> media picker,
     `text` -> inline input, `choice` -> a `<select>` from `options`, `toggle`
-    -> an on/off switch)."""
+    -> an on/off switch, `url` -> an inline input with an "Open" link
+    alongside it once a value is present)."""
 
     key: str
     kind: AdminFieldKind

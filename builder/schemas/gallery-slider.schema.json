@@ -25,7 +25,8 @@
       },
       "additionalProperties": false
     },
-    "visible": { "type": "boolean" }
+    "visible": { "type": "boolean" },
+    "sourceUrl": { "type": "string" }
   },
   "additionalProperties": false
 }
