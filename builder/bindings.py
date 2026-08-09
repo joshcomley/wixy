@@ -23,7 +23,7 @@ from builder.content import dotted_get
 from builder.errors import BuildError, ValidationResult
 from builder.jsontypes import JsonObject, JsonValue
 from builder.markdown_inline import render_markdown_inline
-from builder.sanitize import sanitize_rich_lite
+from builder.sanitize import is_safe_href, sanitize_rich_lite
 
 ATTR_TEXT = "data-wx"
 ATTR_IMG = "data-wx-img"
@@ -251,6 +251,9 @@ def _apply_href(
     found, value = resolve_key(ctx, key)
     if not found or not isinstance(value, str):
         _fail(sink, file_label, key, f"href binding '{key}' does not resolve to a string")
+        return
+    if not is_safe_href(value):
+        _fail(sink, file_label, key, f"href binding '{key}' has a disallowed URL scheme")
         return
     el["href"] = value
 
