@@ -525,12 +525,16 @@ class TestGetStateAdminSections:
                                 "kind": "image",
                                 "label": "Before photo",
                                 "options": [],
+                                "optionsFrom": None,
+                                "required": False,
                             },
                             {
                                 "key": "cat",
                                 "kind": "choice",
                                 "label": "Category",
                                 "options": [{"value": "lips", "label": "Lips"}],
+                                "optionsFrom": None,
+                                "required": False,
                             },
                         ],
                     }

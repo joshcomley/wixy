@@ -361,7 +361,8 @@ BeautifulSoup render pass re-escapes it at serialization time (the same conventi
 current value looks like a real `http(s)://` URL (`renderUrlField` — never a clickable
 `href` for anything else, defensively, since the value round-trips through free text she
 can type/paste anything into); a `choice`-kind field is a
-`<select>` from `field.options`, staged on change. Reordering has BOTH a pointer-based
+`<select>` from `resolveChoiceOptions(field)` (see `optionsFrom` below), staged on change.
+Reordering has BOTH a pointer-based
 drag (a drop-indicator line, stage-on-release) AND ↑/↓ buttons emitting the identical
 whole-array stage — a deliberate addition on top of decisions/00017's earlier "buttons only"
 simplification for the INLINE overlay's own item toolbar, kept here as the fallback/
@@ -370,13 +371,42 @@ accessibility path while this dedicated screen adds real drag for "her pride" po
 field order), then a final form step for the rest — generalizing the brief's literal
 "step 1 Before, step 2 After, step 3 form" to however many image fields a collection
 actually declares (one for `gallery.tiles`, two for `gallery.sliders`); Save stays disabled
-until `sectionPanelModel.isNewItemComplete` (every image field picked, and the field
-literally named `title`, if present, non-blank) — a new item is always born schema-valid,
+until `sectionPanelModel.isNewItemComplete` (every image field picked, and every field with
+`required: true` non-blank — decisions/00124, replacing an earlier hardcoded "a field
+literally named `title` is required" special case, an Inv 1 violation this fixed rather
+than kept) — a new item is always born schema-valid,
 never a half-filled placeholder landing in the array. `sectionPanelModel.ts` is the pure,
 DOM-free half (dotted-path content reads, array reorder/delete/update, the add-flow
 completeness gate, entity decoding) — unit-tested directly; `sectionPanel.test.ts` covers
 the thin DOM binding on top (kept deliberately DOM-light per spec 3c — the pointer-drag
 interaction itself is real-browser e2e territory, not jsdom's).
+
+**Dynamic choice options via `optionsFrom`** (decisions/00124) — a `choice`-kind field's
+selectable options normally come straight from its registry-literal `options` array, but
+when the field declares `"optionsFrom": "<collection path>"` instead (or as well —
+`optionsFrom` wins), `resolveChoiceOptions(field)` (`sectionPanel.ts`, used by both
+`renderChoiceField` on the card and `renderChoiceInputRow` in the add wizard) reads that
+OTHER collection's own current items straight out of `collectionState` — staged,
+possibly-unsaved — and maps each item's `value`/`label` text fields to one
+`{value,label}` option (empty `value`s filtered out). This is what lets a project turn a
+fixed choice set into an ordinary admin-managed collection instead of a registry literal
+only a developer can change: the Before & After gallery's `gallery.categories` is a plain
+two-required-text-field collection (`value` internal key, `label` display name), and
+`gallery.sliders.cat`/`gallery.tiles.cat` point at it via `optionsFrom` instead of a
+static `options` array. Two consequences this required fixing generically rather than
+per-collection: (1) a brand-new item's `blankItem()` used to default a choice field from
+`field.options[0]`, which is always empty for an `optionsFrom` field — `blankItem` gained
+an optional `resolveOptions` parameter (defaults to `field => field.options`, so every
+other caller is unaffected) and `sectionPanel.ts`'s `openAddFlow` now passes
+`resolveChoiceOptions` through it, so a new item's category defaults to the first real
+category instead of silently blank; (2) editing the OTHER collection (renaming a category
+label, adding one) must re-render every field that depends on it, since `stageLocal` only
+re-renders the ONE collection it's called for — `dependentCollectionsOf(collection)`
+(scans `section.collections` for any collection whose fields declare `optionsFrom ===
+collection.path`) is now also re-rendered from both `stageLocal` and `undoLast`, so a
+label edit updates the dependent dropdown immediately, in the same staged edit, with no
+reload (`discardUnsaved` already looped over every collection unconditionally, so needed
+no change).
 
 **The `visible` toggle ("Show on site", decisions/00117 + Inv 28; prominence + bulk actions
 decisions/00119)** — a `"kind": "toggle"` `AdminField` renders as a full-width **card-header

@@ -324,3 +324,29 @@ render-layer guard, not a per-field special case (decisions/00123).
 decisions/00120) is a UX convenience only and must never be treated as the safety boundary;
 this invariant is enforced at render time regardless of what any admin control shows.
 
+### Inv 30 — A `choice` field's `optionsFrom` source, once staged, re-renders every dependent field
+When an `AdminField` declares `optionsFrom: "<collection path>"` (decisions/00124), its
+selectable options are resolved LIVE from that other collection's current staged items
+(`resolveChoiceOptions`, `sectionPanel.ts`), not a static list — so any edit that changes the
+SOURCE collection (rename a label, add/remove an item) must re-render every field that
+depends on it, in the SAME staged edit, or the dependent dropdown silently shows stale
+options until an unrelated re-render happens to occur. `stageLocal` and `undoLast` both
+re-render `dependentCollectionsOf(collection)` (scans `section.collections` for any OTHER
+collection whose fields declare `optionsFrom === collection.path`) in addition to the
+collection they were called for; `discardUnsaved` already re-renders every collection
+unconditionally and needed no change. A brand-new item's `blankItem()` has the same class of
+trap in miniature: defaulting a choice field from `field.options[0]` is always empty for an
+`optionsFrom` field, so `blankItem` takes an optional `resolveOptions` callback (default
+`field => field.options`, unchanged for every pre-existing caller) and `sectionPanel.ts`
+passes `resolveChoiceOptions` through it — without this a newly-added item silently defaults
+its category to blank instead of the first real one.
+*Enforced by:* `admin-ui/tests/sectionPanel.test.ts`'s `"mountSectionPanel — dynamic choice
+options via optionsFrom (decisions/00124)"` block (the unsaved-label-edit test is red without
+the `dependentCollectionsOf` wiring, green with it) and `sectionPanelModel.test.ts`'s
+`describe("blankItem")` `resolveOptions` cases.
+*Exception:* none — every write path that stages a collection (`stageLocal`, `undoLast`,
+`discardUnsaved`) must keep every `optionsFrom`-dependent field in sync; a future write path
+that stages a collection without going through one of these three would violate this
+invariant silently (no test would catch a brand-new, not-yet-existing call site) and must be
+audited against this invariant when added.
+
