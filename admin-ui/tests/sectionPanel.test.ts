@@ -934,6 +934,7 @@ describe("mountSectionPanel — the before/after aligner (decisions/00111)", () 
             title: "Lip filler",
             sub: "",
             cat: "lips",
+            sourceUrl: "",
           },
         ],
       },
