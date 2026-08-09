@@ -54,6 +54,10 @@
      version badge's update glow uses these (decisions/00109). */
   --wx-success-text: #1a7f37;
   --wx-success-tint: #e4f2e8;
+  /* A FILL color (paired with white — the switch's ON track, decisions/00119),
+     distinct from --wx-success-text's text-on-surface role: #1a7f37 as a fill
+     is 5.08:1 against white, safely AA. */
+  --wx-success: #1a7f37;
   --wx-solid-dark: #1e2430;
   --wx-solid-dark-text: #e2e6ec;
   --wx-inline-code-bg: rgba(0, 0, 0, 0.08);
@@ -79,6 +83,11 @@
      glow green, kept literal so every project's update badge reads identically. */
   --wx-success-text: #3fb950;
   --wx-success-tint: #1d3326;
+  /* Same fill/text split as --wx-danger — #3fb950 above is tuned for TEXT on
+     surface only (6.6:1) and is not a safe FILL: only 3.63:1 against dark's
+     --wx-surface. #238636 clears both the fill role's own checks (4.63:1
+     against white, 3.63:1 against --wx-surface — decisions/00119). */
+  --wx-success: #238636;
   --wx-solid-dark: #0d0f14;
   --wx-solid-dark-text: #e2e6ec;
   --wx-inline-code-bg: rgba(255, 255, 255, 0.12);
@@ -106,6 +115,7 @@
     --wx-danger-tint: #3a1e1e;
     --wx-success-text: #3fb950;
     --wx-success-tint: #1d3326;
+    --wx-success: #238636;
     --wx-solid-dark: #0d0f14;
     --wx-solid-dark-text: #e2e6ec;
     --wx-inline-code-bg: rgba(255, 255, 255, 0.12);
@@ -3159,11 +3169,32 @@ div.wx-media-thumb {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
+  flex-wrap: wrap;
 }
 
 .wx-section-collection-header h3 {
   margin: 0;
   font-size: 1rem;
+}
+
+.wx-section-collection-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Secondary/utility actions (decisions/00119) — bordered like
+   `.wx-section-move-button`, distinct from the primary blue "Add a X". */
+.wx-section-turn-all-button {
+  font: 600 0.75rem/1 system-ui, sans-serif;
+  padding: 8px 10px;
+  min-height: 36px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  cursor: pointer;
 }
 
 .wx-section-empty {
@@ -3199,19 +3230,90 @@ div.wx-media-thumb {
 }
 
 /* `visible: false` (docs/ai/invariants.md, sibling of Inv 10) — still fully
-   editable here, just dimmed with a chip so it's obvious at a glance which
-   imports are still switched off from the public site. */
+   editable here, just dimmed as a secondary cue; the header switch bar below
+   (decisions/00119) carries the primary, plain-English explanation. */
 .wx-section-card-hidden {
   opacity: 0.55;
 }
 
-.wx-section-hidden-chip {
-  align-self: flex-start;
-  font: 600 0.625rem/1 system-ui, sans-serif;
-  padding: 3px 8px;
+/* The card-header visibility switch (decisions/00119, replacing the old
+   small "Hidden" chip) — full-width, first child of the card, ahead of the
+   drag handle. */
+.wx-section-visibility-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.wx-section-visibility-text {
+  font-size: 0.8125rem;
+  color: var(--wx-ink);
+}
+
+/* A styled track+thumb over a native checkbox (real a11y: keyboard + screen
+   reader support for free) — the checkbox itself is the full tappable area
+   (44px, Uxer's touch-target convention), sized larger than the visible
+   26px-tall track so it doesn't look oversized. */
+.wx-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+}
+
+.wx-switch-input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* `pointer-events: none` here (and on the thumb) is load-bearing, not
+   decorative: `track` must follow `input` in DOM order for the `:checked +`
+   selector below to work, but a later sibling with no `pointer-events`
+   override paints ON TOP of an earlier `position: absolute` one — without
+   this, the track/thumb visually and INTERACTIVELY cover the real checkbox,
+   so a real click (not just Playwright's strict actionability check) never
+   reaches it at all. */
+.wx-switch-track {
+  position: relative;
+  width: 44px;
+  height: 26px;
   border-radius: 999px;
-  background: var(--wx-solid-dark);
-  color: var(--wx-solid-dark-text);
+  background: var(--wx-muted);
+  transition: background-color 0.15s ease;
+  pointer-events: none;
+}
+
+.wx-switch-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.15s ease;
+  pointer-events: none;
+}
+
+.wx-switch-input:checked + .wx-switch-track {
+  background: var(--wx-success);
+}
+
+.wx-switch-input:checked + .wx-switch-track .wx-switch-thumb {
+  transform: translateX(18px);
+}
+
+.wx-switch-input:focus-visible + .wx-switch-track {
+  outline: 2px solid var(--wx-brand-blue);
+  outline-offset: 2px;
 }
 
 .wx-section-drop-indicator {
@@ -3243,6 +3345,155 @@ div.wx-media-thumb {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
   gap: 8px;
+}
+
+/* Inline drag-to-compare preview (decisions/00119, PR3) — ported from the
+   PUBLIC site's own before/after slider (cottage-aesthetics-preview
+   pages/gallery.html's `.bas-frame`), restyled with this admin's OWN --wx-
+   tokens rather than the site's earthy palette (two separate design
+   systems). The SAME markup/CSS is reused, unscaled, inside the tap-to-
+   enlarge modal — it fills whatever container width it's placed in. */
+.wx-before-after {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 640 / 360;
+  border-radius: var(--wx-radius);
+  overflow: hidden;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-canvas);
+  touch-action: none;
+  user-select: none;
+}
+
+.wx-before-after-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  pointer-events: none;
+}
+
+.wx-before-after-before {
+  z-index: 2;
+  will-change: clip-path;
+}
+
+.wx-before-after-after {
+  z-index: 1;
+}
+
+.wx-before-after-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 3px;
+  margin-left: -1.5px;
+  z-index: 3;
+  background: #ffffff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+}
+
+.wx-before-after-handle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 4;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 1px solid var(--wx-border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+}
+
+/* A transparent full-frame range input as the drag surface — native
+   mouse+touch+keyboard support for free. Only the thumb needs to be wide
+   (a real touch target); the track is fully transparent throughout. */
+.wx-before-after-range {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  z-index: 5;
+  opacity: 0;
+  cursor: ew-resize;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+
+.wx-before-after-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 44px;
+  height: 100%;
+  cursor: ew-resize;
+}
+
+.wx-before-after-range::-moz-range-thumb {
+  width: 44px;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  cursor: ew-resize;
+}
+
+/* The inline card preview's tap-to-enlarge affordance — a small circular
+   button OVER the frame, at a higher z-index than `.wx-before-after-range`
+   so it intercepts its own small tap area instead of starting a drag. */
+.wx-section-before-after-wrap {
+  position: relative;
+}
+
+.wx-section-before-after-expand {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 6;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(20, 24, 32, 0.55);
+  color: #ffffff;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Tap-to-enlarge modal — same backdrop recipe as `.wx-media-dialog-backdrop`/
+   `.wx-section-add-backdrop` (its own class names, not a reuse of either —
+   decisions/00098's add-flow already hit a real E2E strict-mode-violation
+   from two dialogs sharing one selector). Read-only: the SAME
+   `renderBeforeAfter` component as the inline preview, just filling a wider
+   box — no separate "large" variant needed. */
+.wx-before-after-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 24, 32, 0.45);
+  z-index: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wx-before-after-modal {
+  width: 640px;
+  max-width: 92vw;
+  background: var(--wx-surface);
+  border-radius: var(--wx-radius);
+  box-shadow: var(--wx-shadow);
+  padding: 0 16px 16px;
 }
 
 .wx-section-image-slot {

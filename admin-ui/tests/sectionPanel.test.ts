@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AdminApi, AdminSection, ContentResponse, MediaItem, StateResponse } from "../src/api";
 import type { AlignerRequest, AlignerResult } from "../src/alignerDialog";
-import type { OpQueueLike } from "../src/editView";
+import type { EnqueueOutcome } from "../src/opQueue";
 import type { DraftOp } from "../src/protocol";
-import { mountSectionPanel } from "../src/sectionPanel";
+import { mountSectionPanel, type SectionOpQueueLike } from "../src/sectionPanel";
 
 const SLIDER_SECTION: AdminSection = {
   id: "before-after",
@@ -80,29 +80,39 @@ function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
 }
 
 /** A faithful-enough fake of `OpQueue` (opQueue.ts) for the staged-save model
- * (decisions/00118): `enqueue` only stages into `pending`; `flushNow` is what
- * moves `pending` into `enqueued` (the assertion surface every existing test
- * uses) AND advances `rev` — exactly the "rev advanced = the batch landed"
- * signal `sectionPanel.ts`'s `saveNow` reads, since `OpQueueLike` exposes no
- * richer success/failure signal. Setting `failFlushes` simulates BOTH a real
- * failure mode (a network error that re-queues the batch, or a 422 that drops
- * it) — both leave `rev` untouched, which is the only distinction the panel
- * can observe. */
-function fakeQueue(): OpQueueLike & { enqueued: unknown[]; flushes: number; failFlushes: boolean } {
+ * (decisions/00118, decisions/00119): `enqueueTracked` only stages into
+ * `pending` and returns a promise; `flushNow` is what moves `pending` into
+ * `enqueued` (the assertion surface every existing test uses), advances
+ * `rev`, and RESOLVES each staged entry's promise with the real per-batch
+ * outcome — mirroring the real queue's "bounded to one flush attempt" shape.
+ * Setting `failFlushes` simulates BOTH a real failure mode (a network error
+ * that re-queues the batch, or a 422 that drops it) — both resolve
+ * `{accepted: false}` and leave `rev` untouched, the only distinction the
+ * panel can observe either way. */
+function fakeQueue(): SectionOpQueueLike & { enqueued: unknown[]; flushes: number; failFlushes: boolean } {
   const enqueued: unknown[] = [];
-  let pending: DraftOp[] = [];
+  let pending: { op: DraftOp; resolve: (outcome: EnqueueOutcome) => void }[] = [];
   const queue = {
     rev: 0,
     enqueued,
     flushes: 0,
     failFlushes: false,
-    enqueue: (op: DraftOp) => pending.push(op),
+    enqueueTracked: (op: DraftOp): Promise<EnqueueOutcome> =>
+      new Promise((resolve) => {
+        pending.push({ op, resolve });
+      }),
     flushNow: async (): Promise<void> => {
       queue.flushes += 1;
-      if (queue.failFlushes || pending.length === 0) return;
-      enqueued.push(...pending);
+      const batch = pending;
       pending = [];
+      if (queue.failFlushes || batch.length === 0) {
+        batch.forEach((entry) => entry.resolve({ accepted: false }));
+        return;
+      }
+      enqueued.push(...batch.map((entry) => entry.op));
       queue.rev += 1;
+      const rev = queue.rev;
+      batch.forEach((entry) => entry.resolve({ accepted: true, rev }));
     },
   };
   return queue;
@@ -464,7 +474,7 @@ describe("mountSectionPanel", () => {
 });
 
 describe("mountSectionPanel — the visible toggle (Show on site)", () => {
-  it("a shown item's toggle is checked by default and the card carries no hidden styling", async () => {
+  it("a shown item's toggle is checked by default, in a header switch bar, with no hidden styling", async () => {
     const api = fakeApi({
       getContent: vi.fn(async () => ({
         content: { gallery: { sliders: [SLIDER_ITEM] } },
@@ -474,13 +484,15 @@ describe("mountSectionPanel — the visible toggle (Show on site)", () => {
     const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue: fakeQueue() });
     await flush();
 
-    const toggle = panel.element.querySelector<HTMLInputElement>(".wx-section-toggle-input");
+    const toggle = panel.element.querySelector<HTMLInputElement>(".wx-switch-input");
     expect(toggle?.checked).toBe(true);
     expect(panel.element.querySelector(".wx-section-card-hidden")).toBeNull();
+    expect(panel.element.querySelector(".wx-section-visibility-text")?.textContent).toBe("Shown on your site");
+    // The old small pill (decisions/00119 replaces it with the header bar's wording).
     expect(panel.element.querySelector(".wx-section-hidden-chip")).toBeNull();
   });
 
-  it("an item with visible:false renders unchecked, dimmed, with a Hidden chip", async () => {
+  it("an item with visible:false renders unchecked, dimmed, with plain explanatory wording", async () => {
     const api = fakeApi({
       getContent: vi.fn(async () => ({
         content: { gallery: { sliders: [{ ...SLIDER_ITEM, visible: false }] } },
@@ -490,10 +502,13 @@ describe("mountSectionPanel — the visible toggle (Show on site)", () => {
     const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue: fakeQueue() });
     await flush();
 
-    const toggle = panel.element.querySelector<HTMLInputElement>(".wx-section-toggle-input");
+    const toggle = panel.element.querySelector<HTMLInputElement>(".wx-switch-input");
     expect(toggle?.checked).toBe(false);
     expect(panel.element.querySelector(".wx-section-card-hidden")).not.toBeNull();
-    expect(panel.element.querySelector(".wx-section-hidden-chip")?.textContent).toBe("Hidden");
+    expect(panel.element.querySelector(".wx-section-visibility-text")?.textContent).toBe(
+      "Hidden — not on your site yet. Turn on to add it.",
+    );
+    expect(panel.element.querySelector(".wx-section-hidden-chip")).toBeNull();
   });
 
   it("unchecking the toggle stages visible:false on exactly that item; Save then writes it", async () => {
@@ -507,7 +522,7 @@ describe("mountSectionPanel — the visible toggle (Show on site)", () => {
     const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue });
     await flush();
 
-    const toggle = panel.element.querySelector<HTMLInputElement>(".wx-section-toggle-input");
+    const toggle = panel.element.querySelector<HTMLInputElement>(".wx-switch-input");
     expect(toggle).not.toBeNull();
     if (toggle === null) throw new Error("no toggle input");
     toggle.checked = false;
@@ -533,7 +548,7 @@ describe("mountSectionPanel — the visible toggle (Show on site)", () => {
     const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue });
     await flush();
 
-    const toggle = panel.element.querySelector<HTMLInputElement>(".wx-section-toggle-input");
+    const toggle = panel.element.querySelector<HTMLInputElement>(".wx-switch-input");
     expect(toggle).not.toBeNull();
     if (toggle === null) throw new Error("no toggle input");
     toggle.checked = true;
@@ -546,6 +561,82 @@ describe("mountSectionPanel — the visible toggle (Show on site)", () => {
     ]);
     const [op] = opQueue.enqueued as Array<{ value: Array<Record<string, unknown>> }>;
     expect(op !== undefined && "visible" in (op.value[0] ?? {})).toBe(false);
+  });
+
+  it("Turn all on stages every item with the key dropped, after confirming", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: {
+          gallery: { sliders: [{ ...SLIDER_ITEM, visible: false }, { ...SLIDER_ITEM, title: "Two", visible: false }] },
+        },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const opQueue = fakeQueue();
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue, win: fakeWindow() });
+    await flush();
+
+    const button = Array.from(panel.element.querySelectorAll<HTMLButtonElement>(".wx-section-turn-all-button")).find(
+      (b) => b.textContent === "Turn all on",
+    );
+    expect(button).not.toBeUndefined();
+    button?.click();
+    expect(panel.element.querySelectorAll<HTMLInputElement>(".wx-switch-input")).toHaveLength(2);
+    for (const toggle of panel.element.querySelectorAll<HTMLInputElement>(".wx-switch-input")) {
+      expect(toggle.checked).toBe(true);
+    }
+    clickSave(panel);
+    await flush();
+
+    const [op] = opQueue.enqueued as Array<{ value: Array<Record<string, unknown>> }>;
+    if (op === undefined) throw new Error("no op enqueued");
+    expect(op.value.every((item) => !("visible" in item))).toBe(true);
+  });
+
+  it("Turn all off stages every item with visible:false, after confirming", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { sliders: [SLIDER_ITEM, { ...SLIDER_ITEM, title: "Two" }] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const opQueue = fakeQueue();
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue, win: fakeWindow() });
+    await flush();
+
+    const button = Array.from(panel.element.querySelectorAll<HTMLButtonElement>(".wx-section-turn-all-button")).find(
+      (b) => b.textContent === "Turn all off",
+    );
+    button?.click();
+    clickSave(panel);
+    await flush();
+
+    const [op] = opQueue.enqueued as Array<{ value: Array<Record<string, unknown>> }>;
+    if (op === undefined) throw new Error("no op enqueued");
+    expect(op.value.every((item) => item["visible"] === false)).toBe(true);
+  });
+
+  it("declining Turn all on's confirm leaves every item untouched", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { sliders: [{ ...SLIDER_ITEM, visible: false }] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const panel = mountSectionPanel(SLIDER_SECTION, {
+      api,
+      opQueue: fakeQueue(),
+      win: fakeWindow({ confirmReturns: false }),
+    });
+    await flush();
+
+    const button = Array.from(panel.element.querySelectorAll<HTMLButtonElement>(".wx-section-turn-all-button")).find(
+      (b) => b.textContent === "Turn all on",
+    );
+    button?.click();
+
+    expect(panel.element.querySelector<HTMLInputElement>(".wx-switch-input")?.checked).toBe(false);
+    expect(panel.hasUnsavedChanges()).toBe(false);
   });
 
   it("the guided add flow's new item defaults to shown (toggle checked, no key written)", async () => {
@@ -1282,5 +1373,88 @@ describe("mountSectionPanel — staged save, undo, discard, publish (decisions/0
     const afterTeardownEvent = new Event("beforeunload", { cancelable: true });
     win.dispatchEvent(afterTeardownEvent);
     expect(afterTeardownEvent.defaultPrevented).toBe(false);
+  });
+});
+
+describe("mountSectionPanel — inline before/after preview (decisions/00119)", () => {
+  it("a 2-image-filled slider item renders the inline preview", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { sliders: [SLIDER_ITEM] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue: fakeQueue() });
+    await flush();
+
+    expect(panel.element.querySelector(".wx-section-before-after-wrap")).not.toBeNull();
+    expect(panel.element.querySelector(".wx-before-after-before")).not.toBeNull();
+  });
+
+  it("a tile (single image field) never gets a fabricated preview", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { tiles: [{ img: { src: "images/x.jpg", alt: "X" }, title: "T", cat: "lips" }] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const panel = mountSectionPanel(TILE_SECTION, { api, opQueue: fakeQueue() });
+    await flush();
+
+    expect(panel.element.querySelector(".wx-section-before-after-wrap")).toBeNull();
+  });
+
+  it("a slider item missing one of its two photos never gets a fabricated preview", async () => {
+    const { after: _omittedAfter, ...missingAfter } = SLIDER_ITEM;
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { sliders: [missingAfter] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue: fakeQueue() });
+    await flush();
+
+    expect(panel.element.querySelector(".wx-section-before-after-wrap")).toBeNull();
+  });
+
+  it("tapping the expand button opens a larger read-only modal; the close button removes it", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { sliders: [SLIDER_ITEM] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue: fakeQueue() });
+    await flush();
+
+    expect(panel.element.querySelector(".wx-before-after-modal-backdrop")).toBeNull();
+    panel.element.querySelector<HTMLButtonElement>(".wx-section-before-after-expand")?.click();
+
+    const backdrop = panel.element.querySelector(".wx-before-after-modal-backdrop");
+    expect(backdrop).not.toBeNull();
+    // The modal's own slider is a SEPARATE, independently-draggable instance.
+    expect(backdrop?.querySelectorAll(".wx-before-after").length).toBe(1);
+
+    panel.element.querySelector<HTMLButtonElement>(".wx-before-after-modal .wx-drawer-close")?.click();
+    expect(panel.element.querySelector(".wx-before-after-modal-backdrop")).toBeNull();
+  });
+
+  it("Escape closes the tap-to-enlarge modal", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { sliders: [SLIDER_ITEM] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const win = fakeWindow();
+    const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue: fakeQueue(), win });
+    await flush();
+
+    panel.element.querySelector<HTMLButtonElement>(".wx-section-before-after-expand")?.click();
+    expect(panel.element.querySelector(".wx-before-after-modal-backdrop")).not.toBeNull();
+
+    win.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(panel.element.querySelector(".wx-before-after-modal-backdrop")).toBeNull();
   });
 });

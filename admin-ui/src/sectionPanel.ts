@@ -17,9 +17,11 @@
 // Discard available at both the local and the draft stage.
 
 import type { AdminApi, AdminCollection, AdminField, AdminSection } from "./api";
-import type { OpQueueLike } from "./editView";
 import { openAlignerDialog, type AlignerResult } from "./alignerDialog";
+import { renderBeforeAfter } from "./beforeAfterSlider";
 import { contentSrcToDisplayUrl, openMediaDialog, type MediaPickValue } from "./mediaDialog";
+import type { EnqueueOutcome } from "./opQueue";
+import type { DraftOp } from "./protocol";
 import { setButtonBusy, setButtonIdle } from "./spinnerButton";
 import {
   appendItem,
@@ -28,6 +30,7 @@ import {
   decodeCommonEntities,
   deleteItemAt,
   fieldDirty,
+  hideAllItems,
   imageFieldValue,
   isNewItemComplete,
   itemDirty,
@@ -37,6 +40,7 @@ import {
   moveItemUp,
   moveItemTo,
   removeItemField,
+  showAllItems,
   textFieldValue,
   updateItemField,
   type SectionItem,
@@ -59,9 +63,21 @@ export interface SectionPanel {
   teardown(): void;
 }
 
+/** The narrow slice of `OpQueue` this panel needs — `enqueueTracked` (decisions/
+ * 00119), not `editView.ts`'s plain `enqueue`, so `saveNow()` gets a REAL
+ * per-batch accepted signal instead of inferring success from `rev` advancing
+ * (decisions/00118's known gap: a 409-refetch immediately followed by a
+ * network error also advances `rev`, via `fetchCurrentRev`, without the batch
+ * landing). The real `OpQueue` class satisfies this without any change. */
+export interface SectionOpQueueLike {
+  readonly rev: number;
+  enqueueTracked(op: DraftOp): Promise<EnqueueOutcome>;
+  flushNow(): Promise<void>;
+}
+
 export interface SectionPanelDeps {
   api: AdminApi;
-  opQueue: OpQueueLike;
+  opQueue: SectionOpQueueLike;
   win?: Window;
   /** Test seam for the aligner (decisions/00111): the dialog paints on a
    * real canvas, which jsdom doesn't have — panel tests stub this and drive
@@ -256,16 +272,15 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
   }
 
   /** Writes every dirty collection to the draft in one PATCH batch, via the
-   * SAME `opQueue.enqueue` chokepoint every other edit in this codebase uses
-   * (Inv 6 unchanged) — Save just chooses WHEN that write happens, instead of
-   * it happening on every field commit. `OpQueueLike` exposes no success/
-   * failure signal beyond `rev` (the panel can't see the shell's onAccepted/
-   * onError/onRejected — those are shell-owned), so a successful write is
-   * detected by `rev` advancing past what it was before the flush: both
-   * failure modes (a network error, which re-queues the batch for a later
-   * retry, and a 422 rejection, which drops it) leave `rev` untouched
-   * (opQueue.ts) — either way Save must stay available and nothing here may
-   * be marked clean. The shell's own toasts already surface WHY a save
+   * SAME `opQueue.enqueueTracked` chokepoint every other edit in this
+   * codebase uses (Inv 6 unchanged) — Save just chooses WHEN that write
+   * happens, instead of it happening on every field commit. `enqueueTracked`
+   * (decisions/00119) resolves with the REAL per-batch outcome — accepted
+   * (with the new `rev`) or not — bounded to this one flush attempt, so
+   * Save's success/failure reporting can never be fooled by `rev` advancing
+   * for an unrelated reason (decisions/00118's original gap: a 409-refetch
+   * immediately followed by a network error also advances `rev`, without the
+   * batch landing). The shell's own toasts already surface WHY a save
    * failed; this panel doesn't need to duplicate that detail. */
   async function saveNow(): Promise<void> {
     if (destroyed || saving || !isDirty()) return;
@@ -276,13 +291,16 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     saveBarStatus.textContent = "";
     saveBarStatus.classList.remove("wx-section-save-bar-status-error", "wx-section-save-bar-status-ok");
 
-    const revBefore = opQueue.rev;
+    const outcomes: Promise<EnqueueOutcome>[] = [];
     for (const collection of section.collections) {
       if (isCollectionDirty(collection)) {
-        opQueue.enqueue({ file: section.page, path: collection.path, value: itemsFor(collection) });
+        outcomes.push(
+          opQueue.enqueueTracked({ file: section.page, path: collection.path, value: itemsFor(collection) }),
+        );
       }
     }
     await opQueue.flushNow();
+    const settled = await Promise.all(outcomes);
 
     saving = false;
     if (destroyed) return;
@@ -290,7 +308,7 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     undoButton.disabled = false;
     discardUnsavedButton.disabled = false;
 
-    const succeeded = opQueue.rev !== revBefore;
+    const succeeded = settled.every((outcome) => outcome.accepted);
     if (succeeded) {
       for (const collection of section.collections) {
         savedState.set(collection.path, cloneItems(itemsFor(collection)));
@@ -572,20 +590,30 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
 
   /** `visible` items convention (docs/ai/invariants.md, sibling of Inv 10):
    * absent/`true` = shown, `false` = hidden from the public site but still
-   * fully editable here, dimmed with a "Hidden" chip so it's obvious at a
-   * glance which imports are still switched off. */
-  function renderToggleField(
+   * fully editable here. A full-width card-header switch (decisions/00119,
+   * replacing the old small "Hidden" chip) — the explanatory line IS the fix
+   * for "unclear why entries are greyed out": a plain sentence instead of a
+   * one-word chip. The whole bar is a `<label>` so tapping the text also
+   * toggles it (native label-wraps-control semantics, same as the old
+   * per-field toggle this replaces). Still stages via `stageLocal` (PR1's
+   * model) — never auto-saves. */
+  function renderVisibilityBar(
     collection: AdminCollection,
     field: AdminField,
     item: SectionItem,
     index: number,
   ): HTMLElement {
-    const wrap = document.createElement("label");
-    wrap.className = "wx-section-field wx-section-field-toggle";
+    const checked = item[field.key] !== false;
+
+    const bar = document.createElement("label");
+    bar.className = "wx-section-visibility-bar";
+
+    const switchEl = document.createElement("span");
+    switchEl.className = "wx-switch";
     const input = document.createElement("input");
     input.type = "checkbox";
-    input.className = "wx-section-toggle-input";
-    input.checked = item[field.key] !== false;
+    input.className = "wx-switch-input";
+    input.checked = checked;
     input.addEventListener("change", () => {
       if (destroyed) return;
       const current = itemsFor(collection);
@@ -596,11 +624,101 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
           : updateItemField(current, index, field.key, false),
       );
     });
-    const labelText = document.createElement("span");
-    labelText.className = "wx-section-toggle-label";
-    labelText.textContent = field.label;
-    wrap.append(input, labelText);
+    const track = document.createElement("span");
+    track.className = "wx-switch-track";
+    const thumb = document.createElement("span");
+    thumb.className = "wx-switch-thumb";
+    track.appendChild(thumb);
+    switchEl.append(input, track);
+
+    const text = document.createElement("span");
+    text.className = "wx-section-visibility-text";
+    text.textContent = checked ? "Shown on your site" : "Hidden — not on your site yet. Turn on to add it.";
+
+    bar.append(switchEl, text);
+    return bar;
+  }
+
+  // -- Inline before/after preview (decisions/00119, PR3) -------------------
+  // Read-only drag-to-compare, distinct from the aligner (a heavyweight
+  // canvas EDITOR this never reuses) — a collection with >=2 `image`-kind
+  // fields where BOTH are filled gets one under its images block; tapping
+  // the expand button opens the SAME component larger in a modal. NEVER
+  // fabricated from a single image (a tile, or a pair with one photo still
+  // missing, just keeps its existing thumbnail(s) as-is).
+
+  function openBeforeAfterModal(beforeUrl: string, afterUrl: string, beforeAlt: string, afterAlt: string): void {
+    const backdrop = document.createElement("div");
+    backdrop.className = "wx-before-after-modal-backdrop";
+    const box = document.createElement("div");
+    box.className = "wx-before-after-modal";
+
+    function close(): void {
+      backdrop.remove();
+    }
+    const header = document.createElement("div");
+    header.className = "wx-drawer-header";
+    const heading = document.createElement("h3");
+    heading.textContent = "Before & after";
+    const closeButton = document.createElement("button");
+    closeButton.type = "button";
+    closeButton.className = "wx-drawer-close";
+    closeButton.textContent = "✕";
+    closeButton.setAttribute("aria-label", "Close");
+    closeButton.addEventListener("click", close);
+    header.append(heading, closeButton);
+
+    const preview = renderBeforeAfter({ beforeUrl, afterUrl, beforeAlt, afterAlt });
+
+    box.append(header, preview);
+    backdrop.appendChild(box);
+    backdrop.addEventListener("click", (evt) => {
+      if (evt.target === backdrop) close();
+    });
+    function onEscape(evt: KeyboardEvent): void {
+      if (evt.key === "Escape") close();
+    }
+    win.addEventListener("keydown", onEscape);
+    const originalRemove = backdrop.remove.bind(backdrop);
+    backdrop.remove = (): void => {
+      win.removeEventListener("keydown", onEscape);
+      originalRemove();
+    };
+    element.appendChild(backdrop);
+  }
+
+  function renderBeforeAfterPreview(beforeUrl: string, afterUrl: string, beforeAlt: string, afterAlt: string): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.className = "wx-section-before-after-wrap";
+    const slider = renderBeforeAfter({ beforeUrl, afterUrl, beforeAlt, afterAlt });
+    const expandButton = document.createElement("button");
+    expandButton.type = "button";
+    expandButton.className = "wx-section-before-after-expand";
+    expandButton.textContent = "⤢";
+    expandButton.setAttribute("aria-label", "View larger");
+    expandButton.addEventListener("click", () => openBeforeAfterModal(beforeUrl, afterUrl, beforeAlt, afterAlt));
+    wrap.append(slider, expandButton);
     return wrap;
+  }
+
+  /** `null` unless the collection declares >=2 `image`-kind fields AND the
+   * first two are both filled on THIS item — never fabricated from one
+   * photo (Inv 1: which fields are images comes from the registry, never a
+   * hardcoded `before`/`after` key name). */
+  function beforeAfterPreviewFor(collection: AdminCollection, item: SectionItem): HTMLElement | null {
+    const imageFields = collection.fields.filter((f) => f.kind === "image");
+    const beforeField = imageFields[0];
+    const afterField = imageFields[1];
+    if (beforeField === undefined || afterField === undefined) return null;
+    const beforeValue = imageFieldValue(item, beforeField.key);
+    const afterValue = imageFieldValue(item, afterField.key);
+    if (beforeValue === null || afterValue === null) return null;
+    return renderBeforeAfterPreview(
+      contentSrcToDisplayUrl(beforeValue.src),
+      contentSrcToDisplayUrl(afterValue.src),
+      beforeValue.alt,
+      afterValue.alt,
+    );
   }
 
   function renderCard(collection: AdminCollection, item: SectionItem, index: number, count: number): HTMLElement {
@@ -612,6 +730,10 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     const saved = savedState.get(collection.path) ?? [];
     const dirty = itemDirty(itemsFor(collection), saved, index);
     if (dirty) card.classList.add("wx-section-card-dirty");
+
+    const toggleField = collection.fields.find((f) => f.kind === "toggle");
+    const visibilityBar =
+      toggleField !== undefined ? renderVisibilityBar(collection, toggleField, item, index) : null;
 
     const handle = document.createElement("button");
     handle.type = "button";
@@ -626,12 +748,13 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
       if (field.kind === "image") images.appendChild(renderImageSlot(collection, field, item, index));
     }
 
+    const beforeAfterPreview = beforeAfterPreviewFor(collection, item);
+
     const fields = document.createElement("div");
     fields.className = "wx-section-card-fields";
     for (const field of collection.fields) {
       if (field.kind === "text") fields.appendChild(renderTextField(collection, field, item, index));
       if (field.kind === "choice") fields.appendChild(renderChoiceField(collection, field, item, index));
-      if (field.kind === "toggle") fields.appendChild(renderToggleField(collection, field, item, index));
     }
 
     const actions = document.createElement("div");
@@ -670,19 +793,20 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     if (alignButton !== null) actions.append(alignButton);
     actions.append(upButton, downButton, deleteButton);
 
-    if (hidden) {
-      const chip = document.createElement("span");
-      chip.className = "wx-section-hidden-chip";
-      chip.textContent = "Hidden";
-      card.appendChild(chip);
-    }
     if (dirty) {
       const unsavedBadge = document.createElement("span");
       unsavedBadge.className = "wx-section-unsaved-badge";
       unsavedBadge.textContent = "Unsaved";
       card.appendChild(unsavedBadge);
     }
-    card.append(handle, images, fields, actions);
+    card.append(
+      ...(visibilityBar !== null ? [visibilityBar] : []),
+      handle,
+      images,
+      ...(beforeAfterPreview !== null ? [beforeAfterPreview] : []),
+      fields,
+      actions,
+    );
     return card;
   }
 
@@ -1023,6 +1147,34 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     collectionBody.appendChild(grid);
   }
 
+  function itemNounPlural(collection: AdminCollection, count: number): string {
+    return count === 1 ? collection.itemNoun : `${collection.itemNoun}s`;
+  }
+
+  /** "Turn all on/off" (decisions/00119) — bulk-applies the SAME toggle every
+   * card's own switch drives, via the same `stageLocal` chokepoint (one undo
+   * step, one Save). A no-op on an empty collection needs no confirm — there
+   * is nothing to change. */
+  function turnAllOn(collection: AdminCollection, field: AdminField): void {
+    const items = itemsFor(collection);
+    if (items.length === 0) return;
+    const ok = win.confirm(
+      `Show all ${items.length} ${itemNounPlural(collection, items.length)} on your site? You choose when to publish.`,
+    );
+    if (!ok) return;
+    stageLocal(collection, showAllItems(items, field.key));
+  }
+
+  function turnAllOff(collection: AdminCollection, field: AdminField): void {
+    const items = itemsFor(collection);
+    if (items.length === 0) return;
+    const ok = win.confirm(
+      `Hide all ${items.length} ${itemNounPlural(collection, items.length)} from your site? You choose when to publish.`,
+    );
+    if (!ok) return;
+    stageLocal(collection, hideAllItems(items, field.key));
+  }
+
   function renderCollectionSection(collection: AdminCollection): HTMLElement {
     const section = document.createElement("div");
     section.className = "wx-section-collection";
@@ -1031,12 +1183,33 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     collectionHeader.className = "wx-section-collection-header";
     const label = document.createElement("h3");
     label.textContent = collection.label;
+
+    const headerActions = document.createElement("div");
+    headerActions.className = "wx-section-collection-header-actions";
+
+    const toggleField = collection.fields.find((f) => f.kind === "toggle");
+    if (toggleField !== undefined) {
+      const turnAllOnButton = document.createElement("button");
+      turnAllOnButton.type = "button";
+      turnAllOnButton.className = "wx-section-turn-all-button";
+      turnAllOnButton.textContent = "Turn all on";
+      turnAllOnButton.addEventListener("click", () => turnAllOn(collection, toggleField));
+      const turnAllOffButton = document.createElement("button");
+      turnAllOffButton.type = "button";
+      turnAllOffButton.className = "wx-section-turn-all-button";
+      turnAllOffButton.textContent = "Turn all off";
+      turnAllOffButton.addEventListener("click", () => turnAllOff(collection, toggleField));
+      headerActions.append(turnAllOnButton, turnAllOffButton);
+    }
+
     const addButton = document.createElement("button");
     addButton.type = "button";
     addButton.className = "wx-publish-button wx-section-add-button";
     addButton.textContent = `Add a ${collection.itemNoun}`;
     addButton.addEventListener("click", () => openAddFlow(collection));
-    collectionHeader.append(label, addButton);
+    headerActions.appendChild(addButton);
+
+    collectionHeader.append(label, headerActions);
 
     const collectionBody = document.createElement("div");
     collectionBody.className = "wx-section-collection-body";

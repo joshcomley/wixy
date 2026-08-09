@@ -181,8 +181,11 @@ updates the hash without re-loading.
 
 ## Op queue semantics (`admin-ui/src/opQueue.ts`)
 
-One `OpQueue` per session (owned by `shell.ts`); panels take only the `OpQueueLike =
-{readonly rev, enqueue}` slice. DOM/framework-free.
+One `OpQueue` per session (owned by `shell.ts`); most panels take only the `OpQueueLike =
+{readonly rev, enqueue}` slice (`editView.ts`). `sectionPanel.ts` instead takes
+`SectionOpQueueLike = {readonly rev, enqueueTracked, flushNow}` (decisions/00119) — the real
+`OpQueue` class satisfies both without any change, since `enqueueTracked` is an ADDITIONAL
+method alongside `enqueue`, not a replacement. DOM/framework-free.
 - **Coalescing:** `enqueue` → `DEFAULT_COALESCE_MS = 300` timer; multiple ops in the window
   flush as one PATCH.
 - **Ordering:** strict FIFO; ops enqueued during an in-flight request are picked up next
@@ -202,6 +205,16 @@ One `OpQueue` per session (owned by `shell.ts`); panels take only the `OpQueueLi
   shows "Couldn't save… retrying").
 - **`flushNow()`** flushes immediately (before navigating away). A 409 is expected and handled
   here — `api.ts` never blind-retries a 4xx.
+- **`enqueueTracked(op): Promise<EnqueueOutcome>`** (decisions/00119) — like `enqueue`, but
+  resolves `{accepted: true, rev}` or `{accepted: false}` once THIS op's batch is settled,
+  bounded to the SAME flush attempt `flushNow()` triggers (never left waiting on a later
+  automatic background retry — a network-error catch settles `{accepted: false}` immediately
+  and detaches the resolver, so an eventual retry's own settle is a harmless no-op). Exists
+  because `sectionPanel.ts`'s `saveNow()` originally inferred success from `rev` advancing
+  across a plain `flushNow()` call — a false positive when a 409-refetch (which itself
+  advances `rev` via `fetchCurrentRev`) is immediately followed by a network error on the
+  retry: the batch is only re-queued, not landed, but `rev` moved anyway. `enqueueTracked`
+  reports the batch's real fate directly instead.
 
 ## admin-ui panels (`admin-ui/src/`)
 
@@ -279,7 +292,8 @@ After"/`gallery.sliders`/`gallery.tiles` are spelled out). `shell.ts` renders on
 per `state.adminSections[]` entry dynamically (inserted right after Edit via
 `editNavItem.after(...)`, re-synced whenever the section list changes on a state reload —
 unlike `NAV_ROUTES`, which is static) and mounts `mountSectionPanel(section, {api, opQueue,
-win?, openAligner?, onRequestPublish?, onDraftChanged?})` for route `{kind:"section", id}`
+win?, openAligner?, onRequestPublish?, onDraftChanged?})` (`opQueue` here is the narrower
+`SectionOpQueueLike`, above) for route `{kind:"section", id}`
 (the last two deps are decisions/00118's staged-save wiring, below); an unknown `id` (a stale
 deep link, or a section removed from the registry) falls back to the pages panel. The panel
 owns its own fetch (`api.getContent(section.page)`, mirroring `mediaPanel.ts`'s "owns its own
@@ -299,9 +313,10 @@ presses **Save**. Three visible stages: **unsaved** — a `wx-field-dirty` class
 input/select, a `wx-section-unsaved-badge` on a changed card, and a sticky bottom
 `.wx-section-save-bar` (Save / **Undo last**, a panel-wide bounded stack of pre-mutation
 snapshots, purely local / **Discard unsaved**, reverts every collection to `savedState`,
-confirmed); **ready to publish** — once Save succeeds (detected by `opQueue.rev` advancing
-across the `flushNow()` call, since `OpQueueLike` exposes no richer success/failure signal —
-both a network-retry and a 422 drop leave `rev` untouched), a `.wx-section-ready-banner` at
+confirmed); **ready to publish** — once Save succeeds (`saveNow()` awaits
+`opQueue.enqueueTracked(op)` per dirty collection and checks every settled `EnqueueOutcome`
+is `accepted`, decisions/00119 — not inferred from `rev` advancing, the original decisions/
+00118 design's known gap, see "Op queue semantics" above), a `.wx-section-ready-banner` at
 the TOP of the panel reads the same `state.draft.opCount` the shell's status-bar chip does
 (reworded to match: "N changes ready to publish"), with **Publish** (auto-saves any new
 dirty edits first, then calls `deps.onRequestPublish`, wired to `shell.ts`'s
@@ -359,17 +374,71 @@ completeness gate, entity decoding) — unit-tested directly; `sectionPanel.test
 the thin DOM binding on top (kept deliberately DOM-light per spec 3c — the pointer-drag
 interaction itself is real-browser e2e territory, not jsdom's).
 
-**The `visible` toggle ("Show on site", decisions/00117, Inv 28)** — a `"kind": "toggle"`
-`AdminField` renders `renderToggleField` (beside `renderChoiceField`): a checkbox row read as
-`item[field.key] !== false`; unchecking `commit`s `updateItemField(…, field.key, false)`,
-re-checking `commit`s `removeItemField(…, field.key)` (`sectionPanelModel.ts`) — the key exists
-only when `false`, never `true`, matching the builder's own convention exactly. The guided
-add-flow's form step dispatches on `field.kind` with an explicit three-way switch (a `toggle`
-field used to fall through a text/choice ternary into an empty `<select>` — decisions/00117
-fixed the trap before it shipped); its own toggle row starts checked (a new item is born
-shown) and writes a key only if she unchecks it before Save. A card whose item currently has
-`visible: false` gets a `wx-section-card-hidden` class (~0.55 opacity) plus a small "Hidden"
-chip, so which imports are still switched off from the public site is obvious at a glance.
+**The `visible` toggle ("Show on site", decisions/00117 + Inv 28; prominence + bulk actions
+decisions/00119)** — a `"kind": "toggle"` `AdminField` renders as a full-width **card-header
+switch bar** (`renderVisibilityBar`, prepended as the card's first child, ahead of the drag
+handle — NOT in the fields loop with the text/choice fields anymore) rather than a plain
+checkbox row: a real `<input type="checkbox">` behind a styled `.wx-switch` track+thumb (native
+a11y — keyboard + screen reader support for free — 44px tappable area per the Uxer touch-target
+convention), read as `item[field.key] !== false`, next to a plain-English line — "Shown on your
+site" when on, "Hidden — not on your site yet. Turn on to add it." when off.
+**`.wx-switch-track`/`.wx-switch-thumb` MUST carry `pointer-events: none`** — they have to
+follow the checkbox in DOM order for the `:checked + .wx-switch-track` CSS selector below to
+work, but a later sibling with no `pointer-events` override paints ON TOP of an earlier
+`position: absolute` one and silently swallows every click. This shipped broken past a fully
+green `npm test` (jsdom doesn't enforce real paint/stacking order) and was only caught by a
+real-browser e2e `.check()` failing with "element intercepts pointer events" — a reminder that
+this codebase's "DOM-light unit tests, real interaction in e2e" split (see the aligner
+paragraph below) means a CSS stacking bug like this ONLY surfaces in e2e, never earlier. This wording
+REPLACED an earlier small "Hidden" chip pill entirely (`.wx-section-hidden-chip`, now deleted)
+— the chip only said *that* an item was hidden, never *why it looked greyed out* or *what to do
+about it*, which was Purdi's literal complaint. Storage semantics are completely UNCHANGED from
+decisions/00117: unchecking still `stageLocal`s `updateItemField(…, field.key, false)`,
+re-checking still `removeItemField(…, field.key)` (`sectionPanelModel.ts`) — the key exists only
+when `false`, never `true`, matching the builder's own convention exactly; only where and how
+prominently the control renders moved, and it stages via `stageLocal` like every other edit
+(decisions/00118 — never auto-saves). A card whose item currently has `visible: false` also
+keeps the existing `wx-section-card-hidden` class (~0.55 opacity) as a secondary whole-card cue,
+driven by the same `item["visible"] === false` check. The guided add-flow's form step
+dispatches on `field.kind` with an explicit three-way switch (a `toggle` field used to fall
+through a text/choice ternary into an empty `<select>` — decisions/00117 fixed the trap before
+it shipped) — its own toggle row (`renderToggleInputRow`, a SEPARATE code path from
+`renderVisibilityBar`, untouched by decisions/00119) still starts checked (a new item is born
+shown) and writes a key only if she unchecks it before Save.
+
+**Turn all on / Turn all off** (decisions/00119) — each collection header
+(`renderCollectionSection`, next to "Add a X") gets two buttons, shown only when the collection
+actually declares a `toggle`-kind field: **Turn all on** drops `field.key` from every item
+(`sectionPanelModel.showAllItems`), **Turn all off** sets it `false` on every item
+(`hideAllItems`) — both pure, generic over `SectionItem[]` + a field key, following the same
+"never mutate, always return a new array" convention as `updateItemField`/`removeItemField`.
+Both confirm via `win.confirm` ("Show/Hide all N `<itemNoun>`s on/from your site? You choose
+when to publish.") and are a no-op on an empty collection (nothing to confirm). Either stages
+the WHOLE collection through the SAME `stageLocal` chokepoint an individual toggle uses, so one
+bulk action is one Undo step and lands in the same Save batch as anything else she's mid-editing.
+
+**Inline before/after preview** (`beforeAfterSlider.ts`, decisions/00119) — a collection with
+`>= 2` `image`-kind fields where the first two are BOTH filled on a given item gets a
+lightweight, READ-ONLY drag-to-compare preview inserted immediately after the card's images
+block (`renderCard`, `sectionPanel.ts`): two stacked `object-fit: cover` images in a `640:360`
+frame (matching `gallery.sliders`'s registry `alignAspect`), the BEFORE image clipped from the
+right via `clip-path: inset(0 (100-v)% 0 0)`, driven by a transparent full-frame
+`<input type="range">` (native mouse+touch+keyboard drag for free) — `set(v)` updates the
+clip-path plus a divider/handle's `left%`. Ported from the PUBLIC site's own gallery slider
+(`cottage-aesthetics-preview`'s `pages/gallery.html`, `.bas-frame`/`.bas-before`/`.bas-range`),
+restyled with this admin's OWN `--wx-` tokens (two separate design systems — never the site's
+earthy palette here). `renderBeforeAfter({beforeUrl, afterUrl, beforeAlt?, afterAlt?, start?})`
+is the whole pure-DOM component (no editing controls at all, ever) — reused UNCHANGED, just
+filling a wider box, for the tap-to-enlarge modal a small expand button opens
+(`.wx-before-after-modal-backdrop`/`.wx-before-after-modal`, mirroring `openAddFlow`'s own
+backdrop + Escape-key + click-outside-to-close idiom already in this file, not
+`mediaDialog.ts`'s differently-shaped one). Which two fields feed it comes generically from
+`collection.fields.filter(f => f.kind === "image")` (Inv 1 — never a hardcoded `before`/`after`
+key). NEVER fabricated from one photo: a tile (a single `image` field, `gallery.tiles`) or a
+pair with either photo still missing just keeps its existing thumbnail(s) as-is — the fallback
+is silence, not a broken half-slider. Completely separate from the aligner below, which it
+never reuses, wraps, or replaces (the aligner EDITS a photo's crop/position; this only PREVIEWS
+what's already there).
 
 **The before/after aligner** (`alignerDialog.ts` + the pure `alignerModel.ts`,
 decisions/00111) — a collection whose registry entry sets `alignAspect: "W:H"` AND
