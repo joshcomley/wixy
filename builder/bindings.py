@@ -298,6 +298,15 @@ def parse_attr_spec(spec: str) -> list[tuple[str, str] | None]:
     return pairs
 
 
+#: Attribute names a browser will navigate/fetch/submit to — the SAME injection
+#: class `_apply_href` above already closes for `data-wx-href` (decisions/00123),
+#: generalized here because `data-wx-attr` can bind ANY attribute verbatim,
+#: including these, and nothing before decisions/00129 stopped it (found while
+#: adding `data-wx-attr="src:@mapSrc"`, an iframe src bound from content).
+#: `xlink:href` covers SVG's `<use>`/`<a>` equivalent of `href`.
+_URL_BEARING_ATTRS = {"href", "src", "action", "formaction", "xlink:href"}
+
+
 def _apply_attrs(
     el: Tag, ctx: ResolveContext, spec: str, *, file_label: str, sink: ValidationResult | None
 ) -> None:
@@ -314,6 +323,14 @@ def _apply_attrs(
                 file_label,
                 key,
                 f"attribute binding '{key}' (for '{attr_name}') does not resolve to a string",
+            )
+            continue
+        if attr_name.lower() in _URL_BEARING_ATTRS and not is_safe_href(value):
+            _fail(
+                sink,
+                file_label,
+                key,
+                f"attribute binding '{key}' (for '{attr_name}') has a disallowed URL scheme",
             )
             continue
         el[attr_name] = value

@@ -15,6 +15,7 @@
 import { createApi, thumbnailUrl, type AdminApi, type PublishJobData, type StateResponse } from "./api";
 import { createThumbnailService } from "./thumbnailService";
 import { mountChatPanel as mountChatPanelReal, type ChatPanel, type ChatPanelDeps } from "./chatPanel";
+import { mountContactPanel } from "./contactPanel";
 import { mountEditView as mountEditViewReal, type EditView, type MountEditViewDeps } from "./editView";
 import { initFontScale, type FontScaleController } from "./fontScale";
 import { mountHistoryPanel } from "./historyPanel";
@@ -75,6 +76,14 @@ export interface Shell {
 
 const NAV_ROUTES: Array<{ route: Route; label: string }> = [
   { route: { kind: "pages" }, label: "Pages" },
+  // decisions/00129: placed right before "Theme" so the dynamic section-nav
+  // buttons (inserted via `editNavItem.after(...)` below) land BETWEEN Edit
+  // and Contact — "after the section nav items, before Theme" per the
+  // operator's own ask, with no special-casing needed: this is simply the
+  // first STATIC item in DOM order after Edit, and the dynamic inserts always
+  // go immediately after Edit too, pushing this one (and everything after it)
+  // along automatically.
+  { route: { kind: "contact" }, label: "Contact" },
   { route: { kind: "theme" }, label: "Theme" },
   { route: { kind: "media" }, label: "Media" },
   { route: { kind: "chat", conversation: null }, label: "Chat" },
@@ -972,6 +981,17 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       return;
     }
 
+    if (route.kind === "contact") {
+      if (opQueue === null) {
+        main.textContent = "Loading…";
+        return;
+      }
+      const panel = mountContactPanel({ win, api, opQueue });
+      main.appendChild(panel.element);
+      activePanelTeardown = () => panel.teardown();
+      return;
+    }
+
     if (route.kind === "theme") {
       if (opQueue === null) {
         main.textContent = "Loading…";
@@ -1061,7 +1081,6 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
         fontScaleController,
         shortcutsController,
         themeEditorController,
-        opQueue,
         onNavigate: (page) => navigateTo({ kind: "settings", page }, win),
         onResetAll: resetAllSettings,
       });

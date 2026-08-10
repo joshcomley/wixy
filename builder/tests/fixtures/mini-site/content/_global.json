@@ -1,8 +1,11 @@
 {
+  "address": "1 Fixture Street<br>Testville, AB1 2CD",
   "brand": {
     "line1": "Fixture"
   },
   "phone": "01234 567890",
+  "mapCoords": "",
+  "mapSrc": "https://www.google.com/maps?q=1%20Fixture%20Street%2C%20Testville%2C%20AB1%202CD&output=embed",
   "bookingUrl": "https://example.com/book",
   "footer": {
     "legal": [
