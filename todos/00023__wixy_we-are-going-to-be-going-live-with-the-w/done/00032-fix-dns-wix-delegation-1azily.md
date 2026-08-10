@@ -33,3 +33,16 @@ Wix site.
 6. FINAL HANDOFF to planner; merge only after `FINAL HANDOFF CLEARED` naming the exact SHA.
 7. Post-merge: amend Q-005, confirm worktree pulls merged main so the raw-fs link serves the
    updated guide, close todos, POST-RELEASE DONE REPORT.
+
+## Outcome — DONE
+
+wixy PR #185 (https://github.com/joshcomley/wixy/pull/185), candidate 419248b, merged as
+478ff5d. FINAL HANDOFF cleared by planner (0 critical/0 high) before merge. All 6 CI checks
+green (e2e, frontend, guide-linkcheck, image-boot-proof, python, release-note); local
+ruff/mypy/pytest also green (1134 passed). Self-found + fixed a table-overflow CSS bug
+introduced by the new troubleshooting row (see decisions/00129). Worktree fast-forwarded to
+origin/main (tree already matched — merge commit introduced zero extra diff); raw-fs link
+verified serving the merged file (HTTP 200, all five new-content markers present). Answers
+Q-005 (internal id 247) amended in place, twice — first pass wrongly collapsed the
+answer/detail field split, second pass corrected it; final render is clean and matches the
+entry's original structure.
