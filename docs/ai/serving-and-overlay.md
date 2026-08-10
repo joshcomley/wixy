@@ -50,10 +50,15 @@ of `build_site`, once `site.css`/`site.js`/`theme.css`'s final bytes are known: 
 bare `href="site.css"` / `src="site.js"` / `href="theme.css"` is rewritten in place to
 `...?v=<content hash>`. A rebuild that changes an asset's bytes changes its hash, hence its
 URL — no cache layer can hold a stale entry for a URL that didn't exist before. `_cache_
-control_for` serves any request whose query string carries `v` (`fingerprinted="v" in
-request.query_params`, threaded through `_serve`) `public, max-age=31536000, immutable`; a
-request for the same asset's bare URL (only ever a transitional access, from an HTML page
-cached in the ≤300s window before it itself revalidates and picks up the new fingerprinted
+control_for` serves `public, max-age=31536000, immutable` only when the request's `?v=`
+value is VERIFIED to equal `content_fingerprint(resolved)` (the resolved file's actual
+current hash) — presence of `?v=` alone is not sufficient (a mismatched or stale value
+falls through to the default; a naive presence-only check would let a stale fingerprint
+replayed during a publish's propagation window pin the CURRENT bytes under the OLD URL,
+immutably, poisoning it against a future publish that reverts to the old content). A
+request for the same asset's bare (or mismatched) URL (only ever a transitional access,
+from an HTML page cached in the ≤300s window before it itself revalidates and picks up
+the new fingerprinted
 references) keeps the unchanged 24h default.
 
 ## The live pointer (`live_pointer.py`)

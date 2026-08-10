@@ -49,12 +49,18 @@ Extend the same contract to the public site's three shared assets:
    page + `theme.css`/`site.css`/`site.js`/`404.html` are written, before `_self_check` (so
    the check validates the true final output).
 3. **`wixy_server/routes_public.py`**: `_cache_control_for` gained a `fingerprinted: bool`
-   parameter (`"v" in request.query_params`, threaded through `_serve` and both route
-   handlers). HTML is unaffected either way (a stray `?v=` on an HTML request must never
-   change ITS cache behavior — it's the document that *carries* the fingerprinted references,
-   not one itself). A fingerprinted asset request gets `public, max-age=31536000, immutable`
-   (safe — the fingerprint IS the bytes' identity, mirroring `staticcache.py`'s admin-side
-   contract exactly). A **bare** asset request (no `?v=`) keeps the existing 24h default,
+   parameter. **Updated by the audit-round-2 fix below** — `fingerprinted` is only `True`
+   when the request's `?v=` value is VERIFIED to equal `content_fingerprint(resolved)` (the
+   resolved file's actual current hash), computed per request via `_query_fingerprint_
+   matches`; presence of `?v=` alone is not sufficient (see "Audit round 2" §F1 — the
+   original version of this paragraph described presence-only, which was the bug). HTML is
+   unaffected either way (a stray `?v=` on an HTML request must never change ITS cache
+   behavior — it's the document that *carries* the fingerprinted references, not one
+   itself; the hash check is skipped entirely for `.html` paths). A verified-fingerprinted
+   asset request gets `public, max-age=31536000, immutable` (safe — a match can only mean
+   these exact bytes are what this URL will always mean, mirroring `staticcache.py`'s
+   admin-side contract). A **bare** or **mismatched** asset request keeps the existing 24h
+   default,
    unchanged — deliberately not shortened. Once fingerprinting ships, the bare URL is only
    ever hit transitionally, by an HTML page that was itself cached in the ≤300s window before
    its own cache lifetime forces a revalidation and it picks up the new fingerprinted
@@ -151,3 +157,23 @@ a fresh `load_site_source(edited_root, ...)` call, not just an edited `root` arg
 `build_site`), and `wixy_server/tests/test_routes_public.py` (the exact F1 replay scenario:
 `?v=` present but wrong still gets the 24h default, not immutable). Full suite green: 1165
 passed.
+
+## Addendum: the same F1 gap exists, unfixed, in the admin-side sibling
+
+While fixing F1 in `routes_public.py`, checked `wixy_server/staticcache.py`'s
+`FingerprintedStaticFiles.get_response` (decisions/00069, Inv 22 — the pattern this whole
+decision mirrors) for the same class of bug. It has it: `if response.status_code == 200
+and b"v=" in scope["query_string"]:` grants `immutable` on PRESENCE alone, never comparing
+the value against the served file's actual current hash. The admin surface is CF-Access-
+gated (Inv 12), which narrows who can exploit a deliberately-crafted mismatched `?v=`, but
+the accidental-replay scenario F1 was written for (a stale fingerprint served back during a
+bundle's own propagation window, later poisoned against a reverted deploy) applies exactly
+the same way there.
+
+**Not fixed in this PR** — out of scope for a public-site caching incident, and fixing it
+means editing `staticcache.py` + its own test suite (`test_staticcache.py`) under a host
+currently too CPU-saturated (measured 99.9%, `read-cpu` skill) to run tests reliably.
+Recorded here so it isn't lost: a follow-up should add the same `content_fingerprint(path)
+== requested_v` check to `FingerprintedStaticFiles.get_response`, mirroring this PR's fix
+exactly. `docs/ai/invariants.md` Inv 22 and Inv 34 both now cross-reference this as a known,
+outstanding gap.
