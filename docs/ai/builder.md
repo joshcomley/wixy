@@ -19,7 +19,16 @@ subcommand imports from `builder.tests.parity` — that's why `playwright` and `
 ## CLI (`builder/cli.py`)
 
 Common flags (`validate`/`build`/`serve`): `--root` (site checkout, default `.`),
-`--project` (**required**, path to a `projects/*.json`).
+`--project` (**required**, path to a `projects/*.json`), `--domain` (optional, overrides the
+registry's `domain` for this invocation only) and `--indexable {true,false}` (optional,
+overrides the registry's `indexable` flag). Both default to `None` — omitted, the registry's
+own values apply unchanged. `_load_source` applies an override via
+`dataclasses.replace(project, ...)` on the loaded `ProjectConfig`; this is deliberately a
+CLI-only mechanism, not an env var — see `wixy_server/registry.py`'s own
+`_apply_env_overrides` docstring, which records that env-var resolution stays server-side,
+keeping `builder/` env-blind (decisions/00126). Used by the site repo's GitHub Pages deploy
+workflow to build with the operator's public domain + `indexable=true` while
+`projects/ca.json` itself stays `ca.cinnamons.uk` / `indexable=false`.
 
 | Command | Does | Exit |
 |---|---|---|
@@ -50,8 +59,11 @@ Then per page:
    attr; (d) recurse into direct children.
 5. `_mark_nav_active(body, page_url(slug))` marks the active link in **every**
    `data-wx-list="@nav"` container (desktop + mobile — decisions/00007).
-6. `templates.apply_head`: `<title>`/OG/description/fonts-link/`robots` from `meta` + domain
-   + `indexable`; `fonts_url = theme.generate_fonts_url(theme)` if a theme exists else `None`.
+6. `templates.apply_head`: `<title>`/OG/description/fonts-link/`robots`/canonical `<link>`
+   from `meta` + domain + `indexable`; `fonts_url = theme.generate_fonts_url(theme)` if a
+   theme exists else `None`. The canonical link (`_find_or_create_link_rel(soup, head,
+   "canonical")`) always wins over any hand-authored value in the template — single source
+   of truth, same find-or-create idiom as the `og:*`/`description` meta tags.
 
 **The `sink` parameter is the single mode switch for error handling.** `sink=None` → strict
 build: the first unresolvable binding raises `BuildError` (`bindings._fail`). `sink=

@@ -67,7 +67,13 @@ same race the route-level preflight above already covers for the one real caller
    `save_live_pointer(sha, version)` (atomic flip) → `append_ledger(LedgerEntry(...,
    source=_publish_source_kind(...), changed=_changed_summary(overlay)))` →
    `save_overlay(discard_all(overlay))` (clears the overlay, bumps rev) → `_prune_builds`
-   (keep the shas of the last `_MAX_KEPT_VERSIONS = 20` ledger entries). `job.stage = "done"`.
+   (keep the shas of the last `_MAX_KEPT_VERSIONS = 20` ledger entries) →
+   `checkout.push_live_mirror(paths.repo, sha)` (force-push `sha` to `refs/heads/wixy-live` on
+   the site repo's origin — the ref the GitHub Pages deploy workflow watches, Inv 32; see
+   [runbook.md](runbook.md)'s GitHub Pages section). A `push_live_mirror` failure appends a
+   `WARNING` line to the job log (same idiom as the smoke-check warning below) but never fails
+   the publish — advisory only, self-heals on the next successful publish/restore.
+   `job.stage = "done"`.
 
 **Failure / kill:** any `PublishError`/`CheckoutError`/`BuildError` → `job.stage = "failed"`,
 re-raise; `finally` unlinks the lock. Any failure **before step 5** leaves live + ledger +
@@ -91,7 +97,13 @@ draft; **no git commit happens** (the owner's next publish materializes it):
    template); `to_delete = current_pages - old_pages` → `pages_deleted`.
 5. `save_overlay(new Overlay(rev+1, ops, pages_deleted=to_delete))` **first**, then
    `save_live_pointer(entry.sha, new_version)` (instant flip), then
-   `append_ledger({action:"restore", of:version})`. Returns `RestoreResult(version, sha, of)`.
+   `append_ledger({action:"restore", of:version})`, then
+   `checkout.push_live_mirror(paths.repo, entry.sha)` — same mirror push as publish's swap
+   step (Inv 32), except this is the one call site that genuinely needs `push_live_mirror`'s
+   `--force`: a restore moves `wixy-live` BACKWARDS to an older sha already on the remote,
+   which a non-force push would reject as non-fast-forward. A failure here is
+   `logger.warning`-only (restore has no job log) and never fails the restore. Returns
+   `RestoreResult(version, sha, of)`.
 
 `_worktree_at_sha`: `git worktree add --detach <tmp> <sha>` in a `mkdtemp`; cleanup =
 `git worktree remove --force` + `rmtree` + fallback `git worktree prune` if remove failed

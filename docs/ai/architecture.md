@@ -79,6 +79,12 @@ only) site is **Cottage Aesthetics** (`ca.cinnamons.uk`). Five binding principle
 - **Live** is a pinned SHA's immutable build; the swap is one atomic pointer write
   (`live.json`). A crash, bad merge, or half-publish can never mutate it (Invariant 7).
   See [publish-pipeline.md](publish-pipeline.md).
+- **Public custom domain**: every successful publish/restore also force-pushes the live sha
+  to `refs/heads/wixy-live` on the site repo's origin — a GitHub Pages workflow in the site
+  repo deploys that ref to the operator's own domain, so the Pages deploy rides the same
+  Publish/Restore gate as everything else (never the site repo's `main` HEAD directly, which
+  agents merge to routinely). See [publish-pipeline.md](publish-pipeline.md) (mirror push) and
+  [runbook.md](runbook.md) (the GitHub Pages deploy itself).
 
 ## 4. Data flow: how a page becomes bytes
 

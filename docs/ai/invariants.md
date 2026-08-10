@@ -368,3 +368,21 @@ happened at stage-time, not lazily on tab-switch).
 (unchanged from before this capability existed), so this invariant is vacuous for every
 section that hasn't opted into tabs.
 
+### Inv 32 — `wixy-live` mirrors the live pointer; server-only writer; advisory
+The site repo's `refs/heads/wixy-live` branch always reflects the CURRENT live pointer's sha
+— `checkout.push_live_mirror(repo, sha)` force-pushes it at the end of every successful
+publish (`publisher.py`'s swap stage) and every restore (`restore.py`, after the live-pointer
+flip). This is the ref the GitHub Pages deploy workflow (site repo) watches, so the public
+custom domain always serves exactly what the owner last published or restored to — **never**
+the site repo's `main` HEAD, which agents merge content to routinely without the owner's
+involvement (decisions/00126). Force is required: a restore moves the ref BACKWARDS to an
+older sha already on the remote.
+*Exception:* `push_live_mirror` is deliberately advisory-only — it retries once, swallows
+every exception a git subprocess can raise, and returns `False` on failure rather than
+raising. A failed mirror push never fails or blocks a publish/restore (publish logs a
+`WARNING` job-log line; restore logs via `logger.warning`); the ref simply lags until the
+next successful publish/restore heals it. *Known gap (not a violation):* GitHub resolves a
+push-triggered workflow run from the pushed commit's own tree, so a restore to a sha
+predating `pages.yml`'s existence on `main` moves `wixy-live` correctly but triggers no Pages
+run — see [runbook.md](runbook.md)'s GitHub Pages section for the manual-dispatch recovery.
+
