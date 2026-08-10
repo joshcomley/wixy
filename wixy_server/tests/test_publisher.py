@@ -738,3 +738,66 @@ class TestMaterializeCrashSafety:
         assert content_path.read_bytes() == original_bytes
         json.loads(content_path.read_text(encoding="utf-8"))  # still valid JSON
         json.loads(content_path.read_text(encoding="utf-8"))  # still valid JSON, not corrupted
+
+
+class TestLiveMirrorPush:
+    """The `wixy-live` ref on the site repo's origin is what the GitHub Pages
+    deploy workflow watches — the server force-pushes the just-published sha to
+    it at the very end of a successful publish (checkout.push_live_mirror)."""
+
+    def test_publish_updates_the_live_mirror_ref_on_the_origin(
+        self, project: ProjectConfig, paths: ProjectPaths
+    ) -> None:
+        save_overlay(paths.draft_overlay, _make_overlay({"index:hero.title": "New Title"}))
+        result = run_publish(
+            project, paths, message="test publish", expected_rev=0, now=_TS, job=_new_job()
+        )
+
+        mirror_sha = _git(
+            ["rev-parse", "refs/heads/wixy-live"], cwd=Path(project.repo)
+        ).stdout.strip()
+        assert mirror_sha == result.sha
+
+    def test_a_pure_upstream_publish_also_updates_the_live_mirror_ref(
+        self, project: ProjectConfig, paths: ProjectPaths, tmp_path: Path
+    ) -> None:
+        save_overlay(paths.draft_overlay, _make_overlay({}))
+        run_publish(project, paths, message="first", expected_rev=0, now=_TS, job=_new_job())
+
+        seed2 = tmp_path / "seed2"
+        _git(["clone", str(Path(project.repo)), str(seed2)], cwd=tmp_path)
+        _git(["config", "user.email", "ai@example.com"], cwd=seed2)
+        _git(["config", "user.name", "AI Lane"], cwd=seed2)
+        (seed2 / "content" / "about.json").write_text(
+            json.dumps({"meta": {"title": "About Us"}, "intro": {"body": "Updated by AI"}}),
+            encoding="utf-8",
+        )
+        _git(["add", "."], cwd=seed2)
+        _git(["commit", "-m", "ai lane update"], cwd=seed2)
+        _git(["push", "origin", "main"], cwd=seed2)
+
+        save_overlay(paths.draft_overlay, _make_overlay({}, rev=1))
+        result = run_publish(
+            project, paths, message="publish upstream", expected_rev=1, now=_TS, job=_new_job()
+        )
+
+        mirror_sha = _git(
+            ["rev-parse", "refs/heads/wixy-live"], cwd=Path(project.repo)
+        ).stdout.strip()
+        assert mirror_sha == result.sha
+
+    def test_a_failed_mirror_push_warns_but_never_fails_the_publish(
+        self, project: ProjectConfig, paths: ProjectPaths, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("wixy_server.publisher.push_live_mirror", lambda repo, sha: False)
+        save_overlay(paths.draft_overlay, _make_overlay({"index:hero.title": "New Title"}))
+        job = _new_job()
+
+        result = run_publish(
+            project, paths, message="test publish", expected_rev=0, now=_TS, job=job
+        )
+
+        assert job.stage == "done"
+        assert job.error is None
+        assert result.version == 1
+        assert any("live mirror push failed" in line for line in job.log)
