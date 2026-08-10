@@ -1983,6 +1983,32 @@ div.wx-media-thumb {
   color: var(--wx-muted);
 }
 
+/* Contact tab (decisions/00127) — a stacked label/input/hint/reset column,
+   unlike `.wx-settings-row`'s side-by-side label+control-group layout above
+   (a free-text field, especially the address textarea, reads better full-
+   width than squeezed beside a short label). */
+.wx-settings-row-stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.wx-settings-input,
+.wx-settings-textarea {
+  font: inherit;
+  padding: 7px 8px;
+  min-height: 36px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-canvas);
+  color: var(--wx-ink);
+}
+
+.wx-settings-textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
 .wx-settings-stepper {
   display: flex;
   align-items: center;

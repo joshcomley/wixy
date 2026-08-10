@@ -11,9 +11,10 @@
 // editor lets them *tailor* one"). Keyboard Shortcuts: list every shortcut
 // (grouped by category), rebind, disable, reset to defaults.
 
-import type { AdminApi, AiBudgetStatus, EngineStatus, SystemStatus } from "./api";
+import type { AdminApi, AiBudgetStatus, EngineStatus, GlobalSettings, SystemStatus } from "./api";
 import { ApiError } from "./api";
 import { AA_LARGE_TEXT, AA_NORMAL_TEXT, contrastRatioHex, passesAA } from "./contrast";
+import type { OpQueueLike } from "./editView";
 import type { FontScaleController } from "./fontScale";
 import type { SettingsPage } from "./router";
 import {
@@ -36,6 +37,11 @@ export interface SettingsPanelDeps {
   fontScaleController: FontScaleController;
   shortcutsController: ShortcutsController;
   themeEditorController: ThemeEditorController;
+  /** `null` only in the brief window before the shell's own initial `/api/
+   * admin/state` fetch resolves (mirrors `shell.ts`'s "theme" route guard) —
+   * the Contact tab (decisions/00127) is the only tab here that WRITES
+   * server content, so it's the only one that needs this. */
+  opQueue: OpQueueLike | null;
   onNavigate: (page: SettingsPage) => void;
   /** Resets theme/zoom/font-scale/shortcuts/custom-theme to defaults AND
    * clears the persisted last-active-route — owned by shell.ts since it's
@@ -84,6 +90,7 @@ export function mountSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
     tabButton("General", "general"),
     tabButton("Appearance", "appearance"),
     tabButton("Keyboard Shortcuts", "shortcuts"),
+    tabButton("Contact", "contact"),
     tabButton("Engine", "engine"),
     tabButton("AI", "ai"),
     tabButton("System", "system"),
@@ -98,6 +105,7 @@ export function mountSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
     general: renderGeneral,
     appearance: renderAppearance,
     shortcuts: renderShortcuts,
+    contact: renderContact,
     engine: renderEngine,
     ai: renderAi,
     system: renderSystem,
@@ -714,6 +722,161 @@ function renderShortcuts(deps: SettingsPanelDeps, teardownFns: Array<() => void>
     unsubscribe();
   });
 
+  return wrap;
+}
+
+// -- Contact (decisions/00127) -----------------------------------------------
+// Phone/email/address live in `content/_global.json` (spec/02 §5) — already
+// a SINGLE shared source every page's template references via `@phone`/
+// `@email`/`@address` (never hardcoded per-page, `builder/render.py`), and
+// the inline overlay editor already writes edits back here correctly
+// (`opTargeting.directOpTarget`, `@key` -> `{file:"_global", path:key}`).
+// What was missing was a dedicated, discoverable place to edit them — she'd
+// otherwise have to know to click the text directly on some live page. This
+// tab is that place: plain auto-save-per-field editing, the same
+// `opQueue.enqueue`/`discard` pattern Appearance's color rows use (NOT the
+// staged-save model the Before & After section uses, decisions/00118 — three
+// scalar fields need no Undo stack or review step).
+
+/** `_global.json`'s `address` embeds a literal `<br>` for its one line break
+ * (the plain-text-render-ready-HTML convention, decisions/00075) — editing
+ * that as a raw text string would show her a literal "<br>" she'd have to
+ * understand and never break. A plain `<textarea>` where each line she types
+ * becomes one `<br>` on save is the honest, correct UI for a short multi-line
+ * address; these two pure conversions are the whole of that translation.
+ * Exported for direct unit testing (no DOM needed). */
+export function addressToTextareaValue(stored: string): string {
+  return stored.replace(/<br\s*\/?>/gi, "\n");
+}
+
+export function textareaValueToAddress(typed: string): string {
+  return typed
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .join("<br>");
+}
+
+interface ContactFieldConfig {
+  key: string;
+  label: string;
+  hint: string;
+  inputType: "text" | "email" | "tel";
+  multiline?: boolean;
+}
+
+const CONTACT_FIELDS: readonly ContactFieldConfig[] = [
+  { key: "phone", label: "Contact phone", hint: "Shown in the footer and on the Contact page.", inputType: "tel" },
+  { key: "email", label: "Contact email", hint: "Shown in the footer and on the Contact page.", inputType: "email" },
+  {
+    key: "address",
+    label: "Contact address",
+    hint: "Shown on the Contact page and homepage. One address line per line.",
+    inputType: "text",
+    multiline: true,
+  },
+];
+
+function contactFieldValue(global: GlobalSettings, key: string): string {
+  const value = global[key];
+  return typeof value === "string" ? value : "";
+}
+
+function renderContact(deps: SettingsPanelDeps, teardownFns: Array<() => void>): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "wx-settings-contact";
+
+  if (deps.opQueue === null) {
+    const p = document.createElement("p");
+    p.className = "wx-settings-hint";
+    p.textContent = "Loading…";
+    wrap.appendChild(p);
+    return wrap;
+  }
+  const opQueue = deps.opQueue;
+
+  wrap.textContent = "Loading…";
+  let cancelled = false;
+  teardownFns.push(() => {
+    cancelled = true;
+  });
+
+  function renderLoadError(message: string): void {
+    wrap.innerHTML = "";
+    const p = document.createElement("p");
+    p.className = "wx-settings-hint";
+    p.textContent = `Couldn't load contact details: ${message}`;
+    wrap.appendChild(p);
+  }
+
+  function fieldRow(config: ContactFieldConfig, global: GlobalSettings): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "wx-settings-row wx-settings-row-stacked";
+
+    const inputId = `wx-settings-contact-${config.key}`;
+    const label = document.createElement("label");
+    label.className = "wx-settings-row-label";
+    label.textContent = config.label;
+    label.htmlFor = inputId;
+
+    const storedRaw = contactFieldValue(global, config.key);
+    const originalValue = config.multiline ? addressToTextareaValue(storedRaw) : storedRaw;
+
+    const input = document.createElement(config.multiline ? "textarea" : "input") as
+      | HTMLInputElement
+      | HTMLTextAreaElement;
+    input.id = inputId;
+    input.className = config.multiline ? "wx-settings-textarea" : "wx-settings-input";
+    if (input instanceof HTMLInputElement) input.type = config.inputType;
+    if (input instanceof HTMLTextAreaElement) input.rows = 2;
+    input.value = originalValue;
+
+    function commit(): void {
+      const toStore = config.multiline ? textareaValueToAddress(input.value) : input.value.trim();
+      if (toStore === storedRaw) return;
+      opQueue.enqueue({ file: "_global", path: config.key, value: toStore });
+    }
+    input.addEventListener("change", commit);
+
+    const hint = document.createElement("p");
+    hint.className = "wx-settings-hint";
+    hint.textContent = config.hint;
+
+    const resetButton = document.createElement("button");
+    resetButton.type = "button";
+    resetButton.className = "wx-settings-link-button";
+    resetButton.textContent = "Reset";
+    resetButton.addEventListener("click", () => {
+      input.value = originalValue;
+      opQueue.enqueue({ file: "_global", path: config.key, discard: true });
+    });
+
+    row.append(label, input, hint, resetButton);
+    return row;
+  }
+
+  async function load(): Promise<void> {
+    try {
+      const global = await deps.api.getGlobalSettings();
+      if (cancelled) return;
+      wrap.innerHTML = "";
+      const section = settingsSection("Contact details");
+      const intro = document.createElement("p");
+      intro.className = "wx-settings-hint";
+      intro.textContent =
+        "These already appear everywhere your site shows them — change one here and it updates every page, the next time you Publish.";
+      section.appendChild(intro);
+      for (const config of CONTACT_FIELDS) {
+        section.appendChild(fieldRow(config, global));
+      }
+      wrap.appendChild(section);
+    } catch (err) {
+      if (cancelled) return;
+      renderLoadError(err instanceof Error ? err.message : "unknown error");
+    }
+  }
+
+  void load();
   return wrap;
 }
 

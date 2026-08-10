@@ -355,6 +355,14 @@ export interface ThemeData {
   fonts: Record<string, FontSpec>;
 }
 
+/** `content/_global.json`'s current (overlay-merged) shape — read loosely
+ * (decisions/00127), same as `ContentResponse.content`, since it carries many
+ * keys (`brand`, `footer`, `hours`, `nav`, `social`, …) beyond the three
+ * (`phone`, `email`, `address`) Settings > Contact reads/writes; callers read
+ * defensively (`typeof value === "string"`) rather than trusting a strict
+ * shape for the whole file. */
+export type GlobalSettings = Record<string, JsonValue>;
+
 /** `"rejected"` is the draft-write gate's 422 (decisions/00095) — a batch the
  * server can never accept as-is, distinct from `"conflict"`'s 409 (a stale
  * rev, fixed by refetching and retrying the SAME ops). */
@@ -587,6 +595,7 @@ export interface AdminApi {  getState(): Promise<StateResponse>;
   unstageDeleteMedia(name: string): Promise<{ deleted: boolean }>;
   putThumbnail(slug: string, blob: Blob): Promise<{ ok: boolean }>;
   getTheme(): Promise<ThemeData>;
+  getGlobalSettings(): Promise<GlobalSettings>;
   getPublishPreview(): Promise<PublishPreview>;
   publish(message: string, expectedRev: number): Promise<PublishOutcome>;
   repairDraft(expectedRev: number): Promise<RepairOutcome>;
@@ -739,6 +748,10 @@ export function createApi(): AdminApi {
     async getTheme() {
       const body = await parseJson<{ theme: ThemeData }>(await fetchWithRetry("/api/admin/theme"));
       return body.theme;
+    },
+    async getGlobalSettings() {
+      const body = await parseJson<{ global: GlobalSettings }>(await fetchWithRetry("/api/admin/global"));
+      return body.global;
     },
     async getPublishPreview() {
       return parseJson<PublishPreview>(await fetchWithRetry("/api/admin/publish/preview"));

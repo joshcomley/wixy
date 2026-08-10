@@ -1,0 +1,96 @@
+# Decision: Settings > Contact tab, and retiring the non-functional contact form
+
+## Symptom
+
+The operator, looking at the live Contact page: "Does the remove button have a themed
+confirmation pop-up?" led into the real question — "I don't believe [the contact form]
+would be wired up to anything because this is going to run as a GitHub Pages page, it
+won't be on to send out any emails not without exposing a key in JavaScript." The
+premise was checked, not assumed: this deployment is NOT GitHub Pages (it's the real
+Wixy engine, a Python backend, confirmed live all session) — but the conclusion was
+right anyway. The form's own copy admitted it: `content/contact.json`'s `form.thanksText`
+said "(Demo preview: live email delivery is wired up when the site goes live.)" — that
+never happened. Real server-side email delivery was possible but out of proportion: a
+new unauthenticated public POST endpoint, SMTP credentials, spam/abuse protection, for a
+small clinic site where a phone number and a mailto: link already do the job. The
+operator's own fallback ask matched exactly: replace the form with clear phone/email/
+address, and store those three centrally with a dedicated place to edit them.
+
+## What was decided — Settings > Contact, not a new top-level concept
+
+Investigation found most of the "single source of truth" requirement ALREADY true:
+`content/_global.json` already held `phone`/`email`/`address`, and every page
+referencing them (`footer.html`, `index.html`, `contact.html`) already used the SAME
+`@phone`/`@email`/`@address` global bindings — never hardcoded per-page. The inline
+overlay editor already wrote edits back there correctly
+(`opTargeting.directOpTarget`, `@key` -> `{file:"_global", path:key}`). What was
+missing was a DISCOVERABLE place to edit them — she'd otherwise have to know to click
+the text directly on some live page.
+
+A `router.ts` `SettingsPage` framework already existed (`general`/`appearance`/
+`shortcuts`/`engine`/`ai`/`system`, spec/independence/04-06) with a real tab strip
+(`settingsPanel.ts`) mixing local-only tabs (theme mode, zoom — browser prefs) and
+server-backed tabs (Engine/AI/System status). Adding a NEW `"contact"` tab there —
+rather than inventing a separate top-level "Settings" concept, or overloading the
+UNRELATED `general` tab (which is about the ADMIN APP's own preferences, not site
+content — mixing the two would be a category error) — reuses the existing route,
+tab-strip, and panel-mount plumbing entirely. This is the first tab in that panel to
+WRITE server content via `opQueue`/draft ops (every sibling tab is either local-only or
+read-only status); `SettingsPanelDeps.opQueue: OpQueueLike | null` threads it through,
+mirroring `shell.ts`'s existing "theme" route null-guard rather than gating the whole
+settings route (which would regress the OTHER tabs' load speed for one tab's need).
+
+## What was decided — `GET /api/admin/global`, the missing read-side counterpart
+
+The draft-op WRITE side already treated `_global` as an ordinary `file` bucket
+(`file: "_global"` PATCH ops already worked, confirmed by test before writing any new
+code). The READ side had no equivalent: `GET /api/admin/content/{page}` looks up
+`merged.page_contents[slug]` (real page slugs only) and also returns a `bindings` map
+that has no meaningful equivalent for `_global` (a binding means "this ONE page's
+template uses this key"; `_global` keys are referenced from arbitrary, unbounded pages).
+A new `GET /api/admin/global` — a direct sibling of the existing `GET /api/admin/theme`,
+same shape of problem (one non-page-slug content bucket) — is the missing counterpart,
+not a new concept. An untouched `_global.json` reads as `{}` (200), never a 404: unlike
+`theme` (optional, absent on pre-migration checkouts), `_global.json` always exists once
+a site is migrated, and an empty object is a normal, valid state.
+
+## What was decided — the address field is a `<textarea>`, not a plain text input
+
+`_global.json`'s `address` stores a literal `<br>` for its one line break (the
+plain-text-render-ready-HTML convention, decisions/00075) — editing that as a raw
+single-line text input would show her a literal `"<br>"` she'd have to understand and
+never accidentally break. A plain `<textarea>` where each line she TYPES becomes one
+`<br>` on save is the honest UI for a short multi-line address:
+`addressToTextareaValue`/`textareaValueToAddress` (`settingsPanel.ts`, exported for
+direct unit testing) are the whole of that translation — decode `<br>` to `\n` for
+display, join non-blank trimmed lines with `<br>` on save.
+
+## What was decided — the Contact page: remove the form, promote phone/email
+
+`pages/contact.html`'s "Send a message" form (name/email/phone/message/consent
+checkbox, a fake client-side-only "Thank you" with no real submission) is removed
+entirely, along with its now-dead `content/contact.json` `form.*`/`formIntro.*` keys and
+`site.css`'s now-unused `.cform` rules. The page's single remaining content column
+("Get in touch") keeps everything the info column already had (address, parking note,
+hours, socials, Book Online) and adds two prominent CALL/EMAIL cards at the top — the
+SAME `@phone`/`@email` bindings the plain text links below already used, just given
+visual priority since they're now the page's primary action instead of a fallback
+next to a form. `pageHero.tag`'s "Send a message, call, or book online" also updated
+(a stale reference to the removed form) to "Call, email, or book online."
+
+## What to watch for
+
+- Any future page that needs to show phone/email/address should reference `@phone`/
+  `@email`/`@address` (or `@phoneHref`/`@emailHref`) — never hardcode a fresh copy. This
+  was already the convention before this change; nothing new to remember, just don't
+  regress it.
+- If a genuine real-time contact-form need arises later (e.g. the operator wants actual
+  form submissions, not just click-to-call/email), that's a materially different,
+  security-sensitive feature (a public unauthenticated endpoint sending real email) and
+  should get its own design pass — not a reason to second-guess THIS decision, which was
+  scoped to "the form currently does nothing and shouldn't pretend to."
+- `renderContact`'s error-message extraction (`err instanceof Error ? err.message : …`)
+  is the CORRECT pattern already used by `renderEngine`/`renderSystem` in this same
+  file — `renderAi` still has the older, slightly uglier `String(err)` pattern (an
+  existing, low-severity, unrelated inconsistency noticed but deliberately left alone
+  here to keep this change scoped).

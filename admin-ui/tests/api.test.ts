@@ -49,6 +49,14 @@ describe("createApi", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/admin/theme", expect.anything());
   });
 
+  it("getGlobalSettings parses the global response (decisions/00127)", async () => {
+    const global = { phone: "07401 562 462", email: "hello@example.invalid" };
+    fetchMock.mockResolvedValueOnce(jsonResponse({ global }));
+    const api = createApi();
+    await expect(api.getGlobalSettings()).resolves.toEqual(global);
+    expect(fetchMock).toHaveBeenCalledWith("/api/admin/global", expect.anything());
+  });
+
   it("getMedia parses the extended per-item shape (slice 1's dimensions/size/references)", async () => {
     const item = {
       name: "hero.jpg",

@@ -46,6 +46,7 @@ describe("parseHash", () => {
     expect(parseHash("#/settings")).toEqual({ kind: "settings", page: "general" });
     expect(parseHash("#/settings/appearance")).toEqual({ kind: "settings", page: "appearance" });
     expect(parseHash("#/settings/shortcuts")).toEqual({ kind: "settings", page: "shortcuts" });
+    expect(parseHash("#/settings/contact")).toEqual({ kind: "settings", page: "contact" });
     expect(parseHash("#/settings/engine")).toEqual({ kind: "settings", page: "engine" });
     expect(parseHash("#/settings/ai")).toEqual({ kind: "settings", page: "ai" });
   });
@@ -72,6 +73,7 @@ describe("routeToHash", () => {
       { kind: "settings", page: "general" },
       { kind: "settings", page: "appearance" },
       { kind: "settings", page: "shortcuts" },
+      { kind: "settings", page: "contact" },
       { kind: "settings", page: "engine" },
       { kind: "settings", page: "ai" },
     ];
@@ -136,6 +138,7 @@ describe("parsePath", () => {
     expect(parsePath("/admin/settings")).toEqual({ kind: "settings", page: "general" });
     expect(parsePath("/admin/settings/appearance")).toEqual({ kind: "settings", page: "appearance" });
     expect(parsePath("/admin/settings/shortcuts")).toEqual({ kind: "settings", page: "shortcuts" });
+    expect(parsePath("/admin/settings/contact")).toEqual({ kind: "settings", page: "contact" });
     expect(parsePath("/admin/settings/engine")).toEqual({ kind: "settings", page: "engine" });
     expect(parsePath("/admin/settings/ai")).toEqual({ kind: "settings", page: "ai" });
     expect(parsePath("/admin/settings/system")).toEqual({ kind: "settings", page: "system" });
@@ -166,6 +169,7 @@ describe("routeToPath", () => {
       { kind: "settings", page: "general" },
       { kind: "settings", page: "appearance" },
       { kind: "settings", page: "shortcuts" },
+      { kind: "settings", page: "contact" },
       { kind: "settings", page: "engine" },
       { kind: "settings", page: "ai" },
       { kind: "settings", page: "system" },
