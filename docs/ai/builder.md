@@ -34,7 +34,7 @@ workflow to build with the operator's public domain + `indexable=true` while
 |---|---|---|
 | `validate` | `validate_site`; `--json` prints `result.to_json_dict()`, else `[code] file:key: message` per error | `0` if `result.ok` else `1` |
 | `build` | `build_site` into `--out` (default `_build`) | `0` |
-| `serve` | build once, serve `--out` on `127.0.0.1:--port` (dev; no rebuild-on-change) | — |
+| `serve` | build once, serve `--out` on `127.0.0.1:--port` (dev; no rebuild-on-change); its handler (`_CleanUrlHandler`, decisions/00128) mirrors the production/Pages clean-URL resolution via the shared `builder.serving.resolve_site_path` | — |
 | `parity` | rendered-parity check; `--serve-root` + `--slugs` required; `--rebaseline`, `--strict-screenshots` | `1` on any hard issue |
 
 ## Render data flow (`builder/render.py:render_page`)
@@ -156,6 +156,12 @@ cannot drift. Format is **PROVISIONAL** — read decisions/00012 before changing
   --font-<role> }`. `theme_to_dict` is the round-trip inverse the server's overlay uses.
 - **Nav** (`nav.py`): `build_nav` selects `meta.inNav` pages, sorts by `(navOrder, slug)`,
   emits `{label, href}`, appends `_global.navExtra`. `@nav` is never stored (Inv, glossary).
+  `href` comes from `page_url(slug)`: `"/"` for `index`, else `"/<slug>"` — extensionless
+  (decisions/00128 supersedes spec/02 §3's original `/<slug>.html`). The on-disk build output
+  filename is unchanged (`build.py` still writes `<slug>.html`); `page_url` only controls what
+  the engine *emits* (this nav href, `apply_head`'s canonical/og:url, `sitemap.py`'s `<loc>`) —
+  both URL shapes keep *resolving* on the server side, see
+  [serving-and-overlay.md](serving-and-overlay.md).
 - **Sanitize** (`sanitize.py`): `sanitize_rich_lite` over `nh3` — tags `a/em/strong/br/span`,
   `class` only `js-book`, schemes http(s)/mailto/tel; idempotent; applied on every draft
   write and every text render; `is_already_clean` backs the `not-clean` validate code.

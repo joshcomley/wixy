@@ -386,3 +386,19 @@ push-triggered workflow run from the pushed commit's own tree, so a restore to a
 predating `pages.yml`'s existence on `main` moves `wixy-live` correctly but triggers no Pages
 run — see [runbook.md](runbook.md)'s GitHub Pages section for the manual-dispatch recovery.
 
+### Inv 33 — Public page URLs are extensionless; both shapes resolve forever; zero redirects
+`page_url` (`builder/nav.py`) emits `"/"` for `index`, else `"/<slug>"` (decisions/00128
+supersedes the original spec/02 §3 `/<slug>.html` convention) — everything computed from it
+(nav hrefs, canonical/og:url, sitemap `<loc>`) follows. Resolution is strictly WIDER than
+emission: `builder.serving.resolve_site_path`, shared by `wixy_server/routes_public.py` and
+`builder/cli.py:cmd_serve`, accepts the literal `.html`-suffixed path too — on purpose,
+forever, because GitHub Pages (the public domain's actual host) cannot redirect, so the
+server deliberately mirrors Pages rather than diverging from it. Never add a redirect from
+`/<slug>.html` to `/<slug>` (or the reverse) anywhere in this stack — that would desync the
+server from what Pages itself does for the exact same URL.
+*Exception:* none for the shapes themselves — but the trailing-slash case is a deliberate,
+load-bearing NON-resolution: `/<slug>/` always 404s (verified live against Pages — no
+directory-index fallback there either), so `resolve_site_path`'s `.html`-append retry
+explicitly skips any request path ending in `/`. Do not "fix" this into a 200 or a redirect;
+that would be the resolver disagreeing with what Pages actually serves for that path.
+
