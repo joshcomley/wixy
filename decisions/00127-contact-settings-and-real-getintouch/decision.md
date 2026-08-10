@@ -78,12 +78,52 @@ visual priority since they're now the page's primary action instead of a fallbac
 next to a form. `pageHero.tag`'s "Send a message, call, or book online" also updated
 (a stale reference to the removed form) to "Call, email, or book online."
 
+## What was decided — the phone/email <-> phoneHref/emailHref DERIVED PAIR contract
+
+**Caught by a FINAL HANDOFF review before merge, not self-found**: the first draft of
+this tab committed only the DISPLAY keys (`phone`/`email`) on change. `_global.json`
+stores the actual clickable `tel:`/`mailto:` target as a SEPARATE key each
+(`phoneHref`/`emailHref`) — `footer.html`'s link and the site repo's Contact-page
+Call/Email cards both bind `data-wx-href="@phoneHref"`/`"@emailHref"`, independently of
+the `data-wx="@phone"`/`"@email"` text binding on the same or a sibling element. A
+display-only commit would silently strand every real link at the OLD contact, forever,
+the moment she used this tab exactly as intended — the actionable half of the feature
+desyncing from the visible half on first use, with no error anywhere to surface it.
+
+Fixed by making the derivation a config-level fact (`ContactFieldConfig.hrefKey`/
+`hrefKind`, `settingsPanel.ts`) `commit()` and Reset both apply uniformly, not a
+one-off: on commit, `phone`/`email`'s new display value ALSO derives and enqueues its
+paired href in the SAME batch (`deriveContactHref`, exported pure function — phone
+formatting stripped to bare digits with a genuine leading `+` preserved, e.g.
+`"07401 562 462"` -> `"tel:07401562462"`; email prefixed `"mailto:"` as-is; a blank
+display yields a blank href, never a bare scheme). `address` has no href pair —
+`hrefKey`/`hrefKind` are simply absent from its `CONTACT_FIELDS` entry, so `commit()`'s
+`if (config.hrefKey !== undefined)` guard skips it entirely, no special-casing needed.
+
+Reset was ALSO upgraded as part of this fix: it now discards both keys of a pair, then
+`await`s `opQueue.flushNow()` and reloads the whole tab from `GET /api/admin/global`
+(`load()`, re-invoked) rather than resetting the input locally to whatever value was on
+screen at initial mount. This closes a second, lower-severity gap the same review found:
+this tab reads DRAFT-merged content, so the locally-remembered "original" value could
+already be stale relative to what a discard actually reverts to — reloading from the
+server after the round-trip is the only way "Reset" is guaranteed accurate.
+
+**The invariant that must never regress**: display and href can never move independently
+through this tab. Any FUTURE field added to `CONTACT_FIELDS` that has a real link
+elsewhere on the site needs its own `hrefKey`/`hrefKind` from day one — the unit test
+suite's reproduction-invariant test (`settingsPanel.test.ts`, deriving from the real
+seeded `_global.json` values and asserting a byte-for-byte match against the real stored
+hrefs) is what would catch a regression here, not a general "does it render" check.
+
 ## What to watch for
 
 - Any future page that needs to show phone/email/address should reference `@phone`/
   `@email`/`@address` (or `@phoneHref`/`@emailHref`) — never hardcode a fresh copy. This
   was already the convention before this change; nothing new to remember, just don't
   regress it.
+- **The phone/email <-> phoneHref/emailHref pair above is the load-bearing invariant of
+  this whole tab** — see the dedicated section above before touching `CONTACT_FIELDS` or
+  `commit()`/Reset again.
 - If a genuine real-time contact-form need arises later (e.g. the operator wants actual
   form submissions, not just click-to-call/email), that's a materially different,
   security-sensitive feature (a public unauthenticated endpoint sending real email) and

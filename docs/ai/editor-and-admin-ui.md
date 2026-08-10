@@ -308,11 +308,19 @@ address field is a `<textarea>`: the stored value embeds a literal `<br>` for it
 break (decisions/00075's plain-render-ready-HTML convention), so `addressToTextareaValue`/
 `textareaValueToAddress` (exported, pure, unit-tested directly) decode `<br>` -> `\n` for
 display and join typed lines back with `<br>` on save — showing her a literal `"<br>"` in a
-plain input would be a real, avoidable rough edge. `SettingsPanelDeps.opQueue: OpQueueLike |
-null` is the one dependency `contact` needs that no sibling tab does (mirrors `shell.ts`'s
-existing "theme" route null-guard — the brief window before the shell's own initial state
-fetch resolves — localized to this one tab rather than gating the whole settings route and
-regressing the other six's load speed).
+plain input would be a real, avoidable rough edge. **`phone`/`email` each have a DERIVED PAIR
+key** (`phoneHref`/`emailHref`) every real `tel:`/`mailto:` link on the site binds via
+`data-wx-href` — independently of the `data-wx="@phone"`/`"@email"` text binding, since
+`data-wx`/`data-wx-href` apply independently on the same element. `ContactFieldConfig.hrefKey`/
+`hrefKind` (+ the exported pure `deriveContactHref`) make `commit()` enqueue BOTH keys in the
+same batch and Reset discard both then reload the tab from the server — display and href must
+never move independently through this tab, a HIGH-severity gap a FINAL HANDOFF review caught
+before the first merge (decisions/00127 has the full incident). `address` has no href pair;
+`hrefKey` is simply absent from its `CONTACT_FIELDS` entry. `SettingsPanelDeps.opQueue:
+OpQueueLike | null` is the one dependency `contact` needs that no sibling tab does (mirrors
+`shell.ts`'s existing "theme" route null-guard — the brief window before the shell's own
+initial state fetch resolves — localized to this one tab rather than gating the whole settings
+route and regressing the other six's load speed).
 
 **`sectionPanel.ts` + `sectionPanelModel.ts`** (decisions/00098) — the registry-configured
 admin section editor (`state.adminSections`, Inv 1: no site literals in this module or

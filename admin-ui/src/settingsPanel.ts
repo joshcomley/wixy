@@ -757,17 +757,42 @@ export function textareaValueToAddress(typed: string): string {
     .join("<br>");
 }
 
+/** `phone`/`email` are DISPLAY text; every actual `tel:`/`mailto:` LINK on the
+ * site (the footer partial, the Contact page's Call/Email cards) binds a
+ * SEPARATE `phoneHref`/`emailHref` key instead (`data-wx-href="@phoneHref"`)
+ * — `data-wx`/`data-wx-href` have always been independently bindable, this
+ * tab is just the first editor surface for a field pair that needs both kept
+ * in lockstep. Committing the display key alone would silently strand every
+ * link at its old value forever, with no error anywhere (caught in review,
+ * decisions/00127). `hrefKey`/`hrefKind` make that derivation a config-level
+ * fact for `commit()`/Reset to apply uniformly, rather than a one-off. */
 interface ContactFieldConfig {
   key: string;
   label: string;
   hint: string;
   inputType: "text" | "email" | "tel";
   multiline?: boolean;
+  hrefKey?: string;
+  hrefKind?: "tel" | "mailto";
 }
 
 const CONTACT_FIELDS: readonly ContactFieldConfig[] = [
-  { key: "phone", label: "Contact phone", hint: "Shown in the footer and on the Contact page.", inputType: "tel" },
-  { key: "email", label: "Contact email", hint: "Shown in the footer and on the Contact page.", inputType: "email" },
+  {
+    key: "phone",
+    label: "Contact phone",
+    hint: "Shown in the footer and on the Contact page.",
+    inputType: "tel",
+    hrefKey: "phoneHref",
+    hrefKind: "tel",
+  },
+  {
+    key: "email",
+    label: "Contact email",
+    hint: "Shown in the footer and on the Contact page.",
+    inputType: "email",
+    hrefKey: "emailHref",
+    hrefKind: "mailto",
+  },
   {
     key: "address",
     label: "Contact address",
@@ -780,6 +805,21 @@ const CONTACT_FIELDS: readonly ContactFieldConfig[] = [
 function contactFieldValue(global: GlobalSettings, key: string): string {
   const value = global[key];
   return typeof value === "string" ? value : "";
+}
+
+/** The `tel:`/`mailto:` value a display value implies, kept in lockstep by
+ * `commit()` below. A blank display yields a blank href (an inert anchor,
+ * not a bare "tel:"/"mailto:" — both pass `is_safe_href`). Phone formatting
+ * (spaces, dashes, parens) is stripped to bare digits, preserving only a
+ * genuine leading "+" (international dialing prefix); email is used as-is,
+ * already trimmed by the caller. Exported for direct unit testing — this is
+ * the derivation the reproduction-invariant test checks against the real
+ * seeded `_global.json` pair (decisions/00127). */
+export function deriveContactHref(kind: "tel" | "mailto", displayValue: string): string {
+  if (displayValue === "") return "";
+  if (kind === "mailto") return `mailto:${displayValue}`;
+  const leadingPlus = displayValue.startsWith("+") ? "+" : "";
+  return `tel:${leadingPlus}${displayValue.replace(/\D/g, "")}`;
 }
 
 function renderContact(deps: SettingsPanelDeps, teardownFns: Array<() => void>): HTMLElement {
@@ -835,6 +875,9 @@ function renderContact(deps: SettingsPanelDeps, teardownFns: Array<() => void>):
       const toStore = config.multiline ? textareaValueToAddress(input.value) : input.value.trim();
       if (toStore === storedRaw) return;
       opQueue.enqueue({ file: "_global", path: config.key, value: toStore });
+      if (config.hrefKey !== undefined && config.hrefKind !== undefined) {
+        opQueue.enqueue({ file: "_global", path: config.hrefKey, value: deriveContactHref(config.hrefKind, toStore) });
+      }
     }
     input.addEventListener("change", commit);
 
@@ -847,8 +890,20 @@ function renderContact(deps: SettingsPanelDeps, teardownFns: Array<() => void>):
     resetButton.className = "wx-settings-link-button";
     resetButton.textContent = "Reset";
     resetButton.addEventListener("click", () => {
-      input.value = originalValue;
       opQueue.enqueue({ file: "_global", path: config.key, discard: true });
+      if (config.hrefKey !== undefined) {
+        opQueue.enqueue({ file: "_global", path: config.hrefKey, discard: true });
+      }
+      // Re-fetch after the discard(s) land rather than restore `originalValue`
+      // locally: this tab renders draft-merged content (`GET /api/admin/global`),
+      // so "reset" must reflect the true post-discard state, not just what was
+      // on screen when the tab first loaded (decisions/00127) — a plain local
+      // reset would also leave a just-discarded phoneHref/emailHref stale until
+      // the next full reload.
+      void (async () => {
+        await opQueue.flushNow();
+        if (!cancelled) await load();
+      })();
     });
 
     row.append(label, input, hint, resetButton);

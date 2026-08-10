@@ -12,6 +12,7 @@ import type { DraftOp } from "../src/protocol";
 import { initFontScale } from "../src/fontScale";
 import {
   addressToTextareaValue,
+  deriveContactHref,
   mountSettingsPanel,
   textareaValueToAddress,
 } from "../src/settingsPanel";
@@ -1126,10 +1127,40 @@ describe("addressToTextareaValue / textareaValueToAddress (decisions/00127)", ()
   });
 });
 
+async function flushMicrotasks(times = 5): Promise<void> {
+  for (let i = 0; i < times; i++) await Promise.resolve();
+}
+
+describe("deriveContactHref (decisions/00127) — the phone/email <-> phoneHref/emailHref derivation", () => {
+  it("reproduces the real seeded _global.json pair byte-for-byte", () => {
+    // The reproduction invariant: deriving from the CURRENT live display value
+    // must reproduce the CURRENT stored href, not just look plausible.
+    expect(deriveContactHref("tel", "07401 562 462")).toBe("tel:07401562462");
+    expect(deriveContactHref("mailto", "cottageaestheticshartlebury@gmail.com")).toBe(
+      "mailto:cottageaestheticshartlebury@gmail.com",
+    );
+  });
+
+  it("strips phone formatting (spaces/dashes/parens) to bare digits", () => {
+    expect(deriveContactHref("tel", "(01234) 567-890")).toBe("tel:01234567890");
+  });
+
+  it("preserves a genuine leading + (international dialing prefix)", () => {
+    expect(deriveContactHref("tel", "+44 7401 562462")).toBe("tel:+447401562462");
+  });
+
+  it("a blank display value yields a blank href, not a bare scheme", () => {
+    expect(deriveContactHref("tel", "")).toBe("");
+    expect(deriveContactHref("mailto", "")).toBe("");
+  });
+});
+
 describe("mountSettingsPanel — Contact (decisions/00127)", () => {
   const GLOBAL: GlobalSettings = {
     phone: "07401 562 462",
+    phoneHref: "tel:07401562462",
     email: "hello@example.invalid",
+    emailHref: "mailto:hello@example.invalid",
     address: "8 Walton Cottage, Walton Road,<br>Hartlebury, Kidderminster, DY10 4JA",
   };
 
@@ -1174,7 +1205,7 @@ describe("mountSettingsPanel — Contact (decisions/00127)", () => {
     expect(panel.element.textContent).toContain("Couldn't load contact details: boom");
   });
 
-  it("editing the phone field and blurring enqueues a _global draft op", async () => {
+  it("editing the phone field and blurring enqueues BOTH the display op and its derived phoneHref op", async () => {
     const api = fakeApi({ getGlobalSettings: vi.fn(async () => GLOBAL) });
     const opQueue = fakeOpQueue();
     const { panel } = mountContact(fakeWindow(), api, opQueue);
@@ -1186,7 +1217,30 @@ describe("mountSettingsPanel — Contact (decisions/00127)", () => {
     phoneInput.value = "01234 567890";
     phoneInput.dispatchEvent(new Event("change"));
 
-    expect(opQueue.enqueued).toEqual([{ file: "_global", path: "phone", value: "01234 567890" }]);
+    // Both keys must move together — a display-only commit would silently
+    // strand every tel: link on the site at the old number (decisions/00127).
+    expect(opQueue.enqueued).toEqual([
+      { file: "_global", path: "phone", value: "01234 567890" },
+      { file: "_global", path: "phoneHref", value: "tel:01234567890" },
+    ]);
+  });
+
+  it("editing the email field and blurring enqueues BOTH the display op and its derived emailHref op", async () => {
+    const api = fakeApi({ getGlobalSettings: vi.fn(async () => GLOBAL) });
+    const opQueue = fakeOpQueue();
+    const { panel } = mountContact(fakeWindow(), api, opQueue);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const emailInput = panel.element.querySelectorAll<HTMLInputElement>(".wx-settings-input")[1];
+    if (emailInput === undefined) throw new Error("no email input");
+    emailInput.value = "new@example.invalid";
+    emailInput.dispatchEvent(new Event("change"));
+
+    expect(opQueue.enqueued).toEqual([
+      { file: "_global", path: "email", value: "new@example.invalid" },
+      { file: "_global", path: "emailHref", value: "mailto:new@example.invalid" },
+    ]);
   });
 
   it("editing the address textarea joins lines with <br> before enqueueing", async () => {
@@ -1220,8 +1274,12 @@ describe("mountSettingsPanel — Contact (decisions/00127)", () => {
     expect(opQueue.enqueued).toEqual([]);
   });
 
-  it("clicking Reset enqueues a discard op and restores the field's original displayed value", async () => {
-    const api = fakeApi({ getGlobalSettings: vi.fn(async () => GLOBAL) });
+  it("clicking Reset discards BOTH the display key and its href pair, flushes, and reloads from the server", async () => {
+    const getGlobalSettings = vi
+      .fn<() => Promise<GlobalSettings>>()
+      .mockResolvedValueOnce(GLOBAL) // initial load
+      .mockResolvedValueOnce(GLOBAL); // reload triggered by Reset, post-discard
+    const api = fakeApi({ getGlobalSettings });
     const opQueue = fakeOpQueue();
     const { panel } = mountContact(fakeWindow(), api, opQueue);
     await Promise.resolve();
@@ -1237,7 +1295,40 @@ describe("mountSettingsPanel — Contact (decisions/00127)", () => {
     // fields render in registry order: phone, email, address.
     resetButtons[1]?.click();
 
-    expect(emailInput.value).toBe("hello@example.invalid");
-    expect(opQueue.enqueued).toEqual([{ file: "_global", path: "email", discard: true }]);
+    // Reset discards email AND emailHref together — a display-only discard
+    // would leave a just-reset display value pointing at a stale link forever.
+    expect(opQueue.enqueued).toEqual([
+      { file: "_global", path: "email", discard: true },
+      { file: "_global", path: "emailHref", discard: true },
+    ]);
+    expect(opQueue.flushNow).toHaveBeenCalled();
+
+    await flushMicrotasks();
+    expect(getGlobalSettings).toHaveBeenCalledTimes(2);
+
+    // The reload rebuilds the section from scratch — re-query rather than
+    // reuse the (now-detached) `emailInput` reference.
+    const reloadedEmailInput = panel.element.querySelectorAll<HTMLInputElement>(".wx-settings-input")[1];
+    expect(reloadedEmailInput?.value).toBe("hello@example.invalid");
+  });
+
+  it("clicking Reset on phone does not touch the address field's independent state", async () => {
+    const api = fakeApi({ getGlobalSettings: vi.fn(async () => GLOBAL) });
+    const opQueue = fakeOpQueue();
+    const { panel } = mountContact(fakeWindow(), api, opQueue);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const resetButtons = panel.element.querySelectorAll<HTMLButtonElement>(".wx-settings-link-button");
+    resetButtons[0]?.click(); // phone
+
+    expect(opQueue.enqueued).toEqual([
+      { file: "_global", path: "phone", discard: true },
+      { file: "_global", path: "phoneHref", discard: true },
+    ]);
+
+    await flushMicrotasks();
+    const textareas = panel.element.querySelectorAll<HTMLTextAreaElement>(".wx-settings-textarea");
+    expect(textareas[0]?.value).toBe("8 Walton Cottage, Walton Road,\nHartlebury, Kidderminster, DY10 4JA");
   });
 });
