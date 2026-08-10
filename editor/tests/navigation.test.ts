@@ -18,17 +18,33 @@ describe("resolveInternalPageSlug", () => {
     expect(resolveInternalPageSlug(anchor("/"), win)).toBe("index");
   });
 
-  it("resolves /<slug>.html to <slug>, matching builder.nav.page_url's convention", () => {
+  it("resolves /<slug> to <slug>, matching builder.nav.page_url's convention (decisions/00128, clean URLs)", () => {
+    expect(resolveInternalPageSlug(anchor("/about"), win)).toBe("about");
+  });
+
+  it("still resolves the legacy /<slug>.html shape to <slug> (never redirected away, decisions/00128)", () => {
     expect(resolveInternalPageSlug(anchor("/about.html"), win)).toBe("about");
   });
 
-  it("resolves a bare relative href against the SITE ROOT, matching the preview document's <base href=\"/\">", () => {
-    // The real CA content mixes both styles (curl-verified against the live
-    // preview route): @nav-computed links are root-absolute ("/about.html",
-    // builder.nav.page_url), but hand-authored page/footer links are bare
-    // relative ("about.html"). A real browser resolves BOTH the same way once
-    // preview.py's <base href="/"> is in effect — this must agree.
+  it("resolves a bare relative href (clean, no .html) against the SITE ROOT, matching the preview document's <base href=\"/\">", () => {
+    expect(resolveInternalPageSlug(anchor("contact"), win)).toBe("contact");
+  });
+
+  it("resolves a bare relative href (legacy .html) against the SITE ROOT, matching the preview document's <base href=\"/\">", () => {
+    // The real CA content historically mixed both styles (curl-verified against
+    // the live preview route): @nav-computed links are root-absolute
+    // (builder.nav.page_url), but hand-authored page/footer links could be bare
+    // relative. A real browser resolves BOTH the same way once preview.py's
+    // <base href="/"> is in effect — this must agree.
     expect(resolveInternalPageSlug(anchor("contact.html"), win)).toBe("contact");
+  });
+
+  it("returns null for a trailing-slash path — not a valid page path in either shape", () => {
+    expect(resolveInternalPageSlug(anchor("/about/"), win)).toBe(null);
+  });
+
+  it("returns null for a same-origin asset path, not a page", () => {
+    expect(resolveInternalPageSlug(anchor("/site.css"), win)).toBe(null);
   });
 
   it("returns null for a relative href that doesn't match a real page path even once rooted", () => {
