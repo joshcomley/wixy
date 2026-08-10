@@ -252,6 +252,27 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     expect(consoleErrors).toEqual([]);
   });
 
+  test("clean URLs: /gallery serves the same content as /gallery.html; /gallery/ 404s (decisions/00128)", async ({
+    page,
+  }) => {
+    // The bootstrap publish (fixture_server.py:_publish_initial_build) materializes a
+    // live build before the server ever starts, so this needs no photo-upload/publish
+    // choreography of its own — it only exercises routes_public.py's resolution
+    // contract against whatever's currently live. `/gallery.html` is kept working
+    // forever (decisions/00128) alongside the other tests in this file that request it
+    // directly — this is the dedicated coverage for the extensionless shape + the
+    // deliberate trailing-slash 404 (GitHub Pages parity, verified live).
+    const [cleanResponse, htmlResponse, trailingSlashResponse] = await Promise.all([
+      page.request.get("/gallery"),
+      page.request.get("/gallery.html"),
+      page.request.get("/gallery/"),
+    ]);
+    expect(cleanResponse.status()).toBe(200);
+    expect(htmlResponse.status()).toBe(200);
+    expect(await cleanResponse.text()).toBe(await htmlResponse.text());
+    expect(trailingSlashResponse.status()).toBe(404);
+  });
+
   test("align a photo pair: drag + micro nudge, save, publish — the live page serves the baked aligned photo", async ({
     page,
   }) => {
