@@ -1,20 +1,24 @@
 // Client-side PATH routing (decisions/00087): "/admin/pages", "/admin/edit/<page>",
 // "/admin/theme", "/admin/media", "/admin/chat", "/admin/chat/<conv>",
-// "/admin/history", "/admin/settings", "/admin/settings/appearance",
-// "/admin/settings/shortcuts", "/admin/settings/contact" (decisions/00127 — the
-// site's phone/email/address, `content/_global.json`, meaningful on every
-// project/edition, unlike "engine"/"ai" below), "/admin/settings/engine"
-// (spec/independence/04 §2 — standalone-only content, but the route/tab always
-// exists; the panel itself degrades gracefully on the fleet edition),
-// "/admin/settings/ai" (spec/independence/05 §2 — anthropic-backend-only
-// content, same always-exists-but-degrades-gracefully shape as "engine"),
-// "/admin/settings/system" (spec/independence/06 §3 — backup age/disk usage/last
-// publish/engine version, meaningful on BOTH editions, unlike "engine"/"ai"
-// above), "/admin/section/<id>" (decisions/00098 — a registry-configured admin
-// section, e.g. "before-after"; `id` is whatever `state.adminSections[].id`
-// declares, never a literal known to this module). Every path serves the same
-// shell document (`wixy_server.app.get_admin_shell_deep_link`) and this module
-// parses it.
+// "/admin/history", "/admin/contact" (decisions/00129 — a main tab, promoted out
+// of Settings: the site's phone/email/address + map, `content/_global.json`,
+// meaningful on every project/edition, and important enough to not be buried),
+// "/admin/settings", "/admin/settings/appearance", "/admin/settings/shortcuts",
+// "/admin/settings/engine" (spec/independence/04 §2 — standalone-only content,
+// but the route/tab always exists; the panel itself degrades gracefully on the
+// fleet edition), "/admin/settings/ai" (spec/independence/05 §2 —
+// anthropic-backend-only content, same always-exists-but-degrades-gracefully
+// shape as "engine"), "/admin/settings/system" (spec/independence/06 §3 —
+// backup age/disk usage/last publish/engine version, meaningful on BOTH
+// editions, unlike "engine"/"ai" above), "/admin/section/<id>" (decisions/00098
+// — a registry-configured admin section, e.g. "before-after"; `id` is whatever
+// `state.adminSections[].id` declares, never a literal known to this module).
+// A legacy "/admin/settings/contact" deep link degrades gracefully to General
+// (routeFromSegments's settings case no longer recognizes "contact" as a
+// second segment) — decisions/00129 promoted the tab out, but an old bookmark
+// or share link must still land somewhere sane, not a dead 404-shaped panel.
+// Every path serves the same shell document
+// (`wixy_server.app.get_admin_shell_deep_link`) and this module parses it.
 //
 // History: until decisions/00087 these were HASH fragments ("#/pages", …) — "no
 // History-API routing, the whole admin is a single served document". Proper
@@ -23,7 +27,7 @@
 // keep working forever: `parseHash`/`routeToHash` stay, a hash in the URL wins
 // over the path, and `canonicalizeUrl` rewrites it to the path on load.
 
-export type SettingsPage = "general" | "appearance" | "shortcuts" | "contact" | "engine" | "ai" | "system";
+export type SettingsPage = "general" | "appearance" | "shortcuts" | "engine" | "ai" | "system";
 
 export type Route =
   | { kind: "pages" }
@@ -32,6 +36,7 @@ export type Route =
   | { kind: "media" }
   | { kind: "chat"; conversation: string | null }
   | { kind: "history" }
+  | { kind: "contact" }
   | { kind: "settings"; page: SettingsPage }
   | { kind: "section"; id: string };
 
@@ -57,6 +62,8 @@ function routeFromSegments(segments: string[]): Route {
       return { kind: "chat", conversation: second ?? null };
     case "history":
       return { kind: "history" };
+    case "contact":
+      return { kind: "contact" };
     case "settings":
       return {
         kind: "settings",
@@ -65,15 +72,13 @@ function routeFromSegments(segments: string[]): Route {
             ? "shortcuts"
             : second === "appearance"
               ? "appearance"
-              : second === "contact"
-                ? "contact"
-                : second === "engine"
-                  ? "engine"
-                  : second === "ai"
-                    ? "ai"
-                    : second === "system"
-                      ? "system"
-                      : "general",
+              : second === "engine"
+                ? "engine"
+                : second === "ai"
+                  ? "ai"
+                  : second === "system"
+                    ? "system"
+                    : "general",
       };
     case "section":
       return second !== undefined ? { kind: "section", id: second } : DEFAULT_ROUTE;
@@ -113,6 +118,8 @@ function segmentsFor(route: Route): string[] {
       return route.conversation !== null ? ["chat", route.conversation] : ["chat"];
     case "history":
       return ["history"];
+    case "contact":
+      return ["contact"];
     case "settings":
       return route.page === "general" ? ["settings"] : ["settings", route.page];
     case "section":

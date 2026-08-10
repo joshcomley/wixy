@@ -2065,6 +2065,151 @@ div.wx-media-thumb {
   text-decoration: underline;
 }
 
+/* -- Contact panel (decisions/00129) — promoted out of Settings to its own
+   main tab; reuses `.wx-settings-*` field-row styling above (a shared
+   general-purpose "settings-style form row" vocabulary, not something
+   Settings itself owns). ------------------------------------------------- */
+
+.wx-contact-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 560px;
+}
+
+.wx-contact-panel h2 {
+  margin: 0 0 4px;
+  font-size: 1.125rem;
+}
+
+.wx-map-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wx-map-viewport {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.wx-map-viewport.wx-map-dragging {
+  cursor: grabbing;
+}
+
+.wx-map-viewport.wx-map-armed {
+  cursor: crosshair;
+}
+
+.wx-map-tiles {
+  position: absolute;
+  inset: 0 auto auto 0;
+  will-change: transform;
+}
+
+.wx-map-tile {
+  position: absolute;
+  display: block;
+  pointer-events: none;
+}
+
+.wx-map-marker {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  margin: -18px 0 0 -9px; /* tip points at the pinned coordinate */
+  border-radius: 50% 50% 50% 0;
+  transform-origin: center;
+  background: var(--wx-danger);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+.wx-map-attribution {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  font: 500 0.6875rem/1 system-ui, sans-serif;
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.85);
+  color: #333;
+  text-decoration: none;
+}
+
+.wx-map-attribution:hover {
+  text-decoration: underline;
+}
+
+.wx-map-zoom-controls {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--wx-radius);
+  overflow: hidden;
+  border: 1px solid var(--wx-border);
+}
+
+.wx-map-zoom-button {
+  font: 600 1rem/1 system-ui, sans-serif;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: var(--wx-canvas);
+  color: var(--wx-ink);
+  cursor: pointer;
+}
+
+.wx-map-zoom-button:not(:last-child) {
+  border-bottom: 1px solid var(--wx-border);
+}
+
+.wx-map-zoom-button:hover:not(:disabled) {
+  background: var(--wx-btn-bg);
+}
+
+.wx-map-zoom-button:disabled {
+  color: var(--wx-muted);
+  cursor: default;
+}
+
+.wx-map-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wx-map-arm-button-active {
+  color: var(--wx-danger-text);
+}
+
+.wx-map-coords-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.wx-map-coords-input {
+  flex: 1;
+}
+
+.wx-map-coords-hint-error {
+  color: var(--wx-danger-text);
+}
+
+.wx-map-reset-row {
+  align-self: flex-start;
+}
+
 /* -- Appearance (theme editor) --------------------------------------------- */
 
 .wx-settings-appearance {

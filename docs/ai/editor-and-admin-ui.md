@@ -277,6 +277,8 @@ phone enquiry", "Added: …", "Removed: …", capped at 10 + "…and N more" —
 dump, decisions/00081); `mediaPanel.ts` + `mediaDialog.ts` (library + picker);
 `chatPanel.ts` + `markdown.ts` (see [ai-chat.md](ai-chat.md)); `themePanel.ts` + `themeVars.ts`
 + `googleFonts.ts` + `googleFontsCatalog.ts` (site-theme editing with live preview);
+`contactPanel.ts` + `mapPicker.ts` + `mapPickerModel.ts` (the Contact main tab + its map
+picker, decisions/00129 — see its own paragraph below);
 `thumbnailService.ts` (mobile-view page captures for the Pages panel — hidden 390px
 iframe + html2canvas, serial debounced queue, decisions/00078);
 `api.ts` (typed fetch: 10s timeout, 3 attempts, retries network+5xx only). The Uxer-adoption
@@ -286,25 +288,36 @@ theme), `zoom.ts`, `fontScale.ts`, `settingsPanel.ts`, `shortcuts.ts`, `contrast
 00045–00050).
 
 **`settingsPanel.ts`** (`/admin/settings[/<page>]`, Uxer's Settings-view mandate) — one tab
-strip, one `SettingsPage` union (`general`/`appearance`/`shortcuts`/`contact`/`engine`/`ai`/
-`system`, `router.ts`), one `pageRenderers` dispatch table; every tab is a plain function
-`(deps, teardownFns) => HTMLElement`, no shared base class. Most tabs edit LOCAL browser
+strip, one `SettingsPage` union (`general`/`appearance`/`shortcuts`/`engine`/`ai`/`system`,
+`router.ts`), one `pageRenderers` dispatch table; every tab is a plain function
+`(deps, teardownFns) => HTMLElement`, no shared base class. Every tab edits LOCAL browser
 state only (`general`'s quick theme/zoom/font-size toggles, `appearance`'s full theme editor,
-`shortcuts`' rebind list) or are read-only server status + action triggers (`engine`'s
+`shortcuts`' rebind list) or is a read-only server status + action trigger (`engine`'s
 update/rollback, `ai`'s budget, `system`'s backup/disk/publish summary — spec/independence
-04-06, always-exists-but-degrades-gracefully on editions where they don't apply). **`contact`**
-(decisions/00127) is the one tab that WRITES persisted site content: `content/_global.json`'s
-`phone`/`email`/`address` — already a single shared source every page's template references
-via `@phone`/`@email`/`@address` (`builder/render.py`'s `resolved_global_content`, never
-hardcoded per-page), and the inline overlay editor already wrote edits back there correctly
+04-06, always-exists-but-degrades-gracefully on editions where they don't apply) — nothing
+here writes persisted SITE content; `SettingsPanelDeps` carries no `opQueue` as a result.
+(A `"contact"` tab lived here from decisions/00127 until decisions/00129 promoted it to its
+own main tab — a legacy `/admin/settings/contact` deep link degrades to `general`, `router.ts`.)
+
+**`contactPanel.ts`** (`/admin/contact`, a main nav tab — decisions/00129) is the one admin
+surface outside the registry-configured sections that WRITES persisted site content:
+`content/_global.json`'s `phone`/`email`/`address`/`mapCoords`/`mapSrc` — `phone`/`email`/
+`address` already a single shared source every page's template references via `@phone`/
+`@email`/`@address` (`builder/render.py`'s `resolved_global_content`, never hardcoded
+per-page), and the inline overlay editor already wrote edits back there correctly
 (`opTargeting.directOpTarget`, `@key` -> `{file:"_global", path:key}`); this tab is a
-dedicated, discoverable place to do the same edit, not a new mechanism. `GET /api/admin/global`
-(a direct sibling of `GET /api/admin/theme` — same shape of problem, one non-page-slug content
-bucket, `routes_admin_api.py`) reads the current merged value; each field auto-saves on
-`change` via `opQueue.enqueue({file:"_global", path:key, value})`, the SAME per-field
-auto-save/`discard:true`-reset pattern `themePanel.ts`'s color rows use — NOT the Before &
-After section's staged-save model (decisions/00118), which three scalar fields don't need. The
-address field is a `<textarea>`: the stored value embeds a literal `<br>` for its one line
+dedicated, discoverable place to do the same edit, not a new mechanism. `GET
+/api/admin/global` (a direct sibling of `GET /api/admin/theme` — same shape of problem, one
+non-page-slug content bucket, `routes_admin_api.py`) reads the current merged value; each
+field auto-saves on `change` via `opQueue.enqueue({file:"_global", path:key, value})`, the
+SAME per-field auto-save/`discard:true`-reset pattern `themePanel.ts`'s color rows use — NOT
+the Before & After section's staged-save model (decisions/00118), which these scalar fields
+don't need. `ContactPanelDeps.opQueue: OpQueueLike` is non-null (unlike decisions/00127's
+`SettingsPanelDeps.opQueue: OpQueueLike | null`) — `shell.ts` now gates the WHOLE `contact`
+route on it being ready, matching `theme`'s own gate, since Contact no longer shares a mount
+with tabs that don't need it.
+
+The address field is a `<textarea>`: the stored value embeds a literal `<br>` for its one line
 break (decisions/00075's plain-render-ready-HTML convention), so `addressToTextareaValue`/
 `textareaValueToAddress` (exported, pure, unit-tested directly) decode `<br>` -> `\n` for
 display and join typed lines back with `<br>` on save — showing her a literal `"<br>"` in a
@@ -315,12 +328,28 @@ key** (`phoneHref`/`emailHref`) every real `tel:`/`mailto:` link on the site bin
 `hrefKind` (+ the exported pure `deriveContactHref`) make `commit()` enqueue BOTH keys in the
 same batch and Reset discard both then reload the tab from the server — display and href must
 never move independently through this tab, a HIGH-severity gap a FINAL HANDOFF review caught
-before the first merge (decisions/00127 has the full incident). `address` has no href pair;
-`hrefKey` is simply absent from its `CONTACT_FIELDS` entry. `SettingsPanelDeps.opQueue:
-OpQueueLike | null` is the one dependency `contact` needs that no sibling tab does (mirrors
-`shell.ts`'s existing "theme" route null-guard — the brief window before the shell's own
-initial state fetch resolves — localized to this one tab rather than gating the whole settings
-route and regressing the other six's load speed).
+before decisions/00127's first merge (that entry has the full incident). `address` has no href
+pair; `hrefKey` is simply absent from its `CONTACT_FIELDS` entry — but it DOES carry
+`alsoDiscardsOnReset: ["mapCoords", "mapSrc"]` (decisions/00129), so Resetting the address row
+always returns the whole map section to its true published state too.
+
+**The map** (decisions/00129): `mapSrc` is DERIVED, never typed directly —
+`deriveMapSrc(mapCoords, address)` (`contactPanel.ts`, exported pure, reproduction-invariant-
+tested against the real seeded address) prefers a placed pin (`mapCoords`, `"lat,lng"`) when
+present, otherwise derives a Google Maps embed URL from the address — matching the operator's
+own framing, "without coordinates, the map should use the address to show where to go".
+Editing the address ALSO re-derives+enqueues `mapSrc`, but only when the loaded snapshot's
+`mapCoords` is empty (a placed pin is never silently overridden by an address edit). The map
+section has its own "Reset map to published" button (discards `mapCoords`+`mapSrc`, reloads)
+— deliberately separate from "Clear pin" (`mapPicker.ts`'s Clear button, which always SETS
+`mapCoords` to `""` and re-derives `mapSrc` from the CURRENT address, regardless of what's
+published). `mapPicker.ts` + `mapPickerModel.ts` are a small hand-rolled slippy map (OSM
+raster tiles, no CDN, no framework — mirrors `alignerDialog.ts`/`alignerModel.ts`'s DOM/pure-
+math split): drag-to-pan, +/- zoom, and an ARMED click-to-pin mode (a plain click does
+nothing; "Click to pin coordinates" arms it, an armed click places the pin — rounded to 6dp —
+and disarms). `mapPickerModel.ts` holds the Web Mercator projection math in continuous
+WORLD-PIXEL coordinates (`lonLatToWorldPixel`/`worldPixelToLonLat`) and the visible-tile-grid
+computation (`tilesForViewport`), fully unit-tested with no DOM.
 
 **`sectionPanel.ts` + `sectionPanelModel.ts`** (decisions/00098) — the registry-configured
 admin section editor (`state.adminSections`, Inv 1: no site literals in this module or

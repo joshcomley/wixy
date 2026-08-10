@@ -35,6 +35,7 @@ describe("parseHash", () => {
     expect(parseHash("#/theme")).toEqual({ kind: "theme" });
     expect(parseHash("#/media")).toEqual({ kind: "media" });
     expect(parseHash("#/history")).toEqual({ kind: "history" });
+    expect(parseHash("#/contact")).toEqual({ kind: "contact" });
   });
 
   it("parses #/chat with and without a conversation id", () => {
@@ -46,13 +47,16 @@ describe("parseHash", () => {
     expect(parseHash("#/settings")).toEqual({ kind: "settings", page: "general" });
     expect(parseHash("#/settings/appearance")).toEqual({ kind: "settings", page: "appearance" });
     expect(parseHash("#/settings/shortcuts")).toEqual({ kind: "settings", page: "shortcuts" });
-    expect(parseHash("#/settings/contact")).toEqual({ kind: "settings", page: "contact" });
     expect(parseHash("#/settings/engine")).toEqual({ kind: "settings", page: "engine" });
     expect(parseHash("#/settings/ai")).toEqual({ kind: "settings", page: "ai" });
   });
 
   it("falls back to general for an unrecognized settings sub-page", () => {
     expect(parseHash("#/settings/nonsense")).toEqual({ kind: "settings", page: "general" });
+  });
+
+  it("a legacy #/settings/contact deep link degrades gracefully to general (decisions/00129 promoted Contact to its own main tab)", () => {
+    expect(parseHash("#/settings/contact")).toEqual({ kind: "settings", page: "general" });
   });
 
   it("falls back to pages for an unrecognized route", () => {
@@ -70,10 +74,10 @@ describe("routeToHash", () => {
       { kind: "chat", conversation: null },
       { kind: "chat", conversation: "abc123" },
       { kind: "history" },
+      { kind: "contact" },
       { kind: "settings", page: "general" },
       { kind: "settings", page: "appearance" },
       { kind: "settings", page: "shortcuts" },
-      { kind: "settings", page: "contact" },
       { kind: "settings", page: "engine" },
       { kind: "settings", page: "ai" },
     ];
@@ -127,6 +131,7 @@ describe("parsePath", () => {
     expect(parsePath("/admin/theme")).toEqual({ kind: "theme" });
     expect(parsePath("/admin/media")).toEqual({ kind: "media" });
     expect(parsePath("/admin/history")).toEqual({ kind: "history" });
+    expect(parsePath("/admin/contact")).toEqual({ kind: "contact" });
   });
 
   it("parses /admin/chat with and without a conversation id", () => {
@@ -138,11 +143,14 @@ describe("parsePath", () => {
     expect(parsePath("/admin/settings")).toEqual({ kind: "settings", page: "general" });
     expect(parsePath("/admin/settings/appearance")).toEqual({ kind: "settings", page: "appearance" });
     expect(parsePath("/admin/settings/shortcuts")).toEqual({ kind: "settings", page: "shortcuts" });
-    expect(parsePath("/admin/settings/contact")).toEqual({ kind: "settings", page: "contact" });
     expect(parsePath("/admin/settings/engine")).toEqual({ kind: "settings", page: "engine" });
     expect(parsePath("/admin/settings/ai")).toEqual({ kind: "settings", page: "ai" });
     expect(parsePath("/admin/settings/system")).toEqual({ kind: "settings", page: "system" });
     expect(parsePath("/admin/settings/nonsense")).toEqual({ kind: "settings", page: "general" });
+  });
+
+  it("a legacy /admin/settings/contact deep link degrades gracefully to general (decisions/00129 promoted Contact to its own main tab)", () => {
+    expect(parsePath("/admin/settings/contact")).toEqual({ kind: "settings", page: "general" });
   });
 
   it("falls back to pages for an unrecognized path", () => {
@@ -166,10 +174,10 @@ describe("routeToPath", () => {
       { kind: "chat", conversation: null },
       { kind: "chat", conversation: "abc123" },
       { kind: "history" },
+      { kind: "contact" },
       { kind: "settings", page: "general" },
       { kind: "settings", page: "appearance" },
       { kind: "settings", page: "shortcuts" },
-      { kind: "settings", page: "contact" },
       { kind: "settings", page: "engine" },
       { kind: "settings", page: "ai" },
       { kind: "settings", page: "system" },

@@ -215,6 +215,55 @@ class TestAttrBinding:
         assert div["data-a"] == "1"
         assert div["data-b"] == "2"
 
+    def test_a_non_url_bearing_attribute_is_never_scheme_checked(self) -> None:
+        """`data-cat`/`data-booking-url`/etc. are free text, not something a
+        browser navigates/fetches/submits to on its own -- only the specific
+        URL-bearing attribute NAMES below get the scheme guard."""
+        body = _body('<div data-wx-attr="data-cat:cat"></div>')
+        ctx = ResolveContext(page={"cat": "javascript:alert(1)"}, glob={})
+        apply_bindings(body, ctx, mode="publish", file_label="test")
+        assert _find(body, "div")["data-cat"] == "javascript:alert(1)"
+
+    @pytest.mark.parametrize("attr_name", ["src", "href", "action", "formaction", "xlink:href"])
+    def test_javascript_scheme_in_a_url_bearing_attribute_raises_in_build_mode(
+        self, attr_name: str
+    ) -> None:
+        """decisions/00129: `data-wx-attr` sets ANY attribute verbatim, so a URL-
+        bearing one (a browser navigates/fetches/submits to it on its own) needs
+        the SAME scheme guard `data-wx-href` already has (decisions/00121/00123)
+        -- found while binding an iframe's `src` from content (the map picker's
+        `@mapSrc`), the exact class of gap that closed for hrefs already."""
+        body = _body(f'<iframe data-wx-attr="{attr_name}:target"></iframe>')
+        ctx = ResolveContext(page={"target": "javascript:alert(1)"}, glob={})
+        with pytest.raises(BuildError):
+            apply_bindings(body, ctx, mode="publish", file_label="test")
+
+    def test_javascript_scheme_in_src_attribute_collects_in_validate_mode(self) -> None:
+        body = _body('<iframe data-wx-attr="src:target"></iframe>')
+        ctx = ResolveContext(page={"target": "javascript:alert(1)"}, glob={})
+        result = ValidationResult()
+        apply_bindings(body, ctx, mode="preview", file_label="test", sink=result)
+        assert not result.ok
+        assert result.errors[0].key == "target"
+
+    @pytest.mark.parametrize(
+        "url", ["https://www.google.com/maps?q=1,2&output=embed", "/relative/page.html", "#anchor"]
+    )
+    def test_safe_urls_pass_in_a_url_bearing_attribute(self, url: str) -> None:
+        body = _body('<iframe data-wx-attr="src:target"></iframe>')
+        ctx = ResolveContext(page={"target": url}, glob={})
+        apply_bindings(body, ctx, mode="publish", file_label="test")
+        assert _find(body, "iframe")["src"] == url
+
+    def test_the_scheme_check_is_case_insensitive_on_the_attribute_name(self) -> None:
+        """HTML attribute names are case-insensitive; `SRC`/`Src` must be
+        caught exactly like `src` -- the guard must not be bypassable by
+        varying the case in the `data-wx-attr` spec text."""
+        body = _body('<iframe data-wx-attr="SRC:target"></iframe>')
+        ctx = ResolveContext(page={"target": "javascript:alert(1)"}, glob={})
+        with pytest.raises(BuildError):
+            apply_bindings(body, ctx, mode="publish", file_label="test")
+
 
 class TestIfBinding:
     def test_publish_mode_removes_falsy(self) -> None:
