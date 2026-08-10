@@ -259,3 +259,16 @@ class TestServeCommand:
             status, body = self._get(port, "/site.css")
         assert status == 200
         assert body  # non-empty; content itself is covered by build tests
+
+    def test_extensionless_path_with_query_string_still_resolves(
+        self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
+    ) -> None:
+        """`self.path` on a real `http.server` request includes the raw query string
+        (unlike FastAPI's route params, which never do) — `_CleanUrlHandler` must strip
+        it before resolving, not just when matching the literal `.html` file."""
+        out = tmp_path / "out"
+        build_site(mini_site_root, mini_site_source, out)
+        with self._serve(out) as port:
+            status, body = self._get(port, "/about?utm_source=test")
+        assert status == 200
+        assert b"About the fixture" in body
