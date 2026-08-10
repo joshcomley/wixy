@@ -491,9 +491,7 @@ class TestTabParsing:
         assert config.admin_sections[0].collections[0].tab is None
 
     def test_a_string_tab_parses_through(self, tmp_path: Path) -> None:
-        config = load_project_config(
-            _write(tmp_path, _section_with_collection({"tab": "Photos"}))
-        )
+        config = load_project_config(_write(tmp_path, _section_with_collection({"tab": "Photos"})))
 
         assert config.admin_sections[0].collections[0].tab == "Photos"
 
