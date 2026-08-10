@@ -104,3 +104,50 @@ for" below rather than solved here.
 - This mirrors 00069 closely enough that a future third asset-serving path (there are now
   two: `/admin/static/*` and the public site) should default to the same contract from the
   start, not organically reinvent or accidentally skip it a third time.
+
+## Audit round 2 (opus tier) — 3 findings, all fixed
+
+Submitted for the mandatory audit this class of change requires (public HTTP contract
+change, per the fleet's own driver doctrine). Cleared `sonnet-senior` (0 findings — it
+independently re-ran the full verification from a clean environment rather than trusting
+this doc). `opus` found three real issues, all fixed in the same PR before merge:
+
+- **F1 (HIGH).** `_cache_control_for` originally granted `immutable` on the mere PRESENCE of
+  a `?v=` query param — never checking its VALUE matched the resolved file's actual current
+  hash. Consequence: a stale `?v=<old-hash>` replayed from an HTML page cached during a
+  publish's ≤300s propagation window would get the file's CURRENT bytes served back
+  immutably under that OLD, now-mismatched URL — poisoning it for a year against any future
+  publish that legitimately reverts to the old content (an admin Restore, a theme colour
+  changed back, a reverted CSS commit), with no purge mechanism anywhere to undo it. Fixed:
+  `routes_public.py` now computes `content_fingerprint(resolved)` per request and compares it
+  to the query value before granting `immutable`; anything else (missing, wrong, or an
+  arbitrary/attacker-supplied value) falls through to the unchanged `86400s` default. This
+  also generalizes the grant correctly to any file, not just the three named assets — a match
+  can only ever mean "these exact bytes are what this URL will always mean," which is true
+  regardless of which asset it is.
+- **F2 (MEDIUM).** The rewrite silently no-ops on `href="/site.css"` or `href="./site.css"`
+  — a leading-path-segment form the exact bare-string match deliberately doesn't recognise —
+  with no build-time signal. Since this engine doesn't own or validate the site repo's own
+  template markup, a routine template edit there could silently reinstate the original
+  incident. Fixed: `fingerprint_asset_references` now returns the `{name: hash}` map it used,
+  and a new `find_unfingerprinted_asset_references` (real HTML parsing via BeautifulSoup, not
+  another regex) scans every page for a recognisable-but-unrewritten reference;
+  `build_site` raises `BuildError` if it finds one, turning the original bug's silent,
+  hours-to-notice failure mode into an immediate, loud build failure.
+- **F3 (LOW).** The rewrite regex matched `href=`/`src=` as a bare substring, so it also
+  silently rewrote `data-href="site.css"` (matching the tail of a longer attribute name),
+  despite the docstring's claim of being attribute-anchored — harmless today only because
+  this codebase's `data-wx-href` values are always content key paths, never literally one of
+  these filenames, but the code's actual guarantee was weaker than its stated one. Fixed with
+  a fixed-width negative lookbehind (`(?<![\w-])`) requiring a genuine attribute start.
+
+New/updated tests for all three: `builder/tests/test_assetcache.py` (the mismatch case,
+`data-href` non-touch, `find_unfingerprinted_asset_references`'s own coverage),
+`builder/tests/test_build.py` (a leading-slash template reference fails the build — caught a
+real test-authoring bug of my own along the way: `SiteSource.pages_dir` is fixed at
+`load_site_source` time, so reusing a fixture `SiteSource` after editing files in a
+*different* directory silently tests against the ORIGINAL, unedited template; the test needed
+a fresh `load_site_source(edited_root, ...)` call, not just an edited `root` argument to
+`build_site`), and `wixy_server/tests/test_routes_public.py` (the exact F1 replay scenario:
+`?v=` present but wrong still gets the 24h default, not immutable). Full suite green: 1165
+passed.
