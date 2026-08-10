@@ -117,6 +117,20 @@ hrefs) is what would catch a regression here, not a general "does it render" che
 
 ## What to watch for
 
+- **`e2e/tests/section-panel.spec.ts`'s "align a photo pair" test is a pre-existing,
+  timing-sensitive flake under real CPU contention on this shared dev box — NOT caused
+  by this feature.** Observed failing 3 separate times across this feature's development
+  (two different failure modes: a dialog-close timeout, a publish-endpoint non-200) —
+  every occurrence correlated with `read-cpu`-measured heavy contention (89.7% then,
+  100.0% most recently) from an unrelated process on the box, and the SAME test passed
+  cleanly both in isolated local re-runs once contention eased AND on GitHub's own
+  pinned `ubuntu-latest` CI runner every time (which doesn't share this box's local
+  contention) — including the run that gated this PR's own merge. Its own code comments
+  already acknowledge tight timing assumptions ("on localhost the whole bake→upload→
+  stage chain can complete within one Playwright tick"). Deliberately not fixed as part
+  of this feature — a pre-existing test's timing robustness is separate work. If it
+  fails again locally: check `read-cpu` first: contended → sufficient explanation, don't
+  loop on re-investigating; CI is the authoritative gate and has been green throughout.
 - Any future page that needs to show phone/email/address should reference `@phone`/
   `@email`/`@address` (or `@phoneHref`/`@emailHref`) — never hardcode a fresh copy. This
   was already the convention before this change; nothing new to remember, just don't
