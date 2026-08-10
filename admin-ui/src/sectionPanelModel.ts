@@ -3,10 +3,41 @@
 // unit-testable with vitest without mounting real DOM (mirrors opQueue.ts's
 // "framework-free core, unit-testable without a real iframe" convention).
 
-import type { AdminField, AdminFieldOption } from "./api";
+import type { AdminCollection, AdminField, AdminFieldOption } from "./api";
 import type { JsonValue } from "./protocol";
 
 export type SectionItem = Record<string, JsonValue>;
+
+export interface CollectionTabGroup {
+  tab: string;
+  collections: readonly AdminCollection[];
+}
+
+/** Groups a section's collections by their optional `tab` (decisions/00125),
+ * preserving each collection's registry order and each group's first-seen
+ * order. A collection with no `tab` set joins the `"General"` group — so a
+ * section where every collection is untabbed (today's default, and every
+ * OTHER section that hasn't opted in) produces exactly one group, and
+ * `mountSectionPanel` renders it with no tab strip at all, unchanged from
+ * before this capability existed. */
+export function groupCollectionsByTab(
+  collections: readonly AdminCollection[],
+): CollectionTabGroup[] {
+  const groups: CollectionTabGroup[] = [];
+  const byTab = new Map<string, AdminCollection[]>();
+  for (const collection of collections) {
+    const tab = collection.tab ?? "General";
+    const bucket = byTab.get(tab);
+    if (bucket === undefined) {
+      const fresh: AdminCollection[] = [collection];
+      byTab.set(tab, fresh);
+      groups.push({ tab, collections: fresh });
+    } else {
+      bucket.push(collection);
+    }
+  }
+  return groups;
+}
 
 /** Reads a dotted content path (e.g. "gallery.sliders") out of a page's
  * `content` object — the client-side mirror of `builder.content.dotted_get`.

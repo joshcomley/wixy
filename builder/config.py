@@ -74,7 +74,13 @@ class AdminCollection:
     satisfy (spec: 3a). `align_aspect` is the optional `(w, h)` of the frame a
     two-image item is displayed in (from the registry's `alignAspect` "W:H")
     — when present and the collection has ≥2 `image` fields, the panel offers
-    the before/after aligner for its cards (decisions/00111)."""
+    the before/after aligner for its cards (decisions/00111).
+
+    `tab` (decisions/00125) optionally groups this collection under a named
+    tab within its section's panel — collections sharing the same `tab` text
+    render together, switchable via a tab strip, when a section has more than
+    one distinct group; a section where every collection shares one group (or
+    leaves `tab` unset) renders exactly as before, with no tab UI at all."""
 
     path: str
     label: str
@@ -82,6 +88,7 @@ class AdminCollection:
     schema: str
     fields: tuple[AdminField, ...] = ()
     align_aspect: tuple[int, int] | None = None
+    tab: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,6 +202,7 @@ def _parse_admin_collection(raw: JsonValue) -> AdminCollection | None:
     schema = _req_str(raw, "schema")
     if path is None or label is None or item_noun is None or schema is None:
         return None
+    tab_raw = raw.get("tab")
     return AdminCollection(
         path=path,
         label=label,
@@ -202,6 +210,7 @@ def _parse_admin_collection(raw: JsonValue) -> AdminCollection | None:
         schema=schema,
         fields=_parse_admin_fields(raw.get("fields", [])),
         align_aspect=_parse_align_aspect(raw.get("alignAspect")),
+        tab=tab_raw if isinstance(tab_raw, str) else None,
     )
 
 

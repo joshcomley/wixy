@@ -196,6 +196,7 @@ def _admin_sections_snapshot(project: ProjectConfig) -> list[JsonValue]:
                         if collection.align_aspect is None
                         else {"w": collection.align_aspect[0], "h": collection.align_aspect[1]}
                     ),
+                    "tab": collection.tab,
                     "fields": [
                         {
                             "key": field.key,

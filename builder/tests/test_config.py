@@ -478,3 +478,26 @@ class TestAlignAspectParsing:
         )
 
         assert config.admin_sections[0].collections[0].align_aspect is None
+
+
+class TestTabParsing:
+    """decisions/00125: a collection's optional `tab` groups it under a named
+    tab within its section's panel — absent or malformed must read as None
+    (the collection simply joins the section's default, untabbed group)."""
+
+    def test_absent_tab_reads_as_none(self, tmp_path: Path) -> None:
+        config = load_project_config(_write(tmp_path, _section_with_collection({})))
+
+        assert config.admin_sections[0].collections[0].tab is None
+
+    def test_a_string_tab_parses_through(self, tmp_path: Path) -> None:
+        config = load_project_config(
+            _write(tmp_path, _section_with_collection({"tab": "Photos"}))
+        )
+
+        assert config.admin_sections[0].collections[0].tab == "Photos"
+
+    def test_a_non_string_tab_reads_as_none(self, tmp_path: Path) -> None:
+        config = load_project_config(_write(tmp_path, _section_with_collection({"tab": 640})))
+
+        assert config.admin_sections[0].collections[0].tab is None

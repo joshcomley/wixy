@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AdminField, AdminFieldOption } from "../src/api";
+import type { AdminCollection, AdminField, AdminFieldOption } from "../src/api";
 import {
   appendItem,
   blankItem,
@@ -8,6 +8,7 @@ import {
   deleteItemAt,
   dottedGet,
   fieldDirty,
+  groupCollectionsByTab,
   imageFieldValue,
   isNewItemComplete,
   itemDirty,
@@ -469,5 +470,69 @@ describe("decodeCommonEntities", () => {
   it("leaves an unrecognized ampersand sequence untouched rather than guessing", () => {
     expect(decodeCommonEntities("Tom & Jerry")).toBe("Tom & Jerry");
     expect(decodeCommonEntities("A&Bcorp;")).toBe("A&Bcorp;");
+  });
+});
+
+function _collection(path: string, tab: string | null): AdminCollection {
+  return {
+    path,
+    label: path,
+    itemNoun: "item",
+    schema: "s",
+    alignAspect: null,
+    tab,
+    fields: [],
+  };
+}
+
+describe("groupCollectionsByTab (decisions/00125)", () => {
+  it("puts every untabbed collection into one 'General' group, in registry order", () => {
+    const collections = [_collection("a", null), _collection("b", null), _collection("c", null)];
+
+    const groups = groupCollectionsByTab(collections);
+
+    expect(groups).toEqual([{ tab: "General", collections }]);
+  });
+
+  it("splits collections into separate groups by their declared tab, first-seen order", () => {
+    const categories = _collection("gallery.categories", "Categories");
+    const sliders = _collection("gallery.sliders", "Photos");
+    const tiles = _collection("gallery.tiles", "Photos");
+
+    const groups = groupCollectionsByTab([categories, sliders, tiles]);
+
+    expect(groups).toEqual([
+      { tab: "Categories", collections: [categories] },
+      { tab: "Photos", collections: [sliders, tiles] },
+    ]);
+  });
+
+  it("keeps a group's own collection order even when the same tab is revisited later", () => {
+    const first = _collection("a", "X");
+    const middle = _collection("b", "Y");
+    const last = _collection("c", "X");
+
+    const groups = groupCollectionsByTab([first, middle, last]);
+
+    expect(groups).toEqual([
+      { tab: "X", collections: [first, last] },
+      { tab: "Y", collections: [middle] },
+    ]);
+  });
+
+  it("folds an untabbed collection into 'General' alongside explicitly-tabbed ones", () => {
+    const tabbed = _collection("a", "Photos");
+    const untabbed = _collection("b", null);
+
+    const groups = groupCollectionsByTab([tabbed, untabbed]);
+
+    expect(groups).toEqual([
+      { tab: "Photos", collections: [tabbed] },
+      { tab: "General", collections: [untabbed] },
+    ]);
+  });
+
+  it("returns an empty array for a section with no collections", () => {
+    expect(groupCollectionsByTab([])).toEqual([]);
   });
 });
