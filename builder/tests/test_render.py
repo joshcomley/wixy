@@ -5,6 +5,7 @@ from __future__ import annotations
 from bs4 import BeautifulSoup, Tag
 
 from builder.render import SiteSource, render_page
+from builder.templates import apply_head
 
 
 class TestPartialInjection:
@@ -70,6 +71,43 @@ class TestHeadInjection:
         assert isinstance(og_image, Tag)
         assert og_title["content"] == "Home — Fixture"
         assert og_image["content"] == "https://fixture.example.com/images/hero.jpg"
+
+    def test_canonical_link_present_on_index(self, mini_site_source: SiteSource) -> None:
+        html = render_page(mini_site_source, "index", mode="publish")
+        soup = BeautifulSoup(html, "html5lib")
+        canonical = soup.find("link", attrs={"rel": "canonical"})
+        assert isinstance(canonical, Tag)
+        assert canonical["href"] == "https://fixture.example.com/"
+
+    def test_canonical_link_present_on_non_index_page(self, mini_site_source: SiteSource) -> None:
+        html = render_page(mini_site_source, "about", mode="publish")
+        soup = BeautifulSoup(html, "html5lib")
+        canonical = soup.find("link", attrs={"rel": "canonical"})
+        assert isinstance(canonical, Tag)
+        assert canonical["href"] == "https://fixture.example.com/about.html"
+
+    def test_canonical_link_overwrites_hand_authored_href(
+        self, mini_site_source: SiteSource
+    ) -> None:
+        """A template-authored canonical (or one left over from a prior build) must not
+        win — apply_head is the single source of truth for this tag."""
+        soup = BeautifulSoup(
+            '<!DOCTYPE html><html><head><link rel="canonical" href="https://stale.example/x">'
+            "</head><body></body></html>",
+            "html5lib",
+        )
+        apply_head(
+            soup,
+            meta={},
+            fonts_url=None,
+            page_url_path="/about.html",
+            domain="fixture.example.com",
+            indexable=False,
+            file_label="test",
+        )
+        canonicals = soup.find_all("link", attrs={"rel": "canonical"})
+        assert len(canonicals) == 1
+        assert canonicals[0]["href"] == "https://fixture.example.com/about.html"
 
     def test_fonts_link_generated_and_replaces_placeholder(
         self, mini_site_source: SiteSource

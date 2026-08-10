@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 
 import pytest
+from bs4 import BeautifulSoup, Tag
 
 from builder.cli import main
 
@@ -79,3 +80,88 @@ class TestBuildCommand:
         assert (out / "index.html").exists()
         assert (out / "about.html").exists()
         assert (out / "theme.css").exists()
+
+    def test_build_omitted_overrides_preserve_registry_defaults(
+        self, mini_site_root: Path, tmp_path: Path
+    ) -> None:
+        """The fixture registry is domain=fixture.example.com, indexable=false — with no
+        --domain/--indexable flags, build must behave exactly as before this feature."""
+        project = str(mini_site_root.parent / "project.json")
+        out = tmp_path / "out"
+        code = main(
+            ["build", "--root", str(mini_site_root), "--project", project, "--out", str(out)]
+        )
+        assert code == 0
+        robots = (out / "robots.txt").read_text(encoding="utf-8")
+        assert robots == "User-agent: *\nDisallow: /\n"
+        assert not (out / "sitemap.xml").exists()
+        soup = BeautifulSoup((out / "index.html").read_text(encoding="utf-8"), "html5lib")
+        robots_meta = soup.find("meta", attrs={"name": "robots"})
+        assert isinstance(robots_meta, Tag)
+        assert robots_meta["content"] == "noindex"
+
+    def test_build_domain_and_indexable_overrides_applied(
+        self, mini_site_root: Path, tmp_path: Path
+    ) -> None:
+        project = str(mini_site_root.parent / "project.json")
+        out = tmp_path / "out"
+        code = main(
+            [
+                "build",
+                "--root",
+                str(mini_site_root),
+                "--project",
+                project,
+                "--out",
+                str(out),
+                "--domain",
+                "example.org",
+                "--indexable",
+                "true",
+            ]
+        )
+        assert code == 0
+
+        robots = (out / "robots.txt").read_text(encoding="utf-8")
+        assert robots == "User-agent: *\nAllow: /\nSitemap: https://example.org/sitemap.xml\n"
+
+        sitemap = (out / "sitemap.xml").read_text(encoding="utf-8")
+        assert "https://example.org/" in sitemap
+
+        soup = BeautifulSoup((out / "index.html").read_text(encoding="utf-8"), "html5lib")
+        assert soup.find("meta", attrs={"name": "robots"}) is None
+        canonical = soup.find("link", attrs={"rel": "canonical"})
+        assert isinstance(canonical, Tag)
+        assert canonical["href"] == "https://example.org/"
+
+    def test_build_indexable_false_override_still_writes_disallow(
+        self, mini_site_root: Path, tmp_path: Path
+    ) -> None:
+        """Exercises the explicit-false override path (not just the omitted-flag default),
+        alongside a --domain override, to prove the two flags are independent."""
+        project = str(mini_site_root.parent / "project.json")
+        out = tmp_path / "out"
+        code = main(
+            [
+                "build",
+                "--root",
+                str(mini_site_root),
+                "--project",
+                project,
+                "--out",
+                str(out),
+                "--domain",
+                "example.org",
+                "--indexable",
+                "false",
+            ]
+        )
+        assert code == 0
+        robots = (out / "robots.txt").read_text(encoding="utf-8")
+        assert robots == "User-agent: *\nDisallow: /\n"
+        assert not (out / "sitemap.xml").exists()
+
+        soup = BeautifulSoup((out / "index.html").read_text(encoding="utf-8"), "html5lib")
+        canonical = soup.find("link", attrs={"rel": "canonical"})
+        assert isinstance(canonical, Tag)
+        assert canonical["href"] == "https://example.org/"

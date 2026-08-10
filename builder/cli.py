@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import functools
 import http.server
 import json
@@ -23,16 +24,38 @@ from builder.theme import load_theme
 from builder.validate import validate_site
 
 
-def _load_source(root: Path, project_path: Path) -> SiteSource:
+def _load_source(
+    root: Path,
+    project_path: Path,
+    *,
+    domain: str | None = None,
+    indexable: bool | None = None,
+) -> SiteSource:
     project = load_project_config(project_path)
+    if domain is not None:
+        project = dataclasses.replace(project, domain=domain)
+    if indexable is not None:
+        project = dataclasses.replace(project, indexable=indexable)
     theme_path = root / "theme" / "theme.json"
     theme = load_theme(theme_path) if theme_path.exists() else None
     return load_site_source(root, project, theme)
 
 
+def _indexable_override(args: argparse.Namespace) -> bool | None:
+    raw: str | None = args.indexable
+    if raw is None:
+        return None
+    return raw == "true"
+
+
 def cmd_validate(args: argparse.Namespace) -> int:
     root = Path(args.root).resolve()
-    source = _load_source(root, Path(args.project).resolve())
+    source = _load_source(
+        root,
+        Path(args.project).resolve(),
+        domain=args.domain,
+        indexable=_indexable_override(args),
+    )
     result = validate_site(source, root)
     if args.json:
         print(json.dumps(result.to_json_dict(), indent=2))
@@ -46,7 +69,12 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 def cmd_build(args: argparse.Namespace) -> int:
     root = Path(args.root).resolve()
-    source = _load_source(root, Path(args.project).resolve())
+    source = _load_source(
+        root,
+        Path(args.project).resolve(),
+        domain=args.domain,
+        indexable=_indexable_override(args),
+    )
     out_dir = Path(args.out).resolve()
     build_site(root, source, out_dir)
     print(f"build: wrote {out_dir}")
@@ -55,7 +83,12 @@ def cmd_build(args: argparse.Namespace) -> int:
 
 def cmd_serve(args: argparse.Namespace) -> int:
     root = Path(args.root).resolve()
-    source = _load_source(root, Path(args.project).resolve())
+    source = _load_source(
+        root,
+        Path(args.project).resolve(),
+        domain=args.domain,
+        indexable=_indexable_override(args),
+    )
     out_dir = Path(args.out).resolve()
     build_site(root, source, out_dir)
     handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(out_dir))
@@ -107,6 +140,18 @@ def cmd_parity(args: argparse.Namespace) -> int:
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--root", default=".", help="site repo checkout root (default: cwd)")
     parser.add_argument("--project", required=True, help="path to the project registry JSON")
+    parser.add_argument(
+        "--domain",
+        default=None,
+        help="override the registry's domain for this invocation only "
+        "(e.g. a per-deployment public domain distinct from the registry default)",
+    )
+    parser.add_argument(
+        "--indexable",
+        choices=("true", "false"),
+        default=None,
+        help="override the registry's indexable flag for this invocation only",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
