@@ -17,22 +17,6 @@
       "page": "gallery",
       "collections": [
         {
-          "path": "gallery.categories",
-          "label": "Category names",
-          "itemNoun": "category",
-          "schema": "gallery-category",
-          "tab": "Categories",
-          "fields": [
-            {
-              "key": "value",
-              "kind": "text",
-              "label": "Internal key (short, e.g. \"lips\") — avoid changing this once photos use it",
-              "required": true
-            },
-            { "key": "label", "kind": "text", "label": "Display name shown on your site", "required": true }
-          ]
-        },
-        {
           "path": "gallery.sliders",
           "label": "Drag-to-compare photos",
           "itemNoun": "photo pair",
@@ -60,6 +44,22 @@
             { "key": "title", "kind": "text", "label": "Caption", "required": true },
             { "key": "cat", "kind": "choice", "label": "Category", "optionsFrom": "gallery.categories" },
             { "key": "visible", "kind": "toggle", "label": "Show on site" }
+          ]
+        },
+        {
+          "path": "gallery.categories",
+          "label": "Category names",
+          "itemNoun": "category",
+          "schema": "gallery-category",
+          "tab": "Categories",
+          "fields": [
+            {
+              "key": "value",
+              "kind": "text",
+              "label": "Internal key (short, e.g. \"lips\") — avoid changing this once photos use it",
+              "required": true
+            },
+            { "key": "label", "kind": "text", "label": "Display name shown on your site", "required": true }
           ]
         }
       ]
