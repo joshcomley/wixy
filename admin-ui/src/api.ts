@@ -173,6 +173,10 @@ export interface AdminCollection {
   itemNoun: string;
   schema: string;
   alignAspect: { w: number; h: number } | null;
+  /** Groups this collection under a named tab within its section's panel
+   * (decisions/00125) — collections sharing the same text render together,
+   * switchable via a tab strip. `null` joins the section's default group. */
+  tab: string | null;
   fields: AdminField[];
 }
 

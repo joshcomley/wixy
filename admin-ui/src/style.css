@@ -3163,6 +3163,47 @@ div.wx-media-thumb {
   margin-bottom: 28px;
 }
 
+/* Tab strip (decisions/00125) — only rendered when a section groups its
+   collections into more than one tab; an underline style (distinct from the
+   filled-pill `.wx-nav-item` sidebar look) so it reads as "switch view", not
+   as another navigation menu. */
+.wx-section-tablist {
+  display: flex;
+  gap: 20px;
+  border-bottom: 1px solid var(--wx-border);
+  margin-bottom: 20px;
+  overflow-x: auto;
+}
+
+.wx-section-tab {
+  flex: none;
+  font: 600 0.8125rem/1 system-ui, sans-serif;
+  color: var(--wx-muted);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px; /* sits on top of .wx-section-tablist's own border */
+  padding: 12px 2px;
+  min-height: 44px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wx-section-tab:hover {
+  color: var(--wx-ink);
+}
+
+.wx-section-tab[aria-selected="true"] {
+  color: var(--wx-brand-blue-text);
+  border-bottom-color: var(--wx-brand-blue);
+}
+
+.wx-section-tab-panel:focus-visible {
+  outline: 2px solid var(--wx-brand-blue);
+  outline-offset: 2px;
+  border-radius: var(--wx-radius);
+}
+
 .wx-section-collection-header {
   display: flex;
   align-items: center;

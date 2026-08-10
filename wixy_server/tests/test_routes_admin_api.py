@@ -519,6 +519,7 @@ class TestGetStateAdminSections:
                         "itemNoun": "photo pair",
                         "schema": "gallery-slider",
                         "alignAspect": {"w": 640, "h": 360},
+                        "tab": None,
                         "fields": [
                             {
                                 "key": "before",

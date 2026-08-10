@@ -350,3 +350,21 @@ that stages a collection without going through one of these three would violate 
 invariant silently (no test would catch a brand-new, not-yet-existing call site) and must be
 audited against this invariant when added.
 
+### Inv 31 — A collection's tab visibility never gates whether it re-renders
+When a section groups its collections under a tab strip (`AdminCollection.tab`, decisions/
+00125), every collection's inner body is built and kept in `collectionBodies` — and re-rendered
+by `stageLocal`/`undoLast`/`dependentCollectionsOf`/a successful Save — regardless of whether
+its tab is currently the visible one. Tabs are a purely additive DOM visibility layer
+(`renderBody`, `sectionPanel.ts`) toggling `hidden` on each tab's panel wrapper; they must
+never lazily mount, unmount, or skip re-rendering a hidden panel's content, or Inv 30's
+"dependent dropdown updates immediately" guarantee would silently stop holding the moment its
+source collection lives on a DIFFERENT tab than its dependent — the single most likely real
+shape of a multi-tab section (a "Categories" tab feeding a "Photos" tab's dropdowns).
+*Enforced by:* `admin-ui/tests/sectionPanel.test.ts`'s `"mountSectionPanel — tabs (decisions/
+00125)"` block, specifically the cross-tab Inv-30 test (a category renamed while its tab is
+hidden already shows decoded in the OTHER tab's dropdown once switched to, proving the update
+happened at stage-time, not lazily on tab-switch).
+*Exception:* none — a section with ≤1 distinct tab group renders with no tab strip at all
+(unchanged from before this capability existed), so this invariant is vacuous for every
+section that hasn't opted into tabs.
+

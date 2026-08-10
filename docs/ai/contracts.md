@@ -104,11 +104,14 @@ edition, the only one live at `ca.cinnamons.uk`); `false` for `AnthropicAIBacken
 (standalone/milestone 6, no attachment mechanism of its own yet).
 
 `<admin section>` = `{id, navLabel, title, description, page, collections:[<admin
-collection>]}`; `<admin collection>` = `{path, label, itemNoun, schema, alignAspect,
+collection>]}`; `<admin collection>` = `{path, label, itemNoun, schema, alignAspect, tab,
 fields:[<admin field>]}` — `alignAspect` is `{w, h} | null` (from the registry's
 optional `"alignAspect": "W:H"`); when non-null AND the collection has ≥2 `image`
 fields, the section panel offers the before/after aligner on its cards and in its add
-flow (decisions/00111); `<admin field>` = `{key, kind:"image"\|"text"\|"choice"\|"toggle"\|"url",
+flow (decisions/00111); `tab` is `string | null` (decisions/00125) — collections sharing
+the same `tab` text render together under a switchable tab strip when a section has more
+than one distinct group; `null`, or every collection sharing one group, renders exactly as
+before (no tab UI); `<admin field>` = `{key, kind:"image"\|"text"\|"choice"\|"toggle"\|"url",
 label, options:[{value,label}], optionsFrom:string\|null, required:bool}` (decisions/00098;
 `toggle` added decisions/00117; `url` added decisions/00120 — same plain-input UI as `text`
 plus an "Open ↗" link once the value looks like a real URL; `optionsFrom`/`required` added

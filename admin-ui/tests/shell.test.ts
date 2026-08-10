@@ -42,6 +42,7 @@ const BEFORE_AFTER_SECTION = {
       itemNoun: "photo pair",
       schema: "gallery-slider",
       alignAspect: { w: 640, h: 360 },
+      tab: null,
       fields: [
         {
           key: "before",

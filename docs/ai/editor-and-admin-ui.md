@@ -408,6 +408,32 @@ label edit updates the dependent dropdown immediately, in the same staged edit, 
 reload (`discardUnsaved` already looped over every collection unconditionally, so needed
 no change).
 
+**Grouping collections into tabs** (`AdminCollection.tab`, decisions/00125) — a section with
+many collections (e.g. Before & After's category list plus two separate photo collections)
+can group them under a switchable tab strip instead of stacking every collection's cards on
+one long scroll. Purely additive: `groupCollectionsByTab` (`sectionPanelModel.ts`, unit-
+tested directly) buckets `section.collections` by `tab ?? "General"`, preserving registry
+order both within and across groups; `renderBody` (`sectionPanel.ts`, replacing `load()`'s
+old inline render loop) renders every collection sequentially with NO tab UI at all whenever
+that produces exactly one group — today's behavior, and every other section's, byte-for-byte
+unchanged — and only builds a `role="tablist"` strip (full ARIA tabs keyboard pattern: Left/
+Right/Home/End move focus AND switch the active panel, automatic-activation style) once there
+are ≥2 distinct groups. The active tab (`activeTab`, a closure variable) survives a `load()`
+re-render — a background refresh must not yank her back to the first tab mid-edit — and
+switching tabs is PURELY a `hidden` toggle on each group's wrapper `.wx-section-tab-panel`:
+`collectionBodies` still maps every collection's path to its own body element regardless of
+which panel contains it, so `stageLocal`/`undoLast`/`dependentCollectionsOf`'s cross-
+collection re-render (Inv 30) and a successful Save all work completely unchanged — including
+updating a collection on a currently-HIDDEN tab, so switching to it afterward already shows
+the live result rather than needing its own re-render trigger (Inv 31; the categories-feeding-
+photos shape is the realistic case this guards, and the ONE new test in this area proves it
+directly: rename a category while its tab is hidden, then switch tabs and check the OTHER
+collection's dropdown already reflects it). The Before & After section uses this to split
+"Categories" (`gallery.categories`) from "Photos" (`gallery.sliders` + `gallery.tiles`,
+sharing one tab) — the save bar, undo stack, and discard-all/discard-unsaved controls stay
+section-WIDE regardless of which tab is active (unchanged from before tabs existed), so an
+edit made on one tab is still visible/saveable/discardable after switching away from it.
+
 **The `visible` toggle ("Show on site", decisions/00117 + Inv 28; prominence + bulk actions
 decisions/00119)** — a `"kind": "toggle"` `AdminField` renders as a full-width **card-header
 switch bar** (`renderVisibilityBar`, prepended as the card's first child, ahead of the drag

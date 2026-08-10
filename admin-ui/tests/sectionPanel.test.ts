@@ -18,6 +18,7 @@ const SLIDER_SECTION: AdminSection = {
       itemNoun: "photo pair",
       schema: "gallery-slider",
       alignAspect: { w: 640, h: 360 },
+      tab: null,
       fields: [
         { key: "before", kind: "image", label: "Before photo", options: [], optionsFrom: null, required: false },
         { key: "after", kind: "image", label: "After photo", options: [], optionsFrom: null, required: false },
@@ -54,6 +55,7 @@ const TILE_SECTION: AdminSection = {
       itemNoun: "photo",
       schema: "gallery-tile",
       alignAspect: null,
+      tab: null,
       fields: [
         { key: "img", kind: "image", label: "Photo", options: [], optionsFrom: null, required: false },
         { key: "title", kind: "text", label: "Caption", options: [], optionsFrom: null, required: true },
@@ -88,6 +90,7 @@ const CATEGORIES_AND_SLIDERS_SECTION: AdminSection = {
       itemNoun: "category",
       schema: "gallery-category",
       alignAspect: null,
+      tab: null,
       fields: [
         { key: "value", kind: "text", label: "Internal key", options: [], optionsFrom: null, required: true },
         { key: "label", kind: "text", label: "Display name", options: [], optionsFrom: null, required: true },
@@ -99,6 +102,7 @@ const CATEGORIES_AND_SLIDERS_SECTION: AdminSection = {
       itemNoun: "photo pair",
       schema: "gallery-slider",
       alignAspect: { w: 640, h: 360 },
+      tab: null,
       fields: [
         { key: "before", kind: "image", label: "Before photo", options: [], optionsFrom: null, required: false },
         { key: "after", kind: "image", label: "After photo", options: [], optionsFrom: null, required: false },
@@ -112,6 +116,66 @@ const CATEGORIES_AND_SLIDERS_SECTION: AdminSection = {
           required: false,
         },
         { key: "visible", kind: "toggle", label: "Show on site", options: [], optionsFrom: null, required: false },
+      ],
+    },
+  ],
+};
+
+/** Mirrors the REAL `ca.json` registry shape (decisions/00125): categories on
+ * their own tab, both photo collections sharing a second tab. */
+const TABBED_SECTION: AdminSection = {
+  id: "before-after",
+  navLabel: "Before & After",
+  title: "Before & After",
+  description: "Drag to reorder.",
+  page: "gallery",
+  collections: [
+    {
+      path: "gallery.categories",
+      label: "Category names",
+      itemNoun: "category",
+      schema: "gallery-category",
+      alignAspect: null,
+      tab: "Categories",
+      fields: [
+        { key: "value", kind: "text", label: "Internal key", options: [], optionsFrom: null, required: true },
+        { key: "label", kind: "text", label: "Display name", options: [], optionsFrom: null, required: true },
+      ],
+    },
+    {
+      path: "gallery.sliders",
+      label: "Drag-to-compare photos",
+      itemNoun: "photo pair",
+      schema: "gallery-slider",
+      alignAspect: { w: 640, h: 360 },
+      tab: "Photos",
+      fields: [
+        {
+          key: "cat",
+          kind: "choice",
+          label: "Category",
+          options: [],
+          optionsFrom: "gallery.categories",
+          required: false,
+        },
+      ],
+    },
+    {
+      path: "gallery.tiles",
+      label: "Tap-to-zoom photos",
+      itemNoun: "photo",
+      schema: "gallery-tile",
+      alignAspect: null,
+      tab: "Photos",
+      fields: [
+        {
+          key: "cat",
+          kind: "choice",
+          label: "Category",
+          options: [],
+          optionsFrom: "gallery.categories",
+          required: false,
+        },
       ],
     },
   ],
@@ -1702,5 +1766,137 @@ describe("mountSectionPanel — dynamic choice options via optionsFrom (decision
     labelInput.value = "Botox";
     labelInput.dispatchEvent(new Event("input"));
     expect(saveButton?.disabled).toBe(false);
+  });
+});
+
+describe("mountSectionPanel — tabs (decisions/00125)", () => {
+  it("renders no tab strip when every collection shares one group", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: {
+          gallery: { categories: [{ value: "lips", label: "Lips" }], sliders: [SLIDER_ITEM] },
+        },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const panel = mountSectionPanel(CATEGORIES_AND_SLIDERS_SECTION, { api, opQueue: fakeQueue() });
+    await flush();
+
+    expect(panel.element.querySelector(".wx-section-tablist")).toBeNull();
+    // Both collections render, neither hidden behind a tab panel.
+    expect(panel.element.querySelectorAll(".wx-section-collection")).toHaveLength(2);
+    expect(panel.element.querySelector(".wx-section-tab-panel")).toBeNull();
+  });
+
+  it("renders one tab per distinct group, first group active by default", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: {
+          gallery: {
+            categories: [{ value: "lips", label: "Lips" }],
+            sliders: [SLIDER_ITEM],
+            tiles: [],
+          },
+        },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const panel = mountSectionPanel(TABBED_SECTION, { api, opQueue: fakeQueue() });
+    await flush();
+
+    const tabs = panel.element.querySelectorAll<HTMLButtonElement>(".wx-section-tab");
+    expect(Array.from(tabs).map((t) => t.textContent)).toEqual(["Categories", "Photos"]);
+    expect(tabs[0]?.getAttribute("aria-selected")).toBe("true");
+    expect(tabs[1]?.getAttribute("aria-selected")).toBe("false");
+
+    const panels = panel.element.querySelectorAll<HTMLElement>(".wx-section-tab-panel");
+    expect(panels).toHaveLength(2);
+    expect(panels[0]?.hidden).toBe(false); // Categories — active
+    expect(panels[1]?.hidden).toBe(true); // Photos — inactive
+    // The Photos panel holds BOTH photo collections (sliders + tiles).
+    expect(panels[1]?.querySelectorAll(".wx-section-collection")).toHaveLength(2);
+  });
+
+  it("clicking a tab switches the visible panel and aria-selected", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { categories: [], sliders: [], tiles: [] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const panel = mountSectionPanel(TABBED_SECTION, { api, opQueue: fakeQueue() });
+    await flush();
+
+    const tabs = panel.element.querySelectorAll<HTMLButtonElement>(".wx-section-tab");
+    const photosTab = tabs[1];
+    if (photosTab === undefined) throw new Error("no Photos tab");
+    photosTab.click();
+
+    const panels = panel.element.querySelectorAll<HTMLElement>(".wx-section-tab-panel");
+    expect(panels[0]?.hidden).toBe(true);
+    expect(panels[1]?.hidden).toBe(false);
+    expect(tabs[0]?.getAttribute("aria-selected")).toBe("false");
+    expect(photosTab.getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("ArrowRight moves focus and switches the active tab; ArrowLeft wraps around", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: { gallery: { categories: [], sliders: [], tiles: [] } },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const panel = mountSectionPanel(TABBED_SECTION, { api, opQueue: fakeQueue() });
+    await flush();
+    document.body.appendChild(panel.element); // focus() needs real DOM attachment
+
+    const tabs = panel.element.querySelectorAll<HTMLButtonElement>(".wx-section-tab");
+    const [categoriesTab, photosTab] = tabs;
+    if (categoriesTab === undefined || photosTab === undefined) throw new Error("missing tabs");
+    categoriesTab.focus();
+
+    categoriesTab.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    expect(document.activeElement).toBe(photosTab);
+    expect(photosTab.getAttribute("aria-selected")).toBe("true");
+    expect(categoriesTab.getAttribute("aria-selected")).toBe("false");
+
+    photosTab.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    expect(document.activeElement).toBe(categoriesTab); // wraps past the last tab
+    expect(categoriesTab.getAttribute("aria-selected")).toBe("true");
+
+    document.body.removeChild(panel.element);
+  });
+
+  it("a category rename staged while its tab is hidden already shows decoded in the OTHER tab's dropdown once switched to (Inv 30 across tabs)", async () => {
+    const api = fakeApi({
+      getContent: vi.fn(async () => ({
+        content: {
+          gallery: {
+            categories: [{ value: "lips", label: "Lips" }],
+            sliders: [SLIDER_ITEM],
+            tiles: [],
+          },
+        },
+        bindings: { page: "gallery", fields: [] },
+      })),
+    });
+    const panel = mountSectionPanel(TABBED_SECTION, { api, opQueue: fakeQueue() });
+    await flush();
+
+    // Still on the default "Categories" tab — rename "Lips" while "Photos" is hidden.
+    const labelInput = panel.element.querySelectorAll<HTMLInputElement>(".wx-section-field-input")[1];
+    if (labelInput === undefined) throw new Error("no label input");
+    labelInput.value = "Lip Treatments";
+    labelInput.dispatchEvent(new Event("blur"));
+    await flush();
+
+    const tabs = panel.element.querySelectorAll<HTMLButtonElement>(".wx-section-tab");
+    const photosTab = tabs[1];
+    if (photosTab === undefined) throw new Error("no Photos tab");
+    photosTab.click();
+
+    const select = panel.element.querySelectorAll<HTMLSelectElement>(".wx-section-field-select")[0];
+    if (select === undefined) throw new Error("no choice select");
+    expect(Array.from(select.options).map((o) => o.textContent)).toEqual(["Lip Treatments"]);
   });
 });

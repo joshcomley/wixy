@@ -30,6 +30,7 @@ import {
   decodeCommonEntities,
   deleteItemAt,
   fieldDirty,
+  groupCollectionsByTab,
   hideAllItems,
   imageFieldValue,
   isNewItemComplete,
@@ -197,6 +198,13 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
   const collectionState = new Map<string, SectionItem[]>();
   const savedState = new Map<string, SectionItem[]>();
   const collectionBodies = new Map<string, HTMLElement>();
+
+  /** Which tab strip label is currently visible (decisions/00125) — `null`
+   * until the first render picks a default. Survives `load()` re-renders (a
+   * background refresh must not yank her back to the first tab while she's
+   * working on a later one), and is simply unused while the section has ≤1
+   * distinct tab group. */
+  let activeTab: string | null = null;
 
   /** A single panel-wide stack of pre-mutation snapshots (bounded), not one
    * per collection — "Undo last" means "undo what I just did", regardless of
@@ -1319,6 +1327,110 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     return section;
   }
 
+  /** Renders every collection into `body` — grouped under a tab strip when
+   * the section declares more than one distinct `tab` (decisions/00125), or
+   * sequentially with no tab UI at all otherwise (today's behavior, and
+   * every OTHER section's, unchanged). Purely a layout/visibility concern:
+   * `collectionBodies` still maps every collection's path to its own inner
+   * body element regardless of which tab panel contains it, so `stageLocal`/
+   * `undoLast`/`discardUnsaved`/`saveNow` and `dependentCollectionsOf`'s
+   * cross-collection re-render (Inv 30) all work completely unchanged —
+   * including updating a collection that lives on a currently-HIDDEN tab, so
+   * switching to it later already shows the live result. */
+  function renderBody(): void {
+    body.innerHTML = "";
+    collectionBodies.clear();
+
+    const groups = groupCollectionsByTab(section.collections);
+    if (groups.length <= 1) {
+      for (const collection of section.collections) {
+        body.appendChild(renderCollectionSection(collection));
+        renderCollectionBody(collection);
+      }
+      return;
+    }
+
+    const firstGroup = groups[0];
+    if (
+      (activeTab === null || !groups.some((group) => group.tab === activeTab)) &&
+      firstGroup !== undefined
+    ) {
+      activeTab = firstGroup.tab;
+    }
+
+    const tabList = document.createElement("div");
+    tabList.className = "wx-section-tablist";
+    tabList.setAttribute("role", "tablist");
+    body.appendChild(tabList);
+
+    const tabButtons: HTMLButtonElement[] = [];
+    const panelsByTab = new Map<string, HTMLElement>();
+
+    function activateTab(tab: string): void {
+      activeTab = tab;
+      for (const button of tabButtons) {
+        const selected = button.dataset["tab"] === tab;
+        button.setAttribute("aria-selected", selected ? "true" : "false");
+        button.tabIndex = selected ? 0 : -1;
+      }
+      for (const [panelTab, panel] of panelsByTab) panel.hidden = panelTab !== tab;
+    }
+
+    const ARROW_KEYS = ["ArrowLeft", "ArrowRight", "Home", "End"];
+
+    groups.forEach((group, groupIndex) => {
+      const tabId = `wx-section-tab-${section.id}-${groupIndex}`;
+      const panelId = `wx-section-tabpanel-${section.id}-${groupIndex}`;
+
+      const button = document.createElement("button");
+      button.type = "button";
+      button.id = tabId;
+      button.className = "wx-section-tab";
+      button.textContent = group.tab;
+      button.dataset["tab"] = group.tab;
+      button.setAttribute("role", "tab");
+      button.setAttribute("aria-controls", panelId);
+      button.addEventListener("click", () => activateTab(group.tab));
+      // Full ARIA tabs keyboard pattern (automatic activation): arrow keys
+      // both move focus AND switch the visible panel, matching how a native
+      // browser tab strip behaves — Enter/Space activation comes free from
+      // the underlying <button>.
+      button.addEventListener("keydown", (event) => {
+        if (!ARROW_KEYS.includes(event.key)) return;
+        event.preventDefault();
+        const currentIndex = tabButtons.indexOf(button);
+        let nextIndex = currentIndex;
+        if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % tabButtons.length;
+        else if (event.key === "ArrowLeft") {
+          nextIndex = (currentIndex - 1 + tabButtons.length) % tabButtons.length;
+        } else if (event.key === "Home") nextIndex = 0;
+        else if (event.key === "End") nextIndex = tabButtons.length - 1;
+        const next = tabButtons[nextIndex];
+        const nextTab = next?.dataset["tab"];
+        if (next === undefined || nextTab === undefined) return;
+        activateTab(nextTab);
+        next.focus();
+      });
+      tabButtons.push(button);
+      tabList.appendChild(button);
+
+      const panel = document.createElement("div");
+      panel.id = panelId;
+      panel.className = "wx-section-tab-panel";
+      panel.setAttribute("role", "tabpanel");
+      panel.setAttribute("aria-labelledby", tabId);
+      panel.tabIndex = 0;
+      for (const collection of group.collections) {
+        panel.appendChild(renderCollectionSection(collection));
+        renderCollectionBody(collection);
+      }
+      panelsByTab.set(group.tab, panel);
+      body.appendChild(panel);
+    });
+
+    if (activeTab !== null) activateTab(activeTab);
+  }
+
   async function load(): Promise<void> {
     const [content] = await Promise.all([api.getContent(section.page), refreshDraftState()]);
     for (const collection of section.collections) {
@@ -1328,12 +1440,7 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     }
     undoStack.length = 0;
     if (destroyed) return;
-    body.innerHTML = "";
-    collectionBodies.clear();
-    for (const collection of section.collections) {
-      body.appendChild(renderCollectionSection(collection));
-      renderCollectionBody(collection);
-    }
+    renderBody();
     refreshSaveBar();
   }
 

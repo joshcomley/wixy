@@ -21,6 +21,7 @@
           "label": "Category names",
           "itemNoun": "category",
           "schema": "gallery-category",
+          "tab": "Categories",
           "fields": [
             {
               "key": "value",
@@ -37,6 +38,7 @@
           "itemNoun": "photo pair",
           "schema": "gallery-slider",
           "alignAspect": "640:360",
+          "tab": "Photos",
           "fields": [
             { "key": "before", "kind": "image", "label": "Before photo" },
             { "key": "after", "kind": "image", "label": "After photo" },
@@ -52,6 +54,7 @@
           "label": "Tap-to-zoom photos",
           "itemNoun": "photo",
           "schema": "gallery-tile",
+          "tab": "Photos",
           "fields": [
             { "key": "img", "kind": "image", "label": "Photo" },
             { "key": "title", "kind": "text", "label": "Caption", "required": true },
