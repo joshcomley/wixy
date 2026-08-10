@@ -10,8 +10,11 @@ class TestPageUrl:
     def test_index_maps_to_root(self) -> None:
         assert page_url("index") == "/"
 
-    def test_other_pages_map_to_html_files(self) -> None:
-        assert page_url("about") == "/about.html"
+    def test_other_pages_map_to_extensionless_urls(self) -> None:
+        """decisions/00128: clean URLs, no `.html` suffix (supersedes spec/02 §3's
+        original `/<slug>.html` convention — the on-disk file is still `about.html`,
+        `build.py` is unchanged; only the emitted URL shape changed)."""
+        assert page_url("about") == "/about"
 
 
 class TestBuildNav:
@@ -23,7 +26,7 @@ class TestBuildNav:
         nav = build_nav(pages, {})
         assert nav == [
             {"label": "Home", "href": "/"},
-            {"label": "About", "href": "/about.html"},
+            {"label": "About", "href": "/about"},
         ]
 
     def test_excludes_pages_not_in_nav(self) -> None:
@@ -37,7 +40,7 @@ class TestBuildNav:
     def test_falls_back_to_slug_when_no_nav_label(self) -> None:
         pages: dict[str, JsonObject] = {"faq": {"meta": {"inNav": True, "navOrder": 1}}}
         nav = build_nav(pages, {})
-        assert nav == [{"label": "faq", "href": "/faq.html"}]
+        assert nav == [{"label": "faq", "href": "/faq"}]
 
     def test_appends_nav_extra(self) -> None:
         pages: dict[str, JsonObject] = {}

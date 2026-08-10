@@ -33,9 +33,10 @@ Domain terms and status machines. The normative source for the content-model ter
 - **`meta` block** — the reserved per-page content object (`title`, `description`,
   `ogImage`, `navLabel`, `inNav`, `navOrder`) the builder consumes for `<head>` injection
   and nav derivation. No binding annotation needed.
-- **slug** — a page identifier `[a-z0-9-]+`; `pages/<slug>.html` → `/<slug>.html` (the home
-  page's slug is **`index`** everywhere the model threads; `home` survives only in
-  `<body data-page="home">`).
+- **slug** — a page identifier `[a-z0-9-]+`; `pages/<slug>.html` → `/<slug>` (the published
+  URL, extensionless — decisions/00128 supersedes the original `/<slug>.html` shape; the
+  on-disk template/output filename is still `<slug>.html`, unchanged; the home page's slug is
+  **`index`** everywhere the model threads; `home` survives only in `<body data-page="home">`).
 - **`theme.css`** — builder-emitted `:root{ --<color>:…; --shadow:…; --font-<role>:… }` from
   `theme/theme.json`; color keys are the CSS var names minus `--`. Linked before `site.css`.
 

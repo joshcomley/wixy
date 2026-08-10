@@ -23,6 +23,22 @@ prebuilt static files, path-traversal-guarded (`_resolve_within_build_dir`). Bef
 bootstrap there is no `live.json` → **503 plain text** `"Site not yet published"` (never a
 crash). A miss falls back to the build's `404.html`.
 
+**Clean URLs (decisions/00128).** `_resolve_within_build_dir` delegates to `builder.serving.
+resolve_site_path` (shared with the dev server, `builder/cli.py:cmd_serve`'s
+`_CleanUrlHandler`): the literal path first (`/about.html` → `about.html`, `/` → `index.html`),
+and on a miss — only when the request path doesn't end in `/` and its final segment has no
+`.` — a retry with `.html` appended (`/about` → `about.html`, `/index` → `index.html` too, a
+side effect of the same rule, not special-cased). A trailing slash (`/about/`) or an
+already-extensioned miss (a genuinely missing asset) never gets the retry, so both 404 —
+reproducing GitHub Pages' own behavior exactly (verified live against a real Pages
+deployment: `/about` and `/about.html` both 200, `/about/` 404, no directory listing). There
+are deliberately **no redirects** either direction — Pages itself can't redirect, so the
+server mirrors Pages rather than diverging from it; the legacy `.html`-suffixed shape keeps
+resolving forever. `_cache_control_for` keys off the RESOLVED path's suffix, so it stays
+correct automatically regardless of which shape the request used. `page_url` (`builder/
+nav.py`) is what the engine *emits* (nav hrefs, canonical/og:url, sitemap `<loc>`) — this
+resolver is what it *accepts*, a strictly wider set.
+
 ## The live pointer (`live_pointer.py`)
 
 `live.json` = `{sha, version, buildDir}`. `save_live_pointer` writes atomically

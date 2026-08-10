@@ -211,6 +211,13 @@ process) off a fixed, non-configurable container path — see that module and
 | GET,HEAD | `/` | `routes_public.py:get_root` | none | `FileResponse index.html` from live build; **503 plain text** `"Site not yet published"` if no live pointer |
 | GET,HEAD | `/{path}` | `routes_public.py:get_path` | none | `FileResponse` from live build (**registered last** — catch-all); 503 plain text; 404 → `404.html` or `"Not found"` |
 
+Clean URLs (decisions/00128): `/{path}` resolves an extensionless path (`/about`) to
+`<path>.html` with no redirect when the literal path misses — `builder.serving.
+resolve_site_path`, shared with the dev server (`builder/cli.py:cmd_serve`). A trailing
+slash (`/about/`) never falls back and 404s, matching GitHub Pages' own behavior (verified
+live) — no directory-index resolution either. The legacy `/<slug>.html` shape keeps
+resolving forever (never redirected away).
+
 Router include order in `create_app` is load-bearing: internal → version → preview →
 admin_api → chat → engine → ai → system → versions → (inline `/admin`, uxer) →
 static mounts → **public last**.

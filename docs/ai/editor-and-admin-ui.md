@@ -609,6 +609,9 @@ carries `data-wx-control` in the template, decisions/00077);
 `navigation.ts` (internal-link interception — `resolveInternalPageSlug`/`handlePlainAnchorClick`
 in overlay.ts also drive browse-mode navigation unchanged; browse mode only widens WHICH
 clicks reach that path, from "unbound anchors only" to "every anchor", decisions/00091).
+`resolveInternalPageSlug` matches BOTH URL shapes a same-origin page link can carry
+(decisions/00128): clean (`/<slug>`, `builder.nav.page_url`'s current convention) and legacy
+(`/<slug>.html`, kept forever — no redirects anywhere) — either resolves to the same slug.
 
 ## Build
 

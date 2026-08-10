@@ -24,6 +24,10 @@
   ],
   "links": [
     [
+      "CottageAesthetics",
+      "/"
+    ],
+    [
       "Book Now",
       "/#"
     ],
@@ -69,99 +73,95 @@
     ],
     [
       "About",
-      "/about.html"
+      "/about"
     ],
     [
       "About",
-      "/about.html"
+      "/about"
     ],
     [
       "About",
-      "/about.html"
+      "/about"
     ],
     [
       "Aftercare",
-      "/aftercare.html"
+      "/aftercare"
     ],
     [
       "Contact",
-      "/contact.html"
+      "/contact"
     ],
     [
       "Contact",
-      "/contact.html"
+      "/contact"
     ],
     [
       "Contact",
-      "/contact.html"
+      "/contact"
     ],
     [
       "FAQ",
-      "/faq.html"
+      "/faq"
     ],
     [
       "FAQ",
-      "/faq.html"
+      "/faq"
     ],
     [
       "FAQ",
-      "/faq.html"
+      "/faq"
     ],
     [
       "Before & After",
-      "/gallery.html"
+      "/gallery"
     ],
     [
       "Before & After",
-      "/gallery.html"
+      "/gallery"
     ],
     [
       "Before & After",
-      "/gallery.html"
-    ],
-    [
-      "CottageAesthetics",
-      "/index.html"
+      "/gallery"
     ],
     [
       "Clinic Policies",
-      "/policies.html"
+      "/policies"
     ],
     [
       "Read more reviews",
-      "/reviews.html"
+      "/reviews"
     ],
     [
       "Reviews",
-      "/reviews.html"
+      "/reviews"
     ],
     [
       "Reviews",
-      "/reviews.html"
+      "/reviews"
     ],
     [
       "Reviews",
-      "/reviews.html"
+      "/reviews"
     ],
     [
       "Treatments",
-      "/treatments.html"
+      "/treatments"
     ],
     [
       "Treatments",
-      "/treatments.html"
+      "/treatments"
     ],
     [
       "Treatments",
-      "/treatments.html"
+      "/treatments"
     ],
     [
       "View Treatments",
-      "/treatments.html"
+      "/treatments"
     ],
     [
       "View the full treatment menu",
-      "/treatments.html"
+      "/treatments"
     ],
     [
       "Facebook",

@@ -5,13 +5,17 @@
 //
 // A link is "internal" when it resolves (same-origin) to a real published page
 // path this server would serve — `builder.nav.page_url`'s own convention: "/" for
-// the home page, "/<slug>.html" for everything else (the ONLY shape the builder
-// ever emits for an internal href, spec/02 §3's nav derivation). Anything else (a
-// different origin, an /admin/* or /api/* path, a path that doesn't match that
-// convention, or a non-http(s) scheme like mailto:/tel:) is left alone or treated
-// as external — never hijacked into a preview navigation.
+// the home page, "/<slug>" for everything else (decisions/00128 supersedes the
+// original spec/02 §3 "/<slug>.html" shape — clean URLs, no `.html` suffix). The
+// legacy "/<slug>.html" shape is matched too: it keeps resolving forever (no
+// redirects anywhere, decisions/00128), so a hand-typed or not-yet-migrated old-
+// style link must stay interceptable in preview exactly like a clean one. Anything
+// else (a different origin, an /admin/* or /api/* path, a path that matches
+// neither shape, or a non-http(s) scheme like mailto:/tel:) is left alone or
+// treated as external — never hijacked into a preview navigation.
 
-const PAGE_PATH = /^\/([A-Za-z0-9_-]+)\.html$/;
+const PAGE_PATH_CLEAN = /^\/([A-Za-z0-9_-]+)$/;
+const PAGE_PATH_LEGACY_HTML = /^\/([A-Za-z0-9_-]+)\.html$/;
 
 /** The preview-equivalent page slug for an anchor's href, or `null` if the link
  * isn't a same-origin real-page link. Reads the raw `href` ATTRIBUTE (not the
@@ -41,7 +45,7 @@ export function resolveInternalPageSlug(anchor: Element, win: Window): string | 
   }
   if (url.origin !== win.location.origin) return null;
   if (url.pathname === "/") return "index";
-  const match = PAGE_PATH.exec(url.pathname);
+  const match = PAGE_PATH_CLEAN.exec(url.pathname) ?? PAGE_PATH_LEGACY_HTML.exec(url.pathname);
   return match?.[1] ?? null;
 }
 

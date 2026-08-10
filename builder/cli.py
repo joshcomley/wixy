@@ -8,11 +8,15 @@ import functools
 import http.server
 import json
 import sys
+from http import HTTPStatus
+from io import BytesIO
 from pathlib import Path
+from typing import BinaryIO
 
 from builder.build import build_site
 from builder.config import load_project_config
 from builder.render import SiteSource, load_site_source
+from builder.serving import resolve_site_path
 from builder.tests.parity.runner import (
     DEFAULT_MOBILE_SLUGS,
     default_baseline_dir,
@@ -22,6 +26,31 @@ from builder.tests.parity.runner import (
 )
 from builder.theme import load_theme
 from builder.validate import validate_site
+
+
+class _CleanUrlHandler(http.server.SimpleHTTPRequestHandler):
+    """Dev-serve mirror of the production/GitHub Pages resolution contract
+    (decisions/00128): an extensionless path (`/about`) resolves to `about.html` with
+    no redirect, and `/about/` (or a genuinely missing asset) 404s rather than falling
+    back to a directory listing — `SimpleHTTPRequestHandler`'s own inherited directory
+    handling would do exactly that for a real subdirectory (e.g. `/images/`), so
+    resolution is fully replaced via `resolve_site_path` (shared with the production
+    server) rather than layered on top of it. On a hit, `self.path` is rewritten to
+    the resolved file's own request-relative path before delegating to the base class,
+    so its normal file-serving (content-type, conditional GET, HEAD) still applies
+    unmodified — only the miss/redirect/listing paths are ever bypassed.
+    """
+
+    def send_head(self) -> BytesIO | BinaryIO | None:
+        request_path = self.path.split("?", 1)[0].split("#", 1)[0]
+        directory = Path(self.directory).resolve()
+        resolved = resolve_site_path(directory, request_path)
+        if resolved is None:
+            self.send_error(HTTPStatus.NOT_FOUND, "File not found")
+            return None
+        self.path = "/" + resolved.relative_to(directory).as_posix()
+        result: BytesIO | BinaryIO | None = super().send_head()
+        return result
 
 
 def _load_source(
@@ -91,7 +120,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     )
     out_dir = Path(args.out).resolve()
     build_site(root, source, out_dir)
-    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(out_dir))
+    handler = functools.partial(_CleanUrlHandler, directory=str(out_dir))
     server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), handler)
     print(f"serve: http://127.0.0.1:{args.port}/  (built from {root})")
     try:
