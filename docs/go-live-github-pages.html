@@ -136,6 +136,11 @@
   tr:nth-child(even) td { background: #f7f5ec; }
   .records-table td:first-child { white-space: nowrap; font-weight: 600; }
   .records-table code { white-space: nowrap; }
+  table:not(.records-table) code,
+  table:not(.records-table) .domain {
+    white-space: normal;
+    word-break: break-word;
+  }
   .checklist { list-style: none; padding-left: 0; }
   .checklist li {
     padding-left: 1.7rem;
@@ -277,11 +282,58 @@ steps in this guide once.</p>
 
 <ol>
   <li>Sign in at <a href="https://www.name.com">name.com</a> &rarr; <strong>My Domains</strong>
-    &rarr; <span class="domain">cottageaesthetics.co.uk</span> &rarr;
-    <strong>DNS Records</strong>.</li>
+    &rarr; <span class="domain">cottageaesthetics.co.uk</span>.</li>
 </ol>
 
-<h3>First, remove anything that conflicts</h3>
+<h3>First: take the domain&rsquo;s DNS control back from Wix</h3>
+<p>As of 10 August 2026, <span class="domain">cottageaesthetics.co.uk</span>&rsquo;s DNS is
+still controlled by Wix, not by Name.com &mdash; even though the domain itself is registered at
+Name.com. That is why the old Wix website is still what visitors see today, and it is also why
+the records you add further down this page will have <strong>no effect until this is
+fixed</strong>: Name.com&rsquo;s DNS Records page only takes effect once Name.com is actually
+the one answering DNS lookups for the domain, and right now Wix is.</p>
+
+<ol>
+  <li>Still on <span class="domain">cottageaesthetics.co.uk</span>&rsquo;s page at Name.com,
+    find the <strong>Nameservers</strong> section (sometimes shown as part of &ldquo;Domain
+    Details&rdquo;).</li>
+  <li>Switch it back to Name.com&rsquo;s own default nameservers &mdash; look for wording like
+    <strong>&ldquo;Use Name.com default nameservers&rdquo;</strong>, or a toggle between
+    &ldquo;Name.com default&rdquo; and &ldquo;Custom&rdquo;. The exact wording can vary; the
+    goal is simply that Name.com, not Wix, ends up listed as the domain&rsquo;s nameserver
+    provider.</li>
+  <li>Save the change.</li>
+</ol>
+
+<div class="callout important">
+  <span class="label">This is the actual switchover moment</span>
+  Once this change spreads across the internet, the old Wix site will stop being what visitors
+  see at <span class="domain">cottageaesthetics.co.uk</span> &mdash; that is the whole point of
+  this step. Do it in the same sitting as adding the records further down this page, so the new
+  site takes over as soon as the old one drops away, rather than the domain going quiet in
+  between. Nameserver changes usually spread within a few hours; occasionally it can take
+  24&ndash;48 hours.
+</div>
+
+<p>The domain itself &mdash; <span class="domain">cottageaesthetics.co.uk</span> &mdash; is
+registered at Name.com, not at Wix. Nothing about this step, or anything at Wix, affects who
+owns it. Once the new site is live on the domain, the Wix subscription can be cancelled with no
+risk to the domain at all.</p>
+
+<p><strong>You know it worked when</strong> this command lists Name.com&rsquo;s own
+nameservers, not Wix&rsquo;s:</p>
+<pre>nslookup -type=NS cottageaesthetics.co.uk 8.8.8.8</pre>
+<p>While it still lists anything ending in <code>wixdns.net</code>, the switch hasn&rsquo;t
+spread yet &mdash; wait and check again.</p>
+
+<p>You do not have to wait for that switch to spread before continuing. Carry straight on to
+the records below and add them at Name.com now, in the same sitting &mdash; Name.com lets you
+stage records on its DNS Records page immediately, even before the nameserver switch has taken
+effect. They will simply start working on their own once it does.</p>
+
+<h3>Next, remove anything that conflicts</h3>
+<p>On <span class="domain">cottageaesthetics.co.uk</span>&rsquo;s <strong>DNS Records</strong>
+page:</p>
 <ul>
   <li>Delete any existing <strong>A</strong>, <strong>AAAA</strong>, <strong>ANAME</strong> or
     <strong>ALIAS</strong> record on the bare domain (Host column blank, or showing
@@ -318,12 +370,16 @@ as <code>@</code> automatically). Set <strong>TTL</strong> to 300 seconds if you
 <code>https://</code>, no trailing slash, and it does not include the repository name.</p>
 
 <div class="callout important">
-  <span class="label">Using a different nameserver?</span>
-  Check &ldquo;Domain Details&rdquo; for <span class="domain">cottageaesthetics.co.uk</span>.
-  If it lists Name.com&rsquo;s own default nameservers, the steps above are the right place. If
-  it instead lists something else (for example Cloudflare), make these same DNS edits at
-  <em>that</em> provider instead &mdash; Name.com&rsquo;s own DNS Records page won&rsquo;t be
-  the one actually in effect.
+  <span class="label">Still seeing Wix, or something else, under Nameservers?</span>
+  If you completed &ldquo;First: take the domain&rsquo;s DNS control back from Wix&rdquo; above,
+  the nameservers should now be Name.com&rsquo;s own defaults, and the records page above is the
+  right &mdash; and only &mdash; place to make these edits. If &ldquo;Domain Details&rdquo; still
+  shows anything ending in <code>wixdns.net</code>, that step either wasn&rsquo;t completed or
+  hasn&rsquo;t finished spreading yet: go back and do it, rather than adding these records inside
+  Wix&rsquo;s own DNS manager instead. Editing DNS inside Wix would keep the site dependent on
+  Wix, which is the opposite of what this whole guide is for. If &ldquo;Domain Details&rdquo;
+  instead shows a different third-party nameserver you recognise (for example Cloudflare) and
+  that was a deliberate choice, make these same DNS edits at <em>that</em> provider instead.
 </div>
 
 <h2 id="part3">4. Part 3 &mdash; back in GitHub</h2>
@@ -367,6 +423,9 @@ as <code>@</code> automatically). Set <strong>TTL</strong> to 300 seconds if you
 <ul class="checklist">
   <li><code>https://cottageaesthetics.co.uk</code> loads the site with a padlock (secure)
     icon.</li>
+  <li>The old Wix version of the site no longer appears at
+    <span class="domain">cottageaesthetics.co.uk</span> &mdash; expected, and the whole point of
+    this changeover.</li>
   <li><code>https://www.cottageaesthetics.co.uk</code> redirects to the same place.</li>
   <li><code>https://joshcomley.github.io/cottage-aesthetics-preview/</code> also redirects to
     your domain.</li>
@@ -391,6 +450,15 @@ change is there.</p>
     <tr><th>Symptom</th><th>What&rsquo;s happening</th><th>What to do</th></tr>
   </thead>
   <tbody>
+    <tr>
+      <td>You added the records at Name.com but absolutely nothing changed</td>
+      <td>The domain&rsquo;s nameservers still point at Wix &mdash; the &ldquo;First: take the
+        domain&rsquo;s DNS control back from Wix&rdquo; step (Part 2) either wasn&rsquo;t done,
+        or hasn&rsquo;t finished spreading yet</td>
+      <td>Run <code>nslookup -type=NS cottageaesthetics.co.uk 8.8.8.8</code>. If it lists
+        anything ending in <code>wixdns.net</code>, do (or redo) that step, then wait and check
+        again</td>
+    </tr>
     <tr>
       <td>The DNS check on the Pages settings page won&rsquo;t turn green</td>
       <td>Either the records haven&rsquo;t reached everywhere yet, or something doesn&rsquo;t

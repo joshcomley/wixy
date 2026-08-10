@@ -97,3 +97,12 @@ decisions/00013 for the operational detail.
   `wixy-live` as the single source of truth for "what publish/restore last pointed at" — don't
   let a workflow or a manual step derive "what's live" from `main` HEAD by convenience; that
   reintroduces exactly the guardrail violation this decision exists to prevent.
+
+## Correction (2026-08-10)
+
+The "verified end-to-end with the real domain... production health confirmed" claim above
+covered the built pages' own domain-stamping (canonical link, sitemap, robots.txt — all
+correctly emitted for `cottageaesthetics.co.uk`), not real-world DNS resolution to that domain.
+The domain's nameservers were still Wix's own the entire time that claim was made — real
+visitors to `cottageaesthetics.co.uk` were seeing the old Wix site, not GitHub Pages. See
+decisions/00129 for the measurement and the go-live guide fix.
