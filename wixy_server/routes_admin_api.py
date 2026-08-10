@@ -406,6 +406,38 @@ async def get_theme(request: Request) -> JsonObject:
 
 
 # ---------------------------------------------------------------------------
+# GET /api/admin/global (decisions/00127) — the site-wide `_global.json`
+# scalars (phone/email/address, …), for the Settings > Contact panel. A
+# sibling read to `/theme` above: same shape of thing (one non-page-slug
+# content bucket), same reason it needs its OWN route rather than reusing
+# `/content/{page}` — `_build_content_locked` looks up `merged.page_contents`
+# (real page slugs only) and additionally returns a `bindings` map that has
+# no equivalent concept for `_global` (a binding is "this page's template
+# uses this key"; `_global` keys are referenced from ARBITRARY pages, not
+# one). The draft-write side already treats `_global` as an ordinary `file`
+# bucket (`opTargeting.directOpTarget`, spec/02 §8) — this route is the
+# missing read-side counterpart, not a new concept.
+# ---------------------------------------------------------------------------
+
+
+def _build_global(project: ProjectConfig, paths: ProjectPaths) -> JsonObject:
+    source = build_site_source(project, paths.repo)
+    overlay = _load_overlay_for(paths)
+    merged = merge_overlay(source, overlay)
+    return {"global": merged.global_content}
+
+
+@router.get("/global", response_model=None)
+async def get_global(request: Request) -> JsonObject:
+    project: ProjectConfig = request.app.state.project
+    paths: ProjectPaths = request.app.state.paths
+    try:
+        return await anyio.to_thread.run_sync(_build_global, project, paths)
+    except CheckoutError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
 # PATCH + DELETE /api/admin/draft
 # ---------------------------------------------------------------------------
 

@@ -1061,6 +1061,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
         fontScaleController,
         shortcutsController,
         themeEditorController,
+        opQueue,
         onNavigate: (page) => navigateTo({ kind: "settings", page }, win),
         onResetAll: resetAllSettings,
       });

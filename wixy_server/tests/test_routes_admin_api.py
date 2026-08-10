@@ -103,6 +103,21 @@ def _write_theme(repo_dir: Path) -> None:
     )
 
 
+def _write_global_content(repo_dir: Path) -> None:
+    (repo_dir / "content" / "_global.json").write_text(
+        json.dumps(
+            {
+                "phone": "07401 562 462",
+                "phoneHref": "tel:07401562462",
+                "email": "hello@example.invalid",
+                "emailHref": "mailto:hello@example.invalid",
+                "address": "8 Walton Cottage, Walton Road,<br>Hartlebury, Kidderminster, DY10 4JA",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def _write_project_registry(root: Path, repo: Path) -> None:
     (root / "projects").mkdir(parents=True)
     (root / "projects" / "test.json").write_text(
@@ -161,6 +176,27 @@ def origin_repo_with_theme(tmp_path: Path) -> Path:
 def wixy_repo_root_themed(tmp_path: Path, origin_repo_with_theme: Path) -> Path:
     root = tmp_path / "wixy-repo-themed"
     _write_project_registry(root, origin_repo_with_theme)
+    return root
+
+
+@pytest.fixture
+def origin_repo_with_global(tmp_path: Path) -> Path:
+    origin = tmp_path / "origin-global"
+    origin.mkdir()
+    _git(["init", "--initial-branch=main"], origin)
+    _git(["config", "user.email", "test@example.com"], origin)
+    _git(["config", "user.name", "Test"], origin)
+    _write_site_repo(origin)
+    _write_global_content(origin)
+    _git(["add", "."], origin)
+    _git(["commit", "-m", "initial"], origin)
+    return origin
+
+
+@pytest.fixture
+def wixy_repo_root_with_global(tmp_path: Path, origin_repo_with_global: Path) -> Path:
+    root = tmp_path / "wixy-repo-global"
+    _write_project_registry(root, origin_repo_with_global)
     return root
 
 
@@ -652,6 +688,79 @@ class TestGetTheme:
         with TestClient(app) as client:
             response = client.get("/api/admin/theme")
         assert response.status_code == 404
+
+
+class TestGetGlobal:
+    """decisions/00127: the read-side counterpart to draft ops' existing
+    `file: "_global"` bucket — Settings > Contact reads phone/email/address
+    from here."""
+
+    def test_returns_the_merged_global_content(
+        self, storage_root: Path, wixy_repo_root_with_global: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_with_global)
+        with TestClient(app) as client:
+            response = client.get("/api/admin/global")
+        assert response.status_code == 200
+        glob = response.json()["global"]
+        assert glob["phone"] == "07401 562 462"
+        assert glob["email"] == "hello@example.invalid"
+        assert (
+            glob["address"]
+            == "8 Walton Cottage, Walton Road,<br>Hartlebury, Kidderminster, DY10 4JA"
+        )
+
+    def test_an_untouched_global_json_reads_as_an_empty_object_not_an_error(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        # `wixy_repo_root` (unlike `wixy_repo_root_with_global`) points at a repo
+        # whose `_global.json` is `{}` — unlike `theme` (which 404s when absent),
+        # `_global.json` always exists once a site is migrated (spec/02 §5) and an
+        # empty object is a completely normal, valid state, not an error.
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/admin/global")
+        assert response.status_code == 200
+        assert response.json()["global"] == {}
+
+    def test_global_reflects_a_drafted_overlay_op(
+        self, storage_root: Path, wixy_repo_root_with_global: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_with_global)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": 0,
+                    "ops": [{"file": "_global", "path": "phone", "value": "01234 567890"}],
+                },
+            )
+            response = client.get("/api/admin/global")
+        assert response.json()["global"]["phone"] == "01234 567890"
+        # An untouched key survives the merge unchanged.
+        assert response.json()["global"]["email"] == "hello@example.invalid"
+
+    def test_a_discarded_op_reverts_to_the_checkout_value(
+        self, storage_root: Path, wixy_repo_root_with_global: Path
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root_with_global)
+        with TestClient(app) as client:
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": 0,
+                    "ops": [{"file": "_global", "path": "phone", "value": "01234 567890"}],
+                },
+            )
+            client.patch(
+                "/api/admin/draft",
+                json={
+                    "expectedRev": 1,
+                    "ops": [{"file": "_global", "path": "phone", "discard": True}],
+                },
+            )
+            response = client.get("/api/admin/global")
+        assert response.json()["global"]["phone"] == "07401 562 462"
 
 
 class TestPatchDraft:

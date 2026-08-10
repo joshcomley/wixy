@@ -285,6 +285,43 @@ theme), `zoom.ts`, `fontScale.ts`, `settingsPanel.ts`, `shortcuts.ts`, `contrast
 `screenshot.ts` — is separate from the published-site theme (easy to conflate; decisions/
 00045–00050).
 
+**`settingsPanel.ts`** (`/admin/settings[/<page>]`, Uxer's Settings-view mandate) — one tab
+strip, one `SettingsPage` union (`general`/`appearance`/`shortcuts`/`contact`/`engine`/`ai`/
+`system`, `router.ts`), one `pageRenderers` dispatch table; every tab is a plain function
+`(deps, teardownFns) => HTMLElement`, no shared base class. Most tabs edit LOCAL browser
+state only (`general`'s quick theme/zoom/font-size toggles, `appearance`'s full theme editor,
+`shortcuts`' rebind list) or are read-only server status + action triggers (`engine`'s
+update/rollback, `ai`'s budget, `system`'s backup/disk/publish summary — spec/independence
+04-06, always-exists-but-degrades-gracefully on editions where they don't apply). **`contact`**
+(decisions/00127) is the one tab that WRITES persisted site content: `content/_global.json`'s
+`phone`/`email`/`address` — already a single shared source every page's template references
+via `@phone`/`@email`/`@address` (`builder/render.py`'s `resolved_global_content`, never
+hardcoded per-page), and the inline overlay editor already wrote edits back there correctly
+(`opTargeting.directOpTarget`, `@key` -> `{file:"_global", path:key}`); this tab is a
+dedicated, discoverable place to do the same edit, not a new mechanism. `GET /api/admin/global`
+(a direct sibling of `GET /api/admin/theme` — same shape of problem, one non-page-slug content
+bucket, `routes_admin_api.py`) reads the current merged value; each field auto-saves on
+`change` via `opQueue.enqueue({file:"_global", path:key, value})`, the SAME per-field
+auto-save/`discard:true`-reset pattern `themePanel.ts`'s color rows use — NOT the Before &
+After section's staged-save model (decisions/00118), which three scalar fields don't need. The
+address field is a `<textarea>`: the stored value embeds a literal `<br>` for its one line
+break (decisions/00075's plain-render-ready-HTML convention), so `addressToTextareaValue`/
+`textareaValueToAddress` (exported, pure, unit-tested directly) decode `<br>` -> `\n` for
+display and join typed lines back with `<br>` on save — showing her a literal `"<br>"` in a
+plain input would be a real, avoidable rough edge. **`phone`/`email` each have a DERIVED PAIR
+key** (`phoneHref`/`emailHref`) every real `tel:`/`mailto:` link on the site binds via
+`data-wx-href` — independently of the `data-wx="@phone"`/`"@email"` text binding, since
+`data-wx`/`data-wx-href` apply independently on the same element. `ContactFieldConfig.hrefKey`/
+`hrefKind` (+ the exported pure `deriveContactHref`) make `commit()` enqueue BOTH keys in the
+same batch and Reset discard both then reload the tab from the server — display and href must
+never move independently through this tab, a HIGH-severity gap a FINAL HANDOFF review caught
+before the first merge (decisions/00127 has the full incident). `address` has no href pair;
+`hrefKey` is simply absent from its `CONTACT_FIELDS` entry. `SettingsPanelDeps.opQueue:
+OpQueueLike | null` is the one dependency `contact` needs that no sibling tab does (mirrors
+`shell.ts`'s existing "theme" route null-guard — the brief window before the shell's own
+initial state fetch resolves — localized to this one tab rather than gating the whole settings
+route and regressing the other six's load speed).
+
 **`sectionPanel.ts` + `sectionPanelModel.ts`** (decisions/00098) — the registry-configured
 admin section editor (`state.adminSections`, Inv 1: no site literals in this module or
 anywhere else in the engine — `ca.json`'s `adminSections` array is the only place "Before &

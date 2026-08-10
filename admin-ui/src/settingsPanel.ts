@@ -11,9 +11,10 @@
 // editor lets them *tailor* one"). Keyboard Shortcuts: list every shortcut
 // (grouped by category), rebind, disable, reset to defaults.
 
-import type { AdminApi, AiBudgetStatus, EngineStatus, SystemStatus } from "./api";
+import type { AdminApi, AiBudgetStatus, EngineStatus, GlobalSettings, SystemStatus } from "./api";
 import { ApiError } from "./api";
 import { AA_LARGE_TEXT, AA_NORMAL_TEXT, contrastRatioHex, passesAA } from "./contrast";
+import type { OpQueueLike } from "./editView";
 import type { FontScaleController } from "./fontScale";
 import type { SettingsPage } from "./router";
 import {
@@ -36,6 +37,11 @@ export interface SettingsPanelDeps {
   fontScaleController: FontScaleController;
   shortcutsController: ShortcutsController;
   themeEditorController: ThemeEditorController;
+  /** `null` only in the brief window before the shell's own initial `/api/
+   * admin/state` fetch resolves (mirrors `shell.ts`'s "theme" route guard) —
+   * the Contact tab (decisions/00127) is the only tab here that WRITES
+   * server content, so it's the only one that needs this. */
+  opQueue: OpQueueLike | null;
   onNavigate: (page: SettingsPage) => void;
   /** Resets theme/zoom/font-scale/shortcuts/custom-theme to defaults AND
    * clears the persisted last-active-route — owned by shell.ts since it's
@@ -84,6 +90,7 @@ export function mountSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
     tabButton("General", "general"),
     tabButton("Appearance", "appearance"),
     tabButton("Keyboard Shortcuts", "shortcuts"),
+    tabButton("Contact", "contact"),
     tabButton("Engine", "engine"),
     tabButton("AI", "ai"),
     tabButton("System", "system"),
@@ -98,6 +105,7 @@ export function mountSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
     general: renderGeneral,
     appearance: renderAppearance,
     shortcuts: renderShortcuts,
+    contact: renderContact,
     engine: renderEngine,
     ai: renderAi,
     system: renderSystem,
@@ -714,6 +722,216 @@ function renderShortcuts(deps: SettingsPanelDeps, teardownFns: Array<() => void>
     unsubscribe();
   });
 
+  return wrap;
+}
+
+// -- Contact (decisions/00127) -----------------------------------------------
+// Phone/email/address live in `content/_global.json` (spec/02 §5) — already
+// a SINGLE shared source every page's template references via `@phone`/
+// `@email`/`@address` (never hardcoded per-page, `builder/render.py`), and
+// the inline overlay editor already writes edits back here correctly
+// (`opTargeting.directOpTarget`, `@key` -> `{file:"_global", path:key}`).
+// What was missing was a dedicated, discoverable place to edit them — she'd
+// otherwise have to know to click the text directly on some live page. This
+// tab is that place: plain auto-save-per-field editing, the same
+// `opQueue.enqueue`/`discard` pattern Appearance's color rows use (NOT the
+// staged-save model the Before & After section uses, decisions/00118 — three
+// scalar fields need no Undo stack or review step).
+
+/** `_global.json`'s `address` embeds a literal `<br>` for its one line break
+ * (the plain-text-render-ready-HTML convention, decisions/00075) — editing
+ * that as a raw text string would show her a literal "<br>" she'd have to
+ * understand and never break. A plain `<textarea>` where each line she types
+ * becomes one `<br>` on save is the honest, correct UI for a short multi-line
+ * address; these two pure conversions are the whole of that translation.
+ * Exported for direct unit testing (no DOM needed). */
+export function addressToTextareaValue(stored: string): string {
+  return stored.replace(/<br\s*\/?>/gi, "\n");
+}
+
+export function textareaValueToAddress(typed: string): string {
+  return typed
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .join("<br>");
+}
+
+/** `phone`/`email` are DISPLAY text; every actual `tel:`/`mailto:` LINK on the
+ * site (the footer partial, the Contact page's Call/Email cards) binds a
+ * SEPARATE `phoneHref`/`emailHref` key instead (`data-wx-href="@phoneHref"`)
+ * — `data-wx`/`data-wx-href` have always been independently bindable, this
+ * tab is just the first editor surface for a field pair that needs both kept
+ * in lockstep. Committing the display key alone would silently strand every
+ * link at its old value forever, with no error anywhere (caught in review,
+ * decisions/00127). `hrefKey`/`hrefKind` make that derivation a config-level
+ * fact for `commit()`/Reset to apply uniformly, rather than a one-off. */
+interface ContactFieldConfig {
+  key: string;
+  label: string;
+  hint: string;
+  inputType: "text" | "email" | "tel";
+  multiline?: boolean;
+  hrefKey?: string;
+  hrefKind?: "tel" | "mailto";
+}
+
+const CONTACT_FIELDS: readonly ContactFieldConfig[] = [
+  {
+    key: "phone",
+    label: "Contact phone",
+    hint: "Shown in the footer and on the Contact page.",
+    inputType: "tel",
+    hrefKey: "phoneHref",
+    hrefKind: "tel",
+  },
+  {
+    key: "email",
+    label: "Contact email",
+    hint: "Shown in the footer and on the Contact page.",
+    inputType: "email",
+    hrefKey: "emailHref",
+    hrefKind: "mailto",
+  },
+  {
+    key: "address",
+    label: "Contact address",
+    hint: "Shown on the Contact page and homepage. One address line per line.",
+    inputType: "text",
+    multiline: true,
+  },
+];
+
+function contactFieldValue(global: GlobalSettings, key: string): string {
+  const value = global[key];
+  return typeof value === "string" ? value : "";
+}
+
+/** The `tel:`/`mailto:` value a display value implies, kept in lockstep by
+ * `commit()` below. A blank display yields a blank href (an inert anchor,
+ * not a bare "tel:"/"mailto:" — both pass `is_safe_href`). Phone formatting
+ * (spaces, dashes, parens) is stripped to bare digits, preserving only a
+ * genuine leading "+" (international dialing prefix); email is used as-is,
+ * already trimmed by the caller. Exported for direct unit testing — this is
+ * the derivation the reproduction-invariant test checks against the real
+ * seeded `_global.json` pair (decisions/00127). */
+export function deriveContactHref(kind: "tel" | "mailto", displayValue: string): string {
+  if (displayValue === "") return "";
+  if (kind === "mailto") return `mailto:${displayValue}`;
+  const leadingPlus = displayValue.startsWith("+") ? "+" : "";
+  return `tel:${leadingPlus}${displayValue.replace(/\D/g, "")}`;
+}
+
+function renderContact(deps: SettingsPanelDeps, teardownFns: Array<() => void>): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "wx-settings-contact";
+
+  if (deps.opQueue === null) {
+    const p = document.createElement("p");
+    p.className = "wx-settings-hint";
+    p.textContent = "Loading…";
+    wrap.appendChild(p);
+    return wrap;
+  }
+  const opQueue = deps.opQueue;
+
+  wrap.textContent = "Loading…";
+  let cancelled = false;
+  teardownFns.push(() => {
+    cancelled = true;
+  });
+
+  function renderLoadError(message: string): void {
+    wrap.innerHTML = "";
+    const p = document.createElement("p");
+    p.className = "wx-settings-hint";
+    p.textContent = `Couldn't load contact details: ${message}`;
+    wrap.appendChild(p);
+  }
+
+  function fieldRow(config: ContactFieldConfig, global: GlobalSettings): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "wx-settings-row wx-settings-row-stacked";
+
+    const inputId = `wx-settings-contact-${config.key}`;
+    const label = document.createElement("label");
+    label.className = "wx-settings-row-label";
+    label.textContent = config.label;
+    label.htmlFor = inputId;
+
+    const storedRaw = contactFieldValue(global, config.key);
+    const originalValue = config.multiline ? addressToTextareaValue(storedRaw) : storedRaw;
+
+    const input = document.createElement(config.multiline ? "textarea" : "input") as
+      | HTMLInputElement
+      | HTMLTextAreaElement;
+    input.id = inputId;
+    input.className = config.multiline ? "wx-settings-textarea" : "wx-settings-input";
+    if (input instanceof HTMLInputElement) input.type = config.inputType;
+    if (input instanceof HTMLTextAreaElement) input.rows = 2;
+    input.value = originalValue;
+
+    function commit(): void {
+      const toStore = config.multiline ? textareaValueToAddress(input.value) : input.value.trim();
+      if (toStore === storedRaw) return;
+      opQueue.enqueue({ file: "_global", path: config.key, value: toStore });
+      if (config.hrefKey !== undefined && config.hrefKind !== undefined) {
+        opQueue.enqueue({ file: "_global", path: config.hrefKey, value: deriveContactHref(config.hrefKind, toStore) });
+      }
+    }
+    input.addEventListener("change", commit);
+
+    const hint = document.createElement("p");
+    hint.className = "wx-settings-hint";
+    hint.textContent = config.hint;
+
+    const resetButton = document.createElement("button");
+    resetButton.type = "button";
+    resetButton.className = "wx-settings-link-button";
+    resetButton.textContent = "Reset";
+    resetButton.addEventListener("click", () => {
+      opQueue.enqueue({ file: "_global", path: config.key, discard: true });
+      if (config.hrefKey !== undefined) {
+        opQueue.enqueue({ file: "_global", path: config.hrefKey, discard: true });
+      }
+      // Re-fetch after the discard(s) land rather than restore `originalValue`
+      // locally: this tab renders draft-merged content (`GET /api/admin/global`),
+      // so "reset" must reflect the true post-discard state, not just what was
+      // on screen when the tab first loaded (decisions/00127) — a plain local
+      // reset would also leave a just-discarded phoneHref/emailHref stale until
+      // the next full reload.
+      void (async () => {
+        await opQueue.flushNow();
+        if (!cancelled) await load();
+      })();
+    });
+
+    row.append(label, input, hint, resetButton);
+    return row;
+  }
+
+  async function load(): Promise<void> {
+    try {
+      const global = await deps.api.getGlobalSettings();
+      if (cancelled) return;
+      wrap.innerHTML = "";
+      const section = settingsSection("Contact details");
+      const intro = document.createElement("p");
+      intro.className = "wx-settings-hint";
+      intro.textContent =
+        "These already appear everywhere your site shows them — change one here and it updates every page, the next time you Publish.";
+      section.appendChild(intro);
+      for (const config of CONTACT_FIELDS) {
+        section.appendChild(fieldRow(config, global));
+      }
+      wrap.appendChild(section);
+    } catch (err) {
+      if (cancelled) return;
+      renderLoadError(err instanceof Error ? err.message : "unknown error");
+    }
+  }
+
+  void load();
   return wrap;
 }
 

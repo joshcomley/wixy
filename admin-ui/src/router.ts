@@ -1,11 +1,13 @@
 // Client-side PATH routing (decisions/00087): "/admin/pages", "/admin/edit/<page>",
 // "/admin/theme", "/admin/media", "/admin/chat", "/admin/chat/<conv>",
 // "/admin/history", "/admin/settings", "/admin/settings/appearance",
-// "/admin/settings/shortcuts", "/admin/settings/engine" (spec/independence/04 §2 —
-// standalone-only content, but the route/tab always exists; the panel itself
-// degrades gracefully on the fleet edition), "/admin/settings/ai"
-// (spec/independence/05 §2 — anthropic-backend-only content, same
-// always-exists-but-degrades-gracefully shape as "engine"),
+// "/admin/settings/shortcuts", "/admin/settings/contact" (decisions/00127 — the
+// site's phone/email/address, `content/_global.json`, meaningful on every
+// project/edition, unlike "engine"/"ai" below), "/admin/settings/engine"
+// (spec/independence/04 §2 — standalone-only content, but the route/tab always
+// exists; the panel itself degrades gracefully on the fleet edition),
+// "/admin/settings/ai" (spec/independence/05 §2 — anthropic-backend-only
+// content, same always-exists-but-degrades-gracefully shape as "engine"),
 // "/admin/settings/system" (spec/independence/06 §3 — backup age/disk usage/last
 // publish/engine version, meaningful on BOTH editions, unlike "engine"/"ai"
 // above), "/admin/section/<id>" (decisions/00098 — a registry-configured admin
@@ -21,7 +23,7 @@
 // keep working forever: `parseHash`/`routeToHash` stay, a hash in the URL wins
 // over the path, and `canonicalizeUrl` rewrites it to the path on load.
 
-export type SettingsPage = "general" | "appearance" | "shortcuts" | "engine" | "ai" | "system";
+export type SettingsPage = "general" | "appearance" | "shortcuts" | "contact" | "engine" | "ai" | "system";
 
 export type Route =
   | { kind: "pages" }
@@ -63,13 +65,15 @@ function routeFromSegments(segments: string[]): Route {
             ? "shortcuts"
             : second === "appearance"
               ? "appearance"
-              : second === "engine"
-                ? "engine"
-                : second === "ai"
-                  ? "ai"
-                  : second === "system"
-                    ? "system"
-                    : "general",
+              : second === "contact"
+                ? "contact"
+                : second === "engine"
+                  ? "engine"
+                  : second === "ai"
+                    ? "ai"
+                    : second === "system"
+                      ? "system"
+                      : "general",
       };
     case "section":
       return second !== undefined ? { kind: "section", id: second } : DEFAULT_ROUTE;
