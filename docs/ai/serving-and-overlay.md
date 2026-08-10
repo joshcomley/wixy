@@ -10,7 +10,7 @@ HTTP shapes are [contracts.md](contracts.md). Spec: [`spec/04-server.md`](../../
 
 | Path | Route | Source | Editor? | Cache |
 |---|---|---|---|---|
-| Public (published) | `/`, `/{path}` (`routes_public.py`) | live pointer → `builds/<sha>/` | no | `max-age=300` HTML / `86400` assets |
+| Public (published) | `/`, `/{path}` (`routes_public.py`) | live pointer → `builds/<sha>/` | no | `max-age=300` HTML / `86400` bare assets / `immutable` fingerprinted assets |
 | Draft preview | `/admin/preview/{page}.html` (`routes_preview.py`) | checkout ⊕ overlay, rendered live | **yes** | `no-store` |
 | Archived version | `/admin/versions/{n}/{path}` (`routes_versions.py`) | a historical build (rebuilt if pruned) | no | — |
 
@@ -38,6 +38,23 @@ resolving forever. `_cache_control_for` keys off the RESOLVED path's suffix, so 
 correct automatically regardless of which shape the request used. `page_url` (`builder/
 nav.py`) is what the engine *emits* (nav hrefs, canonical/og:url, sitemap `<loc>`) — this
 resolver is what it *accepts*, a strictly wider set.
+
+**Fingerprinted public assets (decisions/00130).** `site.css`/`site.js`/`theme.css` are
+referenced by every page under a bare, stable filename — served with a 24h cache, so a
+browser or CDN edge that fetched one before a publish could keep serving those exact bytes
+for up to 24h afterwards (the same class of bug decisions/00069 already fixed for the admin
+UI's `/admin/static/*`, and hit in production here the same way: a merged, published fix
+looked "unchanged" because the CDN edge cache — not this server — was still serving the
+pre-publish bytes). `builder/assetcache.py`'s `fingerprint_asset_references` runs at the end
+of `build_site`, once `site.css`/`site.js`/`theme.css`'s final bytes are known: every page's
+bare `href="site.css"` / `src="site.js"` / `href="theme.css"` is rewritten in place to
+`...?v=<content hash>`. A rebuild that changes an asset's bytes changes its hash, hence its
+URL — no cache layer can hold a stale entry for a URL that didn't exist before. `_cache_
+control_for` serves any request whose query string carries `v` (`fingerprinted="v" in
+request.query_params`, threaded through `_serve`) `public, max-age=31536000, immutable`; a
+request for the same asset's bare URL (only ever a transitional access, from an HTML page
+cached in the ≤300s window before it itself revalidates and picks up the new fingerprinted
+references) keeps the unchanged 24h default.
 
 ## The live pointer (`live_pointer.py`)
 

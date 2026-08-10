@@ -75,7 +75,11 @@ Same code path; only the sink differs. This is why `validate` reports all errors
 rmtree+mkdir out; render each slug in **publish** mode (`index`→`index.html`, else
 `<slug>.html`, UTF-8, `\n`); write `theme.css` (if theme); copy `site.css`, `site.js`,
 `images/`; write `robots.txt`; write `sitemap.xml` **only if `indexable`**; write the
-generated `404.html`; then `_self_check` (every expected file exists + parses under
+generated `404.html`; then `assetcache.fingerprint_asset_references` rewrites every page's
+bare `href="site.css"` / `src="site.js"` / `href="theme.css"` to `...?v=<content hash>`
+in place (decisions/00130 — `wixy_server/routes_public.py` serves any `?v=`-carrying
+request `immutable`, so a rebuilt asset is a new URL no cache layer can be stale for);
+then `_self_check` (every expected file exists + parses under
 `html5lib`; every content-referenced image (`content.scan_image_refs`) exists — else
 `BuildError`). `hash_output_tree` = sha256 over sorted `(relpath, bytes)` (the determinism
 test, Inv 4).

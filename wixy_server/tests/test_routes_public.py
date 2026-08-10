@@ -155,6 +155,32 @@ class TestPublishedSite:
         assert response.status_code == 200
         assert response.headers["cache-control"] == "public, max-age=86400"
 
+    def test_fingerprinted_asset_gets_immutable_cache_control(
+        self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
+    ) -> None:
+        """decisions/00130: a `?v=` query param (builder/assetcache.py's fingerprint)
+        means these exact bytes can never change under this URL — safe to cache for a
+        year. Without one (the test above), the same file keeps the 24h default."""
+        _publish_build(paths, "a" * 40, 1)
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/site.css?v=abc1234567")
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
+
+    def test_fingerprinted_html_request_still_gets_html_cache_control(
+        self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
+    ) -> None:
+        """An HTML page is never itself fingerprinted (it's the document that CARRIES
+        the fingerprinted references) — a stray `?v=` on one must not change its cache
+        behaviour."""
+        _publish_build(paths, "a" * 40, 1)
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/about.html?v=abc1234567")
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "public, max-age=300"
+
     def test_unknown_path_serves_404_page_with_404_status(
         self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
     ) -> None:

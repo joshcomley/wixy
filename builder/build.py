@@ -10,6 +10,7 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 
+from builder.assetcache import fingerprint_asset_references
 from builder.content import scan_image_refs
 from builder.errors import BuildError
 from builder.render import SiteSource, render_page
@@ -51,6 +52,8 @@ def build_site(root: Path, source: SiteSource, out_dir: Path) -> None:
         (out_dir / "sitemap.xml").write_text(sitemap, encoding="utf-8", newline="\n")
 
     (out_dir / "404.html").write_text(_generate_404_html(source), encoding="utf-8", newline="\n")
+
+    fingerprint_asset_references(out_dir)
 
     _self_check(source, out_dir)
 

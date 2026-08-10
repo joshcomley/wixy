@@ -209,7 +209,7 @@ process) off a fixed, non-configurable container path — see that module and
 | — | `/admin/static/*` | `staticcache.FingerprintedStaticFiles` mount | CF | file bytes / 404; requests carrying `?v=` get `Cache-Control: public, max-age=31536000, immutable`, others get StaticFiles defaults (ETag/Last-Modified) — decisions/00069 |
 | GET | `/admin/guide/*` | `StaticFiles` mount (`html=True`) | CF | file bytes; `/admin/guide/` root and extension-less paths resolve `index.html` — spec/independence/07's HTML guide (milestone 8), built by `guide.build` from `guide/chapters/*.html`, committed output under `wixy_server/static/guide/` |
 | GET,HEAD | `/` | `routes_public.py:get_root` | none | `FileResponse index.html` from live build; **503 plain text** `"Site not yet published"` if no live pointer |
-| GET,HEAD | `/{path}` | `routes_public.py:get_path` | none | `FileResponse` from live build (**registered last** — catch-all); 503 plain text; 404 → `404.html` or `"Not found"` |
+| GET,HEAD | `/{path}` | `routes_public.py:get_path` | none | `FileResponse` from live build (**registered last** — catch-all); 503 plain text; 404 → `404.html` or `"Not found"`. HTML `Cache-Control: public, max-age=300`; `site.css`/`site.js`/`theme.css` requests carrying `?v=` (fingerprinted by `builder/assetcache.py` at build time) get `public, max-age=31536000, immutable`, others (and every other asset) get `public, max-age=86400` — decisions/00130 |
 
 Clean URLs (decisions/00128): `/{path}` resolves an extensionless path (`/about`) to
 `<path>.html` with no redirect when the literal path misses — `builder.serving.

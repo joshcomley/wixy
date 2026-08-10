@@ -33,6 +33,7 @@ router = APIRouter()
 
 _HTML_CACHE_CONTROL = "public, max-age=300"
 _ASSET_CACHE_CONTROL = "public, max-age=86400"
+_FINGERPRINTED_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
 def _resolve_within_build_dir(build_dir: Path, request_path: str) -> Path | None:
@@ -42,15 +43,27 @@ def _resolve_within_build_dir(build_dir: Path, request_path: str) -> Path | None
     return resolve_site_path(build_dir, request_path)
 
 
-def _cache_control_for(path: Path) -> str:
-    return _HTML_CACHE_CONTROL if path.suffix == ".html" else _ASSET_CACHE_CONTROL
+def _cache_control_for(path: Path, *, fingerprinted: bool) -> str:
+    """`fingerprinted` (a `?v=` query param present) means this exact URL's bytes can
+    never change (builder/assetcache.py: a rebuild changes the hash, hence the URL) —
+    safe to cache for a year. Without it, `site.css`/`site.js`/`theme.css` keep the
+    same 24h default as any other asset; that only ever serves a transitional request
+    from a stale HTML page in the (at most 300s) window before it itself revalidates
+    and picks up the new fingerprinted references — decisions/00130."""
+    if path.suffix == ".html":
+        return _HTML_CACHE_CONTROL
+    if fingerprinted:
+        return _FINGERPRINTED_ASSET_CACHE_CONTROL
+    return _ASSET_CACHE_CONTROL
 
 
 def _load_pointer(paths: ProjectPaths) -> LivePointer | None:
     return load_live_pointer(paths)
 
 
-async def _serve(paths: ProjectPaths, redirects: RedirectMap, request_path: str) -> Response:
+async def _serve(
+    paths: ProjectPaths, redirects: RedirectMap, request_path: str, *, fingerprinted: bool
+) -> Response:
     target = resolve_redirect(redirects, request_path)
     if target is not None:
         return RedirectResponse(target, status_code=301)
@@ -64,7 +77,8 @@ async def _serve(paths: ProjectPaths, redirects: RedirectMap, request_path: str)
         _resolve_within_build_dir, pointer.build_dir, request_path
     )
     if resolved is not None:
-        return FileResponse(resolved, headers={"Cache-Control": _cache_control_for(resolved)})
+        cache_control = _cache_control_for(resolved, fingerprinted=fingerprinted)
+        return FileResponse(resolved, headers={"Cache-Control": cache_control})
 
     not_found = await anyio.to_thread.run_sync(
         _resolve_within_build_dir, pointer.build_dir, "/404.html"
@@ -81,11 +95,11 @@ async def get_root(request: Request) -> Response:
     explicitly via `api_route`/`methods=`, it isn't implicit."""
     paths: ProjectPaths = request.app.state.paths
     redirects: RedirectMap = request.app.state.redirects
-    return await _serve(paths, redirects, "/")
+    return await _serve(paths, redirects, "/", fingerprinted="v" in request.query_params)
 
 
 @router.api_route("/{path:path}", methods=["GET", "HEAD"])
 async def get_path(path: str, request: Request) -> Response:
     paths: ProjectPaths = request.app.state.paths
     redirects: RedirectMap = request.app.state.redirects
-    return await _serve(paths, redirects, f"/{path}")
+    return await _serve(paths, redirects, f"/{path}", fingerprinted="v" in request.query_params)

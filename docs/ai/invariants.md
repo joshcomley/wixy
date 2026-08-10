@@ -408,3 +408,18 @@ directory-index fallback there either), so `resolve_site_path`'s `.html`-append 
 explicitly skips any request path ending in `/`. Do not "fix" this into a 200 or a redirect;
 that would be the resolver disagreeing with what Pages actually serves for that path.
 
+### Inv 34 — Every public-site `href="site.css"`/`src="site.js"`/`href="theme.css"` is content-fingerprinted
+Sibling of Inv 22, same failure mode, different code path: `builder/build.py` calls
+`assetcache.fingerprint_asset_references` once all three assets' final bytes are known,
+rewriting every page's bare reference to `...?v=<sha256(file)[:10]>` in place. Otherwise a
+CDN edge or browser that cached one before a publish keeps serving those exact pre-publish
+bytes for up to 24h afterwards — a real production incident (decisions/00130): a merged,
+published fix looked "unchanged" because Cloudflare's edge, not the server, was still
+serving stale bytes. `wixy_server/routes_public.py:_cache_control_for` serves any request
+whose query string carries `v` `public, max-age=31536000, immutable`; a bare request for the
+same asset keeps the unchanged `public, max-age=86400` default. *Enforced by:*
+`builder/tests/test_assetcache.py`, `test_build.py::TestAssetFingerprinting`,
+`test_routes_public.py`'s fingerprinted-vs-bare cache-control tests. *Known exception:*
+images are not fingerprinted (decisions/00130's "what to watch for" — upload filenames are
+effectively-unique by convention today, a materially different risk shape).
+
