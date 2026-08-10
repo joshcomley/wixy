@@ -9,6 +9,11 @@ Also serves the redirects facility (spec/independence/01 §2.2, 03 §2): a reque
 found in `app.state.redirects` gets a 301 before any file resolution is attempted, so
 it applies even when there's no live pointer yet (a pure URL-routing decision, not a
 publish-state one).
+
+Clean URLs (decisions/00128): `_resolve_within_build_dir` resolves an extensionless
+path (`/about`) to `about.html` with no redirect, matching GitHub Pages' own behavior —
+see `builder.serving.resolve_site_path`, the shared implementation this and the dev
+server (`builder/cli.py:cmd_serve`) both delegate to.
 """
 
 from __future__ import annotations
@@ -19,6 +24,7 @@ import anyio
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse, Response
 
+from builder.serving import resolve_site_path
 from wixy_server.live_pointer import LivePointer, load_live_pointer
 from wixy_server.redirects import RedirectMap, resolve_redirect
 from wixy_server.storage import ProjectPaths
@@ -30,19 +36,10 @@ _ASSET_CACHE_CONTROL = "public, max-age=86400"
 
 
 def _resolve_within_build_dir(build_dir: Path, request_path: str) -> Path | None:
-    """`None` when the path doesn't correspond to a real file, or would resolve
-    outside `build_dir` (path-traversal guard) — the caller serves 404 either way, so
-    the two cases don't need to be distinguished here."""
-    relative = request_path.lstrip("/") or "index.html"
-    build_dir_resolved = build_dir.resolve()
-    candidate = (build_dir_resolved / relative).resolve()
-    try:
-        candidate.relative_to(build_dir_resolved)
-    except ValueError:
-        return None
-    if not candidate.is_file():
-        return None
-    return candidate
+    """Thin name-preserving wrapper — see `builder.serving.resolve_site_path` for the
+    actual algorithm (shared with the dev server) and its docstring for the resolution
+    contract (extensionless fallback + path-traversal guard)."""
+    return resolve_site_path(build_dir, request_path)
 
 
 def _cache_control_for(path: Path) -> str:

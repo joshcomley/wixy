@@ -109,6 +109,42 @@ class TestPublishedSite:
         assert response.status_code == 200
         assert "About" in response.text
 
+    def test_extensionless_page_served(
+        self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
+    ) -> None:
+        """decisions/00128: `/about` resolves to `about.html` with no redirect,
+        matching GitHub Pages' own behavior (verified live)."""
+        _publish_build(paths, "a" * 40, 1)
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/about")
+        assert response.status_code == 200
+        assert "About" in response.text
+        assert response.headers["cache-control"] == "public, max-age=300"
+
+    def test_extensionless_index_also_serves_the_home_page(
+        self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
+    ) -> None:
+        """`/index` resolves too — a natural consequence of the same rule, not
+        special-cased, alongside `/` itself."""
+        _publish_build(paths, "a" * 40, 1)
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/index")
+        assert response.status_code == 200
+        assert "Home" in response.text
+
+    def test_trailing_slash_page_path_is_404_not_a_redirect(
+        self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
+    ) -> None:
+        """decisions/00128: `/about/` must 404, never redirect or serve a directory
+        index — GitHub Pages does the same for a clean-URL page (verified live)."""
+        _publish_build(paths, "a" * 40, 1)
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app, follow_redirects=False) as client:
+            response = client.get("/about/")
+        assert response.status_code == 404
+
     def test_asset_gets_long_cache_control(
         self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
     ) -> None:
@@ -252,6 +288,20 @@ class TestResolveWithinBuildDir:
         build_dir = tmp_path / "build"
         build_dir.mkdir()
         assert _resolve_within_build_dir(build_dir, "/nope.html") is None
+
+    def test_extensionless_path_falls_back_to_the_html_file(self, tmp_path: Path) -> None:
+        """decisions/00128 — full coverage of the fallback algorithm itself lives in
+        `builder/tests/test_serving.py`; this proves the wrapper actually delegates."""
+        build_dir = tmp_path / "build"
+        build_dir.mkdir()
+        (build_dir / "about.html").write_text("hi", encoding="utf-8")
+        assert _resolve_within_build_dir(build_dir, "/about") == build_dir / "about.html"
+
+    def test_trailing_slash_never_falls_back(self, tmp_path: Path) -> None:
+        build_dir = tmp_path / "build"
+        build_dir.mkdir()
+        (build_dir / "about.html").write_text("hi", encoding="utf-8")
+        assert _resolve_within_build_dir(build_dir, "/about/") is None
 
     def test_dotdot_escape_is_rejected(self, tmp_path: Path) -> None:
         build_dir = tmp_path / "build"

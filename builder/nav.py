@@ -10,8 +10,17 @@ from builder.jsontypes import JsonObject, JsonValue
 
 
 def page_url(slug: str) -> str:
-    """The home page's slug is `index` everywhere; its published URL is `/` (02 §3)."""
-    return "/" if slug == "index" else f"/{slug}.html"
+    """The home page's slug is `index` everywhere; its published URL is `/` (02 §3).
+
+    Every other page's URL is extensionless (`/<slug>`, no `.html`) — decisions/00128
+    supersedes spec/02 §3's original `/<slug>.html` convention. The build still writes
+    `<slug>.html` files to disk (`build.py`); both `wixy_server`'s public route and
+    GitHub Pages itself resolve the extensionless form to that file with no redirect
+    (`builder.serving.resolve_site_path`), so the old `.html`-suffixed URL keeps
+    working too — this function only controls what the engine *emits* (nav hrefs,
+    canonical/og:url, sitemap `<loc>`), never what it *accepts*.
+    """
+    return "/" if slug == "index" else f"/{slug}"
 
 
 def build_nav(page_contents: dict[str, JsonObject], global_content: JsonObject) -> list[JsonValue]:

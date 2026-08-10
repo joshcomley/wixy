@@ -29,15 +29,15 @@ class TestNavActiveState:
         links = soup.select("nav.primary a")
         by_href = {a["href"]: a for a in links}
         assert by_href["/"]["class"] == ["active"]
-        assert "class" not in by_href["/about.html"].attrs or by_href["/about.html"].get(
-            "class"
-        ) != ["active"]
+        assert "class" not in by_href["/about"].attrs or by_href["/about"].get("class") != [
+            "active"
+        ]
 
     def test_other_page_marks_its_own_link_active(self, mini_site_source: SiteSource) -> None:
         html = render_page(mini_site_source, "about", mode="publish")
         soup = BeautifulSoup(html, "html5lib")
         links = {a["href"]: a for a in soup.select("nav.primary a")}
-        assert links["/about.html"]["class"] == ["active"]
+        assert links["/about"]["class"] == ["active"]
 
     def test_every_nav_container_gets_its_own_active_link(
         self, mini_site_source: SiteSource
@@ -48,7 +48,7 @@ class TestNavActiveState:
         soup = BeautifulSoup(html, "html5lib")
         for nav_class in ("primary", "mobile"):
             links = {a["href"]: a for a in soup.select(f"nav.{nav_class} a")}
-            assert links["/about.html"]["class"] == ["active"], nav_class
+            assert links["/about"]["class"] == ["active"], nav_class
             assert links["/"].get("class") != ["active"], nav_class
 
 
@@ -84,7 +84,7 @@ class TestHeadInjection:
         soup = BeautifulSoup(html, "html5lib")
         canonical = soup.find("link", attrs={"rel": "canonical"})
         assert isinstance(canonical, Tag)
-        assert canonical["href"] == "https://fixture.example.com/about.html"
+        assert canonical["href"] == "https://fixture.example.com/about"
 
     def test_canonical_link_overwrites_hand_authored_href(
         self, mini_site_source: SiteSource
@@ -100,14 +100,14 @@ class TestHeadInjection:
             soup,
             meta={},
             fonts_url=None,
-            page_url_path="/about.html",
+            page_url_path="/about",
             domain="fixture.example.com",
             indexable=False,
             file_label="test",
         )
         canonicals = soup.find_all("link", attrs={"rel": "canonical"})
         assert len(canonicals) == 1
-        assert canonicals[0]["href"] == "https://fixture.example.com/about.html"
+        assert canonicals[0]["href"] == "https://fixture.example.com/about"
 
     def test_fonts_link_generated_and_replaces_placeholder(
         self, mini_site_source: SiteSource

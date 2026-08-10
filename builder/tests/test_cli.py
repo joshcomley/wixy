@@ -1,19 +1,28 @@
-"""CLI tests: `python -m builder build|validate` (spec/09-work-plan.md milestone 2).
+"""CLI tests: `python -m builder build|validate|serve` (spec/09-work-plan.md milestone 2).
 
-`serve` (a thin stdlib-`http.server` wrapper around the already-well-tested `build_site`)
-is verified manually rather than with a networked test here, to avoid port-collision
-flakiness for negligible extra coverage.
+`serve`'s handler is exercised with a real HTTP request against an OS-assigned port (0)
+— the original concern about port-collision flakiness (a hardcoded/default port) doesn't
+apply once the OS picks the port, so `TestServeCommand` below tests it for real rather
+than only through the pure-function-level `builder/tests/test_serving.py` coverage.
 """
 
 from __future__ import annotations
 
+import functools
+import http.client
+import http.server
 import json
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 from bs4 import BeautifulSoup, Tag
 
-from builder.cli import main
+from builder.build import build_site
+from builder.cli import _CleanUrlHandler, main
+from builder.render import SiteSource
 
 
 class TestValidateCommand:
@@ -165,3 +174,88 @@ class TestBuildCommand:
         canonical = soup.find("link", attrs={"rel": "canonical"})
         assert isinstance(canonical, Tag)
         assert canonical["href"] == "https://example.org/"
+
+
+class TestServeCommand:
+    """`_CleanUrlHandler` (decisions/00128) mirrors the production resolver
+    (`wixy_server/routes_public.py`) via the same shared `resolve_site_path`
+    (`builder/tests/test_serving.py` has the exhaustive algorithm-level coverage) —
+    these tests prove the stdlib `http.server` wiring around it actually behaves that
+    way for a real request."""
+
+    @contextmanager
+    def _serve(self, out: Path) -> Iterator[int]:
+        handler = functools.partial(_CleanUrlHandler, directory=str(out))
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield server.server_address[1]
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+
+    def _get(self, port: int, path: str) -> tuple[int, bytes]:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        try:
+            conn.request("GET", path)
+            response = conn.getresponse()
+            return response.status, response.read()
+        finally:
+            conn.close()
+
+    def test_extensionless_path_serves_the_html_file(
+        self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "out"
+        build_site(mini_site_root, mini_site_source, out)
+        with self._serve(out) as port:
+            status, body = self._get(port, "/about")
+        assert status == 200
+        assert b"About the fixture" in body
+
+    def test_html_suffixed_path_still_works(
+        self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "out"
+        build_site(mini_site_root, mini_site_source, out)
+        with self._serve(out) as port:
+            status, body = self._get(port, "/about.html")
+        assert status == 200
+        assert b"About the fixture" in body
+
+    def test_trailing_slash_page_path_is_404_not_a_redirect_or_listing(
+        self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "out"
+        build_site(mini_site_root, mini_site_source, out)
+        with self._serve(out) as port:
+            status, _body = self._get(port, "/about/")
+        assert status == 404
+
+    def test_real_subdirectory_with_no_matching_page_is_404_not_a_listing(
+        self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
+    ) -> None:
+        """`images/` is a real subdirectory in the build output with no
+        `images.html` — must 404, never a directory listing (decisions/00128; this is
+        exactly the case `SimpleHTTPRequestHandler`'s inherited directory handling
+        would NOT 404 if `_CleanUrlHandler` only patched the extensionless fallback on
+        top of it instead of fully replacing resolution)."""
+        out = tmp_path / "out"
+        build_site(mini_site_root, mini_site_source, out)
+        with self._serve(out) as port:
+            status, _body = self._get(port, "/images")
+        assert status == 404
+        with self._serve(out) as port:
+            status, _body = self._get(port, "/images/")
+        assert status == 404
+
+    def test_asset_still_serves_directly(
+        self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "out"
+        build_site(mini_site_root, mini_site_source, out)
+        with self._serve(out) as port:
+            status, body = self._get(port, "/site.css")
+        assert status == 200
+        assert body  # non-empty; content itself is covered by build tests
