@@ -153,6 +153,19 @@ home — see decisions/00126). This lives entirely in the **site repo**
   straight to `refs/heads/wixy-live` from a site-repo clone, then manually dispatch the
   workflow (`gh workflow run pages.yml --ref main -R joshcomley/cottage-aesthetics-preview`)
   — the bootstrap push itself won't auto-trigger a run (next bullet explains why).
+- **The site repo's `github-pages` deployment environment must allow the `wixy-live`
+  branch**, or the workflow's `deploy` job fails with "Branch 'wixy-live' is not allowed to
+  deploy to github-pages due to environment protection rules" — GitHub's environment branch
+  policy check gates on the triggering ref (`github.ref`), not on what a checkout step
+  happens to check out. On `joshcomley/cottage-aesthetics-preview` this is already configured
+  (Settings → Environments → `github-pages` → Deployment branches and tags now lists
+  `gh-pages`, `main`, and `wixy-live` — the first two pre-existed; `wixy-live` was added
+  during this feature's rollout, decisions/00013 in the site repo). A **fresh** Pages setup
+  (a fork, or a from-scratch reinstall) may need the same one-time addition — this is a pure
+  repo-settings change (`gh api -X POST repos/<owner>/<repo>/environments/github-pages/
+  deployment-branch-policies -f name=wixy-live -f type=branch`), not something the workflow
+  YAML can configure itself. It requires repo-admin-level credentials — the fleet's ordinary
+  bot-PAT is deliberately admin-less and 403s on this call; use the operator's own token.
 - **Known gap, not a bug:** GitHub resolves a push-triggered workflow run from the *pushed
   commit's own tree* — so pushing a sha that predates `pages.yml` existing on `main` (true for
   the bootstrap push above, and true for a restore to a version published before this feature

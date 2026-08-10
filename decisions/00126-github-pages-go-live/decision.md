@@ -61,8 +61,29 @@ does nothing destructive by default, and setting the variable is the one deliber
 turns deployment on. It also means changing the operator's domain later is a two-field edit
 (the variable + the Pages custom-domain box), not a code change.
 
+## What was discovered — the `github-pages` environment gates on the triggering branch
+
+Found while rolling this out against the real `joshcomley/cottage-aesthetics-preview` repo,
+not caught by any PR's own CI (the workflow doesn't trigger on `pull_request`, so this never
+surfaced until a real push to `wixy-live` was exercised): GitHub's auto-provisioned
+`github-pages` deployment environment already carried a **custom branch policy** restricting
+deploys to `gh-pages`/`main` only — a job that references `environment: {name: github-pages}`
+is gated on `github.ref` (the ref that triggered the RUN), not on whatever a `checkout` step
+inside the job happens to check out. Left alone, every automatic `wixy-live`-triggered run
+would have failed at the `deploy` job with "Branch 'wixy-live' is not allowed to deploy to
+github-pages due to environment protection rules" — silently defeating the entire feature
+despite every other piece working. Fixed by adding `wixy-live` as a third allowed branch via
+`gh api -X POST .../environments/github-pages/deployment-branch-policies` (repo-admin-level;
+the fleet's ordinary bot-PAT 403s on it — used the operator's token instead, same fallback
+pattern as `gh repo create`). See runbook.md's GitHub Pages section and the site repo's
+decisions/00013 for the operational detail.
+
 ## What to watch for
 
+- **The environment branch policy above** is a pure GitHub repo SETTING, invisible to a diff
+  of this code — a fresh Pages setup (fork, or from-scratch reinstall) needs the same
+  one-time fix, and nothing here will fail loudly until an actual push to `wixy-live` is
+  exercised for real, since PR CI never triggers this workflow.
 - **The pre-workflow-sha restore edge.** GitHub resolves a push-triggered workflow run from
   the *pushed commit's own tree* — so a restore whose sha predates `pages.yml` existing on
   `main` moves `wixy-live` correctly but triggers no Pages run at all; the public domain then
