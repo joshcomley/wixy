@@ -271,7 +271,7 @@
       "font-weight": "500"
     },
     "header#hd": {
-      "background-color": "rgba(0, 0, 0, 0)",
+      "background-color": "rgba(18, 12, 9, 0.64)",
       "color": "rgb(62, 49, 42)",
       "font-family": "Jost, system-ui, sans-serif",
       "font-size": "16px",
