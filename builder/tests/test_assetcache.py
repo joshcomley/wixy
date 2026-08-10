@@ -6,7 +6,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from builder.assetcache import content_fingerprint, fingerprint_asset_references
+from builder.assetcache import (
+    content_fingerprint,
+    find_unfingerprinted_asset_references,
+    fingerprint_asset_references,
+)
 
 
 class TestContentFingerprint:
@@ -93,3 +97,57 @@ class TestFingerprintAssetReferences:
         page.write_text("<p>hello</p>", encoding="utf-8")
         fingerprint_asset_references(tmp_path)  # must not raise
         assert page.read_text(encoding="utf-8") == "<p>hello</p>"
+
+    def test_returns_the_fingerprints_it_used(self, tmp_path: Path) -> None:
+        (tmp_path / "site.css").write_text("body{color:red}", encoding="utf-8")
+        (tmp_path / "index.html").write_text('<link href="site.css">', encoding="utf-8")
+        fingerprints = fingerprint_asset_references(tmp_path)
+        assert fingerprints == {"site.css": content_fingerprint(tmp_path / "site.css")}
+
+    def test_does_not_touch_a_data_attribute_ending_in_href_or_src(self, tmp_path: Path) -> None:
+        """decisions/00130 audit round 2, F3: the rewrite must be anchored to a real
+        `href=`/`src=` attribute START, not just to those characters appearing as the
+        tail of a longer attribute name like `data-href=`."""
+        (tmp_path / "site.css").write_text("body{color:red}", encoding="utf-8")
+        page = tmp_path / "index.html"
+        page.write_text('<a data-href="site.css" data-src="site.css">x</a>', encoding="utf-8")
+        fingerprint_asset_references(tmp_path)
+        assert page.read_text(encoding="utf-8") == (
+            '<a data-href="site.css" data-src="site.css">x</a>'
+        )
+
+
+class TestFindUnfingerprintedAssetReferences:
+    def test_empty_when_everything_was_rewritten(self, tmp_path: Path) -> None:
+        (tmp_path / "site.css").write_text("body{color:red}", encoding="utf-8")
+        (tmp_path / "index.html").write_text('<link href="site.css">', encoding="utf-8")
+        fingerprints = fingerprint_asset_references(tmp_path)
+        assert find_unfingerprinted_asset_references(tmp_path, fingerprints) == []
+
+    def test_catches_a_leading_slash_reference_the_rewrite_does_not_touch(
+        self, tmp_path: Path
+    ) -> None:
+        """decisions/00130 audit round 2, F2: `href="/site.css"` (or `href="./site.css"`)
+        is a recognisable-but-unrewritten reference the exact bare-string rewrite
+        deliberately does not touch — this is the safety net that must catch it instead
+        of letting it ship silently unfingerprinted."""
+        (tmp_path / "site.css").write_text("body{color:red}", encoding="utf-8")
+        (tmp_path / "index.html").write_text('<link href="/site.css">', encoding="utf-8")
+        fingerprints = fingerprint_asset_references(tmp_path)
+        problems = find_unfingerprinted_asset_references(tmp_path, fingerprints)
+        assert problems == [("index.html", "/site.css")]
+
+    def test_ignores_a_name_that_was_never_fingerprinted(self, tmp_path: Path) -> None:
+        """No theme.css in this build -> a bare `href="theme.css"` (which nothing in
+        this build actually emits, but hypothetically) is not this check's concern."""
+        (tmp_path / "index.html").write_text('<link href="theme.css">', encoding="utf-8")
+        assert find_unfingerprinted_asset_references(tmp_path, {}) == []
+
+    def test_ignores_unrelated_links(self, tmp_path: Path) -> None:
+        (tmp_path / "site.css").write_text("body{color:red}", encoding="utf-8")
+        (tmp_path / "index.html").write_text(
+            '<link href="site.css"><a href="/about">About</a><img src="/images/hero.jpg" alt="">',
+            encoding="utf-8",
+        )
+        fingerprints = fingerprint_asset_references(tmp_path)
+        assert find_unfingerprinted_asset_references(tmp_path, fingerprints) == []

@@ -16,7 +16,7 @@ from builder.build import build_site, hash_output_tree
 from builder.content import dotted_set
 from builder.errors import BuildError
 from builder.jsontypes import JsonObject
-from builder.render import SiteSource
+from builder.render import SiteSource, load_site_source
 
 
 class TestBuildSite:
@@ -147,6 +147,37 @@ class TestAssetFingerprinting:
 
         assert index1 != index2
         assert about1 != about2
+
+    def test_leading_slash_asset_reference_fails_the_build(
+        self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
+    ) -> None:
+        """decisions/00130 audit round 2, F2: a template written with `href="/site.css"`
+        instead of the bare `href="site.css"` the rewrite matches must fail the build
+        loudly, not ship silently unfingerprinted — the exact invisibility that made the
+        original production incident cost hours."""
+        edited_root = tmp_path / "edited-site"
+        edited_root.mkdir()
+        for item in mini_site_root.iterdir():
+            if item.is_dir():
+                shutil.copytree(item, edited_root / item.name)
+            else:
+                edited_root.joinpath(item.name).write_bytes(item.read_bytes())
+        index_page = edited_root / "pages" / "index.html"
+        index_page.write_text(
+            index_page.read_text(encoding="utf-8").replace('href="site.css"', 'href="/site.css"'),
+            encoding="utf-8",
+        )
+        # `SiteSource.pages_dir` is fixed at load time (render_page reads the template
+        # fresh from THERE, not from whatever `root` build_site is later called with) —
+        # mini_site_source still points at the ORIGINAL, unedited fixture directory, so
+        # a fresh load from edited_root is required for the edited template to matter.
+        edited_source = load_site_source(
+            edited_root, mini_site_source.project, mini_site_source.theme
+        )
+
+        out = tmp_path / "_build"
+        with pytest.raises(BuildError):
+            build_site(edited_root, edited_source, out)
 
 
 class TestDeterminism:

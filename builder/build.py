@@ -10,7 +10,7 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 
-from builder.assetcache import fingerprint_asset_references
+from builder.assetcache import find_unfingerprinted_asset_references, fingerprint_asset_references
 from builder.content import scan_image_refs
 from builder.errors import BuildError
 from builder.render import SiteSource, render_page
@@ -53,7 +53,17 @@ def build_site(root: Path, source: SiteSource, out_dir: Path) -> None:
 
     (out_dir / "404.html").write_text(_generate_404_html(source), encoding="utf-8", newline="\n")
 
-    fingerprint_asset_references(out_dir)
+    fingerprints = fingerprint_asset_references(out_dir)
+    unfingerprinted = find_unfingerprinted_asset_references(out_dir, fingerprints)
+    if unfingerprinted:
+        html_name, value = unfingerprinted[0]
+        raise BuildError(
+            f"post-build check: '{value}' in '{html_name}' references a fingerprinted "
+            "shared asset by name but was not rewritten — builder/assetcache.py only "
+            'matches an exact bare href/src (e.g. href="site.css"), not a leading-slash '
+            'or relative-prefixed form (e.g. href="/site.css")',
+            location=str(out_dir / html_name),
+        )
 
     _self_check(source, out_dir)
 
