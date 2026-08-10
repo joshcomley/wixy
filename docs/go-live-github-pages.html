@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<title>Going live: cottageaesthetics.co.uk on GitHub Pages</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --ink: #24291f;
+    --ink-soft: #565f4d;
+    --paper: #fbfaf6;
+    --panel: #f2efe4;
+    --line: #ddd6c2;
+    --accent: #4f6b47;
+    --accent-soft: #e8eee0;
+    --warn-bg: #fbf1de;
+    --warn-line: #dcb968;
+    --good-bg: #eaf1e5;
+    --good-line: #8fae7c;
+    --code-bg: #efe9d8;
+    --max-width: 760px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 2.5rem 1.5rem 5rem;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.55;
+    font-size: 16px;
+  }
+  main {
+    max-width: var(--max-width);
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 1.9rem;
+    margin: 0 0 0.4rem;
+    letter-spacing: -0.01em;
+  }
+  .subtitle {
+    color: var(--ink-soft);
+    font-size: 1.05rem;
+    margin: 0 0 1.6rem;
+  }
+  h2 {
+    font-size: 1.35rem;
+    margin: 2.6rem 0 0.9rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 2px solid var(--accent);
+    color: var(--accent);
+  }
+  h2 .step-time {
+    float: right;
+    font-size: 0.85rem;
+    font-weight: 400;
+    color: var(--ink-soft);
+    border-bottom: none;
+  }
+  h3 {
+    font-size: 1.05rem;
+    margin: 1.6rem 0 0.6rem;
+  }
+  p { margin: 0.7rem 0; }
+  ol, ul { margin: 0.6rem 0; padding-left: 1.4rem; }
+  li { margin: 0.45rem 0; }
+  li > ol, li > ul { margin: 0.4rem 0; }
+  code, .domain, .value {
+    font-family: "Cascadia Code", Consolas, "SFMono-Regular", Menlo, monospace;
+    background: var(--code-bg);
+    border-radius: 4px;
+    padding: 0.08em 0.4em;
+    font-size: 0.92em;
+    white-space: nowrap;
+  }
+  pre {
+    background: var(--code-bg);
+    border-radius: 8px;
+    padding: 0.9rem 1rem;
+    overflow-x: auto;
+    font-family: "Cascadia Code", Consolas, "SFMono-Regular", Menlo, monospace;
+    font-size: 0.88rem;
+    line-height: 1.5;
+  }
+  a { color: var(--accent); text-decoration-thickness: 1px; }
+  a:hover { text-decoration-thickness: 2px; }
+  .lede-note {
+    background: var(--accent-soft);
+    border: 1px solid var(--accent);
+    border-radius: 10px;
+    padding: 0.9rem 1.1rem;
+    margin: 1.2rem 0 1.8rem;
+    font-size: 0.97rem;
+  }
+  .callout {
+    border-radius: 10px;
+    padding: 0.85rem 1.1rem;
+    margin: 1rem 0;
+    font-size: 0.95rem;
+  }
+  .callout.important {
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-line);
+  }
+  .callout.recommended {
+    background: var(--good-bg);
+    border: 1px solid var(--good-line);
+  }
+  .callout .label {
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    display: block;
+    margin-bottom: 0.3rem;
+  }
+  .callout.important .label { color: #8a6a1c; }
+  .callout.recommended .label { color: #4a6b39; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0 1.6rem;
+    font-size: 0.92rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid var(--line);
+    vertical-align: top;
+  }
+  th {
+    background: var(--panel);
+    font-weight: 700;
+  }
+  tr:nth-child(even) td { background: #f7f5ec; }
+  .records-table td:first-child { white-space: nowrap; font-weight: 600; }
+  .records-table code { white-space: nowrap; }
+  .checklist { list-style: none; padding-left: 0; }
+  .checklist li {
+    padding-left: 1.7rem;
+    position: relative;
+  }
+  .checklist li::before {
+    content: "\2610";
+    position: absolute;
+    left: 0;
+    color: var(--accent);
+    font-size: 1.05em;
+  }
+  .toc {
+    background: var(--panel);
+    border-radius: 10px;
+    padding: 1rem 1.4rem;
+    margin: 1.4rem 0 2rem;
+  }
+  .toc-title {
+    font-weight: 700;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-soft);
+    margin-bottom: 0.5rem;
+  }
+  .toc ol { margin: 0; padding-left: 1.3rem; }
+  .toc li { margin: 0.25rem 0; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc a:hover { color: var(--accent); text-decoration: underline; }
+  footer {
+    margin-top: 3rem;
+    padding-top: 1.2rem;
+    border-top: 1px solid var(--line);
+    color: var(--ink-soft);
+    font-size: 0.85rem;
+  }
+  @media print {
+    body { padding: 0; font-size: 12.5pt; background: #fff; }
+    .lede-note, .callout, .toc { break-inside: avoid; }
+    h2 { break-after: avoid; }
+    a { color: var(--ink); text-decoration: underline; }
+    a[href]:after { content: " (" attr(href) ")"; font-size: 0.75em; color: var(--ink-soft); }
+  }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Going live: cottageaesthetics.co.uk on GitHub Pages</h1>
+<p class="subtitle">Step-by-step instructions to connect your Name.com domain to the Cottage Aesthetics website.</p>
+
+<div class="lede-note">
+  This guide is written specifically for your domain, <span class="domain">cottageaesthetics.co.uk</span>,
+  registered at Name.com. Every address and record below is the exact one to use &mdash; there is
+  nothing to fill in or substitute. Work through the parts in order: GitHub first, then Name.com,
+  then back to GitHub to finish.
+</div>
+
+<div class="toc">
+  <div class="toc-title">Contents</div>
+  <ol>
+    <li><a href="#done">What&rsquo;s already done for you</a></li>
+    <li><a href="#part1">Part 1 &mdash; GitHub (about 5 minutes)</a></li>
+    <li><a href="#part2">Part 2 &mdash; Name.com DNS (about 10 minutes, plus waiting time)</a></li>
+    <li><a href="#part3">Part 3 &mdash; back in GitHub</a></li>
+    <li><a href="#part4">Part 4 &mdash; check it worked</a></li>
+    <li><a href="#troubleshooting">Troubleshooting</a></li>
+    <li><a href="#afterwards">Afterwards</a></li>
+  </ol>
+</div>
+
+<h2 id="done">1. What&rsquo;s already done for you</h2>
+
+<p>All of the engineering work is finished and already switched on. You only need to do the
+steps in this guide once.</p>
+
+<ul>
+  <li>The website automatically rebuilds and republishes to GitHub Pages every time Purdi
+    presses <strong>Publish</strong> (or <strong>Restore</strong>) in the Wixy admin panel
+    &mdash; normally live within about two minutes.</li>
+  <li>Ordinary changes made to the website&rsquo;s files on GitHub do <strong>not</strong>, by
+    themselves, make anything go live. Only pressing Publish in the admin does that. This is a
+    deliberate safety net so nothing appears on the public site by accident.</li>
+  <li><span class="domain">ca.cinnamons.uk</span> remains the private staging address and the
+    home of the admin panel. It is not indexed by search engines and is not the address the
+    public will use &mdash; that will be <span class="domain">cottageaesthetics.co.uk</span>.</li>
+  <li>All that is left is to point GitHub at your domain, and point your domain at GitHub.
+    That is what the rest of this guide walks through.</li>
+</ul>
+
+<h2 id="part1">2. Part 1 &mdash; GitHub <span class="step-time">about 5 minutes</span></h2>
+
+<h3>a. Confirm the domain setting</h3>
+<ol>
+  <li>Open the website&rsquo;s repository:
+    <a href="https://github.com/joshcomley/cottage-aesthetics-preview">github.com/joshcomley/cottage-aesthetics-preview</a>.</li>
+  <li>Go to <strong>Settings</strong> &rarr; <strong>Secrets and variables</strong> &rarr;
+    <strong>Actions</strong> &rarr; the <strong>Variables</strong> tab.</li>
+  <li>Find <code>WIXY_PUBLIC_DOMAIN</code>. It should already hold
+    <span class="domain">cottageaesthetics.co.uk</span>. If it is missing or different, click
+    it and set the value to exactly <span class="domain">cottageaesthetics.co.uk</span> (no
+    <code>https://</code>, no <code>www.</code>, no trailing slash), then save.</li>
+</ol>
+
+<h3>b. Run the deploy once by hand</h3>
+<ol>
+  <li>Still in the repository, open the <strong>Actions</strong> tab.</li>
+  <li>In the left-hand list, click <strong>Deploy to GitHub Pages</strong>.</li>
+  <li>Click <strong>Run workflow</strong>, leave the branch as <code>main</code>, and click the
+    green <strong>Run workflow</strong> button.</li>
+  <li>Wait about a minute for the run to finish with a green tick.</li>
+</ol>
+
+<h3>c. Tell GitHub Pages about your domain</h3>
+<ol>
+  <li>Go to <strong>Settings</strong> &rarr; <strong>Pages</strong> (left sidebar, under
+    &ldquo;Code, planning, and automation&rdquo;).</li>
+  <li>Under &ldquo;Build and deployment&rdquo;, the source should already say
+    <strong>GitHub Actions</strong> &mdash; nothing to change there.</li>
+  <li>Under &ldquo;Custom domain&rdquo;, type <span class="domain">cottageaesthetics.co.uk</span>
+    and click <strong>Save</strong>.</li>
+</ol>
+
+<div class="callout important">
+  <span class="label">Expected warning</span>
+  GitHub will show that the DNS check has failed. That is normal at this point &mdash; you
+  haven&rsquo;t told Name.com about GitHub yet. That is Part 2, next.
+</div>
+
+<div class="callout important">
+  <span class="label">Keep these two in step</span>
+  The <code>WIXY_PUBLIC_DOMAIN</code> variable (step a) and the &ldquo;Custom domain&rdquo; box
+  (step c) must always hold exactly the same address. If either one is ever changed in future,
+  change the other to match.
+</div>
+
+<h2 id="part2">3. Part 2 &mdash; Name.com DNS <span class="step-time">about 10 minutes, plus waiting time</span></h2>
+
+<ol>
+  <li>Sign in at <a href="https://www.name.com">name.com</a> &rarr; <strong>My Domains</strong>
+    &rarr; <span class="domain">cottageaesthetics.co.uk</span> &rarr;
+    <strong>DNS Records</strong>.</li>
+</ol>
+
+<h3>First, remove anything that conflicts</h3>
+<ul>
+  <li>Delete any existing <strong>A</strong>, <strong>AAAA</strong>, <strong>ANAME</strong> or
+    <strong>ALIAS</strong> record on the bare domain (Host column blank, or showing
+    <code>@</code>).</li>
+  <li>Delete any existing <strong>CNAME</strong> record on <code>www</code>.</li>
+  <li>Delete any of Name.com&rsquo;s own default &ldquo;parking&rdquo; records, if present.</li>
+  <li>Switch off <strong>Domain Forwarding</strong> / <strong>URL Forwarding</strong> for this
+    domain, if it is turned on.</li>
+</ul>
+
+<h3>Then add these records</h3>
+<p>Leave the <strong>Host</strong> column empty for the bare domain (some interfaces show this
+as <code>@</code> automatically). Set <strong>TTL</strong> to 300 seconds if you are asked.</p>
+
+<table class="records-table">
+  <thead>
+    <tr><th>Type</th><th>Host</th><th>Answer / Value</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>A</td><td>(blank)</td><td><code>185.199.108.153</code></td></tr>
+    <tr><td>A</td><td>(blank)</td><td><code>185.199.109.153</code></td></tr>
+    <tr><td>A</td><td>(blank)</td><td><code>185.199.110.153</code></td></tr>
+    <tr><td>A</td><td>(blank)</td><td><code>185.199.111.153</code></td></tr>
+    <tr><td>AAAA</td><td>(blank)</td><td><code>2606:50c0:8000::153</code></td></tr>
+    <tr><td>AAAA</td><td>(blank)</td><td><code>2606:50c0:8001::153</code></td></tr>
+    <tr><td>AAAA</td><td>(blank)</td><td><code>2606:50c0:8002::153</code></td></tr>
+    <tr><td>AAAA</td><td>(blank)</td><td><code>2606:50c0:8003::153</code></td></tr>
+    <tr><td>CNAME</td><td><code>www</code></td><td><code>joshcomley.github.io</code></td></tr>
+  </tbody>
+</table>
+
+<p>That is eight records in total (four A, four AAAA) for the bare domain, plus one CNAME for
+<code>www</code>. The CNAME value is exactly <code>joshcomley.github.io</code> &mdash; no
+<code>https://</code>, no trailing slash, and it does not include the repository name.</p>
+
+<div class="callout important">
+  <span class="label">Using a different nameserver?</span>
+  Check &ldquo;Domain Details&rdquo; for <span class="domain">cottageaesthetics.co.uk</span>.
+  If it lists Name.com&rsquo;s own default nameservers, the steps above are the right place. If
+  it instead lists something else (for example Cloudflare), make these same DNS edits at
+  <em>that</em> provider instead &mdash; Name.com&rsquo;s own DNS Records page won&rsquo;t be
+  the one actually in effect.
+</div>
+
+<h2 id="part3">4. Part 3 &mdash; back in GitHub</h2>
+
+<ol>
+  <li>Return to <strong>Settings</strong> &rarr; <strong>Pages</strong> on the repository (the
+    same page as Part 1c).</li>
+  <li>DNS changes can be immediate or take a few hours to reach everywhere. Refresh the page
+    from time to time &mdash; the domain check turns green automatically once your records have
+    arrived. To check progress yourself without waiting on GitHub&rsquo;s own refresh, use
+    <a href="https://dnschecker.org">dnschecker.org</a>, or open a terminal and run:
+    <pre>nslookup cottageaesthetics.co.uk 8.8.8.8</pre>
+  </li>
+  <li>Once the check is green, tick <strong>Enforce HTTPS</strong>. GitHub issues a
+    certificate automatically &mdash; this usually takes a few minutes, occasionally up to
+    about an hour, and rarely up to 24 hours.</li>
+</ol>
+
+<div class="callout recommended">
+  <span class="label">Recommended, not required</span>
+  <p style="margin-top:0">Verifying your domain with GitHub stops anyone else from ever being
+  able to take it over on GitHub Pages (for example if the repository were ever deleted). It
+  takes a couple of extra minutes:</p>
+  <ol style="margin-bottom:0">
+    <li>Click your profile picture (top right of any GitHub page) &rarr;
+      <strong>Settings</strong> &rarr; <strong>Pages</strong> (left sidebar, under
+      &ldquo;Code, planning, and automation&rdquo;) &rarr; <strong>Add a domain</strong>.</li>
+    <li>Enter <span class="domain">cottageaesthetics.co.uk</span> &rarr;
+      <strong>Add domain</strong>.</li>
+    <li>GitHub shows a TXT record to add. At Name.com, add it exactly as shown: Type
+      <strong>TXT</strong>, Host <code>_github-pages-challenge-joshcomley</code>, Answer/Value
+      exactly the code GitHub gives you (copy it precisely).</li>
+    <li>Wait for it to appear (dnschecker.org, or <code>nslookup -type=TXT
+      _github-pages-challenge-joshcomley.cottageaesthetics.co.uk 8.8.8.8</code>), then click
+      <strong>Verify</strong> back on GitHub.</li>
+  </ol>
+</div>
+
+<h2 id="part4">5. Part 4 &mdash; check it worked</h2>
+
+<ul class="checklist">
+  <li><code>https://cottageaesthetics.co.uk</code> loads the site with a padlock (secure)
+    icon.</li>
+  <li><code>https://www.cottageaesthetics.co.uk</code> redirects to the same place.</li>
+  <li><code>https://joshcomley.github.io/cottage-aesthetics-preview/</code> also redirects to
+    your domain.</li>
+  <li><code>https://cottageaesthetics.co.uk/robots.txt</code> shows &ldquo;Allow&rdquo; and a
+    line pointing at the sitemap.</li>
+  <li><code>https://cottageaesthetics.co.uk/sitemap.xml</code> lists the site&rsquo;s
+    pages.</li>
+  <li>A made-up address, for example
+    <code>https://cottageaesthetics.co.uk/this-page-does-not-exist</code>, shows the site&rsquo;s
+    own styled &ldquo;page not found&rdquo; message, not a blank GitHub error page.</li>
+</ul>
+
+<p><strong>The real test:</strong> make a small change in the Wixy admin (for example, edit a
+line of text) and press <strong>Publish</strong>. Reload
+<span class="domain">cottageaesthetics.co.uk</span> after about two minutes and confirm the
+change is there.</p>
+
+<h2 id="troubleshooting">6. Troubleshooting</h2>
+
+<table>
+  <thead>
+    <tr><th>Symptom</th><th>What&rsquo;s happening</th><th>What to do</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>The DNS check on the Pages settings page won&rsquo;t turn green</td>
+      <td>Either the records haven&rsquo;t reached everywhere yet, or something doesn&rsquo;t
+        match</td>
+      <td>Wait longer (up to 24 hours); re-check every record against Part 2 exactly &mdash; a
+        leftover old record, or the wrong Host column, is the most common cause</td>
+    </tr>
+    <tr>
+      <td>GitHub says &ldquo;Domain is already taken&rdquo;</td>
+      <td>A safety feature &mdash; can happen if the domain was ever connected to a GitHub
+        Pages site before</td>
+      <td>Do the domain verification steps in Part 3 (the TXT record), then try adding the
+        custom domain again</td>
+    </tr>
+    <tr>
+      <td>The HTTPS certificate is stuck, or never appears</td>
+      <td>It only starts being issued once the DNS check has turned green</td>
+      <td>Wait for the DNS check first; if it has been green for over an hour with still no
+        certificate, remove the custom domain in Settings &rarr; Pages, then add it again to
+        restart the process</td>
+    </tr>
+    <tr>
+      <td>The site shows old content</td>
+      <td>Either the automatic deploy hasn&rsquo;t run since the last Publish, or the
+        <code>WIXY_PUBLIC_DOMAIN</code> variable isn&rsquo;t set</td>
+      <td>Check the Actions tab for a recent green &ldquo;Deploy to GitHub Pages&rdquo; run;
+        re-check the variable (Part 1a)</td>
+    </tr>
+    <tr>
+      <td><code>www.cottageaesthetics.co.uk</code> doesn&rsquo;t redirect</td>
+      <td>The <code>www</code> CNAME record is missing or incorrect</td>
+      <td>Re-check the CNAME record in Part 2</td>
+    </tr>
+    <tr>
+      <td>The site looks slightly wrong at the <code>joshcomley.github.io</code> address, but
+        fine at <span class="domain">cottageaesthetics.co.uk</span></td>
+      <td>Expected, and nothing to fix</td>
+      <td>The temporary github.io address hosts the site inside a sub-folder, which by design
+        breaks some internal links there. Always judge the site by
+        <span class="domain">cottageaesthetics.co.uk</span>, never by the github.io
+        address</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="afterwards">7. Afterwards</h2>
+
+<p>There is nothing to maintain day to day. Every time <strong>Publish</strong> is pressed in
+the Wixy admin, the public site rebuilds and redeploys automatically, usually live within a
+couple of minutes.</p>
+
+<p>If the domain ever needs to change in future, update it in two places together &mdash; the
+<code>WIXY_PUBLIC_DOMAIN</code> variable (Part 1a) and the Pages &ldquo;Custom domain&rdquo; box
+(Part 1c) &mdash; then set up matching DNS records at whichever provider hosts the new domain,
+following Part 2&rsquo;s pattern.</p>
+
+<footer>
+  Cottage Aesthetics &middot; GitHub Pages go-live guide &middot; written for
+  cottageaesthetics.co.uk
+</footer>
+
+</main>
+</body>
+</html>
