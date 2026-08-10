@@ -28,6 +28,12 @@ from wixy_server.treelock import tree_lock
 _GIT_TIMEOUT_S = 60
 _LOG_FIELD_SEP = "\x1f"  # ASCII unit separator — never appears in a commit subject/author
 
+LIVE_MIRROR_REF = "wixy-live"
+"""The branch on the site repo's origin that the wixy server force-pushes the current
+live pointer's sha to, on every successful publish and restore — the ref the GitHub
+Pages deploy workflow watches (spec/independence's go-live design; decisions/ entry
+for the GitHub Pages architecture). Only this server ever writes it."""
+
 
 class CheckoutError(Exception):
     """A git operation against the site-repo checkout failed."""
@@ -77,6 +83,29 @@ def _fetch_and_fast_forward(checkout_dir: Path, default_branch: str) -> None:
             "git merge --ff-only failed (a non-fast-forward local state is a bug — "
             f"never force it): {merge.stderr.strip()}"
         )
+
+
+def push_live_mirror(repo: Path, sha: str) -> bool:
+    """Force-push `sha` to `refs/heads/wixy-live` on `repo`'s origin. Force is
+    required — a restore can move this ref BACKWARDS (non-fast-forward) to an
+    older sha, which a plain push would reject.
+
+    Advisory only: retries once, then gives up and returns `False` rather than
+    raising, since a failed mirror push must never fail or block a publish/
+    restore — the public site simply lags until the next successful one heals
+    it. Every exception a git subprocess can raise (a timeout, a missing
+    executable) is swallowed for the same reason.
+    """
+    for _attempt in range(2):
+        try:
+            result = run_git(
+                ["push", "--force", "origin", f"{sha}:refs/heads/{LIVE_MIRROR_REF}"], cwd=repo
+            )
+        except subprocess.SubprocessError, OSError:
+            continue
+        if result.returncode == 0:
+            return True
+    return False
 
 
 def current_sha(checkout_dir: Path) -> str:

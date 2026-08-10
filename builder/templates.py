@@ -104,6 +104,16 @@ def _find_fonts_link(head: Tag) -> Tag | None:
     return None
 
 
+def _find_or_create_link_rel(soup: BeautifulSoup, head: Tag, rel: str) -> Tag:
+    tag = head.find("link", attrs={"rel": rel})
+    if isinstance(tag, Tag):
+        return tag
+    new_tag = soup.new_tag("link")
+    new_tag["rel"] = rel
+    head.append(new_tag)
+    return new_tag
+
+
 def apply_head(
     soup: BeautifulSoup,
     *,
@@ -143,6 +153,7 @@ def apply_head(
     _find_or_create_meta_property(soup, head, "og:url")["content"] = (
         f"https://{domain}{page_url_path}"
     )
+    _find_or_create_link_rel(soup, head, "canonical")["href"] = f"https://{domain}{page_url_path}"
 
     og_image = meta.get("ogImage")
     if isinstance(og_image, dict) and isinstance(og_image.get("src"), str):

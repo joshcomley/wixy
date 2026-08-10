@@ -325,3 +325,42 @@ class TestEnsureBuild:
         build_dir = ensure_build(project, paths, sha)
         assert build_dir == paths.build_dir(sha)
         assert build_dir.is_dir()
+
+
+class TestLiveMirrorPush:
+    """A restore flips the live pointer with NO git commit — yet the `wixy-live`
+    mirror ref (what the GitHub Pages deploy workflow watches) still has to
+    move, and specifically has to move BACKWARDS to an already-published older
+    sha, the one shape that genuinely needs push_live_mirror's `--force`."""
+
+    def test_restore_force_pushes_the_live_mirror_ref_back_to_the_older_sha(
+        self, project: ProjectConfig, paths: ProjectPaths
+    ) -> None:
+        _publish(project, paths, {"index:hero.title": "V1 Title"}, "first")
+        v1_sha = _git(["rev-parse", "refs/heads/wixy-live"], cwd=Path(project.repo)).stdout.strip()
+
+        _publish(project, paths, {"index:hero.title": "V2 Title"}, "second")
+        v2_sha = _git(["rev-parse", "refs/heads/wixy-live"], cwd=Path(project.repo)).stdout.strip()
+        assert v2_sha != v1_sha  # sanity: the mirror really did move forward on publish #2
+
+        result = run_restore(project, paths, version=1, now=_TS)
+        assert result.sha == v1_sha
+
+        mirror_sha = _git(
+            ["rev-parse", "refs/heads/wixy-live"], cwd=Path(project.repo)
+        ).stdout.strip()
+        assert mirror_sha == v1_sha  # moved BACKWARDS — proves --force is doing its job
+
+    def test_a_failed_mirror_push_is_only_logged_never_raised(
+        self, project: ProjectConfig, paths: ProjectPaths, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _publish(project, paths, {"index:hero.title": "V1 Title"}, "first")
+        _publish(project, paths, {"index:hero.title": "V2 Title"}, "second")
+        monkeypatch.setattr("wixy_server.restore.push_live_mirror", lambda repo, sha: False)
+
+        result = run_restore(project, paths, version=1, now=_TS)
+
+        assert result.version == 3
+        pointer = load_live_pointer(paths)
+        assert pointer is not None
+        assert pointer.version == 3

@@ -57,7 +57,13 @@ from builder.errors import BuildError
 from builder.jsontypes import JsonValue
 from builder.render import SiteSource
 from builder.validate import validate_site
-from wixy_server.checkout import CheckoutError, commits_ahead, current_sha, ensure_checkout
+from wixy_server.checkout import (
+    CheckoutError,
+    commits_ahead,
+    current_sha,
+    ensure_checkout,
+    push_live_mirror,
+)
 from wixy_server.checkout import run_git as run_git  # re-exported: tests patch it via this module
 from wixy_server.draft_validate import rewrite_leading_slash_src
 from wixy_server.ledger import LedgerEntry, PublishSource, append_ledger, next_version, read_ledger
@@ -204,6 +210,12 @@ def run_publish(
         append_ledger(paths, entry)
         save_overlay(paths.draft_overlay, discard_all(overlay))
         _prune_builds(paths)
+        if not push_live_mirror(paths.repo, sha):
+            _log(
+                job,
+                "WARNING: live mirror push failed — the public site updates on the "
+                "next successful publish",
+            )
         _log(job, f"published as version {version}")
 
         job.stage = "done"

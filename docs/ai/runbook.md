@@ -124,6 +124,60 @@ at startup, one project in v1 but nothing assumes it — Inv 1):
 baseline; it **builds** the site (`python -m builder build`) then rebaselines against the build
 output (never the raw checkout — decisions/00043).
 
+## Public site: GitHub Pages custom domain
+
+The public site also deploys as a static build to **GitHub Pages**, serving the operator's
+own custom domain (independent of `ca.cinnamons.uk`, which stays the private staging/admin
+home — see decisions/00126). This lives entirely in the **site repo**
+(`joshcomley/cottage-aesthetics-preview`), not here:
+
+- `wixy_server/checkout.py:push_live_mirror` force-pushes the current live pointer's sha to
+  `refs/heads/wixy-live` on the site repo's origin, at the end of every successful publish
+  and restore (Inv 32) — **only this server ever writes that ref.**
+- The site repo's `.github/workflows/pages.yml` triggers on pushes to `wixy-live` (plus
+  `workflow_dispatch`), checks out that exact ref, checks out this engine, and runs
+  `python -m builder build --domain "$WIXY_PUBLIC_DOMAIN" --indexable true` before deploying
+  via `actions/deploy-pages`. It deliberately never deploys the site repo's `main` HEAD
+  directly — that would ship agent-merged content without the owner's Publish/Restore gate.
+- **`WIXY_PUBLIC_DOMAIN`** — a repo Actions **variable** (Settings → Secrets and variables →
+  Actions → Variables) on the site repo, holding the bare apex domain (no scheme, no `www.`,
+  no trailing slash). The workflow no-ops green (a `not-configured` job, not a failure) when
+  it's unset — safe by default on a fork. **Changing the operator's domain later = edit this
+  variable AND the Pages "Custom domain" box (repo Settings → Pages) to the same value, then
+  either wait for the next publish or re-run the workflow manually** — nothing here needs a
+  code change.
+- **Bootstrap (first time only, or after a from-scratch reinstall):** `wixy-live` doesn't
+  exist on the site repo's origin until the first publish/restore after this feature shipped.
+  To bring an already-live site under Pages without waiting for the owner's next publish:
+  push the CURRENT live sha (`D:\Servers\Wixy\Storage\projects\ca\live.json`'s `sha` field)
+  straight to `refs/heads/wixy-live` from a site-repo clone, then manually dispatch the
+  workflow (`gh workflow run pages.yml --ref main -R joshcomley/cottage-aesthetics-preview`)
+  — the bootstrap push itself won't auto-trigger a run (next bullet explains why).
+- **The site repo's `github-pages` deployment environment must allow the `wixy-live`
+  branch**, or the workflow's `deploy` job fails with "Branch 'wixy-live' is not allowed to
+  deploy to github-pages due to environment protection rules" — GitHub's environment branch
+  policy check gates on the triggering ref (`github.ref`), not on what a checkout step
+  happens to check out. On `joshcomley/cottage-aesthetics-preview` this is already configured
+  (Settings → Environments → `github-pages` → Deployment branches and tags now lists
+  `gh-pages`, `main`, and `wixy-live` — the first two pre-existed; `wixy-live` was added
+  during this feature's rollout, decisions/00013 in the site repo). A **fresh** Pages setup
+  (a fork, or a from-scratch reinstall) may need the same one-time addition — this is a pure
+  repo-settings change (`gh api -X POST repos/<owner>/<repo>/environments/github-pages/
+  deployment-branch-policies -f name=wixy-live -f type=branch`), not something the workflow
+  YAML can configure itself. It requires repo-admin-level credentials — the fleet's ordinary
+  bot-PAT is deliberately admin-less and 403s on this call; use the operator's own token.
+- **Known gap, not a bug:** GitHub resolves a push-triggered workflow run from the *pushed
+  commit's own tree* — so pushing a sha that predates `pages.yml` existing on `main` (true for
+  the bootstrap push above, and true for a restore to a version published before this feature
+  shipped) moves `wixy-live` correctly but triggers **no** Pages run. The public domain then
+  lags until the next publish whose sha postdates the workflow file, or a manual
+  `workflow_dispatch`. This is accepted and documented (decisions/00126), not something to
+  "fix" by chasing GitHub's trigger resolution.
+- The full click-by-click setup (GitHub repo variable + Pages custom-domain box, Name.com DNS
+  records, HTTPS enforcement, troubleshooting) is
+  [`docs/go-live-github-pages.html`](../go-live-github-pages.html) — written for the site
+  owner/operator, not an engineering doc.
+
 ## Health & internal surface
 
 `/healthz` (alias of `/internal/ready`), `/internal/warmup`, `/internal/ready`, `/api/version`.

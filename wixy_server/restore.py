@@ -23,6 +23,7 @@ scratch-directory materialization anyway; a real worktree gets the exact same
 
 from __future__ import annotations
 
+import logging
 import shutil
 import tempfile
 from collections.abc import Iterator
@@ -35,12 +36,14 @@ from builder.config import ProjectConfig
 from builder.content import GLOBAL_CONTENT_NAME
 from builder.jsontypes import JsonObject, JsonValue
 from builder.theme import theme_to_dict
-from wixy_server.checkout import run_git
+from wixy_server.checkout import push_live_mirror, run_git
 from wixy_server.ledger import LedgerEntry, append_ledger, find_version, next_version
 from wixy_server.live_pointer import save_live_pointer
 from wixy_server.overlay import Overlay, OverlayOp, load_overlay, save_overlay
 from wixy_server.site_source import build_site_source
 from wixy_server.storage import ProjectPaths
+
+logger = logging.getLogger(__name__)
 
 
 class RestoreError(Exception):
@@ -187,4 +190,10 @@ def run_restore(
         paths,
         LedgerEntry(version=new_version, sha=entry.sha, when=now, action="restore", of=version),
     )
+    if not push_live_mirror(paths.repo, entry.sha):
+        logger.warning(
+            "live mirror push failed after restore to version %d — the public site "
+            "updates on the next successful publish or restore",
+            version,
+        )
     return RestoreResult(version=new_version, sha=entry.sha, of=version)
