@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import threading
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -36,6 +37,19 @@ from bs4 import BeautifulSoup
 
 _FINGERPRINT_LENGTH = 10
 FINGERPRINTED_ASSET_NAMES = ("site.css", "site.js", "theme.css")
+
+# decisions/00130 audit round 3, F4: `wixy_server/routes_public.py` calls
+# `content_fingerprint` on every request that carries a `?v=` for one of these three
+# assets, to VERIFY the value before granting an immutable cache header — which means
+# every such request re-read-and-re-hashed the whole file, forever, even though the
+# bytes only ever change on a publish. Keyed by `(mtime_ns, size)`, not just path, so
+# an actual content change (which always changes at least one of those two) is never
+# served a stale hash. Bounded in size by the number of distinct paths ever fingerprint-
+# checked — in practice just the handful of `FINGERPRINTED_ASSET_NAMES` files per
+# project, never attacker-influenced (the cache key is the resolved server-side path,
+# not anything in the request).
+_fingerprint_cache: dict[Path, tuple[tuple[int, int], str]] = {}
+_fingerprint_cache_lock = threading.Lock()
 
 # `(?<![\w-])` rejects a match whose preceding character is alphanumeric/underscore/
 # hyphen — i.e. requires "href="/"src=" to start a real attribute (preceded by
@@ -49,8 +63,20 @@ _ATTR_START = r"(?<![\w-])"
 
 
 def content_fingerprint(path: Path) -> str:
-    """Short content hash for a static asset — changes iff the file's bytes change."""
-    return hashlib.sha256(path.read_bytes()).hexdigest()[:_FINGERPRINT_LENGTH]
+    """Short content hash for a static asset — changes iff the file's bytes change.
+    Memoized by `(mtime_ns, size)` (decisions/00130 audit round 3, F4) — a cache hit
+    skips the file read entirely, so repeated verification requests for an unchanged
+    file cost one `stat()`, not a full read + sha256 every time."""
+    stat = path.stat()
+    stat_key = (stat.st_mtime_ns, stat.st_size)
+    with _fingerprint_cache_lock:
+        cached = _fingerprint_cache.get(path)
+    if cached is not None and cached[0] == stat_key:
+        return cached[1]
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()[:_FINGERPRINT_LENGTH]
+    with _fingerprint_cache_lock:
+        _fingerprint_cache[path] = (stat_key, digest)
+    return digest
 
 
 def fingerprint_asset_references(out_dir: Path) -> dict[str, str]:

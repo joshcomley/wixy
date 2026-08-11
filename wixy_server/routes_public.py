@@ -24,7 +24,7 @@ import anyio
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse, Response
 
-from builder.assetcache import content_fingerprint
+from builder.assetcache import FINGERPRINTED_ASSET_NAMES, content_fingerprint
 from builder.serving import resolve_site_path
 from wixy_server.live_pointer import LivePointer, load_live_pointer
 from wixy_server.redirects import RedirectMap, resolve_redirect
@@ -58,7 +58,18 @@ def _cache_control_for(path: Path, *, fingerprinted: bool) -> str:
     (matching) `?v=`, `site.css`/`site.js`/`theme.css` keep the same 24h default as any
     other asset; that only ever serves a transitional request from a stale HTML page in
     the (at most 300s) window before it itself revalidates and picks up the new
-    fingerprinted references."""
+    fingerprinted references.
+
+    The caller (`_serve`) only ever passes `fingerprinted=True` for a resolved path whose
+    NAME is one of `FINGERPRINTED_ASSET_NAMES` (decisions/00130 audit round 3, F4) — a
+    verified hash match is cryptographically safe for ANY file in principle, but checking
+    one requires a `content_fingerprint` call, and this is the app's one unauthenticated,
+    catch-all surface: without the name restriction, an unauthenticated `HEAD` request
+    for an arbitrary (potentially large) asset with any `?v=` forces a full file read +
+    sha256 on every request — cheap for the caller (Starlette sends no body on HEAD),
+    expensive for the server, and a guaranteed Cloudflare cache miss besides. Restricting
+    to the three known, small, publish-time-fingerprinted names keeps the verified-match
+    contract exactly where it's actually needed and closes that amplification."""
     if path.suffix == ".html":
         return _HTML_CACHE_CONTROL
     if fingerprinted:
@@ -95,9 +106,14 @@ async def _serve(
     if resolved is not None:
         # HTML's cache-control never depends on `fingerprinted` (_cache_control_for
         # returns on the .html suffix check first) — skip hashing the file to compute
-        # a value that would just be discarded.
+        # a value that would just be discarded. Restricted to FINGERPRINTED_ASSET_NAMES
+        # (decisions/00130 audit round 3, F4) — an arbitrary asset (e.g. an image) never
+        # even reaches the hash check, regardless of what `?v=` it's requested with, so
+        # the one unauthenticated catch-all surface can't be made to hash arbitrary
+        # (potentially large) files on demand.
         fingerprinted = (
             resolved.suffix != ".html"
+            and resolved.name in FINGERPRINTED_ASSET_NAMES
             and query_fingerprint is not None
             and await anyio.to_thread.run_sync(
                 _query_fingerprint_matches, resolved, query_fingerprint

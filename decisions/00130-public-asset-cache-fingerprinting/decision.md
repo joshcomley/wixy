@@ -130,7 +130,11 @@ this doc). `opus` found three real issues, all fixed in the same PR before merge
   arbitrary/attacker-supplied value) falls through to the unchanged `86400s` default. This
   also generalizes the grant correctly to any file, not just the three named assets — a match
   can only ever mean "these exact bytes are what this URL will always mean," which is true
-  regardless of which asset it is.
+  regardless of which asset it is. **Reverted by audit round 3, F4 below** — correct in
+  principle, but the generalization itself became the problem: verifying costs a
+  `content_fingerprint` call, and this route is the app's one unauthenticated, catch-all
+  surface, so "any file" meant an unauthenticated request could force a full read + hash of
+  an arbitrary asset.
 - **F2 (MEDIUM).** The rewrite silently no-ops on `href="/site.css"` or `href="./site.css"`
   — a leading-path-segment form the exact bare-string match deliberately doesn't recognise —
   with no build-time signal. Since this engine doesn't own or validate the site repo's own
@@ -157,6 +161,48 @@ a fresh `load_site_source(edited_root, ...)` call, not just an edited `root` arg
 `build_site`), and `wixy_server/tests/test_routes_public.py` (the exact F1 replay scenario:
 `?v=` present but wrong still gets the 24h default, not immutable). Full suite green: 1165
 passed.
+
+## Audit round 3 (opus tier) — 3 findings, all fixed
+
+Cleared `sonnet-senior` again (0 findings, independently re-verified: `ruff check`, `ruff
+format --check`, `mypy --strict`, full `pytest` — 1165 passed). `opus` found three more real
+issues, all fixed in the same PR before merge:
+
+- **F4 (MEDIUM).** Round 2's F1 fix was correct in what it verified, but too broad in where
+  it applied: `fingerprinted` in `_serve` was computed for ANY resolved file carrying ANY
+  `?v=`, with no restriction to `FINGERPRINTED_ASSET_NAMES` and no memoization. Consequence:
+  an unauthenticated `HEAD`/`GET` request for an arbitrary (potentially large) public asset —
+  an image, for instance — with any `?v=` value forced a full `path.read_bytes()` + sha256
+  over the whole file, on the shared anyio worker threadpool, on every single request.
+  Starlette sends no body for `HEAD`, so the caller pays ~0 bytes while the server pays a
+  full read+hash — a real cost-amplification on the app's one unauthenticated, catch-all
+  surface, and a guaranteed Cloudflare cache miss besides (a unique `?v=` per request never
+  hits the edge). This is new: before decisions/00130, `HEAD` on a public asset was stat-only.
+  Fixed two ways, both needed: (1) `_serve` now also requires `resolved.name in
+  FINGERPRINTED_ASSET_NAMES` before calling `_query_fingerprint_matches` at all — an arbitrary
+  asset never reaches the hash check regardless of its `?v=`; (2)
+  `builder/assetcache.content_fingerprint` is now memoized by `(mtime_ns, size)`, so even
+  repeated legitimate verification requests for an unchanged fingerprinted asset cost one
+  `stat()`, not a full read+hash, after the first. The cache is keyed by server-resolved path,
+  never by anything in the request, so it can't itself be grown by an attacker.
+- **F5 (MEDIUM).** `docs/ai/builder.md` still described the PRE-F1 presence-only mechanism
+  ("`routes_public.py` serves any `?v=`-carrying request `immutable`") and omitted the F2
+  `BuildError` guard from `build_site`'s described sequence — the exact class of doc-drift
+  decision #5 (below the "What was decided" section, at commit `0aa0911`) already caught and
+  fixed in three OTHER docs files; this one was missed. Fixed: the paragraph now describes the
+  verified-match mechanism (and its F4 name restriction), and explicitly lists the
+  `find_unfingerprinted_asset_references` → `BuildError` step.
+- **F6 (LOW).** `docs/ai/contracts.md`'s `/{path}` row already documented the grant as scoped
+  to the three named assets — which was correct all along; F1's own write-up (above) is what
+  overclaimed "any file." F4's fix makes the code match what contracts.md already said, so no
+  contracts.md change was needed — recorded here only so a future reader doesn't go looking
+  for one.
+
+New/updated tests: `builder/tests/test_assetcache.py` (memoization hits/misses, verified via a
+`Path.read_bytes` call-counting monkeypatch — a repeat call on an unchanged file reads once, a
+genuine content change reads again), `wixy_server/tests/test_routes_public.py` (a non-
+fingerprinted-name asset, e.g. `photo.jpg`, never gets `immutable` even when `?v=` is set to
+its own real content hash). Full suite green.
 
 ## Addendum: the same F1 gap exists, unfixed, in the admin-side sibling
 

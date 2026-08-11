@@ -187,6 +187,25 @@ class TestPublishedSite:
         assert response.status_code == 200
         assert response.headers["cache-control"] == "public, max-age=86400"
 
+    def test_non_fingerprinted_asset_never_gets_immutable_even_with_a_matching_hash(
+        self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
+    ) -> None:
+        """decisions/00130 audit round 3, F4/F6: the verified-hash-match check must be
+        scoped to exactly `FINGERPRINTED_ASSET_NAMES`, not to any resolved file —
+        otherwise an unauthenticated request for an arbitrary (potentially large)
+        asset with any `?v=` forces a full file read + sha256 on every request, a real
+        cost-amplification on the app's one unauthenticated catch-all surface. An
+        asset outside that name list must keep the unchanged 24h default regardless of
+        whether its `?v=` happens to match its own real content hash."""
+        build_dir = _publish_build(paths, "a" * 40, 1)
+        (build_dir / "photo.jpg").write_bytes(b"not a real jpeg, just some bytes")
+        fingerprint = content_fingerprint(build_dir / "photo.jpg")
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get(f"/photo.jpg?v={fingerprint}")
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "public, max-age=86400"
+
     def test_fingerprinted_html_request_still_gets_html_cache_control(
         self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
     ) -> None:

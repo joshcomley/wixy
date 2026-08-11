@@ -77,12 +77,23 @@ rmtree+mkdir out; render each slug in **publish** mode (`index`→`index.html`, 
 `images/`; write `robots.txt`; write `sitemap.xml` **only if `indexable`**; write the
 generated `404.html`; then `assetcache.fingerprint_asset_references` rewrites every page's
 bare `href="site.css"` / `src="site.js"` / `href="theme.css"` to `...?v=<content hash>`
-in place (decisions/00130 — `wixy_server/routes_public.py` serves any `?v=`-carrying
-request `immutable`, so a rebuilt asset is a new URL no cache layer can be stale for);
-then `_self_check` (every expected file exists + parses under
-`html5lib`; every content-referenced image (`content.scan_image_refs`) exists — else
-`BuildError`). `hash_output_tree` = sha256 over sorted `(relpath, bytes)` (the determinism
-test, Inv 4).
+in place, then `assetcache.find_unfingerprinted_asset_references` scans every page for a
+recognisable-but-unrewritten reference (e.g. a leading `/` or `./` prefix the exact-match
+rewrite above deliberately doesn't touch) and `build_site` raises `BuildError` if it finds
+one — a publish must never silently ship an asset reference the fingerprinting missed
+(decisions/00130 audit round 2, F2); then `_self_check` (every expected file exists +
+parses under `html5lib`; every content-referenced image (`content.scan_image_refs`)
+exists — else `BuildError`). `hash_output_tree` = sha256 over sorted `(relpath, bytes)`
+(the determinism test, Inv 4).
+
+`wixy_server/routes_public.py` serves one of these three names `public, max-age=31536000,
+immutable` only once its `?v=` is VERIFIED against `content_fingerprint(resolved)` — not
+merely present (decisions/00130 audit round 2, F1) — so a rebuilt asset is a new, verified
+URL no cache layer can be stale for; every other asset (and a bare/mismatched request for
+one of the three) keeps the unchanged `public, max-age=86400` default (decisions/00130
+audit round 3, F4: the verified-match check itself is restricted to
+`FINGERPRINTED_ASSET_NAMES`, so an arbitrary asset never pays the cost of a hash check
+regardless of what `?v=` it's requested with).
 
 ## Validation (`builder/validate.py:validate_site`)
 

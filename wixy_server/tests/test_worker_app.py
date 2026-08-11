@@ -105,13 +105,26 @@ def _poll_transcript_texts(
     replaces the file atomically (tmp file + `os.replace`, its own
     docstring), so a reader only ever sees the old-complete or new-complete
     content, never a partial line — polling for the expected line count is
-    exactly the "wait for the real observable" fix, not a workaround."""
+    exactly the "wait for the real observable" fix, not a workaround.
+
+    Tolerates a transient `PermissionError` on the read itself, same as
+    `write_transcript`'s own `_replace_riding_out_scanners` already tolerates
+    one on the write side: on Windows an external reader (Defender real-time
+    scan, the Search indexer) can briefly hold the file during the moment
+    `os.replace` swaps it in, failing an *open* with WinError 5 even though
+    nothing is actually wrong. Without this, that transient lock surfaces as
+    a hard test failure instead of "not ready yet, keep polling" — seen for
+    real: a full local+CI-green suite still hit this once, non-deterministically,
+    on this exact test."""
     path = transcript_path(tmp_path / "transcripts", conv_id)
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         if path.exists():
-            lines = path.read_text(encoding="utf-8").splitlines()
-            if len(lines) == expected_count:
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except PermissionError:
+                lines = None  # same transient external lock the writer retries around
+            if lines is not None and len(lines) == expected_count:
                 return [json.loads(line)["text"] for line in lines]
         time.sleep(0.02)
     raise AssertionError(

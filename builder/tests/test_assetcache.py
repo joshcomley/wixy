@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from builder.assetcache import (
     content_fingerprint,
     find_unfingerprinted_asset_references,
@@ -27,6 +29,58 @@ class TestContentFingerprint:
         first = content_fingerprint(a)
         a.write_text("body{color:blue}", encoding="utf-8")
         assert content_fingerprint(a) != first
+
+    def test_repeated_calls_on_an_unchanged_file_read_it_only_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """decisions/00130 audit round 3, F4: `routes_public.py` calls this on every
+        request that carries a `?v=` for a fingerprinted asset, to verify the value —
+        so an unmemoized version re-reads and re-hashes the whole file on every single
+        request, forever, even though the bytes only change on a publish. Must hash
+        once per distinct (mtime, size), not once per call."""
+        read_count = 0
+        real_read_bytes = Path.read_bytes
+
+        def counting_read_bytes(self: Path) -> bytes:
+            nonlocal read_count
+            read_count += 1
+            return real_read_bytes(self)
+
+        monkeypatch.setattr(Path, "read_bytes", counting_read_bytes)
+
+        f = tmp_path / "site.css"
+        f.write_text("body{color:red}", encoding="utf-8")
+
+        first = content_fingerprint(f)
+        second = content_fingerprint(f)
+        assert first == second
+        assert read_count == 1
+
+    def test_a_genuine_content_change_still_produces_a_fresh_hash(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The memoization cache must never serve a stale hash for a file that
+        actually changed — the whole point of fingerprinting is that a content change
+        changes the URL."""
+        read_count = 0
+        real_read_bytes = Path.read_bytes
+
+        def counting_read_bytes(self: Path) -> bytes:
+            nonlocal read_count
+            read_count += 1
+            return real_read_bytes(self)
+
+        monkeypatch.setattr(Path, "read_bytes", counting_read_bytes)
+
+        f = tmp_path / "site.css"
+        f.write_text("body{color:red}", encoding="utf-8")
+        first = content_fingerprint(f)
+
+        f.write_text("body{color:blue}", encoding="utf-8")  # different size too
+        second = content_fingerprint(f)
+
+        assert first != second
+        assert read_count == 2
 
 
 class TestFingerprintAssetReferences:
