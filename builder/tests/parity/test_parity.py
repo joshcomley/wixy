@@ -86,6 +86,29 @@ class TestCaptureContent:
         assert ".price" not in captures["about"].probe.styles
 
 
+class TestCaptureConsoleErrorScoping:
+    """`capture_site` reuses one Playwright page across every slug in its loop —
+    `console`/`pageerror` listeners registered per-slug must not outlive that slug's
+    own capture, or a later slug's async error gets attributed to every earlier slug
+    whose listener is still attached (a real incident: a slow-loading Google Maps
+    embed on one page made four earlier, unrelated pages fail parity too).
+    """
+
+    def test_delayed_error_does_not_leak_into_earlier_slugs(self, tmp_path: Path) -> None:
+        (tmp_path / "a.html").write_text("<html><body>A</body></html>", encoding="utf-8")
+        (tmp_path / "b.html").write_text(
+            "<html><body>B<script>"
+            "setTimeout(() => { throw new Error('delayed boom'); }, 30);"
+            "</script></body></html>",
+            encoding="utf-8",
+        )
+        with serve_directory(tmp_path) as base_url:
+            captures = capture_site(base_url, ["a", "b"])
+
+        assert captures["a"].probe.console_errors == []
+        assert any("delayed boom" in e for e in captures["b"].probe.console_errors)
+
+
 class TestCompareFunctions:
     def test_identical_probes_compare_clean(self, built_site_url: str) -> None:
         captures = capture_site(built_site_url, ["index"])
