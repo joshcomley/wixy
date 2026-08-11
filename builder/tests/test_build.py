@@ -6,15 +6,17 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import shutil
 from pathlib import Path
 
 import pytest
 
+from builder.assetcache import content_fingerprint
 from builder.build import build_site, hash_output_tree
 from builder.content import dotted_set
 from builder.errors import BuildError
 from builder.jsontypes import JsonObject
-from builder.render import SiteSource
+from builder.render import SiteSource, load_site_source
 
 
 class TestBuildSite:
@@ -65,8 +67,12 @@ class TestBuildSite:
         build_site(mini_site_root, mini_site_source, out)
         html = (out / "404.html").read_text(encoding="utf-8")
         assert "Page not found" in html
-        assert 'href="theme.css"' in html  # mini_site_source has a theme
-        assert 'href="site.css"' in html
+        # mini_site_source has a theme — references are fingerprinted (see
+        # TestAssetFingerprinting below), not bare.
+        theme_fp = content_fingerprint(out / "theme.css")
+        site_fp = content_fingerprint(out / "site.css")
+        assert f'href="theme.css?v={theme_fp}"' in html
+        assert f'href="site.css?v={site_fp}"' in html
 
     def test_404_page_omits_theme_link_when_no_theme(
         self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
@@ -97,6 +103,81 @@ class TestBuildSite:
         out = tmp_path / "_build"
         with pytest.raises(BuildError):
             build_site(mini_site_root, source, out)
+
+
+class TestAssetFingerprinting:
+    """decisions/00130: build_site wires builder.assetcache in end-to-end."""
+
+    def test_index_page_references_are_fingerprinted(
+        self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "_build"
+        build_site(mini_site_root, mini_site_source, out)
+        html = (out / "index.html").read_text(encoding="utf-8")
+        css_fp = content_fingerprint(out / "site.css")
+        assert f'href="site.css?v={css_fp}"' in html
+        # the page also links an absolute, external Google Fonts stylesheet
+        # (theme-generated, unrelated to this site's own assets) — exactly one `?v=`
+        # in the whole page confirms that external URL's own query string was never
+        # touched by the fingerprinting rewrite.
+        assert "fonts.googleapis.com" in html
+        assert html.count("?v=") == 1
+
+    def test_changing_site_css_changes_its_url_on_every_page(
+        self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
+    ) -> None:
+        out1 = tmp_path / "build1"
+        build_site(mini_site_root, mini_site_source, out1)
+        index1 = (out1 / "index.html").read_text(encoding="utf-8")
+        about1 = (out1 / "about.html").read_text(encoding="utf-8")
+
+        edited_root = tmp_path / "edited-site"
+        edited_root.mkdir()
+        for item in mini_site_root.iterdir():
+            if item.is_dir():
+                shutil.copytree(item, edited_root / item.name)
+            else:
+                edited_root.joinpath(item.name).write_bytes(item.read_bytes())
+        (edited_root / "site.css").write_text("body{color:blue}", encoding="utf-8")
+
+        out2 = tmp_path / "build2"
+        build_site(edited_root, mini_site_source, out2)
+        index2 = (out2 / "index.html").read_text(encoding="utf-8")
+        about2 = (out2 / "about.html").read_text(encoding="utf-8")
+
+        assert index1 != index2
+        assert about1 != about2
+
+    def test_leading_slash_asset_reference_fails_the_build(
+        self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
+    ) -> None:
+        """decisions/00130 audit round 2, F2: a template written with `href="/site.css"`
+        instead of the bare `href="site.css"` the rewrite matches must fail the build
+        loudly, not ship silently unfingerprinted — the exact invisibility that made the
+        original production incident cost hours."""
+        edited_root = tmp_path / "edited-site"
+        edited_root.mkdir()
+        for item in mini_site_root.iterdir():
+            if item.is_dir():
+                shutil.copytree(item, edited_root / item.name)
+            else:
+                edited_root.joinpath(item.name).write_bytes(item.read_bytes())
+        index_page = edited_root / "pages" / "index.html"
+        index_page.write_text(
+            index_page.read_text(encoding="utf-8").replace('href="site.css"', 'href="/site.css"'),
+            encoding="utf-8",
+        )
+        # `SiteSource.pages_dir` is fixed at load time (render_page reads the template
+        # fresh from THERE, not from whatever `root` build_site is later called with) —
+        # mini_site_source still points at the ORIGINAL, unedited fixture directory, so
+        # a fresh load from edited_root is required for the edited template to matter.
+        edited_source = load_site_source(
+            edited_root, mini_site_source.project, mini_site_source.theme
+        )
+
+        out = tmp_path / "_build"
+        with pytest.raises(BuildError):
+            build_site(edited_root, edited_source, out)
 
 
 class TestDeterminism:

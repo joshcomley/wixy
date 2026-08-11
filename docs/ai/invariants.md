@@ -180,9 +180,14 @@ non-heuristically-cacheable (`GET /admin` is `Cache-Control: no-cache`; preview 
 for days — the bug decisions/00069 fixed. The shell is rewritten by construction
 (`app.py:_fingerprint_shell_assets`); anything new that references `/admin/static/*` from a
 served document must go through `fingerprinted_url` too. *Enforced by:*
-`test_staticcache.py` (incl. the no-bare-references guard). *Known exception:* the
+`test_staticcache.py` (incl. the no-bare-references guard). *Known exceptions:* (1) the
 `?uxer=`-gated Uxer compliance-bridge `import()` (AI-tooling-only surface, gitignored
-local build) — see decisions/00069's "what to watch for".
+local build) — see decisions/00069's "what to watch for"; (2) **outstanding gap, found
+2026-08-10 while fixing the sibling Inv 34**: `FingerprintedStaticFiles.get_response`
+grants `immutable` on `?v=` PRESENCE alone, never verifying the value against the served
+file's actual current hash — the same class of bug decisions/00130's audit round 2 (F1)
+fixed on the public-site sibling of this pattern. Not yet fixed here; see decisions/00130's
+addendum for the exact follow-up shape.
 
 ### Inv 23 — Overlay chrome is stripped before any DOM value crosses into a draft op or editor seed
 The overlay injects chrome INTO content elements (today: the `data-wx-if` eye
@@ -407,4 +412,27 @@ load-bearing NON-resolution: `/<slug>/` always 404s (verified live against Pages
 directory-index fallback there either), so `resolve_site_path`'s `.html`-append retry
 explicitly skips any request path ending in `/`. Do not "fix" this into a 200 or a redirect;
 that would be the resolver disagreeing with what Pages actually serves for that path.
+
+### Inv 34 — Every public-site `href="site.css"`/`src="site.js"`/`href="theme.css"` is content-fingerprinted
+Sibling of Inv 22, same failure mode, different code path: `builder/build.py` calls
+`assetcache.fingerprint_asset_references` once all three assets' final bytes are known,
+rewriting every page's bare reference to `...?v=<sha256(file)[:10]>` in place. Otherwise a
+CDN edge or browser that cached one before a publish keeps serving those exact pre-publish
+bytes for up to 24h afterwards — a real production incident (decisions/00130): a merged,
+published fix looked "unchanged" because Cloudflare's edge, not the server, was still
+serving stale bytes. `wixy_server/routes_public.py:_cache_control_for` serves `public,
+max-age=31536000, immutable` only when the request's `?v=` is VERIFIED to equal
+`content_fingerprint(resolved)` — presence alone is not sufficient (decisions/00130's audit
+round 2, F1: a naive presence-only check lets a stale fingerprint replayed during a
+publish's propagation window pin the current bytes under the old URL immutably, poisoning
+it against a future publish that reverts to the old content). A bare or mismatched request
+for the same asset keeps the unchanged `public, max-age=86400` default. *Enforced by:*
+`builder/tests/test_assetcache.py`, `test_build.py::TestAssetFingerprinting`,
+`test_routes_public.py`'s fingerprinted-vs-mismatched-vs-bare cache-control tests. *Known
+exceptions:* (1) images are not fingerprinted (decisions/00130's "what to watch for" —
+upload filenames are effectively-unique by convention today, a materially different risk
+shape); (2) `wixy_server/staticcache.py`'s `FingerprintedStaticFiles` (Inv 22, the admin-side
+sibling this invariant mirrors) still grants immutable caching on `?v=` PRESENCE alone,
+the same class of gap F1 fixed here — not yet fixed there as of this writing; flagged, not
+fixed, pending its own follow-up (see decisions/00130's addendum).
 

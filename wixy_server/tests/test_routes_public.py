@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from builder.assetcache import content_fingerprint
 from wixy_server.app import create_app
 from wixy_server.routes_public import _resolve_within_build_dir
 from wixy_server.storage import ProjectPaths, project_paths
@@ -154,6 +155,69 @@ class TestPublishedSite:
             response = client.get("/site.css")
         assert response.status_code == 200
         assert response.headers["cache-control"] == "public, max-age=86400"
+
+    def test_fingerprinted_asset_gets_immutable_cache_control(
+        self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
+    ) -> None:
+        """decisions/00130: a `?v=` query param that matches this exact file's current
+        content hash (builder/assetcache.py's fingerprint) means these bytes can never
+        change under this URL — safe to cache for a year. Without one (the test above),
+        the same file keeps the 24h default."""
+        build_dir = _publish_build(paths, "a" * 40, 1)
+        fingerprint = content_fingerprint(build_dir / "site.css")
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get(f"/site.css?v={fingerprint}")
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
+
+    def test_mismatched_fingerprint_does_not_get_immutable_cache_control(
+        self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
+    ) -> None:
+        """decisions/00130 audit round 2, F1: presence of `?v=` alone used to be
+        enough — a STALE fingerprint replayed from a page cached during a publish's
+        propagation window would then get the CURRENT bytes served back immutably
+        under that old, now-mismatched URL, poisoning it for a year against a future
+        publish that legitimately reverts to the old content. The value must actually
+        match the file's current hash."""
+        _publish_build(paths, "a" * 40, 1)
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/site.css?v=abc1234567")
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "public, max-age=86400"
+
+    def test_non_fingerprinted_asset_never_gets_immutable_even_with_a_matching_hash(
+        self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
+    ) -> None:
+        """decisions/00130 audit round 3, F4/F6: the verified-hash-match check must be
+        scoped to exactly `FINGERPRINTED_ASSET_NAMES`, not to any resolved file —
+        otherwise an unauthenticated request for an arbitrary (potentially large)
+        asset with any `?v=` forces a full file read + sha256 on every request, a real
+        cost-amplification on the app's one unauthenticated catch-all surface. An
+        asset outside that name list must keep the unchanged 24h default regardless of
+        whether its `?v=` happens to match its own real content hash."""
+        build_dir = _publish_build(paths, "a" * 40, 1)
+        (build_dir / "photo.jpg").write_bytes(b"not a real jpeg, just some bytes")
+        fingerprint = content_fingerprint(build_dir / "photo.jpg")
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get(f"/photo.jpg?v={fingerprint}")
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "public, max-age=86400"
+
+    def test_fingerprinted_html_request_still_gets_html_cache_control(
+        self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
+    ) -> None:
+        """An HTML page is never itself fingerprinted (it's the document that CARRIES
+        the fingerprinted references) — a stray `?v=` on one must not change its cache
+        behaviour."""
+        _publish_build(paths, "a" * 40, 1)
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/about.html?v=abc1234567")
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "public, max-age=300"
 
     def test_unknown_path_serves_404_page_with_404_status(
         self, storage_root: Path, wixy_repo_root: Path, paths: ProjectPaths
