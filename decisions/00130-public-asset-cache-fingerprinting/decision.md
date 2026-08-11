@@ -198,10 +198,28 @@ issues, all fixed in the same PR before merge:
   contracts.md change was needed — recorded here only so a future reader doesn't go looking
   for one.
 
+**F4/F5/F6 fixed in commit `bc04ad2`; re-submitted as a fresh relation (68504b38, linked to
+this one) since the original had already resolved.** `sonnet-senior` found one more real
+issue of its own on that commit, reading the F4 fix directly rather than trusting the diff:
+
+- **F7 (LOW).** F4's own fix comment claimed the new cache stayed bounded to "a handful of
+  `FINGERPRINTED_ASSET_NAMES` files per project" — wrong: each publish resolves those three
+  names against a NEW per-publish build directory, so the cache key (a full resolved `Path`)
+  differs every time, and the old build dir's entries are never looked up again once the live
+  pointer moves on but were never evicted either — unbounded growth over a long-running
+  server's lifetime (practically negligible in absolute terms, but the comment's claim was
+  simply false, and "never evicted" is the kind of gap that's cheap to fix now and expensive
+  to rediscover later). Fixed: `_fingerprint_cache` is now a real bounded LRU
+  (`_FingerprintCache`, `_FINGERPRINT_CACHE_MAX_ENTRIES = 64`) — a hit moves an entry to the
+  back of the eviction queue, an insert past the cap evicts the least-recently-touched entry,
+  so the bound holds regardless of how many publishes accumulate.
+
 New/updated tests: `builder/tests/test_assetcache.py` (memoization hits/misses, verified via a
 `Path.read_bytes` call-counting monkeypatch — a repeat call on an unchanged file reads once, a
-genuine content change reads again), `wixy_server/tests/test_routes_public.py` (a non-
-fingerprinted-name asset, e.g. `photo.jpg`, never gets `immutable` even when `?v=` is set to
+genuine content change reads again; F7's bound — inserting 3x the cap's worth of distinct
+paths never lets the cache exceed it; and LRU-not-FIFO — a stale entry touched again survives
+eviction pressure that would otherwise have dropped it), `wixy_server/tests/test_routes_public.py`
+(a non-fingerprinted-name asset, e.g. `photo.jpg`, never gets `immutable` even when `?v=` is set to
 its own real content hash). Full suite green.
 
 ## Addendum: the same F1 gap exists, unfixed, in the admin-side sibling

@@ -30,6 +30,7 @@ from __future__ import annotations
 import hashlib
 import re
 import threading
+from collections import OrderedDict
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -44,12 +45,51 @@ FINGERPRINTED_ASSET_NAMES = ("site.css", "site.js", "theme.css")
 # every such request re-read-and-re-hashed the whole file, forever, even though the
 # bytes only ever change on a publish. Keyed by `(mtime_ns, size)`, not just path, so
 # an actual content change (which always changes at least one of those two) is never
-# served a stale hash. Bounded in size by the number of distinct paths ever fingerprint-
-# checked — in practice just the handful of `FINGERPRINTED_ASSET_NAMES` files per
-# project, never attacker-influenced (the cache key is the resolved server-side path,
-# not anything in the request).
-_fingerprint_cache: dict[Path, tuple[tuple[int, int], str]] = {}
-_fingerprint_cache_lock = threading.Lock()
+# served a stale hash.
+#
+# decisions/00130 audit round 3, F7: NOT bounded by "a handful of FINGERPRINTED_
+# ASSET_NAMES files per project" as an earlier version of this comment claimed — each
+# publish resolves these names against a NEW per-publish build directory, so the
+# resolved `Path` (the cache key) is different every time, and the old build dir's
+# entries are never looked up again once the live pointer moves on, but nothing was
+# evicting them either: unbounded growth over a long-running server's lifetime,
+# never attacker-influenced (the key is a server-resolved path, not request input),
+# but real. `_FingerprintCache` below is an actual bounded LRU (not just a comment
+# promising boundedness): a cache hit is a move-to-end, an insert past the cap evicts
+# the least-recently-touched entry. The cap only needs to comfortably exceed the
+# number of build dirs that could plausibly still be live/in-flight at once (a
+# handful, even across concurrent publishes of several projects) — 64 is generous
+# headroom over that, not a tuned/load-bearing number.
+_FINGERPRINT_CACHE_MAX_ENTRIES = 64
+
+
+class _FingerprintCache:
+    """A small, bounded, thread-safe LRU used only by `content_fingerprint` — kept as
+    its own class (rather than a bare module-level dict) so the eviction policy has
+    one obvious home instead of being interleaved into every call site."""
+
+    def __init__(self, max_entries: int) -> None:
+        self._max_entries = max_entries
+        self._entries: OrderedDict[Path, tuple[tuple[int, int], str]] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(self, path: Path, stat_key: tuple[int, int]) -> str | None:
+        with self._lock:
+            cached = self._entries.get(path)
+            if cached is None or cached[0] != stat_key:
+                return None
+            self._entries.move_to_end(path)
+            return cached[1]
+
+    def put(self, path: Path, stat_key: tuple[int, int], digest: str) -> None:
+        with self._lock:
+            self._entries[path] = (stat_key, digest)
+            self._entries.move_to_end(path)
+            while len(self._entries) > self._max_entries:
+                self._entries.popitem(last=False)
+
+
+_fingerprint_cache = _FingerprintCache(_FINGERPRINT_CACHE_MAX_ENTRIES)
 
 # `(?<![\w-])` rejects a match whose preceding character is alphanumeric/underscore/
 # hyphen — i.e. requires "href="/"src=" to start a real attribute (preceded by
@@ -64,18 +104,19 @@ _ATTR_START = r"(?<![\w-])"
 
 def content_fingerprint(path: Path) -> str:
     """Short content hash for a static asset — changes iff the file's bytes change.
-    Memoized by `(mtime_ns, size)` (decisions/00130 audit round 3, F4) — a cache hit
-    skips the file read entirely, so repeated verification requests for an unchanged
-    file cost one `stat()`, not a full read + sha256 every time."""
+    Memoized by `(mtime_ns, size)` in a bounded LRU (decisions/00130 audit round 3,
+    F4 + F7) — a cache hit skips the file read entirely, so repeated verification
+    requests for an unchanged file cost one `stat()`, not a full read + sha256 every
+    time, while the cache itself can never grow past `_FINGERPRINT_CACHE_MAX_ENTRIES`
+    regardless of how many publishes (each with its own build-dir path) accumulate
+    over a long-running server's lifetime."""
     stat = path.stat()
     stat_key = (stat.st_mtime_ns, stat.st_size)
-    with _fingerprint_cache_lock:
-        cached = _fingerprint_cache.get(path)
-    if cached is not None and cached[0] == stat_key:
-        return cached[1]
+    cached = _fingerprint_cache.get(path, stat_key)
+    if cached is not None:
+        return cached
     digest = hashlib.sha256(path.read_bytes()).hexdigest()[:_FINGERPRINT_LENGTH]
-    with _fingerprint_cache_lock:
-        _fingerprint_cache[path] = (stat_key, digest)
+    _fingerprint_cache.put(path, stat_key, digest)
     return digest
 
 

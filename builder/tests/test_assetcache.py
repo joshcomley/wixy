@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from builder import assetcache
 from builder.assetcache import (
     content_fingerprint,
     find_unfingerprinted_asset_references,
@@ -81,6 +82,52 @@ class TestContentFingerprint:
 
         assert first != second
         assert read_count == 2
+
+    def test_the_memoization_cache_never_grows_past_its_cap(self, tmp_path: Path) -> None:
+        """decisions/00130 audit round 3, F7: an earlier version of this cache's own
+        comment claimed it stayed bounded to "a handful" of entries because there are
+        only three fingerprinted asset NAMES — but each publish resolves those names
+        against a NEW per-publish build directory, so the cache key (a full resolved
+        path) is different every time, and old entries were never evicted. Must be a
+        real bound, not just a comment promising one: inserting many more distinct
+        paths than the cap must never let the cache exceed it."""
+        cache = assetcache._fingerprint_cache
+        cap = assetcache._FINGERPRINT_CACHE_MAX_ENTRIES
+        for i in range(cap * 3):
+            f = tmp_path / f"build-{i}" / "site.css"
+            f.parent.mkdir()
+            f.write_text(f"body{{color:red}} /* {i} */", encoding="utf-8")
+            content_fingerprint(f)
+            assert len(cache._entries) <= cap
+
+    def test_a_recently_used_entry_survives_over_a_stale_one(self, tmp_path: Path) -> None:
+        """LRU, not FIFO: touching an old entry again must move it to the back of the
+        eviction queue, or a hot, still-relevant file could be evicted ahead of one
+        nobody has asked about in a while."""
+        cache = assetcache._fingerprint_cache
+        cap = assetcache._FINGERPRINT_CACHE_MAX_ENTRIES
+
+        oldest = tmp_path / "oldest" / "site.css"
+        oldest.parent.mkdir()
+        oldest.write_text("body{color:red}", encoding="utf-8")
+        content_fingerprint(oldest)  # inserted first -> would be evicted first by FIFO
+
+        # Fill the cache to capacity with other distinct paths.
+        for i in range(cap - 1):
+            f = tmp_path / f"filler-{i}" / "site.css"
+            f.parent.mkdir()
+            f.write_text(f"body{{color:red}} /* {i} */", encoding="utf-8")
+            content_fingerprint(f)
+
+        content_fingerprint(oldest)  # touch it again -> should now be the freshest
+
+        # One more distinct path tips the cache over its cap by exactly one eviction.
+        newcomer = tmp_path / "newcomer" / "site.css"
+        newcomer.parent.mkdir()
+        newcomer.write_text("body{color:blue}", encoding="utf-8")
+        content_fingerprint(newcomer)
+
+        assert oldest in cache._entries
 
 
 class TestFingerprintAssetReferences:
