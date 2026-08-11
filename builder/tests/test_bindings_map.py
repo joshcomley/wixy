@@ -191,6 +191,7 @@ def _write_page(tmp_path: Path, project: ProjectConfig, body_html: str) -> SiteS
     )
     return SiteSource(
         project=project,
+        root=tmp_path,
         pages_dir=pages_dir,
         partials_dir=partials_dir,
         theme=None,

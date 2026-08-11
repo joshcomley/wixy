@@ -12,7 +12,10 @@
 // backup age/disk usage/last publish/engine version, meaningful on BOTH
 // editions, unlike "engine"/"ai" above), "/admin/section/<id>" (decisions/00098
 // — a registry-configured admin section, e.g. "before-after"; `id` is whatever
-// `state.adminSections[].id` declares, never a literal known to this module).
+// `state.adminSections[].id` declares, never a literal known to this module),
+// "/admin/social" (decisions/00134 — the one-screen Social images manager:
+// every page's `meta.ogImage` in one place, reached from a button in the
+// Pages panel rather than a top-level nav entry).
 // A legacy "/admin/settings/contact" deep link degrades gracefully to General
 // (routeFromSegments's settings case no longer recognizes "contact" as a
 // second segment) — decisions/00129 promoted the tab out, but an old bookmark
@@ -38,7 +41,8 @@ export type Route =
   | { kind: "history" }
   | { kind: "contact" }
   | { kind: "settings"; page: SettingsPage }
-  | { kind: "section"; id: string };
+  | { kind: "section"; id: string }
+  | { kind: "social" };
 
 export const DEFAULT_ROUTE: Route = { kind: "pages" };
 
@@ -82,6 +86,8 @@ function routeFromSegments(segments: string[]): Route {
       };
     case "section":
       return second !== undefined ? { kind: "section", id: second } : DEFAULT_ROUTE;
+    case "social":
+      return { kind: "social" };
     default:
       return DEFAULT_ROUTE;
   }
@@ -124,6 +130,8 @@ function segmentsFor(route: Route): string[] {
       return route.page === "general" ? ["settings"] : ["settings", route.page];
     case "section":
       return ["section", route.id];
+    case "social":
+      return ["social"];
   }
 }
 

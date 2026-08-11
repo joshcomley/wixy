@@ -36,6 +36,7 @@ describe("parseHash", () => {
     expect(parseHash("#/media")).toEqual({ kind: "media" });
     expect(parseHash("#/history")).toEqual({ kind: "history" });
     expect(parseHash("#/contact")).toEqual({ kind: "contact" });
+    expect(parseHash("#/social")).toEqual({ kind: "social" });
   });
 
   it("parses #/chat with and without a conversation id", () => {
@@ -80,6 +81,7 @@ describe("routeToHash", () => {
       { kind: "settings", page: "shortcuts" },
       { kind: "settings", page: "engine" },
       { kind: "settings", page: "ai" },
+      { kind: "social" },
     ];
     for (const route of routes) {
       expect(parseHash(routeToHash(route))).toEqual(route);
@@ -132,6 +134,7 @@ describe("parsePath", () => {
     expect(parsePath("/admin/media")).toEqual({ kind: "media" });
     expect(parsePath("/admin/history")).toEqual({ kind: "history" });
     expect(parsePath("/admin/contact")).toEqual({ kind: "contact" });
+    expect(parsePath("/admin/social")).toEqual({ kind: "social" });
   });
 
   it("parses /admin/chat with and without a conversation id", () => {
@@ -182,6 +185,7 @@ describe("routeToPath", () => {
       { kind: "settings", page: "ai" },
       { kind: "settings", page: "system" },
       { kind: "section", id: "before-after" },
+      { kind: "social" },
     ];
     for (const route of routes) {
       expect(parsePath(routeToPath(route))).toEqual(route);
@@ -189,6 +193,7 @@ describe("routeToPath", () => {
     // …and they really are PATHS, not hashes.
     expect(routeToPath({ kind: "edit", page: "about" })).toBe("/admin/edit/about");
     expect(routeToPath({ kind: "pages" })).toBe("/admin/pages");
+    expect(routeToPath({ kind: "social" })).toBe("/admin/social");
   });
 });
 

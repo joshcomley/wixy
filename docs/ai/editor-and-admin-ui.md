@@ -225,7 +225,24 @@ re-renders from that loop never close an open drawer — only genuine route chan
 decisions/00081); `versionBadge.ts` (the status bar's deploy-awareness badge + its
 themed reload-confirmation dialog — detailed in the status-bar paragraph above);
 `router.ts` (path routes, decisions/00087: pages/edit/theme/
-media/chat/history/settings/section); `pagesPanel.ts` + `pageSettingsDrawer.ts` (`meta.*` editing);
+media/chat/history/settings/section/social); `pagesPanel.ts` + `pageSettingsDrawer.ts` (`meta.*` editing);
+`socialImagesPanel.ts` (`/admin/social`, decisions/00134) — the bulk, one-screen twin of
+`pageSettingsDrawer.ts`'s per-page "Social image" field: every page in one table (thumbnail,
+label falling back to slug, a per-row "Choose image" button), plus a "Use one image for all
+pages" bulk action at the top. Reached from a "Social images" button in the Pages panel's
+header row (`pagesPanel.ts`'s `PagesPanelCallbacks.onOpenSocialImages`, wired by `shell.ts` to
+`navigateTo({kind:"social"})`) rather than a top-level nav entry (`NAV_ROUTES` stays as-is —
+nav space is deliberately tight). Frontend-only, no new server routes: each row fetches its
+own `api.getContent(slug)` in parallel and reads it with the exact same exported `readMeta`
+`pageSettingsDrawer.ts` uses (one parsing implementation, not two — the state snapshot's
+`PageSummary.meta` happens to already carry `ogImage` today, but this panel deliberately
+doesn't rely on that as a stable contract), previews via `mediaDialog.contentSrcToDisplayUrl`
+same as the drawer, and picks via the shared `mediaDialog.openMediaDialog`. Both the per-row
+and bulk pick paths `opQueue.enqueue({file: slug, path: "meta.ogImage", value: {src, alt}})` —
+the shell's single OpQueue, never a second one — storing `src` exactly as the media dialog
+returns it (repo-relative, no leading slash: decisions/00095's publish-corruption incident was
+exactly a leading-slash `ogImage.src`). A failed per-page fetch renders that one row's error
+state without affecting the others.
 `publishDrawer.ts` (review diff + `POST /api/admin/publish` + SSE progress; disables Publish
 with a "Nothing to publish" hint when the preview's `opCount` is 0 AND no upstream commits are
 pending — decisions/00071; layman wording throughout: the chip reads "N changes ready to publish ·

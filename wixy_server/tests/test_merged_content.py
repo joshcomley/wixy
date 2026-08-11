@@ -53,6 +53,7 @@ def source(project: ProjectConfig, tmp_path: Path) -> SiteSource:
     )
     return SiteSource(
         project=project,
+        root=tmp_path,
         pages_dir=tmp_path / "pages",
         partials_dir=tmp_path / "partials",
         theme=theme,
@@ -124,6 +125,7 @@ class TestMergeOverlay:
     ) -> None:
         source_no_theme = SiteSource(
             project=project,
+            root=tmp_path,
             pages_dir=tmp_path / "pages",
             partials_dir=tmp_path / "partials",
             theme=None,

@@ -30,6 +30,7 @@ import { mountSectionPanel, type SectionPanel } from "./sectionPanel";
 import { captureScreenshot, copyBlobToClipboard, downloadBlob, flashScreen, screenshotFilename } from "./screenshot";
 import { clearLastRoute, loadLastRoute, saveLastRoute } from "./sessionState";
 import { mountSettingsPanel } from "./settingsPanel";
+import { mountSocialImagesPanel } from "./socialImagesPanel";
 import { formatBinding, initShortcuts, type ShortcutCommand } from "./shortcuts";
 import { setButtonBusy, setButtonIdle } from "./spinnerButton";
 import { mountThemePanel, type ThemePanel } from "./themePanel";
@@ -916,6 +917,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
           },
           thumbSrcFor: (slug) => thumbnailUrl(slug, state?.draft.rev ?? 0),
           onThumbError: (slug) => thumbnailService.refresh([slug]),
+          onOpenSocialImages: () => navigateTo({ kind: "social" }, win),
         }),
       );
       return;
@@ -1068,6 +1070,17 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
         activeSectionPanel = null;
         panel.teardown();
       };
+      return;
+    }
+
+    if (route.kind === "social") {
+      if (opQueue === null || state === null) {
+        main.textContent = "Loading…";
+        return;
+      }
+      const panel = mountSocialImagesPanel(state.pages, { api, opQueue });
+      main.appendChild(panel.element);
+      activePanelTeardown = () => panel.teardown();
       return;
     }
 

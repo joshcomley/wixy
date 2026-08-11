@@ -1076,6 +1076,24 @@ html, body {
   font-size: 0.75rem;
 }
 
+/* -- Social images panel (decisions/00134) --------------------------------------- */
+/* Reuses .wx-pages-table/.wx-pages-cell-label/.wx-pages-cell-actions (structure +
+   mobile restack) and .wx-og-image-preview/.wx-og-image-empty (the thumbnail box)
+   wholesale — only the thumb column's width is bespoke, since this preview is
+   landscape (a social-share image) rather than the pages table's portrait page shot. */
+
+.wx-social-bulk-row {
+  margin-bottom: 16px;
+}
+
+.wx-social-cell-thumb {
+  width: 160px;
+}
+
+.wx-social-cell-thumb .wx-og-image-preview {
+  height: 70px;
+}
+
 /* -- Publish review drawer (spec/05 §5) ------------------------------------------ */
 
 .wx-drawer-wide {
@@ -4670,6 +4688,13 @@ div.wx-media-thumb {
 
   .wx-pages-table td.wx-pages-cell-thumb {
     float: left;
+    margin: 0 10px 6px 0;
+    padding: 0;
+  }
+
+  .wx-pages-table td.wx-social-cell-thumb {
+    float: left;
+    width: 120px;
     margin: 0 10px 6px 0;
     padding: 0;
   }

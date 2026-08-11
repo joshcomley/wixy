@@ -32,6 +32,10 @@ export interface PagesPanelCallbacks {
    * refreshing state and re-rendering this panel with the new page list;
    * this component never re-fetches or re-renders itself. */
   onChanged: () => void;
+  /** The header's "Social images" button was clicked — this panel stays
+   * router-agnostic (decisions/00134), same as `onEdit`; the caller wires it
+   * to `navigateTo({ kind: "social" })`. */
+  onOpenSocialImages: () => void;
   /** Mobile-view thumbnail URL for a page (decisions/00078). Absent → no
    * thumbnail cells (keeps tests and minimal embeds thumbnail-free). */
   thumbSrcFor?: (slug: string) => string;
@@ -217,9 +221,17 @@ export function renderPagesPanel(pages: PageSummary[], callbacks: PagesPanelCall
   const root = document.createElement("div");
   root.className = "wx-pages-panel";
 
+  const headerRow = document.createElement("div");
+  headerRow.className = "wx-media-header-row";
   const heading = document.createElement("h2");
   heading.textContent = "Pages";
-  root.appendChild(heading);
+  headerRow.appendChild(heading);
+  const socialImagesButton = document.createElement("button");
+  socialImagesButton.type = "button";
+  socialImagesButton.textContent = "Social images";
+  socialImagesButton.addEventListener("click", () => callbacks.onOpenSocialImages());
+  headerRow.appendChild(socialImagesButton);
+  root.appendChild(headerRow);
 
   const hint = document.createElement("p");
   hint.className = "wx-pages-hint";
