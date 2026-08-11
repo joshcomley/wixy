@@ -234,35 +234,46 @@ steps in this guide once.</p>
 
 <h2 id="part1">2. Part 1 &mdash; GitHub <span class="step-time">about 5 minutes</span></h2>
 
+<div class="callout important">
+  <span class="label">If it looks different</span>
+  GitHub redesigns its settings pages from time to time, so menus and sidebars can shift
+  position. Every GitHub step below links straight to the right page regardless &mdash; match
+  the field and button names described in the text, not their position on screen.
+</div>
+
 <h3>a. Confirm the domain setting</h3>
 <ol>
-  <li>Open the website&rsquo;s repository:
-    <a href="https://github.com/joshcomley/cottage-aesthetics-preview">github.com/joshcomley/cottage-aesthetics-preview</a>.</li>
-  <li>Go to <strong>Settings</strong> &rarr; <strong>Secrets and variables</strong> &rarr;
-    <strong>Actions</strong> &rarr; the <strong>Variables</strong> tab.</li>
-  <li>Find <code>WIXY_PUBLIC_DOMAIN</code>. It should already hold
+  <li>The website&rsquo;s repository is
+    <a href="https://github.com/joshcomley/cottage-aesthetics-preview">github.com/joshcomley/cottage-aesthetics-preview</a>
+    &mdash; every GitHub step below happens somewhere inside it.</li>
+  <li>Open <a href="https://github.com/joshcomley/cottage-aesthetics-preview/settings/variables/actions">the repository&rsquo;s Actions variables page</a>.
+    You&rsquo;ll land on a table of repository variables (GitHub will ask you to sign in first
+    if you aren&rsquo;t already).</li>
+  <li>Find <code>WIXY_PUBLIC_DOMAIN</code> in the table. It should already hold
     <span class="domain">cottageaesthetics.co.uk</span>. If it is missing or different, click
-    it and set the value to exactly <span class="domain">cottageaesthetics.co.uk</span> (no
-    <code>https://</code>, no <code>www.</code>, no trailing slash), then save.</li>
+    it to open it, set the value to exactly <span class="domain">cottageaesthetics.co.uk</span>
+    (no <code>https://</code>, no <code>www.</code>, no trailing slash), and save your
+    change.</li>
 </ol>
 
 <h3>b. Run the deploy once by hand</h3>
 <ol>
-  <li>Still in the repository, open the <strong>Actions</strong> tab.</li>
-  <li>In the left-hand list, click <strong>Deploy to GitHub Pages</strong>.</li>
-  <li>Click <strong>Run workflow</strong>, leave the branch as <code>main</code>, and click the
-    green <strong>Run workflow</strong> button.</li>
+  <li>Open <a href="https://github.com/joshcomley/cottage-aesthetics-preview/actions/workflows/pages.yml">the &ldquo;Deploy to GitHub Pages&rdquo; workflow page</a>
+    &mdash; this goes straight to that one workflow, skipping GitHub&rsquo;s full Actions
+    list.</li>
+  <li>Above the list of runs, click <strong>Run workflow</strong>. A small panel opens &mdash;
+    leave the branch as <code>main</code> and click the green <strong>Run workflow</strong>
+    button inside it.</li>
   <li>Wait about a minute for the run to finish with a green tick.</li>
 </ol>
 
 <h3>c. Tell GitHub Pages about your domain</h3>
 <ol>
-  <li>Go to <strong>Settings</strong> &rarr; <strong>Pages</strong> (left sidebar, under
-    &ldquo;Code, planning, and automation&rdquo;).</li>
+  <li>Open <a href="https://github.com/joshcomley/cottage-aesthetics-preview/settings/pages">the repository&rsquo;s Pages settings page</a>.</li>
   <li>Under &ldquo;Build and deployment&rdquo;, the source should already say
     <strong>GitHub Actions</strong> &mdash; nothing to change there.</li>
-  <li>Under &ldquo;Custom domain&rdquo;, type <span class="domain">cottageaesthetics.co.uk</span>
-    and click <strong>Save</strong>.</li>
+  <li>Find the <strong>Custom domain</strong> box, type
+    <span class="domain">cottageaesthetics.co.uk</span> into it, and click <strong>Save</strong>.</li>
 </ol>
 
 <div class="callout important">
@@ -385,15 +396,14 @@ as <code>@</code> automatically). Set <strong>TTL</strong> to 300 seconds if you
 <h2 id="part3">4. Part 3 &mdash; back in GitHub</h2>
 
 <ol>
-  <li>Return to <strong>Settings</strong> &rarr; <strong>Pages</strong> on the repository (the
-    same page as Part 1c).</li>
+  <li>Return to <a href="https://github.com/joshcomley/cottage-aesthetics-preview/settings/pages">the repository&rsquo;s Pages settings page</a> (the same page as Part 1c).</li>
   <li>DNS changes can be immediate or take a few hours to reach everywhere. Refresh the page
     from time to time &mdash; the domain check turns green automatically once your records have
     arrived. To check progress yourself without waiting on GitHub&rsquo;s own refresh, use
     <a href="https://dnschecker.org">dnschecker.org</a>, or open a terminal and run:
     <pre>nslookup cottageaesthetics.co.uk 8.8.8.8</pre>
   </li>
-  <li>Once the check is green, tick <strong>Enforce HTTPS</strong>. GitHub issues a
+  <li>Once the check is green, tick the <strong>Enforce HTTPS</strong> box. GitHub issues a
     certificate automatically &mdash; this usually takes a few minutes, occasionally up to
     about an hour, and rarely up to 24 hours.</li>
 </ol>
@@ -402,13 +412,14 @@ as <code>@</code> automatically). Set <strong>TTL</strong> to 300 seconds if you
   <span class="label">Recommended, not required</span>
   <p style="margin-top:0">Verifying your domain with GitHub stops anyone else from ever being
   able to take it over on GitHub Pages (for example if the repository were ever deleted). It
-  takes a couple of extra minutes:</p>
+  takes a couple of extra minutes, on a different page to everything else in this guide &mdash;
+  your own personal GitHub account settings, not the repository&rsquo;s:</p>
   <ol style="margin-bottom:0">
-    <li>Click your profile picture (top right of any GitHub page) &rarr;
-      <strong>Settings</strong> &rarr; <strong>Pages</strong> (left sidebar, under
-      &ldquo;Code, planning, and automation&rdquo;) &rarr; <strong>Add a domain</strong>.</li>
-    <li>Enter <span class="domain">cottageaesthetics.co.uk</span> &rarr;
-      <strong>Add domain</strong>.</li>
+    <li>Open <a href="https://github.com/settings/pages">your personal Pages settings page</a>
+      (also reachable by hand: your profile picture, top right of any GitHub page &rarr;
+      Settings &rarr; Pages) and click <strong>Add a domain</strong> on the right.</li>
+    <li>Under &ldquo;What domain would you like to add?&rdquo;, enter
+      <span class="domain">cottageaesthetics.co.uk</span> and select <strong>Add domain</strong>.</li>
     <li>GitHub shows a TXT record to add. At Name.com, add it exactly as shown: Type
       <strong>TXT</strong>, Host <code>_github-pages-challenge-joshcomley</code>, Answer/Value
       exactly the code GitHub gives you (copy it precisely).</li>
@@ -460,7 +471,7 @@ change is there.</p>
         again</td>
     </tr>
     <tr>
-      <td>The DNS check on the Pages settings page won&rsquo;t turn green</td>
+      <td>The DNS check on the <a href="https://github.com/joshcomley/cottage-aesthetics-preview/settings/pages">Pages settings page</a> won&rsquo;t turn green</td>
       <td>Either the records haven&rsquo;t reached everywhere yet, or something doesn&rsquo;t
         match</td>
       <td>Wait longer (up to 24 hours); re-check every record against Part 2 exactly &mdash; a
@@ -477,15 +488,15 @@ change is there.</p>
       <td>The HTTPS certificate is stuck, or never appears</td>
       <td>It only starts being issued once the DNS check has turned green</td>
       <td>Wait for the DNS check first; if it has been green for over an hour with still no
-        certificate, remove the custom domain in Settings &rarr; Pages, then add it again to
+        certificate, remove the custom domain on <a href="https://github.com/joshcomley/cottage-aesthetics-preview/settings/pages">the Pages settings page</a>, then add it again to
         restart the process</td>
     </tr>
     <tr>
       <td>The site shows old content</td>
       <td>Either the automatic deploy hasn&rsquo;t run since the last Publish, or the
         <code>WIXY_PUBLIC_DOMAIN</code> variable isn&rsquo;t set</td>
-      <td>Check the Actions tab for a recent green &ldquo;Deploy to GitHub Pages&rdquo; run;
-        re-check the variable (Part 1a)</td>
+      <td>Check <a href="https://github.com/joshcomley/cottage-aesthetics-preview/actions/workflows/pages.yml">the &ldquo;Deploy to GitHub Pages&rdquo; workflow page</a> for a recent
+        green run; re-check the variable (Part 1a)</td>
     </tr>
     <tr>
       <td><code>www.cottageaesthetics.co.uk</code> doesn&rsquo;t redirect</td>
