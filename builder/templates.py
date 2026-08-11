@@ -13,6 +13,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup, Comment, Tag
 
 from builder.errors import BuildError
+from builder.imagesize import probe_image_size
 from builder.jsontypes import JsonObject
 
 PARTIAL_NAMES = ("header", "footer", "booking-modal")
@@ -114,6 +115,19 @@ def _find_or_create_link_rel(soup: BeautifulSoup, head: Tag, rel: str) -> Tag:
     return new_tag
 
 
+def _is_safe_relative_src(src: str) -> bool:
+    """Whether `src` is safe to join onto `site_root` for an on-disk dimension sniff —
+    repo-relative, no leading `/` or `\\`, no drive letter (`C:`), no `..` segment (either
+    slash direction). A `/`-prefixed, drive-rooted, or path-traversing src still gets its
+    (unmodified) `og:image` tag; this only gates the WIDTH/HEIGHT sniff, which has to touch
+    the filesystem — and `Path.joinpath` treats an absolute-looking right-hand segment (a
+    leading slash, or a Windows drive letter) as REPLACING `site_root` entirely rather than
+    joining under it, so those must be rejected explicitly, not just `..`."""
+    if src.startswith(("/", "\\")) or ":" in src:
+        return False
+    return ".." not in src.replace("\\", "/").split("/")
+
+
 def apply_head(
     soup: BeautifulSoup,
     *,
@@ -123,13 +137,22 @@ def apply_head(
     domain: str,
     indexable: bool,
     file_label: str,
+    site_name: str,
+    site_root: Path | None,
 ) -> None:
-    """Set title/description/OG tags/fonts link/robots meta from `meta` + theme + registry.
+    """Set title/description/OG+Twitter tags/fonts link/robots meta from `meta` + theme +
+    registry.
 
     `fonts_url` is `None` before migration step 4 creates `theme/theme.json` (03 §3.4) —
     the page's existing (hand-authored) fonts link is left completely untouched then,
     rather than being overwritten with a font-less URL that would visibly break fonts
     and fail the parity check.
+
+    `site_root` is the on-disk site checkout to resolve a relative `ogImage.src` against
+    for the `og:image:width`/`height` dimension sniff (decisions/00134) — `None` skips
+    the sniff entirely (no disk context, e.g. some future caller with no checkout), as
+    does an absolute (`/`-prefixed) or path-traversing `src`; `og:image` itself is
+    unaffected either way.
     """
     head = soup.head
     if not isinstance(head, Tag):
@@ -155,11 +178,29 @@ def apply_head(
     )
     _find_or_create_link_rel(soup, head, "canonical")["href"] = f"https://{domain}{page_url_path}"
 
+    if site_name:
+        _find_or_create_meta_property(soup, head, "og:site_name")["content"] = site_name
+
     og_image = meta.get("ogImage")
-    if isinstance(og_image, dict) and isinstance(og_image.get("src"), str):
+    og_image_src = og_image.get("src") if isinstance(og_image, dict) else None
+    if isinstance(og_image, dict) and isinstance(og_image_src, str):
         _find_or_create_meta_property(soup, head, "og:image")["content"] = (
-            f"https://{domain}/{og_image['src']}"
+            f"https://{domain}/{og_image_src}"
         )
+        _find_or_create_meta_name(soup, head, "twitter:card")["content"] = "summary_large_image"
+
+        alt = og_image.get("alt")
+        if isinstance(alt, str) and alt != "":
+            _find_or_create_meta_property(soup, head, "og:image:alt")["content"] = alt
+
+        if site_root is not None and _is_safe_relative_src(og_image_src):
+            dims = probe_image_size(site_root / og_image_src)
+            if dims is not None:
+                width, height = dims
+                _find_or_create_meta_property(soup, head, "og:image:width")["content"] = str(width)
+                _find_or_create_meta_property(soup, head, "og:image:height")["content"] = str(
+                    height
+                )
 
     if fonts_url is not None:
         fonts_link = _find_fonts_link(head)

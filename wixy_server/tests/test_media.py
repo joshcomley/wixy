@@ -163,6 +163,7 @@ def _source(page_contents: dict[str, JsonObject], global_content: JsonObject) ->
     # placeholders, never touched.
     return SiteSource(
         project=_UNUSED_PROJECT,
+        root=Path("/unused/root"),
         pages_dir=Path("/unused/pages"),
         partials_dir=Path("/unused/partials"),
         theme=None,

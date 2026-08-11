@@ -63,7 +63,21 @@ Then per page:
    from `meta` + domain + `indexable`; `fonts_url = theme.generate_fonts_url(theme)` if a
    theme exists else `None`. The canonical link (`_find_or_create_link_rel(soup, head,
    "canonical")`) always wins over any hand-authored value in the template — single source
-   of truth, same find-or-create idiom as the `og:*`/`description` meta tags.
+   of truth, same find-or-create idiom as the `og:*`/`description` meta tags. Also emits
+   `og:site_name` (from `site_name` — `ProjectConfig.name`, whenever non-empty) and, only
+   when `meta.ogImage` is present: `twitter:card` (`name="twitter:card"`,
+   `summary_large_image` — X/Twitter reads `name=`, not `property=`), `og:image:alt` (from
+   `ogImage.alt`, whenever non-empty), and `og:image:width`/`og:image:height` sniffed from
+   the actual file via `builder.imagesize.probe_image_size` (decisions/00134) — resolved as
+   `site_name`/`site_root` (= `SiteSource.root`, `render_page`'s new keyword args to
+   `apply_head`). The width/height sniff is skipped (but `og:image` itself is unaffected)
+   when `site_root` is `None`, `ogImage.src` is absolute (`/`-prefixed), contains a `..`
+   segment, or the sniff itself returns `None` (missing file, unrecognized format, malformed
+   header) — `probe_image_size` is a stdlib-only, Pillow-free, **never-raising** JPEG/PNG/
+   GIF/WebP(VP8/VP8L/VP8X) header sniffer (builder's own `build`/`validate` path stays
+   Pillow-free even though Pillow is a core dependency for the parity harness); it reads
+   *stored* pixel dimensions only — EXIF orientation is never applied (decisions/00134's
+   accepted limitation, since every upload-pipeline image is re-encoded by Pillow anyway).
 
 **The `sink` parameter is the single mode switch for error handling.** `sink=None` → strict
 build: the first unresolvable binding raises `BuildError` (`bindings._fail`). `sink=

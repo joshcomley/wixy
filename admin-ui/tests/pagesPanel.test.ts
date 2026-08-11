@@ -25,6 +25,7 @@ function callbacks(overrides: Partial<PagesPanelCallbacks> = {}): PagesPanelCall
     onDuplicate: vi.fn(async (): Promise<PageOpOutcome> => ({ ok: true })),
     onDelete: vi.fn(async (): Promise<PageOpOutcome> => ({ ok: true })),
     onChanged: vi.fn(),
+    onOpenSocialImages: vi.fn(),
     ...overrides,
   };
 }
@@ -70,6 +71,16 @@ describe("renderPagesPanel", () => {
   it("includes a hint pointing structural work at the AI chat lane", () => {
     const el = renderPagesPanel([], callbacks());
     expect(el.querySelector(".wx-pages-hint")?.textContent).toMatch(/chat/i);
+  });
+
+  it("clicking the header's Social images button calls onOpenSocialImages", () => {
+    const onOpenSocialImages = vi.fn();
+    const el = renderPagesPanel(PAGES, callbacks({ onOpenSocialImages }));
+    const button = Array.from(el.querySelectorAll("button")).find(
+      (b) => b.textContent === "Social images",
+    );
+    button?.click();
+    expect(onOpenSocialImages).toHaveBeenCalledOnce();
   });
 
   it("disables Edit and shows an 'unpublished' badge for a non-editable page", () => {

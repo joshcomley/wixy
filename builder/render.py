@@ -40,6 +40,7 @@ class SiteSource:
     """
 
     project: ProjectConfig
+    root: Path
     pages_dir: Path
     partials_dir: Path
     theme: Theme | None
@@ -66,6 +67,7 @@ def load_site_source(root: Path, project: ProjectConfig, theme: Theme | None) ->
 
     return SiteSource(
         project=project,
+        root=root,
         pages_dir=pages_dir,
         partials_dir=partials_dir,
         theme=theme,
@@ -161,6 +163,8 @@ def render_page(
         domain=source.project.domain,
         indexable=source.project.indexable,
         file_label=file_label,
+        site_name=source.project.name,
+        site_root=source.root,
     )
 
     _ensure_doctype(soup)
