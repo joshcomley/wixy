@@ -126,47 +126,63 @@ def capture_page(
     page: Page, url: str, base_url: str, *, selectors: Sequence[str] = COMMON_SELECTORS
 ) -> PageProbe:
     console_errors: list[str] = []
-    page.on("console", lambda msg: _on_console(console_errors, msg))
-    page.on("pageerror", lambda exc: _on_page_error(console_errors, exc))
+    on_console = lambda msg: _on_console(console_errors, msg)  # noqa: E731
+    on_page_error = lambda exc: _on_page_error(console_errors, exc)  # noqa: E731
+    page.on("console", on_console)
+    page.on("pageerror", on_page_error)
 
-    page.goto(url, wait_until="networkidle")
-    page.wait_for_timeout(300)  # let webfont swap / reveal animations settle
-    _force_reveal(page)
+    try:
+        page.goto(url, wait_until="networkidle")
+        page.wait_for_timeout(300)  # let webfont swap / reveal animations settle
+        _force_reveal(page)
 
-    text = _normalize_text(page.inner_text("body"))
+        text = _normalize_text(page.inner_text("body"))
 
-    links_raw = page.eval_on_selector_all(
-        "a[href]",
-        # `.href` (resolved) rather than `getAttribute('href')` (raw) — spec/03 §3.1's
-        # "don't chase byte equality": a root-relative "/about.html" and a plain
-        # relative "about.html" are the same destination for a site with no
-        # subdirectories, and only the resolved URL is what parity should care about.
-        "els => els.map(e => [e.textContent.trim(), e.href])",
-    )
-    links = sorted(
-        ([pair[0], _strip_origin(str(pair[1]), base_url)] for pair in links_raw),
-        key=lambda p: (p[1], p[0]),
-    )
-
-    images_raw = page.eval_on_selector_all(
-        "img",
-        "els => els.map(e => [e.currentSrc || e.src, e.naturalWidth, e.naturalHeight])",
-    )
-    images = sorted(
-        ([_strip_origin(str(triple[0]), base_url), *triple[1:]] for triple in images_raw),
-        key=lambda t: str(t[0]),
-    )
-
-    styles: dict[str, dict[str, str]] = {}
-    for selector in selectors:
-        if page.locator(selector).count() == 0:
-            continue
-        styles[selector] = page.eval_on_selector(
-            selector,
-            "(el, props) => Object.fromEntries("
-            "props.map(p => [p, getComputedStyle(el).getPropertyValue(p)]))",
-            list(STYLE_PROPS),
+        links_raw = page.eval_on_selector_all(
+            "a[href]",
+            # `.href` (resolved) rather than `getAttribute('href')` (raw) — spec/03
+            # §3.1's "don't chase byte equality": a root-relative "/about.html" and a
+            # plain relative "about.html" are the same destination for a site with no
+            # subdirectories, and only the resolved URL is what parity should care
+            # about.
+            "els => els.map(e => [e.textContent.trim(), e.href])",
         )
+        links = sorted(
+            ([pair[0], _strip_origin(str(pair[1]), base_url)] for pair in links_raw),
+            key=lambda p: (p[1], p[0]),
+        )
+
+        images_raw = page.eval_on_selector_all(
+            "img",
+            "els => els.map(e => [e.currentSrc || e.src, e.naturalWidth, e.naturalHeight])",
+        )
+        images = sorted(
+            ([_strip_origin(str(triple[0]), base_url), *triple[1:]] for triple in images_raw),
+            key=lambda t: str(t[0]),
+        )
+
+        styles: dict[str, dict[str, str]] = {}
+        for selector in selectors:
+            if page.locator(selector).count() == 0:
+                continue
+            styles[selector] = page.eval_on_selector(
+                selector,
+                "(el, props) => Object.fromEntries("
+                "props.map(p => [p, getComputedStyle(el).getPropertyValue(p)]))",
+                list(STYLE_PROPS),
+            )
+    finally:
+        # `page` is reused across every slug in `capture_site`'s loop (one browser
+        # tab for the whole batch) — Playwright listeners persist across `.goto()`
+        # navigations and are never auto-removed. Without this, an async error from
+        # slug N's page (a slow-loading third-party script, e.g. a Google Maps
+        # embed) that fires after slug N's own capture window still gets appended
+        # to every OTHER slug's `console_errors` list whose listener is still
+        # registered — every slug captured so far, and any captured later before
+        # the error fires. Scoping removal to this call's own listeners keeps each
+        # slug's console/pageerror capture to its own navigation only.
+        page.remove_listener("console", on_console)
+        page.remove_listener("pageerror", on_page_error)
 
     return PageProbe(
         text=text, links=links, images=images, styles=styles, console_errors=console_errors
