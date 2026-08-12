@@ -55,9 +55,11 @@ serve an HTTP redirect at all.
 - **`wixy_server`'s own publish pipeline does NOT pass `static_redirects_file`.** The brief
   explicitly left this as a separate decision ("decide separately whether the staging Wixy
   host should load the same map; public parity is useful, but do not make an unconfigured
-  runtime dependency") rather than a requirement. `ca.cinnamons.uk` is the private staging/
-  admin host — it never had public backlinks from the retired Wix site, so it has nothing to
-  preserve. Wiring this in with no registry field or env var to configure it would be exactly
+  runtime dependency") rather than a requirement. `ca.cinnamons.uk` is the publicly
+  reachable, non-indexable staging host; its admin routes are separately access-controlled
+  (decisions/00135 — this is not the "private" characterization that decision corrected).
+  The retired Wix paths belonged to the public-domain site, so staging parity for them isn't
+  required. Wiring this in with no registry field or env var to configure it would be exactly
   the "unconfigured runtime dependency" the brief warns against. If a future need arises
   (e.g. an owner wants staging to mirror the public alias set for QA), that's a registry-field
   addition (`projects/*.json`) and its own decision, not a default behavior change here.

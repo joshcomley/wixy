@@ -60,22 +60,40 @@ def _is_valid_path(value: str) -> bool:
 _RESERVED_SLUGS = frozenset({"404"})
 
 
+def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """`object_pairs_hook` for `json.loads` — the stdlib JSON decoder silently keeps
+    only the LAST occurrence of a duplicate object key (confirmed empirically:
+    `json.loads('{"/home": "/", "/home": "/contact"}')` returns `{"/home": "/contact"}`
+    with no warning), which is exactly the kind of silent-surprise behavior this
+    module's strict-reject/no-normalization contract (Inv 36) exists to rule out — a
+    copy-paste duplicate in the redirects file should be a build error, not a quiet
+    last-wins."""
+    seen: set[str] = set()
+    for key, _ in pairs:
+        if key in seen:
+            raise ValueError(f"duplicate key {key!r}")
+        seen.add(key)
+    return dict(pairs)
+
+
 def load_static_redirects(path: Path) -> RedirectMap:
     """Reads a static-redirect JSON map (`{"/old-path": "/new-path", ...}`) — shape
     only; `validate_static_redirects` below checks it against the actual site.
 
     Raises `BuildError` (fatal — this is operator-supplied deployment config, the same
     fail-fast severity `wixy_server.redirects.load_redirects` gives its own config
-    file) on anything not a flat string-to-string JSON object.
+    file) on anything not a flat string-to-string JSON object with no duplicate keys.
     """
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise BuildError(f"could not read: {exc}", location=str(path)) from exc
     try:
-        data = json.loads(text)
+        data = json.loads(text, object_pairs_hook=_reject_duplicate_keys)
     except json.JSONDecodeError as exc:
         raise BuildError(f"not valid JSON: {exc}", location=str(path)) from exc
+    except ValueError as exc:
+        raise BuildError(f"redirects map has a {exc}", location=str(path)) from exc
     if not isinstance(data, dict) or not all(
         isinstance(k, str) and isinstance(v, str) for k, v in data.items()
     ):

@@ -66,6 +66,18 @@ class TestLoadStaticRedirects:
         path = _write_json(tmp_path, {})
         assert load_static_redirects(path) == {}
 
+    def test_duplicate_key_raises_not_silent_last_wins(self, tmp_path: Path) -> None:
+        """`json.dumps` from a Python dict can never itself produce a duplicate key
+        (dicts can't have one), so this writes the raw JSON text by hand — the
+        realistic case is a hand-edited or copy-pasted redirects file. Plain
+        `json.loads` silently keeps only the LAST value for a duplicate key; that
+        contradicts this module's strict-reject contract (Inv 36), so it must be a
+        build error instead."""
+        path = tmp_path / "redirects.json"
+        path.write_text('{"/home": "/", "/home": "/contact"}', encoding="utf-8")
+        with pytest.raises(BuildError, match="duplicate key"):
+            load_static_redirects(path)
+
 
 class TestValidateStaticRedirects:
     def test_valid_map_passes(self) -> None:
