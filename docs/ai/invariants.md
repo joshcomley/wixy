@@ -436,3 +436,23 @@ sibling this invariant mirrors) still grants immutable caching on `?v=` PRESENCE
 the same class of gap F1 fixed here — not yet fixed there as of this writing; flagged, not
 fixed, pending its own follow-up (see decisions/00130's addendum).
 
+### Inv 35 — A non-indexable build allows crawling; it never disallows it
+`builder/sitemap.py:generate_robots_txt(indexable=False)` emits `User-agent: *\nAllow: /\n`
+— never `Disallow: /` or any other crawl block. A blocked page's per-page `<meta
+name="robots" content="noindex">` (`templates.apply_head`) is unobservable to a crawler that
+was never allowed to fetch the page in the first place (Google's own documented behavior); a
+`Disallow`'d-but-linked URL can still surface in results with no snippet, the opposite of
+what "non-indexable" is supposed to achieve. The two signals divide the work cleanly:
+`robots.txt` stays permissive (crawl control only, never privacy), the per-page `noindex`
+meta is what actually excludes the page from the index, and `sitemap.xml` is omitted
+entirely (no `Sitemap:` directive either) so there's nothing pointing a crawler at content
+this build isn't ready to be indexed for (decisions/00135). Do not "fix" this back into a
+crawl block to make a staging host feel more private — `robots.txt` was never a privacy
+mechanism; a genuinely confidential staging surface needs authentication, not this file.
+*Enforced by:* `builder/tests/test_sitemap.py::TestGenerateRobotsTxt`,
+`test_build.py::test_robots_allows_crawling_when_not_indexable`,
+`test_cli.py`'s indexable-override tests, `test_render.py::test_no_noindex_meta_when_indexable`.
+*Exception:* none — this applies to every non-indexable build regardless of project or
+deployment target (`ca.cinnamons.uk` staging today; any future project registered the same
+way).
+

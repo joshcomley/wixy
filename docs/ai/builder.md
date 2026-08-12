@@ -196,8 +196,10 @@ cannot drift. Format is **PROVISIONAL** — read decisions/00012 before changing
   write and every text render; `is_already_clean` backs the `not-clean` validate code.
   `is_safe_href` reuses the same `nh3`/scheme-allowlist machinery as a standalone check —
   `bindings.py:_apply_href` calls it on every `data-wx-href` value (Inv 29, decisions/00123).
-- **Sitemap** (`sitemap.py`): `generate_robots_txt` (Disallow-all when not indexable) +
-  `generate_sitemap_xml` (sorted slugs). Indexability gates whether `sitemap.xml` is written.
+- **Sitemap** (`sitemap.py`): `generate_robots_txt` (`Allow: /`, no `Sitemap:` directive when
+  not indexable — crawl access must stay open for the per-page `noindex` meta to be
+  observable at all, decisions/00135) + `generate_sitemap_xml` (sorted slugs). Indexability
+  gates whether `sitemap.xml` is written.
 
 ## Errors (`builder/errors.py`)
 

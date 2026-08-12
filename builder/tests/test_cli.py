@@ -102,7 +102,7 @@ class TestBuildCommand:
         )
         assert code == 0
         robots = (out / "robots.txt").read_text(encoding="utf-8")
-        assert robots == "User-agent: *\nDisallow: /\n"
+        assert robots == "User-agent: *\nAllow: /\n"
         assert not (out / "sitemap.xml").exists()
         soup = BeautifulSoup((out / "index.html").read_text(encoding="utf-8"), "html5lib")
         robots_meta = soup.find("meta", attrs={"name": "robots"})
@@ -143,7 +143,7 @@ class TestBuildCommand:
         assert isinstance(canonical, Tag)
         assert canonical["href"] == "https://example.org/"
 
-    def test_build_indexable_false_override_still_writes_disallow(
+    def test_build_indexable_false_override_still_omits_sitemap(
         self, mini_site_root: Path, tmp_path: Path
     ) -> None:
         """Exercises the explicit-false override path (not just the omitted-flag default),
@@ -167,7 +167,7 @@ class TestBuildCommand:
         )
         assert code == 0
         robots = (out / "robots.txt").read_text(encoding="utf-8")
-        assert robots == "User-agent: *\nDisallow: /\n"
+        assert robots == "User-agent: *\nAllow: /\n"
         assert not (out / "sitemap.xml").exists()
 
         soup = BeautifulSoup((out / "index.html").read_text(encoding="utf-8"), "html5lib")

@@ -234,9 +234,18 @@ to a class + CSS `nth-of-type` rule so all `sections[]` items share one template
 - New page = new template + content file (AI lane or admin "duplicate page"), automatic
   sitemap.xml entry, optional nav entry via `meta.inNav`.
 - Indexability is a build input (project registry `indexable`, 04 §1): while `false` the
-  builder emits a Disallow-all `robots.txt`, adds `<meta name="robots" content="noindex">`
-  to every page, and omits `sitemap.xml` (ca.cinnamons.uk must not compete with the
-  still-canonical Wix domain until cutover); `true` flips all three.
+  builder emits a crawl-allow `robots.txt` (`Allow: /`, no `Sitemap:` directive), adds
+  `<meta name="robots" content="noindex">` to every page, and omits `sitemap.xml`; `true`
+  flips all three. The non-indexable `robots.txt` deliberately does **not** disallow
+  crawling: a crawler can only observe a page's `noindex` directive by fetching it, so
+  blocking the fetch makes the `noindex` unobservable and can let a blocked-but-linked URL
+  surface with no snippet — the opposite of the intent (decisions/00135). `ca.cinnamons.uk`
+  stays `indexable: false` permanently as the staging/admin host — this is independent of,
+  and does not later flip on, which domain is the public canonical. The public canonical
+  (`cottageaesthetics.co.uk`) has been live since 2026-08-10/11 via a *different* mechanism
+  than a future flip of this registry field: the site repo's GitHub Pages workflow builds
+  with `builder`'s CLI-only `--domain`/`--indexable` overrides (`docs/ai/builder.md`),
+  leaving `projects/ca.json` itself unchanged at `ca.cinnamons.uk` / `indexable: false`.
 
 ## 8. Draft overlay (server-side edit state)
 

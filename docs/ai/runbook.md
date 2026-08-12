@@ -86,7 +86,7 @@ at startup, one project in v1 but nothing assumes it — Inv 1):
 | `cmdProject` | `"cottage-aesthetics-preview"` | the cmd clone dir for the AI chat lane (which cmd project, not host) |
 | `domain` | `"ca.cinnamons.uk"` | used in `<head>` OG/canonical + sitemap |
 | `locale` | `"en-GB"` | site locale |
-| `indexable` | `false` | gates `robots.txt`/`noindex`/`sitemap.xml` (false until the real-domain cutover) |
+| `indexable` | `false` | gates `robots.txt`/`noindex`/`sitemap.xml`; stays `false` permanently for this staging/admin host — the public canonical builds with a CLI `--indexable true` override instead (see "Public site: GitHub Pages custom domain" below) |
 | `media` | `{maxLongSidePx: 2000, jpegQuality: 85}` | the upload downscale/re-encode limits ([media.md](media.md)) |
 
 ## Config & secrets

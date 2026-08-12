@@ -166,10 +166,11 @@ request-admin-action.request_admin_action`. Never hand-run elevated steps.
 7. Reboot survival: Devfleet child `restart = "always"` + tunnel watchdog cover it;
    confirm `Wixy` returns after the next natural hub restart window (note in todos if
    not exercised).
-8. robots: `ca.cinnamons.uk/robots.txt` = Disallow all + pages carry `noindex` while the
-   project registry has `"indexable": false` (stays false until the real-domain cutover
-   decision — the Wix site at `www.cottageaesthetics.co.uk` remains the indexed canonical
-   for now).
+8. robots: `ca.cinnamons.uk/robots.txt` = `Allow: /` (crawl allowed, no `Sitemap:`
+   directive — a crawler can only see a page's `noindex` by fetching it, decisions/00135)
+   + every page carries `noindex` + `sitemap.xml` is absent, while the project registry has
+   `"indexable": false`. This is permanent for the staging/admin host, independent of the
+   public canonical's own state (§5 below).
 
 ## 5. Ops notes (land these in the repo README + `C:\Admin\Index.md`)
 
@@ -179,15 +180,27 @@ request-admin-action.request_admin_action`. Never hand-run elevated steps.
   restore). The two never mix.
 - Secrets inventory in `Storage\.env`: `WIXY_PORT`, `WIXY_ENV`, `WIXY_CF_ACCESS_AUD`,
   `WIXY_CF_TEAM_DOMAIN` (+ the CF_* provisioning set, used only by tooling).
-- Future real-domain cutover (out of scope, documented for later): add
-  `www.cottageaesthetics.co.uk` to the tunnel ingress + move/CNAME its DNS into
-  Cloudflare, flip `indexable: true`, add 301s from ca.cinnamons.uk. Nothing in v1
-  precludes this. The old Wix site's complete indexable surface was enumerated live
-  (headed browser, 2026-07-08) — it is a near-empty landing-page template (homepage
-  `<title>` "Landing Page | Cottage Aesthetics"), so the 301 map is just:
-  `/home → /`, `/about → /about.html`, `/book-online → /treatments.html`,
-  `/contact → /contact.html`, `/cart-page → /` (Wix template cruft; no store),
-  `/english-privacy-policy → /policies.html`. Also at cutover: resubmit the sitemap in
-  Search Console, confirm the Google Business Profile website link resolves, then cancel
-  the Wix premium plan and revoke the (already-leaked, per
-  `docs/projects/01-cottage-aesthetics.md`) Wix API key — nothing in this stack uses Wix.
+- **Real-domain cutover happened 2026-08-10/11 — by a different mechanism than this
+  section originally sketched.** The paragraph below described adding
+  `www.cottageaesthetics.co.uk` to the fleet tunnel ingress and flipping THIS registry's own
+  `indexable`/adding 301s from `ca.cinnamons.uk`; what was actually built instead is the
+  independence-phase GitHub Pages deploy (`spec/independence/01`, `runbook.md`'s "Public
+  site: GitHub Pages custom domain" section): the site repo's own `pages.yml` workflow
+  builds with `builder`'s CLI-only `--domain cottageaesthetics.co.uk --indexable true`
+  overrides, so `projects/ca.json` itself is untouched (`ca.cinnamons.uk` / `indexable:
+  false` forever, per item 8 above) and there is no tunnel ingress entry or DNS record for
+  the public domain on this fleet at all. Kept for history, the old plan's legacy-Wix-URL
+  research is still useful but its target paths are stale (pre-dates decisions/00128's
+  extensionless clean URLs, which dropped every `.html` suffix): the old Wix site's complete
+  indexable surface was enumerated live (headed browser, 2026-07-08) as a near-empty
+  landing-page template (homepage `<title>` "Landing Page | Cottage Aesthetics"), giving a
+  legacy-alias set of `/home`, `/about`, `/book-online`, `/contact`, `/cart-page` (Wix
+  template cruft; no store), `/english-privacy-policy`. The current, decided mechanism for
+  preserving the ones that still matter is a builder-generated static-redirect-page facility
+  on GitHub Pages, not fleet-tunnel 301s or a registry flip —
+  `docs/search-indexing-implementation-brief.md`'s Work package 2 is the up-to-date, in-
+  progress spec for it. Also outstanding from the original cutover checklist, still
+  unactioned as of this writing: resubmit the sitemap in Search Console, confirm the Google
+  Business Profile website link resolves, then cancel the Wix premium plan and revoke the
+  (already-leaked, per `docs/projects/01-cottage-aesthetics.md`) Wix API key — nothing in
+  this stack uses Wix.

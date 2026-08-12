@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 from bs4 import BeautifulSoup, Tag
@@ -155,6 +156,16 @@ class TestHeadInjection:
         robots = soup.find("meta", attrs={"name": "robots"})
         assert isinstance(robots, Tag)
         assert robots["content"] == "noindex"
+
+    def test_no_noindex_meta_when_indexable(self, mini_site_source: SiteSource) -> None:
+        """Sibling of the above (decisions/00135): an indexable build must not carry a
+        `noindex` meta tag — the crawl-allow robots.txt (builder/sitemap.py) and the
+        absence of this tag are the two halves of "indexable", and must move together."""
+        project = dataclasses.replace(mini_site_source.project, indexable=True)
+        source = dataclasses.replace(mini_site_source, project=project)
+        html = render_page(source, "index", mode="publish")
+        soup = BeautifulSoup(html, "html5lib")
+        assert soup.find("meta", attrs={"name": "robots"}) is None
 
     def test_doctype_present(self, mini_site_source: SiteSource) -> None:
         html = render_page(mini_site_source, "index", mode="publish")

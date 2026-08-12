@@ -39,13 +39,18 @@ class TestBuildSite:
         assert (out / "images" / "hero.jpg").exists()
         assert (out / "images" / "icon.jpg").exists()
 
-    def test_robots_disallow_when_not_indexable(
+    def test_robots_allows_crawling_when_not_indexable(
         self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
     ) -> None:
+        """A non-indexable build must not crawl-block `/` (decisions/00135) — Google can
+        only observe a page's `noindex` meta by fetching it, so staging stays crawlable
+        with no `Sitemap:` directive and no sitemap.xml, and relies on the per-page
+        `noindex` (asserted separately below) to keep it out of results."""
         out = tmp_path / "_build"
         build_site(mini_site_root, mini_site_source, out)
         robots = (out / "robots.txt").read_text(encoding="utf-8")
-        assert "Disallow: /" in robots
+        assert robots == "User-agent: *\nAllow: /\n"
+        assert "Disallow" not in robots
         assert not (out / "sitemap.xml").exists()
 
     def test_sitemap_written_when_indexable(
@@ -59,6 +64,7 @@ class TestBuildSite:
         assert "<loc>https://fixture.example.com/</loc>" in sitemap
         robots = (out / "robots.txt").read_text(encoding="utf-8")
         assert "Sitemap:" in robots
+        assert "Disallow" not in robots
 
     def test_writes_a_styled_404_page(
         self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
