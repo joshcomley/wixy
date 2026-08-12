@@ -41,7 +41,8 @@ during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/
 | File | Covers |
 |---|---|
 | `test_bindings.py` / `test_bindings_map.py` | `data-wx-*` resolution (publish vs preview, list expansion, `if`, the `visible: false` item convention — `TestListItemVisible`, Inv 28) / the static binding-map extractor |
-| `test_render.py` / `test_build.py` | per-page render (incl. the social-preview tags: `og:site_name`, `twitter:card`, `og:image:alt/width/height` + their omission/skip cases, decisions/00134) / full build + determinism (`hash_output_tree`) + self-check |
+| `test_render.py` / `test_build.py` | per-page render (incl. the social-preview tags: `og:site_name`, `twitter:card`, `og:image:alt/width/height` + their omission/skip cases, decisions/00134; the indexable-vs-not `noindex` meta presence/absence, decisions/00135) / full build + determinism (`hash_output_tree`) + self-check |
+| `test_sitemap.py` | `generate_robots_txt`/`generate_sitemap_xml` — the non-indexable build's crawl-allow (never `Disallow`), no-`Sitemap:`-directive robots.txt, and the indexable build's `Allow` + `Sitemap:` directive (decisions/00135); sitemap slug sort order |
 | `test_imagesize.py` | `imagesize.probe_image_size`'s stdlib JPEG/PNG/GIF/WebP(VP8/VP8L/VP8X) header sniffer — hand-crafted bytes per format/marker, plus failure cases (missing/truncated/non-image/zero-dim/directory, never raises) |
 | `test_validate.py` | every validate code path; missing-key/image/schema/theme errors |
 | `test_content.py` / `test_theme.py` / `test_nav.py` | dotted paths + canonical JSON; theme dict round-trip + CSS/fonts URL; nav derivation |

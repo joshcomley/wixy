@@ -39,13 +39,18 @@ class TestBuildSite:
         assert (out / "images" / "hero.jpg").exists()
         assert (out / "images" / "icon.jpg").exists()
 
-    def test_robots_disallow_when_not_indexable(
+    def test_robots_allows_crawling_when_not_indexable(
         self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
     ) -> None:
+        """A non-indexable build must not crawl-block `/` (decisions/00135) — Google can
+        only observe a page's `noindex` meta by fetching it, so staging stays crawlable
+        with no `Sitemap:` directive and no sitemap.xml, and relies on the per-page
+        `noindex` (asserted separately below) to keep it out of results."""
         out = tmp_path / "_build"
         build_site(mini_site_root, mini_site_source, out)
         robots = (out / "robots.txt").read_text(encoding="utf-8")
-        assert "Disallow: /" in robots
+        assert robots == "User-agent: *\nAllow: /\n"
+        assert "Disallow" not in robots
         assert not (out / "sitemap.xml").exists()
 
     def test_sitemap_written_when_indexable(
@@ -59,6 +64,7 @@ class TestBuildSite:
         assert "<loc>https://fixture.example.com/</loc>" in sitemap
         robots = (out / "robots.txt").read_text(encoding="utf-8")
         assert "Sitemap:" in robots
+        assert "Disallow" not in robots
 
     def test_writes_a_styled_404_page(
         self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
@@ -67,12 +73,26 @@ class TestBuildSite:
         build_site(mini_site_root, mini_site_source, out)
         html = (out / "404.html").read_text(encoding="utf-8")
         assert "Page not found" in html
+        assert '<meta name="robots" content="noindex">' in html
         # mini_site_source has a theme — references are fingerprinted (see
         # TestAssetFingerprinting below), not bare.
         theme_fp = content_fingerprint(out / "theme.css")
         site_fp = content_fingerprint(out / "site.css")
         assert f'href="theme.css?v={theme_fp}"' in html
         assert f'href="site.css?v={site_fp}"' in html
+
+    def test_404_page_stays_noindex_even_when_project_is_indexable(
+        self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
+    ) -> None:
+        """`_generate_404_html` takes no `indexable` input by design — a 404 page must
+        never be indexed regardless of the site's overall indexability, and it's now the
+        sole exclusion signal for this one always-crawlable path (decisions/00135)."""
+        project = dataclasses.replace(mini_site_source.project, indexable=True)
+        source = dataclasses.replace(mini_site_source, project=project)
+        out = tmp_path / "_build"
+        build_site(mini_site_root, source, out)
+        html = (out / "404.html").read_text(encoding="utf-8")
+        assert '<meta name="robots" content="noindex">' in html
 
     def test_404_page_omits_theme_link_when_no_theme(
         self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
