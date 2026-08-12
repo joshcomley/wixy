@@ -209,11 +209,18 @@ cannot drift. Format is **PROVISIONAL** — read decisions/00012 before changing
 - **Static redirects** (`staticredirects.py`, decisions/00136): opt-in only
   (`build_site`'s `static_redirects_file` keyword / CLI's `--static-redirects-file`) —
   `load_static_redirects` (flat JSON `{"/old": "/new"}` map, `BuildError` fail-fast on
-  anything else) → `validate_static_redirects` (source/target both a single `[a-z0-9-]+`
-  segment or exactly `/` — `re.fullmatch`, never `match`+`^...$`, which would let a
-  trailing-`\n` value slip past; source may not be `/` or collide with a real page's own
-  output filename or the reserved `404` name; target must resolve to a real page, which
-  also rules out chains/loops since an alias source can never itself be a valid target) →
+  anything else, including a **duplicate JSON key** — plain `json.loads` would otherwise
+  silently keep only the last value) → `validate_static_redirects` (source/target both a
+  single `[a-z0-9-]+` segment or exactly `/` — `re.fullmatch`, never `match`+`^...$`, which
+  would let a trailing-`\n` value slip past; source may not be `/`, may not collide with a
+  real page's own output filename, and may not be the reserved `404` name or a lowercase
+  Windows reserved device stem (`con`/`prn`/`aux`/`nul`/`com1-9`/`lpt1-9` — this repo's own
+  dev/test environment is Windows even though the real deployment targets are Linux);
+  target may not be the literal string `/index` (the homepage's real `page_contents` slug
+  IS `"index"`, but its canonical URL is `"/"` — accepting `/index` would generate a page
+  whose canonical conflicts with the homepage's own) and must otherwise resolve to a real
+  page, which also rules out chains/loops since an alias source can never itself be a valid
+  target) →
   `generate_redirect_pages` (one `<slug>.html` per entry: zero-delay `meta http-equiv=
   refresh`, `link rel=canonical` to the absolute target, a plain-language fallback
   `<a href>`, `noindex` when the build is non-indexable — no query string/fragment from the

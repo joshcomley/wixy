@@ -58,11 +58,12 @@ class TestLoadStaticRedirects:
         with pytest.raises(BuildError, match="flat JSON object"):
             load_static_redirects(path)
 
-    def test_non_string_key_raises(self, tmp_path: Path) -> None:
-        # JSON object keys are always strings on the wire, but a non-string VALUE
-        # under a mixed-type structure is the realistic malformed case (covered
-        # above) — this proves the "all values are strings" check is real, not a
-        # vacuously-true `all()` over an empty/degenerate input.
+    def test_non_string_key_is_impossible_json_syntax(self, tmp_path: Path) -> None:
+        # A "non-string key" scenario has no test: JSON object keys are always
+        # strings by the grammar itself (`{1: "x"}` isn't valid JSON at all, so
+        # `json.dumps`/hand-written JSON text can never produce one) — unlike a
+        # non-string VALUE (covered above), which the type system doesn't prevent.
+        # Confirms the trivial empty-map edge case still loads correctly instead.
         path = _write_json(tmp_path, {})
         assert load_static_redirects(path) == {}
 
@@ -201,6 +202,15 @@ class TestGenerateRedirectPages:
         }
         kwargs.update(overrides)
         return generate_redirect_pages(**kwargs)  # type: ignore[arg-type]
+
+    def test_self_defends_against_unvalidated_input(self) -> None:
+        """`build_site` always runs `validate_static_redirects` first, but this
+        function must not trust that blindly — an unvalidated, path-escaping-shaped
+        source must never be silently turned into an output filename. Proves the
+        function's OWN guard, independent of the validator (a future caller that
+        skips validation must still fail loudly, not write a bad file)."""
+        with pytest.raises(BuildError, match="unvalidated entry"):
+            self._page(redirects={"/../evil": "/about"})
 
     def test_filenames_match_source_slugs(self) -> None:
         pages = self._page()

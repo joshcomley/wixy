@@ -226,10 +226,27 @@ def generate_redirect_pages(
     `_PATH_RE`, so nothing here actually needs escaping in practice, but each site
     escapes anyway rather than assuming a future relaxation of that constraint stays
     safe by accident.
+
+    Callers are expected to have already run `validate_static_redirects` — `build_site`
+    always does, in that order. This function re-checks the shape of every source/
+    target anyway (raising `BuildError` rather than trusting the caller) so it can
+    never be tricked into deriving a path-escaping output filename (`source` becomes
+    `{out_dir}/{source[1:]}.html`) from an unvalidated value if a future caller ever
+    invokes it directly, out of order — this is a self-defense check, not a caller
+    convenience, so it deliberately duplicates rather than imports
+    `validate_static_redirects`'s own shape check (that function needs `page_slugs` for
+    its collision/existence rules too, which this one doesn't have and doesn't need).
     """
     pages: dict[str, str] = {}
     for source in sorted(redirects):
         target = redirects[source]
+        if not (_is_valid_path(source) and source != "/" and _is_valid_path(target)):
+            raise BuildError(
+                f"internal error: generate_redirect_pages received an unvalidated "
+                f"entry ({source!r} -> {target!r}) — validate_static_redirects must "
+                "run first",
+                location=source,
+            )
         absolute_target = f"https://{domain}{target}"
         noindex_meta = '<meta name="robots" content="noindex">\n' if not indexable else ""
         html_out = (
