@@ -175,6 +175,45 @@ class TestBuildCommand:
         assert isinstance(canonical, Tag)
         assert canonical["href"] == "https://example.org/"
 
+    def test_build_static_redirects_file_writes_alias_pages(
+        self, mini_site_root: Path, tmp_path: Path
+    ) -> None:
+        project = str(mini_site_root.parent / "project.json")
+        out = tmp_path / "out"
+        redirects_path = tmp_path / "redirects.json"
+        redirects_path.write_text(json.dumps({"/home": "/"}), encoding="utf-8")
+        code = main(
+            [
+                "build",
+                "--root",
+                str(mini_site_root),
+                "--project",
+                project,
+                "--out",
+                str(out),
+                "--static-redirects-file",
+                str(redirects_path),
+            ]
+        )
+        assert code == 0
+        assert (out / "home.html").exists()
+
+    def test_build_omitted_static_redirects_file_writes_none(
+        self, mini_site_root: Path, tmp_path: Path
+    ) -> None:
+        project = str(mini_site_root.parent / "project.json")
+        out = tmp_path / "out"
+        code = main(
+            ["build", "--root", str(mini_site_root), "--project", project, "--out", str(out)]
+        )
+        assert code == 0
+        assert not (out / "home.html").exists()
+        assert sorted(p.name for p in out.glob("*.html")) == [
+            "404.html",
+            "about.html",
+            "index.html",
+        ]
+
 
 class TestServeCommand:
     """`_CleanUrlHandler` (decisions/00128) mirrors the production resolver

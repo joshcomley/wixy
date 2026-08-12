@@ -456,3 +456,24 @@ mechanism; a genuinely confidential staging surface needs authentication, not th
 deployment target (`ca.cinnamons.uk` staging today; any future project registered the same
 way).
 
+### Inv 36 — Static redirect aliases are validated by strict rejection, never normalization
+`builder/staticredirects.py:validate_static_redirects` checks every source/target against
+`re.fullmatch` — **never** `re.match` combined with `^...$` anchors, because Python's `$`
+matches immediately before a trailing `\n`, so an anchored `match()` check lets a value like
+`"/home\n"` silently pass as if it were the clean `"/home"` (confirmed empirically during
+decisions/00136's review). A source or target failing the grammar is a fatal `BuildError` —
+never coerced, trimmed, lowercased, or otherwise "cleaned up" into a passing form. This
+applies to every check in this module: source shape, source-is-not-root, source/real-page
+collision (checked against the actual emitted `<slug>.html` filename, not just the raw
+content-model slug), source/reserved-name (`404`) collision, target shape, and
+target-resolves-to-a-real-page (which also rejects redirect chains/loops, since an alias
+source is already proven disjoint from every real page slug by the checks before it — a
+target can only ever be a real page, never another alias). Generated alias pages carry no
+query string or URL fragment from the original request and contain no `<script>` — this is
+deliberate, script-free, deterministic HTML for retired-path equivalence, not a general
+redirect proxy.
+*Enforced by:* `builder/tests/test_staticredirects.py` (the full module), incl. explicit
+trailing-newline/CRLF/whitespace-variant rejection tests for both source and target.
+*Exception:* none — a future relaxation of the grammar (e.g. multi-segment paths) must keep
+the same reject-don't-normalize discipline and the same `fullmatch` requirement.
+

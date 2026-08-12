@@ -122,6 +122,7 @@ The **normative** contract for all of this is
 | `nav.py` | `build_nav` (derives `@nav`; never stored) |
 | `sanitize.py` | `sanitize_rich_lite` over `nh3` (allowlisted rich-lite HTML) |
 | `sitemap.py` | `generate_robots_txt`, `generate_sitemap_xml` |
+| `staticredirects.py` | opt-in GitHub-Pages-compatible redirect-alias page generator (`load_static_redirects`, `validate_static_redirects`, `generate_redirect_pages`) — decisions/00136 |
 | `collections.py` | the fixed collection-key → schema table (`COLLECTION_RULES`) |
 | `config.py` | `ProjectConfig`, `load_project_config` (the `projects/*.json` registry); `AdminSection`/`AdminCollection`/`AdminField`/`AdminFieldOption` — the registry-configured admin-section screens, decisions/00098 |
 | `errors.py` | `BuildError` (fatal) vs `ValidationError`/`ValidationResult` (collected) |

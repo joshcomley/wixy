@@ -196,10 +196,12 @@ request-admin-action.request_admin_action`. Never hand-run elevated steps.
   landing-page template (homepage `<title>` "Landing Page | Cottage Aesthetics"), giving a
   legacy-alias set of `/home`, `/about`, `/book-online`, `/contact`, `/cart-page` (Wix
   template cruft; no store), `/english-privacy-policy`. The current, decided mechanism for
-  preserving the ones that still matter is a builder-generated static-redirect-page facility
-  on GitHub Pages, not fleet-tunnel 301s or a registry flip —
-  `docs/search-indexing-implementation-brief.md`'s Work package 2 is the up-to-date, in-
-  progress spec for it. Also outstanding from the original cutover checklist, still
+  preserving the ones that still matter is `builder/staticredirects.py`'s opt-in redirect-
+  alias page generator (decisions/00136, `docs/ai/builder.md`), invoked via the engine's own
+  `--static-redirects-file` CLI flag, not fleet-tunnel 301s or a registry flip. The site-
+  owned redirect map itself and the `.github/workflows/pages.yml` wiring that passes the
+  flag live in the site repo, not here — see that repo's own docs for the actual entries in
+  use. Also outstanding from the original cutover checklist, still
   unactioned as of this writing: resubmit the sitemap in Search Console, confirm the Google
   Business Profile website link resolves, then cancel the Wix premium plan and revoke the
   (already-leaked, per `docs/projects/01-cottage-aesthetics.md`) Wix API key — nothing in

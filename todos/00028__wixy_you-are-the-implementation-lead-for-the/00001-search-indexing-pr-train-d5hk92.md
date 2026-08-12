@@ -60,6 +60,21 @@ Definition of done = the brief's own "Definition of done for the implementation 
 section. Update this sidecar / add new sidecars per work package as they start; keep the
 index line's status current.
 
+## Progress
+
+- WP0 (baseline): done, re-verified live, no contradictions. Evidence in the WP1 PR's
+  peer/chat history (not checked into the repo as a separate file — the brief frames this
+  as PR-description-appropriate).
+- WP1 (staging noindex): **shipped**. `joshcomley/wixy` PR #199, merged `1bb1b634`. Went
+  through the required architecture consult (relation `b2834443`, fable, Option 1 affirmed,
+  0.93 confidence) and graded audit (relation `2eafd6cb`, opus rung clean, 2 lows fixed
+  before merge) per the brief's gate. Follow-up spun out to todo [7pxrv9] (X-Robots-Tag for
+  non-HTML responses), not bundled into #199. **Live verification on ca.cinnamons.uk is
+  still pending an owner Publish/Restore** — an engine deploy alone doesn't rewrite the
+  currently-served static `robots.txt` (decisions/00135's live-verification note); not
+  something this session will trigger itself.
+- WP2 (legacy redirect pages): next.
+
 ## Links
 
 - Public site: `https://cottageaesthetics.co.uk/`

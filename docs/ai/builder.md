@@ -30,10 +30,16 @@ keeping `builder/` env-blind (decisions/00126). Used by the site repo's GitHub P
 workflow to build with the operator's public domain + `indexable=true` while
 `projects/ca.json` itself stays `ca.cinnamons.uk` / `indexable=false`.
 
+`build` alone also accepts `--static-redirects-file <path>` (optional, default `None` —
+omitted, no alias pages, unchanged from before this flag existed): a site-owned JSON map of
+legacy source paths to current page paths, generating one minimal HTML redirect-alias page
+per entry for hosts (GitHub Pages) that cannot serve a real HTTP redirect. See
+`builder/staticredirects.py` and decisions/00136.
+
 | Command | Does | Exit |
 |---|---|---|
 | `validate` | `validate_site`; `--json` prints `result.to_json_dict()`, else `[code] file:key: message` per error | `0` if `result.ok` else `1` |
-| `build` | `build_site` into `--out` (default `_build`) | `0` |
+| `build` | `build_site` into `--out` (default `_build`); optionally `--static-redirects-file` | `0` |
 | `serve` | build once, serve `--out` on `127.0.0.1:--port` (dev; no rebuild-on-change); its handler (`_CleanUrlHandler`, decisions/00128) mirrors the production/Pages clean-URL resolution via the shared `builder.serving.resolve_site_path` | — |
 | `parity` | rendered-parity check; `--serve-root` + `--slugs` required; `--rebaseline`, `--strict-screenshots` | `1` on any hard issue |
 
@@ -200,6 +206,24 @@ cannot drift. Format is **PROVISIONAL** — read decisions/00012 before changing
   not indexable — crawl access must stay open for the per-page `noindex` meta to be
   observable at all, decisions/00135) + `generate_sitemap_xml` (sorted slugs). Indexability
   gates whether `sitemap.xml` is written.
+- **Static redirects** (`staticredirects.py`, decisions/00136): opt-in only
+  (`build_site`'s `static_redirects_file` keyword / CLI's `--static-redirects-file`) —
+  `load_static_redirects` (flat JSON `{"/old": "/new"}` map, `BuildError` fail-fast on
+  anything else) → `validate_static_redirects` (source/target both a single `[a-z0-9-]+`
+  segment or exactly `/` — `re.fullmatch`, never `match`+`^...$`, which would let a
+  trailing-`\n` value slip past; source may not be `/` or collide with a real page's own
+  output filename or the reserved `404` name; target must resolve to a real page, which
+  also rules out chains/loops since an alias source can never itself be a valid target) →
+  `generate_redirect_pages` (one `<slug>.html` per entry: zero-delay `meta http-equiv=
+  refresh`, `link rel=canonical` to the absolute target, a plain-language fallback
+  `<a href>`, `noindex` when the build is non-indexable — no query string/fragment from the
+  original request reaches the target; this is deliberately deterministic, script-free HTML
+  for retired-path equivalence, not a redirect proxy). Alias pages are never added to
+  `page_contents`, so they're automatically excluded from `sitemap.xml`/nav and resolve
+  through the exact same `builder.serving.resolve_site_path` path a real page does — no
+  special-casing anywhere else in the pipeline. Never call this an HTTP "301" or "redirect"
+  in isolation — GitHub Pages cannot serve one; see `wixy_server/redirects.py`'s own
+  docstring for the real, server-side 301 facility this is deliberately NOT reusing.
 
 ## Errors (`builder/errors.py`)
 

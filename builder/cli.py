@@ -105,7 +105,10 @@ def cmd_build(args: argparse.Namespace) -> int:
         indexable=_indexable_override(args),
     )
     out_dir = Path(args.out).resolve()
-    build_site(root, source, out_dir)
+    static_redirects_file = (
+        Path(args.static_redirects_file).resolve() if args.static_redirects_file else None
+    )
+    build_site(root, source, out_dir, static_redirects_file=static_redirects_file)
     print(f"build: wrote {out_dir}")
     return 0
 
@@ -195,6 +198,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_build = sub.add_parser("build", help="build the site to an output directory")
     _add_common_args(p_build)
     p_build.add_argument("--out", default="_build", help="output directory (default: _build)")
+    p_build.add_argument(
+        "--static-redirects-file",
+        default=None,
+        help="path to a site-owned JSON map of legacy source paths to current page "
+        "paths (builder/staticredirects.py) — generates a minimal HTML redirect-alias "
+        "page per entry, for hosts (GitHub Pages) that cannot serve a real HTTP "
+        "redirect. Omitted: no alias pages, unchanged from before this flag existed.",
+    )
     p_build.set_defaults(func=cmd_build)
 
     p_serve = sub.add_parser("serve", help="build once and serve over HTTP (dev only)")

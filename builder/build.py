@@ -15,11 +15,28 @@ from builder.content import scan_image_refs
 from builder.errors import BuildError
 from builder.render import SiteSource, render_page
 from builder.sitemap import generate_robots_txt, generate_sitemap_xml
+from builder.staticredirects import (
+    generate_redirect_pages,
+    load_static_redirects,
+    validate_static_redirects,
+)
 from builder.theme import generate_theme_css
 
 
-def build_site(root: Path, source: SiteSource, out_dir: Path) -> None:
-    """Build the full site from `root` (the site repo checkout) into `out_dir`."""
+def build_site(
+    root: Path,
+    source: SiteSource,
+    out_dir: Path,
+    *,
+    static_redirects_file: Path | None = None,
+) -> None:
+    """Build the full site from `root` (the site repo checkout) into `out_dir`.
+
+    `static_redirects_file`, if given, points at a site-owned JSON map of legacy
+    source paths to current page paths (builder/staticredirects.py, decisions/ WP2
+    entry) — a build with no file given emits no alias pages at all, unchanged from
+    before this parameter existed.
+    """
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
@@ -52,6 +69,22 @@ def build_site(root: Path, source: SiteSource, out_dir: Path) -> None:
         (out_dir / "sitemap.xml").write_text(sitemap, encoding="utf-8", newline="\n")
 
     (out_dir / "404.html").write_text(_generate_404_html(source), encoding="utf-8", newline="\n")
+
+    if static_redirects_file is not None:
+        redirects = load_static_redirects(static_redirects_file)
+        validate_static_redirects(
+            redirects,
+            page_slugs=set(source.page_contents),
+            location=str(static_redirects_file),
+        )
+        for filename, page_html in generate_redirect_pages(
+            redirects,
+            domain=source.project.domain,
+            indexable=source.project.indexable,
+            locale=source.project.locale,
+            site_name=source.project.name,
+        ).items():
+            (out_dir / filename).write_text(page_html, encoding="utf-8", newline="\n")
 
     fingerprints = fingerprint_asset_references(out_dir)
     unfingerprinted = find_unfingerprinted_asset_references(out_dir, fingerprints)
