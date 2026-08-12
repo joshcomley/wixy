@@ -128,6 +128,29 @@ class TestValidateStaticRedirects:
         with pytest.raises(BuildError, match="reserved build output name"):
             validate_static_redirects({"/404": "/about"}, page_slugs=_PAGE_SLUGS, location="test")
 
+    @pytest.mark.parametrize("reserved", ["con", "prn", "aux", "nul", "com1", "lpt1"])
+    def test_source_colliding_with_windows_reserved_device_name_rejected(
+        self, reserved: str
+    ) -> None:
+        """A file named e.g. `con.html` can misbehave at the filesystem/device level
+        on Windows — this repo's own dev/test environment, even though the real
+        deployment targets are Linux CI + GitHub Pages."""
+        with pytest.raises(BuildError, match="reserved build output name"):
+            validate_static_redirects(
+                {f"/{reserved}": "/about"}, page_slugs=_PAGE_SLUGS, location="test"
+            )
+
+    def test_index_target_rejected_use_root_instead(self) -> None:
+        """`"index"` is the homepage's real page-content slug, so a naive `target_slug
+        in page_slugs` check would accept `/index` as a target — but `page_url`
+        (builder/nav.py) never emits `"/index"`, only `"/"`, for the homepage. Accepting
+        it would generate a redirect page whose canonical URL conflicts with the
+        homepage's own real canonical (caught in review of decisions/00136)."""
+        with pytest.raises(BuildError, match='canonical URL is "/"'):
+            validate_static_redirects(
+                {"/old-home": "/index"}, page_slugs=_PAGE_SLUGS, location="test"
+            )
+
     @pytest.mark.parametrize(
         "bad_target",
         [

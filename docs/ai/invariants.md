@@ -465,15 +465,24 @@ decisions/00136's review). A source or target failing the grammar is a fatal `Bu
 never coerced, trimmed, lowercased, or otherwise "cleaned up" into a passing form. This
 applies to every check in this module: source shape, source-is-not-root, source/real-page
 collision (checked against the actual emitted `<slug>.html` filename, not just the raw
-content-model slug), source/reserved-name (`404`) collision, target shape, and
-target-resolves-to-a-real-page (which also rejects redirect chains/loops, since an alias
-source is already proven disjoint from every real page slug by the checks before it — a
-target can only ever be a real page, never another alias). Generated alias pages carry no
-query string or URL fragment from the original request and contain no `<script>` — this is
-deliberate, script-free, deterministic HTML for retired-path equivalence, not a general
-redirect proxy.
+content-model slug), source/reserved-name collision (`404`, plus the lowercase Windows
+device-reserved stems `con`/`prn`/`aux`/`nul`/`com1-9`/`lpt1-9`, since the real deployment
+targets are Linux CI + GitHub Pages but this repo's own dev/test environment is Windows),
+target shape, target-is-not-literally-`"/index"` (the homepage's real page-content slug IS
+`"index"`, but its canonical URL is `"/"` — accepting `/index` as a target would generate a
+page whose canonical URL conflicts with the homepage's own, caught in decisions/00136's
+review), and target-resolves-to-a-real-page (which also rejects redirect chains/loops, since
+an alias source is already proven disjoint from every real page slug by the checks before
+it — a target can only ever be a real page, never another alias). The JSON loader itself
+also rejects a **duplicate key** in the source file outright (`object_pairs_hook`) rather
+than silently keeping only the last value, which is what plain `json.loads` does by default
+(confirmed empirically) — the same reject-don't-normalize discipline applied one layer
+earlier, before validation even runs. Generated alias pages carry no query string or URL
+fragment from the original request and contain no `<script>` — this is deliberate,
+script-free, deterministic HTML for retired-path equivalence, not a general redirect proxy.
 *Enforced by:* `builder/tests/test_staticredirects.py` (the full module), incl. explicit
-trailing-newline/CRLF/whitespace-variant rejection tests for both source and target.
+trailing-newline/CRLF/whitespace-variant, duplicate-key, Windows-reserved-name, and
+`/index`-target rejection tests.
 *Exception:* none — a future relaxation of the grammar (e.g. multi-segment paths) must keep
 the same reject-don't-normalize discipline and the same `fullmatch` requirement.
 

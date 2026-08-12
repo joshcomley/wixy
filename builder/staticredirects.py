@@ -56,8 +56,17 @@ def _is_valid_path(value: str) -> bool:
 # the real page slugs checked separately. `404` is the only same-EXTENSION collision
 # risk today (`build.py` always writes `404.html`) — `site`/`theme`/`robots`/`sitemap`
 # as bare alias slugs are harmless (they'd collide only with `site.css`/`theme.css`/
-# `robots.txt`/`sitemap.xml`, a different extension, hence a different filename).
-_RESERVED_SLUGS = frozenset({"404"})
+# `robots.txt`/`sitemap.xml`, a different extension, hence a different filename). Also
+# rejects the Windows reserved device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9) —
+# a file named e.g. `con.html` can misbehave at the filesystem/device level on Windows
+# (this repo's own dev/test environment, even though the real deployment targets are
+# Linux CI + GitHub Pages) — only the lowercase forms need listing since `_PATH_RE`
+# already rejects any uppercase variant.
+_RESERVED_SLUGS = frozenset(
+    {"404", "con", "prn", "aux", "nul"}
+    | {f"com{n}" for n in range(1, 10)}
+    | {f"lpt{n}" for n in range(1, 10)}
+)
 
 
 def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -119,11 +128,15 @@ def validate_static_redirects(
     collision (checked against the exact `<slug>.html` filename the build would emit,
     so this also catches a source that would collide with a real page's own output
     file, not merely its content-model slug), source/reserved-name collision, target
-    shape, target resolves to a real page. That last check alone also rules out chains
-    and loops — an alias source can never itself be a valid target, since it's already
-    been proven disjoint from every real page slug by the two collision checks just
-    before it, so "target must be a real page slug" and "target must not be another
-    alias" are the same rule.
+    shape, target-is-not-literally-"/index" (the homepage's real content-model slug IS
+    `"index"`, but its canonical URL is `"/"` — `page_url` never emits `"/index"` — so
+    a naive "is this slug real" check would wrongly accept a target that generates a
+    canonical URL conflicting with the homepage's own; caught in review, decisions/
+    00136), target resolves to a real page. That last check alone also rules out
+    chains and loops — an alias source can never itself be a valid target, since it's
+    already been proven disjoint from every real page slug by the two collision checks
+    just before it, so "target must be a real page slug" and "target must not be
+    another alias" are the same rule.
     """
     for source, target in redirects.items():
         if not _is_valid_path(source):
@@ -160,6 +173,13 @@ def validate_static_redirects(
                 'root-relative internal path matching /[a-z0-9-]+ (or exactly "/") '
                 "— external URLs are rejected; this facility redirects to CURRENT "
                 "pages on THIS site only",
+                location=location,
+            )
+        if target == "/index":
+            raise BuildError(
+                f'redirect target "/index" (for source {source!r}) is not a valid '
+                'canonical URL — the homepage\'s slug is "index" but its canonical '
+                'URL is "/" (builder.nav.page_url), never "/index"; use "/" instead',
                 location=location,
             )
         target_slug = "index" if target == "/" else target[1:]

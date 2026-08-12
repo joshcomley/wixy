@@ -68,7 +68,25 @@ serve an HTTP redirect at all.
   validate against materially different rules (this module's traversal/collision/loop/
   slug-shape checks have no server-side analogue), and `builder` takes no dependency on
   `wixy_server` (the reverse is the only allowed import direction — `builder` stays
-  importable standalone, a hard constraint the site repo's CI relies on).
+  importable standalone, a hard constraint the site repo's CI relies on). The architecture
+  consult (relation `3cfcb446`) gave the stronger structural reason for deferring
+  `wixy_server` wiring too: a server able to serve real 301s already has its own
+  env-configured facility (`WIXY_REDIRECTS_FILE`) — static aliases there would be the
+  inferior mechanism on the one host that doesn't need it.
+- **Two gaps found during the consult's live-code review, fixed in the same PR before
+  merge:** (1) plain `json.loads` silently keeps only the LAST value for a duplicate object
+  key (`{"/home": "/", "/home": "/contact"}` → `{"/home": "/contact"}`, no warning) —
+  contradicts this module's strict-reject contract, so `load_static_redirects` now uses an
+  `object_pairs_hook` that rejects a duplicate key outright. (2) a target of literally
+  `"/index"` was wrongly accepted — `"index"` IS the homepage's real page-content slug, but
+  its canonical URL is `"/"` (`page_url` never emits `"/index"`), so accepting it as a target
+  would generate a redirect page whose canonical URL conflicts with the homepage's own real
+  canonical; `validate_static_redirects` now rejects it explicitly with a "use / instead"
+  message. Also closed as a low-severity nit from the same review: `_RESERVED_SLUGS` now
+  also rejects the lowercase Windows device-reserved stems (`con`/`prn`/`aux`/`nul`/
+  `com1-9`/`lpt1-9`) as redirect sources — a file named e.g. `con.html` can misbehave at the
+  filesystem/device level on Windows (this repo's own dev/test environment), even though the
+  real deployment targets (GitHub Actions CI, GitHub Pages) are both Linux and unaffected.
 
 ## Why
 
