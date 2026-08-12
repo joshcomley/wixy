@@ -73,7 +73,23 @@ index line's status current.
   still pending an owner Publish/Restore** — an engine deploy alone doesn't rewrite the
   currently-served static `robots.txt` (decisions/00135's live-verification note); not
   something this session will trigger itself.
-- WP2 (legacy redirect pages): next.
+- WP2 (legacy redirect pages, engine side): **shipped**. `joshcomley/wixy` PR #200,
+  merged `391afb13`. New `builder/staticredirects.py` (opt-in `--static-redirects-file`).
+  Architecture consult (relation `3cfcb446`, fable, all 4 questions affirmed, 0.93
+  confidence) live-reviewed the actual code and found two real gaps (silent duplicate-
+  JSON-key last-wins; `/index` as a target producing a canonical-URL conflict with the
+  homepage's own `/`) plus a low Windows-reserved-device-name nit — all three fixed
+  before the linked graded audit. Audit (relation `f6627393`, opus rung) came back
+  AUDIT CLEAN (0 criticals/highs) against implementation head `4869a36`/test delta
+  through `9232933`, with 3 more lows (stale docs/ai/builder.md summary, a
+  self-defense gap in `generate_redirect_pages` trusting caller validation order, a
+  mis-named test asserting success instead of a raise) — all closed in `4732206`
+  before merge. decisions/00136, docs/ai/invariants.md Inv 36.
+  **Live GitHub Pages verification is NOT done** — needs WP3 (the site-owned map +
+  `pages.yml` wiring) merged, then an owner Publish/Restore (which this session will
+  not trigger).
+- WP3 (site repo: the 3-entry map + pages.yml wiring): next — needs its OWN cmd
+  workspace for `cottage-aesthetics-preview` (never author it in this wixy workspace).
 
 ## Links
 
