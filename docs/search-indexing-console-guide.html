@@ -1,0 +1,1281 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Get Cottage Aesthetics into Google &amp; Bing — owner checklist</title>
+  <style>
+    :root {
+      --paper: #fbf8f2;
+      --paper-deep: #f3eadf;
+      --card: #fffdf9;
+      --ink: #2d2722;
+      --muted: #6f665e;
+      --olive: #66705a;
+      --olive-dark: #485141;
+      --olive-pale: #e8ede3;
+      --clay: #a9674b;
+      --clay-pale: #f6e8df;
+      --gold: #c69a5b;
+      --line: #ded5ca;
+      --ok: #30734c;
+      --ok-pale: #e5f2e9;
+      --warn: #8a531f;
+      --warn-pale: #fff1d9;
+      --danger: #8d3b35;
+      --danger-pale: #f8e6e3;
+      --shadow: 0 18px 50px rgba(62, 49, 37, .10);
+      --radius: 18px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+      background: var(--paper);
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 8% -4%, rgba(198, 154, 91, .18), transparent 25rem),
+        radial-gradient(circle at 100% 7%, rgba(102, 112, 90, .15), transparent 29rem),
+        var(--paper);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+      font-size: 16px;
+      line-height: 1.64;
+    }
+
+    a { color: var(--olive-dark); text-underline-offset: .18em; }
+    a:hover { color: var(--clay); }
+    button, input, textarea { font: inherit; }
+
+    .shell {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 34px 0 70px;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: clamp(30px, 6vw, 64px);
+      color: #fffdf8;
+      background:
+        linear-gradient(120deg, rgba(41, 35, 30, .97), rgba(72, 81, 65, .94)),
+        var(--olive-dark);
+      border-radius: 28px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero::after {
+      content: "CA";
+      position: absolute;
+      right: -12px;
+      bottom: -90px;
+      color: rgba(255, 255, 255, .055);
+      font-family: Georgia, serif;
+      font-size: clamp(13rem, 31vw, 25rem);
+      line-height: 1;
+      pointer-events: none;
+    }
+
+    .eyebrow {
+      margin: 0 0 14px;
+      color: #e9c898;
+      font-size: .78rem;
+      font-weight: 800;
+      letter-spacing: .15em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3, h4 {
+      line-height: 1.16;
+      text-wrap: balance;
+    }
+
+    h1 {
+      position: relative;
+      z-index: 1;
+      max-width: 820px;
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(2.45rem, 6vw, 5.25rem);
+      font-weight: 500;
+      letter-spacing: -.035em;
+    }
+
+    .hero .lede {
+      position: relative;
+      z-index: 1;
+      max-width: 720px;
+      margin: 20px 0 0;
+      color: #efe9df;
+      font-size: clamp(1rem, 2vw, 1.2rem);
+    }
+
+    .hero-meta {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 28px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      color: #fffdf8;
+      background: rgba(255, 255, 255, .10);
+      border: 1px solid rgba(255, 255, 255, .2);
+      border-radius: 999px;
+      font-size: .84rem;
+      font-weight: 700;
+      backdrop-filter: blur(6px);
+    }
+
+    .pill::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      background: #e9c898;
+      border-radius: 50%;
+    }
+
+    .progress-panel {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 16px;
+      align-items: center;
+      margin: 22px 0;
+      padding: 18px 22px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: 0 8px 25px rgba(62, 49, 37, .06);
+    }
+
+    .progress-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 9px;
+      font-size: .92rem;
+      font-weight: 800;
+    }
+
+    .progress-track {
+      overflow: hidden;
+      height: 10px;
+      background: var(--paper-deep);
+      border-radius: 999px;
+    }
+
+    .progress-bar {
+      width: 0;
+      height: 100%;
+      background: linear-gradient(90deg, var(--olive), var(--gold));
+      border-radius: inherit;
+      transition: width .25s ease;
+    }
+
+    .reset {
+      padding: 8px 12px;
+      color: var(--muted);
+      background: transparent;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      cursor: pointer;
+    }
+
+    .reset:hover { color: var(--ink); border-color: var(--olive); }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 280px;
+      gap: 26px;
+      align-items: start;
+    }
+
+    .toc {
+      position: sticky;
+      top: 18px;
+      grid-column: 2;
+      grid-row: 1;
+      padding: 20px;
+      background: rgba(255, 253, 249, .94);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: 0 8px 25px rgba(62, 49, 37, .06);
+      backdrop-filter: blur(10px);
+    }
+
+    .toc h2 {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: .76rem;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .toc ol {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      counter-reset: guide;
+    }
+
+    .toc li { counter-increment: guide; }
+
+    .toc a {
+      display: grid;
+      grid-template-columns: 25px 1fr;
+      gap: 8px;
+      padding: 7px 3px;
+      color: var(--ink);
+      text-decoration: none;
+      font-size: .9rem;
+      line-height: 1.35;
+    }
+
+    .toc a::before {
+      content: counter(guide, decimal-leading-zero);
+      color: var(--clay);
+      font-size: .72rem;
+      font-weight: 800;
+      line-height: 1.8;
+    }
+
+    .toc a:hover { color: var(--olive-dark); }
+
+    .content {
+      grid-column: 1;
+      grid-row: 1;
+      min-width: 0;
+    }
+
+    .section {
+      scroll-margin-top: 20px;
+      margin-bottom: 24px;
+      padding: clamp(22px, 4vw, 36px);
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: 0 8px 25px rgba(62, 49, 37, .055);
+    }
+
+    .section-number {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 38px;
+      height: 38px;
+      margin-bottom: 12px;
+      color: #fff;
+      background: var(--olive);
+      border-radius: 50%;
+      font-size: .85rem;
+      font-weight: 900;
+    }
+
+    .section > h2 {
+      margin: 0 0 12px;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(1.65rem, 4vw, 2.45rem);
+      font-weight: 500;
+      letter-spacing: -.02em;
+    }
+
+    h3 {
+      margin: 30px 0 9px;
+      color: var(--olive-dark);
+      font-size: 1.15rem;
+    }
+
+    h4 { margin: 22px 0 7px; font-size: 1rem; }
+    p { margin: 9px 0 15px; }
+    ul, ol { padding-left: 1.35rem; }
+    li + li { margin-top: 8px; }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 13px;
+      margin-top: 20px;
+    }
+
+    .summary-card {
+      padding: 17px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 13px;
+    }
+
+    .summary-card strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--olive-dark);
+    }
+
+    .summary-card p { margin: 0; color: var(--muted); font-size: .91rem; }
+
+    .callout {
+      margin: 20px 0;
+      padding: 17px 18px;
+      background: var(--olive-pale);
+      border-left: 5px solid var(--olive);
+      border-radius: 4px 12px 12px 4px;
+    }
+
+    .callout.warning { background: var(--warn-pale); border-color: var(--warn); }
+    .callout.danger { background: var(--danger-pale); border-color: var(--danger); }
+    .callout.success { background: var(--ok-pale); border-color: var(--ok); }
+
+    .callout .label {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--ink);
+      font-size: .74rem;
+      font-weight: 900;
+      letter-spacing: .09em;
+      text-transform: uppercase;
+    }
+
+    .callout p:last-child { margin-bottom: 0; }
+
+    .steps {
+      margin: 20px 0 0;
+      padding: 0;
+      list-style: none;
+      counter-reset: steps;
+    }
+
+    .step {
+      position: relative;
+      counter-increment: steps;
+      margin: 0 0 14px;
+      padding: 19px 19px 19px 58px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+    }
+
+    .step::before {
+      content: counter(steps);
+      position: absolute;
+      top: 18px;
+      left: 17px;
+      display: grid;
+      place-items: center;
+      width: 27px;
+      height: 27px;
+      color: #fff;
+      background: var(--clay);
+      border-radius: 50%;
+      font-size: .78rem;
+      font-weight: 900;
+    }
+
+    .step h3, .step h4 { margin-top: 0; color: var(--ink); }
+    .step > :last-child { margin-bottom: 0; }
+
+    .check {
+      display: grid;
+      grid-template-columns: 23px 1fr;
+      gap: 10px;
+      align-items: start;
+      margin: 14px 0;
+      cursor: pointer;
+    }
+
+    .check input {
+      width: 19px;
+      height: 19px;
+      margin: 3px 0 0;
+      accent-color: var(--olive);
+    }
+
+    .check span { min-width: 0; }
+    .check input:checked + span { color: var(--muted); text-decoration: line-through; }
+
+    .value-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: stretch;
+      margin: 12px 0;
+    }
+
+    code, .value {
+      overflow-wrap: anywhere;
+      font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+      font-size: .88em;
+    }
+
+    .value {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+      padding: 11px 13px;
+      color: #382f28;
+      background: var(--paper-deep);
+      border: 1px solid var(--line);
+      border-radius: 9px;
+    }
+
+    .copy {
+      min-width: 72px;
+      padding: 9px 12px;
+      color: #fff;
+      background: var(--olive);
+      border: 0;
+      border-radius: 9px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .copy:hover { background: var(--olive-dark); }
+    .copy.copied { background: var(--ok); }
+
+    .button-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin: 5px 7px 5px 0;
+      padding: 10px 14px;
+      color: #fff;
+      background: var(--olive);
+      border-radius: 9px;
+      font-weight: 800;
+      text-decoration: none;
+    }
+
+    .button-link::after { content: "↗"; }
+    .button-link:hover { color: #fff; background: var(--olive-dark); }
+    .button-link.secondary { color: var(--olive-dark); background: var(--olive-pale); }
+    .button-link.secondary:hover { color: #fff; background: var(--olive-dark); }
+
+    table {
+      width: 100%;
+      margin: 16px 0;
+      border-collapse: collapse;
+      font-size: .92rem;
+    }
+
+    th, td {
+      padding: 11px 12px;
+      text-align: left;
+      vertical-align: top;
+      border-bottom: 1px solid var(--line);
+    }
+
+    th {
+      color: var(--olive-dark);
+      background: var(--olive-pale);
+      font-size: .75rem;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    tr:last-child td { border-bottom: 0; }
+
+    .note-label {
+      display: block;
+      margin: 18px 0 6px;
+      color: var(--muted);
+      font-size: .78rem;
+      font-weight: 800;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 88px;
+      resize: vertical;
+      padding: 12px;
+      color: var(--ink);
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+
+    textarea:focus, button:focus-visible, a:focus-visible, input:focus-visible {
+      outline: 3px solid rgba(198, 154, 91, .55);
+      outline-offset: 2px;
+    }
+
+    details {
+      margin: 11px 0;
+      padding: 13px 15px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 11px;
+    }
+
+    summary { color: var(--olive-dark); font-weight: 800; cursor: pointer; }
+    details > :last-child { margin-bottom: 0; }
+
+    .timeline {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin: 20px 0;
+    }
+
+    .time-card {
+      padding: 16px;
+      background: var(--paper);
+      border-top: 4px solid var(--gold);
+      border-radius: 8px 8px 12px 12px;
+    }
+
+    .time-card strong { display: block; margin-bottom: 5px; color: var(--clay); }
+    .time-card p { margin: 0; color: var(--muted); font-size: .88rem; }
+
+    footer {
+      margin-top: 28px;
+      padding: 24px;
+      color: var(--muted);
+      text-align: center;
+      font-size: .86rem;
+    }
+
+    .print-only { display: none; }
+
+    @media (max-width: 860px) {
+      .layout { display: block; }
+      .toc { position: static; margin-bottom: 24px; }
+      .toc ol { columns: 2; column-gap: 18px; }
+      .toc li { break-inside: avoid; }
+    }
+
+    @media (max-width: 600px) {
+      .shell { width: min(100% - 20px, 1120px); padding-top: 10px; }
+      .hero { padding: 28px 22px; border-radius: 20px; }
+      .progress-panel { grid-template-columns: 1fr; }
+      .progress-panel .reset { justify-self: start; }
+      .summary-grid, .timeline { grid-template-columns: 1fr; }
+      .toc ol { columns: 1; }
+      .section { padding: 22px 18px; }
+      .step { padding: 18px 15px 18px 52px; }
+      .value-row { grid-template-columns: 1fr; }
+      .copy { justify-self: start; }
+      table { display: block; overflow-x: auto; }
+    }
+
+    @media print {
+      @page { margin: 14mm; }
+      body { background: #fff; font-size: 10.5pt; }
+      .shell { width: 100%; padding: 0; }
+      .hero { color: #000; background: #fff; border: 2px solid #555; box-shadow: none; }
+      .hero::after, .progress-panel, .toc, .copy, .button-link { display: none; }
+      .hero .lede, .eyebrow { color: #333; }
+      .section { break-inside: avoid; box-shadow: none; }
+      .step, .callout, .summary-card, details { break-inside: avoid; }
+      h2, h3 { break-after: avoid; }
+      a { color: #000; }
+      a[href]::after { content: " (" attr(href) ")"; font-size: .75em; font-weight: 400; }
+      .print-only { display: block; }
+    }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <header class="hero">
+    <p class="eyebrow">Cottage Aesthetics · owner action guide</p>
+    <h1>Get the new website into Google &amp; Bing</h1>
+    <p class="lede">The website itself is crawlable and its sitemap is ready. This guide covers
+      only the account-level checks and approvals that an agent cannot do for you.</p>
+    <div class="hero-meta" aria-label="Guide summary">
+      <span class="pill">About 25–35 minutes now</span>
+      <span class="pill">No coding required</span>
+      <span class="pill">Progress saves on this device</span>
+      <span class="pill">Prepared 12 August 2026</span>
+    </div>
+  </header>
+
+  <div class="progress-panel" aria-live="polite">
+    <div>
+      <div class="progress-title">
+        <span>Your progress</span>
+        <span id="progressText">0 of 0 checks complete</span>
+      </div>
+      <div class="progress-track" role="progressbar" aria-label="Guide completion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div class="progress-bar" id="progressBar"></div>
+      </div>
+    </div>
+    <button class="reset" id="resetProgress" type="button">Reset saved ticks</button>
+  </div>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Guide contents">
+      <h2>In this guide</h2>
+      <ol>
+        <li><a href="#before">Before you start</a></li>
+        <li><a href="#google">Google Search Console</a></li>
+        <li><a href="#bing">Bing Webmaster Tools</a></li>
+        <li><a href="#profile">Google Business Profile</a></li>
+        <li><a href="#review">Approve the agent's work</a></li>
+        <li><a href="#monitor">Check back later</a></li>
+        <li><a href="#trouble">Troubleshooting</a></li>
+      </ol>
+    </nav>
+
+    <main class="content">
+      <section class="section" id="before">
+        <span class="section-number" aria-hidden="true">1</span>
+        <h2>Before you start</h2>
+        <p>You do not need to edit the website, install an SEO plugin, or give an agent your
+          passwords. You only need the Google account connected to the business and a Microsoft
+          account for Bing.</p>
+
+        <div class="summary-grid">
+          <div class="summary-card">
+            <strong>Already done</strong>
+            <p>HTTPS, redirects to the preferred domain, crawlable pages, unique titles and
+              descriptions, canonical links, robots.txt, and a nine-page sitemap are live.</p>
+          </div>
+          <div class="summary-card">
+            <strong>The agent is doing</strong>
+            <p>Technical redirect signals, staging index controls, structured business data,
+              favicon work, mobile performance, tests, and draft treatment pages.</p>
+          </div>
+          <div class="summary-card">
+            <strong>You are doing now</strong>
+            <p>Connect the public site to Google and Bing, submit its sitemap, and check the
+              website link and facts on the Google Business Profile.</p>
+          </div>
+          <div class="summary-card">
+            <strong>You will do later</strong>
+            <p>Review the favicon and any treatment wording in Wixy's draft preview, then press
+              Publish only when you are happy.</p>
+          </div>
+        </div>
+
+        <div class="callout danger">
+          <span class="label">Never submit the staging address</span>
+          <p>Everything in Google and Bing must use
+            <strong>cottageaesthetics.co.uk</strong>. Do not add or submit
+            <code>ca.cinnamons.uk</code>; that is the Wixy staging/admin host and is meant to stay
+            out of search results.</p>
+        </div>
+
+        <h3>Keep these exact values handy</h3>
+
+        <div class="value-row">
+          <div class="value" id="domainValue">cottageaesthetics.co.uk</div>
+          <button class="copy" type="button" data-copy="domainValue">Copy</button>
+        </div>
+        <div class="value-row">
+          <div class="value" id="siteValue">https://cottageaesthetics.co.uk/</div>
+          <button class="copy" type="button" data-copy="siteValue">Copy</button>
+        </div>
+        <div class="value-row">
+          <div class="value" id="sitemapValue">https://cottageaesthetics.co.uk/sitemap.xml</div>
+          <button class="copy" type="button" data-copy="sitemapValue">Copy</button>
+        </div>
+
+        <label class="check">
+          <input type="checkbox" data-progress="accounts">
+          <span>I am signed in to the Google account that owns or manages Cottage Aesthetics'
+            Business Profile, and I have a Microsoft account available for Bing.</span>
+        </label>
+      </section>
+
+      <section class="section" id="google">
+        <span class="section-number" aria-hidden="true">2</span>
+        <h2>Connect Google Search Console</h2>
+        <p>Search Console is Google's private view of whether it has discovered, crawled, and
+          indexed the site. Public Google searches are useful later, but this is the reliable
+          place to diagnose a new domain.</p>
+
+        <p>
+          <a class="button-link" href="https://search.google.com/search-console/" target="_blank" rel="noopener">Open Google Search Console</a>
+          <a class="button-link secondary" href="https://support.google.com/webmasters/answer/34592?hl=en" target="_blank" rel="noopener">Google's property guide</a>
+        </p>
+
+        <ol class="steps">
+          <li class="step">
+            <h3>Look for the property first</h3>
+            <p>Open the property selector at the top-left. If
+              <strong>cottageaesthetics.co.uk</strong> is already listed, select it and skip to
+              “Submit the sitemap”. Do not create a duplicate just because the dashboard is
+              initially empty.</p>
+            <label class="check">
+              <input type="checkbox" data-progress="gsc-property-found">
+              <span>I selected the existing property, or confirmed it is not yet in this Google
+                account.</span>
+            </label>
+          </li>
+
+          <li class="step">
+            <h3>If missing, add a Domain property</h3>
+            <ol>
+              <li>In the property selector choose <strong>+ Add property</strong>.</li>
+              <li>Under <strong>Domain</strong>, enter only
+                <code>cottageaesthetics.co.uk</code> — no <code>https://</code>, no
+                <code>www</code>, and no slash.</li>
+              <li>Select <strong>Continue</strong>.</li>
+            </ol>
+            <div class="callout success">
+              <span class="label">A verification record is already present</span>
+              <p>The audit found this live DNS TXT record:</p>
+              <div class="value-row">
+                <div class="value" id="googleToken">google-site-verification=yLSyZnTI0wT5e2CGeoAuz34B7yVQvuvMkhm_ENvEf_o</div>
+                <button class="copy" type="button" data-copy="googleToken">Copy</button>
+              </div>
+              <p>If Search Console verifies immediately, carry on. If it shows a different new
+                token for this Google account, add the new TXT record alongside the existing
+                one at the DNS provider. <strong>Do not delete or replace the existing
+                record</strong>; it may prove ownership for another authorised user.</p>
+            </div>
+            <details>
+              <summary>If Google asks for a new DNS TXT record</summary>
+              <ol>
+                <li>Copy the complete value Google gives you, including
+                  <code>google-site-verification=</code>.</li>
+                <li>Sign in at <a href="https://www.name.com/" target="_blank" rel="noopener">Name.com</a>, open
+                  <strong>cottageaesthetics.co.uk</strong>, then its <strong>DNS Records</strong>.</li>
+                <li>Add a <strong>TXT</strong> record on the bare domain. Leave Host blank or use
+                  <code>@</code>, according to the form. Paste Google's full token as the value.</li>
+                <li>Save it, wait for DNS to spread, then return to Search Console and select
+                  <strong>Verify</strong>. It can be quick, but waiting a few hours is normal.</li>
+              </ol>
+            </details>
+            <label class="check">
+              <input type="checkbox" data-progress="gsc-verified">
+              <span>The Domain property <strong>cottageaesthetics.co.uk</strong> is visible and
+                verified in my Search Console account.</span>
+            </label>
+          </li>
+
+          <li class="step">
+            <h3>Submit the public sitemap</h3>
+            <ol>
+              <li>Make sure the selected property is
+                <strong>cottageaesthetics.co.uk</strong>.</li>
+              <li>In the left menu open <strong>Sitemaps</strong>.</li>
+              <li>Under <strong>Add a new sitemap</strong>, enter <code>sitemap.xml</code>. If the
+                field expects a full URL, paste
+                <code>https://cottageaesthetics.co.uk/sitemap.xml</code>.</li>
+              <li>Select <strong>Submit</strong>.</li>
+            </ol>
+            <p>The first useful result is <strong>Success</strong>. The sitemap currently contains
+              nine canonical pages, but the discovered count can take time to populate and need
+              not appear instantly.</p>
+            <label class="check">
+              <input type="checkbox" data-progress="gsc-sitemap">
+              <span>The public sitemap is listed in Search Console and is not showing a fetch or
+                parsing error.</span>
+            </label>
+          </li>
+
+          <li class="step">
+            <h3>Inspect and request the homepage</h3>
+            <ol>
+              <li>Paste <code>https://cottageaesthetics.co.uk/</code> into the inspection bar at
+                the top of Search Console and press Enter.</li>
+              <li>If it says the URL is not on Google or is unknown, choose
+                <strong>Test live URL</strong>.</li>
+              <li>The live result should say the URL is available to Google. Then select
+                <strong>Request indexing</strong>.</li>
+              <li>If it is already on Google and the last crawl is after the new-site cutover,
+                no request is needed.</li>
+            </ol>
+            <div class="callout warning">
+              <span class="label">One request is enough</span>
+              <p>A successful request puts the page in a crawl queue; it does not guarantee
+                indexing or make it immediate. Do not repeatedly submit the same unchanged page.
+                The sitemap and normal internal links let Google find the other eight pages.</p>
+            </div>
+            <label class="check">
+              <input type="checkbox" data-progress="gsc-inspect-home">
+              <span>I inspected the homepage, confirmed the live URL is available, and requested
+                indexing only if it was not already indexed.</span>
+            </label>
+          </li>
+
+          <li class="step">
+            <h3>Record the starting position</h3>
+            <p>Open <strong>Indexing → Pages</strong>. A new property can have little or no data
+              for a while. Record what it shows rather than trying to force it.</p>
+            <label class="note-label" for="googleNotes">Google starting notes</label>
+            <textarea id="googleNotes" data-note="google" placeholder="For example: 0 indexed, data processing; sitemap submitted 12 Aug; homepage request accepted."></textarea>
+            <label class="check">
+              <input type="checkbox" data-progress="gsc-baseline">
+              <span>I recorded the indexed/not-indexed counts or noted that Google is still
+                processing the new property.</span>
+            </label>
+          </li>
+        </ol>
+
+        <div class="callout">
+          <span class="label">Normal for a brand-new domain</span>
+          <p>Google says indexing new content can take a few days, and it does not promise to
+            index every URL. The aim is for the canonical versions of the important pages to be
+            indexed—not every duplicate address Google may discover.</p>
+        </div>
+      </section>
+
+      <section class="section" id="bing">
+        <span class="section-number" aria-hidden="true">3</span>
+        <h2>Connect Bing Webmaster Tools</h2>
+        <p>Bing can import the verified Google property and its sitemap. That is the simplest
+          route and avoids adding another ownership file or DNS record.</p>
+
+        <p>
+          <a class="button-link" href="https://www.bing.com/webmasters/" target="_blank" rel="noopener">Open Bing Webmaster Tools</a>
+          <a class="button-link secondary" href="https://www.bing.com/webmasters/help/add-and-verify-site-12184f8b" target="_blank" rel="noopener">Bing's verification guide</a>
+        </p>
+
+        <ol class="steps">
+          <li class="step">
+            <h3>Import from Google Search Console</h3>
+            <ol>
+              <li>Sign in to Bing Webmaster Tools with the Microsoft account you want to keep as
+                the site owner.</li>
+              <li>Choose <strong>Import sites from Google Search Console</strong>.</li>
+              <li>When Google asks, sign in with the account that owns the Search Console
+                property and allow Bing the requested read access.</li>
+              <li>Select only the Cottage Aesthetics public property and choose
+                <strong>Import</strong>.</li>
+            </ol>
+            <label class="check">
+              <input type="checkbox" data-progress="bing-import">
+              <span><strong>https://cottageaesthetics.co.uk/</strong> is listed and verified in
+                Bing Webmaster Tools.</span>
+            </label>
+          </li>
+
+          <li class="step">
+            <h3>Confirm the sitemap</h3>
+            <ol>
+              <li>Select the Cottage Aesthetics site, then open <strong>Sitemaps</strong>.</li>
+              <li>The Google import may already have brought the sitemap across. If the full
+                public sitemap is listed, do not add a duplicate.</li>
+              <li>If it is missing, choose <strong>Submit sitemaps</strong> and paste
+                <code>https://cottageaesthetics.co.uk/sitemap.xml</code>.</li>
+            </ol>
+            <label class="check">
+              <input type="checkbox" data-progress="bing-sitemap">
+              <span>The public sitemap is listed in Bing without a processing error.</span>
+            </label>
+          </li>
+
+          <li class="step">
+            <h3>Submit the homepage once if needed</h3>
+            <p>Use Bing's <strong>URL Inspection</strong> or <strong>URL Submission</strong> for
+              <code>https://cottageaesthetics.co.uk/</code> if Bing has not discovered it. There
+              is no need to paste all nine URLs when the sitemap is healthy.</p>
+            <label class="check">
+              <input type="checkbox" data-progress="bing-home">
+              <span>I confirmed Bing knows the homepage or submitted it once.</span>
+            </label>
+          </li>
+        </ol>
+
+        <div class="callout warning">
+          <span class="label">Leave IndexNow to the engineering lane</span>
+          <p>Bing recommends IndexNow for automated future updates, but it needs a deliberate
+            publish integration and owner-controlled key. Do not paste unknown scripts or keys
+            into the site. The Sonnet implementation lane will assess it separately; it is not
+            required for today's nine-page sitemap.</p>
+        </div>
+      </section>
+
+      <section class="section" id="profile">
+        <span class="section-number" aria-hidden="true">4</span>
+        <h2>Check the Google Business Profile</h2>
+        <p>The profile is distinct from Search Console. It controls the business facts people
+          see in Google Search and Maps. You must be signed into a Google account that owns or
+          manages the verified profile.</p>
+
+        <p>
+          <a class="button-link" href="https://www.google.com/search?q=Cottage+Aesthetics+Hartlebury" target="_blank" rel="noopener">Find the business on Google</a>
+          <a class="button-link secondary" href="https://support.google.com/business/answer/3039617?hl=en" target="_blank" rel="noopener">Google's edit-profile guide</a>
+        </p>
+
+        <ol class="steps">
+          <li class="step">
+            <h3>Open the owner controls</h3>
+            <p>While signed into the managing account, search Google for
+              <strong>Cottage Aesthetics Hartlebury</strong>. The owner controls should appear.
+              Choose <strong>Edit profile</strong>. On a phone, the equivalent is Google Maps →
+              <strong>Business</strong> → <strong>Edit profile</strong>.</p>
+            <label class="check">
+              <input type="checkbox" data-progress="gbp-access">
+              <span>I can see the owner/manager controls for the correct Cottage Aesthetics
+                profile.</span>
+            </label>
+          </li>
+
+          <li class="step">
+            <h3>Set the main website</h3>
+            <p>In the contact or website section, the website must be exactly:</p>
+            <div class="value-row">
+              <div class="value" id="profileWebsite">https://cottageaesthetics.co.uk/</div>
+              <button class="copy" type="button" data-copy="profileWebsite">Copy</button>
+            </div>
+            <p>Replace any Wix or temporary staging URL. Use the full HTTPS address. Save the
+              edit; Google may review it before it appears publicly.</p>
+            <label class="check">
+              <input type="checkbox" data-progress="gbp-website">
+              <span>The profile's main website points to the public HTTPS homepage, not Wix,
+                GitHub, or <code>ca.cinnamons.uk</code>.</span>
+            </label>
+          </li>
+
+          <li class="step">
+            <h3>Compare the factual details</h3>
+            <p>Use this table as a comparison, not permission to overwrite a newer fact. If the
+              business has changed any detail, update the website and profile together so they
+              agree.</p>
+            <table>
+              <thead><tr><th>Field</th><th>Website currently says</th></tr></thead>
+              <tbody>
+                <tr><td>Name</td><td>Cottage Aesthetics</td></tr>
+                <tr><td>Address</td><td>8 Walton Road, Hartlebury, Kidderminster, DY10 4JA</td></tr>
+                <tr><td>Phone</td><td>07401 562 462</td></tr>
+                <tr><td>Email</td><td>cottageaestheticshartlebury@gmail.com</td></tr>
+                <tr><td>Monday</td><td>10:00–17:00</td></tr>
+                <tr><td>Tuesday</td><td>11:00–19:00</td></tr>
+                <tr><td>Wednesday</td><td>Closed</td></tr>
+                <tr><td>Thursday</td><td>11:00–19:00</td></tr>
+                <tr><td>Friday</td><td>10:00–16:00</td></tr>
+                <tr><td>Saturday</td><td>11:00–16:00</td></tr>
+                <tr><td>Sunday</td><td>Closed</td></tr>
+              </tbody>
+            </table>
+            <label class="check">
+              <input type="checkbox" data-progress="gbp-facts">
+              <span>The name, address, phone, and normal opening hours are accurate and consistent
+                between the profile and website.</span>
+            </label>
+          </li>
+
+          <li class="step">
+            <h3>Check booking and social links</h3>
+            <p>If the profile offers appointment or social-link fields, use the business's real
+              destinations:</p>
+            <div class="value-row">
+              <div class="value" id="bookingValue">https://facesconsent.com/bookings/purdi-hadley</div>
+              <button class="copy" type="button" data-copy="bookingValue">Copy</button>
+            </div>
+            <div class="value-row">
+              <div class="value" id="instagramValue">https://www.instagram.com/cottageaesthetics</div>
+              <button class="copy" type="button" data-copy="instagramValue">Copy</button>
+            </div>
+            <div class="value-row">
+              <div class="value" id="facebookValue">https://www.facebook.com/profile.php?id=61572079150383</div>
+              <button class="copy" type="button" data-copy="facebookValue">Copy</button>
+            </div>
+            <p>Some categories or accounts do not show every field; skip any that Google does not
+              offer.</p>
+            <label class="check">
+              <input type="checkbox" data-progress="gbp-links">
+              <span>I checked the available appointment and social links and saved only accurate
+                destinations.</span>
+            </label>
+          </li>
+        </ol>
+
+        <div class="callout danger">
+          <span class="label">Do not add keywords to the business name</span>
+          <p>Keep the profile name as the real-world name, <strong>Cottage Aesthetics</strong>.
+            Do not turn it into “Cottage Aesthetics Microneedling &amp; Fillers Hartlebury” for
+            search visibility. Service and location information belongs in the proper fields
+            and content, not in a stuffed business name.</p>
+        </div>
+      </section>
+
+      <section class="section" id="review">
+        <span class="section-number" aria-hidden="true">5</span>
+        <h2>Review the agent's work before Publish</h2>
+        <p>Sonnet 5 can prepare the technical changes and content, but changes in the site
+          repository remain on Wixy's draft side until the owner presses Publish. Do this review
+          when the agent tells you the relevant PRs are merged and ready.</p>
+
+        <ol class="steps">
+          <li class="step">
+            <h3>Open the Wixy draft preview</h3>
+            <p>Use the normal Cottage Aesthetics Wixy admin. Review the homepage, gallery,
+              contact page, and any new treatment pages on both a phone-sized view and a normal
+              desktop view.</p>
+            <label class="check">
+              <input type="checkbox" data-progress="review-visual">
+              <span>The homepage text appears immediately, images and gallery controls work, and
+                nothing important has shifted or disappeared.</span>
+            </label>
+          </li>
+
+          <li class="step">
+            <h3>Approve the favicon</h3>
+            <p>The agent should provide a visual sheet showing the proposed little browser/search
+              icon at several sizes. It must still look recognisably Cottage Aesthetics at 16 px.
+              Ask for a revision if it looks muddy, generic, or off-brand.</p>
+            <label class="check">
+              <input type="checkbox" data-progress="review-favicon">
+              <span>I approve the proposed favicon at both tiny and larger sizes.</span>
+            </label>
+          </li>
+
+          <li class="step">
+            <h3>Check every treatment claim</h3>
+            <p>For any new treatment page, confirm the treatment is actually offered and check
+              every statement about suitability, expected result, duration, recovery, risks,
+              products, prices, qualifications, and aftercare. Change or reject anything that is
+              not exactly how the clinic works.</p>
+            <label class="check">
+              <input type="checkbox" data-progress="review-clinical">
+              <span>Purdi has checked the clinical and commercial facts on every new treatment
+                page, or no new treatment pages are being published in this release.</span>
+            </label>
+          </li>
+
+          <li class="step">
+            <h3>Publish through Wixy—nowhere else</h3>
+            <p>When the draft is correct, press <strong>Publish</strong> in Wixy. Do not deploy the
+              site repository's <code>main</code> branch directly. Wait a couple of minutes, then
+              reload the public domain and check the changed pages there.</p>
+            <label class="check">
+              <input type="checkbox" data-progress="review-published">
+              <span>I intentionally pressed Publish in Wixy and confirmed the approved changes on
+                <strong>https://cottageaesthetics.co.uk/</strong>.</span>
+            </label>
+          </li>
+
+          <li class="step">
+            <h3>Tell Google only about genuinely new or important changes</h3>
+            <p>After the public site is live, inspect the homepage again if its structured data or
+              favicon changed. For each genuinely new treatment page, inspect its full public URL
+              and request indexing once. The sitemap will update automatically; you do not need to
+              delete and re-add it.</p>
+            <label class="check">
+              <input type="checkbox" data-progress="review-reindex">
+              <span>I requested indexing once for the changed homepage and any genuinely new
+                canonical pages after confirming they were live.</span>
+            </label>
+          </li>
+        </ol>
+      </section>
+
+      <section class="section" id="monitor">
+        <span class="section-number" aria-hidden="true">6</span>
+        <h2>Check back later—without chasing it daily</h2>
+        <p>Search engines work on their own schedules. Use these three sensible checkpoints.</p>
+
+        <div class="timeline">
+          <div class="time-card">
+            <strong>After 48–72 hours</strong>
+            <p>Check sitemap status and inspect the homepage. Note any explicit crawl or indexing
+              error; low counts alone are not an emergency.</p>
+          </div>
+          <div class="time-card">
+            <strong>After 2 weeks</strong>
+            <p>Review indexed pages, early queries/impressions, and Bing's index status. Share
+              exact reasons for any important URL still excluded.</p>
+          </div>
+          <div class="time-card">
+            <strong>After 4 weeks</strong>
+            <p>Compare impressions, clicks, branded searches, and treatment queries. Use this
+              evidence to choose the next content work.</p>
+          </div>
+        </div>
+
+        <h3>What to send back to the implementation agent</h3>
+        <ul>
+          <li>The exact wording of any Search Console or Bing error.</li>
+          <li>The affected public URL—not just a cropped warning.</li>
+          <li>The “last crawled” date and Google-selected canonical from URL Inspection.</li>
+          <li>A screenshot or CSV export of the Page indexing / Search performance table if
+            several pages or queries are involved.</li>
+          <li>Never send passwords, one-time codes, backup codes, or full account access.</li>
+        </ul>
+
+        <label class="note-label" for="followupNotes">Follow-up notes</label>
+        <textarea id="followupNotes" data-note="followup" placeholder="Add dates, indexed counts, useful queries, or exact errors here. These notes save only in this browser."></textarea>
+
+        <label class="check">
+          <input type="checkbox" data-progress="monitor-booked">
+          <span>I have put the 48–72 hour, two-week, and four-week checks in my calendar or task
+            list.</span>
+        </label>
+      </section>
+
+      <section class="section" id="trouble">
+        <span class="section-number" aria-hidden="true">7</span>
+        <h2>Troubleshooting</h2>
+
+        <details open>
+          <summary>Search Console says the property is not verified</summary>
+          <p>Check that you added a <strong>Domain</strong> property using only
+            <code>cottageaesthetics.co.uk</code>. If Google generated a new TXT token for your
+            account, add it alongside the existing token at Name.com; do not replace the old
+            token. Wait for DNS propagation and try Verify again.</p>
+        </details>
+
+        <details>
+          <summary>The sitemap says “Couldn't fetch”</summary>
+          <p>Open <a href="https://cottageaesthetics.co.uk/sitemap.xml" target="_blank" rel="noopener">the sitemap</a>
+            in a private browser window. It should show XML containing the public HTTPS domain.
+            Confirm you selected the public property, submitted the exact URL, and did not use
+            <code>ca.cinnamons.uk</code>. If the file opens normally, wait and retry later rather
+            than repeatedly deleting and resubmitting it.</p>
+        </details>
+
+        <details>
+          <summary>URL Inspection says “URL is unknown to Google”</summary>
+          <p>Choose <strong>Test live URL</strong>. If the live result says it is available, choose
+            <strong>Request indexing</strong> once. Discovery and indexing can still take days.
+            If the live result reports a robots, fetch, server, canonical, or noindex problem on
+            the public domain, send the exact result to the agent.</p>
+        </details>
+
+        <details>
+          <summary>Search Console lists more than nine URLs</summary>
+          <p>That is not automatically wrong. Google may know old Wix addresses, duplicate
+            <code>.html</code> forms, redirects, and genuine 404s. The goal is for each important
+            canonical page to be indexed. Export the list and reasons before asking the agent to
+            change anything.</p>
+        </details>
+
+        <details>
+          <summary>The Google Business Profile controls do not appear</summary>
+          <p>You are probably signed into a Google account that is not an owner or manager of the
+            profile. Switch accounts. If another person owns it, ask that owner to invite your
+            Google account as an owner or manager—do not share a password.</p>
+        </details>
+
+        <details>
+          <summary>A public Google result shows ca.cinnamons.uk</summary>
+          <p>Copy the exact Google result URL and send it to the agent. Do not submit more staging
+            URLs or remove the public property. The engineering work corrects staging's crawler
+            signals; Search Console removal tools, if needed at all, should be used only with the
+            exact staging URL and a deliberate plan.</p>
+        </details>
+
+        <div class="callout success">
+          <span class="label">What success looks like</span>
+          <p>Google and Bing accept the sitemap; the homepage becomes indexed; the Business
+            Profile points at the correct domain; important canonical pages gradually appear;
+            and real search queries begin producing impressions. There is no honest button or
+            engineering change that guarantees a particular ranking.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <footer>
+    <p><strong>Cottage Aesthetics search-indexing owner guide</strong><br>
+      Prepared from a live technical audit on 12 August 2026.</p>
+    <p>Instructions were checked against the official
+      <a href="https://support.google.com/webmasters/answer/34592?hl=en">Google Search Console property</a>,
+      <a href="https://support.google.com/webmasters/answer/7451001?hl=en">Google sitemap</a>,
+      <a href="https://support.google.com/webmasters/answer/9012289?hl=en">Google URL Inspection</a>,
+      <a href="https://www.bing.com/webmasters/help/add-and-verify-site-12184f8b">Bing import</a>,
+      <a href="https://www.bing.com/webmasters/help/Sitemaps-3b5cf6ed">Bing sitemap</a>, and
+      <a href="https://support.google.com/business/answer/3039617?hl=en">Google Business Profile</a>
+      documentation.</p>
+    <p class="print-only">Printed checkboxes do not carry the ticks stored in the browser unless
+      your browser prints form controls. Keep the digital copy for saved progress.</p>
+  </footer>
+</div>
+
+<script>
+  (function () {
+    "use strict";
+
+    var storageKey = "ca-search-indexing-guide-v1";
+    var state = { checks: {}, notes: {} };
+
+    try {
+      var saved = JSON.parse(localStorage.getItem(storageKey) || "null");
+      if (saved && typeof saved === "object") {
+        state.checks = saved.checks && typeof saved.checks === "object" ? saved.checks : {};
+        state.notes = saved.notes && typeof saved.notes === "object" ? saved.notes : {};
+      }
+    } catch (_) {
+      state = { checks: {}, notes: {} };
+    }
+
+    function save() {
+      try { localStorage.setItem(storageKey, JSON.stringify(state)); } catch (_) { /* no-op */ }
+    }
+
+    function updateProgress() {
+      var boxes = Array.prototype.slice.call(document.querySelectorAll("[data-progress]"));
+      var complete = boxes.filter(function (box) { return box.checked; }).length;
+      var percent = boxes.length ? Math.round((complete / boxes.length) * 100) : 0;
+      document.getElementById("progressText").textContent = complete + " of " + boxes.length + " checks complete";
+      document.getElementById("progressBar").style.width = percent + "%";
+      document.querySelector("[role=progressbar]").setAttribute("aria-valuenow", String(percent));
+    }
+
+    document.querySelectorAll("[data-progress]").forEach(function (box) {
+      var key = box.getAttribute("data-progress");
+      box.checked = Boolean(state.checks[key]);
+      box.addEventListener("change", function () {
+        state.checks[key] = box.checked;
+        save();
+        updateProgress();
+      });
+    });
+
+    document.querySelectorAll("[data-note]").forEach(function (field) {
+      var key = field.getAttribute("data-note");
+      field.value = typeof state.notes[key] === "string" ? state.notes[key] : "";
+      field.addEventListener("input", function () {
+        state.notes[key] = field.value;
+        save();
+      });
+    });
+
+    document.querySelectorAll("[data-copy]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var source = document.getElementById(button.getAttribute("data-copy"));
+        var value = source ? source.textContent.trim() : "";
+        function confirmCopy() {
+          button.textContent = "Copied";
+          button.classList.add("copied");
+          window.setTimeout(function () {
+            button.textContent = "Copy";
+            button.classList.remove("copied");
+          }, 1400);
+        }
+        if (navigator.clipboard && window.isSecureContext) {
+          navigator.clipboard.writeText(value).then(confirmCopy).catch(function () {});
+        } else {
+          var area = document.createElement("textarea");
+          area.value = value;
+          area.setAttribute("readonly", "");
+          area.style.position = "fixed";
+          area.style.opacity = "0";
+          document.body.appendChild(area);
+          area.select();
+          try { document.execCommand("copy"); confirmCopy(); } catch (_) { /* no-op */ }
+          document.body.removeChild(area);
+        }
+      });
+    });
+
+    document.getElementById("resetProgress").addEventListener("click", function () {
+      if (!window.confirm("Clear all saved ticks and notes in this guide on this device?")) return;
+      state = { checks: {}, notes: {} };
+      save();
+      document.querySelectorAll("[data-progress]").forEach(function (box) { box.checked = false; });
+      document.querySelectorAll("[data-note]").forEach(function (field) { field.value = ""; });
+      updateProgress();
+    });
+
+    updateProgress();
+  }());
+</script>
+</body>
+</html>
