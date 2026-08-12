@@ -239,6 +239,23 @@ class TestGenerateRedirectPages:
         soup = BeautifulSoup(html, "html5lib")
         assert soup.find("meta", attrs={"name": "robots"}) is None
 
+    def test_site_name_is_html_escaped(self) -> None:
+        """`site_name`/`locale`/`domain` come from operator-trusted `projects/*.json`
+        config, not attacker input — but every interpolation site still calls
+        `html.escape()` independently (module docstring) rather than assuming trust
+        makes escaping unnecessary. A raw `&`/`<`/`>`/`"` in the source value must not
+        corrupt the surrounding markup, and must round-trip back to the original text
+        through a real HTML parser (proof the escaping is correct, not merely
+        present)."""
+        raw_name = 'Fixture & "Site" <Co>'
+        html = self._page(site_name=raw_name)["home.html"]
+        assert "<Co>" not in html  # never raw in the markup
+        assert "&amp;" in html
+        soup = BeautifulSoup(html, "html5lib")
+        title = soup.find("title")
+        assert isinstance(title, Tag)
+        assert raw_name in title.get_text()  # round-trips to the exact original text
+
     def test_not_inserted_into_sitemap_or_nav_structures(self) -> None:
         """No `data-wx-*` binding markup and no `<script>` at all — this is a
         deliberately synthetic stub page, not run through the normal render/nav
