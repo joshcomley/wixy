@@ -18,6 +18,7 @@ from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
     ClaudeSDKClient,
+    ConversationResetMessage,
     RateLimitEvent,
     ResultMessage,
     StreamEvent,
@@ -25,8 +26,24 @@ from claude_agent_sdk import (
     UserMessage,
 )
 
+# `ConversationResetMessage` joined this union in claude-agent-sdk 0.2.137 (this
+# repo pins no upper bound, `pyproject.toml`'s `claude-agent-sdk>=0.2` — CI floats
+# to latest on purpose, so an SDK release can widen `ClaudeSDKClient.receive_
+# response()`'s real return type between two otherwise-unrelated CI runs). It must
+# stay listed here even though `wixy_server.worker.runner.run_turn` never acts on
+# it (see that module's own comment) — omitting it makes `ClaudeSDKClient`
+# structurally narrower than what it actually yields, which is exactly the
+# mismatch mypy correctly rejects (a `Protocol` method's return type must cover
+# every variant the real implementation can produce, not just the ones a caller
+# currently bothers to branch on).
 AgentMessage = (
-    UserMessage | AssistantMessage | SystemMessage | ResultMessage | StreamEvent | RateLimitEvent
+    UserMessage
+    | AssistantMessage
+    | SystemMessage
+    | ResultMessage
+    | StreamEvent
+    | RateLimitEvent
+    | ConversationResetMessage
 )
 
 

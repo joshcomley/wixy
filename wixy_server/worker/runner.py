@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
+    ConversationResetMessage,
     ResultMessage,
     SystemMessage,
     TextBlock,
@@ -163,6 +164,20 @@ async def run_turn(
                             timestamp=_now_iso(),
                         )
                     )
+                continue
+            if isinstance(message, ConversationResetMessage):
+                # Emitted when the SDK discards the in-progress conversation
+                # without closing the connection (e.g. a `/clear`) — never
+                # user-visible transcript content, so no WorkerMessage. It also
+                # zeroes the running totals the SDK reports on subsequent
+                # ResultMessages *within that connection* — irrelevant here
+                # because `run_turn` opens one fresh ClaudeSDKClient per turn
+                # (above) and closes it when this loop ends, so a turn's own
+                # ResultMessage.total_cost_usd is already scoped to that single
+                # connection; there is no multi-turn running total for a
+                # mid-connection reset to invalidate. Would need revisiting if
+                # this worker ever moved to one persistent connection spanning
+                # multiple turns.
                 continue
             # StreamEvent (only ever yielded with include_partial_messages=True,
             # which this worker never sets) / RateLimitEvent: neither is
