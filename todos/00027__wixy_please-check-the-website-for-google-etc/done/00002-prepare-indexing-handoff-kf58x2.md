@@ -1,4 +1,4 @@
-# 00002 [kf58x2] Prepare indexing handoff
+# DONE 00002 [kf58x2] Prepare indexing handoff
 
 ## What
 
@@ -33,3 +33,13 @@ The prior audit is recorded as completed task `[bfx6zs]`. Its priorities were le
 - Staging site: `https://ca.cinnamons.uk/`
 - Google Search Console: `https://search.google.com/search-console/`
 - Bing Webmaster Tools: `https://www.bing.com/webmasters/`
+
+## Outcome
+
+- Added `docs/search-indexing-implementation-brief.md`, a complete work-package and PR-train handover with repository ownership, decisions, risk gates, tests, measurable acceptance criteria, rollback expectations, and explicit human-only blockers.
+- Added `docs/search-indexing-console-guide.html`, a responsive and printable owner walkthrough with saved progress, copyable exact values, official-source links, warnings against submitting staging, and post-publish monitoring checkpoints.
+- Validated the guide with html5lib structural assertions, `node --check`, cmd's artifact endpoint (`200 text/html`), the repository link checker, Playwright at 1440 px and 390 px with no horizontal overflow, and desktop/full-mobile visual review.
+- Merged documentation PR `#196` at `4cf4c941f92b1f0acd87b06bf1b386a14dfb4c37` after every required CI job passed.
+- Launched visible Wixy workspace `00028` (`01d20177-7924-4d9c-8fcc-2b8038b16f61`) on branch `cmd/workspace-00028`, session `38f24301-b8a9-4ae8-aa52-4f4033e2ffb1`, confirmed as `claude` / `claude-sonnet-5` / `max` and active.
+- Armed lane monitor `8d59a952-41d8-4821-a234-7b277927431c` and delivered its reporting instructions to the successor through the peer channel.
+- Checked the Answers log before handoff; no open operator questions required forwarding.
