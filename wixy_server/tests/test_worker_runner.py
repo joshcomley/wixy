@@ -8,6 +8,7 @@ from __future__ import annotations
 import pytest
 from claude_agent_sdk import (
     AssistantMessage,
+    ConversationResetMessage,
     ResultMessage,
     SystemMessage,
     TextBlock,
@@ -188,6 +189,34 @@ async def test_options_pass_cwd_and_budget_through() -> None:
 
     assert clients[0].options.cwd == "/scratch/c1"
     assert clients[0].options.max_budget_usd == 5.0
+
+
+@pytest.mark.asyncio
+async def test_conversation_reset_message_ignored_not_crashed() -> None:
+    """claude-agent-sdk 0.2.137 added ConversationResetMessage to
+    ClaudeSDKClient.receive_response()'s real return type — this worker never
+    triggers a mid-turn reset itself, but must tolerate one appearing in the
+    stream without crashing, appending a transcript entry, or losing the
+    ResultMessage cost that follows it."""
+    conv = WorkerConversation(conv_id="c1", preamble="edit the site", branch_name="wixy-ai/c1")
+    episodes = [
+        ScriptedEpisode(
+            messages=[
+                AssistantMessage(
+                    content=[TextBlock(text="Working on it.")], model="claude-sonnet-5"
+                ),
+                ConversationResetMessage(
+                    new_conversation_id="conv-2", uuid="reset-1", session_id="sdk-session-1"
+                ),
+                _result(total_cost_usd=0.02),
+            ]
+        )
+    ]
+    _clients, factory = create_fake_agent_sdk_client_factory(episodes)
+    await run_turn(conv, "please help", cwd="/scratch/c1", client_factory=factory)
+
+    assert [m.kind for m in conv.messages] == ["text"]
+    assert conv.total_cost_usd == pytest.approx(0.02)
 
 
 @pytest.mark.asyncio
