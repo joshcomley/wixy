@@ -127,8 +127,10 @@ output (never the raw checkout — decisions/00043).
 ## Public site: GitHub Pages custom domain
 
 The public site also deploys as a static build to **GitHub Pages**, serving the operator's
-own custom domain (independent of `ca.cinnamons.uk`, which stays the private staging/admin
-home — see decisions/00126). This lives entirely in the **site repo**
+own custom domain (independent of `ca.cinnamons.uk`, which stays the staging/admin home —
+see decisions/00126). "Staging" here means non-indexable, not confidential: `ca.cinnamons.uk`'s
+`/` is publicly reachable with no authentication, same as before and after decisions/00135;
+only `/admin*`/`/api/admin*` sit behind CF Access. This lives entirely in the **site repo**
 (`joshcomley/cottage-aesthetics-preview`), not here:
 
 - `wixy_server/checkout.py:push_live_mirror` force-pushes the current live pointer's sha to
