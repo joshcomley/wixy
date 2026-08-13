@@ -70,6 +70,7 @@ during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/
 | `test_draft_validate.py` | the draft-write gate — `normalize_set_ops` (leading-slash/nbsp/published-draft-media rewrites) + `check_structural` (incl. `visible: false`/`true` accepted, non-boolean rejected) |
 | `test_cmdchat.py` / `test_chats.py` | the cmd client (vs `fake_cmd`); conversation store |
 | `test_routes_*.py` | HTTP surface per router (admin_api / chat / public / internal / version) |
+| `test_robots_header.py` | `X-Robots-Tag: noindex` middleware (Inv 37) — the path allowlist as a pure-function unit test, plus integration coverage on both indexable states |
 
 ### Frontend (vitest) & E2E (Playwright)
 
