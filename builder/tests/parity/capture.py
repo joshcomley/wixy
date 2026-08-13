@@ -122,6 +122,38 @@ def _force_reveal(page: Page) -> None:
     page.evaluate(_FORCE_REVEAL_JS)
 
 
+_FORCE_EAGER_IMAGES_JS = """() => {
+  const imgs = Array.from(document.querySelectorAll('img'));
+  imgs.forEach(img => img.setAttribute('loading', 'eager'));
+  return Promise.all(imgs.map(img => {
+    if (img.complete) return Promise.resolve();
+    return new Promise(resolve => {
+      img.addEventListener('load', resolve, { once: true });
+      img.addEventListener('error', resolve, { once: true });
+    });
+  }));
+}"""
+
+
+def _force_eager_images(page: Page) -> None:
+    """Make every `<img loading="lazy">` load immediately and wait for it to settle
+    (decisions/00141 — a site repo adding `loading="lazy"` to offscreen gallery images,
+    per the search-indexing brief's WP4-4C, exposed this) — the same "force the
+    deterministic, fully-settled state a real visitor eventually sees" precedent
+    `_force_reveal` already established for scroll-gated content, applied to
+    load-gated content instead. Capture never scrolls, so a
+    correctly below-the-fold lazy image is never asked to load: `naturalWidth`/
+    `naturalHeight` probe as `(0, 0)` and a full-page screenshot shows a blank
+    placeholder box where the real image belongs — neither is a markup bug, both are
+    this harness's own capture step never giving the browser a reason to fetch the
+    image. Setting `loading="eager"` (rather than scrolling the page, which would
+    change viewport-relative layout mid-capture) makes the browser start the fetch
+    unconditionally; waiting for each `load`/`error` event (not just a fixed timeout)
+    means capture blocks exactly as long as the real fetches take, no more, no less.
+    """
+    page.evaluate(_FORCE_EAGER_IMAGES_JS)
+
+
 def capture_page(
     page: Page, url: str, base_url: str, *, selectors: Sequence[str] = COMMON_SELECTORS
 ) -> PageProbe:
@@ -135,6 +167,7 @@ def capture_page(
         page.goto(url, wait_until="networkidle")
         page.wait_for_timeout(300)  # let webfont swap / reveal animations settle
         _force_reveal(page)
+        _force_eager_images(page)
 
         text = _normalize_text(page.inner_text("body"))
 
@@ -194,6 +227,7 @@ def capture_screenshot(page: Page, url: str, *, viewport: Viewport) -> bytes:
     page.goto(url, wait_until="networkidle")
     page.wait_for_timeout(300)
     _force_reveal(page)
+    _force_eager_images(page)
     screenshot: bytes = page.screenshot(full_page=True)
     return screenshot
 
