@@ -21,11 +21,20 @@ public JSON (`/api/version`, `/api/version/notes` — both public by design, Inv
   {"/api/version", "/api/version/notes"}` (a `frozenset` membership check, never
   `startswith("/api/version")`) — confirmed with the spec-author session that both literal
   version-JSON paths belong in scope: `routes_version.py` exposes exactly these two
-  unauthenticated public JSON routes and nothing else (verified by auditing every `@router.get/
-  post/...` decorator across every `wixy_server/routes_*.py` file — there is no third public
-  JSON route this could apply to), so "`/api/version`, etc." (the originating todo's own
-  wording) has nothing else it could mean. Never `/api/*` — a genuinely new API category would
-  need its own decision, not a silent widening of this allowlist.
+  unauthenticated public JSON routes, so "`/api/version`, etc." (the originating todo's own
+  wording) has nothing else it could mean *among that router's own routes*. Never `/api/*` — a
+  genuinely new API category would need its own decision, not a silent widening of this
+  allowlist.
+- **Correction to an earlier over-broad claim in this same PR (caught in the spec-author's live
+  review):** an initial pass here claimed "no third public JSON route" full stop — wrong. The
+  original verification only grepped `@router.get/post/...` decorators across
+  `wixy_server/routes_*.py` files, which misses routes registered directly on `app` inside
+  `app.py` itself. `/uxer-style.json` (`app.py:uxer_style`, `FileResponse` of a real `.json`
+  file) is exactly such a route: public, unauthenticated, and genuinely JSON. It is
+  **deliberately excluded from this follow-up's scope anyway** — it's Uxer MCP dev-tooling
+  (docs/ai/contracts.md), not a page or API surface a real crawler or user would meaningfully
+  reach — but the earlier "no third route" framing was a real factual error, not just an
+  imprecise generalization, and is corrected here rather than left standing.
 - **Never `/admin*`, `/api/admin*` (already CF-Access-gated), `/internal/*`, `/healthz`**
   (already 404 to any externally-headered request, Inv 12) — excluded inside
   `_should_tag_noindex` itself, unconditionally, so a future addition to the JSON allowlist
@@ -77,6 +86,12 @@ public JSON (`/api/version`, `/api/version/notes` — both public by design, Inv
 - If a genuinely new public JSON route is ever added and it should carry this header too, that
   is itself a small, deliberate addition to `_NOINDEX_JSON_PATHS` (and this decision), not an
   automatic consequence of "it's public JSON" — keep the allowlist closed and explicit.
+- **This is not exhaustive over the app's public non-HTML surface, on purpose.**
+  `/uxer-style.json`, `/.uxer-web-port` (both public, non-HTML dev-tooling endpoints, `app.py`)
+  and every other static asset (`site.css`/`site.js`/`theme.css`, anything outside `/images/`)
+  get no `X-Robots-Tag` from this middleware regardless of `indexable` — out of this follow-up's
+  scope, not a gap someone should silently close by widening the allowlist. If any of those ever
+  need this treatment, that's a fresh, deliberate decision.
 - The path-only classification (tagging even a 404) is intentional, not an oversight — see
   `build_robots_header_middleware`'s own docstring and `test_missing_image_still_gets_the_
   header_on_its_404`. Don't "fix" this into a status-code-aware check without a real reason.

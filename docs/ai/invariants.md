@@ -486,7 +486,7 @@ trailing-newline/CRLF/whitespace-variant, duplicate-key, Windows-reserved-name, 
 *Exception:* none — a future relaxation of the grammar (e.g. multi-segment paths) must keep
 the same reject-don't-normalize discipline and the same `fullmatch` requirement.
 
-### Inv 37 — `X-Robots-Tag: noindex` covers the non-indexable public non-HTML surface
+### Inv 37 — `X-Robots-Tag: noindex` on exactly published media + the version-JSON endpoints
 `wixy_server/robots_header.py`'s middleware adds `X-Robots-Tag: noindex` to exactly two path
 categories, and only when `indexable: false`: published media (`/images/*`) and the public
 version JSON endpoints (`/api/version`, `/api/version/notes` — an exact-match allowlist, never
@@ -497,7 +497,10 @@ crawlable. Never applied to `/admin*`/`/api/admin*` (Inv 12's auth gate) or `/in
 `/healthz` (Inv 12's edge-header 404), regardless of `indexable`, and never applied at all when
 `indexable: true`. Classification is by request path alone (`request.url.path`) — a 404 for a
 path inside `/images/` still gets tagged, deliberately, since nothing at that URL should be
-indexed either way.
+indexed either way. **Not exhaustive over the app's public non-HTML surface, deliberately:**
+`/uxer-style.json`, `/.uxer-web-port` (both public, non-HTML dev-tooling endpoints) and every
+other static asset (`site.css`/`site.js`/`theme.css`, anything outside `/images/`) carry no
+`X-Robots-Tag` regardless of `indexable` — out of this invariant's scope, not a gap.
 *Enforced by:* `wixy_server/tests/test_robots_header.py` — the path allowlist as an exhaustive
 pure-function unit test, plus integration coverage on both `indexable` states.
 *Exception:* none — a genuinely new public JSON route that should carry this header is a

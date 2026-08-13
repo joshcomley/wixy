@@ -221,3 +221,12 @@ class TestIndexableProject:
             response = client.get("/api/version")
         assert response.status_code == 200
         assert "x-robots-tag" not in response.headers
+
+    def test_api_version_notes_does_not_get_the_header(self, tmp_path: Path) -> None:
+        storage_root = tmp_path / "storage"
+        wixy_repo_root = _wixy_repo_root(tmp_path, indexable=True)
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/api/version/notes")
+        assert response.status_code == 200
+        assert "x-robots-tag" not in response.headers

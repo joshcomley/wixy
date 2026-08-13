@@ -1,7 +1,7 @@
-"""`X-Robots-Tag: noindex` for a non-indexable project's public non-HTML surface
-(decisions/00137, docs/ai/invariants.md Inv 37) — the non-HTML sibling of WP1's
-per-page HTML `<meta name="robots" content="noindex">` (`builder/templates.py:
-apply_head`, decisions/00135).
+"""`X-Robots-Tag: noindex` for a non-indexable project's published media and public
+version-JSON surface (decisions/00137, docs/ai/invariants.md Inv 37) — the non-HTML
+sibling of WP1's per-page HTML `<meta name="robots" content="noindex">` (`builder/
+templates.py:apply_head`, decisions/00135).
 
 Google's robots-meta-tag mechanism only reads an HTML `<meta>` tag or an HTTP
 response header; it can never observe a `<meta>` tag inside a non-HTML response
@@ -9,15 +9,24 @@ body, so an image or a JSON endpoint has no HTML page to carry one. Since PR #19
 decisions/00135 switched non-indexable `robots.txt` from `Disallow: /` to `Allow: /`
 (so the HTML `noindex` meta is itself observable), crawling is now open to every
 other path on a non-indexable host too — this header closes that gap for the two
-kinds of public non-HTML response a non-indexable project actually serves:
-published media (`/images/*`) and the public JSON version endpoints (`/api/version`,
-`/api/version/notes` — both public by design, Inv 12).
+response categories this WP1 follow-up scoped in: published media (`/images/*`) and
+the public JSON version endpoints (`/api/version`, `/api/version/notes` — both public
+by design, Inv 12).
 
-Deliberately narrow, never a blanket "every non-HTML route" middleware: `/admin*`,
-`/api/admin*` (already CF-Access-gated) and `/internal/*`, `/healthz` (already 404 to
-any externally-headered request, Inv 12) never get this header regardless of
-`indexable` — excluded by `_should_tag_noindex` itself, not left to the caller, so a
-future addition to `_NOINDEX_JSON_PATHS` can't accidentally widen past that boundary.
+**Not exhaustive over every non-HTML response the app serves, deliberately.**
+`/uxer-style.json` and `/.uxer-web-port` (both public, non-HTML dev-tooling
+endpoints — see `app.py`, docs/ai/contracts.md) and every other static asset
+(`site.css`/`site.js`/`theme.css`, anything outside `/images/`) get no header from
+this middleware regardless of `indexable` — out of this follow-up's own scope, not
+an oversight. A future addition to that surface is its own deliberate decision (and
+allowlist change), never an automatic consequence of a route merely being public.
+
+Deliberately narrow in the other direction too, never a blanket "every non-HTML
+route" middleware: `/admin*`, `/api/admin*` (already CF-Access-gated) and
+`/internal/*`, `/healthz` (already 404 to any externally-headered request, Inv 12)
+never get this header regardless of `indexable` — excluded by `_should_tag_noindex`
+itself, not left to the caller, so a future addition to `_NOINDEX_JSON_PATHS` can't
+accidentally widen past that boundary.
 """
 
 from __future__ import annotations
@@ -36,10 +45,11 @@ _NOINDEX_JSON_PATHS = frozenset({"/api/version", "/api/version/notes"})
 
 
 def _should_tag_noindex(path: str) -> bool:
-    """True only for the public, non-HTML paths an HTML `noindex` meta tag can't
-    reach: published media under `/images/` and the public version JSON endpoints.
-    `/admin*`/`/api/admin*`/`/internal/*`/`/healthz` are excluded here, unconditionally
-    — the caller never has to remember to exclude them itself."""
+    """True only for this follow-up's in-scope surface: published media under
+    `/images/` and the two exact public version JSON endpoints — not every public
+    non-HTML path (see the module docstring for what's deliberately excluded, e.g.
+    `/uxer-style.json`). `/admin*`/`/api/admin*`/`/internal*`/`/healthz` are excluded
+    here, unconditionally — the caller never has to remember to exclude them itself."""
     if is_admin_path(path):
         return False
     if path == "/healthz" or path == "/internal" or path.startswith("/internal/"):
