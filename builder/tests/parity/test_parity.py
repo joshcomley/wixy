@@ -109,6 +109,48 @@ class TestCaptureConsoleErrorScoping:
         assert any("delayed boom" in e for e in captures["b"].probe.console_errors)
 
 
+class TestCaptureForcesLazyImagesToLoad:
+    """decisions/00141: capture never scrolls, so a correctly `loading="lazy"` image
+    positioned below the fold is never given a reason to fetch — `capture_page` must
+    force it to load anyway (mirroring `_force_reveal`'s precedent for scroll-gated
+    content) or its probe reports `(0, 0)` and its screenshot shows a blank box,
+    neither of which is a real markup bug."""
+
+    def _site_with_lazy_image_below_the_fold(self, tmp_path: Path) -> None:
+        images_dir = tmp_path / "images"
+        images_dir.mkdir()
+        (images_dir / "below.png").write_bytes(_png_bytes((64, 48), "#3366CC"))
+        (tmp_path / "index.html").write_text(
+            "<!doctype html><html><body>"
+            '<div style="height:20000px">spacer, well past one viewport</div>'
+            '<img src="images/below.png" loading="lazy" alt="below the fold">'
+            "</body></html>",
+            encoding="utf-8",
+        )
+
+    def test_probe_reports_real_dimensions_not_zero(self, tmp_path: Path) -> None:
+        self._site_with_lazy_image_below_the_fold(tmp_path)
+        with serve_directory(tmp_path) as base_url:
+            captures = capture_site(base_url, ["index"])
+        images = captures["index"].probe.images
+        assert len(images) == 1
+        _src, width, height = images[0]
+        assert (width, height) == (64, 48)
+
+    def test_screenshot_is_not_blank_at_the_image_location(self, tmp_path: Path) -> None:
+        self._site_with_lazy_image_below_the_fold(tmp_path)
+        with serve_directory(tmp_path) as base_url:
+            captures = capture_site(base_url, ["index"])
+        shot = Image.open(BytesIO(captures["index"].screenshot_desktop)).convert("RGB")
+        # The image sits just past the 3000px spacer -- sample a strip of rows there
+        # rather than one exact pixel, forgiving of body-margin/layout rounding.
+        found_image_color = any(
+            shot.getpixel((10, y)) == (0x33, 0x66, 0xCC)
+            for y in range(19995, min(20080, shot.height))
+        )
+        assert found_image_color, "expected the lazy image's own color, not a blank box"
+
+
 class TestCompareFunctions:
     def test_identical_probes_compare_clean(self, built_site_url: str) -> None:
         captures = capture_site(built_site_url, ["index"])

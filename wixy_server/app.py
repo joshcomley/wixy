@@ -33,6 +33,7 @@ from wixy_server.github import GitHubClient
 from wixy_server.publisher import PublishJob
 from wixy_server.redirects import load_redirects
 from wixy_server.registry import load_registry
+from wixy_server.robots_header import build_robots_header_middleware
 from wixy_server.routes_admin_api import router as admin_api_router
 from wixy_server.routes_ai import router as ai_router
 from wixy_server.routes_chat import StreamTiming
@@ -237,6 +238,7 @@ def create_app(
     app.state.engine_status_cache = EngineStatusCache()
 
     app.middleware("http")(admin_auth)
+    app.middleware("http")(build_robots_header_middleware(indexable=project.indexable))
 
     # Registration order matters: more specific routes/mounts first, the public
     # catch-all (`GET /{path:path}`) last, or it would shadow everything above it.

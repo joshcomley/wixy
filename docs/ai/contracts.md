@@ -45,8 +45,8 @@ Handler column is `file:func`. "Auth: CF" = gated by the admin middleware. Respo
 | GET | `/internal/ready` | `routes_internal.py:get_ready` | none | `{"ready": true}` — **404 (no body)** if a `Cf-Ray`/`Cf-Connecting-Ip` header is present |
 | GET | `/healthz` | `routes_internal.py:get_healthz` | none | `{"ready": true}` (delegates to `get_ready`; same CF-edge 404) |
 | POST | `/internal/warmup` | `routes_internal.py:post_warmup` | none | `{"warm": true}`; **503** on `CheckoutError`; 404 CF-edge |
-| GET | `/api/version` | `routes_version.py:get_version` | **none (public by design)** | `{"commit": {"sha_full": "<engine HEAD sha>"\|null, "count": <int\|null>}, "slot": <str\|null>, "version": <int\|null>, "edition": "fleet"\|"standalone", "syncBase": <str\|null>}` — `commit.count` (decisions/00109) is the engine's `v N` display number (first-parent count of HEAD; baked `WIXY_ENGINE_VERSION` preferred, git fallback, null on a gitless image); `version` is the SITE's live pointer, unrelated |
-| GET | `/api/version/notes?since=<sha>` | `routes_version.py:get_version_notes` | **none (public by design)** | `{"notes": [<plain-English line>, …]}` (decisions/00112) — the update popup's "What's new": `Release-note:` trailers from `<since>..HEAD`, deduped, chronological, ≤8; `since` hex-validated (anything else ignored → recent history), unknown `since` → recent history, no trailers/gitless → `["General bug fixes and improvements."]`; never a changelog, never a 500 |
+| GET | `/api/version` | `routes_version.py:get_version` | **none (public by design)** | `{"commit": {"sha_full": "<engine HEAD sha>"\|null, "count": <int\|null>}, "slot": <str\|null>, "version": <int\|null>, "edition": "fleet"\|"standalone", "syncBase": <str\|null>}` — `commit.count` (decisions/00109) is the engine's `v N` display number (first-parent count of HEAD; baked `WIXY_ENGINE_VERSION` preferred, git fallback, null on a gitless image); `version` is the SITE's live pointer, unrelated. Adds `X-Robots-Tag: noindex` when the project is non-indexable (Inv 37) |
+| GET | `/api/version/notes?since=<sha>` | `routes_version.py:get_version_notes` | **none (public by design)** | `{"notes": [<plain-English line>, …]}` (decisions/00112) — the update popup's "What's new": `Release-note:` trailers from `<since>..HEAD`, deduped, chronological, ≤8; `since` hex-validated (anything else ignored → recent history), unknown `since` → recent history, no trailers/gitless → `["General bug fixes and improvements."]`; never a changelog, never a 500. Adds `X-Robots-Tag: noindex` when the project is non-indexable (Inv 37) |
 
 ### Admin API (`/api/admin/*`, all Auth: CF)
 
@@ -209,7 +209,7 @@ process) off a fixed, non-configurable container path — see that module and
 | — | `/admin/static/*` | `staticcache.FingerprintedStaticFiles` mount | CF | file bytes / 404; requests carrying `?v=` get `Cache-Control: public, max-age=31536000, immutable`, others get StaticFiles defaults (ETag/Last-Modified) — decisions/00069 |
 | GET | `/admin/guide/*` | `StaticFiles` mount (`html=True`) | CF | file bytes; `/admin/guide/` root and extension-less paths resolve `index.html` — spec/independence/07's HTML guide (milestone 8), built by `guide.build` from `guide/chapters/*.html`, committed output under `wixy_server/static/guide/` |
 | GET,HEAD | `/` | `routes_public.py:get_root` | none | `FileResponse index.html` from live build; **503 plain text** `"Site not yet published"` if no live pointer |
-| GET,HEAD | `/{path}` | `routes_public.py:get_path` | none | `FileResponse` from live build (**registered last** — catch-all); 503 plain text; 404 → `404.html` or `"Not found"`. HTML `Cache-Control: public, max-age=300`; `site.css`/`site.js`/`theme.css` requests whose `?v=` is VERIFIED against `content_fingerprint(resolved)` (not merely present — fingerprinted by `builder/assetcache.py` at build time) get `public, max-age=31536000, immutable`, others (a bare or mismatched `?v=`, and every other asset) get `public, max-age=86400` — decisions/00130 |
+| GET,HEAD | `/{path}` | `routes_public.py:get_path` | none | `FileResponse` from live build (**registered last** — catch-all); 503 plain text; 404 → `404.html` or `"Not found"`. HTML `Cache-Control: public, max-age=300`; `site.css`/`site.js`/`theme.css` requests whose `?v=` is VERIFIED against `content_fingerprint(resolved)` (not merely present — fingerprinted by `builder/assetcache.py` at build time) get `public, max-age=31536000, immutable`, others (a bare or mismatched `?v=`, and every other asset) get `public, max-age=86400` — decisions/00130. `/images/*` responses (any status, including a 404) additionally get `X-Robots-Tag: noindex` when the project is non-indexable (Inv 37); every other path under this catch-all — HTML pages, `site.css`/`site.js`/`theme.css`, any other static asset — never does |
 
 Clean URLs (decisions/00128): `/{path}` resolves an extensionless path (`/about`) to
 `<path>.html` with no redirect when the literal path misses — `builder.serving.
@@ -217,6 +217,21 @@ resolve_site_path`, shared with the dev server (`builder/cli.py:cmd_serve`). A t
 slash (`/about/`) never falls back and 404s, matching GitHub Pages' own behavior (verified
 live) — no directory-index resolution either. The legacy `/<slug>.html` shape keeps
 resolving forever (never redirected away).
+
+**Robots header (Inv 37, `wixy_server/robots_header.py`):** a project-wide middleware
+(registered alongside the admin-auth middleware in `create_app`) adds `X-Robots-Tag:
+noindex` to exactly two path categories, only when the project is non-indexable: `/images/*`
+(above) and the two version-JSON routes (`/api/version`, `/api/version/notes`, above) — the
+non-HTML sibling of the per-page HTML `noindex` meta tag (Inv 35), which can't be observed
+inside a non-HTML response body. Classification is by request path alone, never response
+status or content-type. **Deliberately narrow — not a blanket "every non-HTML route"
+rule:** `/admin*`/`/api/admin*` (already CF-gated) and `/internal/*`/`/healthz` (already
+404 to any externally-headered request) are excluded unconditionally; `/uxer-style.json`
+and `/.uxer-web-port` (both public, non-HTML, listed above) and every other static asset
+(`site.css`/`site.js`/`theme.css`, any file outside `/images/`) remain outside this
+follow-up's scope and carry no `X-Robots-Tag` regardless of `indexable` — a future addition
+to the allowlist is its own deliberate decision, not an automatic consequence of a route
+being public.
 
 Router include order in `create_app` is load-bearing: internal → version → preview →
 admin_api → chat → engine → ai → system → versions → (inline `/admin`, uxer) →
