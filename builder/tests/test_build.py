@@ -39,20 +39,6 @@ class TestBuildSite:
         assert (out / "images" / "hero.jpg").exists()
         assert (out / "images" / "icon.jpg").exists()
 
-    def test_theme_css_carries_the_img_dimension_layout_guard(
-        self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
-    ) -> None:
-        """decisions/00140: a bound `<img>`'s newly-sniffed `height` attribute must
-        never override a site's own CSS that only constrains `width` (e.g.
-        `img{width:100%}`, no `height` rule) -- that would stretch the image out of
-        its real aspect ratio, exactly what WP4-4B's own text warns against. The
-        zero-specificity `:where()` guard fills that gap without ever overriding a
-        real site-authored height rule."""
-        out = tmp_path / "_build"
-        build_site(mini_site_root, mini_site_source, out)
-        theme_css = (out / "theme.css").read_text(encoding="utf-8")
-        assert ":where(img[width][height]){height:auto}" in theme_css
-
     def test_robots_allows_crawling_when_not_indexable(
         self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
     ) -> None:

@@ -63,12 +63,22 @@ Then per page:
    (b) `data-wx-list` (`_expand_list`) — extract the `data-wx-list-item` template, deep-copy
    per array element with `item` bound, append clones (each clone's own bindings, including
    `data-wx-img`, are re-walked independently — never shared/cached across clones); (c)
-   `_apply_scalar` runs text/img/href/bg/attr; (d) recurse into direct children. `_apply_img`
-   (decisions/00140) additionally sniffs intrinsic `width`/`height` for a bound `<img>` via
-   `builder.imagesize.probe_image_size`, using the exact same `is_safe_relative_src` gate and
-   `site_root`-is-`None`/missing-file/malformed-header skip behavior as the `og:image` sniff
-   below — except it never overwrites a `width`/`height` already authored on that specific
-   template tag (an intentional, per-slot override always wins).
+   `_apply_scalar` runs text/**attr**/img/href/bg — `data-wx-attr` deliberately runs *before*
+   `data-wx-img` (decisions/00140) so an attr-authored `width`/`height` on the same tag is
+   visible to `_apply_img`'s "already has width/height, don't sniff" guard, not overwritten by
+   it afterward; this is a considered, one-directional trade-off — an element combining
+   `data-wx-attr` and `data-wx-img`/`href`/`bg` targeting the *same* attribute for a different
+   reason would now have `_apply_attrs` lose instead of win (no current template does this);
+   (d) recurse into direct children. `_apply_img` additionally sniffs intrinsic `width`/
+   `height` for a bound `<img>` via `builder.imagesize.probe_image_size`, using the exact same
+   `is_safe_relative_src` gate and `site_root`-is-`None`/missing-file/malformed-header skip
+   behavior as the `og:image` sniff below — except it never overwrites a `width`/`height`
+   already present on that specific template tag (an intentional, per-slot override always
+   wins, whether template-hardcoded or `data-wx-attr`-authored). `templates.apply_head` (next
+   step) unconditionally injects a paired `:where(img[width][height]){height:auto}` `<style>`
+   into every page's `<head>` — a zero-specificity CSS reset so a sniffed `height` can never
+   distort a site's own width-only image CSS, without ever overriding a real site-authored
+   height rule.
 5. `_mark_nav_active(body, page_url(slug))` marks the active link in **every**
    `data-wx-list="@nav"` container (desktop + mobile — decisions/00007).
 6. `templates.apply_head`: `<title>`/OG/description/fonts-link/`robots`/canonical `<link>`

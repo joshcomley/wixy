@@ -303,6 +303,51 @@ class TestHeadInjection:
         assert head.find("meta", attrs={"property": "og:image:width"}) is None
 
 
+class TestImgDimensionLayoutGuard:
+    """decisions/00140: the CSS guard for a bound `<img>`'s sniffed `width`/`height`
+    is injected inline by `apply_head` on EVERY `render_page` call, not appended to
+    a published build artifact -- an admin-preview render (`site_root=None` or not,
+    themed or not) must carry it just as reliably as a real `build_site` output,
+    since preview never goes through `build_site` at all."""
+
+    def test_guard_style_always_present(self) -> None:
+        head = _rendered_head({})
+        style = head.find("style", attrs={"data-wx-guard": "img-dim"})
+        assert isinstance(style, Tag)
+        assert style.string == ":where(img[width][height]){height:auto}"
+
+    def test_guard_style_present_even_with_no_site_root(self) -> None:
+        """Confirms the guard is unconditional on `site_root` (unlike the og:image
+        dimension sniff it sits next to in this same function) -- it must protect
+        every render, not just ones with on-disk context to sniff against."""
+        head = _rendered_head({}, site_root=None)
+        assert isinstance(head.find("style", attrs={"data-wx-guard": "img-dim"}), Tag)
+
+    def test_guard_style_not_duplicated_if_apply_head_runs_twice(self) -> None:
+        soup = BeautifulSoup("<!DOCTYPE html><html><head></head><body></body></html>", "html5lib")
+        for _ in range(2):
+            apply_head(
+                soup,
+                meta={},
+                fonts_url=None,
+                page_url_path="/about",
+                domain="fixture.example.com",
+                indexable=False,
+                file_label="test",
+                site_name="Fixture Site",
+                site_root=None,
+            )
+        head = soup.head
+        assert isinstance(head, Tag)
+        assert len(head.find_all("style", attrs={"data-wx-guard": "img-dim"})) == 1
+
+    def test_guard_present_in_a_real_render_page_call(self, mini_site_source: SiteSource) -> None:
+        """End-to-end through the real `render_page` pipeline, not just `apply_head`
+        in isolation -- proves the guard reaches actual page output."""
+        html = render_page(mini_site_source, "index", mode="publish")
+        assert ":where(img[width][height]){height:auto}" in html
+
+
 class TestPreviewVsPublishMode:
     def test_publish_mode_removes_falsy_section(self, mini_site_source: SiteSource) -> None:
         html = render_page(mini_site_source, "about", mode="publish")

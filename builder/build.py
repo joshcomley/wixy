@@ -22,24 +22,6 @@ from builder.staticredirects import (
 )
 from builder.theme import generate_theme_css
 
-# decisions/00140: `bindings.py:_apply_img` emits width/height attributes for a bound
-# <img> whenever it can sniff real on-disk dimensions -- but HTML width/height are
-# CSS *presentational hints* for the `width`/`height` properties. A site's own CSS
-# rule that only constrains one axis (e.g. `img{width:100%}`, no `height` rule --
-# exactly what Cottage Aesthetics' site.css does for `.about img`/`.ba-tile img`)
-# lets the newly-present `height` attribute pin a hard pixel value, stretching the
-# image out of its real aspect ratio -- precisely the "without distorting CSS
-# layout" outcome the brief's own WP4-4B text explicitly warned against, and
-# empirically confirmed against the real deployed site. `:where()` keeps this
-# guard's specificity at exactly zero, so ANY real site-authored height rule
-# (`.gal img{height:100%}`, `.bas-frame img{height:100%}`) still wins outright --
-# this only fills the gap when a site's CSS says nothing about height at all.
-# Static and theme-independent by design: kept out of `generate_theme_css` (Inv 20
-# ties that function's output to a byte-identical TS port for the live theme-panel
-# preview, which has nothing to do with this layout concern) and appended directly
-# to the written `theme.css` file instead.
-_IMG_DIMENSION_LAYOUT_GUARD_CSS = ":where(img[width][height]){height:auto}\n"
-
 
 def build_site(
     root: Path,
@@ -65,8 +47,9 @@ def build_site(
         (out_dir / out_name).write_text(html, encoding="utf-8", newline="\n")
 
     if source.theme is not None:
-        theme_css = generate_theme_css(source.theme) + _IMG_DIMENSION_LAYOUT_GUARD_CSS
-        (out_dir / "theme.css").write_text(theme_css, encoding="utf-8", newline="\n")
+        (out_dir / "theme.css").write_text(
+            generate_theme_css(source.theme), encoding="utf-8", newline="\n"
+        )
 
     _copy_if_exists(root / "site.css", out_dir / "site.css")
     _copy_if_exists(root / "site.js", out_dir / "site.js")
