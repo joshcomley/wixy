@@ -187,3 +187,46 @@ class TestCollectionSchemaFailures:
         source = _with_global_content(mini_site_source, glob)
         result = validate_site(source, mini_site_root)
         assert any(e.code == "bad-collection" and e.key == "hours" for e in result.errors)
+
+
+class TestStructuredDataWarnings:
+    """decisions/00139: the address-drift check is a WARNING, never blocking (`result.ok`
+    stays `True`) -- surfaced here too, not just as a silent build-time degradation."""
+
+    def test_drifted_address_is_a_warning_not_an_error(
+        self, mini_site_source: SiteSource, mini_site_root: Path
+    ) -> None:
+        project = dataclasses.replace(mini_site_source.project, indexable=True)
+        glob: JsonObject = copy.deepcopy(mini_site_source.global_content)
+        dotted_set(glob, "business", {"types": ["DaySpa"], "address": {"streetAddress": "nope"}})
+        source = dataclasses.replace(mini_site_source, project=project, global_content=glob)
+        result = validate_site(source, mini_site_root)
+        assert result.ok
+        assert result.errors == []
+        assert any(w.code == "structured-data-drift" for w in result.warnings)
+
+    def test_matching_address_produces_no_warning(
+        self, mini_site_source: SiteSource, mini_site_root: Path
+    ) -> None:
+        project = dataclasses.replace(mini_site_source.project, indexable=True)
+        glob: JsonObject = copy.deepcopy(mini_site_source.global_content)
+        dotted_set(
+            glob,
+            "business",
+            {"types": ["DaySpa"], "address": {"streetAddress": "1 Fixture Street"}},
+        )
+        source = dataclasses.replace(mini_site_source, project=project, global_content=glob)
+        result = validate_site(source, mini_site_root)
+        assert result.ok
+        assert result.warnings == []
+
+    def test_non_indexable_project_never_warns(
+        self, mini_site_source: SiteSource, mini_site_root: Path
+    ) -> None:
+        """The fixture's own default (`indexable: false`) -- structured data is never
+        computed at all off the indexable path, so a drifted address can't warn either."""
+        glob: JsonObject = copy.deepcopy(mini_site_source.global_content)
+        dotted_set(glob, "business", {"types": ["DaySpa"], "address": {"streetAddress": "nope"}})
+        source = _with_global_content(mini_site_source, glob)
+        result = validate_site(source, mini_site_root)
+        assert result.warnings == []

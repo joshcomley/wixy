@@ -22,6 +22,15 @@ from builder.staticredirects import (
 )
 from builder.theme import generate_theme_css
 
+# Root-level convention files a site may hand-author (decisions/00139): generic across
+# every project (universal browser/OS conventions, not a Cottage-Aesthetics-specific list),
+# small and explicit on purpose -- this is a narrow passthrough allowlist, not "copy every
+# root file", so an unrelated root-level file (a README, a stray config) is never silently
+# published. Favicon `<link>` tags themselves are hand-authored per-page (the same
+# convention `theme.css`'s own `<link rel="stylesheet">` already uses), never engine-injected
+# -- this allowlist only makes the referenced files actually reach the build output.
+_ROOT_PASSTHROUGH_FILES = ("favicon.ico", "favicon.svg", "apple-touch-icon.png")
+
 
 def build_site(
     root: Path,
@@ -53,6 +62,8 @@ def build_site(
 
     _copy_if_exists(root / "site.css", out_dir / "site.css")
     _copy_if_exists(root / "site.js", out_dir / "site.js")
+    for name in _ROOT_PASSTHROUGH_FILES:
+        _copy_if_exists(root / name, out_dir / name)
     images_src = root / "images"
     if images_src.is_dir():
         shutil.copytree(images_src, out_dir / "images")

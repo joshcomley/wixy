@@ -108,12 +108,46 @@ hidden).
   "phone": "07401 562 462",
   "phoneHref": "tel:07401562462",
   "email": "cottageaestheticshartlebury@gmail.com",
-  "address": ["8 Walton Cottage, Walton Road,", "Hartlebury, Kidderminster, DY10 4JA"],
+  "address": "Cottage Aesthetics,<br>8 Walton Road,<br>Hartlebury,<br>Kidderminster,<br>DY10 4JA",
   "social": {"instagram": "https://www.instagram.com/cottageaesthetics", "facebook": "…"},
   "hours": [{"day": "Monday", "value": "10:00 – 19:00", "closed": false}],
   "footer": {"…": "columns/links as lists"}
 }
 ```
+
+`address` is a single HTML-bearing string (display line breaks via `<br>`), not an array —
+this shape itself has drifted once already in production (decisions/00139's own finding), which
+is exactly why the optional `business` block below is authored separately rather than parsed
+from it.
+
+**Optional `business` block** (decisions/00139, docs/ai/invariants.md Inv 38) — absent by
+default (Inv 5's partial-migration tolerance: no block means no `LocalBusiness` JSON-LD node
+at all, not an error). When present, feeds `builder/structureddata.py`'s homepage JSON-LD
+alongside the reserved fields above (`phone`, `email`, `social`, `hours`, all reused as-is,
+never duplicated):
+
+```json
+{
+  "business": {
+    "types": ["HealthAndBeautyBusiness", "MedicalBusiness"],
+    "address": {
+      "streetAddress": "8 Walton Road, Hartlebury",
+      "addressLocality": "Kidderminster",
+      "postalCode": "DY10 4JA",
+      "addressCountry": "GB"
+    }
+  }
+}
+```
+
+`business.types` is one or more Schema.org `LocalBusiness` subtypes, authored deliberately
+(never inferred by the engine — Inv 1). `business.address` is a structured `PostalAddress`,
+authored once by whoever can resolve real-world addressing ambiguity (this project: Royal Mail
+post-town convention, `addressLocality` "Kidderminster" rather than the street line's own
+"Hartlebury") — never engine-parsed from the free-text `address` string above, which the
+fable architecture consult (relation `152f1a9f`) explicitly rejected as empirically falsified.
+A build-time substring check degrades a drifted `business.address` field to that plain string
+plus a non-blocking `validate` warning; see Inv 38 for the full contract.
 
 The **nav is builder-generated, never stored**: `@nav` does not exist in `_global.json`.
 The builder derives it at resolve time — pages with `meta.inNav: true` ordered by

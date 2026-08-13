@@ -19,6 +19,19 @@ from builder.jsontypes import JsonObject
 from builder.render import SiteSource, load_site_source
 
 
+def _copy_mini_site(mini_site_root: Path, tmp_path: Path) -> Path:
+    """A writable copy of the mini-site fixture -- `mini_site_root` itself is the real,
+    shared fixtures directory on disk and must never be mutated by a test."""
+    edited_root = tmp_path / "edited-site"
+    edited_root.mkdir()
+    for item in mini_site_root.iterdir():
+        if item.is_dir():
+            shutil.copytree(item, edited_root / item.name)
+        else:
+            edited_root.joinpath(item.name).write_bytes(item.read_bytes())
+    return edited_root
+
+
 class TestBuildSite:
     def test_writes_every_page(
         self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
@@ -65,6 +78,80 @@ class TestBuildSite:
         robots = (out / "robots.txt").read_text(encoding="utf-8")
         assert "Sitemap:" in robots
         assert "Disallow" not in robots
+
+    def test_favicon_ico_copied_when_present(
+        self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
+    ) -> None:
+        """decisions/00139: closes the WP0-audited `/favicon.ico` 404 -- a tiny, generic,
+        project-agnostic root-passthrough allowlist, not a Cottage-Aesthetics special case."""
+        edited_root = _copy_mini_site(mini_site_root, tmp_path)
+        (edited_root / "favicon.ico").write_bytes(b"fake-ico-bytes")
+        out = tmp_path / "_build"
+        build_site(edited_root, mini_site_source, out)
+        assert (out / "favicon.ico").read_bytes() == b"fake-ico-bytes"
+
+    def test_favicon_ico_absent_when_not_authored(
+        self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "_build"
+        build_site(mini_site_root, mini_site_source, out)
+        assert not (out / "favicon.ico").exists()
+
+    def test_structured_data_absent_on_non_indexable_build(
+        self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
+    ) -> None:
+        """The fixture's own default (`indexable: false`) — Inv 35's own "staging emits
+        nothing" precedent applies to the JSON-LD graph too."""
+        out = tmp_path / "_build"
+        build_site(mini_site_root, mini_site_source, out)
+        index_html = (out / "index.html").read_text(encoding="utf-8")
+        assert "application/ld+json" not in index_html
+
+    def test_structured_data_website_only_when_indexable_with_no_business_block(
+        self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
+    ) -> None:
+        project = dataclasses.replace(mini_site_source.project, indexable=True)
+        source = dataclasses.replace(mini_site_source, project=project)
+        out = tmp_path / "_build"
+        build_site(mini_site_root, source, out)
+        index_html = (out / "index.html").read_text(encoding="utf-8")
+        assert '"@type": "WebSite"' in index_html
+        assert "LocalBusiness" not in index_html
+        assert "DaySpa" not in index_html
+
+    def test_structured_data_includes_local_business_when_business_block_present(
+        self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
+    ) -> None:
+        project = dataclasses.replace(mini_site_source.project, indexable=True)
+        global_content: JsonObject = {
+            **mini_site_source.global_content,
+            "business": {"types": ["DaySpa"]},
+        }
+        source = dataclasses.replace(
+            mini_site_source, project=project, global_content=global_content
+        )
+        out = tmp_path / "_build"
+        build_site(mini_site_root, source, out)
+        index_html = (out / "index.html").read_text(encoding="utf-8")
+        assert '"@type": "DaySpa"' in index_html
+        # the fixture's own hours[] (checked above) parses cleanly under the real grammar
+        assert "openingHoursSpecification" in index_html
+
+    def test_structured_data_never_appears_on_a_non_home_page(
+        self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
+    ) -> None:
+        project = dataclasses.replace(mini_site_source.project, indexable=True)
+        global_content: JsonObject = {
+            **mini_site_source.global_content,
+            "business": {"types": ["DaySpa"]},
+        }
+        source = dataclasses.replace(
+            mini_site_source, project=project, global_content=global_content
+        )
+        out = tmp_path / "_build"
+        build_site(mini_site_root, source, out)
+        about_html = (out / "about.html").read_text(encoding="utf-8")
+        assert "application/ld+json" not in about_html
 
     def test_writes_a_styled_404_page(
         self, mini_site_source: SiteSource, mini_site_root: Path, tmp_path: Path
