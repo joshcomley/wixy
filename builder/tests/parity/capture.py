@@ -125,31 +125,41 @@ def _force_reveal(page: Page) -> None:
 _FORCE_EAGER_IMAGES_JS = """() => {
   const imgs = Array.from(document.querySelectorAll('img'));
   imgs.forEach(img => img.setAttribute('loading', 'eager'));
-  return Promise.all(imgs.map(img => {
-    if (img.complete) return Promise.resolve();
-    return new Promise(resolve => {
-      img.addEventListener('load', resolve, { once: true });
-      img.addEventListener('error', resolve, { once: true });
-    });
-  }));
+  return Promise.all(imgs.map(img => img.decode().catch(() => {})));
 }"""
 
 
 def _force_eager_images(page: Page) -> None:
-    """Make every `<img loading="lazy">` load immediately and wait for it to settle
-    (decisions/00141 — a site repo adding `loading="lazy"` to offscreen gallery images,
-    per the search-indexing brief's WP4-4C, exposed this) — the same "force the
-    deterministic, fully-settled state a real visitor eventually sees" precedent
-    `_force_reveal` already established for scroll-gated content, applied to
-    load-gated content instead. Capture never scrolls, so a
-    correctly below-the-fold lazy image is never asked to load: `naturalWidth`/
-    `naturalHeight` probe as `(0, 0)` and a full-page screenshot shows a blank
-    placeholder box where the real image belongs — neither is a markup bug, both are
-    this harness's own capture step never giving the browser a reason to fetch the
-    image. Setting `loading="eager"` (rather than scrolling the page, which would
-    change viewport-relative layout mid-capture) makes the browser start the fetch
-    unconditionally; waiting for each `load`/`error` event (not just a fixed timeout)
-    means capture blocks exactly as long as the real fetches take, no more, no less.
+    """Make every `<img loading="lazy">` load immediately and wait for it to be
+    genuinely decoded and paintable (decisions/00141 — a site repo adding
+    `loading="lazy"` to offscreen gallery images, per the search-indexing brief's
+    WP4-4C, exposed this) — the same "force the deterministic, fully-settled state
+    a real visitor eventually sees" precedent `_force_reveal` already established
+    for scroll-gated content, applied to load-gated content instead. Capture never
+    scrolls, so a correctly below-the-fold lazy image is never asked to load:
+    `naturalWidth`/`naturalHeight` probe as `(0, 0)` and a full-page screenshot
+    shows a blank placeholder box where the real image belongs — neither is a
+    markup bug, both are this harness's own capture step never giving the browser
+    a reason to fetch the image. Setting `loading="eager"` (rather than scrolling
+    the page, which would change viewport-relative layout mid-capture) makes the
+    browser start the fetch unconditionally.
+
+    **Waits on `img.decode()`, not the `load` event** (a real, verified-empirically
+    regression the first cut of this fix shipped, caught by the site-repo's own
+    direct testing against the real gallery page): `decoding="async"` — which
+    WP4-4C's own images carry — explicitly lets the browser defer PIXEL DECODING
+    independently of `load`. `load` fires once bytes are fetched; it does not
+    guarantee the image has been decoded into paintable pixels, so a `load`-based
+    wait can resolve before the image is actually ready to paint, and
+    `page.screenshot()` catches it mid-flight — every DOM/CSS signal
+    (`complete`/`naturalWidth`/`getBoundingClientRect`) already says "ready" while
+    the pixels genuinely aren't yet. `img.decode()` is the browser API specifically
+    for "resolve only once this image is truly decoded and ready to paint" — it
+    subsumes waiting for the fetch too (an undecoded image can't be decoded).
+    `.catch(() => {})` swallows a genuinely broken/unloadable image's decode
+    rejection — degrades to "still blank, but capture continues," never aborts the
+    whole capture run over one bad image reference (a real content bug to catch via
+    `missing-image` validate output, not a parity-harness crash).
     """
     page.evaluate(_FORCE_EAGER_IMAGES_JS)
 
