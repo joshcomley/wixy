@@ -206,6 +206,17 @@ def _apply_scalar(
     if isinstance(text_key, str):
         _apply_text(el, ctx, text_key, file_label=file_label, sink=sink)
 
+    # decisions/00140: data-wx-attr runs BEFORE data-wx-img so a template that
+    # authors e.g. width via data-wx-attr="width:.someKey" is visible to
+    # _apply_img's "already has width/height, don't sniff" check -- the reverse
+    # order would let _apply_img sniff+set both width and height first, then have
+    # data-wx-attr overwrite only width afterward, pairing an authored width with
+    # a sniffed height (a real risk of the exact aspect-ratio distortion Inv 39
+    # guards against, just via a different binding kind).
+    attr_spec = el.get(ATTR_ATTR)
+    if isinstance(attr_spec, str):
+        _apply_attrs(el, ctx, attr_spec, file_label=file_label, sink=sink)
+
     img_key = el.get(ATTR_IMG)
     if isinstance(img_key, str):
         _apply_img(el, ctx, img_key, file_label=file_label, sink=sink, site_root=site_root)
@@ -217,10 +228,6 @@ def _apply_scalar(
     bg_key = el.get(ATTR_BG)
     if isinstance(bg_key, str):
         _apply_bg(el, ctx, bg_key, file_label=file_label, sink=sink)
-
-    attr_spec = el.get(ATTR_ATTR)
-    if isinstance(attr_spec, str):
-        _apply_attrs(el, ctx, attr_spec, file_label=file_label, sink=sink)
 
 
 def _apply_text(

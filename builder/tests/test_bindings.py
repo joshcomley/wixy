@@ -201,6 +201,27 @@ class TestImgBindingIntrinsicDimensions:
         assert img["width"] == "40"
         assert img["height"] == "30"
 
+    def test_data_wx_attr_authored_width_is_also_respected(self, tmp_path: Path) -> None:
+        """`data-wx-attr` runs before `data-wx-img` in `_apply_scalar` specifically so
+        a *dynamically* (not just template-hardcoded) authored width is visible to the
+        "already has width/height" guard — otherwise `_apply_img` would sniff+set both
+        width AND height first, and `data-wx-attr` would only overwrite width
+        afterward, pairing an authored width with a sniffed height (the same aspect-
+        ratio distortion class Inv 39's CSS guard exists for, via a different path)."""
+        images_dir = tmp_path / "images"
+        images_dir.mkdir()
+        Image.new("RGB", (999, 888), (10, 20, 30)).save(images_dir / "x.jpg", "JPEG")
+        body = _body('<img data-wx-img="hero.bg" data-wx-attr="width:.w" src="" alt="">')
+        ctx = ResolveContext(
+            page={"hero": {"bg": {"src": "images/x.jpg", "alt": "X"}}},
+            glob={},
+            item={"w": "40"},
+        )
+        apply_bindings(body, ctx, mode="publish", file_label="test", site_root=tmp_path)
+        img = _find(body, "img")
+        assert img["width"] == "40"
+        assert not img.has_attr("height")
+
     @pytest.mark.parametrize(
         "src",
         [
