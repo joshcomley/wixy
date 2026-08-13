@@ -45,9 +45,17 @@ class ValidationError:
 
 @dataclass(slots=True)
 class ValidationResult:
-    """Aggregate result of `validate()` — the admin UI/CI/AI agent consume `errors`."""
+    """Aggregate result of `validate()` — the admin UI/CI/AI agent consume `errors`.
+
+    `warnings` (decisions/00139) is a separate, deliberately non-blocking channel — reuses
+    `ValidationError`'s own shape (identical fields) rather than a near-duplicate class, but
+    never affects `ok`. A caller that only ever inspected `errors`/`ok` (every consumer before
+    this field existed) sees no behavior change at all — `to_json_dict`'s new `"warnings"` key
+    is additive, not a replacement for `"errors"`.
+    """
 
     errors: list[ValidationError] = field(default_factory=list)
+    warnings: list[ValidationError] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -58,5 +66,14 @@ class ValidationResult:
     ) -> None:
         self.errors.append(ValidationError(code=code, message=message, file=file, key=key))
 
+    def add_warning(
+        self, code: str, message: str, *, file: str | None = None, key: str | None = None
+    ) -> None:
+        self.warnings.append(ValidationError(code=code, message=message, file=file, key=key))
+
     def to_json_dict(self) -> dict[str, object]:
-        return {"ok": self.ok, "errors": [e.to_dict() for e in self.errors]}
+        return {
+            "ok": self.ok,
+            "errors": [e.to_dict() for e in self.errors],
+            "warnings": [w.to_dict() for w in self.warnings],
+        }

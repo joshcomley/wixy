@@ -18,6 +18,7 @@ from builder.errors import BuildError, ValidationResult
 from builder.jsonschema_lite import validate_against_schema
 from builder.jsontypes import JsonObject, JsonValue
 from builder.render import SiteSource, resolved_global_content
+from builder.structureddata import build_structured_data
 from builder.templates import (
     inject_partials,
     load_partials,
@@ -39,7 +40,17 @@ def validate_site(source: SiteSource, project_root: Path) -> ValidationResult:
         _validate_theme(source.theme, result)
     _validate_collections(source, result)
     _validate_images(source, project_root, result)
+    _validate_structured_data(source, result)
     return result
+
+
+def _validate_structured_data(source: SiteSource, result: ValidationResult) -> None:
+    """Non-blocking (decisions/00139): surfaces `builder/structureddata.py`'s address-drift
+    warning here too, not just as a silent build-time degradation, so an author can catch and
+    fix it before publish rather than discovering it only in the rendered `<script>` output."""
+    _, warnings = build_structured_data(source.project, resolved_global_content(source))
+    for message in warnings:
+        result.add_warning("structured-data-drift", message, file="content/_global.json")
 
 
 def _validate_pages(source: SiteSource, result: ValidationResult) -> None:
