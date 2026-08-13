@@ -276,6 +276,61 @@ class TestAddress:
         assert "address" not in _local_business(graph)
         assert warnings == []
 
+    def test_authored_address_used_as_is_when_no_visible_address_text_exists(
+        self, indexable_project: ProjectConfig
+    ) -> None:
+        """A genuinely authored `business.address` must not be discarded just because
+        `_global.json.address` is empty/absent (partial-migration state, Inv 5, or a
+        site that simply hasn't authored the visible text yet) -- there is nothing to
+        compare against, which is not the same as every field having drifted."""
+        graph, warnings = build_structured_data(
+            indexable_project,
+            {
+                "business": {
+                    "types": ["DaySpa"],
+                    "address": {
+                        "streetAddress": "1 Test Street",
+                        "addressLocality": "Testville",
+                        "postalCode": "TE1 1ST",
+                        "addressCountry": "GB",
+                    },
+                },
+                # no "address" key at all in _global.json
+            },
+        )
+        assert graph is not None
+        local_business = _local_business(graph)
+        assert local_business["address"] == {
+            "@type": "PostalAddress",
+            "streetAddress": "1 Test Street",
+            "addressLocality": "Testville",
+            "postalCode": "TE1 1ST",
+            "addressCountry": "GB",
+        }
+        assert warnings == []
+
+    def test_address_with_no_geographic_fields_is_omitted_and_warns(
+        self, indexable_project: ProjectConfig
+    ) -> None:
+        """A typo'd key (e.g. "street" instead of "streetAddress") or an address block
+        with only addressCountry authored must never silently emit a near-useless,
+        country-only PostalAddress -- it's flagged instead, same as any other malformed
+        authoring (never fabricated, per the module's own governing philosophy)."""
+        graph, warnings = build_structured_data(
+            indexable_project,
+            {
+                "business": {
+                    "types": ["DaySpa"],
+                    "address": {"street": "1 Test Street", "addressCountry": "GB"},
+                },
+                "address": "1 Test Street,<br>Testville,<br>TE1 1ST",
+            },
+        )
+        assert graph is not None
+        assert "address" not in _local_business(graph)
+        assert len(warnings) == 1
+        assert "streetAddress" in warnings[0]
+
     def test_visible_address_html_is_stripped_to_plain_text_on_degrade(
         self, indexable_project: ProjectConfig
     ) -> None:
@@ -427,6 +482,33 @@ class TestInjectStructuredData:
             "@graph": [{"name": '<Tom & "Jerry">'}],
         }
         inject_structured_data(soup, graph, file_label="pages/index.html")
+        assert _rendered_ld_json(soup) == graph
+
+    def test_script_tag_breakout_payload_cannot_escape_the_script(self) -> None:
+        """decisions/00139's registered follow-up: a value sourced from `_global.json`
+        (social links, phone, email, business.address.* -- none HTML-sanitized on the
+        way in, per `draft_sanitize.py`) containing a literal `</script>` must never be
+        able to break out of this `<script>` tag and inject an executing sibling
+        element -- on the public homepage AND the same-origin, authenticated
+        `/admin/preview/*` surface. `json.dumps`/BeautifulSoup do not escape this on
+        their own (`<script>` content is raw text, never HTML-entity-escaped on
+        serialization)."""
+        soup = BeautifulSoup("<html><head></head><body></body></html>", "html5lib")
+        payload = "</script><script>window.pwned=1</script>"
+        graph: JsonObject = {"@context": "https://schema.org", "@graph": [{"name": payload}]}
+        inject_structured_data(soup, graph, file_label="pages/index.html")
+
+        rendered = str(soup)
+        # The rendered HTML must contain exactly one <script type=ld+json> element and
+        # no injected sibling <script> -- reparsing the FULL document (not just this
+        # tag's own .string) is what actually proves the breakout never happened.
+        reparsed = BeautifulSoup(rendered, "html5lib")
+        scripts = reparsed.find_all("script")
+        assert len(scripts) == 1
+        assert scripts[0].get("type") == "application/ld+json"
+        # The value still round-trips to the exact original string once genuinely
+        # parsed as JSON -- the escaping is purely a serialization-safety measure,
+        # not a data-mangling one.
         assert _rendered_ld_json(soup) == graph
 
 

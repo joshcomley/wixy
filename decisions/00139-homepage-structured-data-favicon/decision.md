@@ -107,3 +107,42 @@ confidence 0.85) after live verification of the real deployed `_global.json`/`ab
   generic (not Cottage-Aesthetics-specific) allowlist, the same posture Inv 37's JSON path
   allowlist takes for exactly the same reason (an unbounded passthrough risks silently
   publishing an unrelated root file).
+
+## Addendum: graded-audit findings, fixed before merge (2026-08-13)
+
+The genuinely fresh opus-tier graded audit (once the audit-infra fault was fixed) found one
+critical and two medium/low findings, all fixed in the same PR before merge:
+
+- **CRITICAL — script-tag breakout XSS.** `inject_structured_data` assigned
+  `json.dumps(...)` output straight to `script.string`; neither `json.dumps` nor
+  BeautifulSoup escapes a `</script>` sequence inside `<script>` content (which is raw
+  text, never HTML-entity-escaped on serialization — entities aren't decoded inside
+  `<script>`, so escaping `<` as `&lt;` there would be actively wrong). Any `_global.json`
+  field feeding the graph (social links, phone, email, `business.address.*` — none
+  HTML-sanitized on the way in; only text-kind draft fields are per `draft_sanitize.py`,
+  and `is_safe_href`/Inv 29 checks URL *scheme* only) containing a literal `</script>`
+  could break out of the tag and inject an executing sibling `<script>`, reachable on both
+  the public homepage and the same-origin, authenticated `/admin/preview/*` surface. Fixed
+  with `_escape_for_script_tag`: `<`/`>`/`&` become `\uXXXX` JSON string escapes, valid
+  JSON that round-trips through `JSON.parse` back to the original character — changes
+  nothing about the *parsed* data, only how the raw HTML source tokenizes before any
+  script/JS context sees it. Verified red-then-green: a dedicated test
+  (`test_script_tag_breakout_payload_cannot_escape_the_script`) confirmed the breakout
+  really happened before the fix (reparsing the full document found 2 `<script>`
+  elements) and is closed after it (exactly 1).
+- **MEDIUM — a correctly-authored address was silently discarded when `_global.json`
+  had no visible `address` text at all.** The drift check treated "nothing to compare
+  against" (an empty visible string) the same as "every field drifted," which isn't the
+  same claim — this is explicitly a generic engine mechanism (Inv 5's partial-migration
+  tolerance already established this project can be mid-migration), so an authored
+  address with no visible text to check against should be trusted as-is, not discarded.
+  Fixed by only running the drift check when `visible_text` is non-empty.
+- **LOW — a typo'd or partial address key set (e.g. `street` instead of
+  `streetAddress`) silently produced a near-useless, country-only `PostalAddress` with
+  no warning.** Fixed: if none of the three geographic drift-checked fields
+  (`streetAddress`/`addressLocality`/`postalCode`) are populated, the address is omitted
+  entirely with a new warning naming the gap, rather than emitting a minimal node that
+  looks superficially valid but carries no real address information.
+- Also fixed the sonnet-senior rung's own finding: a stale docstring reference to a
+  non-existent `_check_address_drift` function name, corrected to name the actual
+  function (`_build_address`'s drift check).

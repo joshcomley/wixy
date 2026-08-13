@@ -20,7 +20,7 @@ Two deliberately narrow, ruled decisions this module encodes:
   `streetAddress`/`addressLocality`/`postalCode`/`addressCountry` fields are authored once,
   directly, by whoever can actually resolve the real-world addressing ambiguity (this project:
   Royal Mail post-town convention put `addressLocality` at "Kidderminster", not the village
-  "Hartlebury" the street line also names). `_check_address_drift` is the safety net for
+  "Hartlebury" the street line also names). `_build_address`'s drift check is the safety net for
   DIVERGENCE, not a substitute for correct authoring: it checks the authored street/locality/
   postcode still appear as substrings of the (HTML-stripped) visible `_global.json.address`
   text, and degrades to that plain string — plus a non-blocking `validate` warning — the
@@ -91,6 +91,23 @@ def build_structured_data(
     return {"@context": _SCHEMA_CONTEXT, "@graph": graph}, warnings
 
 
+def _escape_for_script_tag(json_text: str) -> str:
+    """Escape `<`, `>`, and `&` as `\\uXXXX` JSON string escapes so a value sourced from
+    `_global.json` (social links, phone, email, business.address.* — none of which are
+    HTML-sanitized on the way in; only text-kind draft fields are, per
+    `draft_sanitize.py`, and `is_safe_href`/Inv 29 checks URL *scheme* only) can never
+    contain a literal `</script>` that breaks the HTML parser out of this CDATA-like tag
+    and starts executing injected markup, on the public homepage AND the same-origin,
+    authenticated `/admin/preview/*` surface. `json.dumps` and BeautifulSoup do **not**
+    escape this on their own — `<script>` content is raw text, never HTML-entity-escaped
+    on serialization (escaping `<` as `&lt;` there would be wrong: browsers don't decode
+    entities inside `<script>`, so it would print literally instead of being interpreted).
+    A `\\uXXXX` escape is valid inside a JSON string and round-trips through `JSON.parse`
+    back to the original character — this changes nothing about the *parsed* JSON-LD data,
+    only how the raw HTML source can be tokenized before a script/JS context ever sees it."""
+    return json_text.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+
+
 def inject_structured_data(soup: BeautifulSoup, graph: JsonObject, *, file_label: str) -> None:
     """Appends the `<script type="application/ld+json">` tag. Caller's job to only call this
     for the homepage and only with a non-`None` graph (`build_structured_data` already
@@ -100,7 +117,8 @@ def inject_structured_data(soup: BeautifulSoup, graph: JsonObject, *, file_label
         raise BuildError("template has no <head>", location=file_label)
     script = soup.new_tag("script")
     script["type"] = "application/ld+json"
-    script.string = json.dumps(graph, indent=2, sort_keys=False, ensure_ascii=False)
+    json_text = json.dumps(graph, indent=2, sort_keys=False, ensure_ascii=False)
+    script.string = _escape_for_script_tag(json_text)
     head.append(script)
 
 
@@ -160,20 +178,37 @@ def _build_address(
     if not fields:
         return None, None
 
-    visible_text = _visible_address_text(global_content)
-    drifted = [
-        key
-        for key in _ADDRESS_DRIFT_CHECKED_FIELDS
-        if key in fields and fields[key] not in visible_text
-    ]
-    if drifted:
+    # A structured address with none of the geographic fields populated (e.g. a
+    # typo'd key like "street" instead of "streetAddress", or only addressCountry
+    # authored) is not a useful PostalAddress and very likely a mistake -- flag it
+    # rather than silently emitting a near-empty, country-only node.
+    if not any(key in fields for key in _ADDRESS_DRIFT_CHECKED_FIELDS):
         warning = (
-            "_global.json.business.address "
-            f"{', '.join(drifted)} not found in the visible _global.json.address text -- "
-            "structured data degraded to a plain string address; re-author business.address "
-            "(or the visible address) so they agree"
+            "_global.json.business.address has none of "
+            f"{', '.join(_ADDRESS_DRIFT_CHECKED_FIELDS)} populated -- check for a "
+            "typo'd key; structured address omitted"
         )
-        return (visible_text or None), warning
+        return None, warning
+
+    # No visible `_global.json.address` text to compare against (partial-migration
+    # state, Inv 5, or a site that simply hasn't authored one yet) means drift can't
+    # be detected either way -- trust the authored structured address as-is rather
+    # than treating "nothing to compare against" as if every field had drifted.
+    visible_text = _visible_address_text(global_content)
+    if visible_text:
+        drifted = [
+            key
+            for key in _ADDRESS_DRIFT_CHECKED_FIELDS
+            if key in fields and fields[key] not in visible_text
+        ]
+        if drifted:
+            warning = (
+                "_global.json.business.address "
+                f"{', '.join(drifted)} not found in the visible _global.json.address text -- "
+                "structured data degraded to a plain string address; re-author business.address "
+                "(or the visible address) so they agree"
+            )
+            return visible_text, warning
 
     return {"@type": "PostalAddress", **fields}, None
 
