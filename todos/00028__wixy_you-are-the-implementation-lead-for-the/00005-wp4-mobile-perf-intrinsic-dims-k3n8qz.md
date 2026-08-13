@@ -27,11 +27,19 @@ Branch `feat/img-intrinsic-dimensions` (off `origin/main`, independent of PR #20
   audit-infra fault (poisoned senior-sonnet relations credential) is fixed. See
   handover 2608130221 Blockers section for full root-cause writeup.
 
-## 4A, 4C, 4E (site-repo: reveal-gating fix, lazy/async gallery, fonts) — NOT STARTED
+## 4A, 4C, 4E (site-repo: reveal-gating fix, lazy/async gallery, fonts) — DISPATCHED, in flight
 
-To be dispatched to the reused cottage-aesthetics-preview session (workspace #18,
-session e46c4302) once it's free (it just finished WP3, merged PR #44) and this
-engine PR is at a stable point to verify against.
+Dispatched via peer_send to the reused cottage-aesthetics-preview session
+(workspace #18, session e46c4302) after it finished WP3 (merged PR #44). Full
+brief covered: 4A (remove reveal-gating from homepage hero/H1, content visible
+by default, test no-JS/reduced-motion/keyboard), 4C (loading="lazy" +
+decoding="async" on gallery tiles + offscreen before/after slider images,
+never lazy-load the true LCP image, verify slider/filter/lightbox still work),
+4E (measure before changing font weights/families, prove unused before
+removing, don't self-host without a clean licensing/subsetting/cache
+investigation). Told: independent of PR #205 (4A/4C/4E don't need 4B's
+width/height to work), one combined PR for all three, brief's own acceptance
+criteria (LCP/transfer/CLS targets) apply.
 
 ## 4D (reduce image bytes) — NOT STARTED, evidence-gated
 
