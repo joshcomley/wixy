@@ -535,3 +535,49 @@ using the actual deployed `cottage-aesthetics-preview` values), `builder/tests/t
 *Exception:* none — a future non-UK project needing `addressCountry` verified against visible
 text would need its own decision, not a quiet change to this check.
 
+### Inv 39 — `data-wx-img` gets intrinsic `width`/`height`, never overriding an authored value
+`builder/bindings.py:_apply_img` sniffs a bound `<img>`'s intrinsic pixel dimensions from the
+real on-disk file via `builder.imagesize.probe_image_size`, the same stdlib, never-raising,
+Pillow-free JPEG/PNG/GIF/WebP header sniffer `templates.py`'s `og:image:width`/`height` already
+uses (decisions/00134) — both now share one `is_safe_relative_src` safety gate, moved into
+`imagesize.py` so it isn't a driftable per-caller copy (decisions/00012's own precedent). The
+sniff is **skipped, never a build failure**, whenever: `site_root` is `None` (no disk context —
+`apply_bindings`'s new keyword defaults to this for any caller not passing one); the resolved
+`src` is unsafe to join onto `site_root` (`is_safe_relative_src` rejects a `/`-prefixed path —
+which covers every draft-staged src, since `docs/ai/media.md` fixes that shape as always
+`/admin/draft-media/<name>` — a remote `http(s):`/other-scheme URL, a `..` traversal segment,
+or a Windows drive/UNC path); or the sniff itself returns `None` (missing file, unrecognized
+format, malformed header). **A `width`/`height` already present on that specific template
+`<img>` tag is never overwritten** — an intentional per-slot dimension override (e.g. a
+fixed-aspect-ratio gallery tile always fed a similarly-cropped image) always wins over the
+sniff, checked before any disk access is attempted; this covers a template-hardcoded value
+AND a `data-wx-attr`-authored one, since `_apply_scalar` deliberately runs `data-wx-attr`
+*before* `data-wx-img` for exactly this reason (the reverse order would let `_apply_img`
+sniff+set both width and height first, then `data-wx-attr` overwrite only width afterward,
+pairing an authored width with a sniffed height — a real bug caught by this invariant's own
+graded audit). Each `data-wx-list` clone of an `<img>` template is walked (and therefore
+sniffed) independently — no caching/sharing of a probed result across clones, since different
+array items bind different `src` values. This applies identically in `publish` and `preview`
+mode (`validate_site` also passes `site_root` so a draft/staged page gets the same coverage a
+real build would, though a draft src is always skipped by the same `/`-prefixed rejection
+above). **A sniffed `height` is paired with a mandatory CSS guard**, since HTML `width`/
+`height` are CSS presentational hints: `templates.py:apply_head` unconditionally injects
+`<style data-wx-guard="img-dim">:where(img[width][height]){height:auto}</style>` into every
+page's `<head>` (zero specificity, so a real site-authored height rule still wins outright) —
+without it, a site whose CSS constrains only `width` on an image (no `height` rule at all)
+would have the browser stretch that image to the sniffed height instead of preserving its
+aspect ratio. This lives in `apply_head`, not appended to the `theme.css` build artifact,
+specifically so it is atomic with the width/height attributes in BOTH `build_site` (publish)
+and `wixy_server/routes_preview.py`'s live admin preview (which calls `render_page` directly,
+independent of any `build_site`/Publish cycle) and independent of whether the project has a
+theme at all (Inv 5's partial-migration tolerance).
+*Enforced by:* `builder/tests/test_bindings.py` (`TestImgBindingIntrinsicDimensions`: real
+JPEG/PNG/GIF/WebP on disk, missing file, `site_root=None`, authored-dimension preservation,
+remote/draft-media/traversal-src skip, preview mode, per-list-clone independence, a
+`data-wx-attr`-authored width leaving height unset), `builder/tests/test_imagesize.py`
+(`TestIsSafeRelativeSrc`, the shared gate's own unit tests), `builder/tests/test_render.py`
+(`TestImgDimensionLayoutGuard`: the guard is present unconditionally, not duplicated across
+repeated `apply_head` calls, and reaches real `render_page` output).
+*Exception:* none — a future project needing a different override rule (e.g. always
+re-sniffing even over an authored value) would need its own decision, not a quiet change here.
+

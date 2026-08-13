@@ -15,12 +15,14 @@ from __future__ import annotations
 import copy
 import re
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Literal
 
 from bs4 import BeautifulSoup, Tag
 
 from builder.content import dotted_get
 from builder.errors import BuildError, ValidationResult
+from builder.imagesize import is_safe_relative_src, probe_image_size
 from builder.jsontypes import JsonObject, JsonValue
 from builder.markdown_inline import render_markdown_inline
 from builder.sanitize import is_safe_href, sanitize_rich_lite
@@ -85,13 +87,27 @@ def apply_bindings(
     mode: Mode,
     file_label: str,
     sink: ValidationResult | None = None,
+    site_root: Path | None = None,
 ) -> None:
-    """Apply every `data-wx-*` binding within `root` (typically a page's `<body>`)."""
-    _walk(root, ctx, mode=mode, file_label=file_label, sink=sink)
+    """Apply every `data-wx-*` binding within `root` (typically a page's `<body>`).
+
+    `site_root` is the on-disk site checkout to resolve a `data-wx-img` binding's `src`
+    against for an intrinsic width/height sniff (decisions/00140, the same on-disk-sniff
+    precedent as `templates.py`'s `og:image:width`/`height`, decisions/00134) — `None` skips
+    the sniff entirely (no disk context), as does a remote/absolute/path-traversing src
+    (`is_safe_relative_src`) or an explicitly authored `width`/`height` already on the tag.
+    """
+    _walk(root, ctx, mode=mode, file_label=file_label, sink=sink, site_root=site_root)
 
 
 def _walk(
-    el: Tag, ctx: ResolveContext, *, mode: Mode, file_label: str, sink: ValidationResult | None
+    el: Tag,
+    ctx: ResolveContext,
+    *,
+    mode: Mode,
+    file_label: str,
+    sink: ValidationResult | None,
+    site_root: Path | None,
 ) -> None:
     if_expr = el.get(ATTR_IF)
     if isinstance(if_expr, str):
@@ -106,13 +122,15 @@ def _walk(
 
     list_key = el.get(ATTR_LIST)
     if isinstance(list_key, str):
-        _expand_list(el, list_key, ctx, mode=mode, file_label=file_label, sink=sink)
+        _expand_list(
+            el, list_key, ctx, mode=mode, file_label=file_label, sink=sink, site_root=site_root
+        )
         return
 
-    _apply_scalar(el, ctx, file_label=file_label, sink=sink)
+    _apply_scalar(el, ctx, file_label=file_label, sink=sink, site_root=site_root)
 
     for child in list(el.find_all(recursive=False)):
-        _walk(child, ctx, mode=mode, file_label=file_label, sink=sink)
+        _walk(child, ctx, mode=mode, file_label=file_label, sink=sink, site_root=site_root)
 
 
 def _evaluate_if(
@@ -136,6 +154,7 @@ def _expand_list(
     mode: Mode,
     file_label: str,
     sink: ValidationResult | None,
+    site_root: Path | None,
 ) -> None:
     found, value = resolve_key(ctx, list_key)
     if not found or not isinstance(value, list):
@@ -171,20 +190,36 @@ def _expand_list(
         item_ctx = replace(ctx, item=item_value)
         if hidden:
             clone[ATTR_ITEM_HIDDEN] = "1"
-        _walk(clone, item_ctx, mode=mode, file_label=file_label, sink=sink)
+        _walk(clone, item_ctx, mode=mode, file_label=file_label, sink=sink, site_root=site_root)
         container.append(clone)
 
 
 def _apply_scalar(
-    el: Tag, ctx: ResolveContext, *, file_label: str, sink: ValidationResult | None
+    el: Tag,
+    ctx: ResolveContext,
+    *,
+    file_label: str,
+    sink: ValidationResult | None,
+    site_root: Path | None,
 ) -> None:
     text_key = el.get(ATTR_TEXT)
     if isinstance(text_key, str):
         _apply_text(el, ctx, text_key, file_label=file_label, sink=sink)
 
+    # decisions/00140: data-wx-attr runs BEFORE data-wx-img so a template that
+    # authors e.g. width via data-wx-attr="width:.someKey" is visible to
+    # _apply_img's "already has width/height, don't sniff" check -- the reverse
+    # order would let _apply_img sniff+set both width and height first, then have
+    # data-wx-attr overwrite only width afterward, pairing an authored width with
+    # a sniffed height (a real risk of the exact aspect-ratio distortion Inv 39
+    # guards against, just via a different binding kind).
+    attr_spec = el.get(ATTR_ATTR)
+    if isinstance(attr_spec, str):
+        _apply_attrs(el, ctx, attr_spec, file_label=file_label, sink=sink)
+
     img_key = el.get(ATTR_IMG)
     if isinstance(img_key, str):
-        _apply_img(el, ctx, img_key, file_label=file_label, sink=sink)
+        _apply_img(el, ctx, img_key, file_label=file_label, sink=sink, site_root=site_root)
 
     href_key = el.get(ATTR_HREF)
     if isinstance(href_key, str):
@@ -193,10 +228,6 @@ def _apply_scalar(
     bg_key = el.get(ATTR_BG)
     if isinstance(bg_key, str):
         _apply_bg(el, ctx, bg_key, file_label=file_label, sink=sink)
-
-    attr_spec = el.get(ATTR_ATTR)
-    if isinstance(attr_spec, str):
-        _apply_attrs(el, ctx, attr_spec, file_label=file_label, sink=sink)
 
 
 def _apply_text(
@@ -230,7 +261,13 @@ def _apply_text(
 
 
 def _apply_img(
-    el: Tag, ctx: ResolveContext, key: str, *, file_label: str, sink: ValidationResult | None
+    el: Tag,
+    ctx: ResolveContext,
+    key: str,
+    *,
+    file_label: str,
+    sink: ValidationResult | None,
+    site_root: Path | None,
 ) -> None:
     found, value = resolve_key(ctx, key)
     if not found or not isinstance(value, dict) or "src" not in value:
@@ -243,6 +280,23 @@ def _apply_img(
         return
     el["src"] = src
     el["alt"] = alt
+
+    # decisions/00140: intrinsic width/height, so the browser can reserve layout space
+    # before the image loads (CLS). A template-authored width/height on this exact tag
+    # wins outright — never second-guessed, since a fixed-aspect-ratio slot may be sized
+    # deliberately regardless of whichever image ends up bound there. `site_root` is
+    # `None` for callers with no disk context (mirrors templates.py's og:image sniff);
+    # `is_safe_relative_src` rejects a remote (`http(s):`), draft-staged
+    # (`/admin/draft-media/...`), or path-traversing src on its own — no separate
+    # "draft" or "preview" special-case needed here (docs/ai/media.md: a draft src is
+    # always `/`-prefixed, which is already an unsafe-to-join shape).
+    if site_root is not None and not (el.has_attr("width") or el.has_attr("height")):
+        if is_safe_relative_src(src):
+            dims = probe_image_size(site_root / src)
+            if dims is not None:
+                width, height = dims
+                el["width"] = str(width)
+                el["height"] = str(height)
 
 
 def _apply_href(

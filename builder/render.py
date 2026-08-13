@@ -149,7 +149,7 @@ def render_page(
     soup, body, file_label = prepare_page_body(source, slug)
 
     ctx = ResolveContext(page=page_content, glob=resolved_global_content(source))
-    apply_bindings(body, ctx, mode=mode, file_label=file_label, sink=sink)
+    apply_bindings(body, ctx, mode=mode, file_label=file_label, sink=sink, site_root=source.root)
     _mark_nav_active(body, page_url(slug))
 
     meta_raw = page_content.get("meta")
