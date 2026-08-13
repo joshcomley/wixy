@@ -57,12 +57,18 @@ Then per page:
    `<!-- wx:partial … -->` markers.
 3. `ctx = ResolveContext(page, glob=resolved_global_content(source))` —
    `resolved_global_content` copies `_global` and injects the computed `nav` (`nav.build_nav`).
-4. `bindings.apply_bindings(body, ctx, mode, sink)` → recursive `_walk`, per element in a
-   **fixed order**: (a) `data-wx-if` (`_evaluate_if`) — publish extracts a false branch and
-   stops walking it; preview keeps it, marks `data-wx-hidden="1"`, still walks it; (b)
-   `data-wx-list` (`_expand_list`) — extract the `data-wx-list-item` template, deep-copy per
-   array element with `item` bound, append clones; (c) `_apply_scalar` runs text/img/href/bg/
-   attr; (d) recurse into direct children.
+4. `bindings.apply_bindings(body, ctx, mode, sink, site_root)` → recursive `_walk`, per
+   element in a **fixed order**: (a) `data-wx-if` (`_evaluate_if`) — publish extracts a false
+   branch and stops walking it; preview keeps it, marks `data-wx-hidden="1"`, still walks it;
+   (b) `data-wx-list` (`_expand_list`) — extract the `data-wx-list-item` template, deep-copy
+   per array element with `item` bound, append clones (each clone's own bindings, including
+   `data-wx-img`, are re-walked independently — never shared/cached across clones); (c)
+   `_apply_scalar` runs text/img/href/bg/attr; (d) recurse into direct children. `_apply_img`
+   (decisions/00140) additionally sniffs intrinsic `width`/`height` for a bound `<img>` via
+   `builder.imagesize.probe_image_size`, using the exact same `is_safe_relative_src` gate and
+   `site_root`-is-`None`/missing-file/malformed-header skip behavior as the `og:image` sniff
+   below — except it never overwrites a `width`/`height` already authored on that specific
+   template tag (an intentional, per-slot override always wins).
 5. `_mark_nav_active(body, page_url(slug))` marks the active link in **every**
    `data-wx-list="@nav"` container (desktop + mobile — decisions/00007).
 6. `templates.apply_head`: `<title>`/OG/description/fonts-link/`robots`/canonical `<link>`

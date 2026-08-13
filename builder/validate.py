@@ -68,7 +68,14 @@ def _validate_pages(source: SiteSource, result: ValidationResult) -> None:
                         file=f"content/{slug}.json",
                     )
             ctx = ResolveContext(page=page_content, glob=resolved_global_content(source))
-            apply_bindings(body, ctx, mode="preview", file_label=file_label, sink=result)
+            apply_bindings(
+                body,
+                ctx,
+                mode="preview",
+                file_label=file_label,
+                sink=result,
+                site_root=source.root,
+            )
         except BuildError as exc:
             result.add("build-error", str(exc), file=file_label)
 

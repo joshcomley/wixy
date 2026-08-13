@@ -486,3 +486,31 @@ trailing-newline/CRLF/whitespace-variant, duplicate-key, Windows-reserved-name, 
 *Exception:* none — a future relaxation of the grammar (e.g. multi-segment paths) must keep
 the same reject-don't-normalize discipline and the same `fullmatch` requirement.
 
+### Inv 39 — `data-wx-img` gets intrinsic `width`/`height`, never overriding an authored value
+`builder/bindings.py:_apply_img` sniffs a bound `<img>`'s intrinsic pixel dimensions from the
+real on-disk file via `builder.imagesize.probe_image_size`, the same stdlib, never-raising,
+Pillow-free JPEG/PNG/GIF/WebP header sniffer `templates.py`'s `og:image:width`/`height` already
+uses (decisions/00134) — both now share one `is_safe_relative_src` safety gate, moved into
+`imagesize.py` so it isn't a driftable per-caller copy (decisions/00012's own precedent). The
+sniff is **skipped, never a build failure**, whenever: `site_root` is `None` (no disk context —
+`apply_bindings`'s new keyword defaults to this for any caller not passing one); the resolved
+`src` is unsafe to join onto `site_root` (`is_safe_relative_src` rejects a `/`-prefixed path —
+which covers every draft-staged src, since `docs/ai/media.md` fixes that shape as always
+`/admin/draft-media/<name>` — a remote `http(s):`/other-scheme URL, a `..` traversal segment,
+or a Windows drive/UNC path); or the sniff itself returns `None` (missing file, unrecognized
+format, malformed header). **A `width`/`height` already present on that specific template
+`<img>` tag is never overwritten** — an intentional per-slot dimension override (e.g. a
+fixed-aspect-ratio gallery tile always fed a similarly-cropped image) always wins over the
+sniff, checked before any disk access is attempted. Each `data-wx-list` clone of an `<img>`
+template is walked (and therefore sniffed) independently — no caching/sharing of a probed
+result across clones, since different array items bind different `src` values. This applies
+identically in `publish` and `preview` mode (`validate_site` also passes `site_root` so a
+draft/staged page gets the same coverage a real build would, though a draft src is always
+skipped by the same `/`-prefixed rejection above).
+*Enforced by:* `builder/tests/test_bindings.py` (`TestImgBindingIntrinsicDimensions`: real
+JPEG/PNG/GIF/WebP on disk, missing file, `site_root=None`, authored-dimension preservation,
+remote/draft-media/traversal-src skip, preview mode, per-list-clone independence),
+`builder/tests/test_imagesize.py` (`TestIsSafeRelativeSrc`, the shared gate's own unit tests).
+*Exception:* none — a future project needing a different override rule (e.g. always
+re-sniffing even over an authored value) would need its own decision, not a quiet change here.
+

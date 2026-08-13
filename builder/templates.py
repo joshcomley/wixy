@@ -13,7 +13,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup, Comment, Tag
 
 from builder.errors import BuildError
-from builder.imagesize import probe_image_size
+from builder.imagesize import is_safe_relative_src, probe_image_size
 from builder.jsontypes import JsonObject
 
 PARTIAL_NAMES = ("header", "footer", "booking-modal")
@@ -115,19 +115,6 @@ def _find_or_create_link_rel(soup: BeautifulSoup, head: Tag, rel: str) -> Tag:
     return new_tag
 
 
-def _is_safe_relative_src(src: str) -> bool:
-    """Whether `src` is safe to join onto `site_root` for an on-disk dimension sniff —
-    repo-relative, no leading `/` or `\\`, no drive letter (`C:`), no `..` segment (either
-    slash direction). A `/`-prefixed, drive-rooted, or path-traversing src still gets its
-    (unmodified) `og:image` tag; this only gates the WIDTH/HEIGHT sniff, which has to touch
-    the filesystem — and `Path.joinpath` treats an absolute-looking right-hand segment (a
-    leading slash, or a Windows drive letter) as REPLACING `site_root` entirely rather than
-    joining under it, so those must be rejected explicitly, not just `..`."""
-    if src.startswith(("/", "\\")) or ":" in src:
-        return False
-    return ".." not in src.replace("\\", "/").split("/")
-
-
 def apply_head(
     soup: BeautifulSoup,
     *,
@@ -193,7 +180,7 @@ def apply_head(
         if isinstance(alt, str) and alt != "":
             _find_or_create_meta_property(soup, head, "og:image:alt")["content"] = alt
 
-        if site_root is not None and _is_safe_relative_src(og_image_src):
+        if site_root is not None and is_safe_relative_src(og_image_src):
             dims = probe_image_size(site_root / og_image_src)
             if dims is not None:
                 width, height = dims

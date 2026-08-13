@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from bs4 import BeautifulSoup, Tag
+from PIL import Image
 
 from builder.bindings import ResolveContext, apply_bindings, is_wx_falsy, resolve_key
 from builder.errors import BuildError, ValidationResult
@@ -142,6 +145,115 @@ class TestImgBinding:
         ctx = ResolveContext(page={"hero": {"bg": "not-an-object"}}, glob={})
         with pytest.raises(BuildError):
             apply_bindings(body, ctx, mode="publish", file_label="test")
+
+
+class TestImgBindingIntrinsicDimensions:
+    """decisions/00140 — width/height sniffed from the real on-disk file the same way
+    `templates.py`'s `og:image:width`/`height` already does (decisions/00134)."""
+
+    def _bound_img(self, tmp_path: Path, *, src: str, extra_attrs: str = "") -> Tag:
+        body = _body(f'<img data-wx-img="hero.bg" src="" alt=""{extra_attrs}>')
+        ctx = ResolveContext(page={"hero": {"bg": {"src": src, "alt": "X"}}}, glob={})
+        apply_bindings(body, ctx, mode="publish", file_label="test", site_root=tmp_path)
+        return _find(body, "img")
+
+    @pytest.mark.parametrize(
+        ("filename", "format_name"),
+        [
+            ("x.jpg", "JPEG"),
+            ("x.png", "PNG"),
+            ("x.gif", "GIF"),
+            ("x.webp", "WEBP"),
+        ],
+    )
+    def test_sets_dims_for_real_local_image(
+        self, tmp_path: Path, filename: str, format_name: str
+    ) -> None:
+        images_dir = tmp_path / "images"
+        images_dir.mkdir()
+        Image.new("RGB", (321, 117), (10, 20, 30)).save(images_dir / filename, format_name)
+        img = self._bound_img(tmp_path, src=f"images/{filename}")
+        assert img["width"] == "321"
+        assert img["height"] == "117"
+
+    def test_skips_dims_when_file_missing(self, tmp_path: Path) -> None:
+        img = self._bound_img(tmp_path, src="images/missing.jpg")
+        assert not img.has_attr("width")
+        assert not img.has_attr("height")
+
+    def test_skips_dims_when_site_root_none(self) -> None:
+        body = _body('<img data-wx-img="hero.bg" src="" alt="">')
+        ctx = ResolveContext(page={"hero": {"bg": {"src": "images/x.jpg", "alt": "X"}}}, glob={})
+        apply_bindings(body, ctx, mode="publish", file_label="test")
+        img = _find(body, "img")
+        assert not img.has_attr("width")
+        assert not img.has_attr("height")
+
+    def test_preserves_explicitly_authored_dimensions(self, tmp_path: Path) -> None:
+        """A template-hardcoded width/height on this exact tag wins outright, even
+        though a real, differently-sized file resolves on disk — never second-guessed
+        (the brief's own "preserve explicitly authored dimensions")."""
+
+        images_dir = tmp_path / "images"
+        images_dir.mkdir()
+        Image.new("RGB", (999, 888), (10, 20, 30)).save(images_dir / "x.jpg", "JPEG")
+        img = self._bound_img(tmp_path, src="images/x.jpg", extra_attrs=' width="40" height="30"')
+        assert img["width"] == "40"
+        assert img["height"] == "30"
+
+    @pytest.mark.parametrize(
+        "src",
+        [
+            "https://example.com/x.jpg",
+            "/admin/draft-media/ab12cd34-x.jpg",
+            "../x.jpg",
+            "images\\..\\..\\secret.jpg",
+            "C:\\Windows\\win.ini",
+        ],
+    )
+    def test_skips_dims_for_unsafe_src(self, tmp_path: Path, src: str) -> None:
+        img = self._bound_img(tmp_path, src=src)
+        assert not img.has_attr("width")
+        assert not img.has_attr("height")
+
+    def test_dims_applied_in_preview_mode_too(self, tmp_path: Path) -> None:
+
+        images_dir = tmp_path / "images"
+        images_dir.mkdir()
+        Image.new("RGB", (50, 25), (10, 20, 30)).save(images_dir / "x.jpg", "JPEG")
+        body = _body('<img data-wx-img="hero.bg" src="" alt="">')
+        ctx = ResolveContext(page={"hero": {"bg": {"src": "images/x.jpg", "alt": "X"}}}, glob={})
+        apply_bindings(body, ctx, mode="preview", file_label="test", site_root=tmp_path)
+        img = _find(body, "img")
+        assert img["width"] == "50"
+        assert img["height"] == "25"
+
+    def test_each_list_clone_gets_its_own_independently_probed_dims(self, tmp_path: Path) -> None:
+        """A `data-wx-list` clone's img binding must be re-probed per clone, never
+        cached/shared from the template's single original element."""
+
+        images_dir = tmp_path / "images"
+        images_dir.mkdir()
+        Image.new("RGB", (100, 50), (0, 0, 0)).save(images_dir / "a.jpg", "JPEG")
+        Image.new("RGB", (200, 80), (0, 0, 0)).save(images_dir / "b.jpg", "JPEG")
+        html = (
+            '<ul data-wx-list="items"><li data-wx-list-item>'
+            '<img data-wx-img=".pic" src="" alt="">'
+            "</li></ul>"
+        )
+        body = _body(html)
+        ctx = ResolveContext(
+            page={
+                "items": [
+                    {"pic": {"src": "images/a.jpg", "alt": "A"}},
+                    {"pic": {"src": "images/b.jpg", "alt": "B"}},
+                ]
+            },
+            glob={},
+        )
+        apply_bindings(body, ctx, mode="publish", file_label="test", site_root=tmp_path)
+        imgs = body.find_all("img")
+        assert [(i["width"], i["height"]) for i in imgs] == [("100", "50"), ("200", "80")]
 
 
 class TestHrefBinding:

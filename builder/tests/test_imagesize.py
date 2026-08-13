@@ -12,7 +12,7 @@ import struct
 import zlib
 from pathlib import Path
 
-from builder.imagesize import probe_image_size
+from builder.imagesize import is_safe_relative_src, probe_image_size
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 MINI_SITE_IMAGES = FIXTURES_DIR / "mini-site" / "images"
@@ -212,3 +212,45 @@ class TestGeneral:
         assert MINI_SITE_IMAGES.joinpath("hero.jpg").read_bytes() == b"placeholder"
         assert probe_image_size(MINI_SITE_IMAGES / "hero.jpg") is None
         assert probe_image_size(MINI_SITE_IMAGES / "icon.jpg") is None
+
+
+class TestIsSafeRelativeSrc:
+    """`is_safe_relative_src` gates both `templates.py`'s `og:image` dims sniff
+    (decisions/00134) and `bindings.py`'s `data-wx-img` dims sniff (decisions/00140) —
+    one shared implementation, tested once here rather than per caller."""
+
+    def test_plain_relative_path_is_safe(self) -> None:
+        assert is_safe_relative_src("images/x.jpg") is True
+
+    def test_nested_relative_path_is_safe(self) -> None:
+        assert is_safe_relative_src("images/sub/x.jpg") is True
+
+    def test_leading_slash_is_unsafe(self) -> None:
+        assert is_safe_relative_src("/admin/draft-media/ab12cd34-x.jpg") is False
+
+    def test_leading_backslash_is_unsafe(self) -> None:
+        assert is_safe_relative_src("\\windows\\win.ini") is False
+
+    def test_drive_letter_is_unsafe(self) -> None:
+        assert is_safe_relative_src("C:\\Windows\\win.ini") is False
+
+    def test_url_scheme_is_unsafe(self) -> None:
+        assert is_safe_relative_src("https://example.com/x.jpg") is False
+
+    def test_unc_path_is_unsafe(self) -> None:
+        assert is_safe_relative_src("\\\\server\\share\\x.jpg") is False
+
+    def test_forward_slash_path_traversal_is_unsafe(self) -> None:
+        assert is_safe_relative_src("../x.jpg") is False
+
+    def test_backslash_path_traversal_is_unsafe(self) -> None:
+        assert is_safe_relative_src("images\\..\\..\\secret.jpg") is False
+
+    def test_dotdot_as_a_full_segment_mid_path_is_unsafe(self) -> None:
+        assert is_safe_relative_src("images/../secret.jpg") is False
+
+    def test_dotdot_as_a_substring_not_a_full_segment_is_safe(self) -> None:
+        """`".."` must be rejected only as a whole path SEGMENT — a filename that
+        merely contains the two characters (e.g. a literal `"..jpg"` component) is a
+        legitimate relative path, not a traversal attempt."""
+        assert is_safe_relative_src("images/foo..jpg") is True

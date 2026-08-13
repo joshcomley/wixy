@@ -21,6 +21,22 @@ _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 _WEBP_VP8_START_CODE = b"\x9d\x01\x2a"
 
 
+def is_safe_relative_src(src: str) -> bool:
+    """Whether `src` is safe to join onto a `site_root` for an on-disk dimension sniff —
+    repo-relative, no leading `/` or `\\`, no drive letter (`C:`), no `..` segment (either
+    slash direction). A `/`-prefixed, drive-rooted, or path-traversing src still gets its
+    (unmodified) rendered tag/attribute; this only gates a WIDTH/HEIGHT sniff, which has to
+    touch the filesystem — and `Path.joinpath` treats an absolute-looking right-hand segment
+    (a leading slash, or a Windows drive letter) as REPLACING `site_root` entirely rather than
+    joining under it, so those must be rejected explicitly, not just `..`. Shared by
+    `templates.py` (og:image dims, decisions/00134) and `bindings.py` (data-wx-img dims,
+    decisions/00140) — one gate, not a driftable copy per caller (decisions/00012's own
+    precedent)."""
+    if src.startswith(("/", "\\")) or ":" in src:
+        return False
+    return ".." not in src.replace("\\", "/").split("/")
+
+
 def probe_image_size(path: Path) -> tuple[int, int] | None:
     """Return `(width, height)` in pixels, or `None` if the file is missing, unreadable,
     an unrecognized format, or its header is truncated/malformed. Never raises — a build
