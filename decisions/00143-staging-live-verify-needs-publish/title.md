@@ -1,0 +1,1 @@
+Slots-deploying wixy engine code does NOT re-materialize ca.cinnamons.uk's static build (robots.txt/sitemap.xml/per-page noindex) — only a Publish does; this blocks live-verification of WP1-WP5 until the owner presses Publish
