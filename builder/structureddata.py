@@ -175,13 +175,14 @@ def _build_address(
         value = structured.get(key)
         if isinstance(value, str) and value != "":
             fields[key] = value
-    if not fields:
-        return None, None
-
-    # A structured address with none of the geographic fields populated (e.g. a
-    # typo'd key like "street" instead of "streetAddress", or only addressCountry
-    # authored) is not a useful PostalAddress and very likely a mistake -- flag it
-    # rather than silently emitting a near-empty, country-only node.
+    # A structured address with none of the geographic fields populated -- every
+    # key typo'd (fields ends up empty), a typo'd key like "street" instead of
+    # "streetAddress", or only addressCountry authored -- is not a useful
+    # PostalAddress and very likely a mistake; flag it rather than silently doing
+    # nothing or emitting a near-empty, country-only node. `structured` being
+    # entirely absent (checked above, `not isinstance(structured, dict)`) is the
+    # only case that stays silent -- an authored-but-unrecognized address dict
+    # always warns.
     if not any(key in fields for key in _ADDRESS_DRIFT_CHECKED_FIELDS):
         warning = (
             "_global.json.business.address has none of "

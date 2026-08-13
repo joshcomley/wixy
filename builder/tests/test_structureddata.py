@@ -331,6 +331,27 @@ class TestAddress:
         assert len(warnings) == 1
         assert "streetAddress" in warnings[0]
 
+    def test_address_with_every_key_typo_d_is_omitted_and_warns(
+        self, indexable_project: ProjectConfig
+    ) -> None:
+        """The all-keys-typo'd case (`fields` ends up completely empty, not just
+        missing the geographic ones) must warn too -- an authored-but-unrecognized
+        `business.address` dict is never silently dropped without a diagnostic."""
+        graph, warnings = build_structured_data(
+            indexable_project,
+            {
+                "business": {
+                    "types": ["DaySpa"],
+                    "address": {"street": "1 Test Street", "town": "Testville"},
+                },
+                "address": "1 Test Street,<br>Testville,<br>TE1 1ST",
+            },
+        )
+        assert graph is not None
+        assert "address" not in _local_business(graph)
+        assert len(warnings) == 1
+        assert "streetAddress" in warnings[0]
+
     def test_visible_address_html_is_stripped_to_plain_text_on_degrade(
         self, indexable_project: ProjectConfig
     ) -> None:

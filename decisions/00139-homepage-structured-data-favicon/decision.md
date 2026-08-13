@@ -146,3 +146,17 @@ critical and two medium/low findings, all fixed in the same PR before merge:
 - Also fixed the sonnet-senior rung's own finding: a stale docstring reference to a
   non-existent `_check_address_drift` function name, corrected to name the actual
   function (`_build_address`'s drift check).
+
+**Round 3, one narrow residual re-found by the re-audit against the round-2 fix:** the
+F3 fix (above) sat behind a pre-existing `if not fields: return None, None` early
+return — so an address dict with **every** key typo'd (`fields` ends up completely
+empty, not just missing the three geographic ones) still returned silently with no
+warning, unlike the partial-typo case (e.g. `street` + `addressCountry`) the round-2
+fix already covered. Not a regression from round 2, an untouched pre-existing gap the
+re-audit's harder variants caught. Fixed by removing that early return — the later
+"none of the geographic fields populated" check already covers the fully-empty case
+correctly (an empty `fields` trivially satisfies `not any(...)`), so the two checks
+collapse into one: `structured` being entirely absent stays silent (nothing was
+authored), any authored-but-unrecognized address dict — partial or total — now warns.
+New test: `test_address_with_every_key_typo_d_is_omitted_and_warns`, verified
+red-then-green.
