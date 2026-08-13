@@ -507,6 +507,34 @@ pure-function unit test, plus integration coverage on both `indexable` states.
 deliberate, explicit addition to the allowlist (and decisions/00137), never an automatic
 consequence of a route merely being public.
 
+### Inv 38 — Homepage JSON-LD: generic mechanics, site-authored facts, never engine-parsed
+`builder/structureddata.py` emits `WebSite` + an optional `LocalBusiness`-family node as one
+`<script type="application/ld+json">` on the homepage (`slug == "index"`) only, and only when
+`indexable: true` — a non-indexable build emits nothing here at all (Inv 35's own "staging
+emits nothing" precedent, not a noindex-flagged version). `WebSite` needs only the registry
+(`project.name`/`domain`); `LocalBusiness` needs the new, optional `_global.json.business`
+block (spec/02-content-model.md §7) — absent or malformed means no `LocalBusiness` node, never
+a fabricated one (Inv 5). `business.types` (the `@type` array) and `business.address`
+(a structured `PostalAddress`) are **site-authored, never engine-parsed** from the free-text,
+HTML-bearing `_global.json.address` display string — that display shape has already drifted
+once in this project (decisions/00139), so no parser could be trusted to stay correct. A
+build-time substring check degrades a drifted `business.address` field to the plain visible
+string plus a non-blocking `validate` warning (`ValidationResult.warnings`, decisions/00139) —
+`addressCountry` is excluded from that check since a UK-local address never displays "GB" on
+the page. Opening hours reuse `_global.json.hours[]` directly via `re.fullmatch` against the
+exact "HH:MM – HH:MM" shape (en dash) — any open day that doesn't match aborts the WHOLE
+`openingHoursSpecification`, never just that one day (a partial emission would assert a false
+closure for the day that failed to parse). The favicon itself is site-repo work (a root-level
+image + hand-authored `<link rel="icon">` tags, the same convention `theme.css`'s own
+`<link rel="stylesheet">` uses) — the only engine piece is a tiny, generic, explicit root-file
+passthrough allowlist in `build_site` (`favicon.ico`, `favicon.svg`, `apple-touch-icon.png`).
+*Enforced by:* `builder/tests/test_structureddata.py` (unit + a real-production-data scenario
+using the actual deployed `cottage-aesthetics-preview` values), `builder/tests/test_build.py`
+(full-build integration: homepage-only, indexable-gated, favicon passthrough),
+`builder/tests/test_validate.py` (the drift warning).
+*Exception:* none — a future non-UK project needing `addressCountry` verified against visible
+text would need its own decision, not a quiet change to this check.
+
 ### Inv 39 — `data-wx-img` gets intrinsic `width`/`height`, never overriding an authored value
 `builder/bindings.py:_apply_img` sniffs a bound `<img>`'s intrinsic pixel dimensions from the
 real on-disk file via `builder.imagesize.probe_image_size`, the same stdlib, never-raising,

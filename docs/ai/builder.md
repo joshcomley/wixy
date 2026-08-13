@@ -106,10 +106,18 @@ build: the first unresolvable binding raises `BuildError` (`bindings._fail`). `s
 ValidationResult()` → collect-and-continue: every problem is recorded and the walk proceeds.
 Same code path; only the sink differs. This is why `validate` reports all errors at once.
 
+7. For the homepage only (`slug == "index"`): `structureddata.build_structured_data(project,
+   ctx.glob)` → `structureddata.inject_structured_data` appends one
+   `<script type="application/ld+json">` to `<head>` (decisions/00139, Inv 38). `None` (a
+   non-indexable build) means no call at all — nothing is injected. See "Structured data"
+   below.
+
 ## Full build (`builder/build.py:build_site`)
 
 rmtree+mkdir out; render each slug in **publish** mode (`index`→`index.html`, else
-`<slug>.html`, UTF-8, `\n`); write `theme.css` (if theme); copy `site.css`, `site.js`,
+`<slug>.html`, UTF-8, `\n`); write `theme.css` (if theme); copy `site.css`, `site.js`, every
+name in `_ROOT_PASSTHROUGH_FILES` (`favicon.ico`, `favicon.svg`, `apple-touch-icon.png` —
+decisions/00139, a small explicit passthrough allowlist, never "copy every root file"),
 `images/`; write `robots.txt`; write `sitemap.xml` **only if `indexable`**; write the
 generated `404.html`; then `assetcache.fingerprint_asset_references` rewrites every page's
 bare `href="site.css"` / `src="site.js"` / `href="theme.css"` to `...?v=<content hash>`
@@ -134,12 +142,40 @@ regardless of what `?v=` it's requested with).
 ## Validation (`builder/validate.py:validate_site`)
 
 Runs `_validate_pages` (bindings walked in **preview** mode with a sink), `_validate_theme`
-(if theme), `_validate_collections`, `_validate_images`; returns a `ValidationResult`
-(never raises for content problems). Error codes: `binding-error`, `not-clean`,
-`missing-template`, `no-body`, `missing-meta`, `build-error`, `bad-color`, `bad-weight`,
-`missing-font-role`, `bad-collection`, `schema`, `missing-image`. `ValidationError.to_dict()`
-= `{code, message, file?, key?}` — surfaced verbatim by the admin UI (see
-[contracts.md](contracts.md)).
+(if theme), `_validate_collections`, `_validate_images`, `_validate_structured_data`; returns
+a `ValidationResult` (never raises for content problems). Error codes: `binding-error`,
+`not-clean`, `missing-template`, `no-body`, `missing-meta`, `build-error`, `bad-color`,
+`bad-weight`, `missing-font-role`, `bad-collection`, `schema`, `missing-image`.
+`ValidationError.to_dict()` = `{code, message, file?, key?}` — surfaced verbatim by the admin
+UI (see [contracts.md](contracts.md)).
+
+**`ValidationResult.warnings`** (decisions/00139) is a separate, non-blocking channel — same
+`ValidationError` shape, never affects `.ok`, additive in `to_json_dict()`. Currently one
+producer: `structured-data-drift` (a `business.address` field that no longer appears in the
+visible `_global.json.address` text — see "Structured data" below).
+
+## Structured data (`builder/structureddata.py`, decisions/00139, Inv 38)
+
+`build_structured_data(project, global_content) -> (graph | None, warnings)`. `None` when
+`project.indexable` is `False` — nothing is computed, nothing is injected (Inv 35's own
+precedent). Otherwise always includes a `WebSite` node (`project.name`/`domain` only) and,
+only when `_global.json.business` is present and well-formed, a `LocalBusiness`-family node:
+`business.types` becomes `@type` (a bare string for one entry, an array for several — Google
+supports both); `phone`/`email`/`social.instagram`/`social.facebook` (all EXISTING
+`_global.json` reserved fields, reused as-is) become `telephone`/`email`/`sameAs`;
+`business.address` (a structured `PostalAddress` object) is used as-authored UNLESS a
+build-time substring check finds a field no longer present in the visible, HTML-stripped
+`_global.json.address` text — then it degrades to that plain string and a `warnings` entry is
+returned; `_global.json.hours[]` becomes `openingHoursSpecification` via a strict
+`re.fullmatch` on each open day's `value` (exact `"HH:MM – HH:MM"` shape) — ANY open day
+failing to match drops the whole block (never a partial one, which would assert a false
+closure for the unparsed day). `inject_structured_data(soup, graph, file_label=...)` appends
+the actual `<script type="application/ld+json">` tag — `render_page` only calls it for
+`slug == "index"`. Never engine-parses `_global.json.address` into `business.address`'s
+fields — that display shape has already drifted once in production (an array to today's
+`<br>`-joined string), so the fable architecture consult (relation `152f1a9f`) explicitly
+rejected engine-side parsing as empirically falsified; `business.address` is authored once,
+directly, in the site repo.
 
 ## Collections & schemas
 

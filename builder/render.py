@@ -16,6 +16,7 @@ from builder.content import GLOBAL_CONTENT_NAME, content_path, load_json_object
 from builder.errors import BuildError, ValidationResult
 from builder.jsontypes import JsonObject
 from builder.nav import build_nav, page_url
+from builder.structureddata import build_structured_data, inject_structured_data
 from builder.templates import (
     apply_head,
     inject_partials,
@@ -166,6 +167,11 @@ def render_page(
         site_name=source.project.name,
         site_root=source.root,
     )
+
+    if slug == "index":
+        graph, _warnings = build_structured_data(source.project, ctx.glob)
+        if graph is not None:
+            inject_structured_data(soup, graph, file_label=file_label)
 
     _ensure_doctype(soup)
     return str(soup)

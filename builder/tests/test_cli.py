@@ -41,7 +41,7 @@ class TestValidateCommand:
         code = main(["validate", "--root", str(mini_site_root), "--project", project, "--json"])
         assert code == 0
         payload = json.loads(capsys.readouterr().out)
-        assert payload == {"ok": True, "errors": []}
+        assert payload == {"ok": True, "errors": [], "warnings": []}
 
     def test_validate_reports_error_and_nonzero_exit(
         self, tmp_path: Path, mini_site_root: Path, capsys: pytest.CaptureFixture[str]

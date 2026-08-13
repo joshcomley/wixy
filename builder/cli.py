@@ -92,6 +92,9 @@ def cmd_validate(args: argparse.Namespace) -> int:
         for err in result.errors:
             loc = f"{err.file}:{err.key}" if err.key else (err.file or "")
             print(f"[{err.code}] {loc}: {err.message}")
+        for warn in result.warnings:
+            loc = f"{warn.file}:{warn.key}" if warn.key else (warn.file or "")
+            print(f"[warning:{warn.code}] {loc}: {warn.message}")
         print("validate: OK" if result.ok else f"validate: {len(result.errors)} error(s)")
     return 0 if result.ok else 1
 
