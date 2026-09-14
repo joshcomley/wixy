@@ -32,10 +32,15 @@ from wixy_server.chat_working import WorkingCache
 from wixy_server.chats import ChatRuntimeEntry
 from wixy_server.cmdchat import CmdChatClient
 from wixy_server.github import GitHubClient
-from wixy_server.livechat.models import MessageHook
+from wixy_server.livechat.models import MessageHook, MessageRow
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import CmdPinVerifier, PinVerifier
+from wixy_server.livechat.push import (
+    dispatch_push_notifications,
+    load_or_create_vapid_keys,
+)
 from wixy_server.livechat.store import LiveChatStore
+from wixy_server.livechat.sw import server_sw_response
 from wixy_server.livechat.tokens import load_or_create_secret
 from wixy_server.publisher import PublishJob
 from wixy_server.redirects import load_redirects
@@ -187,8 +192,21 @@ def create_app(
     # this whole function is plain synchronous setup, not an async context.
     livechat_store = LiveChatStore(paths.server_db)
     livechat_secret = load_or_create_secret(paths.server_secret)
+    livechat_vapid_keys = load_or_create_vapid_keys(paths.server_vapid)
+    livechat_push_client = httpx.AsyncClient(timeout=10.0)
     livechat_notifier = LiveChatNotifier()
     livechat_message_hooks: list[MessageHook] = []
+
+    async def dispatch_server_push(message: MessageRow) -> None:
+        await dispatch_push_notifications(
+            message,
+            store=livechat_store,
+            client=livechat_push_client,
+            project_domain=project.domain,
+            keys=livechat_vapid_keys,
+        )
+
+    livechat_message_hooks.append(dispatch_server_push)
     livechat_started_at = time.time()
     if pin_verifier is not None:
         resolved_pin_verifier: PinVerifier | None = pin_verifier
@@ -242,6 +260,7 @@ def create_app(
                 yield
                 tg.cancel_scope.cancel()
         finally:
+            await livechat_push_client.aclose()
             await chat_client.aclose()
             await gh_client.aclose()
             if resolved_pin_verifier is not None:
@@ -274,6 +293,7 @@ def create_app(
     app.state.engine_status_cache = EngineStatusCache()
     app.state.livechat_store = livechat_store
     app.state.livechat_secret = livechat_secret
+    app.state.livechat_vapid_keys = livechat_vapid_keys
     app.state.livechat_notifier = livechat_notifier
     app.state.livechat_message_hooks = livechat_message_hooks
     app.state.livechat_media_available = True  # P2 sets this at startup once it lands.
@@ -340,6 +360,12 @@ def create_app(
         if _UXER_WEB_PORT_PATH.exists():
             return HTMLResponse(_UXER_WEB_PORT_PATH.read_text(encoding="utf-8").strip())
         return HTMLResponse("0", status_code=404)
+
+    @app.get("/admin/server-sw.js", include_in_schema=False)
+    async def get_server_service_worker() -> FileResponse:
+        """Serve the push worker before the admin SPA's broad catch-all route."""
+
+        return server_sw_response()
 
     # Mount BEFORE /admin/static (more specific path first, per Uxer's own
     # doc) so /admin/static/uxer/... resolves here rather than falling

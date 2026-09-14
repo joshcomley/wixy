@@ -17,13 +17,20 @@ from collections.abc import AsyncGenerator, AsyncIterator
 import anyio
 from anyio.abc import TaskGroup
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from builder.jsontypes import JsonObject
-from wixy_server.livechat.models import EventRow, MessageHook, MessageRow, message_json
+from wixy_server.livechat.models import (
+    EventRow,
+    MessageHook,
+    MessageRow,
+    PushSubscriptionRow,
+    message_json,
+)
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import PinVerifier
+from wixy_server.livechat.push import PushEndpointError, validate_push_endpoint
 from wixy_server.livechat.store import LiveChatStore, UnusableAttachmentError
 from wixy_server.livechat.tokens import (
     MediaSigner,
@@ -347,3 +354,74 @@ async def usage(request: Request) -> JsonObject:
         "freeBytes": max(0, quota_bytes - used_bytes),
         "mediaAvailable": media_available,
     }
+
+
+# ---------------------------------------------------------------------------
+# Push subscriptions (§5.8).
+# ---------------------------------------------------------------------------
+
+
+class PushKeysIn(BaseModel):
+    p256dh: str
+    auth: str
+
+
+class PushSubscriptionIn(BaseModel):
+    endpoint: str
+    keys: PushKeysIn
+
+
+class PushSubscriptionUpsertIn(BaseModel):
+    sender: str
+    subscription: PushSubscriptionIn
+
+
+@router.get("/push/config", response_model=None)
+async def push_config(request: Request) -> JsonObject:
+    require_server_token(request)
+    keys = request.app.state.livechat_vapid_keys
+    return {"publicKey": keys.public_key_b64}
+
+
+@router.get("/push/subscriptions/{device_id}", response_model=None)
+async def push_subscription_status(device_id: str, request: Request) -> JsonObject:
+    require_server_token(request)
+    store: LiveChatStore = request.app.state.livechat_store
+    subscription = await anyio.to_thread.run_sync(store.get_push_subscription, device_id)
+    return {"subscribed": subscription is not None}
+
+
+@router.put("/push/subscriptions/{device_id}", response_model=None)
+async def put_push_subscription(
+    device_id: str, body: PushSubscriptionUpsertIn, request: Request
+) -> Response:
+    require_server_token(request)
+    sender = body.sender.strip()
+    if not (1 <= len(sender) <= 32) or _CONTROL_CHAR_RE.search(sender):
+        return _invalid("sender must be 1-32 characters with no control characters")
+    try:
+        validate_push_endpoint(body.subscription.endpoint)
+    except PushEndpointError as exc:
+        return _invalid(str(exc))
+
+    row = PushSubscriptionRow(
+        device_id=device_id,
+        sender=sender,
+        endpoint=body.subscription.endpoint,
+        p256dh=body.subscription.keys.p256dh,
+        auth=body.subscription.keys.auth,
+        created_at=time.time(),
+        last_ok_at=None,
+        consecutive_failures=0,
+    )
+    store: LiveChatStore = request.app.state.livechat_store
+    await anyio.to_thread.run_sync(store.upsert_push_subscription, row)
+    return Response(status_code=204)
+
+
+@router.delete("/push/subscriptions/{device_id}", response_model=None)
+async def delete_push_subscription(device_id: str, request: Request) -> Response:
+    require_server_token(request)
+    store: LiveChatStore = request.app.state.livechat_store
+    await anyio.to_thread.run_sync(store.delete_push_subscription, device_id)
+    return Response(status_code=204)

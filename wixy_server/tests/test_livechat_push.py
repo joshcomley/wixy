@@ -11,6 +11,7 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
 
+from wixy_server.livechat.models import MessageRow, PushSubscriptionRow
 from wixy_server.livechat.push import (
     PUSH_TOPIC,
     PUSH_TTL_SECONDS,
@@ -19,10 +20,13 @@ from wixy_server.livechat.push import (
     PushResult,
     build_push_request,
     build_vapid_jwt,
+    dispatch_push_notifications,
     load_or_create_vapid_keys,
     send_payloadless_push,
+    should_push_to_subscription,
     validate_push_endpoint,
 )
+from wixy_server.livechat.store import LiveChatStore
 from wixy_server.livechat.sw import server_sw_response
 
 ENDPOINT = "https://fcm.googleapis.com/fcm/send/test-token"
@@ -149,3 +153,86 @@ def test_service_worker_route_response_has_required_headers() -> None:
     assert response.media_type == "text/javascript"
     assert response.headers["cache-control"] == "no-cache"
     assert response.headers["service-worker-allowed"] == "/admin/"
+
+
+def _message(*, sender: str = "Alice", device_id: str = "device-sender") -> MessageRow:
+    return MessageRow(
+        seq=1,
+        client_id="client-123456",
+        sender=sender,
+        device_id=device_id,
+        by_email=None,
+        text="hello",
+        created_at=1_700_000_000.0,
+    )
+
+
+def _subscription(device_id: str, sender: str, endpoint: str) -> PushSubscriptionRow:
+    return PushSubscriptionRow(
+        device_id=device_id,
+        sender=sender,
+        endpoint=endpoint,
+        p256dh="public",
+        auth="secret",
+        created_at=1_700_000_000.0,
+        last_ok_at=None,
+        consecutive_failures=0,
+    )
+
+
+def test_dispatch_self_exclusion_uses_device_and_casefolded_sender() -> None:
+    message = _message()
+    assert not should_push_to_subscription(
+        message, _subscription("device-sender", "Bob", ENDPOINT)
+    )
+    assert not should_push_to_subscription(
+        message, _subscription("device-other", "aLiCe", ENDPOINT)
+    )
+    assert should_push_to_subscription(
+        message, _subscription("device-other", "Bob", ENDPOINT)
+    )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_records_success_and_removes_gone_subscriptions(tmp_path: Path) -> None:
+    store = LiveChatStore(tmp_path / "server.db")
+    store.upsert_push_subscription(_subscription("device-sender", "Bob", ENDPOINT))
+    store.upsert_push_subscription(_subscription("device-same-name", "alice", ENDPOINT + "-same"))
+    store.upsert_push_subscription(_subscription("device-ok", "Bob", ENDPOINT + "-ok"))
+    store.upsert_push_subscription(_subscription("device-gone", "Bob", ENDPOINT + "-gone"))
+    keys = load_or_create_vapid_keys(tmp_path / "vapid.json")
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        status = 410 if str(request.url).endswith("-gone") else 201
+        return httpx.Response(status, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await dispatch_push_notifications(
+            _message(), store=store, client=client, project_domain=DOMAIN, keys=keys
+        )
+
+    assert len(seen) == 2
+    successful = store.get_push_subscription("device-ok")
+    assert successful is not None
+    assert successful.last_ok_at is not None
+    assert store.get_push_subscription("device-gone") is None
+
+
+@pytest.mark.asyncio
+async def test_dispatch_removes_subscription_after_ten_failures(tmp_path: Path) -> None:
+    store = LiveChatStore(tmp_path / "server.db")
+    store.upsert_push_subscription(_subscription("device-failing", "Bob", ENDPOINT))
+    keys = load_or_create_vapid_keys(tmp_path / "vapid.json")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        for _ in range(10):
+            await dispatch_push_notifications(
+                _message(), store=store, client=client, project_domain=DOMAIN, keys=keys
+            )
+
+    assert store.get_push_subscription("device-failing") is None

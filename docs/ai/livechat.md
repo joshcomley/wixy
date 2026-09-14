@@ -163,7 +163,28 @@ the stream loop already knows how to render them — `message_deleted` as `data:
 `message_updated` event whose row has since vanished. This is schema/stream headroom only;
 nothing in P1 ever inserts either event type.
 
-## 7. Settings (`WIXY_SERVER_*`, `WIXY_FFMPEG`/`WIXY_FFPROBE`)
+## 7. Web Push (`livechat/push.py`, `server/pushToggle.ts`)
+
+Push is an explicit Android-only opt-in. `GET /api/admin/server/push/config` returns
+the project's uncompressed P-256 VAPID public key; subscription status and mutations
+use the protected `/push/subscriptions/{deviceId}` routes. Subscription endpoints are
+validated against the frozen HTTPS push-service allowlist before they are stored. The
+VAPID key pair is persisted race-safely in the private server directory's `vapid.json`.
+
+After a message commits, the registered dispatch hook sends a payloadless Web Push
+request to every subscription except the message's device and case-insensitive sender.
+Requests use a shared HTTPX client with a 10-second timeout and concurrency capped at
+four. A 201 records success; 404/410 deletes the subscription; other failures are
+counted and the subscription is deleted after ten consecutive failures.
+
+The service worker is served at `/admin/server-sw.js` before the admin SPA catch-all.
+It emits only the generic `Server` / `New activity` notification, suppresses it for a
+visible focused Server page, and routes notification clicks to `/admin/server`. It has
+no fetch handler. `server/pushToggle.ts` keeps enablement in the settings sheet's
+caller: permission, worker registration, subscription, and protected PUT all happen
+from the enable click; disable unsubscribes, deletes the server row, and unregisters.
+
+## 8. Settings (`WIXY_SERVER_*`, `WIXY_FFMPEG`/`WIXY_FFPROBE`)
 
 | Env var | Setting | Default | Notes |
 |---|---|---|---|
@@ -178,7 +199,7 @@ nothing in P1 ever inserts either event type.
 not by `ensure_project_dirs`: a project that never unlocks the chat never needs the
 directory.
 
-## 8. What P1 built vs. what's still to come
+## 9. What P1 built vs. what's still to come
 
 P1 (this doc, this PR) is the backend core everything else depends on: settings, storage
 paths, the `livechat/` package (`models`/`store`/`tokens`/`pinclient`/`notifier`),
@@ -187,10 +208,11 @@ the `server` field on `GET /api/admin/system/status` (§5.10 — `{"startedAt":e
 "mediaProcessing":"ok"|"unavailable"}`; `mediaProcessing` is a placeholder `"ok"` until P2
 sets `app.state.livechat_media_available` for real at startup).
 
-Not yet built (later parcels, see the brief's §10 wave plan):
+Later parcels (see the brief's §10 wave plan):
 - **P2a/P2b** — media processing (ffmpeg/Pillow pipeline), chunked uploads, the media
   queue, `GET media/*`.
-- **P3a/P3b** — Web Push (VAPID keys, the service worker, the dispatch hook).
+- **P3a/P3b** — Web Push is built: VAPID keys, the service worker, protected push
+  routes, dispatch hook, and standalone Android toggle module.
 - **P4/P5/P6** — the frontend: lock state machine, the decoy, the PIN pad, the chat view,
   media rendering, the recorder/uploader.
 - **P8** — hard delete-a-message / wipe-the-chat (spec §17.3/§17.4), on top of the A1

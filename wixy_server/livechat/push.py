@@ -16,10 +16,14 @@ from pathlib import Path
 from typing import Final
 from urllib.parse import SplitResult, urlsplit
 
+import anyio
 import httpx
 import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
+
+from wixy_server.livechat.models import MessageRow, PushSubscriptionRow
+from wixy_server.livechat.store import LiveChatStore
 
 VAPID_TTL_SECONDS: Final[int] = 12 * 60 * 60
 PUSH_TTL_SECONDS: Final[str] = "86400"
@@ -61,6 +65,22 @@ class PushResult:
     status_code: int
     ok: bool
     delete_subscription: bool
+
+
+def should_push_to_subscription(
+    message: MessageRow, subscription: PushSubscriptionRow
+) -> bool:
+    """Return whether a subscription is an eligible recipient for ``message``.
+
+    The sender's own device and every device registered under the same sender
+    name are excluded.  This is deliberately a pure predicate so the privacy
+    boundary can be tested without involving a network client or task group.
+    """
+
+    return (
+        subscription.device_id != message.device_id
+        and subscription.sender.casefold() != message.sender.casefold()
+    )
 
 
 def _b64url_encode(value: bytes) -> str:
@@ -278,6 +298,71 @@ async def send_payloadless_push(
     )
 
 
+async def dispatch_push_notifications(
+    message: MessageRow,
+    *,
+    store: LiveChatStore,
+    client: httpx.AsyncClient,
+    project_domain: str,
+    keys: VapidKeys,
+) -> None:
+    """Fan out one generic push to eligible subscriptions.
+
+    Store calls remain in worker threads because ``LiveChatStore`` is a
+    synchronous SQLite wrapper.  The semaphore is inside each child task, so
+    all recipients can be scheduled while no more than four push requests are
+    in flight.  A failed request is retained until the store reports ten
+    consecutive failures; 404/410 are permanent endpoint signals and are
+    removed immediately.
+    """
+
+    subscriptions = await anyio.to_thread.run_sync(store.list_push_subscriptions)
+    recipients = [sub for sub in subscriptions if should_push_to_subscription(message, sub)]
+    limiter = anyio.Semaphore(4)
+
+    async def deliver(subscription: PushSubscriptionRow) -> None:
+        async with limiter:
+            result: PushResult | None = None
+            try:
+                result = await send_payloadless_push(
+                    client,
+                    subscription.endpoint,
+                    project_domain,
+                    keys,
+                )
+            except Exception:
+                # Network errors and malformed legacy rows are ordinary failed
+                # delivery signals.  They must not cancel sibling recipients.
+                pass
+
+            if result is not None and result.delete_subscription:
+                await anyio.to_thread.run_sync(
+                    store.delete_push_subscription, subscription.device_id
+                )
+                return
+            if result is not None and result.ok:
+                await anyio.to_thread.run_sync(
+                    lambda: store.record_push_result(
+                        device_id=subscription.device_id, ok=True, now=time.time()
+                    )
+                )
+                return
+
+            failure_count = await anyio.to_thread.run_sync(
+                lambda: store.record_push_result(
+                    device_id=subscription.device_id, ok=False, now=time.time()
+                )
+            )
+            if failure_count is not None and failure_count >= 10:
+                await anyio.to_thread.run_sync(
+                    store.delete_push_subscription, subscription.device_id
+                )
+
+    async with anyio.create_task_group() as task_group:
+        for recipient in recipients:
+            task_group.start_soon(deliver, recipient)
+
+
 __all__ = [
     "PUSH_TOPIC",
     "PUSH_TTL_SECONDS",
@@ -287,7 +372,9 @@ __all__ = [
     "VapidKeys",
     "build_push_request",
     "build_vapid_jwt",
+    "dispatch_push_notifications",
     "load_or_create_vapid_keys",
     "send_payloadless_push",
+    "should_push_to_subscription",
     "validate_push_endpoint",
 ]
