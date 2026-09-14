@@ -327,4 +327,30 @@ fixed same-session.)
   changes). Only in-flight impact: amendment A1 to P1 (not yet merged —
   events CHECK +2 types, nullable `message_seq`, `secure_delete`, stream
   skip/emit); the rest ships as a new late parcel P8 once P1+P2b+P5b land.
-  Relayed to the DM to route A1 to P1 now and schedule P8.
+  Relayed to the DM to route A1 to P1 now and schedule P8. **DM confirmed**:
+  A1 routed to P1 (Builder A) with the exact sec.17.2 text; P8 added as
+  delivery task ord13 (full sec.17 spec), gated on P1+P2b+P5b landing.
+
+## Update 2026-09-14 (later same session) — wave 1 complete, real PIN contract landed
+
+- **Wave 1 all 6 Builders reported finished** (P1/P2a/P3a/P4/P5a/P6a) — P6a
+  already merged (PR #220); DM is processing the rest's FINAL HANDOFFs.
+- **cmd's real PIN-verify contract landed**: PR #3068 open on cmd (full-suite
+  CI running, NOT yet merged/deployed). It genuinely differs from the frozen
+  brief's sec.5.1 placeholder — route is `POST
+  http://127.0.0.1:9320/api/pins/wixy-livechat/verify` (app key in the
+  **path**, plural `pins`, not `/api/pin/verify`), with richer error shapes
+  (401 wrong_pin+attempts_left, 404 unknown_app, 409 pin_changed, 429
+  locked+Retry-After, 503 unavailable) and a strict retry-safety rule
+  (retry ONLY on connection-refused/connect-timeout, since an attempt is
+  charged before evaluation). Lockout: 5 wrong/subject → 60s doubling to
+  24h cap; 20 wrong/app in 15min trips an app-wide lock too. Full text at
+  `http://127.0.0.1:9321/intercomm/5e5cb2dff20f4df781f38af32de38933`.
+  P1's build space was still unmerged, so relayed the real contract straight
+  to P1 (Builder A, session `14dae1f4`) AND to the Architect (for a formal
+  errata correcting sec.5.1) — both urgent, both acked.
+- **Blocker #9 (delivery-merge gate) still OPEN**: cmd's PR is open/CI-running
+  only — not merged, not deployed, PIN not yet registered under
+  `wixy-livechat`. Told the DM explicitly not to treat it as cleared.
+  cmd-side team will self-register using operator decision #973 as
+  authorization once their PR lands; will ping this workspace when live.
