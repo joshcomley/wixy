@@ -155,7 +155,10 @@ def run_publish(
     # same way `site_source.build_site_source` guards its own first checkout read,
     # since the checkout may not exist at all yet (this project's very first publish).
     default_base_sha = current_sha(paths.repo) if (paths.repo / ".git").exists() else ""
-    overlay = load_overlay(paths.draft_overlay, default_base_sha=default_base_sha)
+    # Overlay READ under the process-wide lock (decisions/00144) — same
+    # read-consistency rule the rest of this module's tree_lock() uses.
+    with tree_lock():
+        overlay = load_overlay(paths.draft_overlay, default_base_sha=default_base_sha)
     if overlay.rev != expected_rev:
         raise RevConflictError(expected_rev, overlay.rev)
 
@@ -208,7 +211,9 @@ def run_publish(
             changed=_changed_summary(overlay),
         )
         append_ledger(paths, entry)
-        save_overlay(paths.draft_overlay, discard_all(overlay))
+        # Overlay WRITE under the process-wide lock (decisions/00144).
+        with tree_lock():
+            save_overlay(paths.draft_overlay, discard_all(overlay))
         _prune_builds(paths)
         if not push_live_mirror(paths.repo, sha):
             _log(
