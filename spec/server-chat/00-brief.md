@@ -1,0 +1,943 @@
+# Server chat — Architect's technical brief (workspace #29)
+
+Status: **FROZEN v1** (Architect, 2026-09-14). Contracts in §5 are frozen — any change goes
+through the Architect (`ask-architect`). Rulings in §1 are binding.
+
+> 🔴 **The wixy repo is PUBLIC** (`gh repo view` → `visibility: PUBLIC`, measured
+> 2026-09-14). The PIN value must NEVER appear in any repo file, commit message, PR body,
+> todo, decision, test, or doc. It lives only in `Storage\.env` as `WIXY_SERVER_PIN`.
+> Tests use a made-up test PIN. Do not name the chat participants in repo text either
+> ("admin users").
+
+---
+
+## 0. Summary
+
+A hidden human-to-human chat for admin users, inside the already CF-Access-gated `/admin`.
+It is disguised as a **"Server"** nav tab showing real server status. A rapid multi-tap
+reveals **"Open server settings"**, which opens a PIN pad titled **"Unlock server"**. After
+unlock it's a live chat with text, photos, videos, and voice notes, plus opt-in Android push.
+There are three ways back to locked (10 s idle fade, panic button, multi-tap in chat), plus a
+few fail-closed extras (§1 R6).
+
+**Naming map** (keep it consistent):
+- Code package: `wixy_server/livechat/`
+- Frontend folder: `admin-ui/src/server/`
+- Disguise-consistent URLs: `/admin/server`, `/api/admin/server/*`, `/admin/server-sw.js`
+- Storage dir: `Storage/projects/<slug>/server/`
+- CSS prefix: `.wx-srv-`
+- localStorage prefix: `wx-srv-`
+- Doc: `docs/ai/livechat.md`
+
+---
+
+## 1. Rulings (binding)
+
+**R1 — What it is.** Human↔human admin messaging. It is not the AI assistant and not
+visitor-facing. It has its own storage and routes, separate from `chats.py`, `cmdchat.py`
+and `draft/media/`.
+
+**R2 — Gesture model** (unifies mission messages #1 and #3; the contrast "and when you're in
+the chat view" in #3 means the first sentence describes the locked screen):
+- Locked screen = the **decoy** (real server status) with **no** visible entry point.
+- Rapid multi-tap (≥2 taps, ≤400 ms apart) anywhere → reveals an **"Open server settings"**
+  button. It re-hides after 10 s idle.
+- Tap it → PIN pad titled **"Unlock server"**.
+- The idle-fade path ends on this same decoy. Every lock cause lands in one locked state; the
+  only difference is that idle animates a fade and the others are instant.
+- Flagged to the Orchestrator for optional operator confirmation. Build on this reading.
+
+**R3 — Multi-tap inside the chat view locks.** It counts every pointerdown except those whose
+target is inside `textarea`, `input`, `[contenteditable]`, `audio` or `video` (native media
+controls), so text editing and seeking never lock. Buttons count: a fast double-tap on Send
+sends and then locks, which is acceptable because it fails closed. Detector:
+- Uses Pointer Events only, never pointer+touch+mouse together, to avoid double counting.
+- Uses `performance.now()` so Playwright `page.clock` controls it.
+- Is attached to `document` in the capture phase while the panel is mounted.
+- The panel root gets `touch-action: manipulation`.
+
+**R4 — The PIN is verified server-side.**
+- `POST /unlock` does a constant-time compare against `settings.server_pin`, with a
+  rate limit keyed per CF-Access email.
+- It returns an HMAC unlock token held **only in JS memory**. Never persist it to
+  localStorage, sessionStorage, cookies or URLs.
+- Every other server-chat route requires it as the `X-Wixy-Server-Token` header.
+- `<img>`, `<video>` and `<audio>` use per-attachment HMAC-signed URLs (§5.6), because media
+  elements can't send headers.
+- An unset PIN means the feature isn't configured: `/unlock` → 503 `not_configured`.
+- **No PIN literal in code.**
+
+**R5 — Transport = SSE over `fetch()`**, not `EventSource` and not WebSocket.
+- A `fetch` streaming reader can send the header token, and SSE through cloudflared + CF
+  Access is already proven by the AI chat.
+- Sends are plain POSTs.
+- Server fan-out uses an in-process notifier **plus** a 2 s DB re-check, so a blue/green
+  slot-swap overlap (two processes, one SQLite file) can never strand a message.
+
+**R6 — Lock is fail-closed and client-authoritative for display.** Lock triggers:
+- 10 s with no user input (unless suspended, R7)
+- the panic button
+- a multi-tap in chat
+- the `Escape` key
+- the tab becoming hidden (unless the file picker or mic-permission prompt is open)
+- routing away from `/admin/server`
+- a page reload (unlock state is never persisted)
+- any 401 or `locked` event from the API
+- reaching the token's `expiresAt`
+
+Locking **detaches the chat subtree from the document** (keeps the JS object; nothing
+readable remains in the DOM), aborts the stream, pauses all media, exits fullscreen,
+discards any in-progress recording, and closes the lightbox and sheets. The draft text and
+in-flight uploads survive in memory and resume on unlock. **Nothing new starts while locked.**
+
+**R7 — Activity and suspension.**
+- Activity = `pointerdown`, `pointermove`, `touchstart`, `touchmove`, `wheel`, `keydown`,
+  `input`. **Not** `scroll`: programmatic scroll-to-bottom on an incoming message must never
+  keep the chat visible. Incoming messages are not activity.
+- Suspensions pause the idle timer and restart it with a fresh 10 s when the last one ends:
+  `recording`, `micPermission` (a pending `getUserMedia`), `filePicker` (from the 📎 click
+  until `change`/`cancel`, with a 5-minute safety cap) and `mediaPlaying`.
+- While fading (800 ms), any activity cancels the fade.
+
+**R8 — Identity.**
+- Display name: set on first unlock per device, stored in `localStorage["wx-srv-name"]`,
+  1–32 chars, changeable in settings.
+- `deviceId`: `crypto.randomUUID()` in `localStorage["wx-srv-device"]`.
+- "Mine" = sender name equal case-insensitively, so one person's phone and desktop both
+  count as theirs.
+- The server stores the CF email per message for audit only and never returns it.
+
+**R9 — Message model.** Optional text (≤4000 chars) plus 0–10 attachments (photo/video/voice)
+per message, like the AI composer's staged chips.
+- A voice note sends immediately when recording stops, as its own message.
+- No editing, deleting, typing indicators, read receipts or unread badges in v1 (§16).
+
+**R10 — Media storage = one normalized rendition per attachment** (plus thumb/poster).
+- Metadata is stripped: EXIF/GPS and container metadata.
+- Uploaded originals are deleted after successful processing. A failed original is kept 7
+  days for diagnosis.
+- Rationale: GPS privacy, and D: had only **58.8 GB free** (measured 2026-09-14).
+- Quota: `WIXY_SERVER_MEDIA_QUOTA_MB` (default 20480) plus a free-space floor
+  `WIXY_SERVER_MIN_FREE_MB` (default 10240). Both are enforced at upload init → 507.
+
+**R11 — Uploads are chunked** (8 MiB chunks, one code path for every kind). Cloudflare
+caps a proxied request body at 100 MB, which would otherwise make any video over ~40 s fail
+with an opaque 413. Caps:
+
+| Kind | Max size | Max duration |
+|---|---|---|
+| Photo | 30 MiB | — |
+| Voice | 25 MiB | 15 min (client auto-stops at 15:00) |
+| Video | 1 GiB | 10 min |
+
+**R12 — Push = standard Web Push, payloadless, VAPID (ES256).**
+- The notification text is fixed and generic: title "Server", body "New activity". It never
+  includes message text, the sender, or a count.
+- Offered **only** on Android (`userAgentData.platform === "Android"` or `/Android/i`
+  UA) with PushManager, serviceWorker and Notification support.
+- Explicit opt-in toggle in the chat settings sheet.
+- The service worker has **no fetch handler**.
+
+**R13 — No trace outside the unlocked view.** The decoy shows only real server data. There's
+no unread badge, title change or favicon change. Pushes are generic. Chat data never enters
+the site repo, builds, publish, reports, backups, or any public route.
+
+**R14 — Release-note trailer for every commit of this feature**:
+`Release-note: Added a Server page showing your website's server status.`
+It's true and innocuous; the owner-facing update popup must not reveal the chat.
+
+**R15 — Backups.** The chat store is **not** added to `backup/snapshot.py`'s allowlist. The
+standalone snapshot force-pushes to a GitHub repo, which is an inappropriate home for private
+media, and the hub mirror isn't installed. Flagged to the operator (§15).
+
+---
+
+## 2. Threat model (for the audit)
+
+- **Adversary:** a bystander who glances at, or briefly picks up, an unlocked admin device.
+  Secondary: an admin-session holder without the PIN poking at the API or devtools.
+- **Not in scope:** anyone who already has both CF Access and the PIN. Code secrecy is also
+  out of scope, since the repo is public; the disguise only works against bystanders.
+- **Real gates:** CF Access (Inv 12, unchanged) → server-side PIN with rate limit → HMAC
+  token bound to the CF email → signed media URLs bound to the email and token expiry.
+- **Hardening that must be tested:**
+  - CSRF: mutations need the custom header, which forces a CORS preflight that the origin
+    never grants.
+  - Path traversal: IDs are validated as 32 hex characters and renditions come from an enum.
+  - ffmpeg SSRF/LFI (HLS/concat playlists): magic-byte sniff → explicit `-f <demuxer>` +
+    `-protocol_whitelist file` + demuxer allowlist.
+  - Decompression bombs: a pixel cap.
+  - Push SSRF: endpoint host allowlist, https only.
+  - XSS: `textContent` only; links are http(s)-only with `rel="noopener noreferrer"`.
+  - `nosniff` on every media response.
+  - Tokens never appear in URLs or logs. Media URLs carry only per-file signatures.
+
+---
+
+## 3. Architecture
+
+```
+admin-ui  /admin/server  ── server/panel.ts (lock state machine, decoy, PIN pad)
+                               └─ server/chatView.ts (thread + composer), attached only when unlocked
+   │ fetch + X-Wixy-Server-Token          │ fetch-SSE /stream?after=cursor
+   ▼                                       ▼
+wixy_server/routes_livechat*.py  (behind CF Access middleware, + require_server_token dep)
+   ├─ livechat/pin.py      PIN check + per-email rate limit (in-memory)
+   ├─ livechat/tokens.py   secret.key, unlock tokens, signed media URLs
+   ├─ livechat/store.py    SQLite (WAL) — messages, events, attachments, uploads, push_subscriptions
+   ├─ livechat/notifier.py in-process broadcast (anyio.Event swap)
+   ├─ livechat/uploads.py  chunk staging/assembly, quota + free-space guard
+   ├─ livechat/processing.py  Pillow(+pillow-heif) / ffprobe / ffmpeg — pure functions
+   ├─ livechat/media_queue.py lease-based worker in the app task group (crash-resume)
+   ├─ livechat/janitor.py  hourly cleanup
+   └─ livechat/push.py     VAPID keys, payloadless sender, dispatch hook
+Storage/projects/<slug>/server/   (private; see §4)
+```
+
+The SSE loop (per connection):
+1. `rows = store.events_after(cursor)` in a thread.
+2. Emit each event with the **current** full message JSON, coalescing per message.
+3. If there are none, wait on the notifier with a 2 s timeout.
+4. Send a `: ping` comment every 15 s.
+5. Check token expiry each iteration: once expired, send `event: locked` and close.
+6. Exit when the client disconnects.
+
+Response headers: `Cache-Control: no-cache`, `X-Accel-Buffering: no`.
+
+---
+
+## 4. Storage layout and schema
+
+```
+Storage/projects/<slug>/server/
+  server.db (+ -wal, -shm)       SQLite, WAL, busy_timeout=5000, foreign_keys=ON, synchronous=NORMAL
+  secret.key                     32 random bytes, created O_EXCL (race-safe across slot processes)
+  vapid.json                     {"privateKeyPkcs8B64": ..., "publicKeyB64url": ...}, created O_EXCL
+  media/<id[:2]>/<id>/           full.{jpg|png|gif} thumb.jpg | play.mp4 poster.jpg | play.m4a
+  uploads/<uploadId>/            chunk-000000 ... ; assembled
+  failed/<id>/original.<ext>     kept 7 days on processing failure
+```
+
+`ProjectPaths` gets `server_dir`, `server_db`, `server_secret`, `server_vapid`, `server_media`,
+`server_uploads` and `server_failed` (P1 adds them all up front). The dirs are created lazily,
+following the `reports_dir` precedent.
+
+**Migrations:** `PRAGMA user_version` plus an ordered migration list. v1:
+
+```sql
+CREATE TABLE messages(
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id TEXT NOT NULL UNIQUE,
+  sender TEXT NOT NULL, device_id TEXT NOT NULL, by_email TEXT,
+  text TEXT, created_at REAL NOT NULL);                       -- epoch seconds (never a formatted string)
+CREATE TABLE attachments(
+  id TEXT PRIMARY KEY,                                        -- uuid4().hex
+  kind TEXT NOT NULL CHECK(kind IN ('photo','video','voice')),
+  status TEXT NOT NULL CHECK(status IN ('processing','ready','failed')),
+  message_seq INTEGER REFERENCES messages(seq), ordinal INTEGER,
+  mime TEXT, width INTEGER, height INTEGER, duration_s REAL, peaks TEXT, -- JSON array or NULL
+  renditions TEXT NOT NULL DEFAULT '[]',                      -- JSON array of rendition names present
+  bytes_on_disk INTEGER NOT NULL DEFAULT 0, failure TEXT,
+  lease_owner TEXT, lease_expires_at REAL,
+  created_at REAL NOT NULL, updated_at REAL NOT NULL);
+CREATE TABLE events(
+  event_seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL CHECK(type IN ('message','message_updated')),
+  message_seq INTEGER NOT NULL, created_at REAL NOT NULL);
+CREATE TABLE uploads(
+  id TEXT PRIMARY KEY, kind TEXT NOT NULL, mime TEXT NOT NULL, size_bytes INTEGER NOT NULL,
+  filename TEXT, by_email TEXT, created_at REAL NOT NULL);
+CREATE TABLE push_subscriptions(
+  device_id TEXT PRIMARY KEY, sender TEXT NOT NULL, endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL, auth TEXT NOT NULL, created_at REAL NOT NULL,
+  last_ok_at REAL, consecutive_failures INTEGER NOT NULL DEFAULT 0);
+```
+
+**Store API** (P1 implements all of it; P2 and P3 consume it; frozen signatures. All
+methods are sync and callers wrap them in `anyio.to_thread.run_sync`):
+
+```python
+class LiveChatStore:
+    def __init__(self, db_path: Path) -> None: ...           # opens lazily; migrate() on first use
+    # messages / events
+    def create_message(self, *, client_id: str, sender: str, device_id: str, by_email: str | None,
+                       text: str | None, attachment_ids: Sequence[str], now: float
+                       ) -> tuple[MessageRow, bool]: ...     # (row, created); idempotent on client_id;
+                                                             # validates attachments unreferenced + status in
+                                                             # (processing, ready); one 'message' event, same txn
+    def list_messages(self, *, before: int | None, limit: int) -> tuple[list[MessageRow], bool, int]: ...
+                                                             # ascending rows, has_more, cursor=max event_seq,
+                                                             # all in ONE read txn
+    def get_messages(self, seqs: Sequence[int]) -> list[MessageRow]: ...
+    def events_after(self, cursor: int, limit: int = 200) -> list[EventRow]: ...
+    # attachments (P2)
+    def create_attachment(self, *, att_id: str, kind: AttachmentKind, now: float) -> AttachmentRow: ...
+    def claim_processing(self, *, owner: str, now: float, lease_s: float) -> AttachmentRow | None: ...
+    def renew_lease(self, *, att_id: str, owner: str, now: float, lease_s: float) -> bool: ...
+    def finish_attachment(self, *, att_id: str, owner: str, result: AttachmentResult, now: float) -> None: ...
+                                                             # emits 'message_updated' iff message_seq set
+    def get_attachment(self, att_id: str) -> AttachmentRow | None: ...
+    def media_bytes_used(self) -> int: ...
+    def orphan_attachment_ids(self, *, older_than: float) -> list[str]: ...
+    def delete_attachment(self, att_id: str) -> None: ...
+    # uploads (P2)
+    def create_upload(self, row: UploadRow) -> None: ...
+    def get_upload(self, upload_id: str) -> UploadRow | None: ...
+    def delete_upload(self, upload_id: str) -> None: ...
+    def stale_upload_ids(self, *, older_than: float) -> list[str]: ...
+    def pending_upload_bytes(self) -> int: ...
+    # push (P3)
+    def upsert_push_subscription(self, row: PushSubscriptionRow) -> None: ...
+    def delete_push_subscription(self, device_id: str) -> None: ...
+    def get_push_subscription(self, device_id: str) -> PushSubscriptionRow | None: ...
+    def list_push_subscriptions(self) -> list[PushSubscriptionRow]: ...
+    def record_push_result(self, *, device_id: str, ok: bool, now: float) -> None: ...
+```
+
+Row types (`livechat/models.py`) are frozen slotted dataclasses: `MessageRow` (with
+`attachments: tuple[AttachmentRow, ...]` in ordinal order), `AttachmentRow`, `EventRow`,
+`UploadRow`, `PushSubscriptionRow`, and `AttachmentResult` (status, mime, width, height,
+duration_s, peaks, renditions, bytes_on_disk, failure). The wire serializers
+`message_json(row, signer)` and `attachment_json(row, signer)` also live in `models.py`.
+
+**App state (P1 creates):**
+- `app.state.livechat_store`
+- `app.state.livechat_notifier`
+- `app.state.livechat_message_hooks: list[Callable[[MessageRow], Awaitable[None]]]` — run on
+  the background task group after a *created* message commits; P3 appends the push dispatch.
+- `app.state.livechat_media_available: bool` — set by P2 at startup.
+
+---
+
+## 5. HTTP contracts (FROZEN)
+
+All routes live under `/api/admin/server`, behind the existing CF Access middleware (Inv 12).
+**Auth:**
+- Every route except `POST /unlock` and `GET /media/*` requires the header
+  `X-Wixy-Server-Token`. A token passed as a query parameter is rejected.
+- A missing, invalid or expired token → 401 `{"error":"locked"}`. The client locks on any 401.
+
+The FastAPI dependency `require_server_token(request) -> ServerAuth(email: str, exp: int)`
+lives in P1's `livechat/tokens.py`. In dev-no-auth mode the email is `""`.
+
+### 5.1 Unlock
+
+`POST /unlock` with body `{"pin": "<digits>"}`:
+- 200 `{"token": str, "expiresAt": float}`. The TTL is 12 h absolute.
+- 401 `{"error":"wrong_pin","attemptsLeft":int}`
+- 429 `{"error":"locked_out","retryAfterS":int}` plus a `Retry-After` header. Policy: 5
+  consecutive failures → a 60 s lockout, doubling on each lockout up to 900 s. Success
+  resets it. Keyed per email.
+- 503 `{"error":"not_configured"}` when `WIXY_SERVER_PIN` is unset.
+- 422 when the body is malformed.
+
+**Token format:** `b64url(json{"v":1,"e":email,"iat":int,"exp":int,"n":nonce16}) + "." +
+b64url(HMAC-SHA256(secret, b"unlock|" + payload_b64))`.
+
+**Verify:** use `hmac.compare_digest`, require `exp > now`, and require `e == request email`.
+
+### 5.2 History
+
+`GET /messages?before=<seq>&limit=<1..100, default 50>` → 200
+`{"messages":[Message], "hasMore":bool, "cursor":int}`. Messages are ascending by `seq`.
+`cursor` is the event high-water mark from the same read transaction, and the client opens
+the stream with `after=cursor`.
+
+### 5.3 Send
+
+`POST /messages` with body
+`{"clientId":str(8..64), "sender":str(1..32, trimmed, no control chars), "deviceId":str(8..64),
+"text":str|null(≤4000), "attachmentIds":[hex32](0..10)}`:
+- 201 `{"message":Message}`, or 200 with the same message when a `clientId` is replayed.
+- 422 `{"error":"invalid","detail":str}` for: empty text with no attachments, an
+  unknown/used/failed attachment, too long, or a bad sender.
+
+### 5.4 Stream
+
+`GET /stream?after=<cursor>` → `text/event-stream`. Events:
+- `id:<event_seq>` + `event: message` + `data:<Message JSON>` — a new message.
+- `event: message_updated` + `data:<Message JSON>` — an attachment's status changed.
+- `event: locked` + `data:{}` — the token expired mid-stream; the server closes after it.
+- `: ping` comment every 15 s.
+
+The client re-opens with `after=<last id>`, backing off 1→2→5→10 s, and reconnects if it
+receives no bytes for 45 s.
+
+### 5.5 Uploads
+
+`POST /uploads` with body `{"kind":"photo"|"video"|"voice", "mimeType":str, "sizeBytes":int,
+"filename":str|null}`:
+- 201 `{"uploadId":hex32, "chunkBytes":int, "maxBytes":int}`. `chunkBytes` comes from settings
+  (default 8 MiB).
+- 413 `{"error":"too_large","maxBytes":int}`
+- 415 `{"error":"unsupported_type"}`
+- 507 `{"error":"storage_full"}` when `media_bytes_used + pending_upload_bytes + size >
+  quota` or `disk_free - size < min_free`.
+- 503 `{"error":"media_unavailable"}` when ffmpeg, ffprobe or pillow-heif is unavailable.
+
+Declared-MIME allowlists (advisory; processing sniffs the real bytes):
+- **photo:** jpeg, png, webp, gif, heic, heif
+- **video:** mp4, quicktime, webm, 3gpp, x-matroska
+- **voice:** webm, ogg, mp4, mpeg, aac, wav, x-m4a
+
+`PUT /uploads/{uploadId}/chunks/{index}` with a raw `application/octet-stream` body →
+204.
+- The server reads `request.stream()` with a hard running cap of `chunkBytes` and returns 413
+  once exceeded.
+- `index` must be in `0..ceil(size/chunkBytes)-1`, otherwise 422.
+- Re-PUTting the same index overwrites it, so the call is idempotent. Writes go to `.part`
+  and are then renamed.
+- Unknown upload → 404.
+
+`POST /uploads/{uploadId}/complete`:
+- 202 `{"attachment":Attachment}` (status `processing`).
+- 409 `{"error":"incomplete","missing":[int]}`.
+- 422 `{"error":"size_mismatch"}` when the assembled size differs from the declared size.
+
+`DELETE /uploads/{uploadId}` → 204.
+
+### 5.6 Media
+
+`GET /media/{attId}/{rendition}?exp=<int>&sig=<b64url>`:
+- `rendition` ∈ `full | thumb | poster | play`.
+- `sig = b64url(HMAC(secret, f"media|{attId}|{rendition}|{exp}|{email}"))`, and `exp` = the
+  requesting token's `exp`. The server mints these inside every Message JSON.
+- 200/206 via Starlette `FileResponse`, which handles Range.
+- Headers: `Cache-Control: private, no-cache`, `X-Content-Type-Options: nosniff`,
+  `Content-Disposition: inline`.
+- 403 for a bad or expired signature or an email mismatch. 404 when missing.
+
+### 5.7 Usage
+
+`GET /usage` → `{"usedBytes":int, "quotaBytes":int, "freeBytes":int, "mediaAvailable":bool}`.
+
+### 5.8 Push
+
+- `GET /push/config` → `{"publicKey": b64url uncompressed P-256}`
+- `GET /push/subscriptions/{deviceId}` → `{"subscribed":bool}`
+- `PUT /push/subscriptions/{deviceId}` with body `{"sender":str, "subscription":{"endpoint":https-url,
+  "keys":{"p256dh":str,"auth":str}}}` → 204, or 422 when the endpoint host isn't on the
+  allowlist (`fcm.googleapis.com`, `updates.push.services.mozilla.com`, `*.notify.windows.com`)
+  or isn't https.
+- `DELETE /push/subscriptions/{deviceId}` → 204.
+- **Outside the prefix:** `GET /admin/server-sw.js` (still CF-gated) → the built SW, sent
+  with `Content-Type: text/javascript`, `Cache-Control: no-cache` and
+  `Service-Worker-Allowed: /admin/`. The route is registered before the `/admin/{rest:path}`
+  catch-all.
+
+### 5.9 Wire shapes
+
+```ts
+Message    = { seq:number; clientId:string; sender:string; text:string|null;
+               attachments:Attachment[]; createdAt:number /* epoch s */ }
+Attachment = { id:string; kind:"photo"|"video"|"voice"; status:"processing"|"ready"|"failed";
+               width:number|null; height:number|null; durationS:number|null; peaks:number[]|null;
+               urls:{ full?:string; thumb?:string; poster?:string; play?:string } }  // ready renditions only
+```
+
+### 5.10 System status (decoy data)
+
+P1 adds a `server` field to the existing `GET /api/admin/system/status`:
+`{"startedAt": epoch_s, "mediaProcessing": "ok"|"unavailable"}`. `startedAt` is recorded in
+`create_app`.
+
+---
+
+## 6. Frontend: state machine and interfaces
+
+`server/lockModel.ts` is a **pure reducer**, `(state, event, now) → {state, effects[]}`,
+with 100% branch coverage in vitest. States:
+
+```
+decoy ──multiTap──▶ revealed ──tapAffordance──▶ pin ──submit──▶ verifying ──ok──▶ chat
+  ▲                    │ idle 10s                  │ cancel/Esc/idle 10s   │wrong→pin(error)
+  │◀───────────────────┘◀──────────────────────────┘                       │lockedOut→pin(countdown)
+  │◀── fading(800ms) ◀── idle 10s (no suspension) ── chat
+  │◀── instant: panic | multiTap(chat) | Escape | hidden(no picker/mic) | routeAway | 401/locked | token expiresAt
+```
+
+- The first unlock without a display name shows a name sub-step inside `chat`; idle applies
+  there too.
+- Constants live in `server/constants.ts`:
+  - `IDLE_LOCK_MS = 10_000`
+  - `FADE_MS = 800`
+  - `MULTI_TAP_INTERVAL_MS = 400`
+  - `MULTI_TAP_COUNT = 2`
+  - `PICKER_SUSPEND_MAX_MS = 300_000`
+
+**Interfaces** (frozen, so P4, P5, P6 and P3 can build concurrently):
+
+```ts
+// server/types.ts (P4 owns)
+export interface ServerSession { readonly token: string; readonly expiresAt: number }
+export type SuspendReason = "recording" | "micPermission" | "filePicker" | "mediaPlaying";
+export type LockCause = "idle" | "panic" | "multiTap" | "escape" | "hidden" | "routeAway" | "unauthorized" | "expired";
+export interface LockHooks {
+  suspend(reason: SuspendReason): () => void;   // returns release; idempotent
+  lockNow(cause: LockCause): void;
+}
+export interface ServerChatView {               // P5 implements
+  readonly element: HTMLElement;
+  attach(session: ServerSession): void;         // panel inserts element, then calls attach → load/resume stream
+  detach(): void;                               // panel calls BEFORE removing element: abort stream, pause media,
+                                                // exit fullscreen, discard recording, close sheets/lightbox
+  dispose(): void;                              // panel teardown: also abort in-flight uploads
+}
+export type CreateServerChatView = (deps: { api: ServerApi; hooks: LockHooks; win: Window;
+                                            session: () => ServerSession | null }) => ServerChatView;
+```
+
+`server/api/http.ts` (P4): `serverFetch(path, init, session)` adds the header and maps 401 to
+a `ServerLockedError`, which the panel turns into `lockNow("unauthorized")`. Each parcel adds
+its own `server/api/<area>.ts` (`unlock`, `messages`, `uploads`, `push`) so the files never
+conflict. In-flight uploads and sends capture the session at start and run to completion
+after a lock.
+
+**Decoy** (`server/decoy.ts`, P4):
+- Paints instantly with skeleton rows, then fills from `/api/admin/system/status` and
+  `/api/version`.
+- Rows: Status (Online/Unreachable), Uptime, Engine (vN · sha7), Edition, Disk free, Last
+  publish, Backups, Media processing.
+- Real data only.
+
+**PIN pad** (`server/pinPad.ts`, P4):
+- A custom on-screen keypad (0–9, ⌫, ✓) plus physical digits, Backspace, Enter and Escape.
+- No `<input type=password>` (avoids password-manager prompts) and no autocomplete.
+- Masked dots.
+- Errors: "Incorrect PIN"; "Too many attempts — try again in Ns" with a countdown;
+  "Server settings unavailable" for 503.
+
+---
+
+## 7. Media processing (P2) — `livechat/processing.py`, pure, typed
+
+**Sniff first** from magic bytes:
+
+| Container | Magic |
+|---|---|
+| ISO-BMFF | `ftyp`@4 |
+| EBML | `1A45DFA3` |
+| Ogg | `OggS` |
+| WAV | `RIFF…WAVE` |
+| MP3 | ID3 / `FFEx` |
+| ADTS | `FFF1` / `FFF9` |
+| JPEG / PNG / GIF / WEBP / HEIF | their own magics |
+
+Then:
+- Map to a demuxer allowlist → pass `-f <demuxer> -protocol_whitelist file` to **every**
+  ffprobe/ffmpeg call.
+- Anything else → `failed: unsupported`.
+- The kind must match the content: a photo must decode as an image, a video must have a video
+  stream, a voice note must have an audio stream and no video.
+
+Subprocesses:
+- Windows: `creationflags = BELOW_NORMAL_PRIORITY_CLASS | CREATE_NO_WINDOW`. POSIX: a `nice -n 10`
+  prefix.
+- Hard timeouts: 30 min for video, 5 min for others. Kill on timeout.
+- Outputs are written to temp names, then renamed atomically.
+
+**Photo** (Pillow, with pillow-heif registered):
+- Pixel cap 80 MP.
+- `exif_transpose`, then drop all metadata.
+- PNG → `full.png` (optimize). Animated GIF → keep the bytes as `full.gif`. Everything else
+  (including webp/heic) → `full.jpg` q88.
+- Long edge ≤ 4096. `thumb.jpg` at a 480 px long edge, q80.
+
+**Voice:**
+- `play.m4a`: AAC-LC, mono, 64 kb/s, `+faststart`, `-map_metadata -1`.
+- `durationS` from ffprobe of the **output**. MediaRecorder webm has no duration.
+- `peaks`: decode to s16le mono 8 kHz, compute 64 RMS buckets, normalize to 0..1, 3 dp.
+
+**Video:**
+- **Remux** (`-c copy -movflags +faststart -map_metadata -1 -map 0:v:0 -map 0:a:0?`) when
+  the video is h264 8-bit yuv420p, its long edge is ≤1920, fps ≤60, and the audio is aac or
+  absent.
+- **Otherwise transcode:** libx264 veryfast crf 23, long edge ≤1920, yuv420p, aac 128k,
+  `+faststart`, `-threads 2`.
+- HEVC is transcoded, since it isn't universally playable in browsers.
+- Rotation must survive: remux keeps the display-matrix side data, and transcode autorotates.
+  Test with a rotated sample.
+- `poster.jpg`: `-ss min(1, dur/2)`, long edge ≤ 960.
+- Duration cap: 600 s.
+
+**Queue** (`media_queue.py`):
+- Runs in the app task group.
+- Two limiters: photo/voice CapacityLimiter(2), video CapacityLimiter(1).
+- Claim with a DB lease (`owner = f"{pid}-{uuid}"`, lease 120 s, renewed every 30 s), so a
+  slot-swap overlap never double-processes.
+- At startup it re-queues expired leases (crash-resume).
+- Calls `notifier.publish()` after `finish_attachment`.
+
+**Janitor**, hourly:
+- uploads older than 24 h
+- unreferenced attachments older than 24 h
+- `failed/` entries older than 7 days
+
+**Dependencies:**
+- `pillow-heif` joins the `server` extra and gets a `requirements.txt` pin. A cp314
+  win_amd64 wheel was verified to exist (1.7.0).
+- ffmpeg/ffprobe resolve from `WIXY_FFMPEG`/`WIXY_FFPROBE`, falling back to `shutil.which`.
+  Missing → ERROR log, `media_available = False`, uploads 503, text chat keeps working.
+- Hub has ffmpeg 8.1.2 (gyan full build, libx264 + aac) at the user's WinGet Links. The
+  Dockerfile already installs ffmpeg.
+
+---
+
+## 8. Push (P3)
+
+**Keys:** `livechat/push.py` generates the VAPID keys (cryptography EC P-256, persisted
+O_EXCL in `vapid.json`).
+
+**Request:** payloadless POST to the endpoint with:
+- `Authorization: vapid t=<ES256 JWT {aud: endpoint origin, exp: now+12h, sub: "https://<project.domain>"}>, k=<pub>`
+- `TTL: 86400`
+- `Urgency: high`
+- `Topic: wixy-server` (the push service collapses pending pushes)
+- `Content-Length: 0`
+
+PyJWT with cryptography does ES256.
+
+**Dispatch** (registered in `livechat_message_hooks`):
+- Every subscription except same `device_id` or same sender (casefold).
+- httpx AsyncClient, 10 s timeout, concurrency 4.
+- 201 → `record ok`. 404/410 → delete the subscription. Others → record a failure and
+  delete after 10 consecutive failures.
+
+**SW** (`admin-ui/src/sw/serverSw.ts` → esbuild 3rd build → `wixy_server/static/admin/server-sw.js`,
+committed and drift-checked; its own `tsconfig.sw.json` with the WebWorker lib, and the
+`typecheck` script runs both):
+- `push` → if some window client is visible + focused with a path starting `/admin/server`,
+  do nothing. Otherwise `showNotification("Server", {body:"New activity", tag:"wixy-server",
+  renotify:true})`.
+- `notificationclick` → close. Focus an `/admin` client and navigate it to `/admin/server`,
+  else `openWindow("/admin/server")`.
+- **No `fetch` listener** (asserted by a test).
+
+**UI** (`server/pushToggle.ts`): `mountPushToggle(host, deps) → {teardown}`.
+- Rendered by P5's settings sheet only when `isAndroidPushCapable()`.
+- States: off / on / blocked (explained in plain words) / error.
+- Enable (inside the click gesture): `Notification.requestPermission()` →
+  `register('/admin/server-sw.js', {scope:'/admin/'})` → `ready` →
+  `subscribe({userVisibleOnly:true, applicationServerKey})` → PUT.
+- Disable: unsubscribe → DELETE → unregister the SW.
+
+---
+
+## 9. New invariants (P7 folds these into `docs/ai/invariants.md`; each parcel adds the tests)
+
+- **Inv 40 — Server-chat data is private.**
+  - It lives only in `Storage/projects/<slug>/server/`.
+  - It never enters the site repo, builds, publish, `reports.py` bundles, the backup
+    snapshot allowlist, or any public route.
+  - It's served only by `/api/admin/server/*` with an unlock token or a signed media URL.
+  - Tests: the backup allowlist excludes it; the public catch-all can't reach it; the report
+    bundle lacks it.
+- **Inv 41 — The PIN is server-verified and never committed.**
+  - Constant-time compare, rate-limited.
+  - The PIN value lives only in `Storage/.env` (`WIXY_SERVER_PIN`), never in the repo (the
+    repo is public).
+  - The unlock token lives only in JS memory.
+  - Mutations need the header token. Media uses email+expiry-bound signed URLs. A token in a
+    query string is rejected.
+- **Inv 42 — Lock is fail-closed.** Every R6 trigger → locked. Locking removes the chat
+  subtree from the document, aborts the stream, pauses media and discards recording. The
+  decoy shows only real server data. No badge, title, favicon or push text ever reveals chat
+  activity.
+- **Inv 43 — Idle "activity" is user input only.** `scroll` events and incoming messages
+  never count, so a programmatic scroll can't keep the chat visible.
+- **Inv 44 — Stored media.**
+  - One normalized, metadata-stripped rendition per attachment. Originals are deleted after
+    success.
+  - Every ffmpeg/ffprobe call uses a sniffed explicit demuxer + `-protocol_whitelist file`.
+  - Quota and free-space floor are enforced at upload init.
+- **Inv 45 — The server-chat service worker has no fetch handler.** It's registered only on
+  explicit opt-in on Android. Push is payloadless with fixed generic text.
+- **Inv 12 amendment:** add a sentence saying the server-chat PIN token is an additional
+  in-app gate layered on top of CF Access, never a replacement.
+
+---
+
+## 10. Parcels (Builder-sized; most run concurrently)
+
+Waves:
+- **Wave 1** (all start now): P1, P2a, P3a, P4, P5a, P6a.
+- **Wave 2** (after P1 lands on the feature branch): P2b, P3b, P5b.
+- **Wave 3:** P6b.
+- **Close-out:** P7 plus DM integration.
+
+### P1 — Backend core (Builder A) · everything else depends on it, so land it first
+
+- **Settings** (`settings.py`) — add all of these up front:
+
+  | Env var | Setting | Default | Validation |
+  |---|---|---|---|
+  | `WIXY_SERVER_PIN` | `server_pin` | `""` | `^\d{4,8}$` or empty, else startup error |
+  | `WIXY_SERVER_MEDIA_QUOTA_MB` | `server_media_quota_bytes` | 20480 MB | — |
+  | `WIXY_SERVER_MIN_FREE_MB` | `server_min_free_bytes` | 10240 MB | — |
+  | `WIXY_SERVER_UPLOAD_CHUNK_BYTES` | `server_upload_chunk_bytes` | 8 MiB | clamp 64 KiB–16 MiB |
+  | `WIXY_FFMPEG` | `ffmpeg_path` | `""` | — |
+  | `WIXY_FFPROBE` | `ffprobe_path` | `""` | — |
+
+- **Storage:** add all the `ProjectPaths` properties (§4).
+- **New modules:** `livechat/{__init__,models,store,tokens,pin,notifier}.py`.
+- **Routes:** `routes_livechat.py` — unlock, messages GET/POST, stream, usage.
+- **System status:** the `server` field (§5.10).
+- **app.py wiring:** store, notifier, hooks list, `startedAt`.
+- **Tests:**
+  - migrations; idempotent create; paging; cursor atomicity
+  - token tamper, expiry and email binding (use the `test_auth_gate_integration` JWT pattern
+    for a real email)
+  - rate limit with an injectable clock
+  - unlock 200/401/429/503
+  - every route 401 without a token; a query token is rejected
+  - SSE: after-cursor, coalescing, `locked` on expiry, ping, a cross-"process" write picked up
+    by the 2 s re-check (write via a second store instance)
+- **Docs:** create `docs/ai/livechat.md` (overview, auth, store, routes); add the §5 routes to
+  `contracts.md`; add the modules to `architecture.md`.
+
+### P2a — Media processing, pure (Builder B, wave 1)
+
+- `livechat/processing.py`, as specified in §7.
+- `pillow-heif` dependency.
+- CI: `sudo apt-get update && sudo apt-get install -y ffmpeg` in ci.yml's `pytest` and `e2e`
+  jobs.
+- Tests run **real ffmpeg** on generated samples (`testsrc`/`sine` via ffmpeg in a fixture;
+  **never skip if ffmpeg is missing — fail loudly**):
+  - EXIF GPS stripped + orientation applied; HEIC decodes; animated GIF kept
+  - the remux-vs-transcode decision table; rotation preserved; container metadata (location)
+    stripped
+  - voice → m4a with duration and peaks
+  - an HLS playlist disguised as `.mp4` is rejected by the sniff and never fetched; a concat
+    list is rejected
+  - a decompression bomb is rejected; kind/content mismatch is rejected
+
+### P2b — Uploads, queue, janitor, media routes (Builder B, wave 2)
+
+- `livechat/{uploads,media_queue,janitor}.py` plus `routes_livechat_media.py`: §5.5, §5.6
+  and the `media_available` detection at startup.
+- **Tests:**
+  - chunk-cap 413; missing chunks 409; exact size; quota 507 and free-space 507 (injectable
+    `disk_usage`)
+  - signature tamper / expiry / email-mismatch 403; Range 206; nosniff
+  - lease exclusivity across two store instances; crash-resume; janitor ages (injectable clock)
+- **Docs:** the media section of `livechat.md`.
+
+### P3a — Push core and SW (Builder C, wave 1)
+
+- `livechat/push.py`: keys, JWT, sender, allowlist.
+- `sw/serverSw.ts` + `tsconfig.sw.json` + the 3rd esbuild build + the `/admin/server-sw.js`
+  route.
+- **Tests:**
+  - the VAPID JWT verifies with the public key; exact headers against a fake push endpoint
+    (httpx MockTransport)
+  - 410 deletes the subscription; the allowlist rejects http and foreign hosts
+  - vitest on the SW handlers (focused-client skip, fixed text, `notificationclick`
+    navigation, no fetch listener)
+
+### P3b — Push routes, dispatch hook, toggle UI (Builder C, wave 2)
+
+- §5.8 routes; register the dispatch in `livechat_message_hooks`.
+- `server/api/push.ts`, `server/pushToggle.ts`.
+- **Tests:** the self-exclusion rules; e2e `server-push.spec.ts` (§11).
+- **Docs:** the push section.
+
+### P4 — Frontend lock and disguise (Builder D, wave 1; stubs `/unlock` in vitest until P1 lands)
+
+- **Router:** a `server` route (Route union, `routeFromSegments`, `segmentsFor`).
+- **Nav:** `NAV_ROUTES` gets `{route:{kind:"server"}, label:"Server"}` **last**.
+- **shell.ts:** a `mountPanel` branch plus a `ShellDeps` injection seam like chat's.
+- **Modules:** `server/{constants,types,lockModel,gestures,panel,decoy,pinPad}.ts`,
+  `server/api/{http,unlock}.ts`, and `server/lock.css` (imported from `style.css`). The
+  panel mounts P5's `createServerChatView` through an injected factory; use a stub until P5b.
+- **Tests:** vitest covers the reducer, the gesture detector (synthetic PointerEvents,
+  exclusions, `performance.now`) and suspension accounting. e2e `server-lock.spec.ts` (§11).
+- **Docs:** the lock/gesture section of `livechat.md`; `editor-and-admin-ui.md` nav mention.
+
+### P5a — Shared chat extraction (Builder E, wave 1; a pure refactor of the AI chat)
+
+- Extract `chatThreadScroll.ts` (48 px stick-to-bottom + jump pill) and `lightbox.ts` from
+  `chatPanel.ts`, and make the AI panel use them.
+- Generalise `chatComposer.ts` with these options:
+  - `accept`
+  - `acceptFile(file) → boolean`
+  - `renderChipPreview(file) → HTMLElement` (non-image chips)
+  - `extraButtons: HTMLElement[]` (a slot after 📎)
+  - `upload(file, {onProgress, signal})`
+- Defaults must keep the AI composer byte-for-byte identical in behaviour and class hooks.
+  `chat-ux.spec.ts`, `composer-*.spec.ts` and the vitest suites must stay green, unmodified
+  except for import paths.
+
+### P5b — Server chat view (Builder E, wave 2)
+
+- **Modules:** `server/{chatView,thread,stream,identity,linkify,settingsSheet}.ts`,
+  `server/api/messages.ts`, `server/chat.css`.
+- **Layout:** mirrors the Inv 24 corollary exactly — flex column, the thread is the only scroll
+  region, the composer is pinned by layout, `env(safe-area-inset-bottom)`.
+- **Thread:**
+  - header: title "Server", name chip, ⚙ settings, and a **panic ✕** (`aria-label="Close"`)
+  - day separators; own messages on the right, others on the left with sender + time
+  - history paging via a top sentinel IntersectionObserver
+  - an optimistic echo reconciled by `clientId`, removed on send failure (the composer keeps
+    the draft)
+- **stream.ts:** fetch-SSE with the reconnect/backoff/45 s watchdog. Plain text + linkify
+  (http(s) only).
+- **Name prompt** on first unlock.
+- **Settings sheet:** name, storage used (`/usage`), push slot (P3b), Lock.
+- **Attachment rendering** goes through a `renderAttachments(attachments, ctx)` registry so P6
+  plugs in.
+- **Tests:** vitest for the stream parser and reconnect, and linkify XSS cases. e2e
+  `server-chat.spec.ts` (§11).
+
+### P6a — Frontend media modules (Builder F, wave 1; against frozen §5 contracts with fetch mocks)
+
+- **`server/upload.ts`** — the chunked uploader: init → PUT chunks with per-chunk retry
+  (3×, backoff) → complete; progress and abort; a 413/415/507/503 → a plain-English error.
+- **`server/recorder.ts`** — MediaRecorder.
+  - MIME preference: `audio/webm;codecs=opus`, then `audio/mp4`, then `audio/ogg;codecs=opus`.
+  - Tap to start / tap to stop, with a timer and a cancel.
+  - Auto-stops at 15:00.
+  - `suspend("micPermission")` around `getUserMedia`, `suspend("recording")` while recording.
+  - Fully releases the mic tracks on stop, cancel or detach.
+- **`server/mediaRender.ts`:**
+  - photo grid → the shared lightbox (full rendition)
+  - video (`poster`, `preload="none"`, `playsinline`, `controls`)
+  - voice player (play/pause, peaks waveform, elapsed/duration)
+  - processing state ("Processing…") and failed state ("Couldn't process this file")
+  - `suspend("mediaPlaying")` while any media plays
+
+### P6b — Media wiring (Builder F, wave 3)
+
+- 📎 accepts `image/*,video/*` with `suspend("filePicker")` until `change`/`cancel`.
+- 🎤 goes in the `extraButtons` slot.
+- Register the renderers; uploads survive lock/unlock.
+- e2e `server-media.spec.ts` (§11).
+- Docs: the frontend media section.
+
+### P7 — Docs and invariant close-out (DM or any finishing Builder)
+
+- Invariants 40–45 + the Inv 12 amendment in `invariants.md`.
+- `runbook.md`: the ffmpeg/pillow-heif dependency, the new env vars, the quota, and the
+  `.env` PIN step — without the value.
+- `testing.md`: the new specs, ffmpeg in CI, `page.clock`.
+- `glossary.md`: decoy, unlock token, lock causes.
+- **Decisions** (numbers pre-allocated; re-check for collisions at merge):
+  - 00144 server-chat architecture (SSE-over-fetch, SQLite, token model, disguise, public-repo PIN rule)
+  - 00145 media pipeline (single rendition, chunked uploads, ffmpeg hardening, quota)
+  - 00146 push (payloadless VAPID, Android-only, generic text)
+  - 00147 lock and gesture model (the R2/R3/R6/R7 readings)
+
+### Integration rules for DM
+
+- Committed bundles (`admin.js`, `admin.css`, `server-sw.js`) **will** conflict between
+  parcels. Never hand-merge them: take either side, run `npm run build` in `admin-ui`, and
+  commit.
+- `app.py`, `style.css` and `settings.py` conflicts are trivial additive merges.
+
+---
+
+## 11. E2E matrix (the fixture sets `WIXY_SERVER_PIN` to a made-up test PIN and `WIXY_SERVER_UPLOAD_CHUNK_BYTES=65536`)
+
+Add `/test/server/reset-rate-limit` to `fixture_server.py`. Every spec runs a **desktop leg
+and a mobile leg** (390×844, `isMobile`, `hasTouch`).
+
+**`server-lock.spec.ts` (P4)** — use `page.clock.install()` before `goto`:
+1. The nav shows "Server"; the decoy shows real rows; no affordance is visible.
+2. A single tap does nothing; a double tap reveals "Open server settings"; it re-hides after
+   10 s.
+3. Unlock:
+   - The pad title is "Unlock server".
+   - A wrong PIN shows "Incorrect PIN".
+   - 5 wrong → lockout message + countdown (reset endpoint afterwards).
+   - The right PIN → name prompt → chat.
+4. Idle:
+   - At 9 s it's still visible. A mouse move at 9 s pushes it out: still visible at +9 s.
+   - At +10.5 s it's the decoy, and `.wx-srv-thread` is absent from the DOM.
+   - An incoming message plus its auto-scroll at 5 s does **not** extend idle.
+5. The panic ✕ locks instantly; so does a double-tap on the thread. A double-tap in the
+   textarea does **not** lock. Escape locks.
+6. Routing away and back locks; reload locks; a synthetic hidden `visibilitychange` locks.
+7. Drafts survive: type, panic, unlock → the text is restored.
+
+**`server-chat.spec.ts` (P5)** — two browser contexts with different names:
+- A→B live delivery within 3 s; alignment is correct.
+- History paging over 120 seeded messages; day separator.
+- Echo reconciliation; stream reconnect after a forced drop (test endpoint).
+- Layout-invariants leg, desktop + mobile: the thread scrolls, `.wx-main` doesn't, the
+  composer is fully on-screen, the jump pill behaves, and there's no horizontal overflow.
+
+**`server-media.spec.ts` (P6)** — small committed fixtures (a jpeg with GPS EXIF, a 2 s mp4,
+a rotated mov):
+- A photo → thumb → lightbox.
+- A multi-chunk upload shows progress.
+- A video goes processing → ready → plays (`readyState`).
+- Voice runs in its own describe with `--use-fake-device-for-media-stream
+  --use-fake-ui-for-media-stream` and no clock: record 2 s → the bubble shows ~0:02 → plays.
+- An upload continues across panic + unlock.
+
+**`server-push.spec.ts` (P3b):**
+- A desktop UA shows no toggle.
+- An Android UA (`userAgent` override) shows the toggle.
+- With `addInitScript` stubbing `serviceWorker.register` and `PushManager.subscribe` →
+  PUT → status subscribed; disable → DELETE.
+- `/admin/server-sw.js` is served as JS with `Service-Worker-Allowed`.
+- Real push delivery is live-verified on the operator's Android phone, since headless
+  Chromium has no push service.
+
+---
+
+## 12. Deploy and live verification (DM)
+
+1. **Before** the delivery merge: append `WIXY_SERVER_PIN=<operator's PIN>` to
+   `D:\Servers\Wixy\Storage\.env`. That's runtime config, not a repo file, and the value
+   never goes in git. The next slot boot reads it.
+2. After Slots deploys, confirm the pillow-heif import in the active slot's environment. The
+   decoy's "Media processing" row reads **OK**, which proves that the Devfleet-launched
+   process resolves ffmpeg/ffprobe; if not, set `WIXY_FFMPEG`/`WIXY_FFPROBE` in `.env` to the
+   absolute paths.
+3. Drive `ca.cinnamons.uk/admin/server` with the `verify` skill:
+   - decoy → multi-tap → PIN → text, photo, video, voice
+   - two sessions see live updates; idle lock; panic
+   - mobile viewport
+4. **Android push** needs the operator's phone. Hand him the one-step instruction: Server →
+   unlock → ⚙ → Notifications on.
+
+---
+
+## 13. Audit (opus tier via `audit` skill) — acceptance criteria
+
+These are the §1 rulings R4–R13, the §2 hardening list, invariants 40–45 with tests present,
+and §5 contracts matched exactly. Also:
+- No PIN value in the git history of the delivery PR.
+- No token in any URL or log.
+- The 2 s re-check covers the two-process case.
+- Leases prevent double processing.
+- Every ffmpeg call is hardened.
+- The SW has no fetch handler.
+
+---
+
+## 15. Operator-level flags (routed to the Orchestrator)
+
+1. **PIN leak:** the pushed todo on the public repo's workspace branch contains it. Alerted
+   separately.
+2. **R2 gesture reading:** after the idle fade you multi-tap (not single-tap) to reach
+   "Unlock server". Confirm.
+3. **Disk:** 58.8 GB free on D:. Defaults are a 20 GB chat-media quota, a 10 GB free floor,
+   no originals kept, and video capped at 1080p. Confirm or adjust.
+4. **No backup** of chat history (R15). Confirm he's OK with that.
+5. **Push text** is always "Server — New activity", with no content. Confirm.
+6. **Public repo:** the chat's *code* (and so the disguise) is readable by anyone on GitHub;
+   only the PIN is secret. Confirm acceptable. If not, making the repo private is a GitHub
+   setting, with no design change.
+7. **Not requested, not built:** deleting messages or wiping the chat. Does he want it?
+   Non-blocking.
+
+## 16. Out of scope (v1)
+
+- editing or deleting messages
+- typing indicators, read receipts, presence, unread counts
+- iOS push
+- multiple rooms
+- search
+- backups of chat
+- server-side identity beyond CF Access
