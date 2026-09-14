@@ -571,7 +571,14 @@ class LiveChatStore:
             rows = conn.execute("SELECT * FROM push_subscriptions").fetchall()
             return [_row_to_push_subscription(row) for row in rows]
 
-    def record_push_result(self, *, device_id: str, ok: bool, now: float) -> None:
+    def record_push_result(self, *, device_id: str, ok: bool, now: float) -> int | None:
+        """Record one delivery and return the resulting failure streak.
+
+        The count is read inside the same immediate write transaction as the
+        increment.  Dispatch can therefore apply the ten-failure removal rule
+        without a racy second read when several messages fan out concurrently.
+        ``None`` means the subscription disappeared between listing and result.
+        """
         with self._write_txn() as conn:
             if ok:
                 conn.execute(
@@ -579,9 +586,15 @@ class LiveChatStore:
                     "WHERE device_id = ?",
                     (now, device_id),
                 )
+                return 0
             else:
                 conn.execute(
                     "UPDATE push_subscriptions SET consecutive_failures = consecutive_failures + 1 "
                     "WHERE device_id = ?",
                     (device_id,),
                 )
+                row = conn.execute(
+                    "SELECT consecutive_failures FROM push_subscriptions WHERE device_id = ?",
+                    (device_id,),
+                ).fetchone()
+                return int(row["consecutive_failures"]) if row is not None else None

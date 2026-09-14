@@ -896,3 +896,67 @@ class TestTokenBoundToRequestingEmail:
                 headers={"CF-Access-Jwt-Assertion": josh_jwt, "X-Wixy-Server-Token": token},
             )
         assert response.status_code == 200
+
+
+class TestPushRoutes:
+    def test_push_config_subscription_lifecycle_and_service_worker_route(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        with TestClient(app) as client:
+            token = _unlock(client).json()["token"]
+            headers = {"X-Wixy-Server-Token": token}
+            config = client.get("/api/admin/server/push/config", headers=headers)
+            assert config.status_code == 200
+            assert isinstance(config.json()["publicKey"], str)
+
+            device_id = "device-123456"
+            status_url = f"/api/admin/server/push/subscriptions/{device_id}"
+            assert client.get(status_url, headers=headers).json() == {"subscribed": False}
+            subscribed = client.put(
+                status_url,
+                headers=headers,
+                json={
+                    "sender": "Alice",
+                    "subscription": {
+                        "endpoint": "https://fcm.googleapis.com/fcm/send/token",
+                        "keys": {"p256dh": "public", "auth": "secret"},
+                    },
+                },
+            )
+            assert subscribed.status_code == 204
+            assert client.get(status_url, headers=headers).json() == {"subscribed": True}
+
+            bad_endpoint = client.put(
+                status_url,
+                headers=headers,
+                json={
+                    "sender": "Alice",
+                    "subscription": {
+                        "endpoint": "http://foreign.example/push",
+                        "keys": {"p256dh": "public", "auth": "secret"},
+                    },
+                },
+            )
+            assert bad_endpoint.status_code == 422
+            assert client.delete(status_url, headers=headers).status_code == 204
+            assert client.get(status_url, headers=headers).json() == {"subscribed": False}
+
+            worker = client.get("/admin/server-sw.js")
+            assert worker.status_code == 200
+            assert worker.headers["content-type"].startswith("text/javascript")
+            assert worker.headers["cache-control"] == "no-cache"
+            assert worker.headers["service-worker-allowed"] == "/admin/"
+
+    def test_push_routes_require_unlock_token(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        with TestClient(app) as client:
+            assert client.get("/api/admin/server/push/config").json() == {"error": "locked"}
+            response = client.get("/api/admin/server/push/subscriptions/device-123456")
+            assert response.status_code == 401
