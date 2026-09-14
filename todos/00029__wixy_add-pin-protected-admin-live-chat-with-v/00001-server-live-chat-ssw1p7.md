@@ -320,3 +320,11 @@ fixed same-session.)
   wixy workspace #30 ("anemone-7", session
   `ed5c0281-a830-4ab8-bdbd-d0b73a2482c7`) to root-cause and fix it properly,
   fully decoupled from this workspace's branch/scope.
+- **Both open Architect rulings resolved**: R2 errata v1.3 pushed (`ada8550`)
+  and sent direct to P4 (Builder D) by the Architect — no further action
+  needed. Delete+wipe spec'd as v1.2 addendum sec.17 (`5f29b1f`) — both
+  per-message delete and full wipe, purely additive (no frozen sec.4/5/6
+  changes). Only in-flight impact: amendment A1 to P1 (not yet merged —
+  events CHECK +2 types, nullable `message_seq`, `secure_delete`, stream
+  skip/emit); the rest ships as a new late parcel P8 once P1+P2b+P5b land.
+  Relayed to the DM to route A1 to P1 now and schedule P8.
