@@ -31,6 +31,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from pathlib import Path
 
@@ -48,11 +49,24 @@ from builder.config import ProjectConfig  # noqa: E402
 from wixy_server.chats import find_chat  # noqa: E402
 from wixy_server.checkout import current_sha, ensure_checkout  # noqa: E402
 from wixy_server.cmdchat import CmdChatClient  # noqa: E402
+from wixy_server.livechat.pinclient import CmdPinVerifier  # noqa: E402
+from wixy_server.livechat.store import LiveChatStore  # noqa: E402
 from wixy_server.registry import load_registry  # noqa: E402
 from wixy_server.site_source import build_site_source  # noqa: E402
 from wixy_server.storage import ProjectPaths, ensure_project_dirs, project_paths  # noqa: E402
 from wixy_server.tests.fake_cmd import FakeCmdServer, FakeCmdState  # noqa: E402
 from wixy_server.watcher import WatcherStatus, fetch_once  # noqa: E402
+
+# spec/server-chat/00-brief.md §11: "the fixture's FakeCmdServer registers a
+# made-up test PIN for the app key, and sets WIXY_SERVER_UPLOAD_CHUNK_BYTES=
+# 65536" — shared across server-lock.spec.ts (P4), server-chat.spec.ts (P5b)
+# and server-media.spec.ts (P6b). Landed here first (P4 hadn't pushed yet);
+# whoever's spec runs first in the suite wires this up, the others just use
+# it. TEST_SERVER_PIN is a made-up fixture value, never the operator's real
+# PIN (spec/server-chat/00-brief.md's own banner: the real PIN must never
+# appear in this public repo).
+TEST_SERVER_PIN_APP_KEY = "wixy-livechat"
+TEST_SERVER_PIN = "246813"
 
 
 def _git(args: list[str], cwd: Path) -> None:
@@ -297,6 +311,9 @@ def main() -> None:
 
     os.environ["WIXY_DEV_NO_AUTH"] = "1"
     os.environ["WIXY_ENV"] = "dev"
+    # spec/server-chat/00-brief.md §11 — small enough that server-media.spec.ts's
+    # (P6b) multi-chunk upload can exercise chunking against a real small file.
+    os.environ["WIXY_SERVER_UPLOAD_CHUNK_BYTES"] = "65536"
 
     registry = load_registry(wixy_repo_root)
     _publish_initial_build(registry.get("e2e"), storage_root, "e2e")
@@ -313,6 +330,9 @@ def main() -> None:
     # creates becomes ready almost immediately with zero per-session fixture
     # wiring; a real cmd instance is never touched (fleet rule).
     fake_cmd_state = FakeCmdState(default_ready_after_polls=1)
+    # spec/server-chat/00-brief.md §11's shared PIN fixture — one registered
+    # app key + PIN, used by every server-chat e2e spec's unlock flow.
+    fake_cmd_state.register_pin_app(TEST_SERVER_PIN_APP_KEY, TEST_SERVER_PIN)
     fake_cmd_server = FakeCmdServer(fake_cmd_state)
     fake_cmd_port = fake_cmd_server.start()
     cmdchat_client = CmdChatClient(
@@ -321,10 +341,14 @@ def main() -> None:
         readiness_poll_interval_s=0.2,
         readiness_timeout_s=10.0,
     )
+    pin_verifier = CmdPinVerifier(
+        app_key=TEST_SERVER_PIN_APP_KEY, base_url=f"http://127.0.0.1:{fake_cmd_port}"
+    )
 
     app = create_app(
         storage_root=storage_root,
         wixy_repo_root=wixy_repo_root,
+        pin_verifier=pin_verifier,
         # No E2E flow depends on the PERIODIC watcher tick (spec/04 §7) — E2E 6's
         # own simulated upstream commit fetches directly (this file's
         # `/test/simulate-upstream-commit`, decisions/00030), never waiting on
@@ -342,6 +366,70 @@ def main() -> None:
         watcher_interval_s=3600.0,
         cmdchat_client=cmdchat_client,
     )
+
+    @app.post("/test/server/config", include_in_schema=False)
+    async def _post_server_test_config() -> dict[str, str]:
+        """spec/server-chat/00-brief.md §11 — the shared PIN fixture: the specs
+        need the PIN's actual value to drive the real PIN pad, and hardcoding
+        the same literal independently in Python and TypeScript would silently
+        drift. `server-lock.spec.ts` (P4), `server-chat.spec.ts` (P5b) and
+        `server-media.spec.ts` (P6b) all fetch this once per test. POST (not
+        GET) like every other fixture-only route here: a GET on this path
+        would be shadowed by the site's own public catch-all route, which
+        `create_app()` already registered before this module adds its own
+        test-only routes — measured live (a GET returned the site's "Page not
+        found" page, not this handler)."""
+        return {"pin": TEST_SERVER_PIN}
+
+    @app.post("/test/server/reset-pin-lockout", include_in_schema=False)
+    async def _post_reset_pin_lockout() -> dict[str, bool]:
+        """Clears the fake cmd's wrong-attempt/lockout state for the shared test
+        app key — `server-lock.spec.ts`'s lockout leg needs a clean slate
+        without restarting the whole fixture server."""
+        fake_cmd_state.reset_pin_lockout(TEST_SERVER_PIN_APP_KEY)
+        return {"ok": True}
+
+    @app.post("/test/server/seed-messages", include_in_schema=False)
+    async def _post_seed_server_messages(payload: dict[str, object]) -> dict[str, int]:
+        """server-chat.spec.ts's history-paging leg needs ~120 messages without
+        driving the UI 120 times over — writes straight through the real
+        `LiveChatStore` (the same one `routes_livechat.py` uses), so the
+        seeded rows are indistinguishable from ones a real send would have
+        produced. `startAgoS`/`spreadS` place messages far enough apart in
+        time to land on more than one calendar day, exercising the day
+        separator. `label` (default "Seeded message") lets each test tag its
+        own batch distinctly — this fixture server runs ONE project for the
+        WHOLE spec file (playwright.config.ts's own `workers: 1`, no reset
+        between tests), so two tests seeding the generic default label would
+        make each other's leftover rows indistinguishable from their own."""
+        count = payload["count"]
+        assert isinstance(count, int)
+        start_ago_s = payload.get("startAgoS", 172_800.0)  # 2 days, by default
+        assert isinstance(start_ago_s, (int, float))
+        spread_s = payload.get("spreadS", 120.0)
+        assert isinstance(spread_s, (int, float))
+        sender = payload.get("sender", "Fixture")
+        assert isinstance(sender, str)
+        label = payload.get("label", "Seeded message")
+        assert isinstance(label, str)
+
+        store: LiveChatStore = app.state.livechat_store
+
+        def _seed() -> int:
+            base = time.time() - start_ago_s
+            for i in range(count):
+                store.create_message(
+                    client_id=f"seed-{uuid.uuid4().hex}",
+                    sender=sender,
+                    device_id=f"seed-device-{uuid.uuid4().hex[:16]}",
+                    by_email=None,
+                    text=f"{label} #{i + 1}",
+                    attachment_ids=[],
+                    now=base + i * spread_s,
+                )
+            return count
+
+        return {"seeded": await anyio.to_thread.run_sync(_seed)}
 
     @app.post("/test/simulate-upstream-commit", include_in_schema=False)
     async def _post_simulate_upstream_commit(payload: dict[str, str]) -> dict[str, str]:
