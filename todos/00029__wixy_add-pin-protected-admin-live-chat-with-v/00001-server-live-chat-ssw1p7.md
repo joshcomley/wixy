@@ -371,6 +371,18 @@ fixed same-session.)
   self-hosted Fir vs. both) — correctly left unanswered by every agent
   including me, since it's a genuine operator-only call. Purely a wait on
   him now; not something to solve by guessing.
+- **BLOCKER #9 CLEARED** (2026-09-14): cmd PR #3068 merged (`a3baf62d`),
+  cmd-prod deployed, app_key `wixy-livechat` registered (authorized by
+  decision #973, PIN value never passed through this workspace or git).
+  Live-smoke-tested against production: correct PIN → 200 ok; wrong → 401
+  wrong_pin+attempts_left; unknown app → 404; bad format → 400. Contract is
+  UNCHANGED from what was already relayed to P1/Architect (a pre-merge
+  security review found+fixed a lockout-refund race internally, no response
+  shape moved) — no rework needed on wixy's side. Reference:
+  `docs/ai/pin-service.md` in the cmd repo, new fleet skill `pin-service`.
+  Operator can rotate the PIN himself at `cmd.cinnamons.uk/pins`. Told the
+  DM immediately — **delivery merge is no longer blocked once the remaining
+  parcels land.**
 - **Architect formalized the real PIN contract as brief v1.4** (`7df841b`):
   full cmd↔wixy mapping table, added 409 `pin_changed` to `/unlock`, pinned
   the retry-safety rule, `lock_scope` deliberately not surfaced to the
