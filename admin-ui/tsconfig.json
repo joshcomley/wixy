@@ -17,5 +17,6 @@
     "rootDir": ".",
     "outDir": "dist"
   },
-  "include": ["src", "tests"]
+  "include": ["src", "tests"],
+  "exclude": ["src/sw", "tests/serverSw.test.ts"]
 }

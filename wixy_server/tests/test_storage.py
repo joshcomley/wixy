@@ -18,6 +18,18 @@ class TestProjectPaths:
         assert paths.chats_json == tmp_path / "projects" / "ca" / "chats.json"
         assert paths.publish_lock == tmp_path / "projects" / "ca" / "locks" / "publish.lock"
 
+    def test_server_chat_paths(self, tmp_path: Path) -> None:
+        """spec/server-chat/00-brief.md §4."""
+        paths = project_paths(tmp_path, "ca")
+        server_dir = tmp_path / "projects" / "ca" / "server"
+        assert paths.server_dir == server_dir
+        assert paths.server_db == server_dir / "server.db"
+        assert paths.server_secret == server_dir / "secret.key"
+        assert paths.server_vapid == server_dir / "vapid.json"
+        assert paths.server_media == server_dir / "media"
+        assert paths.server_uploads == server_dir / "uploads"
+        assert paths.server_failed == server_dir / "failed"
+
     def test_build_dir_is_keyed_by_sha(self, tmp_path: Path) -> None:
         paths = project_paths(tmp_path, "ca")
         assert paths.build_dir("abc123") == tmp_path / "projects" / "ca" / "builds" / "abc123"
@@ -41,6 +53,7 @@ class TestEnsureProjectDirs:
         assert paths.builds.is_dir()
         assert paths.locks_dir.is_dir()
         assert not paths.repo.exists()  # repo/ is checkout.py's job, not ours
+        assert not paths.server_dir.exists()  # lazy, like reports_dir — see storage.py
 
     def test_idempotent(self, tmp_path: Path) -> None:
         paths = project_paths(tmp_path, "ca")

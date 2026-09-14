@@ -157,6 +157,71 @@ class TestAiBackend:
             load_settings(tmp_path)
 
 
+class TestServerChatSettings:
+    """spec/server-chat/00-brief.md §10 P1."""
+
+    def test_defaults(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        for key in (
+            "WIXY_SERVER_PIN_APP_KEY",
+            "WIXY_SERVER_MEDIA_QUOTA_MB",
+            "WIXY_SERVER_MIN_FREE_MB",
+            "WIXY_SERVER_UPLOAD_CHUNK_BYTES",
+            "WIXY_FFMPEG",
+            "WIXY_FFPROBE",
+        ):
+            monkeypatch.delenv(key, raising=False)
+        settings = load_settings(tmp_path)
+        assert settings.server_pin_app_key == "wixy-livechat"
+        assert settings.server_media_quota_bytes == 20480 * 1024 * 1024
+        assert settings.server_min_free_bytes == 10240 * 1024 * 1024
+        assert settings.server_upload_chunk_bytes == 8 * 1024 * 1024
+        assert settings.ffmpeg_path == ""
+        assert settings.ffprobe_path == ""
+
+    def test_pin_app_key_is_overridable_and_never_a_pin_value(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WIXY_SERVER_PIN_APP_KEY", "cottage-aesthetics-livechat")
+        assert load_settings(tmp_path).server_pin_app_key == "cottage-aesthetics-livechat"
+
+    def test_empty_pin_app_key_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WIXY_SERVER_PIN_APP_KEY", "")
+        with pytest.raises(RuntimeError, match="WIXY_SERVER_PIN_APP_KEY"):
+            load_settings(tmp_path)
+
+    def test_media_quota_and_min_free_are_read_in_megabytes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WIXY_SERVER_MEDIA_QUOTA_MB", "100")
+        monkeypatch.setenv("WIXY_SERVER_MIN_FREE_MB", "50")
+        settings = load_settings(tmp_path)
+        assert settings.server_media_quota_bytes == 100 * 1024 * 1024
+        assert settings.server_min_free_bytes == 50 * 1024 * 1024
+
+    def test_upload_chunk_bytes_clamps_below_the_floor(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WIXY_SERVER_UPLOAD_CHUNK_BYTES", "1")
+        assert load_settings(tmp_path).server_upload_chunk_bytes == 64 * 1024
+
+    def test_upload_chunk_bytes_clamps_above_the_ceiling(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WIXY_SERVER_UPLOAD_CHUNK_BYTES", str(100 * 1024 * 1024))
+        assert load_settings(tmp_path).server_upload_chunk_bytes == 16 * 1024 * 1024
+
+    def test_ffmpeg_and_ffprobe_paths_are_overridable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WIXY_FFMPEG", r"C:\ffmpeg\ffmpeg.exe")
+        monkeypatch.setenv("WIXY_FFPROBE", r"C:\ffmpeg\ffprobe.exe")
+        settings = load_settings(tmp_path)
+        assert settings.ffmpeg_path == r"C:\ffmpeg\ffmpeg.exe"
+        assert settings.ffprobe_path == r"C:\ffmpeg\ffprobe.exe"
+
+
 class TestContainerized:
     def test_defaults_to_false(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("WIXY_CONTAINERIZED", raising=False)
