@@ -228,3 +228,76 @@ fixed same-session.)
   any that change scope); once cmd's contract is real, relay it to whichever
   Builder owns wixy's P1 backend core (`livechat/pinclient.py`) so they build
   against the real shape instead of the Architect's placeholder.
+
+## Update 2026-09-14 (later same session, by the DM) — delivery record + wave 1 dispatched
+
+- **Delivery record**: cmd delivery `b5377785-73eb-4968-b269-18d958b70d83` (seq 2;
+  seq 1 is a stray empty-mission row from a first POST that mis-named the
+  `mission_md` field — harmless, `get_active_delivery` picks highest-seq
+  `open` row so seq 2 is authoritative). 12 tasks: P1, P2a, P2b, P3a, P3b, P4,
+  P5a, P5b, P6a, P6b, P7, plus a DM-owned "Integration, audit, deploy
+  verification, delivery merge" task. Workspace `delivery_state`:
+  `discussing` → `building`.
+- **Wave 1 dispatched** (6 concurrent Builders, brief sec.10 waves), each its
+  own build space (worktree `..._bs{1..6}`, branch `cmd/workspace-00029-bs{1..6}`,
+  base `cmd/workspace-00029`), each sent a full self-contained module brief
+  (stored via intercomm, envelope pointing at it) plus told the FINAL
+  HANDOFF / BLOCKER protocol:
+  - P1 backend core — session `14dae1f4-d2d4-4d07-aa8f-555dbda1336b`,
+    build space `cc5fa7e8`, claude-sonnet-5 xhigh. Lands first; everything
+    else integrates on it.
+  - P2a media processing (pure, ffmpeg-hardened) — session `08857e56-db5b-
+    4447-a7d2-7bb3c99cc7f2`, build space `a80233ca`, claude-sonnet-5 xhigh.
+  - P3a push core + service worker — session `6794dc17-4d4d-46b2-b7b0-
+    899c0706329e`, build space `ad3fb73b`, codex gpt-5.6-luna high.
+  - P4 frontend lock state machine/disguise/PIN pad — session `067bdbd9-
+    19b1-428c-b81b-c2316f481e17`, build space `44767545`, claude-sonnet-5
+    xhigh (security-critical parcel, kept on the higher tier).
+  - P5a shared chat extraction (pure refactor of the LIVE AI chat panel) —
+    session `cc37ed23-19f7-4201-bccf-d7eb0535294f`, build space `789e14c5`,
+    claude-sonnet-5 xhigh (highest regression-risk parcel — existing
+    chat-ux.spec.ts/composer-*.spec.ts must stay green, unmodified except
+    import paths).
+  - P6a frontend media modules (uploader/recorder/mediaRender) — session
+    `61c0f8b6-da4e-4853-9841-ff99c4e53b42`, build space `db744467`, codex
+    gpt-5.6-luna high.
+  - Model choice rationale: security/auth-adjacent and regression-risk
+    parcels (P1, P2a, P4, P5a) kept on claude-sonnet-5/xhigh (the team's
+    Claude ceiling); more contained/self-mocked parcels (P3a, P6a) given to
+    codex gpt-5.6-luna/high to diversify and parallelize without exceeding
+    the ceiling.
+  - Lane monitors (`lane-monitor` skill) armed on all 6, `expect_secs=3600`:
+    lane ids `c7892056`, `0a2e7a16`, `1fe24d9c`, `d3904fc1`, `e453b0c2`,
+    `bbdcc534`. A stalled Builder pages the DM automatically.
+- **Sequencing for later waves** (not yet dispatched): wave 2 (P2b, P3b, P5b)
+  starts once P1 has landed on `cmd/workspace-00029`; wave 3 (P6b) starts once
+  P2b + P5b + P6a have all landed; P7 (docs/invariants 40-45/decisions
+  00144-00147) is close-out once every other parcel is in.
+- **Merge gate reminder**: the DM reviews every Builder's FINAL HANDOFF
+  independently before that Builder may open/merge its module PR against
+  `cmd/workspace-00029` (never `main`). The DM never merges a Builder's
+  module itself.
+- **Delivery-merge blocker unchanged**: still gated on the Orchestrator's
+  dependency #9 (cmd PIN service live + the operator's PIN registered under
+  app key `wixy-livechat`, brief sec.12 step 1) — the Orchestrator owns
+  clearing this and will notify the DM.
+- **DM session**: `7061c848-e57d-4aee-8fd9-a9bcc459d1b4` (workspace #29
+  Delivery Manager).
+
+## Update 2026-09-14 (later same session, by the Orchestrator) — decisions answered
+
+- **Decision #973** (keep-vs-change the original PIN): answered, kept.
+- **Decision #975** answered: public repo is fine (no change) · standalone
+  edition's PIN gap OK for now (no change) · **"yes, add delete or wipe"**
+  for messages/chat history — this is NEW SCOPE not in the frozen brief.
+  Orchestrator's read: implement BOTH per-message delete and a full
+  wipe-everything (operator didn't pick one over the other; both is the
+  most complete option and isn't worth blocking on a re-ask). Sent to the
+  Architect to spec as a v1.2 addendum, with an explicit question on
+  whether it can be added without touching the already-frozen store
+  API/HTTP contracts/TS interfaces wave-1 Builders are actively coding
+  against, or whether it needs to land as a late parcel (P7 close-out or a
+  fresh P8) to avoid destabilizing in-flight work. Awaiting the Architect's
+  ruling before this reaches any Builder.
+- **Decision #974** still open (idle-fade gesture, storage limits, no-backup,
+  push-text) — non-blocking, no action needed yet.
