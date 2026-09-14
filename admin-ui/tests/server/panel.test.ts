@@ -99,9 +99,18 @@ describe("mountServerPanel", () => {
     return button;
   }
 
+  /** A real tap fires `pointerdown` before `click` — jsdom's own `.click()`
+   * only synthesizes the `click` half, which would silently hide any bug in
+   * the (separately, document-level, capture-phase) `pointerdown` listener
+   * R3's `multiTapDetector` uses (see gestures.ts). */
+  function tap(button: HTMLButtonElement): void {
+    button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    button.click();
+  }
+
   async function enterAndSubmitPin(root: HTMLElement, pin: string): Promise<void> {
-    for (const digit of pin) digitButton(root, digit).click();
-    digitButton(root, "✓").click();
+    for (const digit of pin) tap(digitButton(root, digit));
+    tap(digitButton(root, "✓"));
     await flush();
   }
 
@@ -267,6 +276,28 @@ describe("mountServerPanel", () => {
     chatHost.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
 
     expect(panel.element.querySelector(".wx-srv-thread")).toBeNull();
+    panel.teardown();
+  });
+
+  it("R3 bug fix: PIN-pad taps leave no leftover multi-tap count — ONE genuine tap in chat right after unlock never locks", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ token: "tok", expiresAt: expiresIn(3600) }));
+    const panel = mount();
+    await openPinPad(panel.element);
+    // PIN entry taps 5 <button> elements (digits + the checkmark) — none of
+    // them excluded by `isExcludedTapTarget` (only textarea/input/
+    // contenteditable/audio/video are), so they feed the SAME
+    // multiTapDetector R3 uses inside chat and can leave it holding a
+    // leftover count. Regression: `panel.ts` never reset the detector on
+    // unlock, so this leftover count could combine with the very next tap
+    // made inside the just-unlocked chat view to spuriously complete a
+    // "multi-tap" and instantly re-lock it.
+    await enterAndSubmitPin(panel.element, "1234");
+    expect(panel.element.querySelector(".wx-srv-thread")).not.toBeNull();
+
+    const chatHost = panel.element.querySelector(".wx-srv-chat-host") as HTMLElement;
+    chatHost.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+
+    expect(panel.element.querySelector(".wx-srv-thread")).not.toBeNull(); // must NOT lock on one tap
     panel.teardown();
   });
 

@@ -272,6 +272,35 @@ for (const profile of DEVICE_PROFILES) {
       });
     });
 
+    test(`${profile.name}: PIN-pad taps leave no leftover multi-tap count — ONE genuine tap in chat right after unlock never locks`, async ({
+      browser,
+    }) => {
+      await withServerPage(browser, profile, async (page) => {
+        // Regression: R3's multiTapDetector is attached to `document` for
+        // the panel's whole mounted lifetime, and `isExcludedTapTarget`
+        // excludes textarea/input/contenteditable/audio/video — NOT the PIN
+        // pad's own <button> elements, so every PIN-entry tap feeds the SAME
+        // detector R3 uses inside chat and can leave it holding a leftover
+        // count (parity depends on exactly how many taps PIN entry took —
+        // one extra qualifying tap here forces the odd-leftover case
+        // deterministically, matching a real user who e.g. brushed the pad
+        // once more than the digits alone would). Previously that leftover
+        // count could combine with the very first tap made inside the
+        // just-unlocked chat view to spuriously complete a "multi-tap" and
+        // instantly re-lock a chat that was only just opened.
+        await revealAndOpenPinPad(page);
+        await page
+          .locator(".wx-srv-pinpad")
+          .evaluate((el) => el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })));
+        await enterPin(page, TEST_PIN);
+        await expect(page.locator(".wx-srv-thread")).toBeVisible();
+
+        await page.locator(".wx-srv-thread").click();
+
+        await expect(page.locator(".wx-srv-thread")).toBeVisible();
+      });
+    });
+
     test(`${profile.name}: routing away and back locks; a reload locks; a synthetic hidden event locks`, async ({
       browser,
     }) => {

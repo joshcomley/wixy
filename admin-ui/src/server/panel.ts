@@ -315,6 +315,18 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
       // the reassignment above happened.
       revealedAtMs = win.performance.now();
     }
+    if (previousKind !== "chat" && result.state.kind === "chat") {
+      // R3's multiTapDetector is attached to `document` for the panel's
+      // WHOLE mounted lifetime (see below), not scoped to the chat view —
+      // `isExcludedTapTarget` excludes textarea/input/contenteditable/audio/
+      // video, but NOT the PIN pad's own <button> elements, so every PIN
+      // digit/backspace/checkmark tap feeds the SAME detector R3 uses inside
+      // chat. Without this reset, a leftover odd tap count from PIN entry
+      // can combine with the very first tap made inside the just-unlocked
+      // chat view to spuriously complete a "multi-tap" and instantly
+      // panic-lock the view that was only just unlocked.
+      multiTapDetector.reset();
+    }
     render();
     applyEffects(result.effects);
   }
