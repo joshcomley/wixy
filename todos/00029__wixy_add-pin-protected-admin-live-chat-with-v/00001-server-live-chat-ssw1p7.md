@@ -283,3 +283,48 @@ fixed same-session.)
   clearing this and will notify the DM.
 - **DM session**: `7061c848-e57d-4aee-8fd9-a9bcc459d1b4` (workspace #29
   Delivery Manager).
+
+## Update 2026-09-14 (later same session, by the Orchestrator) — decisions answered
+
+- **Decision #973** (keep-vs-change the original PIN): answered, kept.
+- **Decision #975** answered: public repo is fine (no change) · standalone
+  edition's PIN gap OK for now (no change) · **"yes, add delete or wipe"**
+  for messages/chat history — this is NEW SCOPE not in the frozen brief.
+  Orchestrator's read: implement BOTH per-message delete and a full
+  wipe-everything (operator didn't pick one over the other; both is the
+  most complete option and isn't worth blocking on a re-ask). Sent to the
+  Architect to spec as a v1.2 addendum, with an explicit question on
+  whether it can be added without touching the already-frozen store
+  API/HTTP contracts/TS interfaces wave-1 Builders are actively coding
+  against, or whether it needs to land as a late parcel (P7 close-out or a
+  fresh P8) to avoid destabilizing in-flight work. Awaiting the Architect's
+  ruling before this reaches any Builder.
+- **Decision #974 answered**: storage limits fine, no-backup fine, generic
+  push-text fine — no changes. **Gesture correction (important, urgent):**
+  the frozen brief's **R2 is wrong**. Operator: "No, it is different + Single
+  tap. Double tap is anywhere on the chat view to lock it again." Correct
+  reading: the locked "Server" screen reveals "Open server settings" on a
+  **single tap** (not the brief's "rapid multi-tap ≥2 taps"); **R3** (a
+  double-tap-or-more anywhere in the unlocked chat view re-locks it) was
+  already correct, unchanged. Sent urgently to the Architect (errata/v1.3)
+  and to the DM as a heads-up, since P4 (Builder D) was actively coding the
+  wrong R2 reading. **DM caught it fast**: put an immediate hold on Builder
+  D's decoy-tap-reveal detector specifically (rest of P4 unaffected,
+  continuing), waiting on the Architect's official errata text before
+  redirecting further.
+- **Unrelated e2e flake spun off**: the DM found + independently confirmed a
+  pre-existing, unrelated flake in `e2e/tests/collection-edit.spec.ts`
+  (reorder-timing assertion in the showcase preview iframe, 2/7 failures on
+  unmodified main-line code) while clearing P5a. Per the no-stopgap/root-cause
+  doctrine this isn't left as a dismissed "flake" — spun off into a separate
+  wixy workspace #30 ("anemone-7", session
+  `ed5c0281-a830-4ab8-bdbd-d0b73a2482c7`) to root-cause and fix it properly,
+  fully decoupled from this workspace's branch/scope.
+- **Both open Architect rulings resolved**: R2 errata v1.3 pushed (`ada8550`)
+  and sent direct to P4 (Builder D) by the Architect — no further action
+  needed. Delete+wipe spec'd as v1.2 addendum sec.17 (`5f29b1f`) — both
+  per-message delete and full wipe, purely additive (no frozen sec.4/5/6
+  changes). Only in-flight impact: amendment A1 to P1 (not yet merged —
+  events CHECK +2 types, nullable `message_seq`, `secure_delete`, stream
+  skip/emit); the rest ships as a new late parcel P8 once P1+P2b+P5b land.
+  Relayed to the DM to route A1 to P1 now and schedule P8.

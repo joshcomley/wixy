@@ -1,6 +1,8 @@
 # Server chat — Architect's technical brief (workspace #29)
 
-Status: **FROZEN v1.1** (Architect, 2026-09-14; v1.1 = operator's zero-PIN-state override, R4/§5.1). Contracts in §5 are frozen — any change goes
+Status: **FROZEN v1.3** (Architect, 2026-09-14). v1.1 = operator's zero-PIN-state override
+(R4/§5.1); v1.2 = delete + wipe addendum (§17); **v1.3 = R2 errata: a single tap reveals
+(decision #974)**. Contracts in §5 are frozen — any change goes
 through the Architect (`ask-architect`). Rulings in §1 are binding.
 
 > 🔴 **The wixy repo is PUBLIC** (`gh repo view` → `visibility: PUBLIC`, measured
@@ -18,8 +20,9 @@ through the Architect (`ask-architect`). Rulings in §1 are binding.
 ## 0. Summary
 
 A hidden human-to-human chat for admin users, inside the already CF-Access-gated `/admin`.
-It is disguised as a **"Server"** nav tab showing real server status. A rapid multi-tap
-reveals **"Open server settings"**, which opens a PIN pad titled **"Unlock server"**. After
+It is disguised as a **"Server"** nav tab showing real server status. A single tap on
+that screen reveals **"Open server settings"**, which opens a PIN pad titled
+**"Unlock server"**. After
 unlock it's a live chat with text, photos, videos, and voice notes, plus opt-in Android push.
 There are three ways back to locked (10 s idle fade, panic button, multi-tap in chat), plus a
 few fail-closed extras (§1 R6).
@@ -41,15 +44,20 @@ few fail-closed extras (§1 R6).
 visitor-facing. It has its own storage and routes, separate from `chats.py`, `cmdchat.py`
 and `draft/media/`.
 
-**R2 — Gesture model** (unifies mission messages #1 and #3; the contrast "and when you're in
-the chat view" in #3 means the first sentence describes the locked screen):
+**R2 — Gesture model** (v1.3 ERRATA — operator decision #974: "Single tap. Double tap is
+anywhere on the chat view to lock it again." This supersedes the v1–v1.2 multi-tap reveal):
 - Locked screen = the **decoy** (real server status) with **no** visible entry point.
-- Rapid multi-tap (≥2 taps, ≤400 ms apart) anywhere → reveals an **"Open server settings"**
-  button. It re-hides after 10 s idle.
+- A **single tap** anywhere inside the Server panel (the `.wx-main` panel element, **not**
+  the nav or topbar — so tapping another tab never flashes the affordance) → reveals an
+  **"Open server settings"** button. It re-hides after 10 s idle.
 - Tap it → PIN pad titled **"Unlock server"**.
-- The idle-fade path ends on this same decoy. Every lock cause lands in one locked state; the
-  only difference is that idle animates a fade and the others are instant.
-- Flagged to the Orchestrator for optional operator confirmation. Build on this reading.
+  - **Debounce:** the affordance ignores any tap within 400 ms of its own reveal, so the
+    second tap of an accidental double tap can't open the PIN pad.
+- Multi-tap has **no** special meaning on the decoy. Its first tap reveals, and the rest
+  are absorbed by the debounce. Multi-tap only matters inside the chat view (R3).
+- The idle-fade path ends on this same decoy, so "tap again → unlock server" (mission #1)
+  holds on every path. Every lock cause lands in one locked state; the only difference is
+  that idle animates a fade and the others are instant.
 
 **R3 — Multi-tap inside the chat view locks.** It counts every pointerdown except those whose
 target is inside `textarea`, `input`, `[contenteditable]`, `audio` or `video` (native media
@@ -500,7 +508,7 @@ P1 adds a `server` field to the existing `GET /api/admin/system/status`:
 with 100% branch coverage in vitest. States:
 
 ```
-decoy ──multiTap──▶ revealed ──tapAffordance──▶ pin ──submit──▶ verifying ──ok──▶ chat
+decoy ──tap(panel)──▶ revealed ──tapAffordance(≥400ms after reveal)──▶ pin ──submit──▶ verifying ──ok──▶ chat
   ▲                    │ idle 10s                  │ cancel/Esc/idle 10s   │wrong→pin(error)
   │◀───────────────────┘◀──────────────────────────┘                       │lockedOut→pin(countdown)
   │◀── fading(800ms) ◀── idle 10s (no suspension) ── chat
@@ -899,8 +907,10 @@ and a mobile leg** (390×844, `isMobile`, `hasTouch`).
 
 **`server-lock.spec.ts` (P4)** — use `page.clock.install()` before `goto`:
 1. The nav shows "Server"; the decoy shows real rows; no affordance is visible.
-2. A single tap does nothing; a double tap reveals "Open server settings"; it re-hides after
-   10 s.
+2. A single tap in the panel reveals "Open server settings", and it re-hides after 10 s.
+   A tap on the nav doesn't reveal it. A double tap on the spot where the button appears
+   reveals it but does **not** open the PIN pad (400 ms debounce). Tapping the button
+   after 400 ms opens the pad.
 3. Unlock:
    - The pad title is "Unlock server".
    - A wrong PIN shows "Incorrect PIN".
@@ -955,7 +965,7 @@ a rotated mov):
    process resolves ffmpeg/ffprobe; if not, set `WIXY_FFMPEG`/`WIXY_FFPROBE` in `.env` to the
    absolute paths.
 3. Drive `ca.cinnamons.uk/admin/server` with the `verify` skill:
-   - decoy → multi-tap → PIN → text, photo, video, voice
+   - decoy → single tap → "Open server settings" → PIN → text, photo, video, voice
    - two sessions see live updates; idle lock; panic
    - mobile viewport
 4. **Android push** needs the operator's phone. Hand him the one-step instruction: Server →
@@ -981,8 +991,8 @@ and §5 contracts matched exactly. Also:
 
 1. **PIN leak:** the pushed todo on the public repo's workspace branch contains it. Alerted
    separately.
-2. **R2 gesture reading:** after the idle fade you multi-tap (not single-tap) to reach
-   "Unlock server". Confirm.
+2. ~~R2 gesture reading~~ **RESOLVED** (decision #974): a single tap reveals it; a double
+   tap re-locks only inside the chat. Applied as the v1.3 errata.
 3. **Disk:** 58.8 GB free on D:. Defaults are a 20 GB chat-media quota, a 10 GB free floor,
    no originals kept, and video capped at 1080p. Confirm or adjust.
 4. **No backup** of chat history (R15). Confirm he's OK with that.
@@ -999,10 +1009,180 @@ and §5 contracts matched exactly. Also:
 
 ## 16. Out of scope (v1)
 
-- editing or deleting messages
+- editing messages (deleting and wiping are now **in** scope: §17, v1.2)
 - typing indicators, read receipts, presence, unread counts
 - iOS push
 - multiple rooms
 - search
 - backups of chat
 - server-side identity beyond CF Access
+
+---
+
+## 17. v1.2 addendum — delete a message and wipe the chat (operator decision #975)
+
+The operator's answer: "yes, add delete or wipe". The ruling is that **both** are built: delete
+one message, and wipe everything. The addendum is purely **additive**:
+- The frozen §5 routes, the §6 TS interfaces (`ServerSession`, `LockHooks`,
+  `ServerChatView`, `serverFetch`) and the existing §4 store method signatures are
+  unchanged.
+- New surface only: two store methods, two routes, two SSE event types, and UI entry points.
+- One small in-flight schema/stream amendment (A1, §17.2) goes to P1, which has not merged
+  yet.
+
+### 17.1 Semantics (binding)
+
+- **Anyone unlocked can delete any message, for everyone.** Wipe lets anyone erase
+  everything, so an "own messages only" rule would be inconsistent.
+- **Hard delete, no tombstone.** The message simply disappears on every client: no "message
+  deleted" placeholder, no trace in the thread.
+- **Delete a message** removes:
+  - its row
+  - its attachment rows
+  - its media dirs (`media/<id[:2]>/<id>/`)
+  - its earlier `message` and `message_updated` events
+
+  Then it appends one `message_deleted` event. Deleting an already-deleted message is
+  idempotent.
+- **Wipe** removes every message, attachment, media file, pending upload (row and dir) and
+  `failed/` entry, and every event. Then it appends one `wiped` event.
+  - Not touched: `seq` numbering (AUTOINCREMENT never reuses), push subscriptions,
+    `secret.key`, `vapid.json`, and localStorage names.
+  - In-flight uploads from another device then get a 404 on their next chunk or complete, and
+    show "Upload cancelled".
+- **Scrubbing:**
+  - Every connection sets `PRAGMA secure_delete=ON`, so deleted rows are zeroed in the main
+    DB file.
+  - After a delete: `PRAGMA wal_checkpoint(PASSIVE)`. After a wipe:
+    `PRAGMA wal_checkpoint(TRUNCATE)`, so the old content leaves the WAL too.
+  - Media files are unlinked. **Honest limit:** no byte-level shredding of files on
+    NTFS/SSD, since overwriting in place is not reliable on SSDs anyway. Documented in
+    `livechat.md`.
+- **Race with the media queue** (P2b behaviour; the frozen signature is unchanged):
+  - `finish_attachment` on a row that no longer exists is a silent no-op, with no event.
+  - After `finish_attachment`, the queue re-reads `get_attachment`. If it's `None`, the queue
+    `rmtree`s that attachment's media dir. `delete_message`/`wipe` also `rmtree`. Both are
+    idempotent, so whichever runs last cleans up.
+- Delete and wipe never trigger a push.
+
+### 17.2 Amendment A1 — to P1, only if P1 has NOT yet merged to the feature branch
+
+A1 is a tiny in-flight change so the v1 schema never needs a rebuild migration. As of
+2026-09-14, P1 has not merged, so A1 applies to P1. If P1 has already merged by the time
+this is read, P8 does all of this instead as migration v2, rebuilding the content-free
+`events` table while preserving its `sqlite_sequence` high-water mark.
+
+1. `events.type CHECK IN ('message','message_updated','message_deleted','wiped')`, and
+   `events.message_seq` becomes **nullable** (NULL for `wiped`).
+   `EventRow.type`'s Literal gains the two values; `EventRow.message_seq: int | None`.
+2. Every connection sets `PRAGMA secure_delete=ON`.
+3. The SSE stream:
+   - emits `message_deleted` as `data: {"seq": int}` and `wiped` as `data: {}`;
+   - **skips** a `message` or `message_updated` event whose message no longer exists;
+   - still coalesces per message.
+4. `finish_attachment` on a missing row → a no-op with no event, per §17.1.
+
+### 17.3 New contracts (additive; frozen once published)
+
+**Store:**
+- `delete_message(self, *, seq: int, now: float) -> list[str]` returns the removed attachment
+  ids; the caller `rmtree`s their dirs.
+- `wipe(self, *, now: float) -> tuple[list[str], list[str]]` returns (attachment ids, upload
+  ids) removed; the caller `rmtree`s the `media/`, `uploads/` and `failed/` contents.
+- Both run in one write transaction plus the checkpoint above, and both publish to the
+  notifier.
+
+**HTTP** (header token required, like every §5 route):
+- `DELETE /api/admin/server/messages/{seq}` → 204, idempotent (204 even when already gone).
+- `POST /api/admin/server/wipe` with body `{"confirm":"WIPE"}` → 204. Any other body → 422.
+  The literal guards against an accidental call.
+
+**SSE:**
+- `event: message_deleted` / `data: {"seq": n}` — the client removes that bubble if present
+  and otherwise does nothing.
+- `event: wiped` / `data: {}` — the client clears the thread and all loaded history, sets
+  `hasMore = false`, and drops pending echoes. The stream continues.
+
+### 17.4 UI (binding)
+
+**Message actions:** long-press (touch, 500 ms, cancelled by >10 px movement), right-click
+(`contextmenu`), or a hover "⋯" button (desktop) opens a small action sheet with these
+entries:
+- **Copy text** — text messages only.
+- **Delete for everyone** — a single confirm line inside the sheet: "Delete this message for
+  everyone?" [Delete] [Cancel].
+- **Cancel.**
+
+Details:
+- Deletion is optimistic: the bubble fades out and is removed. It's restored with a plain
+  error line on failure.
+- The long-press counts as activity. A double-tap on a bubble still locks (R3), and a
+  long-press is never a multi-tap.
+- Bubbles set `-webkit-touch-callout: none` so iOS doesn't show its own callout.
+
+**Wipe:** the settings sheet gets a destructive row, "Delete all messages". It uses a
+two-step confirm: "Delete every message, photo, video and voice note for everyone? This can't
+be undone." [Delete everything] [Cancel]. It sends `{"confirm":"WIPE"}`, then the local
+`wiped` handling runs immediately. The server's `wiped` event is then a no-op for this client.
+
+**Lock interplay:** while locked, nothing is shown and nothing starts. A delete or wipe that
+started before a lock completes (like sends, R6). Events that arrive while locked are
+replayed from the cursor on unlock.
+
+### 17.5 Parcel P8 — delete and wipe (one Builder, a vertical slice)
+
+**Starts after P1, P2b and P5b are on the feature branch.** It touches the store, the media
+dirs and the chat view, so it goes last to avoid colliding with in-flight work.
+
+**Backend:**
+- the §17.3 store methods (+ migration v2 if A1 missed P1)
+- the routes in `routes_livechat.py`
+- media, upload and failed cleanup
+- the P2b queue re-check, if P2b didn't already do §17.1's race rule
+
+**Frontend:**
+- `server/messageActions.ts` (long-press, contextmenu, ⋯ sheet)
+- the wipe row in `settingsSheet.ts`
+- `message_deleted`/`wiped` handling in `thread.ts`/`stream.ts`
+- `server/api/messages.ts` gains `deleteMessage` / `wipeChat`
+
+**pytest:**
+- delete removes rows, events and files, and is idempotent
+- wipe removes everything, including an in-flight upload (its next chunk → 404) and `failed/`
+- `PRAGMA secure_delete` reads 1 on store connections
+- **after a delete and after a wipe, a unique marker string from the deleted text is absent
+  from the raw bytes of `server.db` + `server.db-wal`**
+- a delete racing a processing attachment leaves no media dir behind
+- a stream spanning a delete emits `message_deleted`, and skips the stale `message` event on
+  replay from an old cursor
+- a `wiped` replay from an old cursor clears
+- a wipe body other than `{"confirm":"WIPE"}` → 422
+
+**e2e** (`server-chat.spec.ts` gains a "delete and wipe" describe, two contexts, desktop +
+mobile):
+- A deletes B's message via the ⋯ or long-press sheet → it vanishes on both within 3 s.
+- The old media URL for a deleted photo → 404.
+- Wipe from A's settings → B's thread empties live; reload shows empty.
+- A long-press never locks; a double-tap on a bubble still locks.
+
+**Docs:**
+- a `livechat.md` section on delete and wipe, with the honest filesystem limit
+- `contracts.md` gets the two routes and two events
+- invariant **46** in `invariants.md`
+- decision **00148** (delete/wipe semantics: hard delete, no tombstone, anyone-can-delete,
+  scrubbing)
+
+**Audit (§13) gains:**
+- the raw-bytes absence test
+- idempotence
+- the 422 confirm guard
+- no push on delete/wipe
+
+### 17.6 New invariant
+
+**Inv 46 — Delete and wipe are hard deletes, for everyone, with no tombstone.**
+- Content rows are removed with `secure_delete=ON` and the WAL is checkpointed, so deleted
+  text leaves the DB files.
+- Media files are unlinked, and deleted media URLs 404.
+- Clients remove content on `message_deleted`/`wiped`.
+- Honest limit: no byte-level file shredding.
