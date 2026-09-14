@@ -13,6 +13,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
+      # spec/server-chat/00-brief.md §7/§10 P2a: livechat/processing.py's tests
+      # run REAL ffmpeg (never skipped/mocked), so the runner needs the binary.
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Install
         run: pip install -e ".[server,dev]"
       - name: Install Playwright chromium (parity harness)
@@ -113,6 +117,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
+      # spec/server-chat/00-brief.md §7/§10 P2a: server-chat media (voice/video)
+      # e2e specs need real ffmpeg on the fixture server, same as the pytest job.
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Install wixy (server) — fixture_server.py imports it directly
         run: pip install -e ".[server,dev]"
       - uses: actions/setup-node@v4
