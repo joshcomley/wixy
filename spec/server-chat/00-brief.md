@@ -287,24 +287,46 @@ methods are sync and callers wrap them in `anyio.to_thread.run_sync`):
 
 ```python
 class LiveChatStore:
-    def __init__(self, db_path: Path) -> None: ...           # opens lazily; migrate() on first use
+    def __init__(self, db_path: Path) -> None: ...  # opens lazily; migrate() on first use
     # messages / events
-    def create_message(self, *, client_id: str, sender: str, device_id: str, by_email: str | None,
-                       text: str | None, attachment_ids: Sequence[str], now: float
-                       ) -> tuple[MessageRow, bool]: ...     # (row, created); idempotent on client_id;
-                                                             # validates attachments unreferenced + status in
-                                                             # (processing, ready); one 'message' event, same txn
-    def list_messages(self, *, before: int | None, limit: int) -> tuple[list[MessageRow], bool, int]: ...
-                                                             # ascending rows, has_more, cursor=max event_seq,
-                                                             # all in ONE read txn
+    def create_message(
+        self,
+        *,
+        client_id: str,
+        sender: str,
+        device_id: str,
+        by_email: str | None,
+        text: str | None,
+        attachment_ids: Sequence[str],
+        now: float,
+    ) -> tuple[MessageRow, bool]:
+        ...  # (row, created); idempotent on client_id;
+        # validates attachments unreferenced + status in
+        # (processing, ready); one 'message' event, same txn
+
+    def list_messages(
+        self, *, before: int | None, limit: int
+    ) -> tuple[list[MessageRow], bool, int]:
+        ...
+        # ascending rows, has_more, cursor=max event_seq,
+        # all in ONE read txn
+
     def get_messages(self, seqs: Sequence[int]) -> list[MessageRow]: ...
     def events_after(self, cursor: int, limit: int = 200) -> list[EventRow]: ...
     # attachments (P2)
-    def create_attachment(self, *, att_id: str, kind: AttachmentKind, now: float) -> AttachmentRow: ...
-    def claim_processing(self, *, owner: str, now: float, lease_s: float) -> AttachmentRow | None: ...
+    def create_attachment(
+        self, *, att_id: str, kind: AttachmentKind, now: float
+    ) -> AttachmentRow: ...
+    def claim_processing(
+        self, *, owner: str, now: float, lease_s: float
+    ) -> AttachmentRow | None: ...
     def renew_lease(self, *, att_id: str, owner: str, now: float, lease_s: float) -> bool: ...
-    def finish_attachment(self, *, att_id: str, owner: str, result: AttachmentResult, now: float) -> None: ...
-                                                             # emits 'message_updated' iff message_seq set
+    def finish_attachment(
+        self, *, att_id: str, owner: str, result: AttachmentResult, now: float
+    ) -> None:
+        ...
+        # emits 'message_updated' iff message_seq set
+
     def get_attachment(self, att_id: str) -> AttachmentRow | None: ...
     def media_bytes_used(self) -> int: ...
     def orphan_attachment_ids(self, *, older_than: float) -> list[str]: ...
