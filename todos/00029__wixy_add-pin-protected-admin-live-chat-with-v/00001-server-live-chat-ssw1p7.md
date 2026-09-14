@@ -366,3 +366,10 @@ fixed same-session.)
   self-hosted Fir vs. both) — correctly left unanswered by every agent
   including me, since it's a genuine operator-only call. Purely a wait on
   him now; not something to solve by guessing.
+- **Architect formalized the real PIN contract as brief v1.4** (`7df841b`):
+  full cmd↔wixy mapping table, added 409 `pin_changed` to `/unlock`, pinned
+  the retry-safety rule, `lock_scope` deliberately not surfaced to the
+  browser, sub-4-digit PINs rejected client-side so a stray tap can't burn
+  a real attempt. Deploy step + blocker #9 wording updated in the brief.
+  Sent direct to P1. No further action needed — the brief is now the
+  authoritative source, not my earlier paraphrase.
