@@ -210,9 +210,12 @@ class TestResponseMapping:
         await client.aclose()
 
     @pytest.mark.asyncio
-    async def test_400_invalid_request_maps_to_unavailable_and_logs_error(
+    async def test_400_invalid_request_maps_to_invalid_request_and_logs_error(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
+        """§5.1's mapping table: 400 `invalid_request` -> wixy **422**, not the
+        closed-fail 503 `unavailable` bucket every other unexpected-failure case
+        uses — a different signal to the frontend, per the frozen contract."""
         import logging
 
         caplog.set_level(logging.ERROR)
@@ -223,7 +226,7 @@ class TestResponseMapping:
             ),
         )
         result = await client.verify(pin="1234", subject="")
-        assert result.outcome == "unavailable"
+        assert result.outcome == "invalid_request"
         assert "invalid_request" in caplog.text
         await client.aclose()
 
@@ -263,6 +266,26 @@ class TestResponseMapping:
             return httpx.Response(200, content=b"not json at all")
 
         client = CmdPinVerifier(app_key=APP_KEY, transport=httpx.MockTransport(handler))
+        result = await client.verify(pin="1234", subject="")
+        assert result.outcome == "unavailable"
+        await client.aclose()
+
+    @pytest.mark.asyncio
+    async def test_200_with_valid_json_but_ok_not_true_maps_to_unavailable(self) -> None:
+        """Distinct from the malformed-body case above: here the JSON parses
+        fine, but doesn't genuinely say `ok: true` — still must never be
+        trusted as success (the closed-fail check in `_map_response`'s 200
+        branch)."""
+        client = CmdPinVerifier(
+            app_key=APP_KEY, transport=_transport(200, {"ok": False, "app_key": APP_KEY})
+        )
+        result = await client.verify(pin="1234", subject="")
+        assert result.outcome == "unavailable"
+        await client.aclose()
+
+    @pytest.mark.asyncio
+    async def test_200_with_ok_missing_entirely_maps_to_unavailable(self) -> None:
+        client = CmdPinVerifier(app_key=APP_KEY, transport=_transport(200, {"app_key": APP_KEY}))
         result = await client.verify(pin="1234", subject="")
         assert result.outcome == "unavailable"
         await client.aclose()

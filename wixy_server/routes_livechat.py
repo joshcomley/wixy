@@ -95,6 +95,13 @@ async def unlock(body: UnlockIn, request: Request) -> JSONResponse:
         # §5.1 v1.4: the PIN rotated mid-check on cmd's side. Nothing was spent —
         # the owner just tries again.
         return JSONResponse(status_code=409, content={"error": "pin_changed"})
+    if result.outcome == "invalid_request":
+        # §5.1's mapping table: cmd's 400 invalid_request -> wixy 422, never a
+        # closed-fail 503 — "wixy validates first, so this is a wixy bug."
+        # Provably unreachable via any real user path (UnlockIn's 4-16-digit
+        # pattern already rejects anything that could trigger it), but the
+        # frozen contract still specifies this exact mapping.
+        return _invalid("cmd rejected the PIN request as malformed — this is a wixy-side bug")
     if result.outcome == "not_configured":
         return JSONResponse(status_code=503, content={"error": "not_configured"})
     return JSONResponse(status_code=503, content={"error": "pin_service_unavailable"})

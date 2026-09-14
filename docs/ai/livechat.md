@@ -93,8 +93,13 @@ mints a token must never come from trusting a status code alone); a 401 with `lo
 normalizes to the SAME outcome a genuine 429 produces (the owner sees one consistent
 "try again in Ns", never two different UI paths for what is functionally the same lockout);
 404 (`unknown_app`) → `not_configured`; 409 (`pin_changed` — cmd's PIN rotated mid-check,
-nothing spent) → wixy's own 409; 400/403/413/415 are wixy-side bugs or a misrouted
-deployment (logged as `ERROR`, mapped to `unavailable`) — see `pinclient.py`'s own
+nothing spent) → wixy's own 409; 400 `invalid_app_key` (misconfiguration) → `not_configured`;
+400 `invalid_request`, 403, 413, 415 are all wixy-side bugs or a misrouted deployment
+(logged as `ERROR`) — but **not the same wixy-side outcome**: 400 `invalid_request` maps to
+**422** (the frozen contract's own distinction: "wixy validates first, so this is a wixy
+bug" gets the SAME status a locally-invalid PIN would, provably unreachable in practice
+since `UnlockIn`'s 4-16-digit pattern already rejects anything that could trigger it),
+while 403/413/415 map to the closed-fail `unavailable` → 503 — see `pinclient.py`'s own
 docstrings for the exhaustive table.
 
 **Tests use a fake cmd** (`wixy_server/tests/fake_cmd.py`'s `/api/pins/{app_key}/verify`

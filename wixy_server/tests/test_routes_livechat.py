@@ -232,6 +232,30 @@ class TestUnlockMapping:
         assert response.status_code == 503
         assert response.json() == {"error": "pin_service_unavailable"}
 
+    def test_cmd_400_invalid_request_maps_to_422_not_503(
+        self, storage_root: Path, wixy_repo_root: Path
+    ) -> None:
+        """§5.1's mapping table: 400 `invalid_request` -> wixy **422**, distinct
+        from every other unexpected-failure case (which closed-fails 503).
+        Provably unreachable via a real user (UnlockIn's local 4-16-digit
+        validation), but the frozen contract still specifies this exact
+        mapping — end-to-end through the real app, not just pinclient's unit
+        test."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                400, json={"ok": False, "error": "invalid_request", "message": "bad shape"}
+            )
+
+        verifier = CmdPinVerifier(app_key=TEST_APP_KEY, transport=httpx.MockTransport(handler))
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=verifier
+        )
+        with TestClient(app) as client:
+            response = _unlock(client)
+        assert response.status_code == 422
+        assert response.json()["error"] == "invalid"
+
     def test_standalone_edition_has_no_verifier_and_is_not_configured(
         self, storage_root: Path, wixy_repo_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

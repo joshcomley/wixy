@@ -26,7 +26,13 @@ from builder.jsontypes import JsonObject
 logger = logging.getLogger(__name__)
 
 PinOutcome = Literal[
-    "ok", "wrong_pin", "locked_out", "pin_changed", "not_configured", "unavailable"
+    "ok",
+    "wrong_pin",
+    "locked_out",
+    "pin_changed",
+    "invalid_request",
+    "not_configured",
+    "unavailable",
 ]
 
 DEFAULT_PIN_SERVICE_BASE_URL = "http://127.0.0.1:9320"
@@ -198,16 +204,18 @@ def _map_response(response: httpx.Response) -> PinVerifyResult:
         error = data.get("error") if data is not None else None
         if error == "invalid_app_key":
             return PinVerifyResult(outcome="not_configured")
-        # "invalid_request": wixy validates the PIN shape locally before ever
-        # calling cmd, so cmd rejecting the request as malformed means wixy
-        # sent something wrong — a bug, not a PIN outcome. Logged, not raised:
-        # the owner still needs a closed-fail 503, never a stack trace.
+        # §5.1's mapping table: 400 `invalid_request` -> wixy 422 (NOT 503) —
+        # "wixy validates first, so this is a wixy bug." Still logged as an
+        # ERROR (this should be provably unreachable: `UnlockIn`'s 4-16-digit
+        # pattern already rejects anything that could trigger it before
+        # `verify()` is ever called), but the CONTRACT says 422, not a
+        # closed-fail 503 — those are different signals to the frontend.
         logger.error(
             "livechat: cmd PIN-verify rejected wixy's own request as invalid_request "
             "(400) — this is a wixy-side bug, not a PIN or lockout outcome: %r",
             data,
         )
-        return PinVerifyResult(outcome="unavailable")
+        return PinVerifyResult(outcome="invalid_request")
     if status in (403, 413, 415):
         # same-box-only refusal / body too large / wrong content-type — every one
         # of these is either a wixy bug or a misrouted deployment, never
