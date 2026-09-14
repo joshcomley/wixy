@@ -72,12 +72,27 @@ async function revealAndOpenPinPad(page: Page): Promise<void> {
   await expect(page.locator(".wx-srv-pinpad-title")).toHaveText("Unlock server");
 }
 
+/** Enters `pin` and submits, then explicitly waits for the real (unmocked)
+ * `POST /unlock` response before returning — not just the click. This is
+ * the actual backend call, with its own documented 5s timeout (§5.1); the
+ * assertions callers make right after `enterPin` would otherwise be racing
+ * that exact same window with Playwright's own 5000ms default `expect`
+ * timeout, a zero-margin race a busy shared box can lose even when
+ * everything is working correctly (found live: 12/20 tests flaked this way
+ * when run alongside another heavy spec file on a loaded box, all at
+ * exactly this boundary). Waiting on the network response directly removes
+ * the race instead of just widening it. */
 async function enterPin(page: Page, pin: string): Promise<void> {
   const pad = page.locator(".wx-srv-pinpad");
   for (const digit of pin) {
     await pad.getByRole("button", { name: digit, exact: true }).click();
   }
+  const unlockResponse = page.waitForResponse(
+    (res) => res.url().endsWith("/api/admin/server/unlock") && res.request().method() === "POST",
+    { timeout: 15_000 },
+  );
   await pad.getByRole("button", { name: "✓", exact: true }).click();
+  await unlockResponse;
 }
 
 for (const profile of DEVICE_PROFILES) {

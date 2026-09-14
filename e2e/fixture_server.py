@@ -326,9 +326,6 @@ def main() -> None:
     # creates becomes ready almost immediately with zero per-session fixture
     # wiring; a real cmd instance is never touched (fleet rule).
     fake_cmd_state = FakeCmdState(default_ready_after_polls=1)
-    # spec/server-chat/00-brief.md §11: the Server chat's PIN-verify double —
-    # same fake, same box, as the AI-chat one above (one behavior contract).
-    fake_cmd_state.register_pin_app(TEST_SERVER_PIN_APP_KEY, TEST_SERVER_PIN)
     fake_cmd_server = FakeCmdServer(fake_cmd_state)
     fake_cmd_port = fake_cmd_server.start()
     cmdchat_client = CmdChatClient(
@@ -337,13 +334,32 @@ def main() -> None:
         readiness_poll_interval_s=0.2,
         readiness_timeout_s=10.0,
     )
+
+    # spec/server-chat/00-brief.md §11: the Server chat's PIN-verify double.
+    # Deliberately a SECOND, INDEPENDENT `FakeCmdServer` instance (own
+    # uvicorn thread + port) rather than reusing `fake_cmd_server` above —
+    # `chat-ux.spec.ts`'s offline-banner test does a ONE-WAY
+    # `/test/chat/stop-fake-cmd` as the LAST thing it does, documented there
+    # as safe only because "no other spec file touches chat/cmd" (a Python
+    # `Thread` can only ever be started once, so that stop has no clean
+    # restart). This spec file is now a second consumer, so sharing the same
+    # instance would leave PIN verification permanently broken for every
+    # later spec file in the same `workers:1` run once chat-ux's test has
+    # run (found live: 12/20 server-lock.spec.ts tests failing with a
+    # consistent 503 "pin_service_unavailable" whenever run after
+    # chat-ux.spec.ts). Same underlying `FakeCmdState` (so
+    # `register_pin_app`'s data lives in one place regardless), fully
+    # independent server lifecycle — nothing chat-ux does can affect it.
+    fake_pin_server = FakeCmdServer(fake_cmd_state)
+    fake_pin_port = fake_pin_server.start()
+    fake_cmd_state.register_pin_app(TEST_SERVER_PIN_APP_KEY, TEST_SERVER_PIN)
     # `create_app`'s own default `CmdPinVerifier` points at the REAL cmd
     # loopback base URL (Inv 13) — the fixture must point it at the fake
     # instead, same app key `create_app` would otherwise have resolved from
     # settings (TEST_SERVER_PIN_APP_KEY matches that default, see above).
     pin_verifier = CmdPinVerifier(
         app_key=TEST_SERVER_PIN_APP_KEY,
-        base_url=f"http://127.0.0.1:{fake_cmd_port}",
+        base_url=f"http://127.0.0.1:{fake_pin_port}",
     )
 
     app = create_app(
