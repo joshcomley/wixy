@@ -144,5 +144,49 @@ fixed same-session.)
 
 - Full mission dossier (operator verbatim + Orchestrator synthesis):
   `http://127.0.0.1:9321/intercomm/a7c20681164c4764af6edbcb318074bb`
+- PIN-architecture correction dossier (operator override + new design):
+  `http://127.0.0.1:9321/intercomm/2108c7574edc4136ba47a3a7a9cc1843`
 - Workspace: `0ae788cb-70c8-4710-a411-88aa5445df15` (cmd workspace #29, project
   wixy), feature branch `cmd/workspace-00029`.
+- Cross-repo dependency: cmd workspace #875 ("dragonfly-5", session
+  `b1810bdc-4788-45a9-a790-758e4c56d7bd`, folded under this workspace as
+  parent) — building the generic app-key-scoped PIN register/verify/lockout
+  service. wixy's PIN gate depends on this shipping first (or in parallel,
+  stubbed) with a real HTTP contract.
+
+## Update 2026-09-14 (same session) — PIN architecture changed + a leak incident
+
+- **Incident, resolved:** the first version of this sidecar + `TODO-00029.md`
+  briefly committed the operator's literal PIN value to `origin/cmd/workspace-
+  00029` on the PUBLIC `joshcomley/wixy` repo (commit `4024c25`). The Architect
+  caught it within ~2 min. Orchestrator response: amended the tip commit
+  (verified it was the sole author, nothing built on top), redacted both
+  files, force-pushed (`db8657d`, override `CLAUDE_GIT_DESTRUCTIVE_OK=1` past
+  the repo's force-push guard hook). **Caveat told to the operator:** the old
+  commit is gone from branch history/search, but GitHub's raw API can still
+  serve the exact old SHA by direct lookup (verified live) — force-push
+  unlinks, it doesn't delete server-side; true purge needs GitHub Support or
+  their own GC. Operator's call on rotate-vs-keep (decision #973): **keep the
+  original PIN value** — he accepted the risk knowing this. (Now moot for git
+  hygiene purposes anyway: per the architecture change below, this sidecar
+  will never carry the PIN literal again regardless.)
+- **PIN architecture, operator-directed change (overrides the earlier "PIN in
+  `Storage/.env`" plan entirely):** wixy must hold **zero PIN state**, ever —
+  not in `.env`, not in code, not in its own DB. Operator's own words: "So
+  don't store the PIN number in the website code. Have the website code get
+  the PIN number or verify the PIN number with a server method that sits on
+  hub, maybe make a CMD pin verify endpoint with a key for which application
+  it is, and we can register pins, that sort of thing... that pin verify
+  endpoint would only be available if you'd already passed Cloudflare. And
+  still wouldn't reveal the PIN. And then we can do other things like
+  control blocking for certain amounts of time if they get the PIN wrong so
+  many times in a row." Full text + Orchestrator's technical framing at the
+  intercomm link above.
+- New cmd workspace #875 spawned (see Links) to build a generic, reusable,
+  app-key-scoped PIN register/verify/lockout service in the **cmd** repo
+  (loopback-only, same trust model as wixy's existing cmd AI-chat calls,
+  Inv 13). wixy's side will call it (e.g. `POST 127.0.0.1:9320/api/pin/verify
+  {"app_key": "wixy-livechat", "pin": "..."}`) instead of holding any PIN
+  state locally. The Architect has been briefed on this correction and told
+  to proceed with everything else (transport/media/lock-state-machine/push)
+  unblocked while the cmd-side contract is finalized.
