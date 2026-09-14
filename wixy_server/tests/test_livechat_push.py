@@ -182,15 +182,11 @@ def _subscription(device_id: str, sender: str, endpoint: str) -> PushSubscriptio
 
 def test_dispatch_self_exclusion_uses_device_and_casefolded_sender() -> None:
     message = _message()
-    assert not should_push_to_subscription(
-        message, _subscription("device-sender", "Bob", ENDPOINT)
-    )
+    assert not should_push_to_subscription(message, _subscription("device-sender", "Bob", ENDPOINT))
     assert not should_push_to_subscription(
         message, _subscription("device-other", "aLiCe", ENDPOINT)
     )
-    assert should_push_to_subscription(
-        message, _subscription("device-other", "Bob", ENDPOINT)
-    )
+    assert should_push_to_subscription(message, _subscription("device-other", "Bob", ENDPOINT))
 
 
 @pytest.mark.asyncio

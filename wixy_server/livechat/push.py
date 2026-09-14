@@ -67,9 +67,7 @@ class PushResult:
     delete_subscription: bool
 
 
-def should_push_to_subscription(
-    message: MessageRow, subscription: PushSubscriptionRow
-) -> bool:
+def should_push_to_subscription(message: MessageRow, subscription: PushSubscriptionRow) -> bool:
     """Return whether a subscription is an eligible recipient for ``message``.
 
     The sender's own device and every device registered under the same sender
