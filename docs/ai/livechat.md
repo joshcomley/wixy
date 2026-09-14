@@ -132,6 +132,20 @@ reclaimable by a different owner (crash-resume); `finish_attachment` is a silent
 the caller no longer holds the lease (stolen) **or the row no longer exists at all**
 (§17.1 — a future delete/wipe race).
 
+**A cold-start concurrency fix (P2b, 2026-09-14):** `_connect()`'s migration check-then-act
+(read `user_version`, `CREATE TABLE` if not yet migrated) is not itself atomic across
+connections, and `PRAGMA journal_mode = WAL`'s one-time conversion does **not** respect
+`busy_timeout` the way ordinary reads/writes do — it fails immediately with `OperationalError:
+database is locked` rather than retrying. Both surfaced the moment P2b's media queue started
+polling `claim_processing` concurrently with the very first request against a brand-new DB
+file (measured: 100% failure across 160 concurrent cold-start connections without the fixes
+below, 0% with them). Fixed with: every `CREATE TABLE` in the schema now says `IF NOT EXISTS`
+(a racing duplicate migration attempt becomes a harmless no-op), and the `journal_mode = WAL`
+switch retries with a short backoff (up to ~1s) instead of raising on the first
+`OperationalError` — see `LiveChatStore._connect`'s own comments for the measured detail.
+This applies to every SQLite database opened by more than one connection near true first-ever
+startup (blue/green included), not just the media queue's own polling.
+
 ## 6. The SSE stream (`GET /stream?after=<cursor>`)
 
 Full wire shape: [contracts.md](contracts.md) §4. Per-connection loop
@@ -163,7 +177,108 @@ the stream loop already knows how to render them — `message_deleted` as `data:
 `message_updated` event whose row has since vanished. This is schema/stream headroom only;
 nothing in P1 ever inserts either event type.
 
-## 7. Settings (`WIXY_SERVER_*`, `WIXY_FFMPEG`/`WIXY_FFPROBE`)
+## 7. Media processing, chunked uploads and the queue (P2a/P2b)
+
+**Processing (`livechat/processing.py`, P2a) — pure, no DB/settings coupling.** Every
+function takes explicit input/output paths and (for voice/video) explicit `ffmpeg`/
+`ffprobe` paths; callers own everything stateful. The pipeline for every attachment:
+
+1. **Sniff magic bytes first** (`sniff`/`sniff_path`) — before ffmpeg/ffprobe ever sees the
+   file. This is the load-bearing hardening: an HLS playlist or ffconcat script renamed to
+   `.mp4` has no recognised magic bytes, so it's rejected here and never reaches a
+   subprocess (§2's ffmpeg SSRF/LFI concern). The sniffed container is checked against the
+   claimed kind (`MediaProcessingError("kind_mismatch")` on a mismatch) before any
+   processing starts.
+2. **Photo** (Pillow + pillow-heif): an 80MP pixel cap checked immediately after
+   `Image.open()`, before `.load()`/`.convert()`/`exif_transpose()` — a decompression bomb
+   (huge declared dimensions, tiny file) is rejected without ever decoding pixel data.
+   `exif_transpose` + a full metadata strip (rebuilt from raw pixel bytes, not a
+   round-tripped save). PNG stays PNG; an animated GIF keeps its original bytes untouched
+   (no EXIF/GPS to strip, and re-encoding a multi-frame animation buys nothing); everything
+   else (including WEBP/HEIC) becomes JPEG q88. Long edge ≤4096 (full) / ≤480 (thumb).
+3. **Voice**: AAC-LC mono 64kb/s `m4a`, duration from the **output** (MediaRecorder webm has
+   none in its own header), 64-bucket RMS peaks normalized against the clip's own loudest
+   bucket.
+4. **Video**: remux (`-c copy`) iff h264/yuv420p/long-edge≤1920/fps≤60/audio is aac-or-absent
+   — the display-matrix rotation side data survives untouched (`-map_metadata -1` strips
+   metadata *tags*, not stream side data). Otherwise transcode (libx264 veryfast crf23, same
+   caps), relying on ffmpeg's default autorotate to bake rotation into the pixels. A poster
+   frame at `-ss min(1, dur/2)`, long edge ≤960.
+5. **Subprocess hygiene**: Windows `BELOW_NORMAL_PRIORITY_CLASS|CREATE_NO_WINDOW`, POSIX
+   `nice -n 10`; hard timeouts (30min video / 5min else) with kill-on-timeout; every
+   ffprobe/ffmpeg call pins `-f <demuxer> -protocol_whitelist file`; every rendition write is
+   atomic (temp name, then `os.replace`).
+
+`process(kind, src, *, output_dir, ffmpeg, ffprobe)` dispatches to the three and never
+returns a partial/failed result — a caller that catches `MediaProcessingError` has nothing to
+clean up beyond `output_dir` itself.
+
+**Uploads (`livechat/uploads.py`, P2b) — §5.5.** `init_upload` checks (cheapest-first): the
+media-pipeline gate, the declared MIME type against a per-kind allowlist, the declared size
+against the per-kind cap (photo 30MiB / voice 25MiB / video 1GiB), then quota
+(`media_bytes_used + pending_upload_bytes + size > quota`) and the free-space floor
+(injectable `disk_usage`, default `shutil.disk_usage`). `write_chunk` is idempotent
+(`.part` then rename); `assemble` verifies every expected chunk is present (`missing` list on
+409), checks the assembled size against the declared size (422 on mismatch), and is itself
+**idempotent on retry** — a `/complete` replay after the first one already promoted the
+upload returns the same attachment rather than re-assembling or erroring (same posture as
+`create_message`'s `clientId` replay).
+
+**The upload id becomes the attachment id.** There is no separate "original file path"
+column on `AttachmentRow` — the convention *is* the pointer: the media queue looks for its
+source at `uploads/<attachmentId>/assembled`. The `uploads` DB row stays alive (for
+`pending_upload_bytes` accounting) until the queue resolves the attachment, success or
+failure, at which point it — and the staged file — are removed (success) or the original is
+archived to `failed/<id>/original.<ext>` (failure, kept 7 days).
+
+**The queue (`livechat/media_queue.py`, P2b) — `run_forever`, one app-lifetime task.**
+Claims via `store.claim_processing` (`owner=f"{pid}-{uuid}"`, 120s lease), spawns one child
+task per claim into an unbounded dispatch group, then feeds `processing.process()` off the
+event loop via `anyio.to_thread.run_sync`. Concurrency: a `video` claim acquires a
+`CapacityLimiter(1)`, everything else acquires a shared `CapacityLimiter(2)` — chosen
+**after** claiming, since `claim_processing`'s frozen signature has no kind filter. The
+per-attachment lease-renewal loop starts the moment a row is claimed, **before** it may have
+to wait behind a full limiter, so a claim queued behind busy workers never goes lease-stale
+and gets double-claimed. **Crash-resume needs no special code**: `claim_processing`'s own
+query (unclaimed OR lease expired) already re-surfaces a row orphaned by a killed process the
+instant its lease lapses — `run_forever`'s ordinary claim loop on the next startup *is* the
+recovery path.
+
+**The §17.1/A1 delete race, the queue's own half** (P8's delete/wipe routes are the other
+half, built later): after `finish_attachment` (itself a silent no-op against a
+concurrently-deleted row, per `store.py`), the queue re-reads `get_attachment`; `None` means
+a delete/wipe won the race, and the media bytes this worker just wrote are `rmtree`'d.
+
+**`resolve_binaries`** (called once at `create_app` time): `WIXY_FFMPEG`/`WIXY_FFPROBE`,
+falling back to `shutil.which` — but an **explicit** override must point at a file that
+actually exists (`Path(...).is_file()`), or it's treated as unresolved. This catches an
+operator typo in the env var as a clean 503 at upload time, rather than deferring the failure
+to per-upload processing deep inside the queue. Feeds `app.state.livechat_media_available`
+and the queue worker's `QueueConfig`; when `None`, the queue task is never started at all
+(nothing valid to run it with) and the janitor still runs (pure DB/filesystem housekeeping,
+no ffmpeg dependency).
+
+**Janitor (`livechat/janitor.py`, P2b) — `run_once`/`run_forever`, hourly.** Ages out
+uploads >24h (`stale_upload_ids`), unreferenced attachments >24h (`orphan_attachment_ids`,
+keyed off `message_seq IS NULL` — never touches anything a message references, regardless of
+its processing status), and `failed/` entries >7 days (by directory `mtime`, since there's no
+DB row backing them). `run_once` takes an explicit `now`, never reads the clock — every age
+threshold is test-driven, not slept through.
+
+**Media route (`routes_livechat_media.py`, P2b) — `GET /media/{attId}/{rendition}`, §5.6.**
+The one route besides `POST /unlock` that skips `require_server_token`, since
+`<img>`/`<video>`/`<audio>` can't send a custom header — `verify_media_signature` (§3) gates
+it instead. `attId` is validated as exactly 32 lowercase hex chars *before* the signature
+math runs (cheap defense in depth; a forged id can never pass the HMAC anyway, since it's
+covered by the signature). The stored `renditions` tuple carries rendition **names**
+(`"full"`, `"thumb"`, `"play"`, `"poster"`), never file paths — the actual filename's
+extension (`full.jpg` vs `full.png` vs `full.gif`) is resolved by trying each of P2a's
+possible outputs for that name in turn, since exactly one of them ever exists per attachment.
+An explicit MIME map (not `FileResponse`'s extension-guessing) sets `Content-Type`, because
+`X-Content-Type-Options: nosniff` plus a wrong/generic content type would silently break
+playback in the browser. Served via Starlette `FileResponse` (200/206, Range-aware).
+
+## 8. Settings (`WIXY_SERVER_*`, `WIXY_FFMPEG`/`WIXY_FFPROBE`)
 
 | Env var | Setting | Default | Notes |
 |---|---|---|---|
@@ -176,22 +291,24 @@ nothing in P1 ever inserts either event type.
 `ProjectPaths` (`storage.py`) gets `server_dir`/`server_db`/`server_secret`/`server_vapid`/
 `server_media`/`server_uploads`/`server_failed` — created **lazily** (like `reports_dir`),
 not by `ensure_project_dirs`: a project that never unlocks the chat never needs the
-directory.
+directory. Plus three per-item helpers (P2b): `server_upload_dir(uploadId)` →
+`uploads/<uploadId>/`, `server_attachment_media_dir(attachmentId)` → `media/<id[:2]>/<id>/`
+(the two-level fan-out keeps any one directory from accumulating thousands of entries),
+`server_failed_dir(attachmentId)` → `failed/<id>/`.
 
-## 8. What P1 built vs. what's still to come
+## 9. What's built vs. what's still to come
 
-P1 (this doc, this PR) is the backend core everything else depends on: settings, storage
-paths, the `livechat/` package (`models`/`store`/`tokens`/`pinclient`/`notifier`),
-`routes_livechat.py` (unlock/history/send/stream/usage), the `fake_cmd.py` PIN double, and
-the `server` field on `GET /api/admin/system/status` (§5.10 — `{"startedAt":epoch_s,
-"mediaProcessing":"ok"|"unavailable"}`; `mediaProcessing` is a placeholder `"ok"` until P2
-sets `app.state.livechat_media_available` for real at startup).
+**Built:** P1 (settings, storage paths, the `livechat/` package's `models`/`store`/`tokens`/
+`pinclient`/`notifier`, `routes_livechat.py` — unlock/history/send/stream/usage, the
+`fake_cmd.py` PIN double, the `server` field on `GET /api/admin/system/status`); **P2a**
+(`livechat/processing.py`, §7 above); **P2b** (`livechat/{uploads,media_queue,janitor}.py`,
+`routes_livechat_media.py`, §7 above — `mediaProcessing` on the system-status field is now
+the real `app.state.livechat_media_available` value, not the P1-era placeholder `"ok"`).
 
 Not yet built (later parcels, see the brief's §10 wave plan):
-- **P2a/P2b** — media processing (ffmpeg/Pillow pipeline), chunked uploads, the media
-  queue, `GET media/*`.
 - **P3a/P3b** — Web Push (VAPID keys, the service worker, the dispatch hook).
 - **P4/P5/P6** — the frontend: lock state machine, the decoy, the PIN pad, the chat view,
   media rendering, the recorder/uploader.
 - **P8** — hard delete-a-message / wipe-the-chat (spec §17.3/§17.4), on top of the A1
-  schema/stream headroom P1 already laid down (§6 above).
+  schema/stream headroom P1 already laid down (§6 above) and the queue's own delete-race
+  half P2b already laid down (§7 above).
