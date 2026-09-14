@@ -52,6 +52,8 @@ import type {
 } from "./api";
 import { chatUploadBytesUrl, openConversationStream, type ConversationStreamHandle } from "./api";
 import { mountChatComposer } from "./chatComposer";
+import { mountChatThreadScroll } from "./chatThreadScroll";
+import { mountLightbox } from "./lightbox";
 import { renderMarkdown } from "./markdown";
 import { navigateTo, routeToPath, type Route } from "./router";
 
@@ -72,9 +74,6 @@ export interface ChatPanel {
 
 const LIST_POLL_MS = 2000;
 const UPSTREAM_CHECK_THROTTLE_MS = 5000;
-/** How far from the thread's bottom (px) still counts as "at the bottom" —
- * the stick-to-bottom latch's hysteresis (decisions/00110). */
-const BOTTOM_STICK_THRESHOLD_PX = 48;
 /** An optimistic echo that no server message matched within this window is
  * dropped — by then the real bubble has surely streamed in (or the send
  * failed and its error is on screen), so keeping it would be a permanent
@@ -432,6 +431,12 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
   threadWrap.append(thread, jumpPill);
   root.appendChild(threadWrap);
 
+  // sec.10 P5a: extracted from this module's own prior inline implementation
+  // (decisions/00110) — shared with the server chat thread going forward
+  // (spec/server-chat/00-brief.md §6/§10 P5b).
+  const threadScroll = mountChatThreadScroll(thread, jumpPill);
+  const lightbox = mountLightbox();
+
   const composer = mountChatComposer({
     mode: "composer",
     placeholder: "Message the assistant… (Shift+Enter for a new line)",
@@ -461,11 +466,6 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
    * successful send, so a failed attempt's retry click reuses this same key
    * instead of minting a new one (which would defeat the whole point). */
   let pendingIdempotencyKey: string | null = null;
-  /** decisions/00110: the stick-to-bottom latch — true while the owner is at
-   * (or near) the thread's end, so polls snap the newest message into view;
-   * false once they've scrolled up to read, so the same polls never yank
-   * them away from what they're reading (the jump pill offers the way back). */
-  let stickToBottom = true;
   /** decisions/00110: optimistic echoes of what the owner just sent, painted
    * the instant Send fires (cmd's own UI does the same with its
    * OptimisticAttachment). Reconciled FIFO by exact text as the server
@@ -493,51 +493,6 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
    * Start, "No messages yet." reads as broken while cmd spins up). */
   let conversationPending = false;
 
-  // -- Lightbox --------------------------------------------------------------
-
-  let lightboxCleanup: (() => void) | null = null;
-
-  function closeLightbox(): void {
-    lightboxCleanup?.();
-    lightboxCleanup = null;
-  }
-
-  function openLightbox(src: string, alt: string): void {
-    closeLightbox();
-    const overlay = document.createElement("div");
-    overlay.className = "wx-chat-lightbox";
-    overlay.setAttribute("role", "dialog");
-    overlay.setAttribute("aria-modal", "true");
-    overlay.setAttribute("aria-label", alt || "Attached image");
-    const image = document.createElement("img");
-    image.src = src;
-    image.alt = alt;
-    const closeButton = document.createElement("button");
-    closeButton.type = "button";
-    closeButton.className = "wx-chat-lightbox-close";
-    closeButton.textContent = "✕";
-    closeButton.setAttribute("aria-label", "Close image viewer");
-    overlay.append(image, closeButton);
-    const previouslyFocused = document.activeElement;
-    const onKeydown = (evt: KeyboardEvent) => {
-      if (evt.key === "Escape") {
-        evt.preventDefault();
-        closeLightbox();
-      }
-    };
-    overlay.addEventListener("click", (evt) => {
-      if (evt.target === overlay || evt.target === closeButton) closeLightbox();
-    });
-    document.addEventListener("keydown", onKeydown);
-    (document.body ?? root).appendChild(overlay);
-    lightboxCleanup = () => {
-      document.removeEventListener("keydown", onKeydown);
-      overlay.remove();
-      if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
-    };
-    closeButton.focus();
-  }
-
   // -- Attachment thumbnails --------------------------------------------------
 
   function renderAttachmentGrid(attachments: readonly ChatAttachmentRefData[]): HTMLElement {
@@ -557,10 +512,10 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
       // Images change scrollHeight when they finish loading — re-stick so a
       // late-loading thumbnail can't push the newest message out of view.
       img.addEventListener("load", () => {
-        if (stickToBottom) scrollThreadToBottom();
+        if (threadScroll.stuck) threadScroll.scrollToBottom();
       });
       button.appendChild(img);
-      button.addEventListener("click", () => openLightbox(src, alt));
+      button.addEventListener("click", () => lightbox.open(src, alt));
       grid.appendChild(button);
     }
     return grid;
@@ -604,29 +559,17 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
     return row;
   }
 
-  function scrollThreadToBottom(): void {
-    thread.scrollTop = thread.scrollHeight;
-  }
-
-  thread.addEventListener("scroll", () => {
-    const atBottom =
-      thread.scrollTop + thread.clientHeight >= thread.scrollHeight - BOTTOM_STICK_THRESHOLD_PX;
-    stickToBottom = atBottom;
-    if (atBottom) jumpPill.hidden = true;
-  });
-
-  jumpPill.addEventListener("click", () => {
-    stickToBottom = true;
-    jumpPill.hidden = true;
-    scrollThreadToBottom();
-  });
-
-  function renderThread(): void {
+  /** `revealPillIfNotStuck` mirrors the caller's own "should a new arrival
+   * that finds the owner scrolled up surface the jump pill" call — the AI
+   * panel only ever passes true for a non-user (assistant) message; every
+   * other render site (a failed-send rollback, the first load) omits it, so
+   * it defaults to false. Whether the pill actually shows still depends on
+   * `threadScroll`'s own stuck/not-stuck state. */
+  function renderThread(revealPillIfNotStuck = false): void {
     // Expire unmatched echoes first — see ECHO_EXPIRY_MS's note.
     const nowMs = now();
     pendingEchoes = pendingEchoes.filter((e) => nowMs - e.sentAt < ECHO_EXPIRY_MS);
 
-    const wasStuck = stickToBottom;
     thread.innerHTML = "";
     const messages = Array.from(messagesByIndex.values())
       // decisions/00113: thinking messages never render in the owner UI —
@@ -649,7 +592,7 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
     for (const echo of pendingEchoes) {
       thread.appendChild(renderEchoRow(echo));
     }
-    if (wasStuck) scrollThreadToBottom();
+    threadScroll.afterContentChange(revealPillIfNotStuck);
   }
 
   /** Working: any of — cmd itself reports "working" right now, a send just
@@ -788,10 +731,7 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
         awaitingReply = false;
         maybeCheckUpstream();
       }
-      renderThread();
-      if (!stickToBottom && event.message.role !== "user") {
-        jumpPill.hidden = false;
-      }
+      renderThread(event.message.role !== "user");
       renderWorkBanner();
       return;
     }
@@ -841,8 +781,7 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
       sentAt: now(),
     };
     pendingEchoes.push(echo);
-    stickToBottom = true;
-    jumpPill.hidden = true;
+    threadScroll.scrollToBottom();
     renderThread();
     api
       .sendMessage(convId, text, idempotencyKey, attachmentIds)
@@ -930,7 +869,8 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
       cancelled = true;
       streamHandle?.close();
       composer.teardown();
-      closeLightbox();
+      lightbox.teardown();
+      threadScroll.teardown();
     },
   };
 }
