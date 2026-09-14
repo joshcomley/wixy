@@ -282,7 +282,19 @@ fixed same-session.)
   app key `wixy-livechat`, brief sec.12 step 1) — the Orchestrator owns
   clearing this and will notify the DM.
 - **DM session**: `7061c848-e57d-4aee-8fd9-a9bcc459d1b4` (workspace #29
-  Delivery Manager).
+  Delivery Manager) — **handed over to `a13d06a4-6290-41ac-9032-b3b9b229edfe`**
+  at some point during wave 2/3 (peer_check auto-follows the chain; sends to
+  the old id still land correctly). As of 16:05, actively deep in real
+  integration debugging: wiring P4's lock/disguise UI to the real P5b chat
+  view surfaced (1) 4 of P4's own `server-lock.spec.ts` tests failing
+  because they assert the STUB's DOM shape (`.wx-srv-panic`,
+  `.wx-srv-draft-stub`), which stops mounting once the real view replaces
+  it — needs selector updates, not a real regression; (2) a genuine "A → B
+  live delivery" e2e failure, root-caused to B's own message SEND failing
+  (not A's receive) — actively instrumenting. This is normal, expected
+  integration-stage work, not a stall — a lane-monitor "P4 idle" alert on
+  team-status during this period is a false positive (the work is happening
+  in the DM's own session, not delegated back to the P4 builder).
 
 ## Update 2026-09-14 (later same session, by the Orchestrator) — decisions answered
 
