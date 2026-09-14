@@ -1,6 +1,8 @@
 # Server chat — Architect's technical brief (workspace #29)
 
-Status: **FROZEN v1.1** (Architect, 2026-09-14; v1.1 = operator's zero-PIN-state override, R4/§5.1). Contracts in §5 are frozen — any change goes
+Status: **FROZEN v1.3** (Architect, 2026-09-14). v1.1 = operator's zero-PIN-state override
+(R4/§5.1); v1.2 = delete + wipe addendum (§17); **v1.3 = R2 errata: a single tap reveals
+(decision #974)**. Contracts in §5 are frozen — any change goes
 through the Architect (`ask-architect`). Rulings in §1 are binding.
 
 > 🔴 **The wixy repo is PUBLIC** (`gh repo view` → `visibility: PUBLIC`, measured
@@ -18,8 +20,9 @@ through the Architect (`ask-architect`). Rulings in §1 are binding.
 ## 0. Summary
 
 A hidden human-to-human chat for admin users, inside the already CF-Access-gated `/admin`.
-It is disguised as a **"Server"** nav tab showing real server status. A rapid multi-tap
-reveals **"Open server settings"**, which opens a PIN pad titled **"Unlock server"**. After
+It is disguised as a **"Server"** nav tab showing real server status. A single tap on
+that screen reveals **"Open server settings"**, which opens a PIN pad titled
+**"Unlock server"**. After
 unlock it's a live chat with text, photos, videos, and voice notes, plus opt-in Android push.
 There are three ways back to locked (10 s idle fade, panic button, multi-tap in chat), plus a
 few fail-closed extras (§1 R6).
@@ -41,15 +44,20 @@ few fail-closed extras (§1 R6).
 visitor-facing. It has its own storage and routes, separate from `chats.py`, `cmdchat.py`
 and `draft/media/`.
 
-**R2 — Gesture model** (unifies mission messages #1 and #3; the contrast "and when you're in
-the chat view" in #3 means the first sentence describes the locked screen):
+**R2 — Gesture model** (v1.3 ERRATA — operator decision #974: "Single tap. Double tap is
+anywhere on the chat view to lock it again." This supersedes the v1–v1.2 multi-tap reveal):
 - Locked screen = the **decoy** (real server status) with **no** visible entry point.
-- Rapid multi-tap (≥2 taps, ≤400 ms apart) anywhere → reveals an **"Open server settings"**
-  button. It re-hides after 10 s idle.
+- A **single tap** anywhere inside the Server panel (the `.wx-main` panel element, **not**
+  the nav or topbar — so tapping another tab never flashes the affordance) → reveals an
+  **"Open server settings"** button. It re-hides after 10 s idle.
 - Tap it → PIN pad titled **"Unlock server"**.
-- The idle-fade path ends on this same decoy. Every lock cause lands in one locked state; the
-  only difference is that idle animates a fade and the others are instant.
-- Flagged to the Orchestrator for optional operator confirmation. Build on this reading.
+  - **Debounce:** the affordance ignores any tap within 400 ms of its own reveal, so the
+    second tap of an accidental double tap can't open the PIN pad.
+- Multi-tap has **no** special meaning on the decoy. Its first tap reveals, and the rest
+  are absorbed by the debounce. Multi-tap only matters inside the chat view (R3).
+- The idle-fade path ends on this same decoy, so "tap again → unlock server" (mission #1)
+  holds on every path. Every lock cause lands in one locked state; the only difference is
+  that idle animates a fade and the others are instant.
 
 **R3 — Multi-tap inside the chat view locks.** It counts every pointerdown except those whose
 target is inside `textarea`, `input`, `[contenteditable]`, `audio` or `video` (native media
@@ -500,7 +508,7 @@ P1 adds a `server` field to the existing `GET /api/admin/system/status`:
 with 100% branch coverage in vitest. States:
 
 ```
-decoy ──multiTap──▶ revealed ──tapAffordance──▶ pin ──submit──▶ verifying ──ok──▶ chat
+decoy ──tap(panel)──▶ revealed ──tapAffordance(≥400ms after reveal)──▶ pin ──submit──▶ verifying ──ok──▶ chat
   ▲                    │ idle 10s                  │ cancel/Esc/idle 10s   │wrong→pin(error)
   │◀───────────────────┘◀──────────────────────────┘                       │lockedOut→pin(countdown)
   │◀── fading(800ms) ◀── idle 10s (no suspension) ── chat
@@ -899,8 +907,10 @@ and a mobile leg** (390×844, `isMobile`, `hasTouch`).
 
 **`server-lock.spec.ts` (P4)** — use `page.clock.install()` before `goto`:
 1. The nav shows "Server"; the decoy shows real rows; no affordance is visible.
-2. A single tap does nothing; a double tap reveals "Open server settings"; it re-hides after
-   10 s.
+2. A single tap in the panel reveals "Open server settings", and it re-hides after 10 s.
+   A tap on the nav doesn't reveal it. A double tap on the spot where the button appears
+   reveals it but does **not** open the PIN pad (400 ms debounce). Tapping the button
+   after 400 ms opens the pad.
 3. Unlock:
    - The pad title is "Unlock server".
    - A wrong PIN shows "Incorrect PIN".
@@ -955,7 +965,7 @@ a rotated mov):
    process resolves ffmpeg/ffprobe; if not, set `WIXY_FFMPEG`/`WIXY_FFPROBE` in `.env` to the
    absolute paths.
 3. Drive `ca.cinnamons.uk/admin/server` with the `verify` skill:
-   - decoy → multi-tap → PIN → text, photo, video, voice
+   - decoy → single tap → "Open server settings" → PIN → text, photo, video, voice
    - two sessions see live updates; idle lock; panic
    - mobile viewport
 4. **Android push** needs the operator's phone. Hand him the one-step instruction: Server →
@@ -981,8 +991,8 @@ and §5 contracts matched exactly. Also:
 
 1. **PIN leak:** the pushed todo on the public repo's workspace branch contains it. Alerted
    separately.
-2. **R2 gesture reading:** after the idle fade you multi-tap (not single-tap) to reach
-   "Unlock server". Confirm.
+2. ~~R2 gesture reading~~ **RESOLVED** (decision #974): a single tap reveals it; a double
+   tap re-locks only inside the chat. Applied as the v1.3 errata.
 3. **Disk:** 58.8 GB free on D:. Defaults are a 20 GB chat-media quota, a 10 GB free floor,
    no originals kept, and video capped at 1080p. Confirm or adjust.
 4. **No backup** of chat history (R15). Confirm he's OK with that.
@@ -999,7 +1009,7 @@ and §5 contracts matched exactly. Also:
 
 ## 16. Out of scope (v1)
 
-- editing or deleting messages
+- editing messages (deleting and wiping are now **in** scope: §17, v1.2)
 - typing indicators, read receipts, presence, unread counts
 - iOS push
 - multiple rooms
