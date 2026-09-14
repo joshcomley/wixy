@@ -312,14 +312,19 @@ fixed same-session.)
   D's decoy-tap-reveal detector specifically (rest of P4 unaffected,
   continuing), waiting on the Architect's official errata text before
   redirecting further.
-- **Unrelated e2e flake spun off**: the DM found + independently confirmed a
-  pre-existing, unrelated flake in `e2e/tests/collection-edit.spec.ts`
-  (reorder-timing assertion in the showcase preview iframe, 2/7 failures on
-  unmodified main-line code) while clearing P5a. Per the no-stopgap/root-cause
-  doctrine this isn't left as a dismissed "flake" — spun off into a separate
-  wixy workspace #30 ("anemone-7", session
-  `ed5c0281-a830-4ab8-bdbd-d0b73a2482c7`) to root-cause and fix it properly,
-  fully decoupled from this workspace's branch/scope.
+- **Unrelated e2e flake spun off, now FIXED + MERGED**: the DM found + independently
+  confirmed a pre-existing, unrelated flake in `e2e/tests/collection-edit.spec.ts`
+  while clearing P5a. Per the no-stopgap/root-cause doctrine this wasn't left as a
+  dismissed "flake" — spun off into wixy workspace #30 ("anemone-7", session
+  `ed5c0281-a830-4ab8-bdbd-d0b73a2482c7`), fully decoupled from this workspace's
+  branch/scope. **Outcome**: the originally-reported "reorder-timing" symptom
+  never reproduced (55+ clean runs); the REAL, reproduced bug was a server-side
+  concurrency race in `wixy_server`'s draft `overlay.json` (unlocked read/write,
+  Windows `PermissionError`) — fixed by extending the existing `tree_lock()` to
+  every overlay.json access site. Full pytest (1,395) + 50x e2e repro both green
+  post-fix. **Merged**: PR #223, SHA `593837a4f7cdd06614533635d2f1ae2110b38b4f`,
+  branch deleted, decisions/00144-draft-overlay-json-unlocked-rw-race. Fully
+  closed — lane resolved, nothing further to track on this thread.
 - **Both open Architect rulings resolved**: R2 errata v1.3 pushed (`ada8550`)
   and sent direct to P4 (Builder D) by the Architect — no further action
   needed. Delete+wipe spec'd as v1.2 addendum sec.17 (`5f29b1f`) — both
