@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import functools
 import re
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -17,8 +18,9 @@ from pathlib import Path
 
 import anyio
 import httpx
-from fastapi import FastAPI
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import FastAPI, Request
+from fastapi.exceptions import HTTPException as FastAPIHTTPException
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from wixy_server.ai.anthropic_backend import AnthropicAIBackend
@@ -30,6 +32,11 @@ from wixy_server.chat_working import WorkingCache
 from wixy_server.chats import ChatRuntimeEntry
 from wixy_server.cmdchat import CmdChatClient
 from wixy_server.github import GitHubClient
+from wixy_server.livechat.models import MessageHook
+from wixy_server.livechat.notifier import LiveChatNotifier
+from wixy_server.livechat.pinclient import CmdPinVerifier, PinVerifier
+from wixy_server.livechat.store import LiveChatStore
+from wixy_server.livechat.tokens import load_or_create_secret
 from wixy_server.publisher import PublishJob
 from wixy_server.redirects import load_redirects
 from wixy_server.registry import load_registry
@@ -41,6 +48,7 @@ from wixy_server.routes_chat import router as chat_router
 from wixy_server.routes_engine import EngineStatusCache
 from wixy_server.routes_engine import router as engine_router
 from wixy_server.routes_internal import router as internal_router
+from wixy_server.routes_livechat import router as livechat_router
 from wixy_server.routes_preview import DEFAULT_PREVIEW_STALENESS_THRESHOLD_S
 from wixy_server.routes_preview import router as preview_router
 from wixy_server.routes_public import router as public_router
@@ -103,6 +111,7 @@ def create_app(
     chat_stream_timing: StreamTiming | None = None,
     github_client: GitHubClient | None = None,
     ai_backend: AIBackend | None = None,
+    pin_verifier: PinVerifier | None = None,
 ) -> FastAPI:
     """Build the Wixy FastAPI app for one project.
 
@@ -134,6 +143,12 @@ def create_app(
     concrete backends are still constructed unconditionally below (same "no
     per-edition branching, everything closes uniformly at shutdown" posture as
     `gh_client`), only WHICH ONE gets exposed on `app.state` branches.
+    `pin_verifier` (spec/server-chat/00-brief.md R4/§5.1): the server-chat PIN
+    gate's `PinVerifier`. Defaults to `CmdPinVerifier()` on the fleet edition
+    (`settings.edition != "standalone"`), `None` on standalone (no cmd there —
+    `POST /unlock` then always answers 503 `not_configured`) — overridable so
+    tests point it at `fake_cmd.py`'s `/api/pins/<app_key>/verify` double instead, same
+    injection seam as `cmdchat_client`/`ai_backend`/`github_client` above.
     """
     settings = load_settings(storage_root)
     registry = load_registry(wixy_repo_root)
@@ -164,6 +179,25 @@ def create_app(
     gh_client = (
         github_client if github_client is not None else GitHubClient(pat=settings.engine_pat)
     )
+
+    # spec/server-chat/00-brief.md §4/§10 P1: the "Server" panel's own store +
+    # secret, entirely separate from every above (Inv 40 — private data, never in
+    # the site repo/builds/publish/reports/backups). `secret.key` load-or-create is
+    # a blocking file op, same posture as `ensure_project_dirs` a few lines up —
+    # this whole function is plain synchronous setup, not an async context.
+    livechat_store = LiveChatStore(paths.server_db)
+    livechat_secret = load_or_create_secret(paths.server_secret)
+    livechat_notifier = LiveChatNotifier()
+    livechat_message_hooks: list[MessageHook] = []
+    livechat_started_at = time.time()
+    if pin_verifier is not None:
+        resolved_pin_verifier: PinVerifier | None = pin_verifier
+    elif settings.edition == "standalone":
+        # R4: "there's no PIN verifier, so /unlock -> 503 not_configured" — no cmd
+        # on her droplet to call.
+        resolved_pin_verifier = None
+    else:
+        resolved_pin_verifier = CmdPinVerifier(app_key=settings.server_pin_app_key)
 
     jwks = JwksCache(
         fetch=functools.partial(_fetch_jwks, settings.cf_access_team_domain),
@@ -210,6 +244,8 @@ def create_app(
         finally:
             await chat_client.aclose()
             await gh_client.aclose()
+            if resolved_pin_verifier is not None:
+                await resolved_pin_verifier.aclose()
             # `CmdAIBackend.aclose()` is just a passthrough to `chat_client`
             # (already closed above) — closing it again would double-close
             # that same underlying httpx client, so only close
@@ -236,6 +272,26 @@ def create_app(
     app.state.github_client = gh_client
     app.state.redirects = load_redirects()
     app.state.engine_status_cache = EngineStatusCache()
+    app.state.livechat_store = livechat_store
+    app.state.livechat_secret = livechat_secret
+    app.state.livechat_notifier = livechat_notifier
+    app.state.livechat_message_hooks = livechat_message_hooks
+    app.state.livechat_media_available = True  # P2 sets this at startup once it lands.
+    app.state.livechat_started_at = livechat_started_at
+    app.state.livechat_pin_verifier = resolved_pin_verifier
+
+    @app.exception_handler(FastAPIHTTPException)
+    async def _http_exception_handler(_request: Request, exc: FastAPIHTTPException) -> JSONResponse:
+        """Overrides Starlette's default (which always wraps `exc.detail` as
+        `{"detail": ...}`) so a route can raise `HTTPException(status_code=...,
+        detail={"error": "locked"})` and get that dict back VERBATIM as the top-
+        level JSON body — spec/server-chat/00-brief.md §5's contracts are literal
+        shapes like `{"error":"locked"}`, never `{"detail":{"error":"locked"}}`.
+        A plain string `detail` (every existing route's own usage) is untouched —
+        still wrapped as `{"detail": "..."}`, exactly as before this handler."""
+        if isinstance(exc.detail, dict):
+            return JSONResponse(status_code=exc.status_code, content=exc.detail)
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
     app.middleware("http")(admin_auth)
     app.middleware("http")(build_robots_header_middleware(indexable=project.indexable))
@@ -251,6 +307,7 @@ def create_app(
     app.include_router(ai_router)
     app.include_router(system_router)
     app.include_router(versions_router)
+    app.include_router(livechat_router)
 
     @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
     @app.get("/admin/", response_class=HTMLResponse, include_in_schema=False)
