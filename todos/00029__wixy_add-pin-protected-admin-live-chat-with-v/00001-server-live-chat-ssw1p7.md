@@ -354,3 +354,15 @@ fixed same-session.)
   `wixy-livechat`. Told the DM explicitly not to treat it as cleared.
   cmd-side team will self-register using operator decision #973 as
   authorization once their PR lands; will ping this workspace when live.
+- **New fleet-wide stall on blocker #9**: GitHub billing is refusing to start
+  the "Frontend (pnpm)" required CI check on GitHub-rented runners
+  ("recent account payments have failed or your spending limit needs to be
+  increased") across multiple unrelated cmd workspaces (00869/00824/00854/
+  00875 — not just ours), since ~11:19 today. cmd's repo ruleset requires
+  this check with no bypass, so PR #3068 (the PIN service, otherwise fully
+  green — Python suite passed CI, 3,126-test frontend suite passed locally)
+  cannot merge until this clears. Raised as operator decision #977 (real
+  money / shared-infra tradeoff — pay the GitHub bill vs. move the check to
+  self-hosted Fir vs. both) — correctly left unanswered by every agent
+  including me, since it's a genuine operator-only call. Purely a wait on
+  him now; not something to solve by guessing.
