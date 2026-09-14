@@ -190,3 +190,41 @@ fixed same-session.)
   state locally. The Architect has been briefed on this correction and told
   to proceed with everything else (transport/media/lock-state-machine/push)
   unblocked while the cmd-side contract is finalized.
+
+## Update 2026-09-14 (later same session) — brief frozen, delivery underway
+
+- **Architect's brief is FROZEN v1.1**: `spec/server-chat/00-brief.md` @ commit
+  `be57497` on `cmd/workspace-00029`. 6 Builder parcels across 3 waves (sec.10):
+  Wave 1 concurrent (P1 backend core [lands first, others integrate on it],
+  P2a media processing, P3a push core, P4 frontend lock/disguise/PIN pad, P5a
+  shared-chat-extraction refactor, P6a uploader/recorder frontend); Wave 2
+  (P2b uploads/queue/janitor, P3b push routes/dispatch, P5b server chat view);
+  Wave 3 (P6b media wiring); close-out P7 (docs/invariants 40-45, decisions
+  00144-00147, DM integration). Frozen interfaces: store API (sec.4), HTTP
+  contracts (sec.5), TS LockHooks/ServerChatView/serverFetch (sec.6).
+- **Delivery Manager spawned**: session `7061c848-e57d-4aee-8fd9-a9bcc459d1b4`.
+  Briefed with the frozen brief + wave plan; owns partitioning parcels across
+  Builders. Delivery MERGE is explicitly blocked on the cmd PIN service being
+  live + the PIN registered for app_key `wixy-livechat` (brief sec.12 step 1)
+  — Orchestrator (me) owns that dependency, not the DM.
+- **cmd workspace #875** (session `b1810bdc-4788-45a9-a790-758e4c56d7bd`,
+  codename "dragonfly-5") accepted the Architect's 4 contract asks (per-subject
+  lockout via optional `subject`, `attempts_left` on wrong-PIN, 404
+  unknown_app vs 401 wrong_pin vs 429 locked+Retry-After, documented
+  retry-safety). It will self-register `wixy-livechat`'s PIN using cmd
+  decision #973 (operator's "keep the original PIN" answer) as authorization
+  — nobody needs to relay the literal value again. ETA a few hours for a real
+  PR with the finished contract.
+- **7 operator flags raised** (op-ask-question, delayed/non-blocking, split
+  across two multi-question decisions since each call caps at 4): idle-fade
+  multi-tap gesture confirmation, chat-media storage limits (20GB quota/10GB
+  floor/1080p cap/no originals kept), no-backup-anywhere confirmation, generic
+  push-notification text confirmation, public-repo-is-fine-for-code
+  confirmation, whether message delete/wipe is wanted, and the standalone
+  (non-cmd) edition's PIN gap being acceptable for now. None of these block
+  Builder work starting.
+- **Next**: wait for Builders to spin up under the DM; watch for the cmd PIN
+  service PR; watch for the operator's answers to the 7 flags above (act on
+  any that change scope); once cmd's contract is real, relay it to whichever
+  Builder owns wixy's P1 backend core (`livechat/pinclient.py`) so they build
+  against the real shape instead of the Architect's placeholder.
