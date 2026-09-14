@@ -51,6 +51,16 @@ regardless, email is a best-effort convenience notification only. On the
 fleet, these are populated in `Storage\\.env` from the fleet's own Gmail SMTP
 app-password credentials (an operational deploy step, not baked into this
 repo — see `decisions/00096`).
+
+Server-chat additions (spec/server-chat/00-brief.md §10 P1, workspace #29):
+`WIXY_SERVER_PIN_APP_KEY` — the app-key identifier `livechat/pinclient.py`
+sends to cmd's PIN-verify service (an identifier, not a secret; R4 — wixy
+holds **zero PIN state**, so there is deliberately no PIN setting anywhere in
+this module). `WIXY_SERVER_MEDIA_QUOTA_MB`/`WIXY_SERVER_MIN_FREE_MB` (R10):
+the chat-media quota and free-space floor, enforced at upload init.
+`WIXY_SERVER_UPLOAD_CHUNK_BYTES` (R11): the chunked-upload chunk size, clamped
+to a sane range. `WIXY_FFMPEG`/`WIXY_FFPROBE` (§7): absolute paths overriding
+`shutil.which` resolution, for a deploy where the binaries aren't on PATH.
 """
 
 from __future__ import annotations
@@ -84,6 +94,14 @@ def parse_env_file(path: Path) -> dict[str, str]:
 _VALID_EDITIONS = ("fleet", "standalone")
 _VALID_AI_BACKENDS = ("cmd", "anthropic")
 
+_DEFAULT_SERVER_PIN_APP_KEY = "wixy-livechat"
+_MB = 1024 * 1024
+_DEFAULT_SERVER_MEDIA_QUOTA_BYTES = 20480 * _MB
+_DEFAULT_SERVER_MIN_FREE_BYTES = 10240 * _MB
+_DEFAULT_SERVER_UPLOAD_CHUNK_BYTES = 8 * _MB
+_MIN_SERVER_UPLOAD_CHUNK_BYTES = 64 * 1024
+_MAX_SERVER_UPLOAD_CHUNK_BYTES = 16 * _MB
+
 
 @dataclass(frozen=True, slots=True)
 class Settings:
@@ -106,6 +124,12 @@ class Settings:
     report_smtp_password: str
     report_email_to: str
     report_email_from: str
+    server_pin_app_key: str
+    server_media_quota_bytes: int
+    server_min_free_bytes: int
+    server_upload_chunk_bytes: int
+    ffmpeg_path: str
+    ffprobe_path: str
 
 
 def load_settings(storage_root: Path) -> Settings:
@@ -138,6 +162,30 @@ def load_settings(storage_root: Path) -> Settings:
             f"{_VALID_AI_BACKENDS} (spec/independence/05 §1)"
         )
 
+    server_pin_app_key = _get("WIXY_SERVER_PIN_APP_KEY", _DEFAULT_SERVER_PIN_APP_KEY)
+    if not server_pin_app_key:
+        raise RuntimeError(
+            "WIXY_SERVER_PIN_APP_KEY must be non-empty (spec/server-chat/00-brief.md §10 P1) — "
+            "it's an identifier for cmd's PIN service, not a secret, so it must never be unset"
+        )
+    server_media_quota_bytes = (
+        int(_get("WIXY_SERVER_MEDIA_QUOTA_MB")) * _MB
+        if _get("WIXY_SERVER_MEDIA_QUOTA_MB")
+        else _DEFAULT_SERVER_MEDIA_QUOTA_BYTES
+    )
+    server_min_free_bytes = (
+        int(_get("WIXY_SERVER_MIN_FREE_MB")) * _MB
+        if _get("WIXY_SERVER_MIN_FREE_MB")
+        else _DEFAULT_SERVER_MIN_FREE_BYTES
+    )
+    server_upload_chunk_bytes = min(
+        _MAX_SERVER_UPLOAD_CHUNK_BYTES,
+        max(
+            _MIN_SERVER_UPLOAD_CHUNK_BYTES,
+            int(_get("WIXY_SERVER_UPLOAD_CHUNK_BYTES", str(_DEFAULT_SERVER_UPLOAD_CHUNK_BYTES))),
+        ),
+    )
+
     return Settings(
         port=int(_get("WIXY_PORT", "8000")),
         env=env,
@@ -167,4 +215,10 @@ def load_settings(storage_root: Path) -> Settings:
         report_smtp_password=_get("WIXY_REPORT_SMTP_PASSWORD"),
         report_email_to=_get("WIXY_REPORT_EMAIL_TO"),
         report_email_from=_get("WIXY_REPORT_EMAIL_FROM"),
+        server_pin_app_key=server_pin_app_key,
+        server_media_quota_bytes=server_media_quota_bytes,
+        server_min_free_bytes=server_min_free_bytes,
+        server_upload_chunk_bytes=server_upload_chunk_bytes,
+        ffmpeg_path=_get("WIXY_FFMPEG"),
+        ffprobe_path=_get("WIXY_FFPROBE"),
     )

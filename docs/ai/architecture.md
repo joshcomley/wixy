@@ -161,11 +161,31 @@ Deep dive: [builder.md](builder.md).
 | `chat_working.py` | live "is this conversation actively working" flag, TTL-cached (`WorkingCache`) — decisions/00097 |
 | `reports.py` | "Send a report" diagnostic bundle — save unconditional, email best-effort (`submit_report`) — decisions/00095, 00096 |
 | `bootstrap.py` | first-serve "publish zero" (idempotent) |
-| `routes_*.py` | route handlers (public, admin API, internal, preview, chat, version(s)) |
+| `routes_*.py` | route handlers (public, admin API, internal, preview, chat, version(s), system, **server chat**) |
 
 Deep dives: [serving-and-overlay.md](serving-and-overlay.md),
 [publish-pipeline.md](publish-pipeline.md), [ai-chat.md](ai-chat.md),
-[media.md](media.md). The HTTP contract is [contracts.md](contracts.md).
+[media.md](media.md), [livechat.md](livechat.md). The HTTP contract is [contracts.md](contracts.md).
+
+### `wixy_server/livechat/` — the PIN-protected admin live chat ("Server" panel)
+
+spec/server-chat/00-brief.md. Entirely separate storage/routes/auth from everything else in
+this repo (Inv 40: never in the site repo, builds, publish, reports, or backups) — a
+human↔human messaging tool for admin users, disguised behind a "Server" nav tab. Deep dive:
+[livechat.md](livechat.md); routes are in [contracts.md](contracts.md).
+
+| Module | Responsibility |
+|---|---|
+| `models.py` | frozen row dataclasses (`MessageRow`, `AttachmentRow`, `EventRow`, …) + the `message_json`/`attachment_json` wire serializers |
+| `store.py` | `LiveChatStore` — SQLite (WAL), messages/attachments/events/uploads/push subscriptions |
+| `tokens.py` | the per-project HMAC secret, unlock-token mint/verify, signed media-URL signing/verification, `require_server_token` |
+| `pinclient.py` | `PinVerifier` protocol + `CmdPinVerifier` — the zero-PIN-state hop to cmd's PIN-verify service |
+| `notifier.py` | `LiveChatNotifier` — in-process SSE wake-up (`anyio.Event` swap) |
+
+`routes_livechat.py` (not inside the package, alongside the other `routes_*.py` files) wires
+these together. `settings.py` carries the feature's config (`server_pin_app_key`,
+media-quota/free-space/upload-chunk sizing, ffmpeg/ffprobe paths) — deliberately **no PIN
+value anywhere** (R4: wixy holds zero PIN state; cmd owns the registered PIN itself).
 
 ### `admin-ui/` + `editor/` — two independent strict-TS/esbuild bundles
 
@@ -195,6 +215,12 @@ D:\Servers\Wixy\Storage\
     publishes.jsonl            # append-only publish ledger
     chats.json                 # AI conversation registry
     locks\publish.lock         # cross-process publish lock (self-heals after 600s)
+    server\                    # PIN-protected admin live chat — PRIVATE, Inv 40
+      server.db (+ -wal, -shm) # SQLite, WAL — messages/attachments/events/uploads/push subs
+      secret.key                # 32 random bytes (unlock-token + media-URL HMAC key)
+      media\<id[:2]>\<id>\      # processed attachment renditions (P2)
+      uploads\<uploadId>\       # in-progress chunked uploads (P2)
+      failed\<id>\               # originals kept 7 days on processing failure (P2)
 ```
 
 Paths are computed by `wixy_server/storage.py:ProjectPaths`; everything is per-slug (v1 runs
