@@ -283,3 +283,21 @@ fixed same-session.)
   clearing this and will notify the DM.
 - **DM session**: `7061c848-e57d-4aee-8fd9-a9bcc459d1b4` (workspace #29
   Delivery Manager).
+
+## Update 2026-09-14 (later same session, by the Orchestrator) — decisions answered
+
+- **Decision #973** (keep-vs-change the original PIN): answered, kept.
+- **Decision #975** answered: public repo is fine (no change) · standalone
+  edition's PIN gap OK for now (no change) · **"yes, add delete or wipe"**
+  for messages/chat history — this is NEW SCOPE not in the frozen brief.
+  Orchestrator's read: implement BOTH per-message delete and a full
+  wipe-everything (operator didn't pick one over the other; both is the
+  most complete option and isn't worth blocking on a re-ask). Sent to the
+  Architect to spec as a v1.2 addendum, with an explicit question on
+  whether it can be added without touching the already-frozen store
+  API/HTTP contracts/TS interfaces wave-1 Builders are actively coding
+  against, or whether it needs to land as a late parcel (P7 close-out or a
+  fresh P8) to avoid destabilizing in-flight work. Awaiting the Architect's
+  ruling before this reaches any Builder.
+- **Decision #974** still open (idle-fade gesture, storage limits, no-backup,
+  push-text) — non-blocking, no action needed yet.
