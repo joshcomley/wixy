@@ -337,6 +337,23 @@ describe("mountChatComposer", () => {
       withExtra.teardown();
     });
 
+    it("extraButtons survive compose mode's submit-button relocation into the actions row", () => {
+      const mic = document.createElement("button");
+      mic.className = "fake-mic-button";
+      const composer = mountChatComposer(
+        makeOptions({ mode: "compose", submitLabel: "Start", extraButtons: [mic] }),
+      );
+      const row = composer.element.querySelector(".wx-chatc-input-row")!;
+      expect(Array.from(row.children)).toContain(mic);
+      expect(row.querySelector("textarea")?.previousElementSibling).toBe(mic);
+      // Compose mode still relocates the submit button into its own legacy
+      // actions row (Start/Cancel) — extraButtons must not end up caught in
+      // that move.
+      const actionsButtons = composer.element.querySelectorAll(".wx-chat-compose-actions button");
+      expect(Array.from(actionsButtons)).not.toContain(mic);
+      composer.teardown();
+    });
+
     it("upload receives (file, {onProgress, signal}); onProgress updates stagedAttachments()", async () => {
       let capturedOnProgress: ((loaded: number, total: number) => void) | undefined;
       let capturedSignal: AbortSignal | undefined;
