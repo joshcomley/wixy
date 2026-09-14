@@ -32,6 +32,8 @@ from wixy_server.chat_working import WorkingCache
 from wixy_server.chats import ChatRuntimeEntry
 from wixy_server.cmdchat import CmdChatClient
 from wixy_server.github import GitHubClient
+from wixy_server.livechat import janitor as livechat_janitor
+from wixy_server.livechat import media_queue as livechat_media_queue
 from wixy_server.livechat.models import MessageHook, MessageRow
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import CmdPinVerifier, PinVerifier
@@ -54,6 +56,7 @@ from wixy_server.routes_engine import EngineStatusCache
 from wixy_server.routes_engine import router as engine_router
 from wixy_server.routes_internal import router as internal_router
 from wixy_server.routes_livechat import router as livechat_router
+from wixy_server.routes_livechat_media import router as livechat_media_router
 from wixy_server.routes_preview import DEFAULT_PREVIEW_STALENESS_THRESHOLD_S
 from wixy_server.routes_preview import router as preview_router
 from wixy_server.routes_public import router as public_router
@@ -208,6 +211,15 @@ def create_app(
 
     livechat_message_hooks.append(dispatch_server_push)
     livechat_started_at = time.time()
+    # spec/server-chat/00-brief.md §7 Dependencies, §10 P2b: resolved once at
+    # startup (WIXY_FFMPEG/WIXY_FFPROBE, falling back to `shutil.which`), not
+    # per-request — `resolve_binaries` itself ERROR-logs when either binary is
+    # missing. `None` means the media pipeline stays closed all app-lifetime:
+    # uploads 503 media_unavailable, the queue worker never starts (nothing
+    # valid to run ffmpeg/ffprobe with), text chat keeps working regardless.
+    livechat_queue_config = livechat_media_queue.resolve_binaries(
+        settings.ffmpeg_path, settings.ffprobe_path
+    )
     if pin_verifier is not None:
         resolved_pin_verifier: PinVerifier | None = pin_verifier
     elif settings.edition == "standalone":
@@ -249,6 +261,18 @@ def create_app(
                 project, paths, interval_s=watcher_interval_s, status=watcher_status
             )
 
+        async def _run_media_queue() -> None:
+            assert livechat_queue_config is not None
+            await livechat_media_queue.run_forever(
+                store=livechat_store,
+                paths=paths,
+                notifier=livechat_notifier,
+                config=livechat_queue_config,
+            )
+
+        async def _run_janitor() -> None:
+            await livechat_janitor.run_forever(store=livechat_store, paths=paths)
+
         try:
             async with anyio.create_task_group() as tg:
                 # Exposed on `app.state` so route handlers (milestone 10's chat
@@ -257,6 +281,13 @@ def create_app(
                 # itself runs in, cancelled together at shutdown below.
                 _app.state.background_tasks = tg
                 tg.start_soon(_run_watcher)
+                # Only started when the media pipeline actually resolved (see
+                # `livechat_queue_config` above) — nothing valid to hand it
+                # otherwise. The janitor runs regardless: it's pure DB/filesystem
+                # housekeeping with no ffmpeg dependency.
+                if livechat_queue_config is not None:
+                    tg.start_soon(_run_media_queue)
+                tg.start_soon(_run_janitor)
                 yield
                 tg.cancel_scope.cancel()
         finally:
@@ -296,7 +327,7 @@ def create_app(
     app.state.livechat_vapid_keys = livechat_vapid_keys
     app.state.livechat_notifier = livechat_notifier
     app.state.livechat_message_hooks = livechat_message_hooks
-    app.state.livechat_media_available = True  # P2 sets this at startup once it lands.
+    app.state.livechat_media_available = livechat_queue_config is not None
     app.state.livechat_started_at = livechat_started_at
     app.state.livechat_pin_verifier = resolved_pin_verifier
 
@@ -328,6 +359,7 @@ def create_app(
     app.include_router(system_router)
     app.include_router(versions_router)
     app.include_router(livechat_router)
+    app.include_router(livechat_media_router)
 
     @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
     @app.get("/admin/", response_class=HTMLResponse, include_in_schema=False)

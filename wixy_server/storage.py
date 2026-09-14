@@ -137,6 +137,20 @@ class ProjectPaths:
     def server_failed(self) -> Path:
         return self.server_dir / "failed"
 
+    def server_upload_dir(self, upload_id: str) -> Path:
+        """§4: `uploads/<uploadId>/` — chunk staging, then the assembled original
+        (P2b). `upload_id` doubles as the eventual attachment id once promoted."""
+        return self.server_uploads / upload_id
+
+    def server_attachment_media_dir(self, attachment_id: str) -> Path:
+        """§4: `media/<id[:2]>/<id>/` — the two-level fan-out keeps any one
+        directory from accumulating thousands of entries as the chat grows."""
+        return self.server_media / attachment_id[:2] / attachment_id
+
+    def server_failed_dir(self, attachment_id: str) -> Path:
+        """§4: `failed/<id>/` — a failed original kept 7 days for diagnosis."""
+        return self.server_failed / attachment_id
+
 
 def project_paths(storage_root: Path, slug: str) -> ProjectPaths:
     return ProjectPaths(slug=slug, root=storage_root / "projects" / slug)

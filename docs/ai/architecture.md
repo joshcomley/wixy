@@ -181,11 +181,17 @@ human↔human messaging tool for admin users, disguised behind a "Server" nav ta
 | `tokens.py` | the per-project HMAC secret, unlock-token mint/verify, signed media-URL signing/verification, `require_server_token` |
 | `pinclient.py` | `PinVerifier` protocol + `CmdPinVerifier` — the zero-PIN-state hop to cmd's PIN-verify service |
 | `notifier.py` | `LiveChatNotifier` — in-process SSE wake-up (`anyio.Event` swap) |
+| `processing.py` | pure photo/voice/video pipeline (Pillow+pillow-heif, ffmpeg) — magic-byte sniff, hardened subprocess calls, no DB/settings coupling |
+| `uploads.py` | chunked upload staging/assembly, quota + free-space enforcement |
+| `media_queue.py` | lease-based background worker turning a `processing` attachment into `ready`/`failed` |
+| `janitor.py` | hourly cleanup of stale uploads, orphaned attachments, expired `failed/` entries |
 
-`routes_livechat.py` (not inside the package, alongside the other `routes_*.py` files) wires
-these together. `settings.py` carries the feature's config (`server_pin_app_key`,
-media-quota/free-space/upload-chunk sizing, ffmpeg/ffprobe paths) — deliberately **no PIN
-value anywhere** (R4: wixy holds zero PIN state; cmd owns the registered PIN itself).
+`routes_livechat.py` and `routes_livechat_media.py` (not inside the package, alongside the
+other `routes_*.py` files) wire these together — the former owns unlock/history/send/stream/
+usage, the latter owns uploads + the signed `GET media/*` route. `settings.py` carries the
+feature's config (`server_pin_app_key`, media-quota/free-space/upload-chunk sizing,
+ffmpeg/ffprobe paths) — deliberately **no PIN value anywhere** (R4: wixy holds zero PIN
+state; cmd owns the registered PIN itself).
 
 ### `admin-ui/` + `editor/` — two independent strict-TS/esbuild bundles
 

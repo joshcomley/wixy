@@ -197,14 +197,15 @@ process) off a fixed, non-configurable container path — see that module and
 
 ### Server chat (`/api/admin/server/*`, Auth: CF **plus** a second in-app gate)
 
-spec/server-chat/00-brief.md. `wixy_server/routes_livechat.py`. The PIN-protected admin
-live chat (disguised as a "Server" nav tab) — see [livechat.md](livechat.md) for the full
-picture. **Every route below except `POST unlock`** additionally requires the header
-`X-Wixy-Server-Token` (a signed, 12h-lived unlock token minted by `POST unlock`, held only
-in the browser's JS memory — never localStorage/cookies/URLs); a missing/invalid/expired
-token, or one passed as a query parameter instead of the header, is **401**
-`{"error":"locked"}`. `GET media/*` (P2b, not yet built) will be the other exception —
-signed per-URL instead, since `<img>`/`<video>`/`<audio>` tags can't send a header.
+spec/server-chat/00-brief.md. `wixy_server/routes_livechat.py` +
+`wixy_server/routes_livechat_media.py`. The PIN-protected admin live chat (disguised as a
+"Server" nav tab) — see [livechat.md](livechat.md) for the full picture. **Every route below
+except `POST unlock` and `GET media/*`** requires the header `X-Wixy-Server-Token` (a
+signed, 12h-lived unlock token minted by `POST unlock`, held only in the browser's JS
+memory — never localStorage/cookies/URLs); a missing/invalid/expired token, or one passed as
+a query parameter instead of the header, is **401** `{"error":"locked"}`. `GET media/*` is
+signed per-URL instead (`?exp=&sig=`), since `<img>`/`<video>`/`<audio>` tags can't send a
+header.
 
 | Method | Path | Handler | Request | Response |
 |---|---|---|---|---|
@@ -213,6 +214,11 @@ signed per-URL instead, since `<img>`/`<video>`/`<audio>` tags can't send a head
 | POST | `server/messages` | `send_message` | `{"clientId":str(8-64),"sender":str(1-32,trimmed),"deviceId":str(8-64),"text":str\|null(≤4000),"attachmentIds":[hex32](0-10)}` | 201 `{"message":<Message>}` (200 + the SAME message on a replayed `clientId` — idempotent); 422 `{"error":"invalid","detail":str}` (empty text with no attachments, too long, bad sender, or an unknown/already-used/failed attachment id) |
 | GET | `server/stream?after=` | `stream` | query `after?:int` (event cursor) | **SSE**, see §4 |
 | GET | `server/usage` | `usage` | — | `{"usedBytes":int,"quotaBytes":int,"freeBytes":int,"mediaAvailable":bool}` |
+| POST | `server/uploads` | `init_upload` | `{"kind":"photo"\|"video"\|"voice","mimeType":str,"sizeBytes":int,"filename":str\|null}` | 201 `{"uploadId":hex32,"chunkBytes":int,"maxBytes":int}`; 413 `{"error":"too_large","maxBytes":int}`; 415 `{"error":"unsupported_type"}`; 507 `{"error":"storage_full"}`; 503 `{"error":"media_unavailable"}` |
+| PUT | `server/uploads/{id}/chunks/{index}` | `put_chunk` | raw `application/octet-stream` body, ≤`chunkBytes` | 204; 413 `{"error":"too_large","maxBytes":int}`; 422 (index out of range); 404 (unknown upload) |
+| POST | `server/uploads/{id}/complete` | `complete_upload` | — | 202 `{"attachment":<Attachment>}` (status `processing`; idempotent on retry); 409 `{"error":"incomplete","missing":[int]}`; 422 `{"error":"size_mismatch"}`; 404 (unknown upload) |
+| DELETE | `server/uploads/{id}` | `delete_upload` | — | 204 (always — a no-op once already promoted to an attachment) |
+| GET | `server/media/{attId}/{rendition}?exp=&sig=` | `get_media` | `rendition ∈ full\|thumb\|poster\|play`; query `exp:int`, `sig:b64url` | 200/206 (Range-aware `FileResponse`, `Cache-Control: private, no-cache`, `X-Content-Type-Options: nosniff`, `Content-Disposition: inline`); 403 (bad/expired signature or email mismatch); 404 (malformed id, unknown rendition, or missing) |
 
 `<Message>` = `{seq:int, clientId:str, sender:str, text:str\|null, attachments:[<Attachment>],
 createdAt:float}`. `<Attachment>` = `{id:str, kind:"photo"\|"video"\|"voice",
