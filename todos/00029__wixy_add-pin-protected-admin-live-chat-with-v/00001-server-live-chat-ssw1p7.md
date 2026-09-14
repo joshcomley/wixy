@@ -371,6 +371,32 @@ fixed same-session.)
   self-hosted Fir vs. both) — correctly left unanswered by every agent
   including me, since it's a genuine operator-only call. Purely a wait on
   him now; not something to solve by guessing.
+- **BLOCKER #9 CLEARED** (2026-09-14): cmd PR #3068 merged (`a3baf62d`),
+  cmd-prod deployed, app_key `wixy-livechat` registered (authorized by
+  decision #973, PIN value never passed through this workspace or git).
+  Live-smoke-tested against production: correct PIN → 200 ok; wrong → 401
+  wrong_pin+attempts_left; unknown app → 404; bad format → 400. Contract is
+  UNCHANGED from what was already relayed to P1/Architect (a pre-merge
+  security review found+fixed a lockout-refund race internally, no response
+  shape moved) — no rework needed on wixy's side. Reference:
+  `docs/ai/pin-service.md` in the cmd repo, new fleet skill `pin-service`.
+  Operator can rotate the PIN himself at `cmd.cinnamons.uk/pins`. Told the
+  DM immediately — **delivery merge is no longer blocked once the remaining
+  parcels land.**
+- **GitHub billing recurred** (decision #980, ~1hr after #977 resolved): the
+  account-wide GitHub Actions spending limit ran dry again within ~15 min of
+  being topped up (cmd main-branch CI failed again at 14:29 and 14:38, same
+  "recent account payments have failed" message). Cmd team's options: move
+  the GitHub-hosted `frontend (pnpm)` check onto self-hosted Fir (no more
+  GitHub spend, but makes CI depend on Fir's uptime) vs. raise the spending
+  limit again (keeps the fleet-independent design, costs recur) vs. leave
+  blocked. Same as #977 — a shared-infra/spend tradeoff, genuinely the
+  operator's call, left unanswered by design. **Risk noted for THIS
+  workspace**: the spending limit appears account-wide, not cmd-repo-scoped,
+  so wixy's own remaining CI runs (P2b/P3b/P5b/P6b/P7/P8, and the eventual
+  delivery-merge PR itself) could hit the same wall — nothing has failed on
+  wixy's side yet (PR #223's CI, incl. its own `frontend` check, was fully
+  green), just flagging the exposure for awareness.
 - **Architect formalized the real PIN contract as brief v1.4** (`7df841b`):
   full cmd↔wixy mapping table, added 409 `pin_changed` to `/unlock`, pinned
   the retry-safety rule, `lock_scope` deliberately not surfaced to the

@@ -22,3 +22,16 @@ await esbuild.build({
   outfile: "../wixy_server/static/admin/admin.css",
   logLevel: "info",
 });
+
+// The Server notification worker is a separate entry point so it can be
+// registered with /admin/ scope without loading the full admin application.
+await esbuild.build({
+  entryPoints: ["src/sw/serverSw.ts"],
+  bundle: true,
+  minify: true,
+  sourcemap: false,
+  outfile: "../wixy_server/static/admin/server-sw.js",
+  format: "iife",
+  target: ["es2022"],
+  logLevel: "info",
+});

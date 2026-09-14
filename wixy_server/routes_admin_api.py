@@ -382,9 +382,13 @@ async def get_content(page: str, request: Request) -> JsonObject:
 
 
 def _build_theme(project: ProjectConfig, paths: ProjectPaths) -> JsonObject:
-    source = build_site_source(project, paths.repo)
-    overlay = _load_overlay_for(paths)
-    merged = merge_overlay(source, overlay)
+    # Tree+overlay READ under the process-wide lock — same read-consistency
+    # rule as _build_state/_build_content (treelock.py); this route was
+    # missing it (decisions/00144).
+    with tree_lock():
+        source = build_site_source(project, paths.repo)
+        overlay = _load_overlay_for(paths)
+        merged = merge_overlay(source, overlay)
     if merged.theme is None:
         # Pre-migration-step-4 checkouts have no theme/theme.json (decisions/00004) —
         # same "missing resource -> 404" treatment as an unknown page slug above,
@@ -421,9 +425,12 @@ async def get_theme(request: Request) -> JsonObject:
 
 
 def _build_global(project: ProjectConfig, paths: ProjectPaths) -> JsonObject:
-    source = build_site_source(project, paths.repo)
-    overlay = _load_overlay_for(paths)
-    merged = merge_overlay(source, overlay)
+    # Tree+overlay READ under the process-wide lock (decisions/00144) — same
+    # rule as _build_state/_build_content/_build_theme.
+    with tree_lock():
+        source = build_site_source(project, paths.repo)
+        overlay = _load_overlay_for(paths)
+        merged = merge_overlay(source, overlay)
     return {"global": merged.global_content}
 
 
@@ -463,24 +470,36 @@ def _to_patch_op(op_in: DraftOpIn) -> PatchOp:
 def _apply_draft_patch(
     project: ProjectConfig, paths: ProjectPaths, body: DraftPatchIn, *, by: str, now: str
 ) -> int:
-    overlay = _load_overlay_for(paths)
-    ops = [_to_patch_op(op_in) for op_in in body.ops]
-    set_ops = [op for op in ops if isinstance(op, SetOp)]
-    if set_ops:
-        # spec/04 §9: draft writes are sanitized — kind-aware, so only text-kind
-        # string leaves pass through sanitize_rich_lite (decisions/00074).
-        source = build_site_source(project, paths.repo)
-        sanitized = sanitize_set_ops(source, set_ops)
-        # The draft-write gate (decisions/00095): normalize (silent, best-effort
-        # corrections) THEN structurally validate (raises DraftValidationError,
-        # caught by patch_draft below — the overlay must stay untouched on a
-        # violation, so this runs BEFORE apply_patch, never after).
-        normalized = normalize_set_ops(sanitized, paths)
-        check_structural(normalized)
-        ops = [normalized.pop(0) if isinstance(op, SetOp) else op for op in ops]
-    new_overlay = apply_patch(overlay, body.expectedRev, ops, by=by, now=now)
-    save_overlay(paths.draft_overlay, new_overlay)
-    return new_overlay.rev
+    # The whole read-modify-write cycle under the process-wide lock
+    # (treelock.py) — without it, this raced any concurrent overlay reader/
+    # writer on the SAME thread-pool (every route here runs via
+    # `anyio.to_thread.run_sync`): a lost-update between two overlapping
+    # writers (each reads the same rev, the second write silently clobbers
+    # the first — `apply_patch`'s own rev check can't catch this since both
+    # reads were individually valid), and on Windows, a concurrent reader's
+    # plain `open()` can hit `PermissionError: [Errno 13]` against this
+    # file's `os.replace()` mid-rename. Found via a wixy e2e flake
+    # (collection-edit.spec.ts): an un-awaited preview reload racing the
+    # PATCH it followed (decisions/00144).
+    with tree_lock():
+        overlay = _load_overlay_for(paths)
+        ops = [_to_patch_op(op_in) for op_in in body.ops]
+        set_ops = [op for op in ops if isinstance(op, SetOp)]
+        if set_ops:
+            # spec/04 §9: draft writes are sanitized — kind-aware, so only text-kind
+            # string leaves pass through sanitize_rich_lite (decisions/00074).
+            source = build_site_source(project, paths.repo)
+            sanitized = sanitize_set_ops(source, set_ops)
+            # The draft-write gate (decisions/00095): normalize (silent, best-effort
+            # corrections) THEN structurally validate (raises DraftValidationError,
+            # caught by patch_draft below — the overlay must stay untouched on a
+            # violation, so this runs BEFORE apply_patch, never after).
+            normalized = normalize_set_ops(sanitized, paths)
+            check_structural(normalized)
+            ops = [normalized.pop(0) if isinstance(op, SetOp) else op for op in ops]
+        new_overlay = apply_patch(overlay, body.expectedRev, ops, by=by, now=now)
+        save_overlay(paths.draft_overlay, new_overlay)
+        return new_overlay.rev
 
 
 @router.patch("/draft")
@@ -516,9 +535,13 @@ async def patch_draft(body: DraftPatchIn, request: Request) -> dict[str, int]:
 
 
 def _discard_draft(paths: ProjectPaths) -> int:
-    overlay = _load_overlay_for(paths)
-    new_overlay = discard_all(overlay)
-    save_overlay(paths.draft_overlay, new_overlay)
+    # Same read-modify-write locking as _apply_draft_patch (decisions/00144)
+    # — a DELETE racing a concurrent PATCH/read on the same overlay.json is
+    # the same class of bug either direction.
+    with tree_lock():
+        overlay = _load_overlay_for(paths)
+        new_overlay = discard_all(overlay)
+        save_overlay(paths.draft_overlay, new_overlay)
     if paths.draft_media.is_dir():
         for staged in paths.draft_media.iterdir():
             if staged.is_file():
@@ -551,9 +574,11 @@ async def delete_draft(request: Request) -> dict[str, int]:
 
 
 def _merged_source(project: ProjectConfig, paths: ProjectPaths) -> SiteSource:
-    source = build_site_source(project, paths.repo)
-    overlay = _load_overlay_for(paths)
-    return merge_overlay(source, overlay)
+    # Tree+overlay READ under the process-wide lock (decisions/00144).
+    with tree_lock():
+        source = build_site_source(project, paths.repo)
+        overlay = _load_overlay_for(paths)
+        return merge_overlay(source, overlay)
 
 
 def _content_src_for(name: str, source: str) -> str:
@@ -826,35 +851,39 @@ async def start_publish(body: PublishIn, request: Request) -> JsonObject:
         # The overlay load is guarded the same way run_publish's own is
         # (publisher.py): `current_sha` shells out with the checkout as cwd,
         # which may not exist at all on a never-published/broken install.
-        base_sha = current_sha(paths.repo) if (paths.repo / ".git").exists() else ""
-        overlay = load_overlay(paths.draft_overlay, default_base_sha=base_sha)
-        if overlay.rev != body.expectedRev:
-            raise RevConflictError(body.expectedRev, overlay.rev)
+        # tree_lock (decisions/00144) covers the overlay read + the merge it
+        # feeds — same read-consistency rule as every other overlay access.
+        with tree_lock():
+            base_sha = current_sha(paths.repo) if (paths.repo / ".git").exists() else ""
+            overlay = load_overlay(paths.draft_overlay, default_base_sha=base_sha)
+            if overlay.rev != body.expectedRev:
+                raise RevConflictError(body.expectedRev, overlay.rev)
 
-        # decisions/00095: never even START the pipeline against a draft the
-        # owner's own review drawer would show as blocked — the exact same
-        # check GET publish/preview runs (validate_merged_for_publish), so
-        # "looked publishable" and "is publishable" can never drift. Before
-        # this, a bad draft reached _materialize_locked's own validate_site
-        # call deep inside the pipeline and surfaced as a raw PublishError/502
-        # (the incident's own symptom) instead of this calm 422. Skipped
-        # entirely with no checkout yet, same reasoning as the nothing-to-
-        # publish guard below — deliberately NOT a fresh ensure_checkout
-        # first: this must see exactly what the drawer showed the owner, not
-        # a newer upstream state that might disagree with it.
-        if (paths.repo / ".git").exists():
-            source = build_site_source(project, paths.repo)
-            merged = merge_overlay(source, overlay)
-            if not validate_merged_for_publish(merged, paths).ok:
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        "The site's content has a problem that needs fixing before it can publish."
-                    ),
-                )
+            # decisions/00095: never even START the pipeline against a draft the
+            # owner's own review drawer would show as blocked — the exact same
+            # check GET publish/preview runs (validate_merged_for_publish), so
+            # "looked publishable" and "is publishable" can never drift. Before
+            # this, a bad draft reached _materialize_locked's own validate_site
+            # call deep inside the pipeline and surfaced as a raw PublishError/502
+            # (the incident's own symptom) instead of this calm 422. Skipped
+            # entirely with no checkout yet, same reasoning as the nothing-to-
+            # publish guard below — deliberately NOT a fresh ensure_checkout
+            # first: this must see exactly what the drawer showed the owner, not
+            # a newer upstream state that might disagree with it.
+            if (paths.repo / ".git").exists():
+                source = build_site_source(project, paths.repo)
+                merged = merge_overlay(source, overlay)
+                if not validate_merged_for_publish(merged, paths).ok:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            "The site's content has a problem that needs fixing "
+                            "before it can publish."
+                        ),
+                    )
 
-        if overlay.ops or overlay.pages_added or overlay.pages_deleted:
-            return  # something staged — always publishable
+            if overlay.ops or overlay.pages_added or overlay.pages_deleted:
+                return  # something staged — always publishable
         staging = media_staging(paths)
         if staging["replaced"] or staging["deleted"]:
             return  # staged media changes are publishable too (decisions/00080)
@@ -1052,8 +1081,10 @@ async def get_publish_preview(request: Request) -> JsonObject:
     paths: ProjectPaths = request.app.state.paths
 
     def _build() -> JsonObject:
-        overlay = _load_overlay_for(paths)
-        return _build_publish_preview(project, paths, overlay)
+        # Tree+overlay READ under the process-wide lock (decisions/00144).
+        with tree_lock():
+            overlay = _load_overlay_for(paths)
+            return _build_publish_preview(project, paths, overlay)
 
     try:
         return await anyio.to_thread.run_sync(_build)
@@ -1207,26 +1238,29 @@ def _merged_pages(project: ProjectConfig, paths: ProjectPaths, overlay: Overlay)
 def _apply_page_duplicate(
     project: ProjectConfig, paths: ProjectPaths, body: PagesDuplicateIn, *, by: str, now: str
 ) -> int:
-    overlay = _load_overlay_for(paths)
-    if not _SLUG_RE.match(body.slug):
-        raise PageOpError(f"invalid page slug: {body.slug!r}")
-    pages = _merged_pages(project, paths, overlay)
-    if body.from_ not in pages:
-        raise BuildError(f"no such page: {body.from_}", location=body.from_)
-    if body.slug in pages:
-        raise PageOpError(f"page already exists: {body.slug}")
+    # Whole read-modify-write under the process-wide lock (decisions/00144) —
+    # same reasoning as _apply_draft_patch.
+    with tree_lock():
+        overlay = _load_overlay_for(paths)
+        if not _SLUG_RE.match(body.slug):
+            raise PageOpError(f"invalid page slug: {body.slug!r}")
+        pages = _merged_pages(project, paths, overlay)
+        if body.from_ not in pages:
+            raise BuildError(f"no such page: {body.from_}", location=body.from_)
+        if body.slug in pages:
+            raise PageOpError(f"page already exists: {body.slug}")
 
-    new_overlay = add_page(
-        overlay,
-        body.expectedRev,
-        from_slug=body.from_,
-        slug=body.slug,
-        nav_label=body.navLabel,
-        by=by,
-        now=now,
-    )
-    save_overlay(paths.draft_overlay, new_overlay)
-    return new_overlay.rev
+        new_overlay = add_page(
+            overlay,
+            body.expectedRev,
+            from_slug=body.from_,
+            slug=body.slug,
+            nav_label=body.navLabel,
+            by=by,
+            now=now,
+        )
+        save_overlay(paths.draft_overlay, new_overlay)
+        return new_overlay.rev
 
 
 @router.post("/pages/duplicate", response_model=None)
@@ -1253,14 +1287,16 @@ async def post_pages_duplicate(body: PagesDuplicateIn, request: Request) -> dict
 
 
 def _apply_page_delete(project: ProjectConfig, paths: ProjectPaths, body: PagesDeleteIn) -> int:
-    overlay = _load_overlay_for(paths)
-    pages = _merged_pages(project, paths, overlay)
-    if body.slug not in pages:
-        raise BuildError(f"no such page: {body.slug}", location=body.slug)
+    # Whole read-modify-write under the process-wide lock (decisions/00144).
+    with tree_lock():
+        overlay = _load_overlay_for(paths)
+        pages = _merged_pages(project, paths, overlay)
+        if body.slug not in pages:
+            raise BuildError(f"no such page: {body.slug}", location=body.slug)
 
-    new_overlay = delete_page(overlay, body.expectedRev, body.slug)
-    save_overlay(paths.draft_overlay, new_overlay)
-    return new_overlay.rev
+        new_overlay = delete_page(overlay, body.expectedRev, body.slug)
+        save_overlay(paths.draft_overlay, new_overlay)
+        return new_overlay.rev
 
 
 @router.post("/pages/delete", response_model=None)

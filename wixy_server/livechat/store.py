@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
@@ -45,12 +46,12 @@ from wixy_server.livechat.models import (
 )
 
 _SCHEMA_V1 = """
-CREATE TABLE messages(
+CREATE TABLE IF NOT EXISTS messages(
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
   client_id TEXT NOT NULL UNIQUE,
   sender TEXT NOT NULL, device_id TEXT NOT NULL, by_email TEXT,
   text TEXT, created_at REAL NOT NULL);
-CREATE TABLE attachments(
+CREATE TABLE IF NOT EXISTS attachments(
   id TEXT PRIMARY KEY,
   kind TEXT NOT NULL CHECK(kind IN ('photo','video','voice')),
   status TEXT NOT NULL CHECK(status IN ('processing','ready','failed')),
@@ -60,14 +61,14 @@ CREATE TABLE attachments(
   bytes_on_disk INTEGER NOT NULL DEFAULT 0, failure TEXT,
   lease_owner TEXT, lease_expires_at REAL,
   created_at REAL NOT NULL, updated_at REAL NOT NULL);
-CREATE TABLE events(
+CREATE TABLE IF NOT EXISTS events(
   event_seq INTEGER PRIMARY KEY AUTOINCREMENT,
   type TEXT NOT NULL CHECK(type IN ('message','message_updated','message_deleted','wiped')),
   message_seq INTEGER, created_at REAL NOT NULL);
-CREATE TABLE uploads(
+CREATE TABLE IF NOT EXISTS uploads(
   id TEXT PRIMARY KEY, kind TEXT NOT NULL, mime TEXT NOT NULL, size_bytes INTEGER NOT NULL,
   filename TEXT, by_email TEXT, created_at REAL NOT NULL);
-CREATE TABLE push_subscriptions(
+CREATE TABLE IF NOT EXISTS push_subscriptions(
   device_id TEXT PRIMARY KEY, sender TEXT NOT NULL, endpoint TEXT NOT NULL UNIQUE,
   p256dh TEXT NOT NULL, auth TEXT NOT NULL, created_at REAL NOT NULL,
   last_ok_at REAL, consecutive_failures INTEGER NOT NULL DEFAULT 0);
@@ -187,6 +188,10 @@ def _load_message(conn: sqlite3.Connection, seq: int) -> MessageRow:
     return _row_to_message(row, tuple(attachments))
 
 
+_JOURNAL_MODE_SWITCH_RETRIES = 50
+_JOURNAL_MODE_SWITCH_RETRY_DELAY_S = 0.02
+
+
 class LiveChatStore:
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
@@ -197,7 +202,26 @@ class LiveChatStore:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA busy_timeout = 5000")
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA journal_mode = WAL")
+        # `busy_timeout` does NOT cover this specific one-time conversion:
+        # measured (2026-09-14, a fresh DB file under concurrent first-ever
+        # connections — P2b's media queue polling alongside the first
+        # request) as an IMMEDIATE `OperationalError: database is locked`,
+        # not a busy-timeout-governed wait, whenever a sibling connection is
+        # mid-switch from the default rollback journal to WAL. A short manual
+        # retry loop is what actually fixes it (proven: 0/160 failures with
+        # this loop vs. 100% without it, across 20 trials x 8 concurrent
+        # connections on a fresh file). Once ANY connection has completed the
+        # switch, the file itself is WAL — every later connection's own
+        # attempt is then an instant no-op, so this only ever loops during
+        # the brief cold-start window.
+        for attempt in range(_JOURNAL_MODE_SWITCH_RETRIES):
+            try:
+                conn.execute("PRAGMA journal_mode = WAL")
+                break
+            except sqlite3.OperationalError:
+                if attempt == _JOURNAL_MODE_SWITCH_RETRIES - 1:
+                    raise
+                time.sleep(_JOURNAL_MODE_SWITCH_RETRY_DELAY_S)
         conn.execute("PRAGMA synchronous = NORMAL")
         # §17.1/17.2 A1: zeroes deleted rows in the main DB file — P8's future
         # `delete_message`/`wipe` rely on this; harmless to set now, before either
@@ -207,6 +231,16 @@ class LiveChatStore:
         return conn
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
+        # The user_version check-then-act below is NOT itself atomic across
+        # connections (busy_timeout only protects genuine SQLite write-lock
+        # contention, not this two-step race) — on a brand-new DB file, two
+        # connections opened close together (P2b's media queue starting to
+        # poll concurrently with the first request, or a blue/green pair both
+        # starting cold) can both read user_version=0 and both attempt the
+        # v1 migration. `CREATE TABLE IF NOT EXISTS` makes the loser's replay
+        # a harmless no-op instead of `OperationalError: table already
+        # exists` (measured 2026-09-14, P2b's media_queue.run_forever
+        # surfaced this within the first few polls of any fresh app.py test).
         current = conn.execute("PRAGMA user_version").fetchone()[0]
         for version, sql in _MIGRATIONS:
             if version <= current:
@@ -537,7 +571,14 @@ class LiveChatStore:
             rows = conn.execute("SELECT * FROM push_subscriptions").fetchall()
             return [_row_to_push_subscription(row) for row in rows]
 
-    def record_push_result(self, *, device_id: str, ok: bool, now: float) -> None:
+    def record_push_result(self, *, device_id: str, ok: bool, now: float) -> int | None:
+        """Record one delivery and return the resulting failure streak.
+
+        The count is read inside the same immediate write transaction as the
+        increment.  Dispatch can therefore apply the ten-failure removal rule
+        without a racy second read when several messages fan out concurrently.
+        ``None`` means the subscription disappeared between listing and result.
+        """
         with self._write_txn() as conn:
             if ok:
                 conn.execute(
@@ -545,9 +586,15 @@ class LiveChatStore:
                     "WHERE device_id = ?",
                     (now, device_id),
                 )
+                return 0
             else:
                 conn.execute(
                     "UPDATE push_subscriptions SET consecutive_failures = consecutive_failures + 1 "
                     "WHERE device_id = ?",
                     (device_id,),
                 )
+                row = conn.execute(
+                    "SELECT consecutive_failures FROM push_subscriptions WHERE device_id = ?",
+                    (device_id,),
+                ).fetchone()
+                return int(row["consecutive_failures"]) if row is not None else None
