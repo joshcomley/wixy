@@ -1,8 +1,9 @@
 # Server chat — Architect's technical brief (workspace #29)
 
-Status: **FROZEN v1.3** (Architect, 2026-09-14). v1.1 = operator's zero-PIN-state override
-(R4/§5.1); v1.2 = delete + wipe addendum (§17); **v1.3 = R2 errata: a single tap reveals
-(decision #974)**. Contracts in §5 are frozen — any change goes
+Status: **FROZEN v1.4** (Architect, 2026-09-14). v1.1 = operator's zero-PIN-state override
+(R4/§5.1); v1.2 = delete + wipe addendum (§17); v1.3 = R2 errata: a single tap reveals
+(decision #974); **v1.4 = cmd's real PIN contract in §5.1 (app key in the path, richer errors,
+retry-safety) + a new 409 `pin_changed` on `/unlock`**. Contracts in §5 are frozen — any change goes
 through the Architect (`ask-architect`). Rulings in §1 are binding.
 
 > ⚠️ **Editing this file:** ruff formats Python fenced blocks **inside markdown**, so
@@ -384,29 +385,63 @@ lives in P1's `livechat/tokens.py`. In dev-no-auth mode the email is `""`.
 - 200 `{"token": str, "expiresAt": float}`. The TTL is 12 h absolute.
 - 401 `{"error":"wrong_pin","attemptsLeft":int|null}` (`null` when cmd doesn't report it).
 - 429 `{"error":"locked_out","retryAfterS":int}` plus a `Retry-After` header.
-  `retryAfterS = ceil(locked_until - now)`. **The lockout policy is cmd's.**
+  **The lockout policy is cmd's.**
+- 409 `{"error":"pin_changed"}` (v1.4) — the PIN rotated mid-check. Nothing was spent; the
+  owner just tries again.
 - 503 `{"error":"not_configured"}` when the app key is unknown to cmd, or there's no
   verifier (standalone edition).
-- 503 `{"error":"pin_service_unavailable"}` when cmd is unreachable, times out, or returns a
-  5xx.
-- 422 when the body is malformed (the PIN must be 1–16 digits).
+- 503 `{"error":"pin_service_unavailable"}` when cmd is unreachable, times out, or faults.
+- 422 when the body is malformed. wixy validates **4–16 digits locally and does not call cmd
+  below that**, because cmd charges an attempt before checking and a stray keypress must
+  never burn one.
 
-**The wixy → cmd hop is provisional.** It follows the Orchestrator's strawman; the cmd-side
-initiative owns the real contract, and P1 trues up `pinclient.py` + `fake_cmd.py` when it
-lands.
+**v1.4 — the real cmd contract** (cmd workspace #875, PR #3068; supersedes the earlier
+strawman. Frozen from cmd's side pending only a possible security-review diff. Not merged,
+deployed or registered yet — delivery blocker #9 stays open.)
 
-`POST http://127.0.0.1:9320/api/pin/verify` with body
-`{"app_key": <settings.server_pin_app_key>, "pin": str, "subject": <CF email or "">}` returns
-`{"ok": bool, "locked_until": epoch|null, "attempts_left": int|null}`.
-- **Mapping:** `ok` → 200. `locked_until > now` → 429. Otherwise `ok: false` → 401. cmd 404
-  (unknown app key) → 503 `not_configured`. Transport error, 5xx or timeout → 503
-  `pin_service_unavailable`.
-- **Retries:** at most one retry, and only on `httpx.ConnectError` (the request provably
-  never left). Never retry after the body may have been sent.
+```
+POST http://127.0.0.1:9320/api/pins/<app_key>/verify     # plural, app key in the PATH
+Content-Type: application/json                            # REQUIRED (CSRF guard), else 415
+body: {"pin": "<4-16 digits>", "subject": "<CF email or omitted>"}
+```
+
+Loopback only, no auth on the hop — exactly like wixy's existing 9320/9321 calls (Inv 13).
+cmd refuses a request that arrived through Cloudflare with 403 `same_box_only`.
+
+**Mapping cmd → wixy** (every cmd response carries `Cache-Control: no-store`):
+
+| cmd | body | wixy `/unlock` |
+|---|---|---|
+| 200 | `{"ok":true,"app_key":…}` | 200 + token |
+| 401 | `wrong_pin` + `attempts_left`, `locked`, `lock_scope`, `retry_after_seconds` | 401 with `attemptsLeft`; **if `locked` is true**, 429 with `retryAfterS` instead |
+| 429 | `locked` + `lock_scope` + `retry_after_seconds` (PIN not evaluated, nothing spent) | 429 + `Retry-After` |
+| 404 | `unknown_app` | 503 `not_configured` |
+| 409 | `pin_changed` (not counted) | 409 `pin_changed` |
+| 400 | `invalid_app_key` | 503 `not_configured` (misconfiguration) |
+| 400 | `invalid_request` | 422 — and log an ERROR: wixy validates first, so this is a wixy bug |
+| 403 / 413 / 415 | same-box / too big / content-type | 503 `pin_service_unavailable` + ERROR log (a wixy-side bug or a misrouted deployment) |
+| 503 | `unavailable` (nothing spent) | 503 `pin_service_unavailable` |
+| connection error | — | 503 `pin_service_unavailable` |
+
+- **`lock_scope`** (`subject` vs `app`) is **not** surfaced to the browser: the copy is the
+  same either way, so the screen never teaches a bystander how the lockout works.
+- **Retry safety (implement exactly):** cmd charges an attempt **before** checking it, so
+  retry **only** on a connection error that provably never reached cmd
+  (`httpx.ConnectError`, `httpx.ConnectTimeout`) — at most once. **Never** retry a read
+  timeout or any response that didn't arrive. There's no idempotency key by design. A 400,
+  403, 404, 409, 413, 415, 429 or 503 spends nothing, so a corrected request is always safe.
 - **Timeout:** 5 s.
+- **cmd's default ladder for this app** (cmd's to tune, wixy never mirrors it): 5 wrong in a
+  row per subject → 60 s, doubling to a 24 h cap; a correct PIN clears that subject; 20 wrong
+  across everyone in 15 min trips an app-wide lock. Every lockout raises a warning on cmd's
+  `/health`.
 
-The wixy-side asks of the cmd contract are `subject`, for per-person lockout, and
-`attempts_left`. Both are optional for wixy; its mapping tolerates their absence.
+**PIN-pad copy** (P4; never reveals the PIN's length, and never says which scope locked):
+- 401 → "Wrong PIN — 3 attempts left" (drop the tail when `attemptsLeft` is null)
+- 429 → "Too many wrong tries. Try again in 2 minutes."
+- 409 → "Please try again."
+- 503 → "Server settings unavailable."
+- any unexpected status → "Couldn't unlock — try again."
 
 **Settings** (P1): `WIXY_SERVER_PIN_APP_KEY` → `server_pin_app_key`, default
 `"wixy-livechat"`. An identifier, not a secret.
@@ -777,9 +812,16 @@ Waves:
   - migrations; idempotent create; paging; cursor atomicity
   - token tamper, expiry and email binding (use the `test_auth_gate_integration` JWT pattern
     for a real email)
-  - unlock → fake-cmd mapping: 200/401/429 (`Retry-After`)/503 `not_configured`/503
-    `pin_service_unavailable`
-  - no retry after a read timeout; one retry on ConnectError
+  - the full §5.1 v1.4 mapping table, one case each: 200; 401 with `attempts_left`; 401 with
+    `locked: true` → **429**; 429; 404 → 503 `not_configured`; 409 → 409; 400
+    `invalid_app_key` → 503; 400 `invalid_request` → 422 + ERROR log; 403/413/415 → 503;
+    503 → 503
+  - a PIN shorter than 4 digits is rejected locally and **cmd is never called** (assert no
+    request reached the fake)
+  - the outgoing request shape: path `/api/pins/<app_key>/verify`, JSON content-type,
+    `subject` carries the CF email
+  - one retry on ConnectError/ConnectTimeout; **no** retry on a read timeout (assert the
+    fake saw exactly one request)
   - a grep-style test that the PIN never reaches a log record or a response body
   - `Settings` has no PIN field
   - every route 401 without a token; a query token is rejected
@@ -983,9 +1025,11 @@ a rotated mov):
 
 ## 12. Deploy and live verification (DM)
 
-1. **Before** the delivery merge: cmd's PIN service is live on hub, and the operator's PIN is
-   registered under the app key `wixy-livechat` through cmd's registration path (owned by
-   the cmd-side initiative). Nothing PIN-related is written to wixy's Storage or `.env`.
+1. **Before** the delivery merge: cmd's PIN service is merged, deployed on hub, and the PIN is
+   registered under the app key `wixy-livechat`. The cmd-side team does that registration
+   themselves under operator decision #973, so the PIN value never passes through wixy, this
+   workspace, or any chat again; the operator can also set or rotate it himself at
+   `https://cmd.cinnamons.uk/pins`. Nothing PIN-related is written to wixy's Storage or `.env`.
    Confirm it by unlocking against live cmd from a dev run
    (`pytest -o addopts="" -m live_cmd` gains one PIN round-trip test that reads the PIN from
    an env var at run time, never from a file).
@@ -1033,8 +1077,9 @@ and §5 contracts matched exactly. Also:
    Non-blocking.
 8. **Standalone edition:** the chat can't be unlocked on her future droplet until a
    standalone PIN verifier exists (there's no cmd there). OK for now?
-9. **Dependency:** the delivery merge is blocked on the cmd PIN service being live, with
-   the PIN registered.
+9. **Dependency (OPEN):** the delivery merge is blocked until cmd's PIN service PR (#3068,
+   cmd workspace #875) is merged, deployed on hub, **and** `wixy-livechat` is registered.
+   Its contract is frozen from cmd's side, so wixy builds against it now (§5.1 v1.4).
 
 ## 16. Out of scope (v1)
 
