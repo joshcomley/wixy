@@ -1,13 +1,17 @@
 # Server chat — Architect's technical brief (workspace #29)
 
-Status: **FROZEN v1** (Architect, 2026-09-14). Contracts in §5 are frozen — any change goes
+Status: **FROZEN v1.1** (Architect, 2026-09-14; v1.1 = operator's zero-PIN-state override, R4/§5.1). Contracts in §5 are frozen — any change goes
 through the Architect (`ask-architect`). Rulings in §1 are binding.
 
 > 🔴 **The wixy repo is PUBLIC** (`gh repo view` → `visibility: PUBLIC`, measured
 > 2026-09-14). The PIN value must NEVER appear in any repo file, commit message, PR body,
-> todo, decision, test, or doc. It lives only in `Storage\.env` as `WIXY_SERVER_PIN`.
-> Tests use a made-up test PIN. Do not name the chat participants in repo text either
-> ("admin users").
+> todo, decision, test, or doc.
+>
+> **Operator override (v1.1):** wixy holds **zero PIN state** — not in code, not in
+> `Storage\.env`, not in the DB. wixy verifies a submitted PIN by calling cmd's generic,
+> app-key-scoped PIN service on loopback, and cmd owns registration and lockout (see R4 and
+> §5.1). Tests use a made-up test PIN inside the fake cmd. Do not name the chat
+> participants in repo text either ("admin users").
 
 ---
 
@@ -56,16 +60,27 @@ sends and then locks, which is acceptable because it fails closed. Detector:
 - Is attached to `document` in the capture phase while the panel is mounted.
 - The panel root gets `touch-action: manipulation`.
 
-**R4 — The PIN is verified server-side.**
-- `POST /unlock` does a constant-time compare against `settings.server_pin`, with a
-  rate limit keyed per CF-Access email.
-- It returns an HMAC unlock token held **only in JS memory**. Never persist it to
-  localStorage, sessionStorage, cookies or URLs.
-- Every other server-chat route requires it as the `X-Wixy-Server-Token` header.
+**R4 — The PIN is verified by cmd's PIN service; wixy holds no PIN state (operator override).**
+- `POST /unlock` runs after the CF Access middleware. It forwards the submitted PIN,
+  together with the app key and the CF email as `subject`, to cmd's loopback PIN-verify
+  endpoint through a new single-purpose client, `livechat/pinclient.py` (§5.1).
+- cmd owns the registered PIN, the comparison, and the failed-attempt lockout. wixy keeps
+  **no** PIN value, hash, or attempt counter. It only maps cmd's answer to 200/401/429/503.
+- On success, wixy mints an HMAC unlock token held **only in JS memory**. Never persist it to
+  localStorage, sessionStorage, cookies or URLs. The token secret is session state, not
+  PIN state.
+- Every other server-chat route requires the token as the `X-Wixy-Server-Token` header.
 - `<img>`, `<video>` and `<audio>` use per-attachment HMAC-signed URLs (§5.6), because media
   elements can't send headers.
-- An unset PIN means the feature isn't configured: `/unlock` → 503 `not_configured`.
-- **No PIN literal in code.**
+- **Unknown app key or cmd unreachable** → 503 (`not_configured` / `pin_service_unavailable`).
+  The feature is closed, never open. The lock screen says "Server settings unavailable".
+- **Trust model:** identical to wixy's existing cmd calls (Inv 13, `cmdchat.py`) —
+  unauthenticated loopback, same box. The base URL is a hardcoded module constant
+  `http://127.0.0.1:9320`, overridable only through the client constructor (tests/E2E).
+  No new wixy↔cmd auth.
+- **Standalone edition** (her droplet, no cmd): there's no PIN verifier, so `/unlock` → 503
+  `not_configured`. The client is injected behind a `PinVerifier` protocol, like
+  `AIBackend`, so a standalone verifier can plug in later. Flagged (§15).
 
 **R5 — Transport = SSE over `fetch()`**, not `EventSource` and not WebSocket.
 - A `fetch` streaming reader can send the header token, and SSE through cloudflared + CF
@@ -158,8 +173,14 @@ media, and the hub mirror isn't installed. Flagged to the operator (§15).
   Secondary: an admin-session holder without the PIN poking at the API or devtools.
 - **Not in scope:** anyone who already has both CF Access and the PIN. Code secrecy is also
   out of scope, since the repo is public; the disguise only works against bystanders.
-- **Real gates:** CF Access (Inv 12, unchanged) → server-side PIN with rate limit → HMAC
-  token bound to the CF email → signed media URLs bound to the email and token expiry.
+- **Real gates:** CF Access (Inv 12, unchanged) → cmd PIN service with cmd-side lockout
+  (reachable only on loopback, so only after CF Access) → HMAC token bound to the CF email →
+  signed media URLs bound to the email and token expiry.
+- **PIN never leaves the path browser → wixy → cmd:**
+  - never logged or echoed back
+  - never stored by wixy
+  - the request body is not retried on an ambiguous failure (a double-sent attempt would
+    double-count toward the lockout)
 - **Hardening that must be tested:**
   - CSRF: mutations need the custom header, which forces a CORS preflight that the origin
     never grants.
@@ -182,7 +203,7 @@ admin-ui  /admin/server  ── server/panel.ts (lock state machine, decoy, PIN 
    │ fetch + X-Wixy-Server-Token          │ fetch-SSE /stream?after=cursor
    ▼                                       ▼
 wixy_server/routes_livechat*.py  (behind CF Access middleware, + require_server_token dep)
-   ├─ livechat/pin.py      PIN check + per-email rate limit (in-memory)
+   ├─ livechat/pinclient.py  PinVerifier protocol + CmdPinVerifier → cmd :9320 PIN service (no local PIN state)
    ├─ livechat/tokens.py   secret.key, unlock tokens, signed media URLs
    ├─ livechat/store.py    SQLite (WAL) — messages, events, attachments, uploads, push_subscriptions
    ├─ livechat/notifier.py in-process broadcast (anyio.Event swap)
@@ -322,14 +343,44 @@ lives in P1's `livechat/tokens.py`. In dev-no-auth mode the email is `""`.
 
 ### 5.1 Unlock
 
-`POST /unlock` with body `{"pin": "<digits>"}`:
+`POST /unlock` with body `{"pin": "<digits>"}` (the wixy side of the contract is frozen):
 - 200 `{"token": str, "expiresAt": float}`. The TTL is 12 h absolute.
-- 401 `{"error":"wrong_pin","attemptsLeft":int}`
-- 429 `{"error":"locked_out","retryAfterS":int}` plus a `Retry-After` header. Policy: 5
-  consecutive failures → a 60 s lockout, doubling on each lockout up to 900 s. Success
-  resets it. Keyed per email.
-- 503 `{"error":"not_configured"}` when `WIXY_SERVER_PIN` is unset.
-- 422 when the body is malformed.
+- 401 `{"error":"wrong_pin","attemptsLeft":int|null}` (`null` when cmd doesn't report it).
+- 429 `{"error":"locked_out","retryAfterS":int}` plus a `Retry-After` header.
+  `retryAfterS = ceil(locked_until - now)`. **The lockout policy is cmd's.**
+- 503 `{"error":"not_configured"}` when the app key is unknown to cmd, or there's no
+  verifier (standalone edition).
+- 503 `{"error":"pin_service_unavailable"}` when cmd is unreachable, times out, or returns a
+  5xx.
+- 422 when the body is malformed (the PIN must be 1–16 digits).
+
+**The wixy → cmd hop is provisional.** It follows the Orchestrator's strawman; the cmd-side
+initiative owns the real contract, and P1 trues up `pinclient.py` + `fake_cmd.py` when it
+lands.
+
+`POST http://127.0.0.1:9320/api/pin/verify` with body
+`{"app_key": <settings.server_pin_app_key>, "pin": str, "subject": <CF email or "">}` returns
+`{"ok": bool, "locked_until": epoch|null, "attempts_left": int|null}`.
+- **Mapping:** `ok` → 200. `locked_until > now` → 429. Otherwise `ok: false` → 401. cmd 404
+  (unknown app key) → 503 `not_configured`. Transport error, 5xx or timeout → 503
+  `pin_service_unavailable`.
+- **Retries:** at most one retry, and only on `httpx.ConnectError` (the request provably
+  never left). Never retry after the body may have been sent.
+- **Timeout:** 5 s.
+
+The wixy-side asks of the cmd contract are `subject`, for per-person lockout, and
+`attempts_left`. Both are optional for wixy; its mapping tolerates their absence.
+
+**Settings** (P1): `WIXY_SERVER_PIN_APP_KEY` → `server_pin_app_key`, default
+`"wixy-livechat"`. An identifier, not a secret.
+
+**The verifier is injectable:** `create_app(..., pin_verifier: PinVerifier | None = None)`.
+- Fleet → `CmdPinVerifier()`.
+- Standalone → `None` (503 `not_configured`).
+- Tests → a verifier pointed at `fake_cmd.py`, which gains `/api/pin/verify` with a
+  settable test PIN, lockout-state endpoints and an app-key registry.
+
+**Mirror contract changes in the fake first** (the ai-chat.md lesson).
 
 **Token format:** `b64url(json{"v":1,"e":email,"iat":int,"exp":int,"n":nonce16}) + "." +
 b64url(HMAC-SHA256(secret, b"unlock|" + payload_b64))`.
@@ -632,10 +683,11 @@ committed and drift-checked; its own `tsconfig.sw.json` with the WebWorker lib, 
   - It's served only by `/api/admin/server/*` with an unlock token or a signed media URL.
   - Tests: the backup allowlist excludes it; the public catch-all can't reach it; the report
     bundle lacks it.
-- **Inv 41 — The PIN is server-verified and never committed.**
-  - Constant-time compare, rate-limited.
-  - The PIN value lives only in `Storage/.env` (`WIXY_SERVER_PIN`), never in the repo (the
-    repo is public).
+- **Inv 41 — wixy holds zero PIN state.**
+  - The PIN is verified only by cmd's app-key-scoped PIN service over loopback (same trust
+    model as Inv 13). cmd owns registration and lockout.
+  - wixy never stores, logs, echoes or commits a PIN value (the repo is public).
+  - A verifier that's unreachable or missing → 503, never an open gate.
   - The unlock token lives only in JS memory.
   - Mutations need the header token. Media uses email+expiry-bound signed URLs. A token in a
     query string is rejected.
@@ -671,7 +723,7 @@ Waves:
 
   | Env var | Setting | Default | Validation |
   |---|---|---|---|
-  | `WIXY_SERVER_PIN` | `server_pin` | `""` | `^\d{4,8}$` or empty, else startup error |
+  | `WIXY_SERVER_PIN_APP_KEY` | `server_pin_app_key` | `"wixy-livechat"` | non-empty (**no PIN setting exists**) |
   | `WIXY_SERVER_MEDIA_QUOTA_MB` | `server_media_quota_bytes` | 20480 MB | — |
   | `WIXY_SERVER_MIN_FREE_MB` | `server_min_free_bytes` | 10240 MB | — |
   | `WIXY_SERVER_UPLOAD_CHUNK_BYTES` | `server_upload_chunk_bytes` | 8 MiB | clamp 64 KiB–16 MiB |
@@ -679,7 +731,8 @@ Waves:
   | `WIXY_FFPROBE` | `ffprobe_path` | `""` | — |
 
 - **Storage:** add all the `ProjectPaths` properties (§4).
-- **New modules:** `livechat/{__init__,models,store,tokens,pin,notifier}.py`.
+- **New modules:** `livechat/{__init__,models,store,tokens,pinclient,notifier}.py`.
+- **Fake cmd:** `wixy_server/tests/fake_cmd.py` gains the `/api/pin/verify` double (§5.1).
 - **Routes:** `routes_livechat.py` — unlock, messages GET/POST, stream, usage.
 - **System status:** the `server` field (§5.10).
 - **app.py wiring:** store, notifier, hooks list, `startedAt`.
@@ -687,8 +740,11 @@ Waves:
   - migrations; idempotent create; paging; cursor atomicity
   - token tamper, expiry and email binding (use the `test_auth_gate_integration` JWT pattern
     for a real email)
-  - rate limit with an injectable clock
-  - unlock 200/401/429/503
+  - unlock → fake-cmd mapping: 200/401/429 (`Retry-After`)/503 `not_configured`/503
+    `pin_service_unavailable`
+  - no retry after a read timeout; one retry on ConnectError
+  - a grep-style test that the PIN never reaches a log record or a response body
+  - `Settings` has no PIN field
   - every route 401 without a token; a query token is rejected
   - SSE: after-cursor, coalescing, `locked` on expiry, ping, a cross-"process" write picked up
     by the 2 s re-check (write via a second store instance)
@@ -817,11 +873,11 @@ Waves:
 
 - Invariants 40–45 + the Inv 12 amendment in `invariants.md`.
 - `runbook.md`: the ffmpeg/pillow-heif dependency, the new env vars, the quota, and the
-  `.env` PIN step — without the value.
+  the cmd PIN-service dependency (app key, registration via cmd, 503 when cmd is down).
 - `testing.md`: the new specs, ffmpeg in CI, `page.clock`.
 - `glossary.md`: decoy, unlock token, lock causes.
 - **Decisions** (numbers pre-allocated; re-check for collisions at merge):
-  - 00144 server-chat architecture (SSE-over-fetch, SQLite, token model, disguise, public-repo PIN rule)
+  - 00144 server-chat architecture (SSE-over-fetch, SQLite, token model, disguise, zero PIN state via the cmd PIN service)
   - 00145 media pipeline (single rendition, chunked uploads, ffmpeg hardening, quota)
   - 00146 push (payloadless VAPID, Android-only, generic text)
   - 00147 lock and gesture model (the R2/R3/R6/R7 readings)
@@ -835,9 +891,10 @@ Waves:
 
 ---
 
-## 11. E2E matrix (the fixture sets `WIXY_SERVER_PIN` to a made-up test PIN and `WIXY_SERVER_UPLOAD_CHUNK_BYTES=65536`)
+## 11. E2E matrix (the fixture's FakeCmdServer registers a made-up test PIN for the app key, and sets `WIXY_SERVER_UPLOAD_CHUNK_BYTES=65536`)
 
-Add `/test/server/reset-rate-limit` to `fixture_server.py`. Every spec runs a **desktop leg
+Add `/test/server/reset-pin-lockout` to `fixture_server.py`; it clears the fake cmd's lockout
+state. Every spec runs a **desktop leg
 and a mobile leg** (390×844, `isMobile`, `hasTouch`).
 
 **`server-lock.spec.ts` (P4)** — use `page.clock.install()` before `goto`:
@@ -887,9 +944,12 @@ a rotated mov):
 
 ## 12. Deploy and live verification (DM)
 
-1. **Before** the delivery merge: append `WIXY_SERVER_PIN=<operator's PIN>` to
-   `D:\Servers\Wixy\Storage\.env`. That's runtime config, not a repo file, and the value
-   never goes in git. The next slot boot reads it.
+1. **Before** the delivery merge: cmd's PIN service is live on hub, and the operator's PIN is
+   registered under the app key `wixy-livechat` through cmd's registration path (owned by
+   the cmd-side initiative). Nothing PIN-related is written to wixy's Storage or `.env`.
+   Confirm it by unlocking against live cmd from a dev run
+   (`pytest -o addopts="" -m live_cmd` gains one PIN round-trip test that reads the PIN from
+   an env var at run time, never from a file).
 2. After Slots deploys, confirm the pillow-heif import in the active slot's environment. The
    decoy's "Media processing" row reads **OK**, which proves that the Devfleet-launched
    process resolves ffmpeg/ffprobe; if not, set `WIXY_FFMPEG`/`WIXY_FFPROBE` in `.env` to the
@@ -907,7 +967,8 @@ a rotated mov):
 
 These are the §1 rulings R4–R13, the §2 hardening list, invariants 40–45 with tests present,
 and §5 contracts matched exactly. Also:
-- No PIN value in the git history of the delivery PR.
+- No PIN value in the git history of the delivery PR, and no PIN state anywhere in wixy.
+- The unlock path is closed (503) whenever cmd is down.
 - No token in any URL or log.
 - The 2 s re-check covers the two-process case.
 - Leases prevent double processing.
@@ -931,6 +992,10 @@ and §5 contracts matched exactly. Also:
    setting, with no design change.
 7. **Not requested, not built:** deleting messages or wiping the chat. Does he want it?
    Non-blocking.
+8. **Standalone edition:** the chat can't be unlocked on her future droplet until a
+   standalone PIN verifier exists (there's no cmd there). OK for now?
+9. **Dependency:** the delivery merge is blocked on the cmd PIN service being live, with
+   the PIN registered.
 
 ## 16. Out of scope (v1)
 
