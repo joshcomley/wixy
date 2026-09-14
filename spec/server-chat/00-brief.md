@@ -5,6 +5,13 @@ Status: **FROZEN v1.3** (Architect, 2026-09-14). v1.1 = operator's zero-PIN-stat
 (decision #974)**. Contracts in §5 are frozen — any change goes
 through the Architect (`ask-architect`). Rulings in §1 are binding.
 
+> ⚠️ **Editing this file:** ruff formats Python fenced blocks **inside markdown**, so
+> `ruff format --check .` (CI) fails on an unformatted ```python fence here — measured
+> 2026-09-14, when this file's store-API stub broke CI branch-wide until PR #221 fixed it.
+> Run `ruff format` before committing any edit to this file. Reformatting a fence is
+> mechanical and needs no Architect ruling; changing what a signature or comment *says*
+> does.
+
 > 🔴 **The wixy repo is PUBLIC** (`gh repo view` → `visibility: PUBLIC`, measured
 > 2026-09-14). The PIN value must NEVER appear in any repo file, commit message, PR body,
 > todo, decision, test, or doc.
