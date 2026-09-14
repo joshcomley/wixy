@@ -12,9 +12,13 @@ Numbered guarantees: [invariants.md](invariants.md) 40–45.
 - The nav entry says **"Server"**, never "Chat" — it shows real server status (uptime,
   engine version, disk free, media-processing health) with **no visible entry point** into
   the chat.
-- A rapid multi-tap (≥2 taps, ≤400ms apart) anywhere on the decoy reveals an "Open server
-  settings" button, which re-hides after 10s idle. Tapping it opens a PIN pad titled
-  "Unlock server".
+- **R2 v1.3 (operator decision #974, overriding the brief's original R2 text):** a SINGLE
+  tap anywhere inside the Server panel element (not the nav/topbar around it) reveals an
+  "Open server settings" button, which re-hides after 10s idle. Tapping the affordance opens
+  a PIN pad titled "Unlock server" — a tap that lands within 400ms of the reveal itself is
+  ignored, so one accidental rapid double-tap can't reveal-and-open in the same motion.
+  Multi-tap has **no meaning on the decoy**. A multi-tap (≥2 taps, ≤400ms apart) still locks
+  instantly once inside the unlocked chat view — that reading (R3) is unchanged; see §9.
 - Once unlocked: 10s of no activity fades back to the decoy; a panic button, a multi-tap
   inside the chat, `Escape`, tab-hidden, or routing away all lock instantly. A reload never
   restores the unlocked state (Inv 42).
@@ -187,11 +191,87 @@ the `server` field on `GET /api/admin/system/status` (§5.10 — `{"startedAt":e
 "mediaProcessing":"ok"|"unavailable"}`; `mediaProcessing` is a placeholder `"ok"` until P2
 sets `app.state.livechat_media_available` for real at startup).
 
+**P4** (frontend lock/disguise/PIN-pad core — this doc's §9) is also built: the router/nav
+entry, the lock state machine, the decoy, the PIN pad, and the orchestrating panel that wires
+both gesture detectors, R7's idle/suspension timers, and every R6 lock trigger.
+
 Not yet built (later parcels, see the brief's §10 wave plan):
-- **P2a/P2b** — media processing (ffmpeg/Pillow pipeline), chunked uploads, the media
-  queue, `GET media/*`.
-- **P3a/P3b** — Web Push (VAPID keys, the service worker, the dispatch hook).
-- **P4/P5/P6** — the frontend: lock state machine, the decoy, the PIN pad, the chat view,
-  media rendering, the recorder/uploader.
+- **P2b** — chunked uploads, the media queue, `GET media/*` (P2a's pure processing pipeline
+  IS built).
+- **P3b** — the push routes, the dispatch hook, the settings-sheet toggle UI (P3a's VAPID
+  keys + service worker skeleton IS built).
+- **P5b** — the real chat view/thread (`server/chatView.ts`) that plugs into P4's
+  `CreateServerChatView` factory seam, replacing its stub (P5a's shared-chat-extraction
+  refactor IS built and merged).
+- **P6b** — wiring the recorder/uploader/media-render modules into the real chat view (P6a's
+  frontend media modules themselves ARE built).
 - **P8** — hard delete-a-message / wipe-the-chat (spec §17.3/§17.4), on top of the A1
   schema/stream headroom P1 already laid down (§6 above).
+
+## 9. Frontend: the lock/gesture state machine (P4, `admin-ui/src/server/`)
+
+The router/nav/shell wiring is ordinary (`router.ts` gets a `server` route with no
+parameters; `shell.ts`'s `NAV_ROUTES` gets it last, and an injectable `mountServerPanel` seam
+mirrors the AI chat panel's own `mountChatPanel` pattern — real DOM listeners would otherwise
+leak across shell unit tests that never tear the panel down).
+
+**`lockModel.ts`** is a PURE reducer, `(state, event, now) => {state, effects[]}` — every
+decision about what state comes next lives here, with no DOM/timer/network access, so it has
+100% branch coverage in vitest. States: `decoy`, `revealed`, `pin` (with an optional
+`wrong`/`lockedOut`/`unavailable` error), `verifying`, `chat`, `fading`. One deliberate
+design choice: R6's eight lock triggers (`idle`, `panic`, `multiTap`, `escape`, `hidden`,
+`routeAway`, `unauthorized`, `expired`) are ALL modelled as one `{type:"lock", cause}` event
+rather than eight bespoke ones — `idle` is the sole exception, going through `fading` first
+only when raised from `chat` (every other state locks straight to `decoy`). There is
+deliberately no "needs a display name" sub-state tracked here: §6's first-unlock name prompt
+is the mounted chat view's own internal concern (R8 — it reads `localStorage["wx-srv-name"]`
+itself), since the frozen `ServerChatView` interface (`types.ts`) has no hook to report one
+back.
+
+**`gestures.ts`** — TWO independent Pointer-Events-only detectors, both excluding
+`textarea`/`input`/`[contenteditable]`/`audio`/`video` targets (so text entry and native
+media seeking never trigger either one) and both using `performance.now()` (so Playwright's
+`page.clock` controls them deterministically in e2e):
+- `createTapDetector`/`attachTapListener` (R2 v1.3) — fires on every single qualifying tap,
+  no counting. `panel.ts` attaches this to the panel's OWN root element (not `document`) —
+  "not nav/topbar" is free that way, since an event outside the root's subtree never reaches
+  a listener attached to it.
+- `createMultiTapDetector`/`attachMultiTapListener` (R3, unchanged) — two taps within
+  `MULTI_TAP_INTERVAL_MS` (400ms) count as one multi-tap. Attached to `document` in the
+  CAPTURE phase for the panel's whole mounted lifetime, so a tap inside a
+  `stopPropagation()`'d descendant is still seen; only the reducer's `chat`/`fading` states
+  give the resulting event any meaning.
+
+**`panel.ts`** owns everything `lockModel.ts` deliberately doesn't: the idle timer
+(`IDLE_LOCK_MS` = 10s) and fade timer (`FADE_MS` = 800ms), the token-expiry timer, R7's
+suspension bookkeeping (`LockHooks.suspend(reason)` — reference-counted per call, the idle
+timer stays paused while ANY suspension is active and restarts with a FRESH 10s the moment
+the last one releases; `filePicker` alone carries a `PICKER_SUSPEND_MAX_MS` = 5-minute safety
+auto-release), the R7 activity listener set (`pointerdown`/`pointermove`/`touchstart`/
+`touchmove`/`wheel`/`keydown`/`input` — deliberately NOT `scroll`, so a programmatic
+scroll-to-bottom on an incoming message can never keep the chat visible), a dedicated
+`document` `keydown` listener for `Escape`, and a `visibilitychange` listener whose `hidden`
+lock is skipped only while `filePicker` or `micPermission` is suspended (R6's one named
+exception — `recording`/`mediaPlaying` do NOT excuse it).
+
+Locking always runs `ServerChatView.detach()` then removes `element` from the document — the
+view instance itself is created once (on the first successful unlock) and kept alive across
+every subsequent lock/unlock cycle within one page visit, only ever `dispose()`d when the
+panel itself is torn down (routing away from `/admin/server`, which `panel.ts` treats as one
+more R6 lock cause so cleanup runs through the same path). This is the mechanism draft text
+and in-flight uploads survive a lock on (R6) — `attach(session)` is called again with a
+FRESH `ServerSession` on each unlock, never a stale one.
+
+**Until P5b lands**, `panel.ts` calls its own `createStubServerChatView` — a placeholder
+honouring the frozen `ServerChatView` contract closely enough (a `.wx-srv-thread` root
+matching the real view's eventual class, a draft-preserving textarea, a panic button calling
+`hooks.lockNow("panic")`) that this parcel's own tests — including `e2e/tests/
+server-lock.spec.ts` — exercise real detach/panic/draft-survival behaviour today, and stay
+correct once the real factory replaces it via `ServerPanelDeps.createServerChatView`.
+
+Test coverage: `lockModel.ts` and `gestures.ts` both at 100% branch coverage
+(`admin-ui/tests/server/{lockModel,gestures}.test.ts`); `panel.test.ts` covers the full
+unlock flow, every R6 trigger (asserting `.wx-srv-thread` is actually ABSENT from the DOM,
+not just hidden), R7's suspension timer math on a fake clock, and instance survival across
+lock/unlock. `e2e/tests/server-lock.spec.ts` drives the same matrix in a real browser with
+`page.clock`, desktop and mobile legs both.

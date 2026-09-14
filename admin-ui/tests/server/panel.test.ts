@@ -564,4 +564,46 @@ describe("mountServerPanel", () => {
     expect(chatFactory.factoryCalls).toBe(0);
     expect(chatFactory.disposeCalls).toBe(0);
   });
+
+  // -- The DEFAULT stub (no createServerChatView override) — exercises the
+  // real production stand-in `server-lock.spec.ts` (e2e) also drives, until
+  // P5b's real chatView.ts replaces it at DM integration. --------------------
+
+  it("the default stub's panic button locks instantly via hooks.lockNow('panic')", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ token: "tok", expiresAt: expiresIn(3600) }));
+    const panel = mount();
+    await openPinPad(panel.element);
+    await enterAndSubmitPin(panel.element, "1234");
+    expect(panel.element.querySelector(".wx-srv-thread")).not.toBeNull();
+
+    (panel.element.querySelector(".wx-srv-panic") as HTMLButtonElement).click();
+
+    expect(panel.element.querySelector(".wx-srv-thread")).toBeNull();
+    panel.teardown();
+  });
+
+  it("the default stub's instance (and its draft textarea) survives a lock/unlock cycle, not recreated", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ token: "tok-1", expiresAt: expiresIn(3600) }));
+    const panel = mount();
+    await openPinPad(panel.element);
+    await enterAndSubmitPin(panel.element, "1234");
+
+    const draft = panel.element.querySelector<HTMLTextAreaElement>(".wx-srv-draft-stub");
+    if (draft === null) throw new Error("draft textarea not found");
+    draft.value = "unsent thought";
+    const instanceIdBefore = panel.element.querySelector(".wx-srv-thread")?.getAttribute("data-stub-instance");
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(panel.element.querySelector(".wx-srv-thread")).toBeNull(); // detached, not just hidden
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({ token: "tok-2", expiresAt: expiresIn(3600) }));
+    await openPinPad(panel.element);
+    await enterAndSubmitPin(panel.element, "1234");
+
+    const instanceIdAfter = panel.element.querySelector(".wx-srv-thread")?.getAttribute("data-stub-instance");
+    expect(instanceIdAfter).toBe(instanceIdBefore); // the SAME instance — never recreated
+    const draftAfter = panel.element.querySelector<HTMLTextAreaElement>(".wx-srv-draft-stub");
+    expect(draftAfter?.value).toBe("unsent thought"); // the draft survived in memory
+    panel.teardown();
+  });
 });

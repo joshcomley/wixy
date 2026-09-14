@@ -86,11 +86,23 @@
 
 /* -- Overlays (pin pad / chat) cover the decoy entirely --------------------- */
 
+/* `[hidden]`'s UA-stylesheet `display:none` and a class selector's `display`
+   have EQUAL specificity — the later rule in the cascade wins regardless of
+   the attribute, so an unconditional `display:flex` here would silently
+   defeat `.hidden = true` (found live: a real Playwright click on the
+   decoy kept hitting the "hidden" chat-host overlay instead — jsdom's own
+   `el.hidden` property check can't catch this, since it never lays anything
+   out). `:not([hidden])` keeps the flex layout scoped to when it's actually
+   shown. */
 .wx-srv-pinpad-host,
 .wx-srv-chat-host {
   position: absolute;
   inset: 0;
   background: var(--wx-canvas);
+}
+
+.wx-srv-pinpad-host:not([hidden]),
+.wx-srv-chat-host:not([hidden]) {
   display: flex;
   flex-direction: column;
 }
@@ -101,9 +113,42 @@
 }
 
 .wx-srv-chat-stub {
-  margin: auto;
+  margin: 0;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
   color: var(--wx-muted);
   font-size: 0.875rem;
+}
+
+.wx-srv-chat-stub p {
+  margin: auto 0 0;
+}
+
+.wx-srv-draft-stub {
+  width: 100%;
+  min-height: 64px;
+  padding: 8px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font: inherit;
+  resize: vertical;
+}
+
+.wx-srv-panic {
+  align-self: flex-end;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-danger-text);
+  font-size: 1rem;
+  cursor: pointer;
 }
 
 /* -- PIN pad ----------------------------------------------------------------- */

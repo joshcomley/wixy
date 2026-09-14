@@ -56,7 +56,19 @@ const ACTIVITY_EVENT_TYPES: readonly (keyof DocumentEventMap)[] = [
  * stub view below never dereferences it. */
 const STUB_API: ServerApi = {};
 
-function stubServerChatView(): ServerChatView {
+let stubInstanceCounter = 0;
+
+/** Stands in for P5b's real `server/chatView.ts` until it lands — but does
+ * more than the bare minimum: a panic button and a draft-preserving
+ * textarea, matching the REAL view's eventual shape closely enough (§6's
+ * "header: ... a panic ✕ (aria-label='Close')"; draft text living in the
+ * view's own DOM) that this parcel's own e2e spec (`server-lock.spec.ts`)
+ * can exercise panic and draft-survival against real DOM/browser behaviour
+ * today, not just assert them in principle. `data-stub-instance` is a
+ * test-only marker (unique per factory call) proving the SAME instance
+ * persists across a lock/unlock cycle rather than being recreated — the
+ * actual mechanism draft-survival (R6) depends on. */
+const createStubServerChatView: CreateServerChatView = (deps) => {
   const element = document.createElement("div");
   // `.wx-srv-thread` matches the class P5's real thread view will use
   // (§11's e2e matrix asserts its absence from the DOM after a lock) — the
@@ -64,18 +76,36 @@ function stubServerChatView(): ServerChatView {
   // meaningfully testable today, and stays correct once the real view
   // replaces this factory.
   element.className = "wx-srv-chat-stub wx-srv-thread";
-  element.textContent = "Server chat is coming soon.";
+  element.dataset["stubInstance"] = String(++stubInstanceCounter);
+
+  const notice = document.createElement("p");
+  notice.textContent = "Server chat is coming soon.";
+  element.appendChild(notice);
+
+  const draft = document.createElement("textarea");
+  draft.className = "wx-srv-draft-stub";
+  draft.placeholder = "Draft…";
+  element.appendChild(draft);
+
+  const panicButton = document.createElement("button");
+  panicButton.type = "button";
+  panicButton.className = "wx-srv-panic";
+  panicButton.setAttribute("aria-label", "Close");
+  panicButton.textContent = "✕";
+  panicButton.addEventListener("click", () => deps.hooks.lockNow("panic"));
+  element.appendChild(panicButton);
+
   return {
     element,
     attach(): void {},
     detach(): void {},
     dispose(): void {},
   };
-}
+};
 
 export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
   const win = deps.win ?? window;
-  const createChatView = deps.createServerChatView ?? stubServerChatView;
+  const createChatView = deps.createServerChatView ?? createStubServerChatView;
 
   const root = document.createElement("div");
   root.className = "wx-srv-panel";
