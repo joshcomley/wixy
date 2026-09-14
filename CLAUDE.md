@@ -123,7 +123,7 @@ than duplicates. `spec/` is the decided intent; `docs/ai/` is the code reality +
 | [glossary.md](docs/ai/glossary.md) | Domain terms + every status machine (publish/chat/checkout) |
 | [testing.md](docs/ai/testing.md) | Test matrix, fixtures, how to run (bare `pytest` — the `-n 4` cap is load-bearing) |
 | [runbook.md](docs/ai/runbook.md) | Deploy (= merge `main`), rollback, bounce, creds, CI, health |
-| [builder.md](docs/ai/builder.md) · [serving-and-overlay.md](docs/ai/serving-and-overlay.md) · [publish-pipeline.md](docs/ai/publish-pipeline.md) · [media.md](docs/ai/media.md) · [editor-and-admin-ui.md](docs/ai/editor-and-admin-ui.md) · [ai-chat.md](docs/ai/ai-chat.md) | Per-subsystem deep dives |
+| [builder.md](docs/ai/builder.md) · [serving-and-overlay.md](docs/ai/serving-and-overlay.md) · [publish-pipeline.md](docs/ai/publish-pipeline.md) · [media.md](docs/ai/media.md) · [editor-and-admin-ui.md](docs/ai/editor-and-admin-ui.md) · [ai-chat.md](docs/ai/ai-chat.md) · [livechat.md](docs/ai/livechat.md) | Per-subsystem deep dives |
 
 When you change a public surface (routes, schema, env vars, an invariant), update the matching
 `docs/ai/` file **in the same PR** — this is the doc-maintenance contract below.

@@ -1,7 +1,17 @@
 # Server chat — Architect's technical brief (workspace #29)
 
-Status: **FROZEN v1.1** (Architect, 2026-09-14; v1.1 = operator's zero-PIN-state override, R4/§5.1). Contracts in §5 are frozen — any change goes
+Status: **FROZEN v1.4** (Architect, 2026-09-14). v1.1 = operator's zero-PIN-state override
+(R4/§5.1); v1.2 = delete + wipe addendum (§17); v1.3 = R2 errata: a single tap reveals
+(decision #974); **v1.4 = cmd's real PIN contract in §5.1 (app key in the path, richer errors,
+retry-safety) + a new 409 `pin_changed` on `/unlock`**. Contracts in §5 are frozen — any change goes
 through the Architect (`ask-architect`). Rulings in §1 are binding.
+
+> ⚠️ **Editing this file:** ruff formats Python fenced blocks **inside markdown**, so
+> `ruff format --check .` (CI) fails on an unformatted ```python fence here — measured
+> 2026-09-14, when this file's store-API stub broke CI branch-wide until PR #221 fixed it.
+> Run `ruff format` before committing any edit to this file. Reformatting a fence is
+> mechanical and needs no Architect ruling; changing what a signature or comment *says*
+> does.
 
 > 🔴 **The wixy repo is PUBLIC** (`gh repo view` → `visibility: PUBLIC`, measured
 > 2026-09-14). The PIN value must NEVER appear in any repo file, commit message, PR body,
@@ -18,8 +28,9 @@ through the Architect (`ask-architect`). Rulings in §1 are binding.
 ## 0. Summary
 
 A hidden human-to-human chat for admin users, inside the already CF-Access-gated `/admin`.
-It is disguised as a **"Server"** nav tab showing real server status. A rapid multi-tap
-reveals **"Open server settings"**, which opens a PIN pad titled **"Unlock server"**. After
+It is disguised as a **"Server"** nav tab showing real server status. A single tap on
+that screen reveals **"Open server settings"**, which opens a PIN pad titled
+**"Unlock server"**. After
 unlock it's a live chat with text, photos, videos, and voice notes, plus opt-in Android push.
 There are three ways back to locked (10 s idle fade, panic button, multi-tap in chat), plus a
 few fail-closed extras (§1 R6).
@@ -41,15 +52,20 @@ few fail-closed extras (§1 R6).
 visitor-facing. It has its own storage and routes, separate from `chats.py`, `cmdchat.py`
 and `draft/media/`.
 
-**R2 — Gesture model** (unifies mission messages #1 and #3; the contrast "and when you're in
-the chat view" in #3 means the first sentence describes the locked screen):
+**R2 — Gesture model** (v1.3 ERRATA — operator decision #974: "Single tap. Double tap is
+anywhere on the chat view to lock it again." This supersedes the v1–v1.2 multi-tap reveal):
 - Locked screen = the **decoy** (real server status) with **no** visible entry point.
-- Rapid multi-tap (≥2 taps, ≤400 ms apart) anywhere → reveals an **"Open server settings"**
-  button. It re-hides after 10 s idle.
+- A **single tap** anywhere inside the Server panel (the `.wx-main` panel element, **not**
+  the nav or topbar — so tapping another tab never flashes the affordance) → reveals an
+  **"Open server settings"** button. It re-hides after 10 s idle.
 - Tap it → PIN pad titled **"Unlock server"**.
-- The idle-fade path ends on this same decoy. Every lock cause lands in one locked state; the
-  only difference is that idle animates a fade and the others are instant.
-- Flagged to the Orchestrator for optional operator confirmation. Build on this reading.
+  - **Debounce:** the affordance ignores any tap within 400 ms of its own reveal, so the
+    second tap of an accidental double tap can't open the PIN pad.
+- Multi-tap has **no** special meaning on the decoy. Its first tap reveals, and the rest
+  are absorbed by the debounce. Multi-tap only matters inside the chat view (R3).
+- The idle-fade path ends on this same decoy, so "tap again → unlock server" (mission #1)
+  holds on every path. Every lock cause lands in one locked state; the only difference is
+  that idle animates a fade and the others are instant.
 
 **R3 — Multi-tap inside the chat view locks.** It counts every pointerdown except those whose
 target is inside `textarea`, `input`, `[contenteditable]`, `audio` or `video` (native media
@@ -279,24 +295,46 @@ methods are sync and callers wrap them in `anyio.to_thread.run_sync`):
 
 ```python
 class LiveChatStore:
-    def __init__(self, db_path: Path) -> None: ...           # opens lazily; migrate() on first use
+    def __init__(self, db_path: Path) -> None: ...  # opens lazily; migrate() on first use
     # messages / events
-    def create_message(self, *, client_id: str, sender: str, device_id: str, by_email: str | None,
-                       text: str | None, attachment_ids: Sequence[str], now: float
-                       ) -> tuple[MessageRow, bool]: ...     # (row, created); idempotent on client_id;
-                                                             # validates attachments unreferenced + status in
-                                                             # (processing, ready); one 'message' event, same txn
-    def list_messages(self, *, before: int | None, limit: int) -> tuple[list[MessageRow], bool, int]: ...
-                                                             # ascending rows, has_more, cursor=max event_seq,
-                                                             # all in ONE read txn
+    def create_message(
+        self,
+        *,
+        client_id: str,
+        sender: str,
+        device_id: str,
+        by_email: str | None,
+        text: str | None,
+        attachment_ids: Sequence[str],
+        now: float,
+    ) -> tuple[MessageRow, bool]:
+        ...  # (row, created); idempotent on client_id;
+        # validates attachments unreferenced + status in
+        # (processing, ready); one 'message' event, same txn
+
+    def list_messages(
+        self, *, before: int | None, limit: int
+    ) -> tuple[list[MessageRow], bool, int]:
+        ...
+        # ascending rows, has_more, cursor=max event_seq,
+        # all in ONE read txn
+
     def get_messages(self, seqs: Sequence[int]) -> list[MessageRow]: ...
     def events_after(self, cursor: int, limit: int = 200) -> list[EventRow]: ...
     # attachments (P2)
-    def create_attachment(self, *, att_id: str, kind: AttachmentKind, now: float) -> AttachmentRow: ...
-    def claim_processing(self, *, owner: str, now: float, lease_s: float) -> AttachmentRow | None: ...
+    def create_attachment(
+        self, *, att_id: str, kind: AttachmentKind, now: float
+    ) -> AttachmentRow: ...
+    def claim_processing(
+        self, *, owner: str, now: float, lease_s: float
+    ) -> AttachmentRow | None: ...
     def renew_lease(self, *, att_id: str, owner: str, now: float, lease_s: float) -> bool: ...
-    def finish_attachment(self, *, att_id: str, owner: str, result: AttachmentResult, now: float) -> None: ...
-                                                             # emits 'message_updated' iff message_seq set
+    def finish_attachment(
+        self, *, att_id: str, owner: str, result: AttachmentResult, now: float
+    ) -> None:
+        ...
+        # emits 'message_updated' iff message_seq set
+
     def get_attachment(self, att_id: str) -> AttachmentRow | None: ...
     def media_bytes_used(self) -> int: ...
     def orphan_attachment_ids(self, *, older_than: float) -> list[str]: ...
@@ -347,29 +385,63 @@ lives in P1's `livechat/tokens.py`. In dev-no-auth mode the email is `""`.
 - 200 `{"token": str, "expiresAt": float}`. The TTL is 12 h absolute.
 - 401 `{"error":"wrong_pin","attemptsLeft":int|null}` (`null` when cmd doesn't report it).
 - 429 `{"error":"locked_out","retryAfterS":int}` plus a `Retry-After` header.
-  `retryAfterS = ceil(locked_until - now)`. **The lockout policy is cmd's.**
+  **The lockout policy is cmd's.**
+- 409 `{"error":"pin_changed"}` (v1.4) — the PIN rotated mid-check. Nothing was spent; the
+  owner just tries again.
 - 503 `{"error":"not_configured"}` when the app key is unknown to cmd, or there's no
   verifier (standalone edition).
-- 503 `{"error":"pin_service_unavailable"}` when cmd is unreachable, times out, or returns a
-  5xx.
-- 422 when the body is malformed (the PIN must be 1–16 digits).
+- 503 `{"error":"pin_service_unavailable"}` when cmd is unreachable, times out, or faults.
+- 422 when the body is malformed. wixy validates **4–16 digits locally and does not call cmd
+  below that**, because cmd charges an attempt before checking and a stray keypress must
+  never burn one.
 
-**The wixy → cmd hop is provisional.** It follows the Orchestrator's strawman; the cmd-side
-initiative owns the real contract, and P1 trues up `pinclient.py` + `fake_cmd.py` when it
-lands.
+**v1.4 — the real cmd contract** (cmd workspace #875, PR #3068; supersedes the earlier
+strawman. Frozen from cmd's side pending only a possible security-review diff. Not merged,
+deployed or registered yet — delivery blocker #9 stays open.)
 
-`POST http://127.0.0.1:9320/api/pin/verify` with body
-`{"app_key": <settings.server_pin_app_key>, "pin": str, "subject": <CF email or "">}` returns
-`{"ok": bool, "locked_until": epoch|null, "attempts_left": int|null}`.
-- **Mapping:** `ok` → 200. `locked_until > now` → 429. Otherwise `ok: false` → 401. cmd 404
-  (unknown app key) → 503 `not_configured`. Transport error, 5xx or timeout → 503
-  `pin_service_unavailable`.
-- **Retries:** at most one retry, and only on `httpx.ConnectError` (the request provably
-  never left). Never retry after the body may have been sent.
+```
+POST http://127.0.0.1:9320/api/pins/<app_key>/verify     # plural, app key in the PATH
+Content-Type: application/json                            # REQUIRED (CSRF guard), else 415
+body: {"pin": "<4-16 digits>", "subject": "<CF email or omitted>"}
+```
+
+Loopback only, no auth on the hop — exactly like wixy's existing 9320/9321 calls (Inv 13).
+cmd refuses a request that arrived through Cloudflare with 403 `same_box_only`.
+
+**Mapping cmd → wixy** (every cmd response carries `Cache-Control: no-store`):
+
+| cmd | body | wixy `/unlock` |
+|---|---|---|
+| 200 | `{"ok":true,"app_key":…}` | 200 + token |
+| 401 | `wrong_pin` + `attempts_left`, `locked`, `lock_scope`, `retry_after_seconds` | 401 with `attemptsLeft`; **if `locked` is true**, 429 with `retryAfterS` instead |
+| 429 | `locked` + `lock_scope` + `retry_after_seconds` (PIN not evaluated, nothing spent) | 429 + `Retry-After` |
+| 404 | `unknown_app` | 503 `not_configured` |
+| 409 | `pin_changed` (not counted) | 409 `pin_changed` |
+| 400 | `invalid_app_key` | 503 `not_configured` (misconfiguration) |
+| 400 | `invalid_request` | 422 — and log an ERROR: wixy validates first, so this is a wixy bug |
+| 403 / 413 / 415 | same-box / too big / content-type | 503 `pin_service_unavailable` + ERROR log (a wixy-side bug or a misrouted deployment) |
+| 503 | `unavailable` (nothing spent) | 503 `pin_service_unavailable` |
+| connection error | — | 503 `pin_service_unavailable` |
+
+- **`lock_scope`** (`subject` vs `app`) is **not** surfaced to the browser: the copy is the
+  same either way, so the screen never teaches a bystander how the lockout works.
+- **Retry safety (implement exactly):** cmd charges an attempt **before** checking it, so
+  retry **only** on a connection error that provably never reached cmd
+  (`httpx.ConnectError`, `httpx.ConnectTimeout`) — at most once. **Never** retry a read
+  timeout or any response that didn't arrive. There's no idempotency key by design. A 400,
+  403, 404, 409, 413, 415, 429 or 503 spends nothing, so a corrected request is always safe.
 - **Timeout:** 5 s.
+- **cmd's default ladder for this app** (cmd's to tune, wixy never mirrors it): 5 wrong in a
+  row per subject → 60 s, doubling to a 24 h cap; a correct PIN clears that subject; 20 wrong
+  across everyone in 15 min trips an app-wide lock. Every lockout raises a warning on cmd's
+  `/health`.
 
-The wixy-side asks of the cmd contract are `subject`, for per-person lockout, and
-`attempts_left`. Both are optional for wixy; its mapping tolerates their absence.
+**PIN-pad copy** (P4; never reveals the PIN's length, and never says which scope locked):
+- 401 → "Wrong PIN — 3 attempts left" (drop the tail when `attemptsLeft` is null)
+- 429 → "Too many wrong tries. Try again in 2 minutes."
+- 409 → "Please try again."
+- 503 → "Server settings unavailable."
+- any unexpected status → "Couldn't unlock — try again."
 
 **Settings** (P1): `WIXY_SERVER_PIN_APP_KEY` → `server_pin_app_key`, default
 `"wixy-livechat"`. An identifier, not a secret.
@@ -500,7 +572,7 @@ P1 adds a `server` field to the existing `GET /api/admin/system/status`:
 with 100% branch coverage in vitest. States:
 
 ```
-decoy ──multiTap──▶ revealed ──tapAffordance──▶ pin ──submit──▶ verifying ──ok──▶ chat
+decoy ──tap(panel)──▶ revealed ──tapAffordance(≥400ms after reveal)──▶ pin ──submit──▶ verifying ──ok──▶ chat
   ▲                    │ idle 10s                  │ cancel/Esc/idle 10s   │wrong→pin(error)
   │◀───────────────────┘◀──────────────────────────┘                       │lockedOut→pin(countdown)
   │◀── fading(800ms) ◀── idle 10s (no suspension) ── chat
@@ -740,9 +812,16 @@ Waves:
   - migrations; idempotent create; paging; cursor atomicity
   - token tamper, expiry and email binding (use the `test_auth_gate_integration` JWT pattern
     for a real email)
-  - unlock → fake-cmd mapping: 200/401/429 (`Retry-After`)/503 `not_configured`/503
-    `pin_service_unavailable`
-  - no retry after a read timeout; one retry on ConnectError
+  - the full §5.1 v1.4 mapping table, one case each: 200; 401 with `attempts_left`; 401 with
+    `locked: true` → **429**; 429; 404 → 503 `not_configured`; 409 → 409; 400
+    `invalid_app_key` → 503; 400 `invalid_request` → 422 + ERROR log; 403/413/415 → 503;
+    503 → 503
+  - a PIN shorter than 4 digits is rejected locally and **cmd is never called** (assert no
+    request reached the fake)
+  - the outgoing request shape: path `/api/pins/<app_key>/verify`, JSON content-type,
+    `subject` carries the CF email
+  - one retry on ConnectError/ConnectTimeout; **no** retry on a read timeout (assert the
+    fake saw exactly one request)
   - a grep-style test that the PIN never reaches a log record or a response body
   - `Settings` has no PIN field
   - every route 401 without a token; a query token is rejected
@@ -899,8 +978,10 @@ and a mobile leg** (390×844, `isMobile`, `hasTouch`).
 
 **`server-lock.spec.ts` (P4)** — use `page.clock.install()` before `goto`:
 1. The nav shows "Server"; the decoy shows real rows; no affordance is visible.
-2. A single tap does nothing; a double tap reveals "Open server settings"; it re-hides after
-   10 s.
+2. A single tap in the panel reveals "Open server settings", and it re-hides after 10 s.
+   A tap on the nav doesn't reveal it. A double tap on the spot where the button appears
+   reveals it but does **not** open the PIN pad (400 ms debounce). Tapping the button
+   after 400 ms opens the pad.
 3. Unlock:
    - The pad title is "Unlock server".
    - A wrong PIN shows "Incorrect PIN".
@@ -944,9 +1025,11 @@ a rotated mov):
 
 ## 12. Deploy and live verification (DM)
 
-1. **Before** the delivery merge: cmd's PIN service is live on hub, and the operator's PIN is
-   registered under the app key `wixy-livechat` through cmd's registration path (owned by
-   the cmd-side initiative). Nothing PIN-related is written to wixy's Storage or `.env`.
+1. **Before** the delivery merge: cmd's PIN service is merged, deployed on hub, and the PIN is
+   registered under the app key `wixy-livechat`. The cmd-side team does that registration
+   themselves under operator decision #973, so the PIN value never passes through wixy, this
+   workspace, or any chat again; the operator can also set or rotate it himself at
+   `https://cmd.cinnamons.uk/pins`. Nothing PIN-related is written to wixy's Storage or `.env`.
    Confirm it by unlocking against live cmd from a dev run
    (`pytest -o addopts="" -m live_cmd` gains one PIN round-trip test that reads the PIN from
    an env var at run time, never from a file).
@@ -955,7 +1038,7 @@ a rotated mov):
    process resolves ffmpeg/ffprobe; if not, set `WIXY_FFMPEG`/`WIXY_FFPROBE` in `.env` to the
    absolute paths.
 3. Drive `ca.cinnamons.uk/admin/server` with the `verify` skill:
-   - decoy → multi-tap → PIN → text, photo, video, voice
+   - decoy → single tap → "Open server settings" → PIN → text, photo, video, voice
    - two sessions see live updates; idle lock; panic
    - mobile viewport
 4. **Android push** needs the operator's phone. Hand him the one-step instruction: Server →
@@ -981,8 +1064,8 @@ and §5 contracts matched exactly. Also:
 
 1. **PIN leak:** the pushed todo on the public repo's workspace branch contains it. Alerted
    separately.
-2. **R2 gesture reading:** after the idle fade you multi-tap (not single-tap) to reach
-   "Unlock server". Confirm.
+2. ~~R2 gesture reading~~ **RESOLVED** (decision #974): a single tap reveals it; a double
+   tap re-locks only inside the chat. Applied as the v1.3 errata.
 3. **Disk:** 58.8 GB free on D:. Defaults are a 20 GB chat-media quota, a 10 GB free floor,
    no originals kept, and video capped at 1080p. Confirm or adjust.
 4. **No backup** of chat history (R15). Confirm he's OK with that.
@@ -994,15 +1077,186 @@ and §5 contracts matched exactly. Also:
    Non-blocking.
 8. **Standalone edition:** the chat can't be unlocked on her future droplet until a
    standalone PIN verifier exists (there's no cmd there). OK for now?
-9. **Dependency:** the delivery merge is blocked on the cmd PIN service being live, with
-   the PIN registered.
+9. **Dependency (OPEN):** the delivery merge is blocked until cmd's PIN service PR (#3068,
+   cmd workspace #875) is merged, deployed on hub, **and** `wixy-livechat` is registered.
+   Its contract is frozen from cmd's side, so wixy builds against it now (§5.1 v1.4).
 
 ## 16. Out of scope (v1)
 
-- editing or deleting messages
+- editing messages (deleting and wiping are now **in** scope: §17, v1.2)
 - typing indicators, read receipts, presence, unread counts
 - iOS push
 - multiple rooms
 - search
 - backups of chat
 - server-side identity beyond CF Access
+
+---
+
+## 17. v1.2 addendum — delete a message and wipe the chat (operator decision #975)
+
+The operator's answer: "yes, add delete or wipe". The ruling is that **both** are built: delete
+one message, and wipe everything. The addendum is purely **additive**:
+- The frozen §5 routes, the §6 TS interfaces (`ServerSession`, `LockHooks`,
+  `ServerChatView`, `serverFetch`) and the existing §4 store method signatures are
+  unchanged.
+- New surface only: two store methods, two routes, two SSE event types, and UI entry points.
+- One small in-flight schema/stream amendment (A1, §17.2) goes to P1, which has not merged
+  yet.
+
+### 17.1 Semantics (binding)
+
+- **Anyone unlocked can delete any message, for everyone.** Wipe lets anyone erase
+  everything, so an "own messages only" rule would be inconsistent.
+- **Hard delete, no tombstone.** The message simply disappears on every client: no "message
+  deleted" placeholder, no trace in the thread.
+- **Delete a message** removes:
+  - its row
+  - its attachment rows
+  - its media dirs (`media/<id[:2]>/<id>/`)
+  - its earlier `message` and `message_updated` events
+
+  Then it appends one `message_deleted` event. Deleting an already-deleted message is
+  idempotent.
+- **Wipe** removes every message, attachment, media file, pending upload (row and dir) and
+  `failed/` entry, and every event. Then it appends one `wiped` event.
+  - Not touched: `seq` numbering (AUTOINCREMENT never reuses), push subscriptions,
+    `secret.key`, `vapid.json`, and localStorage names.
+  - In-flight uploads from another device then get a 404 on their next chunk or complete, and
+    show "Upload cancelled".
+- **Scrubbing:**
+  - Every connection sets `PRAGMA secure_delete=ON`, so deleted rows are zeroed in the main
+    DB file.
+  - After a delete: `PRAGMA wal_checkpoint(PASSIVE)`. After a wipe:
+    `PRAGMA wal_checkpoint(TRUNCATE)`, so the old content leaves the WAL too.
+  - Media files are unlinked. **Honest limit:** no byte-level shredding of files on
+    NTFS/SSD, since overwriting in place is not reliable on SSDs anyway. Documented in
+    `livechat.md`.
+- **Race with the media queue** (P2b behaviour; the frozen signature is unchanged):
+  - `finish_attachment` on a row that no longer exists is a silent no-op, with no event.
+  - After `finish_attachment`, the queue re-reads `get_attachment`. If it's `None`, the queue
+    `rmtree`s that attachment's media dir. `delete_message`/`wipe` also `rmtree`. Both are
+    idempotent, so whichever runs last cleans up.
+- Delete and wipe never trigger a push.
+
+### 17.2 Amendment A1 — to P1, only if P1 has NOT yet merged to the feature branch
+
+A1 is a tiny in-flight change so the v1 schema never needs a rebuild migration. As of
+2026-09-14, P1 has not merged, so A1 applies to P1. If P1 has already merged by the time
+this is read, P8 does all of this instead as migration v2, rebuilding the content-free
+`events` table while preserving its `sqlite_sequence` high-water mark.
+
+1. `events.type CHECK IN ('message','message_updated','message_deleted','wiped')`, and
+   `events.message_seq` becomes **nullable** (NULL for `wiped`).
+   `EventRow.type`'s Literal gains the two values; `EventRow.message_seq: int | None`.
+2. Every connection sets `PRAGMA secure_delete=ON`.
+3. The SSE stream:
+   - emits `message_deleted` as `data: {"seq": int}` and `wiped` as `data: {}`;
+   - **skips** a `message` or `message_updated` event whose message no longer exists;
+   - still coalesces per message.
+4. `finish_attachment` on a missing row → a no-op with no event, per §17.1.
+
+### 17.3 New contracts (additive; frozen once published)
+
+**Store:**
+- `delete_message(self, *, seq: int, now: float) -> list[str]` returns the removed attachment
+  ids; the caller `rmtree`s their dirs.
+- `wipe(self, *, now: float) -> tuple[list[str], list[str]]` returns (attachment ids, upload
+  ids) removed; the caller `rmtree`s the `media/`, `uploads/` and `failed/` contents.
+- Both run in one write transaction plus the checkpoint above, and both publish to the
+  notifier.
+
+**HTTP** (header token required, like every §5 route):
+- `DELETE /api/admin/server/messages/{seq}` → 204, idempotent (204 even when already gone).
+- `POST /api/admin/server/wipe` with body `{"confirm":"WIPE"}` → 204. Any other body → 422.
+  The literal guards against an accidental call.
+
+**SSE:**
+- `event: message_deleted` / `data: {"seq": n}` — the client removes that bubble if present
+  and otherwise does nothing.
+- `event: wiped` / `data: {}` — the client clears the thread and all loaded history, sets
+  `hasMore = false`, and drops pending echoes. The stream continues.
+
+### 17.4 UI (binding)
+
+**Message actions:** long-press (touch, 500 ms, cancelled by >10 px movement), right-click
+(`contextmenu`), or a hover "⋯" button (desktop) opens a small action sheet with these
+entries:
+- **Copy text** — text messages only.
+- **Delete for everyone** — a single confirm line inside the sheet: "Delete this message for
+  everyone?" [Delete] [Cancel].
+- **Cancel.**
+
+Details:
+- Deletion is optimistic: the bubble fades out and is removed. It's restored with a plain
+  error line on failure.
+- The long-press counts as activity. A double-tap on a bubble still locks (R3), and a
+  long-press is never a multi-tap.
+- Bubbles set `-webkit-touch-callout: none` so iOS doesn't show its own callout.
+
+**Wipe:** the settings sheet gets a destructive row, "Delete all messages". It uses a
+two-step confirm: "Delete every message, photo, video and voice note for everyone? This can't
+be undone." [Delete everything] [Cancel]. It sends `{"confirm":"WIPE"}`, then the local
+`wiped` handling runs immediately. The server's `wiped` event is then a no-op for this client.
+
+**Lock interplay:** while locked, nothing is shown and nothing starts. A delete or wipe that
+started before a lock completes (like sends, R6). Events that arrive while locked are
+replayed from the cursor on unlock.
+
+### 17.5 Parcel P8 — delete and wipe (one Builder, a vertical slice)
+
+**Starts after P1, P2b and P5b are on the feature branch.** It touches the store, the media
+dirs and the chat view, so it goes last to avoid colliding with in-flight work.
+
+**Backend:**
+- the §17.3 store methods (+ migration v2 if A1 missed P1)
+- the routes in `routes_livechat.py`
+- media, upload and failed cleanup
+- the P2b queue re-check, if P2b didn't already do §17.1's race rule
+
+**Frontend:**
+- `server/messageActions.ts` (long-press, contextmenu, ⋯ sheet)
+- the wipe row in `settingsSheet.ts`
+- `message_deleted`/`wiped` handling in `thread.ts`/`stream.ts`
+- `server/api/messages.ts` gains `deleteMessage` / `wipeChat`
+
+**pytest:**
+- delete removes rows, events and files, and is idempotent
+- wipe removes everything, including an in-flight upload (its next chunk → 404) and `failed/`
+- `PRAGMA secure_delete` reads 1 on store connections
+- **after a delete and after a wipe, a unique marker string from the deleted text is absent
+  from the raw bytes of `server.db` + `server.db-wal`**
+- a delete racing a processing attachment leaves no media dir behind
+- a stream spanning a delete emits `message_deleted`, and skips the stale `message` event on
+  replay from an old cursor
+- a `wiped` replay from an old cursor clears
+- a wipe body other than `{"confirm":"WIPE"}` → 422
+
+**e2e** (`server-chat.spec.ts` gains a "delete and wipe" describe, two contexts, desktop +
+mobile):
+- A deletes B's message via the ⋯ or long-press sheet → it vanishes on both within 3 s.
+- The old media URL for a deleted photo → 404.
+- Wipe from A's settings → B's thread empties live; reload shows empty.
+- A long-press never locks; a double-tap on a bubble still locks.
+
+**Docs:**
+- a `livechat.md` section on delete and wipe, with the honest filesystem limit
+- `contracts.md` gets the two routes and two events
+- invariant **46** in `invariants.md`
+- decision **00148** (delete/wipe semantics: hard delete, no tombstone, anyone-can-delete,
+  scrubbing)
+
+**Audit (§13) gains:**
+- the raw-bytes absence test
+- idempotence
+- the 422 confirm guard
+- no push on delete/wipe
+
+### 17.6 New invariant
+
+**Inv 46 — Delete and wipe are hard deletes, for everyone, with no tombstone.**
+- Content rows are removed with `secure_delete=ON` and the WAL is checkpointed, so deleted
+  text leaves the DB files.
+- Media files are unlinked, and deleted media URLs 404.
+- Clients remove content on `message_deleted`/`wiped`.
+- Honest limit: no byte-level file shredding.

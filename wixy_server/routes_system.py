@@ -88,14 +88,33 @@ def _last_publish_field(paths: ProjectPaths) -> JsonObject | None:
     return {"version": latest.version, "when": latest.when}
 
 
+def _server_field(*, started_at: float, media_available: bool) -> JsonObject:
+    """spec/server-chat/00-brief.md §5.10: the decoy's real data — `server/decoy.ts`
+    (P4) renders this straight, so it must never carry anything chat-shaped (Inv
+    42: "the decoy shows only real server data")."""
+    return {
+        "startedAt": started_at,
+        "mediaProcessing": "ok" if media_available else "unavailable",
+    }
+
+
 def _build_status(
-    *, wixy_repo_root: Path, paths: ProjectPaths, settings: Settings, now: datetime
+    *,
+    wixy_repo_root: Path,
+    paths: ProjectPaths,
+    settings: Settings,
+    now: datetime,
+    livechat_started_at: float,
+    livechat_media_available: bool,
 ) -> JsonObject:
     return {
         "backup": _backup_field(now),
         "diskUsage": _disk_usage_field(settings.storage_root),
         "lastPublish": _last_publish_field(paths),
         "engine": {"currentSha": resolve_engine_sha(wixy_repo_root), "edition": settings.edition},
+        "server": _server_field(
+            started_at=livechat_started_at, media_available=livechat_media_available
+        ),
     }
 
 
@@ -104,8 +123,15 @@ async def get_system_status(request: Request) -> JsonObject:
     wixy_repo_root: Path = request.app.state.wixy_repo_root
     paths: ProjectPaths = request.app.state.paths
     settings: Settings = request.app.state.settings
+    livechat_started_at: float = request.app.state.livechat_started_at
+    livechat_media_available: bool = request.app.state.livechat_media_available
     return await anyio.to_thread.run_sync(
         lambda: _build_status(
-            wixy_repo_root=wixy_repo_root, paths=paths, settings=settings, now=datetime.now(UTC)
+            wixy_repo_root=wixy_repo_root,
+            paths=paths,
+            settings=settings,
+            now=datetime.now(UTC),
+            livechat_started_at=livechat_started_at,
+            livechat_media_available=livechat_media_available,
         )
     )
