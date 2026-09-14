@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "node esbuild.config.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.sw.json",
     "test": "vitest run"
   },
   "devDependencies": {
