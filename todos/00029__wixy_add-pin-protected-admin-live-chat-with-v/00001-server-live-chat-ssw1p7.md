@@ -299,5 +299,24 @@ fixed same-session.)
   against, or whether it needs to land as a late parcel (P7 close-out or a
   fresh P8) to avoid destabilizing in-flight work. Awaiting the Architect's
   ruling before this reaches any Builder.
-- **Decision #974** still open (idle-fade gesture, storage limits, no-backup,
-  push-text) — non-blocking, no action needed yet.
+- **Decision #974 answered**: storage limits fine, no-backup fine, generic
+  push-text fine — no changes. **Gesture correction (important, urgent):**
+  the frozen brief's **R2 is wrong**. Operator: "No, it is different + Single
+  tap. Double tap is anywhere on the chat view to lock it again." Correct
+  reading: the locked "Server" screen reveals "Open server settings" on a
+  **single tap** (not the brief's "rapid multi-tap ≥2 taps"); **R3** (a
+  double-tap-or-more anywhere in the unlocked chat view re-locks it) was
+  already correct, unchanged. Sent urgently to the Architect (errata/v1.3)
+  and to the DM as a heads-up, since P4 (Builder D) was actively coding the
+  wrong R2 reading. **DM caught it fast**: put an immediate hold on Builder
+  D's decoy-tap-reveal detector specifically (rest of P4 unaffected,
+  continuing), waiting on the Architect's official errata text before
+  redirecting further.
+- **Unrelated e2e flake spun off**: the DM found + independently confirmed a
+  pre-existing, unrelated flake in `e2e/tests/collection-edit.spec.ts`
+  (reorder-timing assertion in the showcase preview iframe, 2/7 failures on
+  unmodified main-line code) while clearing P5a. Per the no-stopgap/root-cause
+  doctrine this isn't left as a dismissed "flake" — spun off into a separate
+  wixy workspace #30 ("anemone-7", session
+  `ed5c0281-a830-4ab8-bdbd-d0b73a2482c7`) to root-cause and fix it properly,
+  fully decoupled from this workspace's branch/scope.
