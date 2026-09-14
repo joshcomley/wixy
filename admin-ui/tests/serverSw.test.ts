@@ -71,6 +71,25 @@ describe("Server service worker", () => {
     expect(target.clients.openWindow).toHaveBeenCalledWith("/admin/server");
   });
 
+  it("opens a new Server window when an uncontrolled admin window rejects navigation", async () => {
+    const adminClient = {
+      type: "window",
+      url: "https://example.test/admin/pages",
+      focus: vi.fn(async () => adminClient),
+      navigate: vi.fn(async () => {
+        throw new TypeError("client is not controlled");
+      }),
+    };
+    const target = targetWith([adminClient]);
+    const { handleNotificationClick } = await import("../src/sw/serverSw");
+
+    await handleNotificationClick(target as unknown as ServiceWorkerGlobalScope);
+
+    expect(adminClient.focus).toHaveBeenCalledOnce();
+    expect(adminClient.navigate).toHaveBeenCalledWith("/admin/server");
+    expect(target.clients.openWindow).toHaveBeenCalledWith("/admin/server");
+  });
+
   it("registers no fetch handler", async () => {
     vi.resetModules();
     const events: string[] = [];

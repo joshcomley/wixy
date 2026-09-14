@@ -62,12 +62,6 @@ class PushResult:
     ok: bool
     delete_subscription: bool
 
-    @property
-    def should_delete(self) -> bool:
-        """Compatibility spelling for dispatch callers expressing the action."""
-
-        return self.delete_subscription
-
 
 def _b64url_encode(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
@@ -91,10 +85,14 @@ def _public_bytes(private_key: ec.EllipticCurvePrivateKey) -> bytes:
 
 def _key_document(keys: VapidKeys) -> bytes:
     document = {
-        "privateKey": _b64url_encode(
-            keys.private_key.private_numbers().private_value.to_bytes(32, "big")
+        "privateKeyPkcs8B64": _b64url_encode(
+            keys.private_key.private_bytes(
+                serialization.Encoding.DER,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            )
         ),
-        "publicKey": keys.public_key_b64,
+        "publicKeyB64url": keys.public_key_b64,
     }
     return (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode("ascii")
 
@@ -102,17 +100,20 @@ def _key_document(keys: VapidKeys) -> bytes:
 def _keys_from_document(raw: bytes) -> VapidKeys:
     try:
         document = json.loads(raw.decode("ascii"))
-        private_bytes = _b64url_decode(document["privateKey"])
-        public_bytes = _b64url_decode(document["publicKey"])
+        private_bytes = _b64url_decode(document["privateKeyPkcs8B64"])
+        public_bytes = _b64url_decode(document["publicKeyB64url"])
     except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         raise ValueError("invalid VAPID key file") from exc
 
-    if len(private_bytes) != 32:
-        raise ValueError("invalid VAPID private key length")
     try:
-        private_key = ec.derive_private_key(int.from_bytes(private_bytes, "big"), _P256)
-    except ValueError as exc:
+        loaded_key = serialization.load_der_private_key(private_bytes, password=None)
+    except (TypeError, ValueError) as exc:
         raise ValueError("invalid VAPID private key") from exc
+    if not isinstance(loaded_key, ec.EllipticCurvePrivateKey) or not isinstance(
+        loaded_key.curve, ec.SECP256R1
+    ):
+        raise ValueError("VAPID private key is not P-256")
+    private_key = loaded_key
     derived_public = _public_bytes(private_key)
     if public_bytes != derived_public:
         raise ValueError("VAPID public key does not match private key")
@@ -162,12 +163,6 @@ def load_or_create_vapid_keys(path: Path) -> VapidKeys:
             pass
         raise
     return keys
-
-
-def generate_vapid_keys(path: Path) -> VapidKeys:
-    """Named alias used by callers that treat key creation as generation."""
-
-    return load_or_create_vapid_keys(path)
 
 
 def _validated_endpoint(endpoint: str) -> SplitResult:
@@ -292,7 +287,6 @@ __all__ = [
     "VapidKeys",
     "build_push_request",
     "build_vapid_jwt",
-    "generate_vapid_keys",
     "load_or_create_vapid_keys",
     "send_payloadless_push",
     "validate_push_endpoint",

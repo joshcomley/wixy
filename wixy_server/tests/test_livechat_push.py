@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import base64
+import json
 from pathlib import Path
 
 import httpx
 import jwt
 import pytest
+from cryptography.hazmat.primitives import serialization
 
 from wixy_server.livechat.push import (
     PUSH_TOPIC,
@@ -34,6 +36,10 @@ def test_vapid_keys_are_persisted_and_jwt_verifies(tmp_path: Path) -> None:
 
     assert loaded.public_key == keys.public_key
     assert loaded.public_key_b64 == keys.public_key_b64
+    document = json.loads(path.read_text(encoding="ascii"))
+    assert set(document) == {"privateKeyPkcs8B64", "publicKeyB64url"}
+    private_der = base64.urlsafe_b64decode(document["privateKeyPkcs8B64"] + "==")
+    assert serialization.load_der_private_key(private_der, password=None) is not None
     token = build_vapid_jwt(ENDPOINT, DOMAIN, keys, now=1_700_000_000)
     claims = jwt.decode(
         token,
@@ -88,18 +94,19 @@ async def test_sender_sends_exact_payloadless_request(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_gone_response_signals_subscription_deletion(tmp_path: Path) -> None:
+@pytest.mark.parametrize("status", [404, 410])
+async def test_gone_response_signals_subscription_deletion(tmp_path: Path, status: int) -> None:
     keys = load_or_create_vapid_keys(tmp_path / "vapid.json")
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        return httpx.Response(410, request=request)
+        return httpx.Response(status, request=request)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         result = await send_payloadless_push(client, ENDPOINT, DOMAIN, keys, now=1_700_000_000)
 
-    assert result.status_code == 410
+    assert result.status_code == status
     assert result.ok is False
     assert result.delete_subscription is True
     assert len(seen) == 1
@@ -112,6 +119,8 @@ async def test_gone_response_signals_subscription_deletion(tmp_path: Path) -> No
         "http://fcm.googleapis.com/fcm/send/test-token",
         "https://foreign.example.test/push",
         "https://notify.windows.com/push",
+        "https://user:password@fcm.googleapis.com/push",
+        "https://fcm.googleapis.com:8443/push",
     ],
 )
 def test_push_allowlist_rejects_unsafe_endpoints(endpoint: str) -> None:
@@ -121,6 +130,10 @@ def test_push_allowlist_rejects_unsafe_endpoints(endpoint: str) -> None:
 
 def test_windows_push_subdomain_is_allowed() -> None:
     validate_push_endpoint("https://foo.notify.windows.com/push")
+
+
+def test_mozilla_push_host_is_allowed() -> None:
+    validate_push_endpoint("https://updates.push.services.mozilla.com/push")
 
 
 def test_public_key_is_uncompressed_p256(tmp_path: Path) -> None:

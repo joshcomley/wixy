@@ -49,8 +49,16 @@ export async function handleNotificationClick(target: ServiceWorkerGlobalScope):
   );
   if (adminClient !== undefined) {
     await adminClient.focus();
-    await adminClient.navigate(SERVER_PATH);
-    return;
+    try {
+      await adminClient.navigate(SERVER_PATH);
+      return;
+    } catch {
+      // A client opened before opt-in may not yet be controlled by this
+      // worker. Open a controlled route rather than leaving the user on the
+      // unrelated admin panel after the notification tap.
+      await target.clients.openWindow(SERVER_PATH);
+      return;
+    }
   }
   await target.clients.openWindow(SERVER_PATH);
 }
