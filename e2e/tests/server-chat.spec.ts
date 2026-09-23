@@ -50,9 +50,14 @@ async function unlockServer(page: Page, name: string): Promise<void> {
   await page.locator(".wx-srv-pinpad-key-submit").click();
 
   await expect(page.locator(".wx-srv-name-prompt")).toBeVisible({ timeout: 5000 });
+  // Nothing may be sent before a name exists: the thread view (header, thread,
+  // composer) must stay hidden behind the prompt. Only a real browser can prove
+  // it — `[hidden]` loses to a class's own `display` (see serverChatCss.test.ts).
+  await expect(page.locator(".wx-srv-thread-view")).toBeHidden();
   await page.locator(".wx-srv-name-prompt-input").fill(name);
   await page.locator(".wx-srv-name-prompt-button").click();
   await expect(page.locator(".wx-srv-thread")).toBeVisible();
+  await expect(page.locator(".wx-srv-name-prompt")).toBeHidden();
   // R3 (spec §6): two taps inside the chat view less than MULTI_TAP_INTERVAL_MS
   // apart lock the panel instantly. Playwright will otherwise tap Send within a
   // few ms of the Continue tap above — far faster than any person — and trip that
