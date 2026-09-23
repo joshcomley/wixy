@@ -82,6 +82,32 @@ class FakeSession:
 
 
 @dataclass
+class FakePinApp:
+    """spec/server-chat/00-brief.md §5.1 v1.4: one app-key's registered test PIN
+    plus cmd's own per-subject lockout state — mirrors the REAL contract
+    (`POST /api/pins/<app_key>/verify` -> `{"ok", "error"?, "attempts_left"?,
+    "locked"?, "lock_scope"?, "retry_after_seconds"?}`) closely enough that
+    `livechat.pinclient.CmdPinVerifier`'s mapping logic is exercised against
+    something that actually behaves like cmd, not a rubber stamp. Only
+    per-SUBJECT lockout is modeled — cmd's own app-wide ladder isn't, since
+    wixy's client never branches on `lock_scope` (§5.1: "not surfaced to the
+    browser")."""
+
+    app_key: str
+    pin: str
+    lockout_after: int = 5
+    """5 wrong attempts -> locked (matches cmd's own stated default ladder,
+    §5.1: "5 wrong in a row per subject -> 60s, doubling...")."""
+    lockout_seconds: float = 60.0
+    attempts: dict[str, int] = field(default_factory=dict)  # subject -> wrong-attempt count
+    locked_until: dict[str, float] = field(default_factory=dict)  # subject -> epoch
+    simulate_pin_changed_once: bool = False
+    """When true, the NEXT `verify` call for this app returns 409 `pin_changed`
+    (§5.1 v1.4) instead of evaluating the PIN, then resets itself — a test sets
+    this to exercise wixy's 409 mapping without needing a real PIN rotation."""
+
+
+@dataclass
 class FakeCmdState:
     sessions: dict[str, FakeSession] = field(default_factory=dict)
     next_session_n: int = 1
@@ -109,6 +135,34 @@ class FakeCmdState:
     (content, media_type) — overridable per test; an id with no entry but a
     staged upload gets the canned `DEFAULT_UPLOAD_BYTES` (a real 1x1 WEBP, so
     browser `<img>` tags genuinely load in E2E)."""
+    pin_apps: dict[str, FakePinApp] = field(default_factory=dict)
+    """spec/server-chat/00-brief.md §5.1: the PIN-verify double's app-key
+    registry — `register_pin_app` populates it; an unregistered `app_key`
+    404s, mirroring cmd's real "unknown app key" answer."""
+
+    def register_pin_app(
+        self, app_key: str, pin: str, *, lockout_after: int = 5, lockout_seconds: float = 60.0
+    ) -> FakePinApp:
+        pin_app = FakePinApp(
+            app_key=app_key, pin=pin, lockout_after=lockout_after, lockout_seconds=lockout_seconds
+        )
+        self.pin_apps[app_key] = pin_app
+        return pin_app
+
+    def reset_pin_lockout(self, app_key: str, subject: str | None = None) -> None:
+        """Clears wrong-attempt/lockout state for one app key — either one
+        `subject` or every subject registered against it. The e2e fixture's own
+        `/test/server/reset-pin-lockout` route (added alongside the frontend
+        specs that need it) calls straight through to this."""
+        pin_app = self.pin_apps.get(app_key)
+        if pin_app is None:
+            return
+        if subject is None:
+            pin_app.attempts.clear()
+            pin_app.locked_until.clear()
+        else:
+            pin_app.attempts.pop(subject, None)
+            pin_app.locked_until.pop(subject, None)
 
     def create_session(
         self,
@@ -181,6 +235,92 @@ def create_fake_cmd_app(state: FakeCmdState | None = None) -> FastAPI:
     app = FastAPI()
     app.state.fake = state
     app.state.pending_bus = pending_bus
+
+    @app.post("/api/pins/{app_key}/verify")
+    async def pin_verify(app_key: str, request: Request) -> Response:
+        """spec/server-chat/00-brief.md §5.1 v1.4's double (cmd workspace #875 PR
+        #3068's real contract): `{"pin","subject"?}` -> `{"ok", "error"?,
+        "attempts_left"?, "locked"?, "lock_scope"?, "retry_after_seconds"?}`, app
+        key in the URL PATH. An unknown `app_key` 404s (`CmdPinVerifier` maps
+        that to 503 `not_configured`); a non-JSON content-type 415s; a
+        malformed-shape PIN 400s `invalid_request` (wixy validates 4-16 digits
+        locally and should never actually trigger this in practice)."""
+        content_type = request.headers.get("content-type", "")
+        if "application/json" not in content_type:
+            return Response(status_code=415)
+
+        body = await request.json()
+        pin = body.get("pin") if isinstance(body, dict) else None
+        subject_raw = body.get("subject") if isinstance(body, dict) else None
+        subject = subject_raw if isinstance(subject_raw, str) else ""
+
+        if not isinstance(pin, str) or not (4 <= len(pin) <= 16) or not pin.isdigit():
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "ok": False,
+                    "error": "invalid_request",
+                    "message": "pin must be 4-16 digits",
+                },
+            )
+        if app_key not in state.pin_apps:
+            return JSONResponse(status_code=404, content={"ok": False, "error": "unknown_app"})
+
+        pin_app = state.pin_apps[app_key]
+
+        if pin_app.simulate_pin_changed_once:
+            pin_app.simulate_pin_changed_once = False
+            return JSONResponse(status_code=409, content={"ok": False, "error": "pin_changed"})
+
+        now = time.time()
+        locked_until = pin_app.locked_until.get(subject)
+        if locked_until is not None and locked_until > now:
+            retry_after = max(1, int(locked_until - now))
+            return JSONResponse(
+                status_code=429,
+                headers={"Retry-After": str(retry_after)},
+                content={
+                    "ok": False,
+                    "error": "locked",
+                    "lock_scope": "subject",
+                    "retry_after_seconds": retry_after,
+                },
+            )
+
+        if pin == pin_app.pin:
+            pin_app.attempts.pop(subject, None)
+            pin_app.locked_until.pop(subject, None)
+            return JSONResponse(status_code=200, content={"ok": True, "app_key": app_key})
+
+        attempts = pin_app.attempts.get(subject, 0) + 1
+        pin_app.attempts[subject] = attempts
+        if attempts >= pin_app.lockout_after:
+            locked_until = now + pin_app.lockout_seconds
+            pin_app.locked_until[subject] = locked_until
+            retry_after = int(pin_app.lockout_seconds)
+            return JSONResponse(
+                status_code=401,
+                headers={"Retry-After": str(retry_after)},
+                content={
+                    "ok": False,
+                    "error": "wrong_pin",
+                    "attempts_left": 0,
+                    "locked": True,
+                    "lock_scope": "subject",
+                    "retry_after_seconds": retry_after,
+                },
+            )
+        return JSONResponse(
+            status_code=401,
+            content={
+                "ok": False,
+                "error": "wrong_pin",
+                "attempts_left": max(0, pin_app.lockout_after - attempts),
+                "locked": False,
+                "lock_scope": None,
+                "retry_after_seconds": 0,
+            },
+        )
 
     @app.post("/api/project/{project}/new-chat")
     async def new_chat(project: str, request: Request) -> Response:

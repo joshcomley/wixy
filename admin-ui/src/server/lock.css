@@ -1,0 +1,246 @@
+/* The "Server" panel's disguise/lock chrome (spec/server-chat/00-brief.md §6).
+   `.wx-srv-` is this feature's dedicated class prefix (never reused by any
+   other panel), imported into the shell's one CSS bundle from style.css —
+   see esbuild.config.mjs's CSS build, which bundles plain `@import`s same as
+   JS. Phone-width layout matters here as much as anywhere else in the admin
+   (this panel is explicitly meant to be used, discreetly, from a phone). */
+
+.wx-srv-panel {
+  position: relative;
+  min-height: 60vh;
+  /* R3: taps must resolve as Pointer Events without the browser's own
+     double-tap-to-zoom/300ms-delay gesture handling getting in the way of
+     the multi-tap detector. */
+  touch-action: manipulation;
+}
+
+/* -- Decoy (R13: real server data, no trace of the chat) -------------------- */
+
+.wx-srv-decoy {
+  max-width: 560px;
+}
+
+.wx-srv-decoy-title {
+  margin: 0 0 16px;
+  font-size: 1.125rem;
+}
+
+.wx-srv-decoy-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  background: var(--wx-surface);
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  overflow: hidden;
+}
+
+.wx-srv-decoy-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--wx-border);
+}
+
+.wx-srv-decoy-row:last-child {
+  border-bottom: none;
+}
+
+.wx-srv-decoy-label {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--wx-muted);
+}
+
+.wx-srv-decoy-value {
+  margin: 0;
+  font-size: 0.8125rem;
+  text-align: right;
+}
+
+.wx-srv-decoy-skeleton {
+  color: transparent;
+  background: var(--wx-border);
+  border-radius: 4px;
+  min-width: 48px;
+  display: inline-block;
+}
+
+/* -- Reveal affordance (R2) — small and easy to miss on purpose ------------- */
+
+.wx-srv-affordance {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  padding: 8px 14px;
+  font-size: 0.75rem;
+  color: var(--wx-muted);
+  background: var(--wx-btn-bg);
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  cursor: pointer;
+}
+
+/* -- Overlays (pin pad / chat) cover the decoy entirely --------------------- */
+
+/* `[hidden]`'s UA-stylesheet `display:none` and a class selector's `display`
+   have EQUAL specificity — the later rule in the cascade wins regardless of
+   the attribute, so an unconditional `display:flex` here would silently
+   defeat `.hidden = true` (found live: a real Playwright click on the
+   decoy kept hitting the "hidden" chat-host overlay instead — jsdom's own
+   `el.hidden` property check can't catch this, since it never lays anything
+   out). `:not([hidden])` keeps the flex layout scoped to when it's actually
+   shown. */
+.wx-srv-pinpad-host,
+.wx-srv-chat-host {
+  position: absolute;
+  inset: 0;
+  background: var(--wx-canvas);
+}
+
+.wx-srv-pinpad-host:not([hidden]),
+.wx-srv-chat-host:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+}
+
+.wx-srv-chat-host.wx-srv-fading {
+  transition: opacity 800ms ease-out;
+  opacity: 0;
+}
+
+.wx-srv-chat-stub {
+  margin: 0;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  color: var(--wx-muted);
+  font-size: 0.875rem;
+}
+
+.wx-srv-chat-stub p {
+  margin: auto 0 0;
+}
+
+.wx-srv-draft-stub {
+  width: 100%;
+  min-height: 64px;
+  padding: 8px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font: inherit;
+  resize: vertical;
+}
+
+.wx-srv-panic {
+  align-self: flex-end;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-danger-text);
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+/* -- PIN pad ----------------------------------------------------------------- */
+
+.wx-srv-pinpad {
+  margin: auto;
+  width: min(280px, 90vw);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 24px;
+  background: var(--wx-surface);
+  border: 1px solid var(--wx-border);
+  border-radius: calc(var(--wx-radius) + 4px);
+  box-shadow: var(--wx-shadow);
+  outline: none;
+}
+
+.wx-srv-pinpad-title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.wx-srv-pinpad-dots {
+  display: flex;
+  gap: 10px;
+  min-height: 14px;
+}
+
+.wx-srv-pinpad-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--wx-ink);
+}
+
+.wx-srv-pinpad-message {
+  margin: 0;
+  min-height: 1.2em;
+  font-size: 0.8125rem;
+  color: var(--wx-danger-text);
+  text-align: center;
+}
+
+.wx-srv-pinpad-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 56px);
+  gap: 10px;
+}
+
+.wx-srv-pinpad-key {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  font-size: 1.125rem;
+  cursor: pointer;
+}
+
+.wx-srv-pinpad-key:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.wx-srv-pinpad-key-submit {
+  background: var(--wx-brand-blue);
+  color: #fff;
+  border-color: transparent;
+}
+
+.wx-srv-pinpad-cancel {
+  background: none;
+  border: none;
+  color: var(--wx-muted);
+  font-size: 0.8125rem;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 4px;
+}
+
+@media (max-width: 420px) {
+  .wx-srv-pinpad-grid {
+    grid-template-columns: repeat(3, 20vw);
+  }
+
+  .wx-srv-pinpad-key {
+    width: 20vw;
+    height: 20vw;
+    max-width: 64px;
+    max-height: 64px;
+  }
+}

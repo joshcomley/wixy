@@ -104,6 +104,53 @@ class ProjectPaths:
     def publish_lock(self) -> Path:
         return self.locks_dir / "publish.lock"
 
+    @property
+    def server_dir(self) -> Path:
+        """spec/server-chat/00-brief.md §4: the PIN-protected admin live-chat's own
+        private storage tree — never entered into the site repo, builds, publish,
+        `reports.py` bundles, or the backup snapshot allowlist (Inv 40). Created
+        lazily (like `reports_dir`), not by `ensure_project_dirs` — a project that
+        never unlocks the chat never needs the directory."""
+        return self.root / "server"
+
+    @property
+    def server_db(self) -> Path:
+        return self.server_dir / "server.db"
+
+    @property
+    def server_secret(self) -> Path:
+        return self.server_dir / "secret.key"
+
+    @property
+    def server_vapid(self) -> Path:
+        return self.server_dir / "vapid.json"
+
+    @property
+    def server_media(self) -> Path:
+        return self.server_dir / "media"
+
+    @property
+    def server_uploads(self) -> Path:
+        return self.server_dir / "uploads"
+
+    @property
+    def server_failed(self) -> Path:
+        return self.server_dir / "failed"
+
+    def server_upload_dir(self, upload_id: str) -> Path:
+        """§4: `uploads/<uploadId>/` — chunk staging, then the assembled original
+        (P2b). `upload_id` doubles as the eventual attachment id once promoted."""
+        return self.server_uploads / upload_id
+
+    def server_attachment_media_dir(self, attachment_id: str) -> Path:
+        """§4: `media/<id[:2]>/<id>/` — the two-level fan-out keeps any one
+        directory from accumulating thousands of entries as the chat grows."""
+        return self.server_media / attachment_id[:2] / attachment_id
+
+    def server_failed_dir(self, attachment_id: str) -> Path:
+        """§4: `failed/<id>/` — a failed original kept 7 days for diagnosis."""
+        return self.server_failed / attachment_id
+
 
 def project_paths(storage_root: Path, slug: str) -> ProjectPaths:
     return ProjectPaths(slug=slug, root=storage_root / "projects" / slug)

@@ -42,6 +42,7 @@ from wixy_server.live_pointer import save_live_pointer
 from wixy_server.overlay import Overlay, OverlayOp, load_overlay, save_overlay
 from wixy_server.site_source import build_site_source
 from wixy_server.storage import ProjectPaths
+from wixy_server.treelock import tree_lock
 
 logger = logging.getLogger(__name__)
 
@@ -174,15 +175,18 @@ def run_restore(
             "theme", theme_to_dict(current_source.theme), theme_to_dict(old_source.theme), now, ops
         )
 
-    current_overlay = load_overlay(paths.draft_overlay, default_base_sha=entry.sha)
-    new_overlay = Overlay(
-        rev=current_overlay.rev + 1,
-        base_sha=current_overlay.base_sha,
-        ops=ops,
-        pages_added=(),
-        pages_deleted=to_delete,
-    )
-    save_overlay(paths.draft_overlay, new_overlay)
+    # Read-modify-write under the process-wide lock (treelock.py,
+    # decisions/00144) — same reasoning as every other overlay mutation.
+    with tree_lock():
+        current_overlay = load_overlay(paths.draft_overlay, default_base_sha=entry.sha)
+        new_overlay = Overlay(
+            rev=current_overlay.rev + 1,
+            base_sha=current_overlay.base_sha,
+            ops=ops,
+            pages_added=(),
+            pages_deleted=to_delete,
+        )
+        save_overlay(paths.draft_overlay, new_overlay)
 
     new_version = next_version(paths)
     save_live_pointer(paths, entry.sha, new_version)

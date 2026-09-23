@@ -1,0 +1,420 @@
+/* The server chat's message view (spec/server-chat/00-brief.md §10 P5b).
+   `.wx-srv-` is this feature's shared class prefix (see lock.css's own
+   header note). Mirrors the Inv 24 corollary exactly, the same pattern the
+   AI chat's `.wx-chat-conversation-view` uses (decisions/00110): a flex
+   column with exactly ONE scroll region (the thread), the composer pinned
+   by layout. `.wx-srv-chat-host` (lock.css) is already `position:absolute;
+   inset:0; display:flex; flex-direction:column;`, so `.wx-srv-chat` fills it
+   as `flex:1` rather than `height:100%`. */
+
+.wx-srv-chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.wx-srv-thread-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* chatView.ts hides this behind the first-unlock name prompt with `.hidden`;
+   `[hidden]` has the same specificity as the class above, so without this the
+   composer stays usable before a name exists. */
+.wx-srv-thread-view[hidden] {
+  display: none;
+}
+
+.wx-srv-thread-view > * {
+  flex: none;
+}
+
+/* -- Header ------------------------------------------------------------- */
+
+.wx-srv-thread-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.wx-srv-thread-title {
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.wx-srv-name-chip {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  color: var(--wx-muted);
+}
+
+.wx-srv-settings-button,
+.wx-srv-panic-button {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+/* -- Thread + jump pill --------------------------------------------------- */
+
+.wx-srv-thread-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin: 0 12px 10px;
+}
+
+.wx-srv-thread {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--wx-surface);
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+}
+
+.wx-srv-thread-sentinel {
+  flex: none;
+  height: 1px;
+}
+
+.wx-srv-thread-empty {
+  color: var(--wx-muted);
+  margin: auto;
+}
+
+.wx-srv-history-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--wx-danger-text);
+}
+
+.wx-srv-history-error[hidden] {
+  display: none;
+}
+
+.wx-srv-day-separator {
+  display: flex;
+  justify-content: center;
+  margin: 4px 0;
+}
+
+.wx-srv-day-separator span {
+  font: 600 0.6875rem/1 system-ui, sans-serif;
+  color: var(--wx-muted);
+  background: var(--wx-canvas);
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+
+.wx-srv-jump-pill {
+  position: absolute;
+  bottom: 12px;
+  right: 16px;
+  z-index: 2;
+  font: 600 0.75rem/1 system-ui, sans-serif;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-brand-blue-text);
+  background: var(--wx-brand-blue-tint);
+  color: var(--wx-brand-blue-text);
+  cursor: pointer;
+  box-shadow: var(--wx-shadow);
+}
+
+.wx-srv-jump-pill[hidden] {
+  display: none;
+}
+
+/* -- Bubbles ------------------------------------------------------------- */
+
+.wx-srv-bubble {
+  max-width: 80%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border-radius: var(--wx-radius);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-bubble-mine {
+  align-self: flex-end;
+  background: var(--wx-brand-blue-tint);
+  color: var(--wx-ink);
+  border: 1px solid var(--wx-border);
+}
+
+.wx-srv-bubble-theirs {
+  align-self: flex-start;
+  background: var(--wx-canvas);
+  color: var(--wx-ink);
+  border: 1px solid var(--wx-border);
+}
+
+.wx-srv-bubble-sender {
+  font: 600 0.6875rem/1 system-ui, sans-serif;
+  color: var(--wx-muted);
+}
+
+.wx-srv-bubble-text a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.wx-srv-bubble-time {
+  font-size: 0.625rem;
+  opacity: 0.7;
+  align-self: flex-end;
+}
+
+.wx-srv-echo {
+  opacity: 0.7;
+}
+
+/* -- Attachments (P6a's mediaRender.ts renders into these) --------------- */
+
+.wx-srv-attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.wx-srv-photo-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wx-srv-photo-thumb {
+  padding: 0;
+  width: 120px;
+  height: 120px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  overflow: hidden;
+  background: var(--wx-canvas);
+  cursor: zoom-in;
+}
+
+.wx-srv-photo-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.wx-srv-video {
+  max-width: 260px;
+  border-radius: var(--wx-radius);
+  background: #000;
+}
+
+.wx-srv-voice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wx-srv-voice-play {
+  flex: none;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  cursor: pointer;
+}
+
+.wx-srv-voice-waveform {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 24px;
+}
+
+.wx-srv-voice-waveform-bar {
+  flex: 1;
+  min-width: 1px;
+  height: calc(var(--wx-srv-wave-height, 0.2) * 100%);
+  background: currentColor;
+  opacity: 0.6;
+  border-radius: 1px;
+}
+
+.wx-srv-voice-time {
+  flex: none;
+  font-size: 0.6875rem;
+  color: var(--wx-muted);
+}
+
+.wx-srv-attachment-processing,
+.wx-srv-attachment-failed {
+  font-size: 0.75rem;
+  color: var(--wx-muted);
+}
+
+.wx-srv-attachment-failed {
+  color: var(--wx-danger-text);
+}
+
+/* -- Name prompt (first unlock, types.ts's "chat" sub-step) --------------- */
+
+.wx-srv-name-prompt {
+  margin: auto;
+  width: min(320px, 90vw);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  padding: 24px;
+}
+
+.wx-srv-name-prompt[hidden] {
+  display: none;
+}
+
+.wx-srv-name-prompt h3 {
+  margin: 0;
+  text-align: center;
+  font-size: 1rem;
+}
+
+.wx-srv-name-prompt-input,
+.wx-srv-sheet-name-input {
+  font: 0.875rem/1.45 system-ui, sans-serif;
+  padding: 8px 10px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  border-radius: calc(var(--wx-radius) + 2px);
+}
+
+.wx-srv-name-prompt-button {
+  font: 600 0.8125rem/1 system-ui, sans-serif;
+  padding: 10px 16px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-brand-blue);
+  background: var(--wx-brand-blue);
+  color: #fff;
+  cursor: pointer;
+}
+
+/* -- Settings sheet -------------------------------------------------------- */
+
+.wx-srv-sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgb(0 0 0 / 0.4);
+}
+
+.wx-srv-sheet-backdrop[hidden] {
+  display: none;
+}
+
+.wx-srv-sheet {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+  background: var(--wx-surface);
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius) var(--wx-radius) 0 0;
+  box-shadow: var(--wx-shadow);
+}
+
+.wx-srv-sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.wx-srv-sheet-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.wx-srv-sheet-close {
+  border: none;
+  background: none;
+  color: var(--wx-muted);
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.wx-srv-sheet-name-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.wx-srv-sheet-name-label {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--wx-muted);
+}
+
+.wx-srv-sheet-save-name,
+.wx-srv-sheet-lock {
+  font: 600 0.8125rem/1 system-ui, sans-serif;
+  padding: 8px 14px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  cursor: pointer;
+}
+
+.wx-srv-sheet-usage {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--wx-muted);
+}
+
+.wx-srv-sheet-lock {
+  align-self: flex-start;
+  border-color: var(--wx-danger);
+  color: var(--wx-danger-text);
+}

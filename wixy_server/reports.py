@@ -42,6 +42,7 @@ from wixy_server.routes_version import resolve_engine_sha
 from wixy_server.settings import Settings
 from wixy_server.site_source import build_site_source
 from wixy_server.storage import ProjectPaths
+from wixy_server.treelock import tree_lock
 
 logger = logging.getLogger(__name__)
 
@@ -108,26 +109,29 @@ def build_report_bundle(
     note: str | None,
     now: str,
 ) -> JsonObject:
-    overlay_raw: JsonObject = (
-        load_json_object(paths.draft_overlay) if paths.draft_overlay.exists() else {}
-    )
+    # Tree+overlay READ under the process-wide lock (decisions/00144) — same
+    # read-consistency rule as every other overlay access.
+    with tree_lock():
+        overlay_raw: JsonObject = (
+            load_json_object(paths.draft_overlay) if paths.draft_overlay.exists() else {}
+        )
 
-    validate_summary: JsonObject = {"ok": True, "errors": []}
-    if (paths.repo / ".git").exists():
-        try:
-            source = build_site_source(project, paths.repo)
-            overlay = load_overlay(paths.draft_overlay, default_base_sha="")
-            merged = merge_overlay(source, overlay)
-            result = validate_merged_for_publish(merged, paths)
-            validate_summary = {
-                "ok": result.ok,
-                "errors": [{k: v for k, v in e.to_dict().items()} for e in result.errors],
-            }
-        except CheckoutError:
-            validate_summary = {
-                "ok": False,
-                "errors": [{"code": "checkout-error", "message": "site checkout is not ready"}],
-            }
+        validate_summary: JsonObject = {"ok": True, "errors": []}
+        if (paths.repo / ".git").exists():
+            try:
+                source = build_site_source(project, paths.repo)
+                overlay = load_overlay(paths.draft_overlay, default_base_sha="")
+                merged = merge_overlay(source, overlay)
+                result = validate_merged_for_publish(merged, paths)
+                validate_summary = {
+                    "ok": result.ok,
+                    "errors": [{k: v for k, v in e.to_dict().items()} for e in result.errors],
+                }
+            except CheckoutError:
+                validate_summary = {
+                    "ok": False,
+                    "errors": [{"code": "checkout-error", "message": "site checkout is not ready"}],
+                }
 
     live_pointer = load_live_pointer(paths)
     ledger_tail: list[JsonValue] = [

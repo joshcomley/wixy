@@ -282,4 +282,191 @@ fixed same-session.)
   app key `wixy-livechat`, brief sec.12 step 1) — the Orchestrator owns
   clearing this and will notify the DM.
 - **DM session**: `7061c848-e57d-4aee-8fd9-a9bcc459d1b4` (workspace #29
-  Delivery Manager).
+  Delivery Manager) — **handed over to `a13d06a4-6290-41ac-9032-b3b9b229edfe`**
+  at some point during wave 2/3 (peer_check auto-follows the chain; sends to
+  the old id still land correctly). As of 16:05, actively deep in real
+  integration debugging: wiring P4's lock/disguise UI to the real P5b chat
+  view surfaced (1) 4 of P4's own `server-lock.spec.ts` tests failing
+  because they assert the STUB's DOM shape (`.wx-srv-panic`,
+  `.wx-srv-draft-stub`), which stops mounting once the real view replaces
+  it — needs selector updates, not a real regression; (2) a genuine "A → B
+  live delivery" e2e failure, root-caused to B's own message SEND failing
+  (not A's receive) — actively instrumenting. This is normal, expected
+  integration-stage work, not a stall — a lane-monitor "P4 idle" alert on
+  team-status during this period is a false positive (the work is happening
+  in the DM's own session, not delegated back to the P4 builder).
+
+## Update 2026-09-14 (later same session, by the Orchestrator) — decisions answered
+
+- **Decision #973** (keep-vs-change the original PIN): answered, kept.
+- **Decision #975** answered: public repo is fine (no change) · standalone
+  edition's PIN gap OK for now (no change) · **"yes, add delete or wipe"**
+  for messages/chat history — this is NEW SCOPE not in the frozen brief.
+  Orchestrator's read: implement BOTH per-message delete and a full
+  wipe-everything (operator didn't pick one over the other; both is the
+  most complete option and isn't worth blocking on a re-ask). Sent to the
+  Architect to spec as a v1.2 addendum, with an explicit question on
+  whether it can be added without touching the already-frozen store
+  API/HTTP contracts/TS interfaces wave-1 Builders are actively coding
+  against, or whether it needs to land as a late parcel (P7 close-out or a
+  fresh P8) to avoid destabilizing in-flight work. Awaiting the Architect's
+  ruling before this reaches any Builder.
+- **Decision #974 answered**: storage limits fine, no-backup fine, generic
+  push-text fine — no changes. **Gesture correction (important, urgent):**
+  the frozen brief's **R2 is wrong**. Operator: "No, it is different + Single
+  tap. Double tap is anywhere on the chat view to lock it again." Correct
+  reading: the locked "Server" screen reveals "Open server settings" on a
+  **single tap** (not the brief's "rapid multi-tap ≥2 taps"); **R3** (a
+  double-tap-or-more anywhere in the unlocked chat view re-locks it) was
+  already correct, unchanged. Sent urgently to the Architect (errata/v1.3)
+  and to the DM as a heads-up, since P4 (Builder D) was actively coding the
+  wrong R2 reading. **DM caught it fast**: put an immediate hold on Builder
+  D's decoy-tap-reveal detector specifically (rest of P4 unaffected,
+  continuing), waiting on the Architect's official errata text before
+  redirecting further.
+- **Unrelated e2e flake spun off, now FIXED + MERGED**: the DM found + independently
+  confirmed a pre-existing, unrelated flake in `e2e/tests/collection-edit.spec.ts`
+  while clearing P5a. Per the no-stopgap/root-cause doctrine this wasn't left as a
+  dismissed "flake" — spun off into wixy workspace #30 ("anemone-7", session
+  `ed5c0281-a830-4ab8-bdbd-d0b73a2482c7`), fully decoupled from this workspace's
+  branch/scope. **Outcome**: the originally-reported "reorder-timing" symptom
+  never reproduced (55+ clean runs); the REAL, reproduced bug was a server-side
+  concurrency race in `wixy_server`'s draft `overlay.json` (unlocked read/write,
+  Windows `PermissionError`) — fixed by extending the existing `tree_lock()` to
+  every overlay.json access site. Full pytest (1,395) + 50x e2e repro both green
+  post-fix. **Merged**: PR #223, SHA `593837a4f7cdd06614533635d2f1ae2110b38b4f`,
+  branch deleted, decisions/00144-draft-overlay-json-unlocked-rw-race. Fully
+  closed — lane resolved, nothing further to track on this thread.
+- **Both open Architect rulings resolved**: R2 errata v1.3 pushed (`ada8550`)
+  and sent direct to P4 (Builder D) by the Architect — no further action
+  needed. Delete+wipe spec'd as v1.2 addendum sec.17 (`5f29b1f`) — both
+  per-message delete and full wipe, purely additive (no frozen sec.4/5/6
+  changes). Only in-flight impact: amendment A1 to P1 (not yet merged —
+  events CHECK +2 types, nullable `message_seq`, `secure_delete`, stream
+  skip/emit); the rest ships as a new late parcel P8 once P1+P2b+P5b land.
+  Relayed to the DM to route A1 to P1 now and schedule P8. **DM confirmed**:
+  A1 routed to P1 (Builder A) with the exact sec.17.2 text; P8 added as
+  delivery task ord13 (full sec.17 spec), gated on P1+P2b+P5b landing.
+
+## Update 2026-09-14 (later same session) — wave 1 complete, real PIN contract landed
+
+- **Wave 1 all 6 Builders reported finished** (P1/P2a/P3a/P4/P5a/P6a) — P6a
+  already merged (PR #220); DM is processing the rest's FINAL HANDOFFs.
+- **cmd's real PIN-verify contract landed**: PR #3068 open on cmd (full-suite
+  CI running, NOT yet merged/deployed). It genuinely differs from the frozen
+  brief's sec.5.1 placeholder — route is `POST
+  http://127.0.0.1:9320/api/pins/wixy-livechat/verify` (app key in the
+  **path**, plural `pins`, not `/api/pin/verify`), with richer error shapes
+  (401 wrong_pin+attempts_left, 404 unknown_app, 409 pin_changed, 429
+  locked+Retry-After, 503 unavailable) and a strict retry-safety rule
+  (retry ONLY on connection-refused/connect-timeout, since an attempt is
+  charged before evaluation). Lockout: 5 wrong/subject → 60s doubling to
+  24h cap; 20 wrong/app in 15min trips an app-wide lock too. Full text at
+  `http://127.0.0.1:9321/intercomm/5e5cb2dff20f4df781f38af32de38933`.
+  P1's build space was still unmerged, so relayed the real contract straight
+  to P1 (Builder A, session `14dae1f4`) AND to the Architect (for a formal
+  errata correcting sec.5.1) — both urgent, both acked.
+- **Blocker #9 (delivery-merge gate) still OPEN**: cmd's PR is open/CI-running
+  only — not merged, not deployed, PIN not yet registered under
+  `wixy-livechat`. Told the DM explicitly not to treat it as cleared.
+  cmd-side team will self-register using operator decision #973 as
+  authorization once their PR lands; will ping this workspace when live.
+- **New fleet-wide stall on blocker #9**: GitHub billing is refusing to start
+  the "Frontend (pnpm)" required CI check on GitHub-rented runners
+  ("recent account payments have failed or your spending limit needs to be
+  increased") across multiple unrelated cmd workspaces (00869/00824/00854/
+  00875 — not just ours), since ~11:19 today. cmd's repo ruleset requires
+  this check with no bypass, so PR #3068 (the PIN service, otherwise fully
+  green — Python suite passed CI, 3,126-test frontend suite passed locally)
+  cannot merge until this clears. Raised as operator decision #977 (real
+  money / shared-infra tradeoff — pay the GitHub bill vs. move the check to
+  self-hosted Fir vs. both) — correctly left unanswered by every agent
+  including me, since it's a genuine operator-only call. Purely a wait on
+  him now; not something to solve by guessing.
+- **BLOCKER #9 CLEARED** (2026-09-14): cmd PR #3068 merged (`a3baf62d`),
+  cmd-prod deployed, app_key `wixy-livechat` registered (authorized by
+  decision #973, PIN value never passed through this workspace or git).
+  Live-smoke-tested against production: correct PIN → 200 ok; wrong → 401
+  wrong_pin+attempts_left; unknown app → 404; bad format → 400. Contract is
+  UNCHANGED from what was already relayed to P1/Architect (a pre-merge
+  security review found+fixed a lockout-refund race internally, no response
+  shape moved) — no rework needed on wixy's side. Reference:
+  `docs/ai/pin-service.md` in the cmd repo, new fleet skill `pin-service`.
+  Operator can rotate the PIN himself at `cmd.cinnamons.uk/pins`. Told the
+  DM immediately — **delivery merge is no longer blocked once the remaining
+  parcels land.**
+- **GitHub billing recurred** (decision #980, ~1hr after #977 resolved): the
+  account-wide GitHub Actions spending limit ran dry again within ~15 min of
+  being topped up (cmd main-branch CI failed again at 14:29 and 14:38, same
+  "recent account payments have failed" message). Cmd team's options: move
+  the GitHub-hosted `frontend (pnpm)` check onto self-hosted Fir (no more
+  GitHub spend, but makes CI depend on Fir's uptime) vs. raise the spending
+  limit again (keeps the fleet-independent design, costs recur) vs. leave
+  blocked. Same as #977 — a shared-infra/spend tradeoff, genuinely the
+  operator's call, left unanswered by design. **Risk noted for THIS
+  workspace**: the spending limit appears account-wide, not cmd-repo-scoped,
+  so wixy's own remaining CI runs (P2b/P3b/P5b/P6b/P7/P8, and the eventual
+  delivery-merge PR itself) could hit the same wall — nothing has failed on
+  wixy's side yet (PR #223's CI, incl. its own `frontend` check, was fully
+  green), just flagging the exposure for awareness.
+- **Architect formalized the real PIN contract as brief v1.4** (`7df841b`):
+  full cmd↔wixy mapping table, added 409 `pin_changed` to `/unlock`, pinned
+  the retry-safety rule, `lock_scope` deliberately not surfaced to the
+  browser, sub-4-digit PINs rejected client-side so a stray tap can't burn
+  a real attempt. Deploy step + blocker #9 wording updated in the brief.
+  Sent direct to P1. No further action needed — the brief is now the
+  authoritative source, not my earlier paraphrase.
+
+## Update — pause + resume (2026-09-14 17:16 through 2026-09-23 20:33)
+
+- **Operator paused the workspace** ("Pause this work", 2026-09-14 17:16). The
+  Delivery Manager was mid-integration-debug (the "A → B live delivery" bug,
+  root-caused to a P5b test-file gap; fix drafted only in a private scratch
+  worktree, never applied to any real branch). Orchestrator steered the DM
+  to stop, confirmed a clean checkpoint (nothing merged/pushed since, no
+  uncommitted loss), and set delivery_state to `on_hold`.
+- **~9.3 days on hold.** Orchestrator held every recurring lane-monitor alert
+  (wait-expired cycles, allowance walls) throughout with no forward progress
+  — all correctly non-actionable given the explicit pause. One synthetic
+  `[cmd auto-nudge]` message tried to trigger a resume partway through;
+  correctly declined since it wasn't the operator's own words and was
+  factually confused about the actual blocker (pre-pause, already-resolved
+  items).
+- **Operator resumed directly** (2026-09-23 20:33, verbatim: *"Please
+  continue, but handover to Luna 6 XL for all implementation work, and Sol 6
+  non XL to review it"*). Workspace set back to `building`. **NEW MODEL
+  ROUTING for all work from here on**: implementation/Builder dispatches →
+  **Luna 6 XL** (codex provider, model id `gpt-6-luna[xl]`); review passes
+  (FINAL HANDOFF review, code review, audit-style checks) → **Sol 6**
+  (codex provider, model id `gpt-6-sol`, non-XL). Relayed to the DM; applies
+  to new dispatches going forward, not a retroactive redo of in-flight work.
+  Progress unchanged at resume: 7/13 delivery tasks done, nothing lost
+  across the pause.
+
+## Update 2026-09-23 (Orchestrator handover, new seat `b11567bc`) — resume gate + correction
+
+- **Orchestrator seat changed**: `0e9a2c7d` -> `b11567bc` (roster `overlap_session_id`
+  links them). Angel seat `71edb1bf` is active and sweeping; DM `014c0ebc` is idle.
+- **Delivery Manager is deliberately holding** resume + new model routing until
+  decision **#1164** ("Confirm: resume Server chat delivery + new model routing?")
+  shows a genuine operator answer. It verified #1164 exists via cmd's decisions API
+  itself (correct independent channel). Status at this entry: `open`, no answers.
+  Watcher armed on it; on `Yes, confirmed` -> tell the DM to resume the A->B live
+  delivery fix + P4's 4 stale selectors, route NEW implementation to
+  `gpt-6-luna[xl]` (codex) and review to `gpt-6-sol` (codex); no redo of in-flight work.
+- **CORRECTION of the record**: the previous Orchestrator told the DM that the
+  `bleep-test <test@bleep>` commit identity predated 2026-09-14 ("since August").
+  That was FALSE. Verified today: all 41 `bleep-test` commits in the repo are dated
+  2026-09-14 (the day this workspace started, incl. the Orchestrator's own first
+  commit `db8657d`); the repo's earlier history is `Biosphere`/`joshcomley`. The DM's
+  check was right; the claim is retracted (peer-messaged to the DM). The DM's
+  suspicion was reasonable and was answered with better evidence (#1164), not by
+  repeating the claim.
+- **Angel sweep alert (dormant builders, 9 days)** answered: the dormancy was the
+  operator's own hold (9/14 17:16 -> 9/23 20:33), not a stall. Angel asked not to
+  re-dispatch builders or alarm while #1164 is pending.
+- **Decision #1164 ANSWERED by the operator (2026-09-23): "Yes, confirmed"** —
+  resume delivery now; implementation -> Luna 6 XL (`gpt-6-luna[xl]`), review -> Sol 6
+  non-XL (`gpt-6-sol`). Verified via cmd's decisions API (`resolved_by=operator`).
+  DM `014c0ebc` told to go. Remaining: A->B live-delivery fix, P4 selectors, then
+  P6b, P8, P7, delivery merge (named reviewer, CI green, branch current, SHA recorded).
