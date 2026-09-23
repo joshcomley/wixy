@@ -1,9 +1,11 @@
 # Server chat — Architect's technical brief (workspace #29)
 
-Status: **FROZEN v1.4** (Architect, 2026-09-14). v1.1 = operator's zero-PIN-state override
+Status: **FROZEN v1.5** (Architect, 2026-09-14). v1.1 = operator's zero-PIN-state override
 (R4/§5.1); v1.2 = delete + wipe addendum (§17); v1.3 = R2 errata: a single tap reveals
 (decision #974); **v1.4 = cmd's real PIN contract in §5.1 (app key in the path, richer errors,
-retry-safety) + a new 409 `pin_changed` on `/unlock`**. Contracts in §5 are frozen — any change goes
+retry-safety) + a new 409 `pin_changed` on `/unlock`**; **v1.5 = R3 gesture boundaries (a
+tap that opens a menu/sheet may close a double-tap but never open one) + primary button
+only**. Contracts in §5 are frozen — any change goes
 through the Architect (`ask-architect`). Rulings in §1 are binding.
 
 > ⚠️ **Editing this file:** ruff formats Python fenced blocks **inside markdown**, so
@@ -75,6 +77,38 @@ sends and then locks, which is acceptable because it fails closed. Detector:
 - Uses `performance.now()` so Playwright `page.clock` controls it.
 - Is attached to `document` in the capture phase while the panel is mounted.
 - The panel root gets `touch-action: manipulation`.
+- **v1.5 — gesture boundaries** (ruling on P8's question, 2026-09-24). A tap that
+  *opens a new surface under the finger* is the start of a menu flow, not half of a
+  double-tap. Measured on the branch: `gestures.ts` counted the ⋯ trigger tap plus the
+  menu-item tap as a double-tap and locked before the delete confirmation appeared —
+  at Playwright speed every time, and for a quick human too.
+  - **Marker:** every control that opens a sheet, menu, confirm step, dialog or
+    lightbox carries `data-srv-gesture-boundary`.
+  - **Rule ("may close a run, never open one"):** a pointerdown on a boundary target
+    is counted normally first — so it can still complete a double-tap that started
+    elsewhere and lock. If it did not lock, the run is cleared immediately afterwards,
+    so the next tap always starts a fresh count.
+  - **Consequences (each is a test):**
+    - ⋯ → "Delete for everyone" → "Delete" never locks, at any speed.
+    - A double-tap on a bubble or the thread still locks.
+    - A tap elsewhere followed by the ⋯ within 400 ms still locks.
+    - Mashing the ⋯ three or more times still locks (taps 2 and 3 pair).
+    - An exact double-tap that *starts* on a boundary control does not lock. This is
+      the single, deliberate narrowing of R3.
+  - **Primary button only:** a pointerdown with `button !== 0` (a mouse right-click or
+    middle-click) never counts. The right-click is how the desktop action sheet opens
+    (§17.4), so counting it would pair with the menu pick. Touch and pen report
+    `button === 0` and are unaffected.
+  - **Where:** `admin-ui/src/server/gestures.ts` (`createMultiTapDetector`), gaining
+    a `GESTURE_BOUNDARY_SELECTOR` beside `EXCLUDED_SELECTOR`. This is a DOM convention,
+    not a change to any frozen §6 TS interface.
+  - **Controls to mark:** the ones already on the branch — the settings ⚙
+    (`thread.ts`, `wx-srv-settings-button`) and the photo thumbnail that opens the
+    lightbox (`mediaRender.ts`) — plus every P8 control: the message ⋯ trigger, the
+    sheet's "Delete for everyone", and the settings "Delete all messages" row.
+    Final-action buttons (Send, the confirm "Delete", "Delete everything", Close)
+    are **not** boundaries: they open nothing, and a double-tap on them should still
+    lock, per R3's fail-closed choice.
 
 **R4 — The PIN is verified by cmd's PIN service; wixy holds no PIN state (operator override).**
 - `POST /unlock` runs after the CF Access middleware. It forwards the submitted PIN,
@@ -1193,6 +1227,9 @@ Details:
 - The long-press counts as activity. A double-tap on a bubble still locks (R3), and a
   long-press is never a multi-tap.
 - Bubbles set `-webkit-touch-callout: none` so iOS doesn't show its own callout.
+- **Taps inside the flow (v1.5):** the ⋯ trigger, "Delete for everyone" and the settings
+  "Delete all messages" row each carry `data-srv-gesture-boundary` (R3, v1.5), so the
+  open → pick → confirm sequence can never trip the double-tap lock.
 
 **Wipe:** the settings sheet gets a destructive row, "Delete all messages". It uses a
 two-step confirm: "Delete every message, photo, video and voice note for everyone? This can't

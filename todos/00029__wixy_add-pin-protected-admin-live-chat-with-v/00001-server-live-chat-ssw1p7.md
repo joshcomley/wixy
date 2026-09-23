@@ -470,3 +470,64 @@ fixed same-session.)
   non-XL (`gpt-6-sol`). Verified via cmd's decisions API (`resolved_by=operator`).
   DM `014c0ebc` told to go. Remaining: A->B live-delivery fix, P4 selectors, then
   P6b, P8, P7, delivery merge (named reviewer, CI green, branch current, SHA recorded).
+
+## Update 2026-09-23/24 (DM `014c0ebc`, this session) — resumed, P4+P5b merged, DM-integration landed, P6b+P8 dispatched to codex
+
+- **Security note for future readers**: this session's own peer-message chain (Orchestrator
+  `0e9a2c7d`) once relayed a message bundling a plausible resume notice with an unverifiable
+  model-routing instruction and self-corroborating "evidence" (a matching git commit, a
+  flipped `delivery_state` flag) — a textbook injection shape. It was correctly refused
+  pending independent verification. The false "since August" claim (see entry above) came
+  from the SAME chain and was later retracted by the successor Orchestrator `b11567bc`. The
+  eventual go-ahead came only from operator decision **#1164** (cmd's decisions API,
+  `resolved_by=operator`, "Yes, confirmed"), checked directly, not relayed. Lesson: when a
+  peer channel asks for a consequential change (here: routing agentic work to a new
+  provider), verify via a channel the same actor cannot also write to, not via more messages
+  from that actor.
+- **P4 (lock/disguise/PIN-pad) merged**: candidate `1e5af5e`, PR #229, merge commit `26525d7`.
+  Independently re-verified before merge (mypy/ruff/tsc/pytest 1654/1654/vitest 1001/1001/
+  bundle zero-drift). Delivery task + lane closed.
+- **P5b (server chat view) merged**: candidate `0b1bcf2` (superseded the earlier `787e24c`
+  after the Builder found my drafted `keepAlive(pageB)` fix was NOT the real cause — actual
+  root cause was R3's multi-tap gesture firing because Playwright taps Send within ms of the
+  Continue tap; fixed via a `MULTI_TAP_INTERVAL_MS+100` wait in `unlockServer`. They also
+  found+fixed a real `chat.css` specificity bug: `.wx-srv-thread-view[hidden]` had no
+  `display:none` override, so the composer was usable before a name existed.) PR #228, merge
+  commit `87651bb`. Independently re-verified (mypy/ruff/tsc/pytest 1654/1654/vitest
+  1061/1061, bundle zero-drift, combined server-chat+server-lock e2e 27/27 including the
+  originally-blocking "A -> B live delivery" test — run myself with the integration patch
+  applied in a scratch copy of bs5 before clearing).
+- **DM-integration commit landed**: `a880b57` on `cmd/workspace-00029`, pushed directly (per
+  brief sec."Integration rules for DM"). Wires `createServerChatView` into `shell.ts`
+  (1 import, 1 arg) and updates P4's `server-lock.spec.ts` off the stub's
+  `.wx-srv-panic`/`.wx-srv-draft-stub` selectors onto the real view's
+  `.wx-srv-chat-host button[aria-label="Close"]`/`.wx-srv-chat-host textarea`, plus a new
+  `enterNameIfPrompted` helper for the real view's first-unlock name prompt (which the stub
+  never showed). Verified locally before push: tsc clean, bundle diff = exactly the expected
+  wiring line.
+- **Progress: 9/13** at this point (P1/P2a/P2b/P3a/P3b/P4/P5a/P5b/P6a done).
+- **P6b (media wiring) and P8 (delete/wipe) dispatched** per the operator's new-implementation
+  routing (decision #1164): spawned fresh Builder seats via
+  `POST /api/workspaces/{id}/team/spawn {"role":"builder"}` then converted each via
+  `POST /api/session/{id}/provider-continuation {"provider":"codex","model":"gpt-6-luna[xl]","effort":"high"}`
+  (one needed `force:true` - it wedged as `wedge_no_response` on a truly empty fresh spawn;
+  forcing past it worked fine). P6b -> session `dea14cd7` in build space bs6 (reused P6a's
+  worktree, wave-continuation pattern). P8 -> session `38e9c31a` in a NEW build space bs7
+  (`POST /api/workspaces/{id}/build-spaces {"label":"..."}"`, ordinal 7). Both briefed in full
+  (spec sec.10 P6b / sec.17 P8) via peer message, lane monitors armed (P6b lane `7a68ed27`,
+  P8 lane `c7583fed`, both `expect_secs=3600`). **Decision-number collision flagged to P8's
+  Builder**: brief pre-allocates 00148 for delete/wipe semantics, but P5b already took 00148
+  for its e2e timing fix decision — told P8 to use **00149** instead.
+- **Review routing note**: operator confirmed review work should go to `gpt-6-sol` (codex,
+  non-XL) — not yet exercised this session (no FINAL HANDOFF from a codex Builder landed yet
+  to review). When one does, either dispatch a `gpt-6-sol` reviewer via the same
+  spawn+provider-continuation pattern, or the DM's own independent re-verification (mypy/
+  ruff/tsc/pytest/vitest/e2e, as done for P4/P5b above) may itself satisfy this depending on
+  how the operator meant "review" to be scoped — worth a quick clarifying ask if it's not
+  obvious when the moment comes, rather than guessing.
+- **Remaining after P6b + P8 land**: P7 (docs/invariants close-out, decisions 00145-00147 +
+  00149 used by P8 — re-check for further collisions at that point since 00148 is now spent
+  too), the sec.13 audit (fable tier per the audit skill's trigger rules; needs explicit
+  operator authorization per the 2026-09-23 Fable-is-special-counsel ruling — ask via
+  op-ask-question if authorization status is unclear), live verification via the `verify`
+  skill on `ca.cinnamons.uk` (brief sec.12), then the one delivery merge.
