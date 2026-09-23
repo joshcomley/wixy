@@ -416,3 +416,29 @@ fixed same-session.)
   a real attempt. Deploy step + blocker #9 wording updated in the brief.
   Sent direct to P1. No further action needed — the brief is now the
   authoritative source, not my earlier paraphrase.
+
+## Update — pause + resume (2026-09-14 17:16 through 2026-09-23 20:33)
+
+- **Operator paused the workspace** ("Pause this work", 2026-09-14 17:16). The
+  Delivery Manager was mid-integration-debug (the "A → B live delivery" bug,
+  root-caused to a P5b test-file gap; fix drafted only in a private scratch
+  worktree, never applied to any real branch). Orchestrator steered the DM
+  to stop, confirmed a clean checkpoint (nothing merged/pushed since, no
+  uncommitted loss), and set delivery_state to `on_hold`.
+- **~9.3 days on hold.** Orchestrator held every recurring lane-monitor alert
+  (wait-expired cycles, allowance walls) throughout with no forward progress
+  — all correctly non-actionable given the explicit pause. One synthetic
+  `[cmd auto-nudge]` message tried to trigger a resume partway through;
+  correctly declined since it wasn't the operator's own words and was
+  factually confused about the actual blocker (pre-pause, already-resolved
+  items).
+- **Operator resumed directly** (2026-09-23 20:33, verbatim: *"Please
+  continue, but handover to Luna 6 XL for all implementation work, and Sol 6
+  non XL to review it"*). Workspace set back to `building`. **NEW MODEL
+  ROUTING for all work from here on**: implementation/Builder dispatches →
+  **Luna 6 XL** (codex provider, model id `gpt-6-luna[xl]`); review passes
+  (FINAL HANDOFF review, code review, audit-style checks) → **Sol 6**
+  (codex provider, model id `gpt-6-sol`, non-XL). Relayed to the DM; applies
+  to new dispatches going forward, not a retroactive redo of in-flight work.
+  Progress unchanged at resume: 7/13 delivery tasks done, nothing lost
+  across the pause.
