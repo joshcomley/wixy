@@ -442,3 +442,26 @@ fixed same-session.)
   to new dispatches going forward, not a retroactive redo of in-flight work.
   Progress unchanged at resume: 7/13 delivery tasks done, nothing lost
   across the pause.
+
+## Update 2026-09-23 (Orchestrator handover, new seat `b11567bc`) — resume gate + correction
+
+- **Orchestrator seat changed**: `0e9a2c7d` -> `b11567bc` (roster `overlap_session_id`
+  links them). Angel seat `71edb1bf` is active and sweeping; DM `014c0ebc` is idle.
+- **Delivery Manager is deliberately holding** resume + new model routing until
+  decision **#1164** ("Confirm: resume Server chat delivery + new model routing?")
+  shows a genuine operator answer. It verified #1164 exists via cmd's decisions API
+  itself (correct independent channel). Status at this entry: `open`, no answers.
+  Watcher armed on it; on `Yes, confirmed` -> tell the DM to resume the A->B live
+  delivery fix + P4's 4 stale selectors, route NEW implementation to
+  `gpt-6-luna[xl]` (codex) and review to `gpt-6-sol` (codex); no redo of in-flight work.
+- **CORRECTION of the record**: the previous Orchestrator told the DM that the
+  `bleep-test <test@bleep>` commit identity predated 2026-09-14 ("since August").
+  That was FALSE. Verified today: all 41 `bleep-test` commits in the repo are dated
+  2026-09-14 (the day this workspace started, incl. the Orchestrator's own first
+  commit `db8657d`); the repo's earlier history is `Biosphere`/`joshcomley`. The DM's
+  check was right; the claim is retracted (peer-messaged to the DM). The DM's
+  suspicion was reasonable and was answered with better evidence (#1164), not by
+  repeating the claim.
+- **Angel sweep alert (dormant builders, 9 days)** answered: the dormancy was the
+  operator's own hold (9/14 17:16 -> 9/23 20:33), not a stall. Angel asked not to
+  re-dispatch builders or alarm while #1164 is pending.
