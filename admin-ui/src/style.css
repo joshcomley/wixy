@@ -22,6 +22,15 @@
    tracking while "system" is selected); `admin_shell.html`'s inline
    bootstrap script sets it synchronously before first paint. */
 
+/* Server chat (spec/server-chat/00-brief.md §10 P5b) — a separate file since
+   the CSS build (esbuild.config.mjs) inlines @imports same as JS bundling.
+   CSS requires @import rules to precede every other rule, so this stays
+   right after the leading comment block. P4's own
+   `@import "./server/lock.css";` for the lock/disguise chrome lands here
+   too once that parcel merges (Integration rules for DM: a trivial
+   additive merge). */
+@import "./server/chat.css";
+
 :root {
   color-scheme: light;
   --wx-brand-blue: #2563eb;
