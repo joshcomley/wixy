@@ -465,3 +465,8 @@ fixed same-session.)
 - **Angel sweep alert (dormant builders, 9 days)** answered: the dormancy was the
   operator's own hold (9/14 17:16 -> 9/23 20:33), not a stall. Angel asked not to
   re-dispatch builders or alarm while #1164 is pending.
+- **Decision #1164 ANSWERED by the operator (2026-09-23): "Yes, confirmed"** —
+  resume delivery now; implementation -> Luna 6 XL (`gpt-6-luna[xl]`), review -> Sol 6
+  non-XL (`gpt-6-sol`). Verified via cmd's decisions API (`resolved_by=operator`).
+  DM `014c0ebc` told to go. Remaining: A->B live-delivery fix, P4 selectors, then
+  P6b, P8, P7, delivery merge (named reviewer, CI green, branch current, SHA recorded).
