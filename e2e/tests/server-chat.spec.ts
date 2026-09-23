@@ -23,6 +23,9 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
 
+/** Mirrors `MULTI_TAP_INTERVAL_MS` in admin-ui/src/server/constants.ts. */
+const MULTI_TAP_INTERVAL_MS = 400;
+
 async function unlockServer(page: Page, name: string): Promise<void> {
   const configResponse = await page.request.post("/test/server/config");
   const { pin } = (await configResponse.json()) as { pin: string };
@@ -50,6 +53,13 @@ async function unlockServer(page: Page, name: string): Promise<void> {
   await page.locator(".wx-srv-name-prompt-input").fill(name);
   await page.locator(".wx-srv-name-prompt-button").click();
   await expect(page.locator(".wx-srv-thread")).toBeVisible();
+  // R3 (spec §6): two taps inside the chat view less than MULTI_TAP_INTERVAL_MS
+  // apart lock the panel instantly. Playwright will otherwise tap Send within a
+  // few ms of the Continue tap above — far faster than any person — and trip that
+  // panic gesture (measured live: `multiTap chat->decoy` on the Send click, ~2.5s
+  // after page load, nowhere near R7's 10s idle limit). Let the window elapse so
+  // the tests exercise a human tap cadence, not the panic gesture.
+  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
 }
 
 async function seed(
@@ -87,29 +97,39 @@ test.describe("server-chat.spec.ts (P5b)", () => {
     const errorsA = trackConsoleErrors(pageA);
     const errorsB = trackConsoleErrors(pageB);
 
+    // The fixture server (one project per spec file, no per-test reset) keeps every
+    // row a previous run left behind, so this run's texts carry a unique tag — a
+    // fixed string would match the old rows and trip Playwright's strict mode.
+    const tag = `live-delivery-${Date.now()}`;
+    const helloText = `${tag}: hello from Josh`;
+    const replyText = `${tag}: reply from Purdy`;
+
     await unlockServer(pageA, "Josh");
     await unlockServer(pageB, "Purdy");
 
-    await pageA.locator(".wx-srv-thread-view textarea").fill("live-delivery-tag: hello from Josh");
+    await pageA.locator(".wx-srv-thread-view textarea").fill(helloText);
     await pageA.locator(".wx-srv-thread-view .wx-chat-send-button").click();
 
     // The echo paints instantly, then reconciles into the one real bubble —
     // never both at once.
-    const ownBubble = pageA.locator(".wx-srv-bubble-mine").filter({ hasText: "live-delivery-tag: hello from Josh" });
+    const ownBubble = pageA.locator(".wx-srv-bubble-mine").filter({ hasText: helloText });
     await expect(ownBubble).toBeVisible();
     await expect(pageA.locator(".wx-srv-echo")).toBeHidden({ timeout: 3000 });
     expect(await ownBubble.count()).toBe(1);
 
-    const bOwn = pageB.locator(".wx-srv-bubble-theirs").filter({ hasText: "live-delivery-tag: hello from Josh" });
+    const bOwn = pageB.locator(".wx-srv-bubble-theirs").filter({ hasText: helloText });
     await waitVisible(bOwn, pageB);
     await expect(bOwn).toBeVisible({ timeout: 3000 });
     await expect(pageB.locator(".wx-srv-bubble-sender").filter({ hasText: "Josh" })).toBeVisible();
 
     await keepAlive(pageA);
-    await pageB.locator(".wx-srv-thread-view textarea").fill("live-delivery-tag: reply from Purdy");
+    // B has been passive while A acted; a fresh touch keeps R7's 10s idle timer from
+    // firing on a slow machine, mirroring what keepAlive(pageA) does for A's wait.
+    await keepAlive(pageB);
+    await pageB.locator(".wx-srv-thread-view textarea").fill(replyText);
     await pageB.locator(".wx-srv-thread-view .wx-chat-send-button").click();
 
-    const aReply = pageA.locator(".wx-srv-bubble-theirs").filter({ hasText: "live-delivery-tag: reply from Purdy" });
+    const aReply = pageA.locator(".wx-srv-bubble-theirs").filter({ hasText: replyText });
     await waitVisible(aReply, pageA);
     await expect(aReply).toBeVisible({ timeout: 3000 });
 
