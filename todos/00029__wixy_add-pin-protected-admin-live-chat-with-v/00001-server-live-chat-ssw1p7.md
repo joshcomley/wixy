@@ -282,7 +282,19 @@ fixed same-session.)
   app key `wixy-livechat`, brief sec.12 step 1) — the Orchestrator owns
   clearing this and will notify the DM.
 - **DM session**: `7061c848-e57d-4aee-8fd9-a9bcc459d1b4` (workspace #29
-  Delivery Manager).
+  Delivery Manager) — **handed over to `a13d06a4-6290-41ac-9032-b3b9b229edfe`**
+  at some point during wave 2/3 (peer_check auto-follows the chain; sends to
+  the old id still land correctly). As of 16:05, actively deep in real
+  integration debugging: wiring P4's lock/disguise UI to the real P5b chat
+  view surfaced (1) 4 of P4's own `server-lock.spec.ts` tests failing
+  because they assert the STUB's DOM shape (`.wx-srv-panic`,
+  `.wx-srv-draft-stub`), which stops mounting once the real view replaces
+  it — needs selector updates, not a real regression; (2) a genuine "A → B
+  live delivery" e2e failure, root-caused to B's own message SEND failing
+  (not A's receive) — actively instrumenting. This is normal, expected
+  integration-stage work, not a stall — a lane-monitor "P4 idle" alert on
+  team-status during this period is a false positive (the work is happening
+  in the DM's own session, not delegated back to the P4 builder).
 
 ## Update 2026-09-14 (later same session, by the Orchestrator) — decisions answered
 
@@ -404,3 +416,57 @@ fixed same-session.)
   a real attempt. Deploy step + blocker #9 wording updated in the brief.
   Sent direct to P1. No further action needed — the brief is now the
   authoritative source, not my earlier paraphrase.
+
+## Update — pause + resume (2026-09-14 17:16 through 2026-09-23 20:33)
+
+- **Operator paused the workspace** ("Pause this work", 2026-09-14 17:16). The
+  Delivery Manager was mid-integration-debug (the "A → B live delivery" bug,
+  root-caused to a P5b test-file gap; fix drafted only in a private scratch
+  worktree, never applied to any real branch). Orchestrator steered the DM
+  to stop, confirmed a clean checkpoint (nothing merged/pushed since, no
+  uncommitted loss), and set delivery_state to `on_hold`.
+- **~9.3 days on hold.** Orchestrator held every recurring lane-monitor alert
+  (wait-expired cycles, allowance walls) throughout with no forward progress
+  — all correctly non-actionable given the explicit pause. One synthetic
+  `[cmd auto-nudge]` message tried to trigger a resume partway through;
+  correctly declined since it wasn't the operator's own words and was
+  factually confused about the actual blocker (pre-pause, already-resolved
+  items).
+- **Operator resumed directly** (2026-09-23 20:33, verbatim: *"Please
+  continue, but handover to Luna 6 XL for all implementation work, and Sol 6
+  non XL to review it"*). Workspace set back to `building`. **NEW MODEL
+  ROUTING for all work from here on**: implementation/Builder dispatches →
+  **Luna 6 XL** (codex provider, model id `gpt-6-luna[xl]`); review passes
+  (FINAL HANDOFF review, code review, audit-style checks) → **Sol 6**
+  (codex provider, model id `gpt-6-sol`, non-XL). Relayed to the DM; applies
+  to new dispatches going forward, not a retroactive redo of in-flight work.
+  Progress unchanged at resume: 7/13 delivery tasks done, nothing lost
+  across the pause.
+
+## Update 2026-09-23 (Orchestrator handover, new seat `b11567bc`) — resume gate + correction
+
+- **Orchestrator seat changed**: `0e9a2c7d` -> `b11567bc` (roster `overlap_session_id`
+  links them). Angel seat `71edb1bf` is active and sweeping; DM `014c0ebc` is idle.
+- **Delivery Manager is deliberately holding** resume + new model routing until
+  decision **#1164** ("Confirm: resume Server chat delivery + new model routing?")
+  shows a genuine operator answer. It verified #1164 exists via cmd's decisions API
+  itself (correct independent channel). Status at this entry: `open`, no answers.
+  Watcher armed on it; on `Yes, confirmed` -> tell the DM to resume the A->B live
+  delivery fix + P4's 4 stale selectors, route NEW implementation to
+  `gpt-6-luna[xl]` (codex) and review to `gpt-6-sol` (codex); no redo of in-flight work.
+- **CORRECTION of the record**: the previous Orchestrator told the DM that the
+  `bleep-test <test@bleep>` commit identity predated 2026-09-14 ("since August").
+  That was FALSE. Verified today: all 41 `bleep-test` commits in the repo are dated
+  2026-09-14 (the day this workspace started, incl. the Orchestrator's own first
+  commit `db8657d`); the repo's earlier history is `Biosphere`/`joshcomley`. The DM's
+  check was right; the claim is retracted (peer-messaged to the DM). The DM's
+  suspicion was reasonable and was answered with better evidence (#1164), not by
+  repeating the claim.
+- **Angel sweep alert (dormant builders, 9 days)** answered: the dormancy was the
+  operator's own hold (9/14 17:16 -> 9/23 20:33), not a stall. Angel asked not to
+  re-dispatch builders or alarm while #1164 is pending.
+- **Decision #1164 ANSWERED by the operator (2026-09-23): "Yes, confirmed"** —
+  resume delivery now; implementation -> Luna 6 XL (`gpt-6-luna[xl]`), review -> Sol 6
+  non-XL (`gpt-6-sol`). Verified via cmd's decisions API (`resolved_by=operator`).
+  DM `014c0ebc` told to go. Remaining: A->B live-delivery fix, P4 selectors, then
+  P6b, P8, P7, delivery merge (named reviewer, CI green, branch current, SHA recorded).
