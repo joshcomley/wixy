@@ -4,11 +4,10 @@
 // multi-tap has no meaning there any more. R3 (multi-tap locks the chat
 // view) is unchanged).
 //
-// Runs against P4's own stub `ServerChatView` (`.wx-srv-thread`, a
-// `.wx-srv-draft-stub` textarea, a `.wx-srv-panic` button) — P5b's real
-// thread view hasn't landed yet (wave 2); the stub deliberately honours the
-// same class-name contract so every assertion here stays correct once the
-// real view replaces it at DM integration.
+// Runs against whichever `ServerChatView` is wired into the panel: P4's stub
+// or P5b's real one. The selectors below (`.wx-srv-thread`, the chat host's
+// textarea, its `aria-label="Close"` panic button) are valid for both. The
+// real view's first-unlock name prompt is handled once, inside `enterPin`.
 //
 // `page.clock.install()` before every `goto` (per the brief's own e2e
 // note): once installed, virtual time never advances between two
@@ -93,6 +92,24 @@ async function enterPin(page: Page, pin: string): Promise<void> {
   );
   await pad.getByRole("button", { name: "✓", exact: true }).click();
   await unlockResponse;
+  if (pin === TEST_PIN) await enterNameIfPrompted(page);
+}
+
+/** The real chat view asks for a display name the first time a browser
+ * unlocks (spec §6); once saved, later unlocks skip it, and the stub never
+ * asks. Under `page.clock` a Continue tap and the next tap read as 0 ms apart
+ * on `performance.now()` — R3's multi-tap — unless virtual time is advanced
+ * past `MULTI_TAP_INTERVAL_MS` first. */
+async function enterNameIfPrompted(page: Page): Promise<void> {
+  const prompt = page.locator(".wx-srv-name-prompt");
+  // `:visible` scopes each side to what is actually shown: the thread element
+  // exists in the DOM (inside a hidden parent) while the name prompt is up.
+  await expect(page.locator(".wx-srv-name-prompt:visible, .wx-srv-thread:visible")).toBeVisible();
+  if (!(await prompt.isVisible())) return;
+  await page.locator(".wx-srv-name-prompt-input").fill("Tester");
+  await page.locator(".wx-srv-name-prompt-button").click();
+  await expect(page.locator(".wx-srv-thread")).toBeVisible();
+  await page.clock.runFor(401);
 }
 
 for (const profile of DEVICE_PROFILES) {
@@ -247,7 +264,7 @@ for (const profile of DEVICE_PROFILES) {
         // Panic.
         await revealAndOpenPinPad(page);
         await enterPin(page, TEST_PIN);
-        await page.locator(".wx-srv-panic").click();
+        await page.locator('.wx-srv-chat-host button[aria-label="Close"]').click();
         await expect(page.locator(".wx-srv-thread")).toHaveCount(0);
 
         // R3: a double-tap anywhere in the chat view locks.
@@ -261,7 +278,7 @@ for (const profile of DEVICE_PROFILES) {
         // R3's exclusion: a double-tap inside the draft textarea must not.
         await revealAndOpenPinPad(page);
         await enterPin(page, TEST_PIN);
-        const draft = page.locator(".wx-srv-draft-stub");
+        const draft = page.locator(".wx-srv-chat-host textarea");
         await draft.click();
         await draft.click();
         await expect(page.locator(".wx-srv-thread")).toBeVisible();
@@ -341,14 +358,14 @@ for (const profile of DEVICE_PROFILES) {
       await withServerPage(browser, profile, async (page) => {
         await revealAndOpenPinPad(page);
         await enterPin(page, TEST_PIN);
-        await page.locator(".wx-srv-draft-stub").fill("an unsent thought");
+        await page.locator(".wx-srv-chat-host textarea").fill("an unsent thought");
 
-        await page.locator(".wx-srv-panic").click();
+        await page.locator('.wx-srv-chat-host button[aria-label="Close"]').click();
         await expect(page.locator(".wx-srv-thread")).toHaveCount(0);
 
         await revealAndOpenPinPad(page);
         await enterPin(page, TEST_PIN);
-        await expect(page.locator(".wx-srv-draft-stub")).toHaveValue("an unsent thought");
+        await expect(page.locator(".wx-srv-chat-host textarea")).toHaveValue("an unsent thought");
       });
     });
   });

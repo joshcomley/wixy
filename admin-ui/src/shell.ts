@@ -28,6 +28,7 @@ import { PUBLISH_STAGE_LABELS } from "./publishStages";
 import { canonicalizeUrl, currentRoute, navigateTo, onRouteChange, routeToPath, sameRoute, type Route } from "./router";
 import { mountSectionPanel, type SectionPanel } from "./sectionPanel";
 import { mountServerPanel as mountServerPanelReal, type ServerPanel, type ServerPanelDeps } from "./server/panel";
+import { createServerChatView } from "./server/chatView";
 import { captureScreenshot, copyBlobToClipboard, downloadBlob, flashScreen, screenshotFilename } from "./screenshot";
 import { clearLastRoute, loadLastRoute, saveLastRoute } from "./sessionState";
 import { mountSettingsPanel } from "./settingsPanel";
@@ -1055,7 +1056,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     }
 
     if (route.kind === "server") {
-      const panel = createServerPanel({ api, win });
+      const panel = createServerPanel({ api, win, createServerChatView });
       main.appendChild(panel.element);
       activePanelTeardown = () => panel.teardown();
       return;
