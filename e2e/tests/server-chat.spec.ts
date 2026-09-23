@@ -2,8 +2,8 @@
 // P5b, §11's e2e matrix). Assumes P4's lock/decoy/PIN-pad and this parcel's
 // real `createServerChatView` are both wired in (DM integration) — before
 // that, `mountServerPanel`'s default stub shows "Server chat is coming
-// soon." instead, and these specs fail at the `.wx-srv-thread` assertion in
-// `unlockServer`.
+// soon." with no first-unlock name prompt, and every spec here fails at the
+// `.wx-srv-name-prompt` assertion in `unlockServer`.
 //
 // Every helper/assertion here was verified against the REAL, integrated
 // stack (P1's backend + P4's real lock UI + this parcel) during development,
