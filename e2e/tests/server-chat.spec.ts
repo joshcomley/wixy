@@ -30,8 +30,15 @@ async function unlockServer(page: Page, name: string): Promise<void> {
   const configResponse = await page.request.post("/test/server/config");
   const { pin } = (await configResponse.json()) as { pin: string };
 
-  await page.goto("/admin/pages");
-  await page.locator('.wx-nav-item[data-route-kind="server"]').click();
+  // Deep-link straight to the panel rather than loading /admin/pages and clicking
+  // the nav item: the shell re-renders the current route once its first
+  // /api/admin/state answers (shell.ts loadState → handleRoute), which tears down
+  // the panel the click just mounted — and any tap on it. On a slow or busy machine
+  // that lands after the test's first tap (measured: `MOUNT#1 | tap:decoy>revealed |
+  // TEARDOWN#1 | lock:routeAway | MOUNT#2`), leaving a fresh decoy with a hidden
+  // button. A deep link renders the route exactly once. (server-lock.spec.ts does
+  // the same; nav-click behaviour is covered there.)
+  await page.goto("/admin/server");
   await expect(page.locator(".wx-srv-decoy")).toBeVisible();
   await expect(page.locator(".wx-srv-affordance")).toBeHidden();
 
