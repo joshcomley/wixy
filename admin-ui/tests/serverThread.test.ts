@@ -2,17 +2,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HistoryPage, Message, SendMessageResult } from "../src/server/api/messages";
 import type { ServerIdentity } from "../src/server/identity";
 import { mountServerThread } from "../src/server/thread";
+import type { UploadAttachment } from "../src/server/upload";
 import type { ServerStreamEvent } from "../src/server/stream";
 import type { LockHooks, ServerSession } from "../src/server/types";
 
-const { getHistory, sendMessage } = vi.hoisted(() => ({
+const { getHistory, sendMessage, uploadServerAttachment } = vi.hoisted(() => ({
   getHistory: vi.fn(),
   sendMessage: vi.fn(),
+  uploadServerAttachment: vi.fn(),
 }));
 vi.mock("../src/server/api/messages", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/server/api/messages")>()),
   getHistory,
   sendMessage,
+}));
+vi.mock("../src/server/api/uploads", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/server/api/uploads")>()),
+  uploadServerAttachment,
 }));
 
 const SESSION: ServerSession = { token: "tok", expiresAt: 9_999_999_999 };
@@ -66,6 +72,7 @@ describe("mountServerThread", () => {
   beforeEach(() => {
     getHistory.mockReset();
     sendMessage.mockReset();
+    uploadServerAttachment.mockReset();
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -119,6 +126,45 @@ describe("mountServerThread", () => {
       expect(input.clientId).toBe("generated-uuid-1234"); // exactly one cryptoRandomId() call
       view.teardown();
     });
+  });
+
+  it("sends staged attachment IDs and keeps an upload alive across detach/attach", async () => {
+    getHistory.mockResolvedValue(emptyHistory());
+    sendMessage.mockResolvedValue({ ok: true, message: fakeMessage({
+      clientId: "generated-uuid-1234",
+      text: null,
+      attachments: [{
+        id: "attachment-1", kind: "photo", status: "processing", width: null, height: null,
+        durationS: null, peaks: null, urls: {},
+      }],
+    }) } satisfies SendMessageResult);
+    let resolveUpload!: (value: UploadAttachment) => void;
+    uploadServerAttachment.mockReturnValue(new Promise((resolve) => { resolveUpload = resolve; }));
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+    await view.attach(SESSION);
+
+    const input = view.element.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const file = new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" });
+    Object.defineProperty(input, "files", { value: [file], configurable: true });
+    input.dispatchEvent(new Event("change"));
+    await flush();
+    const [, , , uploadOptions] = uploadServerAttachment.mock.calls[0] as [File, "photo", ServerSession, { signal: AbortSignal }];
+
+    view.detach();
+    expect(uploadOptions.signal.aborted).toBe(false);
+    resolveUpload({
+      id: "attachment-1", kind: "photo", status: "processing", width: null, height: null,
+      durationS: null, peaks: null, urls: {},
+    });
+    await flush();
+    await view.attach(SESSION);
+    view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")?.click();
+    await flush();
+
+    const [, sent] = sendMessage.mock.calls[0] as [ServerSession, { attachmentIds: string[] }];
+    expect(sent.attachmentIds).toEqual(["attachment-1"]);
+    expect(view.element.querySelector(".wx-srv-bubble-mine .wx-srv-attachment-processing")?.textContent).toBe("Processing…");
+    view.teardown();
   });
 
   describe("send() — optimistic echo", () => {
@@ -305,7 +351,9 @@ describe("mountServerThread", () => {
     it("the settings button calls onSettings", () => {
       const onSettings = vi.fn();
       const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings });
-      view.element.querySelector<HTMLButtonElement>(".wx-srv-settings-button")?.click();
+      const settingsButton = view.element.querySelector<HTMLButtonElement>(".wx-srv-settings-button");
+      expect(settingsButton?.hasAttribute("data-srv-gesture-boundary")).toBe(true);
+      settingsButton?.click();
       expect(onSettings).toHaveBeenCalledTimes(1);
       view.teardown();
     });

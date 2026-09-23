@@ -48,12 +48,17 @@ export async function serverFetch(
     headers.set("X-Wixy-Server-Token", session.token);
   }
   const controller = new AbortController();
+  const externalSignal = init.signal ?? undefined;
+  const abortFromCaller = () => controller.abort(externalSignal?.reason);
+  if (externalSignal?.aborted) abortFromCaller();
+  else externalSignal?.addEventListener("abort", abortFromCaller, { once: true });
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   let response: Response;
   try {
     response = await fetch(`${SERVER_API_BASE}${path}`, { ...init, headers, signal: controller.signal });
   } finally {
     clearTimeout(timer);
+    externalSignal?.removeEventListener("abort", abortFromCaller);
   }
   if (response.status === 401 && session !== null) {
     throw new ServerLockedError();

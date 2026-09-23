@@ -57,4 +57,16 @@ describe("serverFetch", () => {
     const response = await serverFetch("/messages", {}, { token: "tok", expiresAt: 0 });
     expect(response.status).toBe(503);
   });
+
+  it("propagates an upload caller's abort signal through the timeout wrapper", async () => {
+    fetchMock.mockImplementationOnce((_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+      }),
+    );
+    const caller = new AbortController();
+    const request = serverFetch("/uploads", { signal: caller.signal }, { token: "tok", expiresAt: 0 });
+    caller.abort();
+    await expect(request).rejects.toBeDefined();
+  });
 });

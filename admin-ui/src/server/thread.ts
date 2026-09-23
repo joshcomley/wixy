@@ -11,10 +11,12 @@ import { mountChatComposer } from "../chatComposer";
 import { mountChatThreadScroll, type ChatThreadScroll } from "../chatThreadScroll";
 import { mountLightbox, type Lightbox } from "../lightbox";
 import { ServerLockedError } from "./api/http";
+import { uploadServerAttachment } from "./api/uploads";
 import { getHistory, sendMessage, type Message } from "./api/messages";
 import type { ServerIdentity } from "./identity";
 import { linkifyInto } from "./linkify";
 import { renderAttachments } from "./mediaRender";
+import { createVoiceRecorder, type VoiceRecorder } from "./recorder";
 import type { ServerStreamEvent } from "./stream";
 import type { LockHooks, ServerSession } from "./types";
 
@@ -103,6 +105,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   settingsButton.textContent = "⚙";
   settingsButton.title = "Settings";
   settingsButton.setAttribute("aria-label", "Settings");
+  settingsButton.setAttribute("data-srv-gesture-boundary", "");
   settingsButton.addEventListener("click", () => deps.onSettings());
   const panicButton = documentRef.createElement("button");
   panicButton.type = "button";
@@ -147,23 +150,159 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
 
   const threadScroll: ChatThreadScroll = mountChatThreadScroll(thread, jumpPill);
   const lightbox: Lightbox = mountLightbox();
+  let currentSession: ServerSession | null = null;
+  let voiceRecorder: VoiceRecorder | null = null;
+  let composer: ChatComposer;
+  const voiceDurations = new WeakMap<File, number>();
 
-  const composer: ChatComposer = mountChatComposer({
+  const recordButton = documentRef.createElement("button");
+  recordButton.type = "button";
+  recordButton.className = "wx-srv-record-button";
+  recordButton.textContent = "🎤";
+  recordButton.title = "Record a voice note";
+  recordButton.setAttribute("aria-label", "Record a voice note");
+  const cancelRecordingButton = documentRef.createElement("button");
+  cancelRecordingButton.type = "button";
+  cancelRecordingButton.className = "wx-srv-record-cancel";
+  cancelRecordingButton.textContent = "Cancel";
+  cancelRecordingButton.hidden = true;
+  const recordingStatus = documentRef.createElement("span");
+  recordingStatus.className = "wx-srv-record-status";
+  recordingStatus.hidden = true;
+  recordingStatus.setAttribute("role", "status");
+  recordingStatus.setAttribute("aria-live", "polite");
+
+  function formatRecordingTime(milliseconds: number): string {
+    const seconds = Math.floor(Math.max(0, milliseconds) / 1000);
+    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  }
+
+  function updateRecorderUi(elapsedMs = voiceRecorder?.elapsedMs ?? 0): void {
+    const state = voiceRecorder?.state ?? "idle";
+    const active = state !== "idle";
+    cancelRecordingButton.hidden = !active;
+    recordButton.disabled = state === "starting" || state === "stopping";
+    if (state === "recording") {
+      recordButton.textContent = "■";
+      recordButton.title = "Stop recording";
+      recordButton.setAttribute("aria-label", "Stop recording");
+      recordingStatus.hidden = false;
+      recordingStatus.textContent = `Recording ${formatRecordingTime(elapsedMs)}`;
+    } else if (state === "starting") {
+      recordButton.textContent = "🎤";
+      recordButton.title = "Waiting for microphone";
+      recordButton.setAttribute("aria-label", "Waiting for microphone");
+      recordingStatus.hidden = false;
+      recordingStatus.textContent = "Waiting for microphone…";
+    } else if (state === "stopping") {
+      recordingStatus.hidden = false;
+      recordingStatus.textContent = "Saving voice note…";
+    } else {
+      recordButton.textContent = "🎤";
+      recordButton.title = "Record a voice note";
+      recordButton.setAttribute("aria-label", "Record a voice note");
+      recordingStatus.hidden = true;
+      recordingStatus.textContent = "";
+    }
+  }
+
+  function createRecorder(): VoiceRecorder {
+    return createVoiceRecorder({
+      hooks,
+      onTimer: (elapsedMs) => updateRecorderUi(elapsedMs),
+      onStop: (recording) => {
+        // MediaRecorder may add codec parameters (for example
+        // `audio/webm;codecs=opus`), while §5.5's declared-MIME allowlist is
+        // the container type (`audio/webm`). The bytes are still sniffed and
+        // decoded by the server's processing pipeline.
+        const mimeType = recording.mimeType.split(";")[0] || "audio/webm";
+        const extension = mimeType.includes("mp4") ? "m4a" : mimeType.includes("ogg") ? "ogg" : "webm";
+        const file = new File([recording.blob], `voice-note.${extension}`, { type: mimeType });
+        voiceDurations.set(file, recording.durationMs / 1000);
+        composer.addFile(file);
+        updateRecorderUi();
+      },
+      onCancel: () => updateRecorderUi(),
+      onError: () => {
+        composer.setError("Microphone access failed. Check the browser permission and try again.");
+        updateRecorderUi();
+      },
+    });
+  }
+
+  function activeRecorder(): VoiceRecorder {
+    voiceRecorder ??= createRecorder();
+    return voiceRecorder;
+  }
+
+  recordButton.addEventListener("click", () => {
+    if (currentSession === null) return;
+    const recorder = activeRecorder();
+    if (recorder.state === "idle") {
+      const started = recorder.start();
+      updateRecorderUi();
+      void started.finally(() => updateRecorderUi());
+    } else if (recorder.state === "recording") {
+      recorder.stop();
+      updateRecorderUi();
+    }
+  });
+  cancelRecordingButton.addEventListener("click", () => {
+    voiceRecorder?.cancel();
+    updateRecorderUi();
+  });
+
+  composer = mountChatComposer({
     mode: "composer",
     placeholder: "Message…",
     submitLabel: "Send",
     win,
-    // Attachments are wired in by P6b (spec/server-chat/00-brief.md §10) —
-    // the 📎 button stays hidden by default (setAttachmentsSupported is
-    // simply never called true), so this is never actually invoked.
-    upload: () => Promise.reject(new Error("Attachments aren't available yet.")),
+    accept: "image/*,video/*",
+    acceptFile: (file) => file.type.startsWith("image/") || file.type.startsWith("video/"),
+    onFilePickerOpen: () => hooks.suspend("filePicker"),
+    extraButtons: [recordButton, cancelRecordingButton, recordingStatus],
+    renderChipPreview: (file, previewUrl) => {
+      if (file.type.startsWith("image/")) {
+        const thumb = documentRef.createElement("img");
+        thumb.className = "wx-chat-attachment-thumb";
+        thumb.src = previewUrl;
+        thumb.alt = "";
+        return thumb;
+      }
+      const label = documentRef.createElement("span");
+      label.className = "wx-srv-attachment-chip-label";
+      label.textContent = file.type.startsWith("audio/") ? "🎤 Voice note" : "🎞 Video";
+      return label;
+    },
+    upload: async (file, context) => {
+      const session = currentSession;
+      if (session === null) throw new Error("Unlock Server before adding media.");
+      const kind = file.type.startsWith("audio/") ? "voice" : file.type.startsWith("video/") ? "video" : "photo";
+      const durationS = voiceDurations.get(file);
+      try {
+        const attachment = await uploadServerAttachment(file, kind, session, {
+          signal: context.signal,
+          ...(durationS === undefined ? {} : { durationS }),
+          onProgress: context.onProgress,
+        });
+        return { attachmentId: attachment.id, width: attachment.width, height: attachment.height };
+      } catch (error) {
+        if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+        throw error;
+      }
+    },
     onSubmit: () => send(),
   });
+  composer.setAttachmentsSupported(true);
+  const attachButton = composer.element.querySelector<HTMLButtonElement>(".wx-chat-attach-button");
+  if (attachButton !== null) {
+    attachButton.title = "Attach a photo or video";
+    attachButton.setAttribute("aria-label", "Attach a photo or video");
+  }
   element.appendChild(composer.element);
 
   // -- State ---------------------------------------------------------------
 
-  let currentSession: ServerSession | null = null;
   let historyLoaded = false;
   let historyLoading = false;
   let hasMoreHistory = false;
@@ -342,7 +481,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       sender: identity.getName() ?? "",
       deviceId: identity.getDeviceId(),
       text: text === "" ? null : text,
-      attachmentIds: [],
+      attachmentIds: composer.attachmentIds(),
     })
       .then((result) => {
         composer.setBusy(false);
@@ -373,6 +512,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
 
   async function attach(session: ServerSession): Promise<number | null> {
     currentSession = session;
+    if (voiceRecorder === null) voiceRecorder = createRecorder();
     if (historyLoaded) return null;
     historyErrorRow.hidden = true;
     try {
@@ -401,6 +541,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     attach,
     detach(): void {
       currentSession = null;
+      voiceRecorder?.detach();
+      voiceRecorder = null;
+      updateRecorderUi();
       lightbox.teardown();
       // ServerChatView.detach()'s contract: pause media and exit fullscreen
       // — a lock (panic/idle/escape/…) mid-playback must never leave audio
@@ -408,7 +551,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       for (const media of messageList.querySelectorAll("audio, video")) {
         (media as HTMLMediaElement).pause();
       }
-      if (documentRef.fullscreenElement !== null) {
+      if (documentRef.fullscreenElement != null && typeof documentRef.exitFullscreen === "function") {
         void documentRef.exitFullscreen().catch(() => {});
       }
     },
@@ -440,6 +583,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     refreshNameChip,
     teardown(): void {
       currentSession = null;
+      voiceRecorder?.detach();
+      voiceRecorder = null;
       observer?.disconnect();
       lightbox.teardown();
       threadScroll.teardown();

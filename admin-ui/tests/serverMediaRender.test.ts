@@ -30,7 +30,9 @@ describe("server attachment rendering", () => {
     const ctx = context();
     const root = renderAttachments([base], ctx);
     expect(root.querySelector("img")?.getAttribute("src")).toBe("/thumb");
-    root.querySelector<HTMLButtonElement>("button")?.click();
+    const photoButton = root.querySelector<HTMLButtonElement>("button");
+    expect(photoButton?.hasAttribute("data-srv-gesture-boundary")).toBe(true);
+    photoButton?.click();
     expect(ctx.openLightbox).toHaveBeenCalledWith("/full", "Attached photo");
   });
 
