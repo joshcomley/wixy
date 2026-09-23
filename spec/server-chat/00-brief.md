@@ -1,11 +1,12 @@
 # Server chat — Architect's technical brief (workspace #29)
 
-Status: **FROZEN v1.5** (Architect, 2026-09-14). v1.1 = operator's zero-PIN-state override
+Status: **FROZEN v1.5.1** (Architect, 2026-09-14). v1.1 = operator's zero-PIN-state override
 (R4/§5.1); v1.2 = delete + wipe addendum (§17); v1.3 = R2 errata: a single tap reveals
 (decision #974); **v1.4 = cmd's real PIN contract in §5.1 (app key in the path, richer errors,
 retry-safety) + a new 409 `pin_changed` on `/unlock`**; **v1.5 = R3 gesture boundaries (a
 tap that opens a menu/sheet may close a double-tap but never open one) + primary button
-only**. Contracts in §5 are frozen — any change goes
+only**; v1.5.1 = boundaries are not test cadence (no e2e waits for menu flows) + decision
+numbers no longer pre-allocated. Contracts in §5 are frozen — any change goes
 through the Architect (`ask-architect`). Rulings in §1 are binding.
 
 > ⚠️ **Editing this file:** ruff formats Python fenced blocks **inside markdown**, so
@@ -99,6 +100,16 @@ sends and then locks, which is acceptable because it fails closed. Detector:
     middle-click) never counts. The right-click is how the desktop action sheet opens
     (§17.4), so counting it would pair with the menu pick. Touch and pen report
     `button === 0` and are unaffected.
+  - **Not a test-cadence problem** (v1.5.1, answering whether e2e waits could replace
+    this). `decisions/00148` covers taps on *unrelated* controls (name-prompt Continue,
+    then Send) that only a test is fast enough to pair; spacing those in specs is
+    correct and stays. A menu flow is different: the next surface appears under the
+    finger, and a practised person opens a menu and taps an item in roughly 300–400 ms.
+    On desktop the right-click that opens the menu is itself a counted pointerdown
+    today, so the pick can pair with it. Both happen to real users at human speed.
+    Waits in `server-chat.spec.ts` would hide the defect, not fix it, so **the
+    open → pick → confirm e2e runs at full Playwright speed with no added waits**.
+    That test is the regression proof that the boundary works.
   - **Where:** `admin-ui/src/server/gestures.ts` (`createMultiTapDetector`), gaining
     a `GESTURE_BOUNDARY_SELECTOR` beside `EXCLUDED_SELECTOR`. This is a DOM convention,
     not a change to any frozen §6 TS interface.
@@ -989,11 +1000,16 @@ Waves:
   the cmd PIN-service dependency (app key, registration via cmd, 503 when cmd is down).
 - `testing.md`: the new specs, ffmpeg in CI, `page.clock`.
 - `glossary.md`: decoy, unlock token, lock causes.
-- **Decisions** (numbers pre-allocated; re-check for collisions at merge):
-  - 00144 server-chat architecture (SSE-over-fetch, SQLite, token model, disguise, zero PIN state via the cmd PIN service)
-  - 00145 media pipeline (single rendition, chunked uploads, ffmpeg hardening, quota)
-  - 00146 push (payloadless VAPID, Android-only, generic text)
-  - 00147 lock and gesture model (the R2/R3/R6/R7 readings)
+- **Decisions** — **no pre-allocated numbers** (v1.5.1: the earlier 00144–00148
+  reservations were overtaken; 00144 and 00148 are already used by other entries).
+  Each entry takes the next free number (max+1 across `decisions/`) at the moment it is
+  committed:
+  - server-chat architecture (SSE-over-fetch, SQLite, token model, disguise, zero PIN
+    state via the cmd PIN service)
+  - media pipeline (single rendition, chunked uploads, ffmpeg hardening, quota)
+  - push (payloadless VAPID, Android-only, generic text)
+  - lock and gesture model (the R2/R3/R6/R7 readings, including the v1.5 gesture
+    boundaries and primary-button rule)
 
 ### Integration rules for DM
 
@@ -1280,7 +1296,7 @@ mobile):
 - a `livechat.md` section on delete and wipe, with the honest filesystem limit
 - `contracts.md` gets the two routes and two events
 - invariant **46** in `invariants.md`
-- decision **00148** (delete/wipe semantics: hard delete, no tombstone, anyone-can-delete,
+- a decision entry, next free number at commit time (delete/wipe semantics: hard delete, no tombstone, anyone-can-delete,
   scrubbing)
 
 **Audit (§13) gains:**
