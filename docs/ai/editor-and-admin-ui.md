@@ -225,7 +225,10 @@ re-renders from that loop never close an open drawer — only genuine route chan
 decisions/00081); `versionBadge.ts` (the status bar's deploy-awareness badge + its
 themed reload-confirmation dialog — detailed in the status-bar paragraph above);
 `router.ts` (path routes, decisions/00087: pages/edit/theme/
-media/chat/history/settings/section/social); `pagesPanel.ts` + `pageSettingsDrawer.ts` (`meta.*` editing);
+media/chat/history/settings/section/social/server — the last of these is the disguised
+"Server" live-chat panel, deliberately placed LAST in `NAV_ROUTES` and documented in full in
+[livechat.md](livechat.md) rather than here, since it's a whole separate subsystem with its
+own auth gate, not an editor/admin-UI feature); `pagesPanel.ts` + `pageSettingsDrawer.ts` (`meta.*` editing);
 `socialImagesPanel.ts` (`/admin/social`, decisions/00134) — the bulk, one-screen twin of
 `pageSettingsDrawer.ts`'s per-page "Social image" field: every page in one table (thumbnail,
 label falling back to slug, a per-row "Choose image" button), plus a "Use one image for all

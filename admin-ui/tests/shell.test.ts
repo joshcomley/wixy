@@ -4,6 +4,7 @@ import type { Shell } from "../src/shell";
 import type { AdminApi, PublishJobData, PublishOutcome, ServerVersion, StateResponse } from "../src/api";
 import type { ChatPanel, ChatPanelDeps } from "../src/chatPanel";
 import type { EditView, MountEditViewDeps } from "../src/editView";
+import type { ServerPanel, ServerPanelDeps } from "../src/server/panel";
 import type { DraftOp } from "../src/protocol";
 
 /** jsdom has no `EventSource`, and shell tests below confirm a publish from the
@@ -904,6 +905,89 @@ describe("mountShell", () => {
     goTo(win, "/admin/pages");
 
     expect(chatPanel.teardownCount).toBe(1);
+  });
+
+  interface FakeServerPanelHandle {
+    mountCount: number;
+    teardownCount: number;
+    fn: (deps: ServerPanelDeps) => ServerPanel;
+  }
+
+  /** The real `mountServerPanel` attaches document-level capture-phase
+   * Pointer Event listeners (spec/server-chat/00-brief.md §6/R3) for the
+   * lifetime of the mount — a real mount left un-torn-down across shell
+   * tests would leak those into later specs, so route tests that don't
+   * specifically exercise the server panel's own behaviour inject this
+   * instead, mirroring `fakeMountChatPanel`'s own reason for existing. */
+  function fakeMountServerPanel(): FakeServerPanelHandle {
+    const handle: FakeServerPanelHandle = {
+      mountCount: 0,
+      teardownCount: 0,
+      fn: () => {
+        handle.mountCount += 1;
+        return {
+          element: document.createElement("div"),
+          teardown: () => {
+            handle.teardownCount += 1;
+          },
+        };
+      },
+    };
+    return handle;
+  }
+
+  it("the nav shows 'Server' LAST — spec/server-chat/00-brief.md §10 P4: a disguised entry, not a draw-the-eye one", async () => {
+    const api = fakeApi();
+    const win = fakeWindow();
+    const container = document.createElement("div");
+
+    mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+    await flushState(api);
+
+    const labels = Array.from(container.querySelectorAll<HTMLElement>(".wx-nav-item")).map(
+      (el) => el.textContent,
+    );
+    expect(labels[labels.length - 1]).toBe("Server");
+  });
+
+  it("/admin/server mounts the real server panel (not a stub) via the injectable seam", async () => {
+    const api = fakeApi();
+    const win = fakeWindow();
+    const container = document.createElement("div");
+    const serverPanel = fakeMountServerPanel();
+
+    mountShell(container, {
+      api,
+      win,
+      mountEditView: fakeMountEditView().fn,
+      mountServerPanel: serverPanel.fn,
+    });
+    await flushState(api);
+
+    goTo(win, "/admin/server");
+
+    expect(serverPanel.mountCount).toBe(1);
+    expect(container.querySelector(".wx-coming-soon")).toBeNull();
+  });
+
+  it("navigating away from /admin/server tears down the server panel", async () => {
+    const api = fakeApi();
+    const win = fakeWindow();
+    const container = document.createElement("div");
+    const serverPanel = fakeMountServerPanel();
+
+    mountShell(container, {
+      api,
+      win,
+      mountEditView: fakeMountEditView().fn,
+      mountServerPanel: serverPanel.fn,
+    });
+    await flushState(api);
+
+    goTo(win, "/admin/server");
+    goTo(win, "/admin/pages");
+
+    expect(serverPanel.teardownCount).toBe(1);
   });
 
   it("the History route renders the real history panel, not a stub", async () => {

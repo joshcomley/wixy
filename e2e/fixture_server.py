@@ -41,6 +41,15 @@ WIXY_REPO_ROOT = E2E_DIR.parent
 MINI_SITE_FIXTURE = WIXY_REPO_ROOT / "builder" / "tests" / "fixtures" / "mini-site"
 PORT = int(os.environ.get("WIXY_E2E_PORT", "8799"))
 
+# spec/server-chat/00-brief.md §11: "the fixture's FakeCmdServer registers a
+# made-up test PIN for the app key". Matches settings.py's own
+# `_DEFAULT_SERVER_PIN_APP_KEY` — the fixture never sets
+# `WIXY_SERVER_PIN_APP_KEY`, so `create_app`'s default resolves to this same
+# value; kept as a literal here (rather than imported) so this file has no
+# reach into `wixy_server.settings`'s private constant.
+TEST_SERVER_PIN_APP_KEY = "wixy-livechat"
+TEST_SERVER_PIN = "246813"
+
 sys.path.insert(0, str(WIXY_REPO_ROOT))
 
 from builder.build import build_site  # noqa: E402
@@ -48,6 +57,7 @@ from builder.config import ProjectConfig  # noqa: E402
 from wixy_server.chats import find_chat  # noqa: E402
 from wixy_server.checkout import current_sha, ensure_checkout  # noqa: E402
 from wixy_server.cmdchat import CmdChatClient  # noqa: E402
+from wixy_server.livechat.pinclient import CmdPinVerifier  # noqa: E402
 from wixy_server.registry import load_registry  # noqa: E402
 from wixy_server.site_source import build_site_source  # noqa: E402
 from wixy_server.storage import ProjectPaths, ensure_project_dirs, project_paths  # noqa: E402
@@ -297,6 +307,9 @@ def main() -> None:
 
     os.environ["WIXY_DEV_NO_AUTH"] = "1"
     os.environ["WIXY_ENV"] = "dev"
+    # spec/server-chat/00-brief.md §11: exercises the chunked-upload path
+    # (413/409/missing-chunk cases) without multi-megabyte fixture uploads.
+    os.environ["WIXY_SERVER_UPLOAD_CHUNK_BYTES"] = "65536"
 
     registry = load_registry(wixy_repo_root)
     _publish_initial_build(registry.get("e2e"), storage_root, "e2e")
@@ -322,9 +335,37 @@ def main() -> None:
         readiness_timeout_s=10.0,
     )
 
+    # spec/server-chat/00-brief.md §11: the Server chat's PIN-verify double.
+    # Deliberately a SECOND, INDEPENDENT `FakeCmdServer` instance (own
+    # uvicorn thread + port) rather than reusing `fake_cmd_server` above —
+    # `chat-ux.spec.ts`'s offline-banner test does a ONE-WAY
+    # `/test/chat/stop-fake-cmd` as the LAST thing it does, documented there
+    # as safe only because "no other spec file touches chat/cmd" (a Python
+    # `Thread` can only ever be started once, so that stop has no clean
+    # restart). This spec file is now a second consumer, so sharing the same
+    # instance would leave PIN verification permanently broken for every
+    # later spec file in the same `workers:1` run once chat-ux's test has
+    # run (found live: 12/20 server-lock.spec.ts tests failing with a
+    # consistent 503 "pin_service_unavailable" whenever run after
+    # chat-ux.spec.ts). Same underlying `FakeCmdState` (so
+    # `register_pin_app`'s data lives in one place regardless), fully
+    # independent server lifecycle — nothing chat-ux does can affect it.
+    fake_pin_server = FakeCmdServer(fake_cmd_state)
+    fake_pin_port = fake_pin_server.start()
+    fake_cmd_state.register_pin_app(TEST_SERVER_PIN_APP_KEY, TEST_SERVER_PIN)
+    # `create_app`'s own default `CmdPinVerifier` points at the REAL cmd
+    # loopback base URL (Inv 13) — the fixture must point it at the fake
+    # instead, same app key `create_app` would otherwise have resolved from
+    # settings (TEST_SERVER_PIN_APP_KEY matches that default, see above).
+    pin_verifier = CmdPinVerifier(
+        app_key=TEST_SERVER_PIN_APP_KEY,
+        base_url=f"http://127.0.0.1:{fake_pin_port}",
+    )
+
     app = create_app(
         storage_root=storage_root,
         wixy_repo_root=wixy_repo_root,
+        pin_verifier=pin_verifier,
         # No E2E flow depends on the PERIODIC watcher tick (spec/04 §7) — E2E 6's
         # own simulated upstream commit fetches directly (this file's
         # `/test/simulate-upstream-commit`, decisions/00030), never waiting on
@@ -342,6 +383,15 @@ def main() -> None:
         watcher_interval_s=3600.0,
         cmdchat_client=cmdchat_client,
     )
+
+    @app.post("/test/server/reset-pin-lockout", include_in_schema=False)
+    async def _post_reset_pin_lockout() -> dict[str, bool]:
+        """spec/server-chat/00-brief.md §11: `server-lock.spec.ts`'s lockout
+        test drives 5 wrong PINs to trigger cmd's fake lockout, then needs a
+        clean slate for the NEXT test in the same run (the fake's lockout
+        state persists across specs — there's no per-test fixture restart)."""
+        fake_cmd_state.reset_pin_lockout(TEST_SERVER_PIN_APP_KEY)
+        return {"ok": True}
 
     @app.post("/test/simulate-upstream-commit", include_in_schema=False)
     async def _post_simulate_upstream_commit(payload: dict[str, str]) -> dict[str, str]:

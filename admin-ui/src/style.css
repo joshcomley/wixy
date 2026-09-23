@@ -1,3 +1,10 @@
+/* The "Server" panel's disguise/lock chrome (spec/server-chat/00-brief.md §6)
+   — its own file since it's a large, self-contained feature. CSS requires
+   @import statements to precede every other rule, hence up here rather than
+   grouped with the rest of this panel's mentions further down; esbuild's CSS
+   build (esbuild.config.mjs) inlines it same as JS bundling. */
+@import "./server/lock.css";
+
 /* Admin shell layout (spec/05-editor.md §1's ASCII diagram: top bar + left nav +
    main panel). admin_shell.html's own inline <style> covers the pre-JS instant
    loading screen; this covers the real, JS-mounted UI.
@@ -5188,3 +5195,4 @@ div.wx-media-thumb {
     padding: 6px 5px;
   }
 }
+

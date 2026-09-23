@@ -27,6 +27,7 @@ import { mountPublishDrawer } from "./publishDrawer";
 import { PUBLISH_STAGE_LABELS } from "./publishStages";
 import { canonicalizeUrl, currentRoute, navigateTo, onRouteChange, routeToPath, sameRoute, type Route } from "./router";
 import { mountSectionPanel, type SectionPanel } from "./sectionPanel";
+import { mountServerPanel as mountServerPanelReal, type ServerPanel, type ServerPanelDeps } from "./server/panel";
 import { captureScreenshot, copyBlobToClipboard, downloadBlob, flashScreen, screenshotFilename } from "./screenshot";
 import { clearLastRoute, loadLastRoute, saveLastRoute } from "./sessionState";
 import { mountSettingsPanel } from "./settingsPanel";
@@ -59,6 +60,7 @@ const PUBLISH_WATCH_MAX_POLLS = 600;
 
 type MountEditViewFn = (page: string, deps: MountEditViewDeps) => EditView;
 type MountChatPanelFn = (conversation: string | null, deps: ChatPanelDeps) => ChatPanel;
+type MountServerPanelFn = (deps: ServerPanelDeps) => ServerPanel;
 
 export interface ShellDeps {
   api?: AdminApi;
@@ -69,6 +71,11 @@ export interface ShellDeps {
    * mounts, which jsdom doesn't implement; mirrors `mountEditView`'s own
    * injectable pattern (there for the same reason: a real iframe). */
   mountChatPanel?: MountChatPanelFn;
+  /** Overridable for tests — the real implementation attaches document-level
+   * Pointer Event listeners in the capture phase (spec/server-chat/00-brief.md
+   * §6/R3) that a mounted-but-never-torn-down fake in a test suite would leak
+   * across specs; mirrors `mountChatPanel`'s own injectable pattern. */
+  mountServerPanel?: MountServerPanelFn;
 }
 
 export interface Shell {
@@ -89,6 +96,9 @@ const NAV_ROUTES: Array<{ route: Route; label: string }> = [
   { route: { kind: "media" }, label: "Media" },
   { route: { kind: "chat", conversation: null }, label: "Chat" },
   { route: { kind: "history" }, label: "History" },
+  // spec/server-chat/00-brief.md §10 P4: LAST in the list, deliberately —
+  // this is a disguised entry point, not something to draw the eye.
+  { route: { kind: "server" }, label: "Server" },
 ];
 
 export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell {
@@ -96,6 +106,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   const win = deps.win ?? window;
   const createEditView = deps.mountEditView ?? mountEditViewReal;
   const createChatPanel = deps.mountChatPanel ?? mountChatPanelReal;
+  const createServerPanel = deps.mountServerPanel ?? mountServerPanelReal;
 
   // Page thumbnails (decisions/00078): captures happen client-side, serially;
   // the triggers below keep them fresh (backfill on 404, after accepted ops,
@@ -1038,6 +1049,13 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
 
     if (route.kind === "chat") {
       const panel = createChatPanel(route.conversation, { api, win });
+      main.appendChild(panel.element);
+      activePanelTeardown = () => panel.teardown();
+      return;
+    }
+
+    if (route.kind === "server") {
+      const panel = createServerPanel({ api, win });
       main.appendChild(panel.element);
       activePanelTeardown = () => panel.teardown();
       return;

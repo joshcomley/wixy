@@ -74,3 +74,30 @@ describe("style.css structural sanity", () => {
     expect(styleCss).toMatch(/\.wx-drawer\s*\{[^}]*position:\s*fixed/s);
   });
 });
+
+describe("server/lock.css: a hidden overlay must actually stop intercepting clicks", () => {
+  // Found live via e2e (not vitest — jsdom never lays anything out, so
+  // `el.hidden` reading `true` there proves nothing about real click
+  // interception): `[hidden]`'s UA-stylesheet `display:none` and a class
+  // selector's own `display` have EQUAL specificity, so the class's rule —
+  // being later in the cascade — silently wins regardless of the attribute.
+  // `.wx-srv-chat-host`/`.wx-srv-pinpad-host` cover the decoy via
+  // `position:absolute`, so this exact trap made a real Playwright click on
+  // the decoy land on the "hidden" chat overlay instead. Guard: any rule
+  // targeting these classes without a `:not([hidden])` qualifier must never
+  // set `display`.
+  it("never sets display on .wx-srv-chat-host/.wx-srv-pinpad-host outside a :not([hidden]) guard", () => {
+    const lockCss = readFileSync(join(SRC_DIR, "server", "lock.css"), "utf-8");
+    for (const block of lockCss.split("}")) {
+      const braceIndex = block.indexOf("{");
+      if (braceIndex === -1) continue;
+      const selector = block.slice(0, braceIndex);
+      const body = block.slice(braceIndex + 1);
+      const targetsHost = /\.wx-srv-(chat|pinpad)-host\b/.test(selector);
+      const isGuarded = selector.includes(":not([hidden])");
+      if (targetsHost && !isGuarded) {
+        expect(body).not.toMatch(/display\s*:/);
+      }
+    }
+  });
+});

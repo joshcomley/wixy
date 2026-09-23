@@ -44,6 +44,10 @@ describe("parseHash", () => {
     expect(parseHash("#/chat/abc123")).toEqual({ kind: "chat", conversation: "abc123" });
   });
 
+  it("parses #/server", () => {
+    expect(parseHash("#/server")).toEqual({ kind: "server" });
+  });
+
   it("parses #/settings and every settings sub-page", () => {
     expect(parseHash("#/settings")).toEqual({ kind: "settings", page: "general" });
     expect(parseHash("#/settings/appearance")).toEqual({ kind: "settings", page: "appearance" });
@@ -82,6 +86,7 @@ describe("routeToHash", () => {
       { kind: "settings", page: "engine" },
       { kind: "settings", page: "ai" },
       { kind: "social" },
+      { kind: "server" },
     ];
     for (const route of routes) {
       expect(parseHash(routeToHash(route))).toEqual(route);
@@ -142,6 +147,10 @@ describe("parsePath", () => {
     expect(parsePath("/admin/chat/abc123")).toEqual({ kind: "chat", conversation: "abc123" });
   });
 
+  it("parses /admin/server", () => {
+    expect(parsePath("/admin/server")).toEqual({ kind: "server" });
+  });
+
   it("parses /admin/settings and every settings sub-page", () => {
     expect(parsePath("/admin/settings")).toEqual({ kind: "settings", page: "general" });
     expect(parsePath("/admin/settings/appearance")).toEqual({ kind: "settings", page: "appearance" });
@@ -186,6 +195,7 @@ describe("routeToPath", () => {
       { kind: "settings", page: "system" },
       { kind: "section", id: "before-after" },
       { kind: "social" },
+      { kind: "server" },
     ];
     for (const route of routes) {
       expect(parsePath(routeToPath(route))).toEqual(route);
@@ -194,6 +204,7 @@ describe("routeToPath", () => {
     expect(routeToPath({ kind: "edit", page: "about" })).toBe("/admin/edit/about");
     expect(routeToPath({ kind: "pages" })).toBe("/admin/pages");
     expect(routeToPath({ kind: "social" })).toBe("/admin/social");
+    expect(routeToPath({ kind: "server" })).toBe("/admin/server");
   });
 });
 
