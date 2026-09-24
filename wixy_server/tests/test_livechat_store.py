@@ -61,6 +61,39 @@ class TestMigrations:
         assert store.import_legacy_scrub_marker() == "legacy-marker-token"
         assert not marker.exists()
 
+    def test_unreadable_legacy_marker_still_creates_durable_pending_row(
+        self, store: LiveChatStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        marker = store._legacy_scrub_pending_path()
+        marker.parent.mkdir(parents=True)
+        marker.write_text("owed-legacy-scrub", encoding="ascii")
+        real_read_text = Path.read_text
+        denied = False
+
+        def deny_once(
+            path: Path,
+            encoding: str | None = None,
+            errors: str | None = None,
+            newline: str | None = None,
+        ) -> str:
+            nonlocal denied
+            if path == marker and not denied:
+                denied = True
+                raise PermissionError("legacy marker is temporarily held")
+            return real_read_text(path, encoding=encoding, errors=errors, newline=newline)
+
+        monkeypatch.setattr(Path, "read_text", deny_once)
+        token = store.import_legacy_scrub_marker()
+
+        assert denied
+        assert token is not None
+        assert store.scrub_pending_token() == token
+        assert marker.exists()
+
+        monkeypatch.setattr(Path, "read_text", real_read_text)
+        assert store.import_legacy_scrub_marker() == token
+        assert not marker.exists()
+
     def test_pending_scrub_is_rolled_back_with_its_transaction(self, store: LiveChatStore) -> None:
         with pytest.raises(RuntimeError, match="abort test transaction"):
             with store._write_txn() as conn:

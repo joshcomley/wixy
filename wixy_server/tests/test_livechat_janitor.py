@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from wixy_server.livechat import janitor
+from wixy_server.livechat.models import AttachmentResult, UploadRow
 from wixy_server.livechat.store import LiveChatStore
 from wixy_server.livechat.uploads import init_upload
 from wixy_server.storage import ProjectPaths
@@ -68,6 +69,54 @@ class TestStaleUploads:
         assert not paths.server_upload_dir(old_id).exists()
         assert store.get_upload(fresh_id) is not None
         assert paths.server_upload_dir(fresh_id).exists()
+
+
+class TestReadyUploadCleanup:
+    def test_ready_attachment_does_not_retain_a_raw_upload(
+        self, store: LiveChatStore, paths: ProjectPaths
+    ) -> None:
+        now = 1_000_000.0
+        att_id = "f" * 32
+        store.create_attachment(att_id=att_id, kind="photo", now=now)
+        store.create_upload(
+            UploadRow(
+                id=att_id,
+                kind="photo",
+                mime="image/jpeg",
+                size_bytes=10,
+                filename=None,
+                by_email=None,
+                created_at=now,
+            )
+        )
+        claimed = store.claim_processing(owner="ready-cleanup", now=now, lease_s=120.0)
+        assert claimed is not None
+        store.finish_attachment(
+            att_id=att_id,
+            owner="ready-cleanup",
+            result=AttachmentResult(
+                status="ready",
+                mime="image/jpeg",
+                width=1,
+                height=1,
+                duration_s=None,
+                peaks=None,
+                renditions=("full",),
+                bytes_on_disk=1,
+                failure=None,
+            ),
+            now=now + 1.0,
+        )
+        upload_dir = paths.server_upload_dir(att_id)
+        upload_dir.mkdir(parents=True)
+        source = upload_dir / "assembled"
+        source.write_bytes(b"raw private source")
+
+        janitor.run_once(store=store, paths=paths, now=now + 2.0)
+
+        assert store.get_upload(att_id) is None
+        assert not source.exists()
+        assert not upload_dir.exists()
 
 
 class TestOrphanAttachments:

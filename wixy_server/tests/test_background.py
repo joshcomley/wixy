@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 import anyio
 import pytest
 
@@ -63,3 +65,18 @@ async def test_one_shot_failure_does_not_cancel_later_work() -> None:
         await anyio.sleep(0)
         assert health.consecutive_failures("push-dispatch") == 1
         task_group.cancel_scope.cancel()
+
+
+def test_degraded_health_expires_after_five_minutes_without_a_new_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    health = BackgroundTaskHealth()
+    for _ in range(3):
+        health.failed("livechat-media", ran_for_s=0.0)
+    assert health.media_degraded()
+
+    last_failure_at = time.time()
+    monkeypatch.setattr(time, "time", lambda: last_failure_at + 301.0)
+
+    assert health.consecutive_failures("livechat-media") == 0
+    assert not health.media_degraded()

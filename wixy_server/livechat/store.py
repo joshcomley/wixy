@@ -618,6 +618,12 @@ class LiveChatStore:
             _LOGGER.exception(
                 "Could not read legacy Server chat scrub marker; retrying next startup"
             )
+            with self._write_txn() as conn:
+                conn.execute(
+                    "INSERT INTO pending_scrub(singleton, token) VALUES (1, ?) "
+                    "ON CONFLICT(singleton) DO NOTHING",
+                    (uuid.uuid4().hex,),
+                )
             return self.scrub_pending_token()
 
         token = legacy_token or uuid.uuid4().hex
@@ -1035,6 +1041,16 @@ class LiveChatStore:
                 "WHERE a.status = 'failed' ORDER BY a.updated_at, a.id"
             ).fetchall()
             return [(str(row["id"]), float(row["updated_at"])) for row in rows]
+
+    def ready_upload_cleanup_candidates(self) -> list[str]:
+        """Ready attachments that still retain their raw staged upload files."""
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT a.id FROM attachments AS a "
+                "JOIN uploads AS u ON u.id = a.id "
+                "WHERE a.status = 'ready' ORDER BY a.id"
+            ).fetchall()
+            return [str(row["id"]) for row in rows]
 
     def expire_failed_original_if_still_unarchived(
         self, att_id: str, *, older_than: float, now: float

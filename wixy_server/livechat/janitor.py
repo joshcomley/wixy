@@ -54,6 +54,13 @@ def run_once(*, store: LiveChatStore, paths: ProjectPaths, now: float) -> Janito
             )
             orphan_attachments += 1
 
+    for att_id in store.ready_upload_cleanup_candidates():
+        # Processing has already produced the ready renditions, so the raw
+        # source has no diagnostic-retention value. Keep the deletion journaled
+        # if Windows temporarily denies the filesystem cleanup.
+        store.delete_upload(att_id)
+        cleanup_deleted_storage_once(store=store, paths=paths, only_items={("upload", att_id)})
+
     failed_archive_candidates = store.failed_original_archive_candidates()
     if failed_archive_candidates:
         # Import lazily: media_queue uses the janitor's cleanup helper locally.

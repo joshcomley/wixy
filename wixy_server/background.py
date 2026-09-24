@@ -39,7 +39,9 @@ class BackgroundTaskHealth:
 
     def consecutive_failures(self, name: str) -> int:
         failure = self._failures.get(name)
-        return failure.consecutive_failures if failure is not None else 0
+        if failure is None or time.time() - failure.last_failure_at >= _HEALTHY_RESET_S:
+            return 0
+        return failure.consecutive_failures
 
     def last_failure_at(self, name: str) -> float | None:
         failure = self._failures.get(name)

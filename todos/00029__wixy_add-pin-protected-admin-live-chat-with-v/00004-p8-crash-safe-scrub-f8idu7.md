@@ -47,3 +47,13 @@ The round-7 archive retention finding now has a red/green regression: a denied `
 Local verification: Ruff check/format and mypy over 208 sources pass; strict admin typecheck passes; Admin Vitest 1,095/1,095; focused backend slice 227/227; full Python suite 1,709/1,709; Server chat Playwright 7/7. The DM still owns the required five consecutive full-suite runs, fresh Sol review, and sec.13 audit. No push/PR.
 
 The verified implementation is committed locally with the required `Release-note:` trailer. Send the final exact head SHA to DM and Orchestrator and wait for their review/acceptance. Do not push or run sec.13.
+
+## Round 9 update — final Sol findings from the round-8 pass
+
+Three additional review gaps are now fixed on top of the round-8 candidate:
+
+- If an existing legacy `scrub.pending` file raises `OSError` on startup read, the store creates a synthesized `pending_scrub` row with `ON CONFLICT DO NOTHING` and leaves the file for a later startup retry. This prevents owed scrub work from disappearing during a transient Windows sharing denial.
+- Health reads now report zero consecutive failures after 300 seconds without another failure, so `mediaProcessing` recovers while a supervised loop is healthy rather than waiting for a later failure.
+- The hourly janitor now finds ready attachments that still have upload rows, deletes those raw upload rows/files immediately, and leaves deletion journaled if filesystem cleanup fails. Ready renditions need no raw-source retention window.
+
+Regression tests first failed on the existing code, then passed after the fixes. Ruff check and `ruff format --check` pass; mypy passes across 208 sources; focused background/store/janitor slice passes 71/71. The DM's five-run full-suite acceptance and remaining Sol review continue independently on a detached snapshot. This round does not touch that snapshot. No push/PR; section 13 remains DM-owned.

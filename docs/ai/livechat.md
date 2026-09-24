@@ -349,6 +349,8 @@ DB row backing them). It rechecks orphan/upload eligibility in the delete transa
 filesystem cleanup only when that conditional delete succeeds. It also prunes completed erasure
 tombstones older than seven days, never pending ones. `run_once` takes an explicit `now`, never
 reads the clock — every age threshold is test-driven, not slept through.
+It also deletes staged raw uploads left behind on ready attachments; those sources have no
+diagnostic-retention window once safe renditions exist.
 
 The same module's `run_scrubber_forever` is a separately supervised app-lifetime task. It resumes
 the database-backed scrub marker at startup and attempts `TRUNCATE` every two seconds until the WAL

@@ -627,6 +627,7 @@ recorded without cancelling sibling work. Supervised loops restart with bounded 
 backoff; three consecutive failures in the livechat media or erasure worker mark media processing
 as degraded. The main and standalone worker apps use the same wrapper. Media-queue items and push
 recipients are isolated within their inner task groups, so one item failure leaves siblings
-running. The wrapper exposes no raw `start_soon` method.
+running. A recovered loop's failure count reads as zero after five minutes without another
+failure. The wrapper exposes no raw `start_soon` method.
 *Enforced by:* `wixy_server/tests/test_background.py`, `test_routes_system.py`, worker-app tests,
 and strict mypy.
