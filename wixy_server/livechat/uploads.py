@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import shutil
 import uuid
 from collections.abc import AsyncIterator, Callable
@@ -29,6 +30,12 @@ from wixy_server.storage import ProjectPaths
 
 _MiB = 1024 * 1024
 _GiB = 1024 * _MiB
+
+# `upload_id` is always server-generated via `uuid.uuid4().hex` (see `init_upload`
+# below) and is never meant to reach the filesystem unvalidated: `server_upload_dir`
+# is a plain path join with no normalization, so an id of ".." resolves to the
+# parent `server/` directory (DB, secret.key, vapid.json, every attachment's media).
+_UPLOAD_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 MAX_UPLOAD_BYTES: dict[AttachmentKind, int] = {
     "photo": 30 * _MiB,
@@ -311,6 +318,8 @@ def cancel_upload(*, store: LiveChatStore, paths: ProjectPaths, upload_id: str) 
     contract defines no error case). Once `/complete` has promoted the id to an
     attachment, there's nothing left here to cancel — the queue now owns the
     staged file — so this is a no-op rather than disturbing a claim in flight."""
+    if not _UPLOAD_ID_RE.fullmatch(upload_id):
+        return
     if store.get_attachment(upload_id) is not None:
         return
     store.delete_upload(upload_id)
