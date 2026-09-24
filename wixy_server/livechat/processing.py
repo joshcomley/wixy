@@ -16,7 +16,7 @@ still additionally pins `-f <demuxer> -protocol_whitelist file` as defense in
 depth against ffmpeg's own format auto-detection.
 
 Storage layout (§4) this module's outputs are named for:
-    media/<id[:2]>/<id>/  full.{jpg|png|gif}  thumb.jpg   (photo)
+    media/<id[:2]>/<id>/  full.{jpg|png|gif}  thumb.{jpg|png}   (photo)
                           play.mp4  poster.jpg             (video)
                           play.m4a                         (voice)
 """
