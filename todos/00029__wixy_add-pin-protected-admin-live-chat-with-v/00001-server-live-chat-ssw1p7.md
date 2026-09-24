@@ -747,3 +747,96 @@ fixed same-session.)
   upload-cancel path-traversal bug (decision 00150) and the Sol 6 review layer that
   caught it; (2) the quota-wall episodes and how they were resolved; (3) the delete/wipe
   parcel needed a crash-safe erasure journal after review.
+
+## Update 2026-09-24 (DM `014c0ebc`) — P8 erasure model: 4 fix rounds + Architect holistic review
+
+- **P8's erasure/retry machinery went through 4 fix-forward rounds**, each closing one
+  real race the dedicated `gpt-6-sol` reviewer (session chain `66e9c490` → `d7bc1d78`,
+  handed over mid-review) found - genuinely new issues each round, not the same bug
+  resurfacing:
+  1. `fb6b463f` - crash-resumable erasure via a durable per-ID journal
+     (`deleted_storage` table) written in the SAME transaction as the delete/wipe
+     mutation; `GET /media/{attId}/{rendition}` now checks `store.get_attachment()`
+     before serving, so a deleted attachment 404s even if Windows couldn't unlink the
+     file yet. This is the fix for the original 2 CRITICAL findings from the previous
+     candidate (see the earlier update - DB-commit-before-file-delete, and
+     `rmtree(ignore_errors=True)` hiding a still-servable deleted file).
+  2. `b01d74b4` (via `a3a9a63` first) - fixed 2 scaling MEDIUMs: a partial SQL index
+     (schema v4) so the retry worker only re-checks genuinely-pending tombstones, not
+     every one ever created; scoped the expensive full-tree orphan scan to
+     startup/active-wipe only instead of every 2s tick.
+  3. `f60c8e75` - fixed a NEW HIGH the scan-scoping change introduced: a late/cancelled
+     chunk write racing past a just-completed cleanup could leave private bytes on disk
+     with no recovery path during normal uptime (only a restart's startup scan would
+     catch it) - fixed via `anyio.CancelScope(shield=True)` around the
+     write+check+cleanup sequence in `put_chunk`. Also fixed the wipe/delete
+     scrub-marker race (route vs. background worker both clearing/reading the marker
+     unsynchronized) via a new `store.scrub_guard()` (`threading.Lock` shared between
+     both call sites) - this one I found myself via my own pytest run, not the reviewer.
+  4. `b153be23` - fixed a CONCURRENT variant of the late-write race (not
+     cancellation-based - two genuinely separate requests): `cleanup_deleted_storage_once`
+     removed a file then unconditionally cleared its pending bit, so a late write's
+     requeue landing in that gap got silently erased. Fixed via schema v5 (`generation`
+     column on `deleted_storage`, bumped on every requeue) + true compare-and-clear
+     (`UPDATE ... WHERE generation = ? AND cleanup_pending = 1`) - the same
+     optimistic-concurrency pattern the codebase already used for `scrub_pending_token`.
+  Round 4 was independently Sol-reviewer-CLEARED (0 critical/high/medium) and my own
+  mechanical verification was green (mypy/ruff/tsc, pytest 1688/1688, vitest 1095/1095,
+  bundle zero-drift).
+- **Before clearing round 4, the Orchestrator (correctly) flagged the pattern**: 4
+  rounds each surfacing a new race in the same area smells like point-fixes chasing a
+  deeper design gap. Asked me to get a holistic Architect review of the WHOLE erasure
+  concurrency model rather than just accepting the latest clean per-round review - this
+  was the right call, see below. Also flagged: stop running e2e+pytest simultaneously
+  on hub (load-induced flakes) and move repeated e2e runs to a grid node (fir) instead
+  of hub going forward.
+- **Architect holistic review (candidate `b153be23`) - genuinely caught things the
+  per-round reviews missed**: verdict is the model DOES hold together as one coherent
+  discipline (same-txn durability + compare-and-clear + "rows are authority" +
+  enumerate-before-read + one idempotent worker) - P8's tombstone design is explicitly
+  ENDORSED over the Architect's own alternative `erasure_jobs` sketch, no schema
+  redesign needed. But 3 REQUIRED fixes before merge:
+  - **R1** (privacy ordering): `notifier.publish()` fires only AFTER file cleanup
+    completes, so other open clients keep showing deleted content for the whole cleanup
+    window instead of immediately. Fix: publish immediately after the DB commit, before
+    any file work.
+  - **R2** (MEASURED, not theoretical): `store.scrub()`'s `busy_timeout` is set to the
+    WHOLE remaining deadline (up to 10s) for one TRUNCATE attempt - if that attempt is
+    waiting on a stale reader, it blocks every OTHER writer for the whole wait. Architect
+    measured on hub directly: one 3000ms attempt made a concurrent INSERT fail "database
+    is locked" after 1.58s; slicing into 250ms attempts in a loop let it succeed in
+    0.16s. Real bug affecting ordinary concurrent sends/uploads during any delete/wipe
+    racing a stale reader.
+  - **R3** (deadline accounting): the `scrub_guard()` lock-acquire wait isn't counted
+    against the request's own deadline, so a request can silently exceed its promised
+    10s bound. Fix: `Lock.acquire(timeout=remaining)`.
+  Plus 2 low-severity same-PR items: **L1** janitor deletes are unconditional (a
+  pre-existing P2b-era race, now flagged since it's part of this path) - needs a
+  conditional `WHERE ... AND message_seq IS NULL` style guard; **L2** completed
+  tombstones are never pruned (permanent DB bloat even for ordinary non-wipe deletes) -
+  needs the hourly janitor to prune `cleanup_pending=0 AND deleted_at < now-7d`.
+  All 5 relayed to the Builder in one batch, full detail + exact tests specified at
+  `http://127.0.0.1:9321/intercomm/2f34df5ccf3c4bffae63257029bbf774` (may expire).
+- **Merge-time note (mine to handle, not the Builder's)**: P8's branch independently
+  edited `spec/server-chat/00-brief.md` into a second "v1.5.4" that conflicts with the
+  v1.5.4 already on the feature branch (`0d7d439`, the Architect's own erasure_jobs
+  sketch). At merge: take P8's hunks for that conflict. The Architect will commit a
+  fresh v1.5.5 rewrite of section 17 themselves immediately after, describing the
+  actually-implemented tombstone+token+marker model. P8 makes no further brief edits.
+- **e2e flake diagnosis, closed out properly**: the recurring `server-media.spec.ts`
+  video/voice test flakes (P6b's candidates too) are genuine host contention, not a
+  code or test-quality issue - proved via 4 total isolated single-test runs (3 pass,
+  1 fail), and confirmed the test already polls the real DOM ready-state
+  (`waitForRenderedAttachments`, 120×250ms) rather than using a fixed sleep. The
+  Orchestrator independently measured hub's true load (psutil, 3s window): all 32 cores
+  at 100%, attributable mostly to unrelated baseline tenants (VMs 27%, python 26%,
+  Defender 6%), not to this delivery's own test/build activity. Going forward: move
+  repeated e2e runs to a grid node rather than hub; don't run e2e and pytest
+  simultaneously on hub.
+- **Progress unchanged at 10/13** (P8 still "doing", now on its 5th fix round covering
+  R1/R2/R3/L1/L2). P4/P5b/P6b all merged and closed. Once P8 lands: P7 (docs closeout,
+  decisions 00145-00147 + 00149 P8 + whatever P8 itself used - re-check the decisions/
+  directory for the actual next free number at that point), then the sec.13 audit
+  (opus tier per the audit skill, given this now involves schema migrations - v3→v4→v5
+  - security/auth-adjacent surface, and concurrency design - all independently qualify),
+  live verification via the `verify` skill, then the one delivery merge.
