@@ -583,21 +583,24 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     if (!reconcileWithoutClearing) clearAfterWipe();
     const refreshGeneration = contentGeneration;
     const refreshRevision = contentRevision;
-    try {
-      const page = await getHistory(session, { limit: HISTORY_PAGE_SIZE });
-      if (refreshGeneration !== contentGeneration || refreshRevision !== contentRevision) {
-        return scrubPending;
-      }
-      if (reconcileWithoutClearing) clearAfterWipe();
-      for (const message of page.messages) addConfirmed(message);
-      hasMoreHistory = page.hasMore;
-      renderThreadList(false);
-    } catch {
-      // A second wipe event may have arrived while reconciling. Its handler
-      // already cleared the view; otherwise preserve live events received since
-      // the refresh began instead of replacing them with a failed snapshot.
-      if (refreshGeneration !== contentGeneration) return scrubPending;
-    }
+    // Reconciliation is deliberately detached from this promise: a pending
+    // scrub must reach the settings sheet immediately so it can show 202 status
+    // and poll /usage without waiting on another history request.
+    void getHistory(session, { limit: HISTORY_PAGE_SIZE })
+      .then((page) => {
+        if (
+          currentSession !== session
+          || refreshGeneration !== contentGeneration
+          || refreshRevision !== contentRevision
+        ) return;
+        if (reconcileWithoutClearing) clearAfterWipe();
+        for (const message of page.messages) addConfirmed(message);
+        hasMoreHistory = page.hasMore;
+        renderThreadList(false);
+      })
+      .catch((error: unknown) => {
+        if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+      });
     return scrubPending;
   }
 

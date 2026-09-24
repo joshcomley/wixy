@@ -25,18 +25,20 @@ deleted content out of the database/WAL and private media paths.
 - The initial Sol review of `18fb1cf` found incomplete WAL scrubbing, SSE ordering, stale history
   and duplicate-wipe races. The Architect's later v1.5.3 ruling superseded the v1.5.2 checkpoint
   behavior; the implementation now uses durable pending scrubs and 202 responses.
-- Verification: full Python suite 1,675 passed; after formatting, the affected P8 backend slice
-  passed 130 tests. Full admin Vitest: 1,080 passed; strict admin typecheck; `mypy` over 206
-  sources; `ruff check .` and `ruff format --check .` clean; admin bundles rebuilt. Server-chat
-  Playwright: 7/7 at full speed, including nonempty wipe and mobile cross-client delete/wipe.
-  A fresh Sol review of the final candidate and formal audit remain before handoff.
+- Verification on the integrated P6b/P8 tree: full Python suite 1,675 passed (P6b merge adds no
+  Python source changes); affected P8 backend slice 130 passed; full admin Vitest 1,095 passed;
+  strict admin typecheck; `mypy` over 206 sources; `ruff check .` and `ruff format --check .` clean;
+  admin bundles rebuilt. Full Playwright matrix: 92/94 passed; the P8 server-chat and P6b media
+  suites reran 11/11 after integration. Two unrelated publish/section-editor tests timed out; the
+  section-panel toggle case reproduced alone. Fresh review and formal audit remain before handoff.
 - Never merge or open a PR until the Delivery Manager clears the exact candidate SHA.
 
 ## Build baseline
 
 - Frozen source: `spec/server-chat/00-brief.md` §17, revised spec v1.5.3.
 - SHA-256: `E9591AA45D572E69635212757B1CDDCA80EA15F4CC3E477F9A5D82AA7ED3BCB0`.
-- Source feature-branch head: `7d6584bfedaf409bef45f5d3e527df2b943ce0ce`.
+- Frozen spec commit: `7d6584bfedaf409bef45f5d3e527df2b943ce0ce`.
+- Latest integrated feature-branch head: `fa8223d6a6140bfabd5332b0fdbca38701299ee2` (P6b final merge).
 - Accepted prerequisites: P1, P2b and P5b are already on the feature branch. P6b's independent
   voice-note minimum-duration delta is outside this parcel and has been reported to the DM.
 
@@ -45,8 +47,8 @@ deleted content out of the database/WAL and private media paths.
 - v1.5/v1.5.1/v1.5.2 gesture-boundary rule: affects R3 and P8's trigger/menu/settings/E2E
   surfaces; architectural impact is security/gesture semantics. Status: **Implemented** using
   `data-srv-gesture-boundary`, primary-button filtering, and the `may close, never open` classifier.
-- v1.5.2 voice notes shorter than 1 second: affects P6b recording only, no P8 code. Status:
-  **Waiting** for P6b owner; DM alerted.
+- v1.5.2 voice notes shorter than 1 second: implemented in P6b and included in the integrated
+  feature-branch base; no separate P8 delta.
 - v1.5.3 scrub errata: both operations TRUNCATE, 204 guarantees empty WAL, 202 persists
   `scrub.pending` and resumes in the 2 s background scrubber; `/usage.scrubPending` drives UI
   polling. Status: **Implemented** with token-conditional marker clearing.
