@@ -1354,3 +1354,33 @@ fixed same-session.)
   delivery merge** as a squash with a hand-written body (R14a) — check whether cmd's
   `POST /api/workspaces/.../merge` endpoint supports a custom squash body before that
   step; if not, do it manually via git/gh.
+
+## Update 2026-09-24 (DM `8e7bbea9`) — PR #231 conflict resolved (root-caused, not guessed)
+
+- Orchestrator flagged PR #231 as `mergeable=CONFLICTING` with an empty `statusCheckRollup`
+  6 min after creation. Root-caused rather than assumed: only one file conflicted,
+  `spec/server-chat/00-brief.md` — exactly the conflict the ORIGINAL handover had already
+  anticipated and pre-decided ("P8's branch independently edited `spec/server-chat/
+  00-brief.md` into a second 'v1.5.4' that conflicts with the v1.5.4 already on the
+  feature branch... At merge: take P8's hunks for that conflict"). Confirmed via
+  `git diff` both sides: bs7's version describes the ACTUAL implemented erasure design
+  (tombstones in `deleted_storage`, matching everything built across 10 rounds); the
+  feature branch's version described the Architect's OWN `erasure_jobs` table sketch,
+  which the SAME Architect's later holistic review explicitly endorsed P8's tombstone
+  design over (no schema redesign needed) — so the feature-branch content was stale,
+  describing a design that was deliberately NOT built.
+- Resolved by merging `origin/cmd/workspace-00029` into `bs7` and taking bs7's hunks for
+  all 7 conflict blocks (all within the same §17 rewrite); the R14a squash-merge ruling
+  section (added to the feature branch separately, unrelated to the schema disagreement)
+  auto-merged cleanly with zero conflict. Pushed as merge commit `4af6594`. This resolves
+  ONLY a markdown spec file — zero `.py`/`.ts` changes, so the already-cleared code
+  (`dfe7bd1`, Sol CLEARED + DM's own full-suite pass) is unchanged; did not re-trigger a
+  full Sol review cycle for a pure prose merge, but told the Orchestrator/Architect
+  explicitly for transparency rather than silently treating it as a non-event.
+- **CI was never running because of the conflict state** — confirmed: `statusCheckRollup`
+  had 4 checks in progress within seconds of pushing the resolution (python, frontend,
+  guide-linkcheck running; release-note already passed). This explains the earlier
+  "6 min, still empty" alert — not a CI infra problem, purely the conflict blocking it.
+- **Next**: wait for CI green (Monitor-style polling in background), then
+  `gh pr merge --merge --delete-branch`, mark delivery task done, resolve lane, sync
+  primary checkout, notify Orchestrator/Architect, dispatch P7.
