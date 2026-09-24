@@ -1,12 +1,14 @@
 # Server chat — Architect's technical brief (workspace #29)
 
-Status: **FROZEN v1.5.1** (Architect, 2026-09-14). v1.1 = operator's zero-PIN-state override
+Status: **FROZEN v1.5.2** (Architect, 2026-09-14). v1.1 = operator's zero-PIN-state override
 (R4/§5.1); v1.2 = delete + wipe addendum (§17); v1.3 = R2 errata: a single tap reveals
 (decision #974); **v1.4 = cmd's real PIN contract in §5.1 (app key in the path, richer errors,
 retry-safety) + a new 409 `pin_changed` on `/unlock`**; **v1.5 = R3 gesture boundaries (a
 tap that opens a menu/sheet may close a double-tap but never open one) + primary button
 only**; v1.5.1 = boundaries are not test cadence (no e2e waits for menu flows) + decision
-numbers no longer pre-allocated. Contracts in §5 are frozen — any change goes
+numbers no longer pre-allocated; v1.5.2 = one test for classifying any tap pair
+(causal chain → boundary; independent decisions → test cadence) + voice notes under 1 s
+are discarded. Contracts in §5 are frozen — any change goes
 through the Architect (`ask-architect`). Rulings in §1 are binding.
 
 > ⚠️ **Editing this file:** ruff formats Python fenced blocks **inside markdown**, so
@@ -110,6 +112,28 @@ sends and then locks, which is acceptable because it fails closed. Detector:
     Waits in `server-chat.spec.ts` would hide the defect, not fix it, so **the
     open → pick → confirm e2e runs at full Playwright speed with no added waits**.
     That test is the regression proof that the boundary works.
+  - **How to classify any tap pair (v1.5.2 — use this instead of asking case by case):**
+    ask *did the first tap make the second control appear under the finger?*
+    - **Yes (a causal chain):** the second tap follows by reaction time alone, so a
+      real person can land it inside 400 ms. That is a product hazard. Mark the
+      *first* control as a boundary, and test the chain at full speed with no waits.
+      Examples: ⋯ → menu item, "Delete for everyone" → confirm, ⚙ → settings row,
+      thumbnail → lightbox close.
+    - **No (two independent decisions):** both controls were already on screen, and
+      the second tap is a new intention plus finger travel, so it is well over 400 ms
+      for a person. That is test cadence, per `decisions/00148`: specs space those taps
+      by `MULTI_TAP_INTERVAL_MS + 100`, and no boundary is added. Examples: Continue →
+      Send, **Send → 📎/🎤** (ruled 2026-09-24 on P6b's question), 📎 → Send.
+    - **Toggles in place are never boundaries.** When the same spot changes state (🎤
+      record → stop, ▶ play → pause), a double-tap there is an accidental double tap.
+      Locking and discarding is the safe outcome: R6 discards the recording, so nothing
+      is sent. As a boundary, 🎤 would instead record and send a fraction-of-a-second
+      blip.
+    - **📎 is not a boundary.** It opens the *native* file picker; taps inside that
+      picker are not page pointerdowns, and the `filePicker` suspension (R7) covers
+      the round trip.
+    - **Choice surfaces only:** a boundary is a control that opens an in-page surface
+      of *choices* (menu, sheet, confirm step, dialog, lightbox).
   - **Where:** `admin-ui/src/server/gestures.ts` (`createMultiTapDetector`), gaining
     a `GESTURE_BOUNDARY_SELECTOR` beside `EXCLUDED_SELECTOR`. This is a DOM convention,
     not a change to any frozen §6 TS interface.
@@ -976,6 +1000,9 @@ Waves:
   - MIME preference: `audio/webm;codecs=opus`, then `audio/mp4`, then `audio/ogg;codecs=opus`.
   - Tap to start / tap to stop, with a timer and a cancel.
   - Auto-stops at 15:00.
+  - **Minimum length 1 s (v1.5.2):** a recording shorter than 1 s is discarded, never
+    uploaded or sent, and a brief "Too short" hint shows instead. This catches an
+    accidental start/stop more than 400 ms apart, which R3 does not lock.
   - `suspend("micPermission")` around `getUserMedia`, `suspend("recording")` while recording.
   - Fully releases the mic tracks on stop, cancel or detach.
 - **`server/mediaRender.ts`:**
