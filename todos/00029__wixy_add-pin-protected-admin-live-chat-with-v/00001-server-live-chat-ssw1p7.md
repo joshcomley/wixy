@@ -1326,3 +1326,31 @@ fixed same-session.)
   Architect's own note), live `verify` on `ca.cinnamons.uk`, then the ONE delivery merge
   as a squash with a hand-written body (R14a — verify the cmd merge API supports a custom
   squash body first; if not, merge manually via git/gh).
+
+## Update 2026-09-24 (DM `8e7bbea9`) — P8 FULLY CLEARED, PR open, waiting on CI
+
+- **Both halves of the "do both" verification discipline are now green on the exact final
+  SHA** (`dfe7bd1379b9f7e96f2b675f99c8551696ed55b0`): Sol CLEARED rounds 8-10 together (0
+  critical/high/medium, probed the exact boundary conditions of the health-status fix
+  including rapid crash-loops still correctly degrading). DM's own full pytest suite ran
+  clean on this exact SHA (1713 passed, standalone, not alongside e2e). Round 9's 5x
+  stability harness (on the immediately-prior `240dc76`, which round 10 doesn't diverge
+  from on the race-prone surface) had 2/5 clean runs as extra supporting evidence before
+  this decision — judged sufficient given both primary verification channels are clean.
+- **P8's PR opened**: https://github.com/joshcomley/wixy/pull/231, `cmd/workspace-00029-bs7`
+  → `cmd/workspace-00029` (the feature branch — normal merge, NOT the R14a squash, which
+  applies only to the ONE final delivery merge into `main` later). CI polling in
+  background. Notified the Orchestrator + Architect the PR is open.
+- **Next**: wait for CI green, `gh pr merge --merge --delete-branch`, mark delivery task
+  `3e6c218c-80ca-449c-8bc6-7df8402f381f` done, resolve lane
+  `c7583fed-a9a2-4de8-b423-d8bd62739bcc`, sync the primary checkout (this worktree) to pick
+  up the merge. Then dispatch **P7** (docs/invariants closeout, delivery task
+  `7a9fa759-aaf1-4368-a6db-24ddc2b9bae0`) — next decision number is `00153`+ (check
+  `decisions/` for the actual max at that point, since P8's own final rounds may have used
+  more numbers than 00151-00152 already seen); P7 must add R14a's release-note rule to
+  `docs/ai/livechat.md` + `CLAUDE.md`. Then the **sec.13 audit** (opus tier, DM-owned,
+  scope now includes migration v6 + the new `background.py` supervisor per the Architect's
+  own note). Then live **`verify`** on `ca.cinnamons.uk` per brief §12. Then the **ONE
+  delivery merge** as a squash with a hand-written body (R14a) — check whether cmd's
+  `POST /api/workspaces/.../merge` endpoint supports a custom squash body before that
+  step; if not, do it manually via git/gh.
