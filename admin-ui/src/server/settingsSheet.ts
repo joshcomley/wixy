@@ -16,7 +16,7 @@ export interface ServerSettingsSheetDeps {
   hooks: LockHooks;
   win: Window;
   getSession: () => ServerSession | null;
-  onWipe: () => Promise<boolean>;
+  onWipe: (onOutcomeUnknown: () => void) => Promise<boolean>;
   onNameChanged: () => void;
   onClose: () => void;
   document?: Document;
@@ -154,6 +154,14 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     poll();
   }
 
+  function announceWipeOutcomeUnknown(): void {
+    wipeOutcomeUnknown = true;
+    wipeConfirmation.hidden = true;
+    wipeButton.disabled = true;
+    wipeStatus.textContent = "Couldn't confirm — checking…";
+    wipeStatus.hidden = false;
+  }
+
   const pushSlot = documentRef.createElement("div");
   pushSlot.className = "wx-srv-sheet-push-slot";
 
@@ -233,8 +241,10 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   wipeConfirmButton.addEventListener("click", () => {
     if (wipeOutcomeUnknown) return;
     wipeConfirmButton.disabled = true;
-    void deps.onWipe()
+    void deps.onWipe(announceWipeOutcomeUnknown)
       .then((erasurePending) => {
+        wipeOutcomeUnknown = false;
+        wipeButton.disabled = false;
         if (erasurePending) {
           wipeConfirmation.hidden = true;
           const session = deps.getSession();
@@ -250,17 +260,15 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
           return;
         }
         if (error instanceof ServerErasureOutcomeUnknownError) {
-          wipeOutcomeUnknown = true;
-          wipeConfirmation.hidden = true;
-          wipeButton.disabled = true;
+          announceWipeOutcomeUnknown();
           const session = deps.getSession();
           if (session !== null) startScrubPolling(session, true);
-          else {
-            wipeStatus.textContent = "Couldn't confirm — checking…";
-            wipeStatus.hidden = false;
-          }
           return;
         }
+        wipeOutcomeUnknown = false;
+        wipeButton.disabled = false;
+        wipeStatus.hidden = true;
+        wipeConfirmation.hidden = false;
         wipeError.textContent = "Couldn't delete everything — try again";
         wipeError.hidden = false;
       })

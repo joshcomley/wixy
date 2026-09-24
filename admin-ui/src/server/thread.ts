@@ -52,7 +52,7 @@ export interface ServerThreadView {
    * text, and the scroll/echo state in memory for the next `attach`. */
   detach(): void;
   handleStreamEvent(event: ServerStreamEvent): void;
-  wipe(): Promise<boolean>;
+  wipe(onOutcomeUnknown?: () => void): Promise<boolean>;
   /** Updates the header's name chip — called after the settings sheet (or
    * the first-unlock name prompt) commits a new name. */
   refreshNameChip(): void;
@@ -349,10 +349,12 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   let pendingClientId: string | null = null;
   let contentGeneration = 0;
   let contentRevision = 0;
+  let latestKnownMessageSeq = 0;
 
   function addConfirmed(message: Message): void {
     if (deletedSeqs.has(message.seq)) return;
     confirmedBySeq.set(message.seq, message);
+    latestKnownMessageSeq = Math.max(latestKnownMessageSeq, message.seq);
     confirmedClientIds.add(message.clientId);
     contentRevision += 1;
   }
@@ -671,7 +673,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     }
   }
 
-  async function reconcileUnknownWipe(session: ServerSession, requestStartedAt: number): Promise<boolean> {
+  async function reconcileUnknownWipe(session: ServerSession, wipeBoundarySeq: number): Promise<boolean> {
     let history: readonly Message[];
     try {
       history = await getAllHistory(session);
@@ -680,7 +682,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       throw new ServerErasureOutcomeUnknownError();
     }
 
-    if (history.some((message) => message.createdAt <= requestStartedAt)) {
+    if (history.some((message) => message.seq <= wipeBoundarySeq)) {
       for (const message of history) addConfirmed(message);
       hasMoreHistory = false;
       renderThreadList(false);
@@ -688,7 +690,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     }
 
     const messagesArrivingDuringReconciliation = Array.from(confirmedBySeq.values())
-      .filter((message) => message.createdAt > requestStartedAt);
+      .filter((message) => message.seq > wipeBoundarySeq);
     clearAfterWipe();
     for (const message of messagesArrivingDuringReconciliation) addConfirmed(message);
     for (const message of history) addConfirmed(message);
@@ -698,17 +700,18 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     return true;
   }
 
-  async function wipe(): Promise<boolean> {
+  async function wipe(onOutcomeUnknown?: () => void): Promise<boolean> {
     const session = currentSession;
     if (session === null) throw new Error("The server chat is locked.");
     const requestGeneration = contentGeneration;
-    const requestStartedAt = Date.now() / 1000;
+    const wipeBoundarySeq = latestKnownMessageSeq;
     let erasurePending: boolean;
     try {
       erasurePending = await wipeChat(session);
     } catch (error) {
       if (error instanceof ServerErasureOutcomeUnknownError) {
-        return reconcileUnknownWipe(session, requestStartedAt);
+        onOutcomeUnknown?.();
+        return reconcileUnknownWipe(session, wipeBoundarySeq);
       }
       throw error;
     }

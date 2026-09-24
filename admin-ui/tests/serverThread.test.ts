@@ -2,12 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HistoryPage, Message, SendMessageResult } from "../src/server/api/messages";
 import { ServerErasureOutcomeUnknownError } from "../src/server/api/http";
 import type { ServerIdentity } from "../src/server/identity";
+import { mountServerSettingsSheet } from "../src/server/settingsSheet";
 import { mountServerThread } from "../src/server/thread";
 import type { UploadAttachment } from "../src/server/upload";
 import type { ServerStreamEvent } from "../src/server/stream";
 import type { LockHooks, ServerSession } from "../src/server/types";
 
-const { createVoiceRecorder, deleteMessage, getHistory, sendMessage, wipeChat, uploadServerAttachment } = vi.hoisted(() => ({
+const { createVoiceRecorder, deleteMessage, getHistory, getUsage, sendMessage, wipeChat, uploadServerAttachment } = vi.hoisted(() => ({
   createVoiceRecorder: vi.fn((options: {
     onStop?: (recording: { blob: Blob; durationMs: number; mimeType: string }) => void;
     onCancel?: () => void;
@@ -27,6 +28,7 @@ const { createVoiceRecorder, deleteMessage, getHistory, sendMessage, wipeChat, u
   }),
   deleteMessage: vi.fn(),
   getHistory: vi.fn(),
+  getUsage: vi.fn(),
   sendMessage: vi.fn(),
   wipeChat: vi.fn(),
   uploadServerAttachment: vi.fn(),
@@ -35,6 +37,7 @@ vi.mock("../src/server/recorder", () => ({ createVoiceRecorder }));
 vi.mock("../src/server/api/messages", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/server/api/messages")>()),
   getHistory,
+  getUsage,
   sendMessage,
   deleteMessage,
   wipeChat,
@@ -126,6 +129,9 @@ describe("mountServerThread", () => {
   beforeEach(() => {
     createVoiceRecorder.mockClear();
     getHistory.mockReset();
+    getUsage.mockReset().mockResolvedValue({
+      mediaAvailable: true, usedBytes: 0, quotaBytes: 10, freeBytes: 10, erasurePending: false,
+    });
     sendMessage.mockReset();
     deleteMessage.mockReset();
     wipeChat.mockReset();
@@ -720,6 +726,54 @@ describe("mountServerThread", () => {
       view.teardown();
     });
 
+    it.each(["committed", "not committed"] as const)(
+      "shows wipe outcome checking before slow history reconciliation completes (%s)",
+      async (outcome) => {
+        const oldMessage = fakeMessage({ seq: 1, text: "old before wipe" });
+        let resolveHistory!: (page: HistoryPage) => void;
+        getHistory
+          .mockResolvedValueOnce(emptyHistory({ messages: [oldMessage] }))
+          .mockImplementationOnce(() => new Promise<HistoryPage>((resolve) => { resolveHistory = resolve; }));
+        wipeChat.mockRejectedValue(new ServerErasureOutcomeUnknownError());
+        const identity = fakeIdentity();
+        const hooks = fakeHooks();
+        const view = mountServerThread({ identity, hooks, win: fakeWindow(), onSettings: vi.fn() });
+        await view.attach(SESSION);
+        const sheet = mountServerSettingsSheet({
+          identity,
+          hooks,
+          win: window,
+          getSession: () => SESSION,
+          onWipe: (onOutcomeUnknown) => view.wipe(onOutcomeUnknown),
+          onNameChanged: vi.fn(),
+          onClose: vi.fn(),
+        });
+        document.body.appendChild(sheet.element);
+        sheet.open();
+        await flush();
+
+        sheet.element.querySelector<HTMLButtonElement>(".wx-srv-sheet-wipe")?.click();
+        sheet.element.querySelector<HTMLButtonElement>(".wx-srv-sheet-wipe-confirm-button")?.click();
+        await flush();
+        expect(sheet.element.querySelector(".wx-srv-sheet-wipe-status")?.textContent)
+          .toBe("Couldn't confirm — checking…");
+        expect(sheet.element.querySelector<HTMLDivElement>(".wx-srv-sheet-wipe-confirm")?.hidden).toBe(true);
+
+        resolveHistory(outcome === "committed" ? emptyHistory() : emptyHistory({ messages: [oldMessage] }));
+        if (outcome === "committed") {
+          await vi.waitFor(() => expect(sheet.element.querySelector(".wx-srv-sheet-wipe-status")?.textContent)
+            .toBe("Deleted. Erasing leftover traces…"));
+        } else {
+          await vi.waitFor(() => expect(sheet.element.querySelector(".wx-srv-sheet-wipe-error")?.textContent)
+            .toBe("Couldn't delete everything — try again"));
+          expect(sheet.element.querySelector<HTMLDivElement>(".wx-srv-sheet-wipe-confirm")?.hidden).toBe(false);
+        }
+        expect(wipeChat).toHaveBeenCalledOnce();
+        sheet.teardown();
+        view.teardown();
+      },
+    );
+
     it("reconciles an unknown wipe to empty history without re-POSTing", async () => {
       getHistory
         .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ seq: 1, text: "old before wipe" })] }))
@@ -735,15 +789,19 @@ describe("mountServerThread", () => {
       view.teardown();
     });
 
-    it("keeps only post-request messages after an unknown wipe reconciliation", async () => {
+    it("uses server sequence when the browser clock is ahead during unknown wipe reconciliation", async () => {
+      vi.useFakeTimers();
+      const serverTimeS = 1_800_000_000;
+      vi.setSystemTime((serverTimeS + 3_600) * 1000);
+      const oldMessage = fakeMessage({ seq: 1, text: "old before wipe", createdAt: serverTimeS });
       const sentAfterRequest = fakeMessage({
         seq: 2,
         clientId: "after-1234",
         text: "sent after wipe started",
-        createdAt: Date.now() / 1000 + 1,
+        createdAt: serverTimeS + 10,
       });
       getHistory
-        .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ seq: 1, text: "old before wipe" })] }))
+        .mockResolvedValueOnce(emptyHistory({ messages: [oldMessage] }))
         .mockResolvedValueOnce(emptyHistory({ messages: [sentAfterRequest] }));
       wipeChat.mockRejectedValue(new ServerErasureOutcomeUnknownError());
       const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
@@ -753,6 +811,25 @@ describe("mountServerThread", () => {
 
       expect(view.element.textContent).not.toContain("old before wipe");
       expect(view.element.textContent).toContain("sent after wipe started");
+      expect(wipeChat).toHaveBeenCalledOnce();
+      view.teardown();
+    });
+
+    it("uses server sequence when the browser clock is behind during unknown wipe reconciliation", async () => {
+      vi.useFakeTimers();
+      const serverTimeS = 1_800_000_000;
+      vi.setSystemTime((serverTimeS - 3_600) * 1000);
+      const oldMessage = fakeMessage({ seq: 1, text: "still here after failed wipe", createdAt: serverTimeS });
+      getHistory
+        .mockResolvedValueOnce(emptyHistory({ messages: [oldMessage] }))
+        .mockResolvedValueOnce(emptyHistory({ messages: [oldMessage] }));
+      wipeChat.mockRejectedValue(new ServerErasureOutcomeUnknownError());
+      const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+
+      await expect(view.wipe()).rejects.toMatchObject({ name: "ServerWipeNotCommittedError" });
+
+      expect(view.element.textContent).toContain("still here after failed wipe");
       expect(wipeChat).toHaveBeenCalledOnce();
       view.teardown();
     });
