@@ -35,6 +35,10 @@ server = [
   # lives in the same `server` extra rather than a separate one; the fleet
   # edition's own `wixy` process simply never imports `wixy_server.worker`.
   "claude-agent-sdk>=0.2",
+  # spec/server-chat/00-brief.md §7 — HEIC/HEIF decode for the server-chat photo
+  # pipeline (`livechat/processing.py`). Pinned exact: a cp314 win_amd64 wheel
+  # was verified to exist for 1.7.0 (requirements.txt carries the same pin).
+  "pillow-heif==1.7.0",
 ]
 dev = [
   "pytest>=8.3",

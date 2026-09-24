@@ -41,6 +41,12 @@ pluggable AI, HTML setup guide) is now **in progress** — see `spec/independenc
 - `decisions/` — architecture decision log (`NNNNN-slug/{title,decision}.md`).
 - `todos/` — persistent per-workspace task lists (survive handovers).
 
+## Persisted store schemas
+
+| Store | Tables / purpose |
+|---|---|
+| `wixy_server/livechat/store.py` (`server.db`, schema v6) | `messages`, `attachments`, `events`, `uploads`, `push_subscriptions`, `deleted_storage`, `pending_wipe_cleanup`, `pending_scrub`; the last three are private erasure-recovery state (ids and tokens only), not chat-visible tombstones. See [`docs/ai/livechat.md`](docs/ai/livechat.md). |
+
 ## Dev commands
 
 Python (interpreter: `pythoncore-3.14`; run `pip install -e ".[server,dev]"` once — the
@@ -96,6 +102,14 @@ npx playwright test
   these trailers by `/api/version/notes`, and CI's `release-note` job fails any PR
   with a non-merge commit missing one. A multi-commit PR may repeat the same
   trailer on each commit (the harvest dedupes).
+- **Server-chat release-note rule (R14a):** the ONE delivery merge of
+  `cmd/workspace-00029` to `main` is a squash with a hand-written body whose only
+  `Release-note:` line is exactly `Release-note: Added a Server page showing your website's server status.`
+  Never use GitHub's default squash body. After delivery, every commit that
+  touches Server chat must use exactly `Release-note: General bug fixes and improvements.`;
+  a Server-chat trailer must never name the chat, messages, photos, video, voice, PIN, or
+  locking. `routes_version.resolve_release_notes` reads plain `git log --format=%B`, not
+  first-parent history, so every commit trailer can reach the owner's update popup.
 - Never author code in `D:\Servers\Wixy\` (that's the deployment target, a Slots
   blue/green checkout) — this repo is the source; see the global
   `D:\Servers\CLAUDE.md` worktree-guard rule. Branch here, PR, merge to `main`; Slots
@@ -123,7 +137,7 @@ than duplicates. `spec/` is the decided intent; `docs/ai/` is the code reality +
 | [glossary.md](docs/ai/glossary.md) | Domain terms + every status machine (publish/chat/checkout) |
 | [testing.md](docs/ai/testing.md) | Test matrix, fixtures, how to run (bare `pytest` — the `-n 4` cap is load-bearing) |
 | [runbook.md](docs/ai/runbook.md) | Deploy (= merge `main`), rollback, bounce, creds, CI, health |
-| [builder.md](docs/ai/builder.md) · [serving-and-overlay.md](docs/ai/serving-and-overlay.md) · [publish-pipeline.md](docs/ai/publish-pipeline.md) · [media.md](docs/ai/media.md) · [editor-and-admin-ui.md](docs/ai/editor-and-admin-ui.md) · [ai-chat.md](docs/ai/ai-chat.md) | Per-subsystem deep dives |
+| [builder.md](docs/ai/builder.md) · [serving-and-overlay.md](docs/ai/serving-and-overlay.md) · [publish-pipeline.md](docs/ai/publish-pipeline.md) · [media.md](docs/ai/media.md) · [editor-and-admin-ui.md](docs/ai/editor-and-admin-ui.md) · [ai-chat.md](docs/ai/ai-chat.md) · [livechat.md](docs/ai/livechat.md) | Per-subsystem deep dives |
 
 When you change a public surface (routes, schema, env vars, an invariant), update the matching
 `docs/ai/` file **in the same PR** — this is the doc-maintenance contract below.

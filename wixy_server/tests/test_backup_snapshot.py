@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from wixy_server.backup.settings import BackupSettings
-from wixy_server.backup.snapshot import _SNAPSHOT_BRANCH, run_backup_once
+from wixy_server.backup.snapshot import _SNAPSHOT_BRANCH, _project_backup_items, run_backup_once
 from wixy_server.backup.status import read_status
 
 
@@ -213,6 +213,39 @@ class TestAllowlistContent:
         checkout = tmp_path / "check" / "clone"
         _git(["clone", "--branch", _SNAPSHOT_BRANCH, str(backup_repo), str(checkout)], cwd=tmp_path)
         return checkout
+
+    def test_server_chat_tree_is_absent_from_the_pushed_backup(
+        self, tmp_path: Path, empty_bare_backup_repo: Path
+    ) -> None:
+        settings = _settings(tmp_path, empty_bare_backup_repo)
+        project_dir = settings.storage_root / "projects" / "ca"
+        server = project_dir / "server"
+        (server / "media" / "ab" / "attachment-id").mkdir(parents=True)
+        (server / "server.db").write_bytes(b"private-chat-database")
+        (server / "secret.key").write_bytes(b"private-signing-secret")
+        (server / "vapid.json").write_text("private-vapid-key", encoding="utf-8")
+        (server / "media" / "ab" / "attachment-id" / "full.jpg").write_bytes(b"private-media")
+
+        items = _project_backup_items(project_dir)
+        assert all(source != server and server not in source.parents for source, _rel in items)
+        assert all(not rel.startswith("server/") for _source, rel in items)
+
+        result = run_backup_once(settings, now=_WHEN)
+        assert result.status.ok, result.status.error
+        pushed = self._clone_pushed_tree(tmp_path, empty_bare_backup_repo)
+        project_snapshot = pushed / "projects" / "ca"
+        assert (project_snapshot / "live.json").is_file()
+        assert not (project_snapshot / "server").exists()
+        canaries = (
+            b"private-chat-database",
+            b"private-signing-secret",
+            b"private-vapid-key",
+            b"private-media",
+        )
+        for path in project_snapshot.rglob("*"):
+            if path.is_file():
+                content = path.read_bytes()
+                assert all(canary not in content for canary in canaries)
 
     def test_included_files_are_present(self, tmp_path: Path, empty_bare_backup_repo: Path) -> None:
         settings = _settings(tmp_path, empty_bare_backup_repo)

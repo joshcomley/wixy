@@ -105,6 +105,12 @@ export interface SystemStatus {
   diskUsage: { totalBytes: number; usedBytes: number; freeBytes: number };
   lastPublish: { version: number; when: string } | null;
   engine: { currentSha: string | null; edition: string };
+  /** spec/server-chat/00-brief.md §5.10 — the "Server" panel's decoy reads
+   * this for its Uptime/Media processing rows. Optional because it's only
+   * populated once P1's backend parcel lands the field (this frontend type
+   * is ahead of that landing so `server/decoy.ts` can build against it now);
+   * `undefined` on an older server, which `decoy.ts` renders as "—". */
+  server?: { startedAt: number; mediaProcessing: "ok" | "degraded" | "unavailable" };
 }
 
 /** `wixy_server.chats.conversation_summary`'s exact shape (spec/06 §1) — the

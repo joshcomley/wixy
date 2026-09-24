@@ -16,6 +16,9 @@
 // "/admin/social" (decisions/00134 — the one-screen Social images manager:
 // every page's `meta.ogImage` in one place, reached from a button in the
 // Pages panel rather than a top-level nav entry).
+// "/admin/server" (spec/server-chat/00-brief.md — a disguised "Server" nav
+// tab; no params, "server" is not a real deep-link target for any sub-state,
+// the panel's own lock state machine owns everything past the route).
 // A legacy "/admin/settings/contact" deep link degrades gracefully to General
 // (routeFromSegments's settings case no longer recognizes "contact" as a
 // second segment) — decisions/00129 promoted the tab out, but an old bookmark
@@ -42,7 +45,8 @@ export type Route =
   | { kind: "contact" }
   | { kind: "settings"; page: SettingsPage }
   | { kind: "section"; id: string }
-  | { kind: "social" };
+  | { kind: "social" }
+  | { kind: "server" };
 
 export const DEFAULT_ROUTE: Route = { kind: "pages" };
 
@@ -88,6 +92,8 @@ function routeFromSegments(segments: string[]): Route {
       return second !== undefined ? { kind: "section", id: second } : DEFAULT_ROUTE;
     case "social":
       return { kind: "social" };
+    case "server":
+      return { kind: "server" };
     default:
       return DEFAULT_ROUTE;
   }
@@ -132,6 +138,8 @@ function segmentsFor(route: Route): string[] {
       return ["section", route.id];
     case "social":
       return ["social"];
+    case "server":
+      return ["server"];
   }
 }
 

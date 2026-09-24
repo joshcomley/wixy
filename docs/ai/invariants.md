@@ -88,7 +88,7 @@ still checked.
 `next_version = max(version)+1` across the whole ledger; a restore consumes a **new** version
 even though it revisits an old sha. Every ledger entry (publish or restore) consumes one.
 
-### Inv 12 — CF Access JWT is the only auth; loopback-only; internal surface hidden
+### Inv 12 — CF Access JWT gates admin routes; Server chat adds an in-app gate
 Bind `127.0.0.1` only (the tunnel is the sole ingress). `/admin*` + `/api/admin*` require a
 verified CF Access JWT (`aud` = the app AUD, `iss` = the team domain, signature vs cached
 JWKS). `/internal/*` + `/healthz` return a bare 404 when a `Cf-Ray`/`Cf-Connecting-Ip`
@@ -96,6 +96,9 @@ header is present (they answer loopback probes only). The embedded AI chat has *
 tool** — it cannot publish.
 *Exception:* `WIXY_DEV_NO_AUTH=1` bypasses auth for local dev/tests **only** — the app
 refuses to start if it's set while `WIXY_ENV=prod`. `/api/version` is public by design.
+The Server chat's `/api/admin/server/*` routes also require its short-lived in-app unlock
+token (except PIN unlock and signed media URLs); this is an additional gate layered on CF
+Access, never a replacement. The PIN is verified by cmd and Wixy stores no PIN value.
 
 ### Inv 13 — All AI inference goes through cmd; never the Anthropic API
 No direct Anthropic/Claude API calls anywhere in the engine. `wixy_server/cmdchat.py` is the
@@ -581,3 +584,105 @@ repeated `apply_head` calls, and reaches real `render_page` output).
 *Exception:* none — a future project needing a different override rule (e.g. always
 re-sniffing even over an authored value) would need its own decision, not a quiet change here.
 
+### Inv 40 — Server-chat data stays in private per-project storage
+Chat rows, uploads, originals, and renditions live only below
+`Storage/projects/<slug>/server/`. They are excluded from the site repo, builds, publish,
+`reports.py` bundles, backup snapshots, and public routes. Protected API routes require the
+in-app token as well as CF Access; media is served only through signed URLs. The status decoy
+contains real server data, never chat state.
+
+### Inv 41 — Wixy holds zero PIN state
+Only cmd's app-key-scoped loopback PIN service verifies the PIN and owns registration and
+lockout. **Target rule:** Wixy never stores, logs, echoes, or commits a PIN. A missing or
+unreachable verifier returns 503 and never opens the gate. The unlock token exists only in
+browser memory; mutations send it in `X-Wixy-Server-Token`, while media uses an email- and
+expiry-bound signed URL. A token in a query string is rejected.
+
+**PENDING-AUDIT-FIX F8:** at this candidate, FastAPI's default 422 response for a malformed PIN
+can echo the submitted request input. Do not treat the no-echo guarantee as implemented until
+F8 is merged and verified; the target rule above remains unchanged.
+
+### Inv 42 — Server-chat lock is fail-closed
+Every R6 lock cause locks the chat: idle timeout, panic, multi-tap, Escape, hidden document,
+route-away, unauthorized response, or token expiry. The target behavior detaches the chat
+subtree from the document, aborts the stream, pauses media, and discards an unfinished
+recording. A hidden document is exempt only while the file picker or microphone permission
+flow is suspended. The decoy displays only real server status; badges, titles, favicons, and
+push text never expose chat activity.
+
+**PENDING-AUDIT-FIX F4:** if lock/detach occurs while history loading is pending, the current
+`attach(session).then(...)` continuation can still start the stream after lock. Treat stream
+cancellation across that pending-history race as pending until F4 is merged and verified.
+
+### Inv 43 — Server-chat idle time is reset only by user input
+Only the defined user-input events count as activity. `scroll` events, incoming messages, and
+programmatic scrolling do not reset the idle timer; an incoming message cannot keep a locked-
+eligible chat visible.
+
+### Inv 44 — Server-chat media is sniffed, bounded, and private
+Inspect magic bytes before any media subprocess. Every ffmpeg/ffprobe input uses the sniffed
+explicit demuxer and `-protocol_whitelist file`. Photos are decoded through Pillow (including
+HEIC/HEIF via `pillow-heif`) and metadata is stripped from normalized still images; animated
+GIFs retain their bytes. Voice/video are normalized into private renditions and successful raw
+uploads are removed. Failed originals are diagnostic-only and expire after seven days. Enforce
+quota and the free-space floor at upload initialization. Missing ffmpeg or ffprobe makes media
+uploads unavailable without disabling text chat.
+
+### Inv 45 — Server-chat service worker cannot intercept fetches
+The worker has no `fetch` handler and policy permits registration only after explicit Android
+push opt-in. Pushes are payloadless and the notification text is fixed and generic.
+
+**PENDING-AUDIT-FIX F1:** the app currently does not mount the settings push toggle (`pushSlot`
+is empty), so Android opt-in is not reachable at this candidate. Keep the registration policy
+as the target; do not describe push opt-in as operational until F1 is merged and verified.
+
+### Inv 46 — Server chat delete and wipe are hard deletes, without chat-visible tombstones
+Any unlocked user can delete any message for everyone. Delete removes the message, its
+attachments, media/upload/failed files, and earlier message events, then emits one
+`message_deleted`; repeating the delete is idempotent. Wipe removes all messages, attachments,
+uploads, files, and events, then emits one `wiped`. Clients remove content on those events. The
+internal `deleted_storage` rows are filesystem-recovery tombstones only; they never appear in
+history or the event stream. Each delete/wipe records those rows in the same SQLite transaction
+that removes the attachment/upload rows, so startup can resume file deletion after a crash.
+`GET /media` verifies that the attachment row still exists before serving a signed rendition,
+even if Windows could not remove a file that was open. Failed unlinks remain pending and are
+retried by the two-second startup-resumed worker; they are never silently treated as complete.
+The worker queries only `cleanup_pending=1` rows through `idx_deleted_storage_pending`; completed
+tombstones remain for ID-reuse protection but are not revisited.
+Each cleanup pass clears pending state only if the tombstone generation is unchanged; a concurrent
+late-write requeue bumps the generation and remains scheduled for another pass.
+The compare-and-clear is required because file removal and the SQLite status update are separate
+operations. The hourly janitor conditionally deletes still-orphaned attachment rows and still-
+unpromoted upload rows before queueing their files; completed tombstones age out after seven days,
+while pending tombstones remain.
+Every store connection sets `PRAGMA secure_delete=ON`; both delete and wipe TRUNCATE the WAL.
+Recovery removes media files before retrying the DB scrub. A 204 requires an empty WAL and
+completed media cleanup. 202 returns one `erasurePending` flag covering both; the settings
+sheet waits until it clears. Route and background WAL scrubs serialize through
+`LiveChatStore.scrub_guard()` and re-read the current marker under the guard, avoiding redundant
+scrub attempts against a marker another worker already cleared. A route's ten-second deadline
+includes timed guard acquisition; a busy checkpoint waits at most 250 ms per attempt so writers
+can run between retries. Delete and wipe publish their stream event immediately after commit,
+before filesystem cleanup.
+Sequence high-water marks and push subscriptions are preserved. Media files are unlinked, but
+NTFS/SSD byte-level shredding is not claimed.
+*Enforced by:* `wixy_server/tests/test_livechat_store.py` (migration, idempotence, secure delete,
+and raw-byte scrubbing), `test_routes_livechat.py` (auth, confirmation, held-file cleanup and old
+signed-URL 404), `test_livechat_media_queue.py` (delete/processing race), and
+`e2e/tests/server-chat.spec.ts` (cross-client deletion, old-media 404, wipe replay, and mobile
+gesture behavior).
+*Known limits:* filesystem overwrite is not a reliable shred guarantee on NTFS/SSD. A 202
+response means chat content is already deleted and broadcast while database-byte or media-file
+cleanup continues durably in the background.
+
+### Inv 47 — app-lifetime background work is contained
+Every app-lifetime background loop is started through `ContainedTaskGroup.supervise`; every
+request-triggered one-shot task uses `ContainedTaskGroup.spawn`. Exceptions are logged and
+recorded without cancelling sibling work. Supervised loops restart with bounded exponential
+backoff; three consecutive failures in the livechat media or erasure worker mark media processing
+as degraded. The main and standalone worker apps use the same wrapper. Media-queue items and push
+recipients are isolated within their inner task groups, so one item failure leaves siblings
+running. A recovered loop's failure count reads as zero after five minutes without another
+failure. The wrapper exposes no raw `start_soon` method.
+*Enforced by:* `wixy_server/tests/test_background.py`, `test_routes_system.py`, worker-app tests,
+and strict mypy.

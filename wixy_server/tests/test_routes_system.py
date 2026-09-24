@@ -5,6 +5,7 @@ engine version/edition, all in one response."""
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -210,6 +211,45 @@ class TestEngineField:
             response = client.get("/api/admin/system/status")
 
         assert response.json()["engine"]["currentSha"] == "deadbeef"
+
+
+class TestServerField:
+    """spec/server-chat/00-brief.md §5.10 — the decoy's real data."""
+
+    def test_reports_started_at_and_media_processing_ok_by_default(
+        self, tmp_path: Path, wixy_repo_root: Path
+    ) -> None:
+        before = time.time()
+        app = create_app(storage_root=tmp_path / "storage", wixy_repo_root=wixy_repo_root)
+        after = time.time()
+        with TestClient(app) as client:
+            response = client.get("/api/admin/system/status")
+
+        server = response.json()["server"]
+        assert before <= server["startedAt"] <= after
+        assert server["mediaProcessing"] == "ok"
+
+    def test_media_processing_reflects_app_state_flag(
+        self, tmp_path: Path, wixy_repo_root: Path
+    ) -> None:
+        app = create_app(storage_root=tmp_path / "storage", wixy_repo_root=wixy_repo_root)
+        app.state.livechat_media_available = False
+        with TestClient(app) as client:
+            response = client.get("/api/admin/system/status")
+
+        assert response.json()["server"]["mediaProcessing"] == "unavailable"
+
+    def test_media_processing_degrades_after_three_supervisor_failures(
+        self, tmp_path: Path, wixy_repo_root: Path
+    ) -> None:
+        app = create_app(storage_root=tmp_path / "storage", wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            assert not hasattr(app.state.background_tasks, "start_soon")
+            for _ in range(3):
+                app.state.background_health.failed("livechat-media")
+            response = client.get("/api/admin/system/status")
+
+        assert response.json()["server"]["mediaProcessing"] == "degraded"
 
 
 class TestAvailableOnBothEditions:

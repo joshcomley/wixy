@@ -109,3 +109,10 @@ At publish, `publisher._materialize` copies each overlay-referenced staged file 
 + `git add` **before** `builder validate`, and unlinks the staged original only **after**
 validate passes — so an aborted publish (`git reset --hard` + `git clean -fd`) can never lose
 an image (Inv 16). See [publish-pipeline.md](publish-pipeline.md).
+
+## Private live-chat attachments
+
+Server-chat photos, videos, and voice notes use a separate private storage tree and signed
+`/api/admin/server/media/...` URLs. They never enter `draft/media/`, site content JSON, or the
+publish pipeline described above. The frontend composer, chunked upload adapter, renderers,
+and lock/unlock lifecycle are documented in [livechat.md](livechat.md#11-frontend-chat-and-media-p5b-p6b).

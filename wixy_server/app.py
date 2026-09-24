@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import functools
 import re
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -17,19 +18,34 @@ from pathlib import Path
 
 import anyio
 import httpx
-from fastapi import FastAPI
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import FastAPI, Request
+from fastapi.exceptions import HTTPException as FastAPIHTTPException
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from wixy_server.ai.anthropic_backend import AnthropicAIBackend
 from wixy_server.ai.backend import AIBackend, CmdAIBackend
 from wixy_server.auth import JwksCache, build_admin_auth_middleware, jwks_url
+from wixy_server.background import BackgroundTaskHealth, ContainedTaskGroup
 from wixy_server.bootstrap import bootstrap_if_needed
 from wixy_server.chat_sends import ChatSendsCache
 from wixy_server.chat_working import WorkingCache
 from wixy_server.chats import ChatRuntimeEntry
 from wixy_server.cmdchat import CmdChatClient
 from wixy_server.github import GitHubClient
+from wixy_server.livechat import janitor as livechat_janitor
+from wixy_server.livechat import media_queue as livechat_media_queue
+from wixy_server.livechat import processing as livechat_processing
+from wixy_server.livechat.models import MessageHook, MessageRow
+from wixy_server.livechat.notifier import LiveChatNotifier
+from wixy_server.livechat.pinclient import CmdPinVerifier, PinVerifier
+from wixy_server.livechat.push import (
+    dispatch_push_notifications,
+    load_or_create_vapid_keys,
+)
+from wixy_server.livechat.store import LiveChatStore
+from wixy_server.livechat.sw import server_sw_response
+from wixy_server.livechat.tokens import load_or_create_secret
 from wixy_server.publisher import PublishJob
 from wixy_server.redirects import load_redirects
 from wixy_server.registry import load_registry
@@ -41,6 +57,8 @@ from wixy_server.routes_chat import router as chat_router
 from wixy_server.routes_engine import EngineStatusCache
 from wixy_server.routes_engine import router as engine_router
 from wixy_server.routes_internal import router as internal_router
+from wixy_server.routes_livechat import router as livechat_router
+from wixy_server.routes_livechat_media import router as livechat_media_router
 from wixy_server.routes_preview import DEFAULT_PREVIEW_STALENESS_THRESHOLD_S
 from wixy_server.routes_preview import router as preview_router
 from wixy_server.routes_public import router as public_router
@@ -103,6 +121,7 @@ def create_app(
     chat_stream_timing: StreamTiming | None = None,
     github_client: GitHubClient | None = None,
     ai_backend: AIBackend | None = None,
+    pin_verifier: PinVerifier | None = None,
 ) -> FastAPI:
     """Build the Wixy FastAPI app for one project.
 
@@ -134,6 +153,12 @@ def create_app(
     concrete backends are still constructed unconditionally below (same "no
     per-edition branching, everything closes uniformly at shutdown" posture as
     `gh_client`), only WHICH ONE gets exposed on `app.state` branches.
+    `pin_verifier` (spec/server-chat/00-brief.md R4/§5.1): the server-chat PIN
+    gate's `PinVerifier`. Defaults to `CmdPinVerifier()` on the fleet edition
+    (`settings.edition != "standalone"`), `None` on standalone (no cmd there —
+    `POST /unlock` then always answers 503 `not_configured`) — overridable so
+    tests point it at `fake_cmd.py`'s `/api/pins/<app_key>/verify` double instead, same
+    injection seam as `cmdchat_client`/`ai_backend`/`github_client` above.
     """
     settings = load_settings(storage_root)
     registry = load_registry(wixy_repo_root)
@@ -165,6 +190,49 @@ def create_app(
         github_client if github_client is not None else GitHubClient(pat=settings.engine_pat)
     )
 
+    # spec/server-chat/00-brief.md §4/§10 P1: the "Server" panel's own store +
+    # secret, entirely separate from every above (Inv 40 — private data, never in
+    # the site repo/builds/publish/reports/backups). `secret.key` load-or-create is
+    # a blocking file op, same posture as `ensure_project_dirs` a few lines up —
+    # this whole function is plain synchronous setup, not an async context.
+    livechat_store = LiveChatStore(paths.server_db)
+    livechat_secret = load_or_create_secret(paths.server_secret)
+    livechat_vapid_keys = load_or_create_vapid_keys(paths.server_vapid)
+    livechat_push_client = httpx.AsyncClient(timeout=10.0)
+    livechat_notifier = LiveChatNotifier()
+    livechat_message_hooks: list[MessageHook] = []
+
+    async def dispatch_server_push(message: MessageRow) -> None:
+        await dispatch_push_notifications(
+            message,
+            store=livechat_store,
+            client=livechat_push_client,
+            project_domain=project.domain,
+            keys=livechat_vapid_keys,
+        )
+
+    livechat_message_hooks.append(dispatch_server_push)
+    livechat_started_at = time.time()
+    # spec/server-chat/00-brief.md §7 Dependencies, §10 P2b: resolved once at
+    # startup (WIXY_FFMPEG/WIXY_FFPROBE, falling back to `shutil.which`), not
+    # per-request — `resolve_binaries` itself ERROR-logs when either binary is
+    # missing. Both binaries and pillow-heif must be available before uploads
+    # and the queue are enabled; text chat keeps working regardless.
+    livechat_queue_config = livechat_media_queue.resolve_binaries(
+        settings.ffmpeg_path, settings.ffprobe_path
+    )
+    livechat_media_available = (
+        livechat_queue_config is not None and livechat_processing.PILLOW_HEIF_AVAILABLE
+    )
+    if pin_verifier is not None:
+        resolved_pin_verifier: PinVerifier | None = pin_verifier
+    elif settings.edition == "standalone":
+        # R4: "there's no PIN verifier, so /unlock -> 503 not_configured" — no cmd
+        # on her droplet to call.
+        resolved_pin_verifier = None
+    else:
+        resolved_pin_verifier = CmdPinVerifier(app_key=settings.server_pin_app_key)
+
     jwks = JwksCache(
         fetch=functools.partial(_fetch_jwks, settings.cf_access_team_domain),
     )
@@ -191,25 +259,54 @@ def create_app(
         await anyio.to_thread.run_sync(
             bootstrap_if_needed, project, paths, datetime.now(UTC).isoformat()
         )
+        # Schema v6 moves the old file marker into SQLite. Retry an unlink that
+        # failed during a previous process start before launching the scrubber.
+        await anyio.to_thread.run_sync(livechat_store.import_legacy_scrub_marker)
 
         async def _run_watcher() -> None:
             await watch_upstream(
                 project, paths, interval_s=watcher_interval_s, status=watcher_status
             )
 
+        async def _run_media_queue() -> None:
+            assert livechat_queue_config is not None
+            await livechat_media_queue.run_forever(
+                store=livechat_store,
+                paths=paths,
+                notifier=livechat_notifier,
+                config=livechat_queue_config,
+            )
+
+        async def _run_janitor() -> None:
+            await livechat_janitor.run_forever(store=livechat_store, paths=paths)
+
+        async def _run_scrubber() -> None:
+            await livechat_janitor.run_scrubber_forever(store=livechat_store, paths=paths)
+
         try:
             async with anyio.create_task_group() as tg:
-                # Exposed on `app.state` so route handlers (milestone 10's chat
-                # provisioning tracker, `routes_chat.py`) can spawn app-lifetime
-                # background work of their own — same task group the watcher
-                # itself runs in, cancelled together at shutdown below.
-                _app.state.background_tasks = tg
-                tg.start_soon(_run_watcher)
+                background = ContainedTaskGroup(tg, BackgroundTaskHealth())
+                # Route handlers may schedule work, but cannot access the raw task
+                # group and accidentally cancel every app-lifetime task.
+                _app.state.background_tasks = background
+                _app.state.background_health = background.health
+                background.supervise("watcher", _run_watcher)
+                background.supervise("livechat-erasure", _run_scrubber)
+                # Only started when the media pipeline actually resolved (see
+                # `livechat_queue_config` above) — nothing valid to hand it
+                # otherwise. The janitor runs regardless: it's pure DB/filesystem
+                # housekeeping with no ffmpeg dependency.
+                if livechat_media_available:
+                    background.supervise("livechat-media", _run_media_queue)
+                background.supervise("livechat-janitor", _run_janitor)
                 yield
                 tg.cancel_scope.cancel()
         finally:
+            await livechat_push_client.aclose()
             await chat_client.aclose()
             await gh_client.aclose()
+            if resolved_pin_verifier is not None:
+                await resolved_pin_verifier.aclose()
             # `CmdAIBackend.aclose()` is just a passthrough to `chat_client`
             # (already closed above) — closing it again would double-close
             # that same underlying httpx client, so only close
@@ -236,6 +333,27 @@ def create_app(
     app.state.github_client = gh_client
     app.state.redirects = load_redirects()
     app.state.engine_status_cache = EngineStatusCache()
+    app.state.livechat_store = livechat_store
+    app.state.livechat_secret = livechat_secret
+    app.state.livechat_vapid_keys = livechat_vapid_keys
+    app.state.livechat_notifier = livechat_notifier
+    app.state.livechat_message_hooks = livechat_message_hooks
+    app.state.livechat_media_available = livechat_media_available
+    app.state.livechat_started_at = livechat_started_at
+    app.state.livechat_pin_verifier = resolved_pin_verifier
+
+    @app.exception_handler(FastAPIHTTPException)
+    async def _http_exception_handler(_request: Request, exc: FastAPIHTTPException) -> JSONResponse:
+        """Overrides Starlette's default (which always wraps `exc.detail` as
+        `{"detail": ...}`) so a route can raise `HTTPException(status_code=...,
+        detail={"error": "locked"})` and get that dict back VERBATIM as the top-
+        level JSON body — spec/server-chat/00-brief.md §5's contracts are literal
+        shapes like `{"error":"locked"}`, never `{"detail":{"error":"locked"}}`.
+        A plain string `detail` (every existing route's own usage) is untouched —
+        still wrapped as `{"detail": "..."}`, exactly as before this handler."""
+        if isinstance(exc.detail, dict):
+            return JSONResponse(status_code=exc.status_code, content=exc.detail)
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
     app.middleware("http")(admin_auth)
     app.middleware("http")(build_robots_header_middleware(indexable=project.indexable))
@@ -251,6 +369,8 @@ def create_app(
     app.include_router(ai_router)
     app.include_router(system_router)
     app.include_router(versions_router)
+    app.include_router(livechat_router)
+    app.include_router(livechat_media_router)
 
     @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
     @app.get("/admin/", response_class=HTMLResponse, include_in_schema=False)
@@ -280,9 +400,22 @@ def create_app(
         is running locally. Absent outside an active `ui_launch`/MCP session,
         which is expected — the bridge just fails to connect, same as any
         other optional dev-tooling endpoint would."""
-        if _UXER_WEB_PORT_PATH.exists():
-            return HTMLResponse(_UXER_WEB_PORT_PATH.read_text(encoding="utf-8").strip())
-        return HTMLResponse("0", status_code=404)
+
+        def _read_port() -> str | None:
+            if not _UXER_WEB_PORT_PATH.exists():
+                return None
+            return _UXER_WEB_PORT_PATH.read_text(encoding="utf-8").strip()
+
+        port = await anyio.to_thread.run_sync(_read_port)
+        if port is None:
+            return HTMLResponse("0", status_code=404)
+        return HTMLResponse(port)
+
+    @app.get("/admin/server-sw.js", include_in_schema=False)
+    async def get_server_service_worker() -> FileResponse:
+        """Serve the push worker before the admin SPA's broad catch-all route."""
+
+        return server_sw_response()
 
     # Mount BEFORE /admin/static (more specific path first, per Uxer's own
     # doc) so /admin/static/uxer/... resolves here rather than falling

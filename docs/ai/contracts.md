@@ -195,6 +195,40 @@ file (written by the separate `backup` compose service, never by this
 process) off a fixed, non-configurable container path — see that module and
 `routes_system.py`'s own docstrings.
 
+### Server chat (`/api/admin/server/*`, Auth: CF **plus** a second in-app gate)
+
+spec/server-chat/00-brief.md. `wixy_server/routes_livechat.py` +
+`wixy_server/routes_livechat_media.py`. The PIN-protected admin live chat (disguised as a
+"Server" nav tab) — see [livechat.md](livechat.md) for the full picture. **Every route below
+except `POST unlock` and `GET media/*`** requires the header `X-Wixy-Server-Token` (a
+signed, 12h-lived unlock token minted by `POST unlock`, held only in the browser's JS
+memory — never localStorage/cookies/URLs); a missing/invalid/expired token, or one passed as
+a query parameter instead of the header, is **401** `{"error":"locked"}`. `GET media/*` is
+signed per-URL instead (`?exp=&sig=`), since `<img>`/`<video>`/`<audio>` tags can't send a
+header.
+
+| Method | Path | Handler | Request | Response |
+|---|---|---|---|---|
+| POST | `server/unlock` | `unlock` | `{"pin":str(4-16 digits)}` — a shorter/longer/non-digit PIN 422s locally, wixy never calls cmd for it | 200 `{"token":str,"expiresAt":float}`; 401 `{"error":"wrong_pin","attemptsLeft":int\|null}`; 429 `{"error":"locked_out","retryAfterS":int}` + `Retry-After` header; 409 `{"error":"pin_changed"}` (cmd's PIN rotated mid-check, nothing spent); 503 `{"error":"not_configured"}` (unknown app key, or no verifier on standalone) / `{"error":"pin_service_unavailable"}` (cmd unreachable/faulted) |
+| GET | `server/messages?before=&limit=` | `get_history` | query `before?:int`, `limit?:int(1-100,default 50)` | `{"messages":[<Message>], "hasMore":bool, "cursor":int}`, ascending by `seq`; 422 (`limit` out of range) |
+| POST | `server/messages` | `send_message` | `{"clientId":str(8-64),"sender":str(1-32,trimmed),"deviceId":str(8-64),"text":str\|null(≤4000),"attachmentIds":[hex32](0-10)}` | 201 `{"message":<Message>}` (200 + the SAME message on a replayed `clientId` — idempotent); 422 `{"error":"invalid","detail":str}` (empty text with no attachments, too long, bad sender, or an unknown/already-used/failed attachment id) |
+| DELETE | `server/messages/{seq}` | `delete_message` | — | 204 when DB scrub and media cleanup are complete; otherwise 202 `{"erasurePending":true}`; idempotent even when the message is already gone |
+| POST | `server/wipe` | `wipe_chat` | exactly `{"confirm":"WIPE"}` | 204 when DB scrub and media cleanup are complete; otherwise 202 `{"erasurePending":true}`; every other body, including extra keys, is 422 |
+| GET | `server/stream?after=` | `stream` | query `after?:int` (event cursor) | **SSE**, see §4 |
+| GET | `server/usage` | `usage` | — | `{"usedBytes":int,"quotaBytes":int,"freeBytes":int,"mediaAvailable":bool,"erasurePending":bool}` |
+| POST | `server/uploads` | `init_upload` | `{"kind":"photo"\|"video"\|"voice","mimeType":str,"sizeBytes":int,"filename":str\|null}` | 201 `{"uploadId":hex32,"chunkBytes":int,"maxBytes":int}`; 413 `{"error":"too_large","maxBytes":int}`; 415 `{"error":"unsupported_type"}`; 507 `{"error":"storage_full"}`; 503 `{"error":"media_unavailable"}` |
+| PUT | `server/uploads/{id}/chunks/{index}` | `put_chunk` | raw `application/octet-stream` body, ≤`chunkBytes` | 204; 413 `{"error":"too_large","maxBytes":int}`; 422 (index out of range); 404 (unknown upload) |
+| POST | `server/uploads/{id}/complete` | `complete_upload` | — | 202 `{"attachment":<Attachment>}` (status `processing`; idempotent on retry); 409 `{"error":"incomplete","missing":[int]}`; 422 `{"error":"size_mismatch"}`; 404 (unknown upload) |
+| DELETE | `server/uploads/{id}` | `delete_upload` | — | 204 (always — a no-op once already promoted to an attachment) |
+| GET | `server/media/{attId}/{rendition}?exp=&sig=` | `get_media` | `rendition ∈ full\|thumb\|poster\|play`; query `exp:int`, `sig:b64url` | 200/206 (Range-aware `FileResponse`, `Cache-Control: private, no-cache`, `X-Content-Type-Options: nosniff`, `Content-Disposition: inline`); 403 (bad/expired signature or email mismatch); 404 (malformed id, unknown rendition, deleted/unknown attachment, or missing file) |
+
+`<Message>` = `{seq:int, clientId:str, sender:str, text:str\|null, attachments:[<Attachment>],
+createdAt:float}`. `<Attachment>` = `{id:str, kind:"photo"\|"video"\|"voice",
+status:"processing"\|"ready"\|"failed", width:int\|null, height:int\|null,
+durationS:float\|null, peaks:[float]\|null, urls:{full?,thumb?,poster?,play?}}` — `urls`
+carries only READY renditions, each a freshly per-response HMAC-signed path (never
+precomputed/stored).
+
 ### Preview / versions / shell / public
 
 | Method | Path | Handler | Auth | Response |
@@ -248,8 +282,16 @@ static mounts → **public last**.
   `{"detail": [<per-field>]}` (no custom override).
 - **Public serving errors are plain text**, not JSON: 503 `"Site not yet published"`,
   404 `"Not found"` or a served `404.html`.
-- **No global exception handlers are registered.** Every domain exception is caught
-  per-handler and mapped:
+- **One global exception handler is registered** (`app.py`, added for the server-chat
+  feature): `@app.exception_handler(HTTPException)` — when a route raises
+  `HTTPException(status_code=…, detail=<dict>)`, the dict is returned **verbatim** as the
+  top-level JSON body (not wrapped under `"detail"`). A `str` detail (every OTHER route's
+  own usage, unchanged) still gets the default `{"detail": "<string>"}` envelope. This is
+  how `/api/admin/server/*`'s literal shapes (`{"error":"locked"}`, `{"error":"invalid",
+  "detail":...}`, …) coexist with every other route's plain-string convention. Every domain
+  exception below is still caught **per-handler** and mapped — this global handler only
+  changes how an already-raised `HTTPException`'s BODY is serialized, it never decides
+  which status code to raise:
 
 | Exception (module) | → HTTP |
 |---|---|
@@ -324,6 +366,34 @@ emitted at all — unless it carries attachments (decisions/00110: an image-only
 survives as `text:null` + `attachments`, thumbnails-only). So the indices a client sees can
 skip `0`, and a `text` may be shorter than what cmd's own `/messages` returns for the same
 index. Upstream transcripts are unmodified.
+
+**Server chat** — `GET /api/admin/server/stream?after=<cursor>`
+(`routes_livechat.py:_stream_events`). **Structurally different from the two streams
+above**: this is a real named-event SSE stream (`id: <n>` / `event: <type>` / `data:
+<json>` lines, reconnect via `after=<last id>`), not the `data: {"type":...}` convention
+Publish/Chat use — the client is a `fetch()` streaming reader carrying the
+`X-Wixy-Server-Token` header (plain `EventSource` can't set custom headers).
+
+- `event: message` / `id: <event_seq>` / `data: <Message>` (§2's `<Message>` shape) — a new
+  message.
+- `event: message_updated` / `data: <Message>` — an attachment on an existing message
+  changed status (e.g. `processing` → `ready`).
+- `event: locked` / `data: {}` — the token expired mid-stream; the server closes the
+  connection right after sending this.
+- `: ping` (a bare comment line, no `event:`/`data:`) every 15s, to keep the connection
+  alive through proxies.
+- `event: message_deleted` / `data: {"seq":int}` — the client removes that bubble if present;
+  a missing bubble is a no-op.
+- `event: wiped` / `data: {}` — the client clears loaded history and pending echoes; the stream
+  remains open.
+
+Per-connection loop: read `events_after(cursor)`; if any, look up each event's CURRENT
+message content and emit one frame per distinct message (**coalescing** — a `message` +
+`message_updated` for the same message in one poll batch collapse into a single frame,
+typed `message`); if none, wait up to 2s on an in-process notifier (`LiveChatNotifier`)
+before re-polling — this 2s re-check, not the notifier, is what a slot-swap overlap (two
+processes, one SQLite file) relies on to never strand a message the notifier never fired
+for.
 
 ## 5. Draft op contract (`DraftOp`)
 

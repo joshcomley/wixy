@@ -1,3 +1,10 @@
+/* The "Server" panel's disguise/lock chrome (spec/server-chat/00-brief.md §6)
+   — its own file since it's a large, self-contained feature. CSS requires
+   @import statements to precede every other rule, hence up here rather than
+   grouped with the rest of this panel's mentions further down; esbuild's CSS
+   build (esbuild.config.mjs) inlines it same as JS bundling. */
+@import "./server/lock.css";
+
 /* Admin shell layout (spec/05-editor.md §1's ASCII diagram: top bar + left nav +
    main panel). admin_shell.html's own inline <style> covers the pre-JS instant
    loading screen; this covers the real, JS-mounted UI.
@@ -14,6 +21,15 @@
    how `[data-theme]` gets applied (persisted mode + live OS-preference
    tracking while "system" is selected); `admin_shell.html`'s inline
    bootstrap script sets it synchronously before first paint. */
+
+/* Server chat (spec/server-chat/00-brief.md §10 P5b) — a separate file since
+   the CSS build (esbuild.config.mjs) inlines @imports same as JS bundling.
+   CSS requires @import rules to precede every other rule, so this stays
+   right after the leading comment block. P4's own
+   `@import "./server/lock.css";` for the lock/disguise chrome lands here
+   too once that parcel merges (Integration rules for DM: a trivial
+   additive merge). */
+@import "./server/chat.css";
 
 :root {
   color-scheme: light;
@@ -3187,6 +3203,29 @@ div.wx-media-thumb {
   margin: auto;
   color: #fff;
   filter: drop-shadow(0 0 2px rgb(0 0 0 / 0.6));
+}
+
+.wx-chat-attachment-progress {
+  position: absolute;
+  inset: auto 0 0;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 4px;
+  border: 0;
+  border-radius: 0;
+  appearance: none;
+  background: rgb(0 0 0 / 0.45);
+  color: var(--wx-brand-blue);
+}
+
+.wx-chat-attachment-progress::-webkit-progress-bar {
+  background: rgb(0 0 0 / 0.45);
+}
+
+.wx-chat-attachment-progress::-webkit-progress-value,
+.wx-chat-attachment-progress::-moz-progress-bar {
+  background: var(--wx-brand-blue);
 }
 
 .wx-chat-attachment-remove {

@@ -24,6 +24,7 @@ import anyio
 from fastapi import APIRouter, Request
 
 from builder.jsontypes import JsonObject
+from wixy_server.background import BackgroundTaskHealth
 from wixy_server.backup.status import BackupStatus, read_status
 from wixy_server.ledger import read_ledger
 from wixy_server.routes_version import resolve_engine_sha
@@ -88,14 +89,40 @@ def _last_publish_field(paths: ProjectPaths) -> JsonObject | None:
     return {"version": latest.version, "when": latest.when}
 
 
+def _server_field(
+    *, started_at: float, media_available: bool, media_degraded: bool = False
+) -> JsonObject:
+    """spec/server-chat/00-brief.md §5.10: the decoy's real data — `server/decoy.ts`
+    (P4) renders this straight, so it must never carry anything chat-shaped (Inv
+    42: "the decoy shows only real server data")."""
+    return {
+        "startedAt": started_at,
+        "mediaProcessing": (
+            "unavailable" if not media_available else "degraded" if media_degraded else "ok"
+        ),
+    }
+
+
 def _build_status(
-    *, wixy_repo_root: Path, paths: ProjectPaths, settings: Settings, now: datetime
+    *,
+    wixy_repo_root: Path,
+    paths: ProjectPaths,
+    settings: Settings,
+    now: datetime,
+    livechat_started_at: float,
+    livechat_media_available: bool,
+    media_degraded: bool = False,
 ) -> JsonObject:
     return {
         "backup": _backup_field(now),
         "diskUsage": _disk_usage_field(settings.storage_root),
         "lastPublish": _last_publish_field(paths),
         "engine": {"currentSha": resolve_engine_sha(wixy_repo_root), "edition": settings.edition},
+        "server": _server_field(
+            started_at=livechat_started_at,
+            media_available=livechat_media_available,
+            media_degraded=media_degraded,
+        ),
     }
 
 
@@ -104,8 +131,17 @@ async def get_system_status(request: Request) -> JsonObject:
     wixy_repo_root: Path = request.app.state.wixy_repo_root
     paths: ProjectPaths = request.app.state.paths
     settings: Settings = request.app.state.settings
+    livechat_started_at: float = request.app.state.livechat_started_at
+    livechat_media_available: bool = request.app.state.livechat_media_available
+    background_health: BackgroundTaskHealth = request.app.state.background_health
     return await anyio.to_thread.run_sync(
         lambda: _build_status(
-            wixy_repo_root=wixy_repo_root, paths=paths, settings=settings, now=datetime.now(UTC)
+            wixy_repo_root=wixy_repo_root,
+            paths=paths,
+            settings=settings,
+            now=datetime.now(UTC),
+            livechat_started_at=livechat_started_at,
+            livechat_media_available=livechat_media_available,
+            media_degraded=background_health.media_degraded(),
         )
     )
