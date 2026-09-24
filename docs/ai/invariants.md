@@ -581,3 +581,16 @@ repeated `apply_head` calls, and reaches real `render_page` output).
 *Exception:* none — a future project needing a different override rule (e.g. always
 re-sniffing even over an authored value) would need its own decision, not a quiet change here.
 
+### Inv 46 — Server chat delete and wipe are hard deletes, with no tombstone
+Any unlocked user can delete any message for everyone. Delete removes the message, its
+attachments, media/upload/failed files, and earlier message events, then emits one
+`message_deleted`; repeating the delete is idempotent. Wipe removes all messages, attachments,
+uploads, files, and events, then emits one `wiped`. Clients remove content on those events.
+Every store connection sets `PRAGMA secure_delete=ON`; delete checkpoints WAL passively and wipe
+truncates it. Sequence high-water marks and push subscriptions are preserved. Media files are
+unlinked, but NTFS/SSD byte-level shredding is not claimed.
+*Enforced by:* `wixy_server/tests/test_livechat_store.py` (migration, idempotence, secure delete,
+and raw-byte scrubbing), `test_routes_livechat.py` (auth, confirmation, file cleanup, and no push),
+`test_livechat_media_queue.py` (delete/processing race), and `e2e/tests/server-chat.spec.ts`
+(cross-client deletion, old-media 404, wipe replay, and mobile gesture behavior).
+*Exception:* none — filesystem overwrite is not a reliable shred guarantee on NTFS/SSD.

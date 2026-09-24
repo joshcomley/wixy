@@ -5,14 +5,18 @@ import { mountServerThread } from "../src/server/thread";
 import type { ServerStreamEvent } from "../src/server/stream";
 import type { LockHooks, ServerSession } from "../src/server/types";
 
-const { getHistory, sendMessage } = vi.hoisted(() => ({
+const { deleteMessage, getHistory, sendMessage, wipeChat } = vi.hoisted(() => ({
+  deleteMessage: vi.fn(),
   getHistory: vi.fn(),
   sendMessage: vi.fn(),
+  wipeChat: vi.fn(),
 }));
 vi.mock("../src/server/api/messages", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/server/api/messages")>()),
   getHistory,
   sendMessage,
+  deleteMessage,
+  wipeChat,
 }));
 
 const SESSION: ServerSession = { token: "tok", expiresAt: 9_999_999_999 };
@@ -37,7 +41,21 @@ function fakeWindow(): Window {
   return {
     crypto: { randomUUID: () => "generated-uuid-1234" },
     localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {}, clear: () => {} },
+    setTimeout: globalThis.setTimeout.bind(globalThis),
+    clearTimeout: globalThis.clearTimeout.bind(globalThis),
+    navigator: window.navigator,
   } as unknown as Window;
+}
+
+function touchPointer(type: string, x: number, y: number): PointerEvent {
+  const event = new Event(type, { bubbles: true }) as PointerEvent;
+  Object.defineProperties(event, {
+    pointerType: { value: "touch" },
+    pointerId: { value: 1 },
+    clientX: { value: x },
+    clientY: { value: y },
+  });
+  return event;
 }
 
 function emptyHistory(overrides: Partial<HistoryPage> = {}): HistoryPage {
@@ -66,6 +84,8 @@ describe("mountServerThread", () => {
   beforeEach(() => {
     getHistory.mockReset();
     sendMessage.mockReset();
+    deleteMessage.mockReset();
+    wipeChat.mockReset();
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -261,6 +281,94 @@ describe("mountServerThread", () => {
 
       expect(view.element.textContent).toContain("keep");
       expect(view.element.textContent).not.toContain("delete me");
+      view.teardown();
+    });
+
+    it("deletes optimistically from the message action sheet", async () => {
+      vi.useFakeTimers();
+      getHistory.mockResolvedValue(emptyHistory({ messages: [fakeMessage({ text: "remove me" })] }));
+      deleteMessage.mockResolvedValue(undefined);
+      const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-actions-trigger")?.click();
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-action-delete")?.click();
+      expect(view.element.textContent).toContain("Delete this message for everyone?");
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-delete-confirm-button")?.click();
+      await flush();
+
+      expect(deleteMessage).toHaveBeenCalledWith(SESSION, 1);
+      expect(view.element.querySelector(".wx-srv-bubble")?.classList.contains("wx-srv-bubble-deleting")).toBe(true);
+      vi.advanceTimersByTime(200);
+      await flush();
+      expect(view.element.textContent).not.toContain("remove me");
+      view.teardown();
+    });
+
+    it("restores a failed optimistic delete with an error line", async () => {
+      getHistory.mockResolvedValue(emptyHistory({ messages: [fakeMessage({ text: "keep on error" })] }));
+      deleteMessage.mockRejectedValue(new Error("network"));
+      const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-actions-trigger")?.click();
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-action-delete")?.click();
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-delete-confirm-button")?.click();
+      await flush();
+
+      expect(view.element.textContent).toContain("keep on error");
+      expect(view.element.textContent).toContain("Couldn't delete message. Try again.");
+      view.teardown();
+    });
+
+    it("the settings sheet's wipe call clears local history after success", async () => {
+      getHistory.mockResolvedValue(emptyHistory({ messages: [fakeMessage({ text: "gone" })] }));
+      wipeChat.mockResolvedValue(undefined);
+      const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+
+      await view.wipe();
+
+      expect(wipeChat).toHaveBeenCalledWith(SESSION);
+      expect(view.element.textContent).not.toContain("gone");
+      view.teardown();
+    });
+
+    it("opens on a 500ms touch hold and cancels after movement over 10px", async () => {
+      vi.useFakeTimers();
+      getHistory.mockResolvedValue(emptyHistory({ messages: [fakeMessage()] }));
+      const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+      const bubble = view.element.querySelector<HTMLElement>(".wx-srv-bubble");
+      const menu = view.element.querySelector<HTMLElement>(".wx-srv-message-actions");
+      expect(bubble).not.toBeNull();
+      expect(menu?.hidden).toBe(true);
+
+      bubble?.dispatchEvent(touchPointer("pointerdown", 10, 10));
+      vi.advanceTimersByTime(499);
+      expect(menu?.hidden).toBe(true);
+      bubble?.dispatchEvent(touchPointer("pointermove", 18, 18));
+      vi.advanceTimersByTime(1);
+      expect(menu?.hidden).toBe(true);
+
+      bubble?.dispatchEvent(touchPointer("pointerdown", 10, 10));
+      vi.advanceTimersByTime(500);
+      expect(menu?.hidden).toBe(false);
+      view.teardown();
+    });
+
+    it("closes message actions when the panel locks", async () => {
+      getHistory.mockResolvedValue(emptyHistory({ messages: [fakeMessage()] }));
+      Object.defineProperty(document, "fullscreenElement", { configurable: true, value: null });
+      const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-actions-trigger")?.click();
+      const menu = view.element.querySelector<HTMLElement>(".wx-srv-message-actions");
+      expect(menu?.hidden).toBe(false);
+
+      view.detach();
+
+      expect(menu?.hidden).toBe(true);
       view.teardown();
     });
 

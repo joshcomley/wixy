@@ -226,6 +226,11 @@ async def _handle_claimed(
 
         def _rmtree() -> None:
             shutil.rmtree(paths.server_attachment_media_dir(att.id), ignore_errors=True)
+            shutil.rmtree(paths.server_upload_dir(att.id), ignore_errors=True)
+            # A failed worker may have archived its source after a concurrent
+            # delete/wipe cleared the directory. Re-remove it once the store
+            # confirms the attachment vanished.
+            shutil.rmtree(paths.server_failed_dir(att.id), ignore_errors=True)
 
         await anyio.to_thread.run_sync(_rmtree)
         return

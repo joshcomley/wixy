@@ -101,6 +101,28 @@ export async function sendMessage(
   return { ok: false, kind: "unavailable" };
 }
 
+export async function deleteMessage(session: ServerSession, seq: number): Promise<void> {
+  const response = await serverFetch(
+    `/messages/${encodeURIComponent(String(seq))}`,
+    { method: "DELETE" },
+    session,
+  );
+  if (!response.ok) throw new Error(`Couldn't delete message (${response.status}).`);
+}
+
+export async function wipeChat(session: ServerSession): Promise<void> {
+  const response = await serverFetch(
+    "/wipe",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirm: "WIPE" }),
+    },
+    session,
+  );
+  if (!response.ok) throw new Error(`Couldn't delete messages (${response.status}).`);
+}
+
 export interface UsageInfo {
   readonly usedBytes: number;
   readonly quotaBytes: number;

@@ -3,6 +3,7 @@
 // toggle into, and a Lock button.
 
 import { getUsage } from "./api/messages";
+import { ServerLockedError } from "./api/http";
 import type { ServerIdentity } from "./identity";
 import type { LockHooks, ServerSession } from "./types";
 
@@ -11,6 +12,7 @@ export interface ServerSettingsSheetDeps {
   hooks: LockHooks;
   win: Window;
   getSession: () => ServerSession | null;
+  onWipe: () => Promise<void>;
   onNameChanged: () => void;
   onClose: () => void;
   document?: Document;
@@ -93,11 +95,40 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   lockButton.className = "wx-srv-sheet-lock";
   lockButton.textContent = "Lock";
 
-  sheet.append(header, nameRow, usageRow, pushSlot, lockButton);
+  const wipeButton = documentRef.createElement("button");
+  wipeButton.type = "button";
+  wipeButton.className = "wx-srv-sheet-wipe";
+  wipeButton.textContent = "Delete all messages";
+  wipeButton.dataset["srvGestureBoundary"] = "";
+
+  const wipeConfirmation = documentRef.createElement("div");
+  wipeConfirmation.className = "wx-srv-sheet-wipe-confirm";
+  wipeConfirmation.hidden = true;
+  const wipeQuestion = documentRef.createElement("p");
+  wipeQuestion.textContent =
+    "Delete every message, photo, video and voice note for everyone? This can't be undone.";
+  const wipeError = documentRef.createElement("p");
+  wipeError.className = "wx-srv-sheet-wipe-error";
+  wipeError.hidden = true;
+  const wipeConfirmButtons = documentRef.createElement("div");
+  wipeConfirmButtons.className = "wx-srv-sheet-wipe-buttons";
+  const wipeConfirmButton = documentRef.createElement("button");
+  wipeConfirmButton.type = "button";
+  wipeConfirmButton.className = "wx-srv-sheet-wipe-confirm-button";
+  wipeConfirmButton.textContent = "Delete everything";
+  const wipeCancelButton = documentRef.createElement("button");
+  wipeCancelButton.type = "button";
+  wipeCancelButton.className = "wx-srv-sheet-wipe-cancel";
+  wipeCancelButton.textContent = "Cancel";
+  wipeConfirmButtons.append(wipeConfirmButton, wipeCancelButton);
+  wipeConfirmation.append(wipeQuestion, wipeError, wipeConfirmButtons);
+
+  sheet.append(header, nameRow, usageRow, pushSlot, wipeButton, wipeConfirmation, lockButton);
   backdrop.appendChild(sheet);
 
   function close(): void {
     backdrop.hidden = true;
+    wipeConfirmation.hidden = true;
     deps.onClose();
   }
 
@@ -121,6 +152,30 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     close();
     hooks.lockNow("panic");
   });
+  wipeButton.addEventListener("click", () => {
+    wipeError.hidden = true;
+    wipeConfirmation.hidden = false;
+    wipeConfirmButton.focus();
+  });
+  wipeCancelButton.addEventListener("click", () => {
+    wipeConfirmation.hidden = true;
+  });
+  wipeConfirmButton.addEventListener("click", () => {
+    wipeConfirmButton.disabled = true;
+    void deps.onWipe()
+      .then(close)
+      .catch((error: unknown) => {
+        if (error instanceof ServerLockedError) {
+          hooks.lockNow("unauthorized");
+          return;
+        }
+        wipeError.textContent = "Couldn't delete messages. Try again.";
+        wipeError.hidden = false;
+      })
+      .finally(() => {
+        wipeConfirmButton.disabled = false;
+      });
+  });
   function onKeydown(evt: KeyboardEvent): void {
     if (evt.key === "Escape" && !backdrop.hidden) close();
   }
@@ -131,6 +186,8 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     pushSlot,
     open(): void {
       backdrop.hidden = false;
+      wipeConfirmation.hidden = true;
+      wipeError.hidden = true;
       nameInput.value = identity.getName() ?? "";
       usageRow.textContent = "Storage: loading…";
       const session = deps.getSession();

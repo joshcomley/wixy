@@ -34,7 +34,47 @@ class TestMigrations:
         store.list_messages(before=None, limit=1)
         conn = sqlite3.connect(str(db_path))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        finally:
+            conn.close()
+
+    def test_v2_rebuild_accepts_wiped_and_preserves_event_sequence(self, db_path: Path) -> None:
+        db_path.parent.mkdir(parents=True)
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.executescript(
+                """
+                CREATE TABLE events(
+                  event_seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                  type TEXT NOT NULL CHECK(type IN ('message','message_updated')),
+                  message_seq INTEGER NOT NULL, created_at REAL NOT NULL);
+                INSERT INTO events(event_seq, type, message_seq, created_at)
+                  VALUES (4, 'message', 1, 10.0), (12, 'message_updated', 1, 11.0);
+                DELETE FROM events WHERE event_seq = 12;
+                PRAGMA user_version = 1;
+                """
+            )
+        finally:
+            conn.close()
+
+        store = LiveChatStore(db_path)
+        assert [(event.event_seq, event.type) for event in store.events_after(0)] == [
+            (4, "message")
+        ]
+
+        conn = sqlite3.connect(str(db_path))
+        try:
+            columns = {row[1]: row[3] for row in conn.execute("PRAGMA table_info(events)")}
+            assert columns["message_seq"] == 0  # nullable for the 'wiped' event
+            conn.execute(
+                "INSERT INTO events (type, message_seq, created_at) VALUES ('wiped', NULL, 12.0)"
+            )
+            assert conn.execute("SELECT MAX(event_seq) FROM events").fetchone()[0] == 13
+            assert (
+                conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'events'").fetchone()[0]
+                == 13
+            )
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
         finally:
             conn.close()
 
@@ -304,6 +344,156 @@ class TestListMessagesAndEvents:
         self._seed(store, 3)
         result = store.get_messages([3, 999, 1])
         assert [m.seq for m in result] == [3, 1]
+
+
+class TestDeleteAndWipe:
+    @staticmethod
+    def _raw_database_bytes(db_path: Path) -> bytes:
+        wal_path = Path(f"{db_path}-wal")
+        return db_path.read_bytes() + (wal_path.read_bytes() if wal_path.exists() else b"")
+
+    def test_delete_removes_message_attachments_and_old_events_and_is_idempotent(
+        self, store: LiveChatStore, db_path: Path
+    ) -> None:
+        attachment = store.create_attachment(att_id="attachment-delete-1", kind="photo", now=1.0)
+        store.create_upload(
+            UploadRow(
+                id=attachment.id,
+                kind="photo",
+                mime="image/jpeg",
+                size_bytes=10,
+                filename=None,
+                by_email=None,
+                created_at=1.0,
+            )
+        )
+        message, _ = store.create_message(
+            client_id="client-delete-1",
+            sender="Josh",
+            device_id="device-delete-1",
+            by_email=None,
+            text="delete-marker-7d72c84d",
+            attachment_ids=(attachment.id,),
+            now=2.0,
+        )
+        # The attachment completion event must be removed with the message too.
+        store.claim_processing(owner="worker-1", now=2.0, lease_s=60.0)
+        store.finish_attachment(
+            att_id=attachment.id,
+            owner="worker-1",
+            result=AttachmentResult(
+                status="ready",
+                mime="image/jpeg",
+                width=1,
+                height=1,
+                duration_s=None,
+                peaks=None,
+                renditions=("full",),
+                bytes_on_disk=10,
+                failure=None,
+            ),
+            now=3.0,
+        )
+
+        assert store.delete_message(seq=message.seq, now=4.0) == [attachment.id]
+        assert store.get_messages([message.seq]) == []
+        assert store.get_attachment(attachment.id) is None
+        assert store.get_upload(attachment.id) is None
+        events = store.events_after(0)
+        assert [(event.type, event.message_seq) for event in events] == [
+            ("message_deleted", message.seq)
+        ]
+        assert store.delete_message(seq=message.seq, now=5.0) == []
+        assert store.events_after(0) == events
+        assert b"delete-marker-7d72c84d" not in self._raw_database_bytes(db_path)
+
+    def test_wipe_clears_content_keeps_push_and_never_reuses_sequences(
+        self, store: LiveChatStore, db_path: Path
+    ) -> None:
+        attachment = store.create_attachment(att_id="attachment-wipe-1", kind="voice", now=1.0)
+        store.create_upload(
+            UploadRow(
+                id=attachment.id,
+                kind="voice",
+                mime="audio/webm",
+                size_bytes=30,
+                filename="note.webm",
+                by_email=None,
+                created_at=1.0,
+            )
+        )
+        store.create_upload(
+            UploadRow(
+                id="pending-upload-1",
+                kind="video",
+                mime="video/mp4",
+                size_bytes=40,
+                filename="clip.mp4",
+                by_email=None,
+                created_at=1.0,
+            )
+        )
+        store.create_message(
+            client_id="client-wipe-1",
+            sender="Josh",
+            device_id="device-wipe-1",
+            by_email=None,
+            text="wipe-marker-5121b943",
+            attachment_ids=(attachment.id,),
+            now=2.0,
+        )
+        last_seq = store.create_message(
+            client_id="client-wipe-2",
+            sender="Purdy",
+            device_id="device-wipe-2",
+            by_email=None,
+            text="second message",
+            attachment_ids=(),
+            now=3.0,
+        )[0].seq
+        store.upsert_push_subscription(
+            PushSubscriptionRow(
+                device_id="device-wipe-1",
+                sender="Josh",
+                endpoint="https://push.example/subscription-1",
+                p256dh="public-key",
+                auth="auth-secret",
+                created_at=1.0,
+                last_ok_at=None,
+                consecutive_failures=0,
+            )
+        )
+        _messages, _has_more, old_cursor = store.list_messages(before=None, limit=10)
+
+        attachment_ids, upload_ids = store.wipe(now=4.0)
+
+        assert attachment_ids == [attachment.id]
+        assert upload_ids == [attachment.id, "pending-upload-1"]
+        assert store.list_messages(before=None, limit=10) == ([], False, old_cursor + 1)
+        assert store.get_attachment(attachment.id) is None
+        assert store.get_upload("pending-upload-1") is None
+        assert store.list_push_subscriptions()[0].device_id == "device-wipe-1"
+        assert [(event.type, event.message_seq) for event in store.events_after(old_cursor)] == [
+            ("wiped", None)
+        ]
+        next_message, _ = store.create_message(
+            client_id="client-wipe-3",
+            sender="Josh",
+            device_id="device-wipe-1",
+            by_email=None,
+            text="after wipe",
+            attachment_ids=(),
+            now=5.0,
+        )
+        assert next_message.seq > last_seq
+        assert b"wipe-marker-5121b943" not in self._raw_database_bytes(db_path)
+
+    def test_every_store_connection_enables_secure_delete(self, store: LiveChatStore) -> None:
+        conn = store._connect()
+        try:
+            assert conn.execute("PRAGMA secure_delete").fetchone()[0] == 1
+        finally:
+            conn.close()
 
 
 class TestAttachmentLeasing:

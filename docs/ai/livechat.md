@@ -17,8 +17,17 @@ Numbered guarantees: [invariants.md](invariants.md) 40–45.
   "Open server settings" button, which re-hides after 10s idle. Tapping the affordance opens
   a PIN pad titled "Unlock server" — a tap that lands within 400ms of the reveal itself is
   ignored, so one accidental rapid double-tap can't reveal-and-open in the same motion.
-  Multi-tap has **no meaning on the decoy**. A multi-tap (≥2 taps, ≤400ms apart) still locks
-  instantly once inside the unlocked chat view — that reading (R3) is unchanged; see §10.
+  Multi-tap has **no meaning on the decoy**. Inside the unlocked chat view, two qualifying
+  primary-button taps (≤400ms apart) lock instantly, subject to the v1.5.2 boundary rule below.
+- **R3 v1.5.2 (gesture boundaries):** a control that opens an in-page menu, sheet, confirm
+  step, dialog or lightbox carries `data-srv-gesture-boundary`. Its tap can complete and lock
+  a run started by a preceding ordinary tap, but by itself cannot start a run; a third rapid
+  tap on boundary controls still locks. Only primary-button pointerdowns count. This lets a
+  causal choice flow such as ⋯ → Delete for everyone → Delete run at human or Playwright speed,
+  while a double-tap on the bubble or thread still locks. The settings gear, photo lightbox
+  thumbnail, P8 menu trigger, Delete for everyone item, and Delete all messages row are marked;
+  final-action buttons and toggles are not. The exact classifier is in
+  `admin-ui/src/server/gestures.ts` and is covered by `admin-ui/tests/server/gestures.test.ts`.
 - Once unlocked: 10s of no activity fades back to the decoy; a panic button, a multi-tap
   inside the chat, `Escape`, tab-hidden, or routing away all lock instantly. A reload never
   restores the unlocked state (Inv 42).
@@ -173,13 +182,32 @@ directly in `test_routes_livechat.py::TestStreamEvents
 ::test_cross_process_write_is_picked_up_by_the_2s_recheck` (two `LiveChatStore` instances,
 one db file, the writing instance's own notifier never called).
 
-**§17.2 amendment A1** (delete a message / wipe the chat — the store methods and routes
-themselves are P8's future work, not built yet): the `events` table already accepts
-`message_deleted`/`wiped` event types and a nullable `message_seq` (NULL for `wiped`), and
-the stream loop already knows how to render them — `message_deleted` as `data:
-{"seq":int}`, `wiped` as `data:{}`, and it **skips** (emits nothing for) a `message`/
-`message_updated` event whose row has since vanished. This is schema/stream headroom only;
-nothing in P1 ever inserts either event type.
+**§17.2 migration v2** rebuilds the content-free `events` table on upgrade, accepts
+`message_deleted`/`wiped`, makes `message_seq` nullable for `wiped`, and preserves
+`sqlite_sequence`'s high-water mark. Every store connection enables `PRAGMA secure_delete=ON`.
+The stream emits `message_deleted` as `data: {"seq":int}`, emits `wiped` as `data: {}`, and
+skips a stale `message`/`message_updated` event if its message row has already vanished.
+
+### Delete and wipe (P8)
+
+Any unlocked chat user may hard-delete any message for everyone. Deletion removes its message
+and attachment rows, media/upload/failed directories, and prior `message`/`message_updated`
+events, then appends one `message_deleted` event. Repeating a delete returns 204 and adds no
+second event. The client removes the bubble optimistically, restores it with an error line if
+the request fails, and removes remote bubbles from the same event.
+
+The settings sheet's two-step **Delete all messages** action requires exactly
+`{"confirm":"WIPE"}`. Wipe clears messages, attachments, pending uploads, all events, and the
+contents of `media/`, `uploads/`, and `failed/`, then appends one `wiped` event. The client
+clears loaded history and pending echoes; the stream remains connected. Message/event sequence
+numbers, push subscriptions, `secret.key`, `vapid.json`, and localStorage identity values stay
+intact. Delete and wipe never dispatch push notifications.
+
+Both operations enable secure delete and checkpoint the WAL (`PASSIVE` after one message,
+`TRUNCATE` after wipe). Media files are unlinked; **NTFS/SSD byte-level shredding is not
+claimed**, since overwrite-in-place is not reliable on SSDs. If the media worker finishes after
+a concurrent delete/wipe has removed its row, its post-finish recheck removes the media,
+upload, and failed directories it may have recreated.
 
 ## 7. Web Push (`livechat/push.py`, `server/pushToggle.ts`)
 

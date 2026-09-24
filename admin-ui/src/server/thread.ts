@@ -11,9 +11,10 @@ import { mountChatComposer } from "../chatComposer";
 import { mountChatThreadScroll, type ChatThreadScroll } from "../chatThreadScroll";
 import { mountLightbox, type Lightbox } from "../lightbox";
 import { ServerLockedError } from "./api/http";
-import { getHistory, sendMessage, type Message } from "./api/messages";
+import { deleteMessage, getHistory, sendMessage, wipeChat, type Message } from "./api/messages";
 import type { ServerIdentity } from "./identity";
 import { linkifyInto } from "./linkify";
+import { mountMessageActions, type MessageActionsController } from "./messageActions";
 import { renderAttachments } from "./mediaRender";
 import type { ServerStreamEvent } from "./stream";
 import type { LockHooks, ServerSession } from "./types";
@@ -22,6 +23,7 @@ const HISTORY_PAGE_SIZE = 50;
 /** A pending echo unmatched by a real message this long is dropped rather
  * than kept forever — mirrors the AI chat's own ECHO_EXPIRY_MS. */
 const ECHO_EXPIRY_MS = 30_000;
+const DELETE_FADE_MS = 160;
 
 export interface ServerThreadDeps {
   identity: ServerIdentity;
@@ -44,6 +46,7 @@ export interface ServerThreadView {
    * text, and the scroll/echo state in memory for the next `attach`. */
   detach(): void;
   handleStreamEvent(event: ServerStreamEvent): void;
+  wipe(): Promise<void>;
   /** Updates the header's name chip — called after the settings sheet (or
    * the first-unlock name prompt) commits a new name. */
   refreshNameChip(): void;
@@ -100,6 +103,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   const settingsButton = documentRef.createElement("button");
   settingsButton.type = "button";
   settingsButton.className = "wx-srv-settings-button";
+  settingsButton.dataset["srvGestureBoundary"] = "";
   settingsButton.textContent = "⚙";
   settingsButton.title = "Settings";
   settingsButton.setAttribute("aria-label", "Settings");
@@ -169,9 +173,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   let hasMoreHistory = false;
   const confirmedBySeq = new Map<number, Message>();
   const confirmedClientIds = new Set<string>();
+  const inFlightDeletes = new Set<number>();
+  const deleteEventsDuringRequest = new Set<number>();
+  const deleteFadeTimers = new Map<number, number>();
+  const messageActionControllers: MessageActionsController[] = [];
   let pendingEchoes: PendingEcho[] = [];
   let echoCounter = 0;
   let pendingClientId: string | null = null;
+  let contentGeneration = 0;
 
   function addConfirmed(message: Message): void {
     confirmedBySeq.set(message.seq, message);
@@ -190,6 +199,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   function renderBubble(message: Message, mine: boolean): HTMLElement {
     const bubble = documentRef.createElement("div");
     bubble.className = `wx-srv-bubble ${mine ? "wx-srv-bubble-mine" : "wx-srv-bubble-theirs"}`;
+    bubble.dataset["messageSeq"] = String(message.seq);
     if (!mine) {
       const sender = documentRef.createElement("span");
       sender.className = "wx-srv-bubble-sender";
@@ -208,6 +218,15 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     time.className = "wx-srv-bubble-time";
     time.textContent = formatTime(message.createdAt);
     bubble.appendChild(time);
+    messageActionControllers.push(
+      mountMessageActions({
+        message,
+        bubble,
+        win,
+        document: documentRef,
+        onDelete: deleteForEveryone,
+      }),
+    );
     return bubble;
   }
 
@@ -231,6 +250,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     const nowMs = now();
     pendingEchoes = pendingEchoes.filter((e) => nowMs - e.sentAt < ECHO_EXPIRY_MS);
 
+    for (const controller of messageActionControllers) controller.teardown();
+    messageActionControllers.length = 0;
     messageList.innerHTML = "";
     const messages = Array.from(confirmedBySeq.values()).sort((a, b) => a.seq - b.seq);
     if (messages.length === 0 && pendingEchoes.length === 0) {
@@ -262,6 +283,74 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       messageList.appendChild(renderEchoBubble(echo));
     }
     threadScroll.afterContentChange(revealPillIfNotStuck);
+  }
+
+  async function deleteForEveryone(message: Message): Promise<void> {
+    const session = currentSession;
+    if (session === null) return;
+    inFlightDeletes.add(message.seq);
+    confirmedBySeq.delete(message.seq);
+    const bubble = messageList.querySelector<HTMLElement>(
+      `[data-message-seq="${message.seq}"]`,
+    );
+    if (bubble === null) {
+      renderThreadList(false);
+    } else {
+      bubble.classList.add("wx-srv-bubble-deleting");
+      const menu = bubble.querySelector<HTMLElement>(".wx-srv-message-actions");
+      if (menu !== null) menu.hidden = true;
+      deleteFadeTimers.set(
+        message.seq,
+        win.setTimeout(() => {
+          deleteFadeTimers.delete(message.seq);
+          if (!confirmedBySeq.has(message.seq)) renderThreadList(false);
+        }, DELETE_FADE_MS),
+      );
+    }
+    try {
+      await deleteMessage(session, message.seq);
+    } catch (error) {
+      const deleteArrived = deleteEventsDuringRequest.has(message.seq);
+      if (!deleteArrived) {
+        const fadeTimer = deleteFadeTimers.get(message.seq);
+        if (fadeTimer !== undefined) win.clearTimeout(fadeTimer);
+        deleteFadeTimers.delete(message.seq);
+        addConfirmed(message);
+        renderThreadList(false);
+        const restored = messageList.querySelector<HTMLElement>(
+          `[data-message-seq="${message.seq}"]`,
+        );
+        if (restored !== null) {
+          const errorLine = documentRef.createElement("span");
+          errorLine.className = "wx-srv-message-delete-error";
+          errorLine.textContent = "Couldn't delete message. Try again.";
+          restored.appendChild(errorLine);
+        }
+      }
+      if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+    } finally {
+      inFlightDeletes.delete(message.seq);
+      deleteEventsDuringRequest.delete(message.seq);
+    }
+  }
+
+  function clearAfterWipe(): void {
+    contentGeneration += 1;
+    for (const timer of deleteFadeTimers.values()) win.clearTimeout(timer);
+    deleteFadeTimers.clear();
+    confirmedBySeq.clear();
+    confirmedClientIds.clear();
+    pendingEchoes = [];
+    pendingClientId = null;
+    hasMoreHistory = false;
+    renderThreadList(false);
+  }
+
+  async function wipe(): Promise<void> {
+    const session = currentSession;
+    if (session === null) throw new Error("The server chat is locked.");
+    await wipeChat(session);
+    clearAfterWipe();
   }
 
   // -- History paging --------------------------------------------------------
@@ -323,6 +412,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   function send(): void {
     if (currentSession === null) return;
     const session = currentSession;
+    const requestGeneration = contentGeneration;
     const text = composer.text();
     composer.setBusy(true);
     composer.setError(null);
@@ -343,9 +433,15 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       deviceId: identity.getDeviceId(),
       text: text === "" ? null : text,
       attachmentIds: [],
-    })
+      })
       .then((result) => {
         composer.setBusy(false);
+        if (requestGeneration !== contentGeneration) {
+          if (pendingClientId === clientId) pendingClientId = null;
+          pendingEchoes = pendingEchoes.filter((e) => e.clientId !== clientId);
+          renderThreadList(false);
+          return;
+        }
         if (result.ok) {
           pendingClientId = null;
           composer.reset();
@@ -401,6 +497,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     attach,
     detach(): void {
       currentSession = null;
+      for (const controller of messageActionControllers) controller.close();
       lightbox.teardown();
       // ServerChatView.detach()'s contract: pause media and exit fullscreen
       // — a lock (panic/idle/escape/…) mid-playback must never leave audio
@@ -420,15 +517,15 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           renderThreadList(event.message.sender !== "" && !identity.isMine(event.message.sender));
           return;
         case "message_deleted":
+          if (inFlightDeletes.has(event.seq)) {
+            deleteEventsDuringRequest.add(event.seq);
+            return;
+          }
           confirmedBySeq.delete(event.seq);
           renderThreadList(false);
           return;
         case "wiped":
-          confirmedBySeq.clear();
-          confirmedClientIds.clear();
-          pendingEchoes = [];
-          hasMoreHistory = false;
-          renderThreadList(false);
+          clearAfterWipe();
           return;
         case "locked":
           // The stream's own `locked` event is handled by the caller
@@ -437,9 +534,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           return;
       }
     },
+    wipe,
     refreshNameChip,
     teardown(): void {
       currentSession = null;
+      for (const controller of messageActionControllers) controller.teardown();
+      messageActionControllers.length = 0;
+      for (const timer of deleteFadeTimers.values()) win.clearTimeout(timer);
+      deleteFadeTimers.clear();
       observer?.disconnect();
       lightbox.teardown();
       threadScroll.teardown();

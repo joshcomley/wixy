@@ -74,6 +74,7 @@ export const createServerChatView: CreateServerChatView = (deps) => {
     hooks,
     win,
     getSession: () => currentSession,
+    onWipe: () => thread.wipe(),
     onNameChanged: () => thread.refreshNameChip(),
     onClose: () => {},
   });

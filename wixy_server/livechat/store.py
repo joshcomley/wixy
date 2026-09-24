@@ -34,6 +34,7 @@ import time
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Literal
 
 from wixy_server.livechat.models import (
     AttachmentKind,
@@ -74,7 +75,18 @@ CREATE TABLE IF NOT EXISTS push_subscriptions(
   last_ok_at REAL, consecutive_failures INTEGER NOT NULL DEFAULT 0);
 """
 
-_MIGRATIONS: list[tuple[int, str]] = [(1, _SCHEMA_V1)]
+_SCHEMA_V2_EVENTS = """
+CREATE TABLE events_v2(
+  event_seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL CHECK(type IN ('message','message_updated','message_deleted','wiped')),
+  message_seq INTEGER, created_at REAL NOT NULL);
+INSERT INTO events_v2 (event_seq, type, message_seq, created_at)
+  SELECT event_seq, type, message_seq, created_at FROM events ORDER BY event_seq;
+DROP TABLE events;
+ALTER TABLE events_v2 RENAME TO events;
+"""
+
+_LATEST_SCHEMA_VERSION = 2
 
 
 class LiveChatStoreError(Exception):
@@ -231,22 +243,58 @@ class LiveChatStore:
         return conn
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
-        # The user_version check-then-act below is NOT itself atomic across
-        # connections (busy_timeout only protects genuine SQLite write-lock
-        # contention, not this two-step race) — on a brand-new DB file, two
-        # connections opened close together (P2b's media queue starting to
-        # poll concurrently with the first request, or a blue/green pair both
-        # starting cold) can both read user_version=0 and both attempt the
-        # v1 migration. `CREATE TABLE IF NOT EXISTS` makes the loser's replay
-        # a harmless no-op instead of `OperationalError: table already
-        # exists` (measured 2026-09-14, P2b's media_queue.run_forever
-        # surfaced this within the first few polls of any fresh app.py test).
+        # Most requests only need the cheap version read. During an upgrade,
+        # serialize the check and every migration under SQLite's write lock so
+        # blue/green processes cannot both rebuild the events table.
         current = conn.execute("PRAGMA user_version").fetchone()[0]
-        for version, sql in _MIGRATIONS:
-            if version <= current:
-                continue
-            conn.executescript(sql)
-            conn.execute(f"PRAGMA user_version = {version}")
+        if current >= _LATEST_SCHEMA_VERSION:
+            return
+
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            current = conn.execute("PRAGMA user_version").fetchone()[0]
+            if current < 1:
+                # This static schema has no semicolons inside SQL literals, so
+                # each statement can be executed inside the migration txn.
+                for statement in _SCHEMA_V1.split(";"):
+                    if statement.strip():
+                        conn.execute(statement)
+                current = 1
+                conn.execute("PRAGMA user_version = 1")
+
+            if current < 2:
+                self._migrate_events_v2(conn)
+                conn.execute("PRAGMA user_version = 2")
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+
+    @staticmethod
+    def _migrate_events_v2(conn: sqlite3.Connection) -> None:
+        """Rebuild the event table so old v1 databases accept delete/wipe events.
+
+        Preserve sqlite_sequence's high-water mark even if old events were
+        deleted before the upgrade; event IDs must never be reused.
+        """
+        old_sequence = conn.execute(
+            "SELECT seq FROM sqlite_sequence WHERE name = 'events'"
+        ).fetchone()
+        high_water = int(old_sequence["seq"]) if old_sequence is not None else 0
+        for statement in _SCHEMA_V2_EVENTS.split(";"):
+            if statement.strip():
+                conn.execute(statement)
+
+        new_sequence = conn.execute(
+            "SELECT seq FROM sqlite_sequence WHERE name = 'events'"
+        ).fetchone()
+        high_water = max(high_water, int(new_sequence["seq"]) if new_sequence is not None else 0)
+        if new_sequence is None and high_water > 0:
+            conn.execute(
+                "INSERT INTO sqlite_sequence (name, seq) VALUES ('events', ?)", (high_water,)
+            )
+        elif new_sequence is not None:
+            conn.execute("UPDATE sqlite_sequence SET seq = ? WHERE name = 'events'", (high_water,))
 
     @contextmanager
     def _write_txn(self) -> Iterator[sqlite3.Connection]:
@@ -386,6 +434,66 @@ class LiveChatStore:
                 )
                 for row in rows
             ]
+
+    def delete_message(self, *, seq: int, now: float) -> list[str]:
+        """Hard-delete one message and its attachments, then emit its tombstone-free event."""
+        with self._write_txn() as conn:
+            exists = (
+                conn.execute("SELECT 1 FROM messages WHERE seq = ?", (seq,)).fetchone() is not None
+            )
+            attachment_rows = conn.execute(
+                "SELECT id FROM attachments WHERE message_seq = ? ORDER BY id", (seq,)
+            ).fetchall()
+            attachment_ids = [str(row["id"]) for row in attachment_rows]
+            conn.execute(
+                "DELETE FROM uploads WHERE id IN ("
+                "SELECT id FROM attachments WHERE message_seq = ?)",
+                (seq,),
+            )
+            conn.execute("DELETE FROM attachments WHERE message_seq = ?", (seq,))
+            conn.execute(
+                "DELETE FROM events WHERE message_seq = ? "
+                "AND type IN ('message', 'message_updated')",
+                (seq,),
+            )
+            conn.execute("DELETE FROM messages WHERE seq = ?", (seq,))
+            if exists:
+                conn.execute(
+                    "INSERT INTO events (type, message_seq, created_at) "
+                    "VALUES ('message_deleted', ?, ?)",
+                    (seq, now),
+                )
+        self._checkpoint("PASSIVE")
+        return attachment_ids
+
+    def wipe(self, *, now: float) -> tuple[list[str], list[str]]:
+        """Remove all chat content and append one cursor-preserving wipe event."""
+        with self._write_txn() as conn:
+            attachment_ids = [
+                str(row["id"])
+                for row in conn.execute("SELECT id FROM attachments ORDER BY id").fetchall()
+            ]
+            upload_ids = [
+                str(row["id"])
+                for row in conn.execute("SELECT id FROM uploads ORDER BY id").fetchall()
+            ]
+            conn.execute("DELETE FROM attachments")
+            conn.execute("DELETE FROM messages")
+            conn.execute("DELETE FROM uploads")
+            conn.execute("DELETE FROM events")
+            conn.execute(
+                "INSERT INTO events (type, message_seq, created_at) VALUES ('wiped', NULL, ?)",
+                (now,),
+            )
+        self._checkpoint("TRUNCATE")
+        return attachment_ids, upload_ids
+
+    def _checkpoint(self, mode: Literal["PASSIVE", "TRUNCATE"]) -> None:
+        conn = self._connect()
+        try:
+            conn.execute(f"PRAGMA wal_checkpoint({mode})").fetchone()
+        finally:
+            conn.close()
 
     # -- attachments (P2) -------------------------------------------------------
 

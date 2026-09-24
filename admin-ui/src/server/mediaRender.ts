@@ -88,6 +88,7 @@ function renderPhotoButton(
   const button = documentRef.createElement("button");
   button.type = "button";
   button.className = "wx-srv-photo-thumb";
+  button.dataset["srvGestureBoundary"] = "";
   button.setAttribute("aria-label", "Open attached photo");
   const image = documentRef.createElement("img");
   image.src = attachment.urls.thumb ?? attachment.urls.full ?? "";

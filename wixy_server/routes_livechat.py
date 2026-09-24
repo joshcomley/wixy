@@ -11,14 +11,16 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import time
 from collections.abc import AsyncGenerator, AsyncIterator
+from typing import Literal
 
 import anyio
 from anyio.abc import TaskGroup
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from builder.jsontypes import JsonObject
 from wixy_server.livechat.models import (
@@ -39,6 +41,7 @@ from wixy_server.livechat.tokens import (
     require_server_token,
 )
 from wixy_server.settings import Settings
+from wixy_server.storage import ProjectPaths
 
 router = APIRouter(prefix="/api/admin/server")
 
@@ -153,6 +156,12 @@ class SendMessageIn(BaseModel):
     attachmentIds: list[str] = Field(default_factory=list)
 
 
+class WipeChatIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirm: Literal["WIPE"]
+
+
 @router.post("/messages", response_model=None)
 async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
     auth = require_server_token(request)
@@ -213,6 +222,60 @@ async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
         status_code=201 if created else 200,
         content={"message": message_json(message, signer)},
     )
+
+
+@router.delete("/messages/{seq}", response_model=None)
+async def delete_message(seq: int, request: Request) -> Response:
+    require_server_token(request)
+    store: LiveChatStore = request.app.state.livechat_store
+    paths: ProjectPaths = request.app.state.paths
+    notifier: LiveChatNotifier = request.app.state.livechat_notifier
+
+    attachment_ids = await anyio.to_thread.run_sync(
+        lambda: store.delete_message(seq=seq, now=time.time())
+    )
+
+    def _remove_files() -> None:
+        for attachment_id in attachment_ids:
+            shutil.rmtree(paths.server_attachment_media_dir(attachment_id), ignore_errors=True)
+            shutil.rmtree(paths.server_upload_dir(attachment_id), ignore_errors=True)
+            shutil.rmtree(paths.server_failed_dir(attachment_id), ignore_errors=True)
+
+    await anyio.to_thread.run_sync(_remove_files)
+    notifier.publish()
+    return Response(status_code=204)
+
+
+@router.post("/wipe", response_model=None)
+async def wipe_chat(body: WipeChatIn, request: Request) -> Response:
+    require_server_token(request)
+    store: LiveChatStore = request.app.state.livechat_store
+    paths: ProjectPaths = request.app.state.paths
+    notifier: LiveChatNotifier = request.app.state.livechat_notifier
+
+    attachment_ids, upload_ids = await anyio.to_thread.run_sync(lambda: store.wipe(now=time.time()))
+
+    def _remove_files() -> None:
+        for attachment_id in attachment_ids:
+            shutil.rmtree(paths.server_attachment_media_dir(attachment_id), ignore_errors=True)
+            shutil.rmtree(paths.server_failed_dir(attachment_id), ignore_errors=True)
+        for upload_id in upload_ids:
+            shutil.rmtree(paths.server_upload_dir(upload_id), ignore_errors=True)
+        # Also clear untracked remnants and any directory created by a worker
+        # racing the wipe. The queue's post-finish check handles its own late
+        # output, while this removes every path already present at this point.
+        for root in (paths.server_media, paths.server_uploads, paths.server_failed):
+            if not root.is_dir():
+                continue
+            for child in root.iterdir():
+                if child.is_dir():
+                    shutil.rmtree(child, ignore_errors=True)
+                else:
+                    child.unlink(missing_ok=True)
+
+    await anyio.to_thread.run_sync(_remove_files)
+    notifier.publish()
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------

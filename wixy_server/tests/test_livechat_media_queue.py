@@ -274,11 +274,22 @@ class TestDeleteRace:
         delete/wipe won the race, and the media bytes this worker just wrote
         must not be left behind."""
         att_id = _seed_processing_photo(store, paths, now=1000.0)
+        message, _created = store.create_message(
+            client_id="client-delete-race-1",
+            sender="Josh",
+            device_id="device-delete-race",
+            by_email=None,
+            text="delete while media is processing",
+            attachment_ids=(att_id,),
+            now=1000.0,
+        )
         claimed = store.claim_processing(owner="owner", now=1000.0, lease_s=120.0)
         assert claimed is not None
 
-        # Simulate P8's delete/wipe landing while this worker is mid-flight.
-        store.delete_attachment(att_id)
+        # Simulate P8's delete landing while this worker is mid-flight. A bad
+        # source makes the worker create `failed/<id>/` after the delete, too.
+        store.delete_message(seq=message.seq, now=1001.0)
+        (paths.server_upload_dir(att_id) / "assembled").write_bytes(b"not an image")
 
         notifier = LiveChatNotifier()
         await media_queue._handle_claimed(
@@ -287,3 +298,5 @@ class TestDeleteRace:
 
         assert store.get_attachment(att_id) is None
         assert not paths.server_attachment_media_dir(att_id).exists()
+        assert not paths.server_upload_dir(att_id).exists()
+        assert not paths.server_failed_dir(att_id).exists()

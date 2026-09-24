@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 import subprocess
 import time
 from pathlib import Path
@@ -25,7 +26,7 @@ from jwt.algorithms import RSAAlgorithm
 import wixy_server.app as wixy_app_module
 import wixy_server.routes_livechat as routes_livechat_module
 from wixy_server.app import create_app
-from wixy_server.livechat.models import AttachmentResult
+from wixy_server.livechat.models import AttachmentResult, PushSubscriptionRow, UploadRow
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import CmdPinVerifier
 from wixy_server.livechat.store import LiveChatStore
@@ -717,6 +718,224 @@ class TestStreamEventsAmendmentA1:
             await gen.aclose()
         assert frame["event"] == "wiped"
         assert frame["data"] == {}
+
+
+class TestDeleteWipeRoutes:
+    def _new_app(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> Any:
+        return create_app(
+            storage_root=storage_root,
+            wixy_repo_root=wixy_repo_root,
+            pin_verifier=pin_verifier,
+        )
+
+    def test_delete_requires_token_and_removes_message_files_without_push(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        app = self._new_app(storage_root, wixy_repo_root, pin_verifier)
+        push_calls: list[str] = []
+
+        async def _push(_message: object) -> None:
+            push_calls.append("called")
+
+        app.state.livechat_message_hooks.append(_push)
+        store: LiveChatStore = app.state.livechat_store
+        paths = app.state.paths
+        attachment = store.create_attachment(
+            att_id="delete-route-attachment", kind="photo", now=1.0
+        )
+        store.create_upload(
+            UploadRow(
+                id=attachment.id,
+                kind="photo",
+                mime="image/jpeg",
+                size_bytes=12,
+                filename=None,
+                by_email=None,
+                created_at=1.0,
+            )
+        )
+        message, _ = store.create_message(
+            client_id="client-delete-route",
+            sender="Josh",
+            device_id="device-delete-route",
+            by_email=None,
+            text="route delete marker",
+            attachment_ids=(attachment.id,),
+            now=2.0,
+        )
+        media_dir = paths.server_attachment_media_dir(attachment.id)
+        media_dir.mkdir(parents=True)
+        (media_dir / "full.jpg").write_bytes(b"private media")
+        upload_dir = paths.server_upload_dir(attachment.id)
+        upload_dir.mkdir(parents=True)
+        (upload_dir / "assembled").write_bytes(b"source upload")
+        failed_dir = paths.server_failed_dir(attachment.id)
+        failed_dir.mkdir(parents=True)
+        (failed_dir / "original.jpg").write_bytes(b"failed original")
+
+        with TestClient(app) as client:
+            locked = client.delete(f"/api/admin/server/messages/{message.seq}")
+            assert locked.status_code == 401
+            token = _unlock(client).json()["token"]
+            response = client.delete(
+                f"/api/admin/server/messages/{message.seq}",
+                headers={"X-Wixy-Server-Token": token},
+            )
+            repeat = client.delete(
+                f"/api/admin/server/messages/{message.seq}",
+                headers={"X-Wixy-Server-Token": token},
+            )
+
+        assert response.status_code == 204
+        assert repeat.status_code == 204
+        assert store.get_messages([message.seq]) == []
+        assert store.events_after(0)[-1].type == "message_deleted"
+        assert not media_dir.exists()
+        assert not upload_dir.exists()
+        assert not failed_dir.exists()
+        assert push_calls == []
+
+    def test_wipe_requires_exact_confirmation_and_clears_private_content_only(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        app = self._new_app(storage_root, wixy_repo_root, pin_verifier)
+        push_calls: list[str] = []
+
+        async def _push(_message: object) -> None:
+            push_calls.append("called")
+
+        app.state.livechat_message_hooks.append(_push)
+        store: LiveChatStore = app.state.livechat_store
+        paths = app.state.paths
+        attachment = store.create_attachment(att_id="wipe-route-attachment", kind="voice", now=1.0)
+        store.create_upload(
+            UploadRow(
+                id=attachment.id,
+                kind="voice",
+                mime="audio/webm",
+                size_bytes=20,
+                filename="note.webm",
+                by_email=None,
+                created_at=1.0,
+            )
+        )
+        store.create_upload(
+            UploadRow(
+                id="pending-wipe-upload",
+                kind="video",
+                mime="video/mp4",
+                size_bytes=30,
+                filename="clip.mp4",
+                by_email=None,
+                created_at=1.0,
+            )
+        )
+        message, _ = store.create_message(
+            client_id="client-wipe-route",
+            sender="Purdy",
+            device_id="device-wipe-route",
+            by_email=None,
+            text="wipe route marker",
+            attachment_ids=(attachment.id,),
+            now=2.0,
+        )
+        store.upsert_push_subscription(
+            PushSubscriptionRow(
+                device_id="keep-push-device",
+                sender="Purdy",
+                endpoint="https://push.example/keep",
+                p256dh="public-key",
+                auth="auth-secret",
+                created_at=1.0,
+                last_ok_at=None,
+                consecutive_failures=0,
+            )
+        )
+        old_cursor = store.list_messages(before=None, limit=10)[2]
+        for directory, name in (
+            (paths.server_attachment_media_dir(attachment.id), "full.m4a"),
+            (paths.server_upload_dir(attachment.id), "assembled"),
+            (paths.server_failed_dir(attachment.id), "original.webm"),
+        ):
+            directory.mkdir(parents=True)
+            (directory / name).write_bytes(b"private data")
+        # A remnant with no surviving DB row must be removed by the wipe too.
+        orphan_failed = paths.server_failed_dir("orphan-id")
+        orphan_failed.mkdir(parents=True)
+        (orphan_failed / "original.jpg").write_bytes(b"orphan")
+        pending_upload_dir = paths.server_upload_dir("pending-wipe-upload")
+        pending_upload_dir.mkdir(parents=True)
+        (pending_upload_dir / "chunk-000000").write_bytes(b"partial")
+
+        with TestClient(app) as client:
+            token = _unlock(client).json()["token"]
+            headers = {"X-Wixy-Server-Token": token}
+            assert (
+                client.post("/api/admin/server/wipe", headers=headers, json={}).status_code == 422
+            )
+            assert (
+                client.post(
+                    "/api/admin/server/wipe",
+                    headers=headers,
+                    json={"confirm": "WIPE", "extra": True},
+                ).status_code
+                == 422
+            )
+            wrong_case = client.post(
+                "/api/admin/server/wipe", headers=headers, json={"confirm": "wipe"}
+            )
+            assert wrong_case.status_code == 422
+            response = client.post(
+                "/api/admin/server/wipe", headers=headers, json={"confirm": "WIPE"}
+            )
+            next_chunk = client.put(
+                "/api/admin/server/uploads/pending-wipe-upload/chunks/0",
+                headers=headers,
+                content=b"remaining bytes",
+            )
+            complete = client.post(
+                "/api/admin/server/uploads/pending-wipe-upload/complete",
+                headers=headers,
+            )
+
+        assert response.status_code == 204
+        assert next_chunk.status_code == 404
+        assert complete.status_code == 404
+        assert store.list_messages(before=None, limit=10)[0] == []
+        assert store.events_after(old_cursor)[0].type == "wiped"
+        assert store.list_push_subscriptions()[0].device_id == "keep-push-device"
+        assert not paths.server_media.exists() or not list(paths.server_media.iterdir())
+        assert not paths.server_uploads.exists() or not list(paths.server_uploads.iterdir())
+        assert not paths.server_failed.exists() or not list(paths.server_failed.iterdir())
+        assert push_calls == []
+
+
+class TestStreamEventsA1VanishedMessage:
+    def _insert_event(
+        self, db_path: Path, *, event_type: str, message_seq: int | None, now: float
+    ) -> None:
+        store = LiveChatStore(db_path)
+        store.events_after(0)
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.execute(
+                "INSERT INTO events (type, message_seq, created_at) VALUES (?, ?, ?)",
+                (event_type, message_seq, now),
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
     @pytest.mark.asyncio
     async def test_a_message_event_for_an_already_vanished_row_is_skipped(
