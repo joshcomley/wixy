@@ -102,6 +102,14 @@ npx playwright test
   these trailers by `/api/version/notes`, and CI's `release-note` job fails any PR
   with a non-merge commit missing one. A multi-commit PR may repeat the same
   trailer on each commit (the harvest dedupes).
+- **Server-chat release-note rule (R14a):** the ONE delivery merge of
+  `cmd/workspace-00029` to `main` is a squash with a hand-written body whose only
+  `Release-note:` line is exactly `Release-note: Added a Server page showing your website's server status.`
+  Never use GitHub's default squash body. After delivery, every commit that
+  touches Server chat must use exactly `Release-note: General bug fixes and improvements.`;
+  a Server-chat trailer must never name the chat, messages, photos, video, voice, PIN, or
+  locking. `routes_version.resolve_release_notes` reads plain `git log --format=%B`, not
+  first-parent history, so every commit trailer can reach the owner's update popup.
 - Never author code in `D:\Servers\Wixy\` (that's the deployment target, a Slots
   blue/green checkout) — this repo is the source; see the global
   `D:\Servers\CLAUDE.md` worktree-guard rule. Branch here, PR, merge to `main`; Slots

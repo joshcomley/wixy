@@ -72,6 +72,9 @@ during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/
 | `test_cmdchat.py` / `test_chats.py` | the cmd client (vs `fake_cmd`); conversation store |
 | `test_routes_*.py` | HTTP surface per router (admin_api / chat / public / internal / version) |
 | `test_robots_header.py` | `X-Robots-Tag: noindex` middleware (Inv 37) — the path allowlist as a pure-function unit test, plus integration coverage on both indexable states |
+| `test_livechat_pinclient.py`, `test_livechat_tokens.py`, `test_livechat_store.py`, `test_livechat_uploads.py`, `test_livechat_processing.py`, `test_livechat_media_queue.py`, `test_livechat_janitor.py`, `test_livechat_push.py` | PIN client and tokens; SQLite migrations and erasure; upload validation and chunking; media processing, queue, janitor, and push |
+| `test_routes_livechat.py`, `test_routes_livechat_media.py` | protected chat/upload routes, delete/wipe recovery, and signed media |
+| `test_background.py`, `test_routes_system.py`, `test_settings.py` | contained loop/one-shot failures, media health status, and Server-chat environment settings |
 
 ### Frontend (vitest) & E2E (Playwright)
 
@@ -87,7 +90,18 @@ during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/
   round trip and the write gate accepting `visible: false`, decisions/00117). The gallery
   fixture (`fixture_server.py`'s `_GALLERY_JSON`) seeds one HIDDEN slider pair ("Hidden Pair")
   so both files have a real hidden item to exercise without touching the shared mini-site
-  fixture's `showcase.items` (whose item count several other specs assert exactly).
+  fixture's `showcase.items` (whose item count several other specs assert exactly). Server chat
+  coverage is `server-chat.spec.ts` (conversation, delete/wipe, and cross-client behavior),
+  `server-media.spec.ts` (chunked photo/video/voice upload and rendering), and
+  `server-lock.spec.ts` (disguise, lock causes, and gestures).
+
+Server-chat unit coverage also lives in `admin-ui/tests/server/{gestures,lockModel,panel,http,unlock}.test.ts`.
+The lock browser spec uses Playwright `page.clock` to control the 400 ms multi-tap window,
+idle timeout, and suspensions. Media e2e uses fake microphone devices; voice readiness is
+polled from the rendered DOM rather than controlled by `page.clock`.
+CI installs the real `ffmpeg` binary in both the Python and e2e jobs: media-processing tests
+exercise actual voice/video conversion, and the e2e fixture needs it for uploaded media.
+Pillow is a core dependency; `pillow-heif` is installed by the server extra.
 
 ## Named fixtures
 
@@ -107,3 +121,11 @@ A failing test is yours to fix regardless of author — `git fetch && git merge 
 before declaring a verdict, fix the root cause, never skip/xfail/delete to go green, red main
 blocks merges. A rare full-suite-only flake is a box-level resource-contention characteristic
 (decisions/00025, 00027) — investigate, but never lower `-n 4` or add per-test retries.
+
+Two Server-chat delivery lessons set the acceptance bar:
+
+- For erasure or background-worker changes, require **five consecutive clean full-suite
+  runs**, run alone. Never overlap pytest and e2e; Windows concurrent-file-access races fail
+  different tests on different loaded runs, so one green run does not establish stability.
+- Do not dismiss a Server-chat e2e failure as host load based on a small number of retries.
+  Reproduce it **10/10 on an unloaded node** before classifying it as load-only.

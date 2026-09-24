@@ -177,14 +177,15 @@ human↔human messaging tool for admin users, disguised behind a "Server" nav ta
 | Module | Responsibility |
 |---|---|
 | `models.py` | frozen row dataclasses (`MessageRow`, `AttachmentRow`, `EventRow`, …) + the `message_json`/`attachment_json` wire serializers |
-| `store.py` | `LiveChatStore` — SQLite (WAL), messages/attachments/events/uploads/push subscriptions plus durable deleted-storage and wipe-cleanup records |
+| `store.py` | `LiveChatStore` — SQLite (WAL), messages/attachments/events/uploads/push subscriptions plus durable `deleted_storage`, `pending_wipe_cleanup`, and `pending_scrub` records |
+| `background.py` | `ContainedTaskGroup` — supervised app-lifetime loops, contained one-shot tasks, and health state |
 | `tokens.py` | the per-project HMAC secret, unlock-token mint/verify, signed media-URL signing/verification, `require_server_token` |
 | `pinclient.py` | `PinVerifier` protocol + `CmdPinVerifier` — the zero-PIN-state hop to cmd's PIN-verify service |
 | `notifier.py` | `LiveChatNotifier` — in-process SSE wake-up (`anyio.Event` swap) |
 | `processing.py` | pure photo/voice/video pipeline (Pillow+pillow-heif, ffmpeg) — magic-byte sniff, hardened subprocess calls, no DB/settings coupling |
 | `uploads.py` | chunked upload staging/assembly, quota + free-space enforcement |
 | `media_queue.py` | lease-based background worker turning a `processing` attachment into `ready`/`failed` |
-| `janitor.py` | hourly stale-file cleanup plus a 2 s startup-resumed WAL scrubber and durable media-deletion retry worker |
+| `janitor.py` | hourly stale-file cleanup plus the 2 s startup-resumed erasure worker for journaled media deletion, wipe sweeps, and WAL scrubbing |
 
 `routes_livechat.py` and `routes_livechat_media.py` (not inside the package, alongside the
 other `routes_*.py` files) wire these together — the former owns unlock/history/send/stream/
@@ -222,12 +223,16 @@ D:\Servers\Wixy\Storage\
     chats.json                 # AI conversation registry
     locks\publish.lock         # cross-process publish lock (self-heals after 600s)
     server\                    # PIN-protected admin live chat — PRIVATE, Inv 40
-      server.db (+ -wal, -shm) # SQLite, WAL — chat rows, deletion tombstones, and retry state
+      server.db (+ -wal, -shm) # SQLite, schema v6 — chat rows and private erasure journals (`deleted_storage`, `pending_wipe_cleanup`, `pending_scrub`)
       secret.key                # 32 random bytes (unlock-token + media-URL HMAC key)
       media\<id[:2]>\<id>\      # processed attachment renditions (P2)
       uploads\<uploadId>\       # in-progress chunked uploads (P2)
       failed\<id>\               # originals kept 7 days on processing failure (P2)
 ```
+
+The erasure-journal rows contain storage IDs, tokens, and retry state only; they are not
+chat-visible message tombstones. See [livechat.md](livechat.md) §5–6 and
+[invariants.md](invariants.md) 46–47.
 
 Paths are computed by `wixy_server/storage.py:ProjectPaths`; everything is per-slug (v1 runs
 one project but no code assumes it — Invariant 1).
