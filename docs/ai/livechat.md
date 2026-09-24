@@ -17,8 +17,17 @@ Numbered guarantees: [invariants.md](invariants.md) 40–45.
   "Open server settings" button, which re-hides after 10s idle. Tapping the affordance opens
   a PIN pad titled "Unlock server" — a tap that lands within 400ms of the reveal itself is
   ignored, so one accidental rapid double-tap can't reveal-and-open in the same motion.
-  Multi-tap has **no meaning on the decoy**. A multi-tap (≥2 taps, ≤400ms apart) still locks
-  instantly once inside the unlocked chat view — that reading (R3) is unchanged; see §10.
+  Multi-tap has **no meaning on the decoy**. Inside the unlocked chat view, two qualifying
+  primary-button taps (≤400ms apart) lock instantly, subject to the v1.5.2 boundary rule below.
+- **R3 v1.5.2 (gesture boundaries):** a control that opens an in-page menu, sheet, confirm
+  step, dialog or lightbox carries `data-srv-gesture-boundary`. Its tap can complete and lock
+  a run started by a preceding ordinary tap, but by itself cannot start a run; a third rapid
+  tap on boundary controls still locks. Only primary-button pointerdowns count. This lets a
+  causal choice flow such as ⋯ → Delete for everyone → Delete run at human or Playwright speed,
+  while a double-tap on the bubble or thread still locks. The settings gear, photo lightbox
+  thumbnail, P8 menu trigger, Delete for everyone item, and Delete all messages row are marked;
+  final-action buttons and toggles are not. The exact classifier is in
+  `admin-ui/src/server/gestures.ts` and is covered by `admin-ui/tests/server/gestures.test.ts`.
 - Once unlocked: 10s of no activity fades back to the decoy; a panic button, a multi-tap
   inside the chat, `Escape`, tab-hidden, or routing away all lock instantly. A reload never
   restores the unlocked state (Inv 42).
@@ -120,8 +129,16 @@ blue/green slot-swap overlap, since WAL + `busy_timeout=5000` handle cross-proce
 contention at the file level). Every method is **synchronous**; route handlers wrap each
 call in `anyio.to_thread.run_sync`.
 
-Tables: `messages`, `attachments`, `events`, `uploads`, `push_subscriptions` — schema +
-every method signature are in the brief's §4 (frozen; P2/P3 only ever call what P1 built).
+Tables: `messages`, `attachments`, `events`, `uploads`, `push_subscriptions`, `deleted_storage`,
+`pending_wipe_cleanup`, and `pending_scrub`. Schema migrations are serialized under the SQLite writer lock.
+`deleted_storage` retains internal attachment/upload tombstones and retry status; it is not a
+message/event tombstone and is never returned to chat clients. `pending_wipe_cleanup` records a
+wipe's filesystem sweep token so a crash cannot lose cleanup of orphaned paths. Schema v4 adds the
+partial `idx_deleted_storage_pending` index containing only incomplete cleanup rows. Schema v5
+adds a per-tombstone generation so a late requeue cannot be cleared by an older cleanup pass, plus
+an age index for completed rows. The hourly janitor prunes completed tombstones after seven days;
+pending tombstones are never pruned. Schema v6 adds the singleton `pending_scrub` row, written in
+the same transaction as delete/wipe; startup imports and removes a legacy `scrub.pending` file.
 Two transaction shapes:
 - `BEGIN IMMEDIATE` for writes needing a race-safe conditional check (an attachment's lease
   claim, `create_message`'s idempotent client-id insert) — serializes concurrent claimants
@@ -173,13 +190,55 @@ directly in `test_routes_livechat.py::TestStreamEvents
 ::test_cross_process_write_is_picked_up_by_the_2s_recheck` (two `LiveChatStore` instances,
 one db file, the writing instance's own notifier never called).
 
-**§17.2 amendment A1** (delete a message / wipe the chat — the store methods and routes
-themselves are P8's future work, not built yet): the `events` table already accepts
-`message_deleted`/`wiped` event types and a nullable `message_seq` (NULL for `wiped`), and
-the stream loop already knows how to render them — `message_deleted` as `data:
-{"seq":int}`, `wiped` as `data:{}`, and it **skips** (emits nothing for) a `message`/
-`message_updated` event whose row has since vanished. This is schema/stream headroom only;
-nothing in P1 ever inserts either event type.
+**§17.2 migration v2** rebuilds the content-free `events` table on upgrade, accepts
+`message_deleted`/`wiped`, makes `message_seq` nullable for `wiped`, and preserves
+`sqlite_sequence`'s high-water mark. Every store connection enables `PRAGMA secure_delete=ON`.
+The stream emits `message_deleted` as `data: {"seq":int}`, emits `wiped` as `data: {}`, and
+skips a stale `message`/`message_updated` event if its message row has already vanished.
+
+### Delete and wipe (P8)
+
+Any unlocked chat user may hard-delete any message for everyone. Deletion removes its message
+and attachment rows, media/upload/failed directories, and prior `message`/`message_updated`
+events, then appends one `message_deleted` event. Repeating a delete adds no second event and
+returns 204 or 202 according to the scrub result. The client removes the bubble optimistically,
+restores it with an error line if the request fails, and removes remote bubbles from the same
+event.
+
+The settings sheet's two-step **Delete all messages** action requires exactly
+`{"confirm":"WIPE"}`. Wipe clears messages, attachments, pending uploads, all events, and the
+contents of `media/`, `uploads/`, and `failed/`, then appends one `wiped` event. The client
+clears loaded history and pending echoes; the stream remains connected. Message/event sequence
+numbers, push subscriptions, `secret.key`, `vapid.json`, and localStorage identity values stay
+intact. Delete and wipe never dispatch push notifications.
+
+Both operations enable secure delete and use `PRAGMA wal_checkpoint(TRUNCATE)`. A 204 means the
+WAL is empty, deleted text is absent from both database files, and media-file cleanup completed.
+The route gives the scrub up to 10 seconds; if a reader still blocks it, the route retains the
+database-backed `pending_scrub` row. Delete and wipe transactions record deleted storage IDs and
+the scrub marker before commit.
+Both routes publish the deletion event immediately after commit and before file cleanup. Each WAL
+checkpoint attempt waits no more than 250 ms for SQLite's busy lock; the route's ten-second
+deadline includes waiting for `LiveChatStore.scrub_guard()`, and lock timeout returns pending.
+If an unlink fails (for example, Windows reports a file-sharing violation), the durable cleanup
+record remains pending and the two-second worker retries at startup and while the app runs. It
+removes files before retrying the database scrub. `/usage` exposes one `erasurePending` flag;
+202 returns `{"erasurePending":true}`, and the settings sheet polls until it clears. `GET /media`
+checks that the attachment row still exists
+before opening a signed rendition, so an old URL returns 404 even while a locked file awaits
+cleanup. Wipe cleanup sweeps only paths without live attachment/upload rows, preserving uploads
+created after the wipe transaction. **NTFS/SSD byte-level shredding is not claimed**, since
+overwrite-in-place is not reliable on SSDs. If the media worker finishes after deletion removed
+its row, its post-finish check re-queues cleanup for any paths it recreated. The worker scans
+unreferenced `media/`, `uploads/`, and `failed/` entries once at startup, then repeats that sweep
+only while a wipe-sweep token remains pending. Each sweep reads live attachment and upload IDs in
+one DB snapshot; a failed startup sweep creates a durable retry token. Chunk writes shield the
+write-and-row-check sequence from cancellation. If a late write finds its upload deleted, it
+re-marks that upload for durable cleanup, even when an earlier cleanup already completed.
+Route-owned and background WAL scrubs serialize under `LiveChatStore.scrub_guard()` and read the
+current marker after acquiring the guard; a route skips its scrub if the worker already cleared it.
+Media cleanup clears a pending row only if its generation is unchanged; a late requeue increments
+the generation so an older cleanup pass cannot lose it.
 
 ## 7. Web Push (`livechat/push.py`, `server/pushToggle.ts`)
 
@@ -282,12 +341,23 @@ and the queue worker's `QueueConfig`; when `None`, the queue task is never start
 (nothing valid to run it with) and the janitor still runs (pure DB/filesystem housekeeping,
 no ffmpeg dependency).
 
-**Janitor (`livechat/janitor.py`, P2b) — `run_once`/`run_forever`, hourly.** Ages out
+**Janitor (`livechat/janitor.py`, P2b/P8) — `run_once`/`run_forever`, hourly.** Ages out
 uploads >24h (`stale_upload_ids`), unreferenced attachments >24h (`orphan_attachment_ids`,
 keyed off `message_seq IS NULL` — never touches anything a message references, regardless of
 its processing status), and `failed/` entries >7 days (by directory `mtime`, since there's no
-DB row backing them). `run_once` takes an explicit `now`, never reads the clock — every age
-threshold is test-driven, not slept through.
+DB row backing them). It rechecks orphan/upload eligibility in the delete transaction and queues
+filesystem cleanup only when that conditional delete succeeds. It also prunes completed erasure
+tombstones older than seven days, never pending ones. `run_once` takes an explicit `now`, never
+reads the clock — every age threshold is test-driven, not slept through.
+It also deletes staged raw uploads left behind on ready attachments; those sources have no
+diagnostic-retention window once safe renditions exist.
+
+The same module's `run_scrubber_forever` is a separately supervised app-lifetime task. It resumes
+the database-backed scrub marker at startup and attempts `TRUNCATE` every two seconds until the WAL
+is empty, then compare-and-clears the marker and performs one best-effort checkpoint. Legacy
+`scrub.pending` files are imported once at startup and removed; a denied removal is retried on the
+next startup. A failed-original archive is retried by the hourly janitor and its staged original is
+removed after the seven-day diagnostic retention window.
 
 **Media route (`routes_livechat_media.py`, P2b) — `GET /media/{attId}/{rendition}`, §5.6.**
 The one route besides `POST /unlock` that skips `require_server_token`, since
@@ -453,7 +523,8 @@ flags and does not install the Playwright clock.
 `fake_cmd.py` PIN double, the `server` field on `GET /api/admin/system/status`); **P2a**
 (`livechat/processing.py`, §8 above); **P2b** (`livechat/{uploads,media_queue,janitor}.py`,
 `routes_livechat_media.py`, §8 above — `mediaProcessing` on the system-status field is now
-the real `app.state.livechat_media_available` value, not the P1-era placeholder `"ok"`);
+the real `app.state.livechat_media_available` value, not the P1-era placeholder `"ok"`; three
+consecutive supervised media/erasure failures render as `"degraded"`);
 **P3a/P3b** (Web Push — VAPID keys, the service worker, protected push routes, the dispatch
 hook, and the standalone Android toggle module); **P4** (frontend lock/disguise/PIN-pad core
 — §10 above — the router/nav entry, the lock state machine, the decoy, the PIN pad, and the

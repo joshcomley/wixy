@@ -3,6 +3,7 @@
 // toggle into, and a Lock button.
 
 import { getUsage } from "./api/messages";
+import { ServerLockedError } from "./api/http";
 import type { ServerIdentity } from "./identity";
 import type { LockHooks, ServerSession } from "./types";
 
@@ -11,6 +12,7 @@ export interface ServerSettingsSheetDeps {
   hooks: LockHooks;
   win: Window;
   getSession: () => ServerSession | null;
+  onWipe: () => Promise<boolean>;
   onNameChanged: () => void;
   onClose: () => void;
   document?: Document;
@@ -84,6 +86,45 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   const usageRow = documentRef.createElement("p");
   usageRow.className = "wx-srv-sheet-usage";
   usageRow.textContent = "Storage: loading…";
+  const wipeStatus = documentRef.createElement("p");
+  wipeStatus.className = "wx-srv-sheet-wipe-status";
+  wipeStatus.hidden = true;
+  let scrubPollGeneration = 0;
+  let scrubPollTimer: number | null = null;
+
+  function stopScrubPolling(): void {
+    scrubPollGeneration += 1;
+    if (scrubPollTimer !== null) {
+      win.clearTimeout(scrubPollTimer);
+      scrubPollTimer = null;
+    }
+  }
+
+  function startScrubPolling(session: ServerSession): void {
+    stopScrubPolling();
+    const generation = scrubPollGeneration;
+    const stopAt = Date.now() + 60_000;
+    wipeStatus.textContent = "Deleted. Erasing leftover traces…";
+    wipeStatus.hidden = false;
+
+    const poll = (): void => {
+      if (generation !== scrubPollGeneration || Date.now() >= stopAt) return;
+      scrubPollTimer = win.setTimeout(() => {
+        scrubPollTimer = null;
+        void getUsage(session)
+          .then((usage) => {
+            if (generation !== scrubPollGeneration) return;
+            if (!usage.erasurePending) {
+              wipeStatus.textContent = "Done";
+              return;
+            }
+            poll();
+          })
+          .catch(() => poll());
+      }, 1000);
+    };
+    poll();
+  }
 
   const pushSlot = documentRef.createElement("div");
   pushSlot.className = "wx-srv-sheet-push-slot";
@@ -93,11 +134,42 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   lockButton.className = "wx-srv-sheet-lock";
   lockButton.textContent = "Lock";
 
-  sheet.append(header, nameRow, usageRow, pushSlot, lockButton);
+  const wipeButton = documentRef.createElement("button");
+  wipeButton.type = "button";
+  wipeButton.className = "wx-srv-sheet-wipe";
+  wipeButton.textContent = "Delete all messages";
+  wipeButton.dataset["srvGestureBoundary"] = "";
+
+  const wipeConfirmation = documentRef.createElement("div");
+  wipeConfirmation.className = "wx-srv-sheet-wipe-confirm";
+  wipeConfirmation.hidden = true;
+  const wipeQuestion = documentRef.createElement("p");
+  wipeQuestion.textContent =
+    "Delete every message, photo, video and voice note for everyone? This can't be undone.";
+  const wipeError = documentRef.createElement("p");
+  wipeError.className = "wx-srv-sheet-wipe-error";
+  wipeError.hidden = true;
+  const wipeConfirmButtons = documentRef.createElement("div");
+  wipeConfirmButtons.className = "wx-srv-sheet-wipe-buttons";
+  const wipeConfirmButton = documentRef.createElement("button");
+  wipeConfirmButton.type = "button";
+  wipeConfirmButton.className = "wx-srv-sheet-wipe-confirm-button";
+  wipeConfirmButton.textContent = "Delete everything";
+  const wipeCancelButton = documentRef.createElement("button");
+  wipeCancelButton.type = "button";
+  wipeCancelButton.className = "wx-srv-sheet-wipe-cancel";
+  wipeCancelButton.textContent = "Cancel";
+  wipeConfirmButtons.append(wipeConfirmButton, wipeCancelButton);
+  wipeConfirmation.append(wipeQuestion, wipeError, wipeConfirmButtons);
+
+  sheet.append(header, nameRow, usageRow, wipeStatus, pushSlot, wipeButton, wipeConfirmation, lockButton);
   backdrop.appendChild(sheet);
 
   function close(): void {
     backdrop.hidden = true;
+    wipeConfirmation.hidden = true;
+    wipeStatus.hidden = true;
+    stopScrubPolling();
     deps.onClose();
   }
 
@@ -121,6 +193,39 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     close();
     hooks.lockNow("panic");
   });
+  wipeButton.addEventListener("click", () => {
+    wipeError.hidden = true;
+    wipeConfirmation.hidden = false;
+    wipeConfirmButton.focus();
+  });
+  wipeCancelButton.addEventListener("click", () => {
+    wipeConfirmation.hidden = true;
+  });
+  wipeConfirmButton.addEventListener("click", () => {
+    wipeConfirmButton.disabled = true;
+    void deps.onWipe()
+      .then((erasurePending) => {
+        if (erasurePending) {
+          wipeConfirmation.hidden = true;
+          const session = deps.getSession();
+          if (session !== null) startScrubPolling(session);
+          return;
+        }
+        wipeStatus.hidden = true;
+        close();
+      })
+      .catch((error: unknown) => {
+        if (error instanceof ServerLockedError) {
+          hooks.lockNow("unauthorized");
+          return;
+        }
+        wipeError.textContent = "Couldn't delete messages. Try again.";
+        wipeError.hidden = false;
+      })
+      .finally(() => {
+        wipeConfirmButton.disabled = false;
+      });
+  });
   function onKeydown(evt: KeyboardEvent): void {
     if (evt.key === "Escape" && !backdrop.hidden) close();
   }
@@ -130,7 +235,11 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     element: backdrop,
     pushSlot,
     open(): void {
+      stopScrubPolling();
       backdrop.hidden = false;
+      wipeConfirmation.hidden = true;
+      wipeError.hidden = true;
+      wipeStatus.hidden = true;
       nameInput.value = identity.getName() ?? "";
       usageRow.textContent = "Storage: loading…";
       const session = deps.getSession();
@@ -140,6 +249,10 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
             usageRow.textContent = usage.mediaAvailable
               ? `Storage: ${formatBytes(usage.usedBytes)} of ${formatBytes(usage.quotaBytes)} used`
               : "Storage: media isn't available on this server.";
+            if (usage.erasurePending) {
+              const session = deps.getSession();
+              if (session !== null) startScrubPolling(session);
+            }
           })
           .catch(() => {
             usageRow.textContent = "Storage: couldn't load.";
@@ -149,6 +262,7 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     },
     close,
     teardown(): void {
+      stopScrubPolling();
       win.document.removeEventListener("keydown", onKeydown);
     },
   };

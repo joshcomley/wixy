@@ -1,6 +1,6 @@
 # Server chat — Architect's technical brief (workspace #29)
 
-Status: **FROZEN v1.5.4** (Architect, 2026-09-14). v1.1 = operator's zero-PIN-state override
+Status: **FROZEN v1.5.4** (Architect, 2026-09-24). v1.1 = operator's zero-PIN-state override
 (R4/§5.1); v1.2 = delete + wipe addendum (§17); v1.3 = R2 errata: a single tap reveals
 (decision #974); **v1.4 = cmd's real PIN contract in §5.1 (app key in the path, richer errors,
 retry-safety) + a new 409 `pin_changed` on `/unlock`**; **v1.5 = R3 gesture boundaries (a
@@ -9,9 +9,9 @@ only**; v1.5.1 = boundaries are not test cadence (no e2e waits for menu flows) +
 numbers no longer pre-allocated; v1.5.2 = one test for classifying any tap pair
 (causal chain → boundary; independent decisions → test cadence) + voice notes under 1 s
 are discarded; v1.5.3 = delete/wipe scrub errata (TRUNCATE for both — PASSIVE measured
-insufficient), 204-guarantees / 202-scrub-pending semantics, `/usage.scrubPending`; v1.5.4 = an erasure journal in the same transaction as the
-delete (crash-safe, covers WAL + files), `scrubPending` → `erasurePending`, and media
-serving checks the row. Contracts in §5 are frozen — any change goes
+insufficient), 204-guarantees / 202-pending semantics; v1.5.4 = crash-safe media erasure via
+per-item tombstones written in the same transaction as the delete (covers WAL + files),
+`scrubPending` → `erasurePending`, and media serving checks the row. Contracts in §5 are frozen — any change goes
 through the Architect (`ask-architect`). Rulings in §1 are binding.
 
 > ⚠️ **Editing this file:** ruff formats Python fenced blocks **inside markdown**, so
@@ -1258,53 +1258,36 @@ one message, and wipe everything. The addendum is purely **additive**:
     - **Complete** means the call returned `busy == 0` **and** `server.db-wal` is 0
       bytes or absent.
     - The deadline is **10 s** total, counted from the commit.
-  - **v1.5.4 — the erasure journal** (replaces the v1.5.3 `scrub.pending` file; ruling
-    on P8's two audit findings: a crash mid-scrub left no marker, and media removal
-    after the commit could be orphaned or silently fail):
-    - New table (the v2 migration, or folded into P8's schema step):
-      `erasure_jobs(id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL NOT NULL,
-      attachment_ids TEXT NOT NULL, upload_ids TEXT NOT NULL, failed_ids TEXT NOT
-      NULL)`. The JSON arrays hold ids only, never content.
-    - **Inserted in the SAME write transaction as the delete/wipe.** The job therefore
-      exists if and only if the deletion committed: no pre-commit marker, no
-      false-positive job from a rolled-back delete, and one row per request, so one
-      request's completion can never clear another's pending work. This is
-      preferred over P8's own pre-commit-marker proposal because it is atomic rather
-      than merely safe.
-    - **Wipe records explicit ids.** A wipe records exactly the attachment, upload
-      and `failed/` ids it removed, never "everything under `media/`": an upload or
-      attachment created a moment after the wipe must survive the cleanup.
-    - **`run_erasure(job_id, deadline)`, strictly in this order:**
-      1. For each listed id, verify its row no longer exists, then remove its
-         directory. Never use `ignore_errors=True`: collect failures (on Windows a
-         file being streamed is locked) and verify each path is gone afterwards.
-      2. Run the TRUNCATE scrub loop above.
-      3. Only when both 1 and 2 are complete, delete the job row in a write
-         transaction, then run one best-effort TRUNCATE. The job row holds ids only,
-         so any WAL frame it leaves carries no chat content.
-      A crash at any point leaves the row in place, so the work resumes.
-  - **Result → response** (the deletion is committed and broadcast first, then the
-    request runs `run_erasure` against the 10 s deadline):
-    - Complete → **204**. **Every 204 carries the full guarantee**: the deleted text
-      is in neither `server.db` nor `server.db-wal`, **and** every listed media,
-      upload and `failed/` directory is gone.
-    - Not complete → **202 `{"erasurePending": true}`**, meaning deleted for
-      everyone, with erasure still finishing. The job row is already durable.
+- **Result → response** (the deletion itself is already committed and broadcast
+    before scrubbing starts):
+    - Scrub complete within the deadline → **204**. **Every 204 carries the raw-byte
+      guarantee**: the deleted text is in neither `server.db` nor `server.db-wal`.
+    - Deadline passed → leave the durable erasure record in place **before**
+      responding, then respond **202 `{"erasurePending": true}`**, meaning deleted
+      for everyone, with file removal or leftover-byte erasure still finishing.
     - **Never** an error status, and **never** a rollback. The message is already
       gone from every screen, so an error would make the sender's screen restore a
       message that no longer exists anywhere.
-  - **The erasure worker** (app task group, replacing the v1.5.3 scrubber): while any
-    `erasure_jobs` row exists, run `run_erasure` on the oldest every 2 s. It also
-    runs once at startup, so a crash or slot swap anywhere in the sequence still
-    finishes. Every step is idempotent, so both slot processes may run it at once
-    without harm. A job still failing after 10 minutes logs an ERROR each hour
-    (usually a file locked by something outside wixy) and keeps retrying.
-  - **`erasurePending` is ONE field** for *any* unfinished erasure, WAL or files. It
-    is not split into separate scrub and media fields: the owner-facing meaning is
-    the same ("some deleted content may still be on disk"), and two fields would
-    only add UI states. It supersedes v1.5.3's `scrubPending`, which was never
-    merged. It is true while any job row exists, including during the synchronous
-    10 s phase — accurate, and acceptable.
+  - **The background erasure worker** (app task group): retry recorded file removal
+    first, then run `scrub` every 2 s. It also runs once at startup, so a crash or slot
+    swap mid-erasure still finishes. Route and worker scrubs serialize per store and
+    re-read the pending marker under the guard; if one already cleared it, the other skips
+    its redundant scrub. It is idempotent across both slot processes.
+  - **Media-file cleanup (v1.5.4):** delete and wipe record attachment/upload IDs for
+  filesystem cleanup in the same SQLite transaction that removes their rows. Wipe also
+  records a token for sweeping unreferenced paths. The app worker retries file removal at
+  startup and every 2 s; an OS unlink error keeps cleanup pending rather than being ignored.
+    It scans unreferenced media/upload/failed entries once at startup and repeats only while a
+    wipe-sweep token is pending. Each scan batches live attachment/upload IDs in one DB read;
+    a failed startup scan creates a durable token so legacy orphans keep retrying without a full
+    tree scan on every ordinary two-second tick.
+    `GET /media/{attId}/{rendition}` must verify that the attachment row still exists before
+    opening a file, so an old signed URL returns 404 even if Windows temporarily holds the
+    deleted file open.
+  - **Pending status (v1.5.4):** `/usage` exposes one `erasurePending` boolean. Delete/wipe
+    return 202 `{"erasurePending":true}` while any recorded file removal or DB scrub remains;
+    the settings sheet polls until it is false. A 204 requires both
+    the raw-WAL guarantee above and completed file cleanup.
   - **Readers stay short (store invariant):** no store method returns with an open
     statement or transaction, and no caller holds a transaction across an `await`.
     The store already does this (per-call connections; `fetchall`/`fetchone` inside
@@ -1321,9 +1304,11 @@ one message, and wipe everything. The addendum is purely **additive**:
 - **Race with the media queue** (P2b behaviour; the frozen signature is unchanged):
   - `finish_attachment` on a row that no longer exists is a silent no-op, with no event.
   - After `finish_attachment`, the queue re-reads `get_attachment`. If it's `None`, the queue
-    removes that attachment's media dir (errors collected, not ignored, and it retries on
-    its next tick). The erasure journal removes it too. Both are idempotent, so
-    whichever runs last cleans up.
+    `rmtree`s that attachment's media dir. `delete_message`/`wipe` also `rmtree`. Both are
+    idempotent, so whichever runs last cleans up.
+  - A chunk write and its post-write upload-row check are shielded from request cancellation.
+    If a late write finds the upload row deleted, it re-marks the upload cleanup record before
+    retrying file removal, including when an earlier cleanup had already completed.
 - Delete and wipe never trigger a push.
 
 ### 17.2 Amendment A1 — to P1, only if P1 has NOT yet merged to the feature branch
@@ -1331,7 +1316,10 @@ one message, and wipe everything. The addendum is purely **additive**:
 A1 is a tiny in-flight change so the v1 schema never needs a rebuild migration. As of
 2026-09-14, P1 has not merged, so A1 applies to P1. If P1 has already merged by the time
 this is read, P8 does all of this instead as migration v2, rebuilding the content-free
-`events` table while preserving its `sqlite_sequence` high-water mark.
+`events` table while preserving its `sqlite_sequence` high-water mark. v1.5.4 adds migration
+v3 for durable deleted-storage and wipe-cleanup records, migration v4 adds a partial index over
+pending deletions so completed tombstones are retained without being scanned on every retry tick,
+and migration v5 adds a generation used to compare-and-clear each cleanup pass after file removal.
 
 1. `events.type CHECK IN ('message','message_updated','message_deleted','wiped')`, and
    `events.message_seq` becomes **nullable** (NULL for `wiped`).
@@ -1346,27 +1334,25 @@ this is read, P8 does all of this instead as migration v2, rebuilding the conten
 ### 17.3 New contracts (additive; frozen once published)
 
 **Store:**
-- `delete_message(self, *, seq: int, now: float) -> int` and `wipe(self, *, now: float,
-  failed_ids: Sequence[str]) -> int` return the **erasure job id** (v1.5.4). Each runs
-  one write transaction that deletes the rows, appends the event, and inserts the
-  `erasure_jobs` row. The caller then publishes to the notifier and runs
-  `run_erasure(job_id, deadline)`.
-- `pending_erasure_jobs(self) -> list[ErasureJobRow]`, `get_erasure_job(self, job_id:
-  int) -> ErasureJobRow | None` and `complete_erasure_job(self, job_id: int) -> None`
-  support the worker. `erasure_pending(self) -> bool` backs `/usage`.
+- `delete_message(self, *, seq: int, now: float) -> list[str]` returns removed attachment ids
+  and records durable file-deletion tombstones in the same write transaction.
+- `wipe(self, *, now: float) -> tuple[list[str], list[str]]` returns removed (attachment ids,
+  upload ids), records those deletions and a wipe-sweep token in that transaction.
+- The route-level `delete_message_for_scrub` / `wipe_for_scrub` variants also return the WAL
+  scrub token (and wipe token) used by the response/retry flow. Neither route owns an untracked
+  post-commit `rmtree` list.
+- Both delete and wipe publish to the notifier and run the checkpoint above.
 
 **HTTP** (header token required, like every §5 route):
-- `DELETE /api/admin/server/messages/{seq}` → **204** (deleted **and** fully erased), or
-  **202 `{"erasurePending": true}`** (deleted; erasure finishes in the background;
-  v1.5.4). Idempotent: repeating it on an already-deleted message runs any pending
-  erasure jobs, answers 204 when none remain, and 202 otherwise.
-- `POST /api/admin/server/wipe` with body `{"confirm":"WIPE"}` → **204** or **202
-  `{"erasurePending": true}`**, on the same rule. Any other body → 422. The literal
+- `DELETE /api/admin/server/messages/{seq}` → **204** (DB scrub and media cleanup complete), or
+  **202 `{"erasurePending": true}`** (v1.5.4). Idempotent:
+  repeating it on an already-deleted message re-runs cleanup and answers 204 or 202 the same way.
+- `POST /api/admin/server/wipe` with body `{"confirm":"WIPE"}` → **204** or the same **202
+  response**. Any other body → 422. The literal
   guards against an accidental call. Never re-POST a wipe to poll: a repeat would also
   delete anything sent since.
-- `GET /api/admin/server/usage` gains **`erasurePending: bool`** (v1.5.4, an additive
-  field; true while any `erasure_jobs` row exists). This is how a client polls
-  completion.
+- `GET /api/admin/server/usage` exposes **`erasurePending: bool`** (true while any durable
+  file removal or DB scrub remains). This is how a client polls completion.
 
 **SSE:**
 - `event: message_deleted` / `data: {"seq": n}` — the client removes that bubble if present
@@ -1438,22 +1424,26 @@ dirs and the chat view, so it goes last to avoid colliding with in-flight work.
   PASSIVE checkpoint, leaves the marker in `-wal`. This pins why the rule is TRUNCATE,
   so nobody "optimises" back to PASSIVE.
 - **stale reader:** open a raw connection, `BEGIN` + `SELECT` *before* the delete, and
-  inject a short deadline → 202, and a job row exists (the marker may remain). Release
-  the reader, run one worker tick → no job remains, `/usage` `erasurePending` is false,
-  and the marker is absent.
-- **crash resume (v1.5.4):** commit a delete, then stop before `run_erasure` (simulate
-  a crash) → the job row exists → startup runs it → the marker is absent and the dirs
-  are gone. Repeat with the stop placed between steps 1 and 2, and between 2 and 3.
-- **atomicity:** a delete/wipe transaction that fails leaves no job row.
-- **locked file:** hold an open handle on one media file (Windows sharing violation)
-  → 202 with the job kept. Close the handle, run a worker tick → the dir is gone and
-  no job remains. Nothing is ever silently ignored.
-- **wipe spares newcomers:** an attachment or upload created after a wipe commits
-  survives that wipe's erasure job.
-- **media gate:** after a delete commits, a still-valid signed media URL → 404, even
-  while the files are still on disk.
+  inject a short deadline → 202 + `scrub.pending` exists (the marker may remain).
+  Release the reader, run one scrubber tick → the sentinel is gone, `/usage`
+  `erasurePending` is false, and the marker is absent.
+- **startup resume:** durable erasure work present at startup is resumed and removed.
 - **reader invariant:** after each public store read method returns, a TRUNCATE on
   another connection with `busy_timeout=0` returns `busy == 0`.
+- Hold a rendition file open during delete and wipe: both return media cleanup pending; the old
+  signed URL returns 404 while the bytes remain on disk; a reopened store's worker removes the
+  file after the handle closes.
+- Inject an unlink failure and prove it remains pending for retry rather than being reported
+  complete.
+- Complete a tombstone, run another cleanup tick, and prove the completed row is retained but
+  neither selected nor sent through filesystem cleanup again.
+- Requeue an upload tombstone between file removal and the previous cleanup pass clearing its
+  state; prove the generation check preserves the requeue and a later pass removes the late bytes.
+- Prove unreferenced storage is scanned at startup and while a wipe token remains pending, not
+  on ordinary ticks, and that the scan uses one batched live-ID read rather than per-entry DB
+  connections.
+- Delete and fully clean an upload during an in-flight chunk request, then let the chunk write
+  land late; prove the post-write check requeues cleanup and the recreated bytes are removed.
 - a delete racing a processing attachment leaves no media dir behind
 - a stream spanning a delete emits `message_deleted`, and skips the stale `message` event on
   replay from an old cursor
@@ -1482,14 +1472,14 @@ mobile):
 
 ### 17.6 New invariant
 
-**Inv 46 — Delete and wipe are hard deletes, for everyone, with no tombstone.**
+**Inv 46 — Delete and wipe are hard deletes, without chat-visible tombstones.**
 - Content rows are removed with `secure_delete=ON`, then a TRUNCATE checkpoint runs.
   **204 means the deleted text is provably absent from `server.db` + `server.db-wal`.**
-  **204 also means every listed media, upload and `failed/` directory is gone.** 202
-  means deleted, with an `erasure_jobs` row — written in the same transaction as the
-  delete, so it survives any crash — that the erasure worker completes. It is never an
-  error and never a rollback.
-- Deleted media URLs 404 immediately, because serving checks the attachment row, not
-  just the signature.
+  202 means deleted, with one durable `erasurePending` signal for WAL scrub and media cleanup. It is never
+  an error and never a rollback.
+- Internal storage tombstones are recorded in the same transaction as row deletion; they never
+  appear in history or events. Failed unlinks remain pending for startup/two-second retry.
+- The media route checks the live attachment row; deleted media URLs 404 even while a locked file
+  remains on disk pending retry.
 - Clients remove content on `message_deleted`/`wiped`.
 - Honest limit: no byte-level file shredding.

@@ -11,10 +11,11 @@ import { mountChatComposer } from "../chatComposer";
 import { mountChatThreadScroll, type ChatThreadScroll } from "../chatThreadScroll";
 import { mountLightbox, type Lightbox } from "../lightbox";
 import { ServerLockedError } from "./api/http";
+import { deleteMessage, getHistory, sendMessage, wipeChat, type Message } from "./api/messages";
 import { uploadServerAttachment } from "./api/uploads";
-import { getHistory, sendMessage, type Message } from "./api/messages";
 import type { ServerIdentity } from "./identity";
 import { linkifyInto } from "./linkify";
+import { mountMessageActions, type MessageActionsController } from "./messageActions";
 import { disposeAttachmentMedia, renderAttachments } from "./mediaRender";
 import { createVoiceRecorder, type VoiceRecorder } from "./recorder";
 import type { ServerStreamEvent } from "./stream";
@@ -25,6 +26,7 @@ const MIN_VOICE_DURATION_MS = 1_000;
 /** A pending echo unmatched by a real message this long is dropped rather
  * than kept forever — mirrors the AI chat's own ECHO_EXPIRY_MS. */
 const ECHO_EXPIRY_MS = 30_000;
+const DELETE_FADE_MS = 160;
 
 export interface ServerThreadDeps {
   identity: ServerIdentity;
@@ -46,6 +48,7 @@ export interface ServerThreadView {
    * text, and the scroll/echo state in memory for the next `attach`. */
   detach(): void;
   handleStreamEvent(event: ServerStreamEvent): void;
+  wipe(): Promise<boolean>;
   /** Updates the header's name chip — called after the settings sheet (or
    * the first-unlock name prompt) commits a new name. */
   refreshNameChip(): void;
@@ -102,6 +105,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   const settingsButton = documentRef.createElement("button");
   settingsButton.type = "button";
   settingsButton.className = "wx-srv-settings-button";
+  settingsButton.dataset["srvGestureBoundary"] = "";
   settingsButton.textContent = "⚙";
   settingsButton.title = "Settings";
   settingsButton.setAttribute("aria-label", "Settings");
@@ -313,7 +317,12 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   let historyLoading = false;
   let hasMoreHistory = false;
   const confirmedBySeq = new Map<number, Message>();
+  const deletedSeqs = new Set<number>();
   const confirmedClientIds = new Set<string>();
+  const inFlightDeletes = new Set<number>();
+  const deleteEventsDuringRequest = new Set<number>();
+  const deleteFadeTimers = new Map<number, number>();
+  const messageActionControllers = new Map<number, MessageActionsController>();
   const renderedMessages = new Map<number, { readonly message: Message; readonly element: HTMLElement }>();
   const daySeparators = new Map<number, HTMLElement>();
   const renderedEchoes = new Map<string, { readonly echo: PendingEcho; readonly element: HTMLElement }>();
@@ -321,10 +330,19 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   let pendingEchoes: PendingEcho[] = [];
   let echoCounter = 0;
   let pendingClientId: string | null = null;
+  let contentGeneration = 0;
+  let contentRevision = 0;
 
   function addConfirmed(message: Message): void {
+    if (deletedSeqs.has(message.seq)) return;
     confirmedBySeq.set(message.seq, message);
     confirmedClientIds.add(message.clientId);
+    contentRevision += 1;
+  }
+
+  function teardownMessageActions(seq: number): void {
+    messageActionControllers.get(seq)?.teardown();
+    messageActionControllers.delete(seq);
   }
 
   function renderAttachmentsFor(message: Message): HTMLElement | null {
@@ -339,6 +357,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   function renderBubble(message: Message, mine: boolean): HTMLElement {
     const bubble = documentRef.createElement("div");
     bubble.className = `wx-srv-bubble ${mine ? "wx-srv-bubble-mine" : "wx-srv-bubble-theirs"}`;
+    bubble.dataset["messageSeq"] = String(message.seq);
     if (!mine) {
       const sender = documentRef.createElement("span");
       sender.className = "wx-srv-bubble-sender";
@@ -357,6 +376,16 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     time.className = "wx-srv-bubble-time";
     time.textContent = formatTime(message.createdAt);
     bubble.appendChild(time);
+    messageActionControllers.set(
+      message.seq,
+      mountMessageActions({
+        message,
+        bubble,
+        win,
+        document: documentRef,
+        onDelete: deleteForEveryone,
+      }),
+    );
     return bubble;
   }
 
@@ -379,7 +408,6 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   function renderThreadList(revealPillIfNotStuck = false): void {
     const nowMs = now();
     pendingEchoes = pendingEchoes.filter((e) => nowMs - e.sentAt < ECHO_EXPIRY_MS);
-
     const messages = Array.from(confirmedBySeq.values()).sort((a, b) => a.seq - b.seq);
     const visibleEchoes = pendingEchoes.filter((echo) => !confirmedClientIds.has(echo.clientId));
     const desiredNodes: HTMLElement[] = [];
@@ -405,6 +433,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       let rendered = renderedMessages.get(message.seq);
       if (rendered === undefined || rendered.message !== message) {
         if (rendered !== undefined) {
+          teardownMessageActions(message.seq);
           disposeAttachmentMedia(rendered.element);
           rendered.element.remove();
         }
@@ -417,6 +446,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     const visibleSeqs = new Set(messages.map((message) => message.seq));
     for (const [seq, rendered] of renderedMessages) {
       if (!visibleSeqs.has(seq)) {
+        teardownMessageActions(seq);
         disposeAttachmentMedia(rendered.element);
         rendered.element.remove();
         renderedMessages.delete(seq);
@@ -477,6 +507,103 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     threadScroll.afterContentChange(revealPillIfNotStuck);
   }
 
+  async function deleteForEveryone(message: Message): Promise<void> {
+    const session = currentSession;
+    if (session === null) return;
+    const requestGeneration = contentGeneration;
+    contentRevision += 1;
+    deletedSeqs.add(message.seq);
+    inFlightDeletes.add(message.seq);
+    confirmedBySeq.delete(message.seq);
+    const bubble = messageList.querySelector<HTMLElement>(
+      `[data-message-seq="${message.seq}"]`,
+    );
+    if (bubble === null) {
+      renderThreadList(false);
+    } else {
+      bubble.classList.add("wx-srv-bubble-deleting");
+      const menu = bubble.querySelector<HTMLElement>(".wx-srv-message-actions");
+      if (menu !== null) menu.hidden = true;
+      deleteFadeTimers.set(
+        message.seq,
+        win.setTimeout(() => {
+          deleteFadeTimers.delete(message.seq);
+          if (!confirmedBySeq.has(message.seq)) renderThreadList(false);
+        }, DELETE_FADE_MS),
+      );
+    }
+    try {
+      await deleteMessage(session, message.seq);
+    } catch (error) {
+      const deleteArrived = deleteEventsDuringRequest.has(message.seq);
+      if (!deleteArrived && requestGeneration === contentGeneration) {
+        deletedSeqs.delete(message.seq);
+        const fadeTimer = deleteFadeTimers.get(message.seq);
+        if (fadeTimer !== undefined) win.clearTimeout(fadeTimer);
+        deleteFadeTimers.delete(message.seq);
+        addConfirmed(message);
+        renderThreadList(false);
+        const restored = messageList.querySelector<HTMLElement>(
+          `[data-message-seq="${message.seq}"]`,
+        );
+        if (restored !== null) {
+          const errorLine = documentRef.createElement("span");
+          errorLine.className = "wx-srv-message-delete-error";
+          errorLine.textContent = "Couldn't delete message. Try again.";
+          restored.appendChild(errorLine);
+        }
+      }
+      if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+    } finally {
+      inFlightDeletes.delete(message.seq);
+      deleteEventsDuringRequest.delete(message.seq);
+    }
+  }
+
+  function clearAfterWipe(): void {
+    contentGeneration += 1;
+    contentRevision += 1;
+    for (const timer of deleteFadeTimers.values()) win.clearTimeout(timer);
+    deleteFadeTimers.clear();
+    confirmedBySeq.clear();
+    deletedSeqs.clear();
+    confirmedClientIds.clear();
+    pendingEchoes = [];
+    pendingClientId = null;
+    hasMoreHistory = false;
+    renderThreadList(false);
+  }
+
+  async function wipe(): Promise<boolean> {
+    const session = currentSession;
+    if (session === null) throw new Error("The server chat is locked.");
+    const requestGeneration = contentGeneration;
+    const erasurePending = await wipeChat(session);
+    const reconcileWithoutClearing = requestGeneration !== contentGeneration;
+    if (!reconcileWithoutClearing) clearAfterWipe();
+    const refreshGeneration = contentGeneration;
+    const refreshRevision = contentRevision;
+    // Reconciliation is deliberately detached from this promise: a pending
+    // scrub must reach the settings sheet immediately so it can show 202 status
+    // and poll /usage without waiting on another history request.
+    void getHistory(session, { limit: HISTORY_PAGE_SIZE })
+      .then((page) => {
+        if (
+          currentSession !== session
+          || refreshGeneration !== contentGeneration
+          || refreshRevision !== contentRevision
+        ) return;
+        if (reconcileWithoutClearing) clearAfterWipe();
+        for (const message of page.messages) addConfirmed(message);
+        hasMoreHistory = page.hasMore;
+        renderThreadList(false);
+      })
+      .catch((error: unknown) => {
+        if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+      });
+    return erasurePending;
+  }
+
   // -- History paging --------------------------------------------------------
 
   let observer: IntersectionObserver | null = null;
@@ -491,11 +618,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
 
   async function loadOlderPage(): Promise<void> {
     if (currentSession === null || historyLoading || !hasMoreHistory) return;
+    const requestGeneration = contentGeneration;
+    const session = currentSession;
     const before = oldestLoadedSeq();
     if (before === null) return;
     historyLoading = true;
     try {
-      const page = await getHistory(currentSession, { before, limit: HISTORY_PAGE_SIZE });
+      const page = await getHistory(session, { before, limit: HISTORY_PAGE_SIZE });
+      if (requestGeneration !== contentGeneration) return;
       const wasStuck = threadScroll.stuck;
       const prevScrollHeight = thread.scrollHeight;
       const prevScrollTop = thread.scrollTop;
@@ -536,6 +666,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   function send(): void {
     if (currentSession === null) return;
     const session = currentSession;
+    const requestGeneration = contentGeneration;
     const text = composer.text();
     composer.setBusy(true);
     composer.setError(null);
@@ -547,6 +678,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     const clientId = pendingClientId;
     const echo: PendingEcho = { clientId, text: text === "" ? null : text, sentAt: now() };
     pendingEchoes.push(echo);
+    contentRevision += 1;
     threadScroll.scrollToBottom();
     renderThreadList();
 
@@ -559,6 +691,12 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     })
       .then((result) => {
         composer.setBusy(false);
+        if (requestGeneration !== contentGeneration) {
+          if (pendingClientId === clientId) pendingClientId = null;
+          pendingEchoes = pendingEchoes.filter((e) => e.clientId !== clientId);
+          renderThreadList(false);
+          return;
+        }
         if (result.ok) {
           pendingClientId = null;
           composer.reset();
@@ -587,6 +725,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   async function attach(session: ServerSession): Promise<number | null> {
     currentSession = session;
     if (voiceRecorder === null) voiceRecorder = createRecorder();
+    const requestGeneration = contentGeneration;
     const oldestSeqAtAttach = historyLoaded ? oldestLoadedSeq() : null;
     const retainedSeqsAtAttach = new Set(confirmedBySeq.keys());
     historyErrorRow.hidden = true;
@@ -599,6 +738,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           session,
           before === undefined ? { limit: HISTORY_PAGE_SIZE } : { before, limit: HISTORY_PAGE_SIZE },
         );
+        if (requestGeneration !== contentGeneration) return null;
         if (cursor === null) cursor = page.cursor;
         for (const message of page.messages) {
           if (oldestSeqAtAttach === null || message.seq >= oldestSeqAtAttach) {
@@ -638,6 +778,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       ensureObserver();
       return cursor;
     } catch (error) {
+      if (requestGeneration !== contentGeneration) return null;
       if (error instanceof ServerLockedError) throw error;
       historyErrorText.textContent =
         error instanceof Error ? error.message : "Couldn't load messages.";
@@ -655,6 +796,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     attach,
     detach(): void {
       currentSession = null;
+      for (const controller of messageActionControllers.values()) controller.close();
       voiceRecorder?.detach();
       voiceRecorder = null;
       updateRecorderUi();
@@ -675,15 +817,18 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           renderThreadList(event.message.sender !== "" && !identity.isMine(event.message.sender));
           return;
         case "message_deleted":
+          deletedSeqs.add(event.seq);
+          contentRevision += 1;
           confirmedBySeq.delete(event.seq);
+          if (inFlightDeletes.has(event.seq)) {
+            deleteEventsDuringRequest.add(event.seq);
+            renderThreadList(false);
+            return;
+          }
           renderThreadList(false);
           return;
         case "wiped":
-          confirmedBySeq.clear();
-          confirmedClientIds.clear();
-          pendingEchoes = [];
-          hasMoreHistory = false;
-          renderThreadList(false);
+          clearAfterWipe();
           return;
         case "locked":
           // The stream's own `locked` event is handled by the caller
@@ -692,9 +837,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           return;
       }
     },
+    wipe,
     refreshNameChip,
     teardown(): void {
       currentSession = null;
+      for (const controller of messageActionControllers.values()) controller.teardown();
+      messageActionControllers.clear();
+      for (const timer of deleteFadeTimers.values()) win.clearTimeout(timer);
+      deleteFadeTimers.clear();
       voiceRecorder?.detach();
       voiceRecorder = null;
       disposeAttachmentMedia(messageList);

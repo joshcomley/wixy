@@ -239,6 +239,18 @@ class TestServerField:
 
         assert response.json()["server"]["mediaProcessing"] == "unavailable"
 
+    def test_media_processing_degrades_after_three_supervisor_failures(
+        self, tmp_path: Path, wixy_repo_root: Path
+    ) -> None:
+        app = create_app(storage_root=tmp_path / "storage", wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            assert not hasattr(app.state.background_tasks, "start_soon")
+            for _ in range(3):
+                app.state.background_health.failed("livechat-media")
+            response = client.get("/api/admin/system/status")
+
+        assert response.json()["server"]["mediaProcessing"] == "degraded"
+
 
 class TestAvailableOnBothEditions:
     def test_200s_on_the_fleet_edition_too(self, tmp_path: Path, wixy_repo_root: Path) -> None:

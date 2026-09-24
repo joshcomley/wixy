@@ -9,10 +9,17 @@ import {
   createMultiTapDetector,
   createTapDetector,
   isExcludedTapTarget,
+  isGestureBoundaryTarget,
 } from "../../src/server/gestures";
 
 function fakeEvent(target: EventTarget, button = 0): PointerEvent {
   return { target, button } as unknown as PointerEvent;
+}
+
+function gestureBoundary(): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.setAttribute("data-srv-gesture-boundary", "");
+  return button;
 }
 
 describe("isExcludedTapTarget", () => {
@@ -43,6 +50,17 @@ describe("isExcludedTapTarget", () => {
   it("treats a non-Element target as not excluded", () => {
     expect(isExcludedTapTarget(null)).toBe(false);
     expect(isExcludedTapTarget(document)).toBe(false);
+  });
+});
+
+describe("isGestureBoundaryTarget", () => {
+  it("recognizes a marked control and its descendants", () => {
+    const button = gestureBoundary();
+    const icon = document.createElement("span");
+    button.appendChild(icon);
+    expect(isGestureBoundaryTarget(button)).toBe(true);
+    expect(isGestureBoundaryTarget(icon)).toBe(true);
+    expect(isGestureBoundaryTarget(document.createElement("button"))).toBe(false);
   });
 });
 
@@ -194,6 +212,60 @@ describe("createMultiTapDetector", () => {
     detector.handlePointerDown(fakeEvent(target));
     detector.handlePointerDown(fakeEvent(target));
     expect(onMultiTap).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs a boundary open-pick-confirm chain at any speed without locking", () => {
+    const onMultiTap = vi.fn();
+    let now = 0;
+    const detector = createMultiTapDetector(onMultiTap, () => now);
+    const trigger = gestureBoundary();
+    const menuItem = gestureBoundary();
+    const confirm = document.createElement("button");
+
+    detector.handlePointerDown(fakeEvent(trigger));
+    now += 1;
+    detector.handlePointerDown(fakeEvent(menuItem));
+    now += 1;
+    detector.handlePointerDown(fakeEvent(confirm));
+
+    expect(onMultiTap).not.toHaveBeenCalled();
+  });
+
+  it("lets a boundary close a run started by an unrelated tap", () => {
+    const onMultiTap = vi.fn();
+    let now = 0;
+    const detector = createMultiTapDetector(onMultiTap, () => now);
+    detector.handlePointerDown(fakeEvent(document.createElement("div")));
+    now += 1;
+    detector.handlePointerDown(fakeEvent(gestureBoundary()));
+    expect(onMultiTap).toHaveBeenCalledOnce();
+  });
+
+  it("does not lock on two taps starting at a boundary, but locks on the third", () => {
+    const onMultiTap = vi.fn();
+    let now = 0;
+    const detector = createMultiTapDetector(onMultiTap, () => now);
+    const trigger = gestureBoundary();
+
+    detector.handlePointerDown(fakeEvent(trigger));
+    now += 1;
+    detector.handlePointerDown(fakeEvent(trigger));
+    expect(onMultiTap).not.toHaveBeenCalled();
+    now += 1;
+    detector.handlePointerDown(fakeEvent(trigger));
+    expect(onMultiTap).toHaveBeenCalledOnce();
+  });
+
+  it("ignores non-primary pointerdowns", () => {
+    const onMultiTap = vi.fn();
+    const detector = createMultiTapDetector(onMultiTap, () => 0);
+    const target = document.createElement("div");
+
+    detector.handlePointerDown(fakeEvent(target, 2));
+    detector.handlePointerDown(fakeEvent(target));
+    expect(onMultiTap).not.toHaveBeenCalled();
+    detector.handlePointerDown(fakeEvent(target));
+    expect(onMultiTap).toHaveBeenCalledOnce();
   });
 });
 

@@ -26,6 +26,7 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from builder.jsontypes import JsonObject
+from wixy_server.background import ContainedTaskGroup
 from wixy_server.github import GitHubApiError, GitHubClient
 from wixy_server.preamble import compose_prompt
 from wixy_server.worker.agent_client import AgentSDKClientFactory
@@ -374,7 +375,8 @@ def create_worker_app(
             scratch_dir = resolved_settings.scratch_root / conv.conv_id
             await anyio.to_thread.run_sync(lambda: scratch_dir.mkdir(parents=True, exist_ok=True))
             prompt = _compose_prompt(conv.preamble, first_message)
-            request.app.state.background_tasks.start_soon(
+            request.app.state.background_tasks.spawn(
+                "worker-conversation",
                 _run_and_track,
                 conv,
                 prompt,
@@ -433,7 +435,8 @@ def create_worker_app(
         # clones straight into this dir fine either way — `git clone` accepts
         # an already-existing but EMPTY destination.
         await anyio.to_thread.run_sync(lambda: scratch_dir.mkdir(parents=True, exist_ok=True))
-        request.app.state.background_tasks.start_soon(
+        request.app.state.background_tasks.spawn(
+            "worker-conversation",
             _run_and_track,
             conv,
             text,
@@ -465,8 +468,13 @@ def create_worker_app(
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         async with anyio.create_task_group() as tg:
-            _app.state.background_tasks = tg
-            tg.start_soon(_run_scratch_sweep, resolved_settings)
+            background = ContainedTaskGroup(tg)
+            _app.state.background_tasks = background
+
+            async def _scratch_sweep_loop() -> None:
+                await _run_scratch_sweep(resolved_settings)
+
+            background.supervise("worker-scratch-sweep", _scratch_sweep_loop)
             yield
             tg.cancel_scope.cancel()
 

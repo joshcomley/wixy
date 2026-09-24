@@ -6,15 +6,19 @@ import type { UploadAttachment } from "../src/server/upload";
 import type { ServerStreamEvent } from "../src/server/stream";
 import type { LockHooks, ServerSession } from "../src/server/types";
 
-const { getHistory, sendMessage, uploadServerAttachment } = vi.hoisted(() => ({
+const { deleteMessage, getHistory, sendMessage, wipeChat, uploadServerAttachment } = vi.hoisted(() => ({
+  deleteMessage: vi.fn(),
   getHistory: vi.fn(),
   sendMessage: vi.fn(),
+  wipeChat: vi.fn(),
   uploadServerAttachment: vi.fn(),
 }));
 vi.mock("../src/server/api/messages", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/server/api/messages")>()),
   getHistory,
   sendMessage,
+  deleteMessage,
+  wipeChat,
 }));
 vi.mock("../src/server/api/uploads", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/server/api/uploads")>()),
@@ -43,7 +47,38 @@ function fakeWindow(): Window {
   return {
     crypto: { randomUUID: () => "generated-uuid-1234" },
     localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {}, clear: () => {} },
+    setTimeout: globalThis.setTimeout.bind(globalThis),
+    clearTimeout: globalThis.clearTimeout.bind(globalThis),
+    navigator: window.navigator,
   } as unknown as Window;
+}
+
+function fakeWindowWithIntersection(): { win: Window; intersect: () => void } {
+  let callback: IntersectionObserverCallback | null = null;
+  const FakeIntersectionObserver = class {
+    constructor(onIntersect: IntersectionObserverCallback) {
+      callback = onIntersect;
+    }
+    observe(): void {}
+    disconnect(): void {}
+  } as unknown as typeof IntersectionObserver;
+  const win = fakeWindow();
+  Object.defineProperty(win, "IntersectionObserver", { value: FakeIntersectionObserver });
+  return {
+    win,
+    intersect: () => callback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver),
+  };
+}
+
+function touchPointer(type: string, x: number, y: number): PointerEvent {
+  const event = new Event(type, { bubbles: true }) as PointerEvent;
+  Object.defineProperties(event, {
+    pointerType: { value: "touch" },
+    pointerId: { value: 1 },
+    clientX: { value: x },
+    clientY: { value: y },
+  });
+  return event;
 }
 
 function emptyHistory(overrides: Partial<HistoryPage> = {}): HistoryPage {
@@ -72,6 +107,8 @@ describe("mountServerThread", () => {
   beforeEach(() => {
     getHistory.mockReset();
     sendMessage.mockReset();
+    deleteMessage.mockReset();
+    wipeChat.mockReset();
     uploadServerAttachment.mockReset();
   });
   afterEach(() => {
@@ -399,6 +436,92 @@ describe("mountServerThread", () => {
       view.teardown();
     });
 
+    it("does not restore an older history page after a wipe", async () => {
+      let resolveOlder!: (page: HistoryPage) => void;
+      getHistory
+        .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ seq: 2, text: "current" })], hasMore: true }))
+        .mockImplementationOnce(() => new Promise<HistoryPage>((resolve) => { resolveOlder = resolve; }));
+      const { win, intersect } = fakeWindowWithIntersection();
+      const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win, onSettings: vi.fn() });
+      await view.attach(SESSION);
+      intersect();
+      await flush();
+
+      view.handleStreamEvent({ type: "wiped" } as ServerStreamEvent);
+      resolveOlder(emptyHistory({ messages: [fakeMessage({ seq: 1, text: "stale older message" })] }));
+      await flush();
+
+      expect(view.element.textContent).not.toContain("current");
+      expect(view.element.textContent).not.toContain("stale older message");
+      view.teardown();
+    });
+
+    it("does not restore a separately deleted message from a pending older page", async () => {
+      let resolveOlder!: (page: HistoryPage) => void;
+      getHistory
+        .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ seq: 2, text: "keep" })], hasMore: true }))
+        .mockImplementationOnce(() => new Promise<HistoryPage>((resolve) => { resolveOlder = resolve; }));
+      const { win, intersect } = fakeWindowWithIntersection();
+      const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win, onSettings: vi.fn() });
+      await view.attach(SESSION);
+      intersect();
+      await flush();
+
+      view.handleStreamEvent({ type: "message_deleted", seq: 1 } as ServerStreamEvent);
+      resolveOlder(emptyHistory({ messages: [fakeMessage({ seq: 1, text: "deleted elsewhere" })] }));
+      await flush();
+
+      expect(view.element.textContent).toContain("keep");
+      expect(view.element.textContent).not.toContain("deleted elsewhere");
+      view.teardown();
+    });
+
+    it("keeps an in-flight local delete tombstoned against a stale history page", async () => {
+      let resolveOlder!: (page: HistoryPage) => void;
+      let resolveDelete!: () => void;
+      getHistory
+        .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ seq: 1, text: "delete this" })], hasMore: true }))
+        .mockImplementationOnce(() => new Promise<HistoryPage>((resolve) => { resolveOlder = resolve; }));
+      deleteMessage.mockImplementationOnce(() => new Promise<void>((resolve) => { resolveDelete = resolve; }));
+      const { win, intersect } = fakeWindowWithIntersection();
+      const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win, onSettings: vi.fn() });
+      await view.attach(SESSION);
+      intersect();
+      await flush();
+
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-actions-trigger")?.click();
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-action-delete")?.click();
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-delete-confirm-button")?.click();
+      resolveOlder(emptyHistory({ messages: [fakeMessage({ seq: 1, text: "stale delete this" })] }));
+      await flush();
+      view.handleStreamEvent({ type: "message_deleted", seq: 1 } as ServerStreamEvent);
+      resolveDelete();
+      await flush();
+
+      expect(view.element.textContent).not.toContain("delete this");
+      expect(view.element.textContent).not.toContain("stale delete this");
+      view.teardown();
+    });
+
+    it("does not restore a failed optimistic delete after a wipe", async () => {
+      let rejectDelete!: (error: Error) => void;
+      getHistory.mockResolvedValue(emptyHistory({ messages: [fakeMessage({ text: "deleted by wipe" })] }));
+      deleteMessage.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectDelete = reject; }));
+      const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-actions-trigger")?.click();
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-action-delete")?.click();
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-delete-confirm-button")?.click();
+      view.handleStreamEvent({ type: "wiped" } as ServerStreamEvent);
+      rejectDelete(new Error("network"));
+      await flush();
+
+      expect(view.element.textContent).not.toContain("deleted by wipe");
+      expect(view.element.textContent).not.toContain("Couldn't delete message");
+      view.teardown();
+    });
+
     it("a message_deleted event removes just that message", async () => {
       getHistory.mockResolvedValue(
         emptyHistory({ messages: [fakeMessage({ seq: 1, text: "keep" }), fakeMessage({ seq: 2, text: "delete me" })] }),
@@ -410,6 +533,139 @@ describe("mountServerThread", () => {
 
       expect(view.element.textContent).toContain("keep");
       expect(view.element.textContent).not.toContain("delete me");
+      view.teardown();
+    });
+
+    it("deletes optimistically from the message action sheet", async () => {
+      vi.useFakeTimers();
+      getHistory.mockResolvedValue(emptyHistory({ messages: [fakeMessage({ text: "remove me" })] }));
+      deleteMessage.mockResolvedValue(undefined);
+      const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-actions-trigger")?.click();
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-action-delete")?.click();
+      expect(view.element.textContent).toContain("Delete this message for everyone?");
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-delete-confirm-button")?.click();
+      await flush();
+
+      expect(deleteMessage).toHaveBeenCalledWith(SESSION, 1);
+      expect(view.element.querySelector(".wx-srv-bubble")?.classList.contains("wx-srv-bubble-deleting")).toBe(true);
+      vi.advanceTimersByTime(200);
+      await flush();
+      expect(view.element.textContent).not.toContain("remove me");
+      view.teardown();
+    });
+
+    it("restores a failed optimistic delete with an error line", async () => {
+      getHistory.mockResolvedValue(emptyHistory({ messages: [fakeMessage({ text: "keep on error" })] }));
+      deleteMessage.mockRejectedValue(new Error("network"));
+      const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-actions-trigger")?.click();
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-action-delete")?.click();
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-delete-confirm-button")?.click();
+      await flush();
+
+      expect(view.element.textContent).toContain("keep on error");
+      expect(view.element.textContent).toContain("Couldn't delete message. Try again.");
+      view.teardown();
+    });
+
+    it("the settings sheet's wipe call clears local history after success", async () => {
+      getHistory
+        .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ text: "gone" })] }))
+        .mockResolvedValueOnce(emptyHistory());
+      wipeChat.mockResolvedValue(false);
+      const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+
+      await view.wipe();
+
+      expect(wipeChat).toHaveBeenCalledWith(SESSION);
+      expect(view.element.textContent).not.toContain("gone");
+      view.teardown();
+    });
+
+    it("does not clear a new message when the wipe SSE precedes its HTTP response", async () => {
+      let resolveWipe!: () => void;
+      let resolveRefresh!: (page: HistoryPage) => void;
+      getHistory
+        .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ text: "old" })] }))
+        .mockImplementationOnce(() => new Promise<HistoryPage>((resolve) => { resolveRefresh = resolve; }));
+      wipeChat.mockImplementationOnce(() => new Promise<void>((resolve) => { resolveWipe = resolve; }));
+      const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+
+      const request = view.wipe();
+      view.handleStreamEvent({ type: "wiped" } as ServerStreamEvent);
+      resolveWipe();
+      await flush(); // the post-wipe history reconciliation is now in flight
+      view.handleStreamEvent({ type: "message", message: fakeMessage({ seq: 2, text: "after wipe" }) } as ServerStreamEvent);
+      resolveRefresh(emptyHistory()); // snapshot began before the message event
+      await request;
+
+      expect(view.element.textContent).not.toContain("old");
+      expect(view.element.textContent).toContain("after wipe");
+      view.teardown();
+    });
+
+    it("preserves a message event that arrives during the successful wipe refresh", async () => {
+      let resolveRefresh!: (page: HistoryPage) => void;
+      getHistory
+        .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ text: "old" })] }))
+        .mockImplementationOnce(() => new Promise<HistoryPage>((resolve) => { resolveRefresh = resolve; }));
+      wipeChat.mockResolvedValue(false);
+      const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+
+      const request = view.wipe();
+      await flush(); // local clear is complete; history refresh is pending
+      view.handleStreamEvent({ type: "message", message: fakeMessage({ seq: 2, text: "arrived during refresh" }) } as ServerStreamEvent);
+      resolveRefresh(emptyHistory()); // this earlier snapshot does not include the message
+      await request;
+
+      expect(view.element.textContent).not.toContain("old");
+      expect(view.element.textContent).toContain("arrived during refresh");
+      view.teardown();
+    });
+
+    it("opens on a 500ms touch hold and cancels after movement over 10px", async () => {
+      vi.useFakeTimers();
+      getHistory.mockResolvedValue(emptyHistory({ messages: [fakeMessage()] }));
+      const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+      const bubble = view.element.querySelector<HTMLElement>(".wx-srv-bubble");
+      const menu = view.element.querySelector<HTMLElement>(".wx-srv-message-actions");
+      expect(bubble).not.toBeNull();
+      expect(menu?.hidden).toBe(true);
+
+      bubble?.dispatchEvent(touchPointer("pointerdown", 10, 10));
+      vi.advanceTimersByTime(499);
+      expect(menu?.hidden).toBe(true);
+      bubble?.dispatchEvent(touchPointer("pointermove", 18, 18));
+      vi.advanceTimersByTime(1);
+      expect(menu?.hidden).toBe(true);
+
+      bubble?.dispatchEvent(touchPointer("pointerdown", 10, 10));
+      vi.advanceTimersByTime(500);
+      expect(menu?.hidden).toBe(false);
+      view.teardown();
+    });
+
+    it("closes message actions when the panel locks", async () => {
+      getHistory.mockResolvedValue(emptyHistory({ messages: [fakeMessage()] }));
+      Object.defineProperty(document, "fullscreenElement", { configurable: true, value: null });
+      const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-actions-trigger")?.click();
+      const menu = view.element.querySelector<HTMLElement>(".wx-srv-message-actions");
+      expect(menu?.hidden).toBe(false);
+
+      view.detach();
+
+      expect(menu?.hidden).toBe(true);
       view.teardown();
     });
 

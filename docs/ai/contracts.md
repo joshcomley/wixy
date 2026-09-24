@@ -212,21 +212,22 @@ header.
 | POST | `server/unlock` | `unlock` | `{"pin":str(4-16 digits)}` — a shorter/longer/non-digit PIN 422s locally, wixy never calls cmd for it | 200 `{"token":str,"expiresAt":float}`; 401 `{"error":"wrong_pin","attemptsLeft":int\|null}`; 429 `{"error":"locked_out","retryAfterS":int}` + `Retry-After` header; 409 `{"error":"pin_changed"}` (cmd's PIN rotated mid-check, nothing spent); 503 `{"error":"not_configured"}` (unknown app key, or no verifier on standalone) / `{"error":"pin_service_unavailable"}` (cmd unreachable/faulted) |
 | GET | `server/messages?before=&limit=` | `get_history` | query `before?:int`, `limit?:int(1-100,default 50)` | `{"messages":[<Message>], "hasMore":bool, "cursor":int}`, ascending by `seq`; 422 (`limit` out of range) |
 | POST | `server/messages` | `send_message` | `{"clientId":str(8-64),"sender":str(1-32,trimmed),"deviceId":str(8-64),"text":str\|null(≤4000),"attachmentIds":[hex32](0-10)}` | 201 `{"message":<Message>}` (200 + the SAME message on a replayed `clientId` — idempotent); 422 `{"error":"invalid","detail":str}` (empty text with no attachments, too long, bad sender, or an unknown/already-used/failed attachment id) |
+| DELETE | `server/messages/{seq}` | `delete_message` | — | 204 when DB scrub and media cleanup are complete; otherwise 202 `{"erasurePending":true}`; idempotent even when the message is already gone |
+| POST | `server/wipe` | `wipe_chat` | exactly `{"confirm":"WIPE"}` | 204 when DB scrub and media cleanup are complete; otherwise 202 `{"erasurePending":true}`; every other body, including extra keys, is 422 |
 | GET | `server/stream?after=` | `stream` | query `after?:int` (event cursor) | **SSE**, see §4 |
-| GET | `server/usage` | `usage` | — | `{"usedBytes":int,"quotaBytes":int,"freeBytes":int,"mediaAvailable":bool}` |
+| GET | `server/usage` | `usage` | — | `{"usedBytes":int,"quotaBytes":int,"freeBytes":int,"mediaAvailable":bool,"erasurePending":bool}` |
 | POST | `server/uploads` | `init_upload` | `{"kind":"photo"\|"video"\|"voice","mimeType":str,"sizeBytes":int,"filename":str\|null}` | 201 `{"uploadId":hex32,"chunkBytes":int,"maxBytes":int}`; 413 `{"error":"too_large","maxBytes":int}`; 415 `{"error":"unsupported_type"}`; 507 `{"error":"storage_full"}`; 503 `{"error":"media_unavailable"}` |
 | PUT | `server/uploads/{id}/chunks/{index}` | `put_chunk` | raw `application/octet-stream` body, ≤`chunkBytes` | 204; 413 `{"error":"too_large","maxBytes":int}`; 422 (index out of range); 404 (unknown upload) |
 | POST | `server/uploads/{id}/complete` | `complete_upload` | — | 202 `{"attachment":<Attachment>}` (status `processing`; idempotent on retry); 409 `{"error":"incomplete","missing":[int]}`; 422 `{"error":"size_mismatch"}`; 404 (unknown upload) |
 | DELETE | `server/uploads/{id}` | `delete_upload` | — | 204 (always — a no-op once already promoted to an attachment) |
-| GET | `server/media/{attId}/{rendition}?exp=&sig=` | `get_media` | `rendition ∈ full\|thumb\|poster\|play`; query `exp:int`, `sig:b64url` | 200/206 (Range-aware `FileResponse`, `Cache-Control: private, no-cache`, `X-Content-Type-Options: nosniff`, `Content-Disposition: inline`); 403 (bad/expired signature or email mismatch); 404 (malformed id, unknown rendition, or missing) |
+| GET | `server/media/{attId}/{rendition}?exp=&sig=` | `get_media` | `rendition ∈ full\|thumb\|poster\|play`; query `exp:int`, `sig:b64url` | 200/206 (Range-aware `FileResponse`, `Cache-Control: private, no-cache`, `X-Content-Type-Options: nosniff`, `Content-Disposition: inline`); 403 (bad/expired signature or email mismatch); 404 (malformed id, unknown rendition, deleted/unknown attachment, or missing file) |
 
 `<Message>` = `{seq:int, clientId:str, sender:str, text:str\|null, attachments:[<Attachment>],
 createdAt:float}`. `<Attachment>` = `{id:str, kind:"photo"\|"video"\|"voice",
 status:"processing"\|"ready"\|"failed", width:int\|null, height:int\|null,
 durationS:float\|null, peaks:[float]\|null, urls:{full?,thumb?,poster?,play?}}` — `urls`
 carries only READY renditions, each a freshly per-response HMAC-signed path (never
-precomputed/stored). P2b will add `server/uploads*` + `server/media/*` (§5.5/§5.6 of the
-brief); P3b will add `server/push/*` (§5.8) — not yet built as of this table.
+precomputed/stored).
 
 ### Preview / versions / shell / public
 
@@ -381,10 +382,10 @@ Publish/Chat use — the client is a `fetch()` streaming reader carrying the
   connection right after sending this.
 - `: ping` (a bare comment line, no `event:`/`data:`) every 15s, to keep the connection
   alive through proxies.
-- `event: message_deleted` / `data: {"seq":int}` and `event: wiped` / `data: {}` — schema
-  support only (spec §17.2 amendment A1); nothing emits these yet, they're P8's future
-  delete-message/wipe-chat routes. The loop already SKIPS a `message`/`message_updated`
-  whose row has vanished (rather than emitting broken content) so P8 slots in cleanly.
+- `event: message_deleted` / `data: {"seq":int}` — the client removes that bubble if present;
+  a missing bubble is a no-op.
+- `event: wiped` / `data: {}` — the client clears loaded history and pending echoes; the stream
+  remains open.
 
 Per-connection loop: read `events_after(cursor)`; if any, look up each event's CURRENT
 message content and emit one frame per distinct message (**coalescing** — a `message` +

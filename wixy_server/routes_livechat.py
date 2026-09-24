@@ -10,17 +10,20 @@ Every route here (except `POST /unlock`, which has no token yet) calls
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from collections.abc import AsyncGenerator, AsyncIterator
+from typing import Literal
 
 import anyio
-from anyio.abc import TaskGroup
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from builder.jsontypes import JsonObject
+from wixy_server.background import ContainedTaskGroup
+from wixy_server.livechat import janitor as livechat_janitor
 from wixy_server.livechat.models import (
     EventRow,
     MessageHook,
@@ -31,7 +34,10 @@ from wixy_server.livechat.models import (
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import PinVerifier
 from wixy_server.livechat.push import PushEndpointError, validate_push_endpoint
-from wixy_server.livechat.store import LiveChatStore, UnusableAttachmentError
+from wixy_server.livechat.store import (
+    LiveChatStore,
+    UnusableAttachmentError,
+)
 from wixy_server.livechat.tokens import (
     MediaSigner,
     ServerAuth,
@@ -39,11 +45,14 @@ from wixy_server.livechat.tokens import (
     require_server_token,
 )
 from wixy_server.settings import Settings
+from wixy_server.storage import ProjectPaths
 
 router = APIRouter(prefix="/api/admin/server")
+_LOGGER = logging.getLogger(__name__)
 
 _PING_INTERVAL_S = 15.0
 _NOTIFIER_WAIT_S = 2.0
+_DELETE_SCRUB_DEADLINE_S = 10.0
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 
@@ -55,6 +64,74 @@ def _invalid(detail: str) -> JSONResponse:
     that's a different failure class (the request isn't even shaped right) than
     these named business rejections."""
     return JSONResponse(status_code=422, content={"error": "invalid", "detail": detail})
+
+
+def _scrub_pending_locked(store: LiveChatStore, *, deadline_at: float) -> bool:
+    """Scrub and clear the current marker within the mutation's full deadline."""
+    remaining = deadline_at - time.monotonic()
+    if remaining <= 0:
+        return False
+    with store.scrub_guard(timeout_s=remaining) as acquired:
+        if not acquired:
+            return False
+        pending_token = store.scrub_pending_token()
+        if pending_token is None:
+            # The background worker may already have completed this request's scrub.
+            return True
+        remaining = deadline_at - time.monotonic()
+        if remaining <= 0 or not store.scrub(deadline_s=remaining):
+            return False
+        if not store.clear_scrub_pending(expected_token=pending_token):
+            return False
+        try:
+            store.scrub(deadline_s=min(0.25, max(0.0, deadline_at - time.monotonic())))
+        except Exception:
+            _LOGGER.warning(
+                "Best-effort checkpoint after clearing pending scrub failed", exc_info=True
+            )
+        return True
+
+
+async def _finish_committed_erasure(
+    *,
+    store: LiveChatStore,
+    paths: ProjectPaths,
+    notifier: LiveChatNotifier,
+    attachment_ids: list[str],
+    upload_ids: list[str],
+    wipe_token: str | None,
+    deadline_at: float,
+) -> Response:
+    """Finish best-effort work after commit; committed mutations never return 5xx."""
+    try:
+        notifier.publish()
+        items = {
+            item
+            for storage_id in attachment_ids
+            for item in (("attachment", storage_id), ("upload", storage_id))
+        }
+        items.update(("upload", storage_id) for storage_id in upload_ids)
+        await anyio.to_thread.run_sync(
+            lambda: livechat_janitor.cleanup_deleted_storage_once(
+                store=store, paths=paths, only_items=items
+            )
+        )
+        if wipe_token is not None:
+            await anyio.to_thread.run_sync(
+                lambda: livechat_janitor.cleanup_unreferenced_storage_once(store=store, paths=paths)
+            )
+        await anyio.to_thread.run_sync(
+            lambda: _scrub_pending_locked(store, deadline_at=deadline_at)
+        )
+        erasure_pending = await anyio.to_thread.run_sync(
+            lambda: store.scrub_pending() or store.storage_cleanup_pending()
+        )
+    except Exception:
+        _LOGGER.exception("Server chat erasure committed but synchronous cleanup did not finish")
+        return JSONResponse(status_code=202, content={"erasurePending": True})
+    if erasure_pending:
+        return JSONResponse(status_code=202, content={"erasurePending": True})
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +230,12 @@ class SendMessageIn(BaseModel):
     attachmentIds: list[str] = Field(default_factory=list)
 
 
+class WipeChatIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirm: Literal["WIPE"]
+
+
 @router.post("/messages", response_model=None)
 async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
     auth = require_server_token(request)
@@ -175,7 +258,7 @@ async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
     store: LiveChatStore = request.app.state.livechat_store
     notifier: LiveChatNotifier = request.app.state.livechat_notifier
     hooks: list[MessageHook] = request.app.state.livechat_message_hooks
-    background: TaskGroup = request.app.state.background_tasks
+    background: ContainedTaskGroup = request.app.state.background_tasks
     secret: bytes = request.app.state.livechat_secret
     now = time.time()
 
@@ -198,7 +281,7 @@ async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
     if created:
         notifier.publish()
         for hook in hooks:
-            # `TaskGroup.start_soon` wants a `Callable[..., Coroutine]`, not the
+            # The contained group accepts positional arguments, not the
             # broader `Awaitable`-returning `MessageHook` shape the frozen spec
             # gives `livechat_message_hooks` — a tiny wrapper coroutine bridges
             # the two (default arg captures THIS iteration's `hook`, not the
@@ -206,12 +289,56 @@ async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
             async def _dispatch(h: MessageHook = hook) -> None:
                 await h(message)
 
-            background.start_soon(_dispatch)
+            background.spawn("livechat-push-dispatch", _dispatch)
 
     signer = MediaSigner.for_auth(secret, auth)
     return JSONResponse(
         status_code=201 if created else 200,
         content={"message": message_json(message, signer)},
+    )
+
+
+@router.delete("/messages/{seq}", response_model=None)
+async def delete_message(seq: int, request: Request) -> Response:
+    require_server_token(request)
+    store: LiveChatStore = request.app.state.livechat_store
+    paths: ProjectPaths = request.app.state.paths
+    notifier: LiveChatNotifier = request.app.state.livechat_notifier
+
+    attachment_ids, _pending_token = await anyio.to_thread.run_sync(
+        lambda: store.delete_message_for_scrub(seq=seq, now=time.time())
+    )
+    commit_returned_at = time.monotonic()
+    return await _finish_committed_erasure(
+        store=store,
+        paths=paths,
+        notifier=notifier,
+        attachment_ids=attachment_ids,
+        upload_ids=[],
+        wipe_token=None,
+        deadline_at=commit_returned_at + _DELETE_SCRUB_DEADLINE_S,
+    )
+
+
+@router.post("/wipe", response_model=None)
+async def wipe_chat(body: WipeChatIn, request: Request) -> Response:
+    require_server_token(request)
+    store: LiveChatStore = request.app.state.livechat_store
+    paths: ProjectPaths = request.app.state.paths
+    notifier: LiveChatNotifier = request.app.state.livechat_notifier
+
+    attachment_ids, upload_ids, _pending_token, wipe_token = await anyio.to_thread.run_sync(
+        lambda: store.wipe_for_scrub(now=time.time())
+    )
+    commit_returned_at = time.monotonic()
+    return await _finish_committed_erasure(
+        store=store,
+        paths=paths,
+        notifier=notifier,
+        attachment_ids=attachment_ids,
+        upload_ids=upload_ids,
+        wipe_token=wipe_token,
+        deadline_at=commit_returned_at + _DELETE_SCRUB_DEADLINE_S,
     )
 
 
@@ -267,53 +394,56 @@ async def _stream_events(
         # forever.
         cursor = max(event.event_seq for event in events)
 
-        # §17.2 A1: 'wiped' carries no message_seq (NULL), so it's tracked
-        # separately from the per-message groups below rather than colliding
-        # every 'wiped' event onto a fake `None` group key.
+        # Coalesce message events only within the region between wipes. A wipe
+        # is an ordering boundary: a later message in this batch must be sent
+        # after the wipe so clients never clear newer content or regress their
+        # event cursor.
+        batches: list[dict[int, list[EventRow]] | EventRow] = []
         groups: dict[int, list[EventRow]] = {}
-        order: list[int] = []
-        wiped_events: list[EventRow] = []
         for event in events:
             if event.type == "wiped":
-                wiped_events.append(event)
+                if groups:
+                    batches.append(groups)
+                    groups = {}
+                batches.append(event)
                 continue
             message_seq = event.message_seq
             assert message_seq is not None  # every non-'wiped' event carries one
             if message_seq not in groups:
                 groups[message_seq] = []
-                order.append(message_seq)
             groups[message_seq].append(event)
+        if groups:
+            batches.append(groups)
 
-        messages = await anyio.to_thread.run_sync(store.get_messages, order)
-        by_seq = {message.seq: message for message in messages}
         signer = MediaSigner.for_auth(secret, auth)
-
-        for message_seq in order:
-            group = groups[message_seq]
-            message = by_seq.get(message_seq)
-            event_id = max(e.event_seq for e in group)
-            if message is None:
-                # §17.2 A1: a genuine delete emits 'message_deleted'; a
-                # 'message'/'message_updated' whose row is now gone (deleted
-                # concurrently, e.g. by P8's future delete route) is SKIPPED
-                # entirely rather than sent with nothing to show.
-                if any(e.type == "message_deleted" for e in group):
-                    yield _format_sse("message_deleted", {"seq": message_seq}, event_id=event_id)
+        for batch in batches:
+            if isinstance(batch, EventRow):
+                yield _format_sse("wiped", {}, event_id=batch.event_seq)
                 continue
-            # "Coalescing per message": one SSE frame per message per batch,
-            # carrying the CURRENT full message JSON — a 'message' + a later
-            # 'message_updated' for the same message in one batch collapse into
-            # a single frame, typed 'message' (a genuinely new message matters
-            # more to the client than an attachment-status change riding along).
-            event_type = "message" if any(e.type == "message" for e in group) else "message_updated"
-            yield _format_sse(event_type, message_json(message, signer), event_id=event_id)
-
-        if wiped_events:
-            # Coalesced too: however many 'wiped' events landed in one batch
-            # (there should only ever be one), the client only needs to hear it
-            # once.
-            wiped_id = max(e.event_seq for e in wiped_events)
-            yield _format_sse("wiped", {}, event_id=wiped_id)
+            order = sorted(
+                batch,
+                key=lambda message_seq: max(event.event_seq for event in batch[message_seq]),
+            )
+            messages = await anyio.to_thread.run_sync(store.get_messages, order)
+            by_seq = {message.seq: message for message in messages}
+            for message_seq in order:
+                group = batch[message_seq]
+                message = by_seq.get(message_seq)
+                event_id = max(e.event_seq for e in group)
+                if message is None:
+                    # A genuine delete emits 'message_deleted'; a stale
+                    # message event whose row vanished is skipped.
+                    if any(e.type == "message_deleted" for e in group):
+                        yield _format_sse(
+                            "message_deleted", {"seq": message_seq}, event_id=event_id
+                        )
+                    continue
+                # Coalesce per message within this no-wipe region, carrying the
+                # current full message JSON.
+                event_type = (
+                    "message" if any(e.type == "message" for e in group) else "message_updated"
+                )
+                yield _format_sse(event_type, message_json(message, signer), event_id=event_id)
 
 
 @router.get("/stream")
@@ -353,6 +483,9 @@ async def usage(request: Request) -> JsonObject:
         "quotaBytes": quota_bytes,
         "freeBytes": max(0, quota_bytes - used_bytes),
         "mediaAvailable": media_available,
+        "erasurePending": await anyio.to_thread.run_sync(
+            lambda: store.scrub_pending() or store.storage_cleanup_pending()
+        ),
     }
 
 

@@ -130,6 +130,17 @@ class UnknownUploadError(UploadError):
         self.upload_id = upload_id
 
 
+def cleanup_deleted_upload(*, store: LiveChatStore, paths: ProjectPaths, upload_id: str) -> None:
+    """Requeue and remove files recreated by a late write for a deleted upload."""
+    if not _UPLOAD_ID_RE.fullmatch(upload_id):
+        return
+
+    store.requeue_deleted_storage_if_exists(kind="upload", storage_id=upload_id)
+    from wixy_server.livechat.janitor import cleanup_deleted_storage_once
+
+    cleanup_deleted_storage_once(store=store, paths=paths, only_items={("upload", upload_id)})
+
+
 class InvalidChunkIndexError(UploadError):
     def __init__(self, index: int) -> None:
         super().__init__(f"chunk index {index} out of range")
@@ -285,27 +296,52 @@ def assemble(
         raise UnknownUploadError(upload_id)
 
     upload_dir = paths.server_upload_dir(upload_id)
-    count = expected_chunk_count(upload.size_bytes, chunk_bytes)
-    missing = [i for i in range(count) if not _chunk_path(upload_dir, i).is_file()]
-    if missing:
-        raise IncompleteUploadError(missing)
+    try:
+        count = expected_chunk_count(upload.size_bytes, chunk_bytes)
+        missing = [i for i in range(count) if not _chunk_path(upload_dir, i).is_file()]
+        if missing:
+            if store.get_upload(upload_id) is None:
+                cleanup_deleted_upload(store=store, paths=paths, upload_id=upload_id)
+                raise UnknownUploadError(upload_id)
+            raise IncompleteUploadError(missing)
 
-    assembled_path = upload_dir / "assembled"
-    tmp_path = upload_dir / "assembled.part"
-    total = 0
-    with tmp_path.open("wb") as out:
+        assembled_path = upload_dir / "assembled"
+        tmp_path = upload_dir / "assembled.part"
+        total = 0
+        with tmp_path.open("wb") as out:
+            for i in range(count):
+                data = _chunk_path(upload_dir, i).read_bytes()
+                out.write(data)
+                total += len(data)
+        if total != upload.size_bytes:
+            tmp_path.unlink(missing_ok=True)
+            if store.get_upload(upload_id) is None:
+                cleanup_deleted_upload(store=store, paths=paths, upload_id=upload_id)
+                raise UnknownUploadError(upload_id)
+            raise SizeMismatchError()
+        os.replace(tmp_path, assembled_path)
         for i in range(count):
-            data = _chunk_path(upload_dir, i).read_bytes()
-            out.write(data)
-            total += len(data)
-    if total != upload.size_bytes:
-        tmp_path.unlink(missing_ok=True)
-        raise SizeMismatchError()
-    os.replace(tmp_path, assembled_path)
-    for i in range(count):
-        _chunk_path(upload_dir, i).unlink(missing_ok=True)
+            _chunk_path(upload_dir, i).unlink(missing_ok=True)
+    except OSError:
+        # A concurrent delete/wipe racing this assemble may remove
+        # upload_dir mid-operation. On Windows that surfaces as
+        # PermissionError ("Access is denied") rather than
+        # FileNotFoundError when another thread is mid-rmtree on the same
+        # path (janitor.py's own cleanup catches the same broad OSError for
+        # the identical reason) — catching OSError here handles both
+        # signatures of the same race, and the re-check below still
+        # re-raises anything that isn't actually the concurrent delete
+        # winning.
+        if store.get_upload(upload_id) is None:
+            cleanup_deleted_upload(store=store, paths=paths, upload_id=upload_id)
+            raise UnknownUploadError(upload_id) from None
+        raise
 
-    return store.create_attachment(att_id=upload_id, kind=upload.kind, now=now)
+    attachment = store.create_attachment_from_upload(att_id=upload_id, kind=upload.kind, now=now)
+    if attachment is None:
+        cleanup_deleted_upload(store=store, paths=paths, upload_id=upload_id)
+        raise UnknownUploadError(upload_id)
+    return attachment
 
 
 # ---------------------------------------------------------------------------
@@ -323,4 +359,4 @@ def cancel_upload(*, store: LiveChatStore, paths: ProjectPaths, upload_id: str) 
     if store.get_attachment(upload_id) is not None:
         return
     store.delete_upload(upload_id)
-    shutil.rmtree(paths.server_upload_dir(upload_id), ignore_errors=True)
+    cleanup_deleted_upload(store=store, paths=paths, upload_id=upload_id)

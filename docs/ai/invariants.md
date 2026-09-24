@@ -581,3 +581,53 @@ repeated `apply_head` calls, and reaches real `render_page` output).
 *Exception:* none — a future project needing a different override rule (e.g. always
 re-sniffing even over an authored value) would need its own decision, not a quiet change here.
 
+### Inv 46 — Server chat delete and wipe are hard deletes, without chat-visible tombstones
+Any unlocked user can delete any message for everyone. Delete removes the message, its
+attachments, media/upload/failed files, and earlier message events, then emits one
+`message_deleted`; repeating the delete is idempotent. Wipe removes all messages, attachments,
+uploads, files, and events, then emits one `wiped`. Clients remove content on those events. The
+internal `deleted_storage` rows are filesystem-recovery tombstones only; they never appear in
+history or the event stream. Each delete/wipe records those rows in the same SQLite transaction
+that removes the attachment/upload rows, so startup can resume file deletion after a crash.
+`GET /media` verifies that the attachment row still exists before serving a signed rendition,
+even if Windows could not remove a file that was open. Failed unlinks remain pending and are
+retried by the two-second startup-resumed worker; they are never silently treated as complete.
+The worker queries only `cleanup_pending=1` rows through `idx_deleted_storage_pending`; completed
+tombstones remain for ID-reuse protection but are not revisited.
+Each cleanup pass clears pending state only if the tombstone generation is unchanged; a concurrent
+late-write requeue bumps the generation and remains scheduled for another pass.
+The compare-and-clear is required because file removal and the SQLite status update are separate
+operations. The hourly janitor conditionally deletes still-orphaned attachment rows and still-
+unpromoted upload rows before queueing their files; completed tombstones age out after seven days,
+while pending tombstones remain.
+Every store connection sets `PRAGMA secure_delete=ON`; both delete and wipe TRUNCATE the WAL.
+Recovery removes media files before retrying the DB scrub. A 204 requires an empty WAL and
+completed media cleanup. 202 returns one `erasurePending` flag covering both; the settings
+sheet waits until it clears. Route and background WAL scrubs serialize through
+`LiveChatStore.scrub_guard()` and re-read the current marker under the guard, avoiding redundant
+scrub attempts against a marker another worker already cleared. A route's ten-second deadline
+includes timed guard acquisition; a busy checkpoint waits at most 250 ms per attempt so writers
+can run between retries. Delete and wipe publish their stream event immediately after commit,
+before filesystem cleanup.
+Sequence high-water marks and push subscriptions are preserved. Media files are unlinked, but
+NTFS/SSD byte-level shredding is not claimed.
+*Enforced by:* `wixy_server/tests/test_livechat_store.py` (migration, idempotence, secure delete,
+and raw-byte scrubbing), `test_routes_livechat.py` (auth, confirmation, held-file cleanup and old
+signed-URL 404), `test_livechat_media_queue.py` (delete/processing race), and
+`e2e/tests/server-chat.spec.ts` (cross-client deletion, old-media 404, wipe replay, and mobile
+gesture behavior).
+*Known limits:* filesystem overwrite is not a reliable shred guarantee on NTFS/SSD. A 202
+response means chat content is already deleted and broadcast while database-byte or media-file
+cleanup continues durably in the background.
+
+### Inv 47 — app-lifetime background work is contained
+Every app-lifetime background loop is started through `ContainedTaskGroup.supervise`; every
+request-triggered one-shot task uses `ContainedTaskGroup.spawn`. Exceptions are logged and
+recorded without cancelling sibling work. Supervised loops restart with bounded exponential
+backoff; three consecutive failures in the livechat media or erasure worker mark media processing
+as degraded. The main and standalone worker apps use the same wrapper. Media-queue items and push
+recipients are isolated within their inner task groups, so one item failure leaves siblings
+running. A recovered loop's failure count reads as zero after five minutes without another
+failure. The wrapper exposes no raw `start_soon` method.
+*Enforced by:* `wixy_server/tests/test_background.py`, `test_routes_system.py`, worker-app tests,
+and strict mypy.

@@ -2,9 +2,9 @@
 // the same set of targets (`isExcludedTapTarget`):
 //
 // - R3's multi-tap-inside-the-chat-view-locks detector (`createMultiTapDetector`
-//   / `attachMultiTapListener`). Two primary-button Pointer Events at most
-//   `MULTI_TAP_INTERVAL_MS` apart count as one "multi-tap"; v1.5 surface-opening
-//   controls may complete a run but clear it if they do not lock. `panel.ts`
+//   / `attachMultiTapListener`) — UNCHANGED by R2 v1.3 (operator decision
+//   #974, spec/server-chat/00-brief.md §6). Two Pointer Events at most
+//   `MULTI_TAP_INTERVAL_MS` apart count as one "multi-tap". `panel.ts`
 //   attaches this to `document` in the capture phase for the lifetime of the
 //   mounted panel, and only its "chat"/"fading" states give the resulting
 //   event any meaning (lockModel.ts) — it has NO meaning on the decoy.
@@ -28,13 +28,18 @@
 import { MULTI_TAP_COUNT, MULTI_TAP_INTERVAL_MS } from "./constants";
 
 const EXCLUDED_SELECTOR = "textarea, input, [contenteditable], audio, video";
-const GESTURE_BOUNDARY_SELECTOR = "[data-srv-gesture-boundary]";
+export const GESTURE_BOUNDARY_SELECTOR = "[data-srv-gesture-boundary]";
 
 /** Exported for direct unit testing — no DOM event plumbing needed to check
  * the exclusion rule itself. */
 export function isExcludedTapTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   return target.closest(EXCLUDED_SELECTOR) !== null;
+}
+
+export function isGestureBoundaryTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  return target.closest(GESTURE_BOUNDARY_SELECTOR) !== null;
 }
 
 /** Attaches `handlePointerDown` to `target` in the capture phase, Pointer
@@ -56,10 +61,10 @@ function attachPointerDownListener(
 export interface MultiTapDetector {
   /** Feed one qualifying pointerdown. Fires `onMultiTap` (and resets the
    * count) the moment `MULTI_TAP_COUNT` taps have landed within
-   * `MULTI_TAP_INTERVAL_MS` of each other. Taps whose target is excluded
-   * (see `isExcludedTapTarget`) are silently ignored — they neither count
-   * nor break a run already in progress (a stray tap that lands in the
-   * composer mid-sequence shouldn't reset someone's deliberate double-tap). */
+   * `MULTI_TAP_INTERVAL_MS` of each other. Only primary-button taps count.
+   * Excluded targets (see `isExcludedTapTarget`) are ignored. A gesture-boundary
+   * target may complete a run started elsewhere, but cannot start one; repeated
+   * boundary taps still lock on the third tap (spec v1.5.2). */
   handlePointerDown(event: PointerEvent): void;
   /** Clears any in-progress tap run without firing — used when the panel's
    * own state changes in a way that should invalidate a partial sequence
@@ -76,28 +81,61 @@ export function createMultiTapDetector(
 ): MultiTapDetector {
   let tapCount = 0;
   let lastTapAt = 0;
+  let lastTapWasBoundary = false;
+  let boundaryTapCount = 0;
 
   function reset(): void {
     tapCount = 0;
     lastTapAt = 0;
+    lastTapWasBoundary = false;
+    boundaryTapCount = 0;
   }
 
   function handlePointerDown(event: PointerEvent): void {
-    if (event.button !== 0 || isExcludedTapTarget(event.target)) return;
-    const isBoundary =
-      event.target instanceof Element && event.target.closest(GESTURE_BOUNDARY_SELECTOR) !== null;
+    if (event.button !== 0) return;
+    if (isExcludedTapTarget(event.target)) return;
     const at = now();
     if (tapCount > 0 && at - lastTapAt > MULTI_TAP_INTERVAL_MS) {
-      tapCount = 0;
+      reset();
     }
+
+    const isBoundary = isGestureBoundaryTarget(event.target);
+
+    // A pair that begins on a boundary opens a causal surface; it must not
+    // lock. Keep the newest boundary as the start so the third rapid boundary
+    // tap still locks (the second and third taps form the pair).
+    if (tapCount > 0 && lastTapWasBoundary && isBoundary) {
+      boundaryTapCount += 1;
+      if (boundaryTapCount >= MULTI_TAP_COUNT + 1) {
+        onMultiTap();
+        reset();
+        return;
+      }
+      tapCount = 1;
+      lastTapAt = at;
+      lastTapWasBoundary = true;
+      return;
+    }
+
+    // A boundary tap cannot start a pair with a later unrelated control.
+    // That next primary tap begins a fresh run instead.
+    if (tapCount > 0 && lastTapWasBoundary && !isBoundary) {
+      tapCount = 1;
+      lastTapAt = at;
+      lastTapWasBoundary = false;
+      boundaryTapCount = 0;
+      return;
+    }
+
     tapCount += 1;
     lastTapAt = at;
     if (tapCount >= MULTI_TAP_COUNT) {
-      reset();
       onMultiTap();
+      reset();
       return;
     }
-    if (isBoundary) reset();
+    lastTapWasBoundary = isBoundary;
+    boundaryTapCount = isBoundary ? 1 : 0;
   }
 
   return { handlePointerDown, reset };

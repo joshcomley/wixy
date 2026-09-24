@@ -4,6 +4,7 @@ push subscriptions."""
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -34,7 +35,181 @@ class TestMigrations:
         store.list_messages(before=None, limit=1)
         conn = sqlite3.connect(str(db_path))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        finally:
+            conn.close()
+
+    def test_legacy_file_marker_is_imported_and_unlink_is_retried(
+        self, store: LiveChatStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        marker = store._legacy_scrub_pending_path()
+        marker.parent.mkdir(parents=True)
+        marker.write_text("legacy-marker-token", encoding="ascii")
+        real_unlink = Path.unlink
+
+        def denied_once(path: Path, *, missing_ok: bool = False) -> None:
+            if path == marker:
+                raise PermissionError("held by a legacy reader")
+            real_unlink(path, missing_ok=missing_ok)
+
+        monkeypatch.setattr(Path, "unlink", denied_once)
+        assert store.import_legacy_scrub_marker() == "legacy-marker-token"
+        assert marker.exists()
+        assert store.scrub_pending_token() == "legacy-marker-token"
+
+        monkeypatch.setattr(Path, "unlink", real_unlink)
+        assert store.import_legacy_scrub_marker() == "legacy-marker-token"
+        assert not marker.exists()
+
+    def test_unreadable_legacy_marker_still_creates_durable_pending_row(
+        self, store: LiveChatStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        marker = store._legacy_scrub_pending_path()
+        marker.parent.mkdir(parents=True)
+        marker.write_text("owed-legacy-scrub", encoding="ascii")
+        real_read_text = Path.read_text
+        denied = False
+
+        def deny_once(
+            path: Path,
+            encoding: str | None = None,
+            errors: str | None = None,
+            newline: str | None = None,
+        ) -> str:
+            nonlocal denied
+            if path == marker and not denied:
+                denied = True
+                raise PermissionError("legacy marker is temporarily held")
+            return real_read_text(path, encoding=encoding, errors=errors, newline=newline)
+
+        monkeypatch.setattr(Path, "read_text", deny_once)
+        token = store.import_legacy_scrub_marker()
+
+        assert denied
+        assert token is not None
+        assert store.scrub_pending_token() == token
+        assert marker.exists()
+
+        monkeypatch.setattr(Path, "read_text", real_read_text)
+        assert store.import_legacy_scrub_marker() == token
+        assert not marker.exists()
+
+    def test_pending_scrub_is_rolled_back_with_its_transaction(self, store: LiveChatStore) -> None:
+        with pytest.raises(RuntimeError, match="abort test transaction"):
+            with store._write_txn() as conn:
+                store._upsert_pending_scrub(conn)
+                raise RuntimeError("abort test transaction")
+        assert not store.scrub_pending()
+
+    def test_v3_database_gets_pending_storage_index_in_v4(self, db_path: Path) -> None:
+        store = LiveChatStore(db_path)
+        store.list_messages(before=None, limit=1)
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.execute("ALTER TABLE deleted_storage DROP COLUMN generation")
+            conn.execute("DROP INDEX idx_deleted_storage_pending")
+            conn.execute("PRAGMA user_version = 3")
+            conn.commit()
+        finally:
+            conn.close()
+
+        upgraded = LiveChatStore(db_path)
+        upgraded.list_messages(before=None, limit=1)
+        conn = sqlite3.connect(str(db_path))
+        try:
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+            index = conn.execute(
+                "SELECT sql FROM sqlite_master "
+                "WHERE type = 'index' AND name = 'idx_deleted_storage_pending'"
+            ).fetchone()
+        finally:
+            conn.close()
+        assert index is not None
+        assert "WHERE cleanup_pending = 1" in str(index[0])
+
+    def test_v4_database_gets_storage_generation_and_pending_scrub_schema(
+        self, db_path: Path
+    ) -> None:
+        db_path.parent.mkdir(parents=True)
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.executescript(
+                """
+                CREATE TABLE deleted_storage(
+                  kind TEXT NOT NULL, id TEXT NOT NULL,
+                  cleanup_pending INTEGER NOT NULL, deleted_at REAL NOT NULL,
+                  PRIMARY KEY(kind, id));
+                CREATE INDEX idx_deleted_storage_pending
+                  ON deleted_storage(kind, id) WHERE cleanup_pending = 1;
+                INSERT INTO deleted_storage(kind, id, cleanup_pending, deleted_at)
+                  VALUES ('upload', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, 1.0);
+                PRAGMA user_version = 4;
+                """
+            )
+        finally:
+            conn.close()
+
+        store = LiveChatStore(db_path)
+        conn = store._connect()
+        conn.close()
+        conn = sqlite3.connect(str(db_path))
+        try:
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+            columns = {row[1]: row for row in conn.execute("PRAGMA table_info(deleted_storage)")}
+            assert columns["generation"][3] == 1
+            assert (
+                conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'pending_scrub'"
+                ).fetchone()
+                is not None
+            )
+            assert (
+                conn.execute(
+                    "SELECT generation FROM deleted_storage WHERE id = ?",
+                    ("a" * 32,),
+                ).fetchone()[0]
+                == 1
+            )
+        finally:
+            conn.close()
+
+    def test_v2_rebuild_accepts_wiped_and_preserves_event_sequence(self, db_path: Path) -> None:
+        db_path.parent.mkdir(parents=True)
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.executescript(
+                """
+                CREATE TABLE events(
+                  event_seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                  type TEXT NOT NULL CHECK(type IN ('message','message_updated')),
+                  message_seq INTEGER NOT NULL, created_at REAL NOT NULL);
+                INSERT INTO events(event_seq, type, message_seq, created_at)
+                  VALUES (4, 'message', 1, 10.0), (12, 'message_updated', 1, 11.0);
+                DELETE FROM events WHERE event_seq = 12;
+                PRAGMA user_version = 1;
+                """
+            )
+        finally:
+            conn.close()
+
+        store = LiveChatStore(db_path)
+        assert [(event.event_seq, event.type) for event in store.events_after(0)] == [
+            (4, "message")
+        ]
+
+        conn = sqlite3.connect(str(db_path))
+        try:
+            columns = {row[1]: row[3] for row in conn.execute("PRAGMA table_info(events)")}
+            assert columns["message_seq"] == 0  # nullable for the 'wiped' event
+            conn.execute(
+                "INSERT INTO events (type, message_seq, created_at) VALUES ('wiped', NULL, 12.0)"
+            )
+            assert conn.execute("SELECT MAX(event_seq) FROM events").fetchone()[0] == 13
+            assert (
+                conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'events'").fetchone()[0]
+                == 13
+            )
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
         finally:
             conn.close()
 
@@ -304,6 +479,311 @@ class TestListMessagesAndEvents:
         self._seed(store, 3)
         result = store.get_messages([3, 999, 1])
         assert [m.seq for m in result] == [3, 1]
+
+
+class TestDeleteAndWipe:
+    @staticmethod
+    def _raw_database_bytes(db_path: Path) -> bytes:
+        wal_path = Path(f"{db_path}-wal")
+        return db_path.read_bytes() + (wal_path.read_bytes() if wal_path.exists() else b"")
+
+    def test_delete_removes_message_attachments_and_old_events_and_is_idempotent(
+        self, store: LiveChatStore, db_path: Path
+    ) -> None:
+        attachment = store.create_attachment(att_id="attachment-delete-1", kind="photo", now=1.0)
+        store.create_upload(
+            UploadRow(
+                id=attachment.id,
+                kind="photo",
+                mime="image/jpeg",
+                size_bytes=10,
+                filename=None,
+                by_email=None,
+                created_at=1.0,
+            )
+        )
+        message, _ = store.create_message(
+            client_id="client-delete-1",
+            sender="Josh",
+            device_id="device-delete-1",
+            by_email=None,
+            text="delete-marker-7d72c84d",
+            attachment_ids=(attachment.id,),
+            now=2.0,
+        )
+        # The attachment completion event must be removed with the message too.
+        store.claim_processing(owner="worker-1", now=2.0, lease_s=60.0)
+        store.finish_attachment(
+            att_id=attachment.id,
+            owner="worker-1",
+            result=AttachmentResult(
+                status="ready",
+                mime="image/jpeg",
+                width=1,
+                height=1,
+                duration_s=None,
+                peaks=None,
+                renditions=("full",),
+                bytes_on_disk=10,
+                failure=None,
+            ),
+            now=3.0,
+        )
+
+        assert store.delete_message(seq=message.seq, now=4.0) == [attachment.id]
+        assert store.scrub(deadline_s=10.0)
+        assert store.get_messages([message.seq]) == []
+        assert store.get_attachment(attachment.id) is None
+        assert store.get_upload(attachment.id) is None
+        events = store.events_after(0)
+        assert [(event.type, event.message_seq) for event in events] == [
+            ("message_deleted", message.seq)
+        ]
+        assert store.delete_message(seq=message.seq, now=5.0) == []
+        assert store.scrub(deadline_s=10.0)
+        assert store.events_after(0) == events
+        assert b"delete-marker-7d72c84d" not in self._raw_database_bytes(db_path)
+
+    def test_wipe_clears_content_keeps_push_and_never_reuses_sequences(
+        self, store: LiveChatStore, db_path: Path
+    ) -> None:
+        attachment = store.create_attachment(att_id="attachment-wipe-1", kind="voice", now=1.0)
+        store.create_upload(
+            UploadRow(
+                id=attachment.id,
+                kind="voice",
+                mime="audio/webm",
+                size_bytes=30,
+                filename="note.webm",
+                by_email=None,
+                created_at=1.0,
+            )
+        )
+        store.create_upload(
+            UploadRow(
+                id="pending-upload-1",
+                kind="video",
+                mime="video/mp4",
+                size_bytes=40,
+                filename="clip.mp4",
+                by_email=None,
+                created_at=1.0,
+            )
+        )
+        store.create_message(
+            client_id="client-wipe-1",
+            sender="Josh",
+            device_id="device-wipe-1",
+            by_email=None,
+            text="wipe-marker-5121b943",
+            attachment_ids=(attachment.id,),
+            now=2.0,
+        )
+        last_seq = store.create_message(
+            client_id="client-wipe-2",
+            sender="Purdy",
+            device_id="device-wipe-2",
+            by_email=None,
+            text="second message",
+            attachment_ids=(),
+            now=3.0,
+        )[0].seq
+        store.upsert_push_subscription(
+            PushSubscriptionRow(
+                device_id="device-wipe-1",
+                sender="Josh",
+                endpoint="https://push.example/subscription-1",
+                p256dh="public-key",
+                auth="auth-secret",
+                created_at=1.0,
+                last_ok_at=None,
+                consecutive_failures=0,
+            )
+        )
+        _messages, _has_more, old_cursor = store.list_messages(before=None, limit=10)
+
+        attachment_ids, upload_ids = store.wipe(now=4.0)
+        assert store.scrub(deadline_s=10.0)
+
+        assert attachment_ids == [attachment.id]
+        assert upload_ids == [attachment.id, "pending-upload-1"]
+        assert store.list_messages(before=None, limit=10) == ([], False, old_cursor + 1)
+        assert store.get_attachment(attachment.id) is None
+        assert store.get_upload("pending-upload-1") is None
+        assert store.list_push_subscriptions()[0].device_id == "device-wipe-1"
+        assert [(event.type, event.message_seq) for event in store.events_after(old_cursor)] == [
+            ("wiped", None)
+        ]
+        next_message, _ = store.create_message(
+            client_id="client-wipe-3",
+            sender="Josh",
+            device_id="device-wipe-1",
+            by_email=None,
+            text="after wipe",
+            attachment_ids=(),
+            now=5.0,
+        )
+        assert next_message.seq > last_seq
+        assert b"wipe-marker-5121b943" not in self._raw_database_bytes(db_path)
+
+    def test_delete_persists_pending_scrub_until_reader_releases_old_wal_snapshot(
+        self, store: LiveChatStore, db_path: Path
+    ) -> None:
+        message, _ = store.create_message(
+            client_id="client-delete-reader",
+            sender="Josh",
+            device_id="device-delete-reader",
+            by_email=None,
+            text="delete-reader-marker-1e4c",
+            attachment_ids=(),
+            now=1.0,
+        )
+        reader = sqlite3.connect(str(db_path), isolation_level=None)
+        reader.execute("BEGIN")
+        assert (
+            reader.execute("SELECT text FROM messages").fetchone()[0] == "delete-reader-marker-1e4c"
+        )
+        try:
+            store.delete_message(seq=message.seq, now=2.0)
+            assert not store.scrub(deadline_s=0.1)
+            pending_token = store.mark_scrub_pending()
+            assert store.scrub_pending()
+            assert b"delete-reader-marker-1e4c" in self._raw_database_bytes(db_path)
+        finally:
+            reader.close()
+
+        assert store.scrub(deadline_s=10.0)
+        assert store.clear_scrub_pending(expected_token=pending_token)
+        assert not store.scrub_pending()
+        assert b"delete-reader-marker-1e4c" not in self._raw_database_bytes(db_path)
+
+    def test_wipe_persists_pending_scrub_until_reader_releases_old_wal_snapshot(
+        self, store: LiveChatStore, db_path: Path
+    ) -> None:
+        store.create_message(
+            client_id="client-wipe-reader",
+            sender="Josh",
+            device_id="device-wipe-reader",
+            by_email=None,
+            text="wipe-reader-marker-37bc",
+            attachment_ids=(),
+            now=1.0,
+        )
+        reader = sqlite3.connect(str(db_path), isolation_level=None)
+        reader.execute("BEGIN")
+        assert (
+            reader.execute("SELECT text FROM messages").fetchone()[0] == "wipe-reader-marker-37bc"
+        )
+        try:
+            store.wipe(now=2.0)
+            assert not store.scrub(deadline_s=0.1)
+            pending_token = store.mark_scrub_pending()
+            assert store.scrub_pending()
+            assert b"wipe-reader-marker-37bc" in self._raw_database_bytes(db_path)
+        finally:
+            reader.close()
+
+        assert store.scrub(deadline_s=10.0)
+        assert store.clear_scrub_pending(expected_token=pending_token)
+        assert b"wipe-reader-marker-37bc" not in self._raw_database_bytes(db_path)
+
+    def test_scrub_retries_wal_stat_permission_error(
+        self, store: LiveChatStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        wal_path = Path(f"{store._db_path}-wal")
+        real_stat = Path.stat
+        denied = False
+
+        def deny_once(path: Path, *, follow_symlinks: bool = True) -> os.stat_result:
+            nonlocal denied
+            if path == wal_path and not denied:
+                denied = True
+                raise PermissionError("WAL is delete-pending")
+            return real_stat(path, follow_symlinks=follow_symlinks)
+
+        monkeypatch.setattr(Path, "stat", deny_once)
+        assert store.scrub(deadline_s=1.0)
+        assert denied
+
+    def test_complete_passive_checkpoint_can_leave_deleted_text_in_wal(
+        self, store: LiveChatStore, db_path: Path
+    ) -> None:
+        store.list_messages(before=None, limit=1)
+        conn = sqlite3.connect(str(db_path), isolation_level=None)
+        conn.execute("PRAGMA journal_mode = WAL")
+        message, _ = store.create_message(
+            client_id="client-passive-characterization",
+            sender="Josh",
+            device_id="device-passive-characterization",
+            by_email=None,
+            text="passive-wal-marker-2e18",
+            attachment_ids=(),
+            now=1.0,
+        )
+        store.delete_message(seq=message.seq, now=2.0)
+        try:
+            busy, log_frames, checkpointed_frames = conn.execute(
+                "PRAGMA wal_checkpoint(PASSIVE)"
+            ).fetchone()
+            assert busy == 0
+            assert checkpointed_frames == log_frames
+            assert b"passive-wal-marker-2e18" in self._raw_database_bytes(db_path)
+            assert store.scrub(deadline_s=10.0)
+            assert b"passive-wal-marker-2e18" not in self._raw_database_bytes(db_path)
+        finally:
+            conn.close()
+
+    def test_read_methods_leave_no_snapshot_blocking_a_truncate_checkpoint(
+        self, store: LiveChatStore, db_path: Path
+    ) -> None:
+        store.create_message(
+            client_id="client-reader-invariant",
+            sender="Josh",
+            device_id="device-reader-invariant",
+            by_email=None,
+            text="short-lived read",
+            attachment_ids=(),
+            now=1.0,
+        )
+        store.list_messages(before=None, limit=10)
+        store.events_after(0)
+        store.get_messages([1])
+        conn = sqlite3.connect(str(db_path), isolation_level=None)
+        try:
+            conn.execute("PRAGMA busy_timeout = 0")
+            busy, _log_frames, _checkpointed_frames = conn.execute(
+                "PRAGMA wal_checkpoint(TRUNCATE)"
+            ).fetchone()
+            assert busy == 0
+        finally:
+            conn.close()
+
+    def test_every_store_connection_enables_secure_delete(self, store: LiveChatStore) -> None:
+        conn = store._connect()
+        try:
+            assert conn.execute("PRAGMA secure_delete").fetchone()[0] == 1
+        finally:
+            conn.close()
+
+    def test_upload_promotion_cannot_create_an_attachment_after_wipe(
+        self, store: LiveChatStore
+    ) -> None:
+        upload_id = "c" * 32
+        store.create_upload(
+            UploadRow(
+                id=upload_id,
+                kind="photo",
+                mime="image/jpeg",
+                size_bytes=1,
+                filename=None,
+                by_email=None,
+                created_at=1.0,
+            )
+        )
+        store.wipe(now=2.0)
+
+        assert store.create_attachment_from_upload(att_id=upload_id, kind="photo", now=3.0) is None
+        assert store.get_attachment(upload_id) is None
 
 
 class TestAttachmentLeasing:

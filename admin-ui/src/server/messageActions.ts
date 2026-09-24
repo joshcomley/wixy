@@ -1,0 +1,186 @@
+import type { Message } from "./api/messages";
+
+const LONG_PRESS_MS = 500;
+const LONG_PRESS_MOVE_PX = 10;
+
+export interface MessageActionsDeps {
+  readonly message: Message;
+  readonly bubble: HTMLElement;
+  readonly win: Window;
+  readonly document?: Document;
+  readonly onDelete: (message: Message) => Promise<void>;
+}
+
+export interface MessageActionsController {
+  close(): void;
+  teardown(): void;
+}
+
+/** Adds the desktop menu and touch long-press action sheet to one message bubble. */
+export function mountMessageActions(deps: MessageActionsDeps): MessageActionsController {
+  const { message, bubble, win } = deps;
+  const documentRef = deps.document ?? document;
+  const trigger = documentRef.createElement("button");
+  trigger.type = "button";
+  trigger.className = "wx-srv-message-actions-trigger";
+  trigger.textContent = "⋯";
+  trigger.setAttribute("aria-label", "Message actions");
+  trigger.setAttribute("aria-haspopup", "menu");
+  trigger.setAttribute("aria-expanded", "false");
+  trigger.dataset["srvGestureBoundary"] = "";
+
+  const menu = documentRef.createElement("div");
+  menu.className = "wx-srv-message-actions";
+  menu.setAttribute("role", "menu");
+  menu.hidden = true;
+
+  const actions = documentRef.createElement("div");
+  actions.className = "wx-srv-message-actions-list";
+  const confirmation = documentRef.createElement("div");
+  confirmation.className = "wx-srv-message-delete-confirm";
+  confirmation.hidden = true;
+
+  const copyError = documentRef.createElement("p");
+  copyError.className = "wx-srv-message-action-error";
+  copyError.hidden = true;
+  let deleteButton: HTMLButtonElement | null = null;
+
+  function close(): void {
+    menu.hidden = true;
+    confirmation.hidden = true;
+    actions.hidden = false;
+    trigger.setAttribute("aria-expanded", "false");
+    bubble.classList.remove("wx-srv-message-actions-open");
+  }
+
+  function open(): void {
+    menu.hidden = false;
+    trigger.setAttribute("aria-expanded", "true");
+    bubble.classList.add("wx-srv-message-actions-open");
+  }
+
+  if (message.text !== null && message.text !== "") {
+    const copy = documentRef.createElement("button");
+    copy.type = "button";
+    copy.className = "wx-srv-message-action-copy";
+    copy.textContent = "Copy text";
+    copy.setAttribute("role", "menuitem");
+    copy.addEventListener("click", () => {
+      const clipboard = win.navigator.clipboard;
+      if (clipboard === undefined) {
+        copyError.textContent = "Copying isn't available on this device.";
+        copyError.hidden = false;
+        return;
+      }
+      void clipboard.writeText(message.text ?? "").then(close).catch(() => {
+        copyError.textContent = "Couldn't copy the message.";
+        copyError.hidden = false;
+      });
+    });
+    actions.appendChild(copy);
+  }
+
+  const remove = documentRef.createElement("button");
+  remove.type = "button";
+  remove.className = "wx-srv-message-action-delete";
+  remove.textContent = "Delete for everyone";
+  remove.setAttribute("role", "menuitem");
+  remove.dataset["srvGestureBoundary"] = "";
+  remove.addEventListener("click", () => {
+    actions.hidden = true;
+    confirmation.hidden = false;
+    deleteButton?.focus();
+  });
+  actions.appendChild(remove);
+
+  const cancel = documentRef.createElement("button");
+  cancel.type = "button";
+  cancel.className = "wx-srv-message-action-cancel";
+  cancel.textContent = "Cancel";
+  cancel.setAttribute("role", "menuitem");
+  cancel.addEventListener("click", close);
+  actions.appendChild(cancel);
+
+  const question = documentRef.createElement("p");
+  question.textContent = "Delete this message for everyone?";
+  const confirmButtons = documentRef.createElement("div");
+  confirmButtons.className = "wx-srv-message-delete-buttons";
+  const confirmDeleteButton = documentRef.createElement("button");
+  deleteButton = confirmDeleteButton;
+  confirmDeleteButton.type = "button";
+  confirmDeleteButton.className = "wx-srv-message-delete-confirm-button";
+  confirmDeleteButton.textContent = "Delete";
+  confirmDeleteButton.addEventListener("click", () => {
+    confirmDeleteButton.disabled = true;
+    void deps.onDelete(message).finally(() => {
+      confirmDeleteButton.disabled = false;
+    });
+  });
+  const cancelDelete = documentRef.createElement("button");
+  cancelDelete.type = "button";
+  cancelDelete.className = "wx-srv-message-delete-cancel";
+  cancelDelete.textContent = "Cancel";
+  cancelDelete.addEventListener("click", close);
+  confirmButtons.append(confirmDeleteButton, cancelDelete);
+  confirmation.append(question, confirmButtons);
+  menu.append(actions, confirmation, copyError);
+
+  trigger.addEventListener("click", () => {
+    if (menu.hidden) open();
+    else close();
+  });
+
+  const onContextMenu = (event: Event): void => {
+    event.preventDefault();
+    open();
+  };
+  bubble.addEventListener("contextmenu", onContextMenu);
+
+  let pressTimer: number | null = null;
+  let pressStart: { readonly x: number; readonly y: number } | null = null;
+  function clearPress(): void {
+    if (pressTimer !== null) win.clearTimeout(pressTimer);
+    pressTimer = null;
+    pressStart = null;
+  }
+  const onPointerDown = (event: PointerEvent): void => {
+    if (event.pointerType !== "touch") return;
+    const target = event.target;
+    if (target instanceof Element && target.closest("button, a, audio, video")) return;
+    clearPress();
+    pressStart = { x: event.clientX, y: event.clientY };
+    pressTimer = win.setTimeout(() => {
+      pressTimer = null;
+      pressStart = null;
+      open();
+    }, LONG_PRESS_MS);
+  };
+  const onPointerMove = (event: PointerEvent): void => {
+    if (pressStart === null) return;
+    if (Math.hypot(event.clientX - pressStart.x, event.clientY - pressStart.y) > LONG_PRESS_MOVE_PX) {
+      clearPress();
+    }
+  };
+  bubble.addEventListener("pointerdown", onPointerDown);
+  bubble.addEventListener("pointermove", onPointerMove);
+  bubble.addEventListener("pointerup", clearPress);
+  bubble.addEventListener("pointercancel", clearPress);
+
+  trigger.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") close();
+  });
+  bubble.append(trigger, menu);
+
+  return {
+    close,
+    teardown(): void {
+      close();
+      clearPress();
+      bubble.removeEventListener("contextmenu", onContextMenu);
+      bubble.removeEventListener("pointerdown", onPointerDown);
+      bubble.removeEventListener("pointermove", onPointerMove);
+      bubble.removeEventListener("pointerup", clearPress);
+      bubble.removeEventListener("pointercancel", clearPress);
+    },
+  };
+}

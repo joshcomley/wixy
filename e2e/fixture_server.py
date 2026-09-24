@@ -452,6 +452,60 @@ def main() -> None:
 
         return {"seeded": await anyio.to_thread.run_sync(_seed)}
 
+    @app.post("/test/server/seed-photo", include_in_schema=False)
+    async def _post_seed_server_photo(payload: dict[str, object]) -> dict[str, object]:
+        """Seed one ready private photo for delete/wipe E2E coverage.
+
+        The row and files use the real server-chat paths and media route; only
+        processing is bypassed so this remains deterministic without ffmpeg.
+        """
+        sender = payload.get("sender", "Purdy")
+        text = payload.get("text", "E2E photo")
+        assert isinstance(sender, str) and isinstance(text, str)
+        store: LiveChatStore = app.state.livechat_store
+        paths: ProjectPaths = app.state.paths
+
+        def _seed() -> dict[str, object]:
+            now = time.time()
+            attachment_id = uuid.uuid4().hex
+            conn = store._connect()
+            try:
+                conn.execute(
+                    "INSERT INTO attachments "
+                    "(id, kind, status, mime, width, height, renditions, bytes_on_disk, "
+                    "created_at, updated_at) "
+                    "VALUES (?, 'photo', 'ready', 'image/jpeg', 16, 12, ?, ?, ?, ?)",
+                    (attachment_id, '["full","thumb"]', 0, now, now),
+                )
+            finally:
+                conn.close()
+            message, _created = store.create_message(
+                client_id=f"seed-photo-{uuid.uuid4().hex}",
+                sender=sender,
+                device_id=f"seed-device-{uuid.uuid4().hex[:16]}",
+                by_email=None,
+                text=text,
+                attachment_ids=(attachment_id,),
+                now=now,
+            )
+            image = (E2E_DIR / "fixtures" / "tiny-second-image.jpg").read_bytes()
+            media_dir = paths.server_attachment_media_dir(attachment_id)
+            media_dir.mkdir(parents=True, exist_ok=True)
+            (media_dir / "full.jpg").write_bytes(image)
+            (media_dir / "thumb.jpg").write_bytes(image)
+            conn = store._connect()
+            try:
+                conn.execute(
+                    "UPDATE attachments SET bytes_on_disk = ? WHERE id = ?",
+                    (len(image) * 2, attachment_id),
+                )
+            finally:
+                conn.close()
+            app.state.livechat_notifier.publish()
+            return {"seq": message.seq, "attachmentId": attachment_id}
+
+        return await anyio.to_thread.run_sync(_seed)
+
     @app.post("/test/server/reset-pin-lockout", include_in_schema=False)
     async def _post_reset_pin_lockout() -> dict[str, bool]:
         """spec/server-chat/00-brief.md §11: `server-lock.spec.ts`'s lockout

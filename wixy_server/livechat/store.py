@@ -29,8 +29,11 @@ transaction-before-DML behavior.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
+import threading
 import time
+import uuid
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
@@ -74,7 +77,49 @@ CREATE TABLE IF NOT EXISTS push_subscriptions(
   last_ok_at REAL, consecutive_failures INTEGER NOT NULL DEFAULT 0);
 """
 
-_MIGRATIONS: list[tuple[int, str]] = [(1, _SCHEMA_V1)]
+_SCHEMA_V2_EVENTS = """
+CREATE TABLE events_v2(
+  event_seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL CHECK(type IN ('message','message_updated','message_deleted','wiped')),
+  message_seq INTEGER, created_at REAL NOT NULL);
+INSERT INTO events_v2 (event_seq, type, message_seq, created_at)
+  SELECT event_seq, type, message_seq, created_at FROM events ORDER BY event_seq;
+DROP TABLE events;
+ALTER TABLE events_v2 RENAME TO events;
+"""
+
+_SCHEMA_V3_DELETION_TRACKING = """
+CREATE TABLE IF NOT EXISTS deleted_storage(
+  kind TEXT NOT NULL CHECK(kind IN ('attachment','upload')),
+  id TEXT NOT NULL,
+  cleanup_pending INTEGER NOT NULL CHECK(cleanup_pending IN (0,1)),
+  deleted_at REAL NOT NULL,
+  PRIMARY KEY(kind, id));
+CREATE TABLE IF NOT EXISTS pending_wipe_cleanup(
+  singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+  token TEXT NOT NULL);
+"""
+
+_SCHEMA_V4_PENDING_STORAGE_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_deleted_storage_pending
+  ON deleted_storage(kind, id) WHERE cleanup_pending = 1;
+"""
+
+_SCHEMA_V5_STORAGE_GENERATION = """
+ALTER TABLE deleted_storage
+  ADD COLUMN generation INTEGER NOT NULL DEFAULT 1;
+CREATE INDEX IF NOT EXISTS idx_deleted_storage_completed_age
+  ON deleted_storage(deleted_at) WHERE cleanup_pending = 0;
+"""
+
+_SCHEMA_V6_PENDING_SCRUB = """
+CREATE TABLE IF NOT EXISTS pending_scrub(
+  singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+  token TEXT NOT NULL);
+"""
+
+_LATEST_SCHEMA_VERSION = 6
+_LOGGER = logging.getLogger(__name__)
 
 
 class LiveChatStoreError(Exception):
@@ -195,6 +240,21 @@ _JOURNAL_MODE_SWITCH_RETRY_DELAY_S = 0.02
 class LiveChatStore:
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
+        self._scrub_lock = threading.Lock()
+
+    @contextmanager
+    def scrub_guard(self, *, timeout_s: float | None = None) -> Iterator[bool]:
+        """Serialize WAL scrubs, optionally bounding a request's lock wait."""
+        acquired = (
+            self._scrub_lock.acquire()
+            if timeout_s is None
+            else self._scrub_lock.acquire(timeout=max(0.0, timeout_s))
+        )
+        try:
+            yield acquired
+        finally:
+            if acquired:
+                self._scrub_lock.release()
 
     def _connect(self) -> sqlite3.Connection:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -231,22 +291,86 @@ class LiveChatStore:
         return conn
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
-        # The user_version check-then-act below is NOT itself atomic across
-        # connections (busy_timeout only protects genuine SQLite write-lock
-        # contention, not this two-step race) — on a brand-new DB file, two
-        # connections opened close together (P2b's media queue starting to
-        # poll concurrently with the first request, or a blue/green pair both
-        # starting cold) can both read user_version=0 and both attempt the
-        # v1 migration. `CREATE TABLE IF NOT EXISTS` makes the loser's replay
-        # a harmless no-op instead of `OperationalError: table already
-        # exists` (measured 2026-09-14, P2b's media_queue.run_forever
-        # surfaced this within the first few polls of any fresh app.py test).
+        # Most requests only need the cheap version read. During an upgrade,
+        # serialize the check and every migration under SQLite's write lock so
+        # blue/green processes cannot both rebuild the events table.
         current = conn.execute("PRAGMA user_version").fetchone()[0]
-        for version, sql in _MIGRATIONS:
-            if version <= current:
-                continue
-            conn.executescript(sql)
-            conn.execute(f"PRAGMA user_version = {version}")
+        if current >= _LATEST_SCHEMA_VERSION:
+            return
+
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            current = conn.execute("PRAGMA user_version").fetchone()[0]
+            if current < 1:
+                # This static schema has no semicolons inside SQL literals, so
+                # each statement can be executed inside the migration txn.
+                for statement in _SCHEMA_V1.split(";"):
+                    if statement.strip():
+                        conn.execute(statement)
+                current = 1
+                conn.execute("PRAGMA user_version = 1")
+
+            if current < 2:
+                self._migrate_events_v2(conn)
+                conn.execute("PRAGMA user_version = 2")
+                current = 2
+
+            if current < 3:
+                for statement in _SCHEMA_V3_DELETION_TRACKING.split(";"):
+                    if statement.strip():
+                        conn.execute(statement)
+                conn.execute("PRAGMA user_version = 3")
+                current = 3
+
+            if current < 4:
+                for statement in _SCHEMA_V4_PENDING_STORAGE_INDEX.split(";"):
+                    if statement.strip():
+                        conn.execute(statement)
+                conn.execute("PRAGMA user_version = 4")
+                current = 4
+
+            if current < 5:
+                for statement in _SCHEMA_V5_STORAGE_GENERATION.split(";"):
+                    if statement.strip():
+                        conn.execute(statement)
+                conn.execute("PRAGMA user_version = 5")
+                current = 5
+
+            if current < 6:
+                for statement in _SCHEMA_V6_PENDING_SCRUB.split(";"):
+                    if statement.strip():
+                        conn.execute(statement)
+                conn.execute("PRAGMA user_version = 6")
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+
+    @staticmethod
+    def _migrate_events_v2(conn: sqlite3.Connection) -> None:
+        """Rebuild the event table so old v1 databases accept delete/wipe events.
+
+        Preserve sqlite_sequence's high-water mark even if old events were
+        deleted before the upgrade; event IDs must never be reused.
+        """
+        old_sequence = conn.execute(
+            "SELECT seq FROM sqlite_sequence WHERE name = 'events'"
+        ).fetchone()
+        high_water = int(old_sequence["seq"]) if old_sequence is not None else 0
+        for statement in _SCHEMA_V2_EVENTS.split(";"):
+            if statement.strip():
+                conn.execute(statement)
+
+        new_sequence = conn.execute(
+            "SELECT seq FROM sqlite_sequence WHERE name = 'events'"
+        ).fetchone()
+        high_water = max(high_water, int(new_sequence["seq"]) if new_sequence is not None else 0)
+        if new_sequence is None and high_water > 0:
+            conn.execute(
+                "INSERT INTO sqlite_sequence (name, seq) VALUES ('events', ?)", (high_water,)
+            )
+        elif new_sequence is not None:
+            conn.execute("UPDATE sqlite_sequence SET seq = ? WHERE name = 'events'", (high_water,))
 
     @contextmanager
     def _write_txn(self) -> Iterator[sqlite3.Connection]:
@@ -387,10 +511,353 @@ class LiveChatStore:
                 for row in rows
             ]
 
+    def delete_message(self, *, seq: int, now: float) -> list[str]:
+        attachment_ids, _ = self._delete_message(seq=seq, now=now, mark_scrub_pending=False)
+        return attachment_ids
+
+    def delete_message_for_scrub(self, *, seq: int, now: float) -> tuple[list[str], str]:
+        attachment_ids, token = self._delete_message(seq=seq, now=now, mark_scrub_pending=True)
+        assert token is not None
+        return attachment_ids, token
+
+    def _delete_message(
+        self, *, seq: int, now: float, mark_scrub_pending: bool
+    ) -> tuple[list[str], str | None]:
+        """Hard-delete one message and its attachments, then emit its tombstone-free event."""
+        pending_token: str | None = None
+        with self._write_txn() as conn:
+            exists = (
+                conn.execute("SELECT 1 FROM messages WHERE seq = ?", (seq,)).fetchone() is not None
+            )
+            attachment_rows = conn.execute(
+                "SELECT id FROM attachments WHERE message_seq = ? ORDER BY id", (seq,)
+            ).fetchall()
+            attachment_ids = [str(row["id"]) for row in attachment_rows]
+            self._queue_deleted_storage(conn, kind="attachment", ids=attachment_ids, now=now)
+            self._queue_deleted_storage(conn, kind="upload", ids=attachment_ids, now=now)
+            conn.execute(
+                "DELETE FROM uploads WHERE id IN ("
+                "SELECT id FROM attachments WHERE message_seq = ?)",
+                (seq,),
+            )
+            conn.execute("DELETE FROM attachments WHERE message_seq = ?", (seq,))
+            conn.execute(
+                "DELETE FROM events WHERE message_seq = ? "
+                "AND type IN ('message', 'message_updated')",
+                (seq,),
+            )
+            conn.execute("DELETE FROM messages WHERE seq = ?", (seq,))
+            if exists:
+                conn.execute(
+                    "INSERT INTO events (type, message_seq, created_at) "
+                    "VALUES ('message_deleted', ?, ?)",
+                    (seq, now),
+                )
+            if mark_scrub_pending:
+                pending_token = self._upsert_pending_scrub(conn)
+        return attachment_ids, pending_token
+
+    def wipe(self, *, now: float) -> tuple[list[str], list[str]]:
+        attachment_ids, upload_ids, _, _ = self._wipe(now=now, mark_scrub_pending=False)
+        return attachment_ids, upload_ids
+
+    def wipe_for_scrub(self, *, now: float) -> tuple[list[str], list[str], str, str]:
+        attachment_ids, upload_ids, token, wipe_token = self._wipe(now=now, mark_scrub_pending=True)
+        assert token is not None
+        assert wipe_token is not None
+        return attachment_ids, upload_ids, token, wipe_token
+
+    def _wipe(
+        self, *, now: float, mark_scrub_pending: bool
+    ) -> tuple[list[str], list[str], str | None, str | None]:
+        """Remove all chat content and append one cursor-preserving wipe event."""
+        pending_token: str | None = None
+        wipe_token: str | None = None
+        with self._write_txn() as conn:
+            attachment_ids = [
+                str(row["id"])
+                for row in conn.execute("SELECT id FROM attachments ORDER BY id").fetchall()
+            ]
+            upload_ids = [
+                str(row["id"])
+                for row in conn.execute("SELECT id FROM uploads ORDER BY id").fetchall()
+            ]
+            self._queue_deleted_storage(conn, kind="attachment", ids=attachment_ids, now=now)
+            self._queue_deleted_storage(conn, kind="upload", ids=upload_ids, now=now)
+            wipe_token = uuid.uuid4().hex
+            conn.execute(
+                "INSERT INTO pending_wipe_cleanup(singleton, token) VALUES (1, ?) "
+                "ON CONFLICT(singleton) DO UPDATE SET token = excluded.token",
+                (wipe_token,),
+            )
+            conn.execute("DELETE FROM attachments")
+            conn.execute("DELETE FROM messages")
+            conn.execute("DELETE FROM uploads")
+            conn.execute("DELETE FROM events")
+            conn.execute(
+                "INSERT INTO events (type, message_seq, created_at) VALUES ('wiped', NULL, ?)",
+                (now,),
+            )
+            if mark_scrub_pending:
+                pending_token = self._upsert_pending_scrub(conn)
+        return attachment_ids, upload_ids, pending_token, wipe_token
+
+    def _legacy_scrub_pending_path(self) -> Path:
+        return self._db_path.parent / "scrub.pending"
+
+    def scrub_pending(self) -> bool:
+        return self.scrub_pending_token() is not None
+
+    def import_legacy_scrub_marker(self) -> str | None:
+        """Import the pre-v6 marker once at startup, then remove the legacy file."""
+        try:
+            legacy_token = self._legacy_scrub_pending_path().read_text(encoding="ascii").strip()
+        except FileNotFoundError:
+            return self.scrub_pending_token()
+        except OSError:
+            _LOGGER.exception(
+                "Could not read legacy Server chat scrub marker; retrying next startup"
+            )
+            with self._write_txn() as conn:
+                conn.execute(
+                    "INSERT INTO pending_scrub(singleton, token) VALUES (1, ?) "
+                    "ON CONFLICT(singleton) DO NOTHING",
+                    (uuid.uuid4().hex,),
+                )
+            return self.scrub_pending_token()
+
+        token = legacy_token or uuid.uuid4().hex
+        with self._write_txn() as conn:
+            row = conn.execute("SELECT token FROM pending_scrub WHERE singleton = 1").fetchone()
+            if row is None:
+                conn.execute("INSERT INTO pending_scrub(singleton, token) VALUES (1, ?)", (token,))
+            else:
+                token = str(row["token"])
+        try:
+            self._legacy_scrub_pending_path().unlink(missing_ok=True)
+        except OSError:
+            _LOGGER.exception("Could not remove imported legacy Server chat scrub marker")
+        return token
+
+    @staticmethod
+    def _queue_deleted_storage(
+        conn: sqlite3.Connection, *, kind: str, ids: Sequence[str], now: float
+    ) -> None:
+        for storage_id in set(ids):
+            conn.execute(
+                "INSERT INTO deleted_storage(kind, id, cleanup_pending, deleted_at, generation) "
+                "VALUES (?, ?, 1, ?, 1) "
+                "ON CONFLICT(kind, id) DO UPDATE SET "
+                "cleanup_pending = 1, deleted_at = excluded.deleted_at, "
+                "generation = deleted_storage.generation + 1",
+                (kind, storage_id, now),
+            )
+
+    @staticmethod
+    def _is_deleted_storage(conn: sqlite3.Connection, *, kind: str, storage_id: str) -> bool:
+        return (
+            conn.execute(
+                "SELECT 1 FROM deleted_storage WHERE kind = ? AND id = ?",
+                (kind, storage_id),
+            ).fetchone()
+            is not None
+        )
+
+    def pending_deleted_storage_items(self) -> list[tuple[str, str, int]]:
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT kind, id, generation FROM deleted_storage "
+                "WHERE cleanup_pending = 1 ORDER BY kind, id"
+            ).fetchall()
+            return [(str(row["kind"]), str(row["id"]), int(row["generation"])) for row in rows]
+
+    def mark_deleted_storage_pending(self, *, kind: str, storage_id: str, now: float) -> None:
+        with self._write_txn() as conn:
+            self._queue_deleted_storage(conn, kind=kind, ids=[storage_id], now=now)
+
+    def requeue_deleted_storage_if_exists(self, *, kind: str, storage_id: str) -> bool:
+        """Bump the generation so a cleanup pass cannot erase a concurrent requeue."""
+        with self._write_txn() as conn:
+            cursor = conn.execute(
+                "UPDATE deleted_storage SET cleanup_pending = 1, generation = generation + 1 "
+                "WHERE kind = ? AND id = ?",
+                (kind, storage_id),
+            )
+            return cursor.rowcount > 0
+
+    def clear_deleted_storage_pending_many(self, items: Sequence[tuple[str, str, int]]) -> None:
+        if not items:
+            return
+        with self._write_txn() as conn:
+            conn.executemany(
+                "UPDATE deleted_storage SET cleanup_pending = 0 "
+                "WHERE kind = ? AND id = ? AND generation = ? AND cleanup_pending = 1",
+                items,
+            )
+
+    def has_deleted_storage_pending(self, *, kind: str, storage_id: str) -> bool:
+        with self._read_txn() as conn:
+            row = conn.execute(
+                "SELECT cleanup_pending FROM deleted_storage WHERE kind = ? AND id = ?",
+                (kind, storage_id),
+            ).fetchone()
+            return row is not None and bool(row["cleanup_pending"])
+
+    def storage_cleanup_pending(self) -> bool:
+        with self._read_txn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM deleted_storage WHERE cleanup_pending = 1 LIMIT 1"
+            ).fetchone()
+            wipe = conn.execute("SELECT 1 FROM pending_wipe_cleanup WHERE singleton = 1").fetchone()
+            return row is not None or wipe is not None
+
+    def pending_wipe_cleanup_token(self) -> str | None:
+        with self._read_txn() as conn:
+            row = conn.execute(
+                "SELECT token FROM pending_wipe_cleanup WHERE singleton = 1"
+            ).fetchone()
+            return str(row["token"]) if row is not None else None
+
+    def ensure_pending_wipe_cleanup_token(self) -> str:
+        """Persist retry work when a startup orphan sweep finds an unlink failure."""
+        with self._write_txn() as conn:
+            row = conn.execute(
+                "SELECT token FROM pending_wipe_cleanup WHERE singleton = 1"
+            ).fetchone()
+            if row is not None:
+                return str(row["token"])
+            token = uuid.uuid4().hex
+            conn.execute(
+                "INSERT INTO pending_wipe_cleanup(singleton, token) VALUES (1, ?)", (token,)
+            )
+            return token
+
+    def clear_pending_wipe_cleanup(self, *, expected_token: str) -> bool:
+        with self._write_txn() as conn:
+            row = conn.execute(
+                "SELECT token FROM pending_wipe_cleanup WHERE singleton = 1"
+            ).fetchone()
+            if row is None or str(row["token"]) != expected_token:
+                return False
+            conn.execute("DELETE FROM pending_wipe_cleanup WHERE singleton = 1")
+            return True
+
+    def live_storage_ids(self) -> tuple[set[str], set[str]]:
+        """Read live attachment/upload IDs in one snapshot for an orphan sweep."""
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT 'attachment' AS kind, id FROM attachments "
+                "UNION SELECT 'upload' AS kind, id FROM uploads"
+            ).fetchall()
+            attachment_ids = {str(row["id"]) for row in rows if str(row["kind"]) == "attachment"}
+            upload_ids = {str(row["id"]) for row in rows if str(row["kind"]) == "upload"}
+            return attachment_ids, upload_ids
+
+    def scrub_pending_token(self) -> str | None:
+        with self._read_txn() as conn:
+            row = conn.execute("SELECT token FROM pending_scrub WHERE singleton = 1").fetchone()
+            return str(row["token"]) if row is not None else None
+
+    def mark_scrub_pending(self) -> str:
+        """Durably record unfinished erasure before a 202 can be returned."""
+        with self._write_txn() as conn:
+            return self._upsert_pending_scrub(conn)
+
+    def _upsert_pending_scrub(self, conn: sqlite3.Connection) -> str:
+        """Write the marker atomically with the erasure transaction."""
+        if not conn.in_transaction:
+            raise RuntimeError("scrub marker must be written inside a SQLite transaction")
+        token = uuid.uuid4().hex
+        conn.execute(
+            "INSERT INTO pending_scrub(singleton, token) VALUES (1, ?) "
+            "ON CONFLICT(singleton) DO UPDATE SET token = excluded.token",
+            (token,),
+        )
+        return token
+
+    def clear_scrub_pending(self, *, expected_token: str | None) -> bool:
+        """Clear only the marker observed before this successful scrub began."""
+        if expected_token is None:
+            return False
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            cursor = conn.execute(
+                "DELETE FROM pending_scrub WHERE singleton = 1 AND token = ?",
+                (expected_token,),
+            )
+            conn.execute("COMMIT")
+            return cursor.rowcount == 1
+        except BaseException:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
+        finally:
+            conn.close()
+
+    def scrub(self, *, deadline_s: float) -> bool:
+        """TRUNCATE the WAL on a fresh connection until it is physically empty.
+
+        The deadline includes SQLite's busy wait and the explicit retry delay.
+        ``False`` means the database-backed pending marker remains for retry.
+        """
+        deadline = time.monotonic() + max(0.0, deadline_s)
+        conn = self._connect()
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                busy_timeout_ms = max(1, min(250, int(remaining * 1000)))
+                conn.execute(f"PRAGMA busy_timeout = {busy_timeout_ms}")
+                result_row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+                assert result_row is not None
+                busy = int(result_row[0])
+                wal_path = Path(f"{self._db_path}-wal")
+                try:
+                    wal_empty = wal_path.stat().st_size == 0
+                except FileNotFoundError:
+                    wal_empty = True
+                except OSError:
+                    # SQLite may be deleting the WAL as its last connection
+                    # closes; a transient Windows sharing denial means retry.
+                    wal_empty = False
+                if busy == 0 and wal_empty:
+                    return True
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                time.sleep(min(0.05, remaining))
+        finally:
+            conn.close()
+
     # -- attachments (P2) -------------------------------------------------------
 
     def create_attachment(self, *, att_id: str, kind: AttachmentKind, now: float) -> AttachmentRow:
         with self._write_txn() as conn:
+            if self._is_deleted_storage(conn, kind="attachment", storage_id=att_id):
+                raise LiveChatStoreError("attachment id has already been deleted")
+            conn.execute(
+                "INSERT INTO attachments "
+                "(id, kind, status, renditions, bytes_on_disk, created_at, updated_at) "
+                "VALUES (?, ?, 'processing', '[]', 0, ?, ?)",
+                (att_id, kind, now, now),
+            )
+            return _load_attachment(conn, att_id)
+
+    def create_attachment_from_upload(
+        self, *, att_id: str, kind: AttachmentKind, now: float
+    ) -> AttachmentRow | None:
+        """Promote an upload only if it survived a concurrent delete/wipe."""
+        with self._write_txn() as conn:
+            existing = conn.execute("SELECT id FROM attachments WHERE id = ?", (att_id,)).fetchone()
+            if existing is not None:
+                return _load_attachment(conn, att_id)
+            if self._is_deleted_storage(conn, kind="attachment", storage_id=att_id):
+                return None
+            upload = conn.execute("SELECT 1 FROM uploads WHERE id = ?", (att_id,)).fetchone()
+            if upload is None:
+                return None
             conn.execute(
                 "INSERT INTO attachments "
                 "(id, kind, status, renditions, bytes_on_disk, created_at, updated_at) "
@@ -438,6 +905,11 @@ class LiveChatStore:
                 # The lease expired and was reclaimed by someone else — this
                 # worker's result is stale, so it's discarded rather than
                 # clobbering whatever the new claimant is doing.
+                exists = conn.execute(
+                    "SELECT 1 FROM attachments WHERE id = ?", (att_id,)
+                ).fetchone()
+                if exists is None:
+                    self._queue_deleted_storage(conn, kind="attachment", ids=[att_id], now=now)
                 return
             conn.execute(
                 "UPDATE attachments SET status = ?, mime = ?, width = ?, height = ?, "
@@ -487,12 +959,26 @@ class LiveChatStore:
 
     def delete_attachment(self, att_id: str) -> None:
         with self._write_txn() as conn:
+            self._queue_deleted_storage(conn, kind="attachment", ids=[att_id], now=time.time())
             conn.execute("DELETE FROM attachments WHERE id = ?", (att_id,))
+
+    def delete_orphan_attachment_if_unclaimed(self, att_id: str, *, now: float) -> bool:
+        """Delete and journal an attachment only if no message claimed it meanwhile."""
+        with self._write_txn() as conn:
+            cursor = conn.execute(
+                "DELETE FROM attachments WHERE id = ? AND message_seq IS NULL", (att_id,)
+            )
+            if cursor.rowcount != 1:
+                return False
+            self._queue_deleted_storage(conn, kind="attachment", ids=[att_id], now=now)
+            return True
 
     # -- uploads (P2) -------------------------------------------------------
 
     def create_upload(self, row: UploadRow) -> None:
         with self._write_txn() as conn:
+            if self._is_deleted_storage(conn, kind="upload", storage_id=row.id):
+                raise LiveChatStoreError("upload id has already been deleted")
             conn.execute(
                 "INSERT INTO uploads (id, kind, mime, size_bytes, filename, by_email, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -514,7 +1000,30 @@ class LiveChatStore:
 
     def delete_upload(self, upload_id: str) -> None:
         with self._write_txn() as conn:
+            self._queue_deleted_storage(conn, kind="upload", ids=[upload_id], now=time.time())
             conn.execute("DELETE FROM uploads WHERE id = ?", (upload_id,))
+
+    def delete_stale_upload_if_unpromoted(self, upload_id: str, *, now: float) -> bool:
+        """Delete and journal an upload only if it has not been promoted meanwhile."""
+        with self._write_txn() as conn:
+            cursor = conn.execute(
+                "DELETE FROM uploads WHERE id = ? "
+                "AND NOT EXISTS (SELECT 1 FROM attachments WHERE id = ?)",
+                (upload_id, upload_id),
+            )
+            if cursor.rowcount != 1:
+                return False
+            self._queue_deleted_storage(conn, kind="upload", ids=[upload_id], now=now)
+            return True
+
+    def prune_completed_deleted_storage(self, *, older_than: float) -> int:
+        """Drop old completed tombstones while retaining all active cleanup work."""
+        with self._write_txn() as conn:
+            cursor = conn.execute(
+                "DELETE FROM deleted_storage WHERE cleanup_pending = 0 AND deleted_at < ?",
+                (older_than,),
+            )
+            return cursor.rowcount
 
     def stale_upload_ids(self, *, older_than: float) -> list[str]:
         with self._read_txn() as conn:
@@ -522,6 +1031,42 @@ class LiveChatStore:
                 "SELECT id FROM uploads WHERE created_at < ?", (older_than,)
             ).fetchall()
             return [row["id"] for row in rows]
+
+    def failed_original_archive_candidates(self) -> list[tuple[str, float]]:
+        """Failed attachments whose staged original is retained for archive retry."""
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT a.id, a.updated_at FROM attachments AS a "
+                "JOIN uploads AS u ON u.id = a.id "
+                "WHERE a.status = 'failed' ORDER BY a.updated_at, a.id"
+            ).fetchall()
+            return [(str(row["id"]), float(row["updated_at"])) for row in rows]
+
+    def ready_upload_cleanup_candidates(self) -> list[str]:
+        """Ready attachments that still retain their raw staged upload files."""
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT a.id FROM attachments AS a "
+                "JOIN uploads AS u ON u.id = a.id "
+                "WHERE a.status = 'ready' ORDER BY a.id"
+            ).fetchall()
+            return [str(row["id"]) for row in rows]
+
+    def expire_failed_original_if_still_unarchived(
+        self, att_id: str, *, older_than: float, now: float
+    ) -> bool:
+        """Drop the staged source only after its seven-day diagnostic window."""
+        with self._write_txn() as conn:
+            cursor = conn.execute(
+                "DELETE FROM uploads WHERE id = ? AND EXISTS ("
+                "SELECT 1 FROM attachments WHERE id = ? AND status = 'failed' "
+                "AND updated_at < ?)",
+                (att_id, att_id, older_than),
+            )
+            if cursor.rowcount != 1:
+                return False
+            self._queue_deleted_storage(conn, kind="upload", ids=[att_id], now=now)
+            return True
 
     def pending_upload_bytes(self) -> int:
         with self._read_txn() as conn:
