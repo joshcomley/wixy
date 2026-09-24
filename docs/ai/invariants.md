@@ -581,20 +581,28 @@ repeated `apply_head` calls, and reaches real `render_page` output).
 *Exception:* none — a future project needing a different override rule (e.g. always
 re-sniffing even over an authored value) would need its own decision, not a quiet change here.
 
-### Inv 46 — Server chat delete and wipe are hard deletes, with no tombstone
+### Inv 46 — Server chat delete and wipe are hard deletes, without chat-visible tombstones
 Any unlocked user can delete any message for everyone. Delete removes the message, its
 attachments, media/upload/failed files, and earlier message events, then emits one
 `message_deleted`; repeating the delete is idempotent. Wipe removes all messages, attachments,
-uploads, files, and events, then emits one `wiped`. Clients remove content on those events.
-Every store connection sets `PRAGMA secure_delete=ON`; both delete and wipe TRUNCATE the WAL. A
-204 requires an empty WAL and the raw-byte guarantee. If a reader blocks the 10-second scrub,
-the route durably records `server/scrub.pending` and returns 202; the background scrubber resumes
-at startup and retries every two seconds. Sequence high-water marks and push subscriptions are
-preserved. Media files are unlinked, but NTFS/SSD byte-level shredding is not claimed.
+uploads, files, and events, then emits one `wiped`. Clients remove content on those events. The
+internal `deleted_storage` rows are filesystem-recovery tombstones only; they never appear in
+history or the event stream. Each delete/wipe records those rows in the same SQLite transaction
+that removes the attachment/upload rows, so startup can resume file deletion after a crash.
+`GET /media` verifies that the attachment row still exists before serving a signed rendition,
+even if Windows could not remove a file that was open. Failed unlinks remain pending and are
+retried by the two-second startup-resumed worker; they are never silently treated as complete.
+Every store connection sets `PRAGMA secure_delete=ON`; both delete and wipe TRUNCATE the WAL.
+Recovery removes media files before retrying the DB scrub. A 204 requires an empty WAL and
+completed media cleanup. 202 returns one `erasurePending` flag covering both; the settings
+sheet waits until it clears.
+Sequence high-water marks and push subscriptions are preserved. Media files are unlinked, but
+NTFS/SSD byte-level shredding is not claimed.
 *Enforced by:* `wixy_server/tests/test_livechat_store.py` (migration, idempotence, secure delete,
-and raw-byte scrubbing), `test_routes_livechat.py` (auth, confirmation, file cleanup, and no push),
-`test_livechat_media_queue.py` (delete/processing race), and `e2e/tests/server-chat.spec.ts`
-(cross-client deletion, old-media 404, wipe replay, and mobile gesture behavior).
+and raw-byte scrubbing), `test_routes_livechat.py` (auth, confirmation, held-file cleanup and old
+signed-URL 404), `test_livechat_media_queue.py` (delete/processing race), and
+`e2e/tests/server-chat.spec.ts` (cross-client deletion, old-media 404, wipe replay, and mobile
+gesture behavior).
 *Known limits:* filesystem overwrite is not a reliable shred guarantee on NTFS/SSD. A 202
-response means chat content is already deleted and broadcast while the durable background scrub
-finishes removing leftover database bytes.
+response means chat content is already deleted and broadcast while database-byte or media-file
+cleanup continues durably in the background.

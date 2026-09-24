@@ -130,6 +130,13 @@ class UnknownUploadError(UploadError):
         self.upload_id = upload_id
 
 
+def cleanup_deleted_upload(*, store: LiveChatStore, paths: ProjectPaths, upload_id: str) -> None:
+    """Use the durable cleanup ledger for an upload that no longer has a live row."""
+    from wixy_server.livechat.janitor import cleanup_deleted_storage_once
+
+    cleanup_deleted_storage_once(store=store, paths=paths, only_items={("upload", upload_id)})
+
+
 class InvalidChunkIndexError(UploadError):
     def __init__(self, index: int) -> None:
         super().__init__(f"chunk index {index} out of range")
@@ -290,7 +297,7 @@ def assemble(
         missing = [i for i in range(count) if not _chunk_path(upload_dir, i).is_file()]
         if missing:
             if store.get_upload(upload_id) is None:
-                shutil.rmtree(upload_dir, ignore_errors=True)
+                cleanup_deleted_upload(store=store, paths=paths, upload_id=upload_id)
                 raise UnknownUploadError(upload_id)
             raise IncompleteUploadError(missing)
 
@@ -305,7 +312,7 @@ def assemble(
         if total != upload.size_bytes:
             tmp_path.unlink(missing_ok=True)
             if store.get_upload(upload_id) is None:
-                shutil.rmtree(upload_dir, ignore_errors=True)
+                cleanup_deleted_upload(store=store, paths=paths, upload_id=upload_id)
                 raise UnknownUploadError(upload_id)
             raise SizeMismatchError()
         os.replace(tmp_path, assembled_path)
@@ -313,13 +320,13 @@ def assemble(
             _chunk_path(upload_dir, i).unlink(missing_ok=True)
     except FileNotFoundError:
         if store.get_upload(upload_id) is None:
-            shutil.rmtree(upload_dir, ignore_errors=True)
+            cleanup_deleted_upload(store=store, paths=paths, upload_id=upload_id)
             raise UnknownUploadError(upload_id) from None
         raise
 
     attachment = store.create_attachment_from_upload(att_id=upload_id, kind=upload.kind, now=now)
     if attachment is None:
-        shutil.rmtree(upload_dir, ignore_errors=True)
+        cleanup_deleted_upload(store=store, paths=paths, upload_id=upload_id)
         raise UnknownUploadError(upload_id)
     return attachment
 
@@ -339,4 +346,4 @@ def cancel_upload(*, store: LiveChatStore, paths: ProjectPaths, upload_id: str) 
     if store.get_attachment(upload_id) is not None:
         return
     store.delete_upload(upload_id)
-    shutil.rmtree(paths.server_upload_dir(upload_id), ignore_errors=True)
+    cleanup_deleted_upload(store=store, paths=paths, upload_id=upload_id)

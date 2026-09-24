@@ -129,8 +129,11 @@ blue/green slot-swap overlap, since WAL + `busy_timeout=5000` handle cross-proce
 contention at the file level). Every method is **synchronous**; route handlers wrap each
 call in `anyio.to_thread.run_sync`.
 
-Tables: `messages`, `attachments`, `events`, `uploads`, `push_subscriptions` — schema +
-every method signature are in the brief's §4 (frozen; P2/P3 only ever call what P1 built).
+Tables: `messages`, `attachments`, `events`, `uploads`, `push_subscriptions`, `deleted_storage`,
+and `pending_wipe_cleanup`. Schema migrations are serialized under the SQLite writer lock.
+`deleted_storage` retains internal attachment/upload tombstones and retry status; it is not a
+message/event tombstone and is never returned to chat clients. `pending_wipe_cleanup` records a
+wipe's filesystem sweep token so a crash cannot lose cleanup of orphaned paths.
 Two transaction shapes:
 - `BEGIN IMMEDIATE` for writes needing a race-safe conditional check (an attachment's lease
   claim, `create_message`'s idempotent client-id insert) — serializes concurrent claimants
@@ -205,14 +208,21 @@ numbers, push subscriptions, `secret.key`, `vapid.json`, and localStorage identi
 intact. Delete and wipe never dispatch push notifications.
 
 Both operations enable secure delete and use `PRAGMA wal_checkpoint(TRUNCATE)`. A 204 means the
-WAL is empty and deleted text is absent from both database files. The route gives the scrub up
-to 10 seconds; if a reader still blocks it, the route writes durable `server/scrub.pending`
-before returning 202 `{"scrubPending":true}`. An app-lifetime scrubber retries every two seconds
-and resumes once at startup; `/usage` exposes `scrubPending` for the settings sheet to poll.
-Media files are unlinked; **NTFS/SSD byte-level shredding is not claimed**, since
-overwrite-in-place is not reliable on SSDs. If the media worker finishes after a concurrent
-delete/wipe has removed its row, its post-finish recheck removes the media, upload, and failed
-directories it may have recreated.
+WAL is empty, deleted text is absent from both database files, and media-file cleanup completed.
+The route gives the scrub up to 10 seconds; if a reader still blocks it, the route writes durable
+`server/scrub.pending`. Delete and wipe transactions also record deleted storage IDs before commit.
+If an unlink fails (for example, Windows reports a file-sharing violation), the durable cleanup
+record remains pending and the two-second worker retries at startup and while the app runs. It
+removes files before retrying the database scrub. `/usage` exposes one `erasurePending` flag;
+202 returns `{"erasurePending":true}`, and the settings sheet polls until it clears. `GET /media`
+checks that the attachment row still exists
+before opening a signed rendition, so an old URL returns 404 even while a locked file awaits
+cleanup. Wipe cleanup sweeps only paths without live attachment/upload rows, preserving uploads
+created after the wipe transaction. **NTFS/SSD byte-level shredding is not claimed**, since
+overwrite-in-place is not reliable on SSDs. If the media worker finishes after deletion removed
+its row, its post-finish check re-queues cleanup for any paths it recreated. The same worker
+rescans unreferenced `media/`, `uploads/`, and `failed/` entries on startup and every two seconds,
+so orphaned paths from earlier versions are discovered even without an old tombstone.
 
 ## 7. Web Push (`livechat/push.py`, `server/pushToggle.ts`)
 

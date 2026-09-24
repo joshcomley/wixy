@@ -31,7 +31,7 @@ async function flush(): Promise<void> {
 
 describe("mountServerSettingsSheet wipe confirmation", () => {
   beforeEach(() => {
-    getUsage.mockReset().mockResolvedValue({ mediaAvailable: true, usedBytes: 0, quotaBytes: 10, freeBytes: 10, scrubPending: false });
+    getUsage.mockReset().mockResolvedValue({ mediaAvailable: true, usedBytes: 0, quotaBytes: 10, freeBytes: 10, erasurePending: false });
   });
   afterEach(() => {
     document.body.innerHTML = "";
@@ -92,8 +92,9 @@ describe("mountServerSettingsSheet wipe confirmation", () => {
     vi.useFakeTimers();
     const onWipe = vi.fn().mockResolvedValue(true);
     getUsage
-      .mockResolvedValueOnce({ mediaAvailable: true, usedBytes: 0, quotaBytes: 10, freeBytes: 10, scrubPending: false })
-      .mockResolvedValueOnce({ mediaAvailable: true, usedBytes: 0, quotaBytes: 10, freeBytes: 10, scrubPending: false });
+      .mockResolvedValueOnce({ mediaAvailable: true, usedBytes: 0, quotaBytes: 10, freeBytes: 10, erasurePending: false })
+      .mockResolvedValueOnce({ mediaAvailable: true, usedBytes: 0, quotaBytes: 10, freeBytes: 10, erasurePending: true })
+      .mockResolvedValueOnce({ mediaAvailable: true, usedBytes: 0, quotaBytes: 10, freeBytes: 10, erasurePending: false });
     const view = mountServerSettingsSheet({
       identity: identity(),
       hooks: hooks(),
@@ -112,6 +113,9 @@ describe("mountServerSettingsSheet wipe confirmation", () => {
 
     expect(view.element.hidden).toBe(false);
     expect(view.element.textContent).toContain("Deleted. Erasing leftover traces…");
+    await vi.advanceTimersByTimeAsync(1000);
+    await flush();
+    expect(view.element.textContent).not.toContain("Done");
     await vi.advanceTimersByTimeAsync(1000);
     await flush();
     expect(view.element.textContent).toContain("Done");

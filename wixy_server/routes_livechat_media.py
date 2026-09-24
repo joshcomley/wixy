@@ -8,7 +8,6 @@ except `GET /media/*` (which uses a signed query string instead — an
 from __future__ import annotations
 
 import re
-import shutil
 import time
 from pathlib import Path
 from typing import Literal
@@ -129,7 +128,11 @@ async def put_chunk(upload_id: str, index: int, request: Request) -> Response:
             lambda: store.get_attachment(upload_id) is not None
         )
         if not attachment_exists:
-            await anyio.to_thread.run_sync(lambda: shutil.rmtree(upload_dir, ignore_errors=True))
+            await anyio.to_thread.run_sync(
+                lambda: uploads.cleanup_deleted_upload(
+                    store=store, paths=paths, upload_id=upload_id
+                )
+            )
         raise HTTPException(status_code=404, detail="unknown upload")
     return Response(status_code=204)
 
@@ -248,6 +251,12 @@ async def get_media(att_id: str, rendition: str, request: Request, exp: int, sig
         raise HTTPException(status_code=403)
 
     paths: ProjectPaths = request.app.state.paths
+    store: LiveChatStore = request.app.state.livechat_store
+    attachment = await anyio.to_thread.run_sync(lambda: store.get_attachment(att_id))
+    if attachment is None:
+        # Deletion is authoritative even if Windows could not unlink an open
+        # rendition yet; the durable cleanup worker will retry the file removal.
+        raise HTTPException(status_code=404)
 
     def _resolve() -> Path | None:
         return _resolve_rendition_path(paths, att_id, rendition)

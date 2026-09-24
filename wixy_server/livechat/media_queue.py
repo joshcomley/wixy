@@ -39,6 +39,16 @@ from wixy_server.storage import ProjectPaths
 
 logger = logging.getLogger(__name__)
 
+
+def _cleanup_deleted_storage(
+    *, store: LiveChatStore, paths: ProjectPaths, items: set[tuple[str, str]]
+) -> None:
+    # Local import avoids coupling the queue module's startup to the janitor.
+    from wixy_server.livechat.janitor import cleanup_deleted_storage_once
+
+    cleanup_deleted_storage_once(store=store, paths=paths, only_items=items)
+
+
 LEASE_S = 120.0
 RENEW_INTERVAL_S = 30.0
 _POLL_IDLE_S = 1.0
@@ -164,7 +174,7 @@ def _do_work(
             att_id=att.id, owner=owner, result=_attachment_result_for(result), now=time.time()
         )
         store.delete_upload(att.id)
-        shutil.rmtree(paths.server_upload_dir(att.id), ignore_errors=True)
+        _cleanup_deleted_storage(store=store, paths=paths, items={("upload", att.id)})
 
     return store.get_attachment(att.id) is not None
 
@@ -175,6 +185,18 @@ def _archive_failed_original(
     """§4: `failed/<id>/original.<ext>`, kept 7 days for diagnosis (janitor.py
     ages it out). The upload DB row is dropped either way — its job (tracking a
     PENDING upload) is done once the attachment resolved, success or failure."""
+    if store.get_attachment(att_id) is None:
+        # A concurrent message delete/wipe is authoritative: do not recreate a
+        # failed/ directory after the transaction queued this ID for removal.
+        store.mark_deleted_storage_pending(kind="attachment", storage_id=att_id, now=time.time())
+        _cleanup_deleted_storage(
+            store=store,
+            paths=paths,
+            items={("attachment", att_id)},
+        )
+        store.delete_upload(att_id)
+        _cleanup_deleted_storage(store=store, paths=paths, items={("upload", att_id)})
+        return
     if src.is_file():
         upload = store.get_upload(att_id)
         ext = failed_extension(upload.mime if upload is not None else None)
@@ -187,9 +209,16 @@ def _archive_failed_original(
             # directory after is_file()/mkdir(). It wins over archiving.
             if store.get_attachment(att_id) is not None:
                 raise
-            shutil.rmtree(failed_dir, ignore_errors=True)
+            store.mark_deleted_storage_pending(
+                kind="attachment", storage_id=att_id, now=time.time()
+            )
+            _cleanup_deleted_storage(
+                store=store,
+                paths=paths,
+                items={("attachment", att_id)},
+            )
     store.delete_upload(att_id)
-    shutil.rmtree(paths.server_upload_dir(att_id), ignore_errors=True)
+    _cleanup_deleted_storage(store=store, paths=paths, items={("upload", att_id)})
 
 
 async def _renew_loop(store: LiveChatStore, att_id: str, owner: str, stop: anyio.Event) -> None:
@@ -230,16 +259,15 @@ async def _handle_claimed(
             tg.cancel_scope.cancel()
 
     if not still_exists:
-
-        def _rmtree() -> None:
-            shutil.rmtree(paths.server_attachment_media_dir(att.id), ignore_errors=True)
-            shutil.rmtree(paths.server_upload_dir(att.id), ignore_errors=True)
-            # A failed worker may have archived its source after a concurrent
-            # delete/wipe cleared the directory. Re-remove it once the store
-            # confirms the attachment vanished.
-            shutil.rmtree(paths.server_failed_dir(att.id), ignore_errors=True)
-
-        await anyio.to_thread.run_sync(_rmtree)
+        store.mark_deleted_storage_pending(kind="attachment", storage_id=att.id, now=time.time())
+        store.mark_deleted_storage_pending(kind="upload", storage_id=att.id, now=time.time())
+        await anyio.to_thread.run_sync(
+            lambda: _cleanup_deleted_storage(
+                store=store,
+                paths=paths,
+                items={("attachment", att.id), ("upload", att.id)},
+            )
+        )
         return
 
     notifier.publish()

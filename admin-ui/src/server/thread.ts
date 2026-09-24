@@ -578,7 +578,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     const session = currentSession;
     if (session === null) throw new Error("The server chat is locked.");
     const requestGeneration = contentGeneration;
-    const scrubPending = await wipeChat(session);
+    const erasurePending = await wipeChat(session);
     const reconcileWithoutClearing = requestGeneration !== contentGeneration;
     if (!reconcileWithoutClearing) clearAfterWipe();
     const refreshGeneration = contentGeneration;
@@ -601,7 +601,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       .catch((error: unknown) => {
         if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
       });
-    return scrubPending;
+    return erasurePending;
   }
 
   // -- History paging --------------------------------------------------------

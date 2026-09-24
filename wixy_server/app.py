@@ -274,7 +274,7 @@ def create_app(
             await livechat_janitor.run_forever(store=livechat_store, paths=paths)
 
         async def _run_scrubber() -> None:
-            await livechat_janitor.run_scrubber_forever(store=livechat_store)
+            await livechat_janitor.run_scrubber_forever(store=livechat_store, paths=paths)
 
         try:
             async with anyio.create_task_group() as tg:

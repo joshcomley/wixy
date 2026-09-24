@@ -31,7 +31,7 @@ from wixy_server.livechat.models import AttachmentResult, PushSubscriptionRow, U
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import CmdPinVerifier
 from wixy_server.livechat.store import LiveChatStore
-from wixy_server.livechat.tokens import ServerAuth
+from wixy_server.livechat.tokens import ServerAuth, sign_media_url
 from wixy_server.routes_livechat import _stream_events
 from wixy_server.storage import ProjectPaths
 from wixy_server.tests.fake_cmd import FakeCmdState, create_fake_cmd_app
@@ -466,7 +466,7 @@ class TestSendHistoryUsage:
             assert body["usedBytes"] == 0
             assert body["freeBytes"] == body["quotaBytes"]
             assert body["mediaAvailable"] is True
-            assert body["scrubPending"] is False
+            assert body["erasurePending"] is False
         finally:
             client.__exit__(None, None, None)
 
@@ -832,10 +832,17 @@ class TestDeleteWipeRoutes:
                 headers={"X-Wixy-Server-Token": token},
             )
 
-        assert response.status_code == 204
-        assert repeat.status_code == 204
+        assert response.status_code in {204, 202}
+        assert repeat.status_code in {204, 202}
+        if response.status_code == 202:
+            assert any(response.json().values())
+        if repeat.status_code == 202:
+            assert any(repeat.json().values())
+        livechat_janitor.cleanup_deleted_storage_once(store=store, paths=paths)
+        livechat_janitor.scrub_once(store=store, deadline_s=1.0)
         assert store.get_messages([message.seq]) == []
         assert store.events_after(0)[-1].type == "message_deleted"
+        assert not store.storage_cleanup_pending()
         assert not media_dir.exists()
         assert not upload_dir.exists()
         assert not failed_dir.exists()
@@ -881,9 +888,136 @@ class TestDeleteWipeRoutes:
             )
 
         assert response.status_code == 204
-        assert marker_states == [True]
+        assert marker_states and marker_states[0] is True
+        assert not store.scrub_pending()
         assert marker_transactions == [True]
         assert not store.scrub_pending()
+
+    def test_delete_cannot_serve_a_locked_file_after_message_row_is_removed(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        app = self._new_app(storage_root, wixy_repo_root, pin_verifier)
+        store: LiveChatStore = app.state.livechat_store
+        paths: ProjectPaths = app.state.paths
+        attachment_id = "a" * 32
+        store.create_attachment(att_id=attachment_id, kind="photo", now=1.0)
+        message, _ = store.create_message(
+            client_id="client-delete-open-media",
+            sender="Josh",
+            device_id="device-delete-open-media",
+            by_email=None,
+            text="delete-open-media",
+            attachment_ids=[attachment_id],
+            now=2.0,
+        )
+        media_dir = paths.server_attachment_media_dir(attachment_id)
+        media_dir.mkdir(parents=True)
+        media_file = media_dir / "full.jpg"
+        media_file.write_bytes(b"still-present-media")
+        exp = int(time.time()) + 3600
+        signature = sign_media_url(
+            app.state.livechat_secret,
+            attachment_id=attachment_id,
+            rendition="full",
+            exp=exp,
+            email="",
+        )
+        original_remove = livechat_janitor._remove_entry
+
+        def fail_locked_directory(path: Path) -> None:
+            if path == media_dir:
+                raise PermissionError("simulated Windows sharing violation")
+            original_remove(path)
+
+        monkeypatch.setattr(livechat_janitor, "_remove_entry", fail_locked_directory)
+        with TestClient(app) as client:
+            token = _unlock(client).json()["token"]
+            with media_file.open("rb"):
+                response = client.delete(
+                    f"/api/admin/server/messages/{message.seq}",
+                    headers={"X-Wixy-Server-Token": token},
+                )
+                assert response.status_code == 202
+                assert response.json() == {"erasurePending": True}
+                assert media_file.exists()
+                stale_url = (
+                    f"/api/admin/server/media/{attachment_id}/full?exp={exp}&sig={signature}"
+                )
+                assert client.get(stale_url).status_code == 404
+
+        monkeypatch.undo()
+        reopened = LiveChatStore(store._db_path)
+        assert ("attachment", attachment_id, True) in reopened.deleted_storage_items()
+        assert not livechat_janitor.cleanup_deleted_storage_once(store=reopened, paths=paths)
+        assert not media_dir.exists()
+
+    def test_wipe_cannot_serve_a_locked_file_after_attachment_rows_are_removed(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        app = self._new_app(storage_root, wixy_repo_root, pin_verifier)
+        store: LiveChatStore = app.state.livechat_store
+        paths: ProjectPaths = app.state.paths
+        attachment_id = "b" * 32
+        store.create_attachment(att_id=attachment_id, kind="photo", now=1.0)
+        store.create_message(
+            client_id="client-wipe-open-media",
+            sender="Josh",
+            device_id="device-wipe-open-media",
+            by_email=None,
+            text="wipe-open-media",
+            attachment_ids=[attachment_id],
+            now=2.0,
+        )
+        media_dir = paths.server_attachment_media_dir(attachment_id)
+        media_dir.mkdir(parents=True)
+        media_file = media_dir / "full.jpg"
+        media_file.write_bytes(b"still-present-media")
+        exp = int(time.time()) + 3600
+        signature = sign_media_url(
+            app.state.livechat_secret,
+            attachment_id=attachment_id,
+            rendition="full",
+            exp=exp,
+            email="",
+        )
+        original_remove = livechat_janitor._remove_entry
+
+        def fail_locked_directory(path: Path) -> None:
+            if path == media_dir:
+                raise PermissionError("simulated Windows sharing violation")
+            original_remove(path)
+
+        monkeypatch.setattr(livechat_janitor, "_remove_entry", fail_locked_directory)
+        with TestClient(app) as client:
+            token = _unlock(client).json()["token"]
+            with media_file.open("rb"):
+                response = client.post(
+                    "/api/admin/server/wipe",
+                    headers={"X-Wixy-Server-Token": token},
+                    json={"confirm": "WIPE"},
+                )
+                assert response.status_code == 202
+                assert response.json() == {"erasurePending": True}
+                assert media_file.exists()
+                stale_url = (
+                    f"/api/admin/server/media/{attachment_id}/full?exp={exp}&sig={signature}"
+                )
+                assert client.get(stale_url).status_code == 404
+
+        monkeypatch.undo()
+        reopened = LiveChatStore(store._db_path)
+        livechat_janitor.cleanup_deleted_storage_once(store=reopened, paths=paths)
+        assert not livechat_janitor.cleanup_unreferenced_storage_once(store=reopened, paths=paths)
+        assert not reopened.storage_cleanup_pending()
+        assert not media_dir.exists()
 
     def test_wipe_persists_scrub_marker_before_starting_checkpoint(
         self,
@@ -963,10 +1097,10 @@ class TestDeleteWipeRoutes:
                     f"/api/admin/server/messages/{message.seq}", headers=headers
                 )
                 assert blocked.status_code == 202
-                assert blocked.json() == {"scrubPending": True}
+                assert blocked.json() == {"erasurePending": True}
                 assert store.scrub_pending()
                 usage = client.get("/api/admin/server/usage", headers=headers)
-                assert usage.json()["scrubPending"] is True
+                assert usage.json()["erasurePending"] is True
                 assert store.get_messages([message.seq]) == []
             finally:
                 reader.close()
@@ -1018,7 +1152,7 @@ class TestDeleteWipeRoutes:
                     "/api/admin/server/wipe", headers=headers, json={"confirm": "WIPE"}
                 )
                 assert response.status_code == 202
-                assert response.json() == {"scrubPending": True}
+                assert response.json() == {"erasurePending": True}
                 assert store.scrub_pending()
                 assert store.get_messages([message.seq]) == []
             finally:
@@ -1028,7 +1162,7 @@ class TestDeleteWipeRoutes:
                 livechat_janitor.scrub_once(store=store, deadline_s=1.0)
             usage = client.get("/api/admin/server/usage", headers=headers)
             assert usage.status_code == 200
-            assert usage.json()["scrubPending"] is False
+            assert usage.json()["erasurePending"] is False
 
         raw = store._db_path.read_bytes()
         wal_path = Path(f"{store._db_path}-wal")
@@ -1049,16 +1183,17 @@ class TestDeleteWipeRoutes:
         old_orphan = paths.server_upload_dir("old-orphan-before-wipe")
         old_orphan.mkdir(parents=True)
         (old_orphan / "chunk-000000").write_bytes(b"old")
-        original_cleanup = routes_livechat_module._remove_wipe_entries
+        original_cleanup = livechat_janitor.cleanup_deleted_storage_once
         post_wipe_id = "f" * 32
 
         def _create_after_commit(
-            cleanup_paths: ProjectPaths,
             *,
-            attachment_ids: list[str],
-            upload_ids: list[str],
-            snapshot: tuple[list[Path], list[Path], list[Path]],
-        ) -> None:
+            store: LiveChatStore,
+            paths: ProjectPaths,
+            only_items: set[tuple[str, str]] | None = None,
+        ) -> bool:
+            if only_items is None:
+                return original_cleanup(store=store, paths=paths)
             store.create_upload(
                 UploadRow(
                     id=post_wipe_id,
@@ -1074,13 +1209,17 @@ class TestDeleteWipeRoutes:
             new_upload.mkdir(parents=True)
             (new_upload / "chunk-000000").write_bytes(b"new")
             original_cleanup(
-                cleanup_paths,
-                attachment_ids=attachment_ids,
-                upload_ids=upload_ids,
-                snapshot=snapshot,
+                store=store,
+                paths=paths,
+                only_items=only_items,
             )
+            return store.storage_cleanup_pending()
 
-        monkeypatch.setattr(routes_livechat_module, "_remove_wipe_entries", _create_after_commit)
+        monkeypatch.setattr(
+            livechat_janitor,
+            "cleanup_deleted_storage_once",
+            _create_after_commit,
+        )
         with TestClient(app) as client:
             token = _unlock(client).json()["token"]
             response = client.post(
@@ -1200,9 +1339,15 @@ class TestDeleteWipeRoutes:
                 headers=headers,
             )
 
-        assert response.status_code == 204
+        assert response.status_code in {204, 202}
+        if response.status_code == 202:
+            assert any(response.json().values())
         assert next_chunk.status_code == 404
         assert complete.status_code == 404
+        livechat_janitor.cleanup_deleted_storage_once(store=store, paths=paths)
+        livechat_janitor.cleanup_unreferenced_storage_once(store=store, paths=paths)
+        livechat_janitor.scrub_once(store=store, deadline_s=1.0)
+        assert not store.storage_cleanup_pending()
         assert store.list_messages(before=None, limit=10)[0] == []
         assert store.events_after(old_cursor)[0].type == "wiped"
         assert store.list_push_subscriptions()[0].device_id == "keep-push-device"

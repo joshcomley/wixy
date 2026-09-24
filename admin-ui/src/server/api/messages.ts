@@ -109,8 +109,8 @@ export async function deleteMessage(session: ServerSession, seq: number): Promis
   );
   if (!response.ok) throw new Error(`Couldn't delete message (${response.status}).`);
   if (response.status === 202) {
-    const body = (await response.json()) as { scrubPending: boolean };
-    return body.scrubPending;
+    const body = (await response.json()) as { erasurePending: boolean };
+    return body.erasurePending;
   }
   return false;
 }
@@ -127,8 +127,8 @@ export async function wipeChat(session: ServerSession): Promise<boolean> {
   );
   if (!response.ok) throw new Error(`Couldn't delete messages (${response.status}).`);
   if (response.status === 202) {
-    const body = (await response.json()) as { scrubPending: boolean };
-    return body.scrubPending;
+    const body = (await response.json()) as { erasurePending: boolean };
+    return body.erasurePending;
   }
   return false;
 }
@@ -138,7 +138,7 @@ export interface UsageInfo {
   readonly quotaBytes: number;
   readonly freeBytes: number;
   readonly mediaAvailable: boolean;
-  readonly scrubPending: boolean;
+  readonly erasurePending: boolean;
 }
 
 export async function getUsage(session: ServerSession): Promise<UsageInfo> {

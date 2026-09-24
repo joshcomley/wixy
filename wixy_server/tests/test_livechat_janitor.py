@@ -165,6 +165,22 @@ class TestRunOnceIsIdempotent:
         assert janitor.scrub_once(store=store, deadline_s=1.0)
         assert not store.scrub_pending()
 
+    def test_startup_sweep_removes_legacy_untracked_media_without_a_wipe_marker(
+        self, store: LiveChatStore, paths: ProjectPaths
+    ) -> None:
+        att_id = "f" * 32
+        orphan_dir = paths.server_attachment_media_dir(att_id)
+        orphan_dir.mkdir(parents=True)
+        (orphan_dir / "full.jpg").write_bytes(b"old orphan")
+        upload_dir = paths.server_upload_dir("e" * 32)
+        upload_dir.mkdir(parents=True)
+        (upload_dir / "chunk-000000").write_bytes(b"old chunk")
+
+        assert store.pending_wipe_cleanup_token() is None
+        assert not janitor.cleanup_unreferenced_storage_once(store=store, paths=paths)
+        assert not orphan_dir.exists()
+        assert not upload_dir.exists()
+
     def test_old_scrub_cannot_clear_a_newer_pending_marker(self, store: LiveChatStore) -> None:
         first_token = store.mark_scrub_pending()
         second_token = store.mark_scrub_pending()

@@ -87,7 +87,19 @@ DROP TABLE events;
 ALTER TABLE events_v2 RENAME TO events;
 """
 
-_LATEST_SCHEMA_VERSION = 2
+_SCHEMA_V3_DELETION_TRACKING = """
+CREATE TABLE IF NOT EXISTS deleted_storage(
+  kind TEXT NOT NULL CHECK(kind IN ('attachment','upload')),
+  id TEXT NOT NULL,
+  cleanup_pending INTEGER NOT NULL CHECK(cleanup_pending IN (0,1)),
+  deleted_at REAL NOT NULL,
+  PRIMARY KEY(kind, id));
+CREATE TABLE IF NOT EXISTS pending_wipe_cleanup(
+  singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+  token TEXT NOT NULL);
+"""
+
+_LATEST_SCHEMA_VERSION = 3
 
 
 class LiveChatStoreError(Exception):
@@ -266,6 +278,13 @@ class LiveChatStore:
             if current < 2:
                 self._migrate_events_v2(conn)
                 conn.execute("PRAGMA user_version = 2")
+                current = 2
+
+            if current < 3:
+                for statement in _SCHEMA_V3_DELETION_TRACKING.split(";"):
+                    if statement.strip():
+                        conn.execute(statement)
+                conn.execute("PRAGMA user_version = 3")
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
@@ -458,6 +477,8 @@ class LiveChatStore:
                 "SELECT id FROM attachments WHERE message_seq = ? ORDER BY id", (seq,)
             ).fetchall()
             attachment_ids = [str(row["id"]) for row in attachment_rows]
+            self._queue_deleted_storage(conn, kind="attachment", ids=attachment_ids, now=now)
+            self._queue_deleted_storage(conn, kind="upload", ids=attachment_ids, now=now)
             conn.execute(
                 "DELETE FROM uploads WHERE id IN ("
                 "SELECT id FROM attachments WHERE message_seq = ?)",
@@ -481,19 +502,21 @@ class LiveChatStore:
         return attachment_ids, pending_token
 
     def wipe(self, *, now: float) -> tuple[list[str], list[str]]:
-        attachment_ids, upload_ids, _ = self._wipe(now=now, mark_scrub_pending=False)
+        attachment_ids, upload_ids, _, _ = self._wipe(now=now, mark_scrub_pending=False)
         return attachment_ids, upload_ids
 
-    def wipe_for_scrub(self, *, now: float) -> tuple[list[str], list[str], str]:
-        attachment_ids, upload_ids, token = self._wipe(now=now, mark_scrub_pending=True)
+    def wipe_for_scrub(self, *, now: float) -> tuple[list[str], list[str], str, str]:
+        attachment_ids, upload_ids, token, wipe_token = self._wipe(now=now, mark_scrub_pending=True)
         assert token is not None
-        return attachment_ids, upload_ids, token
+        assert wipe_token is not None
+        return attachment_ids, upload_ids, token, wipe_token
 
     def _wipe(
         self, *, now: float, mark_scrub_pending: bool
-    ) -> tuple[list[str], list[str], str | None]:
+    ) -> tuple[list[str], list[str], str | None, str | None]:
         """Remove all chat content and append one cursor-preserving wipe event."""
         pending_token: str | None = None
+        wipe_token: str | None = None
         with self._write_txn() as conn:
             attachment_ids = [
                 str(row["id"])
@@ -503,6 +526,14 @@ class LiveChatStore:
                 str(row["id"])
                 for row in conn.execute("SELECT id FROM uploads ORDER BY id").fetchall()
             ]
+            self._queue_deleted_storage(conn, kind="attachment", ids=attachment_ids, now=now)
+            self._queue_deleted_storage(conn, kind="upload", ids=upload_ids, now=now)
+            wipe_token = uuid.uuid4().hex
+            conn.execute(
+                "INSERT INTO pending_wipe_cleanup(singleton, token) VALUES (1, ?) "
+                "ON CONFLICT(singleton) DO UPDATE SET token = excluded.token",
+                (wipe_token,),
+            )
             conn.execute("DELETE FROM attachments")
             conn.execute("DELETE FROM messages")
             conn.execute("DELETE FROM uploads")
@@ -513,7 +544,7 @@ class LiveChatStore:
             )
             if mark_scrub_pending:
                 pending_token = self._write_scrub_pending_marker(conn)
-        return attachment_ids, upload_ids, pending_token
+        return attachment_ids, upload_ids, pending_token, wipe_token
 
     @property
     def scrub_pending_path(self) -> Path:
@@ -521,6 +552,87 @@ class LiveChatStore:
 
     def scrub_pending(self) -> bool:
         return self.scrub_pending_path.exists()
+
+    @staticmethod
+    def _queue_deleted_storage(
+        conn: sqlite3.Connection, *, kind: str, ids: Sequence[str], now: float
+    ) -> None:
+        for storage_id in set(ids):
+            conn.execute(
+                "INSERT INTO deleted_storage(kind, id, cleanup_pending, deleted_at) "
+                "VALUES (?, ?, 1, ?) "
+                "ON CONFLICT(kind, id) DO UPDATE SET "
+                "cleanup_pending = 1, deleted_at = excluded.deleted_at",
+                (kind, storage_id, now),
+            )
+
+    @staticmethod
+    def _is_deleted_storage(conn: sqlite3.Connection, *, kind: str, storage_id: str) -> bool:
+        return (
+            conn.execute(
+                "SELECT 1 FROM deleted_storage WHERE kind = ? AND id = ?",
+                (kind, storage_id),
+            ).fetchone()
+            is not None
+        )
+
+    def deleted_storage_items(self) -> list[tuple[str, str, bool]]:
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT kind, id, cleanup_pending FROM deleted_storage ORDER BY kind, id"
+            ).fetchall()
+            return [
+                (str(row["kind"]), str(row["id"]), bool(row["cleanup_pending"])) for row in rows
+            ]
+
+    def mark_deleted_storage_pending(self, *, kind: str, storage_id: str, now: float) -> None:
+        with self._write_txn() as conn:
+            self._queue_deleted_storage(conn, kind=kind, ids=[storage_id], now=now)
+
+    def set_deleted_storage_pending(self, *, kind: str, storage_id: str, pending: bool) -> None:
+        self.set_deleted_storage_pending_many([(kind, storage_id, pending)])
+
+    def set_deleted_storage_pending_many(self, items: Sequence[tuple[str, str, bool]]) -> None:
+        if not items:
+            return
+        with self._write_txn() as conn:
+            conn.executemany(
+                "UPDATE deleted_storage SET cleanup_pending = ? WHERE kind = ? AND id = ?",
+                [(int(pending), kind, storage_id) for kind, storage_id, pending in items],
+            )
+
+    def has_deleted_storage_pending(self, *, kind: str, storage_id: str) -> bool:
+        with self._read_txn() as conn:
+            row = conn.execute(
+                "SELECT cleanup_pending FROM deleted_storage WHERE kind = ? AND id = ?",
+                (kind, storage_id),
+            ).fetchone()
+            return row is not None and bool(row["cleanup_pending"])
+
+    def storage_cleanup_pending(self) -> bool:
+        with self._read_txn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM deleted_storage WHERE cleanup_pending = 1 LIMIT 1"
+            ).fetchone()
+            wipe = conn.execute("SELECT 1 FROM pending_wipe_cleanup WHERE singleton = 1").fetchone()
+            return row is not None or wipe is not None
+
+    def pending_wipe_cleanup_token(self) -> str | None:
+        with self._read_txn() as conn:
+            row = conn.execute(
+                "SELECT token FROM pending_wipe_cleanup WHERE singleton = 1"
+            ).fetchone()
+            return str(row["token"]) if row is not None else None
+
+    def clear_pending_wipe_cleanup(self, *, expected_token: str) -> bool:
+        with self._write_txn() as conn:
+            row = conn.execute(
+                "SELECT token FROM pending_wipe_cleanup WHERE singleton = 1"
+            ).fetchone()
+            if row is None or str(row["token"]) != expected_token:
+                return False
+            conn.execute("DELETE FROM pending_wipe_cleanup WHERE singleton = 1")
+            return True
 
     def scrub_pending_token(self) -> str | None:
         try:
@@ -609,6 +721,8 @@ class LiveChatStore:
 
     def create_attachment(self, *, att_id: str, kind: AttachmentKind, now: float) -> AttachmentRow:
         with self._write_txn() as conn:
+            if self._is_deleted_storage(conn, kind="attachment", storage_id=att_id):
+                raise LiveChatStoreError("attachment id has already been deleted")
             conn.execute(
                 "INSERT INTO attachments "
                 "(id, kind, status, renditions, bytes_on_disk, created_at, updated_at) "
@@ -625,6 +739,8 @@ class LiveChatStore:
             existing = conn.execute("SELECT id FROM attachments WHERE id = ?", (att_id,)).fetchone()
             if existing is not None:
                 return _load_attachment(conn, att_id)
+            if self._is_deleted_storage(conn, kind="attachment", storage_id=att_id):
+                return None
             upload = conn.execute("SELECT 1 FROM uploads WHERE id = ?", (att_id,)).fetchone()
             if upload is None:
                 return None
@@ -675,6 +791,11 @@ class LiveChatStore:
                 # The lease expired and was reclaimed by someone else — this
                 # worker's result is stale, so it's discarded rather than
                 # clobbering whatever the new claimant is doing.
+                exists = conn.execute(
+                    "SELECT 1 FROM attachments WHERE id = ?", (att_id,)
+                ).fetchone()
+                if exists is None:
+                    self._queue_deleted_storage(conn, kind="attachment", ids=[att_id], now=now)
                 return
             conn.execute(
                 "UPDATE attachments SET status = ?, mime = ?, width = ?, height = ?, "
@@ -724,12 +845,15 @@ class LiveChatStore:
 
     def delete_attachment(self, att_id: str) -> None:
         with self._write_txn() as conn:
+            self._queue_deleted_storage(conn, kind="attachment", ids=[att_id], now=time.time())
             conn.execute("DELETE FROM attachments WHERE id = ?", (att_id,))
 
     # -- uploads (P2) -------------------------------------------------------
 
     def create_upload(self, row: UploadRow) -> None:
         with self._write_txn() as conn:
+            if self._is_deleted_storage(conn, kind="upload", storage_id=row.id):
+                raise LiveChatStoreError("upload id has already been deleted")
             conn.execute(
                 "INSERT INTO uploads (id, kind, mime, size_bytes, filename, by_email, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -751,6 +875,7 @@ class LiveChatStore:
 
     def delete_upload(self, upload_id: str) -> None:
         with self._write_txn() as conn:
+            self._queue_deleted_storage(conn, kind="upload", ids=[upload_id], now=time.time())
             conn.execute("DELETE FROM uploads WHERE id = ?", (upload_id,))
 
     def stale_upload_ids(self, *, older_than: float) -> list[str]:

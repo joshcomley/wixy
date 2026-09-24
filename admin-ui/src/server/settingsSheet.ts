@@ -114,7 +114,7 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
         void getUsage(session)
           .then((usage) => {
             if (generation !== scrubPollGeneration) return;
-            if (!usage.scrubPending) {
+            if (!usage.erasurePending) {
               wipeStatus.textContent = "Done";
               return;
             }
@@ -204,8 +204,8 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   wipeConfirmButton.addEventListener("click", () => {
     wipeConfirmButton.disabled = true;
     void deps.onWipe()
-      .then((scrubPending) => {
-        if (scrubPending) {
+      .then((erasurePending) => {
+        if (erasurePending) {
           wipeConfirmation.hidden = true;
           const session = deps.getSession();
           if (session !== null) startScrubPolling(session);
@@ -249,7 +249,7 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
             usageRow.textContent = usage.mediaAvailable
               ? `Storage: ${formatBytes(usage.usedBytes)} of ${formatBytes(usage.quotaBytes)} used`
               : "Storage: media isn't available on this server.";
-            if (usage.scrubPending) {
+            if (usage.erasurePending) {
               const session = deps.getSession();
               if (session !== null) startScrubPolling(session);
             }

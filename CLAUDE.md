@@ -41,6 +41,12 @@ pluggable AI, HTML setup guide) is now **in progress** — see `spec/independenc
 - `decisions/` — architecture decision log (`NNNNN-slug/{title,decision}.md`).
 - `todos/` — persistent per-workspace task lists (survive handovers).
 
+## Persisted store schemas
+
+| Store | Tables / purpose |
+|---|---|
+| `wixy_server/livechat/store.py` (`server.db`, schema v3) | `messages`, `attachments`, `events`, `uploads`, `push_subscriptions`, `deleted_storage`, `pending_wipe_cleanup`; the last two are private filesystem-recovery state, not chat-visible tombstones. See [`docs/ai/livechat.md`](docs/ai/livechat.md). |
+
 ## Dev commands
 
 Python (interpreter: `pythoncore-3.14`; run `pip install -e ".[server,dev]"` once — the
