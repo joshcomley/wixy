@@ -348,11 +348,19 @@ media seeking never trigger either one) and both using `performance.now()` (so P
   no counting. `panel.ts` attaches this to the panel's OWN root element (not `document`) —
   "not nav/topbar" is free that way, since an event outside the root's subtree never reaches
   a listener attached to it.
-- `createMultiTapDetector`/`attachMultiTapListener` (R3, unchanged) — two taps within
+- `createMultiTapDetector`/`attachMultiTapListener` (R3) — two primary-button taps within
   `MULTI_TAP_INTERVAL_MS` (400ms) count as one multi-tap. Attached to `document` in the
   CAPTURE phase for the panel's whole mounted lifetime, so a tap inside a
   `stopPropagation()`'d descendant is still seen; only the reducer's `chat`/`fading` states
   give the resulting event any meaning.
+
+Brief v1.5.2's `GESTURE_BOUNDARY_SELECTOR` reads `[data-srv-gesture-boundary]` from the
+pointer target or its ancestors. The boundary tap counts normally first, so it can still
+complete a run started elsewhere; if it doesn't lock, the detector clears the partial run
+afterward. Classify a pair by asking whether tap 1 made control 2 appear under the finger:
+causal flows such as settings → sheet option or photo → lightbox close use a boundary, while
+independent controls such as Send → 📎/🎤 keep normal cadence. The native file picker doesn't
+need a marker, and the mic start/stop toggle deliberately remains non-boundary.
 
 **`panel.ts`** owns everything `lockModel.ts` deliberately doesn't: the idle timer
 (`IDLE_LOCK_MS` = 10s) and fade timer (`FADE_MS` = 800ms), the token-expiry timer, R7's
@@ -416,8 +424,8 @@ with its captured session. Leaving the route disposes the view and aborts its up
 On send, `thread.ts` posts the staged attachment IDs in the message request. It uses
 `server/mediaRender.ts` for processing/failed states, the photo grid and shared lightbox,
 native video, and the voice-note player with waveform. The settings button and photo
-thumbnails that open the lightbox carry `data-srv-gesture-boundary` per brief v1.5's R3
-menu/surface boundary. Playback and an open lightbox are cleaned up on detach. These files
+thumbnails that open the lightbox carry `data-srv-gesture-boundary` per brief v1.5.2's R3
+surface boundary. Playback and an open lightbox are cleaned up on detach. These files
 and signed media URLs remain separate from the site's `draft/media/` and public build, as
 documented in
 [media.md](media.md#private-live-chat-attachments).
