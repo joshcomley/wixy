@@ -2,17 +2,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HistoryPage, Message, SendMessageResult } from "../src/server/api/messages";
 import type { ServerIdentity } from "../src/server/identity";
 import { mountServerThread } from "../src/server/thread";
+import type { UploadAttachment } from "../src/server/upload";
 import type { ServerStreamEvent } from "../src/server/stream";
 import type { LockHooks, ServerSession } from "../src/server/types";
 
-const { getHistory, sendMessage } = vi.hoisted(() => ({
+const { getHistory, sendMessage, uploadServerAttachment } = vi.hoisted(() => ({
   getHistory: vi.fn(),
   sendMessage: vi.fn(),
+  uploadServerAttachment: vi.fn(),
 }));
 vi.mock("../src/server/api/messages", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/server/api/messages")>()),
   getHistory,
   sendMessage,
+}));
+vi.mock("../src/server/api/uploads", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/server/api/uploads")>()),
+  uploadServerAttachment,
 }));
 
 const SESSION: ServerSession = { token: "tok", expiresAt: 9_999_999_999 };
@@ -66,13 +72,16 @@ describe("mountServerThread", () => {
   beforeEach(() => {
     getHistory.mockReset();
     sendMessage.mockReset();
+    uploadServerAttachment.mockReset();
   });
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it("attach() loads history once; a second attach() is a no-op returning null", async () => {
-    getHistory.mockResolvedValue(emptyHistory({ cursor: 42 }));
+  it("attach() reloads history on reattach to refresh signed media URLs", async () => {
+    getHistory
+      .mockResolvedValueOnce(emptyHistory({ cursor: 42 }))
+      .mockResolvedValueOnce(emptyHistory({ cursor: 43 }));
     const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
 
     const first = await view.attach(SESSION);
@@ -80,8 +89,76 @@ describe("mountServerThread", () => {
     expect(getHistory).toHaveBeenCalledTimes(1);
 
     const second = await view.attach(SESSION);
-    expect(second).toBeNull();
-    expect(getHistory).toHaveBeenCalledTimes(1); // not re-fetched
+    expect(second).toBe(43);
+    expect(getHistory).toHaveBeenCalledTimes(2);
+    view.teardown();
+  });
+
+  it("replaces retained media URLs with signatures from the fresh unlock session", async () => {
+    const older = fakeMessage({
+      seq: 1,
+      text: null,
+      attachments: [{
+        id: "photo-1", kind: "photo", status: "ready", width: 100, height: 80,
+        durationS: null, peaks: null, urls: { thumb: "/old-thumb?exp=1", full: "/old-full?exp=1" },
+      }],
+    });
+    const refreshed = fakeMessage({
+      ...older,
+      attachments: [{
+        id: "photo-1", kind: "photo", status: "ready", width: 100, height: 80,
+        durationS: null, peaks: null, urls: { thumb: "/new-thumb?exp=2", full: "/new-full?exp=2" },
+      }],
+    });
+    getHistory
+      .mockResolvedValueOnce(emptyHistory({ messages: [older], cursor: 1 }))
+      .mockResolvedValueOnce(emptyHistory({ messages: [refreshed], cursor: 1 }));
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+    await view.attach(SESSION);
+    expect(view.element.querySelector(".wx-srv-photo-thumb img")?.getAttribute("src")).toBe("/old-thumb?exp=1");
+
+    view.detach();
+    const renewedSession: ServerSession = { token: "renewed-token", expiresAt: 99_999_999 };
+    await view.attach(renewedSession);
+
+    expect(getHistory).toHaveBeenLastCalledWith(renewedSession, { limit: 50 });
+    expect(view.element.querySelector(".wx-srv-photo-thumb img")?.getAttribute("src")).toBe("/new-thumb?exp=2");
+    view.teardown();
+  });
+
+  it("reattach removes messages deleted while the chat was locked", async () => {
+    const kept = fakeMessage({ seq: 1, text: "keep after unlock" });
+    const deleted = fakeMessage({ seq: 2, clientId: "c2", text: "deleted while locked" });
+    getHistory
+      .mockResolvedValueOnce(emptyHistory({ messages: [kept, deleted], cursor: 2 }))
+      .mockResolvedValueOnce(emptyHistory({ messages: [kept], cursor: 4 }));
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+    await view.attach(SESSION);
+    expect(view.element.textContent).toContain("deleted while locked");
+
+    view.detach();
+    const cursor = await view.attach(SESSION);
+
+    expect(cursor).toBe(4);
+    expect(view.element.textContent).toContain("keep after unlock");
+    expect(view.element.textContent).not.toContain("deleted while locked");
+    view.teardown();
+  });
+
+  it("reattach clears retained messages after the chat was wiped while locked", async () => {
+    getHistory
+      .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ text: "before wipe" })], cursor: 2 }))
+      .mockResolvedValueOnce(emptyHistory({ cursor: 5 }));
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+    await view.attach(SESSION);
+    expect(view.element.textContent).toContain("before wipe");
+
+    view.detach();
+    const cursor = await view.attach(SESSION);
+
+    expect(cursor).toBe(5);
+    expect(view.element.querySelectorAll(".wx-srv-bubble")).toHaveLength(0);
+    expect(view.element.querySelector(".wx-srv-thread-empty")?.textContent).toMatch(/no messages yet/i);
     view.teardown();
   });
 
@@ -91,6 +168,39 @@ describe("mountServerThread", () => {
     await view.attach(SESSION);
 
     expect(view.element.querySelector(".wx-srv-thread-empty")?.textContent).toMatch(/no messages yet/i);
+    view.teardown();
+  });
+
+  it("ordinary updates preserve active media while detach stops it", async () => {
+    getHistory.mockResolvedValue(emptyHistory({ messages: [fakeMessage({
+      seq: 1,
+      text: null,
+      attachments: [{
+        id: "video-1", kind: "video", status: "ready", width: 64, height: 48,
+        durationS: 2, peaks: null, urls: { play: "/video" },
+      }],
+    })] }));
+    const release = vi.fn();
+    const hooks: LockHooks = { suspend: vi.fn(() => release), lockNow: vi.fn() };
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks, win: fakeWindow(), onSettings: vi.fn() });
+    await view.attach(SESSION);
+
+    const firstVideo = view.element.querySelector<HTMLVideoElement>(".wx-srv-video")!;
+    const pauseFirst = vi.spyOn(firstVideo, "pause").mockImplementation(() => {});
+    const loadFirst = vi.spyOn(firstVideo, "load").mockImplementation(() => {});
+    firstVideo.dispatchEvent(new Event("play"));
+    view.handleStreamEvent({ type: "message", message: fakeMessage({ seq: 2, sender: "Purdy" }) });
+
+    expect(view.element.querySelector(".wx-srv-video")).toBe(firstVideo);
+    expect(firstVideo.closest(".wx-srv-message-list")).not.toBeNull();
+    expect(pauseFirst).not.toHaveBeenCalled();
+    expect(loadFirst).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
+
+    view.detach();
+    expect(pauseFirst).toHaveBeenCalledTimes(1);
+    expect(loadFirst).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledTimes(1);
     view.teardown();
   });
 
@@ -119,6 +229,45 @@ describe("mountServerThread", () => {
       expect(input.clientId).toBe("generated-uuid-1234"); // exactly one cryptoRandomId() call
       view.teardown();
     });
+  });
+
+  it("sends staged attachment IDs and keeps an upload alive across detach/attach", async () => {
+    getHistory.mockResolvedValue(emptyHistory());
+    sendMessage.mockResolvedValue({ ok: true, message: fakeMessage({
+      clientId: "generated-uuid-1234",
+      text: null,
+      attachments: [{
+        id: "attachment-1", kind: "photo", status: "processing", width: null, height: null,
+        durationS: null, peaks: null, urls: {},
+      }],
+    }) } satisfies SendMessageResult);
+    let resolveUpload!: (value: UploadAttachment) => void;
+    uploadServerAttachment.mockReturnValue(new Promise((resolve) => { resolveUpload = resolve; }));
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+    await view.attach(SESSION);
+
+    const input = view.element.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const file = new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" });
+    Object.defineProperty(input, "files", { value: [file], configurable: true });
+    input.dispatchEvent(new Event("change"));
+    await flush();
+    const [, , , uploadOptions] = uploadServerAttachment.mock.calls[0] as [File, "photo", ServerSession, { signal: AbortSignal }];
+
+    view.detach();
+    expect(uploadOptions.signal.aborted).toBe(false);
+    resolveUpload({
+      id: "attachment-1", kind: "photo", status: "processing", width: null, height: null,
+      durationS: null, peaks: null, urls: {},
+    });
+    await flush();
+    await view.attach(SESSION);
+    view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")?.click();
+    await flush();
+
+    const [, sent] = sendMessage.mock.calls[0] as [ServerSession, { attachmentIds: string[] }];
+    expect(sent.attachmentIds).toEqual(["attachment-1"]);
+    expect(view.element.querySelector(".wx-srv-bubble-mine .wx-srv-attachment-processing")?.textContent).toBe("Processing…");
+    view.teardown();
   });
 
   describe("send() — optimistic echo", () => {
@@ -305,7 +454,9 @@ describe("mountServerThread", () => {
     it("the settings button calls onSettings", () => {
       const onSettings = vi.fn();
       const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings });
-      view.element.querySelector<HTMLButtonElement>(".wx-srv-settings-button")?.click();
+      const settingsButton = view.element.querySelector<HTMLButtonElement>(".wx-srv-settings-button");
+      expect(settingsButton?.hasAttribute("data-srv-gesture-boundary")).toBe(true);
+      settingsButton?.click();
       expect(onSettings).toHaveBeenCalledTimes(1);
       view.teardown();
     });

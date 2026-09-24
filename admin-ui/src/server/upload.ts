@@ -109,36 +109,53 @@ export async function uploadFile(
     throw new UploadError("The server returned an invalid upload session.");
   }
 
-  const report = options.onProgress;
-  report?.({ uploadedBytes: 0, totalBytes: file.size, fraction: file.size === 0 ? 1 : 0 });
-  let uploadedBytes = 0;
-  const chunkCount = Math.ceil(file.size / init.chunkBytes);
-  for (let index = 0; index < chunkCount; index += 1) {
-    throwIfAborted(signal);
-    const start = index * init.chunkBytes;
-    const chunk = file.slice(start, Math.min(start + init.chunkBytes, file.size));
-    await putChunkWithRetry({ request, endpoint, uploadId: init.uploadId, index, chunk, signal, options });
-    uploadedBytes += chunk.size;
-    report?.({
-      uploadedBytes,
-      totalBytes: file.size,
-      fraction: file.size === 0 ? 1 : uploadedBytes / file.size,
-    });
-  }
+  let cancellableUploadId: string | null = init.uploadId;
+  try {
+    const report = options.onProgress;
+    report?.({ uploadedBytes: 0, totalBytes: file.size, fraction: file.size === 0 ? 1 : 0 });
+    let uploadedBytes = 0;
+    const chunkCount = Math.ceil(file.size / init.chunkBytes);
+    for (let index = 0; index < chunkCount; index += 1) {
+      throwIfAborted(signal);
+      const start = index * init.chunkBytes;
+      const chunk = file.slice(start, Math.min(start + init.chunkBytes, file.size));
+      await putChunkWithRetry({ request, endpoint, uploadId: init.uploadId, index, chunk, signal, options });
+      uploadedBytes += chunk.size;
+      report?.({
+        uploadedBytes,
+        totalBytes: file.size,
+        fraction: file.size === 0 ? 1 : uploadedBytes / file.size,
+      });
+    }
 
-  throwIfAborted(signal);
-  const completeResponse = await request(`${endpoint}/${init.uploadId}/complete`, withSignal({
-    method: "POST",
-  }, signal));
-  if (!completeResponse.ok) {
-    throw await uploadResponseError(completeResponse);
+    throwIfAborted(signal);
+    const completeResponse = await request(`${endpoint}/${init.uploadId}/complete`, withSignal({
+      method: "POST",
+    }, signal));
+    if (!completeResponse.ok) {
+      throw await uploadResponseError(completeResponse);
+    }
+    // A successful complete promotes the upload to an attachment; DELETE is
+    // only for sessions that are still pending.
+    cancellableUploadId = null;
+    const complete = await parseJson<{ attachment?: UploadAttachment }>(completeResponse);
+    if (!complete.attachment) {
+      throw new UploadError("The server returned an invalid completed upload.");
+    }
+    report?.({ uploadedBytes: file.size, totalBytes: file.size, fraction: 1 });
+    return complete.attachment;
+  } catch (error) {
+    if (cancellableUploadId !== null) {
+      try {
+        // Do not reuse the aborted upload signal: cleanup is best-effort but
+        // should still reach the authenticated server after a user cancels.
+        await request(`${endpoint}/${cancellableUploadId}`, { method: "DELETE" });
+      } catch {
+        // Keep the original upload/cancellation failure as the caller's result.
+      }
+    }
+    throw error;
   }
-  const complete = await parseJson<{ attachment?: UploadAttachment }>(completeResponse);
-  if (!complete.attachment) {
-    throw new UploadError("The server returned an invalid completed upload.");
-  }
-  report?.({ uploadedBytes: file.size, totalBytes: file.size, fraction: 1 });
-  return complete.attachment;
 }
 
 /** Alias matching the terminology used by the server-chat composer. */

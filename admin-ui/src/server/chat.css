@@ -73,6 +73,42 @@
   cursor: pointer;
 }
 
+.wx-srv-record-button,
+.wx-srv-record-cancel {
+  flex: none;
+  min-height: 36px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  cursor: pointer;
+}
+
+.wx-srv-record-button {
+  width: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 1rem;
+}
+
+.wx-srv-record-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.wx-srv-record-cancel {
+  padding: 6px 10px;
+  font: 0.75rem/1 system-ui, sans-serif;
+}
+
+.wx-srv-record-status {
+  color: var(--wx-muted);
+  font: 0.6875rem/1.2 system-ui, sans-serif;
+  white-space: nowrap;
+}
+
 /* -- Thread + jump pill --------------------------------------------------- */
 
 .wx-srv-thread-wrap {
@@ -233,6 +269,21 @@
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+.wx-srv-attachment-chip-label {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  background: var(--wx-canvas);
+  color: var(--wx-muted);
+  font-size: 0.625rem;
+  line-height: 1.1;
+  text-align: center;
 }
 
 .wx-srv-video {

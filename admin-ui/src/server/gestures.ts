@@ -2,9 +2,9 @@
 // the same set of targets (`isExcludedTapTarget`):
 //
 // - R3's multi-tap-inside-the-chat-view-locks detector (`createMultiTapDetector`
-//   / `attachMultiTapListener`) — UNCHANGED by R2 v1.3 (operator decision
-//   #974, spec/server-chat/00-brief.md §6). Two Pointer Events at most
-//   `MULTI_TAP_INTERVAL_MS` apart count as one "multi-tap". `panel.ts`
+//   / `attachMultiTapListener`). Two primary-button Pointer Events at most
+//   `MULTI_TAP_INTERVAL_MS` apart count as one "multi-tap"; v1.5 surface-opening
+//   controls may complete a run but clear it if they do not lock. `panel.ts`
 //   attaches this to `document` in the capture phase for the lifetime of the
 //   mounted panel, and only its "chat"/"fading" states give the resulting
 //   event any meaning (lockModel.ts) — it has NO meaning on the decoy.
@@ -28,6 +28,7 @@
 import { MULTI_TAP_COUNT, MULTI_TAP_INTERVAL_MS } from "./constants";
 
 const EXCLUDED_SELECTOR = "textarea, input, [contenteditable], audio, video";
+const GESTURE_BOUNDARY_SELECTOR = "[data-srv-gesture-boundary]";
 
 /** Exported for direct unit testing — no DOM event plumbing needed to check
  * the exclusion rule itself. */
@@ -82,7 +83,9 @@ export function createMultiTapDetector(
   }
 
   function handlePointerDown(event: PointerEvent): void {
-    if (isExcludedTapTarget(event.target)) return;
+    if (event.button !== 0 || isExcludedTapTarget(event.target)) return;
+    const isBoundary =
+      event.target instanceof Element && event.target.closest(GESTURE_BOUNDARY_SELECTOR) !== null;
     const at = now();
     if (tapCount > 0 && at - lastTapAt > MULTI_TAP_INTERVAL_MS) {
       tapCount = 0;
@@ -90,9 +93,11 @@ export function createMultiTapDetector(
     tapCount += 1;
     lastTapAt = at;
     if (tapCount >= MULTI_TAP_COUNT) {
-      tapCount = 0;
+      reset();
       onMultiTap();
+      return;
     }
+    if (isBoundary) reset();
   }
 
   return { handlePointerDown, reset };

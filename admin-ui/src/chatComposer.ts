@@ -87,11 +87,15 @@ export interface ChatComposerOptions {
    * `<img class="wx-chat-attachment-thumb">` sourced from the file's blob
    * URL — a caller overrides this for a non-image kind (e.g. a voice note
    * or video chip) without touching this module. */
-  renderChipPreview?: ((file: File) => HTMLElement) | undefined;
+  renderChipPreview?: ((file: File, previewUrl: string) => HTMLElement) | undefined;
   /** Extra buttons mounted in a slot right after the 📎 attach button (e.g.
    * the server chat's 🎤 recorder, P6b). Defaults to none — the AI composer
    * omits this and its input row is unaffected. */
   extraButtons?: HTMLElement[] | undefined;
+  /** Called immediately before opening the native file picker. The returned
+   * release is called on either `change` or `cancel`; server chat uses this
+   * to pause its idle lock while the picker is open. */
+  onFilePickerOpen?: (() => () => void) | undefined;
 }
 
 export interface ChatComposer {
@@ -104,6 +108,9 @@ export interface ChatComposer {
    * as the local echo's thumbnails (their `previewUrl`s stay valid until
    * `reset()`). */
   stagedAttachments(): readonly StagedAttachment[];
+  /** Programmatically stage a file from an auxiliary composer control, such
+   * as a MediaRecorder result. Picker/paste/drop still use `acceptFile`. */
+  addFile(file: File): void;
   hasUploadsInFlight(): boolean;
   setAttachmentsSupported(supported: boolean): void;
   setBusy(busy: boolean): void;
@@ -158,7 +165,21 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
   attachInput.accept = options.accept ?? "image/*";
   attachInput.multiple = true;
   attachInput.hidden = true;
-  attachButton.addEventListener("click", () => attachInput.click());
+  let releaseFilePicker: (() => void) | null = null;
+  function finishFilePicker(): void {
+    releaseFilePicker?.();
+    releaseFilePicker = null;
+  }
+  attachButton.addEventListener("click", () => {
+    finishFilePicker();
+    try {
+      releaseFilePicker = options.onFilePickerOpen?.() ?? null;
+      attachInput.click();
+    } catch (error) {
+      finishFilePicker();
+      throw error;
+    }
+  });
 
   const textarea = document.createElement("textarea");
   textarea.className = isCompose ? "wx-chat-compose-input" : "wx-chat-composer-input";
@@ -269,19 +290,27 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
       const chip = document.createElement("div");
       chip.className = "wx-chat-attachment-chip";
       chip.appendChild(
-        options.renderChipPreview?.(attachment.file) ?? defaultChipPreview(attachment.previewUrl),
+        options.renderChipPreview?.(attachment.file, attachment.previewUrl) ?? defaultChipPreview(attachment.previewUrl),
       );
       if (attachment.uploading) {
         const spinner = document.createElement("span");
         spinner.className = "wx-spinner wx-chat-attachment-spinner";
         spinner.setAttribute("aria-hidden", "true");
         chip.appendChild(spinner);
+        if (attachment.progress !== null) {
+          const progress = document.createElement("progress");
+          progress.className = "wx-chat-attachment-progress";
+          progress.max = Math.max(attachment.progress.total, 1);
+          progress.value = attachment.progress.loaded;
+          progress.setAttribute("aria-label", `Uploading ${attachment.file.name}`);
+          chip.appendChild(progress);
+        }
       }
       const removeButton = document.createElement("button");
       removeButton.type = "button";
       removeButton.className = "wx-chat-attachment-remove";
       removeButton.textContent = "✕";
-      removeButton.setAttribute("aria-label", "Remove this image");
+      removeButton.setAttribute("aria-label", "Remove this attachment");
       removeButton.addEventListener("click", () => removeAttachment(attachment.localId));
       chip.appendChild(removeButton);
       attachmentRow.appendChild(chip);
@@ -298,8 +327,8 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
     renderChips();
   }
 
-  function uploadAndAttach(file: File): void {
-    if (!acceptFile(file)) return;
+  function uploadAndAttach(file: File, checkAcceptedType = true): void {
+    if (checkAcceptedType && !acceptFile(file)) return;
     const localId = cryptoRandomId(win);
     const previewUrl = URL.createObjectURL(file);
     staged = [...staged, { localId, file, previewUrl, attachmentId: null, uploading: true, progress: null }];
@@ -311,6 +340,7 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
         onProgress: (loaded, total) => {
           if (tornDown) return;
           staged = staged.map((a) => (a.localId === localId ? { ...a, progress: { loaded, total } } : a));
+          renderChips();
         },
         signal: controller.signal,
       })
@@ -325,6 +355,7 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
       .catch((error: unknown) => {
         uploadControllers.delete(localId);
         if (tornDown) return;
+        if (controller.signal.aborted) return;
         // A failed upload never sends silently without the image the owner
         // thinks is attached — drop the chip and surface why.
         removeAttachment(localId);
@@ -338,9 +369,11 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
   }
 
   attachInput.addEventListener("change", () => {
+    finishFilePicker();
     handleFileList(attachInput.files);
     attachInput.value = "";
   });
+  attachInput.addEventListener("cancel", finishFilePicker);
   textarea.addEventListener("paste", (evt) => {
     const items = evt.clipboardData?.items;
     if (items === undefined) return;
@@ -396,6 +429,9 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
     stagedAttachments() {
       return staged;
     },
+    addFile(file) {
+      uploadAndAttach(file, false);
+    },
     hasUploadsInFlight() {
       return anyUploading();
     },
@@ -421,6 +457,7 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
     },
     teardown() {
       tornDown = true;
+      finishFilePicker();
       for (const controller of uploadControllers.values()) controller.abort();
       uploadControllers.clear();
       for (const attachment of staged) URL.revokeObjectURL(attachment.previewUrl);

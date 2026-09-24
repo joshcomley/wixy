@@ -11,8 +11,8 @@ import {
   isExcludedTapTarget,
 } from "../../src/server/gestures";
 
-function fakeEvent(target: EventTarget): PointerEvent {
-  return { target } as unknown as PointerEvent;
+function fakeEvent(target: EventTarget, button = 0): PointerEvent {
+  return { target, button } as unknown as PointerEvent;
 }
 
 describe("isExcludedTapTarget", () => {
@@ -122,6 +122,56 @@ describe("createMultiTapDetector", () => {
     detector.handlePointerDown(fakeEvent(target)); // tap 1 of a real run
     detector.handlePointerDown(fakeEvent(textarea)); // stray excluded tap in between
     detector.handlePointerDown(fakeEvent(target)); // tap 2 — still completes the run
+    expect(onMultiTap).toHaveBeenCalledTimes(1);
+  });
+
+  it("a boundary tap clears its unmatched run so the next choice tap starts fresh", () => {
+    const onMultiTap = vi.fn();
+    let now = 0;
+    const detector = createMultiTapDetector(onMultiTap, () => now);
+    const boundary = document.createElement("button");
+    boundary.setAttribute("data-srv-gesture-boundary", "");
+    const boundaryChild = document.createElement("span");
+    boundary.appendChild(boundaryChild);
+    const choice = document.createElement("button");
+
+    detector.handlePointerDown(fakeEvent(boundaryChild));
+    now += 100;
+    detector.handlePointerDown(fakeEvent(choice));
+    expect(onMultiTap).not.toHaveBeenCalled();
+
+    now += 100;
+    detector.handlePointerDown(fakeEvent(choice));
+    expect(onMultiTap).toHaveBeenCalledTimes(1);
+  });
+
+  it("a boundary tap can complete a run that started on an unrelated control", () => {
+    const onMultiTap = vi.fn();
+    let now = 0;
+    const detector = createMultiTapDetector(onMultiTap, () => now);
+    const unrelated = document.createElement("div");
+    const boundary = document.createElement("button");
+    boundary.setAttribute("data-srv-gesture-boundary", "");
+
+    detector.handlePointerDown(fakeEvent(unrelated));
+    now += 100;
+    detector.handlePointerDown(fakeEvent(boundary));
+    expect(onMultiTap).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores non-primary buttons without counting or breaking a run", () => {
+    const onMultiTap = vi.fn();
+    let now = 0;
+    const detector = createMultiTapDetector(onMultiTap, () => now);
+    const target = document.createElement("div");
+
+    detector.handlePointerDown(fakeEvent(target, 2)); // right-click
+    detector.handlePointerDown(fakeEvent(target));
+    expect(onMultiTap).not.toHaveBeenCalled();
+    now += 100;
+    detector.handlePointerDown(fakeEvent(target, 1)); // middle-click
+    now += 100;
+    detector.handlePointerDown(fakeEvent(target));
     expect(onMultiTap).toHaveBeenCalledTimes(1);
   });
 
