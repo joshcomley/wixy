@@ -1292,3 +1292,37 @@ fixed same-session.)
   confirmation on that specific delta. Then: full suite once on the final SHA (not
   necessarily another full 5x, per the reasoning above), push, PR, CI, merge, mark
   delivery task done, resolve lane, P7, sec.13 audit, live verify, R14a squash merge.
+
+## Update 2026-09-24 (DM `8e7bbea9`) — P8 round 10 final handoff; likely the last round
+
+- **Luna's round-10 FINAL HANDOFF**: `dfe7bd1379b9f7e96f2b675f99c8551696ed55b0`, on top of
+  `240dc76`, committed (not pushed). Fix matches exactly what was asked: `failed()` now
+  resets by wall-clock gap since the previous failure (same measure as the read-side
+  `consecutive_failures()` fix), not the loop's own `ran_for_s`. Own red/green test
+  confirms the exact repro scenario (301s elapsed / 297s runtime) now yields count=1, not
+  4. Focused background/status slice 17/17, ruff/format-check/mypy clean.
+  Correctly left the SEPARATE backoff-delay-reset timer alone (that's retry pacing, not
+  degraded-status reporting — a different concern that wasn't part of the finding).
+- **DM verification**: fresh worktree `__review-p8-r10` matches `dfe7bd1` exactly.
+  Mechanical checks (ruff/format-check/mypy) independently clean. Full suite running once
+  on this exact SHA (background task) — NOT a fresh full 5x cycle, per the reasoning
+  recorded in the prior update (round 9's 5x harness against `240dc76`, run 1/5 already
+  clean, remains valid evidence for the race-prone filesystem surface this delta doesn't
+  touch). Scoped review brief sent to Sol (`e1b11e24`) covering just this delta, asking it
+  to confirm CLEARED for round 8 through 10 together if this holds.
+- **This is very likely the FINAL round** — Sol's round-9 verdict already cleared
+  everything except this one boundary condition. Once the full suite passes clean and Sol
+  confirms, this closes P8's whole verification arc (10 rounds: 4 original Builder rounds
+  + Architect holistic review + DM-found bugs 5-8 + the containment ruling round + this
+  boundary fix).
+- **Next**: wait for full-suite result + Sol's verdict. If BOTH clean: push `bs7`, open/
+  update PR, wait CI green (Monitor pattern), `gh pr merge --merge --delete-branch`
+  (P8's own merge into the feature branch — normal merge, R14a squash only applies to the
+  ONE final delivery merge later), mark delivery task `3e6c218c-80ca-449c-8bc6-7df8402f381f`
+  done, resolve lane `c7583fed-a9a2-4de8-b423-d8bd62739bcc`. Then: P7 (docs closeout,
+  `7a9fa759-aaf1-4368-a6db-24ddc2b9bae0`, decision numbering continues from `00152`, must
+  add R14a's release-note rule to `docs/ai/livechat.md` + `CLAUDE.md`), sec.13 opus audit
+  (DM-owned, now covers migration v6 + the new background-task supervisor per the
+  Architect's own note), live `verify` on `ca.cinnamons.uk`, then the ONE delivery merge
+  as a squash with a hand-written body (R14a — verify the cmd merge API supports a custom
+  squash body first; if not, merge manually via git/gh).
