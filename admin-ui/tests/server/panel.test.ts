@@ -200,51 +200,66 @@ describe("mountServerPanel", () => {
     const panel = mount();
     await openPinPad(panel.element);
     const pad = panel.element.querySelector(".wx-srv-pinpad") as HTMLElement;
-    for (const key of ["1", "2", "9"]) {
+    for (const key of ["1", "2", "9", "4"]) {
       pad.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
     }
     pad.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", bubbles: true }));
     pad.dispatchEvent(new KeyboardEvent("keydown", { key: "4", bubbles: true }));
-    expect(panel.element.querySelectorAll(".wx-srv-pinpad-dot")).toHaveLength(3); // "1","2","4"
+    expect(panel.element.querySelectorAll(".wx-srv-pinpad-dot")).toHaveLength(4); // "1","2","4","4"
     pad.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     await flush();
     expect(panel.element.querySelector(".wx-srv-thread")).not.toBeNull();
     panel.teardown();
   });
 
-  it("wrong PIN shows exactly 'Incorrect PIN' and stays on the pad", async () => {
+  it("wrong PIN shows the attempts remaining and stays on the pad", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ error: "wrong_pin", attemptsLeft: 2 }, 401));
     const panel = mount();
     await openPinPad(panel.element);
     await enterAndSubmitPin(panel.element, "0000");
-    expect(panel.element.querySelector(".wx-srv-pinpad-message")?.textContent).toBe("Incorrect PIN");
+    expect(panel.element.querySelector(".wx-srv-pinpad-message")?.textContent).toBe("Wrong PIN — 2 attempts left");
     expect((panel.element.querySelector(".wx-srv-pinpad-host") as HTMLElement).hidden).toBe(false);
     panel.teardown();
   });
 
-  it("a lockout shows the exact countdown message and it ticks down live", async () => {
+  it("a lockout shows the frozen copy until the retry period expires", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ error: "locked_out", retryAfterS: 5 }, 429));
     const panel = mount();
     await openPinPad(panel.element);
     await enterAndSubmitPin(panel.element, "0000");
     expect(panel.element.querySelector(".wx-srv-pinpad-message")?.textContent).toBe(
-      "Too many attempts — try again in 5s",
+      "Too many wrong tries. Try again in 2 minutes.",
     );
     await vi.advanceTimersByTimeAsync(2000);
     expect(panel.element.querySelector(".wx-srv-pinpad-message")?.textContent).toBe(
-      "Too many attempts — try again in 3s",
+      "Too many wrong tries. Try again in 2 minutes.",
     );
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(panel.element.querySelector(".wx-srv-pinpad-message")?.textContent).toBe("");
     panel.teardown();
   });
 
-  it("cmd unreachable (503) shows exactly 'Server settings unavailable'", async () => {
+  it("cmd unreachable (503) shows exactly 'Server settings unavailable.'", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ error: "pin_service_unavailable" }, 503));
     const panel = mount();
     await openPinPad(panel.element);
     await enterAndSubmitPin(panel.element, "0000");
     expect(panel.element.querySelector(".wx-srv-pinpad-message")?.textContent).toBe(
-      "Server settings unavailable",
+      "Server settings unavailable.",
     );
+    panel.teardown();
+  });
+
+  it.each([
+    [409, { error: "pin_changed" }, "Please try again."],
+    [422, { error: "invalid" }, "Couldn't unlock — try again."],
+    [418, {}, "Couldn't unlock — try again."],
+  ] as const)("status %i shows the matching retry copy", async (status, body, copy) => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(body, status));
+    const panel = mount();
+    await openPinPad(panel.element);
+    await enterAndSubmitPin(panel.element, "0000");
+    expect(panel.element.querySelector(".wx-srv-pinpad-message")?.textContent).toBe(copy);
     panel.teardown();
   });
 

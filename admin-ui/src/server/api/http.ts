@@ -24,7 +24,22 @@ export class ServerLockedError extends Error {
   }
 }
 
+/** A delete/wipe request was aborted after dispatch; the server may have committed it. */
+export class ServerErasureOutcomeUnknownError extends Error {
+  constructor() {
+    super("server chat: erasure request is still working; outcome unknown");
+    this.name = "ServerErasureOutcomeUnknownError";
+  }
+}
+
 const TIMEOUT_MS = 10_000;
+const ERASURE_TIMEOUT_MS = 30_000;
+
+function isErasureMutation(path: string, method: string | undefined): boolean {
+  const normalizedMethod = method?.toUpperCase();
+  return (normalizedMethod === "DELETE" && /^\/messages\/\d+$/.test(path))
+    || (normalizedMethod === "POST" && path === "/wipe");
+}
 
 /** `path` is relative to `SERVER_API_BASE` and must start with "/" (e.g.
  * `"/messages"`, `"/unlock"`). `session` is `null` only for `POST /unlock`
@@ -44,6 +59,8 @@ export async function serverFetch(
   session: ServerSession | null,
   timeoutMs = TIMEOUT_MS,
 ): Promise<Response> {
+  const erasureMutation = isErasureMutation(path, init.method);
+  const effectiveTimeoutMs = erasureMutation ? Math.max(timeoutMs, ERASURE_TIMEOUT_MS) : timeoutMs;
   const headers = new Headers(init.headers);
   if (session !== null) {
     headers.set("X-Wixy-Server-Token", session.token);
@@ -53,10 +70,13 @@ export async function serverFetch(
   const abortFromCaller = () => controller.abort(externalSignal?.reason);
   if (externalSignal?.aborted) abortFromCaller();
   else externalSignal?.addEventListener("abort", abortFromCaller, { once: true });
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort(), effectiveTimeoutMs);
   let response: Response;
   try {
     response = await fetch(`${SERVER_API_BASE}${path}`, { ...init, headers, signal: controller.signal });
+  } catch (error) {
+    if (erasureMutation && controller.signal.aborted) throw new ServerErasureOutcomeUnknownError();
+    throw error;
   } finally {
     clearTimeout(timer);
     externalSignal?.removeEventListener("abort", abortFromCaller);

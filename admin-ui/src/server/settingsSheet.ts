@@ -3,8 +3,9 @@
 // toggle into, and a Lock button.
 
 import { getUsage } from "./api/messages";
-import { ServerLockedError } from "./api/http";
+import { ServerErasureOutcomeUnknownError, ServerLockedError } from "./api/http";
 import type { ServerIdentity } from "./identity";
+import { isAndroidPushCapable, mountPushToggle, type PushToggle } from "./pushToggle";
 import type { LockHooks, ServerSession } from "./types";
 
 export interface ServerSettingsSheetDeps {
@@ -91,6 +92,26 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   wipeStatus.hidden = true;
   let scrubPollGeneration = 0;
   let scrubPollTimer: number | null = null;
+  let pushToggle: PushToggle | null = null;
+  let wipeOutcomeUnknown = false;
+
+  function unmountPushToggle(): void {
+    pushToggle?.teardown();
+    pushToggle = null;
+  }
+
+  function mountPushToggleIfCapable(session: ServerSession | null): void {
+    unmountPushToggle();
+    if (session === null || !isAndroidPushCapable(win)) return;
+    const sender = identity.getName();
+    if (sender === null) return;
+    pushToggle = mountPushToggle(pushSlot, {
+      deviceId: identity.getDeviceId(),
+      sender,
+      win,
+      getToken: () => deps.getSession()?.token ?? null,
+    });
+  }
 
   function stopScrubPolling(): void {
     scrubPollGeneration += 1;
@@ -100,11 +121,13 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     }
   }
 
-  function startScrubPolling(session: ServerSession): void {
+  function startScrubPolling(session: ServerSession, outcomeUnknown = false): void {
     stopScrubPolling();
     const generation = scrubPollGeneration;
     const stopAt = Date.now() + 60_000;
-    wipeStatus.textContent = "Deleted. Erasing leftover traces…";
+    wipeStatus.textContent = outcomeUnknown
+      ? "Still working — check again."
+      : "Deleted. Erasing leftover traces…";
     wipeStatus.hidden = false;
 
     const poll = (): void => {
@@ -115,7 +138,9 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
           .then((usage) => {
             if (generation !== scrubPollGeneration) return;
             if (!usage.erasurePending) {
-              wipeStatus.textContent = "Done";
+              wipeStatus.textContent = outcomeUnknown
+                ? "Status unclear. Check the messages to confirm."
+                : "Done";
               return;
             }
             poll();
@@ -168,8 +193,9 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   function close(): void {
     backdrop.hidden = true;
     wipeConfirmation.hidden = true;
-    wipeStatus.hidden = true;
+    wipeStatus.hidden = !wipeOutcomeUnknown;
     stopScrubPolling();
+    unmountPushToggle();
     deps.onClose();
   }
 
@@ -202,6 +228,7 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     wipeConfirmation.hidden = true;
   });
   wipeConfirmButton.addEventListener("click", () => {
+    if (wipeOutcomeUnknown) return;
     wipeConfirmButton.disabled = true;
     void deps.onWipe()
       .then((erasurePending) => {
@@ -217,6 +244,18 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
       .catch((error: unknown) => {
         if (error instanceof ServerLockedError) {
           hooks.lockNow("unauthorized");
+          return;
+        }
+        if (error instanceof ServerErasureOutcomeUnknownError) {
+          wipeOutcomeUnknown = true;
+          wipeConfirmation.hidden = true;
+          wipeButton.disabled = true;
+          const session = deps.getSession();
+          if (session !== null) startScrubPolling(session, true);
+          else {
+            wipeStatus.textContent = "Still working — check again.";
+            wipeStatus.hidden = false;
+          }
           return;
         }
         wipeError.textContent = "Couldn't delete messages. Try again.";
@@ -239,10 +278,11 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
       backdrop.hidden = false;
       wipeConfirmation.hidden = true;
       wipeError.hidden = true;
-      wipeStatus.hidden = true;
+      wipeStatus.hidden = !wipeOutcomeUnknown;
       nameInput.value = identity.getName() ?? "";
       usageRow.textContent = "Storage: loading…";
       const session = deps.getSession();
+      mountPushToggleIfCapable(session);
       if (session !== null) {
         getUsage(session)
           .then((usage) => {
@@ -251,7 +291,7 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
               : "Storage: media isn't available on this server.";
             if (usage.erasurePending) {
               const session = deps.getSession();
-              if (session !== null) startScrubPolling(session);
+              if (session !== null) startScrubPolling(session, wipeOutcomeUnknown);
             }
           })
           .catch(() => {
@@ -263,6 +303,7 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     close,
     teardown(): void {
       stopScrubPolling();
+      unmountPushToggle();
       win.document.removeEventListener("keydown", onKeydown);
     },
   };

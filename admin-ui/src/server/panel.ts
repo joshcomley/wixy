@@ -399,6 +399,12 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
         dispatch({ type: "verifyWrong", attemptsLeft: result.attemptsLeft });
       } else if (result.kind === "lockedOut") {
         dispatch({ type: "verifyLockedOut", retryAfterS: result.retryAfterS });
+      } else if (result.kind === "pinChanged") {
+        dispatch({ type: "verifyPinChanged" });
+      } else if (result.kind === "invalid") {
+        dispatch({ type: "verifyInvalid" });
+      } else if (result.kind === "unexpected") {
+        dispatch({ type: "verifyUnexpected" });
       } else {
         dispatch({ type: "verifyUnavailable" });
       }

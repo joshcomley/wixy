@@ -83,13 +83,16 @@ export const createServerChatView: CreateServerChatView = (deps) => {
   // -- Stream lifecycle ----------------------------------------------------
 
   let streamHandle: ServerStreamHandle | null = null;
+  let attachEpoch = 0;
   let resumeCursor = 0;
 
-  function openStream(session: ServerSession): void {
+  function openStream(session: ServerSession, epoch: number): void {
+    closeStream();
     streamHandle = openServerStream(
       session,
       resumeCursor,
       (event) => {
+        if (epoch !== attachEpoch || currentSession !== session) return;
         if (event.type === "locked") {
           hooks.lockNow("unauthorized");
           return;
@@ -101,21 +104,26 @@ export const createServerChatView: CreateServerChatView = (deps) => {
   }
 
   function closeStream(): void {
-    if (streamHandle === null) return;
-    resumeCursor = streamHandle.getCursor();
-    streamHandle.close();
+    const handle = streamHandle;
     streamHandle = null;
+    if (handle === null) return;
+    resumeCursor = handle.getCursor();
+    handle.close();
   }
 
   function showThreadAndConnect(session: ServerSession): void {
+    const epoch = ++attachEpoch;
+    closeStream();
     thread.element.hidden = false;
     thread
       .attach(session)
       .then((freshCursor) => {
+        if (epoch !== attachEpoch || currentSession !== session) return;
         if (freshCursor !== null) resumeCursor = freshCursor;
-        openStream(session);
+        openStream(session, epoch);
       })
       .catch((error: unknown) => {
+        if (epoch !== attachEpoch || currentSession !== session) return;
         if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
       });
   }
@@ -137,12 +145,15 @@ export const createServerChatView: CreateServerChatView = (deps) => {
     },
     detach(): void {
       currentSession = null;
+      attachEpoch += 1;
       pendingSessionForNamePrompt = null;
       closeStream();
       thread.detach();
       settingsSheet.close();
     },
     dispose(): void {
+      currentSession = null;
+      attachEpoch += 1;
       closeStream();
       thread.teardown();
       settingsSheet.teardown();
