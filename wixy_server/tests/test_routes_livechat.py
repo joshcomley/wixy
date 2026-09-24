@@ -951,7 +951,10 @@ class TestDeleteWipeRoutes:
 
         monkeypatch.undo()
         reopened = LiveChatStore(store._db_path)
-        assert ("attachment", attachment_id) in reopened.pending_deleted_storage_items()
+        assert any(
+            kind == "attachment" and storage_id == attachment_id
+            for kind, storage_id, _generation in reopened.pending_deleted_storage_items()
+        )
         assert not livechat_janitor.cleanup_deleted_storage_once(store=reopened, paths=paths)
         assert not media_dir.exists()
 

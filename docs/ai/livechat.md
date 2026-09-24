@@ -133,9 +133,9 @@ Tables: `messages`, `attachments`, `events`, `uploads`, `push_subscriptions`, `d
 and `pending_wipe_cleanup`. Schema migrations are serialized under the SQLite writer lock.
 `deleted_storage` retains internal attachment/upload tombstones and retry status; it is not a
 message/event tombstone and is never returned to chat clients. `pending_wipe_cleanup` records a
-wipe's filesystem sweep token so a crash cannot lose cleanup of orphaned paths. Schema v4 adds the partial
-`idx_deleted_storage_pending` index contains only incomplete cleanup rows, so the two-second
-worker does not revisit completed tombstones as delete history grows.
+wipe's filesystem sweep token so a crash cannot lose cleanup of orphaned paths. Schema v4 adds the
+partial `idx_deleted_storage_pending` index containing only incomplete cleanup rows. Schema v5
+adds a per-tombstone generation so a late requeue cannot be cleared by an older cleanup pass.
 Two transaction shapes:
 - `BEGIN IMMEDIATE` for writes needing a race-safe conditional check (an attachment's lease
   claim, `create_message`'s idempotent client-id insert) — serializes concurrent claimants
@@ -230,6 +230,8 @@ write-and-row-check sequence from cancellation. If a late write finds its upload
 re-marks that upload for durable cleanup, even when an earlier cleanup already completed.
 Route-owned and background WAL scrubs serialize under `LiveChatStore.scrub_guard()` and read the
 current marker after acquiring the guard; a route skips its scrub if the worker already cleared it.
+Media cleanup clears a pending row only if its generation is unchanged; a late requeue increments
+the generation so an older cleanup pass cannot lose it.
 
 ## 7. Web Push (`livechat/push.py`, `server/pushToggle.ts`)
 

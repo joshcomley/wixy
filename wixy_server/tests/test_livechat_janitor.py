@@ -204,6 +204,35 @@ class TestRunOnceIsIdempotent:
         assert index is not None
         assert "WHERE cleanup_pending = 1" in str(index[0])
 
+    def test_concurrent_late_requeue_survives_old_cleanup_clear(
+        self,
+        store: LiveChatStore,
+        paths: ProjectPaths,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        upload_id = "d" * 32
+        upload_dir = paths.server_upload_dir(upload_id)
+        upload_dir.mkdir(parents=True)
+        (upload_dir / "chunk-000000").write_bytes(b"original")
+        store.mark_deleted_storage_pending(kind="upload", storage_id=upload_id, now=1.0)
+        original_clear = store.clear_deleted_storage_pending_many
+
+        def requeue_and_write_late(items: list[tuple[str, str, int]]) -> None:
+            assert store.requeue_deleted_storage_if_exists(kind="upload", storage_id=upload_id)
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            (upload_dir / "chunk-000000").write_bytes(b"late")
+            original_clear(items)
+
+        monkeypatch.setattr(store, "clear_deleted_storage_pending_many", requeue_and_write_late)
+        assert janitor.cleanup_deleted_storage_once(store=store, paths=paths)
+        assert (upload_dir / "chunk-000000").read_bytes() == b"late"
+        assert store.pending_deleted_storage_items() == [("upload", upload_id, 2)]
+
+        monkeypatch.setattr(store, "clear_deleted_storage_pending_many", original_clear)
+        assert not janitor.cleanup_deleted_storage_once(store=store, paths=paths)
+        assert not upload_dir.exists()
+        assert store.pending_deleted_storage_items() == []
+
     def test_orphan_scan_batches_live_attachment_and_upload_lookups(
         self,
         store: LiveChatStore,

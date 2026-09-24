@@ -135,7 +135,7 @@ def cleanup_deleted_upload(*, store: LiveChatStore, paths: ProjectPaths, upload_
     if not _UPLOAD_ID_RE.fullmatch(upload_id):
         return
 
-    store.set_deleted_storage_pending(kind="upload", storage_id=upload_id, pending=True)
+    store.requeue_deleted_storage_if_exists(kind="upload", storage_id=upload_id)
     from wixy_server.livechat.janitor import cleanup_deleted_storage_once
 
     cleanup_deleted_storage_once(store=store, paths=paths, only_items={("upload", upload_id)})

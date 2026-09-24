@@ -105,7 +105,12 @@ CREATE INDEX IF NOT EXISTS idx_deleted_storage_pending
   ON deleted_storage(kind, id) WHERE cleanup_pending = 1;
 """
 
-_LATEST_SCHEMA_VERSION = 4
+_SCHEMA_V5_STORAGE_GENERATION = """
+ALTER TABLE deleted_storage
+  ADD COLUMN generation INTEGER NOT NULL DEFAULT 1;
+"""
+
+_LATEST_SCHEMA_VERSION = 5
 
 
 class LiveChatStoreError(Exception):
@@ -305,6 +310,13 @@ class LiveChatStore:
                     if statement.strip():
                         conn.execute(statement)
                 conn.execute("PRAGMA user_version = 4")
+                current = 4
+
+            if current < 5:
+                for statement in _SCHEMA_V5_STORAGE_GENERATION.split(";"):
+                    if statement.strip():
+                        conn.execute(statement)
+                conn.execute("PRAGMA user_version = 5")
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
@@ -579,10 +591,11 @@ class LiveChatStore:
     ) -> None:
         for storage_id in set(ids):
             conn.execute(
-                "INSERT INTO deleted_storage(kind, id, cleanup_pending, deleted_at) "
-                "VALUES (?, ?, 1, ?) "
+                "INSERT INTO deleted_storage(kind, id, cleanup_pending, deleted_at, generation) "
+                "VALUES (?, ?, 1, ?, 1) "
                 "ON CONFLICT(kind, id) DO UPDATE SET "
-                "cleanup_pending = 1, deleted_at = excluded.deleted_at",
+                "cleanup_pending = 1, deleted_at = excluded.deleted_at, "
+                "generation = deleted_storage.generation + 1",
                 (kind, storage_id, now),
             )
 
@@ -596,27 +609,36 @@ class LiveChatStore:
             is not None
         )
 
-    def pending_deleted_storage_items(self) -> list[tuple[str, str]]:
+    def pending_deleted_storage_items(self) -> list[tuple[str, str, int]]:
         with self._read_txn() as conn:
             rows = conn.execute(
-                "SELECT kind, id FROM deleted_storage WHERE cleanup_pending = 1 ORDER BY kind, id"
+                "SELECT kind, id, generation FROM deleted_storage "
+                "WHERE cleanup_pending = 1 ORDER BY kind, id"
             ).fetchall()
-            return [(str(row["kind"]), str(row["id"])) for row in rows]
+            return [(str(row["kind"]), str(row["id"]), int(row["generation"])) for row in rows]
 
     def mark_deleted_storage_pending(self, *, kind: str, storage_id: str, now: float) -> None:
         with self._write_txn() as conn:
             self._queue_deleted_storage(conn, kind=kind, ids=[storage_id], now=now)
 
-    def set_deleted_storage_pending(self, *, kind: str, storage_id: str, pending: bool) -> None:
-        self.set_deleted_storage_pending_many([(kind, storage_id, pending)])
+    def requeue_deleted_storage_if_exists(self, *, kind: str, storage_id: str) -> bool:
+        """Bump the generation so a cleanup pass cannot erase a concurrent requeue."""
+        with self._write_txn() as conn:
+            cursor = conn.execute(
+                "UPDATE deleted_storage SET cleanup_pending = 1, generation = generation + 1 "
+                "WHERE kind = ? AND id = ?",
+                (kind, storage_id),
+            )
+            return cursor.rowcount > 0
 
-    def set_deleted_storage_pending_many(self, items: Sequence[tuple[str, str, bool]]) -> None:
+    def clear_deleted_storage_pending_many(self, items: Sequence[tuple[str, str, int]]) -> None:
         if not items:
             return
         with self._write_txn() as conn:
             conn.executemany(
-                "UPDATE deleted_storage SET cleanup_pending = ? WHERE kind = ? AND id = ?",
-                [(int(pending), kind, storage_id) for kind, storage_id, pending in items],
+                "UPDATE deleted_storage SET cleanup_pending = 0 "
+                "WHERE kind = ? AND id = ? AND generation = ? AND cleanup_pending = 1",
+                items,
             )
 
     def has_deleted_storage_pending(self, *, kind: str, storage_id: str) -> bool:

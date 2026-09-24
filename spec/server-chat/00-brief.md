@@ -1281,9 +1281,9 @@ A1 is a tiny in-flight change so the v1 schema never needs a rebuild migration. 
 2026-09-14, P1 has not merged, so A1 applies to P1. If P1 has already merged by the time
 this is read, P8 does all of this instead as migration v2, rebuilding the content-free
 `events` table while preserving its `sqlite_sequence` high-water mark. v1.5.4 adds migration
-v3 for durable deleted-storage and wipe-cleanup records, and migration v4 adds a partial index
-over pending deletions so completed tombstones are retained without being scanned on every retry
-tick.
+v3 for durable deleted-storage and wipe-cleanup records, migration v4 adds a partial index over
+pending deletions so completed tombstones are retained without being scanned on every retry tick,
+and migration v5 adds a generation used to compare-and-clear each cleanup pass after file removal.
 
 1. `events.type CHECK IN ('message','message_updated','message_deleted','wiped')`, and
    `events.message_seq` becomes **nullable** (NULL for `wiped`).
@@ -1400,6 +1400,8 @@ dirs and the chat view, so it goes last to avoid colliding with in-flight work.
   complete.
 - Complete a tombstone, run another cleanup tick, and prove the completed row is retained but
   neither selected nor sent through filesystem cleanup again.
+- Requeue an upload tombstone between file removal and the previous cleanup pass clearing its
+  state; prove the generation check preserves the requeue and a later pass removes the late bytes.
 - Prove unreferenced storage is scanned at startup and while a wipe token remains pending, not
   on ordinary ticks, and that the scan uses one batched live-ID read rather than per-entry DB
   connections.

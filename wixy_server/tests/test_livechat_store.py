@@ -34,7 +34,7 @@ class TestMigrations:
         store.list_messages(before=None, limit=1)
         conn = sqlite3.connect(str(db_path))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
         finally:
             conn.close()
 
@@ -43,6 +43,7 @@ class TestMigrations:
         store.list_messages(before=None, limit=1)
         conn = sqlite3.connect(str(db_path))
         try:
+            conn.execute("ALTER TABLE deleted_storage DROP COLUMN generation")
             conn.execute("DROP INDEX idx_deleted_storage_pending")
             conn.execute("PRAGMA user_version = 3")
             conn.commit()
@@ -53,7 +54,7 @@ class TestMigrations:
         upgraded.list_messages(before=None, limit=1)
         conn = sqlite3.connect(str(db_path))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
             index = conn.execute(
                 "SELECT sql FROM sqlite_master "
                 "WHERE type = 'index' AND name = 'idx_deleted_storage_pending'"
@@ -62,6 +63,44 @@ class TestMigrations:
             conn.close()
         assert index is not None
         assert "WHERE cleanup_pending = 1" in str(index[0])
+
+    def test_v4_database_gets_storage_generation_in_v5(self, db_path: Path) -> None:
+        db_path.parent.mkdir(parents=True)
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.executescript(
+                """
+                CREATE TABLE deleted_storage(
+                  kind TEXT NOT NULL, id TEXT NOT NULL,
+                  cleanup_pending INTEGER NOT NULL, deleted_at REAL NOT NULL,
+                  PRIMARY KEY(kind, id));
+                CREATE INDEX idx_deleted_storage_pending
+                  ON deleted_storage(kind, id) WHERE cleanup_pending = 1;
+                INSERT INTO deleted_storage(kind, id, cleanup_pending, deleted_at)
+                  VALUES ('upload', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 1, 1.0);
+                PRAGMA user_version = 4;
+                """
+            )
+        finally:
+            conn.close()
+
+        store = LiveChatStore(db_path)
+        conn = store._connect()
+        conn.close()
+        conn = sqlite3.connect(str(db_path))
+        try:
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+            columns = {row[1]: row for row in conn.execute("PRAGMA table_info(deleted_storage)")}
+            assert columns["generation"][3] == 1
+            assert (
+                conn.execute(
+                    "SELECT generation FROM deleted_storage WHERE id = ?",
+                    ("a" * 32,),
+                ).fetchone()[0]
+                == 1
+            )
+        finally:
+            conn.close()
 
     def test_v2_rebuild_accepts_wiped_and_preserves_event_sequence(self, db_path: Path) -> None:
         db_path.parent.mkdir(parents=True)
@@ -99,7 +138,7 @@ class TestMigrations:
                 conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'events'").fetchone()[0]
                 == 13
             )
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
         finally:
             conn.close()
 

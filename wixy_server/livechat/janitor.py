@@ -116,8 +116,8 @@ def cleanup_deleted_storage_once(
     only_items: set[tuple[str, str]] | None = None,
 ) -> bool:
     """Retry durable per-ID deletion work; keep tombstones when the OS refuses."""
-    state_changes: list[tuple[str, str, bool]] = []
-    for kind, storage_id in store.pending_deleted_storage_items():
+    state_changes: list[tuple[str, str, int]] = []
+    for kind, storage_id, generation in store.pending_deleted_storage_items():
         if only_items is not None and (kind, storage_id) not in only_items:
             continue
         if kind == "attachment":
@@ -140,8 +140,8 @@ def cleanup_deleted_storage_once(
                 exc_info=True,
             )
         else:
-            state_changes.append((kind, storage_id, False))
-    store.set_deleted_storage_pending_many(state_changes)
+            state_changes.append((kind, storage_id, generation))
+    store.clear_deleted_storage_pending_many(state_changes)
     return store.storage_cleanup_pending()
 
 
@@ -177,9 +177,11 @@ def cleanup_unreferenced_storage_once(*, store: LiveChatStore, paths: ProjectPat
     live_attachments, live_uploads = store.live_storage_ids()
     pending_storage = store.pending_deleted_storage_items()
     pending_attachments = {
-        storage_id for kind, storage_id in pending_storage if kind == "attachment"
+        storage_id for kind, storage_id, _generation in pending_storage if kind == "attachment"
     }
-    pending_uploads = {storage_id for kind, storage_id in pending_storage if kind == "upload"}
+    pending_uploads = {
+        storage_id for kind, storage_id, _generation in pending_storage if kind == "upload"
+    }
 
     for entry, kind in candidates:
         storage_id = entry.name
