@@ -1414,3 +1414,42 @@ fixed same-session.)
      reviewer, CI green, branch current, SHA recorded.
   4. **Live verification** with the `verify` skill against ca.cinnamons.uk.
   Main still has NO livechat code; nothing is live until steps 3 and 4 are both done.
+
+## Update 2026-09-24 (DM `8e7bbea9`) — P8 closed (11/13); P7 dispatched to Luna; sec.13 audit being prepared
+
+- **P8 done**: delivery task `3e6c218c…` marked done via PATCH, lane auto-resolved, build
+  space `bs7` stamped merged (PR 231). Progress **11/13**; remaining tasks are P7 (docs
+  close-out) and my own DM integration/audit/delivery-merge task.
+- **P7 dispatched** to a fresh Luna 6 XL (`14b18836-3dc7-4418-a559-e1ab3e2aab2b`, new build
+  space `P7-docs-closeout`, spawned directly with the codex override). Self-contained brief
+  stored at intercomm `bbe33eefc96d46b4b799731a3a0ee3bd` (deliverables A-G: invariants 40-45 +
+  Inv 12 amendment, runbook, testing incl. the 5x-suite and unloaded-node lessons, glossary,
+  livechat.md consistency pass vs final code, R14a rule in livechat.md AND CLAUDE.md,
+  decision entries at 00145-00147 gaps + 00153+ for architecture/erasure/containment/R14a).
+  Docs only; Sol reviews before merge. Decision 00144 was already taken by an unrelated entry.
+- **Dependency #9 CLEARED** (Orchestrator re-verified via read-only `pins_cli.py status`: cmd
+  PIN service up, app key `wixy-livechat` registered 2026-09-14 under decision 973, never
+  rotated, no lockouts). Live verification must still exercise a REAL PIN unlock end to end.
+- **Audit tier settled**: Opus 5.5 (my task text said fable; Fable is not authorised — operator
+  rule: only with his explicit go-ahead for a specific use, none given).
+- **Audit sequencing**: `origin/main` (`593837a`) is already an ancestor of the feature head
+  (0 commits behind), so the latest-main convergence gate holds; re-check immediately before
+  submitting. The Architect asked me to HOLD submission until their v1.5.5 rewrite of sec.17
+  is pushed (sec.17 is part of the intent being audited) — they are writing it in a separate
+  worktree. A relations audit runs IN this primary checkout, so from submission until it
+  reports NO ONE may edit/commit/pull/switch branches here; Orchestrator and Architect both
+  acknowledged and will announce-wait for my explicit AUDIT START / AUDIT END messages.
+  Deps pre-installed here (`pip install -e`, `npm ci` in admin-ui and e2e; tree stays clean).
+- **Audit intent** (criteria, to be sent as `intent.acceptance_criteria`): spec rulings R4-R13
+  + sec.2 hardening; sec.5 contracts exact; invariants 40-47 with tests; no PIN value in the
+  delivery diff and no PIN state in wixy; unlock fail-closed 503 when cmd is down; no token in
+  any URL or log; 2 s re-check covers two processes; leases prevent double processing; every
+  ffmpeg call hardened; SW has no fetch handler; the Architect's 4 erasure checks (raw-bytes
+  absence after 204, idempotence, 422 confirm guard on wipe, no push on delete/wipe); decision
+  00150 path-traversal class across ALL id-taking routes; containment ruling Rules A/B/C;
+  migrations v1->v6 incl. legacy scrub.pending import; the operator's original requirements.
+- **Next**: Architect's SHA -> fetch/ff-merge -> announce AUDIT START -> submit audit (opus) ->
+  wait (do not poll) -> fix top-rung findings via Luna, never dismiss -> AUDIT END. In parallel:
+  Luna's P7 handoff -> Sol docs review (separate worktree) -> merge P7 PR (sync of this
+  checkout deferred until the audit reports). Then live `verify` on ca.cinnamons.uk with a real
+  PIN unlock, then the ONE delivery merge as a squash with an explicit body (R14a).
