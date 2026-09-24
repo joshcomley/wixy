@@ -621,3 +621,54 @@ fixed same-session.)
 - **Progress unchanged at 9/13** (P6b and P8 still both "doing" pending fixes).
   P4/P5b delivery tasks + lanes already closed (see above). P6b/P8 delivery tasks
   marked "doing" with their builder_session_id/build_space_id set for tracking.
+
+## Update 2026-09-24 (DM `014c0ebc`) — CRITICAL security fix, DM-owned, pushed
+
+- **The `gpt-6-sol` reviewer (`e89fc62b`), while reviewing P6b, found a critical
+  base-branch (P1/P2b, already-merged) vulnerability unrelated to P6b's own diff**:
+  `DELETE /api/admin/server/uploads/{uploadId}` -> `cancel_upload()` in
+  `wixy_server/livechat/uploads.py` passed the client-supplied `upload_id` straight
+  into `paths.server_upload_dir(upload_id)` (a plain path join, no normalization),
+  then unconditionally `shutil.rmtree(..., ignore_errors=True)`'d the result. An
+  authenticated request (any unlocked chat participant) with `upload_id=".."`
+  resolved to the PARENT `server/` directory - DB, `secret.key`, `vapid.json`, every
+  attachment's media - and silently wiped it. No backup exists for this feature's
+  data (per the operator's own accepted decision #974), so this would have been
+  unrecoverable.
+- **Fixed it myself, directly, as the DM** (not routed to a Builder - small, surgical,
+  urgent, and touches P1/P2b's already-closed area, not P6b's or P8's own work):
+  red/green discipline - wrote `test_cancel_rejects_a_traversal_id_instead_of_deleting_server_dir`
+  in `test_livechat_uploads.py` (a sentinel file in `server_dir`, asserts it survives),
+  confirmed it FAILED on unfixed code (the sentinel was actually deleted - proved the
+  vuln, not just theorized it), then added `_UPLOAD_ID_RE = re.compile(r"^[0-9a-f]{32}$")`
+  (mirrors the existing `_ATTACHMENT_ID_RE` pattern already used for attachment ids)
+  and a `.fullmatch()` guard at the top of `cancel_upload` before any DB/filesystem
+  access. `upload_id` is always server-generated via `uuid.uuid4().hex`, so this
+  closes the gap without changing the frozen "204 unconditionally, no error case"
+  HTTP contract - an invalid id is now just treated the same as an unknown one.
+  Traced every other `server_upload_dir`/`server_attachment_media_dir` call site
+  (`janitor.py`, `media_queue.py`, the chunk-upload/complete routes) - all of them
+  only ever operate on DB-sourced ids gated by an existence check first, never raw
+  client input, so this was the one reachable entry point; did NOT add redundant
+  validation there (nothing to guard against).
+- **Had the same reviewer (already deep in this exact code) check my fix before
+  push** - confirmed clean, one polish suggestion (`.fullmatch()` over `.match()`
+  with `$`, since Python's `$` technically also matches before a trailing newline;
+  not itself exploitable here, but worth the correctness). Applied. mypy/ruff/full
+  pytest (1655/1655) all clean. Pushed directly to `cmd/workspace-00029` as `b472919`
+  (matches the DM-integration-commit precedent for small, urgent, DM-owned fixes
+  outside any Builder's active parcel).
+- **Also caught while reviewing**: a MEDIUM finding for P6b (upload-cancel chip never
+  calls `DELETE /uploads/{id}` on abort, leaking quota/disk until the 24h janitor) -
+  relayed to P6b's Builder alongside the 3 HIGH findings (see update above), to fix
+  together before their next FINAL HANDOFF.
+- **Isolated review worktree** at
+  `...__review-p6b\wixy` (detached HEAD, throwaway) is now stale/done - the reviewer's
+  work there is complete; safe to remove at any point, not referenced by anything else.
+- **This validates the extra Sol-review layer beyond just my own automated
+  verification even more strongly than the first 3 HIGH findings did** - a genuinely
+  critical, unrelated, already-merged vulnerability that had been sitting in the
+  integration branch since P1/P2b merged, caught only because a dedicated reviewer
+  was reading the code with fresh eyes rather than just running the existing test
+  suite (which had 100% coverage of the "happy path" and the "unknown id" no-op case,
+  but nobody had written a test for a malformed/malicious id before now).
