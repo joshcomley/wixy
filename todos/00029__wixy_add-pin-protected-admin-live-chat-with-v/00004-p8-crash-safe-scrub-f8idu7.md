@@ -18,8 +18,9 @@ The v1.5.3 candidate had two critical Sol findings: a crash could leave deleted 
 - The DM's fresh Sol review confirmed both critical findings and the first medium were resolved, then measured a second medium: the full unreferenced-storage scan cost 0.221 s with 100 live attachments and opened a DB connection per entry every two seconds.
 - The follow-up scans only at startup or while a wipe-sweep token is pending. It enumerates candidate paths before one batched live-ID snapshot, skips journaled pending IDs, and creates a durable retry token when a startup scan fails. This preserves newly-created post-wipe uploads while avoiding routine full-tree scans and per-entry DB calls.
 - Sol then found a high: cancellation after a chunk write could skip the row check, and completed tombstones were no longer scanned on ordinary ticks. The route now shields write plus post-write check; missing-upload cleanup re-marks the validated upload ID before retrying, so late bytes are removed even after prior cleanup completed.
+- DM then reproduced a second test failure: the background scrubber and wipe route could both invoke `store.scrub()` for one marker. Route and worker scrub attempts now share `LiveChatStore.scrub_guard()` and re-read the marker under the lock; a route skips the scrub if the worker already completed it.
 - Keep the follow-up local. The DM owns fresh Sol review and sec.13 audit; do not push or run/arrange sec.13.
-- Latest evidence after both medium fixes and the late-chunk fix: affected backend store/janitor/routes/media-queue slice 141/141 passed; Ruff check/format passed; mypy passed across 206 sources. Prior Admin Vitest 1,095, strict typecheck, and P8 Server chat Playwright 7/7 remain valid; the follow-up does not touch the frontend.
+- Latest evidence after both scaling fixes, late-chunk fix, and scrub guard: affected backend store/janitor/routes/media-queue slice 141/141 passed; wipe marker test passed 3/3 isolated runs with `-p no:randomly`; Ruff check/format passed; mypy passed across 206 sources. Prior Admin Vitest 1,095, strict typecheck, and P8 Server chat Playwright 7/7 remain valid; this follow-up does not touch the frontend.
 - Earlier combined chat/media Playwright run was 8/11: all seven P8 tests passed; three P6b media-processing cases timed out while rows remained processing under severe CPU/disk load. This limitation is not re-tested in this continuation.
 
 ## Relevant files + commits
@@ -32,5 +33,5 @@ The v1.5.3 candidate had two critical Sol findings: a crash could leave deleted 
 
 1. Review final diff and ensure generated files have no drift.
 2. Commit this follow-up with a `Release-note:` trailer.
-3. Send the DM the exact base/candidate SHAs, scan-scaling and late-chunk fixes, verification, and the P6b E2E caveat; request fresh exact-SHA Sol review. DM owns sec.13. Do not push.
+3. Send the DM the exact base/candidate SHAs, scan-scaling, late-chunk, and scrub-race fixes, verification, and the P6b E2E caveat; request fresh exact-SHA Sol review. DM owns sec.13. Do not push.
 4. Amend Answers entry #1912 with the updated plain-English status.

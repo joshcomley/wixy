@@ -1238,7 +1238,9 @@ one message, and wipe everything. The addendum is purely **additive**:
       message that no longer exists anywhere.
   - **The background erasure worker** (app task group): retry recorded file removal
     first, then run `scrub` every 2 s. It also runs once at startup, so a crash or slot
-    swap mid-erasure still finishes. It is idempotent across both slot processes.
+    swap mid-erasure still finishes. Route and worker scrubs serialize per store and
+    re-read the pending marker under the guard; if one already cleared it, the other skips
+    its redundant scrub. It is idempotent across both slot processes.
   - **Media-file cleanup (v1.5.4):** delete and wipe record attachment/upload IDs for
   filesystem cleanup in the same SQLite transaction that removes their rows. Wipe also
   records a token for sweeping unreferenced paths. The app worker retries file removal at

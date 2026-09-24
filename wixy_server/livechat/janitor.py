@@ -86,12 +86,13 @@ async def run_forever(
 
 def scrub_once(*, store: LiveChatStore, deadline_s: float = SCRUB_TICK_DEADLINE_S) -> bool:
     """Resume the durable WAL scrub if a prior delete/wipe exceeded its deadline."""
-    pending_token = store.scrub_pending_token()
-    if pending_token is None:
-        return False
-    if not store.scrub(deadline_s=deadline_s):
-        return False
-    return store.clear_scrub_pending(expected_token=pending_token)
+    with store.scrub_guard():
+        pending_token = store.scrub_pending_token()
+        if pending_token is None:
+            return False
+        if not store.scrub(deadline_s=deadline_s):
+            return False
+        return store.clear_scrub_pending(expected_token=pending_token)
 
 
 def _remove_entry(path: Path) -> None:

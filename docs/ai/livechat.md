@@ -228,6 +228,8 @@ only while a wipe-sweep token remains pending. Each sweep reads live attachment 
 one DB snapshot; a failed startup sweep creates a durable retry token. Chunk writes shield the
 write-and-row-check sequence from cancellation. If a late write finds its upload deleted, it
 re-marks that upload for durable cleanup, even when an earlier cleanup already completed.
+Route-owned and background WAL scrubs serialize under `LiveChatStore.scrub_guard()` and read the
+current marker after acquiring the guard; a route skips its scrub if the worker already cleared it.
 
 ## 7. Web Push (`livechat/push.py`, `server/pushToggle.ts`)
 

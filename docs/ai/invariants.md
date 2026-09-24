@@ -597,7 +597,9 @@ tombstones remain for ID-reuse protection but are not revisited.
 Every store connection sets `PRAGMA secure_delete=ON`; both delete and wipe TRUNCATE the WAL.
 Recovery removes media files before retrying the DB scrub. A 204 requires an empty WAL and
 completed media cleanup. 202 returns one `erasurePending` flag covering both; the settings
-sheet waits until it clears.
+sheet waits until it clears. Route and background WAL scrubs serialize through
+`LiveChatStore.scrub_guard()` and re-read the current marker under the guard, avoiding redundant
+scrub attempts against a marker another worker already cleared.
 Sequence high-water marks and push subscriptions are preserved. Media files are unlinked, but
 NTFS/SSD byte-level shredding is not claimed.
 *Enforced by:* `wixy_server/tests/test_livechat_store.py` (migration, idempotence, secure delete,

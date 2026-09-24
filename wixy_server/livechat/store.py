@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 import time
 import uuid
 from collections.abc import Iterator, Sequence
@@ -225,6 +226,13 @@ _JOURNAL_MODE_SWITCH_RETRY_DELAY_S = 0.02
 class LiveChatStore:
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
+        self._scrub_lock = threading.Lock()
+
+    @contextmanager
+    def scrub_guard(self) -> Iterator[None]:
+        """Serialize route-owned and background WAL scrubs for this store instance."""
+        with self._scrub_lock:
+            yield
 
     def _connect(self) -> sqlite3.Connection:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
