@@ -671,7 +671,7 @@ describe("mountServerThread", () => {
       view.teardown();
     });
 
-    it("keeps an optimistically deleted message removed when DELETE outcome is unknown", async () => {
+    it("restores an unknown DELETE after retry exhaustion with the confirm copy", async () => {
       getHistory.mockResolvedValue(emptyHistory({ messages: [fakeMessage({ text: "remove me" })] }));
       deleteMessage.mockRejectedValue(new ServerErasureOutcomeUnknownError());
       const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
@@ -682,10 +682,26 @@ describe("mountServerThread", () => {
       view.element.querySelector<HTMLButtonElement>(".wx-srv-message-delete-confirm-button")?.click();
       await flush();
 
-      expect(view.element.querySelector(".wx-srv-erasure-status")?.textContent)
-        .toBe("Deletion is still working — check again.");
-      expect(view.element.querySelector(".wx-srv-message-delete-error")).toBeNull();
-      expect(view.element.textContent).not.toContain("Couldn't delete message. Try again.");
+      expect(view.element.textContent).toContain("remove me");
+      expect(view.element.querySelector(".wx-srv-message-delete-error")?.textContent)
+        .toBe("Couldn't confirm the delete — try again");
+      view.teardown();
+    });
+
+    it("removes a restored delete bubble when its late message_deleted event arrives", async () => {
+      getHistory.mockResolvedValue(emptyHistory({ messages: [fakeMessage({ text: "late delete" })] }));
+      deleteMessage.mockRejectedValue(new ServerErasureOutcomeUnknownError());
+      const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-actions-trigger")?.click();
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-action-delete")?.click();
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-delete-confirm-button")?.click();
+      await flush();
+      expect(view.element.textContent).toContain("late delete");
+
+      view.handleStreamEvent({ type: "message_deleted", seq: 1 });
+      expect(view.element.textContent).not.toContain("late delete");
       view.teardown();
     });
 
@@ -701,6 +717,81 @@ describe("mountServerThread", () => {
 
       expect(wipeChat).toHaveBeenCalledWith(SESSION);
       expect(view.element.textContent).not.toContain("gone");
+      view.teardown();
+    });
+
+    it("reconciles an unknown wipe to empty history without re-POSTing", async () => {
+      getHistory
+        .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ seq: 1, text: "old before wipe" })] }))
+        .mockResolvedValueOnce(emptyHistory());
+      wipeChat.mockRejectedValue(new ServerErasureOutcomeUnknownError());
+      const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+
+      await expect(view.wipe()).resolves.toBe(true);
+
+      expect(wipeChat).toHaveBeenCalledOnce();
+      expect(view.element.textContent).not.toContain("old before wipe");
+      view.teardown();
+    });
+
+    it("keeps only post-request messages after an unknown wipe reconciliation", async () => {
+      const sentAfterRequest = fakeMessage({
+        seq: 2,
+        clientId: "after-1234",
+        text: "sent after wipe started",
+        createdAt: Date.now() / 1000 + 1,
+      });
+      getHistory
+        .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ seq: 1, text: "old before wipe" })] }))
+        .mockResolvedValueOnce(emptyHistory({ messages: [sentAfterRequest] }));
+      wipeChat.mockRejectedValue(new ServerErasureOutcomeUnknownError());
+      const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+
+      await expect(view.wipe()).resolves.toBe(true);
+
+      expect(view.element.textContent).not.toContain("old before wipe");
+      expect(view.element.textContent).toContain("sent after wipe started");
+      expect(wipeChat).toHaveBeenCalledOnce();
+      view.teardown();
+    });
+
+    it("preserves a post-request stream message while reconciling an unknown wipe", async () => {
+      let resolveHistory!: (page: HistoryPage) => void;
+      getHistory
+        .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ seq: 1, text: "old before wipe" })] }))
+        .mockImplementationOnce(() => new Promise<HistoryPage>((resolve) => { resolveHistory = resolve; }));
+      wipeChat.mockRejectedValue(new ServerErasureOutcomeUnknownError());
+      const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+
+      const request = view.wipe();
+      await flush();
+      view.handleStreamEvent({
+        type: "message",
+        message: fakeMessage({ seq: 2, text: "new while reconciling", createdAt: Date.now() / 1000 + 1 }),
+      });
+      resolveHistory(emptyHistory());
+      await expect(request).resolves.toBe(true);
+
+      expect(view.element.textContent).not.toContain("old before wipe");
+      expect(view.element.textContent).toContain("new while reconciling");
+      view.teardown();
+    });
+
+    it("restores history and reports a non-committed wipe after an unknown outcome", async () => {
+      getHistory
+        .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ seq: 1, text: "still here" })] }))
+        .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ seq: 1, text: "still here" })] }));
+      wipeChat.mockRejectedValue(new ServerErasureOutcomeUnknownError());
+      const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+
+      await expect(view.wipe()).rejects.toMatchObject({ name: "ServerWipeNotCommittedError" });
+
+      expect(wipeChat).toHaveBeenCalledOnce();
+      expect(view.element.textContent).toContain("still here");
       view.teardown();
     });
 

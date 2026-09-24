@@ -10,7 +10,11 @@ import type { ChatComposer } from "../chatComposer";
 import { mountChatComposer } from "../chatComposer";
 import { mountChatThreadScroll, type ChatThreadScroll } from "../chatThreadScroll";
 import { mountLightbox, type Lightbox } from "../lightbox";
-import { ServerErasureOutcomeUnknownError, ServerLockedError } from "./api/http";
+import {
+  ServerErasureOutcomeUnknownError,
+  ServerLockedError,
+  ServerWipeNotCommittedError,
+} from "./api/http";
 import { deleteMessage, getHistory, sendMessage, wipeChat, type Message } from "./api/messages";
 import { uploadServerAttachment } from "./api/uploads";
 import type { ServerIdentity } from "./identity";
@@ -154,12 +158,6 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
 
   const threadScroll: ChatThreadScroll = mountChatThreadScroll(thread, jumpPill);
   const lightbox: Lightbox = mountLightbox();
-  const erasureStatus = documentRef.createElement("p");
-  erasureStatus.className = "wx-srv-erasure-status";
-  erasureStatus.hidden = true;
-  erasureStatus.setAttribute("role", "status");
-  erasureStatus.setAttribute("aria-live", "polite");
-  element.appendChild(erasureStatus);
   let currentSession: ServerSession | null = null;
   let voiceRecorder: VoiceRecorder | null = null;
   let composer: ChatComposer;
@@ -340,7 +338,6 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   const confirmedClientIds = new Set<string>();
   const inFlightDeletes = new Set<number>();
   const deleteEventsDuringRequest = new Set<number>();
-  const unknownDeleteSeqs = new Set<number>();
   const deleteFadeTimers = new Map<number, number>();
   const messageActionControllers = new Map<number, MessageActionsController>();
   const renderedMessages = new Map<number, { readonly message: Message; readonly element: HTMLElement }>();
@@ -618,13 +615,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       await deleteMessage(session, message.seq);
     } catch (error) {
       const deleteArrived = deleteEventsDuringRequest.has(message.seq);
-      if (error instanceof ServerErasureOutcomeUnknownError) {
-        if (!deleteArrived && requestGeneration === contentGeneration) {
-          unknownDeleteSeqs.add(message.seq);
-          erasureStatus.textContent = "Deletion is still working — check again.";
-          erasureStatus.hidden = false;
-        }
-      } else if (!deleteArrived && requestGeneration === contentGeneration) {
+      if (!deleteArrived && requestGeneration === contentGeneration) {
         deletedSeqs.delete(message.seq);
         const fadeTimer = deleteFadeTimers.get(message.seq);
         if (fadeTimer !== undefined) win.clearTimeout(fadeTimer);
@@ -637,7 +628,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         if (restored !== null) {
           const errorLine = documentRef.createElement("span");
           errorLine.className = "wx-srv-message-delete-error";
-          errorLine.textContent = "Couldn't delete message. Try again.";
+          errorLine.textContent = error instanceof ServerErasureOutcomeUnknownError
+            ? "Couldn't confirm the delete — try again"
+            : "Couldn't delete message. Try again.";
           restored.appendChild(errorLine);
         }
       }
@@ -658,22 +651,64 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     confirmedClientIds.clear();
     pendingEchoes = [];
     pendingClientId = null;
-    unknownDeleteSeqs.clear();
-    erasureStatus.hidden = true;
     hasMoreHistory = false;
     renderThreadList(false);
+  }
+
+  async function getAllHistory(session: ServerSession): Promise<readonly Message[]> {
+    const messages: Message[] = [];
+    let before: number | undefined;
+    while (true) {
+      const page = await getHistory(
+        session,
+        before === undefined ? { limit: HISTORY_PAGE_SIZE } : { before, limit: HISTORY_PAGE_SIZE },
+      );
+      messages.push(...page.messages);
+      if (!page.hasMore || page.messages.length === 0) return messages;
+      const nextBefore = Math.min(...page.messages.map((message) => message.seq));
+      if (nextBefore === before) return messages;
+      before = nextBefore;
+    }
+  }
+
+  async function reconcileUnknownWipe(session: ServerSession, requestStartedAt: number): Promise<boolean> {
+    let history: readonly Message[];
+    try {
+      history = await getAllHistory(session);
+    } catch (error) {
+      if (error instanceof ServerLockedError) throw error;
+      throw new ServerErasureOutcomeUnknownError();
+    }
+
+    if (history.some((message) => message.createdAt <= requestStartedAt)) {
+      for (const message of history) addConfirmed(message);
+      hasMoreHistory = false;
+      renderThreadList(false);
+      throw new ServerWipeNotCommittedError();
+    }
+
+    const messagesArrivingDuringReconciliation = Array.from(confirmedBySeq.values())
+      .filter((message) => message.createdAt > requestStartedAt);
+    clearAfterWipe();
+    for (const message of messagesArrivingDuringReconciliation) addConfirmed(message);
+    for (const message of history) addConfirmed(message);
+    historyLoaded = true;
+    hasMoreHistory = false;
+    renderThreadList(false);
+    return true;
   }
 
   async function wipe(): Promise<boolean> {
     const session = currentSession;
     if (session === null) throw new Error("The server chat is locked.");
     const requestGeneration = contentGeneration;
+    const requestStartedAt = Date.now() / 1000;
     let erasurePending: boolean;
     try {
       erasurePending = await wipeChat(session);
     } catch (error) {
-      if (error instanceof ServerErasureOutcomeUnknownError && requestGeneration === contentGeneration) {
-        clearAfterWipe();
+      if (error instanceof ServerErasureOutcomeUnknownError) {
+        return reconcileUnknownWipe(session, requestStartedAt);
       }
       throw error;
     }
@@ -917,8 +952,6 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           return;
         case "message_deleted":
           deletedSeqs.add(event.seq);
-          unknownDeleteSeqs.delete(event.seq);
-          if (unknownDeleteSeqs.size === 0) erasureStatus.hidden = true;
           contentRevision += 1;
           confirmedBySeq.delete(event.seq);
           if (inFlightDeletes.has(event.seq)) {

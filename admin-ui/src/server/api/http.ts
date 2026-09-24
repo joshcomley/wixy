@@ -24,11 +24,19 @@ export class ServerLockedError extends Error {
   }
 }
 
-/** A delete/wipe request was aborted after dispatch; the server may have committed it. */
+/** A delete/wipe request failed after dispatch; the server may have committed it. */
 export class ServerErasureOutcomeUnknownError extends Error {
   constructor() {
     super("server chat: erasure request is still working; outcome unknown");
     this.name = "ServerErasureOutcomeUnknownError";
+  }
+}
+
+/** History reconciliation proved the non-idempotent wipe did not commit. */
+export class ServerWipeNotCommittedError extends Error {
+  constructor() {
+    super("server chat: wipe did not commit");
+    this.name = "ServerWipeNotCommittedError";
   }
 }
 
@@ -60,7 +68,7 @@ export async function serverFetch(
   timeoutMs = TIMEOUT_MS,
 ): Promise<Response> {
   const erasureMutation = isErasureMutation(path, init.method);
-  const effectiveTimeoutMs = erasureMutation ? Math.max(timeoutMs, ERASURE_TIMEOUT_MS) : timeoutMs;
+  const effectiveTimeoutMs = erasureMutation ? ERASURE_TIMEOUT_MS : timeoutMs;
   const headers = new Headers(init.headers);
   if (session !== null) {
     headers.set("X-Wixy-Server-Token", session.token);
@@ -75,7 +83,7 @@ export async function serverFetch(
   try {
     response = await fetch(`${SERVER_API_BASE}${path}`, { ...init, headers, signal: controller.signal });
   } catch (error) {
-    if (erasureMutation && controller.signal.aborted) throw new ServerErasureOutcomeUnknownError();
+    if (erasureMutation) throw new ServerErasureOutcomeUnknownError();
     throw error;
   } finally {
     clearTimeout(timer);

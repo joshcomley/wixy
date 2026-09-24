@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mountServerSettingsSheet } from "../src/server/settingsSheet";
-import { ServerErasureOutcomeUnknownError } from "../src/server/api/http";
+import { ServerErasureOutcomeUnknownError, ServerWipeNotCommittedError } from "../src/server/api/http";
 import type { ServerIdentity } from "../src/server/identity";
 import type { LockHooks, ServerSession } from "../src/server/types";
 
@@ -88,6 +88,55 @@ describe("mountServerSettingsSheet wipe confirmation", () => {
     desktopView.teardown();
   });
 
+  it("shows used and quota bytes from /usage", async () => {
+    getUsage.mockResolvedValueOnce({
+      mediaAvailable: true, usedBytes: 1536, quotaBytes: 1_048_576, freeBytes: 1_047_040, erasurePending: false,
+    });
+    const view = mountServerSettingsSheet({
+      identity: identity(),
+      hooks: hooks(),
+      win: window,
+      getSession: () => SESSION,
+      onWipe: vi.fn(),
+      onNameChanged: vi.fn(),
+      onClose: vi.fn(),
+    });
+    document.body.appendChild(view.element);
+    view.open();
+    await flush();
+
+    expect(view.element.querySelector(".wx-srv-sheet-usage")?.textContent)
+      .toBe("Storage: 1.5 KB of 1 MB used");
+    view.teardown();
+  });
+
+  it("shows the unavailable and failure storage states", async () => {
+    const view = mountServerSettingsSheet({
+      identity: identity(),
+      hooks: hooks(),
+      win: window,
+      getSession: () => SESSION,
+      onWipe: vi.fn(),
+      onNameChanged: vi.fn(),
+      onClose: vi.fn(),
+    });
+    document.body.appendChild(view.element);
+
+    getUsage.mockResolvedValueOnce({
+      mediaAvailable: false, usedBytes: 0, quotaBytes: 0, freeBytes: 0, erasurePending: false,
+    });
+    view.open();
+    await flush();
+    expect(view.element.querySelector(".wx-srv-sheet-usage")?.textContent)
+      .toBe("Storage: media isn't available on this server.");
+
+    getUsage.mockRejectedValueOnce(new Error("storage request failed"));
+    view.open();
+    await flush();
+    expect(view.element.querySelector(".wx-srv-sheet-usage")?.textContent).toBe("Storage: couldn't load.");
+    view.teardown();
+  });
+
   it("requires the two-step destructive confirmation before wiping", async () => {
     const onWipe = vi.fn().mockResolvedValue(false);
     const view = mountServerSettingsSheet({
@@ -135,11 +184,11 @@ describe("mountServerSettingsSheet wipe confirmation", () => {
     await flush();
 
     expect(view.element.hidden).toBe(false);
-    expect(view.element.textContent).toContain("Couldn't delete messages. Try again.");
+    expect(view.element.textContent).toContain("Couldn't delete everything — try again");
     view.teardown();
   });
 
-  it("shows an unknown wipe as still working and blocks a repeat submission", async () => {
+  it("shows an unknown wipe as checking and blocks a repeat submission", async () => {
     const onWipe = vi.fn().mockRejectedValue(new ServerErasureOutcomeUnknownError());
     const view = mountServerSettingsSheet({
       identity: identity(),
@@ -157,7 +206,7 @@ describe("mountServerSettingsSheet wipe confirmation", () => {
     view.element.querySelector<HTMLButtonElement>(".wx-srv-sheet-wipe-confirm-button")?.click();
     await flush();
 
-    expect(view.element.textContent).toContain("Still working — check again.");
+    expect(view.element.textContent).toContain("Couldn't confirm — checking…");
     expect(view.element.querySelector<HTMLDivElement>(".wx-srv-sheet-wipe-confirm")?.hidden).toBe(true);
     const wipeButton = view.element.querySelector<HTMLButtonElement>(".wx-srv-sheet-wipe");
     expect(wipeButton?.disabled).toBe(true);
@@ -171,8 +220,38 @@ describe("mountServerSettingsSheet wipe confirmation", () => {
     });
     view.open();
     await flush();
-    expect(view.element.textContent).toContain("Still working — check again.");
+    expect(view.element.textContent).toContain("Couldn't confirm — checking…");
     expect(view.element.textContent).not.toContain("Deleted. Erasing leftover traces…");
+    view.teardown();
+  });
+
+  it("keeps wipe confirmation retryable after history proves the wipe did not commit", async () => {
+    const onWipe = vi.fn()
+      .mockRejectedValueOnce(new ServerWipeNotCommittedError())
+      .mockResolvedValueOnce(false);
+    const view = mountServerSettingsSheet({
+      identity: identity(),
+      hooks: hooks(),
+      win: window,
+      getSession: () => SESSION,
+      onWipe,
+      onNameChanged: vi.fn(),
+      onClose: vi.fn(),
+    });
+    document.body.appendChild(view.element);
+    view.open();
+    await flush();
+    view.element.querySelector<HTMLButtonElement>(".wx-srv-sheet-wipe")?.click();
+    const confirm = view.element.querySelector<HTMLButtonElement>(".wx-srv-sheet-wipe-confirm-button")!;
+    confirm.click();
+    await flush();
+
+    expect(view.element.querySelector<HTMLParagraphElement>(".wx-srv-sheet-wipe-error")?.textContent)
+      .toBe("Couldn't delete everything — try again");
+    expect(view.element.querySelector<HTMLDivElement>(".wx-srv-sheet-wipe-confirm")?.hidden).toBe(false);
+    confirm.click();
+    await flush();
+    expect(onWipe).toHaveBeenCalledTimes(2);
     view.teardown();
   });
 

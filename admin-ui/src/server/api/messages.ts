@@ -2,7 +2,7 @@
 // parcel's own `server/api/<area>.ts`, calling through P4's `serverFetch` so
 // the token/401 handling stays in one place (`http.ts`'s own docstring).
 
-import { ServerLockedError, serverFetch } from "./http";
+import { ServerErasureOutcomeUnknownError, ServerLockedError, serverFetch } from "./http";
 import type { ServerSession } from "../types";
 
 export type AttachmentKind = "photo" | "video" | "voice";
@@ -101,18 +101,31 @@ export async function sendMessage(
   return { ok: false, kind: "unavailable" };
 }
 
+const DELETE_UNKNOWN_RETRY_MS = [1_000, 2_000, 4_000] as const;
+
+function waitForDeleteRetry(delayMs: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
 export async function deleteMessage(session: ServerSession, seq: number): Promise<boolean> {
-  const response = await serverFetch(
-    `/messages/${encodeURIComponent(String(seq))}`,
-    { method: "DELETE" },
-    session,
-  );
-  if (!response.ok) throw new Error(`Couldn't delete message (${response.status}).`);
-  if (response.status === 202) {
-    const body = (await response.json()) as { erasurePending: boolean };
-    return body.erasurePending;
+  const path = `/messages/${encodeURIComponent(String(seq))}`;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const response = await serverFetch(path, { method: "DELETE" }, session);
+      if (!response.ok) throw new Error(`Couldn't delete message (${response.status}).`);
+      if (response.status === 202) {
+        const body = (await response.json()) as { erasurePending: boolean };
+        return body.erasurePending;
+      }
+      return false;
+    } catch (error) {
+      if (error instanceof ServerLockedError) throw error;
+      if (!(error instanceof ServerErasureOutcomeUnknownError) || attempt >= DELETE_UNKNOWN_RETRY_MS.length) {
+        throw error;
+      }
+      await waitForDeleteRetry(DELETE_UNKNOWN_RETRY_MS[attempt] ?? 4_000);
+    }
   }
-  return false;
 }
 
 export async function wipeChat(session: ServerSession): Promise<boolean> {

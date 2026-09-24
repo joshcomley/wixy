@@ -3,7 +3,10 @@
 // toggle into, and a Lock button.
 
 import { getUsage } from "./api/messages";
-import { ServerErasureOutcomeUnknownError, ServerLockedError } from "./api/http";
+import {
+  ServerErasureOutcomeUnknownError,
+  ServerLockedError,
+} from "./api/http";
 import type { ServerIdentity } from "./identity";
 import { isAndroidPushCapable, mountPushToggle, type PushToggle } from "./pushToggle";
 import type { LockHooks, ServerSession } from "./types";
@@ -126,7 +129,7 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     const generation = scrubPollGeneration;
     const stopAt = Date.now() + 60_000;
     wipeStatus.textContent = outcomeUnknown
-      ? "Still working — check again."
+      ? "Couldn't confirm — checking…"
       : "Deleted. Erasing leftover traces…";
     wipeStatus.hidden = false;
 
@@ -253,12 +256,12 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
           const session = deps.getSession();
           if (session !== null) startScrubPolling(session, true);
           else {
-            wipeStatus.textContent = "Still working — check again.";
+            wipeStatus.textContent = "Couldn't confirm — checking…";
             wipeStatus.hidden = false;
           }
           return;
         }
-        wipeError.textContent = "Couldn't delete messages. Try again.";
+        wipeError.textContent = "Couldn't delete everything — try again";
         wipeError.hidden = false;
       })
       .finally(() => {

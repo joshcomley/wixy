@@ -36,3 +36,30 @@ For every finding, add/run a regression test and observe it fail before implemen
 - Targeted Playwright: 5 passed — voice immediate-send/media playback, Android and desktop push visibility/subscription, and desktop/mobile PIN lockout copy.
 - `ruff check .`, `ruff format --check .`, `mypy`: passed. Bare `pytest` with configured `-n 4`: 1,713 passed; 4 Starlette/httpx deprecation warnings.
 - Remaining: create the local candidate commit with the required release-note trailer, send the exact SHA and handoff to DM + Orchestrator, and wait for exact-candidate clearance. No push or merge before clearance.
+
+## Review expansion — 2026-09-24
+
+The DM and Architect sent follow-up requirements after the first candidate. Work now also includes:
+
+- Architect ruling `spec/server-chat/02-audit-r3-rulings.md` at `0fe4439`: DELETE retries unknown outcomes up to three times after 1/2/4 seconds and restores after exhaustion; wipe never retries and reconciles with history; add the delayed 12-second DELETE E2E.
+- DM traceability addendum `http://127.0.0.1:9321/intercomm/5427146c13d04130bd365fc460b02991`: add proof for rows #13, #27, #42, #64, #65, #69 and #70, retaining F1 mounted-toggle and F3 send-before-Send e2e proof.
+- Superseding corrected matrix `http://127.0.0.1:9321/intercomm/65b0d0958d5347fc8bf7b745e2155695` (replaces the earlier stale file:line pointers).
+- Prior candidate `76982876395918a18a533333e3f3f6034b2ce551` remains local; expanded work will produce a new candidate and require a new exact-SHA DM handoff.
+- Red-first traceability proof is being added for rows #13/#27/#42/#64/#65/#69/#70. One additional F11 defect was found red-first: `wiped` history reconciliation dropped a newer `message` stream event that arrived during the refetch. The fix preserves post-request confirmed messages while clearing older history; report as `P-F11` in the replacement handoff.
+
+## Expanded verification update — 2026-09-24
+
+- F11 now follows Architect ruling: 30s dedicated DELETE/wipe transport policy; DELETE performs up to three explicit retries after 1/2/4 seconds on unknown network outcomes and restores with the confirmation copy after exhaustion; wipe is never retried, refetches all history, preserves only post-request messages when committed, and restores/re-enables retry only when older messages remain.
+- Fixture has a post-commit DELETE response delay control. The two-client E2E holds the HTTP response 12 seconds; both bubbles disappear before the response and stay removed after it.
+- Sol proof rows: #13 token-surface E2E; #27 settings rename/persistence E2E; #42 no title/favicon/nav signal E2E; #64 desktop contextmenu E2E plus unit; #65 clipboard success/media-only/rejection unit; #69 used/quota/unavailable/failure unit; #70 real settings Lock E2E. Each has a red probe documented in the builder transcript.
+- New real defect `P-F11`: a post-request message event arriving during wipe history reconciliation was lost when old state cleared; a red-first regression test exposed it, and reconciliation now preserves post-request confirmed stream messages.
+- Current E2E: 9 passed (six server-chat proof/delayed-delete cases, desktop+Android push, immediate voice send/media playback). Earlier desktop/mobile PIN lockout e2e also passed.
+- Current `npm test`: 1,133 passed across 64 files; `npm run typecheck` passed; `npm run build` passed; `ruff check .`, `ruff format --check .`, and mypy (208 files) passed; bare `pytest` with fixed `-n 4`: 1,713 passed, 4 Starlette/httpx deprecation warnings.
+- Remaining: commit the replacement candidate with the required release-note trailer, send its exact SHA and this expanded handoff to the live DM + Orchestrator, then wait for exact-SHA clearance. No push/merge.
+
+## Replacement candidate committed — 2026-09-24
+
+- Expanded work is committed locally on `cmd/workspace-00029-bs10` as the replacement candidate; its exact SHA and parent are in the peer handoff. The prior candidate is superseded.
+- Red-first probes passed for all seven proof rows and F11. Additional `P-F11` stream-message preservation regression also failed before its fix and passes now.
+- Final counts at handoff: Vitest 1,133/64 files; pytest 1,713 with 4 deprecation warnings; 9 targeted E2E cases passed; TypeScript, Ruff, mypy and post-commit bundle drift check passed.
+- No PR, push, or merge. Await exact-SHA Delivery Manager clearance.
