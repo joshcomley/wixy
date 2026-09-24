@@ -31,7 +31,13 @@ import wixy_server.routes_livechat as routes_livechat_module
 from wixy_server.app import create_app
 from wixy_server.livechat import janitor as livechat_janitor
 from wixy_server.livechat import media_queue as livechat_media_queue
-from wixy_server.livechat.models import AttachmentResult, PushSubscriptionRow, UploadRow
+from wixy_server.livechat.models import (
+    AttachmentKind,
+    AttachmentResult,
+    AttachmentRow,
+    PushSubscriptionRow,
+    UploadRow,
+)
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import CmdPinVerifier
 from wixy_server.livechat.store import LiveChatStore
@@ -103,6 +109,47 @@ def storage_root(tmp_path: Path) -> Path:
 @pytest.fixture(autouse=True)
 def _dev_no_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("WIXY_DEV_NO_AUTH", "1")
+
+
+@pytest.fixture(autouse=True)
+def _live_app_seeds_must_be_recent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Refuse to seed a stale attachment/upload into a store that belongs to a live app.
+
+    An app's janitor sweeps unreferenced attachments and unpromoted uploads older than 24 h
+    when it starts and hourly after (`livechat.janitor.run_forever`), so a 1970-era stamp is
+    reaped whenever that sweep lands between the seed and its use — an intermittent failure
+    (decisions/00157). Stores built directly (no `create_app`) are unaffected: the store and
+    janitor unit tests rely on historical stamps."""
+    live_dbs: set[Path] = set()
+    real_create_app = create_app
+    real_create_attachment = LiveChatStore.create_attachment
+    real_create_upload = LiveChatStore.create_upload
+
+    def refuse_if_ancient(store: LiveChatStore, stamp: float, what: str, window_s: float) -> None:
+        if store._db_path in live_dbs and stamp < time.time() - window_s:
+            raise AssertionError(
+                f"{what} seeded with the ancient stamp {stamp!r} into a live app's store; its "
+                "janitor reaps rows older than 24 h — seed with time.time() (decisions/00157)"
+            )
+
+    def tracking_create_app(*args: Any, **kwargs: Any) -> Any:
+        app = real_create_app(*args, **kwargs)
+        live_dbs.add(app.state.livechat_store._db_path)
+        return app
+
+    def guarded_create_attachment(
+        self: LiveChatStore, *, att_id: str, kind: AttachmentKind, now: float
+    ) -> AttachmentRow:
+        refuse_if_ancient(self, now, "attachment", livechat_janitor.ORPHAN_ATTACHMENT_AGE_S)
+        return real_create_attachment(self, att_id=att_id, kind=kind, now=now)
+
+    def guarded_create_upload(self: LiveChatStore, row: UploadRow) -> None:
+        refuse_if_ancient(self, row.created_at, "upload", livechat_janitor.STALE_UPLOAD_AGE_S)
+        real_create_upload(self, row)
+
+    monkeypatch.setitem(globals(), "create_app", tracking_create_app)
+    monkeypatch.setattr(LiveChatStore, "create_attachment", guarded_create_attachment)
+    monkeypatch.setattr(LiveChatStore, "create_upload", guarded_create_upload)
 
 
 @pytest.fixture
@@ -875,9 +922,15 @@ class TestSendHistoryUsage:
         client, headers = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
         try:
             store: LiveChatStore = client.app.state.livechat_store  # type: ignore[attr-defined]
+            paths: ProjectPaths = client.app.state.paths  # type: ignore[attr-defined]
             attachment_ids = [f"{index + 1:032x}" for index in range(attachment_count)]
-            for index, attachment_id in enumerate(attachment_ids):
-                store.create_attachment(att_id=attachment_id, kind="photo", now=float(index))
+            # The live app's janitor sweeps unreferenced attachments older than 24 h at
+            # startup and hourly (decisions/00157). Seed with the real clock, and force
+            # a sweep now: an ancient stamp would be reaped here on every run instead
+            # of only when the startup sweep happened to land before the POST.
+            for attachment_id in attachment_ids:
+                store.create_attachment(att_id=attachment_id, kind="photo", now=time.time())
+            livechat_janitor.run_once(store=store, paths=paths, now=time.time())
             response = client.post(
                 "/api/admin/server/messages",
                 json={
@@ -1375,7 +1428,8 @@ class TestDeleteWipeRoutes:
         paths: ProjectPaths = app.state.paths
         notifier: LiveChatNotifier = app.state.livechat_notifier
         attachment_id = "9" * 32
-        attachment = store.create_attachment(att_id=attachment_id, kind="photo", now=1.0)
+        seeded_at = time.time()
+        attachment = store.create_attachment(att_id=attachment_id, kind="photo", now=seeded_at)
         message, _ = store.create_message(
             client_id="client-publish-before-cleanup",
             sender="Josh",
@@ -1383,7 +1437,7 @@ class TestDeleteWipeRoutes:
             by_email=None,
             text="erase this while another screen is open",
             attachment_ids=[attachment.id],
-            now=2.0,
+            now=seeded_at + 1,
         )
         media_dir = paths.server_attachment_media_dir(attachment_id)
         media_dir.mkdir(parents=True)
@@ -1609,8 +1663,9 @@ class TestDeleteWipeRoutes:
         app.state.livechat_message_hooks.append(_push)
         store: LiveChatStore = app.state.livechat_store
         paths = app.state.paths
+        seeded_at = time.time()
         attachment = store.create_attachment(
-            att_id="delete-route-attachment", kind="photo", now=1.0
+            att_id="delete-route-attachment", kind="photo", now=seeded_at
         )
         store.create_upload(
             UploadRow(
@@ -1620,7 +1675,7 @@ class TestDeleteWipeRoutes:
                 size_bytes=12,
                 filename=None,
                 by_email=None,
-                created_at=1.0,
+                created_at=seeded_at,
             )
         )
         message, _ = store.create_message(
@@ -1630,7 +1685,7 @@ class TestDeleteWipeRoutes:
             by_email=None,
             text="delete-route-raw-marker-4f6a",
             attachment_ids=(attachment.id,),
-            now=2.0,
+            now=seeded_at + 1,
         )
         media_dir = paths.server_attachment_media_dir(attachment.id)
         media_dir.mkdir(parents=True)
@@ -1735,7 +1790,8 @@ class TestDeleteWipeRoutes:
         store: LiveChatStore = app.state.livechat_store
         paths: ProjectPaths = app.state.paths
         attachment_id = "a" * 32
-        store.create_attachment(att_id=attachment_id, kind="photo", now=1.0)
+        seeded_at = time.time()
+        store.create_attachment(att_id=attachment_id, kind="photo", now=seeded_at)
         message, _ = store.create_message(
             client_id="client-delete-open-media",
             sender="Josh",
@@ -1743,7 +1799,7 @@ class TestDeleteWipeRoutes:
             by_email=None,
             text="delete-open-media",
             attachment_ids=[attachment_id],
-            now=2.0,
+            now=seeded_at + 1,
         )
         media_dir = paths.server_attachment_media_dir(attachment_id)
         media_dir.mkdir(parents=True)
@@ -1800,7 +1856,8 @@ class TestDeleteWipeRoutes:
         store: LiveChatStore = app.state.livechat_store
         paths: ProjectPaths = app.state.paths
         attachment_id = "b" * 32
-        store.create_attachment(att_id=attachment_id, kind="photo", now=1.0)
+        seeded_at = time.time()
+        store.create_attachment(att_id=attachment_id, kind="photo", now=seeded_at)
         store.create_message(
             client_id="client-wipe-open-media",
             sender="Josh",
@@ -1808,7 +1865,7 @@ class TestDeleteWipeRoutes:
             by_email=None,
             text="wipe-open-media",
             attachment_ids=[attachment_id],
-            now=2.0,
+            now=seeded_at + 1,
         )
         media_dir = paths.server_attachment_media_dir(attachment_id)
         media_dir.mkdir(parents=True)
@@ -2092,7 +2149,12 @@ class TestDeleteWipeRoutes:
         app.state.livechat_message_hooks.append(_push)
         store: LiveChatStore = app.state.livechat_store
         paths = app.state.paths
-        attachment = store.create_attachment(att_id="wipe-route-attachment", kind="voice", now=1.0)
+        # Real-clock stamps: a 1970-dated bare upload would be reaped by the app's startup
+        # janitor sweep before the wipe under test ever removed it (decisions/00157).
+        seeded_at = time.time()
+        attachment = store.create_attachment(
+            att_id="wipe-route-attachment", kind="voice", now=seeded_at
+        )
         store.create_upload(
             UploadRow(
                 id=attachment.id,
@@ -2101,7 +2163,7 @@ class TestDeleteWipeRoutes:
                 size_bytes=20,
                 filename="note.webm",
                 by_email=None,
-                created_at=1.0,
+                created_at=seeded_at,
             )
         )
         store.create_upload(
@@ -2112,7 +2174,7 @@ class TestDeleteWipeRoutes:
                 size_bytes=30,
                 filename="clip.mp4",
                 by_email=None,
-                created_at=1.0,
+                created_at=seeded_at,
             )
         )
         message, _ = store.create_message(
@@ -2122,7 +2184,7 @@ class TestDeleteWipeRoutes:
             by_email=None,
             text="wipe-route-raw-marker-2bc1",
             attachment_ids=(attachment.id,),
-            now=2.0,
+            now=seeded_at + 1,
         )
         store.upsert_push_subscription(
             PushSubscriptionRow(
@@ -2430,8 +2492,11 @@ class TestTokenBoundToRequestingEmail:
 
             store: LiveChatStore = app.state.livechat_store
             attachment_id = "b" * 32
-            store.create_attachment(att_id=attachment_id, kind="photo", now=1.0)
-            claimed = store.claim_processing(owner="token-audit-worker", now=1.0, lease_s=60.0)
+            seeded_at = time.time()
+            store.create_attachment(att_id=attachment_id, kind="photo", now=seeded_at)
+            claimed = store.claim_processing(
+                owner="token-audit-worker", now=seeded_at, lease_s=60.0
+            )
             assert claimed is not None
             store.finish_attachment(
                 att_id=attachment_id,
@@ -2447,7 +2512,7 @@ class TestTokenBoundToRequestingEmail:
                     bytes_on_disk=12,
                     failure=None,
                 ),
-                now=2.0,
+                now=seeded_at + 1,
             )
             media_file = app.state.paths.server_attachment_media_dir(attachment_id) / "full.jpg"
             media_file.parent.mkdir(parents=True)
@@ -2603,3 +2668,37 @@ class TestPushRoutes:
             assert client.get("/api/admin/server/push/config").json() == {"error": "locked"}
             response = client.get("/api/admin/server/push/subscriptions/device-123456")
             assert response.status_code == 401
+
+
+class TestLiveAppSeedTimestampGuard:
+    """decisions/00157: seeds older than the janitor's 24 h window are reaped mid-test."""
+
+    def test_ancient_seeds_into_a_live_apps_store_are_refused(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        store: LiveChatStore = app.state.livechat_store
+
+        with pytest.raises(AssertionError, match="janitor reaps rows older than 24 h"):
+            store.create_attachment(att_id="1" * 32, kind="photo", now=1.0)
+        with pytest.raises(AssertionError, match="janitor reaps rows older than 24 h"):
+            store.create_upload(
+                UploadRow(
+                    id="2" * 32,
+                    kind="photo",
+                    mime="image/jpeg",
+                    size_bytes=1,
+                    filename=None,
+                    by_email=None,
+                    created_at=float(0),
+                )
+            )
+        # Recent stamps are fine, and nothing was written by the refused calls.
+        store.create_attachment(att_id="3" * 32, kind="photo", now=time.time())
+        assert store.get_attachment("1" * 32) is None
+
+    def test_a_store_built_directly_still_takes_historical_stamps(self, tmp_path: Path) -> None:
+        store = LiveChatStore(tmp_path / "bare" / "server.db")
+        assert store.create_attachment(att_id="4" * 32, kind="photo", now=1.0).id == "4" * 32

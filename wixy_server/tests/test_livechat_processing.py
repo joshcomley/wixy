@@ -391,10 +391,11 @@ class TestProcessPhoto:
         with Image.open(src) as original:
             if kind == "gray16-png":
                 expected_gray = Image.new("L", original.size)
+                # The source holds only 0 and 32768, which scale to the literals 0 and 128.
                 expected_gray.putdata(
                     [
-                        round(int(original.getpixel((x, y))) * 255 / 65535)
-                        for y in range(original.height)
+                        0 if x < 20 else 128
+                        for _y in range(original.height)
                         for x in range(original.width)
                     ]
                 )
@@ -432,7 +433,7 @@ class TestProcessPhoto:
             [0 if x < 13 else 32768 if x < 27 else 65535 for _y in range(20) for x in range(40)]
         )
         image.save(src, format="PNG")
-        expected_midtone = round(32768 * 255 / 65535)
+        expected_midtone = 128  # 32768 of 65535 is 127.5 of 255, rounded half up
 
         result = processing.process_photo(src, output_dir=tmp_path / "out")
 
