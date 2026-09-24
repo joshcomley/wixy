@@ -328,6 +328,9 @@ def main() -> None:
     _publish_initial_build(registry.get("e2e"), storage_root, "e2e")
 
     import uvicorn
+    from starlette.middleware.base import RequestResponseEndpoint
+    from starlette.requests import Request
+    from starlette.responses import Response
 
     from wixy_server.app import create_app
 
@@ -395,6 +398,33 @@ def main() -> None:
         watcher_interval_s=3600.0,
         cmdchat_client=cmdchat_client,
     )
+
+    delete_response_delay_s = 0.0
+
+    @app.middleware("http")
+    async def _delay_delete_response(
+        request: Request,
+        call_next: RequestResponseEndpoint,
+    ) -> Response:
+        response = await call_next(request)
+        if (
+            request.method == "DELETE"
+            and request.url.path.startswith("/api/admin/server/messages/")
+            and delete_response_delay_s > 0
+        ):
+            # The route has committed, published its message_deleted event, and
+            # finished cleanup before this fixture-only delay holds the HTTP reply.
+            await anyio.sleep(delete_response_delay_s)
+        return response
+
+    @app.post("/test/server/delete-response-delay", include_in_schema=False)
+    async def _post_delete_response_delay(payload: dict[str, object]) -> dict[str, float]:
+        """Hold DELETE responses after commit to prove the SSE event settles the UI."""
+        nonlocal delete_response_delay_s
+        seconds = payload.get("seconds", 0.0)
+        assert isinstance(seconds, (int, float)) and 0 <= seconds <= 30
+        delete_response_delay_s = float(seconds)
+        return {"seconds": delete_response_delay_s}
 
     @app.post("/test/server/config", include_in_schema=False)
     async def _post_server_test_config() -> dict[str, str]:

@@ -17,12 +17,10 @@ export interface UnlockOk {
 export type UnlockFailure =
   | { readonly ok: false; readonly kind: "wrongPin"; readonly attemptsLeft: number | null }
   | { readonly ok: false; readonly kind: "lockedOut"; readonly retryAfterS: number }
-  /** Covers both 503 variants (`not_configured`, `pin_service_unavailable`)
-   * plus any transport failure, a malformed 200 body, and 422 — every one of
-   * them must read as "Server settings unavailable" (R4: closed, never
-   * open). There is no operator-facing distinction between "cmd doesn't
-   * know this app key" and "cmd is unreachable" — both mean the same thing
-   * from here: no verifier answered. */
+  | { readonly ok: false; readonly kind: "pinChanged" }
+  | { readonly ok: false; readonly kind: "invalid" }
+  | { readonly ok: false; readonly kind: "unexpected" }
+  /** The 503 variants and transport failures: cmd cannot verify the PIN. */
   | { readonly ok: false; readonly kind: "unavailable" };
 
 export type UnlockResult = UnlockOk | UnlockFailure;
@@ -58,7 +56,7 @@ export async function unlock(pin: string): Promise<UnlockResult> {
       const typed = body as { token: string; expiresAt: number };
       return { ok: true, token: typed.token, expiresAt: typed.expiresAt };
     }
-    return { ok: false, kind: "unavailable" };
+    return { ok: false, kind: "unexpected" };
   }
 
   if (response.status === 401) {
@@ -81,7 +79,10 @@ export async function unlock(pin: string): Promise<UnlockResult> {
     return { ok: false, kind: "lockedOut", retryAfterS: Math.max(0, retryAfterS) };
   }
 
-  // 503 (not_configured / pin_service_unavailable), 422, and anything else
-  // unrecognized — fail closed, never open (R4).
-  return { ok: false, kind: "unavailable" };
+  if (response.status === 409) return { ok: false, kind: "pinChanged" };
+  if (response.status === 422) return { ok: false, kind: "invalid" };
+  if (response.status === 503) return { ok: false, kind: "unavailable" };
+
+  // Unknown statuses fail closed and use the generic retry copy (R4).
+  return { ok: false, kind: "unexpected" };
 }

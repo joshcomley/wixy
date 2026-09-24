@@ -171,7 +171,7 @@ for (const profile of DEVICE_PROFILES) {
       });
     });
 
-    test(`${profile.name}: unlock — wrong PIN, 5-strike lockout with a live countdown, then the real PIN opens chat`, async ({
+    test(`${profile.name}: unlock — wrong PIN attempts, 5-strike lockout, then the real PIN opens chat`, async ({
       browser,
       request,
     }) => {
@@ -180,12 +180,15 @@ for (const profile of DEVICE_PROFILES) {
 
         for (let attempt = 0; attempt < 4; attempt++) {
           await enterPin(page, WRONG_PIN);
-          await expect(page.locator(".wx-srv-pinpad-message")).toHaveText("Incorrect PIN");
+          await expect(page.locator(".wx-srv-pinpad-message")).toHaveText(
+            `Wrong PIN — ${4 - attempt} attempts left`,
+          );
         }
         // The fake's default lockout_after is 5 — this trips it.
         await enterPin(page, WRONG_PIN);
-        await expect(page.locator(".wx-srv-pinpad-message")).toContainText("Too many attempts");
-        await expect(page.locator(".wx-srv-pinpad-message")).toContainText("try again in");
+        await expect(page.locator(".wx-srv-pinpad-message")).toHaveText(
+          "Too many wrong tries. Try again in 2 minutes.",
+        );
 
         // The pad itself is disabled while genuinely locked out — asserted
         // directly rather than via `enterPin` (a real, auto-RETRYING click

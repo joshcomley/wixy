@@ -105,6 +105,40 @@ async function waitVisible(locator: ReturnType<Page["locator"]>, keepAlivePage: 
   await expect(locator).toBeVisible({ timeout: 3000 });
 }
 
+async function browserTokenSurfaces(page: Page): Promise<string> {
+  const pageState = await page.evaluate(() => ({
+    url: window.location.href,
+    historyState: window.history.state,
+    localStorage: Object.fromEntries(Object.entries(window.localStorage)),
+    sessionStorage: Object.fromEntries(Object.entries(window.sessionStorage)),
+    documentCookie: document.cookie,
+    resourceUrls: performance.getEntriesByType("resource").map((entry) => entry.name),
+    dom: document.documentElement.outerHTML,
+  }));
+  return JSON.stringify({ pageState, cookies: await page.context().cookies() });
+}
+
+async function browserSignals(page: Page): Promise<{
+  title: string;
+  icons: string[];
+  serverNav: string | null;
+  badges: string[];
+}> {
+  return page.evaluate(() => {
+    const serverNav = Array.from(document.querySelectorAll("button"))
+      .find((button) => button.textContent?.trim() === "Server");
+    return {
+      title: document.title,
+      icons: Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel~="icon"]'))
+        .map((link) => link.href),
+      serverNav: serverNav?.outerHTML ?? null,
+      badges: Array.from(document.querySelectorAll<HTMLElement>(
+        '[class*="badge"], [aria-label*="unread" i], [data-unread]',
+      )).map((element) => element.outerHTML),
+    };
+  });
+}
+
 test.describe("server-chat.spec.ts (P5b)", () => {
   test("A -> B live delivery within 3s, correct alignment, and echo reconciliation", async ({ browser }) => {
     const contextA = await browser.newContext();
@@ -155,6 +189,93 @@ test.describe("server-chat.spec.ts (P5b)", () => {
 
     await contextA.close();
     await contextB.close();
+  });
+
+  test("unlock token never enters browser storage, cookies, history or URLs", async ({ page }) => {
+    await page.goto("/admin/server");
+    const beforeUnlock = await browserTokenSurfaces(page);
+    const unlockResponse = page.waitForResponse((response) =>
+      response.url().endsWith("/api/admin/server/unlock") && response.request().method() === "POST",
+    );
+    await unlockServer(page, "Token tester");
+    const body = (await unlockResponse).json() as Promise<{ token: string }>;
+    const token = (await body).token;
+    expect(token).toBeTruthy();
+
+    expect(beforeUnlock).not.toContain(token);
+    expect(await browserTokenSurfaces(page)).not.toContain(token);
+    await page.locator('.wx-srv-chat-host button[aria-label="Close"]').click();
+    await expect(page.locator(".wx-srv-decoy")).toBeVisible();
+    expect(await browserTokenSurfaces(page)).not.toContain(token);
+  });
+
+  test("saving a settings name updates local storage and survives reload/unlock", async ({ page }) => {
+    await unlockServer(page, "Original name");
+    await page.locator(".wx-srv-settings-button").click();
+    await page.locator(".wx-srv-sheet-name-input").fill("Saved name");
+    await page.locator(".wx-srv-sheet-save-name").click();
+
+    await expect(page.locator(".wx-srv-name-chip")).toHaveText("Saved name");
+    expect(await page.evaluate(() => localStorage.getItem("wx-srv-name"))).toBe("Saved name");
+    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+    await page.reload();
+    await unlockServer(page, "Ignored after saved name");
+    await expect(page.locator(".wx-srv-name-chip")).toHaveText("Saved name");
+    expect(await page.evaluate(() => localStorage.getItem("wx-srv-name"))).toBe("Saved name");
+  });
+
+  test("incoming messages do not change the title, favicon or nav badge while locked or unlocked", async ({ browser }) => {
+    const contextA = await browser.newContext();
+    const contextB = await browser.newContext();
+    const pageA = await contextA.newPage();
+    const pageB = await contextB.newPage();
+    const tag = `no-unread-signal-${Date.now()}`;
+    try {
+      await unlockServer(pageA, "Signal A");
+      await unlockServer(pageB, "Signal B");
+      await pageA.locator('.wx-srv-chat-host button[aria-label="Close"]').click();
+      await expect(pageA.locator(".wx-srv-decoy")).toBeVisible();
+      const lockedSignals = await browserSignals(pageA);
+
+      const lockedText = `${tag}: while locked`;
+      await pageB.locator(".wx-srv-thread-view textarea").fill(lockedText);
+      await pageB.locator(".wx-srv-thread-view .wx-chat-send-button").click();
+      await expect(pageB.locator(".wx-srv-bubble-mine").filter({ hasText: lockedText })).toBeVisible();
+      expect(await browserSignals(pageA)).toEqual(lockedSignals);
+
+      await unlockServer(pageA, "Signal A");
+      const unlockedSignals = await browserSignals(pageA);
+      const unlockedText = `${tag}: while unlocked`;
+      await keepAlive(pageA);
+      await pageB.locator(".wx-srv-thread-view textarea").fill(unlockedText);
+      await pageB.locator(".wx-srv-thread-view .wx-chat-send-button").click();
+      await waitVisible(pageA.locator(".wx-srv-bubble-theirs").filter({ hasText: unlockedText }), pageA);
+      expect(await browserSignals(pageA)).toEqual(unlockedSignals);
+    } finally {
+      await contextA.close();
+      await contextB.close();
+    }
+  });
+
+  test("desktop right-click opens message actions without locking the chat", async ({ page }) => {
+    const label = `right-click-${Date.now()}`;
+    await seed(page, { count: 1, label, sender: "Purdy" });
+    await unlockServer(page, "Context tester");
+    const bubble = page.locator(".wx-srv-bubble").filter({ hasText: `${label} #1` });
+    await expect(bubble).toBeVisible();
+    await bubble.dispatchEvent("contextmenu", { button: 2, bubbles: true, cancelable: true });
+    await expect(bubble.locator(".wx-srv-message-actions")).toBeVisible();
+    await expect(bubble.getByRole("menuitem", { name: "Delete for everyone" })).toBeVisible();
+    await expect(bubble.getByRole("menuitem", { name: "Copy text" })).toBeVisible();
+    await expect(page.locator(".wx-srv-thread")).toBeVisible();
+  });
+
+  test("the settings Lock button detaches the thread and returns to the decoy", async ({ page }) => {
+    await unlockServer(page, "Lock button tester");
+    await page.locator(".wx-srv-settings-button").click();
+    await page.locator(".wx-srv-sheet-lock").click();
+    await expect(page.locator(".wx-srv-thread")).toHaveCount(0);
+    await expect(page.locator(".wx-srv-decoy")).toBeVisible();
   });
 
   test("history paging over 120 seeded messages, with a day separator", async ({ page }) => {
@@ -288,7 +409,7 @@ test.describe("server-chat.spec.ts (P5b)", () => {
     await context.close();
   });
 
-  test("delete a photo message for both users, then wipe and replay empty history", async ({ browser }) => {
+  test("a 12s-delayed delete stays removed for both users, then wipe and replay empty history", async ({ browser }) => {
     const contextA = await browser.newContext();
     const contextB = await browser.newContext();
     const pageA = await contextA.newPage();
@@ -308,15 +429,41 @@ test.describe("server-chat.spec.ts (P5b)", () => {
     const oldMediaPath = await photoBubbleA.locator("img").getAttribute("src");
     expect(oldMediaPath).not.toBeNull();
 
-    // v1.5.2: these taps form a causal menu flow; test it at full speed so a
-    // regression in the gesture-boundary markers trips R3 as it would for a user.
-    await photoBubbleA.hover();
-    await photoBubbleA.locator(".wx-srv-message-actions-trigger").click();
-    await photoBubbleA.getByRole("menuitem", { name: "Delete for everyone" }).click();
-    await expect(photoBubbleA.getByText("Delete this message for everyone?")).toBeVisible();
-    await photoBubbleA.locator(".wx-srv-message-delete-confirm-button").click();
-    await expect(photoBubbleA).toHaveCount(0);
-    await expect(photoBubbleB).toHaveCount(0, { timeout: 3000 });
+    await pageA.request.post("/test/server/delete-response-delay", { data: { seconds: 12 } });
+    const keepAliveTimer = setInterval(() => {
+      void pageA.mouse.move(42, 42);
+      void pageB.mouse.move(46, 46);
+    }, 2_000);
+    let deleteResponseReceived = false;
+    const onResponse = (response: { url(): string; request(): { method(): string } }): void => {
+      if (response.url().includes("/api/admin/server/messages/") && response.request().method() === "DELETE") {
+        deleteResponseReceived = true;
+      }
+    };
+    pageA.on("response", onResponse);
+    try {
+      // v1.5.2: these taps form a causal menu flow; test it at full speed so a
+      // regression in the gesture-boundary markers trips R3 as it would for a user.
+      await photoBubbleA.hover();
+      await photoBubbleA.locator(".wx-srv-message-actions-trigger").click();
+      await photoBubbleA.getByRole("menuitem", { name: "Delete for everyone" }).click();
+      await expect(photoBubbleA.getByText("Delete this message for everyone?")).toBeVisible();
+      const deleteResponse = pageA.waitForResponse((response) =>
+        response.url().includes("/api/admin/server/messages/") && response.request().method() === "DELETE",
+      );
+      const deleteStartedAt = Date.now();
+      await photoBubbleA.locator(".wx-srv-message-delete-confirm-button").click();
+      await expect(photoBubbleA).toHaveCount(0);
+      await expect(photoBubbleB).toHaveCount(0, { timeout: 3000 });
+      expect(deleteResponseReceived).toBe(false);
+      const response = await deleteResponse;
+      expect(Date.now() - deleteStartedAt).toBeGreaterThanOrEqual(11_000);
+      expect([204, 202]).toContain(response.status());
+    } finally {
+      clearInterval(keepAliveTimer);
+      pageA.off("response", onResponse);
+      await pageA.request.post("/test/server/delete-response-delay", { data: { seconds: 0 } });
+    }
 
     if (oldMediaPath !== null) {
       const mediaUrl = new URL(oldMediaPath, pageA.url()).toString();

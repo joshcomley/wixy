@@ -41,7 +41,7 @@ describe("unlock", () => {
 
   it("a malformed 200 body maps to unavailable rather than throwing", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ nonsense: true }, 200));
-    await expect(unlock("1234")).resolves.toEqual({ ok: false, kind: "unavailable" });
+    await expect(unlock("1234")).resolves.toEqual({ ok: false, kind: "unexpected" });
   });
 
   it("401 -> wrongPin with attemptsLeft", async () => {
@@ -69,6 +69,11 @@ describe("unlock", () => {
     await expect(unlock("0000")).resolves.toEqual({ ok: false, kind: "lockedOut", retryAfterS: 0 });
   });
 
+  it("409 pin_changed stays distinct from a genuine unavailable response", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ error: "pin_changed" }, 409));
+    await expect(unlock("0000")).resolves.toEqual({ ok: false, kind: "pinChanged" });
+  });
+
   it("503 not_configured -> unavailable", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ error: "not_configured" }, 503));
     await expect(unlock("0000")).resolves.toEqual({ ok: false, kind: "unavailable" });
@@ -79,9 +84,14 @@ describe("unlock", () => {
     await expect(unlock("0000")).resolves.toEqual({ ok: false, kind: "unavailable" });
   });
 
-  it("422 (malformed PIN) -> unavailable, fails closed rather than open", async () => {
+  it("422 (malformed request) has its own failure kind", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ error: "invalid" }, 422));
-    await expect(unlock("")).resolves.toEqual({ ok: false, kind: "unavailable" });
+    await expect(unlock("")).resolves.toEqual({ ok: false, kind: "invalid" });
+  });
+
+  it("an unexpected status has a distinct retryable failure kind", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({}, 418));
+    await expect(unlock("0000")).resolves.toEqual({ ok: false, kind: "unexpected" });
   });
 
   it("a network failure (cmd unreachable) -> unavailable, never throws", async () => {
