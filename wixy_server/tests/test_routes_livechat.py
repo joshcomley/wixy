@@ -137,12 +137,40 @@ def _server_request(app: Any, token: str, *, method: str, path: str) -> Request:
     )
 
 
+def _raw_server_database_bytes(store: LiveChatStore) -> bytes:
+    db_path = store._db_path
+    wal_path = Path(f"{db_path}-wal")
+    return db_path.read_bytes() + (wal_path.read_bytes() if wal_path.exists() else b"")
+
+
 # ---------------------------------------------------------------------------
 # POST /unlock -> fake-cmd mapping (§5.1)
 # ---------------------------------------------------------------------------
 
 
 class TestUnlockMapping:
+    @pytest.mark.parametrize("pin", ["12", "1234567890123456789012345678901234567890"])
+    def test_invalid_pin_is_never_echoed_or_logged(
+        self,
+        pin: str,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        fake_cmd_state: FakeCmdState,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        caplog.set_level(logging.DEBUG)
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        with TestClient(app) as client:
+            response = _unlock(client, pin=pin)
+
+        assert response.status_code == 422
+        assert pin not in response.text
+        assert pin not in caplog.text
+        assert fake_cmd_state.pin_apps[TEST_APP_KEY].attempts == {}
+
     def test_correct_pin_returns_a_token(
         self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
     ) -> None:
@@ -299,6 +327,28 @@ class TestUnlockMapping:
 
 
 class TestTokenRequired:
+    def test_non_ascii_unlock_token_is_401_locked(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        app = self._app(storage_root, wixy_repo_root, pin_verifier)
+
+        async def send_latin1_header() -> httpx.Response:
+            transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+            async with httpx.AsyncClient(
+                transport=transport, base_url="http://testserver"
+            ) as client:
+                request = httpx.Request(
+                    "GET",
+                    "http://testserver/api/admin/server/messages",
+                    headers=[(b"X-Wixy-Server-Token", b"\xe9.invalid")],
+                )
+                return await client.send(request)
+
+        response = anyio.run(send_latin1_header)
+
+        assert response.status_code == 401
+        assert response.json() == {"error": "locked"}
+
     def _app(self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier) -> Any:
         return create_app(
             storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
@@ -1114,7 +1164,7 @@ class TestDeleteWipeRoutes:
             sender="Josh",
             device_id="device-delete-route",
             by_email=None,
-            text="route delete marker",
+            text="delete-route-raw-marker-4f6a",
             attachment_ids=(attachment.id,),
             now=2.0,
         )
@@ -1178,6 +1228,7 @@ class TestDeleteWipeRoutes:
         marker_states: list[bool] = []
         marker_transactions: list[bool] = []
         write_marker = store._upsert_pending_scrub
+        scrub = store.scrub
 
         def observe_write_transaction(conn: sqlite3.Connection) -> str:
             marker_transactions.append(conn.in_transaction)
@@ -1185,16 +1236,23 @@ class TestDeleteWipeRoutes:
 
         def observe_marker(*, deadline_s: float) -> bool:
             marker_states.append(store.scrub_pending())
-            return True
+            return scrub(deadline_s=deadline_s)
 
         monkeypatch.setattr(store, "_upsert_pending_scrub", observe_write_transaction)
         monkeypatch.setattr(store, "scrub", observe_marker)
         with TestClient(app) as client:
             token = _unlock(client).json()["token"]
-            response = client.delete(
-                f"/api/admin/server/messages/{message.seq}",
-                headers={"X-Wixy-Server-Token": token},
-            )
+            second_connection = sqlite3.connect(str(store._db_path), isolation_level=None)
+            second_connection.execute("SELECT 1")
+            try:
+                response = client.delete(
+                    f"/api/admin/server/messages/{message.seq}",
+                    headers={"X-Wixy-Server-Token": token},
+                )
+                assert response.status_code == 204
+                assert b"delete-marker-before-scrub-55f3" not in _raw_server_database_bytes(store)
+            finally:
+                second_connection.close()
 
         assert response.status_code == 204
         assert marker_states and marker_states[0] is True
@@ -1352,6 +1410,7 @@ class TestDeleteWipeRoutes:
         marker_states: list[bool] = []
         marker_transactions: list[bool] = []
         write_marker = store._upsert_pending_scrub
+        scrub = store.scrub
 
         def observe_write_transaction(conn: sqlite3.Connection) -> str:
             marker_transactions.append(conn.in_transaction)
@@ -1359,17 +1418,24 @@ class TestDeleteWipeRoutes:
 
         def observe_marker(*, deadline_s: float) -> bool:
             marker_states.append(store.scrub_pending())
-            return True
+            return scrub(deadline_s=deadline_s)
 
         monkeypatch.setattr(store, "_upsert_pending_scrub", observe_write_transaction)
         monkeypatch.setattr(store, "scrub", observe_marker)
         with TestClient(app) as client:
             token = _unlock(client).json()["token"]
-            response = client.post(
-                "/api/admin/server/wipe",
-                headers={"X-Wixy-Server-Token": token},
-                json={"confirm": "WIPE"},
-            )
+            second_connection = sqlite3.connect(str(store._db_path), isolation_level=None)
+            second_connection.execute("SELECT 1")
+            try:
+                response = client.post(
+                    "/api/admin/server/wipe",
+                    headers={"X-Wixy-Server-Token": token},
+                    json={"confirm": "WIPE"},
+                )
+                assert response.status_code == 204
+                assert b"wipe-marker-before-scrub-a197" not in _raw_server_database_bytes(store)
+            finally:
+                second_connection.close()
 
         assert response.status_code == 204
         # The first checkpoint runs with the marker present; clearing it is
@@ -1590,7 +1656,7 @@ class TestDeleteWipeRoutes:
             sender="Purdy",
             device_id="device-wipe-route",
             by_email=None,
-            text="wipe route marker",
+            text="wipe-route-raw-marker-2bc1",
             attachment_ids=(attachment.id,),
             now=2.0,
         )

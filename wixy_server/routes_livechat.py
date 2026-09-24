@@ -142,22 +142,30 @@ async def _finish_committed_erasure(
 class UnlockIn(BaseModel):
     # §5.1 v1.4: "wixy validates 4-16 digits locally and does not call cmd below
     # that" — cmd charges an attempt BEFORE checking it, so a stray keypress must
-    # never reach the PIN service at all. Pydantic 422s a bad shape before this
-    # route's body ever runs, so `verifier.verify()` is simply never called.
-    pin: str = Field(pattern=r"^\d{4,16}$")
+    # never reach the PIN service at all. Keep the raw value opaque here so a
+    # validation failure can return a redacted 422 instead of Pydantic echoing it.
+    pin: object
 
 
 @router.post("/unlock", response_model=None)
 async def unlock(body: UnlockIn, request: Request) -> JSONResponse:
     verifier: PinVerifier | None = request.app.state.livechat_pin_verifier
     access_email = getattr(request.state, "access_email", None) or ""
+    pin = body.pin
+    if (
+        not isinstance(pin, str)
+        or not pin.isascii()
+        or not pin.isdecimal()
+        or not 4 <= len(pin) <= 16
+    ):
+        return JSONResponse(status_code=422, content={"error": "invalid_pin"})
 
     if verifier is None:
         # Standalone edition (no cmd here) — R4: "there's no PIN verifier, so
         # /unlock -> 503 not_configured." Closed, never open.
         return JSONResponse(status_code=503, content={"error": "not_configured"})
 
-    result = await verifier.verify(pin=body.pin, subject=access_email)
+    result = await verifier.verify(pin=pin, subject=access_email)
 
     if result.outcome == "ok":
         secret: bytes = request.app.state.livechat_secret

@@ -24,7 +24,9 @@ Storage layout (§4) this module's outputs are named for:
 from __future__ import annotations
 
 import array
+import io
 import json
+import logging
 import math
 import os
 import subprocess
@@ -34,16 +36,26 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
 
-from PIL import Image, ImageOps
-
-try:
-    import pillow_heif
-
-    pillow_heif.register_heif_opener()  # type: ignore[attr-defined]  # no stubs for pillow_heif
-except ImportError:  # pragma: no cover - exercised only if the dependency is missing
-    pass
+from PIL import Image, ImageCms, ImageOps
 
 from builder.jsontypes import JsonObject, JsonValue
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _register_pillow_heif() -> bool:
+    try:
+        import pillow_heif
+    except ImportError:
+        # The server can still start and serve text chat, but app.py uses this
+        # capability flag to reject uploads until all media dependencies exist.
+        _LOGGER.error("pillow-heif is unavailable; Server chat media uploads are disabled")
+        return False
+    pillow_heif.register_heif_opener()  # type: ignore[attr-defined]  # no stubs for pillow_heif
+    return True
+
+
+PILLOW_HEIF_AVAILABLE = _register_pillow_heif()
 
 AttachmentKind = Literal["photo", "video", "voice"]
 
@@ -56,8 +68,8 @@ class MediaProcessingError(Exception):
     """Any rejected or failed input. `.reason` is a short machine code a caller
     can store verbatim (e.g. in `AttachmentRow.failure`): "unsupported",
     "kind_mismatch", "decompression_bomb", "duration_exceeded", "corrupt",
-    "timeout", or "media_unavailable" (the ffmpeg/ffprobe binary itself is
-    missing or unrunnable)."""
+    "timeout", or "media_unavailable" (a required media dependency is missing
+    or unrunnable)."""
 
     def __init__(self, reason: str, detail: str = "") -> None:
         self.reason = reason
@@ -325,10 +337,61 @@ def _clamp_long_edge(image: Image.Image, cap: int) -> Image.Image:
     return image.resize(new_size, Image.LANCZOS)
 
 
+def _image_has_alpha(image: Image.Image) -> bool:
+    return image.mode in {"RGBA", "LA", "PA"} or "transparency" in image.info
+
+
+def _icc_input_image(image: Image.Image) -> Image.Image:
+    """Convert Pillow modes unsupported by ImageCms while retaining color values."""
+    if image.mode in {"P", "PA", "RGBA", "LA"}:
+        return image.convert("RGB")
+    if image.mode == "I" or image.mode.startswith("I;16"):
+        return image.convert("L")
+    if image.mode in {"RGB", "CMYK", "L"}:
+        return image
+    return image.convert("RGB")
+
+
+def _convert_to_srgb(image: Image.Image, *, has_alpha: bool) -> Image.Image:
+    icc_profile = image.info.get("icc_profile")
+    if not isinstance(icc_profile, bytes) or not icc_profile:
+        return image
+    try:
+        color_image = _icc_input_image(image)
+        source_profile = ImageCms.ImageCmsProfile(io.BytesIO(icc_profile))
+        srgb_profile = ImageCms.createProfile("sRGB")
+        converted = ImageCms.profileToProfile(
+            color_image,
+            source_profile,
+            srgb_profile,
+            renderingIntent=ImageCms.Intent.PERCEPTUAL,
+            outputMode="RGB",
+        )
+    except Exception:
+        _LOGGER.warning("Could not convert Server chat photo ICC profile to sRGB", exc_info=True)
+        return image
+    if has_alpha:
+        converted.putalpha(image.convert("RGBA").getchannel("A"))
+    return cast(Image.Image, converted)
+
+
+def _normalize_photo_mode(image: Image.Image, *, has_alpha: bool) -> Image.Image:
+    """Normalize all still-photo pixels to 8-bit RGB/RGBA before metadata removal."""
+    if image.mode == "I" or image.mode.startswith("I;16"):
+        image = image.convert("L")
+    return image.convert("RGBA" if has_alpha else "RGB")
+
+
+def _strip_image_metadata(image: Image.Image) -> Image.Image:
+    """Rebuild normalized RGB/RGBA pixels without any source metadata."""
+    return Image.frombytes(image.mode, image.size, image.tobytes())
+
+
 def process_photo(src: Path, *, output_dir: Path) -> PhotoResult:
     container = sniff_path(src)
     _validate_photo_container(container)
-    thumb_path = output_dir / "thumb.jpg"
+    if container == "heif" and not PILLOW_HEIF_AVAILABLE:
+        raise MediaProcessingError("media_unavailable", "pillow-heif is unavailable")
     try:
         with Image.open(src) as probe:
             width, height = probe.size
@@ -347,29 +410,40 @@ def process_photo(src: Path, *, output_dir: Path) -> PhotoResult:
                 _atomic_write_bytes(full_path, src.read_bytes())
                 mime = "image/gif"
                 final_width, final_height = width, height
-                thumb_source = probe.convert("RGB")
-            else:
-                image = ImageOps.exif_transpose(probe) or probe
-                # Rebuild from raw pixels: the only way to guarantee every
-                # metadata chunk (EXIF, ICC, XMP, GIF/PNG text chunks) is gone,
-                # not just the ones a plain `.save()` happens not to round-trip.
-                stripped = Image.frombytes(image.mode, image.size, image.tobytes())
-                stripped = _clamp_long_edge(stripped, _PHOTO_LONG_EDGE_CAP)
-                if probe_format == "PNG":
-                    full_path = output_dir / "full.png"
-                    _atomic_save_image(stripped, full_path, format="PNG", optimize=True)
-                    mime = "image/png"
-                else:
-                    full_path = output_dir / "full.jpg"
-                    _atomic_save_image(
-                        stripped.convert("RGB"), full_path, format="JPEG", quality=88, optimize=True
-                    )
-                    mime = "image/jpeg"
+            image = ImageOps.exif_transpose(probe) or probe
+            has_alpha = _image_has_alpha(image)
+            image = _convert_to_srgb(image, has_alpha=has_alpha)
+            normalized = _normalize_photo_mode(image, has_alpha=has_alpha)
+            stripped = _clamp_long_edge(_strip_image_metadata(normalized), _PHOTO_LONG_EDGE_CAP)
+
+            if is_animated_gif:
+                thumb_source = stripped
+            elif has_alpha:
+                full_path = output_dir / "full.png"
+                _atomic_save_image(stripped, full_path, format="PNG", optimize=True)
+                mime = "image/png"
                 final_width, final_height = stripped.size
-                thumb_source = stripped.convert("RGB")
+                thumb_source = stripped
+            elif probe_format in {"PNG", "GIF"}:
+                full_path = output_dir / "full.png"
+                _atomic_save_image(stripped, full_path, format="PNG", optimize=True)
+                mime = "image/png"
+                final_width, final_height = stripped.size
+                thumb_source = stripped
+            else:
+                full_path = output_dir / "full.jpg"
+                _atomic_save_image(stripped, full_path, format="JPEG", quality=88, optimize=True)
+                mime = "image/jpeg"
+                final_width, final_height = stripped.size
+                thumb_source = stripped
 
             thumb = _clamp_long_edge(thumb_source, _THUMB_LONG_EDGE)
-            _atomic_save_image(thumb, thumb_path, format="JPEG", quality=80, optimize=True)
+            if has_alpha:
+                thumb_path = output_dir / "thumb.png"
+                _atomic_save_image(thumb, thumb_path, format="PNG", optimize=True)
+            else:
+                thumb_path = output_dir / "thumb.jpg"
+                _atomic_save_image(thumb, thumb_path, format="JPEG", quality=80, optimize=True)
     except MediaProcessingError:
         raise
     except Exception as exc:

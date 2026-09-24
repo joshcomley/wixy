@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from builder.assetcache import content_fingerprint
+from wixy_server import app as wixy_app_module
 from wixy_server.app import create_app
 from wixy_server.routes_public import _resolve_within_build_dir
 from wixy_server.storage import ProjectPaths, project_paths
@@ -72,6 +73,34 @@ def _publish_build(paths: ProjectPaths, sha: str, version: int) -> Path:
         encoding="utf-8",
     )
     return build_dir
+
+
+def test_public_catch_all_cannot_reach_server_chat_storage(
+    storage_root: Path,
+    wixy_repo_root: Path,
+    paths: ProjectPaths,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(wixy_app_module, "fetch_once", lambda *_args, **_kwargs: None)
+    app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+    paths.server_dir.mkdir(parents=True, exist_ok=True)
+    with TestClient(app) as client:
+        # create_app initializes the database and secret; write canaries only
+        # after startup so the fixture does not poison its store.
+        paths.server_secret.write_bytes(b"private-signing-secret-canary")
+        paths.server_vapid.write_text("private-vapid-canary", encoding="utf-8")
+        private_media = paths.server_media / "ab" / "attachment-id"
+        private_media.mkdir(parents=True)
+        (private_media / "full.jpg").write_bytes(b"private-media-canary")
+        for path in (
+            "/server/server.db",
+            "/server/secret.key",
+            "/server/vapid.json",
+            "/server/media/ab/attachment-id/full.jpg",
+        ):
+            response = client.get(path)
+            assert response.status_code != 200
+            assert b"private-" not in response.content
 
 
 class TestNoLivePointerYet:

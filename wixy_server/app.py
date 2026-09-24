@@ -35,6 +35,7 @@ from wixy_server.cmdchat import CmdChatClient
 from wixy_server.github import GitHubClient
 from wixy_server.livechat import janitor as livechat_janitor
 from wixy_server.livechat import media_queue as livechat_media_queue
+from wixy_server.livechat import processing as livechat_processing
 from wixy_server.livechat.models import MessageHook, MessageRow
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import CmdPinVerifier, PinVerifier
@@ -215,11 +216,13 @@ def create_app(
     # spec/server-chat/00-brief.md §7 Dependencies, §10 P2b: resolved once at
     # startup (WIXY_FFMPEG/WIXY_FFPROBE, falling back to `shutil.which`), not
     # per-request — `resolve_binaries` itself ERROR-logs when either binary is
-    # missing. `None` means the media pipeline stays closed all app-lifetime:
-    # uploads 503 media_unavailable, the queue worker never starts (nothing
-    # valid to run ffmpeg/ffprobe with), text chat keeps working regardless.
+    # missing. Both binaries and pillow-heif must be available before uploads
+    # and the queue are enabled; text chat keeps working regardless.
     livechat_queue_config = livechat_media_queue.resolve_binaries(
         settings.ffmpeg_path, settings.ffprobe_path
+    )
+    livechat_media_available = (
+        livechat_queue_config is not None and livechat_processing.PILLOW_HEIF_AVAILABLE
     )
     if pin_verifier is not None:
         resolved_pin_verifier: PinVerifier | None = pin_verifier
@@ -293,7 +296,7 @@ def create_app(
                 # `livechat_queue_config` above) — nothing valid to hand it
                 # otherwise. The janitor runs regardless: it's pure DB/filesystem
                 # housekeeping with no ffmpeg dependency.
-                if livechat_queue_config is not None:
+                if livechat_media_available:
                     background.supervise("livechat-media", _run_media_queue)
                 background.supervise("livechat-janitor", _run_janitor)
                 yield
@@ -335,7 +338,7 @@ def create_app(
     app.state.livechat_vapid_keys = livechat_vapid_keys
     app.state.livechat_notifier = livechat_notifier
     app.state.livechat_message_hooks = livechat_message_hooks
-    app.state.livechat_media_available = livechat_queue_config is not None
+    app.state.livechat_media_available = livechat_media_available
     app.state.livechat_started_at = livechat_started_at
     app.state.livechat_pin_verifier = resolved_pin_verifier
 
@@ -397,9 +400,16 @@ def create_app(
         is running locally. Absent outside an active `ui_launch`/MCP session,
         which is expected — the bridge just fails to connect, same as any
         other optional dev-tooling endpoint would."""
-        if _UXER_WEB_PORT_PATH.exists():
-            return HTMLResponse(_UXER_WEB_PORT_PATH.read_text(encoding="utf-8").strip())
-        return HTMLResponse("0", status_code=404)
+
+        def _read_port() -> str | None:
+            if not _UXER_WEB_PORT_PATH.exists():
+                return None
+            return _UXER_WEB_PORT_PATH.read_text(encoding="utf-8").strip()
+
+        port = await anyio.to_thread.run_sync(_read_port)
+        if port is None:
+            return HTMLResponse("0", status_code=404)
+        return HTMLResponse(port)
 
     @app.get("/admin/server-sw.js", include_in_schema=False)
     async def get_server_service_worker() -> FileResponse:

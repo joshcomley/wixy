@@ -14,6 +14,7 @@ from __future__ import annotations
 import io
 import os
 import shutil
+import threading
 from pathlib import Path
 
 import anyio
@@ -51,15 +52,22 @@ def _ample_disk_usage(_path: str) -> tuple[int, int, int]:
     return 1_000_000_000_000, 0, 1_000_000_000_000
 
 
-def _seed_processing_photo(store: LiveChatStore, paths: ProjectPaths, *, now: float) -> str:
+def _seed_processing_photo(
+    store: LiveChatStore,
+    paths: ProjectPaths,
+    *,
+    now: float,
+    payload: bytes | None = None,
+    mime_type: str = "image/jpeg",
+) -> str:
     """Runs a real upload through init -> chunk -> complete, landing a
     `processing`-status photo attachment with a genuine JPEG staged at
     `uploads/<id>/assembled` — exactly what `media_queue` expects to find."""
-    data = _jpeg_bytes()
+    data = payload if payload is not None else _jpeg_bytes()
     init = uploads.init_upload(
         store=store,
         kind="photo",
-        mime_type="image/jpeg",
+        mime_type=mime_type,
         size_bytes=len(data),
         filename=None,
         by_email=None,
@@ -114,6 +122,87 @@ class TestResolveBinaries:
 
 
 class TestRunForeverEndToEnd:
+    def test_palette_photo_renditions_are_verified_before_original_is_deleted(
+        self,
+        store: LiveChatStore,
+        paths: ProjectPaths,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        source_image = Image.new("P", (40, 20), 1)
+        source_image.putpalette([0, 0, 0, 15, 180, 225] + [0, 0, 0] * 254)
+        source = io.BytesIO()
+        source_image.save(source, format="PNG")
+        expected = source_image.convert("RGB").getpixel((20, 10))
+        att_id = _seed_processing_photo(
+            store, paths, now=1000.0, payload=source.getvalue(), mime_type="image/png"
+        )
+        attachment = store.get_attachment(att_id)
+        assert attachment is not None
+        original = paths.server_upload_dir(att_id) / "assembled"
+        media_dir = paths.server_attachment_media_dir(att_id)
+        original_delete = store.delete_upload
+
+        def delete_only_after_rendering_verified(upload_id: str) -> None:
+            assert upload_id == att_id
+            assert original.is_file()
+            with Image.open(media_dir / "full.png") as full:
+                assert full.convert("RGB").getpixel((20, 10)) == expected
+            with Image.open(media_dir / "thumb.jpg") as thumb:
+                actual = thumb.convert("RGB").getpixel((thumb.width // 2, thumb.height // 2))
+                assert all(abs(actual[channel] - expected[channel]) <= 8 for channel in range(3))
+            original_delete(upload_id)
+
+        monkeypatch.setattr(store, "delete_upload", delete_only_after_rendering_verified)
+
+        assert media_queue._do_work(
+            store=store,
+            paths=paths,
+            config=_UNUSED_CONFIG,
+            owner="owner",
+            att=attachment,
+        )
+        assert store.get_upload(att_id) is None
+        assert not original.exists()
+
+    @pytest.mark.asyncio
+    async def test_delete_race_pending_writes_run_off_event_loop(
+        self,
+        store: LiveChatStore,
+        paths: ProjectPaths,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        att_id = _seed_processing_photo(store, paths, now=1000.0)
+        att = store.get_attachment(att_id)
+        assert att is not None
+        event_loop_thread = threading.get_ident()
+        write_threads: list[int] = []
+        original_mark_pending = store.mark_deleted_storage_pending
+
+        def mark_pending(*, kind: str, storage_id: str, now: float) -> None:
+            write_threads.append(threading.get_ident())
+            original_mark_pending(kind=kind, storage_id=storage_id, now=now)
+
+        async def no_renewal(*_args: object) -> None:
+            return None
+
+        monkeypatch.setattr(store, "mark_deleted_storage_pending", mark_pending)
+        monkeypatch.setattr(media_queue, "_do_work", lambda **_kwargs: False)
+        monkeypatch.setattr(media_queue, "_renew_loop", no_renewal)
+        monkeypatch.setattr(media_queue, "_cleanup_deleted_storage", lambda **_kwargs: None)
+
+        await media_queue._handle_claimed(
+            store,
+            paths,
+            LiveChatNotifier(),
+            _UNUSED_CONFIG,
+            CapacityLimiter(1),
+            att,
+            "owner",
+        )
+
+        assert len(write_threads) == 2
+        assert all(thread_id != event_loop_thread for thread_id in write_threads)
+
     @pytest.mark.asyncio
     async def test_processes_a_claimed_photo_to_ready_and_notifies(
         self, store: LiveChatStore, paths: ProjectPaths

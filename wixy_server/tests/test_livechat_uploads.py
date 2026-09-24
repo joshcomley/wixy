@@ -33,6 +33,29 @@ def _ample_disk_usage(_path: str) -> tuple[int, int, int]:
 
 
 class TestInitUpload:
+    @pytest.mark.parametrize("size_bytes", [0, -1, -(10**100)])
+    def test_nonpositive_size_is_rejected_before_creating_a_row(
+        self, size_bytes: int, store: LiveChatStore, paths: ProjectPaths
+    ) -> None:
+        with pytest.raises(ValueError, match="positive"):
+            uploads.init_upload(
+                store=store,
+                kind="photo",
+                mime_type="image/jpeg",
+                size_bytes=size_bytes,
+                filename=None,
+                by_email=None,
+                chunk_bytes=8 * 1024 * 1024,
+                quota_bytes=1_000_000_000,
+                min_free_bytes=1_000,
+                media_available=True,
+                disk_check_path=paths.root,
+                now=1000.0,
+                disk_usage=_ample_disk_usage,
+            )
+
+        assert store.pending_upload_bytes() == 0
+
     def test_success_creates_upload_row_and_returns_caps(
         self, store: LiveChatStore, paths: ProjectPaths
     ) -> None:

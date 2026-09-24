@@ -116,13 +116,19 @@ def verify_unlock_token(secret: bytes, token: str, *, email: str, now: float) ->
     signature mismatch, expiry, or an email that doesn't match the CURRENT request's
     CF Access identity (so a token can't outlive a change of admin on the device)."""
     try:
+        token.encode("ascii")
+    except UnicodeEncodeError:
+        raise InvalidTokenError("malformed token encoding") from None
+    try:
         payload_b64, signature_b64 = token.split(".", 1)
     except ValueError:
         raise InvalidTokenError("malformed token: no '.' separator") from None
 
-    expected_signature = hmac.new(
-        secret, b"unlock|" + payload_b64.encode("ascii"), hashlib.sha256
-    ).digest()
+    try:
+        payload_bytes = payload_b64.encode("ascii")
+    except UnicodeEncodeError:
+        raise InvalidTokenError("malformed token encoding") from None
+    expected_signature = hmac.new(secret, b"unlock|" + payload_bytes, hashlib.sha256).digest()
     if not hmac.compare_digest(_b64url_decode_signature(signature_b64), expected_signature):
         raise InvalidTokenError("signature mismatch")
 

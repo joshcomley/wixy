@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from wixy_server.backup.settings import BackupSettings
-from wixy_server.backup.snapshot import _SNAPSHOT_BRANCH, run_backup_once
+from wixy_server.backup.snapshot import _SNAPSHOT_BRANCH, _project_backup_items, run_backup_once
 from wixy_server.backup.status import read_status
 
 
@@ -213,6 +213,20 @@ class TestAllowlistContent:
         checkout = tmp_path / "check" / "clone"
         _git(["clone", "--branch", _SNAPSHOT_BRANCH, str(backup_repo), str(checkout)], cwd=tmp_path)
         return checkout
+
+    def test_server_chat_tree_is_excluded_from_backup_allowlist(self, tmp_path: Path) -> None:
+        storage = _make_storage(tmp_path)
+        server = storage / "projects" / "ca" / "server"
+        (server / "media" / "ab" / "attachment-id").mkdir(parents=True)
+        (server / "server.db").write_bytes(b"private-chat-database")
+        (server / "secret.key").write_bytes(b"private-signing-secret")
+        (server / "vapid.json").write_text("private-vapid-key", encoding="utf-8")
+        (server / "media" / "ab" / "attachment-id" / "full.jpg").write_bytes(b"private-media")
+
+        items = _project_backup_items(storage / "projects" / "ca")
+
+        assert all(source != server and server not in source.parents for source, _rel in items)
+        assert all(not rel.startswith("server/") for _source, rel in items)
 
     def test_included_files_are_present(self, tmp_path: Path, empty_bare_backup_repo: Path) -> None:
         settings = _settings(tmp_path, empty_bare_backup_repo)
