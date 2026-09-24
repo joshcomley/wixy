@@ -138,6 +138,37 @@ test("phone layout: one shared gutter, one control height, tight top spacing", a
   const cog = await box(page, ".wx-srv-settings-button");
   expect.soft(Math.abs(cog.top - mainTop)).toBeLessThanOrEqual(1); // was 10px lower
 
+  // -- 5. Bubble rhythm + alignment ------------------------------------------
+  // `.wx-srv-message-list` must be a flex column: as a plain block, consecutive
+  // bubbles touched and `align-self` (own messages right, theirs left) did
+  // nothing, so every bubble sat on the left.
+  const adjacentBubbleGap = await page.evaluate(() => {
+    const bubbles = Array.from(document.querySelectorAll<HTMLElement>(".wx-srv-message-list > .wx-srv-bubble"));
+    for (const bubble of bubbles) {
+      const next = bubble.nextElementSibling;
+      if (next instanceof HTMLElement && next.classList.contains("wx-srv-bubble")) {
+        return next.getBoundingClientRect().top - bubble.getBoundingClientRect().bottom;
+      }
+    }
+    return -1;
+  });
+  expect.soft(adjacentBubbleGap, "two bubbles in a row have a visible gap").toBeGreaterThanOrEqual(6);
+
+  await page.mouse.move(40, 40);
+  await page.locator(".wx-chat-composer-input").fill("Layout probe reply");
+  await page.locator(".wx-chat-send-button").click();
+  const mine = page.locator(".wx-srv-bubble-mine").last();
+  await expect(mine).toBeVisible();
+  const cardNow = await box(page, ".wx-srv-thread");
+  const mineBox = await mine.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height };
+  });
+  const theirsBox = await box(page, ".wx-srv-bubble-theirs");
+  // Card border (1px) + padding (12px) on each side.
+  expect.soft(Math.abs(mineBox.right - (cardNow.right - 13)), "own bubble hugs the right edge").toBeLessThanOrEqual(1);
+  expect.soft(Math.abs(theirsBox.left - (cardNow.left + 13)), "their bubble hugs the left edge").toBeLessThanOrEqual(1);
+
   // -- No horizontal overflow at this width ----------------------------------
   const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
   expect.soft(scrollWidth).toBeLessThanOrEqual(viewportWidth);

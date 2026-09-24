@@ -223,6 +223,17 @@
   height: 1px;
 }
 
+/* thread.ts renders every day chip / bubble / echo as a direct child of this
+   wrapper. It was a plain block, so `.wx-srv-bubble-mine/-theirs`'s
+   `align-self` never applied (own messages sat on the left) and bubbles
+   touched each other with no gap; a flex column gives the rows the 8px rhythm
+   and the left/right alignment those rules were written for. */
+.wx-srv-message-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .wx-srv-thread-empty {
   color: var(--wx-muted);
   margin: auto;
@@ -245,7 +256,6 @@
 .wx-srv-day-separator {
   display: flex;
   justify-content: center;
-  margin: 0 0 4px;
 }
 
 .wx-srv-day-separator span {
