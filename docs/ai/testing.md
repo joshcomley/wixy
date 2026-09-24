@@ -128,4 +128,5 @@ Two Server-chat delivery lessons set the acceptance bar:
   runs**, run alone. Never overlap pytest and e2e; Windows concurrent-file-access races fail
   different tests on different loaded runs, so one green run does not establish stability.
 - Do not dismiss a Server-chat e2e failure as host load based on a small number of retries.
-  Reproduce it **10/10 on an unloaded node** before classifying it as load-only.
+  Require **10/10 passes on an unloaded node** before classifying a hub-only failure as
+  host-load-only. Any failure in that unloaded control run means a real bug needs investigation.

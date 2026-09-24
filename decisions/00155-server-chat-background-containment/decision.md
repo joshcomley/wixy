@@ -41,5 +41,5 @@ is binding; the code and numbered invariant 47 implement it.
 Do not allow `Exception` to escape into the lifespan task group, discard a legacy marker after
 an unreadable-file error, or clear durable work before completion. For erasure/background
 changes, acceptance requires five consecutive clean full-suite runs, with no e2e suite running
-alongside them; a suspected host-load e2e failure needs 10/10 reproduction on an unloaded node
-before dismissal.
+alongside them. Classify a hub-only e2e failure as host-load-only only after 10/10 passes on an
+unloaded node; any failure in that control run means a real bug needs investigation.

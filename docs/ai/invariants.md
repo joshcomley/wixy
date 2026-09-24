@@ -593,18 +593,26 @@ contains real server data, never chat state.
 
 ### Inv 41 — Wixy holds zero PIN state
 Only cmd's app-key-scoped loopback PIN service verifies the PIN and owns registration and
-lockout. Wixy never stores, logs, echoes, or commits a PIN. A missing or unreachable verifier
-returns 503 and never opens the gate. The unlock token exists only in browser memory; mutations
-send it in `X-Wixy-Server-Token`, while media uses an email- and expiry-bound signed URL. A
-token in a query string is rejected.
+lockout. **Target rule:** Wixy never stores, logs, echoes, or commits a PIN. A missing or
+unreachable verifier returns 503 and never opens the gate. The unlock token exists only in
+browser memory; mutations send it in `X-Wixy-Server-Token`, while media uses an email- and
+expiry-bound signed URL. A token in a query string is rejected.
+
+**PENDING-AUDIT-FIX F8:** at this candidate, FastAPI's default 422 response for a malformed PIN
+can echo the submitted request input. Do not treat the no-echo guarantee as implemented until
+F8 is merged and verified; the target rule above remains unchanged.
 
 ### Inv 42 — Server-chat lock is fail-closed
 Every R6 lock cause locks the chat: idle timeout, panic, multi-tap, Escape, hidden document,
-route-away, unauthorized response, or token expiry. Locking detaches the chat subtree from the
-document, aborts the stream, pauses media, and discards an unfinished recording. A hidden
-document is exempt only while the file picker or microphone permission flow is suspended. The
-decoy displays only real server status; badges, titles, favicons, and push text never expose
-chat activity.
+route-away, unauthorized response, or token expiry. The target behavior detaches the chat
+subtree from the document, aborts the stream, pauses media, and discards an unfinished
+recording. A hidden document is exempt only while the file picker or microphone permission
+flow is suspended. The decoy displays only real server status; badges, titles, favicons, and
+push text never expose chat activity.
+
+**PENDING-AUDIT-FIX F4:** if lock/detach occurs while history loading is pending, the current
+`attach(session).then(...)` continuation can still start the stream after lock. Treat stream
+cancellation across that pending-history race as pending until F4 is merged and verified.
 
 ### Inv 43 — Server-chat idle time is reset only by user input
 Only the defined user-input events count as activity. `scroll` events, incoming messages, and
@@ -621,8 +629,12 @@ quota and the free-space floor at upload initialization. Missing ffmpeg or ffpro
 uploads unavailable without disabling text chat.
 
 ### Inv 45 — Server-chat service worker cannot intercept fetches
-The worker has no `fetch` handler and is registered only after explicit Android push opt-in.
-Pushes are payloadless and the notification text is fixed and generic.
+The worker has no `fetch` handler and policy permits registration only after explicit Android
+push opt-in. Pushes are payloadless and the notification text is fixed and generic.
+
+**PENDING-AUDIT-FIX F1:** the app currently does not mount the settings push toggle (`pushSlot`
+is empty), so Android opt-in is not reachable at this candidate. Keep the registration policy
+as the target; do not describe push opt-in as operational until F1 is merged and verified.
 
 ### Inv 46 — Server chat delete and wipe are hard deletes, without chat-visible tombstones
 Any unlocked user can delete any message for everyone. Delete removes the message, its

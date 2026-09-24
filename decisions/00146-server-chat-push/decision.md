@@ -23,6 +23,13 @@ disguise and PIN gate.
 Payloadless notifications keep message content out of push-provider storage and the OS
 notification surface, while opt-in avoids registering a worker for users who do not want it.
 
+## Current reachability
+
+**PENDING-AUDIT-FIX F1:** the Android-only opt-in is the approved policy, but it is not
+reachable at this candidate. The settings sheet leaves `pushSlot` empty and does not mount
+the toggle module, so do not describe push opt-in as operational until F1 is merged and
+verified.
+
 ## What to watch for
 
 Any new push field or service-worker fetch handler can reveal activity or intercept unrelated

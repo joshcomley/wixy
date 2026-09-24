@@ -254,6 +254,11 @@ use the protected `/push/subscriptions/{deviceId}` routes. Subscription endpoint
 validated against the frozen HTTPS push-service allowlist before they are stored. The
 VAPID key pair is persisted race-safely in the private server directory's `vapid.json`.
 
+**PENDING-AUDIT-FIX F1:** the Android opt-in is not reachable at this candidate. The push
+routes, service worker, and toggle module exist, but `settingsSheet.ts` leaves `pushSlot`
+empty and the app does not mount the toggle. Treat Android opt-in as the intended policy, not
+an operational feature, until F1 is merged and verified.
+
 After a message commits, the registered dispatch hook sends a payloadless Web Push
 request to every subscription except the message's device and case-insensitive sender.
 Requests use a shared HTTPX client with a 10-second timeout and concurrency capped at
@@ -553,7 +558,8 @@ flags and does not install the Playwright clock.
 ## 13. Delivery status
 
 The feature branch contains the P1–P8 implementation; P7 closes this manual, invariants, and
-decision log. The code parcels are: P1 (settings, storage paths, the `livechat/` package's `models`/`store`/`tokens`/
+decision log. **PENDING-AUDIT-FIX F1:** the Server push toggle is not mounted, so Android opt-in
+is unavailable at this candidate. The code parcels are: P1 (settings, storage paths, the `livechat/` package's `models`/`store`/`tokens`/
 `pinclient`/`notifier`, `routes_livechat.py` — unlock/history/send/stream/usage, the
 `fake_cmd.py` PIN double, the `server` field on `GET /api/admin/system/status`); **P2a**
 (`livechat/processing.py`, §8 above); **P2b** (`livechat/{uploads,media_queue,janitor}.py`,
