@@ -1453,3 +1453,22 @@ fixed same-session.)
   Luna's P7 handoff -> Sol docs review (separate worktree) -> merge P7 PR (sync of this
   checkout deferred until the audit reports). Then live `verify` on ca.cinnamons.uk with a real
   PIN unlock, then the ONE delivery merge as a squash with an explicit body (R14a).
+
+## Update 2026-09-24 ~17:30 UTC (Orchestrator `b11567bc`) — sec.13 audit submitted
+
+- **P7 (docs/invariants/decisions close-out)** dispatched by the DM to a fresh Luna 6 XL
+  builder `14b18836` (correct model on the first try). Progress **11/13**.
+- **The opus-tier security audit is SUBMITTED**: cmd relation
+  `e971ce44-6835-4f94-bdce-baf63bcbfa63`, tier **Opus 5.5**, audited range
+  `593837a..b0d3470` (the feature branch head at the Architect's brief v1.5.5), 15
+  acceptance criteria (spec acceptance criteria + the Architect's 4 erasure checks +
+  decision 00150 + the operator's original requirements). Fable was NOT used: the
+  operator's rule is Fable only with his explicit authorization for a specific use, and
+  none was given. Only a fully clean result (C0/H0/M0/L0) is merge-clean; a top-rung
+  finding is fixed by a Luna builder, never dismissed.
+- **EDIT FREEZE**: the audit runs in the primary checkout (this worktree). From the DM's
+  AUDIT START until its AUDIT END nobody edits, commits, pulls, merges or switches
+  branches there. This entry was written from a throwaway worktree off origin and pushed.
+- **Dependency #9 re-verified** (cmd PIN service + app key `wixy-livechat`): registered
+  2026-09-14 under decision 973, never rotated, no lockouts (`pins_cli.py status`,
+  read-only, no PIN attempt charged).
