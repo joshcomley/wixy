@@ -423,7 +423,9 @@ with its captured session. Removing a chip aborts its upload and makes a best-ef
 authenticated `DELETE /uploads/{uploadId}` after init; failed uploads use the same cleanup,
 so the server releases pending quota promptly. The aborted chip removal doesn't show an error.
 On each reattach, `thread.ts` re-reads loaded history pages to mint fresh signed media URLs
-for the new token expiry. Leaving the route disposes the view and aborts its uploads.
+for the new token expiry, and reconciles retained rows against that refreshed range before
+advancing the stream cursor so deletes and wipes during a lock cannot resurface old messages.
+Leaving the route disposes the view and aborts its uploads.
 
 On send, `thread.ts` posts the staged attachment IDs in the message request. It uses
 `server/mediaRender.ts` for processing/failed states, the photo grid and shared lightbox,

@@ -126,6 +126,42 @@ describe("mountServerThread", () => {
     view.teardown();
   });
 
+  it("reattach removes messages deleted while the chat was locked", async () => {
+    const kept = fakeMessage({ seq: 1, text: "keep after unlock" });
+    const deleted = fakeMessage({ seq: 2, clientId: "c2", text: "deleted while locked" });
+    getHistory
+      .mockResolvedValueOnce(emptyHistory({ messages: [kept, deleted], cursor: 2 }))
+      .mockResolvedValueOnce(emptyHistory({ messages: [kept], cursor: 4 }));
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+    await view.attach(SESSION);
+    expect(view.element.textContent).toContain("deleted while locked");
+
+    view.detach();
+    const cursor = await view.attach(SESSION);
+
+    expect(cursor).toBe(4);
+    expect(view.element.textContent).toContain("keep after unlock");
+    expect(view.element.textContent).not.toContain("deleted while locked");
+    view.teardown();
+  });
+
+  it("reattach clears retained messages after the chat was wiped while locked", async () => {
+    getHistory
+      .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ text: "before wipe" })], cursor: 2 }))
+      .mockResolvedValueOnce(emptyHistory({ cursor: 5 }));
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+    await view.attach(SESSION);
+    expect(view.element.textContent).toContain("before wipe");
+
+    view.detach();
+    const cursor = await view.attach(SESSION);
+
+    expect(cursor).toBe(5);
+    expect(view.element.querySelectorAll(".wx-srv-bubble")).toHaveLength(0);
+    expect(view.element.querySelector(".wx-srv-thread-empty")?.textContent).toMatch(/no messages yet/i);
+    view.teardown();
+  });
+
   it("empty history shows the empty-state message", async () => {
     getHistory.mockResolvedValue(emptyHistory());
     const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });

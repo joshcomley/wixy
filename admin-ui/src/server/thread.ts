@@ -521,10 +521,12 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     currentSession = session;
     if (voiceRecorder === null) voiceRecorder = createRecorder();
     const oldestSeqAtAttach = historyLoaded ? oldestLoadedSeq() : null;
+    const retainedSeqsAtAttach = new Set(confirmedBySeq.keys());
     historyErrorRow.hidden = true;
     try {
       let before: number | undefined;
       let cursor: number | null = null;
+      const refreshedMessages = new Map<number, Message>();
       while (true) {
         const page = await getHistory(
           session,
@@ -532,7 +534,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         );
         if (cursor === null) cursor = page.cursor;
         for (const message of page.messages) {
-          if (oldestSeqAtAttach === null || message.seq >= oldestSeqAtAttach) addConfirmed(message);
+          if (oldestSeqAtAttach === null || message.seq >= oldestSeqAtAttach) {
+            refreshedMessages.set(message.seq, message);
+          }
         }
         if (oldestSeqAtAttach === null || page.messages.length === 0) {
           hasMoreHistory = page.hasMore;
@@ -553,6 +557,15 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         }
         before = nextBefore;
       }
+      if (oldestSeqAtAttach !== null) {
+        // History omits deleted rows, and a wipe can return an empty first
+        // page. Drop retained rows in the refreshed range before returning
+        // the newer event cursor, or those events would be skipped on resume.
+        for (const seq of retainedSeqsAtAttach) {
+          if (seq >= oldestSeqAtAttach && !refreshedMessages.has(seq)) confirmedBySeq.delete(seq);
+        }
+      }
+      for (const message of refreshedMessages.values()) addConfirmed(message);
       historyLoaded = true;
       renderThreadList();
       ensureObserver();

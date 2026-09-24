@@ -46,3 +46,16 @@ ecorder.ts, mediaRender.ts
 - Fixed all three HIGH findings and the bundled MEDIUM: gesture boundaries now affect tap handling; reattach refreshes signed attachment URLs; redraw/detach disposes active playback and releases its idle-lock suspension; failed or canceled pending uploads issue best-effort DELETE and user cancellation stays quiet.
 - Full verification after these fixes passed: ruff, mypy (206 files), TypeScript typecheck, Vitest 1074/1074, pytest 1654/1654, bundle build, and combined media/chat/lock Playwright 31/31.
 - Fixes are still uncommitted; create one stable candidate commit with the required `Release-note:` trailer, then send the DM a structured FINAL HANDOFF for that exact SHA. Do not push or update PR #230 until matching explicit clearance.
+
+## Update 2026-09-24 — fix-forward review found stale rows on reattach
+
+- DM/Sol identified that the signed-URL refresh merged current rows but retained deleted messages, then returned a cursor beyond the locked-time delete/wipe events. The old row could therefore reappear after unlock.
+- `thread.attach()` now stages refreshed pages, reconciles rows in the covered loaded range only after a successful fetch, and removes stale rows before returning the fresh cursor. Added reattach tests for a deleted message and a wipe; both failed before the fix and pass after it.
+- `docs/ai/livechat.md` now describes that reconciliation. Strict typecheck passed, full Vitest passed (1076/1076), build passed, and media/chat/lock Playwright passed (31/31). Full ruff/mypy/pytest is running; do not create the new candidate or hand it off until it completes and the final base is checked.
+- PR #230 remains unchanged. Fix-forward candidate must receive fresh exact-SHA DM clearance before any push.
+
+## Update 2026-09-24 — fix-forward committed and fully verified
+
+- Candidate fix-forward commit: `aa817ed0202ad79c500acb0384e27fa01e18c4a8`; feature base remains `7d6584bfedaf409bef45f5d3e527df2b943ce0ce`, including `b1c394f`.
+- Complete verification passed after the history reconciliation fix: ruff, mypy (206 files), pytest 1655/1655, strict TypeScript, Vitest 1076/1076, admin build, and combined media/chat/lock Playwright 31/31.
+- The candidate is local and clean. New FINAL HANDOFF is next; wait for exact-SHA DM clearance before pushing or updating PR #230.
