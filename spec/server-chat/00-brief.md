@@ -249,6 +249,37 @@ the site repo, builds, publish, reports, backups, or any public route.
 `Release-note: Added a Server page showing your website's server status.`
 It's true and innocuous; the owner-facing update popup must not reveal the chat.
 
+**R14a — the delivery merge is a SQUASH with an explicitly written message (2026-09-24,
+binding on the Delivery Manager).**
+- **Why:** R14 was not followed branch-wide. Measured on `origin/cmd/workspace-00029`:
+  - five commits carry "Send photos, videos, and voice notes in the private Server chat."
+  - one carries "Deleted messages stay removed after you unlock the Server chat."
+  - one carries "Keep voice and video playback going as new Server chat messages arrive."
+  - build space bs7's `94fc647` carries "…deleting a chat message… photo, video, or voice
+    attachment…".
+- **How the leak would happen:** `routes_version.resolve_release_notes` runs
+  `git log --format=%B <since>..HEAD` — *not* first-parent — and `_TRAILER_RE` matches any
+  line (even indented) starting `Release-note:`. An ordinary merge commit would therefore put
+  every one of those lines into the owner's update popup.
+- **The mechanism:**
+  - Merge the delivery PR with `gh pr merge <n> --squash --subject "<subject>" --body
+    "<body>"`, where the body's **only** `Release-note:` line is the R14 text above.
+  - **Never** accept GitHub's default squash body. This repo's `squash_merge_commit_message`
+    is `COMMIT_MESSAGES`, which pastes every commit's message — leaking trailers included —
+    into the squash commit.
+  - Rewriting ~60 commits' messages on a branch with in-flight build spaces is heavier, and
+    the history is not otherwise needed on main: the decision log keeps the *why*, and the
+    PR refs keep the individual commits.
+- **Verify** (both checks are required, and both go in the delivery record):
+  - Before merging, preview the body.
+  - After merging, `git log --format=%B <main-before>..<main-after> | grep -iE
+    '^\s*release-note\s*:'` must print exactly one line: the R14 text.
+- **After delivery:** any later commit touching the Server chat uses exactly `Release-note:
+  General bug fixes and improvements.`, and never names the chat, messages, photos, video,
+  voice, PIN or locking. P7 records this in `docs/ai/livechat.md` **and** as a bullet under
+  "Rules that bind this repo" in `CLAUDE.md`, so future agents see it without reading this
+  brief.
+
 **R15 — Backups.** The chat store is **not** added to `backup/snapshot.py`'s allowlist. The
 standalone snapshot force-pushes to a GitHub repo, which is an inappropriate home for private
 media, and the hub mirror isn't installed. Flagged to the operator (§15).
