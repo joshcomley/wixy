@@ -34,9 +34,34 @@ class TestMigrations:
         store.list_messages(before=None, limit=1)
         conn = sqlite3.connect(str(db_path))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
         finally:
             conn.close()
+
+    def test_v3_database_gets_pending_storage_index_in_v4(self, db_path: Path) -> None:
+        store = LiveChatStore(db_path)
+        store.list_messages(before=None, limit=1)
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.execute("DROP INDEX idx_deleted_storage_pending")
+            conn.execute("PRAGMA user_version = 3")
+            conn.commit()
+        finally:
+            conn.close()
+
+        upgraded = LiveChatStore(db_path)
+        upgraded.list_messages(before=None, limit=1)
+        conn = sqlite3.connect(str(db_path))
+        try:
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+            index = conn.execute(
+                "SELECT sql FROM sqlite_master "
+                "WHERE type = 'index' AND name = 'idx_deleted_storage_pending'"
+            ).fetchone()
+        finally:
+            conn.close()
+        assert index is not None
+        assert "WHERE cleanup_pending = 1" in str(index[0])
 
     def test_v2_rebuild_accepts_wiped_and_preserves_event_sequence(self, db_path: Path) -> None:
         db_path.parent.mkdir(parents=True)
@@ -74,7 +99,7 @@ class TestMigrations:
                 conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'events'").fetchone()[0]
                 == 13
             )
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
         finally:
             conn.close()
 

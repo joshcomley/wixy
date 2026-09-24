@@ -99,7 +99,12 @@ CREATE TABLE IF NOT EXISTS pending_wipe_cleanup(
   token TEXT NOT NULL);
 """
 
-_LATEST_SCHEMA_VERSION = 3
+_SCHEMA_V4_PENDING_STORAGE_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_deleted_storage_pending
+  ON deleted_storage(kind, id) WHERE cleanup_pending = 1;
+"""
+
+_LATEST_SCHEMA_VERSION = 4
 
 
 class LiveChatStoreError(Exception):
@@ -285,6 +290,13 @@ class LiveChatStore:
                     if statement.strip():
                         conn.execute(statement)
                 conn.execute("PRAGMA user_version = 3")
+                current = 3
+
+            if current < 4:
+                for statement in _SCHEMA_V4_PENDING_STORAGE_INDEX.split(";"):
+                    if statement.strip():
+                        conn.execute(statement)
+                conn.execute("PRAGMA user_version = 4")
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
@@ -576,14 +588,12 @@ class LiveChatStore:
             is not None
         )
 
-    def deleted_storage_items(self) -> list[tuple[str, str, bool]]:
+    def pending_deleted_storage_items(self) -> list[tuple[str, str]]:
         with self._read_txn() as conn:
             rows = conn.execute(
-                "SELECT kind, id, cleanup_pending FROM deleted_storage ORDER BY kind, id"
+                "SELECT kind, id FROM deleted_storage WHERE cleanup_pending = 1 ORDER BY kind, id"
             ).fetchall()
-            return [
-                (str(row["kind"]), str(row["id"]), bool(row["cleanup_pending"])) for row in rows
-            ]
+            return [(str(row["kind"]), str(row["id"])) for row in rows]
 
     def mark_deleted_storage_pending(self, *, kind: str, storage_id: str, now: float) -> None:
         with self._write_txn() as conn:

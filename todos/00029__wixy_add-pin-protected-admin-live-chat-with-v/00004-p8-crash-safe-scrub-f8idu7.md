@@ -15,8 +15,9 @@ The v1.5.3 candidate had two critical Sol findings: a crash could leave deleted 
 - Previous candidate: `fb6b463f62da8828ec8c3cf727acd160628af802`.
 - Current implementation records deleted storage IDs in the delete/wipe transaction, strictly retries failed unlink operations, gates signed media reads on a live attachment row, and resumes cleanup at startup/every two seconds.
 - Follow-up to Architect's v1.5.4 ruling: background recovery now retries files before DB scrub; DELETE, wipe, and `/usage` expose one `erasurePending` field.
-- Candidate is committed locally and the exact-SHA handoff was sent to the DM. Fresh Sol review and sec.13 audit remain with the DM; do not push or run sec.13.
-- Latest evidence: affected backend slice reported 134 passed plus one concurrency-sensitive assertion failure; after correcting the assertion to allow a second startup scrub, that test passed alone, and the final delete/wipe route subset passed 12/12 after removing post-scrub retries. Admin Vitest 1,095 passed; strict typecheck passed; Ruff check/format and mypy 206 sources passed; P8 Server chat Playwright 7/7 passed. Build completed and refreshed committed bundle/map.
+- The DM's fresh Sol review confirmed both critical findings were resolved and raised one medium: the two-second worker replayed completed storage tombstones. The follow-up queries only pending rows using the partial index `idx_deleted_storage_pending`; completed tombstones remain for ID-reuse protection but are skipped. The DM requested a fresh exact-SHA handoff after the fix.
+- Keep the follow-up local. The DM owns fresh Sol review and sec.13 audit; do not push or run/arrange sec.13.
+- Latest evidence after the medium fix: affected backend store/janitor/routes/media-queue slice 137/137 passed, including the schema v3→v4 index migration; Ruff check/format passed; mypy passed across 206 sources. The earlier candidate also passed Admin Vitest 1,095, strict typecheck, and P8 Server chat Playwright 7/7. The medium change does not touch the frontend.
 - Earlier combined chat/media Playwright run was 8/11: all seven P8 tests passed; three P6b media-processing cases timed out while rows remained processing under severe CPU/disk load. This limitation is not re-tested in this continuation.
 
 ## Relevant files + commits
@@ -27,7 +28,7 @@ The v1.5.3 candidate had two critical Sol findings: a crash could leave deleted 
 
 ## How to continue + acceptance
 
-1. Review final diff and ensure generated files have no drift. Complete.
-2. Commit with a `Release-note:` trailer. Complete.
-3. Send the DM the exact base/candidate SHAs, changes, verification, and the P6b E2E caveat. Complete; fresh Sol review and sec.13 remain pending with the DM.
-4. Amend Answers entry #1912 with the plain-English final status. Complete.
+1. Review final diff and ensure generated files have no drift.
+2. Commit this follow-up with a `Release-note:` trailer.
+3. Send the DM the exact base/candidate SHAs, tombstone-scaling fix, verification, and the P6b E2E caveat; request fresh exact-SHA Sol review. DM owns sec.13. Do not push.
+4. Amend Answers entry #1912 with the updated plain-English status.

@@ -133,7 +133,9 @@ Tables: `messages`, `attachments`, `events`, `uploads`, `push_subscriptions`, `d
 and `pending_wipe_cleanup`. Schema migrations are serialized under the SQLite writer lock.
 `deleted_storage` retains internal attachment/upload tombstones and retry status; it is not a
 message/event tombstone and is never returned to chat clients. `pending_wipe_cleanup` records a
-wipe's filesystem sweep token so a crash cannot lose cleanup of orphaned paths.
+wipe's filesystem sweep token so a crash cannot lose cleanup of orphaned paths. Schema v4 adds the partial
+`idx_deleted_storage_pending` index contains only incomplete cleanup rows, so the two-second
+worker does not revisit completed tombstones as delete history grows.
 Two transaction shapes:
 - `BEGIN IMMEDIATE` for writes needing a race-safe conditional check (an attachment's lease
   claim, `create_message`'s idempotent client-id insert) — serializes concurrent claimants

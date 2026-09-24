@@ -115,7 +115,7 @@ def cleanup_deleted_storage_once(
 ) -> bool:
     """Retry durable per-ID deletion work; keep tombstones when the OS refuses."""
     state_changes: list[tuple[str, str, bool]] = []
-    for kind, storage_id, was_pending in store.deleted_storage_items():
+    for kind, storage_id in store.pending_deleted_storage_items():
         if only_items is not None and (kind, storage_id) not in only_items:
             continue
         if kind == "attachment":
@@ -131,17 +131,14 @@ def cleanup_deleted_storage_once(
             for target in targets:
                 _remove_entry(target)
         except OSError:
-            if not was_pending:
-                state_changes.append((kind, storage_id, True))
-                _LOGGER.warning(
-                    "Server chat storage deletion remains pending for %s %s",
-                    kind,
-                    storage_id,
-                    exc_info=True,
-                )
+            _LOGGER.warning(
+                "Server chat storage deletion remains pending for %s %s",
+                kind,
+                storage_id,
+                exc_info=True,
+            )
         else:
-            if was_pending:
-                state_changes.append((kind, storage_id, False))
+            state_changes.append((kind, storage_id, False))
     store.set_deleted_storage_pending_many(state_changes)
     return store.storage_cleanup_pending()
 

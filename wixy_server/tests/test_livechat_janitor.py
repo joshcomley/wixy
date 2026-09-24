@@ -159,6 +159,51 @@ class TestRunOnceIsIdempotent:
         assert first.stale_uploads == 1
         assert second.stale_uploads == 0
 
+    def test_completed_storage_tombstones_are_not_revisited(
+        self,
+        store: LiveChatStore,
+        paths: ProjectPaths,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        upload_id = "a" * 32
+        upload_dir = paths.server_upload_dir(upload_id)
+        upload_dir.mkdir(parents=True)
+        (upload_dir / "chunk-000000").write_bytes(b"chunk")
+        store.mark_deleted_storage_pending(kind="upload", storage_id=upload_id, now=1.0)
+
+        assert janitor.cleanup_deleted_storage_once(store=store, paths=paths) is False
+        assert not upload_dir.exists()
+        assert store.pending_deleted_storage_items() == []
+
+        revisited: list[Path] = []
+        original_remove = janitor._remove_entry
+
+        def observe_remove(path: Path) -> None:
+            revisited.append(path)
+            original_remove(path)
+
+        monkeypatch.setattr(janitor, "_remove_entry", observe_remove)
+        assert janitor.cleanup_deleted_storage_once(store=store, paths=paths) is False
+        assert revisited == []
+
+        conn = store._connect()
+        try:
+            rows = conn.execute("SELECT kind, id FROM deleted_storage ORDER BY kind, id").fetchall()
+        finally:
+            conn.close()
+        assert [(str(row["kind"]), str(row["id"])) for row in rows] == [("upload", upload_id)]
+
+        conn = store._connect()
+        try:
+            index = conn.execute(
+                "SELECT sql FROM sqlite_master "
+                "WHERE type = 'index' AND name = 'idx_deleted_storage_pending'"
+            ).fetchone()
+        finally:
+            conn.close()
+        assert index is not None
+        assert "WHERE cleanup_pending = 1" in str(index[0])
+
     def test_scrubber_resumes_a_durable_pending_marker(self, store: LiveChatStore) -> None:
         store.mark_scrub_pending()
 

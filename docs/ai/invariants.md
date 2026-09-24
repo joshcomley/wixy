@@ -592,6 +592,8 @@ that removes the attachment/upload rows, so startup can resume file deletion aft
 `GET /media` verifies that the attachment row still exists before serving a signed rendition,
 even if Windows could not remove a file that was open. Failed unlinks remain pending and are
 retried by the two-second startup-resumed worker; they are never silently treated as complete.
+The worker queries only `cleanup_pending=1` rows through `idx_deleted_storage_pending`; completed
+tombstones remain for ID-reuse protection but are not revisited.
 Every store connection sets `PRAGMA secure_delete=ON`; both delete and wipe TRUNCATE the WAL.
 Recovery removes media files before retrying the DB scrub. A 204 requires an empty WAL and
 completed media cleanup. 202 returns one `erasurePending` flag covering both; the settings
