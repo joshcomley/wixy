@@ -99,6 +99,38 @@ Domain terms and status machines. The normative source for the content-model ter
 - **Slot anti-stale gate** — Slots' smoke probe requires `GET /api/version`'s
   `commit.sha_full` to match the just-deployed sha before flipping `active.txt`.
 
+## Server chat
+
+- **Decoy** — the real Server status panel shown before unlock; it contains no chat state or
+  activity signal. One tap inside the panel reveals the separate unlock affordance.
+- **Multi-tap** — two qualifying primary-button taps within 400 ms. In the unlocked chat it
+  locks immediately. A `data-srv-gesture-boundary` control can finish an existing tap run but
+  cannot start one; an unmatched boundary tap clears the partial run.
+- **Unlock token** — a 12-hour, email-bound HMAC token minted after cmd verifies the PIN. It is
+  held in browser memory, sent in `X-Wixy-Server-Token`, and never placed in persistent browser
+  storage or a query string.
+- **Lock cause** — a model event that returns the chat to the decoy: idle, panic, multi-tap,
+  Escape, hidden document, route-away, unauthorized response, or token expiry. Lock detaches
+  the chat DOM; file-picker and microphone-permission suspensions are the only hidden-document
+  exceptions.
+- **Attachment status** — `processing` while a queued upload is normalized; `ready` when its
+  private renditions can be served; `failed` when processing cannot produce renditions.
+- **Erasure pending** — `erasurePending: true` means a committed delete or wipe still has
+  database-byte or filesystem cleanup to finish. The routes return 202; they return 204 only
+  when no erasure work remains.
+- **`deleted_storage` tombstone** — an internal per-attachment or per-upload cleanup record.
+  It is not a deleted-message placeholder and never appears in chat history or events. A
+  generation check preserves late requeues; completed records are pruned after seven days.
+- **`pending_scrub`** — the schema-v6 singleton token that records outstanding SQLite WAL
+  scrub work. Delete/wipe writes it in the same transaction as row removal; the worker
+  compare-and-clears it after a successful scrub. Migration v6 imports legacy `scrub.pending`.
+- **Wipe-sweep token** — the `pending_wipe_cleanup` token that keeps a full orphan-path sweep
+  retryable after a wipe or failed startup scan. Full-tree scans run at startup and while this
+  token is pending, not on every ordinary worker tick.
+- **`ContainedTaskGroup`** — the app-lifetime wrapper for background work. `supervise` restarts
+  long-running loops with backoff; `spawn` contains one-shot exceptions. Neither lets a task
+  exception cancel sibling app work.
+
 ## Status machines
 
 **Publish stages** (`publisher.py:PublishStage`, on `PublishJob.stage`):

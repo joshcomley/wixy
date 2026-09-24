@@ -3,8 +3,9 @@
 A hidden human↔human live chat for admin users, disguised as a **"Server"** nav tab inside
 the already CF-Access-gated `/admin`. Not the AI assistant, not visitor-facing — its own
 storage, routes, and second auth gate, entirely separate from `chats.py`/`cmdchat.py`/
-`draft/media/`. Full decided design: [`spec/server-chat/00-brief.md`](../../spec/server-chat/00-brief.md)
-(the Architect's frozen technical brief — read it for anything this file doesn't cover).
+`draft/media/`. Full decided design: [`spec/server-chat/00-brief.md`](../../spec/server-chat/00-brief.md).
+This manual describes the current implementation; where intent and code differ, follow the
+code and record the difference in `decisions/`.
 Numbered guarantees: [invariants.md](invariants.md) 40–45.
 
 ## 1. The disguise (why it looks like nothing is here)
@@ -137,8 +138,9 @@ wipe's filesystem sweep token so a crash cannot lose cleanup of orphaned paths. 
 partial `idx_deleted_storage_pending` index containing only incomplete cleanup rows. Schema v5
 adds a per-tombstone generation so a late requeue cannot be cleared by an older cleanup pass, plus
 an age index for completed rows. The hourly janitor prunes completed tombstones after seven days;
-pending tombstones are never pruned. Schema v6 adds the singleton `pending_scrub` row, written in
-the same transaction as delete/wipe; startup imports and removes a legacy `scrub.pending` file.
+pending tombstones are never pruned. Schema v6 adds singleton `pending_scrub`, written in the same
+transaction as delete/wipe. Startup imports a legacy `scrub.pending` file into this row before
+trying to remove it; an access failure retains durable scrub work and the file for retry.
 Two transaction shapes:
 - `BEGIN IMMEDIATE` for writes needing a race-safe conditional check (an attachment's lease
   claim, `create_message`'s idempotent client-id insert) — serializes concurrent claimants
@@ -217,9 +219,12 @@ WAL is empty, deleted text is absent from both database files, and media-file cl
 The route gives the scrub up to 10 seconds; if a reader still blocks it, the route retains the
 database-backed `pending_scrub` row. Delete and wipe transactions record deleted storage IDs and
 the scrub marker before commit.
-Both routes publish the deletion event immediately after commit and before file cleanup. Each WAL
-checkpoint attempt waits no more than 250 ms for SQLite's busy lock; the route's ten-second
-deadline includes waiting for `LiveChatStore.scrub_guard()`, and lock timeout returns pending.
+Both routes publish the deletion event immediately after commit and before file cleanup. Every
+post-commit cleanup exception is logged and returns 202; committed deletion is never turned into
+an error response. Each WAL checkpoint attempt waits no more than 250 ms for SQLite's busy lock;
+the route's ten-second deadline includes waiting for `LiveChatStore.scrub_guard()`, and lock
+timeout returns pending. A WAL `stat()` error other than `FileNotFoundError` is treated as an
+incomplete scrub and retried, not raised from the worker.
 If an unlink fails (for example, Windows reports a file-sharing violation), the durable cleanup
 record remains pending and the two-second worker retries at startup and while the app runs. It
 removes files before retrying the database scrub. `/usage` exposes one `erasurePending` flag;
@@ -231,9 +236,10 @@ created after the wipe transaction. **NTFS/SSD byte-level shredding is not claim
 overwrite-in-place is not reliable on SSDs. If the media worker finishes after deletion removed
 its row, its post-finish check re-queues cleanup for any paths it recreated. The worker scans
 unreferenced `media/`, `uploads/`, and `failed/` entries once at startup, then repeats that sweep
-only while a wipe-sweep token remains pending. Each sweep reads live attachment and upload IDs in
-one DB snapshot; a failed startup sweep creates a durable retry token. Chunk writes shield the
-write-and-row-check sequence from cancellation. If a late write finds its upload deleted, it
+only while a wipe-sweep token remains pending. It enumerates paths before consulting a batched
+snapshot of live attachment/upload rows and acts only on paths without a live row. A failed
+startup sweep creates a durable retry token. Chunk writes shield the write-and-row-check sequence
+from cancellation. If a late write finds its upload deleted, it
 re-marks that upload for durable cleanup, even when an earlier cleanup already completed.
 Route-owned and background WAL scrubs serialize under `LiveChatStore.scrub_guard()` and read the
 current marker after acquiring the guard; a route skips its scrub if the worker already cleared it.
@@ -247,6 +253,11 @@ the project's uncompressed P-256 VAPID public key; subscription status and mutat
 use the protected `/push/subscriptions/{deviceId}` routes. Subscription endpoints are
 validated against the frozen HTTPS push-service allowlist before they are stored. The
 VAPID key pair is persisted race-safely in the private server directory's `vapid.json`.
+
+**PENDING-AUDIT-FIX F1:** the Android opt-in is not reachable at this candidate. The push
+routes, service worker, and toggle module exist, but `settingsSheet.ts` leaves `pushSlot`
+empty and the app does not mount the toggle. Treat Android opt-in as the intended policy, not
+an operational feature, until F1 is merged and verified.
 
 After a message commits, the registered dispatch hook sends a payloadless Web Push
 request to every subscription except the message's device and case-insensitive sender.
@@ -272,7 +283,7 @@ function takes explicit input/output paths and (for voice/video) explicit `ffmpe
    subprocess (§2's ffmpeg SSRF/LFI concern). The sniffed container is checked against the
    claimed kind (`MediaProcessingError("kind_mismatch")` on a mismatch) before any
    processing starts.
-2. **Photo** (Pillow + pillow-heif): an 80MP pixel cap checked immediately after
+2. **Photo** (Pillow + `pillow-heif==1.7.0`, included by the server extra): an 80MP pixel cap checked immediately after
    `Image.open()`, before `.load()`/`.convert()`/`exif_transpose()` — a decompression bomb
    (huge declared dimensions, tiny file) is rejected without ever decoding pixel data.
    `exif_transpose` + a full metadata strip (rebuilt from raw pixel bytes, not a
@@ -327,10 +338,10 @@ query (unclaimed OR lease expired) already re-surfaces a row orphaned by a kille
 instant its lease lapses — `run_forever`'s ordinary claim loop on the next startup *is* the
 recovery path.
 
-**The §17.1/A1 delete race, the queue's own half** (P8's delete/wipe routes are the other
-half, built later): after `finish_attachment` (itself a silent no-op against a
-concurrently-deleted row, per `store.py`), the queue re-reads `get_attachment`; `None` means
-a delete/wipe won the race, and the media bytes this worker just wrote are `rmtree`'d.
+**The delete/processing race:** after `finish_attachment` (itself a silent no-op against a
+concurrently-deleted row, per `store.py`), the queue re-reads `get_attachment`. If the row is
+gone, it journals cleanup for any paths this worker recreated; the erasure worker removes
+them with the same retryable deletion path as request-side cleanup.
 
 **`resolve_binaries`** (called once at `create_app` time): `WIXY_FFMPEG`/`WIXY_FFPROBE`,
 falling back to `shutil.which` — but an **explicit** override must point at a file that
@@ -377,10 +388,10 @@ playback in the browser. Served via Starlette `FileResponse` (200/206, Range-awa
 | Env var | Setting | Default | Notes |
 |---|---|---|---|
 | `WIXY_SERVER_PIN_APP_KEY` | `server_pin_app_key` | `"wixy-livechat"` | an identifier, never a secret — **no PIN setting exists** |
-| `WIXY_SERVER_MEDIA_QUOTA_MB` | `server_media_quota_bytes` | 20480 MB | R10 — enforced at upload init (P2b) |
-| `WIXY_SERVER_MIN_FREE_MB` | `server_min_free_bytes` | 10240 MB | R10 — the disk free-space floor, enforced alongside the quota |
+| `WIXY_SERVER_MEDIA_QUOTA_MB` | `server_media_quota_bytes` | 20480 MiB (20 GiB) | R10 — enforced at upload init (P2b); MB values multiply by 1024² |
+| `WIXY_SERVER_MIN_FREE_MB` | `server_min_free_bytes` | 10240 MiB (10 GiB) | R10 — the disk free-space floor, enforced alongside the quota |
 | `WIXY_SERVER_UPLOAD_CHUNK_BYTES` | `server_upload_chunk_bytes` | 8 MiB | clamped to 64 KiB–16 MiB |
-| `WIXY_FFMPEG` / `WIXY_FFPROBE` | `ffmpeg_path` / `ffprobe_path` | `""` (resolve via `PATH`) | overrides for a deploy where the binaries aren't on `PATH` |
+| `WIXY_FFMPEG` / `WIXY_FFPROBE` | `ffmpeg_path` / `ffprobe_path` | `""` (resolve via `PATH`) | overrides must point to existing files; either missing makes media uploads return 503 while text chat works |
 
 `ProjectPaths` (`storage.py`) gets `server_dir`/`server_db`/`server_secret`/`server_vapid`/
 `server_media`/`server_uploads`/`server_failed` — created **lazily** (like `reports_dir`),
@@ -390,7 +401,35 @@ directory. Plus three per-item helpers (P2b): `server_upload_dir(uploadId)` →
 (the two-level fan-out keeps any one directory from accumulating thousands of entries),
 `server_failed_dir(attachmentId)` → `failed/<id>/`.
 
-## 10. Frontend: the lock/gesture state machine (P4, `admin-ui/src/server/`)
+## 10. Background containment and recovery
+
+`wixy_server/background.py` wraps app-lifetime work in `ContainedTaskGroup`. Long-running loops
+(`livechat-media` and `livechat-erasure`, among others) use `supervise`: exceptions are logged,
+health is recorded, and loops restart with exponential backoff capped at 60 seconds. One-shot
+work uses `spawn`, which logs and contains an exception. No worker exception can cancel the
+lifespan task group; media-queue items and push recipients are also isolated from sibling items.
+
+The erasure worker starts immediately and retries every two seconds. It removes
+`deleted_storage` paths, resumes `pending_scrub` WAL work, and runs the full wipe/orphan sweep at
+startup and while `pending_wipe_cleanup` exists. The hourly janitor runs once at startup and then
+every hour: it removes stale uploads and unclaimed orphan attachments after 24 hours, removes
+raw upload sources for ready attachments, retries archiving failed originals, expires an
+unarchived failed original after seven days, and prunes completed cleanup rows after seven days.
+It never ages out pending work.
+
+If `/api/admin/server/usage` reports `erasurePending: true`, delete/wipe has committed and the
+worker still owes WAL or file cleanup. Check server logs for filesystem errors, restore access,
+and allow automatic retry; a restart also retries startup recovery and legacy-marker import.
+Do not manually clear `pending_scrub`, `deleted_storage`, or the wipe-sweep token. Schema v6
+imports legacy `server/scrub.pending` into `pending_scrub`; an unreadable marker is retained and
+a durable row is created so privacy work is not lost.
+
+`/api/admin/system/status` reports `server.mediaProcessing` as `unavailable` when either binary
+cannot be resolved, `degraded` after at least three consecutive media-queue or erasure-worker
+failures, and `ok` when media is available without that failure threshold. The reported failure
+count resets after five minutes without another failure.
+
+## 11. Frontend: the lock/gesture state machine (P4, `admin-ui/src/server/`)
 
 The router/nav/shell wiring is ordinary (`router.ts` gets a `server` route with no
 parameters; `shell.ts`'s `NAV_ROUTES` gets it last, and an injectable `mountServerPanel` seam
@@ -463,7 +502,7 @@ not just hidden), R7's suspension timer math on a fake clock, and instance survi
 lock/unlock. `e2e/tests/server-lock.spec.ts` drives the same matrix in a real browser with
 `page.clock`, desktop and mobile legs both.
 
-## 11. Frontend chat and media (P5b/P6b)
+## 12. Frontend chat and media (P5b/P6b)
 
 `admin-ui/src/server/chatView.ts` owns the name prompt and stream lifecycle;
 `admin-ui/src/server/thread.ts` owns message history, rendering, and the shared composer from
@@ -516,25 +555,34 @@ coverage is `e2e/tests/server-media.spec.ts` together with `server-chat.spec.ts`
 multiple chunks. Voice coverage launches Chromium with fake media-device and permission
 flags and does not install the Playwright clock.
 
-## 12. What's built vs. what's still to come
+## 13. Delivery status
 
-**Built:** P1 (settings, storage paths, the `livechat/` package's `models`/`store`/`tokens`/
+The feature branch contains the P1–P8 implementation; P7 closes this manual, invariants, and
+decision log. **PENDING-AUDIT-FIX F1:** the Server push toggle is not mounted, so Android opt-in
+is unavailable at this candidate. The code parcels are: P1 (settings, storage paths, the `livechat/` package's `models`/`store`/`tokens`/
 `pinclient`/`notifier`, `routes_livechat.py` — unlock/history/send/stream/usage, the
 `fake_cmd.py` PIN double, the `server` field on `GET /api/admin/system/status`); **P2a**
 (`livechat/processing.py`, §8 above); **P2b** (`livechat/{uploads,media_queue,janitor}.py`,
-`routes_livechat_media.py`, §8 above — `mediaProcessing` on the system-status field is now
-the real `app.state.livechat_media_available` value, not the P1-era placeholder `"ok"`; three
-consecutive supervised media/erasure failures render as `"degraded"`);
+`routes_livechat_media.py`, §8 above — `mediaProcessing` reflects binary availability and
+supervised media/erasure health (`unavailable`, `degraded`, or `ok`);
 **P3a/P3b** (Web Push — VAPID keys, the service worker, protected push routes, the dispatch
 hook, and the standalone Android toggle module); **P4** (frontend lock/disguise/PIN-pad core
-— §10 above — the router/nav entry, the lock state machine, the decoy, the PIN pad, and the
+— §11 above — the router/nav entry, the lock state machine, the decoy, the PIN pad, and the
 orchestrating panel that wires both gesture detectors, R7's idle/suspension timers, and every
 R6 lock trigger); **P5b** (the real chat view and thread); **P6a/P6b** (upload, recording,
-rendering, and media wiring; §11 above).
+rendering, and media wiring; §12 above); P8 adds hard delete, wipe, transactional erasure
+journals, and restartable cleanup (see §6).
 
-Not yet built (later parcels, see the brief's §10 wave plan):
-- **P7** — docs/invariant close-out for the whole feature (the frontend media guide is now
-  documented above; remaining items are in the frozen brief).
-- **P8** — hard delete-a-message / wipe-the-chat (spec §17.3/§17.4), on top of the A1
-  schema/stream headroom P1 already laid down (§6 above) and the queue's own delete-race
-  half P2b already laid down (§7 above).
+Delivery to `main` and live verification are separate release steps.
+
+## 14. Release notes and delivery merge (R14a)
+
+The ONE feature delivery merge from `cmd/workspace-00029` to `main` must be a squash with a
+hand-written body whose only `Release-note:` line is exactly
+`Release-note: Added a Server page showing your website's server status.` Never accept
+GitHub's default squash body: it copies the individual commit messages, including descriptive
+trailers, into the release commit. `routes_version.resolve_release_notes` runs plain
+`git log --format=%B`, not first-parent history, so every commit's trailer can reach the
+owner-facing update popup. After delivery, every commit touching Server chat must carry
+exactly `Release-note: General bug fixes and improvements.` and no release-note line may name
+the chat, messages, photos, video, voice, PIN, or locking.
