@@ -246,7 +246,7 @@ class TestServerField:
         with TestClient(app) as client:
             assert not hasattr(app.state.background_tasks, "start_soon")
             for _ in range(3):
-                app.state.background_health.failed("livechat-media", ran_for_s=0.0)
+                app.state.background_health.failed("livechat-media")
             response = client.get("/api/admin/system/status")
 
         assert response.json()["server"]["mediaProcessing"] == "degraded"

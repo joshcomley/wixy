@@ -72,7 +72,7 @@ def test_degraded_health_expires_after_five_minutes_without_a_new_failure(
 ) -> None:
     health = BackgroundTaskHealth()
     for _ in range(3):
-        health.failed("livechat-media", ran_for_s=0.0)
+        health.failed("livechat-media")
     assert health.media_degraded()
 
     last_failure_at = time.time()
@@ -80,3 +80,22 @@ def test_degraded_health_expires_after_five_minutes_without_a_new_failure(
 
     assert health.consecutive_failures("livechat-media") == 0
     assert not health.media_degraded()
+
+
+def test_new_failure_resets_count_after_elapsed_quiet_period_including_backoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    health = BackgroundTaskHealth()
+    now = [1000.0]
+    monkeypatch.setattr(time, "time", lambda: now[0])
+    for _ in range(3):
+        health.failed("livechat-media")
+    assert health.consecutive_failures("livechat-media") == 3
+
+    # The running attempt itself lasted 297s, while 301s elapsed since the
+    # previous failure once the supervisor's backoff is included.
+    now[0] = 1301.0
+    assert health.consecutive_failures("livechat-media") == 0
+    health.failed("livechat-media")
+
+    assert health.consecutive_failures("livechat-media") == 1

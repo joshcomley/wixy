@@ -57,3 +57,9 @@ Three additional review gaps are now fixed on top of the round-8 candidate:
 - The hourly janitor now finds ready attachments that still have upload rows, deletes those raw upload rows/files immediately, and leaves deletion journaled if filesystem cleanup fails. Ready renditions need no raw-source retention window.
 
 Regression tests first failed on the existing code, then passed after the fixes. Ruff check and `ruff format --check` pass; mypy passes across 208 sources; focused background/store/janitor slice passes 71/71. The DM's five-run full-suite acceptance and remaining Sol review continue independently on a detached snapshot. This round does not touch that snapshot. No push/PR; section 13 remains DM-owned.
+
+## Round 10 update — health reset boundary
+
+Sol found that the health counter's write-side reset used only the current attempt's runtime, while the read-side reset used elapsed time since the previous failure. It now uses the same wall-clock gap on both sides, so supervisor backoff is included and a new failure after five quiet minutes starts a fresh streak. A regression simulates three failures at t=1000, then a new failure at t=1301 after a 297-second attempt; the count resets to one rather than four.
+
+Verification: Ruff, `ruff format --check`, and mypy across 208 sources pass; focused background/status tests pass 17/17. Commit this narrow change with a `Release-note:` trailer and send the exact SHA to DM; do not push or run section 13.

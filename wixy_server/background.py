@@ -28,14 +28,15 @@ class BackgroundTaskHealth:
     def __init__(self) -> None:
         self._failures: dict[str, TaskFailure] = {}
 
-    def failed(self, name: str, *, ran_for_s: float) -> None:
+    def failed(self, name: str) -> None:
         previous = self._failures.get(name)
+        now = time.time()
         count = (
             1
-            if previous is None or ran_for_s >= _HEALTHY_RESET_S
+            if previous is None or now - previous.last_failure_at >= _HEALTHY_RESET_S
             else previous.consecutive_failures + 1
         )
-        self._failures[name] = TaskFailure(count, time.time())
+        self._failures[name] = TaskFailure(count, now)
 
     def consecutive_failures(self, name: str) -> int:
         failure = self._failures.get(name)
@@ -70,16 +71,14 @@ class ContainedTaskGroup:
             try:
                 await loop_fn()
             except Exception:
-                ran_for = time.monotonic() - started
-                if ran_for >= _HEALTHY_RESET_S:
+                if time.monotonic() - started >= _HEALTHY_RESET_S:
                     delay = 1.0
-                self.health.failed(name, ran_for_s=ran_for)
+                self.health.failed(name)
                 _LOGGER.exception("Background loop %s failed; restarting in %.1fs", name, delay)
             else:
-                ran_for = time.monotonic() - started
-                if ran_for >= _HEALTHY_RESET_S:
+                if time.monotonic() - started >= _HEALTHY_RESET_S:
                     delay = 1.0
-                self.health.failed(name, ran_for_s=ran_for)
+                self.health.failed(name)
                 _LOGGER.error("Background loop %s returned; restarting in %.1fs", name, delay)
             await anyio.sleep(delay)
             delay = min(delay * 2.0, _MAX_BACKOFF_S)
@@ -93,5 +92,5 @@ class ContainedTaskGroup:
         try:
             await fn(*args)
         except Exception:
-            self.health.failed(name, ran_for_s=0.0)
+            self.health.failed(name)
             _LOGGER.exception("One-shot background task %s failed", name)
