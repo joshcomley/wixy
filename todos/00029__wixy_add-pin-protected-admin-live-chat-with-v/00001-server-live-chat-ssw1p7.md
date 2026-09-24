@@ -840,3 +840,289 @@ fixed same-session.)
   (opus tier per the audit skill, given this now involves schema migrations - v3→v4→v5
   - security/auth-adjacent surface, and concurrency design - all independently qualify),
   live verification via the `verify` skill, then the one delivery merge.
+
+## Update 2026-09-24 (DM `8e7bbea9`, continuation via handover from `014c0ebc`) — P8 round 5 CLEARED (both halves), grid flake-test root-caused and resubmitted
+
+- **Picked up via formal handover** (`handover/2609241205-wixy-29-p8-erasure-concurrency-review.md`)
+  with two things in flight: P8's Builder finishing R1/R2/R3/L1/L2, and the fir grid
+  flake-investigation task. Both resolved this session.
+- **P8 round 5 (candidate `fa32bf3c5db2151657cba4b0b68fb90a868dafe2`, base `fa8223d6`)
+  arrived mid-session** covering all 5 Architect-required fixes. Read the diff directly
+  (9 files, +452/-35 vs round 4): R1 `notifier.publish()` now fires immediately after
+  commit in both `delete_message`/`wipe_chat`, before file cleanup; R2 `busy_timeout`
+  now capped `min(remaining, 250ms)` per TRUNCATE attempt; R3 `scrub_guard()` takes
+  `timeout_s`, `_scrub_pending_locked` uses an absolute `deadline_at` and rechecks
+  remaining time after acquiring the lock; L1 new `delete_orphan_attachment_if_unclaimed`/
+  `delete_stale_upload_if_unpromoted` conditional deletes (rowcount-gated tombstone
+  queuing); L2 new `prune_completed_deleted_storage`, wired into the existing hourly
+  janitor sweep reusing the existing 7-day `FAILED_RETENTION_S` constant. All 5 match
+  the Architect's spec exactly, nothing hand-waved.
+- **Both verification halves CLEARED**:
+  - Mechanical (isolated `__review-p8` worktree, re-pointed to `fa32bf3`): ruff
+    check+format clean, mypy 206 files clean, pytest full suite green, vitest
+    1095/1095, admin-ui bundle rebuild zero-drift (npm typecheck also clean). P8 does
+    touch admin-ui (`messageActions.ts`, `gestures.ts`, `settingsSheet.ts`, `thread.ts`)
+    and e2e (`server-chat.spec.ts`) beyond just the Python backend — full TS+bundle
+    verification was in scope, not skippable.
+  - Fresh Sol review (session `c80b7714`, spawned via team/spawn + forced
+    provider-continuation — first attempt hit `wedge_no_response`, `force:true`
+    succeeded): **CLEARED, 0 critical/high/medium/low**, 67 focused tests passed,
+    confirmed lock-timeout/worker-completion and prune-vs-pending paths preserve
+    durable state, no edits made.
+  - **Process note**: a misaddressed "stand down, stray spawn" message (meant for what
+    I believed was a separate leftover Claude-default spawn) auto-resolved via cmd's
+    lineage chain to the SAME live reviewer session mid-review — because
+    `team/spawn` + `provider-continuation` is one lineage (predecessor→successor), not
+    two independent sessions. Caught before it landed (peer messages to a busy
+    recipient defer to turn-end) and corrected with a follow-up before the reviewer's
+    turn ended; no actual disruption. Lesson for next time: a `provider-continuation`
+    response's `predecessor_session_id` is the SAME agent, not a stray to be
+    stood down — don't message it separately.
+- **Grid flake-investigation task failed a second time, root-caused (not dismissed)**:
+  `t-9939d2c30c1b` failed at the python-deps step — winget reported "Successfully
+  installed" Python 3.14.7 on fir, but the script's hardcoded
+  `%LOCALAPPDATA%\Python\pythoncore-3.14-64\python.exe` check came back empty. Probed
+  fir directly (fleet-run) rather than guessing: that path is genuinely
+  **hub-specific** (confirmed absent on fir, matching the `fleet-run` skill's own
+  documented warning) — fir's winget install actually landed at `C:\Python314\python.exe`
+  (also visible via `C:\Program Files\Python314\python.exe` and the `py -0p` launcher
+  list). Fixed `C:\Users\josh\.claude\scratch_fir_flake_test.ps1` to search a candidate
+  path list (`pythoncore-3.14-64`, `Programs\Python\Python314`, `C:\Python314`,
+  `C:\Program Files\Python314`) plus a `py -0p` regex fallback, instead of one
+  hardcoded path. Resubmitted as `t-b56a41041f59` (same node, same 10x-run script
+  otherwise unchanged); 90s liveness check confirmed it found Python 3.14 correctly
+  this time and progressed past the python-deps step into admin-ui build. Result still
+  pending as of this update — check `grid status t-b56a41041f59` / `grid wait
+  t-b56a41041f59`.
+- **Next**: push `cmd/workspace-00029-bs7` (currently local-only, matches reviewed
+  `fa32bf3` exactly, no PR open yet), open/update the PR, wait CI green (Monitor
+  pattern), `gh pr merge --merge --delete-branch`, mark delivery task
+  `3e6c218c-80ca-449c-8bc6-7df8402f381f` done, resolve lane `c7583fed-a9a2-4de8-b423-d8bd62739bcc`,
+  resolve the `spec/server-chat/00-brief.md` v1.5.4 merge conflict in P8's favor per the
+  existing merge-time note above. Then read grid task `t-b56a41041f59`'s final result
+  and act on it (10/10 = host-load confirmed, any failure = real bug). Then P7, the
+  sec.13 audit, live verification, delivery merge — unchanged from prior plan.
+
+## Update 2026-09-24 (DM `8e7bbea9`) — P8 round 6: DM-found real Windows race, root-caused and fixed directly; grid ffmpeg gap fixed
+
+- **The full pytest suite on round 5 (`fa32bf3c`) was NOT actually clean** — 1694 passed,
+  **1 failed**: `test_delete_requires_token_and_removes_message_files_without_push`.
+  Not dismissed as flaky (per standing doctrine). Investigated properly:
+  - Did not reproduce serially (8/8 pass alone) or under `-n4` on just this one file
+    (3/3 runs, 50/50 tests each) — only manifests under genuine full-suite (~1695 test)
+    CPU contention, consistent with this delivery's already-documented hub-load issues.
+  - Root cause, confirmed by reading the code (not guessing): the test creates an
+    attachment directly via `store.create_attachment(...)`, landing it in
+    `status='processing'` — exactly eligible for the REAL background media-queue worker
+    (started by `TestClient(app)`'s app lifespan, same task group as the janitor) to
+    independently claim and start processing the SAME attachment the test is about to
+    delete. `media_queue.py`'s `_archive_failed_original` and `uploads.py`'s `assemble()`
+    BOTH already anticipate this exact race (re-check `store.get_attachment`/
+    `store.get_upload` after a file-op exception to distinguish "concurrent delete won,
+    benign" from "genuine error, re-raise") — but both only caught `FileNotFoundError`.
+    On Windows, a concurrent `rmtree` on the same path surfaces as `PermissionError`
+    ("Access is denied") instead, falling straight through the existing guard. Confirmed
+    via a deterministic red/green regression test (monkeypatch `os.replace` to raise
+    `PermissionError` at the exact moment a concurrent wipe lands) — failed on unfixed
+    code, passed after.
+  - **Real severity, not just a test artifact**: `_archive_failed_original` runs inside
+    the app's lifespan-owned background task group; an unhandled exception there would
+    have propagated up and crashed BOTH the media-queue worker and the janitor for the
+    rest of the process's life on a real Windows Slots deployment — an availability bug,
+    triggerable by an ordinary user deleting a message the same moment its attachment is
+    still processing.
+  - `janitor.py`'s own cleanup functions already catch the broader `OSError` for exactly
+    this race (established precedent in the SAME codebase) — this was an inconsistency
+    between two call sites, not a design gap. Fixed both to `except OSError:` (not a
+    `except (FileNotFoundError, PermissionError):` tuple — see next bullet).
+  - **Also hit and worked around a genuine `ruff format` 0.16.0 bug** while fixing this:
+    running `ruff format` on a file with `except (A, B):` corrupts it into invalid
+    Python-2-style `except A, B:` (a SyntaxError), reproduced in complete isolation on a
+    2-line repro file. Already discovered and documented once before in THIS codebase
+    (`wixy_server/livechat/pinclient.py`'s `_post_with_narrow_retry` comment) — I didn't
+    know that when I started, found it by grepping for existing `except (` patterns after
+    my own fix got silently corrupted by `ruff format` (not `--check`, the writing form).
+    Used `except OSError:` (single type, no tuple) instead of the documented two-clause
+    workaround, since the guard body is identical either way and duplicating it would be
+    worse. **Lesson: never run `ruff format` (write mode) blind on a file with a
+    multi-exception except clause on this box until this ruff version issue is fixed
+    upstream — always diff the result.**
+  - Committed directly to P8's own branch (`cmd/workspace-00029-bs7`, commit `94fc647`),
+    matching the established "critical fix, DM-owned directly" precedent from
+    `decisions/00150` (found independently during my own verification, narrow and
+    well-precedented fix, no Builder judgment call needed). New decision entry:
+    `decisions/00151-windows-permissionerror-concurrent-delete-race/`.
+  - **Not yet re-verified or re-reviewed** — this is now round 6, unpushed. Still needs:
+    fresh mechanical verification of the new HEAD SHA, and either a follow-up message to
+    the still-live Sol reviewer (`c80b7714`, who cleared round 5 before I found this) or a
+    fresh Sol dispatch, before this can be called FINAL HANDOFF CLEARED. The Architect
+    should also be told (relevant to their pending brief v1.5.5 rewrite of section 17).
+- **Grid flake-investigation task, 2nd new environment gap found and fixed**: after the
+  Python 3.14 path fix (prior update), resubmission (`t-b56a41041f59`) got past the
+  python-deps step but failed at "voice test run 1" — fir has no `ffmpeg`/`ffprobe`
+  installed anywhere (confirmed via direct `fleet-run` probe: `where.exe` empty, no
+  WinGet package, no `C:\ffmpeg`), needed by the server-chat media pipeline for the voice
+  note test specifically. Fixed `C:\Users\josh\.claude\scratch_fir_flake_test.ps1`: added
+  a `Find-Ffmpeg` function (recursive search under WinGet's package dir + a
+  `C:\ffmpeg\bin` fallback, winget-install `Gyan.FFmpeg` if neither found), setting
+  `WIXY_FFMPEG`/`WIXY_FFPROBE` env vars per the app's own error-message hint. Resubmitted
+  as `t-864a288c3b57`; 90s liveness check confirmed it now gets past setup cleanly and is
+  progressing through the actual 10x voice-test runs (on run 2/10 as of this update).
+  Result still pending — check `grid status t-864a288c3b57` / `grid wait t-864a288c3b57`.
+- **Next**: get round 6 (bs7 @ `94fc647`) independently re-verified (mechanical +
+  fresh/follow-up Sol review) before FINAL HANDOFF CLEARED; tell the Architect about the
+  new finding; then push/PR/merge P8 per the established pattern. Then read the grid
+  task's final result and act on the flake diagnosis. Then P7, sec.13 audit, live
+  verification, delivery merge — unchanged from prior plan otherwise.
+
+## Update 2026-09-24 (DM `8e7bbea9`) — process note: don't manipulate a worktree a background pytest run is still using
+
+- The FIRST post-fix pytest run I launched (`bnvo2josr`, on `__review-p8`, uncommitted-fix
+  state) came back catastrophic — 92 failed, 826 errors, cascading `ImportError`/
+  `CollectError` on `builder/__init__.py` across completely unrelated test files
+  (`test_auth.py`, `test_routes_livechat_media.py`, etc.). **Not a real regression** —
+  root cause: while that run was still active, I `git worktree remove --force`'d and then
+  `rm -rf`'d the SAME `__review-p8` directory (to re-point it at the round-6 SHA for a
+  fresh review), which corrupted the files pytest was actively importing out from under
+  it. The `rm -rf`'s own `Device or resource busy` error was the tell I initially
+  attributed to something else (the Sol reviewer's leftover process) — it also reflected
+  bnvo2josr's own still-open file handles. Discarded that result entirely; did not
+  re-run it (superseded by a clean run on a genuinely fresh worktree, `__review-p8-r6`).
+  **Lesson: once a background verification run is launched against a worktree, don't
+  touch that worktree again (remove/recreate/re-point) until the run's notification
+  arrives.** Use a distinctly-new path for the next thing instead of racing the old one.
+
+## Update 2026-09-24 (DM `8e7bbea9`) — Architect RULING R14a: the final delivery merge MUST be a squash with a hand-written body
+
+- The Architect independently verified my round-6 Windows-fix (correct: both sites still
+  re-raise unless the row is genuinely gone) and, while reading bs7's own commits for
+  that, found a much bigger problem: **several `Release-note:` trailers across this whole
+  delivery plainly reveal the feature's hidden nature** — e.g. "Send photos, videos, and
+  voice notes in the **private** Server chat", "Deleted messages stay removed after you
+  **unlock** the Server chat". Confirmed myself by reading the actual git log on
+  `cmd/workspace-00029` (not just trusting the peer message — this delivery has had one
+  real prompt-injection attempt before, so verified both the message's authenticity via
+  the Architect's raw session store AND the substance independently before acting).
+- **Why this matters**: `wixy_server/routes_version.py`'s `/api/version/notes` (the
+  update-popup "What's new" feed the site owner reads) harvests `Release-note:` trailers
+  via plain `git log --format=%B` — **no `--first-parent`** — so every individual commit
+  that ever lands on `main`, not just merge points, gets its trailer surfaced. Confirmed
+  by reading the actual implementation. A normal (non-squash) final delivery merge would
+  put EVERY one of the leaking lines above into her own "what's new" popup — visible to
+  her and to anyone glancing at her screen, defeating the entire point of a PIN-protected,
+  disguised admin chat.
+- **RULING R14a** (Architect, spec commit `a3e828c`): the ONE final delivery merge
+  (`cmd/workspace-00029` → `main`) must be a **squash merge with an explicit, hand-written
+  commit body** containing ONLY the intended harmless line ("Added a Server page showing
+  your website's server status." or similar) — **not** GitHub's default squash body, which
+  pastes every squashed commit's message verbatim (and `_extract_release_notes` would
+  happily re-match every `Release-note:` line inside that pasted text too, so squashing
+  alone with the default body does NOT fix this). DM must grep `/api/version/notes` (or
+  the raw git log) both just before and just after the delivery merge to confirm exactly
+  one line survives. P7 is to add this rule permanently to `docs/ai/livechat.md` +
+  `CLAUDE.md` so future single-commit changes to this feature keep using the generic
+  fallback line ("General bug fixes and improvements.") rather than a descriptive one.
+- **Does NOT apply** to P8's own PR-into-feature-branch merge (bs7 → cmd/workspace-00029)
+  — that stays a normal merge like every other parcel in this delivery; `main`'s own
+  release-notes harvest is the only one the site owner's popup actually reads, so only the
+  FINAL delivery merge needs the squash+explicit-body treatment.
+- **Open item for me before reaching that step**: verify whether cmd's own delivery-merge
+  endpoint (`POST /api/workspaces/.../merge`) supports a squash mode with a custom commit
+  body, or whether I need to do the final `main` merge manually via git/gh instead. Not
+  urgent yet (P8 hasn't even merged its own PR), but must be resolved before the actual
+  delivery-merge step, not discovered at the last second.
+
+## Update 2026-09-24 (DM `8e7bbea9`) — flake investigation CLOSED (10/10 on fir); P8 round 7: 2 more Sol-found gaps fixed, plus a 3rd found via full-suite re-verify
+
+- **Grid flake investigation CONCLUDED**: `t-864a288c3b57` finished 10/10 PASS on fir
+  (dedicated, unloaded node) for `server-media.spec.ts`'s voice-note test — confirms
+  host-load-only, not a real bug. Reported to the Orchestrator. No code change needed
+  (test already polls real DOM ready-state via `waitForRenderedAttachments`). This open
+  item is now fully closed.
+- **P8 round 6's Sol review came back NOT CLEARED**: 2 high-severity gaps in the SAME
+  concurrency surface as `decisions/00151`, both proven by the reviewer's own pytest
+  probes:
+  1. `media_queue.py`: `failed_dir.mkdir(parents=True, exist_ok=True)` ran BEFORE the
+     `try:` block guarding `os.replace` — a concurrent wipe racing the mkdir itself
+     escaped uncaught even though the same row-gone recheck would have treated it as
+     benign. Fixed: moved inside the `try`.
+  2. `uploads.py`'s `write_chunk()` had no guard at all; `routes_livechat_media.py`'s
+     `put_chunk` route already checks whether the upload row still exists AFTER a
+     successful write (the same rows-are-authority pattern used throughout this
+     delivery) — but a write-TIME exception skipped that check entirely, escaping as an
+     unhandled 500 instead of a clean 404. Fixed: wrapped the write, folded its outcome
+     into the existing row check.
+  - Reviewer honestly qualified finding 2: their probe directly deleted the row to prove
+    the route-level skip, which proves the escaping-exception/failed-PUT part but NOT
+    durable file leakage in the real full delete-route flow — good, precise reporting,
+    not overclaiming.
+- **A THIRD variant of the SAME underlying race found by ME**, not the reviewer, while
+  re-running the FULL suite (not just the 2 targeted regression tests) against round 6's
+  fix: the SAME pre-existing test failed a THIRD way — `os.replace` raised
+  `FileNotFoundError` this time, and the post-exception `store.get_attachment(att_id) is
+  not None` recheck STILL evaluated True, so the existing "reraise if row exists" logic
+  correctly-by-its-own-logic reraised and crashed the worker's shared task group again.
+  Root cause: `delete_message`'s DB commit and its actual file cleanup are TWO SEPARATE
+  steps, so a single post-exception recheck isn't a reliable enough signal — it can read
+  stale relative to the exact race that caused the failure. **Policy fix**: since this
+  archive is diagnostic-only (docstring already says "kept for diagnosis", never
+  load-bearing) and runs inside the app's SHARED background task group alongside the
+  janitor (crashing here kills BOTH for the rest of the process's life), changed
+  `_archive_failed_original` to never re-raise on `OSError` — log a warning
+  (`exc_info=True`) and continue either way, matching `janitor.py`'s own already-
+  established log-and-continue pattern for this identical class of problem. Full
+  reasoning: `decisions/00152-archive-failed-original-never-crashes-worker/`.
+- **Committed as round 7** (`cmd/workspace-00029-bs7` commit `f7ce39c`, 6 files
+  +212/-20). Local mechanical verification green (mypy/ruff/format-check, all affected
+  test files serially green). Fresh follow-up brief sent to the Sol reviewer (session
+  `c80b7714`, isolated worktree `__review-p8-r7`) covering all 3 fixes, explicitly asking
+  it to scrutinize the policy-change (log-and-continue) reasoning and whether
+  `uploads.py`'s `assemble()` needs the same treatment. **Full pytest suite re-run in
+  progress** (background task, `__review-p8-r7`) — this is the critical confirmation
+  since round 6's OWN full-suite run still had 1 failure despite passing its own two
+  targeted regression tests, so a green full-suite run is the real bar here, not just the
+  new tests passing.
+- **Next**: check the round-7 full pytest suite result + the Sol reviewer's round-7
+  verdict. If BOTH clean: push `bs7`, open/update PR, wait CI, merge, mark P8's delivery
+  task done, resolve its lane, sync primary checkout. If the full suite finds a 4th
+  variant of this same race, seriously consider escalating to the Architect for a fresh
+  targeted look at this specific function rather than continuing solo point-fixes — this
+  is now 3 rounds deep on the exact same function, echoing the Orchestrator's earlier
+  "point-fixes chasing a deeper gap" warning from before the holistic review.
+
+## Update 2026-09-24 (DM `8e7bbea9`) — OWNERSHIP CORRECTION + round 8 is Luna's; DM is review-only
+
+- **Standing rule (operator, relayed by the Orchestrator): the codex Builder (Luna 6 XL) does ALL
+  implementation, including fixes. The DM reviews and verifies only.** I broke this in P8 rounds
+  6 and 7 by authoring the fixes myself (`94fc647`, `f7ce39c`), rationalising it with the
+  `decisions/00150` "critical fix, DM-owned" precedent. That precedent was a security bug found
+  in an unrelated area; a fix inside the Builder's own open parcel is not the same thing. Do not
+  edit `cmd/workspace-00029-bs7` again while a Builder owns it. Send evidence + a reference patch
+  and let Luna implement.
+- The Orchestrator relayed the Sol round-7 MEDIUM to Luna as **ROUND 8** while I was
+  session-walled (12:20-15:50 UTC). Round 7 (`f7ce39c`) is NOT cleared: Sol found the
+  log-and-continue policy then deleted the only staged original on a genuine archive failure
+  (breaks the 7-day retention rule). Luna's brief also asks for a bounded later retry, one
+  tolerant helper swept over every racy file op under `wixy_server/livechat/`, and a reworded
+  decision note.
+- I reverse-applied my own uncommitted edits from bs7 (clean at `f7ce39c`); my tested reference
+  patch is at `..._review-p8-r7/ref/dm_reference_round8_retention.patch` (in the scratch
+  worktree area, not the repo). Sent Luna a supplement: the round-7 full-suite run failed a
+  THIRD site (`store.scrub_pending_token()` PermissionError inside the background scrubber loop),
+  plus why Windows does this (CPython opens without FILE_SHARE_DELETE, both directions).
+- **Asked the Architect to rule** on the systemic shape: per-tick fault isolation in the three
+  background loops (media_queue `_handle_claimed`, `janitor.run_forever`, `run_scrubber_forever`
+  -- today any escaping exception kills the whole app.py lifespan task group) plus a bounded
+  PermissionError retry around the three `scrub.pending` file ops. Ruling to be copied to Luna.
+- **Process lessons this session**: (1) never remove/re-point a worktree a background test run
+  is using (`bnvo2josr` garbage result); (2) `ruff format` 0.16.0 corrupts `except (A, B):` into
+  invalid syntax -- use `--check`, diff any write, prefer a single broader exception type;
+  (3) a full-suite run, not just targeted tests, is the real bar in this area; (4) an
+  unproven causal claim in a decision note gets caught by review -- write only what was measured.
+- **Still owed after Luna's round 8**: fresh Sol review (`c80b7714`), my own full-suite +
+  ruff/mypy verification on the exact SHA, then push/PR/CI/merge P8, mark task
+  `3e6c218c-80ca-449c-8bc6-7df8402f381f` done, resolve lane `c7583fed-a9a2-4de8-b423-d8bd62739bcc`,
+  then P7 (`7a9fa759-aaf1-4368-a6db-24ddc2b9bae0`, must add the R14a release-note rule to
+  `docs/ai/livechat.md` + `CLAUDE.md`), sec.13 opus audit, live `verify`, and the ONE delivery
+  merge as a SQUASH with a hand-written body (R14a; check the cmd merge API supports a custom
+  squash body, else merge manually).
