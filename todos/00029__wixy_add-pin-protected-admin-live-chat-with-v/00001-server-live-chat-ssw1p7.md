@@ -1143,3 +1143,37 @@ fixed same-session.)
   HANDOFF SHA, then: fresh detached worktree `__review-p8-r8`, ruff/ruff-format-check/mypy,
   the 5x full-suite harness (`__review-p8-r7/ref/run5x.sh`, background), fresh Sol review
   pointed at that worktree. No merge until both clear.
+
+## Update 2026-09-24 (DM `8e7bbea9`) — P8 round 8 final handoff received; verification in flight
+
+- **Luna's FINAL HANDOFF**: `fb9f66f4fd6aeb2a8b12de82b2eec700cc5f3a6c` on `bs7`, committed
+  (not pushed). Implements the Architect's containment ruling (spec commit `83bc29b`) in
+  full: Rule A (`wixy_server/background.py`, `ContainedTaskGroup` with `supervise()`/
+  `spawn()`, per-item isolation in the media queue + push dispatch, health tracking
+  surfacing via `/api/admin/system/status`), Rule B (migration v6, `pending_scrub` row
+  atomic with the delete/wipe transaction, legacy file import, all file-marker code
+  removed), Rule C sweep (WAL `stat()` tolerant loop, post-commit exceptions → 202
+  `erasurePending` instead of 500, hourly janitor retry+7-day-expire for lingering failed
+  originals). Also folds in round 7's retention fix + the sweep items from my supplement.
+  Luna's own self-report: pytest 1709 passed, 227-test focused slice, P8's 7 browser
+  tests, vitest 1095, TS build clean, ruff/format/mypy clean (208 files).
+- **DM verification in flight** (fresh worktree `__review-p8-r8`, matches `fb9f66f` exactly):
+  mechanical checks (ruff check/format-check, mypy) independently confirmed clean. The
+  Architect's own acceptance bar — **5 consecutive clean full-suite runs on hub** — is
+  running now in the background via `ref/run5x.sh` (stops at first failure; could take
+  30-45+ min given ~5-8 min per run under hub contention). Fresh Sol review also
+  dispatched (session `c80b7714`, pointed at this same worktree), explicitly asked to
+  adversarially review the WHOLE containment mechanism (not just diff against round 7) —
+  cancellation/shutdown propagation through `supervise()`, migration v6 atomicity +
+  legacy-import crash safety, the 202-on-post-commit-exception behavior change, the
+  janitor's own new retry logic for TOCTOU gaps, and the new `background.py` test coverage
+  against the ruling's own listed acceptance tests.
+- **Next**: wait for BOTH the 5x harness (auto-notifies) and Sol's verdict. Only clear once
+  both are clean — this is explicitly the round meant to end the whack-a-mole pattern, so
+  don't rush it. If the 5x harness fails on any run, do NOT dismiss — read the actual
+  failure, it's either a genuine miss in round 8's coverage or a NEW site, either way
+  needs root-causing before another round. Once cleared: push `bs7`, PR, CI, merge, mark
+  P8 delivery task `3e6c218c-80ca-449c-8bc6-7df8402f381f` done, resolve lane
+  `c7583fed-a9a2-4de8-b423-d8bd62739bcc`. Then P7, sec.13 audit (now heavier — migration v6
+  + new background supervisor per the Architect's own note), live `verify`, R14a squash
+  delivery merge.
