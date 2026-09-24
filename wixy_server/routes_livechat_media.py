@@ -124,7 +124,17 @@ async def put_chunk(upload_id: str, index: int, request: Request) -> Response:
     # Keep the filesystem write and its post-write row check in one shielded
     # operation. A disconnect after the write must not skip the cleanup check.
     with anyio.CancelScope(shield=True):
-        await anyio.to_thread.run_sync(_write)
+        write_error: OSError | None = None
+        try:
+            await anyio.to_thread.run_sync(_write)
+        except OSError as exc:
+            # A concurrent delete/wipe may remove upload_dir mid-write; on
+            # Windows this raises PermissionError rather than letting the
+            # write raise nothing and simply vanish. Fall through to the
+            # same row check below instead of letting the raw exception
+            # skip it — that check is what decides "benign race" vs.
+            # "genuine error", not the write's own exception type.
+            write_error = exc
         upload_still_open = await anyio.to_thread.run_sync(lambda: store.get_upload(upload_id))
         if upload_still_open is None:
             attachment_exists = await anyio.to_thread.run_sync(
@@ -136,7 +146,9 @@ async def put_chunk(upload_id: str, index: int, request: Request) -> Response:
                         store=store, paths=paths, upload_id=upload_id
                     )
                 )
-            raise HTTPException(status_code=404, detail="unknown upload")
+            raise HTTPException(status_code=404, detail="unknown upload") from write_error
+        if write_error is not None:
+            raise write_error
     return Response(status_code=204)
 
 

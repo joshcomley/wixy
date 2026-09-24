@@ -201,29 +201,46 @@ def _archive_failed_original(
         upload = store.get_upload(att_id)
         ext = failed_extension(upload.mime if upload is not None else None)
         failed_dir = paths.server_failed_dir(att_id)
-        failed_dir.mkdir(parents=True, exist_ok=True)
         try:
+            failed_dir.mkdir(parents=True, exist_ok=True)
             os.replace(src, failed_dir / f"original.{ext}")
         except OSError:
             # A concurrent delete/wipe may remove the upload or failed
-            # directory after is_file()/mkdir(). It wins over archiving.
-            # Windows reports a concurrent rmtree on the same path as
-            # PermissionError ("Access is denied") rather than
-            # FileNotFoundError (janitor.py's own cleanup catches the same
-            # broad OSError for the identical reason) — catching OSError
-            # here handles both signatures of the same race, and the
-            # re-check below still re-raises anything that isn't actually
-            # the concurrent delete winning.
-            if store.get_attachment(att_id) is not None:
-                raise
-            store.mark_deleted_storage_pending(
-                kind="attachment", storage_id=att_id, now=time.time()
+            # directory after is_file()/mkdir(). It wins over
+            # archiving. Windows reports a concurrent rmtree on the same
+            # path as PermissionError ("Access is denied") rather than
+            # FileNotFoundError; both signatures of the same race are
+            # handled identically here — but "the row still exists" is
+            # NOT a reliable enough signal to decide whether to re-raise:
+            # the delete route commits its DB transaction and THEN does
+            # file cleanup as two separate steps, so a re-check here can
+            # observe the row as still-present even when this exact race
+            # is what caused the failure (measured: this exact test failed
+            # three different ways across verification rounds — Permission-
+            # Error, then FileNotFoundError with the row apparently still
+            # present). This archive is diagnostic-only (kept for debugging
+            # a failed upload; never load-bearing data), and this worker
+            # runs inside the app's shared background task group alongside
+            # the janitor, so an unhandled exception here would crash BOTH
+            # for the rest of the process's life. Log and continue instead
+            # of re-raising, matching janitor.py's own established
+            # log-and-retry-later posture for this identical class of
+            # problem, rather than trusting a racy re-check to gate a
+            # crash-worthy decision.
+            logger.warning(
+                "server-chat media queue: could not archive failed original for %s",
+                att_id,
+                exc_info=True,
             )
-            _cleanup_deleted_storage(
-                store=store,
-                paths=paths,
-                items={("attachment", att_id)},
-            )
+            if store.get_attachment(att_id) is None:
+                store.mark_deleted_storage_pending(
+                    kind="attachment", storage_id=att_id, now=time.time()
+                )
+                _cleanup_deleted_storage(
+                    store=store,
+                    paths=paths,
+                    items={("attachment", att_id)},
+                )
     store.delete_upload(att_id)
     _cleanup_deleted_storage(store=store, paths=paths, items={("upload", att_id)})
 

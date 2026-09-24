@@ -357,6 +357,43 @@ class TestChunkPut:
         finally:
             client.__exit__(None, None, None)
 
+    def test_wipe_racing_chunk_replace_via_windows_sharing_violation_returns_404(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Sibling of the two wipe-race tests above, but the concurrent wipe
+        lands *during* write_chunk's own os.replace rather than either before
+        or cleanly after it. On Windows this raises PermissionError ("Access
+        is denied") instead of letting the write succeed -- write_chunk had no
+        guard at all, so the raw exception used to escape the route's shielded
+        block before its post-write row check ever ran, instead of falling
+        through to the same "unknown upload" handling as the sibling tests."""
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        app = cast(FastAPI, client.app)
+        store: LiveChatStore = app.state.livechat_store
+        paths = app.state.paths
+        upload_id = _init_upload(client, headers, size_bytes=3).json()["uploadId"]
+
+        def _write_raises_access_denied(upload_dir: Path, index: int, data: bytes) -> None:
+            store.wipe(now=time.time())
+            raise PermissionError(5, "Access is denied")
+
+        monkeypatch.setattr(uploads_module, "write_chunk", _write_raises_access_denied)
+        try:
+            response = client.put(
+                f"/api/admin/server/uploads/{upload_id}/chunks/0",
+                content=b"abc",
+                headers={**headers, "Content-Type": "application/octet-stream"},
+            )
+            assert response.status_code == 404
+            assert store.get_upload(upload_id) is None
+            assert not paths.server_upload_dir(upload_id).exists()
+        finally:
+            client.__exit__(None, None, None)
+
 
 class TestComplete:
     def test_upload_deleted_during_assembly_is_not_promoted_after_wipe(

@@ -341,6 +341,48 @@ class TestDeleteRace:
         assert not paths.server_upload_dir(att_id).exists()
         assert not paths.server_failed_dir(att_id).exists()
 
+    def test_wipe_racing_failed_dir_mkdir_via_windows_sharing_violation_does_not_crash_worker(
+        self,
+        store: LiveChatStore,
+        paths: ProjectPaths,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Sibling of the two tests above, but the race lands one line earlier:
+        `failed_dir.mkdir(parents=True, exist_ok=True)` used to run BEFORE the
+        `try:` block that guards `os.replace`, so a concurrent wipe racing the
+        mkdir itself (Windows: PermissionError) escaped uncaught even though
+        the row-gone recheck below would have treated it as benign, exactly
+        like the os.replace case."""
+        att_id = _seed_processing_photo(store, paths, now=1000.0)
+        store.create_message(
+            client_id="client-wipe-mkdir-race-winerror5",
+            sender="Josh",
+            device_id="device-wipe-mkdir-race-winerror5",
+            by_email=None,
+            text="wipe while failed_dir is being created (Windows sharing violation)",
+            attachment_ids=(att_id,),
+            now=1000.0,
+        )
+        src = paths.server_upload_dir(att_id) / "assembled"
+        failed_dir = paths.server_failed_dir(att_id)
+        assert store.get_attachment(att_id) is not None
+
+        real_mkdir = Path.mkdir
+
+        def _mkdir_raises_access_denied(self: Path, *args: object, **kwargs: object) -> None:
+            if self == failed_dir:
+                store.wipe(now=1001.0)
+                raise PermissionError(5, "Access is denied")
+            real_mkdir(self, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Path, "mkdir", _mkdir_raises_access_denied)
+        media_queue._archive_failed_original(store=store, paths=paths, att_id=att_id, src=src)
+
+        assert store.get_attachment(att_id) is None
+        assert store.get_upload(att_id) is None
+        assert not paths.server_upload_dir(att_id).exists()
+        assert not paths.server_failed_dir(att_id).exists()
+
     @pytest.mark.asyncio
     async def test_media_dir_is_rmtreed_when_the_row_is_gone_after_finish(
         self, store: LiveChatStore, paths: ProjectPaths
