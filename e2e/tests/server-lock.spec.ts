@@ -186,9 +186,16 @@ for (const profile of DEVICE_PROFILES) {
         }
         // The fake's default lockout_after is 5 — this trips it.
         await enterPin(page, WRONG_PIN);
+        // The copy states cmd's REAL wait (the fake's 60 s lockout), not a canned
+        // "2 minutes" (F15) — "1 minute" on the first paint, then seconds as it ticks.
         await expect(page.locator(".wx-srv-pinpad-message")).toHaveText(
-          "Too many wrong tries. Try again in 2 minutes.",
+          /^Too many wrong tries\. Try again in (1 minute|\d+ seconds?)\.$/,
         );
+        await page.clock.runFor(3_000);
+        const countdownText = (await page.locator(".wx-srv-pinpad-message").textContent()) ?? "";
+        const secondsLeft = Number(/in (\d+) seconds?\./.exec(countdownText)?.[1]);
+        expect(secondsLeft).toBeGreaterThan(0);
+        expect(secondsLeft).toBeLessThan(60);
 
         // The pad itself is disabled while genuinely locked out — asserted
         // directly rather than via `enterPin` (a real, auto-RETRYING click
