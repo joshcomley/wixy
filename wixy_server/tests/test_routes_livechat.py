@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
 import sqlite3
 import subprocess
 import threading
@@ -495,6 +496,118 @@ class TestSendHistoryUsage:
         finally:
             client.__exit__(None, None, None)
 
+    @pytest.mark.parametrize(("text_length", "expected_status"), [(4000, 201), (4001, 422)])
+    def test_text_length_boundary(
+        self,
+        text_length: int,
+        expected_status: int,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        client, headers = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            response = client.post(
+                "/api/admin/server/messages",
+                json={
+                    "clientId": "text-boundary-client",
+                    "sender": "J",
+                    "deviceId": "device-aaaaaaaa",
+                    "text": "x" * text_length,
+                },
+                headers=headers,
+            )
+            assert response.status_code == expected_status, response.text
+        finally:
+            client.__exit__(None, None, None)
+
+    @pytest.mark.parametrize(
+        ("sender", "expected_status"),
+        [("J", 201), ("J" * 32, 201), ("J" * 33, 422), ("J\x01", 422)],
+    )
+    def test_sender_length_and_control_character_boundaries(
+        self,
+        sender: str,
+        expected_status: int,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        client, headers = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            response = client.post(
+                "/api/admin/server/messages",
+                json={
+                    "clientId": "sender-boundary-client",
+                    "sender": sender,
+                    "deviceId": "device-aaaaaaaa",
+                    "text": "x",
+                },
+                headers=headers,
+            )
+            assert response.status_code == expected_status
+        finally:
+            client.__exit__(None, None, None)
+
+    @pytest.mark.parametrize(
+        ("client_id_length", "expected_status"), [(8, 201), (64, 201), (65, 422)]
+    )
+    def test_client_id_length_boundaries(
+        self,
+        client_id_length: int,
+        expected_status: int,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        client, headers = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            response = client.post(
+                "/api/admin/server/messages",
+                json={
+                    "clientId": "c" * client_id_length,
+                    "sender": "Josh",
+                    "deviceId": "device-aaaaaaaa",
+                    "text": "x",
+                },
+                headers=headers,
+            )
+            assert response.status_code == expected_status
+        finally:
+            client.__exit__(None, None, None)
+
+    @pytest.mark.parametrize(("attachment_count", "expected_status"), [(10, 201), (11, 422)])
+    def test_attachment_count_boundaries(
+        self,
+        attachment_count: int,
+        expected_status: int,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(livechat_media_queue, "resolve_binaries", lambda *_args: None)
+        client, headers = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            store: LiveChatStore = client.app.state.livechat_store  # type: ignore[attr-defined]
+            attachment_ids = [f"{index + 1:032x}" for index in range(attachment_count)]
+            for index, attachment_id in enumerate(attachment_ids):
+                store.create_attachment(att_id=attachment_id, kind="photo", now=float(index))
+            response = client.post(
+                "/api/admin/server/messages",
+                json={
+                    "clientId": "attachment-boundary-client",
+                    "sender": "Josh",
+                    "deviceId": "device-aaaaaaaa",
+                    "text": "attachments",
+                    "attachmentIds": attachment_ids,
+                },
+                headers=headers,
+            )
+            assert response.status_code == expected_status, response.text
+        finally:
+            client.__exit__(None, None, None)
+
     def test_history_returns_messages_ascending_with_cursor(
         self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
     ) -> None:
@@ -548,6 +661,69 @@ class TestSendHistoryUsage:
 # The SSE stream loop (§3, §5.4) — driven directly (TestClient can't observe an
 # infinite generator), same pattern as `test_routes_chat.py`.
 # ---------------------------------------------------------------------------
+
+
+class TestCrossOriginDenial:
+    def test_server_mutation_preflights_do_not_grant_cross_origin_access(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        preflights = (
+            ("POST", "/api/admin/server/messages"),
+            ("POST", "/api/admin/server/uploads"),
+            ("DELETE", "/api/admin/server/messages/1"),
+            ("POST", "/api/admin/server/wipe"),
+        )
+
+        with TestClient(app) as client:
+            responses = [
+                client.options(
+                    path,
+                    headers={
+                        "Origin": "https://attacker.example",
+                        "Access-Control-Request-Method": method,
+                        "Access-Control-Request-Headers": "content-type,x-wixy-server-token",
+                    },
+                )
+                for method, path in preflights
+            ]
+
+        for response in responses:
+            assert response.status_code == 405
+            assert "access-control-allow-origin" not in response.headers
+            assert "access-control-allow-headers" not in response.headers
+            assert "access-control-allow-methods" not in response.headers
+
+    def test_simple_cross_origin_form_post_cannot_create_a_message(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        store: LiveChatStore = app.state.livechat_store
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/server/messages",
+                data={
+                    "clientId": "cross-origin-client",
+                    "sender": "Attacker",
+                    "deviceId": "cross-origin-device",
+                    "text": "must not be stored",
+                },
+                headers={"Origin": "https://attacker.example"},
+            )
+
+        assert response.status_code in {401, 422}
+        messages, _has_more, _cursor = store.list_messages(before=None, limit=100)
+        assert messages == []
 
 
 def _decode_sse_frame(raw: str) -> dict[str, Any]:
@@ -1884,6 +2060,150 @@ class TestTokenBoundToRequestingEmail:
             "email": email,
         }
         return pyjwt.encode(claims, private_key, algorithm="RS256", headers={"kid": self._KID})
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("configured_env", "patched_jwks_fetch")
+    async def test_cf_email_is_stored_but_absent_from_send_history_and_sse(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        keypair: tuple[Any, Any],
+    ) -> None:
+        private, _public = keypair
+        email = "audit-owner-sentinel@example.com"
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        with TestClient(app) as client:
+            access_jwt = self._sign(private, email=email)
+            unlocked = _unlock(client, headers={"CF-Access-Jwt-Assertion": access_jwt})
+            token = unlocked.json()["token"]
+            headers = {
+                "CF-Access-Jwt-Assertion": access_jwt,
+                "X-Wixy-Server-Token": token,
+            }
+            sent = client.post(
+                "/api/admin/server/messages",
+                json={
+                    "clientId": "audit-email-client",
+                    "sender": "Josh",
+                    "deviceId": "audit-email-device",
+                    "text": "private audit event",
+                },
+                headers=headers,
+            )
+            history = client.get("/api/admin/server/messages", headers=headers)
+            store: LiveChatStore = app.state.livechat_store
+            saved = store.get_messages([sent.json()["message"]["seq"]])[0]
+            stream = _stream_events(
+                store,
+                app.state.livechat_notifier,
+                app.state.livechat_secret,
+                ServerAuth(email=email, exp=int(time.time()) + 3600),
+                after=0,
+            )
+            try:
+                raw_sse = await stream.__anext__()
+            finally:
+                await stream.aclose()
+
+        assert sent.status_code == 201
+        assert saved.by_email == email
+        for wire in (sent.text, history.text, raw_sse):
+            assert "by_email" not in wire
+            assert email not in wire
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("configured_env", "patched_jwks_fetch")
+    async def test_unlock_token_is_absent_from_urls_api_media_stream_and_logs(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        keypair: tuple[Any, Any],
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        private, _public = keypair
+        email = "token-audit-owner@example.com"
+        monkeypatch.setattr(secrets, "token_hex", lambda _n: "0123456789abcdef")
+        monkeypatch.setattr(livechat_media_queue, "resolve_binaries", lambda *_args: None)
+        caplog.set_level(logging.DEBUG)
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        with TestClient(app) as client:
+            access_jwt = self._sign(private, email=email)
+            access_header = {"CF-Access-Jwt-Assertion": access_jwt}
+            unlock = _unlock(client, headers=access_header)
+            token = unlock.json()["token"]
+            headers = {**access_header, "X-Wixy-Server-Token": token}
+
+            store: LiveChatStore = app.state.livechat_store
+            attachment_id = "b" * 32
+            store.create_attachment(att_id=attachment_id, kind="photo", now=1.0)
+            claimed = store.claim_processing(owner="token-audit-worker", now=1.0, lease_s=60.0)
+            assert claimed is not None
+            store.finish_attachment(
+                att_id=attachment_id,
+                owner="token-audit-worker",
+                result=AttachmentResult(
+                    status="ready",
+                    mime="image/jpeg",
+                    width=1,
+                    height=1,
+                    duration_s=None,
+                    peaks=None,
+                    renditions=("full",),
+                    bytes_on_disk=12,
+                    failure=None,
+                ),
+                now=2.0,
+            )
+            media_file = app.state.paths.server_attachment_media_dir(attachment_id) / "full.jpg"
+            media_file.parent.mkdir(parents=True)
+            media_file.write_bytes(b"not-a-real-image; FileResponse does not decode it")
+
+            sent = client.post(
+                "/api/admin/server/messages",
+                json={
+                    "clientId": "token-audit-client",
+                    "sender": "Josh",
+                    "deviceId": "token-audit-device",
+                    "text": "image",
+                    "attachmentIds": [attachment_id],
+                },
+                headers=headers,
+            )
+            assert sent.status_code == 201, sent.text
+            history = client.get("/api/admin/server/messages", headers=headers)
+            media_url = sent.json()["message"]["attachments"][0]["urls"]["full"]
+            media = client.get(media_url, headers=access_header)
+            stream = _stream_events(
+                store,
+                app.state.livechat_notifier,
+                app.state.livechat_secret,
+                ServerAuth(email=email, exp=int(time.time()) + 3600),
+                after=0,
+            )
+            try:
+                raw_sse = await stream.__anext__()
+            finally:
+                await stream.aclose()
+
+        assert unlock.status_code == 200
+        assert token in unlock.text
+        assert sent.status_code == 201
+        assert history.status_code == 200
+        assert media.status_code == 200
+        assert token not in media_url
+        for response in (sent, history, media):
+            assert token not in str(response.request.url)
+            body = response.content.decode("latin-1")
+            assert token not in body
+        assert token not in raw_sse
+        assert token not in caplog.text
 
     @pytest.mark.usefixtures("configured_env", "patched_jwks_fetch")
     def test_token_minted_for_one_email_is_rejected_under_another(

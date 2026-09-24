@@ -31,3 +31,22 @@ For every finding: write a regression test first, run it red on the current impl
 - Synchronized from feature branch `cmd/workspace-00029` at `0fe4439`; no code conflicts.
 - Affected backend modules: 325 passed. Full suite: 1,743 passed, 4 existing FastAPI/Starlette deprecation warnings. `ruff format --check .`, `ruff check .`, `mypy`, and `git diff --check` are clean.
 - Current state: ready for the required local candidate commit and exact-SHA DM handoff; awaiting DM clearance before any PR or merge.
+
+## Update 2026-09-24 — DM traceability addendum
+
+- The DM added Sol's traceability rows #29, #45, #46, #51 and #76 after the first handoff. These are proof-strength gaps, not known production defects; no implementation defect surfaced.
+- Added real-JWT email-redaction and Server Access-gate tests; CSRF preflight/simple-form tests; unlock-token API/media/SSE/log non-disclosure tests; and send-boundary tests for text, sender/control chars, client ID and attachment count.
+- Each new row's guard was mutation-checked: serialization echoed email; API Access gate was bypassed; wildcard CORS was installed; send echoed the unlock header; and the send bound checks were disabled. Each targeted test failed as expected; all mutations were restored.
+- Prior candidate `8c735cffe68cfb6d3b828c768926d09eda3291b4` is superseded by this follow-up and remains without DM clearance. Do not open a PR; new verification and replacement candidate SHA are required.
+
+## Update 2026-09-24 — traceability proof round verified
+
+- Added proof for Sol rows #29, #45, #46, #51 and #76. Email attribution is persisted but absent from POST/history/SSE wire data; Server unlock/API/service-worker paths reject missing JWT and accept a valid JWT; mutation preflights have no permissive CORS headers and a simple cross-origin form does not mutate; a deterministic real unlock token is absent from other API/media/SSE output, URLs and logs; all requested send boundaries are asserted.
+- Each new guard was mutation-checked and failed when the respective behavior was weakened. A full run first exposed the manually seeded token-leak attachment racing the active media queue; the fixture now disables that unrelated worker and the isolated test passes.
+- Affected modules: 351 passed. Final full suite: 1,760 passed, 4 existing Starlette/httpx deprecation warnings. Format, lint, mypy and diff checks pass.
+- Re-fetched `origin/cmd/workspace-00029`; no new commits since `0fe4439`. Replacement candidate commit is pending. Prior candidate `8c735cf` remains superseded; no PR was opened.
+
+## Current state after DM addendum commit
+
+- The replacement test-proof commit is now recorded locally after the implementation commit. The earlier `8c735cf` candidate remains superseded; the current exact head will be supplied in the replacement DM handoff.
+- No PR, push or merge has occurred. Awaiting exact-head final verification and DM clearance.

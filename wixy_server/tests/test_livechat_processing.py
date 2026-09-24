@@ -341,6 +341,7 @@ class TestProcessPhoto:
             ("gif-opaque", ".png", ".jpg", False),
             ("gif-transparent", ".png", ".png", True),
             ("la-png", ".png", ".png", True),
+            ("rgba-png", ".png", ".png", True),
             ("rgba-webp", ".png", ".png", True),
             ("gray16-png", ".png", ".jpg", False),
             ("cmyk-jpeg", ".jpg", ".jpg", False),
@@ -370,6 +371,10 @@ class TestProcessPhoto:
         elif kind == "la-png":
             image = Image.new("LA", (40, 20), (175, 255))
             image.putpixel((5, 10), (90, 0))
+            image.save(src, format="PNG")
+        elif kind == "rgba-png":
+            image = Image.new("RGBA", (40, 20), (14, 180, 220, 255))
+            image.putpixel((5, 10), (240, 20, 30, 0))
             image.save(src, format="PNG")
         elif kind == "rgba-webp":
             image = Image.new("RGBA", (40, 20), (14, 180, 220, 255))
