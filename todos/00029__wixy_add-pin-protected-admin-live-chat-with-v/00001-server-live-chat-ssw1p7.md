@@ -1477,8 +1477,7 @@ fixed same-session.)
 
 - The opus-tier audit (relation `e971ce44`, Opus 5.5, round 3; the local and Sonnet rungs
   were clean) is **blocked**. Full findings:
-  `D:\Servers\Cmd\Storage\relations\artifacts\e971ce44-6835-4f91-b7bd-bcbfa63\findings-3.json`
-  (see the relation folder `e971ce44-6835-4f94-bdce-baf63bcbfa63` for the exact path).
+  `D:\Servers\Cmd\Storage\relations\artifacts\e971ce44-6835-4f94-bdce-baf63bcbfa63\findings-3.json`.
   Top-rung findings are fixed, never dismissed.
 - **HIGH F1 — push notifications can never be enabled**: `mountPushToggle` (P3b) exists but
   nothing in app code calls it; the settings sheet renders an empty slot. The backend push
