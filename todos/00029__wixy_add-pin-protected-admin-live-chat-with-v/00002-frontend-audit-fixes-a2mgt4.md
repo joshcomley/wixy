@@ -63,3 +63,10 @@ The DM and Architect sent follow-up requirements after the first candidate. Work
 - Red-first probes passed for all seven proof rows and F11. Additional `P-F11` stream-message preservation regression also failed before its fix and passes now.
 - Final counts at handoff: Vitest 1,133/64 files; pytest 1,713 with 4 deprecation warnings; 9 targeted E2E cases passed; TypeScript, Ruff, mypy and post-commit bundle drift check passed.
 - No PR, push, or merge. Await exact-SHA Delivery Manager clearance.
+
+## H1/L1 second review continuation — 2026-09-24
+
+- The DM committed the browser/server clock-skew fix and early unknown-wipe status on top of the replacement candidate as `11875d9`; generated admin assets were rebuilt in `d0f027837d253ebaef8e8dcf8f8fd8dac793e3d0`.
+- The fix uses the server-issued message sequence boundary for wipe reconciliation, independent of browser wall-clock skew, and surfaces “Couldn’t confirm — checking…” before the history refetch finishes.
+- Local verification at `d0f0278`: affected Vitest files 56/56; full Vitest suite 1,136/1,136 across 64 files; TypeScript passed; wipe E2E cases 2/2; admin build passed with zero generated bundle drift.
+- No Python source changed. Worktree is clean. Branch remains six commits behind the moving feature branch; no push, merge, or PR. Sol is re-reviewing H1/L1; wait for review and DM direction before any further integration.
