@@ -1384,3 +1384,33 @@ fixed same-session.)
 - **Next**: wait for CI green (Monitor-style polling in background), then
   `gh pr merge --merge --delete-branch`, mark delivery task done, resolve lane, sync
   primary checkout, notify Orchestrator/Architect, dispatch P7.
+
+## Update 2026-09-24 ~17:15 UTC (Orchestrator `b11567bc`) — P8 merged; what is still owed
+
+- **P8 (delete a message + wipe the chat) MERGED** into `cmd/workspace-00029` via PR #231
+  (`e7070bf`) after 10 review rounds. It passed the DM's own verification, the Sol 6
+  independent review, the Architect's 5-consecutive-clean-run acceptance bar, and all 6 CI
+  checks (python, frontend, guide-linkcheck, release-note, image-boot-proof, e2e). The
+  only merge conflict was the already-anticipated `spec/server-chat/00-brief.md` clash
+  (take P8's actual tombstone design). Delivery: 10 -> 11 of 13 once the DM closes the task.
+- **Process lessons worth keeping:** (1) rounds 6-7 were implemented by the DM itself,
+  contrary to the operator's "Luna 6 XL for ALL implementation" routing — caught at 15:06
+  UTC, the DM reverted its uncommitted edits, and from round 8 Luna implements / Sol reviews
+  / DM verifies. (2) A ~3 h stall (12:20-15:10 UTC) happened because the DM hit a Claude
+  session limit right after Sol's round-7 verdict and nobody relayed it; the Orchestrator
+  relayed it to the Luna builder directly. (3) "Flaky e2e = host contention" was NOT
+  accepted on 3-of-4 passes; it was proven with 10/10 on the unloaded fir node before
+  being closed. (4) The hub sits at ~100% CPU from baseline tenants (VMs ~27%, python
+  ~26%, Defender ~6%): repeated e2e runs belong on a grid node, and pytest/e2e must not run
+  together on the hub.
+- **STILL OWED before this can be called done:**
+  1. **P7** — docs/invariants/decisions close-out (re-check `decisions/` for the real next
+     free number; record the erasure-journal design, the Architect's holistic ruling, the
+     tolerant-file-op sweep, the 00150 path-traversal fix and the R14a squash-delivery rule).
+     Implementation goes to Luna 6 XL, review to Sol 6.
+  2. **The opus-tier security audit of the whole PR** (audit skill: schema migrations
+     v3->v6, security/auth surface, concurrency design), fixing any top-rung finding.
+  3. **The one delivery merge to main** as a SQUASH WITH AN EXPLICIT BODY (spec R14a): named
+     reviewer, CI green, branch current, SHA recorded.
+  4. **Live verification** with the `verify` skill against ca.cinnamons.uk.
+  Main still has NO livechat code; nothing is live until steps 3 and 4 are both done.
