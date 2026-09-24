@@ -234,7 +234,11 @@ def test_a_real_process_kill_mid_publish_leaves_live_ledger_and_draft_untouched(
     try:
         _wait_until_serving_state(base_url, proc, log_path)
 
-        with httpx.Client(base_url=base_url, timeout=10.0) as client:
+        # 30s, like the publish call below: this is the freshly spawned server's first
+        # real request, and under full-suite `-n 4` contention a cold process starves
+        # here exactly as it does in `_wait_until_serving_state` (decisions/00053) —
+        # a 10s client budget produced a ReadTimeout with no logic defect behind it.
+        with httpx.Client(base_url=base_url, timeout=30.0) as client:
             patch_resp = client.patch(
                 "/api/admin/draft",
                 json={
@@ -327,7 +331,8 @@ def test_a_real_process_kill_mid_publish_leaves_live_ledger_and_draft_untouched(
     proc2 = _start_server(script2, log_path2)
     try:
         _wait_until_serving_state(base_url2, proc2, log_path2)
-        with httpx.Client(base_url=base_url2, timeout=15.0) as client:
+        # Same cold-start budget as the first server's client above.
+        with httpx.Client(base_url=base_url2, timeout=30.0) as client:
             state_resp = client.get("/api/admin/state")
             assert state_resp.status_code == 200
             recovered_rev = state_resp.json()["draft"]["rev"]
