@@ -204,9 +204,16 @@ def _archive_failed_original(
         failed_dir.mkdir(parents=True, exist_ok=True)
         try:
             os.replace(src, failed_dir / f"original.{ext}")
-        except FileNotFoundError:
+        except OSError:
             # A concurrent delete/wipe may remove the upload or failed
             # directory after is_file()/mkdir(). It wins over archiving.
+            # Windows reports a concurrent rmtree on the same path as
+            # PermissionError ("Access is denied") rather than
+            # FileNotFoundError (janitor.py's own cleanup catches the same
+            # broad OSError for the identical reason) — catching OSError
+            # here handles both signatures of the same race, and the
+            # re-check below still re-raises anything that isn't actually
+            # the concurrent delete winning.
             if store.get_attachment(att_id) is not None:
                 raise
             store.mark_deleted_storage_pending(

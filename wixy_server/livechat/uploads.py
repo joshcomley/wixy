@@ -322,7 +322,16 @@ def assemble(
         os.replace(tmp_path, assembled_path)
         for i in range(count):
             _chunk_path(upload_dir, i).unlink(missing_ok=True)
-    except FileNotFoundError:
+    except OSError:
+        # A concurrent delete/wipe racing this assemble may remove
+        # upload_dir mid-operation. On Windows that surfaces as
+        # PermissionError ("Access is denied") rather than
+        # FileNotFoundError when another thread is mid-rmtree on the same
+        # path (janitor.py's own cleanup catches the same broad OSError for
+        # the identical reason) — catching OSError here handles both
+        # signatures of the same race, and the re-check below still
+        # re-raises anything that isn't actually the concurrent delete
+        # winning.
         if store.get_upload(upload_id) is None:
             cleanup_deleted_upload(store=store, paths=paths, upload_id=upload_id)
             raise UnknownUploadError(upload_id) from None

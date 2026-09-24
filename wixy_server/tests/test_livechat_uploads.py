@@ -5,6 +5,7 @@ assemble (missing chunks, size mismatch, idempotent replay), cancel.
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -370,6 +371,47 @@ class TestAssemble:
             store=store, paths=paths, upload_id=init.upload_id, chunk_bytes=4, now=1002.0
         )
         assert second == first
+
+    def test_delete_racing_replace_via_windows_sharing_violation_reports_unknown_upload(
+        self,
+        store: LiveChatStore,
+        paths: ProjectPaths,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A concurrent delete/wipe racing this assemble's `os.replace` (moving
+        `assembled.part` -> `assembled`) can remove `upload_dir` mid-operation.
+        On POSIX that surfaces as `FileNotFoundError`; on Windows, a concurrent
+        rmtree on the same path surfaces as `PermissionError` ("Access is
+        denied") instead — both must be treated the same way (the concurrent
+        delete wins, report UnknownUploadError), not crash the request."""
+        init = uploads.init_upload(
+            store=store,
+            kind="photo",
+            mime_type="image/jpeg",
+            size_bytes=4,
+            filename=None,
+            by_email=None,
+            chunk_bytes=4,
+            quota_bytes=1_000_000,
+            min_free_bytes=0,
+            media_available=True,
+            disk_check_path=paths.root,
+            now=1000.0,
+            disk_usage=_ample_disk_usage,
+        )
+        upload_dir = paths.server_upload_dir(init.upload_id)
+        uploads.write_chunk(upload_dir, 0, b"abcd")
+
+        def _replace_raises_access_denied(*args: object, **kwargs: object) -> None:
+            store.delete_upload(init.upload_id)
+            raise PermissionError(5, "Access is denied")
+
+        monkeypatch.setattr(os, "replace", _replace_raises_access_denied)
+
+        with pytest.raises(uploads.UnknownUploadError):
+            uploads.assemble(
+                store=store, paths=paths, upload_id=init.upload_id, chunk_bytes=4, now=1001.0
+            )
 
 
 class TestCancelUpload:

@@ -12,6 +12,7 @@ are safe as long as nothing here ever claims a video/voice kind.
 from __future__ import annotations
 
 import io
+import os
 import shutil
 from pathlib import Path
 
@@ -292,6 +293,47 @@ class TestDeleteRace:
             return exists
 
         monkeypatch.setattr(Path, "is_file", _vanish_after_file_check)
+        media_queue._archive_failed_original(store=store, paths=paths, att_id=att_id, src=src)
+
+        assert store.get_attachment(att_id) is None
+        assert store.get_upload(att_id) is None
+        assert not paths.server_upload_dir(att_id).exists()
+        assert not paths.server_failed_dir(att_id).exists()
+
+    def test_wipe_racing_archive_via_windows_sharing_violation_does_not_crash_worker(
+        self,
+        store: LiveChatStore,
+        paths: ProjectPaths,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Same race as the sibling FileNotFoundError test above, but the OS-level
+        signature a concurrent rmtree actually produces on Windows: `os.replace`
+        raises `PermissionError` ("Access is denied"), not `FileNotFoundError`,
+        when another thread is mid-delete on the same directory. Unlike the
+        sibling test, the attachment row must still exist when `os.replace` is
+        invoked (otherwise `_archive_failed_original`'s row-gone check at the top
+        short-circuits before ever calling `os.replace`) — so the wipe happens
+        *inside* the patched `os.replace`, matching the real two-thread timing:
+        the concurrent delete commits its DB transaction and starts removing
+        files at the exact moment this worker's own replace is in flight."""
+        att_id = _seed_processing_photo(store, paths, now=1000.0)
+        store.create_message(
+            client_id="client-wipe-archive-race-winerror5",
+            sender="Josh",
+            device_id="device-wipe-archive-race-winerror5",
+            by_email=None,
+            text="wipe while failure is archived (Windows sharing violation)",
+            attachment_ids=(att_id,),
+            now=1000.0,
+        )
+        src = paths.server_upload_dir(att_id) / "assembled"
+        assert store.get_attachment(att_id) is not None
+
+        def _replace_raises_access_denied(*args: object, **kwargs: object) -> None:
+            store.wipe(now=1001.0)
+            raise PermissionError(5, "Access is denied")
+
+        monkeypatch.setattr(os, "replace", _replace_raises_access_denied)
         media_queue._archive_failed_original(store=store, paths=paths, att_id=att_id, src=src)
 
         assert store.get_attachment(att_id) is None
