@@ -433,9 +433,10 @@ native video, and the voice-note player with waveform. The settings button and p
 thumbnails that open the lightbox carry `data-srv-gesture-boundary` per brief v1.5.2's R3
 surface boundary. `gestures.ts` consumes that marker: a boundary tap can close a run begun
 elsewhere, but an unmatched run is cleared afterward; non-primary clicks do not count.
-P8's in-page choice controls use the same marker convention. Before every message-list redraw
-and lock detach, `thread.ts` pauses media, clears its source, and releases its `mediaPlaying`
-suspension; playback cannot remain active in a detached node. These files and signed media
+P8's in-page choice controls use the same marker convention. During each message-list redraw,
+unchanged message nodes are reused, so another incoming message does not interrupt active
+playback. Replaced or deleted rows dispose their own media; lock detach pauses all players,
+clears their sources, and releases each `mediaPlaying` suspension. These files and signed media
 URLs remain separate from the site's `draft/media/` and public build, as documented in
 [media.md](media.md#private-live-chat-attachments).
 

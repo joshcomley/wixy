@@ -59,3 +59,17 @@ ecorder.ts, mediaRender.ts
 - Candidate fix-forward commit: `aa817ed0202ad79c500acb0384e27fa01e18c4a8`; feature base remains `7d6584bfedaf409bef45f5d3e527df2b943ce0ce`, including `b1c394f`.
 - Complete verification passed after the history reconciliation fix: ruff, mypy (206 files), pytest 1655/1655, strict TypeScript, Vitest 1076/1076, admin build, and combined media/chat/lock Playwright 31/31.
 - The candidate is local and clean. New FINAL HANDOFF is next; wait for exact-SHA DM clearance before pushing or updating PR #230.
+
+## Update 2026-09-24 — preserve playback across ordinary thread updates
+
+- The DM's Sol reviewer found the prior global media disposal fixed panic/privacy leakage but interrupted active playback whenever an unrelated message redrew the thread.
+- `renderThreadList()` now reuses unchanged message, day-separator, and echo nodes; it disposes media only for replaced/deleted message rows, while lock detach/teardown still disposes every player. Updated the playback test to assert an incoming message preserves the same playing element and suspension, then verifies detach stops and releases it.
+- Focused thread tests pass (21/21), strict typecheck and full Vitest pass (1076/1076), bundle build passes, and media/chat/lock Playwright passes (31/31). Full ruff/mypy/pytest is running now; do not create another candidate/handoff until it completes.
+- Previous candidate `e1a355f` remains unpushed and uncleared; PR #230 remains unchanged.
+
+## Update 2026-09-24 — media continuity fix fully verified
+
+- Latest feature base at final fetch: $base (includes 1c394f); no base movement.
+- The renderer now preserves active media through unrelated thread updates by reusing unchanged message nodes; affected rows and lock detach still dispose media. The regression test confirms the player node and playback suspension survive a new incoming message, then are released on detach.
+- Complete verification after this fix passed: ruff, mypy (206 files), pytest 1655/1655, strict TypeScript, Vitest 1076/1076, admin build, and combined media/chat/lock Playwright 31/31. git diff --check is clean.
+- Ready for a new local candidate and exact-SHA FINAL HANDOFF. Do not push or update PR #230 before matching DM clearance.

@@ -171,7 +171,7 @@ describe("mountServerThread", () => {
     view.teardown();
   });
 
-  it("redraw and detach stop active media and release its playback suspension", async () => {
+  it("ordinary updates preserve active media while detach stops it", async () => {
     getHistory.mockResolvedValue(emptyHistory({ messages: [fakeMessage({
       seq: 1,
       text: null,
@@ -191,19 +191,16 @@ describe("mountServerThread", () => {
     firstVideo.dispatchEvent(new Event("play"));
     view.handleStreamEvent({ type: "message", message: fakeMessage({ seq: 2, sender: "Purdy" }) });
 
-    expect(firstVideo.closest(".wx-srv-message-list")).toBeNull();
+    expect(view.element.querySelector(".wx-srv-video")).toBe(firstVideo);
+    expect(firstVideo.closest(".wx-srv-message-list")).not.toBeNull();
+    expect(pauseFirst).not.toHaveBeenCalled();
+    expect(loadFirst).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
+
+    view.detach();
     expect(pauseFirst).toHaveBeenCalledTimes(1);
     expect(loadFirst).toHaveBeenCalledTimes(1);
     expect(release).toHaveBeenCalledTimes(1);
-
-    const redrawnVideo = view.element.querySelector<HTMLVideoElement>(".wx-srv-video")!;
-    const pauseRedrawn = vi.spyOn(redrawnVideo, "pause").mockImplementation(() => {});
-    const loadRedrawn = vi.spyOn(redrawnVideo, "load").mockImplementation(() => {});
-    redrawnVideo.dispatchEvent(new Event("play"));
-    view.detach();
-    expect(pauseRedrawn).toHaveBeenCalledTimes(1);
-    expect(loadRedrawn).toHaveBeenCalledTimes(1);
-    expect(release).toHaveBeenCalledTimes(2);
     view.teardown();
   });
 

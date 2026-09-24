@@ -314,6 +314,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   let hasMoreHistory = false;
   const confirmedBySeq = new Map<number, Message>();
   const confirmedClientIds = new Set<string>();
+  const renderedMessages = new Map<number, { readonly message: Message; readonly element: HTMLElement }>();
+  const daySeparators = new Map<number, HTMLElement>();
+  const renderedEchoes = new Map<string, { readonly echo: PendingEcho; readonly element: HTMLElement }>();
+  let emptyState: HTMLElement | null = null;
   let pendingEchoes: PendingEcho[] = [];
   let echoCounter = 0;
   let pendingClientId: string | null = null;
@@ -376,36 +380,99 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     const nowMs = now();
     pendingEchoes = pendingEchoes.filter((e) => nowMs - e.sentAt < ECHO_EXPIRY_MS);
 
-    disposeAttachmentMedia(messageList);
-    messageList.innerHTML = "";
     const messages = Array.from(confirmedBySeq.values()).sort((a, b) => a.seq - b.seq);
-    if (messages.length === 0 && pendingEchoes.length === 0) {
-      const empty = documentRef.createElement("p");
-      empty.className = "wx-srv-thread-empty";
-      empty.textContent = "No messages yet — say hello below.";
-      messageList.appendChild(empty);
-      threadScroll.afterContentChange(revealPillIfNotStuck);
-      return;
-    }
-
-    let lastDay: number | null = null;
+    const visibleEchoes = pendingEchoes.filter((echo) => !confirmedClientIds.has(echo.clientId));
+    const desiredNodes: HTMLElement[] = [];
+    const activeDays = new Set<number>();
     const nowDate = new Date();
+
     for (const message of messages) {
       const day = startOfLocalDay(message.createdAt);
-      if (day !== lastDay) {
-        const separator = documentRef.createElement("div");
-        separator.className = "wx-srv-day-separator";
-        const label = documentRef.createElement("span");
-        label.textContent = formatDaySeparator(message.createdAt, nowDate);
-        separator.appendChild(label);
-        messageList.appendChild(separator);
-        lastDay = day;
+      if (!activeDays.has(day)) {
+        activeDays.add(day);
+        let separator = daySeparators.get(day);
+        if (separator === undefined) {
+          separator = documentRef.createElement("div");
+          separator.className = "wx-srv-day-separator";
+          separator.appendChild(documentRef.createElement("span"));
+          daySeparators.set(day, separator);
+        }
+        const label = separator.querySelector("span");
+        if (label !== null) label.textContent = formatDaySeparator(message.createdAt, nowDate);
+        desiredNodes.push(separator);
       }
-      messageList.appendChild(renderBubble(message, identity.isMine(message.sender)));
+
+      let rendered = renderedMessages.get(message.seq);
+      if (rendered === undefined || rendered.message !== message) {
+        if (rendered !== undefined) {
+          disposeAttachmentMedia(rendered.element);
+          rendered.element.remove();
+        }
+        rendered = { message, element: renderBubble(message, identity.isMine(message.sender)) };
+        renderedMessages.set(message.seq, rendered);
+      }
+      desiredNodes.push(rendered.element);
     }
-    for (const echo of pendingEchoes) {
-      if (confirmedClientIds.has(echo.clientId)) continue; // superseded by the real message
-      messageList.appendChild(renderEchoBubble(echo));
+
+    const visibleSeqs = new Set(messages.map((message) => message.seq));
+    for (const [seq, rendered] of renderedMessages) {
+      if (!visibleSeqs.has(seq)) {
+        disposeAttachmentMedia(rendered.element);
+        rendered.element.remove();
+        renderedMessages.delete(seq);
+      }
+    }
+    for (const [day, separator] of daySeparators) {
+      if (!activeDays.has(day)) {
+        separator.remove();
+        daySeparators.delete(day);
+      }
+    }
+
+    const visibleEchoIds = new Set<string>();
+    for (const echo of visibleEchoes) {
+      visibleEchoIds.add(echo.clientId);
+      let rendered = renderedEchoes.get(echo.clientId);
+      if (rendered === undefined || rendered.echo !== echo) {
+        rendered?.element.remove();
+        rendered = { echo, element: renderEchoBubble(echo) };
+        renderedEchoes.set(echo.clientId, rendered);
+      }
+      desiredNodes.push(rendered.element);
+    }
+    for (const [clientId, rendered] of renderedEchoes) {
+      if (!visibleEchoIds.has(clientId)) {
+        rendered.element.remove();
+        renderedEchoes.delete(clientId);
+      }
+    }
+
+    if (messages.length === 0 && visibleEchoes.length === 0) {
+      if (emptyState === null) {
+        emptyState = documentRef.createElement("p");
+        emptyState.className = "wx-srv-thread-empty";
+        emptyState.textContent = "No messages yet — say hello below.";
+      }
+      desiredNodes.push(emptyState);
+    } else if (emptyState !== null) {
+      emptyState.remove();
+      emptyState = null;
+    }
+
+    // Reuse unchanged message nodes so ordinary incoming messages do not
+    // pause/reset media already playing elsewhere in the thread.
+    let current = messageList.firstChild;
+    for (const node of desiredNodes) {
+      if (node === current) {
+        current = current.nextSibling;
+      } else {
+        messageList.insertBefore(node, current);
+      }
+    }
+    while (current !== null) {
+      const next = current.nextSibling;
+      messageList.removeChild(current);
+      current = next;
     }
     threadScroll.afterContentChange(revealPillIfNotStuck);
   }
