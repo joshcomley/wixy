@@ -713,3 +713,37 @@ fixed same-session.)
   re-`add --detach` at the new SHA each time, rather than creating a fresh one per
   round - keeps the throwaway-worktree count from growing unbounded across a
   multi-round fix cycle.
+
+## Update 2026-09-24 ~04:55 UTC (Orchestrator `b11567bc`) — quota walls, P6b merged, P8 erasure journal
+
+- **P6b merged** (PR #230, `fa8223d`) after three Sol 6 review rounds; progress **10/13**.
+  Remaining: P8 (delete + wipe), P7 (docs/invariants/decisions close-out; next free
+  decision number 00151), then the delivery merge to main.
+- **P8 candidate `fb6b463f` got two CRITICAL Sol 6 findings** (a crash between the
+  delete/wipe commit and the synchronous scrub can leave "erased" data behind). The
+  Architect, after resuming, ruled one unifying mechanism — a **crash-safe erasure
+  journal** (spec v1.5.4, `0d7d439`) — and the DM relayed it to the P8 builder, which is
+  implementing it. This is the most privacy-sensitive parcel; expect another
+  Sol 6 review round before clearance.
+- **Claude weekly-limit walls (fleet-wide, several accounts exhausted).** The DM hit
+  the wall twice (02:51 and 04:11 UTC); the Architect (03:49) and the Angel (04:05)
+  once each. Handling per fleet doctrine: probe, then nudge — never park until the
+  printed reset (17:00 UTC+1). One peer nudge resumed the DM within ~1-3 minutes both
+  times (cmd switches it to an available account). On the second wall the DM had just
+  been handed P8's candidate one second before dying, so it was nudged immediately.
+  I deliberately did NOT nudge the Architect/Angel (not on the critical path; only one
+  Claude account, `joshcomleymac`, showed available); the Architect came back on its
+  own. If the DM keeps dying: nudge at once; last resort is assuming DM duties or moving
+  that role to a non-Claude seat.
+- **Lane housekeeping:** cancelled two false monitors on finished/stray seats (the
+  failed-spawn Sonnet seat `441212d7`, and the first Sol reviewer `e89fc62b`, retired
+  `no_live_session`); the live P8 reviewer is a separate session.
+- **Still owed before "done":** the delivery merge needs a named reviewer, CI green,
+  branch current, SHA recorded, plus this workspace's own opus-tier security audit of
+  the whole PR (new auth surface, real-time transport, new HTTP contract; decision 00150
+  upload-cancel path-traversal precedent). The Architect may be walled again — use an
+  opus relations seat for design questions if so.
+- **Operator-relevant facts to surface at completion:** (1) the pre-production
+  upload-cancel path-traversal bug (decision 00150) and the Sol 6 review layer that
+  caught it; (2) the quota-wall episodes and how they were resolved; (3) the delete/wipe
+  parcel needed a crash-safe erasure journal after review.
