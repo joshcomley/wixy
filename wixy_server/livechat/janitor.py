@@ -40,15 +40,19 @@ class JanitorReport:
 def run_once(*, store: LiveChatStore, paths: ProjectPaths, now: float) -> JanitorReport:
     stale_uploads = 0
     for upload_id in store.stale_upload_ids(older_than=now - STALE_UPLOAD_AGE_S):
-        store.delete_upload(upload_id)
-        cleanup_deleted_storage_once(store=store, paths=paths, only_items={("upload", upload_id)})
-        stale_uploads += 1
+        if store.delete_stale_upload_if_unpromoted(upload_id, now=now):
+            cleanup_deleted_storage_once(
+                store=store, paths=paths, only_items={("upload", upload_id)}
+            )
+            stale_uploads += 1
 
     orphan_attachments = 0
     for att_id in store.orphan_attachment_ids(older_than=now - ORPHAN_ATTACHMENT_AGE_S):
-        store.delete_attachment(att_id)
-        cleanup_deleted_storage_once(store=store, paths=paths, only_items={("attachment", att_id)})
-        orphan_attachments += 1
+        if store.delete_orphan_attachment_if_unclaimed(att_id, now=now):
+            cleanup_deleted_storage_once(
+                store=store, paths=paths, only_items={("attachment", att_id)}
+            )
+            orphan_attachments += 1
 
     expired_failed = 0
     if paths.server_failed.is_dir():
@@ -61,6 +65,8 @@ def run_once(*, store: LiveChatStore, paths: ProjectPaths, now: float) -> Janito
                 except OSError:
                     _LOGGER.warning("could not remove expired Server chat files at %s", entry)
                 expired_failed += 1
+
+    store.prune_completed_deleted_storage(older_than=now - FAILED_RETENTION_S)
 
     return JanitorReport(
         stale_uploads=stale_uploads,
@@ -86,7 +92,8 @@ async def run_forever(
 
 def scrub_once(*, store: LiveChatStore, deadline_s: float = SCRUB_TICK_DEADLINE_S) -> bool:
     """Resume the durable WAL scrub if a prior delete/wipe exceeded its deadline."""
-    with store.scrub_guard():
+    with store.scrub_guard() as acquired:
+        assert acquired
         pending_token = store.scrub_pending_token()
         if pending_token is None:
             return False

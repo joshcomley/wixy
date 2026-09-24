@@ -64,14 +64,20 @@ def _invalid(detail: str) -> JSONResponse:
     return JSONResponse(status_code=422, content={"error": "invalid", "detail": detail})
 
 
-def _scrub_pending_locked(store: LiveChatStore, *, deadline_s: float) -> bool:
-    """Scrub and clear the current marker under the shared route/worker guard."""
-    with store.scrub_guard():
+def _scrub_pending_locked(store: LiveChatStore, *, deadline_at: float) -> bool:
+    """Scrub and clear the current marker within the mutation's full deadline."""
+    remaining = deadline_at - time.monotonic()
+    if remaining <= 0:
+        return False
+    with store.scrub_guard(timeout_s=remaining) as acquired:
+        if not acquired:
+            return False
         pending_token = store.scrub_pending_token()
         if pending_token is None:
             # The background worker may already have completed this request's scrub.
             return True
-        if not store.scrub(deadline_s=deadline_s):
+        remaining = deadline_at - time.monotonic()
+        if remaining <= 0 or not store.scrub(deadline_s=remaining):
             return False
         return store.clear_scrub_pending(expected_token=pending_token)
 
@@ -251,6 +257,7 @@ async def delete_message(seq: int, request: Request) -> Response:
         lambda: store.delete_message_for_scrub(seq=seq, now=time.time())
     )
     commit_returned_at = time.monotonic()
+    notifier.publish()
 
     await anyio.to_thread.run_sync(
         lambda: livechat_janitor.cleanup_deleted_storage_once(
@@ -263,14 +270,10 @@ async def delete_message(seq: int, request: Request) -> Response:
             },
         )
     )
-    notifier.publish()
     await anyio.to_thread.run_sync(
         lambda: _scrub_pending_locked(
             store,
-            deadline_s=max(
-                0.0,
-                _DELETE_SCRUB_DEADLINE_S - (time.monotonic() - commit_returned_at),
-            ),
+            deadline_at=commit_returned_at + _DELETE_SCRUB_DEADLINE_S,
         )
     )
     erasure_pending = await anyio.to_thread.run_sync(
@@ -292,6 +295,7 @@ async def wipe_chat(body: WipeChatIn, request: Request) -> Response:
         lambda: store.wipe_for_scrub(now=time.time())
     )
     commit_returned_at = time.monotonic()
+    notifier.publish()
 
     await anyio.to_thread.run_sync(
         lambda: livechat_janitor.cleanup_deleted_storage_once(
@@ -306,14 +310,10 @@ async def wipe_chat(body: WipeChatIn, request: Request) -> Response:
     await anyio.to_thread.run_sync(
         lambda: livechat_janitor.cleanup_unreferenced_storage_once(store=store, paths=paths)
     )
-    notifier.publish()
     await anyio.to_thread.run_sync(
         lambda: _scrub_pending_locked(
             store,
-            deadline_s=max(
-                0.0,
-                _DELETE_SCRUB_DEADLINE_S - (time.monotonic() - commit_returned_at),
-            ),
+            deadline_at=commit_returned_at + _DELETE_SCRUB_DEADLINE_S,
         )
     )
     erasure_pending = await anyio.to_thread.run_sync(

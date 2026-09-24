@@ -116,6 +116,46 @@ class TestOrphanAttachments:
         assert report.orphan_attachments == 0
         assert store.get_attachment(att.id) is not None
 
+    def test_attachment_claimed_after_orphan_scan_survives_conditional_delete(
+        self,
+        store: LiveChatStore,
+        paths: ProjectPaths,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        now = 1_000_000.0
+        attachment_id = "e" * 32
+        store.create_attachment(att_id=attachment_id, kind="photo", now=now - _DAY_S - 1)
+        media_dir = paths.server_attachment_media_dir(attachment_id)
+        media_dir.mkdir(parents=True)
+        (media_dir / "full.jpg").write_bytes(b"claimed")
+        orphan_scan = store.orphan_attachment_ids
+
+        def scan_then_claim(*, older_than: float) -> list[str]:
+            ids = orphan_scan(older_than=older_than)
+            assert attachment_id in ids
+            store.create_message(
+                client_id="client-claim-between-orphan-scan-and-delete",
+                sender="Josh",
+                device_id="device-claim-between-scan",
+                by_email=None,
+                text="claimed while janitor was sweeping",
+                attachment_ids=[attachment_id],
+                now=now,
+            )
+            return ids
+
+        monkeypatch.setattr(store, "orphan_attachment_ids", scan_then_claim)
+        report = janitor.run_once(store=store, paths=paths, now=now)
+
+        attachment = store.get_attachment(attachment_id)
+        assert report.orphan_attachments == 0
+        assert attachment is not None and attachment.message_seq is not None
+        assert (media_dir / "full.jpg").read_bytes() == b"claimed"
+        assert not any(
+            kind == "attachment" and storage_id == attachment_id
+            for kind, storage_id, _generation in store.pending_deleted_storage_items()
+        )
+
 
 class TestFailedRetention:
     def test_failed_entries_older_than_7_days_are_removed(
@@ -158,6 +198,63 @@ class TestRunOnceIsIdempotent:
         second = janitor.run_once(store=store, paths=paths, now=now)
         assert first.stale_uploads == 1
         assert second.stale_uploads == 0
+
+    def test_promoted_upload_is_not_deleted_after_stale_upload_scan(
+        self,
+        store: LiveChatStore,
+        paths: ProjectPaths,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        now = 1_000_000.0
+        upload_id = _make_upload(store, paths, created_at=now - _DAY_S - 1)
+        stale_scan = store.stale_upload_ids
+
+        def scan_then_promote(*, older_than: float) -> list[str]:
+            ids = stale_scan(older_than=older_than)
+            assert upload_id in ids
+            assert (
+                store.create_attachment_from_upload(att_id=upload_id, kind="photo", now=now)
+                is not None
+            )
+            return ids
+
+        monkeypatch.setattr(store, "stale_upload_ids", scan_then_promote)
+        report = janitor.run_once(store=store, paths=paths, now=now)
+
+        assert report.stale_uploads == 0
+        assert store.get_upload(upload_id) is not None
+        assert store.get_attachment(upload_id) is not None
+        assert (paths.server_upload_dir(upload_id) / "chunk-000000").read_bytes() == b"1234567890"
+        assert not store.pending_deleted_storage_items()
+
+    def test_old_completed_tombstones_are_pruned_but_pending_ones_remain(
+        self, store: LiveChatStore, paths: ProjectPaths
+    ) -> None:
+        now = 1_000_000.0
+        completed_id = "e" * 32
+        pending_id = "f" * 32
+        old_deleted_at = now - 8 * _DAY_S
+        store.mark_deleted_storage_pending(
+            kind="upload", storage_id=completed_id, now=old_deleted_at
+        )
+        completed = next(
+            item for item in store.pending_deleted_storage_items() if item[1] == completed_id
+        )
+        store.clear_deleted_storage_pending_many([completed])
+        store.mark_deleted_storage_pending(kind="upload", storage_id=pending_id, now=old_deleted_at)
+
+        janitor.run_once(store=store, paths=paths, now=now)
+
+        conn = store._connect()
+        try:
+            rows = {
+                str(row["id"]): bool(row["cleanup_pending"])
+                for row in conn.execute("SELECT id, cleanup_pending FROM deleted_storage")
+            }
+        finally:
+            conn.close()
+        assert completed_id not in rows
+        assert rows[pending_id] is True
 
     def test_completed_storage_tombstones_are_not_revisited(
         self,

@@ -108,6 +108,8 @@ CREATE INDEX IF NOT EXISTS idx_deleted_storage_pending
 _SCHEMA_V5_STORAGE_GENERATION = """
 ALTER TABLE deleted_storage
   ADD COLUMN generation INTEGER NOT NULL DEFAULT 1;
+CREATE INDEX IF NOT EXISTS idx_deleted_storage_completed_age
+  ON deleted_storage(deleted_at) WHERE cleanup_pending = 0;
 """
 
 _LATEST_SCHEMA_VERSION = 5
@@ -234,10 +236,18 @@ class LiveChatStore:
         self._scrub_lock = threading.Lock()
 
     @contextmanager
-    def scrub_guard(self) -> Iterator[None]:
-        """Serialize route-owned and background WAL scrubs for this store instance."""
-        with self._scrub_lock:
-            yield
+    def scrub_guard(self, *, timeout_s: float | None = None) -> Iterator[bool]:
+        """Serialize WAL scrubs, optionally bounding a request's lock wait."""
+        acquired = (
+            self._scrub_lock.acquire()
+            if timeout_s is None
+            else self._scrub_lock.acquire(timeout=max(0.0, timeout_s))
+        )
+        try:
+            yield acquired
+        finally:
+            if acquired:
+                self._scrub_lock.release()
 
     def _connect(self) -> sqlite3.Connection:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -764,7 +774,8 @@ class LiveChatStore:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return False
-                conn.execute(f"PRAGMA busy_timeout = {max(1, int(remaining * 1000))}")
+                busy_timeout_ms = max(1, min(250, int(remaining * 1000)))
+                conn.execute(f"PRAGMA busy_timeout = {busy_timeout_ms}")
                 result_row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
                 assert result_row is not None
                 busy = int(result_row[0])
@@ -913,6 +924,17 @@ class LiveChatStore:
             self._queue_deleted_storage(conn, kind="attachment", ids=[att_id], now=time.time())
             conn.execute("DELETE FROM attachments WHERE id = ?", (att_id,))
 
+    def delete_orphan_attachment_if_unclaimed(self, att_id: str, *, now: float) -> bool:
+        """Delete and journal an attachment only if no message claimed it meanwhile."""
+        with self._write_txn() as conn:
+            cursor = conn.execute(
+                "DELETE FROM attachments WHERE id = ? AND message_seq IS NULL", (att_id,)
+            )
+            if cursor.rowcount != 1:
+                return False
+            self._queue_deleted_storage(conn, kind="attachment", ids=[att_id], now=now)
+            return True
+
     # -- uploads (P2) -------------------------------------------------------
 
     def create_upload(self, row: UploadRow) -> None:
@@ -942,6 +964,28 @@ class LiveChatStore:
         with self._write_txn() as conn:
             self._queue_deleted_storage(conn, kind="upload", ids=[upload_id], now=time.time())
             conn.execute("DELETE FROM uploads WHERE id = ?", (upload_id,))
+
+    def delete_stale_upload_if_unpromoted(self, upload_id: str, *, now: float) -> bool:
+        """Delete and journal an upload only if it has not been promoted meanwhile."""
+        with self._write_txn() as conn:
+            cursor = conn.execute(
+                "DELETE FROM uploads WHERE id = ? "
+                "AND NOT EXISTS (SELECT 1 FROM attachments WHERE id = ?)",
+                (upload_id, upload_id),
+            )
+            if cursor.rowcount != 1:
+                return False
+            self._queue_deleted_storage(conn, kind="upload", ids=[upload_id], now=now)
+            return True
+
+    def prune_completed_deleted_storage(self, *, older_than: float) -> int:
+        """Drop old completed tombstones while retaining all active cleanup work."""
+        with self._write_txn() as conn:
+            cursor = conn.execute(
+                "DELETE FROM deleted_storage WHERE cleanup_pending = 0 AND deleted_at < ?",
+                (older_than,),
+            )
+            return cursor.rowcount
 
     def stale_upload_ids(self, *, older_than: float) -> list[str]:
         with self._read_txn() as conn:

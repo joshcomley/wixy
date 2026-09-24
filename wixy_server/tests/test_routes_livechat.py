@@ -11,6 +11,7 @@ import json
 import logging
 import sqlite3
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 from jwt.algorithms import RSAAlgorithm
+from starlette.requests import Request
 
 import wixy_server.app as wixy_app_module
 import wixy_server.routes_livechat as routes_livechat_module
@@ -31,7 +33,7 @@ from wixy_server.livechat.models import AttachmentResult, PushSubscriptionRow, U
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import CmdPinVerifier
 from wixy_server.livechat.store import LiveChatStore
-from wixy_server.livechat.tokens import ServerAuth, sign_media_url
+from wixy_server.livechat.tokens import ServerAuth, mint_unlock_token, sign_media_url
 from wixy_server.routes_livechat import _stream_events
 from wixy_server.storage import ProjectPaths
 from wixy_server.tests.fake_cmd import FakeCmdState, create_fake_cmd_app
@@ -112,6 +114,26 @@ def _unlock(
     client: TestClient, *, pin: str = TEST_PIN, headers: dict[str, str] | None = None
 ) -> Any:
     return client.post("/api/admin/server/unlock", json={"pin": pin}, headers=headers or {})
+
+
+def _server_request(app: Any, token: str, *, method: str, path: str) -> Request:
+    return Request(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "method": method,
+            "scheme": "http",
+            "path": path,
+            "raw_path": path.encode("ascii"),
+            "query_string": b"",
+            "headers": [(b"x-wixy-server-token", token.encode("ascii"))],
+            "client": ("127.0.0.1", 12345),
+            "server": ("127.0.0.1", 80),
+            "app": app,
+            "state": {"access_email": ""},
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -770,6 +792,240 @@ class TestDeleteWipeRoutes:
             wixy_repo_root=wixy_repo_root,
             pin_verifier=pin_verifier,
         )
+
+    @pytest.mark.parametrize(
+        ("wipe", "expected_event"),
+        [(False, "message_deleted"), (True, "wiped")],
+    )
+    @pytest.mark.asyncio
+    async def test_other_stream_receives_erasure_before_file_cleanup(
+        self,
+        wipe: bool,
+        expected_event: str,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        app = self._new_app(storage_root, wixy_repo_root, pin_verifier)
+        store: LiveChatStore = app.state.livechat_store
+        paths: ProjectPaths = app.state.paths
+        notifier: LiveChatNotifier = app.state.livechat_notifier
+        attachment_id = "9" * 32
+        attachment = store.create_attachment(att_id=attachment_id, kind="photo", now=1.0)
+        message, _ = store.create_message(
+            client_id="client-publish-before-cleanup",
+            sender="Josh",
+            device_id="device-publish-before-cleanup",
+            by_email=None,
+            text="erase this while another screen is open",
+            attachment_ids=[attachment.id],
+            now=2.0,
+        )
+        media_dir = paths.server_attachment_media_dir(attachment_id)
+        media_dir.mkdir(parents=True)
+        (media_dir / "full.jpg").write_bytes(b"private")
+        cursor = store.events_after(0)[-1].event_seq
+        token, _ = mint_unlock_token(app.state.livechat_secret, email="", now=time.time())
+        request = _server_request(
+            app,
+            token,
+            method="POST" if wipe else "DELETE",
+            path=(
+                "/api/admin/server/wipe" if wipe else f"/api/admin/server/messages/{message.seq}"
+            ),
+        )
+
+        cleanup_started = threading.Event()
+        release_cleanup = threading.Event()
+        original_cleanup = livechat_janitor.cleanup_deleted_storage_once
+
+        def slow_cleanup(**kwargs: Any) -> bool:
+            cleanup_started.set()
+            if not release_cleanup.wait(timeout=5.0):
+                raise TimeoutError("test did not release the simulated slow cleanup")
+            return original_cleanup(**kwargs)
+
+        monkeypatch.setattr(livechat_janitor, "cleanup_deleted_storage_once", slow_cleanup)
+        stream_waiting = anyio.Event()
+        original_wait = notifier.wait
+
+        async def observe_wait(*, timeout_s: float) -> None:
+            stream_waiting.set()
+            await original_wait(timeout_s=timeout_s)
+
+        monkeypatch.setattr(notifier, "wait", observe_wait)
+        stream = _stream_events(store, notifier, app.state.livechat_secret, _FIXED_AUTH, cursor)
+        frames: list[dict[str, Any]] = []
+        frame_ready = anyio.Event()
+        route_done = anyio.Event()
+        responses: list[Any] = []
+
+        async def read_next_frame() -> None:
+            frames.append(await _next_frame(stream, timeout_s=4.0))
+            frame_ready.set()
+
+        async def run_erasure() -> None:
+            response = (
+                await routes_livechat_module.wipe_chat(
+                    routes_livechat_module.WipeChatIn(confirm="WIPE"), request
+                )
+                if wipe
+                else await routes_livechat_module.delete_message(message.seq, request)
+            )
+            responses.append(response)
+            route_done.set()
+
+        try:
+            async with anyio.create_task_group() as task_group:
+                task_group.start_soon(read_next_frame)
+                await stream_waiting.wait()
+                task_group.start_soon(run_erasure)
+                cleanup_entered = await anyio.to_thread.run_sync(cleanup_started.wait, 4.0)
+                assert cleanup_entered
+                await frame_ready.wait()
+                assert frames[0]["event"] == expected_event
+                assert not release_cleanup.is_set()
+                release_cleanup.set()
+                await route_done.wait()
+                task_group.cancel_scope.cancel()
+        finally:
+            release_cleanup.set()
+            await stream.aclose()
+
+        assert responses[0].status_code in {204, 202}
+
+    @pytest.mark.asyncio
+    async def test_stale_reader_does_not_block_a_concurrent_message_send(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        app = self._new_app(storage_root, wixy_repo_root, pin_verifier)
+        store: LiveChatStore = app.state.livechat_store
+        app.state.livechat_message_hooks = []
+        app.state.background_tasks = None
+        message, _ = store.create_message(
+            client_id="client-stale-reader-delete",
+            sender="Josh",
+            device_id="device-stale-reader-delete",
+            by_email=None,
+            text="hold this stale row while deleting",
+            attachment_ids=(),
+            now=1.0,
+        )
+        reader = sqlite3.connect(str(store._db_path), isolation_level=None)
+        reader.execute("BEGIN")
+        assert reader.execute("SELECT text FROM messages WHERE seq = ?", (message.seq,)).fetchone()
+
+        connect = store._connect
+
+        def connect_with_one_second_busy_timeout() -> sqlite3.Connection:
+            conn = connect()
+            conn.execute("PRAGMA busy_timeout = 1000")
+            return conn
+
+        monkeypatch.setattr(store, "_connect", connect_with_one_second_busy_timeout)
+        original_scrub = store.scrub
+        scrub_started = threading.Event()
+
+        def observe_scrub(*, deadline_s: float) -> bool:
+            scrub_started.set()
+            return original_scrub(deadline_s=deadline_s)
+
+        monkeypatch.setattr(store, "scrub", observe_scrub)
+        token, _ = mint_unlock_token(app.state.livechat_secret, email="", now=time.time())
+        delete_request = _server_request(
+            app, token, method="DELETE", path=f"/api/admin/server/messages/{message.seq}"
+        )
+        send_request = _server_request(app, token, method="POST", path="/api/admin/server/messages")
+        delete_done = anyio.Event()
+        delete_responses: list[Any] = []
+
+        async def delete_route() -> None:
+            delete_responses.append(
+                await routes_livechat_module.delete_message(message.seq, delete_request)
+            )
+            delete_done.set()
+
+        try:
+            async with anyio.create_task_group() as task_group:
+                task_group.start_soon(delete_route)
+                assert await anyio.to_thread.run_sync(scrub_started.wait, 3.0)
+                await anyio.sleep(0.05)
+                send_response = await routes_livechat_module.send_message(
+                    routes_livechat_module.SendMessageIn(
+                        clientId="client-concurrent-send",
+                        sender="Josh",
+                        deviceId="device-concurrent-send",
+                        text="must stay available during scrub",
+                        attachmentIds=[],
+                    ),
+                    send_request,
+                )
+                assert send_response.status_code == 201
+                reader.execute("COMMIT")
+                await delete_done.wait()
+                task_group.cancel_scope.cancel()
+        finally:
+            reader.close()
+
+        assert delete_responses[0].status_code == 204
+
+    @pytest.mark.asyncio
+    async def test_scrub_guard_wait_counts_against_request_deadline(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(routes_livechat_module, "_DELETE_SCRUB_DEADLINE_S", 0.05)
+        app = self._new_app(storage_root, wixy_repo_root, pin_verifier)
+        store: LiveChatStore = app.state.livechat_store
+        message, _ = store.create_message(
+            client_id="client-scrub-lock-deadline",
+            sender="Josh",
+            device_id="device-scrub-lock-deadline",
+            by_email=None,
+            text="scrub lock deadline",
+            attachment_ids=(),
+            now=1.0,
+        )
+        token, _ = mint_unlock_token(app.state.livechat_secret, email="", now=time.time())
+        request = _server_request(
+            app, token, method="DELETE", path=f"/api/admin/server/messages/{message.seq}"
+        )
+        lock_entered = threading.Event()
+        release_lock = threading.Event()
+        lock_done = threading.Event()
+
+        def hold_scrub_guard() -> None:
+            with store.scrub_guard() as acquired:
+                assert acquired
+                lock_entered.set()
+                release_lock.wait(timeout=3.0)
+            lock_done.set()
+
+        started_at = time.monotonic()
+        try:
+            async with anyio.create_task_group() as task_group:
+                task_group.start_soon(anyio.to_thread.run_sync, hold_scrub_guard)
+                assert await anyio.to_thread.run_sync(lock_entered.wait, 2.0)
+                response = await routes_livechat_module.delete_message(message.seq, request)
+                assert response.status_code == 202
+                assert store.scrub_pending()
+                assert time.monotonic() - started_at < 0.5
+                release_lock.set()
+                assert await anyio.to_thread.run_sync(lock_done.wait, 2.0)
+                task_group.cancel_scope.cancel()
+        finally:
+            release_lock.set()
+
+        assert livechat_janitor.scrub_once(store=store, deadline_s=1.0)
+        assert not store.scrub_pending()
 
     def test_delete_requires_token_and_removes_message_files_without_push(
         self,

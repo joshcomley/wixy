@@ -20,8 +20,9 @@ The v1.5.3 candidate had two critical Sol findings: a crash could leave deleted 
 - Sol then found a high: cancellation after a chunk write could skip the row check, and completed tombstones were no longer scanned on ordinary ticks. The route now shields write plus post-write check; missing-upload cleanup re-marks the validated upload ID before retrying, so late bytes are removed even after prior cleanup completed.
 - DM then reproduced a second test failure: the background scrubber and wipe route could both invoke `store.scrub()` for one marker. Route and worker scrub attempts now share `LiveChatStore.scrub_guard()` and re-read the marker under the lock; a route skips the scrub if the worker already completed it.
 - Sol then found a concurrent cleanup/requeue race: an older file-removal pass could clear a newer late-write requeue. Schema v5 adds a tombstone generation; requeue increments it, and a cleanup pass clears pending only if its generation still matches.
+- The Architect's holistic review then required R1-R3 and L1-L2 before merge. Implemented: publish delete/wipe immediately after commit; cap each WAL checkpoint wait at 250 ms; include scrub-guard acquisition in the request deadline; conditionally delete only unclaimed attachments/unpromoted uploads; prune completed tombstones after seven days while retaining pending rows. Do not edit `spec/server-chat/00-brief.md`; the Architect will reconcile it after merge.
 - Keep the follow-up local. The DM owns fresh Sol review and sec.13 audit; do not push or run/arrange sec.13.
-- Latest evidence after the generation fix: affected backend store/janitor/routes/media-queue slice 143/143 passed; the wipe marker test passed 3/3 isolated runs with `-p no:randomly`; Ruff check/format passed; mypy passed across 206 sources. Prior Admin Vitest 1,095, strict typecheck, and P8 Server chat Playwright 7/7 remain valid; this follow-up does not touch the frontend.
+- Latest evidence after the Architect's full review fixes: affected backend store/janitor/routes/media-queue slice 150/150 passed; R1 stream-order tests cover delete and wipe; R2 concurrent send under stale reader returns 201; R3 held-guard delete returns 202 within deadline; janitor conditional-delete/pruning tests pass. The wipe marker test also passed 3/3 isolated runs with `-p no:randomly`; Ruff check/format passed; mypy passed across 206 sources. Prior Admin Vitest 1,095, strict typecheck, and P8 Server chat Playwright 7/7 remain valid; this follow-up does not touch the frontend.
 - Earlier combined chat/media Playwright run was 8/11: all seven P8 tests passed; three P6b media-processing cases timed out while rows remained processing under severe CPU/disk load. This limitation is not re-tested in this continuation.
 
 ## Relevant files + commits
@@ -34,5 +35,5 @@ The v1.5.3 candidate had two critical Sol findings: a crash could leave deleted 
 
 1. Review final diff and ensure generated files have no drift.
 2. Commit this follow-up with a `Release-note:` trailer.
-3. Send the DM the exact base/candidate SHAs, scaling, late-chunk, scrub-marker, and concurrent-requeue fixes, verification, and the P6b E2E caveat; request fresh exact-SHA Sol review. DM owns sec.13. Do not push.
+3. Send the DM the exact base/candidate SHAs, R1-R3/L1-L2 fixes, verification, and the P6b E2E caveat; request fresh exact-SHA Sol review. DM owns sec.13. Do not push.
 4. Amend Answers entry #1912 with the updated plain-English status.

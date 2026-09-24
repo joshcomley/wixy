@@ -135,7 +135,9 @@ and `pending_wipe_cleanup`. Schema migrations are serialized under the SQLite wr
 message/event tombstone and is never returned to chat clients. `pending_wipe_cleanup` records a
 wipe's filesystem sweep token so a crash cannot lose cleanup of orphaned paths. Schema v4 adds the
 partial `idx_deleted_storage_pending` index containing only incomplete cleanup rows. Schema v5
-adds a per-tombstone generation so a late requeue cannot be cleared by an older cleanup pass.
+adds a per-tombstone generation so a late requeue cannot be cleared by an older cleanup pass, plus
+an age index for completed rows. The hourly janitor prunes completed tombstones after seven days;
+pending tombstones are never pruned.
 Two transaction shapes:
 - `BEGIN IMMEDIATE` for writes needing a race-safe conditional check (an attachment's lease
   claim, `create_message`'s idempotent client-id insert) — serializes concurrent claimants
@@ -213,6 +215,9 @@ Both operations enable secure delete and use `PRAGMA wal_checkpoint(TRUNCATE)`. 
 WAL is empty, deleted text is absent from both database files, and media-file cleanup completed.
 The route gives the scrub up to 10 seconds; if a reader still blocks it, the route writes durable
 `server/scrub.pending`. Delete and wipe transactions also record deleted storage IDs before commit.
+Both routes publish the deletion event immediately after commit and before file cleanup. Each WAL
+checkpoint attempt waits no more than 250 ms for SQLite's busy lock; the route's ten-second
+deadline includes waiting for `LiveChatStore.scrub_guard()`, and lock timeout returns pending.
 If an unlink fails (for example, Windows reports a file-sharing violation), the durable cleanup
 record remains pending and the two-second worker retries at startup and while the app runs. It
 removes files before retrying the database scrub. `/usage` exposes one `erasurePending` flag;
@@ -338,8 +343,10 @@ no ffmpeg dependency).
 uploads >24h (`stale_upload_ids`), unreferenced attachments >24h (`orphan_attachment_ids`,
 keyed off `message_seq IS NULL` — never touches anything a message references, regardless of
 its processing status), and `failed/` entries >7 days (by directory `mtime`, since there's no
-DB row backing them). `run_once` takes an explicit `now`, never reads the clock — every age
-threshold is test-driven, not slept through.
+DB row backing them). It rechecks orphan/upload eligibility in the delete transaction and queues
+filesystem cleanup only when that conditional delete succeeds. It also prunes completed erasure
+tombstones older than seven days, never pending ones. `run_once` takes an explicit `now`, never
+reads the clock — every age threshold is test-driven, not slept through.
 
 The same module's `run_scrubber_forever` is a separate app-lifetime task. It resumes a durable
 `scrub.pending` marker at startup and attempts `TRUNCATE` every two seconds until the WAL is
