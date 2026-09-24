@@ -325,6 +325,7 @@ def _unlink_quietly(*paths: Path) -> None:
 _PHOTO_PIXEL_CAP = 80_000_000
 _PHOTO_LONG_EDGE_CAP = 4096
 _THUMB_LONG_EDGE = 480
+_GRAY_16_TO_8_LUT = tuple(round(value * 255 / 65535) for value in range(65536))
 
 
 def _clamp_long_edge(image: Image.Image, cap: int) -> Image.Image:
@@ -346,10 +347,14 @@ def _icc_input_image(image: Image.Image) -> Image.Image:
     if image.mode in {"P", "PA", "RGBA", "LA"}:
         return image.convert("RGB")
     if image.mode == "I" or image.mode.startswith("I;16"):
-        return image.convert("L")
+        return _scale_16bit_gray_to_l(image)
     if image.mode in {"RGB", "CMYK", "L"}:
         return image
     return image.convert("RGB")
+
+
+def _scale_16bit_gray_to_l(image: Image.Image) -> Image.Image:
+    return image.convert("I").point(_GRAY_16_TO_8_LUT, mode="L")
 
 
 def _convert_to_srgb(image: Image.Image, *, has_alpha: bool) -> Image.Image:
@@ -378,7 +383,7 @@ def _convert_to_srgb(image: Image.Image, *, has_alpha: bool) -> Image.Image:
 def _normalize_photo_mode(image: Image.Image, *, has_alpha: bool) -> Image.Image:
     """Normalize all still-photo pixels to 8-bit RGB/RGBA before metadata removal."""
     if image.mode == "I" or image.mode.startswith("I;16"):
-        image = image.convert("L")
+        image = _scale_16bit_gray_to_l(image)
     return image.convert("RGBA" if has_alpha else "RGB")
 
 

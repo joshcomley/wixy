@@ -214,19 +214,38 @@ class TestAllowlistContent:
         _git(["clone", "--branch", _SNAPSHOT_BRANCH, str(backup_repo), str(checkout)], cwd=tmp_path)
         return checkout
 
-    def test_server_chat_tree_is_excluded_from_backup_allowlist(self, tmp_path: Path) -> None:
-        storage = _make_storage(tmp_path)
-        server = storage / "projects" / "ca" / "server"
+    def test_server_chat_tree_is_absent_from_the_pushed_backup(
+        self, tmp_path: Path, empty_bare_backup_repo: Path
+    ) -> None:
+        settings = _settings(tmp_path, empty_bare_backup_repo)
+        project_dir = settings.storage_root / "projects" / "ca"
+        server = project_dir / "server"
         (server / "media" / "ab" / "attachment-id").mkdir(parents=True)
         (server / "server.db").write_bytes(b"private-chat-database")
         (server / "secret.key").write_bytes(b"private-signing-secret")
         (server / "vapid.json").write_text("private-vapid-key", encoding="utf-8")
         (server / "media" / "ab" / "attachment-id" / "full.jpg").write_bytes(b"private-media")
 
-        items = _project_backup_items(storage / "projects" / "ca")
-
+        items = _project_backup_items(project_dir)
         assert all(source != server and server not in source.parents for source, _rel in items)
         assert all(not rel.startswith("server/") for _source, rel in items)
+
+        result = run_backup_once(settings, now=_WHEN)
+        assert result.status.ok, result.status.error
+        pushed = self._clone_pushed_tree(tmp_path, empty_bare_backup_repo)
+        project_snapshot = pushed / "projects" / "ca"
+        assert (project_snapshot / "live.json").is_file()
+        assert not (project_snapshot / "server").exists()
+        canaries = (
+            b"private-chat-database",
+            b"private-signing-secret",
+            b"private-vapid-key",
+            b"private-media",
+        )
+        for path in project_snapshot.rglob("*"):
+            if path.is_file():
+                content = path.read_bytes()
+                assert all(canary not in content for canary in canaries)
 
     def test_included_files_are_present(self, tmp_path: Path, empty_bare_backup_repo: Path) -> None:
         settings = _settings(tmp_path, empty_bare_backup_repo)

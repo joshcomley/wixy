@@ -390,7 +390,15 @@ class TestProcessPhoto:
 
         with Image.open(src) as original:
             if kind == "gray16-png":
-                expected = original.convert("L").convert("RGB")
+                expected_gray = Image.new("L", original.size)
+                expected_gray.putdata(
+                    [
+                        round(int(original.getpixel((x, y))) * 255 / 65535)
+                        for y in range(original.height)
+                        for x in range(original.width)
+                    ]
+                )
+                expected = expected_gray.convert("RGB")
             else:
                 expected = original.convert("RGBA" if has_alpha else "RGB")
 
@@ -416,6 +424,37 @@ class TestProcessPhoto:
                 assert "icc_profile" not in output.info
                 assert "private-note" not in output.info
                 assert "comment" not in output.info
+
+    def test_gray16_midtone_is_scaled_in_full_and_thumbnail(self, tmp_path: Path) -> None:
+        src = tmp_path / "gray16.png"
+        image = Image.new("I;16", (40, 20))
+        image.putdata(
+            [0 if x < 13 else 32768 if x < 27 else 65535 for _y in range(20) for x in range(40)]
+        )
+        image.save(src, format="PNG")
+        expected_midtone = round(32768 * 255 / 65535)
+
+        result = processing.process_photo(src, output_dir=tmp_path / "out")
+
+        with Image.open(result.renditions["full"]) as full:
+            assert full.convert("RGB").getpixel((20, 10)) == (
+                expected_midtone,
+                expected_midtone,
+                expected_midtone,
+            )
+        with Image.open(result.renditions["thumb"]) as thumb:
+            actual = thumb.convert("RGB").getpixel((20, 10))
+            assert all(abs(channel - expected_midtone) <= 2 for channel in actual)
+
+    @pytest.mark.parametrize("mode", ["I;16", "I"])
+    def test_gray16_icc_input_preparation_scales_midtones(self, mode: str) -> None:
+        image = Image.new(mode, (3, 1))
+        image.putdata([0, 32768, 65535])
+
+        prepared = processing._icc_input_image(image)
+
+        assert prepared.mode == "L"
+        assert [int(prepared.getpixel((x, 0))) for x in range(3)] == [0, 128, 255]
 
     def test_display_p3_jpeg_is_converted_to_srgb_and_profile_is_stripped(
         self, tmp_path: Path

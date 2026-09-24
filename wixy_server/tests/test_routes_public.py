@@ -83,6 +83,7 @@ def test_public_catch_all_cannot_reach_server_chat_storage(
 ) -> None:
     monkeypatch.setattr(wixy_app_module, "fetch_once", lambda *_args, **_kwargs: None)
     app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+    _publish_build(paths, sha="server-chat-public-privacy", version=1)
     paths.server_dir.mkdir(parents=True, exist_ok=True)
     with TestClient(app) as client:
         # create_app initializes the database and secret; write canaries only
@@ -92,6 +93,9 @@ def test_public_catch_all_cannot_reach_server_chat_storage(
         private_media = paths.server_media / "ab" / "attachment-id"
         private_media.mkdir(parents=True)
         (private_media / "full.jpg").write_bytes(b"private-media-canary")
+        public_control = client.get("/about")
+        assert public_control.status_code == 200
+        assert "About" in public_control.text
         for path in (
             "/server/server.db",
             "/server/secret.key",

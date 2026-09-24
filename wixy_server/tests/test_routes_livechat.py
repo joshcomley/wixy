@@ -150,6 +150,36 @@ def _raw_server_database_bytes(store: LiveChatStore) -> bytes:
 
 
 class TestUnlockMapping:
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"Pin": TEST_PIN},
+            {"pin": int(TEST_PIN)},
+            {"pin": {"value": TEST_PIN}},
+            [TEST_PIN],
+        ],
+    )
+    def test_malformed_unlock_shapes_never_echo_pin_values(
+        self,
+        body: object,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        fake_cmd_state: FakeCmdState,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        caplog.set_level(logging.DEBUG)
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        with TestClient(app) as client:
+            response = client.post("/api/admin/server/unlock", json=body)
+
+        assert response.status_code == 422
+        assert TEST_PIN not in response.text
+        assert TEST_PIN not in caplog.text
+        assert fake_cmd_state.pin_apps[TEST_APP_KEY].attempts == {}
+
     @pytest.mark.parametrize("pin", ["12", "1234567890123456789012345678901234567890"])
     def test_invalid_pin_is_never_echoed_or_logged(
         self,
@@ -292,7 +322,7 @@ class TestUnlockMapping:
     ) -> None:
         """§5.1's mapping table: 400 `invalid_request` -> wixy **422**, distinct
         from every other unexpected-failure case (which closed-fails 503).
-        Provably unreachable via a real user (UnlockIn's local 4-16-digit
+        Provably unreachable via a real user (manual 4-16 ASCII digit
         validation), but the frozen contract still specifies this exact
         mapping — end-to-end through the real app, not just pinclient's unit
         test."""

@@ -50,3 +50,9 @@ For every finding: write a regression test first, run it red on the current impl
 
 - The replacement test-proof commit is now recorded locally after the implementation commit. The earlier `8c735cf` candidate remains superseded; the current exact head will be supplied in the replacement DM handoff.
 - No PR, push or merge has occurred. Awaiting exact-head final verification and DM clearance.
+
+## Update 2026-09-24 — independent round-2 findings
+
+- Sol's fresh review of `51513b1896aa3012a637cc9d50df381c91a1f696` reported C0/H0/M2/L1. New round: M1 correct 16-bit grayscale scaling (test now expects independently calculated midtone 128 in full and thumb; both final RGB normalization and ICC input prep use the LUT); M2 strengthen F6 proof (live public build plus positive public-file control; inspect actual pushed backup canaries); L1 redact malformed unlock-body shapes (raw JSON parsing returns generic 422 for missing/misspelled key, wrong type or non-object body).
+- Red evidence: old grayscale clipping produced white at 32768 versus expected 128; missing/misspelled PIN shapes echoed under FastAPI Pydantic validation. M2 public test fails when the live pointer setup is removed; backup snapshot test fails when the parent project directory is selected as the allowlist source. All temporary mutations were restored.
+- Focused M1/M2/L1 checks: 30 passed. Previous candidate `51513b1896aa3012a637cc9d50df381c91a1f696` is superseded pending full affected/full-suite verification and a new exact-SHA handoff. No PR/push/merge.
