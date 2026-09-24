@@ -62,7 +62,12 @@ async function waitForUploads(page: Page, expectedCount: number): Promise<void> 
   await expect(send).toBeEnabled();
 }
 
-async function waitForRenderedAttachments(page: Page, selector: string, expectedCount: number): Promise<void> {
+async function waitForRenderedAttachments(
+  page: Page,
+  selector: string,
+  expectedCount: number,
+  timeout = 5_000,
+): Promise<void> {
   const attachments = page.locator(selector);
   // The fixture's real FFmpeg queue runs asynchronously and can take longer
   // when the media specs follow the full chat/lock matrix on a busy host.
@@ -71,7 +76,7 @@ async function waitForRenderedAttachments(page: Page, selector: string, expected
     await page.mouse.move(24 + attempt, 24 + attempt);
     await page.waitForTimeout(250);
   }
-  await expect(attachments).toHaveCount(expectedCount);
+  await expect(attachments).toHaveCount(expectedCount, { timeout });
 }
 
 test.describe("server-media.spec.ts (P6b)", () => {
@@ -143,21 +148,23 @@ test.describe("server-media.spec.ts (P6b)", () => {
 
   test("voice recorder uploads a short note that can be played", async ({ page }) => {
     await unlockServer(page, "Voice tester");
+    const draft = page.locator(".wx-chat-composer textarea");
+    await draft.fill("Keep this draft for a separate message");
     const record = page.getByRole("button", { name: "Record a voice note" });
     await record.click();
     await expect(page.getByRole("button", { name: "Stop recording" })).toBeVisible();
     await expect(page.locator(".wx-srv-record-status")).toContainText("Recording");
     await page.waitForTimeout(2_100);
+    const sentVoice = page.waitForResponse((response) =>
+      response.url().endsWith("/api/admin/server/messages") && response.request().method() === "POST",
+    );
     await page.getByRole("button", { name: "Stop recording" }).click();
-
-    const chip = page.locator(".wx-chat-attachment-chip");
-    await expect(chip).toContainText("Voice note");
-    await waitForUploads(page, 1);
-    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-    await page.locator(".wx-chat-send-button").click();
+    expect((await sentVoice).status()).toBe(201);
 
     const voice = page.locator(".wx-srv-voice");
-    await waitForRenderedAttachments(page, ".wx-srv-voice", 1);
+    await waitForRenderedAttachments(page, ".wx-srv-voice", 1, 15_000);
+    await expect(draft).toHaveValue("Keep this draft for a separate message");
+    await expect(page.locator(".wx-chat-attachment-chip")).toHaveCount(0);
     await expect(voice.locator(".wx-srv-voice-time")).toContainText(/\/ 0:0[12]/);
     const audio = voice.locator("audio");
     await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);

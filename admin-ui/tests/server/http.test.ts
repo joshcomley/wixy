@@ -91,4 +91,45 @@ describe("serverFetch", () => {
     await rejected;
     expect(aborted).toBe(true);
   });
+
+  it.each([
+    ["DELETE", "/messages/42"],
+    ["POST", "/wipe"],
+  ] as const)("gives %s %s time to finish and reports a timeout as unknown", async (method, path) => {
+    vi.useFakeTimers();
+    const requestSignals: AbortSignal[] = [];
+    fetchMock.mockImplementationOnce((_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        if (init?.signal != null) requestSignals.push(init.signal);
+        init?.signal?.addEventListener("abort", () => reject(init?.signal?.reason), { once: true });
+      }),
+    );
+    const request = serverFetch(path, { method }, { token: "tok", expiresAt: 0 });
+    const outcome = request.then(
+      () => { throw new Error("expected request to abort"); },
+      (error: unknown) => error,
+    );
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(requestSignals[0]?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(await outcome).toMatchObject({ name: "ServerErasureOutcomeUnknownError" });
+    expect(requestSignals[0]?.aborted).toBe(true);
+  });
+
+  it("reports an aborted wipe as unknown instead of an ordinary failure", async () => {
+    fetchMock.mockImplementationOnce((_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init?.signal?.reason), { once: true });
+      }),
+    );
+    const caller = new AbortController();
+    const request = serverFetch(
+      "/wipe",
+      { method: "POST", signal: caller.signal },
+      { token: "tok", expiresAt: 0 },
+    );
+    caller.abort();
+    await expect(request).rejects.toMatchObject({ name: "ServerErasureOutcomeUnknownError" });
+  });
 });

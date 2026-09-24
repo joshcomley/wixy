@@ -32,6 +32,9 @@ import type { LockCause } from "./types";
 export type PinError =
   | { readonly kind: "wrong"; readonly attemptsLeft: number | null }
   | { readonly kind: "lockedOut"; readonly retryAfterS: number }
+  | { readonly kind: "pinChanged" }
+  | { readonly kind: "invalid" }
+  | { readonly kind: "unexpected" }
   | { readonly kind: "unavailable" };
 
 // Note: there is deliberately no "needsName" tracked here. §6's "the first
@@ -69,6 +72,9 @@ export type LockEvent =
   | { readonly type: "verifyOk" }
   | { readonly type: "verifyWrong"; readonly attemptsLeft: number | null }
   | { readonly type: "verifyLockedOut"; readonly retryAfterS: number }
+  | { readonly type: "verifyPinChanged" }
+  | { readonly type: "verifyInvalid" }
+  | { readonly type: "verifyUnexpected" }
   | { readonly type: "verifyUnavailable" }
   /** An explicit Cancel on the PIN pad — distinct from `lock`: nothing was
    * ever unlocked, so there's no chat subtree to detach. */
@@ -160,6 +166,12 @@ function reduceVerifying(state: LockState, event: LockEvent): LockTransitionResu
         state: { kind: "pin", error: { kind: "lockedOut", retryAfterS: event.retryAfterS } },
         effects: ["resetIdleTimer", "focusPin"],
       };
+    case "verifyPinChanged":
+      return { state: { kind: "pin", error: { kind: "pinChanged" } }, effects: ["resetIdleTimer", "focusPin"] };
+    case "verifyInvalid":
+      return { state: { kind: "pin", error: { kind: "invalid" } }, effects: ["resetIdleTimer", "focusPin"] };
+    case "verifyUnexpected":
+      return { state: { kind: "pin", error: { kind: "unexpected" } }, effects: ["resetIdleTimer", "focusPin"] };
     case "verifyUnavailable":
       return {
         state: { kind: "pin", error: { kind: "unavailable" } },

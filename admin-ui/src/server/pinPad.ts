@@ -26,19 +26,23 @@ export interface PinPadView {
   teardown(): void;
 }
 
-/** §5.1: "the PIN must be 1–16 digits" — the client-side cap exists purely so
- * a fat-fingered long paste-equivalent can't build an oversized request; the
- * real validation is server-side. */
+/** §5.1 validates the allowed 4–16 digit range locally. */
+const MIN_PIN_LENGTH = 4;
 const MAX_PIN_LENGTH = 16;
 
-function errorMessageFor(error: PinError, retryRemainingS: number): string {
+function errorMessageFor(error: PinError): string {
   switch (error.kind) {
     case "wrong":
-      return "Incorrect PIN";
+      return error.attemptsLeft === null ? "Wrong PIN" : `Wrong PIN — ${error.attemptsLeft} attempts left`;
     case "lockedOut":
-      return `Too many attempts — try again in ${retryRemainingS}s`;
+      return "Too many wrong tries. Try again in 2 minutes.";
+    case "pinChanged":
+      return "Please try again.";
+    case "invalid":
+    case "unexpected":
+      return "Couldn't unlock — try again.";
     case "unavailable":
-      return "Server settings unavailable";
+      return "Server settings unavailable.";
   }
 }
 
@@ -97,7 +101,7 @@ export function mountPinPad(deps: PinPadDeps): PinPadView {
     }
     const remaining =
       currentError.kind === "lockedOut" ? Math.max(0, Math.ceil((lockedOutUntilMs - Date.now()) / 1000)) : 0;
-    message.textContent = errorMessageFor(currentError, remaining);
+    message.textContent = errorMessageFor(currentError);
     if (currentError.kind === "lockedOut" && remaining <= 0) {
       currentError = null;
       stopCountdown();
@@ -110,6 +114,8 @@ export function mountPinPad(deps: PinPadDeps): PinPadView {
     keys.querySelectorAll<HTMLButtonElement>("button").forEach((btn) => {
       btn.disabled = busy || lockedOut;
     });
+    const submitButton = keys.querySelector<HTMLButtonElement>(".wx-srv-pinpad-key-submit");
+    if (submitButton !== null) submitButton.disabled = busy || lockedOut || pin.length < MIN_PIN_LENGTH;
   }
 
   function appendDigit(digit: string): void {
@@ -117,16 +123,18 @@ export function mountPinPad(deps: PinPadDeps): PinPadView {
     if (currentError?.kind === "lockedOut" && Date.now() < lockedOutUntilMs) return;
     pin += digit;
     renderDots();
+    renderKeysState();
   }
 
   function backspace(): void {
     if (busy) return;
     pin = pin.slice(0, -1);
     renderDots();
+    renderKeysState();
   }
 
   function submit(): void {
-    if (busy || pin.length === 0) return;
+    if (busy || pin.length < MIN_PIN_LENGTH || pin.length > MAX_PIN_LENGTH) return;
     if (currentError?.kind === "lockedOut" && Date.now() < lockedOutUntilMs) return;
     deps.onSubmit(pin);
   }
@@ -178,6 +186,7 @@ export function mountPinPad(deps: PinPadDeps): PinPadView {
     // state (not just the pin pad) rather than duplicated per-view.
   }
   root.addEventListener("keydown", onKeyDown);
+  renderKeysState();
 
   return {
     element: root,

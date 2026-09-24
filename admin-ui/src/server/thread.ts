@@ -10,7 +10,11 @@ import type { ChatComposer } from "../chatComposer";
 import { mountChatComposer } from "../chatComposer";
 import { mountChatThreadScroll, type ChatThreadScroll } from "../chatThreadScroll";
 import { mountLightbox, type Lightbox } from "../lightbox";
-import { ServerLockedError } from "./api/http";
+import {
+  ServerErasureOutcomeUnknownError,
+  ServerLockedError,
+  ServerWipeNotCommittedError,
+} from "./api/http";
 import { deleteMessage, getHistory, sendMessage, wipeChat, type Message } from "./api/messages";
 import { uploadServerAttachment } from "./api/uploads";
 import type { ServerIdentity } from "./identity";
@@ -48,7 +52,7 @@ export interface ServerThreadView {
    * text, and the scroll/echo state in memory for the next `attach`. */
   detach(): void;
   handleStreamEvent(event: ServerStreamEvent): void;
-  wipe(): Promise<boolean>;
+  wipe(onOutcomeUnknown?: () => void): Promise<boolean>;
   /** Updates the header's name chip — called after the settings sheet (or
    * the first-unlock name prompt) commits a new name. */
   refreshNameChip(): void;
@@ -158,6 +162,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   let voiceRecorder: VoiceRecorder | null = null;
   let composer: ChatComposer;
   const voiceDurations = new WeakMap<File, number>();
+  let pendingVoiceNote: { readonly file: File; readonly clientId: string; attachmentId: string | null } | null = null;
+  let voiceSendBusy = false;
 
   const recordButton = documentRef.createElement("button");
   recordButton.type = "button";
@@ -175,6 +181,12 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   recordingStatus.hidden = true;
   recordingStatus.setAttribute("role", "status");
   recordingStatus.setAttribute("aria-live", "polite");
+  const retryVoiceButton = documentRef.createElement("button");
+  retryVoiceButton.type = "button";
+  retryVoiceButton.className = "wx-srv-retry-voice-button";
+  retryVoiceButton.textContent = "Retry voice note";
+  retryVoiceButton.hidden = true;
+  retryVoiceButton.setAttribute("aria-label", "Retry sending voice note");
 
   function formatRecordingTime(milliseconds: number): string {
     const seconds = Math.floor(Math.max(0, milliseconds) / 1000);
@@ -185,7 +197,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     const state = voiceRecorder?.state ?? "idle";
     const active = state !== "idle";
     cancelRecordingButton.hidden = !active;
-    recordButton.disabled = state === "starting" || state === "stopping";
+    recordButton.disabled = voiceSendBusy || pendingVoiceNote !== null
+      || state === "starting" || state === "stopping";
     if (state === "recording") {
       recordButton.textContent = "■";
       recordButton.title = "Stop recording";
@@ -201,6 +214,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     } else if (state === "stopping") {
       recordingStatus.hidden = false;
       recordingStatus.textContent = "Saving voice note…";
+    } else if (voiceSendBusy) {
+      recordingStatus.hidden = false;
+      recordingStatus.textContent = "Sending voice note…";
     } else {
       recordButton.textContent = "🎤";
       recordButton.title = "Record a voice note";
@@ -228,7 +244,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         const extension = mimeType.includes("mp4") ? "m4a" : mimeType.includes("ogg") ? "ogg" : "webm";
         const file = new File([recording.blob], `voice-note.${extension}`, { type: mimeType });
         voiceDurations.set(file, recording.durationMs / 1000);
-        composer.addFile(file);
+        pendingVoiceNote = { file, clientId: cryptoRandomId(win), attachmentId: null };
+        void sendVoiceNote();
         updateRecorderUi();
       },
       onCancel: () => updateRecorderUi(),
@@ -270,7 +287,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     accept: "image/*,video/*",
     acceptFile: (file) => file.type.startsWith("image/") || file.type.startsWith("video/"),
     onFilePickerOpen: () => hooks.suspend("filePicker"),
-    extraButtons: [recordButton, cancelRecordingButton, recordingStatus],
+    extraButtons: [recordButton, cancelRecordingButton, retryVoiceButton, recordingStatus],
     renderChipPreview: (file, previewUrl) => {
       if (file.type.startsWith("image/")) {
         const thumb = documentRef.createElement("img");
@@ -332,13 +349,77 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   let pendingClientId: string | null = null;
   let contentGeneration = 0;
   let contentRevision = 0;
+  let latestKnownMessageSeq = 0;
 
   function addConfirmed(message: Message): void {
     if (deletedSeqs.has(message.seq)) return;
     confirmedBySeq.set(message.seq, message);
+    latestKnownMessageSeq = Math.max(latestKnownMessageSeq, message.seq);
     confirmedClientIds.add(message.clientId);
     contentRevision += 1;
   }
+
+  async function sendVoiceNote(): Promise<void> {
+    const pending = pendingVoiceNote;
+    const session = currentSession;
+    if (pending === null || session === null || voiceSendBusy) return;
+    voiceSendBusy = true;
+    retryVoiceButton.disabled = true;
+    retryVoiceButton.hidden = true;
+    recordingStatus.hidden = false;
+    recordingStatus.textContent = "Sending voice note…";
+    composer.setError(null);
+    updateRecorderUi();
+    try {
+      if (pending.attachmentId === null) {
+        const durationS = voiceDurations.get(pending.file);
+        const attachment = await uploadServerAttachment(
+          pending.file,
+          "voice",
+          session,
+          { ...(durationS === undefined ? {} : { durationS }) },
+        );
+        pending.attachmentId = attachment.id;
+      }
+      const sendSession = currentSession;
+      if (sendSession === null) return;
+      const result = await sendMessage(sendSession, {
+        clientId: pending.clientId,
+        sender: identity.getName() ?? "",
+        deviceId: identity.getDeviceId(),
+        text: null,
+        attachmentIds: [pending.attachmentId],
+      });
+      if (!result.ok) {
+        composer.setError(result.kind === "invalid"
+          ? result.detail
+          : "Couldn't send voice note. Try again.");
+        retryVoiceButton.hidden = false;
+        return;
+      }
+      if (pendingVoiceNote !== pending) return;
+      pendingVoiceNote = null;
+      addConfirmed(result.message);
+      renderThreadList();
+    } catch (error) {
+      if (error instanceof ServerLockedError) {
+        hooks.lockNow("unauthorized");
+      } else {
+        composer.setError(error instanceof Error && error.message !== ""
+          ? `Couldn't send voice note: ${error.message}`
+          : "Couldn't send voice note. Try again.");
+        retryVoiceButton.hidden = false;
+      }
+    } finally {
+      voiceSendBusy = false;
+      retryVoiceButton.disabled = false;
+      if (pendingVoiceNote === null) recordingStatus.hidden = true;
+      else if (retryVoiceButton.hidden) recordingStatus.hidden = true;
+      updateRecorderUi();
+    }
+  }
+
+  retryVoiceButton.addEventListener("click", () => void sendVoiceNote());
 
   function teardownMessageActions(seq: number): void {
     messageActionControllers.get(seq)?.teardown();
@@ -549,7 +630,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         if (restored !== null) {
           const errorLine = documentRef.createElement("span");
           errorLine.className = "wx-srv-message-delete-error";
-          errorLine.textContent = "Couldn't delete message. Try again.";
+          errorLine.textContent = error instanceof ServerErasureOutcomeUnknownError
+            ? "Couldn't confirm the delete — try again"
+            : "Couldn't delete message. Try again.";
           restored.appendChild(errorLine);
         }
       }
@@ -574,11 +657,64 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     renderThreadList(false);
   }
 
-  async function wipe(): Promise<boolean> {
+  async function getAllHistory(session: ServerSession): Promise<readonly Message[]> {
+    const messages: Message[] = [];
+    let before: number | undefined;
+    while (true) {
+      const page = await getHistory(
+        session,
+        before === undefined ? { limit: HISTORY_PAGE_SIZE } : { before, limit: HISTORY_PAGE_SIZE },
+      );
+      messages.push(...page.messages);
+      if (!page.hasMore || page.messages.length === 0) return messages;
+      const nextBefore = Math.min(...page.messages.map((message) => message.seq));
+      if (nextBefore === before) return messages;
+      before = nextBefore;
+    }
+  }
+
+  async function reconcileUnknownWipe(session: ServerSession, wipeBoundarySeq: number): Promise<boolean> {
+    let history: readonly Message[];
+    try {
+      history = await getAllHistory(session);
+    } catch (error) {
+      if (error instanceof ServerLockedError) throw error;
+      throw new ServerErasureOutcomeUnknownError();
+    }
+
+    if (history.some((message) => message.seq <= wipeBoundarySeq)) {
+      for (const message of history) addConfirmed(message);
+      hasMoreHistory = false;
+      renderThreadList(false);
+      throw new ServerWipeNotCommittedError();
+    }
+
+    const messagesArrivingDuringReconciliation = Array.from(confirmedBySeq.values())
+      .filter((message) => message.seq > wipeBoundarySeq);
+    clearAfterWipe();
+    for (const message of messagesArrivingDuringReconciliation) addConfirmed(message);
+    for (const message of history) addConfirmed(message);
+    historyLoaded = true;
+    hasMoreHistory = false;
+    renderThreadList(false);
+    return true;
+  }
+
+  async function wipe(onOutcomeUnknown?: () => void): Promise<boolean> {
     const session = currentSession;
     if (session === null) throw new Error("The server chat is locked.");
     const requestGeneration = contentGeneration;
-    const erasurePending = await wipeChat(session);
+    const wipeBoundarySeq = latestKnownMessageSeq;
+    let erasurePending: boolean;
+    try {
+      erasurePending = await wipeChat(session);
+    } catch (error) {
+      if (error instanceof ServerErasureOutcomeUnknownError) {
+        onOutcomeUnknown?.();
+        return reconcileUnknownWipe(session, wipeBoundarySeq);
+      }
+      throw error;
+    }
     const reconcileWithoutClearing = requestGeneration !== contentGeneration;
     if (!reconcileWithoutClearing) clearAfterWipe();
     const refreshGeneration = contentGeneration;
@@ -776,6 +912,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       historyLoaded = true;
       renderThreadList();
       ensureObserver();
+      if (pendingVoiceNote !== null) void sendVoiceNote();
       return cursor;
     } catch (error) {
       if (requestGeneration !== contentGeneration) return null;

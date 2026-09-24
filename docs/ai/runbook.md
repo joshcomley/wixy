@@ -109,6 +109,56 @@ at startup, one project in v1 but nothing assumes it — Inv 1):
 - **Git auth**: the sentinel clone URL `https://x-access-token@github.com/joshcomley/wixy.git`
   (fleet askpass). Every git subprocess passes `-c credential.helper=` + a 60s timeout.
 
+## Server-chat media and erasure
+
+Install the normal server extra (`pip install -e ".[server]"`): Pillow is a core
+dependency and `pillow-heif==1.7.0` is in the server extra for HEIC/HEIF photos. The media
+queue also requires both `ffmpeg` and `ffprobe` on `PATH`. `WIXY_FFMPEG` and `WIXY_FFPROBE`
+can each point to an existing executable file instead. A bad explicit path does not fall back
+to `PATH`. If either binary is missing, startup logs `server-chat media pipeline unavailable`,
+`server.mediaProcessing` reports `unavailable`, and media upload initialization returns 503;
+text chat remains available. Install/fix the binaries and restart Wixy to resolve the startup
+configuration.
+
+Server-chat settings are read by `wixy_server/settings.py`:
+
+| Environment variable | Setting | Default and effect |
+|---|---|---|
+| `WIXY_SERVER_PIN_APP_KEY` | `server_pin_app_key` | `wixy-livechat`; cmd PIN-service app-key identifier, not a secret or PIN. Register the PIN in cmd. |
+| `WIXY_SERVER_MEDIA_QUOTA_MB` | `server_media_quota_bytes` | 20,480 MiB (20 GiB); per-project chat-media quota. |
+| `WIXY_SERVER_MIN_FREE_MB` | `server_min_free_bytes` | 10,240 MiB (10 GiB); minimum free-space floor. |
+| `WIXY_SERVER_UPLOAD_CHUNK_BYTES` | `server_upload_chunk_bytes` | 8 MiB; clamped to 64 KiB–16 MiB. |
+| `WIXY_FFMPEG` | `ffmpeg_path` | Empty means resolve `ffmpeg` from `PATH`; otherwise must name an existing file. |
+| `WIXY_FFPROBE` | `ffprobe_path` | Empty means resolve `ffprobe` from `PATH`; otherwise must name an existing file. |
+
+The `*_MB` values are multiplied by 1,048,576. The quota and free-space floor are enforced
+when an upload is initialized. cmd must have the PIN app registered under the configured
+`server_pin_app_key` (default `wixy-livechat`); Wixy calls cmd's loopback verify route and
+fails closed with 503 if it is missing or unreachable. See [livechat.md](livechat.md) for
+the media pipeline and HTTP details.
+
+`GET /api/admin/system/status` includes `server.mediaProcessing`: `unavailable` when media
+binaries were not resolved, `degraded` after at least three consecutive failures in the media
+queue or erasure worker, and `ok` when media is available without that failure threshold.
+Health reads reset to zero after five minutes without another failure. The decoy displays this
+real status and never displays chat activity.
+
+The erasure worker starts immediately and retries every two seconds. It resumes `deleted_storage`
+file removals and `pending_scrub` WAL work, and runs the full orphan-path sweep at startup and
+while a `pending_wipe_cleanup` token exists. Schema migration v6 imports a legacy
+`server/scrub.pending` file into `pending_scrub`; if Windows denies reading it, Wixy preserves
+the file and records durable work for retry. Delete/wipe return 202 with
+`{"erasurePending":true}` only after their database transaction has committed; the flag at
+`GET /api/admin/server/usage` stays true until both the WAL scrub and file cleanup finish. Do
+not manually remove a marker or clear a journal row. If the flag remains true, inspect Wixy
+logs for cleanup errors, restore filesystem access, and allow the worker to retry; restarting
+also retries legacy-marker import and startup recovery.
+
+The separate hourly janitor runs once at startup, then every hour. It removes stale uploads and
+unclaimed orphan attachments after 24 hours, removes raw upload sources for ready attachments,
+retries archiving failed originals, expires an unarchived failed original after seven days, and
+prunes completed cleanup tombstones after seven days. Pending cleanup rows are not aged out.
+
 ## CI (`.github/workflows/ci.yml`, on push-to-main + all PRs)
 
 - **`python`** (ubuntu, py3.14): `pip install -e ".[server,dev]"` + `playwright install`;
