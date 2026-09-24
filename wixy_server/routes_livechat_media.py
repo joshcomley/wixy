@@ -15,7 +15,7 @@ from typing import Literal
 import anyio
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from wixy_server.livechat import uploads
 from wixy_server.livechat.models import AttachmentRow, UploadRow, attachment_json
@@ -34,7 +34,7 @@ router = APIRouter(prefix="/api/admin/server")
 class InitUploadIn(BaseModel):
     kind: Literal["photo", "video", "voice"]
     mimeType: str
-    sizeBytes: int
+    sizeBytes: int = Field(ge=1)
     filename: str | None = None
 
 
@@ -216,11 +216,11 @@ async def delete_upload(upload_id: str, request: Request) -> Response:
 _ATTACHMENT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 # Each rendition name maps to the possible filenames P2a's processing.py can
-# have written for it (§7: PNG->full.png, animated GIF->full.gif, everything
-# else->full.jpg — mutually exclusive, so exactly one of these ever exists).
+# have written for it (§7: alpha photos use PNG renditions, opaque PNG/static
+# GIF keep lossless full images, and animated GIF keeps its original bytes).
 _RENDITION_FILENAMES: dict[str, tuple[str, ...]] = {
     "full": ("full.jpg", "full.png", "full.gif"),
-    "thumb": ("thumb.jpg",),
+    "thumb": ("thumb.png", "thumb.jpg"),
     "play": ("play.mp4", "play.m4a"),
     "poster": ("poster.jpg",),
 }

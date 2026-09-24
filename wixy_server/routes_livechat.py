@@ -139,25 +139,34 @@ async def _finish_committed_erasure(
 # ---------------------------------------------------------------------------
 
 
-class UnlockIn(BaseModel):
-    # §5.1 v1.4: "wixy validates 4-16 digits locally and does not call cmd below
-    # that" — cmd charges an attempt BEFORE checking it, so a stray keypress must
-    # never reach the PIN service at all. Pydantic 422s a bad shape before this
-    # route's body ever runs, so `verifier.verify()` is simply never called.
-    pin: str = Field(pattern=r"^\d{4,16}$")
-
-
 @router.post("/unlock", response_model=None)
-async def unlock(body: UnlockIn, request: Request) -> JSONResponse:
+async def unlock(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        return JSONResponse(status_code=422, content={"error": "invalid_pin"})
+    except UnicodeDecodeError:
+        return JSONResponse(status_code=422, content={"error": "invalid_pin"})
+    if not isinstance(body, dict):
+        return JSONResponse(status_code=422, content={"error": "invalid_pin"})
+
     verifier: PinVerifier | None = request.app.state.livechat_pin_verifier
     access_email = getattr(request.state, "access_email", None) or ""
+    pin = body.get("pin")
+    if (
+        not isinstance(pin, str)
+        or not pin.isascii()
+        or not pin.isdecimal()
+        or not 4 <= len(pin) <= 16
+    ):
+        return JSONResponse(status_code=422, content={"error": "invalid_pin"})
 
     if verifier is None:
         # Standalone edition (no cmd here) — R4: "there's no PIN verifier, so
         # /unlock -> 503 not_configured." Closed, never open.
         return JSONResponse(status_code=503, content={"error": "not_configured"})
 
-    result = await verifier.verify(pin=body.pin, subject=access_email)
+    result = await verifier.verify(pin=pin, subject=access_email)
 
     if result.outcome == "ok":
         secret: bytes = request.app.state.livechat_secret
@@ -182,8 +191,8 @@ async def unlock(body: UnlockIn, request: Request) -> JSONResponse:
     if result.outcome == "invalid_request":
         # §5.1's mapping table: cmd's 400 invalid_request -> wixy 422, never a
         # closed-fail 503 — "wixy validates first, so this is a wixy bug."
-        # Provably unreachable via any real user path (UnlockIn's 4-16-digit
-        # pattern already rejects anything that could trigger it), but the
+        # Provably unreachable via any real user path (manual 4-16 ASCII digit
+        # validation above rejects anything that could trigger it), but the
         # frozen contract still specifies this exact mapping.
         return _invalid("cmd rejected the PIN request as malformed — this is a wixy-side bug")
     if result.outcome == "not_configured":

@@ -10,14 +10,17 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import shutil
 import subprocess
 from pathlib import Path
 from typing import cast
+from unittest.mock import patch
 
 import pillow_heif
 import pytest
-from PIL import Image
+from PIL import Image, ImageCms
+from PIL.PngImagePlugin import PngInfo
 from PIL.TiffImagePlugin import IFDRational
 
 from wixy_server.livechat import processing
@@ -159,6 +162,14 @@ def _static_gif(dest: Path) -> Path:
     return dest
 
 
+def _transparent_static_gif(dest: Path) -> Path:
+    image = Image.new("P", (40, 20), 0)
+    image.putpalette([240, 30, 40, 20, 190, 225] + [0, 0, 0] * 254)
+    image.putdata([0 if x < 20 else 1 for _y in range(20) for x in range(40)])
+    image.save(dest, format="GIF", transparency=0, comment=b"private-gif-note")
+    return dest
+
+
 def _webp(dest: Path) -> Path:
     Image.new("RGB", (40, 20), "teal").save(dest, format="WEBP")
     return dest
@@ -261,6 +272,242 @@ class TestSniff:
 
 
 class TestProcessPhoto:
+    @staticmethod
+    def _assert_near_rgb(actual: tuple[int, ...], expected: tuple[int, int, int]) -> None:
+        assert all(abs(actual[index] - expected[index]) <= 8 for index in range(3))
+
+    def test_static_gif_palette_colors_survive_full_and_thumbnail(self, tmp_path: Path) -> None:
+        src = _static_gif(tmp_path / "in.gif")
+        with Image.open(src) as original:
+            expected = original.convert("RGB").getpixel((20, 10))
+
+        result = processing.process_photo(src, output_dir=tmp_path / "out")
+
+        for rendition in ("full", "thumb"):
+            with Image.open(result.renditions[rendition]) as image:
+                pixel = image.convert("RGB").getpixel((image.width // 2, image.height // 2))
+                self._assert_near_rgb(pixel, expected)
+
+    def test_palette_png_colors_and_metadata_survive_without_palette_loss(
+        self, tmp_path: Path
+    ) -> None:
+        src = tmp_path / "indexed.png"
+        image = Image.new("P", (40, 20), 1)
+        image.putpalette([0, 0, 0, 15, 185, 225] + [0, 0, 0] * 254)
+        metadata = PngInfo()
+        metadata.add_text("private-note", "must be removed")
+        exif = image.getexif()
+        exif[0x010E] = "private-exif"
+        image.save(src, format="PNG", pnginfo=metadata, exif=exif.tobytes())
+        expected = image.convert("RGB").getpixel((20, 10))
+
+        result = processing.process_photo(src, output_dir=tmp_path / "out")
+
+        for rendition in ("full", "thumb"):
+            with Image.open(result.renditions[rendition]) as output:
+                pixel = output.convert("RGB").getpixel((output.width // 2, output.height // 2))
+                self._assert_near_rgb(pixel, expected)
+                assert "exif" not in output.info
+                assert "private-note" not in output.info
+
+    def test_transparent_palette_png_preserves_alpha_in_full_and_thumbnail(
+        self, tmp_path: Path
+    ) -> None:
+        src = tmp_path / "transparent.png"
+        image = Image.new("P", (40, 20), 0)
+        image.putpalette([230, 20, 30, 10, 180, 220] + [0, 0, 0] * 254)
+        image.putdata([0 if x < 20 else 1 for _y in range(20) for x in range(40)])
+        image.info["transparency"] = 0
+        image.save(src, format="PNG", transparency=0)
+
+        result = processing.process_photo(src, output_dir=tmp_path / "out")
+
+        with Image.open(result.renditions["full"]) as full:
+            rgba = full.convert("RGBA")
+            assert rgba.getpixel((5, 10)) == (230, 20, 30, 0)
+            assert rgba.getpixel((35, 10)) == (10, 180, 220, 255)
+        with Image.open(result.renditions["thumb"]) as thumb:
+            rgba = thumb.convert("RGBA")
+            assert rgba.getpixel((5, 10)) == (230, 20, 30, 0)
+            assert rgba.getpixel((35, 10)) == (10, 180, 220, 255)
+        assert result.renditions["full"].name == "full.png"
+        assert result.renditions["thumb"].name == "thumb.png"
+
+    @pytest.mark.parametrize(
+        ("kind", "full_suffix", "thumb_suffix", "has_alpha"),
+        [
+            ("png8-opaque", ".png", ".jpg", False),
+            ("png8-transparent", ".png", ".png", True),
+            ("gif-opaque", ".png", ".jpg", False),
+            ("gif-transparent", ".png", ".png", True),
+            ("la-png", ".png", ".png", True),
+            ("rgba-png", ".png", ".png", True),
+            ("rgba-webp", ".png", ".png", True),
+            ("gray16-png", ".png", ".jpg", False),
+            ("cmyk-jpeg", ".jpg", ".jpg", False),
+        ],
+    )
+    def test_pixel_modes_preserve_colors_alpha_and_choose_formats(
+        self,
+        kind: str,
+        full_suffix: str,
+        thumb_suffix: str,
+        has_alpha: bool,
+        tmp_path: Path,
+    ) -> None:
+        src = tmp_path / "mode-input"
+        if kind.startswith("png8"):
+            image = Image.new("P", (40, 20), 1)
+            image.putpalette([0, 0, 0, 22, 177, 231] + [0, 0, 0] * 254)
+            if has_alpha:
+                image.putdata([0 if x < 20 else 1 for _y in range(20) for x in range(40)])
+                image.save(src, format="PNG", transparency=0)
+            else:
+                image.save(src, format="PNG")
+        elif kind == "gif-opaque":
+            Image.new("RGB", (40, 20), "purple").save(src, format="GIF")
+        elif kind == "gif-transparent":
+            src = _transparent_static_gif(src)
+        elif kind == "la-png":
+            image = Image.new("LA", (40, 20), (175, 255))
+            image.putpixel((5, 10), (90, 0))
+            image.save(src, format="PNG")
+        elif kind == "rgba-png":
+            image = Image.new("RGBA", (40, 20), (14, 180, 220, 255))
+            image.putpixel((5, 10), (240, 20, 30, 0))
+            image.save(src, format="PNG")
+        elif kind == "rgba-webp":
+            image = Image.new("RGBA", (40, 20), (14, 180, 220, 255))
+            image.putpixel((5, 10), (240, 20, 30, 0))
+            image.save(src, format="WEBP", lossless=True)
+        elif kind == "gray16-png":
+            image = Image.new("I;16", (40, 20))
+            image.putdata([0 if x < 20 else 32768 for _y in range(20) for x in range(40)])
+            image.save(src, format="PNG")
+        else:
+            image = Image.new("CMYK", (40, 20), (210, 90, 30, 5))
+            image.save(src, format="JPEG", quality=100, subsampling=0)
+
+        with Image.open(src) as original:
+            if kind == "gray16-png":
+                expected_gray = Image.new("L", original.size)
+                expected_gray.putdata(
+                    [
+                        round(int(original.getpixel((x, y))) * 255 / 65535)
+                        for y in range(original.height)
+                        for x in range(original.width)
+                    ]
+                )
+                expected = expected_gray.convert("RGB")
+            else:
+                expected = original.convert("RGBA" if has_alpha else "RGB")
+
+        result = processing.process_photo(src, output_dir=tmp_path / "out")
+
+        assert result.renditions["full"].suffix == full_suffix
+        assert result.renditions["thumb"].suffix == thumb_suffix
+        points = ((5, 10), (35, 10))
+        for name in ("full", "thumb"):
+            with Image.open(result.renditions[name]) as output:
+                rgba = output.convert("RGBA")
+                for point in points:
+                    actual = rgba.getpixel(point)
+                    wanted = expected.convert("RGBA").getpixel(point)
+                    if has_alpha:
+                        assert actual == wanted
+                    else:
+                        assert all(
+                            abs(actual[channel] - wanted[channel]) <= 8 for channel in range(3)
+                        )
+                        assert actual[3] == 255
+                assert "exif" not in output.info
+                assert "icc_profile" not in output.info
+                assert "private-note" not in output.info
+                assert "comment" not in output.info
+
+    def test_gray16_midtone_is_scaled_in_full_and_thumbnail(self, tmp_path: Path) -> None:
+        src = tmp_path / "gray16.png"
+        image = Image.new("I;16", (40, 20))
+        image.putdata(
+            [0 if x < 13 else 32768 if x < 27 else 65535 for _y in range(20) for x in range(40)]
+        )
+        image.save(src, format="PNG")
+        expected_midtone = round(32768 * 255 / 65535)
+
+        result = processing.process_photo(src, output_dir=tmp_path / "out")
+
+        with Image.open(result.renditions["full"]) as full:
+            assert full.convert("RGB").getpixel((20, 10)) == (
+                expected_midtone,
+                expected_midtone,
+                expected_midtone,
+            )
+        with Image.open(result.renditions["thumb"]) as thumb:
+            actual = thumb.convert("RGB").getpixel((20, 10))
+            assert all(abs(channel - expected_midtone) <= 2 for channel in actual)
+
+    @pytest.mark.parametrize("mode", ["I;16", "I"])
+    def test_gray16_icc_input_preparation_scales_midtones(self, mode: str) -> None:
+        image = Image.new(mode, (3, 1))
+        image.putdata([0, 32768, 65535])
+
+        prepared = processing._icc_input_image(image)
+
+        assert prepared.mode == "L"
+        assert [int(prepared.getpixel((x, 0))) for x in range(3)] == [0, 128, 255]
+
+    def test_display_p3_jpeg_is_converted_to_srgb_and_profile_is_stripped(
+        self, tmp_path: Path
+    ) -> None:
+        p3_bytes = (Path(__file__).parent / "fixtures" / "display-p3.icc").read_bytes()
+        p3_profile = ImageCms.ImageCmsProfile(io.BytesIO(p3_bytes))
+        srgb_profile = ImageCms.createProfile("sRGB")
+        src = tmp_path / "p3.jpg"
+        Image.new("RGB", (40, 20), (200, 100, 50)).save(
+            src, format="JPEG", quality=100, subsampling=0, icc_profile=p3_bytes
+        )
+        with Image.open(src) as original:
+            expected = ImageCms.profileToProfile(
+                original,
+                p3_profile,
+                srgb_profile,
+                renderingIntent=ImageCms.Intent.PERCEPTUAL,
+                outputMode="RGB",
+            ).getpixel((20, 10))
+
+        result = processing.process_photo(src, output_dir=tmp_path / "out")
+
+        assert result.renditions["full"].name == "full.jpg"
+        assert result.renditions["thumb"].name == "thumb.jpg"
+        for rendition in result.renditions.values():
+            with Image.open(rendition) as output:
+                actual = output.convert("RGB").getpixel((output.width // 2, output.height // 2))
+                assert all(abs(actual[channel] - expected[channel]) <= 2 for channel in range(3))
+                assert "icc_profile" not in output.info
+
+    def test_icc_conversion_failure_warns_and_still_processes_photo(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        p3_bytes = (Path(__file__).parent / "fixtures" / "display-p3.icc").read_bytes()
+        src = tmp_path / "p3.jpg"
+        Image.new("RGB", (40, 20), (120, 90, 60)).save(
+            src, format="JPEG", quality=100, subsampling=0, icc_profile=p3_bytes
+        )
+
+        def fail_conversion(*_args: object, **_kwargs: object) -> Image.Image:
+            raise RuntimeError("forced ICC conversion failure")
+
+        monkeypatch.setattr(ImageCms, "profileToProfile", fail_conversion)
+        caplog.set_level(logging.WARNING, logger=processing.__name__)
+
+        result = processing.process_photo(src, output_dir=tmp_path / "out")
+
+        assert result.renditions["full"].is_file()
+        assert "Could not convert Server chat photo ICC profile to sRGB" in caplog.text
+
     def test_exif_gps_stripped_and_orientation_applied(self, tmp_path: Path) -> None:
         src = _jpeg_with_gps_and_orientation(tmp_path / "in.jpg", stored_size=(100, 60))
         result = processing.process_photo(src, output_dir=tmp_path / "out")
@@ -292,11 +539,11 @@ class TestProcessPhoto:
         # A thumbnail is still produced even though the full rendition is untouched.
         assert result.renditions["thumb"].is_file()
 
-    def test_static_gif_becomes_jpeg(self, tmp_path: Path) -> None:
+    def test_static_gif_becomes_lossless_png(self, tmp_path: Path) -> None:
         src = _static_gif(tmp_path / "in.gif")
         result = processing.process_photo(src, output_dir=tmp_path / "out")
-        assert result.mime == "image/jpeg"
-        assert Image.open(result.renditions["full"]).format == "JPEG"
+        assert result.mime == "image/png"
+        assert Image.open(result.renditions["full"]).format == "PNG"
 
     def test_webp_becomes_jpeg(self, tmp_path: Path) -> None:
         src = _webp(tmp_path / "in.webp")
@@ -719,3 +966,8 @@ class TestProcessDispatcher:
             "video", src, output_dir=tmp_path / "out", ffmpeg=ffmpeg_bin, ffprobe=ffprobe_bin
         )
         assert isinstance(result, processing.VideoResult)
+
+
+def test_pillow_heif_import_failure_is_reported_as_unavailable() -> None:
+    with patch("builtins.__import__", side_effect=ImportError("forced missing pillow-heif")):
+        assert processing._register_pillow_heif() is False

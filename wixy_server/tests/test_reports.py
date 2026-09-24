@@ -120,6 +120,39 @@ def _settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **env: str) -> An
 
 
 class TestBuildReportBundle:
+    def test_report_bundle_excludes_server_chat_storage(
+        self,
+        project: ProjectConfig,
+        paths: ProjectPaths,
+        engine_root: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        settings = _settings(tmp_path, monkeypatch)
+        paths.server_dir.mkdir(parents=True)
+        paths.server_db.write_bytes(b"private-chat-database-canary")
+        paths.server_secret.write_bytes(b"private-signing-secret-canary")
+        paths.server_vapid.write_text("private-vapid-canary", encoding="utf-8")
+        media = paths.server_media / "ab" / "attachment-id"
+        media.mkdir(parents=True)
+        (media / "full.jpg").write_bytes(b"private-media-canary")
+
+        bundle = build_report_bundle(
+            project, paths, engine_root, settings, None, context="ctx", note=None, now=_TS
+        )
+
+        serialized = json.dumps(bundle)
+        for secret in (
+            "private-chat-database-canary",
+            "private-signing-secret-canary",
+            "private-vapid-canary",
+            "private-media-canary",
+            "server.db",
+            "secret.key",
+            "vapid.json",
+        ):
+            assert secret not in serialized
+
     def test_shape_with_no_checkout_yet(
         self,
         project: ProjectConfig,

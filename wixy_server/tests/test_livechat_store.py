@@ -530,19 +530,24 @@ class TestDeleteAndWipe:
             now=3.0,
         )
 
-        assert store.delete_message(seq=message.seq, now=4.0) == [attachment.id]
-        assert store.scrub(deadline_s=10.0)
-        assert store.get_messages([message.seq]) == []
-        assert store.get_attachment(attachment.id) is None
-        assert store.get_upload(attachment.id) is None
-        events = store.events_after(0)
-        assert [(event.type, event.message_seq) for event in events] == [
-            ("message_deleted", message.seq)
-        ]
-        assert store.delete_message(seq=message.seq, now=5.0) == []
-        assert store.scrub(deadline_s=10.0)
-        assert store.events_after(0) == events
-        assert b"delete-marker-7d72c84d" not in self._raw_database_bytes(db_path)
+        second_connection = sqlite3.connect(str(db_path), isolation_level=None)
+        second_connection.execute("SELECT 1")
+        try:
+            assert store.delete_message(seq=message.seq, now=4.0) == [attachment.id]
+            assert store.scrub(deadline_s=10.0)
+            assert store.get_messages([message.seq]) == []
+            assert store.get_attachment(attachment.id) is None
+            assert store.get_upload(attachment.id) is None
+            events = store.events_after(0)
+            assert [(event.type, event.message_seq) for event in events] == [
+                ("message_deleted", message.seq)
+            ]
+            assert store.delete_message(seq=message.seq, now=5.0) == []
+            assert store.scrub(deadline_s=10.0)
+            assert store.events_after(0) == events
+            assert b"delete-marker-7d72c84d" not in self._raw_database_bytes(db_path)
+        finally:
+            second_connection.close()
 
     def test_wipe_clears_content_keeps_push_and_never_reuses_sequences(
         self, store: LiveChatStore, db_path: Path
@@ -602,29 +607,34 @@ class TestDeleteAndWipe:
         )
         _messages, _has_more, old_cursor = store.list_messages(before=None, limit=10)
 
-        attachment_ids, upload_ids = store.wipe(now=4.0)
-        assert store.scrub(deadline_s=10.0)
+        second_connection = sqlite3.connect(str(db_path), isolation_level=None)
+        second_connection.execute("SELECT 1")
+        try:
+            attachment_ids, upload_ids = store.wipe(now=4.0)
+            assert store.scrub(deadline_s=10.0)
 
-        assert attachment_ids == [attachment.id]
-        assert upload_ids == [attachment.id, "pending-upload-1"]
-        assert store.list_messages(before=None, limit=10) == ([], False, old_cursor + 1)
-        assert store.get_attachment(attachment.id) is None
-        assert store.get_upload("pending-upload-1") is None
-        assert store.list_push_subscriptions()[0].device_id == "device-wipe-1"
-        assert [(event.type, event.message_seq) for event in store.events_after(old_cursor)] == [
-            ("wiped", None)
-        ]
-        next_message, _ = store.create_message(
-            client_id="client-wipe-3",
-            sender="Josh",
-            device_id="device-wipe-1",
-            by_email=None,
-            text="after wipe",
-            attachment_ids=(),
-            now=5.0,
-        )
-        assert next_message.seq > last_seq
-        assert b"wipe-marker-5121b943" not in self._raw_database_bytes(db_path)
+            assert attachment_ids == [attachment.id]
+            assert upload_ids == [attachment.id, "pending-upload-1"]
+            assert store.list_messages(before=None, limit=10) == ([], False, old_cursor + 1)
+            assert store.get_attachment(attachment.id) is None
+            assert store.get_upload("pending-upload-1") is None
+            assert store.list_push_subscriptions()[0].device_id == "device-wipe-1"
+            assert [
+                (event.type, event.message_seq) for event in store.events_after(old_cursor)
+            ] == [("wiped", None)]
+            next_message, _ = store.create_message(
+                client_id="client-wipe-3",
+                sender="Josh",
+                device_id="device-wipe-1",
+                by_email=None,
+                text="after wipe",
+                attachment_ids=(),
+                now=5.0,
+            )
+            assert next_message.seq > last_seq
+            assert b"wipe-marker-5121b943" not in self._raw_database_bytes(db_path)
+        finally:
+            second_connection.close()
 
     def test_delete_persists_pending_scrub_until_reader_releases_old_wal_snapshot(
         self, store: LiveChatStore, db_path: Path

@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 
 from wixy_server.app import create_app
 from wixy_server.livechat import janitor as livechat_janitor
+from wixy_server.livechat import processing as processing_module
 from wixy_server.livechat import uploads as uploads_module
 from wixy_server.livechat.pinclient import CmdPinVerifier
 from wixy_server.livechat.store import LiveChatStore
@@ -131,6 +132,44 @@ def _init_upload(
 
 
 class TestUploadInit:
+    @pytest.mark.parametrize("size_bytes", [0, -1, -(10**100)])
+    def test_nonpositive_declared_size_is_422_and_never_reduces_pending_quota(
+        self,
+        size_bytes: int,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            response = _init_upload(client, headers, size_bytes=size_bytes)
+
+            assert response.status_code == 422
+            app = cast(FastAPI, client.app)
+            assert app.state.livechat_store.pending_upload_bytes() == 0
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_missing_pillow_heif_disables_uploads_and_status(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Simulate the optional HEIF decoder import failing at startup.
+        monkeypatch.setattr(processing_module, "PILLOW_HEIF_AVAILABLE", False, raising=False)
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            response = _init_upload(client, headers, size_bytes=1000)
+            status = client.get("/api/admin/system/status")
+
+            assert response.status_code == 503
+            assert response.json() == {"error": "media_unavailable"}
+            assert status.json()["server"]["mediaProcessing"] == "unavailable"
+        finally:
+            client.__exit__(None, None, None)
+
     def test_returns_upload_id_and_the_configured_chunk_size(
         self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
     ) -> None:
@@ -511,8 +550,14 @@ class TestDeleteUpload:
 
 
 class TestMediaRoute:
-    def _ready_attachment(self, client: TestClient, headers: dict[str, str]) -> tuple[str, bytes]:
-        """Runs a real (small) JPEG through the full upload flow and waits for
+    def _ready_attachment(
+        self,
+        client: TestClient,
+        headers: dict[str, str],
+        *,
+        image_format: str = "JPEG",
+    ) -> tuple[str, bytes]:
+        """Runs a real (small) image through the full upload flow and waits for
         the background queue to resolve it to `ready`, returning its id and a
         signed `full` rendition URL's query params source (the secret)."""
         import io
@@ -520,10 +565,14 @@ class TestMediaRoute:
         from PIL import Image
 
         buf = io.BytesIO()
-        Image.new("RGB", (20, 10), "blue").save(buf, format="JPEG")
+        mode = "RGBA" if image_format == "PNG" else "RGB"
+        Image.new(mode, (20, 10), "blue").save(buf, format=image_format)
         data = buf.getvalue()
 
-        upload_id = _init_upload(client, headers, size_bytes=len(data)).json()["uploadId"]
+        mime_type = "image/png" if image_format == "PNG" else "image/jpeg"
+        upload_id = _init_upload(client, headers, size_bytes=len(data), mime_type=mime_type).json()[
+            "uploadId"
+        ]
         client.put(
             f"/api/admin/server/uploads/{upload_id}/chunks/0",
             content=data,
@@ -555,6 +604,21 @@ class TestMediaRoute:
             assert response.headers["x-content-type-options"] == "nosniff"
             assert response.headers["content-disposition"] == "inline"
             assert response.headers["content-type"] == "image/jpeg"
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_signed_transparent_thumbnail_serves_png(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            att_id, secret = self._ready_attachment(client, headers, image_format="PNG")
+            exp = int(time.time()) + 3600
+            sig = sign_media_url(secret, attachment_id=att_id, rendition="thumb", exp=exp, email="")
+            response = client.get(f"/api/admin/server/media/{att_id}/thumb?exp={exp}&sig={sig}")
+
+            assert response.status_code == 200
+            assert response.headers["content-type"] == "image/png"
         finally:
             client.__exit__(None, None, None)
 

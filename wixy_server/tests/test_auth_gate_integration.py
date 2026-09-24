@@ -20,6 +20,7 @@ from jwt.algorithms import RSAAlgorithm
 
 import wixy_server.app as wixy_app_module
 from wixy_server.app import create_app
+from wixy_server.livechat.pinclient import PinVerifyResult
 
 _TEAM_DOMAIN = "example.cloudflareaccess.com"
 _AUD = "the-configured-aud"
@@ -119,6 +120,16 @@ def _sign(private_key: Any, *, email: str = "owner@example.com", **overrides: An
     return pyjwt.encode(claims, private_key, algorithm="RS256", headers={"kid": _KID})
 
 
+class _SuccessfulPinVerifier:
+    async def verify(self, *, pin: str, subject: str) -> PinVerifyResult:
+        assert pin == "482913"
+        assert subject == "owner@example.com"
+        return PinVerifyResult(outcome="ok")
+
+    async def aclose(self) -> None:
+        return None
+
+
 @pytest.mark.usefixtures("configured_env", "patched_jwks_fetch")
 class TestAdminGateRejectsUnauthenticated:
     def test_admin_preview_without_token_redirects_to_root(
@@ -173,6 +184,44 @@ class TestAdminGateRejectsUnauthenticated:
 
 @pytest.mark.usefixtures("configured_env", "patched_jwks_fetch")
 class TestAdminGateAcceptsValidToken:
+    def test_server_routes_reject_missing_jwt_and_accept_valid_jwt(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        keypair: tuple[Any, Any],
+    ) -> None:
+        private, _public = keypair
+        app = create_app(
+            storage_root=storage_root,
+            wixy_repo_root=wixy_repo_root,
+            pin_verifier=_SuccessfulPinVerifier(),
+        )
+        with TestClient(app, follow_redirects=False) as client:
+            no_jwt_unlock = client.post("/api/admin/server/unlock", json={"pin": "482913"})
+            no_jwt_messages = client.get("/api/admin/server/messages")
+            no_jwt_worker = client.get("/admin/server-sw.js")
+
+            access_jwt = _sign(private, email="owner@example.com")
+            access_header = {"CF-Access-Jwt-Assertion": access_jwt}
+            unlock = client.post(
+                "/api/admin/server/unlock", json={"pin": "482913"}, headers=access_header
+            )
+            server_headers = {
+                **access_header,
+                "X-Wixy-Server-Token": unlock.json()["token"],
+            }
+            messages = client.get("/api/admin/server/messages", headers=server_headers)
+            worker = client.get("/admin/server-sw.js", headers=access_header)
+
+        assert no_jwt_unlock.status_code == 401
+        assert no_jwt_unlock.json()["error"] == "unauthorized"
+        assert no_jwt_messages.status_code == 401
+        assert no_jwt_messages.json()["error"] == "unauthorized"
+        assert no_jwt_worker.status_code == 302
+        assert unlock.status_code == 200
+        assert messages.status_code == 200
+        assert worker.status_code == 200
+
     def test_valid_token_reaches_the_real_route(
         self, storage_root: Path, wixy_repo_root: Path, keypair: tuple[Any, Any]
     ) -> None:

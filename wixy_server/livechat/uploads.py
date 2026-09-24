@@ -205,6 +205,8 @@ def init_upload(
         raise MediaUnavailableError()
     if mime_type not in ALLOWED_MIME_TYPES[kind]:
         raise UnsupportedTypeError(mime_type)
+    if size_bytes < 1:
+        raise ValueError("size_bytes must be positive")
     max_bytes = MAX_UPLOAD_BYTES[kind]
     if size_bytes > max_bytes:
         raise TooLargeError(max_bytes)

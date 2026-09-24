@@ -284,8 +284,16 @@ async def _handle_claimed(
             tg.cancel_scope.cancel()
 
     if not still_exists:
-        store.mark_deleted_storage_pending(kind="attachment", storage_id=att.id, now=time.time())
-        store.mark_deleted_storage_pending(kind="upload", storage_id=att.id, now=time.time())
+        await anyio.to_thread.run_sync(
+            lambda: store.mark_deleted_storage_pending(
+                kind="attachment", storage_id=att.id, now=time.time()
+            )
+        )
+        await anyio.to_thread.run_sync(
+            lambda: store.mark_deleted_storage_pending(
+                kind="upload", storage_id=att.id, now=time.time()
+            )
+        )
         await anyio.to_thread.run_sync(
             lambda: _cleanup_deleted_storage(
                 store=store,

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
 import sqlite3
 import subprocess
 import threading
@@ -137,12 +138,70 @@ def _server_request(app: Any, token: str, *, method: str, path: str) -> Request:
     )
 
 
+def _raw_server_database_bytes(store: LiveChatStore) -> bytes:
+    db_path = store._db_path
+    wal_path = Path(f"{db_path}-wal")
+    return db_path.read_bytes() + (wal_path.read_bytes() if wal_path.exists() else b"")
+
+
 # ---------------------------------------------------------------------------
 # POST /unlock -> fake-cmd mapping (§5.1)
 # ---------------------------------------------------------------------------
 
 
 class TestUnlockMapping:
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"Pin": TEST_PIN},
+            {"pin": int(TEST_PIN)},
+            {"pin": {"value": TEST_PIN}},
+            [TEST_PIN],
+        ],
+    )
+    def test_malformed_unlock_shapes_never_echo_pin_values(
+        self,
+        body: object,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        fake_cmd_state: FakeCmdState,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        caplog.set_level(logging.DEBUG)
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        with TestClient(app) as client:
+            response = client.post("/api/admin/server/unlock", json=body)
+
+        assert response.status_code == 422
+        assert TEST_PIN not in response.text
+        assert TEST_PIN not in caplog.text
+        assert fake_cmd_state.pin_apps[TEST_APP_KEY].attempts == {}
+
+    @pytest.mark.parametrize("pin", ["12", "1234567890123456789012345678901234567890"])
+    def test_invalid_pin_is_never_echoed_or_logged(
+        self,
+        pin: str,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        fake_cmd_state: FakeCmdState,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        caplog.set_level(logging.DEBUG)
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        with TestClient(app) as client:
+            response = _unlock(client, pin=pin)
+
+        assert response.status_code == 422
+        assert pin not in response.text
+        assert pin not in caplog.text
+        assert fake_cmd_state.pin_apps[TEST_APP_KEY].attempts == {}
+
     def test_correct_pin_returns_a_token(
         self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
     ) -> None:
@@ -263,7 +322,7 @@ class TestUnlockMapping:
     ) -> None:
         """§5.1's mapping table: 400 `invalid_request` -> wixy **422**, distinct
         from every other unexpected-failure case (which closed-fails 503).
-        Provably unreachable via a real user (UnlockIn's local 4-16-digit
+        Provably unreachable via a real user (manual 4-16 ASCII digit
         validation), but the frozen contract still specifies this exact
         mapping — end-to-end through the real app, not just pinclient's unit
         test."""
@@ -299,6 +358,28 @@ class TestUnlockMapping:
 
 
 class TestTokenRequired:
+    def test_non_ascii_unlock_token_is_401_locked(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        app = self._app(storage_root, wixy_repo_root, pin_verifier)
+
+        async def send_latin1_header() -> httpx.Response:
+            transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+            async with httpx.AsyncClient(
+                transport=transport, base_url="http://testserver"
+            ) as client:
+                request = httpx.Request(
+                    "GET",
+                    "http://testserver/api/admin/server/messages",
+                    headers=[(b"X-Wixy-Server-Token", b"\xe9.invalid")],
+                )
+                return await client.send(request)
+
+        response = anyio.run(send_latin1_header)
+
+        assert response.status_code == 401
+        assert response.json() == {"error": "locked"}
+
     def _app(self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier) -> Any:
         return create_app(
             storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
@@ -445,6 +526,118 @@ class TestSendHistoryUsage:
         finally:
             client.__exit__(None, None, None)
 
+    @pytest.mark.parametrize(("text_length", "expected_status"), [(4000, 201), (4001, 422)])
+    def test_text_length_boundary(
+        self,
+        text_length: int,
+        expected_status: int,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        client, headers = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            response = client.post(
+                "/api/admin/server/messages",
+                json={
+                    "clientId": "text-boundary-client",
+                    "sender": "J",
+                    "deviceId": "device-aaaaaaaa",
+                    "text": "x" * text_length,
+                },
+                headers=headers,
+            )
+            assert response.status_code == expected_status, response.text
+        finally:
+            client.__exit__(None, None, None)
+
+    @pytest.mark.parametrize(
+        ("sender", "expected_status"),
+        [("J", 201), ("J" * 32, 201), ("J" * 33, 422), ("J\x01", 422)],
+    )
+    def test_sender_length_and_control_character_boundaries(
+        self,
+        sender: str,
+        expected_status: int,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        client, headers = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            response = client.post(
+                "/api/admin/server/messages",
+                json={
+                    "clientId": "sender-boundary-client",
+                    "sender": sender,
+                    "deviceId": "device-aaaaaaaa",
+                    "text": "x",
+                },
+                headers=headers,
+            )
+            assert response.status_code == expected_status
+        finally:
+            client.__exit__(None, None, None)
+
+    @pytest.mark.parametrize(
+        ("client_id_length", "expected_status"), [(8, 201), (64, 201), (65, 422)]
+    )
+    def test_client_id_length_boundaries(
+        self,
+        client_id_length: int,
+        expected_status: int,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        client, headers = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            response = client.post(
+                "/api/admin/server/messages",
+                json={
+                    "clientId": "c" * client_id_length,
+                    "sender": "Josh",
+                    "deviceId": "device-aaaaaaaa",
+                    "text": "x",
+                },
+                headers=headers,
+            )
+            assert response.status_code == expected_status
+        finally:
+            client.__exit__(None, None, None)
+
+    @pytest.mark.parametrize(("attachment_count", "expected_status"), [(10, 201), (11, 422)])
+    def test_attachment_count_boundaries(
+        self,
+        attachment_count: int,
+        expected_status: int,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(livechat_media_queue, "resolve_binaries", lambda *_args: None)
+        client, headers = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            store: LiveChatStore = client.app.state.livechat_store  # type: ignore[attr-defined]
+            attachment_ids = [f"{index + 1:032x}" for index in range(attachment_count)]
+            for index, attachment_id in enumerate(attachment_ids):
+                store.create_attachment(att_id=attachment_id, kind="photo", now=float(index))
+            response = client.post(
+                "/api/admin/server/messages",
+                json={
+                    "clientId": "attachment-boundary-client",
+                    "sender": "Josh",
+                    "deviceId": "device-aaaaaaaa",
+                    "text": "attachments",
+                    "attachmentIds": attachment_ids,
+                },
+                headers=headers,
+            )
+            assert response.status_code == expected_status, response.text
+        finally:
+            client.__exit__(None, None, None)
+
     def test_history_returns_messages_ascending_with_cursor(
         self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
     ) -> None:
@@ -498,6 +691,69 @@ class TestSendHistoryUsage:
 # The SSE stream loop (§3, §5.4) — driven directly (TestClient can't observe an
 # infinite generator), same pattern as `test_routes_chat.py`.
 # ---------------------------------------------------------------------------
+
+
+class TestCrossOriginDenial:
+    def test_server_mutation_preflights_do_not_grant_cross_origin_access(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        preflights = (
+            ("POST", "/api/admin/server/messages"),
+            ("POST", "/api/admin/server/uploads"),
+            ("DELETE", "/api/admin/server/messages/1"),
+            ("POST", "/api/admin/server/wipe"),
+        )
+
+        with TestClient(app) as client:
+            responses = [
+                client.options(
+                    path,
+                    headers={
+                        "Origin": "https://attacker.example",
+                        "Access-Control-Request-Method": method,
+                        "Access-Control-Request-Headers": "content-type,x-wixy-server-token",
+                    },
+                )
+                for method, path in preflights
+            ]
+
+        for response in responses:
+            assert response.status_code == 405
+            assert "access-control-allow-origin" not in response.headers
+            assert "access-control-allow-headers" not in response.headers
+            assert "access-control-allow-methods" not in response.headers
+
+    def test_simple_cross_origin_form_post_cannot_create_a_message(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        store: LiveChatStore = app.state.livechat_store
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/server/messages",
+                data={
+                    "clientId": "cross-origin-client",
+                    "sender": "Attacker",
+                    "deviceId": "cross-origin-device",
+                    "text": "must not be stored",
+                },
+                headers={"Origin": "https://attacker.example"},
+            )
+
+        assert response.status_code in {401, 422}
+        messages, _has_more, _cursor = store.list_messages(before=None, limit=100)
+        assert messages == []
 
 
 def _decode_sse_frame(raw: str) -> dict[str, Any]:
@@ -1114,7 +1370,7 @@ class TestDeleteWipeRoutes:
             sender="Josh",
             device_id="device-delete-route",
             by_email=None,
-            text="route delete marker",
+            text="delete-route-raw-marker-4f6a",
             attachment_ids=(attachment.id,),
             now=2.0,
         )
@@ -1178,6 +1434,7 @@ class TestDeleteWipeRoutes:
         marker_states: list[bool] = []
         marker_transactions: list[bool] = []
         write_marker = store._upsert_pending_scrub
+        scrub = store.scrub
 
         def observe_write_transaction(conn: sqlite3.Connection) -> str:
             marker_transactions.append(conn.in_transaction)
@@ -1185,16 +1442,23 @@ class TestDeleteWipeRoutes:
 
         def observe_marker(*, deadline_s: float) -> bool:
             marker_states.append(store.scrub_pending())
-            return True
+            return scrub(deadline_s=deadline_s)
 
         monkeypatch.setattr(store, "_upsert_pending_scrub", observe_write_transaction)
         monkeypatch.setattr(store, "scrub", observe_marker)
         with TestClient(app) as client:
             token = _unlock(client).json()["token"]
-            response = client.delete(
-                f"/api/admin/server/messages/{message.seq}",
-                headers={"X-Wixy-Server-Token": token},
-            )
+            second_connection = sqlite3.connect(str(store._db_path), isolation_level=None)
+            second_connection.execute("SELECT 1")
+            try:
+                response = client.delete(
+                    f"/api/admin/server/messages/{message.seq}",
+                    headers={"X-Wixy-Server-Token": token},
+                )
+                assert response.status_code == 204
+                assert b"delete-marker-before-scrub-55f3" not in _raw_server_database_bytes(store)
+            finally:
+                second_connection.close()
 
         assert response.status_code == 204
         assert marker_states and marker_states[0] is True
@@ -1352,6 +1616,7 @@ class TestDeleteWipeRoutes:
         marker_states: list[bool] = []
         marker_transactions: list[bool] = []
         write_marker = store._upsert_pending_scrub
+        scrub = store.scrub
 
         def observe_write_transaction(conn: sqlite3.Connection) -> str:
             marker_transactions.append(conn.in_transaction)
@@ -1359,17 +1624,24 @@ class TestDeleteWipeRoutes:
 
         def observe_marker(*, deadline_s: float) -> bool:
             marker_states.append(store.scrub_pending())
-            return True
+            return scrub(deadline_s=deadline_s)
 
         monkeypatch.setattr(store, "_upsert_pending_scrub", observe_write_transaction)
         monkeypatch.setattr(store, "scrub", observe_marker)
         with TestClient(app) as client:
             token = _unlock(client).json()["token"]
-            response = client.post(
-                "/api/admin/server/wipe",
-                headers={"X-Wixy-Server-Token": token},
-                json={"confirm": "WIPE"},
-            )
+            second_connection = sqlite3.connect(str(store._db_path), isolation_level=None)
+            second_connection.execute("SELECT 1")
+            try:
+                response = client.post(
+                    "/api/admin/server/wipe",
+                    headers={"X-Wixy-Server-Token": token},
+                    json={"confirm": "WIPE"},
+                )
+                assert response.status_code == 204
+                assert b"wipe-marker-before-scrub-a197" not in _raw_server_database_bytes(store)
+            finally:
+                second_connection.close()
 
         assert response.status_code == 204
         # The first checkpoint runs with the marker present; clearing it is
@@ -1590,7 +1862,7 @@ class TestDeleteWipeRoutes:
             sender="Purdy",
             device_id="device-wipe-route",
             by_email=None,
-            text="wipe route marker",
+            text="wipe-route-raw-marker-2bc1",
             attachment_ids=(attachment.id,),
             now=2.0,
         )
@@ -1818,6 +2090,150 @@ class TestTokenBoundToRequestingEmail:
             "email": email,
         }
         return pyjwt.encode(claims, private_key, algorithm="RS256", headers={"kid": self._KID})
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("configured_env", "patched_jwks_fetch")
+    async def test_cf_email_is_stored_but_absent_from_send_history_and_sse(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        keypair: tuple[Any, Any],
+    ) -> None:
+        private, _public = keypair
+        email = "audit-owner-sentinel@example.com"
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        with TestClient(app) as client:
+            access_jwt = self._sign(private, email=email)
+            unlocked = _unlock(client, headers={"CF-Access-Jwt-Assertion": access_jwt})
+            token = unlocked.json()["token"]
+            headers = {
+                "CF-Access-Jwt-Assertion": access_jwt,
+                "X-Wixy-Server-Token": token,
+            }
+            sent = client.post(
+                "/api/admin/server/messages",
+                json={
+                    "clientId": "audit-email-client",
+                    "sender": "Josh",
+                    "deviceId": "audit-email-device",
+                    "text": "private audit event",
+                },
+                headers=headers,
+            )
+            history = client.get("/api/admin/server/messages", headers=headers)
+            store: LiveChatStore = app.state.livechat_store
+            saved = store.get_messages([sent.json()["message"]["seq"]])[0]
+            stream = _stream_events(
+                store,
+                app.state.livechat_notifier,
+                app.state.livechat_secret,
+                ServerAuth(email=email, exp=int(time.time()) + 3600),
+                after=0,
+            )
+            try:
+                raw_sse = await stream.__anext__()
+            finally:
+                await stream.aclose()
+
+        assert sent.status_code == 201
+        assert saved.by_email == email
+        for wire in (sent.text, history.text, raw_sse):
+            assert "by_email" not in wire
+            assert email not in wire
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("configured_env", "patched_jwks_fetch")
+    async def test_unlock_token_is_absent_from_urls_api_media_stream_and_logs(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        keypair: tuple[Any, Any],
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        private, _public = keypair
+        email = "token-audit-owner@example.com"
+        monkeypatch.setattr(secrets, "token_hex", lambda _n: "0123456789abcdef")
+        monkeypatch.setattr(livechat_media_queue, "resolve_binaries", lambda *_args: None)
+        caplog.set_level(logging.DEBUG)
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        with TestClient(app) as client:
+            access_jwt = self._sign(private, email=email)
+            access_header = {"CF-Access-Jwt-Assertion": access_jwt}
+            unlock = _unlock(client, headers=access_header)
+            token = unlock.json()["token"]
+            headers = {**access_header, "X-Wixy-Server-Token": token}
+
+            store: LiveChatStore = app.state.livechat_store
+            attachment_id = "b" * 32
+            store.create_attachment(att_id=attachment_id, kind="photo", now=1.0)
+            claimed = store.claim_processing(owner="token-audit-worker", now=1.0, lease_s=60.0)
+            assert claimed is not None
+            store.finish_attachment(
+                att_id=attachment_id,
+                owner="token-audit-worker",
+                result=AttachmentResult(
+                    status="ready",
+                    mime="image/jpeg",
+                    width=1,
+                    height=1,
+                    duration_s=None,
+                    peaks=None,
+                    renditions=("full",),
+                    bytes_on_disk=12,
+                    failure=None,
+                ),
+                now=2.0,
+            )
+            media_file = app.state.paths.server_attachment_media_dir(attachment_id) / "full.jpg"
+            media_file.parent.mkdir(parents=True)
+            media_file.write_bytes(b"not-a-real-image; FileResponse does not decode it")
+
+            sent = client.post(
+                "/api/admin/server/messages",
+                json={
+                    "clientId": "token-audit-client",
+                    "sender": "Josh",
+                    "deviceId": "token-audit-device",
+                    "text": "image",
+                    "attachmentIds": [attachment_id],
+                },
+                headers=headers,
+            )
+            assert sent.status_code == 201, sent.text
+            history = client.get("/api/admin/server/messages", headers=headers)
+            media_url = sent.json()["message"]["attachments"][0]["urls"]["full"]
+            media = client.get(media_url, headers=access_header)
+            stream = _stream_events(
+                store,
+                app.state.livechat_notifier,
+                app.state.livechat_secret,
+                ServerAuth(email=email, exp=int(time.time()) + 3600),
+                after=0,
+            )
+            try:
+                raw_sse = await stream.__anext__()
+            finally:
+                await stream.aclose()
+
+        assert unlock.status_code == 200
+        assert token in unlock.text
+        assert sent.status_code == 201
+        assert history.status_code == 200
+        assert media.status_code == 200
+        assert token not in media_url
+        for response in (sent, history, media):
+            assert token not in str(response.request.url)
+            body = response.content.decode("latin-1")
+            assert token not in body
+        assert token not in raw_sse
+        assert token not in caplog.text
 
     @pytest.mark.usefixtures("configured_env", "patched_jwks_fetch")
     def test_token_minted_for_one_email_is_rejected_under_another(
