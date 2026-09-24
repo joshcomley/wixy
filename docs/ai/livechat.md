@@ -385,11 +385,19 @@ media seeking never trigger either one) and both using `performance.now()` (so P
   no counting. `panel.ts` attaches this to the panel's OWN root element (not `document`) —
   "not nav/topbar" is free that way, since an event outside the root's subtree never reaches
   a listener attached to it.
-- `createMultiTapDetector`/`attachMultiTapListener` (R3, unchanged) — two taps within
+- `createMultiTapDetector`/`attachMultiTapListener` (R3) — two primary-button taps within
   `MULTI_TAP_INTERVAL_MS` (400ms) count as one multi-tap. Attached to `document` in the
   CAPTURE phase for the panel's whole mounted lifetime, so a tap inside a
   `stopPropagation()`'d descendant is still seen; only the reducer's `chat`/`fading` states
   give the resulting event any meaning.
+
+Brief v1.5.2's `GESTURE_BOUNDARY_SELECTOR` reads `[data-srv-gesture-boundary]` from the
+pointer target or its ancestors. The boundary tap counts normally first, so it can still
+complete a run started elsewhere; if it doesn't lock, the detector clears the partial run
+afterward. Classify a pair by asking whether tap 1 made control 2 appear under the finger:
+causal flows such as settings → sheet option or photo → lightbox close use a boundary, while
+independent controls such as Send → 📎/🎤 keep normal cadence. The native file picker doesn't
+need a marker, and the mic start/stop toggle deliberately remains non-boundary.
 
 **`panel.ts`** owns everything `lockModel.ts` deliberately doesn't: the idle timer
 (`IDLE_LOCK_MS` = 10s) and fade timer (`FADE_MS` = 800ms), the token-expiry timer, R7's
@@ -411,12 +419,9 @@ more R6 lock cause so cleanup runs through the same path). This is the mechanism
 and in-flight uploads survive a lock on (R6) — `attach(session)` is called again with a
 FRESH `ServerSession` on each unlock, never a stale one.
 
-**Until P5b lands**, `panel.ts` calls its own `createStubServerChatView` — a placeholder
-honouring the frozen `ServerChatView` contract closely enough (a `.wx-srv-thread` root
-matching the real view's eventual class, a draft-preserving textarea, a panic button calling
-`hooks.lockNow("panic")`) that this parcel's own tests — including `e2e/tests/
-server-lock.spec.ts` — exercise real detach/panic/draft-survival behaviour today, and stay
-correct once the real factory replaces it via `ServerPanelDeps.createServerChatView`.
+`panel.ts` calls the `createServerChatView` factory in `server/chatView.ts` after the first
+successful unlock. It retains that view through later lock/unlock cycles and disposes it only
+when routing away from `/admin/server`.
 
 Test coverage: `lockModel.ts` and `gestures.ts` both at 100% branch coverage
 (`admin-ui/tests/server/{lockModel,gestures}.test.ts`); `panel.test.ts` covers the full
@@ -425,7 +430,60 @@ not just hidden), R7's suspension timer math on a fake clock, and instance survi
 lock/unlock. `e2e/tests/server-lock.spec.ts` drives the same matrix in a real browser with
 `page.clock`, desktop and mobile legs both.
 
-## 11. What's built vs. what's still to come
+## 11. Frontend chat and media (P5b/P6b)
+
+`admin-ui/src/server/chatView.ts` owns the name prompt and stream lifecycle;
+`admin-ui/src/server/thread.ts` owns message history, rendering, and the shared composer from
+`admin-ui/src/chatComposer.ts`. The chat composer enables its paperclip for `image/*` and
+`video/*`, stages selected files immediately, and keeps Send disabled until every upload has
+finished. Its progress element reflects uploaded bytes. A picker opening calls
+`hooks.suspend("filePicker")`; the composer releases that suspension on the input's `change`
+or `cancel` event. P4 also has a five-minute safety release for browsers that fail to emit
+either event.
+
+The 🎤 control uses `server/recorder.ts`. It requests microphone permission, shows a recording
+timer, supports stop and cancel, and passes the resulting `File` into the same staged-upload
+flow. Locking calls the recorder's `detach()` to discard an unfinished recording and release
+the microphone. A new recorder is created on the next attach because a detached recorder is
+terminal. Recordings shorter than one second are discarded with a “Too short” hint and never
+uploaded.
+
+`server/api/uploads.ts` adapts `server/upload.ts` to the authenticated `serverFetch` wrapper.
+It captures the current `ServerSession` when an upload starts, sends the chunked
+`POST /uploads` → `PUT /uploads/{id}/chunks/{index}` → `POST /uploads/{id}/complete` sequence,
+and maps uploaded-byte progress back to the composer. The shared `serverFetch` wrapper
+preserves the caller's abort signal while applying its request timeout. Ordinary chat API
+requests use a 10-second timeout; upload requests allow 120 seconds per chunk for slower
+mobile uplinks. Locking detaches the thread but keeps staged files and in-flight uploads in
+memory; reattaching supplies a fresh session, while any upload already in flight continues
+with its captured session. Removing a chip aborts its upload and makes a best-effort
+authenticated `DELETE /uploads/{uploadId}` after init; failed uploads use the same cleanup,
+so the server releases pending quota promptly. The aborted chip removal doesn't show an error.
+On each reattach, `thread.ts` re-reads loaded history pages to mint fresh signed media URLs
+for the new token expiry, and reconciles retained rows against that refreshed range before
+advancing the stream cursor so deletes and wipes during a lock cannot resurface old messages.
+Leaving the route disposes the view and aborts its uploads.
+
+On send, `thread.ts` posts the staged attachment IDs in the message request. It uses
+`server/mediaRender.ts` for processing/failed states, the photo grid and shared lightbox,
+native video, and the voice-note player with waveform. The settings button and photo
+thumbnails that open the lightbox carry `data-srv-gesture-boundary` per brief v1.5.2's R3
+surface boundary. `gestures.ts` consumes that marker: a boundary tap can close a run begun
+elsewhere, but an unmatched run is cleared afterward; non-primary clicks do not count.
+P8's in-page choice controls use the same marker convention. During each message-list redraw,
+unchanged message nodes are reused, so another incoming message does not interrupt active
+playback. Replaced or deleted rows dispose their own media; lock detach pauses all players,
+clears their sources, and releases each `mediaPlaying` suspension. These files and signed media
+URLs remain separate from the site's `draft/media/` and public build, as documented in
+[media.md](media.md#private-live-chat-attachments).
+
+Verification: `admin-ui/` runs `npm run typecheck` and `npm test`; the integrated browser
+coverage is `e2e/tests/server-media.spec.ts` together with `server-chat.spec.ts` and
+`server-lock.spec.ts`. The fixture server sets a 64 KiB chunk size so the photo case exercises
+multiple chunks. Voice coverage launches Chromium with fake media-device and permission
+flags and does not install the Playwright clock.
+
+## 12. What's built vs. what's still to come
 
 **Built:** P1 (settings, storage paths, the `livechat/` package's `models`/`store`/`tokens`/
 `pinclient`/`notifier`, `routes_livechat.py` — unlock/history/send/stream/usage, the
@@ -437,14 +495,12 @@ the real `app.state.livechat_media_available` value, not the P1-era placeholder 
 hook, and the standalone Android toggle module); **P4** (frontend lock/disguise/PIN-pad core
 — §10 above — the router/nav entry, the lock state machine, the decoy, the PIN pad, and the
 orchestrating panel that wires both gesture detectors, R7's idle/suspension timers, and every
-R6 lock trigger).
+R6 lock trigger); **P5b** (the real chat view and thread); **P6a/P6b** (upload, recording,
+rendering, and media wiring; §11 above).
 
 Not yet built (later parcels, see the brief's §10 wave plan):
-- **P5b** — the real chat view/thread (`server/chatView.ts`) that plugs into P4's
-  `CreateServerChatView` factory seam, replacing its stub (P5a's shared-chat-extraction
-  refactor IS built and merged).
-- **P6b** — wiring the recorder/uploader/media-render modules into the real chat view (P6a's
-  frontend media modules themselves ARE built).
+- **P7** — docs/invariant close-out for the whole feature (the frontend media guide is now
+  documented above; remaining items are in the frozen brief).
 - **P8** — hard delete-a-message / wipe-the-chat (spec §17.3/§17.4), on top of the A1
   schema/stream headroom P1 already laid down (§6 above) and the queue's own delete-race
   half P2b already laid down (§7 above).

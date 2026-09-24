@@ -29,6 +29,10 @@ function pngFile(name = "photo.png"): File {
   return new File([new Uint8Array([1, 2, 3])], name, { type: "image/png" });
 }
 
+function voiceFile(name = "voice-note.webm"): File {
+  return new File([new Uint8Array([1, 2, 3])], name, { type: "audio/webm" });
+}
+
 async function flush(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
@@ -108,6 +112,36 @@ describe("mountChatComposer", () => {
     expect(composer.element.querySelectorAll(".wx-chat-attachment-chip")).toHaveLength(1);
     expect(composer.attachmentIds()).toEqual(["att-9"]);
     expect(composer.element.querySelector<HTMLElement>(".wx-chat-attachment-row")?.hidden).toBe(false);
+    composer.teardown();
+  });
+
+  it("releases the picker suspension on both selection and cancellation", () => {
+    const release = vi.fn();
+    const composer = mountChatComposer(makeOptions({ onFilePickerOpen: () => release }));
+    composer.setAttachmentsSupported(true);
+    composer.element.querySelector<HTMLButtonElement>(".wx-chat-attach-button")?.click();
+
+    expect(release).not.toHaveBeenCalled();
+    composer.element.querySelector<HTMLInputElement>('input[type="file"]')?.dispatchEvent(new Event("cancel"));
+    expect(release).toHaveBeenCalledTimes(1);
+
+    composer.element.querySelector<HTMLButtonElement>(".wx-chat-attach-button")?.click();
+    composer.element.querySelector<HTMLInputElement>('input[type="file"]')?.dispatchEvent(new Event("change"));
+    expect(release).toHaveBeenCalledTimes(2);
+    composer.teardown();
+  });
+
+  it("stages a recorder file through addFile even when the picker type filter excludes audio", async () => {
+    const upload = vi.fn(async () => ({ attachmentId: "voice-1", width: null, height: null }));
+    const composer = mountChatComposer(
+      makeOptions({ acceptFile: (file) => file.type.startsWith("image/") || file.type.startsWith("video/"), upload }),
+    );
+    const file = voiceFile();
+    composer.addFile(file);
+    await flush();
+
+    expect(upload).toHaveBeenCalledWith(file, expect.anything());
+    expect(composer.attachmentIds()).toEqual(["voice-1"]);
     composer.teardown();
   });
 
@@ -294,7 +328,7 @@ describe("mountChatComposer", () => {
       fileInput.dispatchEvent(new Event("change"));
       await flush();
 
-      expect(renderChipPreview).toHaveBeenCalledWith(file);
+      expect(renderChipPreview).toHaveBeenCalledWith(file, expect.any(String));
       const chip = composer.element.querySelector(".wx-chat-attachment-chip");
       expect(chip?.querySelector(".fake-audio-chip")?.textContent).toBe("clip.png");
       expect(chip?.querySelector("img.wx-chat-attachment-thumb")).toBeNull();
@@ -374,6 +408,7 @@ describe("mountChatComposer", () => {
       expect(capturedSignal?.aborted).toBe(false);
       capturedOnProgress?.(50, 100);
       expect(composer.stagedAttachments()[0]?.progress).toEqual({ loaded: 50, total: 100 });
+      expect(composer.element.querySelector<HTMLProgressElement>(".wx-chat-attachment-progress")?.value).toBe(50);
       composer.teardown();
     });
 
@@ -381,7 +416,9 @@ describe("mountChatComposer", () => {
       let capturedSignal: AbortSignal | undefined;
       const upload = vi.fn((_file: File, ctx: ChatComposerUploadContext) => {
         capturedSignal = ctx.signal;
-        return new Promise<ChatAttachment>(() => {});
+        return new Promise<ChatAttachment>((_resolve, reject) => {
+          ctx.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        });
       });
       const composer = mountChatComposer(makeOptions({ upload }));
       const fileInput = composer.element.querySelector<HTMLInputElement>('input[type="file"]')!;
@@ -393,6 +430,8 @@ describe("mountChatComposer", () => {
       expect(capturedSignal?.aborted).toBe(false);
       composer.element.querySelector<HTMLButtonElement>(".wx-chat-attachment-remove")?.click();
       expect(capturedSignal?.aborted).toBe(true);
+      await flush();
+      expect(composer.element.querySelector<HTMLElement>(".wx-chat-composer-error")?.hidden).toBe(true);
       composer.teardown();
     });
 

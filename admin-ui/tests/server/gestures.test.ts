@@ -143,6 +143,56 @@ describe("createMultiTapDetector", () => {
     expect(onMultiTap).toHaveBeenCalledTimes(1);
   });
 
+  it("a boundary tap clears its unmatched run so the next choice tap starts fresh", () => {
+    const onMultiTap = vi.fn();
+    let now = 0;
+    const detector = createMultiTapDetector(onMultiTap, () => now);
+    const boundary = document.createElement("button");
+    boundary.setAttribute("data-srv-gesture-boundary", "");
+    const boundaryChild = document.createElement("span");
+    boundary.appendChild(boundaryChild);
+    const choice = document.createElement("button");
+
+    detector.handlePointerDown(fakeEvent(boundaryChild));
+    now += 100;
+    detector.handlePointerDown(fakeEvent(choice));
+    expect(onMultiTap).not.toHaveBeenCalled();
+
+    now += 100;
+    detector.handlePointerDown(fakeEvent(choice));
+    expect(onMultiTap).toHaveBeenCalledTimes(1);
+  });
+
+  it("a boundary tap can complete a run that started on an unrelated control", () => {
+    const onMultiTap = vi.fn();
+    let now = 0;
+    const detector = createMultiTapDetector(onMultiTap, () => now);
+    const unrelated = document.createElement("div");
+    const boundary = document.createElement("button");
+    boundary.setAttribute("data-srv-gesture-boundary", "");
+
+    detector.handlePointerDown(fakeEvent(unrelated));
+    now += 100;
+    detector.handlePointerDown(fakeEvent(boundary));
+    expect(onMultiTap).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores non-primary buttons without counting or breaking a run", () => {
+    const onMultiTap = vi.fn();
+    let now = 0;
+    const detector = createMultiTapDetector(onMultiTap, () => now);
+    const target = document.createElement("div");
+
+    detector.handlePointerDown(fakeEvent(target, 2)); // right-click
+    detector.handlePointerDown(fakeEvent(target));
+    expect(onMultiTap).not.toHaveBeenCalled();
+    now += 100;
+    detector.handlePointerDown(fakeEvent(target, 1)); // middle-click
+    now += 100;
+    detector.handlePointerDown(fakeEvent(target));
+    expect(onMultiTap).toHaveBeenCalledTimes(1);
+  });
+
   it("reset() clears an in-progress run without firing", () => {
     const onMultiTap = vi.fn();
     const detector = createMultiTapDetector(onMultiTap, () => 0);

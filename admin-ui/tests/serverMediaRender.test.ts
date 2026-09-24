@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { renderAttachment, renderAttachments, type Attachment } from "../src/server/mediaRender";
+import {
+  disposeAttachmentMedia,
+  renderAttachment,
+  renderAttachments,
+  type Attachment,
+} from "../src/server/mediaRender";
 
 const base: Attachment = {
   id: "a1",
@@ -30,7 +35,9 @@ describe("server attachment rendering", () => {
     const ctx = context();
     const root = renderAttachments([base], ctx);
     expect(root.querySelector("img")?.getAttribute("src")).toBe("/thumb");
-    root.querySelector<HTMLButtonElement>("button")?.click();
+    const photoButton = root.querySelector<HTMLButtonElement>("button");
+    expect(photoButton?.hasAttribute("data-srv-gesture-boundary")).toBe(true);
+    photoButton?.click();
     expect(ctx.openLightbox).toHaveBeenCalledWith("/full", "Attached photo");
   });
 
@@ -64,5 +71,35 @@ describe("server attachment rendering", () => {
     expect(ctx.hooks.suspend).toHaveBeenCalledWith("mediaPlaying");
     audio?.dispatchEvent(new Event("pause"));
     expect(ctx.hooks.suspend).toHaveBeenCalledTimes(1);
+  });
+
+  it("pauses and synchronously releases active video and voice before redraw", () => {
+    const audioRelease = vi.fn();
+    const videoRelease = vi.fn();
+    let releaseIndex = 0;
+    const suspend = vi.fn(() => [audioRelease, videoRelease][releaseIndex++] ?? vi.fn());
+    const root = renderAttachments([
+      { ...base, kind: "voice", durationS: 3, peaks: [0.5], urls: { play: "/voice" } },
+      { ...base, kind: "video", urls: { play: "/video", poster: "/poster" } },
+    ], { hooks: { suspend } });
+    const audio = root.querySelector<HTMLAudioElement>("audio")!;
+    const video = root.querySelector<HTMLVideoElement>("video")!;
+    const pauseAudio = vi.spyOn(audio, "pause").mockImplementation(() => {});
+    const loadAudio = vi.spyOn(audio, "load").mockImplementation(() => {});
+    const pauseVideo = vi.spyOn(video, "pause").mockImplementation(() => {});
+    const loadVideo = vi.spyOn(video, "load").mockImplementation(() => {});
+    audio.dispatchEvent(new Event("play"));
+    video.dispatchEvent(new Event("play"));
+
+    disposeAttachmentMedia(root);
+
+    expect(pauseAudio).toHaveBeenCalledTimes(1);
+    expect(pauseVideo).toHaveBeenCalledTimes(1);
+    expect(loadAudio).toHaveBeenCalledTimes(1);
+    expect(loadVideo).toHaveBeenCalledTimes(1);
+    expect(audioRelease).toHaveBeenCalledTimes(1);
+    expect(videoRelease).toHaveBeenCalledTimes(1);
+    expect(audio.hasAttribute("src")).toBe(false);
+    expect(video.hasAttribute("src")).toBe(false);
   });
 });

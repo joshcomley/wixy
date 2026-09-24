@@ -672,3 +672,44 @@ fixed same-session.)
   was reading the code with fresh eyes rather than just running the existing test
   suite (which had 100% coverage of the "happy path" and the "unknown id" no-op case,
   but nobody had written a test for a malformed/malicious id before now).
+
+## Update 2026-09-24 (DM `014c0ebc`) — P6b done (3 fix-forward rounds, 6 findings, merging)
+
+- **P6b took 3 fix-forward rounds after the initial 4 findings** (3 HIGH + 1 MEDIUM),
+  because the FIRST fix round (candidate `5fc2ef7`) introduced 2 NEW regressions of
+  its own, both caught by the same `gpt-6-sol` reviewer re-checking the fix rather
+  than just rubber-stamping it:
+  1. The HIGH-2 fix (refresh signed media URLs by re-fetching history on reattach)
+     merged fresh rows into `confirmedBySeq` but never removed retained rows absent
+     from that refresh, then advanced the stream cursor past them - so a message
+     deleted (or the whole chat wiped) while a client was locked would REAPPEAR on
+     unlock, since the deletion event got silently skipped. Fixed in `e1a355f`:
+     reconcile retained rows against the refreshed range before advancing the cursor.
+  2. The HIGH-3 fix (dispose media on redraw/detach so playback can't survive panic)
+     was too broad: `renderThreadList` still called `disposeAttachmentMedia` +
+     `innerHTML = ""` on EVERY render, so an ordinary incoming message from anyone
+     else would stop/reset any actively-playing voice note or video elsewhere in the
+     thread. Fixed in `f373ea4`: rewrote the renderer as a real DOM-diff/reconciliation
+     (keyed maps for message/separator/echo nodes, `insertBefore` only for genuinely
+     new/moved nodes, dispose only for nodes actually being removed or changed) -
+     playback now survives ordinary updates and only stops on lock/delete of that
+     specific item.
+- **Both regressions were things my own mechanical verification (mypy/ruff/tsc/
+  pytest/vitest/e2e) could not have caught** - the delete/wipe reappearance can't be
+  exercised until P8 merges (no real route to test against yet; covered by new unit
+  tests exercising the reconciliation logic directly), and the playback-interruption
+  bug doesn't fail any assertion, it's a UX regression a human would notice, not a
+  test. This is now THREE separate real findings (the base-branch security bug +
+  these 2 regressions) that only surfaced because of the dedicated review layer -
+  strong, repeated evidence for keeping it on every remaining candidate.
+- **P6b CLEARED** on final candidate `f373ea4` (base `7d6584b`, includes the security
+  fix `b1c394f` and the Architect's `7d6584b`/v1.5.3 scrub ruling) - my own full
+  verification green (mypy/ruff/tsc, pytest 1655/1655, vitest 1076/1076, bundle
+  zero-drift, e2e 31/31) AND the Sol reviewer's independent 0-critical/0-high
+  confirmation on this exact SHA. Pushed, PR #230 updated to this SHA, CI running.
+  Merging once CI is green - not yet merged as of this entry.
+- **Reviewer worktree pattern refined further**: reused the SAME isolated worktree
+  path (`...__review-p6b\wixy`) across all 3 rounds by `git worktree remove` +
+  re-`add --detach` at the new SHA each time, rather than creating a fresh one per
+  round - keeps the throwaway-worktree count from growing unbounded across a
+  multi-round fix cycle.

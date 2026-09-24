@@ -33,6 +33,8 @@ export default defineConfig({
     command: `${PYTHON} fixture_server.py`,
     url: `http://127.0.0.1:${PORT}/healthz`,
     reuseExistingServer: false,
-    timeout: 30_000,
+    // The fixture builds and publishes its temporary site before binding the
+    // health endpoint; a local cold start can exceed 30s on this Windows host.
+    timeout: 60_000,
   },
 });

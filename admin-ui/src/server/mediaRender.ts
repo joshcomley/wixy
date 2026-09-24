@@ -31,6 +31,8 @@ export interface MediaRenderContext {
   readonly document?: Document;
 }
 
+const releasePlaybackByElement = new WeakMap<HTMLMediaElement, () => void>();
+
 export function renderAttachments(
   attachments: readonly Attachment[],
   context: MediaRenderContext,
@@ -52,6 +54,27 @@ export function renderAttachments(
     }
   }
   return container;
+}
+
+/** Stop rendered media and release its idle-lock suspension before its DOM
+ * node is removed during a thread redraw or lock detach. Pause events are
+ * asynchronous in browsers, so release the tracked suspension synchronously. */
+export function disposeAttachmentMedia(root: ParentNode): void {
+  for (const media of root.querySelectorAll<HTMLMediaElement>("audio, video")) {
+    try {
+      media.pause();
+    } catch {
+      // A detached or unsupported media element is already unusable.
+    }
+    releasePlaybackByElement.get(media)?.();
+    media.removeAttribute("src");
+    if (media.tagName === "VIDEO") media.removeAttribute("poster");
+    try {
+      media.load();
+    } catch {
+      // Older engines may not implement load() for an already detached node.
+    }
+  }
 }
 
 export function renderAttachment(
@@ -147,6 +170,7 @@ function renderVoice(
     release?.();
     release = null;
   };
+  releasePlaybackByElement.set(audio, releaseMedia);
   audio.addEventListener("play", () => {
     releaseMedia();
     release = context.hooks.suspend("mediaPlaying");
@@ -204,6 +228,7 @@ function wireMediaSuspension(element: HTMLMediaElement, hooks: MediaRenderHooks)
     release?.();
     release = null;
   };
+  releasePlaybackByElement.set(element, releaseMedia);
   element.addEventListener("play", () => {
     releaseMedia();
     release = hooks.suspend("mediaPlaying");
