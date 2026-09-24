@@ -1,6 +1,7 @@
 # Decision
 
-**Status:** accepted  
+**Status:** accepted
+
 **Scope:** PIN-protected admin Server chat, P8, spec/server-chat/00-brief.md §17.
 
 ## Decision
