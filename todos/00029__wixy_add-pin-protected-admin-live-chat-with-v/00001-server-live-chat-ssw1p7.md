@@ -531,3 +531,29 @@ fixed same-session.)
   operator authorization per the 2026-09-23 Fable-is-special-counsel ruling — ask via
   op-ask-question if authorization status is unclear), live verification via the `verify`
   skill on `ca.cinnamons.uk` (brief sec.12), then the one delivery merge.
+
+## Update 2026-09-24 (Orchestrator `b11567bc`) — delivery resumed; routing ruling
+
+- **Resume confirmed and running.** Since #1164 was answered: P4 merged (PR #229,
+  `26525d7`), P5b merged (PR #228, `87651bb`) -> progress 9/13. P6b (media wiring,
+  `dea14cd7`) and P8 (delete + wipe, `38e9c31a`, build space bs7) dispatched by the
+  DM on `gpt-6-luna[xl]` (codex). The DM first spawned them on defaults, caught it
+  itself, and converted them via `provider-continuation` before briefing.
+- **Real product finding (Architect ruling, spec v1.5.1):** the 400 ms multi-tap
+  re-lock gesture can fire on a person's normal pick->confirm taps in the delete menu
+  (and desktop right-click was miscounted). Genuine user-facing timing bug, not a
+  test artifact: tests must run at full speed with no added waits. I flagged that
+  P6b's pauses between Send and the photo/voice controls may be the same class; the
+  DM asked the Architect and told P6b to hold before finalizing.
+- **Review-routing ruling (DM asked, I answered):** operator's "Sol 6 non-XL to
+  review it" is read as ALL Luna implementation candidates. The DM keeps its own
+  mechanical verification as the gate AND dispatches a dedicated `gpt-6-sol`
+  reviewer per candidate before CLEARED. The DM had cleared P6b on its own
+  verification alone, so P6b gets the Sol review before merge, or on the merged
+  diff with a fix-forward if it already merged. The sec.13 audit is separate and
+  still applies at the delivery merge. Fuller reading chosen; the operator can
+  narrow it.
+- **Noise worth knowing:** roster "active" flickers on finished builders (P4, P5b,
+  P6a) are trailing close-out or Q&A, not new dispatches. The old P6a session was
+  auto-continued onto another Codex account after its source account hit a usage
+  limit (cmd's quota-successor mechanism); no action needed.
