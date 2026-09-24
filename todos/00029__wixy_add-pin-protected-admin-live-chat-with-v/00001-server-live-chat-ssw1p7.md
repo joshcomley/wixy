@@ -1126,3 +1126,20 @@ fixed same-session.)
   `docs/ai/livechat.md` + `CLAUDE.md`), sec.13 opus audit, live `verify`, and the ONE delivery
   merge as a SQUASH with a hand-written body (R14a; check the cmd merge API supports a custom
   squash body, else merge manually).
+
+## Update 2026-09-24 (DM `8e7bbea9`) — Luna implementing round 8 (containment ruling), local checks clean, awaiting final SHA
+
+- Luna (`62b47e1b`) confirmed alive and working per `peer_check`. `bs7`'s working tree (not
+  yet committed) already touches `app.py`, `janitor.py`, `media_queue.py`, `push.py`,
+  `store.py`, `routes_chat.py`, `routes_livechat.py`, `routes_system.py`, admin-ui +
+  bundle, docs, plus new `wixy_server/background.py` + `test_background.py` — matches
+  Rule A (`ContainedTaskGroup`) scope from the ruling.
+- Luna's own standalone checks both green: full Python suite 1,709 passed in 4m45s; Server
+  chat Playwright suite 7/7 in 42.4s (both run alone, never simultaneously, per standing
+  instruction). Luna explicitly deferred the 5-consecutive-full-suite stability bar to the
+  DM's acceptance harness (as briefed) and is now doing a final diff/site review before
+  committing and sending the exact SHA.
+- **Not touching `bs7`** per the ownership correction above. Waiting for Luna's FINAL
+  HANDOFF SHA, then: fresh detached worktree `__review-p8-r8`, ruff/ruff-format-check/mypy,
+  the 5x full-suite harness (`__review-p8-r7/ref/run5x.sh`, background), fresh Sol review
+  pointed at that worktree. No merge until both clear.
