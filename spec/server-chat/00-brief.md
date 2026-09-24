@@ -1,6 +1,6 @@
 # Server chat — Architect's technical brief (workspace #29)
 
-Status: **FROZEN v1.5.2** (Architect, 2026-09-14). v1.1 = operator's zero-PIN-state override
+Status: **FROZEN v1.5.3** (Architect, 2026-09-14). v1.1 = operator's zero-PIN-state override
 (R4/§5.1); v1.2 = delete + wipe addendum (§17); v1.3 = R2 errata: a single tap reveals
 (decision #974); **v1.4 = cmd's real PIN contract in §5.1 (app key in the path, richer errors,
 retry-safety) + a new 409 `pin_changed` on `/unlock`**; **v1.5 = R3 gesture boundaries (a
@@ -8,7 +8,8 @@ tap that opens a menu/sheet may close a double-tap but never open one) + primary
 only**; v1.5.1 = boundaries are not test cadence (no e2e waits for menu flows) + decision
 numbers no longer pre-allocated; v1.5.2 = one test for classifying any tap pair
 (causal chain → boundary; independent decisions → test cadence) + voice notes under 1 s
-are discarded. Contracts in §5 are frozen — any change goes
+are discarded; v1.5.3 = delete/wipe scrub errata (TRUNCATE for both — PASSIVE measured
+insufficient), 204-guarantees / 202-scrub-pending semantics, `/usage.scrubPending`. Contracts in §5 are frozen — any change goes
 through the Architect (`ask-architect`). Rulings in §1 are binding.
 
 > ⚠️ **Editing this file:** ruff formats Python fenced blocks **inside markdown**, so
@@ -1204,8 +1205,46 @@ one message, and wipe everything. The addendum is purely **additive**:
 - **Scrubbing:**
   - Every connection sets `PRAGMA secure_delete=ON`, so deleted rows are zeroed in the main
     DB file.
-  - After a delete: `PRAGMA wal_checkpoint(PASSIVE)`. After a wipe:
-    `PRAGMA wal_checkpoint(TRUNCATE)`, so the old content leaves the WAL too.
+  - **v1.5.3 ERRATA — delete and wipe BOTH use `PRAGMA wal_checkpoint(TRUNCATE)`.**
+    The earlier `PASSIVE` rule for delete was wrong, measured 2026-09-24 with a
+    connection held open as in a live server: a message inserted and deleted inside
+    the WAL, followed by a *complete* PASSIVE checkpoint (`busy=0`), still left the
+    deleted text in `server.db-wal`, because PASSIVE never resets or truncates the
+    WAL file. Only TRUNCATE (0 bytes) removed it.
+  - **A reader can block the scrub (measured):** a reader holding a snapshot taken
+    *before* the delete makes TRUNCATE return `busy=1`, with the deleted text still
+    in the main DB file. Once that reader finished, the retry returned `(0,0,0)` and
+    both files were clean. A reader whose snapshot was taken *after* the delete also
+    returns `busy=1`, but the files are already clean. So `busy` alone cannot say
+    whether text survives, and the completion test below is deliberately
+    conservative.
+  - **The scrub routine** (`LiveChatStore.scrub(deadline_s: float) -> bool`) runs on
+    a fresh connection, outside any transaction, after the delete/wipe commit:
+    - Loop `PRAGMA wal_checkpoint(TRUNCATE)`, with the busy timeout capped to the
+      remaining time so SQLite itself waits out short readers.
+    - **Complete** means the call returned `busy == 0` **and** `server.db-wal` is 0
+      bytes or absent.
+    - The deadline is **10 s** total, counted from the commit.
+  - **Result → response** (the deletion itself is already committed and broadcast
+    before scrubbing starts):
+    - Scrub complete within the deadline → **204**. **Every 204 carries the raw-byte
+      guarantee**: the deleted text is in neither `server.db` nor `server.db-wal`.
+    - Deadline passed → write the durable sentinel `server/scrub.pending` **before**
+      responding, then respond **202 `{"scrubPending": true}`**, meaning deleted
+      for everyone, with the erasure of leftover bytes still finishing.
+    - **Never** an error status, and **never** a rollback. The message is already
+      gone from every screen, so an error would make the sender's screen restore a
+      message that no longer exists anywhere.
+  - **The background scrubber** (app task group): while `scrub.pending` exists, run
+    `scrub` every 2 s, and delete the sentinel on completion. It also runs once at
+    startup, so a crash or slot swap mid-scrub still finishes. It is idempotent
+    across both slot processes.
+  - **Readers stay short (store invariant):** no store method returns with an open
+    statement or transaction, and no caller holds a transaction across an `await`.
+    The store already does this (per-call connections; `fetchall`/`fetchone` inside
+    `_read_txn`); it is now a tested rule, so in practice a blocking snapshot is one
+    query long and the 10 s wait covers it. 202 is the pathological path: the other
+    slot's process mid-swap, or an external reader.
   - Media files are unlinked. **Honest limit:** no byte-level shredding of files on
     NTFS/SSD, since overwriting in place is not reliable on SSDs anyway. Documented in
     `livechat.md`.
@@ -1244,9 +1283,16 @@ this is read, P8 does all of this instead as migration v2, rebuilding the conten
   notifier.
 
 **HTTP** (header token required, like every §5 route):
-- `DELETE /api/admin/server/messages/{seq}` → 204, idempotent (204 even when already gone).
-- `POST /api/admin/server/wipe` with body `{"confirm":"WIPE"}` → 204. Any other body → 422.
-  The literal guards against an accidental call.
+- `DELETE /api/admin/server/messages/{seq}` → **204** (deleted **and** scrubbed), or
+  **202 `{"scrubPending": true}`** (deleted; the scrub finishes in the background;
+  v1.5.3). Idempotent: repeating it on an already-deleted message re-runs the scrub
+  and answers 204 or 202 the same way.
+- `POST /api/admin/server/wipe` with body `{"confirm":"WIPE"}` → **204** or **202
+  `{"scrubPending": true}`**, on the same rule. Any other body → 422. The literal
+  guards against an accidental call. Never re-POST a wipe to poll: a repeat would also
+  delete anything sent since.
+- `GET /api/admin/server/usage` gains **`scrubPending: bool`** (v1.5.3, an additive
+  field; true while `scrub.pending` exists). This is how a client polls completion.
 
 **SSE:**
 - `event: message_deleted` / `data: {"seq": n}` — the client removes that bubble if present
@@ -1266,7 +1312,8 @@ entries:
 
 Details:
 - Deletion is optimistic: the bubble fades out and is removed. It's restored with a plain
-  error line on failure.
+  error line only on a real failure (network error, 4xx/5xx). **202 is success**: the
+  bubble stays removed, and no extra UI is shown for a single message.
 - The long-press counts as activity. A double-tap on a bubble still locks (R3), and a
   long-press is never a multi-tap.
 - Bubbles set `-webkit-touch-callout: none` so iOS doesn't show its own callout.
@@ -1278,6 +1325,9 @@ Details:
 two-step confirm: "Delete every message, photo, video and voice note for everyone? This can't
 be undone." [Delete everything] [Cancel]. It sends `{"confirm":"WIPE"}`, then the local
 `wiped` handling runs immediately. The server's `wiped` event is then a no-op for this client.
+On **202**, the sheet shows "Deleted. Erasing leftover traces…" and polls `/usage`
+every 1 s until `scrubPending` is false. Then it shows "Done"; after 60 s it stops
+polling quietly, since the server keeps scrubbing regardless.
 
 **Lock interplay:** while locked, nothing is shown and nothing starts. A delete or wipe that
 started before a lock completes (like sends, R6). Events that arrive while locked are
@@ -1304,8 +1354,21 @@ dirs and the chat view, so it goes last to avoid colliding with in-flight work.
 - delete removes rows, events and files, and is idempotent
 - wipe removes everything, including an in-flight upload (its next chunk → 404) and `failed/`
 - `PRAGMA secure_delete` reads 1 on store connections
-- **after a delete and after a wipe, a unique marker string from the deleted text is absent
-  from the raw bytes of `server.db` + `server.db-wal`**
+- **on every 204 from delete or wipe, a unique marker string from the deleted text is
+  absent from the raw bytes of `server.db` + `server.db-wal`, and the WAL is 0 bytes**.
+  Keep a second store connection open during the test, since the last-close
+  auto-checkpoint would otherwise mask a broken scrub (measured: the first probe was
+  fooled exactly this way).
+- **characterisation guard:** an insert+delete kept inside the WAL, then a *complete*
+  PASSIVE checkpoint, leaves the marker in `-wal`. This pins why the rule is TRUNCATE,
+  so nobody "optimises" back to PASSIVE.
+- **stale reader:** open a raw connection, `BEGIN` + `SELECT` *before* the delete, and
+  inject a short deadline → 202 + `scrub.pending` exists (the marker may remain).
+  Release the reader, run one scrubber tick → the sentinel is gone, `/usage`
+  `scrubPending` is false, and the marker is absent.
+- **startup resume:** a `scrub.pending` present at startup is scrubbed and removed.
+- **reader invariant:** after each public store read method returns, a TRUNCATE on
+  another connection with `busy_timeout=0` returns `busy == 0`.
 - a delete racing a processing attachment leaves no media dir behind
 - a stream spanning a delete emits `message_deleted`, and skips the stale `message` event on
   replay from an old cursor
@@ -1335,8 +1398,10 @@ mobile):
 ### 17.6 New invariant
 
 **Inv 46 — Delete and wipe are hard deletes, for everyone, with no tombstone.**
-- Content rows are removed with `secure_delete=ON` and the WAL is checkpointed, so deleted
-  text leaves the DB files.
+- Content rows are removed with `secure_delete=ON`, then a TRUNCATE checkpoint runs.
+  **204 means the deleted text is provably absent from `server.db` + `server.db-wal`.**
+  202 means deleted, with a durable background scrub (`scrub.pending`) that runs until
+  it is. It is never an error and never a rollback.
 - Media files are unlinked, and deleted media URLs 404.
 - Clients remove content on `message_deleted`/`wiped`.
 - Honest limit: no byte-level file shredding.

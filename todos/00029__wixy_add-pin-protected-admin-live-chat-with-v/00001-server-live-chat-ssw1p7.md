@@ -531,3 +531,144 @@ fixed same-session.)
   operator authorization per the 2026-09-23 Fable-is-special-counsel ruling — ask via
   op-ask-question if authorization status is unclear), live verification via the `verify`
   skill on `ca.cinnamons.uk` (brief sec.12), then the one delivery merge.
+
+## Update 2026-09-24 (Orchestrator `b11567bc`) — delivery resumed; routing ruling
+
+- **Resume confirmed and running.** Since #1164 was answered: P4 merged (PR #229,
+  `26525d7`), P5b merged (PR #228, `87651bb`) -> progress 9/13. P6b (media wiring,
+  `dea14cd7`) and P8 (delete + wipe, `38e9c31a`, build space bs7) dispatched by the
+  DM on `gpt-6-luna[xl]` (codex). The DM first spawned them on defaults, caught it
+  itself, and converted them via `provider-continuation` before briefing.
+- **Real product finding (Architect ruling, spec v1.5.1):** the 400 ms multi-tap
+  re-lock gesture can fire on a person's normal pick->confirm taps in the delete menu
+  (and desktop right-click was miscounted). Genuine user-facing timing bug, not a
+  test artifact: tests must run at full speed with no added waits. I flagged that
+  P6b's pauses between Send and the photo/voice controls may be the same class; the
+  DM asked the Architect and told P6b to hold before finalizing.
+- **Review-routing ruling (DM asked, I answered):** operator's "Sol 6 non-XL to
+  review it" is read as ALL Luna implementation candidates. The DM keeps its own
+  mechanical verification as the gate AND dispatches a dedicated `gpt-6-sol`
+  reviewer per candidate before CLEARED. The DM had cleared P6b on its own
+  verification alone, so P6b gets the Sol review before merge, or on the merged
+  diff with a fix-forward if it already merged. The sec.13 audit is separate and
+  still applies at the delivery merge. Fuller reading chosen; the operator can
+  narrow it.
+- **Noise worth knowing:** roster "active" flickers on finished builders (P4, P5b,
+  P6a) are trailing close-out or Q&A, not new dispatches. The old P6a session was
+  auto-continued onto another Codex account after its source account hit a usage
+  limit (cmd's quota-successor mechanism); no action needed.
+
+## Update 2026-09-24 (DM `014c0ebc`) — P8 course-correction, P6b Sol review findings, process notes
+
+- **P8 nearly shipped a wrong fix once**: after the Architect's v1.5.1 ruling (menu
+  taps need a real gesture-boundary product fix, not test waits), the Builder
+  independently reconverged on the SAME rejected waits-only approach mid-flight
+  (parallel reasoning that hadn't incorporated my relay yet), self-reported it
+  "resolved" via decision 00148 with "product lock behavior unchanged." I held this
+  firmly (did not accept the clearance), re-escalated, and the Builder correctly
+  course-corrected once it saw the ruling — now implementing gesture boundaries +
+  `button!==0` filter in `gestures.ts` per spec v1.5.2 (`11bedfd`). **Lesson**: a
+  Builder's own "resolved" self-report needs the same skepticism as a FINAL
+  HANDOFF — this one crossed in transit with a still-open correction.
+- **Architect classify rule (v1.5.2), useful going forward**: did tap 1 make
+  control 2 APPEAR UNDER THE FINGER? Yes -> needs a gesture boundary. No -> ordinary
+  cadence, waits in the test are fine. P6b's Send->attach case got the "No" answer
+  (both controls already on screen) plus one new requirement: voice notes need a
+  1s minimum duration (shorter = discard + "Too short" hint).
+- **P6b (candidate `9ebcc492`) — my own verification was clean, but the dedicated
+  `gpt-6-sol` review (per the routing ruling above) caught 3 real HIGH findings my
+  automated checks missed entirely:**
+  1. Gesture boundaries are INERT — `thread.ts:109`/`mediaRender.ts:91` mark
+     settings/photo openers with `data-srv-gesture-boundary`, but `gestures.ts:85-96`
+     never reads that marker. The v1.5.2 fix looks present (markers exist) but does
+     nothing functionally.
+  2. Old media URLs expire after re-unlock — `thread.ts:523` doesn't refresh loaded
+     history's signed URLs on attach/re-render; they carry the original 12h TTL
+     (`tokens.py:183-229`), so old thumbnails/video/voice 403 after that window
+     despite a fresh unlock.
+  3. `thread.ts:380` clears every media DOM node on each send/SSE redraw without
+     pausing/disposing active playback (`detach():558` only pauses nodes still in
+     `messageList`) — a detached-but-playing node can keep playing after panic,
+     undermining the panic button's instant-hide/privacy guarantee, and can leave
+     `mediaPlaying` suspended incorrectly.
+  All 3 relayed to the Builder for fix-forward; PR #230 (candidate `9ebcc492`) is
+  NOT merged and won't be until a new candidate clears both my verification and a
+  fresh Sol pass. **This is strong evidence the Sol-review-in-addition-to-DM-
+  verification ruling was the right call** — none of these 3 would have been caught
+  by mypy/ruff/pytest/vitest/e2e alone.
+- **Reviewer worktree pattern established**: dispatch a `gpt-6-sol` reviewer via
+  `team/spawn {role:builder}` + `provider-continuation {force:true if wedged}`,
+  then point it at an ISOLATED, detached, read-only `git worktree add` checkout of
+  the exact candidate SHA (e.g. `...__review-p6b\wixy`) — NOT the shared build-space
+  worktree (a live Builder may still be working there) and NOT the DM's own primary
+  checkout (one reviewer spawn defaulted into it before being briefed; caught and
+  redirected before any edit happened, no harm done, but redirect explicitly next
+  time in the FIRST message).
+- **Peer-messaging volume cap discovered**: sending several sends to the same
+  recipient in quick succession gets `"reason":"volume_cap"` degraded delivery
+  (truncated to ~197 chars, independent of the normal ~600-char `over_short_max`
+  envelope limit). Workaround used successfully: `POST http://127.0.0.1:9321/intercomm
+  {"text":...}` to store the full content, then send a SHORT pointer message (the URL
+  survives truncation since it's early in a short message) - same mechanism other
+  senders already used when relaying long content to me.
+- **Fresh Builder-seat spawns are unreliable** (`team/spawn {role:builder}` ->
+  `provider-continuation`): observed `context_unreadable` (spawn genuinely never
+  started - check `retired_reason` on the team roster; `"no_live_session"` means
+  abandon and respawn, don't keep retrying the same session id) vs `wedge_no_response`
+  (spawn is alive but needs `force:true` to convert) vs success. No reliable fixed
+  wait time - poll the roster/messages endpoint for a real transcript before
+  concluding a spawn failed vs is just slow.
+- **Progress unchanged at 9/13** (P6b and P8 still both "doing" pending fixes).
+  P4/P5b delivery tasks + lanes already closed (see above). P6b/P8 delivery tasks
+  marked "doing" with their builder_session_id/build_space_id set for tracking.
+
+## Update 2026-09-24 (DM `014c0ebc`) — CRITICAL security fix, DM-owned, pushed
+
+- **The `gpt-6-sol` reviewer (`e89fc62b`), while reviewing P6b, found a critical
+  base-branch (P1/P2b, already-merged) vulnerability unrelated to P6b's own diff**:
+  `DELETE /api/admin/server/uploads/{uploadId}` -> `cancel_upload()` in
+  `wixy_server/livechat/uploads.py` passed the client-supplied `upload_id` straight
+  into `paths.server_upload_dir(upload_id)` (a plain path join, no normalization),
+  then unconditionally `shutil.rmtree(..., ignore_errors=True)`'d the result. An
+  authenticated request (any unlocked chat participant) with `upload_id=".."`
+  resolved to the PARENT `server/` directory - DB, `secret.key`, `vapid.json`, every
+  attachment's media - and silently wiped it. No backup exists for this feature's
+  data (per the operator's own accepted decision #974), so this would have been
+  unrecoverable.
+- **Fixed it myself, directly, as the DM** (not routed to a Builder - small, surgical,
+  urgent, and touches P1/P2b's already-closed area, not P6b's or P8's own work):
+  red/green discipline - wrote `test_cancel_rejects_a_traversal_id_instead_of_deleting_server_dir`
+  in `test_livechat_uploads.py` (a sentinel file in `server_dir`, asserts it survives),
+  confirmed it FAILED on unfixed code (the sentinel was actually deleted - proved the
+  vuln, not just theorized it), then added `_UPLOAD_ID_RE = re.compile(r"^[0-9a-f]{32}$")`
+  (mirrors the existing `_ATTACHMENT_ID_RE` pattern already used for attachment ids)
+  and a `.fullmatch()` guard at the top of `cancel_upload` before any DB/filesystem
+  access. `upload_id` is always server-generated via `uuid.uuid4().hex`, so this
+  closes the gap without changing the frozen "204 unconditionally, no error case"
+  HTTP contract - an invalid id is now just treated the same as an unknown one.
+  Traced every other `server_upload_dir`/`server_attachment_media_dir` call site
+  (`janitor.py`, `media_queue.py`, the chunk-upload/complete routes) - all of them
+  only ever operate on DB-sourced ids gated by an existence check first, never raw
+  client input, so this was the one reachable entry point; did NOT add redundant
+  validation there (nothing to guard against).
+- **Had the same reviewer (already deep in this exact code) check my fix before
+  push** - confirmed clean, one polish suggestion (`.fullmatch()` over `.match()`
+  with `$`, since Python's `$` technically also matches before a trailing newline;
+  not itself exploitable here, but worth the correctness). Applied. mypy/ruff/full
+  pytest (1655/1655) all clean. Pushed directly to `cmd/workspace-00029` as `b472919`
+  (matches the DM-integration-commit precedent for small, urgent, DM-owned fixes
+  outside any Builder's active parcel).
+- **Also caught while reviewing**: a MEDIUM finding for P6b (upload-cancel chip never
+  calls `DELETE /uploads/{id}` on abort, leaking quota/disk until the 24h janitor) -
+  relayed to P6b's Builder alongside the 3 HIGH findings (see update above), to fix
+  together before their next FINAL HANDOFF.
+- **Isolated review worktree** at
+  `...__review-p6b\wixy` (detached HEAD, throwaway) is now stale/done - the reviewer's
+  work there is complete; safe to remove at any point, not referenced by anything else.
+- **This validates the extra Sol-review layer beyond just my own automated
+  verification even more strongly than the first 3 HIGH findings did** - a genuinely
+  critical, unrelated, already-merged vulnerability that had been sitting in the
+  integration branch since P1/P2b merged, caught only because a dedicated reviewer
+  was reading the code with fresh eyes rather than just running the existing test
+  suite (which had 100% coverage of the "happy path" and the "unknown id" no-op case,
+  but nobody had written a test for a malformed/malicious id before now).

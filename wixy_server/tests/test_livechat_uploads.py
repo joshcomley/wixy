@@ -432,6 +432,23 @@ class TestCancelUpload:
     ) -> None:
         uploads.cancel_upload(store=store, paths=paths, upload_id="deadbeef")  # doesn't raise
 
+    def test_cancel_rejects_a_traversal_id_instead_of_deleting_server_dir(
+        self, store: LiveChatStore, paths: ProjectPaths
+    ) -> None:
+        # `server_upload_dir` is a plain path join with no normalization:
+        # `server_uploads / ".."` resolves to `server_dir` itself, which holds
+        # the DB, secret.key, vapid.json and every attachment's media. An
+        # unvalidated id here would let an authenticated request wipe the
+        # whole feature's state via `shutil.rmtree(..., ignore_errors=True)`.
+        sentinel = paths.server_dir / "secret.key"
+        sentinel.parent.mkdir(parents=True, exist_ok=True)
+        sentinel.write_bytes(b"not-actually-a-secret")
+
+        uploads.cancel_upload(store=store, paths=paths, upload_id="..")
+
+        assert sentinel.exists()
+        assert sentinel.read_bytes() == b"not-actually-a-secret"
+
 
 class TestFailedExtension:
     def test_known_mime_maps_to_its_extension(self) -> None:
