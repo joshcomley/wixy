@@ -1177,3 +1177,33 @@ fixed same-session.)
   `c7583fed-a9a2-4de8-b423-d8bd62739bcc`. Then P7, sec.13 audit (now heavier — migration v6
   + new background supervisor per the Architect's own note), live `verify`, R14a squash
   delivery merge.
+
+## Update 2026-09-24 (DM `8e7bbea9`) — P8 round 8 review: 2 findings so far (relayed to Luna as round 9), 5x harness + rest of Sol's pass still running
+
+- Sol's round-8 review is in progress (large round, explicitly told not to rush). Two
+  findings confirmed so far, both narrow completion gaps in the already-decided ruling
+  design (not new architecture questions, so relayed directly to Luna, no Architect
+  escalation needed):
+  1. **HIGH**: `store.py::import_legacy_scrub_marker()` — if reading the legacy
+     `scrub.pending` file raises anything but `FileNotFoundError` (a transient Windows
+     race, exactly what this round exists to eliminate), the code returns "no pending
+     scrub" even though the file demonstrably exists and represents real owed erasure
+     work. Silently loses privacy-critical "deleted content genuinely erased" tracking
+     until a later restart happens to read it successfully. Sol reproduced with a probe.
+  2. **MEDIUM**: `background.py`'s `BackgroundTaskHealth.failed()` only runs from
+     `_supervise`'s except/else branches, so a long-running healthy loop never resets a
+     stale failure count — `mediaProcessing` can read "degraded" forever after full
+     recovery, contradicting the ruling's own explicit "reset after 300s healthy"
+     intent. Worse: the existing write-side reset only fires on the NEXT failure, so
+     status briefly reads OK at the exact moment a new failure lands (backwards).
+  Both relayed to Luna as **round 9** (batched, not split into separate rounds) with lean
+  fixes: (1) insert a durable `pending_scrub` row with a synthesized token on any
+  OSError-not-FileNotFoundError reading the legacy marker, leave the file for retry; (2)
+  move the 300s reset to the READ side (`consecutive_failures()` checks elapsed time
+  since `last_failure_at` directly) instead of relying on the write-side path.
+- **5x full-suite acceptance harness** still on run 1 as of this update (background task,
+  auto-notifies on completion or first failure) — not yet informative either way.
+- **Next**: wait for Luna's round-9 SHA, Sol's continued round-8 findings (if any), and
+  the 5x harness result. Given round 9 will move bs7's HEAD again, the 5x harness and any
+  remaining Sol review should be re-run against round 9's SHA once it lands, not just
+  patched on top mentally — don't clear on a stale SHA.
