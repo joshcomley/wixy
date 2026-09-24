@@ -4,7 +4,10 @@ stream and usage; P2b adds uploads (§5.5) and media (§5.6); P3b adds push (§5
 
 Every route here (except `POST /unlock`, which has no token yet) calls
 `require_server_token` FIRST — a missing/invalid/expired token is a 401
-`{"error":"locked"}` (Inv 41), and the client locks on any 401 it sees.
+`{"error":"locked"}` (Inv 41), and the client locks on any 401 it sees. `POST /unlock`
+instead runs `unlock_request_refusal` FIRST (custom guard header + strict JSON content
+type + same-origin `Sec-Fetch-Site`), so a cross-site page cannot make cmd charge
+PIN attempts against the owner.
 """
 
 from __future__ import annotations
@@ -43,6 +46,7 @@ from wixy_server.livechat.tokens import (
     ServerAuth,
     mint_unlock_token,
     require_server_token,
+    unlock_request_refusal,
 )
 from wixy_server.settings import Settings
 from wixy_server.storage import ProjectPaths
@@ -141,6 +145,13 @@ async def _finish_committed_erasure(
 
 @router.post("/unlock", response_model=None)
 async def unlock(request: Request) -> JSONResponse:
+    # No token yet, so the token header cannot be this route's CSRF guard: refuse a
+    # request a cross-site page could have sent BEFORE reading the body or calling cmd,
+    # which charges an attempt before it checks (audit round 4, F14).
+    refusal = unlock_request_refusal(request)
+    if refusal is not None:
+        _LOGGER.warning("Server chat unlock refused before cmd was contacted: %s", refusal.reason)
+        return JSONResponse(status_code=refusal.status_code, content={"error": refusal.error})
     try:
         body = await request.json()
     except json.JSONDecodeError:

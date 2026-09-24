@@ -35,7 +35,13 @@ from wixy_server.livechat.models import AttachmentResult, PushSubscriptionRow, U
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import CmdPinVerifier
 from wixy_server.livechat.store import LiveChatStore
-from wixy_server.livechat.tokens import ServerAuth, mint_unlock_token, sign_media_url
+from wixy_server.livechat.tokens import (
+    UNLOCK_GUARD_HEADER,
+    UNLOCK_GUARD_VALUE,
+    ServerAuth,
+    mint_unlock_token,
+    sign_media_url,
+)
 from wixy_server.routes_livechat import _stream_events
 from wixy_server.storage import ProjectPaths
 from wixy_server.tests.fake_cmd import FakeCmdState, create_fake_cmd_app
@@ -112,10 +118,18 @@ def pin_verifier(fake_cmd_state: FakeCmdState) -> CmdPinVerifier:
     return CmdPinVerifier(app_key=TEST_APP_KEY, transport=httpx.ASGITransport(app=fake_app))
 
 
+UNLOCK_GUARD_HEADERS = {UNLOCK_GUARD_HEADER: UNLOCK_GUARD_VALUE}
+
+
 def _unlock(
     client: TestClient, *, pin: str = TEST_PIN, headers: dict[str, str] | None = None
 ) -> Any:
-    return client.post("/api/admin/server/unlock", json={"pin": pin}, headers=headers or {})
+    """The admin UI's own request shape: JSON body + the custom CSRF-guard header."""
+    return client.post(
+        "/api/admin/server/unlock",
+        json={"pin": pin},
+        headers={**UNLOCK_GUARD_HEADERS, **(headers or {})},
+    )
 
 
 def _server_request(app: Any, token: str, *, method: str, path: str) -> Request:
@@ -173,7 +187,9 @@ class TestUnlockMapping:
             storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
         )
         with TestClient(app) as client:
-            response = client.post("/api/admin/server/unlock", json=body)
+            response = client.post(
+                "/api/admin/server/unlock", json=body, headers=UNLOCK_GUARD_HEADERS
+            )
 
         assert response.status_code == 422
         assert TEST_PIN not in response.text
@@ -350,6 +366,245 @@ class TestUnlockMapping:
             response = _unlock(client)
         assert response.status_code == 503
         assert response.json() == {"error": "not_configured"}
+
+
+# ---------------------------------------------------------------------------
+# POST /unlock CSRF guard (audit round 4, F14). Every other mutation needs the
+# X-Wixy-Server-Token header, which forces a CORS preflight wixy never grants;
+# /unlock runs before a token exists, so it has to earn the same property from
+# a custom guard header + a strict JSON content type (+ Sec-Fetch-Site).
+# ---------------------------------------------------------------------------
+
+_WRONG_PIN = "000000"
+
+
+class _CountingTransport(httpx.AsyncBaseTransport):
+    """Wraps the fake-cmd transport so a test can prove cmd was never contacted."""
+
+    def __init__(self, inner: httpx.AsyncBaseTransport) -> None:
+        self._inner = inner
+        self.calls = 0
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        self.calls += 1
+        return await self._inner.handle_async_request(request)
+
+
+def _form_style_json(pin: str) -> bytes:
+    return json.dumps({"pin": pin}).encode("ascii")
+
+
+# (id, request kwargs for a given PIN, the status the guard must answer with).
+# A cross-site attacker page can only send a CORS "simple" request: a form or a
+# no-cors fetch with one of the three simple content types and no custom header.
+_REFUSED_SHAPES: list[Any] = [
+    pytest.param(
+        lambda pin: {
+            "content": _form_style_json(pin),
+            "headers": {"Content-Type": "text/plain", **UNLOCK_GUARD_HEADERS},
+        },
+        415,
+        id="text-plain-json-body",
+    ),
+    pytest.param(
+        lambda pin: {
+            "content": _form_style_json(pin),
+            "headers": {"Content-Type": "text/plain"},
+        },
+        415,
+        id="text-plain-form-style-post",
+    ),
+    pytest.param(
+        lambda pin: {"data": {"pin": pin}, "headers": UNLOCK_GUARD_HEADERS},
+        415,
+        id="urlencoded-form",
+    ),
+    pytest.param(lambda pin: {"data": {"pin": pin}}, 415, id="urlencoded-form-post"),
+    pytest.param(
+        lambda pin: {"files": {"pin": (None, pin)}, "headers": UNLOCK_GUARD_HEADERS},
+        415,
+        id="multipart-form",
+    ),
+    pytest.param(lambda pin: {"files": {"pin": (None, pin)}}, 415, id="multipart-form-post"),
+    pytest.param(
+        lambda pin: {"content": _form_style_json(pin), "headers": UNLOCK_GUARD_HEADERS},
+        415,
+        id="missing-content-type",
+    ),
+    pytest.param(
+        lambda pin: {
+            "content": _form_style_json(pin),
+            "headers": {"Content-Type": "text/json", **UNLOCK_GUARD_HEADERS},
+        },
+        415,
+        id="text-json-is-not-application-json",
+    ),
+    pytest.param(
+        lambda pin: {
+            "content": _form_style_json(pin),
+            "headers": {"Content-Type": "application/json-patch+json", **UNLOCK_GUARD_HEADERS},
+        },
+        415,
+        id="json-suffix-lookalike",
+    ),
+    pytest.param(lambda pin: {"json": {"pin": pin}}, 403, id="json-without-guard-header"),
+    pytest.param(
+        lambda pin: {"json": {"pin": pin}, "headers": {UNLOCK_GUARD_HEADER: "0"}},
+        403,
+        id="json-with-wrong-guard-value",
+    ),
+    pytest.param(
+        lambda pin: {"json": {"pin": pin}, "headers": {UNLOCK_GUARD_HEADER: ""}},
+        403,
+        id="json-with-empty-guard-value",
+    ),
+    *[
+        pytest.param(
+            lambda pin, site=site: {
+                "json": {"pin": pin},
+                "headers": {**UNLOCK_GUARD_HEADERS, "Sec-Fetch-Site": site},
+            },
+            403,
+            id=f"sec-fetch-site-{site}",
+        )
+        for site in ("cross-site", "same-site", "none", "not-a-real-value")
+    ],
+]
+
+
+class TestUnlockRequestGuard:
+    def _app(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        fake_cmd_state: FakeCmdState,
+    ) -> tuple[Any, _CountingTransport]:
+        transport = _CountingTransport(httpx.ASGITransport(app=create_fake_cmd_app(fake_cmd_state)))
+        verifier = CmdPinVerifier(app_key=TEST_APP_KEY, transport=transport)
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=verifier
+        )
+        return app, transport
+
+    @pytest.mark.parametrize(("build", "expected_status"), _REFUSED_SHAPES)
+    def test_shapes_a_cross_site_page_can_send_are_refused_before_cmd_is_contacted(
+        self,
+        build: Any,
+        expected_status: int,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        fake_cmd_state: FakeCmdState,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # A WRONG pin makes the zero-attempts assertion meaningful: had the guard let
+        # this through, cmd would have charged an attempt (a correct PIN would clear
+        # the counter and hide it).
+        caplog.set_level(logging.DEBUG)
+        app, transport = self._app(storage_root, wixy_repo_root, fake_cmd_state)
+        with TestClient(app) as client:
+            response = client.post("/api/admin/server/unlock", **build(_WRONG_PIN))
+
+        assert response.status_code == expected_status
+        assert "token" not in response.text
+        assert _WRONG_PIN not in response.text
+        assert _WRONG_PIN not in caplog.text
+        # Zero attempts charged on cmd — and cmd was never even called.
+        assert transport.calls == 0
+        assert fake_cmd_state.pin_apps[TEST_APP_KEY].attempts == {}
+
+    def test_no_refused_shape_can_mint_a_token_even_with_the_correct_pin(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        fake_cmd_state: FakeCmdState,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        caplog.set_level(logging.DEBUG)
+        app, transport = self._app(storage_root, wixy_repo_root, fake_cmd_state)
+        with TestClient(app) as client:
+            responses = [
+                (case.id, client.post("/api/admin/server/unlock", **case.values[0](TEST_PIN)))
+                for case in _REFUSED_SHAPES
+            ]
+
+        for case_id, response in responses:
+            assert response.status_code in (403, 415), case_id
+            assert "token" not in response.text, case_id
+            assert TEST_PIN not in response.text, case_id
+        assert TEST_PIN not in caplog.text
+        assert transport.calls == 0
+
+    def test_a_flood_of_refused_requests_cannot_lock_the_owner_out(
+        self, storage_root: Path, wixy_repo_root: Path, fake_cmd_state: FakeCmdState
+    ) -> None:
+        """The exploit the audit named: 5 wrong attempts lock cmd's subject out.
+        Twenty cross-site-shaped attempts must leave the real owner able to unlock."""
+        app, transport = self._app(storage_root, wixy_repo_root, fake_cmd_state)
+        with TestClient(app) as client:
+            for _ in range(20):
+                refused = client.post(
+                    "/api/admin/server/unlock",
+                    content=_form_style_json(_WRONG_PIN),
+                    headers={"Content-Type": "text/plain"},
+                )
+                assert refused.status_code == 415
+            genuine = _unlock(client)
+
+        assert genuine.status_code == 200
+        assert transport.calls == 1
+
+    @pytest.mark.parametrize(
+        "content_type",
+        ["application/json", "application/json; charset=utf-8", "Application/JSON;charset=UTF-8"],
+    )
+    @pytest.mark.parametrize("sec_fetch_site", [None, "same-origin"])
+    def test_the_admin_uis_own_request_shape_still_unlocks(
+        self,
+        content_type: str,
+        sec_fetch_site: str | None,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        fake_cmd_state: FakeCmdState,
+    ) -> None:
+        app, transport = self._app(storage_root, wixy_repo_root, fake_cmd_state)
+        headers = {**UNLOCK_GUARD_HEADERS, "Content-Type": content_type}
+        if sec_fetch_site is not None:
+            headers["Sec-Fetch-Site"] = sec_fetch_site
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/server/unlock", content=_form_style_json(TEST_PIN), headers=headers
+            )
+
+        assert response.status_code == 200
+        assert isinstance(response.json()["token"], str)
+        assert transport.calls == 1
+
+    def test_the_guard_also_covers_a_wrong_pin_from_the_real_ui_shape(
+        self, storage_root: Path, wixy_repo_root: Path, fake_cmd_state: FakeCmdState
+    ) -> None:
+        """A genuine shape must still reach cmd and be charged exactly once."""
+        app, transport = self._app(storage_root, wixy_repo_root, fake_cmd_state)
+        with TestClient(app) as client:
+            response = _unlock(client, pin=_WRONG_PIN, headers={"Sec-Fetch-Site": "same-origin"})
+
+        assert response.status_code == 401
+        assert response.json()["attemptsLeft"] == 4
+        assert transport.calls == 1
+
+    def test_the_standalone_edition_refuses_a_cross_site_shape_too(
+        self, storage_root: Path, wixy_repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No verifier there, but the guard is edition-independent: a cross-site simple
+        request gets the guard's refusal, not a 503 that reveals the edition."""
+        monkeypatch.setenv("WIXY_EDITION", "standalone")
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/server/unlock",
+                content=_form_style_json(_WRONG_PIN),
+                headers={"Content-Type": "text/plain"},
+            )
+        assert response.status_code == 415
 
 
 # ---------------------------------------------------------------------------
@@ -704,6 +959,7 @@ class TestCrossOriginDenial:
             storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
         )
         preflights = (
+            ("POST", "/api/admin/server/unlock"),
             ("POST", "/api/admin/server/messages"),
             ("POST", "/api/admin/server/uploads"),
             ("DELETE", "/api/admin/server/messages/1"),
@@ -717,7 +973,9 @@ class TestCrossOriginDenial:
                     headers={
                         "Origin": "https://attacker.example",
                         "Access-Control-Request-Method": method,
-                        "Access-Control-Request-Headers": "content-type,x-wixy-server-token",
+                        "Access-Control-Request-Headers": (
+                            "content-type,x-wixy-server-token,x-wixy-server-unlock"
+                        ),
                     },
                 )
                 for method, path in preflights

@@ -21,6 +21,7 @@ from jwt.algorithms import RSAAlgorithm
 import wixy_server.app as wixy_app_module
 from wixy_server.app import create_app
 from wixy_server.livechat.pinclient import PinVerifyResult
+from wixy_server.livechat.tokens import UNLOCK_GUARD_HEADER, UNLOCK_GUARD_VALUE
 
 _TEAM_DOMAIN = "example.cloudflareaccess.com"
 _AUD = "the-configured-aud"
@@ -197,14 +198,25 @@ class TestAdminGateAcceptsValidToken:
             pin_verifier=_SuccessfulPinVerifier(),
         )
         with TestClient(app, follow_redirects=False) as client:
-            no_jwt_unlock = client.post("/api/admin/server/unlock", json={"pin": "482913"})
+            guard_header = {UNLOCK_GUARD_HEADER: UNLOCK_GUARD_VALUE}
+            # CF Access answers first: even the UI's own request shape is a 401 here.
+            no_jwt_unlock = client.post(
+                "/api/admin/server/unlock", json={"pin": "482913"}, headers=guard_header
+            )
             no_jwt_messages = client.get("/api/admin/server/messages")
             no_jwt_worker = client.get("/admin/server-sw.js")
 
             access_jwt = _sign(private, email="owner@example.com")
             access_header = {"CF-Access-Jwt-Assertion": access_jwt}
-            unlock = client.post(
+            # A valid Access session alone is not enough (F14): a cross-site page rides
+            # the same cookie, so the unlock route also needs the guard header.
+            unguarded_unlock = client.post(
                 "/api/admin/server/unlock", json={"pin": "482913"}, headers=access_header
+            )
+            unlock = client.post(
+                "/api/admin/server/unlock",
+                json={"pin": "482913"},
+                headers={**access_header, **guard_header},
             )
             server_headers = {
                 **access_header,
@@ -218,6 +230,7 @@ class TestAdminGateAcceptsValidToken:
         assert no_jwt_messages.status_code == 401
         assert no_jwt_messages.json()["error"] == "unauthorized"
         assert no_jwt_worker.status_code == 302
+        assert unguarded_unlock.status_code == 403
         assert unlock.status_code == 200
         assert messages.status_code == 200
         assert worker.status_code == 200

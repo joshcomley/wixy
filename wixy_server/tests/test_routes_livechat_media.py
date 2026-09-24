@@ -22,7 +22,7 @@ from wixy_server.livechat import processing as processing_module
 from wixy_server.livechat import uploads as uploads_module
 from wixy_server.livechat.pinclient import CmdPinVerifier
 from wixy_server.livechat.store import LiveChatStore
-from wixy_server.livechat.tokens import sign_media_url
+from wixy_server.livechat.tokens import UNLOCK_GUARD_HEADER, UNLOCK_GUARD_VALUE, sign_media_url
 from wixy_server.tests.fake_cmd import FakeCmdState, create_fake_cmd_app
 
 TEST_APP_KEY = "wixy-livechat"
@@ -100,7 +100,11 @@ def pin_verifier(fake_cmd_state: FakeCmdState) -> CmdPinVerifier:
 
 
 def _unlock(client: TestClient, *, pin: str = TEST_PIN) -> Any:
-    return client.post("/api/admin/server/unlock", json={"pin": pin})
+    return client.post(
+        "/api/admin/server/unlock",
+        json={"pin": pin},
+        headers={UNLOCK_GUARD_HEADER: UNLOCK_GUARD_VALUE},
+    )
 
 
 def _unlocked_client(
