@@ -557,3 +557,67 @@ fixed same-session.)
   P6a) are trailing close-out or Q&A, not new dispatches. The old P6a session was
   auto-continued onto another Codex account after its source account hit a usage
   limit (cmd's quota-successor mechanism); no action needed.
+
+## Update 2026-09-24 (DM `014c0ebc`) — P8 course-correction, P6b Sol review findings, process notes
+
+- **P8 nearly shipped a wrong fix once**: after the Architect's v1.5.1 ruling (menu
+  taps need a real gesture-boundary product fix, not test waits), the Builder
+  independently reconverged on the SAME rejected waits-only approach mid-flight
+  (parallel reasoning that hadn't incorporated my relay yet), self-reported it
+  "resolved" via decision 00148 with "product lock behavior unchanged." I held this
+  firmly (did not accept the clearance), re-escalated, and the Builder correctly
+  course-corrected once it saw the ruling — now implementing gesture boundaries +
+  `button!==0` filter in `gestures.ts` per spec v1.5.2 (`11bedfd`). **Lesson**: a
+  Builder's own "resolved" self-report needs the same skepticism as a FINAL
+  HANDOFF — this one crossed in transit with a still-open correction.
+- **Architect classify rule (v1.5.2), useful going forward**: did tap 1 make
+  control 2 APPEAR UNDER THE FINGER? Yes -> needs a gesture boundary. No -> ordinary
+  cadence, waits in the test are fine. P6b's Send->attach case got the "No" answer
+  (both controls already on screen) plus one new requirement: voice notes need a
+  1s minimum duration (shorter = discard + "Too short" hint).
+- **P6b (candidate `9ebcc492`) — my own verification was clean, but the dedicated
+  `gpt-6-sol` review (per the routing ruling above) caught 3 real HIGH findings my
+  automated checks missed entirely:**
+  1. Gesture boundaries are INERT — `thread.ts:109`/`mediaRender.ts:91` mark
+     settings/photo openers with `data-srv-gesture-boundary`, but `gestures.ts:85-96`
+     never reads that marker. The v1.5.2 fix looks present (markers exist) but does
+     nothing functionally.
+  2. Old media URLs expire after re-unlock — `thread.ts:523` doesn't refresh loaded
+     history's signed URLs on attach/re-render; they carry the original 12h TTL
+     (`tokens.py:183-229`), so old thumbnails/video/voice 403 after that window
+     despite a fresh unlock.
+  3. `thread.ts:380` clears every media DOM node on each send/SSE redraw without
+     pausing/disposing active playback (`detach():558` only pauses nodes still in
+     `messageList`) — a detached-but-playing node can keep playing after panic,
+     undermining the panic button's instant-hide/privacy guarantee, and can leave
+     `mediaPlaying` suspended incorrectly.
+  All 3 relayed to the Builder for fix-forward; PR #230 (candidate `9ebcc492`) is
+  NOT merged and won't be until a new candidate clears both my verification and a
+  fresh Sol pass. **This is strong evidence the Sol-review-in-addition-to-DM-
+  verification ruling was the right call** — none of these 3 would have been caught
+  by mypy/ruff/pytest/vitest/e2e alone.
+- **Reviewer worktree pattern established**: dispatch a `gpt-6-sol` reviewer via
+  `team/spawn {role:builder}` + `provider-continuation {force:true if wedged}`,
+  then point it at an ISOLATED, detached, read-only `git worktree add` checkout of
+  the exact candidate SHA (e.g. `...__review-p6b\wixy`) — NOT the shared build-space
+  worktree (a live Builder may still be working there) and NOT the DM's own primary
+  checkout (one reviewer spawn defaulted into it before being briefed; caught and
+  redirected before any edit happened, no harm done, but redirect explicitly next
+  time in the FIRST message).
+- **Peer-messaging volume cap discovered**: sending several sends to the same
+  recipient in quick succession gets `"reason":"volume_cap"` degraded delivery
+  (truncated to ~197 chars, independent of the normal ~600-char `over_short_max`
+  envelope limit). Workaround used successfully: `POST http://127.0.0.1:9321/intercomm
+  {"text":...}` to store the full content, then send a SHORT pointer message (the URL
+  survives truncation since it's early in a short message) - same mechanism other
+  senders already used when relaying long content to me.
+- **Fresh Builder-seat spawns are unreliable** (`team/spawn {role:builder}` ->
+  `provider-continuation`): observed `context_unreadable` (spawn genuinely never
+  started - check `retired_reason` on the team roster; `"no_live_session"` means
+  abandon and respawn, don't keep retrying the same session id) vs `wedge_no_response`
+  (spawn is alive but needs `force:true` to convert) vs success. No reliable fixed
+  wait time - poll the roster/messages endpoint for a real transcript before
+  concluding a spawn failed vs is just slow.
+- **Progress unchanged at 9/13** (P6b and P8 still both "doing" pending fixes).
+  P4/P5b delivery tasks + lanes already closed (see above). P6b/P8 delivery tasks
+  marked "doing" with their builder_session_id/build_space_id set for tracking.
