@@ -13,6 +13,7 @@ import { mountLightbox, type Lightbox } from "../lightbox";
 import {
   ServerErasureOutcomeUnknownError,
   ServerLockedError,
+  ServerWipeAbandonedError,
   ServerWipeNotCommittedError,
 } from "./api/http";
 import { deleteMessage, getHistory, sendMessage, wipeChat, type Message } from "./api/messages";
@@ -31,6 +32,9 @@ const MIN_VOICE_DURATION_MS = 1_000;
  * than kept forever — mirrors the AI chat's own ECHO_EXPIRY_MS. */
 const ECHO_EXPIRY_MS = 30_000;
 const DELETE_FADE_MS = 160;
+/** Backoff for reconciling an unconfirmed wipe against history: 1 s, 2 s, 4 s … capped. */
+const WIPE_RECONCILE_BASE_DELAY_MS = 1_000;
+const WIPE_RECONCILE_MAX_DELAY_MS = 15_000;
 
 export interface ServerThreadDeps {
   identity: ServerIdentity;
@@ -673,31 +677,87 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     }
   }
 
-  async function reconcileUnknownWipe(session: ServerSession, wipeBoundarySeq: number): Promise<boolean> {
-    let history: readonly Message[];
-    try {
-      history = await getAllHistory(session);
-    } catch (error) {
-      if (error instanceof ServerLockedError) throw error;
-      throw new ServerErasureOutcomeUnknownError();
-    }
+  /** The one unconfirmed-wipe reconciliation that may be running (F16). `end` settles it
+   * from outside: the stream's `wiped` event proves it committed; a lock or teardown
+   * abandons it. */
+  interface WipeReconcile {
+    end(reason: "committed" | "abandoned"): void;
+  }
+  let pendingWipeReconcile: WipeReconcile | null = null;
 
-    if (history.some((message) => message.seq <= wipeBoundarySeq)) {
-      for (const message of history) addConfirmed(message);
-      hasMoreHistory = false;
-      renderThreadList(false);
-      throw new ServerWipeNotCommittedError();
-    }
+  function endWipeReconcile(reason: "committed" | "abandoned"): void {
+    pendingWipeReconcile?.end(reason);
+  }
 
-    const messagesArrivingDuringReconciliation = Array.from(confirmedBySeq.values())
-      .filter((message) => message.seq > wipeBoundarySeq);
-    clearAfterWipe();
-    for (const message of messagesArrivingDuringReconciliation) addConfirmed(message);
-    for (const message of history) addConfirmed(message);
-    historyLoaded = true;
-    hasMoreHistory = false;
-    renderThreadList(false);
-    return true;
+  /** A wipe whose request timed out or dropped may or may not have committed, and a wipe
+   * is never re-POSTed (it would delete anything sent since). So the thread reconciles
+   * against the server's history instead — and keeps doing so, with backoff, until it gets
+   * a definite answer: history with nothing at or before the wipe boundary means it
+   * committed, history that still holds older messages means it did not, and the stream's
+   * `wiped` event settles it either way. It gives up only when the chat locks or is torn
+   * down. Resolves `true` (committed; the caller polls the erasure) or rejects with
+   * `ServerWipeNotCommittedError` / `ServerLockedError` / `ServerWipeAbandonedError`,
+   * which is what lets the settings sheet leave its "checking" state for good. */
+  function reconcileUnknownWipe(session: ServerSession, wipeBoundarySeq: number): Promise<boolean> {
+    endWipeReconcile("abandoned");
+    return new Promise<boolean>((resolve, reject) => {
+      let finished = false;
+      let attempts = 0;
+      let timer: number | null = null;
+
+      const finish = (settle: () => void): void => {
+        if (finished) return;
+        finished = true;
+        if (timer !== null) win.clearTimeout(timer);
+        timer = null;
+        if (pendingWipeReconcile === handle) pendingWipeReconcile = null;
+        settle();
+      };
+      const handle: WipeReconcile = {
+        end: (reason) =>
+          finish(reason === "committed" ? () => resolve(true) : () => reject(new ServerWipeAbandonedError())),
+      };
+      pendingWipeReconcile = handle;
+
+      const attempt = async (): Promise<void> => {
+        timer = null;
+        if (finished) return;
+        let history: readonly Message[];
+        try {
+          history = await getAllHistory(session);
+        } catch (error) {
+          if (finished) return;
+          if (error instanceof ServerLockedError) {
+            finish(() => reject(error));
+            return;
+          }
+          const delayMs = Math.min(WIPE_RECONCILE_BASE_DELAY_MS * 2 ** attempts, WIPE_RECONCILE_MAX_DELAY_MS);
+          attempts += 1;
+          timer = win.setTimeout(() => void attempt(), delayMs);
+          return;
+        }
+        if (finished) return;
+
+        if (history.some((message) => message.seq <= wipeBoundarySeq)) {
+          for (const message of history) addConfirmed(message);
+          hasMoreHistory = false;
+          renderThreadList(false);
+          finish(() => reject(new ServerWipeNotCommittedError()));
+          return;
+        }
+
+        const messagesArrivingDuringReconciliation = Array.from(confirmedBySeq.values())
+          .filter((message) => message.seq > wipeBoundarySeq);
+        clearAfterWipe();
+        for (const message of messagesArrivingDuringReconciliation) addConfirmed(message);
+        for (const message of history) addConfirmed(message);
+        historyLoaded = true;
+        hasMoreHistory = false;
+        renderThreadList(false);
+        finish(() => resolve(true));
+      };
+      void attempt();
+    });
   }
 
   async function wipe(onOutcomeUnknown?: () => void): Promise<boolean> {
@@ -933,6 +993,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     attach,
     detach(): void {
       currentSession = null;
+      endWipeReconcile("abandoned");
       for (const controller of messageActionControllers.values()) controller.close();
       voiceRecorder?.detach();
       voiceRecorder = null;
@@ -966,6 +1027,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           return;
         case "wiped":
           clearAfterWipe();
+          // Truth arrives over the stream: if an unconfirmed wipe was still being
+          // reconciled, this settles it as committed (F16).
+          endWipeReconcile("committed");
           return;
         case "locked":
           // The stream's own `locked` event is handled by the caller
@@ -978,6 +1042,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     refreshNameChip,
     teardown(): void {
       currentSession = null;
+      endWipeReconcile("abandoned");
       for (const controller of messageActionControllers.values()) controller.teardown();
       messageActionControllers.clear();
       for (const timer of deleteFadeTimers.values()) win.clearTimeout(timer);

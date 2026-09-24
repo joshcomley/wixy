@@ -6,6 +6,7 @@ import { getUsage } from "./api/messages";
 import {
   ServerErasureOutcomeUnknownError,
   ServerLockedError,
+  ServerWipeAbandonedError,
 } from "./api/http";
 import type { ServerIdentity } from "./identity";
 import { isAndroidPushCapable, mountPushToggle, type PushToggle } from "./pushToggle";
@@ -97,6 +98,9 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   let scrubPollTimer: number | null = null;
   let pushToggle: PushToggle | null = null;
   let wipeOutcomeUnknown = false;
+  /** True from the confirm click until `onWipe` settles. While it is, the thread is still
+   * reconciling an unconfirmed wipe and is the only authority on its outcome. */
+  let wipeInFlight = false;
 
   function unmountPushToggle(): void {
     pushToggle?.teardown();
@@ -134,16 +138,19 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     wipeStatus.hidden = false;
 
     const poll = (): void => {
-      if (generation !== scrubPollGeneration || Date.now() >= stopAt) return;
+      if (generation !== scrubPollGeneration) return;
+      if (Date.now() >= stopAt) {
+        if (outcomeUnknown) settleUnknownWipeAsUnclear();
+        return;
+      }
       scrubPollTimer = win.setTimeout(() => {
         scrubPollTimer = null;
         void getUsage(session)
           .then((usage) => {
             if (generation !== scrubPollGeneration) return;
             if (!usage.erasurePending) {
-              wipeStatus.textContent = outcomeUnknown
-                ? "Status unclear. Check the messages to confirm."
-                : "Done";
+              if (outcomeUnknown) settleUnknownWipeAsUnclear();
+              else wipeStatus.textContent = "Done";
               return;
             }
             poll();
@@ -152,6 +159,23 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
       }, 1000);
     };
     poll();
+  }
+
+  /** The sheet's own way out of an unconfirmed wipe when nothing is reconciling it (an
+   * `onWipe` that rejected with `ServerErasureOutcomeUnknownError` and has no thread behind
+   * it): say so honestly and hand the decision back to the owner instead of leaving the
+   * control disabled for good (F16). A wipe is still never re-sent on its own — the owner
+   * has to confirm it again. */
+  function unknownWipeNeedsCheck(): boolean {
+    return wipeOutcomeUnknown && !wipeInFlight;
+  }
+
+  function settleUnknownWipeAsUnclear(): void {
+    if (wipeInFlight) return; // the thread is still reconciling — it decides, not this poll
+    wipeOutcomeUnknown = false;
+    wipeButton.disabled = false;
+    wipeStatus.textContent = "Status unclear. Check the messages to confirm.";
+    wipeStatus.hidden = false;
   }
 
   function announceWipeOutcomeUnknown(): void {
@@ -241,6 +265,7 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   wipeConfirmButton.addEventListener("click", () => {
     if (wipeOutcomeUnknown) return;
     wipeConfirmButton.disabled = true;
+    wipeInFlight = true;
     void deps.onWipe(announceWipeOutcomeUnknown)
       .then((erasurePending) => {
         wipeOutcomeUnknown = false;
@@ -268,11 +293,17 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
         wipeOutcomeUnknown = false;
         wipeButton.disabled = false;
         wipeStatus.hidden = true;
+        if (error instanceof ServerWipeAbandonedError) {
+          // The chat locked before the outcome was confirmed. Nothing failed: the next
+          // unlock reloads the real history, so the control just goes back to normal.
+          return;
+        }
         wipeConfirmation.hidden = false;
         wipeError.textContent = "Couldn't delete everything — try again";
         wipeError.hidden = false;
       })
       .finally(() => {
+        wipeInFlight = false;
         wipeConfirmButton.disabled = false;
       });
   });
@@ -300,13 +331,16 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
             usageRow.textContent = usage.mediaAvailable
               ? `Storage: ${formatBytes(usage.usedBytes)} of ${formatBytes(usage.quotaBytes)} used`
               : "Storage: media isn't available on this server.";
-            if (usage.erasurePending) {
+            // An unconfirmed wipe with nothing reconciling it must be re-checked on every
+            // open, or closing the sheet mid-check would strand the wipe control (F16).
+            if (usage.erasurePending || unknownWipeNeedsCheck()) {
               const session = deps.getSession();
               if (session !== null) startScrubPolling(session, wipeOutcomeUnknown);
             }
           })
           .catch(() => {
             usageRow.textContent = "Storage: couldn't load.";
+            if (unknownWipeNeedsCheck()) startScrubPolling(session, true);
           });
       }
       nameInput.focus();

@@ -40,6 +40,16 @@ export class ServerWipeNotCommittedError extends Error {
   }
 }
 
+/** The chat locked (or was torn down) before an unconfirmed wipe could be reconciled. Not
+ * a failure and not a lock trigger: the next unlock reloads the real history, so the wipe
+ * control simply goes back to normal. */
+export class ServerWipeAbandonedError extends Error {
+  constructor() {
+    super("server chat: wipe reconciliation abandoned");
+    this.name = "ServerWipeAbandonedError";
+  }
+}
+
 const TIMEOUT_MS = 10_000;
 const ERASURE_TIMEOUT_MS = 30_000;
 

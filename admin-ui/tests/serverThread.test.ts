@@ -774,6 +774,168 @@ describe("mountServerThread", () => {
       },
     );
 
+    // F16 (audit round 4): a wipe whose outcome cannot be confirmed used to leave the
+    // sheet on "Couldn't confirm — checking…" with the wipe control disabled for good,
+    // because nothing told it about the stream's `wiped` event or a later successful
+    // history load. These drive the REAL thread + REAL sheet together.
+    describe("an unconfirmed wipe that cannot be reconciled straight away (F16)", () => {
+      const CHECKING = "Couldn't confirm — checking…";
+
+      async function startUnconfirmedWipe() {
+        const identity = fakeIdentity();
+        const hooks = fakeHooks();
+        const view = mountServerThread({ identity, hooks, win: fakeWindow(), onSettings: vi.fn() });
+        await view.attach(SESSION);
+        const sheet = mountServerSettingsSheet({
+          identity,
+          hooks,
+          win: window,
+          getSession: () => SESSION,
+          onWipe: (onOutcomeUnknown) => view.wipe(onOutcomeUnknown),
+          onNameChanged: vi.fn(),
+          onClose: vi.fn(),
+        });
+        document.body.appendChild(sheet.element);
+        sheet.open();
+        await vi.advanceTimersByTimeAsync(0);
+        sheet.element.querySelector<HTMLButtonElement>(".wx-srv-sheet-wipe")?.click();
+        sheet.element.querySelector<HTMLButtonElement>(".wx-srv-sheet-wipe-confirm-button")?.click();
+        await vi.advanceTimersByTimeAsync(0);
+        return {
+          view,
+          sheet,
+          status: () => sheet.element.querySelector(".wx-srv-sheet-wipe-status")?.textContent,
+          statusHidden: () => sheet.element.querySelector<HTMLElement>(".wx-srv-sheet-wipe-status")?.hidden,
+          wipeButton: () => sheet.element.querySelector<HTMLButtonElement>(".wx-srv-sheet-wipe"),
+          confirmHidden: () => sheet.element.querySelector<HTMLElement>(".wx-srv-sheet-wipe-confirm")?.hidden,
+          errorText: () => sheet.element.querySelector(".wx-srv-sheet-wipe-error")?.textContent,
+        };
+      }
+
+      beforeEach(() => {
+        vi.useFakeTimers();
+        wipeChat.mockRejectedValue(new ServerErasureOutcomeUnknownError());
+      });
+      afterEach(() => {
+        document.body.innerHTML = "";
+      });
+
+      it("keeps retrying the reconciliation with backoff, never the wipe, and stays 'checking' meanwhile", async () => {
+        getHistory
+          .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ text: "old before wipe" })] }))
+          .mockRejectedValue(new Error("offline"));
+        const wipe = await startUnconfirmedWipe();
+        expect(wipe.status()).toBe(CHECKING);
+        expect(wipe.wipeButton()?.disabled).toBe(true);
+        const afterFirstAttempt = getHistory.mock.calls.length;
+
+        await vi.advanceTimersByTimeAsync(1_000);
+        await vi.advanceTimersByTimeAsync(2_000);
+        await vi.advanceTimersByTimeAsync(4_000);
+        expect(getHistory.mock.calls.length).toBeGreaterThan(afterFirstAttempt + 1);
+        expect(getHistory.mock.calls.length).toBeLessThan(afterFirstAttempt + 5); // backoff, not a hot loop
+        expect(wipe.status()).toBe(CHECKING);
+        expect(wipe.wipeButton()?.disabled).toBe(true);
+        expect(wipeChat).toHaveBeenCalledOnce();
+        wipe.sheet.teardown();
+        wipe.view.teardown();
+      });
+
+      it("a wiped stream event settles it: the sheet leaves 'checking' and the wipe control is usable again", async () => {
+        getHistory
+          .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ text: "old before wipe" })] }))
+          .mockRejectedValue(new Error("offline"));
+        const wipe = await startUnconfirmedWipe();
+        await vi.advanceTimersByTimeAsync(3_000);
+        expect(wipe.status()).toBe(CHECKING);
+        expect(wipe.wipeButton()?.disabled).toBe(true);
+
+        wipe.view.handleStreamEvent({ type: "wiped" } as ServerStreamEvent);
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(wipe.status()).toBe("Deleted. Erasing leftover traces…");
+        expect(wipe.wipeButton()?.disabled).toBe(false);
+        expect(wipe.confirmHidden()).toBe(true);
+        expect(wipe.view.element.textContent).not.toContain("old before wipe");
+        // Settled means settled: no more reconciliation requests, no re-POST.
+        const settledCalls = getHistory.mock.calls.length;
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(getHistory.mock.calls.length).toBe(settledCalls);
+        expect(wipe.status()).toBe("Done");
+        expect(wipeChat).toHaveBeenCalledOnce();
+        wipe.sheet.teardown();
+        wipe.view.teardown();
+      });
+
+      it("a later successful history load settles it as committed", async () => {
+        getHistory
+          .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ text: "old before wipe" })] }))
+          .mockRejectedValueOnce(new Error("offline")) // first reconciliation, immediately
+          .mockRejectedValueOnce(new Error("offline")) // after 1 s
+          .mockResolvedValueOnce(emptyHistory()); // after 2 s more
+        const wipe = await startUnconfirmedWipe();
+        expect(wipe.status()).toBe(CHECKING);
+
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(wipe.status()).toBe(CHECKING);
+        expect(wipe.wipeButton()?.disabled).toBe(true);
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        expect(wipe.status()).toBe("Deleted. Erasing leftover traces…");
+        expect(wipe.wipeButton()?.disabled).toBe(false);
+        expect(getHistory).toHaveBeenCalledTimes(4);
+        expect(wipe.view.element.textContent).not.toContain("old before wipe");
+        expect(wipeChat).toHaveBeenCalledOnce();
+        wipe.sheet.teardown();
+        wipe.view.teardown();
+      });
+
+      it("a later history load that still holds older messages settles it as NOT committed and offers a retry", async () => {
+        const old = fakeMessage({ seq: 1, text: "still here" });
+        getHistory
+          .mockResolvedValueOnce(emptyHistory({ messages: [old] }))
+          .mockRejectedValueOnce(new Error("offline"))
+          .mockResolvedValueOnce(emptyHistory({ messages: [old] }));
+        const wipe = await startUnconfirmedWipe();
+        expect(wipe.status()).toBe(CHECKING);
+
+        await vi.advanceTimersByTimeAsync(1_000);
+
+        expect(wipe.errorText()).toBe("Couldn't delete everything — try again");
+        expect(wipe.confirmHidden()).toBe(false);
+        expect(wipe.wipeButton()?.disabled).toBe(false);
+        expect(wipe.statusHidden()).toBe(true);
+        expect(wipe.view.element.textContent).toContain("still here");
+        expect(wipeChat).toHaveBeenCalledOnce();
+        wipe.sheet.teardown();
+        wipe.view.teardown();
+      });
+
+      it("locking while the outcome is unconfirmed stops reconciling and leaves the wipe control usable", async () => {
+        getHistory
+          .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ text: "old before wipe" })] }))
+          .mockRejectedValue(new Error("offline"));
+        const wipe = await startUnconfirmedWipe();
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(wipe.wipeButton()?.disabled).toBe(true);
+
+        wipe.view.detach();
+        wipe.sheet.close();
+        await vi.advanceTimersByTimeAsync(0);
+        const callsAtLock = getHistory.mock.calls.length;
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(getHistory.mock.calls.length).toBe(callsAtLock);
+
+        // The next unlock finds an ordinary sheet, not a control stuck on 'checking'.
+        wipe.sheet.open();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(wipe.wipeButton()?.disabled).toBe(false);
+        expect(wipe.statusHidden()).toBe(true);
+        wipe.sheet.teardown();
+        wipe.view.teardown();
+      });
+    });
+
     it("reconciles an unknown wipe to empty history without re-POSTing", async () => {
       getHistory
         .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ seq: 1, text: "old before wipe" })] }))

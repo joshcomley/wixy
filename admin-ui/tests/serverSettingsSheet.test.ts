@@ -225,6 +225,114 @@ describe("mountServerSettingsSheet wipe confirmation", () => {
     view.teardown();
   });
 
+  describe("an unknown wipe outcome from a provider with no reconciler (F16)", () => {
+    // `onWipe` rejecting with ServerErasureOutcomeUnknownError leaves the sheet with
+    // nothing but /usage to look at. It used to stay 'checking' with the wipe control
+    // disabled forever (the poll simply stopped at 60 s, or never restarted after a
+    // close/reopen). It now gives up honestly and hands the decision back to the owner.
+    function mountUnknownWipeSheet() {
+      const view = mountServerSettingsSheet({
+        identity: identity(),
+        hooks: hooks(),
+        win: window,
+        getSession: () => SESSION,
+        onWipe: vi.fn().mockRejectedValue(new ServerErasureOutcomeUnknownError()),
+        onNameChanged: vi.fn(),
+        onClose: vi.fn(),
+      });
+      document.body.appendChild(view.element);
+      return view;
+    }
+    const wipeButton = (view: { element: HTMLElement }) =>
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-sheet-wipe");
+    const status = (view: { element: HTMLElement }) =>
+      view.element.querySelector(".wx-srv-sheet-wipe-status")?.textContent;
+
+    async function submitWipe(view: { element: HTMLElement }): Promise<void> {
+      wipeButton(view)?.click();
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-sheet-wipe-confirm-button")?.click();
+      await vi.advanceTimersByTimeAsync(0);
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    it("says the status is unclear and re-enables the wipe control once nothing is pending", async () => {
+      const view = mountUnknownWipeSheet();
+      view.open();
+      await vi.advanceTimersByTimeAsync(0);
+      await submitWipe(view);
+      expect(status(view)).toBe("Couldn't confirm — checking…");
+      expect(wipeButton(view)?.disabled).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(1_500);
+
+      expect(status(view)).toBe("Status unclear. Check the messages to confirm.");
+      expect(wipeButton(view)?.disabled).toBe(false);
+      view.teardown();
+    });
+
+    it("gives up after the polling window instead of staying 'checking' forever", async () => {
+      getUsage.mockReset().mockResolvedValue({
+        mediaAvailable: true, usedBytes: 0, quotaBytes: 10, freeBytes: 10, erasurePending: true,
+      });
+      const view = mountUnknownWipeSheet();
+      view.open();
+      await vi.advanceTimersByTimeAsync(0);
+      await submitWipe(view);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(status(view)).toBe("Couldn't confirm — checking…");
+      expect(wipeButton(view)?.disabled).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(31_000);
+
+      expect(status(view)).toBe("Status unclear. Check the messages to confirm.");
+      expect(wipeButton(view)?.disabled).toBe(false);
+      view.teardown();
+    });
+
+    it("a close and reopen before the check finished does not strand the control", async () => {
+      const view = mountUnknownWipeSheet();
+      view.open();
+      await vi.advanceTimersByTimeAsync(0);
+      await submitWipe(view);
+      view.close();
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      view.open();
+      await vi.advanceTimersByTimeAsync(1_500);
+
+      expect(status(view)).toBe("Status unclear. Check the messages to confirm.");
+      expect(wipeButton(view)?.disabled).toBe(false);
+      view.teardown();
+    });
+
+    it("never re-submits while it is still checking", async () => {
+      getUsage.mockReset().mockResolvedValue({
+        mediaAvailable: true, usedBytes: 0, quotaBytes: 10, freeBytes: 10, erasurePending: true,
+      });
+      const onWipe = vi.fn().mockRejectedValue(new ServerErasureOutcomeUnknownError());
+      const view = mountServerSettingsSheet({
+        identity: identity(),
+        hooks: hooks(),
+        win: window,
+        getSession: () => SESSION,
+        onWipe,
+        onNameChanged: vi.fn(),
+        onClose: vi.fn(),
+      });
+      document.body.appendChild(view.element);
+      view.open();
+      await vi.advanceTimersByTimeAsync(0);
+      await submitWipe(view);
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-sheet-wipe-confirm-button")?.click();
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(onWipe).toHaveBeenCalledOnce();
+      view.teardown();
+    });
+  });
+
   it("keeps wipe confirmation retryable after history proves the wipe did not commit", async () => {
     const onWipe = vi.fn()
       .mockRejectedValueOnce(new ServerWipeNotCommittedError())
