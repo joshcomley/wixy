@@ -1505,3 +1505,38 @@ fixed same-session.)
   requirement to proof. Orchestrator suggestion to the DM: before the final merge, have Sol
   6 check every ORIGINAL operator requirement against a passing test or a manual live check
   and list any with no proof.
+
+## Update 2026-09-24 ~22:20 UTC (Orchestrator `b11567bc`, handing over) — OPERATOR: stop using Codex; audit-fix merges
+
+- **OPERATOR INSTRUCTION (verbatim, ~21:40 UTC): "Use Claude not Codex right now. Codex is
+  having issues."** This overrides the earlier "Luna 6 XL implements / Sol 6 reviews" routing
+  for as long as it stands. Relayed to the DM at once; all Codex builders/reviewers were told
+  to stand down; a single `claude-sonnet-5`/xhigh reviewer (`4d1c8a10`) now reviews the
+  audit-fix work. No work was lost: the DM committed the finished WIP verbatim (frontend
+  H1/L1 `11875d9` + bundle `d0f0278`; backend M1/M2/L1 `99d0de2`) and re-verified it itself.
+  Until the operator says Codex is fine again, ALL new implementation and review = Claude.
+- **Known fleet gap (worth telling the operator afterwards, not a mid-delivery fix):** cmd's
+  own quota recovery auto-revives a stood-down Codex session the moment its account frees
+  up (seen 3x: backend `e459441b`, frontend `70ea7f25`, P7 `f0123731`). Each one reads its
+  handover and starts to act. Handling: send it an explicit STOP quoting the operator, and
+  tell the DM to ignore it. It cost nothing so far (one harmless journal write).
+- **Codex quota wall (21:29 UTC):** the frontend Luna's Codex account was walled with no
+  eligible account for ~4 days (Personal + Purple exhausted), even while a sibling Codex
+  session still worked; superseded by the operator's Claude instruction above.
+- **PR #233 MERGED** (`2f8362d1`): frontend audit-fix (F1 push toggle mounted, F3 voice
+  send-on-stop, F4 orphan stream, F5 unlock copy, F11 + the proof rows + the H1/L1 wipe
+  clock-skew fix: the browser-vs-server timestamp comparison was replaced by a server
+  message-sequence fence). The DM resolved the base conflict itself (kept both histories in
+  the shared todo journal) and hit GitHub's unauthenticated 60/hr limit while polling raw
+  check-runs (switched to authenticated `gh pr checks`).
+- **Backend audit-fix (M1/M2/L1: 16-bit grayscale clipping, proof-gap coverage, PIN echo on
+  a malformed key) is the LAST open piece**: committed `99d0de2`, awaiting the Claude
+  reviewer's verdict and a full-pytest tie-breaker run (one odd result in a narrow subset
+  run, passed in isolation - the DM will not dismiss it without the full-suite verdict).
+- **Still owed before live:** clear + merge the backend fix -> P7's final docs-vs-final-code
+  pass -> the DM's `POST /round` on the opus audit (relation `e971ce44`; only C0/H0/M0/L0 is
+  merge-clean) -> AUDIT END -> ONE squash delivery merge to main with an explicit body (spec
+  R14a) -> the `verify` skill on ca.cinnamons.uk including a REAL PIN unlock. Main still has
+  ZERO livechat files (verified 21:37 UTC); nothing is live.
+- **Orchestrator handover:** this seat hands over at 59% context. The successor must read
+  `handover/` (newest by NAME) in the primary checkout, and keep the edit-freeze rule.
