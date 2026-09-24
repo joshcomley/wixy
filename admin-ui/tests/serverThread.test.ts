@@ -4,7 +4,7 @@ import { ServerErasureOutcomeUnknownError } from "../src/server/api/http";
 import type { ServerIdentity } from "../src/server/identity";
 import { mountServerSettingsSheet } from "../src/server/settingsSheet";
 import { mountServerThread } from "../src/server/thread";
-import type { UploadAttachment } from "../src/server/upload";
+import { UploadError, type UploadAttachment } from "../src/server/upload";
 import type { ServerStreamEvent } from "../src/server/stream";
 import type { LockHooks, ServerSession } from "../src/server/types";
 
@@ -409,6 +409,185 @@ describe("mountServerThread", () => {
     expect(sendMessage).toHaveBeenCalledOnce();
     expect(view.element.querySelector<HTMLButtonElement>(".wx-srv-retry-voice-button")?.hidden).toBe(true);
     view.teardown();
+  });
+
+  // F17 (audit round 4): a failed voice note used to disable the mic until the owner
+  // routed away and back (which also locks). A resend that can never succeed — a 422
+  // because the attachment failed processing or was reaped — left "Retry voice note"
+  // failing forever with no way out.
+  describe("a voice note that cannot be sent (F17)", () => {
+    const voiceAttachment = (id = "voice-id"): UploadAttachment => ({
+      id, kind: "voice", status: "processing", width: null, height: null, durationS: 2, peaks: null, urls: {},
+    });
+    const button = (view: { element: HTMLElement }, selector: string) =>
+      view.element.querySelector<HTMLButtonElement>(selector);
+    const mic = (view: { element: HTMLElement }) => button(view, ".wx-srv-record-button");
+    const retry = (view: { element: HTMLElement }) => button(view, ".wx-srv-retry-voice-button");
+    const discard = (view: { element: HTMLElement }) => button(view, ".wx-srv-discard-voice-button");
+    const composerError = (view: { element: HTMLElement }) =>
+      view.element.querySelector(".wx-chat-composer-error")?.textContent ?? "";
+
+    async function recordVoiceNote(view: { element: HTMLElement }): Promise<void> {
+      mic(view)?.click();
+      await flush();
+      mic(view)?.click();
+      await flush();
+      await flush();
+    }
+
+    async function mountView() {
+      getHistory.mockResolvedValue(emptyHistory());
+      const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+      return view;
+    }
+
+    it("offers Discard next to Retry after a transient failure, and discarding frees the mic for a new note", async () => {
+      uploadServerAttachment.mockResolvedValue(voiceAttachment());
+      sendMessage
+        .mockResolvedValueOnce({ ok: false, kind: "unavailable" } satisfies SendMessageResult)
+        .mockResolvedValueOnce({
+          ok: true,
+          message: fakeMessage({ seq: 5, clientId: "generated-uuid-1234", text: null }),
+        } satisfies SendMessageResult);
+      const view = await mountView();
+      await recordVoiceNote(view);
+
+      expect(retry(view)?.hidden).toBe(false);
+      expect(discard(view)?.hidden).toBe(false);
+      expect(discard(view)?.textContent).toBe("Discard");
+      expect(mic(view)?.disabled).toBe(true); // a note is pending: no second recording yet
+
+      discard(view)?.click();
+      await flush();
+
+      expect(retry(view)?.hidden).toBe(true);
+      expect(discard(view)?.hidden).toBe(true);
+      expect(composerError(view)).toBe("");
+      expect(mic(view)?.disabled).toBe(false);
+      expect(view.element.querySelector(".wx-srv-record-status")?.hasAttribute("hidden")).toBe(true);
+
+      await recordVoiceNote(view);
+      expect(uploadServerAttachment).toHaveBeenCalledTimes(2); // the discarded note is not resent
+      expect(sendMessage).toHaveBeenCalledTimes(2);
+      expect(discard(view)?.hidden).toBe(true);
+      expect(mic(view)?.disabled).toBe(false);
+      view.teardown();
+    });
+
+    it("a transient failure keeps the retry path: same clientId, no second upload", async () => {
+      uploadServerAttachment.mockResolvedValue(voiceAttachment());
+      sendMessage
+        .mockResolvedValueOnce({ ok: false, kind: "unavailable" } satisfies SendMessageResult)
+        .mockResolvedValueOnce({ ok: false, kind: "unavailable" } satisfies SendMessageResult)
+        .mockResolvedValueOnce({
+          ok: true,
+          message: fakeMessage({ seq: 6, clientId: "generated-uuid-1234", text: null }),
+        } satisfies SendMessageResult);
+      const view = await mountView();
+      await recordVoiceNote(view);
+      retry(view)?.click();
+      await flush();
+      await flush();
+      // A second transient failure: still retryable, still discardable.
+      expect(retry(view)?.hidden).toBe(false);
+      expect(discard(view)?.hidden).toBe(false);
+      expect(composerError(view)).toBe("Couldn't send voice note. Try again.");
+
+      retry(view)?.click();
+      await flush();
+      await flush();
+
+      const inputs = sendMessage.mock.calls.map((call) => call[1] as { clientId: string; attachmentIds: string[] });
+      expect(inputs).toHaveLength(3);
+      expect(new Set(inputs.map((input) => input.clientId)).size).toBe(1);
+      expect(inputs.every((input) => input.attachmentIds[0] === "voice-id")).toBe(true);
+      expect(uploadServerAttachment).toHaveBeenCalledOnce();
+      expect(retry(view)?.hidden).toBe(true);
+      expect(discard(view)?.hidden).toBe(true);
+      expect(mic(view)?.disabled).toBe(false);
+      view.teardown();
+    });
+
+    it.each([
+      ["a 422 (the attachment failed processing or was reaped)",
+        { ok: false, kind: "invalid", detail: "attachment voice-id is unknown, already used, or failed" }],
+      ["a 404", { ok: false, kind: "rejected", status: 404 }],
+    ] as const)("%s on the retry is definitive: it is discarded with a clear message and the mic is free", async (_name, rejection) => {
+      uploadServerAttachment.mockResolvedValue(voiceAttachment());
+      sendMessage
+        .mockResolvedValueOnce({ ok: false, kind: "unavailable" } satisfies SendMessageResult)
+        .mockResolvedValueOnce(rejection as SendMessageResult)
+        .mockResolvedValueOnce({
+          ok: true,
+          message: fakeMessage({ seq: 7, clientId: "generated-uuid-1234", text: null }),
+        } satisfies SendMessageResult);
+      const view = await mountView();
+      await recordVoiceNote(view);
+      expect(retry(view)?.hidden).toBe(false);
+
+      retry(view)?.click();
+      await flush();
+      await flush();
+
+      expect(composerError(view)).toBe(
+        "The server couldn't accept that voice note, so it was discarded. Record it again.",
+      );
+      expect(composerError(view)).not.toContain("voice-id"); // no raw server detail / ids
+      expect(retry(view)?.hidden).toBe(true);
+      expect(discard(view)?.hidden).toBe(true);
+      expect(mic(view)?.disabled).toBe(false);
+
+      await recordVoiceNote(view);
+      expect(uploadServerAttachment).toHaveBeenCalledTimes(2);
+      expect(sendMessage).toHaveBeenCalledTimes(3);
+      expect(composerError(view)).toBe("");
+      view.teardown();
+    });
+
+    it("a definitive rejection on the FIRST send is discarded straight away, not left to retry forever", async () => {
+      uploadServerAttachment.mockResolvedValue(voiceAttachment());
+      sendMessage.mockResolvedValue({ ok: false, kind: "invalid", detail: "bad attachment" } satisfies SendMessageResult);
+      const view = await mountView();
+      await recordVoiceNote(view);
+
+      expect(retry(view)?.hidden).toBe(true);
+      expect(discard(view)?.hidden).toBe(true);
+      expect(mic(view)?.disabled).toBe(false);
+      expect(composerError(view)).toBe(
+        "The server couldn't accept that voice note, so it was discarded. Record it again.",
+      );
+      view.teardown();
+    });
+
+    it("an upload the server rejects (413) is discarded with the upload's own message", async () => {
+      uploadServerAttachment.mockRejectedValue(new UploadError("This file is too large.", 413));
+      const view = await mountView();
+      await recordVoiceNote(view);
+
+      expect(composerError(view)).toBe(
+        "This file is too large. The voice note was discarded — record it again.",
+      );
+      expect(retry(view)?.hidden).toBe(true);
+      expect(discard(view)?.hidden).toBe(true);
+      expect(mic(view)?.disabled).toBe(false);
+      expect(sendMessage).not.toHaveBeenCalled();
+      view.teardown();
+    });
+
+    it("an upload that fails without a verdict (network) stays retryable and discardable", async () => {
+      uploadServerAttachment.mockRejectedValue(new TypeError("Failed to fetch"));
+      const view = await mountView();
+      await recordVoiceNote(view);
+
+      expect(composerError(view)).toContain("Couldn't send voice note");
+      expect(retry(view)?.hidden).toBe(false);
+      expect(discard(view)?.hidden).toBe(false);
+      discard(view)?.click();
+      await flush();
+      expect(mic(view)?.disabled).toBe(false);
+      view.teardown();
+    });
   });
 
   describe("send() — optimistic echo", () => {

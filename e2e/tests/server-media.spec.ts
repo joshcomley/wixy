@@ -186,6 +186,115 @@ test.describe("server-media.spec.ts (P6b)", () => {
     await audioNode!.dispose();
   });
 
+  test("a voice note the server cannot accept never strands the mic, on a 360px phone (F17)", async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 740 });
+    let sends = 0;
+    await page.route("**/api/admin/server/messages", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+      sends += 1;
+      if (sends === 1) {
+        // A transient failure: Retry stays offered, and so does Discard.
+        await route.fulfill({ status: 503, contentType: "application/json", body: '{"error":"unavailable"}' });
+      } else if (sends === 2) {
+        // The retry meets a definitive verdict (the attachment failed processing or was
+        // reaped): it can never succeed, so the note is discarded and the mic is free.
+        await route.fulfill({
+          status: 422,
+          contentType: "application/json",
+          body: '{"error":"invalid","detail":"attachment x is unknown, already used, or failed"}',
+        });
+      } else {
+        await route.fallback();
+      }
+    });
+    // One fixture chat serves the whole spec file (no reset between tests), so count
+    // only THIS run's own voice bubble: a unique sender name keeps it independent of
+    // every voice note an earlier test left behind.
+    await unlockServer(page, `Retry ${Date.now()}`);
+
+    const record = page.getByRole("button", { name: "Record a voice note" });
+    const retry = page.getByRole("button", { name: "Retry sending voice note" });
+    const discard = page.getByRole("button", { name: "Discard voice note" });
+    const draft = page.locator(".wx-chat-composer textarea");
+
+    await record.click();
+    await expect(page.getByRole("button", { name: "Stop recording" })).toBeVisible();
+    await page.waitForTimeout(1_300);
+    await page.getByRole("button", { name: "Stop recording" }).click();
+    await expect(retry).toBeVisible();
+    await expect(discard).toBeVisible();
+
+    // Narrow-viewport layout: Retry and Discard sit on their own row, so the text field
+    // keeps a usable width and nothing spills past the 360px viewport.
+    const draftBox = await draft.boundingBox();
+    expect(draftBox?.width ?? 0).toBeGreaterThan(120);
+    for (const control of [retry, discard]) {
+      const box = await control.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(360);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await expect(record).toBeDisabled(); // a note is pending: no second recording yet
+
+    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+    await retry.click();
+    await expect(page.locator(".wx-chat-composer-error")).toContainText("was discarded");
+    await expect(retry).toBeHidden();
+    await expect(discard).toBeHidden();
+    await expect(record).toBeEnabled();
+
+    // A new note can be recorded and now goes through.
+    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+    await record.click();
+    await expect(page.getByRole("button", { name: "Stop recording" })).toBeVisible();
+    await page.waitForTimeout(1_300);
+    const sentVoice = page.waitForResponse((response) =>
+      response.url().endsWith("/api/admin/server/messages") && response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: "Stop recording" }).click();
+    expect((await sentVoice).status()).toBe(201);
+    // The new note is sent and shown as this user's own message. Whether ffmpeg has
+    // finished it is not F17's concern (the two intercepted attempts above left orphan
+    // uploads queued ahead of it, which can take a while on a loaded host), so this
+    // asserts the bubble, not the processed player.
+    await expect(page.locator(".wx-srv-bubble-mine")).toHaveCount(1);
+    await expect(
+      page.locator(".wx-srv-bubble-mine .wx-srv-voice, .wx-srv-bubble-mine .wx-srv-attachment-processing"),
+    ).toHaveCount(1);
+    await expect(page.locator(".wx-chat-composer-error")).toBeHidden();
+  });
+
+  test("a failed voice note can simply be discarded (F17)", async ({ page }) => {
+    await page.route("**/api/admin/server/messages", async (route) => {
+      if (route.request().method() === "POST") {
+        await route.fulfill({ status: 503, contentType: "application/json", body: '{"error":"unavailable"}' });
+      } else {
+        await route.fallback();
+      }
+    });
+    await unlockServer(page, "Discard tester");
+    const record = page.getByRole("button", { name: "Record a voice note" });
+    await record.click();
+    await expect(page.getByRole("button", { name: "Stop recording" })).toBeVisible();
+    await page.waitForTimeout(1_300);
+    await page.getByRole("button", { name: "Stop recording" }).click();
+
+    const discard = page.getByRole("button", { name: "Discard voice note" });
+    await expect(discard).toBeVisible();
+    await expect(record).toBeDisabled();
+    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+    await discard.click();
+
+    await expect(discard).toBeHidden();
+    await expect(page.getByRole("button", { name: "Retry sending voice note" })).toBeHidden();
+    await expect(page.locator(".wx-chat-composer-error")).toBeHidden();
+    await expect(record).toBeEnabled();
+  });
+
   test("voice recordings shorter than one second are discarded", async ({ page }) => {
     const uploadRequests: string[] = [];
     page.on("request", (request) => {
