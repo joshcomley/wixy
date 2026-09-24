@@ -406,10 +406,11 @@ terminal.
 It captures the current `ServerSession` when an upload starts, sends the chunked
 `POST /uploads` → `PUT /uploads/{id}/chunks/{index}` → `POST /uploads/{id}/complete` sequence,
 and maps uploaded-byte progress back to the composer. The shared `serverFetch` wrapper
-preserves the caller's abort signal while applying its request timeout. Locking detaches the
-thread but keeps staged files and in-flight uploads in memory; reattaching supplies a fresh
-session, while any upload already in flight continues with its captured session. Leaving the
-route disposes the view and aborts its uploads.
+preserves the caller's abort signal while applying its request timeout. Ordinary chat API
+requests use a 10-second timeout; upload requests allow 120 seconds per chunk for slower
+mobile uplinks. Locking detaches the thread but keeps staged files and in-flight uploads in
+memory; reattaching supplies a fresh session, while any upload already in flight continues
+with its captured session. Leaving the route disposes the view and aborts its uploads.
 
 On send, `thread.ts` posts the staged attachment IDs in the message request. It uses
 `server/mediaRender.ts` for processing/failed states, the photo grid and shared lightbox,

@@ -15,6 +15,7 @@ describe("serverFetch", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("prefixes the path with the server API base", async () => {
@@ -68,5 +69,26 @@ describe("serverFetch", () => {
     const request = serverFetch("/uploads", { signal: caller.signal }, { token: "tok", expiresAt: 0 });
     caller.abort();
     await expect(request).rejects.toBeDefined();
+  });
+
+  it("uses a longer timeout only when an upload requests one", async () => {
+    vi.useFakeTimers();
+    let aborted = false;
+    fetchMock.mockImplementationOnce((_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          aborted = true;
+          reject(init?.signal?.reason);
+        }, { once: true });
+      }),
+    );
+    const request = serverFetch("/uploads", {}, { token: "tok", expiresAt: 0 }, 120_000);
+    const rejected = expect(request).rejects.toMatchObject({ name: "AbortError" });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(110_000);
+    await rejected;
+    expect(aborted).toBe(true);
   });
 });
