@@ -419,15 +419,22 @@ preserves the caller's abort signal while applying its request timeout. Ordinary
 requests use a 10-second timeout; upload requests allow 120 seconds per chunk for slower
 mobile uplinks. Locking detaches the thread but keeps staged files and in-flight uploads in
 memory; reattaching supplies a fresh session, while any upload already in flight continues
-with its captured session. Leaving the route disposes the view and aborts its uploads.
+with its captured session. Removing a chip aborts its upload and makes a best-effort
+authenticated `DELETE /uploads/{uploadId}` after init; failed uploads use the same cleanup,
+so the server releases pending quota promptly. The aborted chip removal doesn't show an error.
+On each reattach, `thread.ts` re-reads loaded history pages to mint fresh signed media URLs
+for the new token expiry. Leaving the route disposes the view and aborts its uploads.
 
 On send, `thread.ts` posts the staged attachment IDs in the message request. It uses
 `server/mediaRender.ts` for processing/failed states, the photo grid and shared lightbox,
 native video, and the voice-note player with waveform. The settings button and photo
 thumbnails that open the lightbox carry `data-srv-gesture-boundary` per brief v1.5.2's R3
-surface boundary. Playback and an open lightbox are cleaned up on detach. These files
-and signed media URLs remain separate from the site's `draft/media/` and public build, as
-documented in
+surface boundary. `gestures.ts` consumes that marker: a boundary tap can close a run begun
+elsewhere, but an unmatched run is cleared afterward; non-primary clicks do not count.
+P8's in-page choice controls use the same marker convention. Before every message-list redraw
+and lock detach, `thread.ts` pauses media, clears its source, and releases its `mediaPlaying`
+suspension; playback cannot remain active in a detached node. These files and signed media
+URLs remain separate from the site's `draft/media/` and public build, as documented in
 [media.md](media.md#private-live-chat-attachments).
 
 Verification: `admin-ui/` runs `npm run typecheck` and `npm test`; the integrated browser

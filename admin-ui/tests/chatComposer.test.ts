@@ -416,7 +416,9 @@ describe("mountChatComposer", () => {
       let capturedSignal: AbortSignal | undefined;
       const upload = vi.fn((_file: File, ctx: ChatComposerUploadContext) => {
         capturedSignal = ctx.signal;
-        return new Promise<ChatAttachment>(() => {});
+        return new Promise<ChatAttachment>((_resolve, reject) => {
+          ctx.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        });
       });
       const composer = mountChatComposer(makeOptions({ upload }));
       const fileInput = composer.element.querySelector<HTMLInputElement>('input[type="file"]')!;
@@ -428,6 +430,8 @@ describe("mountChatComposer", () => {
       expect(capturedSignal?.aborted).toBe(false);
       composer.element.querySelector<HTMLButtonElement>(".wx-chat-attachment-remove")?.click();
       expect(capturedSignal?.aborted).toBe(true);
+      await flush();
+      expect(composer.element.querySelector<HTMLElement>(".wx-chat-composer-error")?.hidden).toBe(true);
       composer.teardown();
     });
 

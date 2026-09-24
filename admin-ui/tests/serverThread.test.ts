@@ -78,8 +78,10 @@ describe("mountServerThread", () => {
     vi.useRealTimers();
   });
 
-  it("attach() loads history once; a second attach() is a no-op returning null", async () => {
-    getHistory.mockResolvedValue(emptyHistory({ cursor: 42 }));
+  it("attach() reloads history on reattach to refresh signed media URLs", async () => {
+    getHistory
+      .mockResolvedValueOnce(emptyHistory({ cursor: 42 }))
+      .mockResolvedValueOnce(emptyHistory({ cursor: 43 }));
     const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
 
     const first = await view.attach(SESSION);
@@ -87,8 +89,40 @@ describe("mountServerThread", () => {
     expect(getHistory).toHaveBeenCalledTimes(1);
 
     const second = await view.attach(SESSION);
-    expect(second).toBeNull();
-    expect(getHistory).toHaveBeenCalledTimes(1); // not re-fetched
+    expect(second).toBe(43);
+    expect(getHistory).toHaveBeenCalledTimes(2);
+    view.teardown();
+  });
+
+  it("replaces retained media URLs with signatures from the fresh unlock session", async () => {
+    const older = fakeMessage({
+      seq: 1,
+      text: null,
+      attachments: [{
+        id: "photo-1", kind: "photo", status: "ready", width: 100, height: 80,
+        durationS: null, peaks: null, urls: { thumb: "/old-thumb?exp=1", full: "/old-full?exp=1" },
+      }],
+    });
+    const refreshed = fakeMessage({
+      ...older,
+      attachments: [{
+        id: "photo-1", kind: "photo", status: "ready", width: 100, height: 80,
+        durationS: null, peaks: null, urls: { thumb: "/new-thumb?exp=2", full: "/new-full?exp=2" },
+      }],
+    });
+    getHistory
+      .mockResolvedValueOnce(emptyHistory({ messages: [older], cursor: 1 }))
+      .mockResolvedValueOnce(emptyHistory({ messages: [refreshed], cursor: 1 }));
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+    await view.attach(SESSION);
+    expect(view.element.querySelector(".wx-srv-photo-thumb img")?.getAttribute("src")).toBe("/old-thumb?exp=1");
+
+    view.detach();
+    const renewedSession: ServerSession = { token: "renewed-token", expiresAt: 99_999_999 };
+    await view.attach(renewedSession);
+
+    expect(getHistory).toHaveBeenLastCalledWith(renewedSession, { limit: 50 });
+    expect(view.element.querySelector(".wx-srv-photo-thumb img")?.getAttribute("src")).toBe("/new-thumb?exp=2");
     view.teardown();
   });
 
@@ -98,6 +132,42 @@ describe("mountServerThread", () => {
     await view.attach(SESSION);
 
     expect(view.element.querySelector(".wx-srv-thread-empty")?.textContent).toMatch(/no messages yet/i);
+    view.teardown();
+  });
+
+  it("redraw and detach stop active media and release its playback suspension", async () => {
+    getHistory.mockResolvedValue(emptyHistory({ messages: [fakeMessage({
+      seq: 1,
+      text: null,
+      attachments: [{
+        id: "video-1", kind: "video", status: "ready", width: 64, height: 48,
+        durationS: 2, peaks: null, urls: { play: "/video" },
+      }],
+    })] }));
+    const release = vi.fn();
+    const hooks: LockHooks = { suspend: vi.fn(() => release), lockNow: vi.fn() };
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks, win: fakeWindow(), onSettings: vi.fn() });
+    await view.attach(SESSION);
+
+    const firstVideo = view.element.querySelector<HTMLVideoElement>(".wx-srv-video")!;
+    const pauseFirst = vi.spyOn(firstVideo, "pause").mockImplementation(() => {});
+    const loadFirst = vi.spyOn(firstVideo, "load").mockImplementation(() => {});
+    firstVideo.dispatchEvent(new Event("play"));
+    view.handleStreamEvent({ type: "message", message: fakeMessage({ seq: 2, sender: "Purdy" }) });
+
+    expect(firstVideo.closest(".wx-srv-message-list")).toBeNull();
+    expect(pauseFirst).toHaveBeenCalledTimes(1);
+    expect(loadFirst).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledTimes(1);
+
+    const redrawnVideo = view.element.querySelector<HTMLVideoElement>(".wx-srv-video")!;
+    const pauseRedrawn = vi.spyOn(redrawnVideo, "pause").mockImplementation(() => {});
+    const loadRedrawn = vi.spyOn(redrawnVideo, "load").mockImplementation(() => {});
+    redrawnVideo.dispatchEvent(new Event("play"));
+    view.detach();
+    expect(pauseRedrawn).toHaveBeenCalledTimes(1);
+    expect(loadRedrawn).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledTimes(2);
     view.teardown();
   });
 

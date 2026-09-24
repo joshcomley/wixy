@@ -21,7 +21,7 @@ describe("uploadServerAttachment", () => {
       const headers = new Headers(init?.headers);
       expect(headers.get("X-Wixy-Server-Token")).toBe(SESSION.token);
       if (path === `${SERVER_API_BASE}/uploads`) {
-        return jsonResponse({ uploadId: "u".repeat(32), chunkBytes: 3, maxBytes: 100 }, 201);
+        return jsonResponse({ uploadId: "a".repeat(32), chunkBytes: 3, maxBytes: 100 }, 201);
       }
       if (path.endsWith(`/chunks/${chunkIndex}`)) {
         chunkIndex += 1;
@@ -44,11 +44,48 @@ describe("uploadServerAttachment", () => {
     expect(result.id).toBe("a".repeat(32));
     expect(paths).toEqual([
       `${SERVER_API_BASE}/uploads`,
-      `${SERVER_API_BASE}/uploads/${"u".repeat(32)}/chunks/0`,
-      `${SERVER_API_BASE}/uploads/${"u".repeat(32)}/chunks/1`,
-      `${SERVER_API_BASE}/uploads/${"u".repeat(32)}/complete`,
+      `${SERVER_API_BASE}/uploads/${"a".repeat(32)}/chunks/0`,
+      `${SERVER_API_BASE}/uploads/${"a".repeat(32)}/chunks/1`,
+      `${SERVER_API_BASE}/uploads/${"a".repeat(32)}/complete`,
     ]);
     expect(progress).toHaveBeenCalledWith(0, 5);
     expect(progress).toHaveBeenCalledWith(5, 5);
+  });
+
+  it("best-effort deletes a canceled pending upload with the captured session", async () => {
+    const controller = new AbortController();
+    const calls: Array<{ path: string; method: string | undefined }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      calls.push({ path, method: init?.method });
+      const headers = new Headers(init?.headers);
+      expect(headers.get("X-Wixy-Server-Token")).toBe(SESSION.token);
+      if (path === `${SERVER_API_BASE}/uploads`) {
+        return jsonResponse({ uploadId: "a".repeat(32), chunkBytes: 3, maxBytes: 100 }, 201);
+      }
+      if (path.endsWith("/chunks/0")) {
+        controller.abort();
+        return new Response(null, { status: 204 });
+      }
+      if (init?.method === "DELETE") {
+        expect(init.signal?.aborted).toBe(false);
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`unexpected upload request: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(uploadServerAttachment(
+      new Blob([new Uint8Array([1, 2, 3, 4, 5])], { type: "image/jpeg" }),
+      "photo",
+      SESSION,
+      { signal: controller.signal },
+    )).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(calls).toEqual([
+      { path: `${SERVER_API_BASE}/uploads`, method: "POST" },
+      { path: `${SERVER_API_BASE}/uploads/${"a".repeat(32)}/chunks/0`, method: "PUT" },
+      { path: `${SERVER_API_BASE}/uploads/${"a".repeat(32)}`, method: "DELETE" },
+    ]);
   });
 });

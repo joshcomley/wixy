@@ -15,7 +15,7 @@ import { uploadServerAttachment } from "./api/uploads";
 import { getHistory, sendMessage, type Message } from "./api/messages";
 import type { ServerIdentity } from "./identity";
 import { linkifyInto } from "./linkify";
-import { renderAttachments } from "./mediaRender";
+import { disposeAttachmentMedia, renderAttachments } from "./mediaRender";
 import { createVoiceRecorder, type VoiceRecorder } from "./recorder";
 import type { ServerStreamEvent } from "./stream";
 import type { LockHooks, ServerSession } from "./types";
@@ -36,11 +36,10 @@ export interface ServerThreadDeps {
 
 export interface ServerThreadView {
   readonly element: HTMLElement;
-  /** First call: loads the newest history page and returns its cursor.
-   * Every later call (the view already has history): a no-op that returns
-   * `null` — the caller keeps using whatever cursor it already has. Throws
-   * `ServerLockedError` on a 401, letting the caller lock; any other
-   * failure is shown in-thread with a retry affordance instead. */
+  /** Loads the newest history page, and on reattach refreshes every loaded
+   * page so signed media URLs use the new session's expiry. Returns the
+   * newest cursor. Throws `ServerLockedError` on a 401, letting the caller
+   * lock; other failures are shown in-thread with a retry affordance. */
   attach(session: ServerSession): Promise<number | null>;
   /** Detaches from the DOM's interactive bits for a lock: closes the
    * lightbox and settings-sheet host, but keeps every message, the draft
@@ -377,6 +376,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     const nowMs = now();
     pendingEchoes = pendingEchoes.filter((e) => nowMs - e.sentAt < ECHO_EXPIRY_MS);
 
+    disposeAttachmentMedia(messageList);
     messageList.innerHTML = "";
     const messages = Array.from(confirmedBySeq.values()).sort((a, b) => a.seq - b.seq);
     if (messages.length === 0 && pendingEchoes.length === 0) {
@@ -520,16 +520,43 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   async function attach(session: ServerSession): Promise<number | null> {
     currentSession = session;
     if (voiceRecorder === null) voiceRecorder = createRecorder();
-    if (historyLoaded) return null;
+    const oldestSeqAtAttach = historyLoaded ? oldestLoadedSeq() : null;
     historyErrorRow.hidden = true;
     try {
-      const page = await getHistory(session, { limit: HISTORY_PAGE_SIZE });
-      for (const message of page.messages) addConfirmed(message);
-      hasMoreHistory = page.hasMore;
+      let before: number | undefined;
+      let cursor: number | null = null;
+      while (true) {
+        const page = await getHistory(
+          session,
+          before === undefined ? { limit: HISTORY_PAGE_SIZE } : { before, limit: HISTORY_PAGE_SIZE },
+        );
+        if (cursor === null) cursor = page.cursor;
+        for (const message of page.messages) {
+          if (oldestSeqAtAttach === null || message.seq >= oldestSeqAtAttach) addConfirmed(message);
+        }
+        if (oldestSeqAtAttach === null || page.messages.length === 0) {
+          hasMoreHistory = page.hasMore;
+          break;
+        }
+        if (page.messages.some((message) => message.seq <= oldestSeqAtAttach)) {
+          hasMoreHistory = page.hasMore || page.messages.some((message) => message.seq < oldestSeqAtAttach);
+          break;
+        }
+        if (!page.hasMore) {
+          hasMoreHistory = false;
+          break;
+        }
+        const nextBefore = Math.min(...page.messages.map((message) => message.seq));
+        if (nextBefore === before) {
+          hasMoreHistory = page.hasMore;
+          break;
+        }
+        before = nextBefore;
+      }
       historyLoaded = true;
       renderThreadList();
       ensureObserver();
-      return page.cursor;
+      return cursor;
     } catch (error) {
       if (error instanceof ServerLockedError) throw error;
       historyErrorText.textContent =
@@ -551,13 +578,11 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       voiceRecorder?.detach();
       voiceRecorder = null;
       updateRecorderUi();
+      disposeAttachmentMedia(messageList);
       lightbox.teardown();
-      // ServerChatView.detach()'s contract: pause media and exit fullscreen
-      // — a lock (panic/idle/escape/…) mid-playback must never leave audio
-      // or video running once the chat subtree is detached.
-      for (const media of messageList.querySelectorAll("audio, video")) {
-        (media as HTMLMediaElement).pause();
-      }
+      // ServerChatView.detach()'s contract: pause media, release any
+      // mediaPlaying suspension, and exit fullscreen — a lock mid-playback
+      // must never leave audio/video running once the subtree is detached.
       if (documentRef.fullscreenElement != null && typeof documentRef.exitFullscreen === "function") {
         void documentRef.exitFullscreen().catch(() => {});
       }
@@ -592,6 +617,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       currentSession = null;
       voiceRecorder?.detach();
       voiceRecorder = null;
+      disposeAttachmentMedia(messageList);
       observer?.disconnect();
       lightbox.teardown();
       threadScroll.teardown();

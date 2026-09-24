@@ -355,6 +355,7 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
       .catch((error: unknown) => {
         uploadControllers.delete(localId);
         if (tornDown) return;
+        if (controller.signal.aborted) return;
         // A failed upload never sends silently without the image the owner
         // thinks is attached — drop the chip and surface why.
         removeAttachment(localId);

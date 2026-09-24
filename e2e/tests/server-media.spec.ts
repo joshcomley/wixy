@@ -163,6 +163,20 @@ test.describe("server-media.spec.ts (P6b)", () => {
     await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
     await voice.getByRole("button", { name: "Play voice note" }).click();
     await expect.poll(() => audio.evaluate((node) => (node as HTMLAudioElement).currentTime)).toBeGreaterThan(0);
+    const audioNode = await audio.elementHandle();
+    expect(audioNode).not.toBeNull();
+    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+    await page.locator('.wx-srv-chat-host button[aria-label="Close"]').click();
+    await expect(page.locator(".wx-srv-thread")).toHaveCount(0);
+    const stopped = await audioNode!.evaluate((node) => ({
+      paused: (node as HTMLAudioElement).paused,
+      currentTime: (node as HTMLAudioElement).currentTime,
+    }));
+    expect(stopped.paused).toBe(true);
+    await page.waitForTimeout(250);
+    const afterDetach = await audioNode!.evaluate((node) => (node as HTMLAudioElement).currentTime);
+    expect(afterDetach).toBeCloseTo(stopped.currentTime, 2);
+    await audioNode!.dispose();
   });
 
   test("voice recordings shorter than one second are discarded", async ({ page }) => {

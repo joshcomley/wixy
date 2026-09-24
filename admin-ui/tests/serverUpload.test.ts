@@ -9,7 +9,7 @@ function response(body: unknown, status = 200): Response {
 }
 
 function initResponse(): Response {
-  return response({ uploadId: "u".repeat(32), chunkBytes: 2, maxBytes: 100 });
+  return response({ uploadId: "a".repeat(32), chunkBytes: 2, maxBytes: 100 });
 }
 
 describe("server upload", () => {
@@ -32,10 +32,10 @@ describe("server upload", () => {
     expect(result.id).toBe("a");
     expect(calls.map(({ url }) => url)).toEqual([
       "/api/admin/server/uploads",
-      "/api/admin/server/uploads/" + "u".repeat(32) + "/chunks/0",
-      "/api/admin/server/uploads/" + "u".repeat(32) + "/chunks/1",
-      "/api/admin/server/uploads/" + "u".repeat(32) + "/chunks/2",
-      "/api/admin/server/uploads/" + "u".repeat(32) + "/complete",
+      "/api/admin/server/uploads/" + "a".repeat(32) + "/chunks/0",
+      "/api/admin/server/uploads/" + "a".repeat(32) + "/chunks/1",
+      "/api/admin/server/uploads/" + "a".repeat(32) + "/chunks/2",
+      "/api/admin/server/uploads/" + "a".repeat(32) + "/complete",
     ]);
     expect(progress).toEqual([0, 2, 4, 5, 5]);
     expect(calls[1]?.init?.method).toBe("PUT");
@@ -62,7 +62,7 @@ describe("server upload", () => {
   });
 
   it("fails after three chunk attempts", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       if (String(input).endsWith("/uploads")) return initResponse();
       return response({ error: "media_unavailable" }, 503);
     });
@@ -71,7 +71,9 @@ describe("server upload", () => {
       fetch: fetchMock,
       sleep: async () => undefined,
     })).rejects.toMatchObject({ message: "Media processing is currently unavailable.", status: 503 });
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(String(fetchMock.mock.calls[4]?.[0])).toBe("/api/admin/server/uploads/" + "a".repeat(32));
+    expect(fetchMock.mock.calls[4]?.[1]).toMatchObject({ method: "DELETE" });
   });
 
   it.each([
@@ -94,10 +96,12 @@ describe("server upload", () => {
 
   it("stops before completion when aborted between chunks", async () => {
     const controller = new AbortController();
+    const calls: string[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      calls.push(url);
       if (url.endsWith("/uploads")) return initResponse();
-      controller.abort();
+      if (url.includes("/chunks/")) controller.abort();
       return new Response(null, { status: 204 });
     });
 
@@ -106,5 +110,10 @@ describe("server upload", () => {
       signal: controller.signal,
     })).rejects.toMatchObject({ name: "AbortError" });
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/complete"))).toBe(false);
+    expect(calls).toEqual([
+      "/api/admin/server/uploads",
+      "/api/admin/server/uploads/" + "a".repeat(32) + "/chunks/0",
+      "/api/admin/server/uploads/" + "a".repeat(32),
+    ]);
   });
 });

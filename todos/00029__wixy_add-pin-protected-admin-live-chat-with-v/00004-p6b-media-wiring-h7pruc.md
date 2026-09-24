@@ -39,3 +39,10 @@ ecorder.ts, mediaRender.ts
 
 - Workspace 0ae788cb-70c8-4710-a411-88aa5445df15; the Delivery Manager assigned sequential P6b work in the `__bs6/wixy` checkout.
 - Feature branch: cmd/workspace-00029; this builder branch: cmd/workspace-00029-bs6.
+
+## Update 2026-09-24 — all DM review findings fixed; new handoff pending
+
+- Latest feature base merged: `7d6584bfedaf409bef45f5d3e527df2b943ce0ce`; candidate integration commit: `615f3bd68d43b49fbd2e7b739be71bce5dcd5bcc`.
+- Fixed all three HIGH findings and the bundled MEDIUM: gesture boundaries now affect tap handling; reattach refreshes signed attachment URLs; redraw/detach disposes active playback and releases its idle-lock suspension; failed or canceled pending uploads issue best-effort DELETE and user cancellation stays quiet.
+- Full verification after these fixes passed: ruff, mypy (206 files), TypeScript typecheck, Vitest 1074/1074, pytest 1654/1654, bundle build, and combined media/chat/lock Playwright 31/31.
+- Fixes are still uncommitted; create one stable candidate commit with the required `Release-note:` trailer, then send the DM a structured FINAL HANDOFF for that exact SHA. Do not push or update PR #230 until matching explicit clearance.
