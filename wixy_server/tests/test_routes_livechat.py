@@ -29,6 +29,7 @@ import wixy_server.app as wixy_app_module
 import wixy_server.routes_livechat as routes_livechat_module
 from wixy_server.app import create_app
 from wixy_server.livechat import janitor as livechat_janitor
+from wixy_server.livechat import media_queue as livechat_media_queue
 from wixy_server.livechat.models import AttachmentResult, PushSubscriptionRow, UploadRow
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import CmdPinVerifier
@@ -793,6 +794,54 @@ class TestDeleteWipeRoutes:
             pin_verifier=pin_verifier,
         )
 
+    def test_post_commit_cleanup_exception_returns_pending_not_error(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        app = self._new_app(storage_root, wixy_repo_root, pin_verifier)
+
+        async def paused_scrubber(**_kwargs: object) -> None:
+            await anyio.sleep_forever()
+
+        monkeypatch.setattr(livechat_janitor, "run_scrubber_forever", paused_scrubber)
+        store: LiveChatStore = app.state.livechat_store
+        message, _ = store.create_message(
+            client_id="client-postcommit-cleanup-failure",
+            sender="Josh",
+            device_id="device-postcommit-cleanup-failure",
+            by_email=None,
+            text="committed before cleanup error",
+            attachment_ids=(),
+            now=1.0,
+        )
+        real_cleanup = livechat_janitor.cleanup_deleted_storage_once
+
+        def fail_route_cleanup(
+            *,
+            store: LiveChatStore,
+            paths: ProjectPaths,
+            only_items: set[tuple[str, str]] | None = None,
+        ) -> bool:
+            if only_items is not None:
+                raise OSError("simulated post-commit filesystem failure")
+            return real_cleanup(store=store, paths=paths, only_items=only_items)
+
+        monkeypatch.setattr(livechat_janitor, "cleanup_deleted_storage_once", fail_route_cleanup)
+        with TestClient(app) as client:
+            token = _unlock(client).json()["token"]
+            response = client.delete(
+                f"/api/admin/server/messages/{message.seq}",
+                headers={"X-Wixy-Server-Token": token},
+            )
+
+        assert response.status_code == 202
+        assert response.json() == {"erasurePending": True}
+        assert store.get_messages([message.seq]) == []
+        assert store.scrub_pending()
+
     @pytest.mark.parametrize(
         ("wipe", "expected_event"),
         [(False, "message_deleted"), (True, "wiped")],
@@ -1032,7 +1081,11 @@ class TestDeleteWipeRoutes:
         storage_root: Path,
         wixy_repo_root: Path,
         pin_verifier: CmdPinVerifier,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        # This test deliberately seeds a processing attachment; hold the media
+        # queue off so it cannot race its filesystem fixture with the route.
+        monkeypatch.setattr(livechat_media_queue, "resolve_binaries", lambda *_: None)
         app = self._new_app(storage_root, wixy_repo_root, pin_verifier)
         push_calls: list[str] = []
 
@@ -1124,7 +1177,7 @@ class TestDeleteWipeRoutes:
         )
         marker_states: list[bool] = []
         marker_transactions: list[bool] = []
-        write_marker = store._write_scrub_pending_marker
+        write_marker = store._upsert_pending_scrub
 
         def observe_write_transaction(conn: sqlite3.Connection) -> str:
             marker_transactions.append(conn.in_transaction)
@@ -1134,7 +1187,7 @@ class TestDeleteWipeRoutes:
             marker_states.append(store.scrub_pending())
             return True
 
-        monkeypatch.setattr(store, "_write_scrub_pending_marker", observe_write_transaction)
+        monkeypatch.setattr(store, "_upsert_pending_scrub", observe_write_transaction)
         monkeypatch.setattr(store, "scrub", observe_marker)
         with TestClient(app) as client:
             token = _unlock(client).json()["token"]
@@ -1298,7 +1351,7 @@ class TestDeleteWipeRoutes:
         )
         marker_states: list[bool] = []
         marker_transactions: list[bool] = []
-        write_marker = store._write_scrub_pending_marker
+        write_marker = store._upsert_pending_scrub
 
         def observe_write_transaction(conn: sqlite3.Connection) -> str:
             marker_transactions.append(conn.in_transaction)
@@ -1308,7 +1361,7 @@ class TestDeleteWipeRoutes:
             marker_states.append(store.scrub_pending())
             return True
 
-        monkeypatch.setattr(store, "_write_scrub_pending_marker", observe_write_transaction)
+        monkeypatch.setattr(store, "_upsert_pending_scrub", observe_write_transaction)
         monkeypatch.setattr(store, "scrub", observe_marker)
         with TestClient(app) as client:
             token = _unlock(client).json()["token"]
@@ -1319,7 +1372,9 @@ class TestDeleteWipeRoutes:
             )
 
         assert response.status_code == 204
-        assert marker_states == [True]
+        # The first checkpoint runs with the marker present; clearing it is
+        # followed by one best-effort checkpoint that sees it absent.
+        assert marker_states == [True, False]
         assert marker_transactions == [True]
         assert not store.scrub_pending()
 

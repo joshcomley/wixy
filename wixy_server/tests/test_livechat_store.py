@@ -4,6 +4,7 @@ push subscriptions."""
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -34,9 +35,38 @@ class TestMigrations:
         store.list_messages(before=None, limit=1)
         conn = sqlite3.connect(str(db_path))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
         finally:
             conn.close()
+
+    def test_legacy_file_marker_is_imported_and_unlink_is_retried(
+        self, store: LiveChatStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        marker = store._legacy_scrub_pending_path()
+        marker.parent.mkdir(parents=True)
+        marker.write_text("legacy-marker-token", encoding="ascii")
+        real_unlink = Path.unlink
+
+        def denied_once(path: Path, *, missing_ok: bool = False) -> None:
+            if path == marker:
+                raise PermissionError("held by a legacy reader")
+            real_unlink(path, missing_ok=missing_ok)
+
+        monkeypatch.setattr(Path, "unlink", denied_once)
+        assert store.import_legacy_scrub_marker() == "legacy-marker-token"
+        assert marker.exists()
+        assert store.scrub_pending_token() == "legacy-marker-token"
+
+        monkeypatch.setattr(Path, "unlink", real_unlink)
+        assert store.import_legacy_scrub_marker() == "legacy-marker-token"
+        assert not marker.exists()
+
+    def test_pending_scrub_is_rolled_back_with_its_transaction(self, store: LiveChatStore) -> None:
+        with pytest.raises(RuntimeError, match="abort test transaction"):
+            with store._write_txn() as conn:
+                store._upsert_pending_scrub(conn)
+                raise RuntimeError("abort test transaction")
+        assert not store.scrub_pending()
 
     def test_v3_database_gets_pending_storage_index_in_v4(self, db_path: Path) -> None:
         store = LiveChatStore(db_path)
@@ -54,7 +84,7 @@ class TestMigrations:
         upgraded.list_messages(before=None, limit=1)
         conn = sqlite3.connect(str(db_path))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
             index = conn.execute(
                 "SELECT sql FROM sqlite_master "
                 "WHERE type = 'index' AND name = 'idx_deleted_storage_pending'"
@@ -64,7 +94,9 @@ class TestMigrations:
         assert index is not None
         assert "WHERE cleanup_pending = 1" in str(index[0])
 
-    def test_v4_database_gets_storage_generation_in_v5(self, db_path: Path) -> None:
+    def test_v4_database_gets_storage_generation_and_pending_scrub_schema(
+        self, db_path: Path
+    ) -> None:
         db_path.parent.mkdir(parents=True)
         conn = sqlite3.connect(str(db_path))
         try:
@@ -89,9 +121,15 @@ class TestMigrations:
         conn.close()
         conn = sqlite3.connect(str(db_path))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
             columns = {row[1]: row for row in conn.execute("PRAGMA table_info(deleted_storage)")}
             assert columns["generation"][3] == 1
+            assert (
+                conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'pending_scrub'"
+                ).fetchone()
+                is not None
+            )
             assert (
                 conn.execute(
                     "SELECT generation FROM deleted_storage WHERE id = ?",
@@ -138,7 +176,7 @@ class TestMigrations:
                 conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'events'").fetchone()[0]
                 == 13
             )
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
         finally:
             conn.close()
 
@@ -615,6 +653,24 @@ class TestDeleteAndWipe:
         assert store.scrub(deadline_s=10.0)
         assert store.clear_scrub_pending(expected_token=pending_token)
         assert b"wipe-reader-marker-37bc" not in self._raw_database_bytes(db_path)
+
+    def test_scrub_retries_wal_stat_permission_error(
+        self, store: LiveChatStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        wal_path = Path(f"{store._db_path}-wal")
+        real_stat = Path.stat
+        denied = False
+
+        def deny_once(path: Path, *, follow_symlinks: bool = True) -> os.stat_result:
+            nonlocal denied
+            if path == wal_path and not denied:
+                denied = True
+                raise PermissionError("WAL is delete-pending")
+            return real_stat(path, follow_symlinks=follow_symlinks)
+
+        monkeypatch.setattr(Path, "stat", deny_once)
+        assert store.scrub(deadline_s=1.0)
+        assert denied
 
     def test_complete_passive_checkpoint_can_leave_deleted_text_in_wal(
         self, store: LiveChatStore, db_path: Path

@@ -21,7 +21,9 @@ import pytest
 from anyio import CapacityLimiter
 from PIL import Image
 
+from wixy_server.livechat import janitor as livechat_janitor
 from wixy_server.livechat import media_queue, processing, uploads
+from wixy_server.livechat.models import AttachmentResult, AttachmentRow
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.store import LiveChatStore
 from wixy_server.storage import ProjectPaths
@@ -265,6 +267,61 @@ class TestLeaseExclusivityAndCrashResume:
 
 
 class TestDeleteRace:
+    @pytest.mark.asyncio
+    async def test_one_failed_item_does_not_cancel_its_sibling(
+        self,
+        store: LiveChatStore,
+        paths: ProjectPaths,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        first_id = _seed_processing_photo(store, paths, now=1000.0)
+        second_id = _seed_processing_photo(store, paths, now=1000.0)
+        first = store.get_attachment(first_id)
+        second = store.get_attachment(second_id)
+        assert first is not None and second is not None
+        sibling_ran = anyio.Event()
+
+        async def fail_one(
+            _store: LiveChatStore,
+            _paths: ProjectPaths,
+            _notifier: LiveChatNotifier,
+            _config: media_queue.QueueConfig,
+            _limiter: CapacityLimiter,
+            att: AttachmentRow,
+            _owner: str,
+        ) -> None:
+            if att.id == first_id:
+                raise RuntimeError("simulated isolated item failure")
+            sibling_ran.set()
+
+        monkeypatch.setattr(media_queue, "_handle_claimed", fail_one)
+        config = media_queue.QueueConfig(ffmpeg="ffmpeg", ffprobe="ffprobe")
+        limiter = CapacityLimiter(2)
+        async with anyio.create_task_group() as task_group:
+            task_group.start_soon(
+                media_queue._handle_claimed_isolated,
+                store,
+                paths,
+                LiveChatNotifier(),
+                config,
+                limiter,
+                first,
+                "first-owner",
+            )
+            task_group.start_soon(
+                media_queue._handle_claimed_isolated,
+                store,
+                paths,
+                LiveChatNotifier(),
+                config,
+                limiter,
+                second,
+                "second-owner",
+            )
+            with anyio.fail_after(1):
+                await sibling_ran.wait()
+            task_group.cancel_scope.cancel()
+
     def test_wipe_removing_source_during_failed_archive_does_not_crash_worker(
         self,
         store: LiveChatStore,
@@ -382,6 +439,107 @@ class TestDeleteRace:
         assert store.get_upload(att_id) is None
         assert not paths.server_upload_dir(att_id).exists()
         assert not paths.server_failed_dir(att_id).exists()
+
+    def test_genuine_archive_failure_preserves_original_and_hourly_retry_archives_it(
+        self,
+        store: LiveChatStore,
+        paths: ProjectPaths,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        att_id = _seed_processing_photo(store, paths, now=1000.0)
+        claimed = store.claim_processing(owner="owner", now=1000.0, lease_s=120.0)
+        assert claimed is not None
+        store.finish_attachment(
+            att_id=att_id,
+            owner="owner",
+            result=AttachmentResult(
+                status="failed",
+                mime=None,
+                width=None,
+                height=None,
+                duration_s=None,
+                peaks=None,
+                renditions=(),
+                bytes_on_disk=0,
+                failure="decode_failed",
+            ),
+            now=1001.0,
+        )
+        src = paths.server_upload_dir(att_id) / "assembled"
+        original_bytes = src.read_bytes()
+        real_replace = os.replace
+
+        def deny_archive(source: object, destination: object) -> None:
+            raise PermissionError(5, "Access is denied")
+
+        monkeypatch.setattr(os, "replace", deny_archive)
+        media_queue._archive_failed_original(store=store, paths=paths, att_id=att_id, src=src)
+
+        assert store.get_attachment(att_id) is not None
+        assert store.get_upload(att_id) is not None
+        assert src.read_bytes() == original_bytes
+        assert not paths.server_failed_dir(att_id).joinpath("original.jpg").exists()
+
+        monkeypatch.setattr(os, "replace", real_replace)
+        livechat_janitor.run_once(store=store, paths=paths, now=1002.0)
+
+        assert store.get_attachment(att_id) is not None
+        assert store.get_upload(att_id) is None
+        assert not paths.server_upload_dir(att_id).exists()
+        assert (
+            paths.server_failed_dir(att_id).joinpath("original.jpg").read_bytes() == original_bytes
+        )
+
+    def test_unarchived_failed_original_expires_after_seven_days(
+        self, store: LiveChatStore, paths: ProjectPaths
+    ) -> None:
+        failed_at = 101.0
+        att_id = _seed_processing_photo(store, paths, now=100.0)
+        claimed = store.claim_processing(owner="owner", now=100.0, lease_s=120.0)
+        assert claimed is not None
+        store.finish_attachment(
+            att_id=att_id,
+            owner="owner",
+            result=AttachmentResult(
+                status="failed",
+                mime=None,
+                width=None,
+                height=None,
+                duration_s=None,
+                peaks=None,
+                renditions=(),
+                bytes_on_disk=0,
+                failure="decode_failed",
+            ),
+            now=failed_at,
+        )
+        message, _ = store.create_message(
+            client_id="client-failed-original-retention",
+            sender="Josh",
+            device_id="device-failed-original-retention",
+            by_email=None,
+            text="failed media remains attached for retention",
+            attachment_ids=(),
+            now=failed_at,
+        )
+        with store._write_txn() as conn:
+            conn.execute(
+                "UPDATE attachments SET message_seq = ?, ordinal = 0 WHERE id = ?",
+                (message.seq, att_id),
+            )
+        source = paths.server_upload_dir(att_id) / "assembled"
+        assert source.exists()
+
+        livechat_janitor.run_once(
+            store=store,
+            paths=paths,
+            now=failed_at + livechat_janitor.FAILED_RETENTION_S + 1,
+        )
+
+        assert store.get_attachment(att_id) is not None
+        assert store.get_upload(att_id) is None
+        assert not source.exists()
+        assert not paths.server_upload_dir(att_id).exists()
 
     @pytest.mark.asyncio
     async def test_media_dir_is_rmtreed_when_the_row_is_gone_after_finish(

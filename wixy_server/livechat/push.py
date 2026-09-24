@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import time
 from dataclasses import dataclass
@@ -24,6 +25,8 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 from wixy_server.livechat.models import MessageRow, PushSubscriptionRow
 from wixy_server.livechat.store import LiveChatStore
+
+_LOGGER = logging.getLogger(__name__)
 
 VAPID_TTL_SECONDS: Final[int] = 12 * 60 * 60
 PUSH_TTL_SECONDS: Final[str] = "86400"
@@ -356,9 +359,20 @@ async def dispatch_push_notifications(
                     store.delete_push_subscription, subscription.device_id
                 )
 
+    async def deliver_isolated(subscription: PushSubscriptionRow) -> None:
+        try:
+            await deliver(subscription)
+        except Exception:
+            # A SQLite or unexpected per-recipient failure cannot cancel other
+            # deliveries that are already in flight.
+            _LOGGER.exception(
+                "Server chat push delivery bookkeeping failed for device %s",
+                subscription.device_id,
+            )
+
     async with anyio.create_task_group() as task_group:
         for recipient in recipients:
-            task_group.start_soon(deliver, recipient)
+            task_group.start_soon(deliver_isolated, recipient)
 
 
 __all__ = [

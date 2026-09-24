@@ -619,3 +619,14 @@ gesture behavior).
 *Known limits:* filesystem overwrite is not a reliable shred guarantee on NTFS/SSD. A 202
 response means chat content is already deleted and broadcast while database-byte or media-file
 cleanup continues durably in the background.
+
+### Inv 47 — app-lifetime background work is contained
+Every app-lifetime background loop is started through `ContainedTaskGroup.supervise`; every
+request-triggered one-shot task uses `ContainedTaskGroup.spawn`. Exceptions are logged and
+recorded without cancelling sibling work. Supervised loops restart with bounded exponential
+backoff; three consecutive failures in the livechat media or erasure worker mark media processing
+as degraded. The main and standalone worker apps use the same wrapper. Media-queue items and push
+recipients are isolated within their inner task groups, so one item failure leaves siblings
+running. The wrapper exposes no raw `start_soon` method.
+*Enforced by:* `wixy_server/tests/test_background.py`, `test_routes_system.py`, worker-app tests,
+and strict mypy.

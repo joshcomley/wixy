@@ -18,28 +18,14 @@ Fixed both (moved the `mkdir` inside the `try`; wrapped the route's `_write()` c
 folded its outcome into the existing row-check instead of skipping it), added regression
 tests for each, verified locally.
 
-## A third finding, discovered independently while re-verifying
+## A third failure variant, discovered while re-verifying
 
-Running the **full** pytest suite (not just the two new regression tests) against the
-combined fix surfaced a further failure in the SAME pre-existing test
-(`test_delete_requires_token_and_removes_message_files_without_push`,
-`decisions/00151`'s original trigger) — this time `os.replace` raised `FileNotFoundError`
-(not `PermissionError`) while `store.get_attachment(att_id) is not None` still evaluated
-`True` at the re-check, so `_archive_failed_original`'s `except OSError: ... if
-store.get_attachment(att_id) is not None: raise` correctly-by-its-own-logic re-raised —
-and crashed the worker's shared task group again.
-
-Root cause: the "recheck the row after catching the exception" pattern from
-`decisions/00151` has its own TOCTOU gap. `delete_message`'s route does the DB delete
-(one atomic transaction) and the actual file cleanup (`cleanup_deleted_storage_once`,
-which does the `os.replace`-racing `rmtree`) as **two separate steps**. A worker's
-`_archive_failed_original` can start, pass its *own* initial "does the row exist" check
-(finding it present) before the delete's DB transaction commits, then have its
-`os.replace` fail because the delete's *file* cleanup already ran — while the delete's DB
-commit and the worker's *post-exception* recheck haven't necessarily resolved in the
-order the single recheck assumes. The recheck is therefore not a reliable enough signal
-to gate a crash-worthy decision: "row still exists" can be a stale read relative to the
-exact race that caused the failure, not proof of a genuine unrelated error.
+The full pytest suite failed again in the existing delete/processing race test
+(`test_delete_requires_token_and_removes_message_files_without_push`). This run reported
+`FileNotFoundError` from `os.replace` while a subsequent attachment-row read still
+returned a row. The evidence establishes those observations, but does not establish the
+precise ordering that caused them. Sol later confirmed the proposed timing explanation
+was unproven; it is intentionally not stated as a root cause here.
 
 ## What was decided
 
@@ -54,11 +40,9 @@ re-raise on `OSError`, regardless of what the row-existence recheck shows. Inste
   either way and only makes sense when the row is genuinely gone.
 - The function never lets the exception escape and crash the worker's task group.
 
-This matches `janitor.py`'s own already-established pattern for the identical class of
-problem (log a warning, keep the tombstone pending for the next sweep, never crash) —
-`_archive_failed_original` is now consistent with the rest of this subsystem rather than
-being the one call site that tried to be "smart" about distinguishing race-loss from
-genuine error via a re-check that can't actually make that distinction reliably.
+This avoids allowing an observed filesystem error in a diagnostic-only background task
+to cancel the shared task group. The later Architect ruling adds system-wide task
+containment as the backstop, while preserving this point fix.
 
 This is a deliberate, narrow exception to the general "genuine errors should surface"
 principle used elsewhere in this same file (`assemble()` in `uploads.py`, and the

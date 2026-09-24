@@ -129,7 +129,13 @@ export function mountDecoy(deps: DecoyDeps): DecoyView {
       );
       setValue(
         "Media processing",
-        status.server === undefined ? "—" : status.server.mediaProcessing === "ok" ? "OK" : "Unavailable",
+        status.server === undefined
+          ? "—"
+          : status.server.mediaProcessing === "ok"
+            ? "OK"
+            : status.server.mediaProcessing === "degraded"
+              ? "Degraded"
+              : "Unavailable",
       );
     } catch {
       if (cancelled) return;

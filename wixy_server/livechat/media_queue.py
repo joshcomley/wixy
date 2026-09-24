@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import stat
 import time
 import uuid
 from dataclasses import dataclass
@@ -179,68 +180,68 @@ def _do_work(
     return store.get_attachment(att.id) is not None
 
 
+def _cleanup_archive_if_attachment_deleted(
+    *, store: LiveChatStore, paths: ProjectPaths, att_id: str
+) -> bool:
+    """Let a concurrent delete/wipe own cleanup instead of recreating failed files."""
+    if store.get_attachment(att_id) is not None:
+        return False
+    store.mark_deleted_storage_pending(kind="attachment", storage_id=att_id, now=time.time())
+    _cleanup_deleted_storage(store=store, paths=paths, items={("attachment", att_id)})
+    store.delete_upload(att_id)
+    _cleanup_deleted_storage(store=store, paths=paths, items={("upload", att_id)})
+    return True
+
+
 def _archive_failed_original(
     *, store: LiveChatStore, paths: ProjectPaths, att_id: str, src: Path
 ) -> None:
-    """§4: `failed/<id>/original.<ext>`, kept 7 days for diagnosis (janitor.py
-    ages it out). The upload DB row is dropped either way — its job (tracking a
-    PENDING upload) is done once the attachment resolved, success or failure."""
-    if store.get_attachment(att_id) is None:
-        # A concurrent message delete/wipe is authoritative: do not recreate a
-        # failed/ directory after the transaction queued this ID for removal.
-        store.mark_deleted_storage_pending(kind="attachment", storage_id=att_id, now=time.time())
-        _cleanup_deleted_storage(
-            store=store,
-            paths=paths,
-            items={("attachment", att_id)},
-        )
+    """Archive a failed original, retaining staged data for hourly retry on OSError."""
+    if _cleanup_archive_if_attachment_deleted(store=store, paths=paths, att_id=att_id):
+        return
+
+    try:
+        source_stat = src.stat()
+    except FileNotFoundError:
+        # Another archive attempt may already have moved it; no staged source remains.
         store.delete_upload(att_id)
         _cleanup_deleted_storage(store=store, paths=paths, items={("upload", att_id)})
         return
-    if src.is_file():
-        upload = store.get_upload(att_id)
-        ext = failed_extension(upload.mime if upload is not None else None)
-        failed_dir = paths.server_failed_dir(att_id)
-        try:
-            failed_dir.mkdir(parents=True, exist_ok=True)
-            os.replace(src, failed_dir / f"original.{ext}")
-        except OSError:
-            # A concurrent delete/wipe may remove the upload or failed
-            # directory after is_file()/mkdir(). It wins over
-            # archiving. Windows reports a concurrent rmtree on the same
-            # path as PermissionError ("Access is denied") rather than
-            # FileNotFoundError; both signatures of the same race are
-            # handled identically here — but "the row still exists" is
-            # NOT a reliable enough signal to decide whether to re-raise:
-            # the delete route commits its DB transaction and THEN does
-            # file cleanup as two separate steps, so a re-check here can
-            # observe the row as still-present even when this exact race
-            # is what caused the failure (measured: this exact test failed
-            # three different ways across verification rounds — Permission-
-            # Error, then FileNotFoundError with the row apparently still
-            # present). This archive is diagnostic-only (kept for debugging
-            # a failed upload; never load-bearing data), and this worker
-            # runs inside the app's shared background task group alongside
-            # the janitor, so an unhandled exception here would crash BOTH
-            # for the rest of the process's life. Log and continue instead
-            # of re-raising, matching janitor.py's own established
-            # log-and-retry-later posture for this identical class of
-            # problem, rather than trusting a racy re-check to gate a
-            # crash-worthy decision.
+    except OSError:
+        if not _cleanup_archive_if_attachment_deleted(store=store, paths=paths, att_id=att_id):
             logger.warning(
-                "server-chat media queue: could not archive failed original for %s",
+                "server-chat media queue: could not inspect failed original for %s; "
+                "retaining for retry",
                 att_id,
                 exc_info=True,
             )
-            if store.get_attachment(att_id) is None:
-                store.mark_deleted_storage_pending(
-                    kind="attachment", storage_id=att_id, now=time.time()
-                )
-                _cleanup_deleted_storage(
-                    store=store,
-                    paths=paths,
-                    items={("attachment", att_id)},
-                )
+        return
+
+    if not stat.S_ISREG(source_stat.st_mode):
+        logger.warning(
+            "server-chat media queue: failed original is not a regular file for %s; retaining",
+            att_id,
+        )
+        return
+
+    upload = store.get_upload(att_id)
+    ext = failed_extension(upload.mime if upload is not None else None)
+    failed_dir = paths.server_failed_dir(att_id)
+    try:
+        failed_dir.mkdir(parents=True, exist_ok=True)
+        os.replace(src, failed_dir / f"original.{ext}")
+    except OSError:
+        if not _cleanup_archive_if_attachment_deleted(store=store, paths=paths, att_id=att_id):
+            # Keep both the upload row and its sole original. The hourly janitor
+            # retries this diagnostic-only move until its seven-day retention ends.
+            logger.warning(
+                "server-chat media queue: could not archive failed original for %s; "
+                "retaining for retry",
+                att_id,
+                exc_info=True,
+            )
+        return
+
     store.delete_upload(att_id)
     _cleanup_deleted_storage(store=store, paths=paths, items={("upload", att_id)})
 
@@ -300,7 +301,7 @@ async def _handle_claimed(
 async def run_forever(
     *, store: LiveChatStore, paths: ProjectPaths, notifier: LiveChatNotifier, config: QueueConfig
 ) -> None:
-    """The app-lifetime loop `app.py`'s lifespan `start_soon`s. Never returns
+    """The supervised app-lifetime loop. Never returns
     under normal operation — exits only when its enclosing task group is
     cancelled (app shutdown), the same path a crash takes, which is why no
     separate crash-resume step exists (see module docstring)."""
@@ -322,5 +323,29 @@ async def run_forever(
 
             limiter = video_limiter if claimed.kind == "video" else photo_voice_limiter
             dispatch_tg.start_soon(
-                _handle_claimed, store, paths, notifier, config, limiter, claimed, owner
+                _handle_claimed_isolated,
+                store,
+                paths,
+                notifier,
+                config,
+                limiter,
+                claimed,
+                owner,
             )
+
+
+async def _handle_claimed_isolated(
+    store: LiveChatStore,
+    paths: ProjectPaths,
+    notifier: LiveChatNotifier,
+    config: QueueConfig,
+    limiter: CapacityLimiter,
+    att: AttachmentRow,
+    owner: str,
+) -> None:
+    try:
+        await _handle_claimed(store, paths, notifier, config, limiter, att, owner)
+    except Exception:
+        # Leave the lease untouched: its expiry makes the item naturally claimable
+        # again, without letting one bad attachment cancel sibling dispatches.
+        logger.exception("Server chat media item %s failed; lease expiry will retry it", att.id)

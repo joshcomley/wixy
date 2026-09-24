@@ -110,7 +110,7 @@ export interface SystemStatus {
    * populated once P1's backend parcel lands the field (this frontend type
    * is ahead of that landing so `server/decoy.ts` can build against it now);
    * `undefined` on an older server, which `decoy.ts` renders as "—". */
-  server?: { startedAt: number; mediaProcessing: "ok" | "unavailable" };
+  server?: { startedAt: number; mediaProcessing: "ok" | "degraded" | "unavailable" };
 }
 
 /** `wixy_server.chats.conversation_summary`'s exact shape (spec/06 §1) — the

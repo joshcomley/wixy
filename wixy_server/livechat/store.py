@@ -29,7 +29,7 @@ transaction-before-DML behavior.
 from __future__ import annotations
 
 import json
-import os
+import logging
 import sqlite3
 import threading
 import time
@@ -112,7 +112,14 @@ CREATE INDEX IF NOT EXISTS idx_deleted_storage_completed_age
   ON deleted_storage(deleted_at) WHERE cleanup_pending = 0;
 """
 
-_LATEST_SCHEMA_VERSION = 5
+_SCHEMA_V6_PENDING_SCRUB = """
+CREATE TABLE IF NOT EXISTS pending_scrub(
+  singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+  token TEXT NOT NULL);
+"""
+
+_LATEST_SCHEMA_VERSION = 6
+_LOGGER = logging.getLogger(__name__)
 
 
 class LiveChatStoreError(Exception):
@@ -327,6 +334,13 @@ class LiveChatStore:
                     if statement.strip():
                         conn.execute(statement)
                 conn.execute("PRAGMA user_version = 5")
+                current = 5
+
+            if current < 6:
+                for statement in _SCHEMA_V6_PENDING_SCRUB.split(";"):
+                    if statement.strip():
+                        conn.execute(statement)
+                conn.execute("PRAGMA user_version = 6")
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
@@ -540,7 +554,7 @@ class LiveChatStore:
                     (seq, now),
                 )
             if mark_scrub_pending:
-                pending_token = self._write_scrub_pending_marker(conn)
+                pending_token = self._upsert_pending_scrub(conn)
         return attachment_ids, pending_token
 
     def wipe(self, *, now: float) -> tuple[list[str], list[str]]:
@@ -585,15 +599,39 @@ class LiveChatStore:
                 (now,),
             )
             if mark_scrub_pending:
-                pending_token = self._write_scrub_pending_marker(conn)
+                pending_token = self._upsert_pending_scrub(conn)
         return attachment_ids, upload_ids, pending_token, wipe_token
 
-    @property
-    def scrub_pending_path(self) -> Path:
+    def _legacy_scrub_pending_path(self) -> Path:
         return self._db_path.parent / "scrub.pending"
 
     def scrub_pending(self) -> bool:
-        return self.scrub_pending_path.exists()
+        return self.scrub_pending_token() is not None
+
+    def import_legacy_scrub_marker(self) -> str | None:
+        """Import the pre-v6 marker once at startup, then remove the legacy file."""
+        try:
+            legacy_token = self._legacy_scrub_pending_path().read_text(encoding="ascii").strip()
+        except FileNotFoundError:
+            return self.scrub_pending_token()
+        except OSError:
+            _LOGGER.exception(
+                "Could not read legacy Server chat scrub marker; retrying next startup"
+            )
+            return self.scrub_pending_token()
+
+        token = legacy_token or uuid.uuid4().hex
+        with self._write_txn() as conn:
+            row = conn.execute("SELECT token FROM pending_scrub WHERE singleton = 1").fetchone()
+            if row is None:
+                conn.execute("INSERT INTO pending_scrub(singleton, token) VALUES (1, ?)", (token,))
+            else:
+                token = str(row["token"])
+        try:
+            self._legacy_scrub_pending_path().unlink(missing_ok=True)
+        except OSError:
+            _LOGGER.exception("Could not remove imported legacy Server chat scrub marker")
+        return token
 
     @staticmethod
     def _queue_deleted_storage(
@@ -710,35 +748,26 @@ class LiveChatStore:
             return attachment_ids, upload_ids
 
     def scrub_pending_token(self) -> str | None:
-        try:
-            return self.scrub_pending_path.read_text(encoding="ascii").strip()
-        except FileNotFoundError:
-            return None
+        with self._read_txn() as conn:
+            row = conn.execute("SELECT token FROM pending_scrub WHERE singleton = 1").fetchone()
+            return str(row["token"]) if row is not None else None
 
     def mark_scrub_pending(self) -> str:
         """Durably record unfinished erasure before a 202 can be returned."""
         with self._write_txn() as conn:
-            return self._write_scrub_pending_marker(conn)
+            return self._upsert_pending_scrub(conn)
 
-    def _write_scrub_pending_marker(self, conn: sqlite3.Connection) -> str:
-        """Write the marker while holding SQLite's writer lock for this mutation."""
+    def _upsert_pending_scrub(self, conn: sqlite3.Connection) -> str:
+        """Write the marker atomically with the erasure transaction."""
         if not conn.in_transaction:
             raise RuntimeError("scrub marker must be written inside a SQLite transaction")
-        path = self.scrub_pending_path
-        path.parent.mkdir(parents=True, exist_ok=True)
         token = uuid.uuid4().hex
-        temp_path = path.with_name(f".{path.name}.{token}.tmp")
-        try:
-            with temp_path.open("x", encoding="ascii") as handle:
-                handle.write(token)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temp_path, path)
-            return token
-        except BaseException:
-            if temp_path.exists():
-                temp_path.unlink(missing_ok=True)
-            raise
+        conn.execute(
+            "INSERT INTO pending_scrub(singleton, token) VALUES (1, ?) "
+            "ON CONFLICT(singleton) DO UPDATE SET token = excluded.token",
+            (token,),
+        )
+        return token
 
     def clear_scrub_pending(self, *, expected_token: str | None) -> bool:
         """Clear only the marker observed before this successful scrub began."""
@@ -747,13 +776,12 @@ class LiveChatStore:
         conn = self._connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
-            current_token = self.scrub_pending_token()
-            if current_token != expected_token:
-                conn.execute("COMMIT")
-                return False
-            self.scrub_pending_path.unlink(missing_ok=True)
+            cursor = conn.execute(
+                "DELETE FROM pending_scrub WHERE singleton = 1 AND token = ?",
+                (expected_token,),
+            )
             conn.execute("COMMIT")
-            return True
+            return cursor.rowcount == 1
         except BaseException:
             if conn.in_transaction:
                 conn.execute("ROLLBACK")
@@ -765,7 +793,7 @@ class LiveChatStore:
         """TRUNCATE the WAL on a fresh connection until it is physically empty.
 
         The deadline includes SQLite's busy wait and the explicit retry delay.
-        ``False`` means a caller must persist ``scrub.pending`` before replying.
+        ``False`` means the database-backed pending marker remains for retry.
         """
         deadline = time.monotonic() + max(0.0, deadline_s)
         conn = self._connect()
@@ -784,6 +812,10 @@ class LiveChatStore:
                     wal_empty = wal_path.stat().st_size == 0
                 except FileNotFoundError:
                     wal_empty = True
+                except OSError:
+                    # SQLite may be deleting the WAL as its last connection
+                    # closes; a transient Windows sharing denial means retry.
+                    wal_empty = False
                 if busy == 0 and wal_empty:
                     return True
                 remaining = deadline - time.monotonic()
@@ -993,6 +1025,32 @@ class LiveChatStore:
                 "SELECT id FROM uploads WHERE created_at < ?", (older_than,)
             ).fetchall()
             return [row["id"] for row in rows]
+
+    def failed_original_archive_candidates(self) -> list[tuple[str, float]]:
+        """Failed attachments whose staged original is retained for archive retry."""
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT a.id, a.updated_at FROM attachments AS a "
+                "JOIN uploads AS u ON u.id = a.id "
+                "WHERE a.status = 'failed' ORDER BY a.updated_at, a.id"
+            ).fetchall()
+            return [(str(row["id"]), float(row["updated_at"])) for row in rows]
+
+    def expire_failed_original_if_still_unarchived(
+        self, att_id: str, *, older_than: float, now: float
+    ) -> bool:
+        """Drop the staged source only after its seven-day diagnostic window."""
+        with self._write_txn() as conn:
+            cursor = conn.execute(
+                "DELETE FROM uploads WHERE id = ? AND EXISTS ("
+                "SELECT 1 FROM attachments WHERE id = ? AND status = 'failed' "
+                "AND updated_at < ?)",
+                (att_id, att_id, older_than),
+            )
+            if cursor.rowcount != 1:
+                return False
+            self._queue_deleted_storage(conn, kind="upload", ids=[att_id], now=now)
+            return True
 
     def pending_upload_bytes(self) -> int:
         with self._read_txn() as conn:

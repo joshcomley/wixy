@@ -37,3 +37,13 @@ The v1.5.3 candidate had two critical Sol findings: a crash could leave deleted 
 2. Commit this follow-up with a `Release-note:` trailer.
 3. Send the DM the exact base/candidate SHAs, R1-R3/L1-L2 fixes, verification, and the P6b E2E caveat; request fresh exact-SHA Sol review. DM owns sec.13. Do not push.
 4. Amend Answers entry #1912 with the updated plain-English status.
+
+## Round 8 update — Architect containment ruling
+
+Implemented the 2026-09-24 v1.5.6 ruling from `spec/server-chat/01-background-containment-ruling.md` (commit `83bc29b`): all main and standalone-worker app tasks now use `ContainedTaskGroup`; media items and push recipients are isolated; media status degrades after three repeated media/erasure failures. Schema v6 stores the scrub token in SQLite, with a startup import for legacy `scrub.pending`; the scrubber compare-clears after a complete checkpoint and makes one best-effort checkpoint afterward. Committed deletes/wipes return 202 on any post-commit cleanup exception. The WAL `stat()` retries on `OSError`. The janitor retries unarchived failed originals hourly and removes the staged original after seven days.
+
+The round-7 archive retention finding now has a red/green regression: a denied `os.replace` preserves the upload row and only original, then a later janitor pass archives and removes the staged copy. The 7-day expiry path is also covered. Decision 00152 now reports only observed failure facts; it no longer asserts an unproven race ordering.
+
+Local verification: Ruff check/format and mypy over 208 sources pass; strict admin typecheck passes; Admin Vitest 1,095/1,095; focused backend slice 227/227; full Python suite 1,709/1,709; Server chat Playwright 7/7. The DM still owns the required five consecutive full-suite runs, fresh Sol review, and sec.13 audit. No push/PR.
+
+The verified implementation is committed locally with the required `Release-note:` trailer. Send the final exact head SHA to DM and Orchestrator and wait for their review/acceptance. Do not push or run sec.13.

@@ -54,6 +54,27 @@ def run_once(*, store: LiveChatStore, paths: ProjectPaths, now: float) -> Janito
             )
             orphan_attachments += 1
 
+    failed_archive_candidates = store.failed_original_archive_candidates()
+    if failed_archive_candidates:
+        # Import lazily: media_queue uses the janitor's cleanup helper locally.
+        from wixy_server.livechat.media_queue import _archive_failed_original
+
+        for att_id, failed_at in failed_archive_candidates:
+            if failed_at < now - FAILED_RETENTION_S:
+                if store.expire_failed_original_if_still_unarchived(
+                    att_id, older_than=now - FAILED_RETENTION_S, now=now
+                ):
+                    cleanup_deleted_storage_once(
+                        store=store, paths=paths, only_items={("upload", att_id)}
+                    )
+                continue
+            _archive_failed_original(
+                store=store,
+                paths=paths,
+                att_id=att_id,
+                src=paths.server_upload_dir(att_id) / "assembled",
+            )
+
     expired_failed = 0
     if paths.server_failed.is_dir():
         for entry in paths.server_failed.iterdir():
@@ -99,7 +120,15 @@ def scrub_once(*, store: LiveChatStore, deadline_s: float = SCRUB_TICK_DEADLINE_
             return False
         if not store.scrub(deadline_s=deadline_s):
             return False
-        return store.clear_scrub_pending(expected_token=pending_token)
+        if not store.clear_scrub_pending(expected_token=pending_token):
+            return False
+        try:
+            store.scrub(deadline_s=0.25)
+        except Exception:
+            _LOGGER.warning(
+                "Best-effort checkpoint after clearing pending scrub failed", exc_info=True
+            )
+        return True
 
 
 def _remove_entry(path: Path) -> None:

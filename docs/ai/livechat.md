@@ -130,14 +130,15 @@ contention at the file level). Every method is **synchronous**; route handlers w
 call in `anyio.to_thread.run_sync`.
 
 Tables: `messages`, `attachments`, `events`, `uploads`, `push_subscriptions`, `deleted_storage`,
-and `pending_wipe_cleanup`. Schema migrations are serialized under the SQLite writer lock.
+`pending_wipe_cleanup`, and `pending_scrub`. Schema migrations are serialized under the SQLite writer lock.
 `deleted_storage` retains internal attachment/upload tombstones and retry status; it is not a
 message/event tombstone and is never returned to chat clients. `pending_wipe_cleanup` records a
 wipe's filesystem sweep token so a crash cannot lose cleanup of orphaned paths. Schema v4 adds the
 partial `idx_deleted_storage_pending` index containing only incomplete cleanup rows. Schema v5
 adds a per-tombstone generation so a late requeue cannot be cleared by an older cleanup pass, plus
 an age index for completed rows. The hourly janitor prunes completed tombstones after seven days;
-pending tombstones are never pruned.
+pending tombstones are never pruned. Schema v6 adds the singleton `pending_scrub` row, written in
+the same transaction as delete/wipe; startup imports and removes a legacy `scrub.pending` file.
 Two transaction shapes:
 - `BEGIN IMMEDIATE` for writes needing a race-safe conditional check (an attachment's lease
   claim, `create_message`'s idempotent client-id insert) — serializes concurrent claimants
@@ -213,8 +214,9 @@ intact. Delete and wipe never dispatch push notifications.
 
 Both operations enable secure delete and use `PRAGMA wal_checkpoint(TRUNCATE)`. A 204 means the
 WAL is empty, deleted text is absent from both database files, and media-file cleanup completed.
-The route gives the scrub up to 10 seconds; if a reader still blocks it, the route writes durable
-`server/scrub.pending`. Delete and wipe transactions also record deleted storage IDs before commit.
+The route gives the scrub up to 10 seconds; if a reader still blocks it, the route retains the
+database-backed `pending_scrub` row. Delete and wipe transactions record deleted storage IDs and
+the scrub marker before commit.
 Both routes publish the deletion event immediately after commit and before file cleanup. Each WAL
 checkpoint attempt waits no more than 250 ms for SQLite's busy lock; the route's ten-second
 deadline includes waiting for `LiveChatStore.scrub_guard()`, and lock timeout returns pending.
@@ -348,9 +350,12 @@ filesystem cleanup only when that conditional delete succeeds. It also prunes co
 tombstones older than seven days, never pending ones. `run_once` takes an explicit `now`, never
 reads the clock — every age threshold is test-driven, not slept through.
 
-The same module's `run_scrubber_forever` is a separate app-lifetime task. It resumes a durable
-`scrub.pending` marker at startup and attempts `TRUNCATE` every two seconds until the WAL is
-empty, then removes the marker.
+The same module's `run_scrubber_forever` is a separately supervised app-lifetime task. It resumes
+the database-backed scrub marker at startup and attempts `TRUNCATE` every two seconds until the WAL
+is empty, then compare-and-clears the marker and performs one best-effort checkpoint. Legacy
+`scrub.pending` files are imported once at startup and removed; a denied removal is retried on the
+next startup. A failed-original archive is retried by the hourly janitor and its staged original is
+removed after the seven-day diagnostic retention window.
 
 **Media route (`routes_livechat_media.py`, P2b) — `GET /media/{attId}/{rendition}`, §5.6.**
 The one route besides `POST /unlock` that skips `require_server_token`, since
@@ -516,7 +521,8 @@ flags and does not install the Playwright clock.
 `fake_cmd.py` PIN double, the `server` field on `GET /api/admin/system/status`); **P2a**
 (`livechat/processing.py`, §8 above); **P2b** (`livechat/{uploads,media_queue,janitor}.py`,
 `routes_livechat_media.py`, §8 above — `mediaProcessing` on the system-status field is now
-the real `app.state.livechat_media_available` value, not the P1-era placeholder `"ok"`);
+the real `app.state.livechat_media_available` value, not the P1-era placeholder `"ok"`; three
+consecutive supervised media/erasure failures render as `"degraded"`);
 **P3a/P3b** (Web Push — VAPID keys, the service worker, protected push routes, the dispatch
 hook, and the standalone Android toggle module); **P4** (frontend lock/disguise/PIN-pad core
 — §10 above — the router/nav entry, the lock state machine, the decoy, the PIN pad, and the

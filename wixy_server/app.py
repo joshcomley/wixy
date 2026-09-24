@@ -26,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from wixy_server.ai.anthropic_backend import AnthropicAIBackend
 from wixy_server.ai.backend import AIBackend, CmdAIBackend
 from wixy_server.auth import JwksCache, build_admin_auth_middleware, jwks_url
+from wixy_server.background import BackgroundTaskHealth, ContainedTaskGroup
 from wixy_server.bootstrap import bootstrap_if_needed
 from wixy_server.chat_sends import ChatSendsCache
 from wixy_server.chat_working import WorkingCache
@@ -255,6 +256,9 @@ def create_app(
         await anyio.to_thread.run_sync(
             bootstrap_if_needed, project, paths, datetime.now(UTC).isoformat()
         )
+        # Schema v6 moves the old file marker into SQLite. Retry an unlink that
+        # failed during a previous process start before launching the scrubber.
+        await anyio.to_thread.run_sync(livechat_store.import_legacy_scrub_marker)
 
         async def _run_watcher() -> None:
             await watch_upstream(
@@ -278,20 +282,20 @@ def create_app(
 
         try:
             async with anyio.create_task_group() as tg:
-                # Exposed on `app.state` so route handlers (milestone 10's chat
-                # provisioning tracker, `routes_chat.py`) can spawn app-lifetime
-                # background work of their own — same task group the watcher
-                # itself runs in, cancelled together at shutdown below.
-                _app.state.background_tasks = tg
-                tg.start_soon(_run_watcher)
-                tg.start_soon(_run_scrubber)
+                background = ContainedTaskGroup(tg, BackgroundTaskHealth())
+                # Route handlers may schedule work, but cannot access the raw task
+                # group and accidentally cancel every app-lifetime task.
+                _app.state.background_tasks = background
+                _app.state.background_health = background.health
+                background.supervise("watcher", _run_watcher)
+                background.supervise("livechat-erasure", _run_scrubber)
                 # Only started when the media pipeline actually resolved (see
                 # `livechat_queue_config` above) — nothing valid to hand it
                 # otherwise. The janitor runs regardless: it's pure DB/filesystem
                 # housekeeping with no ffmpeg dependency.
                 if livechat_queue_config is not None:
-                    tg.start_soon(_run_media_queue)
-                tg.start_soon(_run_janitor)
+                    background.supervise("livechat-media", _run_media_queue)
+                background.supervise("livechat-janitor", _run_janitor)
                 yield
                 tg.cancel_scope.cancel()
         finally:

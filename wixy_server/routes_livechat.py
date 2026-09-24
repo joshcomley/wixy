@@ -10,18 +10,19 @@ Every route here (except `POST /unlock`, which has no token yet) calls
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from collections.abc import AsyncGenerator, AsyncIterator
 from typing import Literal
 
 import anyio
-from anyio.abc import TaskGroup
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from builder.jsontypes import JsonObject
+from wixy_server.background import ContainedTaskGroup
 from wixy_server.livechat import janitor as livechat_janitor
 from wixy_server.livechat.models import (
     EventRow,
@@ -47,6 +48,7 @@ from wixy_server.settings import Settings
 from wixy_server.storage import ProjectPaths
 
 router = APIRouter(prefix="/api/admin/server")
+_LOGGER = logging.getLogger(__name__)
 
 _PING_INTERVAL_S = 15.0
 _NOTIFIER_WAIT_S = 2.0
@@ -79,7 +81,57 @@ def _scrub_pending_locked(store: LiveChatStore, *, deadline_at: float) -> bool:
         remaining = deadline_at - time.monotonic()
         if remaining <= 0 or not store.scrub(deadline_s=remaining):
             return False
-        return store.clear_scrub_pending(expected_token=pending_token)
+        if not store.clear_scrub_pending(expected_token=pending_token):
+            return False
+        try:
+            store.scrub(deadline_s=min(0.25, max(0.0, deadline_at - time.monotonic())))
+        except Exception:
+            _LOGGER.warning(
+                "Best-effort checkpoint after clearing pending scrub failed", exc_info=True
+            )
+        return True
+
+
+async def _finish_committed_erasure(
+    *,
+    store: LiveChatStore,
+    paths: ProjectPaths,
+    notifier: LiveChatNotifier,
+    attachment_ids: list[str],
+    upload_ids: list[str],
+    wipe_token: str | None,
+    deadline_at: float,
+) -> Response:
+    """Finish best-effort work after commit; committed mutations never return 5xx."""
+    try:
+        notifier.publish()
+        items = {
+            item
+            for storage_id in attachment_ids
+            for item in (("attachment", storage_id), ("upload", storage_id))
+        }
+        items.update(("upload", storage_id) for storage_id in upload_ids)
+        await anyio.to_thread.run_sync(
+            lambda: livechat_janitor.cleanup_deleted_storage_once(
+                store=store, paths=paths, only_items=items
+            )
+        )
+        if wipe_token is not None:
+            await anyio.to_thread.run_sync(
+                lambda: livechat_janitor.cleanup_unreferenced_storage_once(store=store, paths=paths)
+            )
+        await anyio.to_thread.run_sync(
+            lambda: _scrub_pending_locked(store, deadline_at=deadline_at)
+        )
+        erasure_pending = await anyio.to_thread.run_sync(
+            lambda: store.scrub_pending() or store.storage_cleanup_pending()
+        )
+    except Exception:
+        _LOGGER.exception("Server chat erasure committed but synchronous cleanup did not finish")
+        return JSONResponse(status_code=202, content={"erasurePending": True})
+    if erasure_pending:
+        return JSONResponse(status_code=202, content={"erasurePending": True})
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------
@@ -206,7 +258,7 @@ async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
     store: LiveChatStore = request.app.state.livechat_store
     notifier: LiveChatNotifier = request.app.state.livechat_notifier
     hooks: list[MessageHook] = request.app.state.livechat_message_hooks
-    background: TaskGroup = request.app.state.background_tasks
+    background: ContainedTaskGroup = request.app.state.background_tasks
     secret: bytes = request.app.state.livechat_secret
     now = time.time()
 
@@ -229,7 +281,7 @@ async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
     if created:
         notifier.publish()
         for hook in hooks:
-            # `TaskGroup.start_soon` wants a `Callable[..., Coroutine]`, not the
+            # The contained group accepts positional arguments, not the
             # broader `Awaitable`-returning `MessageHook` shape the frozen spec
             # gives `livechat_message_hooks` — a tiny wrapper coroutine bridges
             # the two (default arg captures THIS iteration's `hook`, not the
@@ -237,7 +289,7 @@ async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
             async def _dispatch(h: MessageHook = hook) -> None:
                 await h(message)
 
-            background.start_soon(_dispatch)
+            background.spawn("livechat-push-dispatch", _dispatch)
 
     signer = MediaSigner.for_auth(secret, auth)
     return JSONResponse(
@@ -257,31 +309,15 @@ async def delete_message(seq: int, request: Request) -> Response:
         lambda: store.delete_message_for_scrub(seq=seq, now=time.time())
     )
     commit_returned_at = time.monotonic()
-    notifier.publish()
-
-    await anyio.to_thread.run_sync(
-        lambda: livechat_janitor.cleanup_deleted_storage_once(
-            store=store,
-            paths=paths,
-            only_items={
-                item
-                for attachment_id in attachment_ids
-                for item in (("attachment", attachment_id), ("upload", attachment_id))
-            },
-        )
+    return await _finish_committed_erasure(
+        store=store,
+        paths=paths,
+        notifier=notifier,
+        attachment_ids=attachment_ids,
+        upload_ids=[],
+        wipe_token=None,
+        deadline_at=commit_returned_at + _DELETE_SCRUB_DEADLINE_S,
     )
-    await anyio.to_thread.run_sync(
-        lambda: _scrub_pending_locked(
-            store,
-            deadline_at=commit_returned_at + _DELETE_SCRUB_DEADLINE_S,
-        )
-    )
-    erasure_pending = await anyio.to_thread.run_sync(
-        lambda: store.scrub_pending() or store.storage_cleanup_pending()
-    )
-    if erasure_pending:
-        return JSONResponse(status_code=202, content={"erasurePending": True})
-    return Response(status_code=204)
 
 
 @router.post("/wipe", response_model=None)
@@ -291,37 +327,19 @@ async def wipe_chat(body: WipeChatIn, request: Request) -> Response:
     paths: ProjectPaths = request.app.state.paths
     notifier: LiveChatNotifier = request.app.state.livechat_notifier
 
-    attachment_ids, upload_ids, _pending_token, _wipe_token = await anyio.to_thread.run_sync(
+    attachment_ids, upload_ids, _pending_token, wipe_token = await anyio.to_thread.run_sync(
         lambda: store.wipe_for_scrub(now=time.time())
     )
     commit_returned_at = time.monotonic()
-    notifier.publish()
-
-    await anyio.to_thread.run_sync(
-        lambda: livechat_janitor.cleanup_deleted_storage_once(
-            store=store,
-            paths=paths,
-            only_items={
-                *[("attachment", item) for item in attachment_ids],
-                *[("upload", item) for item in upload_ids],
-            },
-        )
+    return await _finish_committed_erasure(
+        store=store,
+        paths=paths,
+        notifier=notifier,
+        attachment_ids=attachment_ids,
+        upload_ids=upload_ids,
+        wipe_token=wipe_token,
+        deadline_at=commit_returned_at + _DELETE_SCRUB_DEADLINE_S,
     )
-    await anyio.to_thread.run_sync(
-        lambda: livechat_janitor.cleanup_unreferenced_storage_once(store=store, paths=paths)
-    )
-    await anyio.to_thread.run_sync(
-        lambda: _scrub_pending_locked(
-            store,
-            deadline_at=commit_returned_at + _DELETE_SCRUB_DEADLINE_S,
-        )
-    )
-    erasure_pending = await anyio.to_thread.run_sync(
-        lambda: store.scrub_pending() or store.storage_cleanup_pending()
-    )
-    if erasure_pending:
-        return JSONResponse(status_code=202, content={"erasurePending": True})
-    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------

@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Annotated
 
 import anyio
-from anyio.abc import TaskGroup
 from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -28,6 +27,7 @@ from wixy_server.ai.backend import (
     ConversationRef,
     UploadNotFoundError,
 )
+from wixy_server.background import ContainedTaskGroup
 from wixy_server.chat_attachments import (
     AttachmentError,
     ChatAttachmentRef,
@@ -111,7 +111,7 @@ async def create_conversation(body: ConversationCreateIn, request: Request) -> J
     paths: ProjectPaths = request.app.state.paths
     client: AIBackend = request.app.state.ai_backend
     runtime: dict[str, ChatRuntimeEntry] = request.app.state.chat_runtime
-    background: TaskGroup = request.app.state.background_tasks
+    background: ContainedTaskGroup = request.app.state.background_tasks
     sends: ChatSendsCache = request.app.state.chat_sends
 
     first_message = body.firstMessage
@@ -177,7 +177,7 @@ async def create_conversation(body: ConversationCreateIn, request: Request) -> J
     async def _track() -> None:
         await _track_readiness(client, runtime, conv_id, result.id)
 
-    background.start_soon(_track)
+    background.spawn("chat-readiness", _track)
 
     return conversation_summary(conversation, runtime[conv_id])
 
