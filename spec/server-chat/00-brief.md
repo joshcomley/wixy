@@ -1243,8 +1243,10 @@ one message, and wipe everything. The addendum is purely **additive**:
   filesystem cleanup in the same SQLite transaction that removes their rows. Wipe also
   records a token for sweeping unreferenced paths. The app worker retries file removal at
   startup and every 2 s; an OS unlink error keeps cleanup pending rather than being ignored.
-    It also scans unreferenced media/upload/failed entries on every startup tick, so paths left
-    by earlier versions are found even if they have no deletion tombstone.
+    It scans unreferenced media/upload/failed entries once at startup and repeats only while a
+    wipe-sweep token is pending. Each scan batches live attachment/upload IDs in one DB read;
+    a failed startup scan creates a durable token so legacy orphans keep retrying without a full
+    tree scan on every ordinary two-second tick.
     `GET /media/{attId}/{rendition}` must verify that the attachment row still exists before
     opening a file, so an old signed URL returns 404 even if Windows temporarily holds the
     deleted file open.
@@ -1393,6 +1395,9 @@ dirs and the chat view, so it goes last to avoid colliding with in-flight work.
   complete.
 - Complete a tombstone, run another cleanup tick, and prove the completed row is retained but
   neither selected nor sent through filesystem cleanup again.
+- Prove unreferenced storage is scanned at startup and while a wipe token remains pending, not
+  on ordinary ticks, and that the scan uses one batched live-ID read rather than per-entry DB
+  connections.
 - a delete racing a processing attachment leaves no media dir behind
 - a stream spanning a delete emits `message_deleted`, and skips the stale `message` event on
   replay from an old cursor

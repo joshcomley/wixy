@@ -634,6 +634,20 @@ class LiveChatStore:
             ).fetchone()
             return str(row["token"]) if row is not None else None
 
+    def ensure_pending_wipe_cleanup_token(self) -> str:
+        """Persist retry work when a startup orphan sweep finds an unlink failure."""
+        with self._write_txn() as conn:
+            row = conn.execute(
+                "SELECT token FROM pending_wipe_cleanup WHERE singleton = 1"
+            ).fetchone()
+            if row is not None:
+                return str(row["token"])
+            token = uuid.uuid4().hex
+            conn.execute(
+                "INSERT INTO pending_wipe_cleanup(singleton, token) VALUES (1, ?)", (token,)
+            )
+            return token
+
     def clear_pending_wipe_cleanup(self, *, expected_token: str) -> bool:
         with self._write_txn() as conn:
             row = conn.execute(
@@ -643,6 +657,17 @@ class LiveChatStore:
                 return False
             conn.execute("DELETE FROM pending_wipe_cleanup WHERE singleton = 1")
             return True
+
+    def live_storage_ids(self) -> tuple[set[str], set[str]]:
+        """Read live attachment/upload IDs in one snapshot for an orphan sweep."""
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT 'attachment' AS kind, id FROM attachments "
+                "UNION SELECT 'upload' AS kind, id FROM uploads"
+            ).fetchall()
+            attachment_ids = {str(row["id"]) for row in rows if str(row["kind"]) == "attachment"}
+            upload_ids = {str(row["id"]) for row in rows if str(row["kind"]) == "upload"}
+            return attachment_ids, upload_ids
 
     def scrub_pending_token(self) -> str | None:
         try:

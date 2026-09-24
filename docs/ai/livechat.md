@@ -222,9 +222,10 @@ before opening a signed rendition, so an old URL returns 404 even while a locked
 cleanup. Wipe cleanup sweeps only paths without live attachment/upload rows, preserving uploads
 created after the wipe transaction. **NTFS/SSD byte-level shredding is not claimed**, since
 overwrite-in-place is not reliable on SSDs. If the media worker finishes after deletion removed
-its row, its post-finish check re-queues cleanup for any paths it recreated. The same worker
-rescans unreferenced `media/`, `uploads/`, and `failed/` entries on startup and every two seconds,
-so orphaned paths from earlier versions are discovered even without an old tombstone.
+its row, its post-finish check re-queues cleanup for any paths it recreated. The worker scans
+unreferenced `media/`, `uploads/`, and `failed/` entries once at startup, then repeats that sweep
+only while a wipe-sweep token remains pending. Each sweep reads live attachment and upload IDs in
+one DB snapshot; a failed startup sweep creates a durable retry token.
 
 ## 7. Web Push (`livechat/push.py`, `server/pushToggle.ts`)
 

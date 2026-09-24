@@ -204,6 +204,88 @@ class TestRunOnceIsIdempotent:
         assert index is not None
         assert "WHERE cleanup_pending = 1" in str(index[0])
 
+    def test_orphan_scan_batches_live_attachment_and_upload_lookups(
+        self,
+        store: LiveChatStore,
+        paths: ProjectPaths,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        attachment_id = "b" * 32
+        store.create_attachment(att_id=attachment_id, kind="photo", now=1.0)
+        media_dir = paths.server_attachment_media_dir(attachment_id)
+        media_dir.mkdir(parents=True)
+        (media_dir / "full.jpg").write_bytes(b"live")
+        upload_id = _make_upload(store, paths, created_at=2.0)
+
+        def unexpected_per_id_read(_storage_id: str) -> None:
+            pytest.fail("the orphan sweep must use its batched live-ID snapshot")
+
+        monkeypatch.setattr(store, "get_attachment", unexpected_per_id_read)
+        monkeypatch.setattr(store, "get_upload", unexpected_per_id_read)
+
+        assert not janitor.cleanup_unreferenced_storage_once(store=store, paths=paths)
+        assert media_dir.is_dir()
+        assert paths.server_upload_dir(upload_id).is_dir()
+
+    def test_orphan_scan_runs_at_startup_and_while_wipe_retry_is_pending(
+        self,
+        store: LiveChatStore,
+        paths: ProjectPaths,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        sweeps: list[bool] = []
+        monkeypatch.setattr(
+            janitor,
+            "cleanup_deleted_storage_once",
+            lambda **_kwargs: False,
+        )
+
+        def record_sweep(*, store: LiveChatStore, paths: ProjectPaths) -> bool:
+            del store, paths
+            sweeps.append(True)
+            return False
+
+        monkeypatch.setattr(
+            janitor,
+            "cleanup_unreferenced_storage_once",
+            record_sweep,
+        )
+        monkeypatch.setattr(janitor, "scrub_once", lambda **_kwargs: False)
+
+        janitor.recover_erasure_once(store=store, paths=paths, startup_scan=True)
+        janitor.recover_erasure_once(store=store, paths=paths, startup_scan=False)
+        assert sweeps == [True]
+
+        store.ensure_pending_wipe_cleanup_token()
+        janitor.recover_erasure_once(store=store, paths=paths, startup_scan=False)
+        assert sweeps == [True, True]
+
+    def test_failed_startup_orphan_scan_persists_retry_token(
+        self,
+        store: LiveChatStore,
+        paths: ProjectPaths,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        orphan_id = "c" * 32
+        orphan_dir = paths.server_attachment_media_dir(orphan_id)
+        orphan_dir.mkdir(parents=True)
+        (orphan_dir / "full.jpg").write_bytes(b"orphan")
+        original_remove = janitor._remove_entry
+
+        def fail_orphan(path: Path) -> None:
+            if path == orphan_dir:
+                raise PermissionError("simulated locked orphan")
+            original_remove(path)
+
+        monkeypatch.setattr(janitor, "_remove_entry", fail_orphan)
+        assert janitor.cleanup_unreferenced_storage_once(store=store, paths=paths)
+        assert store.pending_wipe_cleanup_token() is not None
+
+        monkeypatch.setattr(janitor, "_remove_entry", original_remove)
+        assert not janitor.cleanup_unreferenced_storage_once(store=store, paths=paths)
+        assert store.pending_wipe_cleanup_token() is None
+        assert not orphan_dir.exists()
+
     def test_scrubber_resumes_a_durable_pending_marker(self, store: LiveChatStore) -> None:
         store.mark_scrub_pending()
 

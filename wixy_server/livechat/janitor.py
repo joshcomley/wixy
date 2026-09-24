@@ -12,6 +12,7 @@ import re
 import shutil
 import time
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 import anyio
@@ -144,37 +145,58 @@ def cleanup_deleted_storage_once(
 
 
 def cleanup_unreferenced_storage_once(*, store: LiveChatStore, paths: ProjectPaths) -> bool:
-    """Remove unreferenced paths, including leftovers from old delete/wipe versions."""
+    """Remove legacy orphan paths, batching live-row checks and retaining failed sweeps."""
     token = store.pending_wipe_cleanup_token()
-
+    candidates: list[tuple[Path, str]] = []
+    media_buckets: list[Path] = []
     failed = False
 
-    def _remove_unreferenced(entry: Path, *, kind: str) -> None:
-        nonlocal failed
+    try:
+        if paths.server_media.is_dir():
+            for bucket in list(paths.server_media.iterdir()):
+                if bucket.is_symlink() or not bucket.is_dir():
+                    candidates.append((bucket, "attachment"))
+                    continue
+                media_buckets.append(bucket)
+                candidates.extend((entry, "attachment") for entry in list(bucket.iterdir()))
+
+        for root, kind in (
+            (paths.server_uploads, "upload"),
+            (paths.server_failed, "attachment"),
+        ):
+            if root.is_dir():
+                candidates.extend((entry, kind) for entry in list(root.iterdir()))
+    except OSError:
+        failed = True
+        _LOGGER.warning("could not enumerate Server chat wipe files", exc_info=True)
+
+    # Snapshot the directory entries before reading live IDs. A concurrently-created
+    # upload that appears after enumeration cannot be swept by this pass, even if it
+    # arrives after a previous worker tick began.
+    live_attachments, live_uploads = store.live_storage_ids()
+    pending_storage = store.pending_deleted_storage_items()
+    pending_attachments = {
+        storage_id for kind, storage_id in pending_storage if kind == "attachment"
+    }
+    pending_uploads = {storage_id for kind, storage_id in pending_storage if kind == "upload"}
+
+    for entry, kind in candidates:
         storage_id = entry.name
         if _STORAGE_ID_RE.fullmatch(storage_id):
-            live = (
-                store.get_attachment(storage_id)
-                if kind == "attachment"
-                else store.get_upload(storage_id)
-            )
-            if live is not None:
-                return
+            live_ids = live_attachments if kind == "attachment" else live_uploads
+            pending_ids = pending_attachments if kind == "attachment" else pending_uploads
+            if storage_id in live_ids or storage_id in pending_ids:
+                continue
         try:
             _remove_entry(entry)
         except OSError:
             failed = True
             _LOGGER.warning("Server chat wipe cleanup remains pending for %s", entry, exc_info=True)
 
-    try:
-        if paths.server_media.is_dir():
-            for bucket in list(paths.server_media.iterdir()):
-                if bucket.is_symlink() or not bucket.is_dir():
-                    _remove_unreferenced(bucket, kind="attachment")
-                    continue
-                for entry in list(bucket.iterdir()):
-                    _remove_unreferenced(entry, kind="attachment")
-                if bucket.is_dir() and not any(bucket.iterdir()):
+    for bucket in media_buckets:
+        if bucket.is_dir():
+            try:
+                if not any(bucket.iterdir()):
                     try:
                         bucket.rmdir()
                     except FileNotFoundError:
@@ -186,36 +208,44 @@ def cleanup_unreferenced_storage_once(*, store: LiveChatStore, paths: ProjectPat
                             bucket,
                             exc_info=True,
                         )
-
-        for root, kind in (
-            (paths.server_uploads, "upload"),
-            (paths.server_failed, "attachment"),
-        ):
-            if root.is_dir():
-                for entry in list(root.iterdir()):
-                    _remove_unreferenced(entry, kind=kind)
-    except OSError:
-        failed = True
-        _LOGGER.warning("could not enumerate Server chat wipe files", exc_info=True)
+            except OSError:
+                failed = True
+                _LOGGER.warning(
+                    "could not inspect media shard after cleanup %s", bucket, exc_info=True
+                )
 
     if failed:
+        if token is None:
+            store.ensure_pending_wipe_cleanup_token()
         return True
     if token is not None:
         store.clear_pending_wipe_cleanup(expected_token=token)
     return store.storage_cleanup_pending()
 
 
+def recover_erasure_once(*, store: LiveChatStore, paths: ProjectPaths, startup_scan: bool) -> None:
+    """Retry journaled IDs each tick; scan the whole tree only at startup or for a wipe."""
+    cleanup_deleted_storage_once(store=store, paths=paths)
+    if startup_scan or store.pending_wipe_cleanup_token() is not None:
+        cleanup_unreferenced_storage_once(store=store, paths=paths)
+    scrub_once(store=store)
+
+
 async def run_scrubber_forever(
     *, store: LiveChatStore, paths: ProjectPaths, interval_s: float = SCRUB_INTERVAL_S
 ) -> None:
     """Resume WAL and media deletion work at startup and then every two seconds."""
+    startup_scan = True
     while True:
         started_at = time.monotonic()
+        scan_on_start = startup_scan
         await anyio.to_thread.run_sync(
-            lambda: cleanup_deleted_storage_once(store=store, paths=paths)
+            partial(
+                recover_erasure_once,
+                store=store,
+                paths=paths,
+                startup_scan=scan_on_start,
+            )
         )
-        await anyio.to_thread.run_sync(
-            lambda: cleanup_unreferenced_storage_once(store=store, paths=paths)
-        )
-        await anyio.to_thread.run_sync(lambda: scrub_once(store=store))
+        startup_scan = False
         await anyio.sleep(max(0.0, interval_s - (time.monotonic() - started_at)))
