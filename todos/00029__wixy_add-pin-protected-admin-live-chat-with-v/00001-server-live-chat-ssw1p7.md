@@ -1260,3 +1260,35 @@ fixed same-session.)
   `bs7`, PR, CI, merge, mark delivery task done, resolve lane, then P7 → sec.13 audit
   (DM-owned per the Architect, now covers the new background-task supervisor + migration
   v6) → live `verify` → R14a squash delivery merge.
+
+## Update 2026-09-24 (DM `8e7bbea9`) — round 9: 4/5 findings CLEARED, 1 narrow round-10 fix pending
+
+- Sol's consolidated round 8+9 review: **legacy-marker import, ready-original cleanup/retry,
+  processing-status exclusion, and 7-day failed-original retention all PASS** (88 focused
+  tests). One remaining MEDIUM: `background.py`'s `failed()` (write side) still gates its
+  reset on `ran_for_s >= 300` (the loop's own uninterrupted runtime before failing), not on
+  wall-clock time since the last recorded failure — but `ran_for_s` excludes the backoff
+  delay between attempts, so a genuinely-quiet-300s+ loop (by the SAME measure
+  `consecutive_failures()`'s read-side fix already uses) can still have `ran_for_s < 300`
+  and wrongly increment from the stale old count instead of resetting to 1. Sol's repro:
+  3 failures at t=1000 (count 3); next attempt runs 297s, fails at t=1301 (301s real
+  elapsed quiet) — read-side correctly shows 0 just before, but `failed()` still computes 4
+  (degraded).
+- **Lean fix relayed to Luna as round 10** (one line-level change): `failed()`'s reset
+  condition should use `time.time() - previous.last_failure_at >= _HEALTHY_RESET_S`
+  (matching the read-side check) instead of `ran_for_s >= _HEALTHY_RESET_S`, so read and
+  write sides agree on what "quiet long enough" means.
+- **5x harness judgment call** (both the Orchestrator and Architect independently flagged
+  this exact class of risk earlier — reusing a stale-SHA run — so being explicit here):
+  round 10 is a tiny, isolated, deterministic arithmetic fix in a health-tracking
+  dataclass, touching NO filesystem/threading code — it does not intersect the
+  load-dependent Windows file-race surface the 5x harness exists to stress-test. Letting
+  the CURRENT 5x run (against `240dc76`, in progress) continue as valid stability evidence
+  for the race-prone surface, rather than restarting it — but will still run the full
+  suite at least once against round 10's exact final SHA before clearing, to catch any
+  regression from the one-line change itself. Will state this reasoning explicitly to the
+  Orchestrator/Architect at clearance time, not just silently reuse the run.
+- **Next**: wait for Luna's round-10 SHA (should be fast, one-line fix) + Sol's
+  confirmation on that specific delta. Then: full suite once on the final SHA (not
+  necessarily another full 5x, per the reasoning above), push, PR, CI, merge, mark
+  delivery task done, resolve lane, P7, sec.13 audit, live verify, R14a squash merge.
