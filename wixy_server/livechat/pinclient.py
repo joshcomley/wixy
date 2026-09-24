@@ -206,10 +206,11 @@ def _map_response(response: httpx.Response) -> PinVerifyResult:
             return PinVerifyResult(outcome="not_configured")
         # §5.1's mapping table: 400 `invalid_request` -> wixy 422 (NOT 503) —
         # "wixy validates first, so this is a wixy bug." Still logged as an
-        # ERROR (this should be provably unreachable: `UnlockIn`'s 4-16-digit
-        # pattern already rejects anything that could trigger it before
-        # `verify()` is ever called), but the CONTRACT says 422, not a
-        # closed-fail 503 — those are different signals to the frontend.
+        # ERROR (this should be provably unreachable: the `unlock` route's manual
+        # 4-16 ASCII-digit check in `routes_livechat.py` already rejects anything
+        # that could trigger it before `verify()` is ever called), but the
+        # CONTRACT says 422, not a closed-fail 503 — those are different
+        # signals to the frontend.
         logger.error(
             "livechat: cmd PIN-verify rejected wixy's own request as invalid_request "
             "(400) — this is a wixy-side bug, not a PIN or lockout outcome: %r",

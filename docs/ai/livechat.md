@@ -6,7 +6,7 @@ storage, routes, and second auth gate, entirely separate from `chats.py`/`cmdcha
 `draft/media/`. Full decided design: [`spec/server-chat/00-brief.md`](../../spec/server-chat/00-brief.md).
 This manual describes the current implementation; where intent and code differ, follow the
 code and record the difference in `decisions/`.
-Numbered guarantees: [invariants.md](invariants.md) 40–45.
+Numbered guarantees: [invariants.md](invariants.md) 40–47.
 
 ## 1. The disguise (why it looks like nothing is here)
 
@@ -63,7 +63,10 @@ one). The PIN is verified entirely by cmd; see §4.
   *different* email, so it can't outlive a change of admin on the shared device.
 - Held **only in JS memory** on the client — never localStorage/sessionStorage/cookies/URLs.
   Sent as the `X-Wixy-Server-Token` header; a token in a query string is rejected outright
-  (the header is the only place `require_server_token` ever looks).
+  (the header is the only place `require_server_token` ever looks). A header value that is not
+  pure ASCII fails verification like any other malformed token and gets the same
+  `401 {"error":"locked"}` — never a server error (`tokens.verify_unlock_token` rejects it
+  before any HMAC work; `TestTokenRequired::test_non_ascii_unlock_token_is_401_locked`).
 - **Signed media URLs** (§5.6, for P2b's `GET media/*` — `<img>`/`<video>`/`<audio>` can't
   send custom headers): `MediaSigner` mints `?exp=<token's own exp>&sig=<HMAC(secret,
   "media|{attId}|{rendition}|{exp}|{email}")>` per attachment, per response — never
@@ -88,10 +91,14 @@ Content-Type: application/json                            # required (CSRF guard
 body: {"pin": "<4-16 digits>", "subject": "<CF email, omitted if empty>"}
 ```
 
-wixy validates **4–16 digits locally** and never calls cmd below that — cmd charges an
-attempt **before** checking it, so a stray keypress must never burn one (`UnlockIn`'s
-pydantic `pattern=r"^\d{4,16}$"` 422s before the route handler, and therefore before
-`verifier.verify()`, ever runs).
+wixy validates **4–16 ASCII digits locally** and never calls cmd for anything else — cmd
+charges an attempt **before** checking it, so a stray keypress must never burn one. The
+`unlock` route (`routes_livechat.py`) reads the raw JSON body itself instead of binding a
+Pydantic model, and rejects every malformed shape (invalid or non-UTF-8 JSON, a non-object
+body, a missing or misspelled `pin` key, a non-string or nested `pin`, or a `pin` that is not
+4–16 ASCII digits) with one redacted `422 {"error":"invalid_pin"}` **before**
+`verifier.verify()` is ever reached; the submitted value appears in no response or log line
+(Inv 41).
 
 **Retry policy** (`CmdPinVerifier._post_with_narrow_retry`) — the one place in this whole
 feature where getting retries wrong double-counts a wrong PIN toward the owner's real
@@ -112,10 +119,11 @@ nothing spent) → wixy's own 409; 400 `invalid_app_key` (misconfiguration) → 
 400 `invalid_request`, 403, 413, 415 are all wixy-side bugs or a misrouted deployment
 (logged as `ERROR`) — but **not the same wixy-side outcome**: 400 `invalid_request` maps to
 **422** (the frozen contract's own distinction: "wixy validates first, so this is a wixy
-bug" gets the SAME status a locally-invalid PIN would, provably unreachable in practice
-since `UnlockIn`'s 4-16-digit pattern already rejects anything that could trigger it),
-while 403/413/415 map to the closed-fail `unavailable` → 503 — see `pinclient.py`'s own
-docstrings for the exhaustive table.
+bug" gets a 422 like a locally-invalid PIN does — as `{"error":"invalid","detail":...}`, not
+`invalid_pin` — and is provably unreachable in practice, since the route's manual 4–16
+ASCII-digit check already rejects anything that could trigger it), while 403/413/415 map to
+the closed-fail `unavailable` → 503 — see `pinclient.py`'s own docstrings for the exhaustive
+table.
 
 **Tests use a fake cmd** (`wixy_server/tests/fake_cmd.py`'s `/api/pins/{app_key}/verify`
 double — `FakeCmdState.register_pin_app(app_key, pin)`) — the real PIN value never appears
@@ -204,9 +212,38 @@ skips a stale `message`/`message_updated` event if its message row has already v
 Any unlocked chat user may hard-delete any message for everyone. Deletion removes its message
 and attachment rows, media/upload/failed directories, and prior `message`/`message_updated`
 events, then appends one `message_deleted` event. Repeating a delete adds no second event and
-returns 204 or 202 according to the scrub result. The client removes the bubble optimistically,
-restores it with an error line if the request fails, and removes remote bubbles from the same
-event.
+returns 204 or 202 according to the scrub result. The client removes the bubble optimistically
+and removes remote bubbles from the same `message_deleted` event; the stream is the source of
+truth.
+
+**Client timeouts, retries and reconciliation.** Delete and wipe requests use a dedicated
+30-second timeout (`serverFetch` in `admin-ui/src/server/api/http.ts`; ordinary chat requests
+keep 10 seconds and upload chunks 120), so a slow but successful erasure is not abandoned by
+the client. A timeout or network failure of either request is an *unknown outcome*
+(`ServerErasureOutcomeUnknownError`), distinct from a definite HTTP failure:
+
+- **Delete** is idempotent, so `deleteMessage` (`api/messages.ts`) retries an unknown outcome up
+  to three times, after 1, 2 and 4 seconds (at most four requests). If it still cannot be
+  confirmed, the bubble is restored with "Couldn't confirm the delete — try again". A definite
+  HTTP failure other than 401 is not retried and restores the bubble with "Couldn't delete
+  message. Try again."; a 401 locks the chat. If the delete did commit, its `message_deleted`
+  event removes the bubble anyway, even after a restore.
+- **Wipe** is never retried, because a repeat would delete anything sent since. A definite
+  failure keeps the two-step confirmation open with "Couldn't delete everything — try again".
+  On an unknown outcome the settings sheet shows "Couldn't confirm — checking…" immediately,
+  before any history request. `thread.ts` then pages the whole history and compares server
+  message sequence numbers against the newest sequence the client knew when it sent the wipe;
+  browser and server clocks are never compared. If any message at or before that boundary is
+  still there, the wipe did not commit: the history is restored and the retry message is shown.
+  Otherwise the wipe counts as done, messages newer than the boundary are kept, and the
+  `/usage` erasure poll starts. If the history request itself fails, the sheet keeps polling
+  `/usage` and ends with "Status unclear. Check the messages to confirm." A `wiped` event from
+  the stream settles either case.
+
+Covered by `admin-ui/tests/server/erasureRequests.test.ts`,
+`admin-ui/tests/serverThread.test.ts` and `admin-ui/tests/serverSettingsSheet.test.ts`, and by
+`e2e/tests/server-chat.spec.ts` (a delete whose response is delayed 12 seconds still ends
+removed on both clients).
 
 The settings sheet's two-step **Delete all messages** action requires exactly
 `{"confirm":"WIPE"}`. Wipe clears messages, attachments, pending uploads, all events, and the
@@ -255,10 +292,12 @@ use the protected `/push/subscriptions/{deviceId}` routes. Subscription endpoint
 validated against the frozen HTTPS push-service allowlist before they are stored. The
 VAPID key pair is persisted race-safely in the private server directory's `vapid.json`.
 
-**PENDING-AUDIT-FIX F1:** the Android opt-in is not reachable at this candidate. The push
-routes, service worker, and toggle module exist, but `settingsSheet.ts` leaves `pushSlot`
-empty and the app does not mount the toggle. Treat Android opt-in as the intended policy, not
-an operational feature, until F1 is merged and verified.
+The opt-in is reachable from the UI. Each time the settings sheet opens, `settingsSheet.ts`
+mounts `pushToggle.ts` into its push slot — only on an Android-capable browser (an Android user
+agent with `PushManager`, `serviceWorker` and `Notification`) and only once the chat has a
+display name; the sheet unmounts it on close. Desktop and other browsers never see the control.
+`e2e/tests/server-push.spec.ts` proves both: a desktop browser shows no control, and an Android
+browser enables and disables the subscription through the sheet.
 
 After a message commits, the registered dispatch hook sends a payloadless Web Push
 request to every subscription except the message's device and case-insensitive sender.
@@ -272,6 +311,7 @@ visible focused Server page, and routes notification clicks to `/admin/server`. 
 no fetch handler. `server/pushToggle.ts` keeps enablement in the settings sheet's
 caller: permission, worker registration, subscription, and protected PUT all happen
 from the enable click; disable unsubscribes, deletes the server row, and unregisters.
+
 ## 8. Media processing, chunked uploads and the queue (P2a/P2b)
 
 **Processing (`livechat/processing.py`, P2a) — pure, no DB/settings coupling.** Every
@@ -284,13 +324,22 @@ function takes explicit input/output paths and (for voice/video) explicit `ffmpe
    subprocess (§2's ffmpeg SSRF/LFI concern). The sniffed container is checked against the
    claimed kind (`MediaProcessingError("kind_mismatch")` on a mismatch) before any
    processing starts.
-2. **Photo** (Pillow + `pillow-heif==1.7.0`, included by the server extra): an 80MP pixel cap checked immediately after
-   `Image.open()`, before `.load()`/`.convert()`/`exif_transpose()` — a decompression bomb
-   (huge declared dimensions, tiny file) is rejected without ever decoding pixel data.
-   `exif_transpose` + a full metadata strip (rebuilt from raw pixel bytes, not a
-   round-tripped save). PNG stays PNG; an animated GIF keeps its original bytes untouched
-   (no EXIF/GPS to strip, and re-encoding a multi-frame animation buys nothing); everything
-   else (including WEBP/HEIC) becomes JPEG q88. Long edge ≤4096 (full) / ≤480 (thumb).
+2. **Photo** (Pillow + `pillow-heif==1.7.0`, included by the server extra): an 80MP pixel cap
+   is checked immediately after `Image.open()`, before `.load()`/`.convert()`/
+   `exif_transpose()` — a decompression bomb (huge declared dimensions, tiny file) is rejected
+   without ever decoding pixel data. A still image then goes through, in this order:
+   (a) `exif_transpose`; (b) **colour management** — an embedded ICC profile is converted to
+   sRGB with the perceptual intent (a failed conversion logs a `WARNING` and continues with the
+   pixels as they are, never failing the upload; alpha is carried across); (c) **normalization
+   to 8-bit RGB or RGBA** — palette modes (`P`/`PA`) keep their colours, alpha is kept for
+   `RGBA`/`LA`/`PA` and for any image with a `transparency` entry (a PNG tRNS chunk or a GIF
+   transparent index), 16-bit greyscale (`I;16*`/`I`) is scaled 0–65535 → 0–255 through a
+   lookup table (`round(v * 255 / 65535)`, so 32768 becomes 128 — never clipped), and every
+   other mode, CMYK included, goes through Pillow's own `convert()`; (d) the **metadata strip**
+   — the image is rebuilt from those normalized raw pixels (not a round-tripped save), so EXIF,
+   ICC and text chunks are gone, and the profile is not re-attached because the pixels are
+   already sRGB; (e) long edge ≤4096 (full) / ≤480 (thumb). The output format then follows
+   transparency, not the source format — see the photo table below.
 3. **Voice**: AAC-LC mono 64kb/s `m4a`, duration from the **output** (MediaRecorder webm has
    none in its own header), 64-bucket RMS peaks normalized against the clip's own loudest
    bucket.
@@ -304,13 +353,29 @@ function takes explicit input/output paths and (for voice/video) explicit `ffmpe
    ffprobe/ffmpeg call pins `-f <demuxer> -protocol_whitelist file`; every rendition write is
    atomic (temp name, then `os.replace`).
 
+**Photo renditions** (`processing.process_photo`; the first matching row applies):
+
+| Source | `full` | `thumb` |
+|---|---|---|
+| animated GIF | the original bytes, untouched, as `full.gif` — the one documented exception to "metadata stripped" (a GIF carries no EXIF/GPS, and re-encoding an animation buys nothing); its recorded width/height are the original's | the first frame through steps (a)–(d) and the 480px cap: `thumb.png` if that frame has transparency, otherwise `thumb.jpg` |
+| has alpha (any other format) | `full.png` | `thumb.png` |
+| opaque PNG or opaque static GIF | `full.png` (lossless) | `thumb.jpg` (q80) |
+| any other opaque source (JPEG, WebP, HEIC/HEIF) | `full.jpg` (q88) | `thumb.jpg` (q80) |
+
+The signed-media route resolves the `thumb` rendition as `thumb.png` or `thumb.jpg`, whichever
+exists (see the media-route paragraph below).
+
 `process(kind, src, *, output_dir, ffmpeg, ffprobe)` dispatches to the three and never
 returns a partial/failed result — a caller that catches `MediaProcessingError` has nothing to
 clean up beyond `output_dir` itself.
 
 **Uploads (`livechat/uploads.py`, P2b) — §5.5.** `init_upload` checks (cheapest-first): the
-media-pipeline gate, the declared MIME type against a per-kind allowlist, the declared size
-against the per-kind cap (photo 30MiB / voice 25MiB / video 1GiB), then quota
+media-pipeline gate (ffmpeg **and** ffprobe **and** `pillow-heif` all available — see
+`resolve_binaries` below), the declared MIME type against a per-kind allowlist, the declared
+size (`sizeBytes` must be at least 1: the route's request model rejects 0 or a negative value
+with a 422, and `init_upload` itself refuses it as defence in depth, so such a size cannot
+bypass the quota arithmetic) against the per-kind cap (photo 30MiB / voice 25MiB / video
+1GiB), then quota
 (`media_bytes_used + pending_upload_bytes + size > quota`) and the free-space floor
 (injectable `disk_usage`, default `shutil.disk_usage`). `write_chunk` is idempotent
 (`.part` then rename); `assemble` verifies every expected chunk is present (`missing` list on
@@ -341,17 +406,22 @@ recovery path.
 
 **The delete/processing race:** after `finish_attachment` (itself a silent no-op against a
 concurrently-deleted row, per `store.py`), the queue re-reads `get_attachment`. If the row is
-gone, it journals cleanup for any paths this worker recreated; the erasure worker removes
-them with the same retryable deletion path as request-side cleanup.
+gone, it journals cleanup for any paths this worker recreated — the journal writes, like every
+other store call here, run in worker threads so the event loop never blocks on SQLite; the
+erasure worker removes them with the same retryable deletion path as request-side cleanup.
 
 **`resolve_binaries`** (called once at `create_app` time): `WIXY_FFMPEG`/`WIXY_FFPROBE`,
 falling back to `shutil.which` — but an **explicit** override must point at a file that
 actually exists (`Path(...).is_file()`), or it's treated as unresolved. This catches an
 operator typo in the env var as a clean 503 at upload time, rather than deferring the failure
-to per-upload processing deep inside the queue. Feeds `app.state.livechat_media_available`
-and the queue worker's `QueueConfig`; when `None`, the queue task is never started at all
-(nothing valid to run it with) and the janitor still runs (pure DB/filesystem housekeeping,
-no ffmpeg dependency).
+to per-upload processing deep inside the queue. It returns the queue worker's `QueueConfig`, or
+`None` when either binary is unresolved. `app.py` then sets `app.state.livechat_media_available`
+to true only when that config exists **and** `pillow-heif` imported (`processing.
+PILLOW_HEIF_AVAILABLE`), so a missing ffmpeg, ffprobe or HEIF decoder gates media the same way:
+uploads return 503 `media_unavailable`, `GET /usage` reports `mediaAvailable: false`, the
+decoy's "Media processing" row degrades to `unavailable`, the queue task is never started at
+all (nothing valid to run it with), and text chat is unaffected. The janitor still runs (pure
+DB/filesystem housekeeping, no ffmpeg dependency).
 
 **Janitor (`livechat/janitor.py`, P2b/P8) — `run_once`/`run_forever`, hourly.** Ages out
 uploads >24h (`stale_upload_ids`), unreferenced attachments >24h (`orphan_attachment_ids`,
@@ -360,7 +430,9 @@ its processing status), and `failed/` entries >7 days (by directory `mtime`, sin
 DB row backing them). It rechecks orphan/upload eligibility in the delete transaction and queues
 filesystem cleanup only when that conditional delete succeeds. It also prunes completed erasure
 tombstones older than seven days, never pending ones. `run_once` takes an explicit `now`, never
-reads the clock — every age threshold is test-driven, not slept through.
+reads the clock — every age threshold is test-driven, not slept through. `run_forever` sweeps
+once immediately at app start and then hourly, so a test that seeds a live app's store directly
+must use real-clock timestamps: a 1970-dated orphan is reaped mid-test (decisions/00157).
 It also deletes staged raw uploads left behind on ready attachments; those sources have no
 diagnostic-retention window once safe renditions exist.
 
@@ -378,8 +450,9 @@ it instead. `attId` is validated as exactly 32 lowercase hex chars *before* the 
 math runs (cheap defense in depth; a forged id can never pass the HMAC anyway, since it's
 covered by the signature). The stored `renditions` tuple carries rendition **names**
 (`"full"`, `"thumb"`, `"play"`, `"poster"`), never file paths — the actual filename's
-extension (`full.jpg` vs `full.png` vs `full.gif`) is resolved by trying each of P2a's
-possible outputs for that name in turn, since exactly one of them ever exists per attachment.
+extension (`full.jpg`, `full.png` or `full.gif`; `thumb.png` or `thumb.jpg`) is resolved by
+trying each of P2a's possible outputs for that name in turn, since exactly one of them ever
+exists per attachment and rendition.
 An explicit MIME map (not `FileResponse`'s extension-guessing) sets `Content-Type`, because
 `X-Content-Type-Options: nosniff` plus a wrong/generic content type would silently break
 playback in the browser. Served via Starlette `FileResponse` (200/206, Range-aware).
@@ -392,7 +465,7 @@ playback in the browser. Served via Starlette `FileResponse` (200/206, Range-awa
 | `WIXY_SERVER_MEDIA_QUOTA_MB` | `server_media_quota_bytes` | 20480 MiB (20 GiB) | R10 — enforced at upload init (P2b); MB values multiply by 1024² |
 | `WIXY_SERVER_MIN_FREE_MB` | `server_min_free_bytes` | 10240 MiB (10 GiB) | R10 — the disk free-space floor, enforced alongside the quota |
 | `WIXY_SERVER_UPLOAD_CHUNK_BYTES` | `server_upload_chunk_bytes` | 8 MiB | clamped to 64 KiB–16 MiB |
-| `WIXY_FFMPEG` / `WIXY_FFPROBE` | `ffmpeg_path` / `ffprobe_path` | `""` (resolve via `PATH`) | overrides must point to existing files; either missing makes media uploads return 503 while text chat works |
+| `WIXY_FFMPEG` / `WIXY_FFPROBE` | `ffmpeg_path` / `ffprobe_path` | `""` (resolve via `PATH`) | overrides must point to existing files; either binary missing — or `pillow-heif` not importable — makes media uploads return 503 while text chat works |
 
 `ProjectPaths` (`storage.py`) gets `server_dir`/`server_db`/`server_secret`/`server_vapid`/
 `server_media`/`server_uploads`/`server_failed` — created **lazily** (like `reports_dir`),
@@ -425,10 +498,10 @@ Do not manually clear `pending_scrub`, `deleted_storage`, or the wipe-sweep toke
 imports legacy `server/scrub.pending` into `pending_scrub`; an unreadable marker is retained and
 a durable row is created so privacy work is not lost.
 
-`/api/admin/system/status` reports `server.mediaProcessing` as `unavailable` when either binary
-cannot be resolved, `degraded` after at least three consecutive media-queue or erasure-worker
-failures, and `ok` when media is available without that failure threshold. The reported failure
-count resets after five minutes without another failure.
+`/api/admin/system/status` reports `server.mediaProcessing` as `unavailable` when ffmpeg,
+ffprobe or `pillow-heif` is unavailable, `degraded` after at least three consecutive
+media-queue or erasure-worker failures, and `ok` when media is available without that failure
+threshold. The reported failure count resets after five minutes without another failure.
 
 ## 11. Frontend: the lock/gesture state machine (P4, `admin-ui/src/server/`)
 
@@ -539,7 +612,10 @@ lock/unlock. `e2e/tests/server-lock.spec.ts` drives the same matrix in a real br
 
 `admin-ui/src/server/chatView.ts` owns the name prompt and stream lifecycle;
 `admin-ui/src/server/thread.ts` owns message history, rendering, and the shared composer from
-`admin-ui/src/chatComposer.ts`. The chat composer enables its paperclip for `image/*` and
+`admin-ui/src/chatComposer.ts`. `chatView.ts` guards the stream with an attach epoch that every
+attach, detach and dispose advances: a lock that lands while history is still loading can never
+open a stream afterwards, and a stale `locked` event or 401 from a previous unlock is ignored
+(Inv 42). The chat composer enables its paperclip for `image/*` and
 `video/*`, stages selected files immediately, and keeps Send disabled until every upload has
 finished. Its progress element reflects uploaded bytes. A picker opening calls
 `hooks.suspend("filePicker")`; the composer releases that suspension on the input's `change`
@@ -559,7 +635,8 @@ It captures the current `ServerSession` when an upload starts, sends the chunked
 and maps uploaded-byte progress back to the composer. The shared `serverFetch` wrapper
 preserves the caller's abort signal while applying its request timeout. Ordinary chat API
 requests use a 10-second timeout; upload requests allow 120 seconds per chunk for slower
-mobile uplinks. Locking detaches the thread but keeps staged files and in-flight uploads in
+mobile uplinks; delete and wipe requests use their own 30-second timeout (§6). Locking
+detaches the thread but keeps staged files and in-flight uploads in
 memory; reattaching supplies a fresh session, while any upload already in flight continues
 with its captured session. Removing a chip aborts its upload and makes a best-effort
 authenticated `DELETE /uploads/{uploadId}` after init; failed uploads use the same cleanup,
@@ -590,16 +667,17 @@ flags and does not install the Playwright clock.
 
 ## 13. Delivery status
 
-The feature branch contains the P1–P8 implementation; P7 closes this manual, invariants, and
-decision log. **PENDING-AUDIT-FIX F1:** the Server push toggle is not mounted, so Android opt-in
-is unavailable at this candidate. The code parcels are: P1 (settings, storage paths, the `livechat/` package's `models`/`store`/`tokens`/
-`pinclient`/`notifier`, `routes_livechat.py` — unlock/history/send/stream/usage, the
+The feature branch contains the P1–P8 implementation and the fixes from the pre-delivery audit;
+P7 closes this manual, invariants, and decision log, and they describe the code as built. The
+code parcels are: P1 (settings, storage paths, the `livechat/` package's `models`/`store`/
+`tokens`/`pinclient`/`notifier`, `routes_livechat.py` — unlock/history/send/stream/usage, the
 `fake_cmd.py` PIN double, the `server` field on `GET /api/admin/system/status`); **P2a**
 (`livechat/processing.py`, §8 above); **P2b** (`livechat/{uploads,media_queue,janitor}.py`,
-`routes_livechat_media.py`, §8 above — `mediaProcessing` reflects binary availability and
-supervised media/erasure health (`unavailable`, `degraded`, or `ok`);
-**P3a/P3b** (Web Push — VAPID keys, the service worker, protected push routes, the dispatch
-hook, and the standalone Android toggle module); **P4** (frontend lock/disguise/PIN-pad core
+`routes_livechat_media.py`, §8 above — `mediaProcessing` reflects media-dependency availability
+(ffmpeg, ffprobe and `pillow-heif`) and supervised media/erasure health (`unavailable`,
+`degraded`, or `ok`)); **P3a/P3b** (Web Push — VAPID keys, the service worker, protected push
+routes, the dispatch hook, and the Android toggle, mounted in the settings sheet — §7);
+**P4** (frontend lock/disguise/PIN-pad core
 — §11 above — the router/nav entry, the lock state machine, the decoy, the PIN pad, and the
 orchestrating panel that wires both gesture detectors, R7's idle/suspension timers, and every
 R6 lock trigger); **P5b** (the real chat view and thread); **P6a/P6b** (upload, recording,

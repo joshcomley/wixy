@@ -23,12 +23,16 @@ disguise and PIN gate.
 Payloadless notifications keep message content out of push-provider storage and the OS
 notification surface, while opt-in avoids registering a worker for users who do not want it.
 
-## Current reachability
+## Reachability
 
-**PENDING-AUDIT-FIX F1:** the Android-only opt-in is the approved policy, but it is not
-reachable at this candidate. The settings sheet leaves `pushSlot` empty and does not mount
-the toggle module, so do not describe push opt-in as operational until F1 is merged and
-verified.
+The pre-delivery audit found that the toggle module existed but nothing mounted it, so the
+opt-in could not be reached (finding F1). It is now mounted: each time the settings sheet
+opens, `settingsSheet.ts` puts `pushToggle.ts` into the sheet's push slot, only on an
+Android-capable browser (Android user agent with `PushManager`, `serviceWorker` and
+`Notification`) and only once the chat has a display name; the sheet unmounts it on close, and
+desktop and other browsers never see it. The worker is still registered only from the enable
+click. `e2e/tests/server-push.spec.ts` proves both halves: a desktop browser shows no control,
+and an Android browser enables and disables the subscription through the sheet.
 
 ## What to watch for
 

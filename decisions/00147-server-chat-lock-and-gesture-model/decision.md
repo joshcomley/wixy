@@ -21,6 +21,10 @@ when it locks. The original multi-tap-only reveal was replaced before implementa
 - Ten seconds without user input fades to the decoy. Panic, Escape, hidden-document,
   route-away, multi-tap, unauthorized, and expired-token causes lock immediately; the chat
   subtree is detached from the document and media/recording is stopped.
+- A lock is final even while history is still loading: `chatView.ts` advances an attach epoch on
+  every attach, detach and dispose, and every continuation, failure handler and stream callback
+  checks it, so a lock can never be followed by a stream opening, and a late `locked` event or
+  401 from a previous unlock cannot lock the next one (Inv 42).
 - Incoming messages and programmatic scroll do not count as user activity. The unlock token
   and unlocked state are not restored after reload; localStorage display-name and device
   identity values remain.

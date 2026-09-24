@@ -598,22 +598,37 @@ unreachable verifier returns 503 and never opens the gate. The unlock token exis
 browser memory; mutations send it in `X-Wixy-Server-Token`, while media uses an email- and
 expiry-bound signed URL. A token in a query string is rejected.
 
-**PENDING-AUDIT-FIX F8:** at this candidate, FastAPI's default 422 response for a malformed PIN
-can echo the submitted request input. Do not treat the no-echo guarantee as implemented until
-F8 is merged and verified; the target rule above remains unchanged.
+`POST /unlock` reads the raw JSON body itself instead of binding a Pydantic model, and validates
+the PIN in the route — 4–16 ASCII digits — before cmd is contacted, so a rejected keypress never
+costs an attempt. Every malformed shape returns the same redacted `422 {"error":"invalid_pin"}`:
+invalid, empty, truncated or non-UTF-8 JSON; a top-level array or other non-object; a missing or
+misspelled key; a non-string or nested-object `pin`; and a `pin` outside 4–16 ASCII digits. No
+response or log line carries the submitted value.
+*Enforced by:* `wixy_server/tests/test_routes_livechat.py::TestUnlockMapping` (the malformed-shape
+and unparseable-body cases assert the exact 422 body, no PIN in the response or in captured
+logs, and zero attempts charged at the fake cmd; too-short and too-long PINs likewise) and
+`TestSettingsHaveNoPinField`.
 
 ### Inv 42 — Server-chat lock is fail-closed
 Every R6 lock cause locks the chat: idle timeout (10 seconds, or 60 seconds on a device where
-the owner ticked "Extend auto-lock to 1 minute"), panic, multi-tap, Escape, hidden document,
-route-away, unauthorized response, or token expiry. The target behavior detaches the chat
-subtree from the document, aborts the stream, pauses media, and discards an unfinished
-recording. A hidden document is exempt only while the file picker or microphone permission
-flow is suspended. The decoy displays only real server status; badges, titles, favicons, and
-push text never expose chat activity.
+the owner ticked "Extend auto-lock to 1 minute" — a per-device preference, chat-only, stored in
+`localStorage` under `wx-srv-idle-extended`; the decoy and every other state still use the fixed
+10 seconds), panic, multi-tap, Escape, hidden document, route-away, unauthorized response, or
+token expiry. A lock detaches the chat subtree from the document, aborts the stream, pauses
+media, and discards an unfinished recording. A hidden document is exempt only while the file
+picker or microphone permission flow is suspended. The decoy displays only real server status;
+badges, titles, favicons, and push text never expose chat activity.
 
-**PENDING-AUDIT-FIX F4:** if lock/detach occurs while history loading is pending, the current
-`attach(session).then(...)` continuation can still start the stream after lock. Treat stream
-cancellation across that pending-history race as pending until F4 is merged and verified.
+The lock also wins the race with an attach still loading history. `chatView.ts` keeps an attach
+epoch that every attach, detach, and dispose advances; the pending history load's continuation,
+its failure handler (including a stale 401 lock), and every stream callback each check both the
+epoch and the current session before acting. A lock or detach while history is loading can
+therefore never open a stream afterwards, and a late `locked` event or 401 from a previous unlock
+can never lock the next session.
+*Enforced by:* `admin-ui/tests/serverChatView.test.ts` (no stream after a panic, idle or hidden
+lock while attach is pending; a late `locked` event or unauthorized attach failure from the
+previous unlock is ignored), `admin-ui/tests/server/panel.test.ts`, and
+`e2e/tests/server-lock.spec.ts`.
 
 ### Inv 43 — Server-chat idle time is reset only by user input
 Only the defined user-input events count as activity. `scroll` events, incoming messages, and
@@ -630,25 +645,48 @@ stay 10 seconds.
 ### Inv 44 — Server-chat media is sniffed, bounded, and private
 Inspect magic bytes before any media subprocess. Every ffmpeg/ffprobe input uses the sniffed
 explicit demuxer and `-protocol_whitelist file`. Photos are decoded through Pillow (including
-HEIC/HEIF via `pillow-heif`) and metadata is stripped from normalized still images; animated
-GIFs retain their bytes. Voice/video are normalized into private renditions and successful raw
-uploads are removed. Failed originals are diagnostic-only and expire after seven days. Enforce
-quota and the free-space floor at upload initialization. Missing ffmpeg or ffprobe makes media
-uploads unavailable without disabling text chat.
+HEIC/HEIF via `pillow-heif`) and every still image is normalized to 8-bit RGB or RGBA before
+its metadata is stripped: palette modes (`P`/`PA`) keep their colours, alpha is preserved, an
+embedded ICC profile is converted to sRGB (a failed conversion logs a warning and keeps the
+pixels as they are, never failing the upload), and 16-bit greyscale is scaled through a
+0–65535 → 0–255 lookup table rather than clipped. Metadata (EXIF, ICC, text chunks) is then
+removed by rebuilding the image from those normalized pixels. Animated GIFs are the one
+documented exception: they keep their original bytes as `full.gif`. The output format follows
+transparency, not the source format (table in [livechat.md](livechat.md) §8). Voice/video are
+normalized into private renditions and successful raw uploads are removed. Failed originals are
+diagnostic-only and expire after seven days. Enforce quota and the free-space floor at upload
+initialization; a declared `sizeBytes` below 1 is rejected. Missing ffmpeg, ffprobe or
+`pillow-heif` makes media uploads, the media queue and the `mediaProcessing` status
+unavailable without disabling text chat.
+*Enforced by:* `wixy_server/tests/test_livechat_processing.py` (pixel-level checks per source
+mode, colour profile and output format, including the palette, 16-bit greyscale and Display-P3
+cases), `test_livechat_uploads.py`, `test_livechat_media_queue.py`, and
+`test_routes_livechat_media.py` (the availability gate, including a missing `pillow-heif`, and
+the `sizeBytes` bound).
 
 ### Inv 45 — Server-chat service worker cannot intercept fetches
 The worker has no `fetch` handler and policy permits registration only after explicit Android
 push opt-in. Pushes are payloadless and the notification text is fixed and generic.
 
-**PENDING-AUDIT-FIX F1:** the app currently does not mount the settings push toggle (`pushSlot`
-is empty), so Android opt-in is not reachable at this candidate. Keep the registration policy
-as the target; do not describe push opt-in as operational until F1 is merged and verified.
+The opt-in is reachable: each time the settings sheet opens, `settingsSheet.ts` mounts the
+`pushToggle.ts` control into its push slot, but only on an Android-capable browser (Android
+user agent plus `PushManager`, `serviceWorker` and `Notification`) once the chat has a display
+name. Desktop and other browsers never see it, the sheet unmounts it on close, and the worker is
+registered only from the enable click.
+*Enforced by:* `e2e/tests/server-push.spec.ts` (a desktop browser shows no control; an Android
+browser sees it, enabling registers `/admin/server-sw.js` with scope `/admin/` and stores the
+subscription, disabling deletes it and unregisters), `admin-ui/tests/serverSettingsSheet.test.ts`,
+`admin-ui/tests/pushToggle.test.ts`, `admin-ui/tests/serverSw.test.ts`, and
+`wixy_server/tests/test_livechat_push.py`.
 
 ### Inv 46 — Server chat delete and wipe are hard deletes, without chat-visible tombstones
 Any unlocked user can delete any message for everyone. Delete removes the message, its
 attachments, media/upload/failed files, and earlier message events, then emits one
 `message_deleted`; repeating the delete is idempotent. Wipe removes all messages, attachments,
-uploads, files, and events, then emits one `wiped`. Clients remove content on those events. The
+uploads, files, and events, then emits one `wiped`. Clients remove content on those events. A
+client's delete and wipe requests wait up to 30 seconds; an unknown outcome is settled by
+retrying the idempotent delete, or for a wipe — which is never re-sent — by comparing server
+message sequence numbers in the history (see [livechat.md](livechat.md) §6). The
 internal `deleted_storage` rows are filesystem-recovery tombstones only; they never appear in
 history or the event stream. Each delete/wipe records those rows in the same SQLite transaction
 that removes the attachment/upload rows, so startup can resume file deletion after a crash.
@@ -675,10 +713,13 @@ before filesystem cleanup.
 Sequence high-water marks and push subscriptions are preserved. Media files are unlinked, but
 NTFS/SSD byte-level shredding is not claimed.
 *Enforced by:* `wixy_server/tests/test_livechat_store.py` (migration, idempotence, secure delete,
-and raw-byte scrubbing), `test_routes_livechat.py` (auth, confirmation, held-file cleanup and old
-signed-URL 404), `test_livechat_media_queue.py` (delete/processing race), and
-`e2e/tests/server-chat.spec.ts` (cross-client deletion, old-media 404, wipe replay, and mobile
-gesture behavior).
+and raw-byte scrubbing — the delete and wipe raw-byte assertions run while a second store
+connection is held open, so a WAL that was not truncated would fail them),
+`test_routes_livechat.py` (auth, confirmation, held-file cleanup and old signed-URL 404),
+`test_livechat_media_queue.py` (delete/processing race), `admin-ui/tests/server/erasureRequests.test.ts`
+and `admin-ui/tests/serverThread.test.ts` (the client's timeout, retry and reconciliation rules),
+and `e2e/tests/server-chat.spec.ts` (cross-client deletion, a 12-second-delayed delete, old-media
+404, wipe replay, and mobile gesture behavior).
 *Known limits:* filesystem overwrite is not a reliable shred guarantee on NTFS/SSD. A 202
 response means chat content is already deleted and broadcast while database-byte or media-file
 cleanup continues durably in the background.
