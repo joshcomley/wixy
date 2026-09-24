@@ -540,6 +540,36 @@ class TestProcessPhoto:
         # A thumbnail is still produced even though the full rendition is untouched.
         assert result.renditions["thumb"].is_file()
 
+    @pytest.mark.parametrize(
+        ("transparent", "thumb_name"), [(False, "thumb.jpg"), (True, "thumb.png")]
+    )
+    def test_animated_gif_thumbnail_format_follows_first_frame_transparency(
+        self, transparent: bool, thumb_name: str, tmp_path: Path
+    ) -> None:
+        src = tmp_path / "in.gif"
+        frames = [
+            Image.new("RGB", (40, 20), colour).convert("P", palette=Image.Palette.ADAPTIVE)
+            for colour in ("red", "green", "blue")
+        ]
+        if transparent:
+            frames[0].save(
+                src,
+                format="GIF",
+                save_all=True,
+                append_images=frames[1:],
+                duration=100,
+                transparency=0,
+            )
+        else:
+            frames[0].save(src, format="GIF", save_all=True, append_images=frames[1:], duration=100)
+
+        result = processing.process_photo(src, output_dir=tmp_path / "out")
+
+        assert result.renditions["full"].name == "full.gif"
+        assert result.renditions["full"].read_bytes() == src.read_bytes()
+        assert result.renditions["thumb"].name == thumb_name
+        assert (result.width, result.height) == (40, 20)
+
     def test_static_gif_becomes_lossless_png(self, tmp_path: Path) -> None:
         src = _static_gif(tmp_path / "in.gif")
         result = processing.process_photo(src, output_dir=tmp_path / "out")

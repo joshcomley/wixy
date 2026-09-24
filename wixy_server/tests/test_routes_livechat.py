@@ -239,6 +239,38 @@ class TestUnlockMapping:
             )
 
         assert response.status_code == 422
+        assert response.json() == {"error": "invalid_pin"}
+        assert TEST_PIN not in response.text
+        assert TEST_PIN not in caplog.text
+        assert fake_cmd_state.pin_apps[TEST_APP_KEY].attempts == {}
+
+    @pytest.mark.parametrize(
+        "raw",
+        [b"{not json", f'{{"pin": "{TEST_PIN}"'.encode(), b"\xff\xfe\x00", b""],
+        ids=["not-json", "truncated-json-holding-the-pin", "not-utf8", "empty"],
+    )
+    def test_unparseable_unlock_bodies_are_one_redacted_422(
+        self,
+        raw: bytes,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        fake_cmd_state: FakeCmdState,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        caplog.set_level(logging.DEBUG)
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/admin/server/unlock",
+                content=raw,
+                headers={"Content-Type": "application/json", **UNLOCK_GUARD_HEADERS},
+            )
+
+        assert response.status_code == 422
+        assert response.json() == {"error": "invalid_pin"}
         assert TEST_PIN not in response.text
         assert TEST_PIN not in caplog.text
         assert fake_cmd_state.pin_apps[TEST_APP_KEY].attempts == {}
