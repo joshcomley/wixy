@@ -586,11 +586,15 @@ Any unlocked user can delete any message for everyone. Delete removes the messag
 attachments, media/upload/failed files, and earlier message events, then emits one
 `message_deleted`; repeating the delete is idempotent. Wipe removes all messages, attachments,
 uploads, files, and events, then emits one `wiped`. Clients remove content on those events.
-Every store connection sets `PRAGMA secure_delete=ON`; delete checkpoints WAL passively and wipe
-truncates it. Sequence high-water marks and push subscriptions are preserved. Media files are
-unlinked, but NTFS/SSD byte-level shredding is not claimed.
+Every store connection sets `PRAGMA secure_delete=ON`; both delete and wipe TRUNCATE the WAL. A
+204 requires an empty WAL and the raw-byte guarantee. If a reader blocks the 10-second scrub,
+the route durably records `server/scrub.pending` and returns 202; the background scrubber resumes
+at startup and retries every two seconds. Sequence high-water marks and push subscriptions are
+preserved. Media files are unlinked, but NTFS/SSD byte-level shredding is not claimed.
 *Enforced by:* `wixy_server/tests/test_livechat_store.py` (migration, idempotence, secure delete,
 and raw-byte scrubbing), `test_routes_livechat.py` (auth, confirmation, file cleanup, and no push),
 `test_livechat_media_queue.py` (delete/processing race), and `e2e/tests/server-chat.spec.ts`
 (cross-client deletion, old-media 404, wipe replay, and mobile gesture behavior).
-*Exception:* none — filesystem overwrite is not a reliable shred guarantee on NTFS/SSD.
+*Known limits:* filesystem overwrite is not a reliable shred guarantee on NTFS/SSD. A 202
+response means chat content is already deleted and broadcast while the durable background scrub
+finishes removing leftover database bytes.

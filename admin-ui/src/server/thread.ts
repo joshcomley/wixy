@@ -46,7 +46,7 @@ export interface ServerThreadView {
    * text, and the scroll/echo state in memory for the next `attach`. */
   detach(): void;
   handleStreamEvent(event: ServerStreamEvent): void;
-  wipe(): Promise<void>;
+  wipe(): Promise<boolean>;
   /** Updates the header's name chip — called after the settings sheet (or
    * the first-unlock name prompt) commits a new name. */
   refreshNameChip(): void;
@@ -172,6 +172,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   let historyLoading = false;
   let hasMoreHistory = false;
   const confirmedBySeq = new Map<number, Message>();
+  const deletedSeqs = new Set<number>();
   const confirmedClientIds = new Set<string>();
   const inFlightDeletes = new Set<number>();
   const deleteEventsDuringRequest = new Set<number>();
@@ -181,10 +182,13 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   let echoCounter = 0;
   let pendingClientId: string | null = null;
   let contentGeneration = 0;
+  let contentRevision = 0;
 
   function addConfirmed(message: Message): void {
+    if (deletedSeqs.has(message.seq)) return;
     confirmedBySeq.set(message.seq, message);
     confirmedClientIds.add(message.clientId);
+    contentRevision += 1;
   }
 
   function renderAttachmentsFor(message: Message): HTMLElement | null {
@@ -288,6 +292,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   async function deleteForEveryone(message: Message): Promise<void> {
     const session = currentSession;
     if (session === null) return;
+    const requestGeneration = contentGeneration;
+    contentRevision += 1;
+    deletedSeqs.add(message.seq);
     inFlightDeletes.add(message.seq);
     confirmedBySeq.delete(message.seq);
     const bubble = messageList.querySelector<HTMLElement>(
@@ -311,7 +318,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       await deleteMessage(session, message.seq);
     } catch (error) {
       const deleteArrived = deleteEventsDuringRequest.has(message.seq);
-      if (!deleteArrived) {
+      if (!deleteArrived && requestGeneration === contentGeneration) {
+        deletedSeqs.delete(message.seq);
         const fadeTimer = deleteFadeTimers.get(message.seq);
         if (fadeTimer !== undefined) win.clearTimeout(fadeTimer);
         deleteFadeTimers.delete(message.seq);
@@ -336,9 +344,11 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
 
   function clearAfterWipe(): void {
     contentGeneration += 1;
+    contentRevision += 1;
     for (const timer of deleteFadeTimers.values()) win.clearTimeout(timer);
     deleteFadeTimers.clear();
     confirmedBySeq.clear();
+    deletedSeqs.clear();
     confirmedClientIds.clear();
     pendingEchoes = [];
     pendingClientId = null;
@@ -346,11 +356,31 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     renderThreadList(false);
   }
 
-  async function wipe(): Promise<void> {
+  async function wipe(): Promise<boolean> {
     const session = currentSession;
     if (session === null) throw new Error("The server chat is locked.");
-    await wipeChat(session);
-    clearAfterWipe();
+    const requestGeneration = contentGeneration;
+    const scrubPending = await wipeChat(session);
+    const reconcileWithoutClearing = requestGeneration !== contentGeneration;
+    if (!reconcileWithoutClearing) clearAfterWipe();
+    const refreshGeneration = contentGeneration;
+    const refreshRevision = contentRevision;
+    try {
+      const page = await getHistory(session, { limit: HISTORY_PAGE_SIZE });
+      if (refreshGeneration !== contentGeneration || refreshRevision !== contentRevision) {
+        return scrubPending;
+      }
+      if (reconcileWithoutClearing) clearAfterWipe();
+      for (const message of page.messages) addConfirmed(message);
+      hasMoreHistory = page.hasMore;
+      renderThreadList(false);
+    } catch {
+      // A second wipe event may have arrived while reconciling. Its handler
+      // already cleared the view; otherwise preserve live events received since
+      // the refresh began instead of replacing them with a failed snapshot.
+      if (refreshGeneration !== contentGeneration) return scrubPending;
+    }
+    return scrubPending;
   }
 
   // -- History paging --------------------------------------------------------
@@ -367,11 +397,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
 
   async function loadOlderPage(): Promise<void> {
     if (currentSession === null || historyLoading || !hasMoreHistory) return;
+    const requestGeneration = contentGeneration;
+    const session = currentSession;
     const before = oldestLoadedSeq();
     if (before === null) return;
     historyLoading = true;
     try {
-      const page = await getHistory(currentSession, { before, limit: HISTORY_PAGE_SIZE });
+      const page = await getHistory(session, { before, limit: HISTORY_PAGE_SIZE });
+      if (requestGeneration !== contentGeneration) return;
       const wasStuck = threadScroll.stuck;
       const prevScrollHeight = thread.scrollHeight;
       const prevScrollTop = thread.scrollTop;
@@ -424,6 +457,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     const clientId = pendingClientId;
     const echo: PendingEcho = { clientId, text: text === "" ? null : text, sentAt: now() };
     pendingEchoes.push(echo);
+    contentRevision += 1;
     threadScroll.scrollToBottom();
     renderThreadList();
 
@@ -470,9 +504,11 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   async function attach(session: ServerSession): Promise<number | null> {
     currentSession = session;
     if (historyLoaded) return null;
+    const requestGeneration = contentGeneration;
     historyErrorRow.hidden = true;
     try {
       const page = await getHistory(session, { limit: HISTORY_PAGE_SIZE });
+      if (requestGeneration !== contentGeneration) return null;
       for (const message of page.messages) addConfirmed(message);
       hasMoreHistory = page.hasMore;
       historyLoaded = true;
@@ -480,6 +516,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       ensureObserver();
       return page.cursor;
     } catch (error) {
+      if (requestGeneration !== contentGeneration) return null;
       if (error instanceof ServerLockedError) throw error;
       historyErrorText.textContent =
         error instanceof Error ? error.message : "Couldn't load messages.";
@@ -517,11 +554,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           renderThreadList(event.message.sender !== "" && !identity.isMine(event.message.sender));
           return;
         case "message_deleted":
+          deletedSeqs.add(event.seq);
+          contentRevision += 1;
+          confirmedBySeq.delete(event.seq);
           if (inFlightDeletes.has(event.seq)) {
             deleteEventsDuringRequest.add(event.seq);
+            renderThreadList(false);
             return;
           }
-          confirmedBySeq.delete(event.seq);
           renderThreadList(false);
           return;
         case "wiped":

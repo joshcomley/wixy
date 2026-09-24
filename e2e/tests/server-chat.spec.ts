@@ -324,6 +324,11 @@ test.describe("server-chat.spec.ts (P5b)", () => {
       expect(response.status()).toBe(404);
     }
 
+    const wipeLabel = `${tag}-remaining`;
+    await seed(pageA, { count: 1, label: wipeLabel, sender: "Josh" });
+    const remainingBubbleB = pageB.locator(".wx-srv-bubble").filter({ hasText: `${wipeLabel} #1` });
+    await waitVisible(remainingBubbleB, pageB);
+
     await keepAlive(pageA);
     // Deleting and then opening settings are independent decisions, so retain
     // decision 00148's 400ms gap between these separate flows.
@@ -344,34 +349,59 @@ test.describe("server-chat.spec.ts (P5b)", () => {
     await contextB.close();
   });
 
-  test("mobile long-press opens actions without locking; a double-tap still locks", async ({ browser }) => {
-    const context = await browser.newContext({
+  test("mobile long-press deletes for both users, wipe clears remaining history, and double-tap locks", async ({ browser }) => {
+    const contextA = await browser.newContext({
       viewport: { width: 390, height: 844 },
       isMobile: true,
       hasTouch: true,
       deviceScaleFactor: 3,
     });
-    const page = await context.newPage();
+    const contextB = await browser.newContext();
+    const pageA = await contextA.newPage();
+    const pageB = await contextB.newPage();
     const label = `mobile-message-actions-${Date.now()}`;
-    await seed(page, { count: 1, label, sender: "Purdy" });
-    await unlockServer(page, "Josh");
-    const bubble = page.locator(".wx-srv-bubble").filter({ hasText: `${label} #1` });
-    await expect(bubble).toBeVisible();
+    await seed(pageA, { count: 2, label, sender: "Purdy" });
+    await unlockServer(pageA, "Josh");
+    await unlockServer(pageB, "Purdy");
+    const deletedBubbleA = pageA.locator(".wx-srv-bubble").filter({ hasText: `${label} #1` });
+    const deletedBubbleB = pageB.locator(".wx-srv-bubble").filter({ hasText: `${label} #1` });
+    const lockBubble = pageA.locator(".wx-srv-bubble").filter({ hasText: `${label} #2` });
+    await waitVisible(deletedBubbleA, pageA);
+    await waitVisible(deletedBubbleB, pageB);
+    await expect(lockBubble).toBeVisible();
 
     const pointer = { pointerType: "touch", pointerId: 1, clientX: 40, clientY: 40, button: 0 };
-    await bubble.dispatchEvent("pointerdown", pointer);
-    await page.waitForTimeout(550);
-    await expect(bubble.locator(".wx-srv-message-actions")).toBeVisible();
-    await expect(page.locator(".wx-srv-thread")).toBeVisible();
-    await bubble.dispatchEvent("pointerup", pointer);
-    await bubble.locator(".wx-srv-message-action-cancel").click();
+    await deletedBubbleA.dispatchEvent("pointerdown", pointer);
+    await pageA.waitForTimeout(550);
+    await expect(deletedBubbleA.locator(".wx-srv-message-actions")).toBeVisible();
+    await expect(pageA.locator(".wx-srv-thread")).toBeVisible();
+    await deletedBubbleA.dispatchEvent("pointerup", pointer);
+    await deletedBubbleA.getByRole("menuitem", { name: "Delete for everyone" }).click();
+    await deletedBubbleA.locator(".wx-srv-message-delete-confirm-button").click();
+    await expect(deletedBubbleA).toHaveCount(0);
+    await expect(deletedBubbleB).toHaveCount(0, { timeout: 3000 });
+    await expect(pageA.locator(".wx-srv-thread")).toBeVisible();
 
-    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 50);
-    await bubble.dispatchEvent("pointerdown", pointer);
-    await bubble.dispatchEvent("pointerup", pointer);
-    await page.waitForTimeout(80);
-    await bubble.dispatchEvent("pointerdown", { ...pointer, pointerId: 2 });
-    await expect(page.locator(".wx-srv-decoy")).toBeVisible();
-    await context.close();
+    await pageA.waitForTimeout(MULTI_TAP_INTERVAL_MS + 50);
+    await lockBubble.dispatchEvent("pointerdown", pointer);
+    await lockBubble.dispatchEvent("pointerup", pointer);
+    await pageA.waitForTimeout(80);
+    await lockBubble.dispatchEvent("pointerdown", { ...pointer, pointerId: 2 });
+    await expect(pageA.locator(".wx-srv-decoy")).toBeVisible();
+
+    await unlockServer(pageA, "Josh");
+    await keepAlive(pageB);
+    const wipeLabel = `${label}-remaining`;
+    await seed(pageA, { count: 1, label: wipeLabel, sender: "Josh" });
+    const remainingBubbleB = pageB.locator(".wx-srv-bubble").filter({ hasText: `${wipeLabel} #1` });
+    await waitVisible(remainingBubbleB, pageB);
+    await keepAlive(pageA);
+    await pageA.locator(".wx-srv-settings-button").click();
+    await pageA.locator(".wx-srv-sheet-wipe").click();
+    await pageA.locator(".wx-srv-sheet-wipe-confirm-button").click();
+    await expect(pageB.locator(".wx-srv-thread-empty")).toBeVisible({ timeout: 3000 });
+
+    await contextA.close();
+    await contextB.close();
   });
 });

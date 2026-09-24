@@ -101,16 +101,21 @@ export async function sendMessage(
   return { ok: false, kind: "unavailable" };
 }
 
-export async function deleteMessage(session: ServerSession, seq: number): Promise<void> {
+export async function deleteMessage(session: ServerSession, seq: number): Promise<boolean> {
   const response = await serverFetch(
     `/messages/${encodeURIComponent(String(seq))}`,
     { method: "DELETE" },
     session,
   );
   if (!response.ok) throw new Error(`Couldn't delete message (${response.status}).`);
+  if (response.status === 202) {
+    const body = (await response.json()) as { scrubPending: boolean };
+    return body.scrubPending;
+  }
+  return false;
 }
 
-export async function wipeChat(session: ServerSession): Promise<void> {
+export async function wipeChat(session: ServerSession): Promise<boolean> {
   const response = await serverFetch(
     "/wipe",
     {
@@ -121,6 +126,11 @@ export async function wipeChat(session: ServerSession): Promise<void> {
     session,
   );
   if (!response.ok) throw new Error(`Couldn't delete messages (${response.status}).`);
+  if (response.status === 202) {
+    const body = (await response.json()) as { scrubPending: boolean };
+    return body.scrubPending;
+  }
+  return false;
 }
 
 export interface UsageInfo {
@@ -128,6 +138,7 @@ export interface UsageInfo {
   readonly quotaBytes: number;
   readonly freeBytes: number;
   readonly mediaAvailable: boolean;
+  readonly scrubPending: boolean;
 }
 
 export async function getUsage(session: ServerSession): Promise<UsageInfo> {

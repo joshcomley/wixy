@@ -9,13 +9,15 @@ import json
 import subprocess
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from wixy_server.app import create_app
+from wixy_server.livechat import uploads as uploads_module
 from wixy_server.livechat.pinclient import CmdPinVerifier
 from wixy_server.livechat.store import LiveChatStore
 from wixy_server.livechat.tokens import sign_media_url
@@ -285,8 +287,78 @@ class TestChunkPut:
         finally:
             client.__exit__(None, None, None)
 
+    def test_chunk_started_before_wipe_cleans_its_late_directory_and_returns_404(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        app = cast(FastAPI, client.app)
+        store: LiveChatStore = app.state.livechat_store
+        paths = app.state.paths
+        upload_id = _init_upload(client, headers, size_bytes=3).json()["uploadId"]
+        write_chunk = uploads_module.write_chunk
+
+        def _write_then_wipe(upload_dir: Path, index: int, data: bytes) -> None:
+            write_chunk(upload_dir, index, data)
+            store.wipe(now=time.time())
+
+        monkeypatch.setattr(uploads_module, "write_chunk", _write_then_wipe)
+        try:
+            response = client.put(
+                f"/api/admin/server/uploads/{upload_id}/chunks/0",
+                content=b"abc",
+                headers={**headers, "Content-Type": "application/octet-stream"},
+            )
+            assert response.status_code == 404
+            assert store.get_upload(upload_id) is None
+            assert not paths.server_upload_dir(upload_id).exists()
+        finally:
+            client.__exit__(None, None, None)
+
 
 class TestComplete:
+    def test_upload_deleted_during_assembly_is_not_promoted_after_wipe(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        app = cast(FastAPI, client.app)
+        store: LiveChatStore = app.state.livechat_store
+        paths = app.state.paths
+        data = b"abc"
+        upload_id = _init_upload(client, headers, size_bytes=len(data)).json()["uploadId"]
+        assert (
+            client.put(
+                f"/api/admin/server/uploads/{upload_id}/chunks/0",
+                content=data,
+                headers={**headers, "Content-Type": "application/octet-stream"},
+            ).status_code
+            == 204
+        )
+        promote = store.create_attachment_from_upload
+
+        def _wipe_before_promotion(**kwargs: Any) -> Any:
+            store.wipe(now=time.time())
+            return promote(**kwargs)
+
+        monkeypatch.setattr(store, "create_attachment_from_upload", _wipe_before_promotion)
+        try:
+            response = client.post(
+                f"/api/admin/server/uploads/{upload_id}/complete", headers=headers
+            )
+            assert response.status_code == 404
+            assert store.get_upload(upload_id) is None
+            assert store.get_attachment(upload_id) is None
+            assert not paths.server_upload_dir(upload_id).exists()
+        finally:
+            client.__exit__(None, None, None)
+
     def test_full_flow_succeeds_with_a_processing_attachment(
         self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
     ) -> None:

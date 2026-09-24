@@ -264,6 +264,41 @@ class TestLeaseExclusivityAndCrashResume:
 
 
 class TestDeleteRace:
+    def test_wipe_removing_source_during_failed_archive_does_not_crash_worker(
+        self,
+        store: LiveChatStore,
+        paths: ProjectPaths,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        att_id = _seed_processing_photo(store, paths, now=1000.0)
+        message, _created = store.create_message(
+            client_id="client-wipe-archive-race",
+            sender="Josh",
+            device_id="device-wipe-archive-race",
+            by_email=None,
+            text="wipe while failure is archived",
+            attachment_ids=(att_id,),
+            now=1000.0,
+        )
+        src = paths.server_upload_dir(att_id) / "assembled"
+        store.wipe(now=1001.0)
+
+        is_file = Path.is_file
+
+        def _vanish_after_file_check(path: Path) -> bool:
+            exists = is_file(path)
+            if path == src and exists:
+                path.unlink()
+            return exists
+
+        monkeypatch.setattr(Path, "is_file", _vanish_after_file_check)
+        media_queue._archive_failed_original(store=store, paths=paths, att_id=att_id, src=src)
+
+        assert store.get_attachment(att_id) is None
+        assert store.get_upload(att_id) is None
+        assert not paths.server_upload_dir(att_id).exists()
+        assert not paths.server_failed_dir(att_id).exists()
+
     @pytest.mark.asyncio
     async def test_media_dir_is_rmtreed_when_the_row_is_gone_after_finish(
         self, store: LiveChatStore, paths: ProjectPaths

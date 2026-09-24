@@ -14,6 +14,7 @@ import re
 import shutil
 import time
 from collections.abc import AsyncGenerator, AsyncIterator
+from pathlib import Path
 from typing import Literal
 
 import anyio
@@ -33,7 +34,10 @@ from wixy_server.livechat.models import (
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import PinVerifier
 from wixy_server.livechat.push import PushEndpointError, validate_push_endpoint
-from wixy_server.livechat.store import LiveChatStore, UnusableAttachmentError
+from wixy_server.livechat.store import (
+    LiveChatStore,
+    UnusableAttachmentError,
+)
 from wixy_server.livechat.tokens import (
     MediaSigner,
     ServerAuth,
@@ -47,6 +51,7 @@ router = APIRouter(prefix="/api/admin/server")
 
 _PING_INTERVAL_S = 15.0
 _NOTIFIER_WAIT_S = 2.0
+_DELETE_SCRUB_DEADLINE_S = 10.0
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 
@@ -58,6 +63,64 @@ def _invalid(detail: str) -> JSONResponse:
     that's a different failure class (the request isn't even shaped right) than
     these named business rejections."""
     return JSONResponse(status_code=422, content={"error": "invalid", "detail": detail})
+
+
+def _snapshot_wipe_entries(paths: ProjectPaths) -> tuple[list[Path], list[Path], list[Path]]:
+    """Capture only files present before the wipe transaction begins.
+
+    Uploads created after the wipe commits must survive its filesystem cleanup.
+    Store-returned ids cover rows removed by the transaction; these snapshots
+    cover older untracked remnants without sweeping new ids created afterward.
+    """
+
+    def _children(root: Path) -> list[Path]:
+        try:
+            return list(root.iterdir())
+        except FileNotFoundError:
+            return []
+
+    media_entries: list[Path] = []
+    for prefix in _children(paths.server_media):
+        if prefix.is_dir():
+            media_entries.extend(_children(prefix))
+        else:
+            media_entries.append(prefix)
+    upload_entries = _children(paths.server_uploads)
+    failed_entries = _children(paths.server_failed)
+    return media_entries, upload_entries, failed_entries
+
+
+def _remove_wipe_entries(
+    paths: ProjectPaths,
+    *,
+    attachment_ids: list[str],
+    upload_ids: list[str],
+    snapshot: tuple[list[Path], list[Path], list[Path]],
+) -> None:
+    media_entries, upload_entries, failed_entries = snapshot
+    for attachment_id in attachment_ids:
+        shutil.rmtree(paths.server_attachment_media_dir(attachment_id), ignore_errors=True)
+        shutil.rmtree(paths.server_failed_dir(attachment_id), ignore_errors=True)
+    for upload_id in upload_ids:
+        shutil.rmtree(paths.server_upload_dir(upload_id), ignore_errors=True)
+    for entry in media_entries + upload_entries + failed_entries:
+        if entry.is_dir():
+            shutil.rmtree(entry, ignore_errors=True)
+        else:
+            entry.unlink(missing_ok=True)
+    # Media is sharded one level by the id prefix. Remove only empty old shards;
+    # a new post-wipe attachment may already have populated the same shard.
+    if paths.server_media.is_dir():
+        try:
+            prefixes = list(paths.server_media.iterdir())
+        except FileNotFoundError:
+            prefixes = []
+        for prefix in prefixes:
+            if prefix.is_dir():
+                try:
+                    prefix.rmdir()
+                except OSError:
+                    pass
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +297,7 @@ async def delete_message(seq: int, request: Request) -> Response:
     attachment_ids = await anyio.to_thread.run_sync(
         lambda: store.delete_message(seq=seq, now=time.time())
     )
+    commit_returned_at = time.monotonic()
 
     def _remove_files() -> None:
         for attachment_id in attachment_ids:
@@ -243,7 +307,22 @@ async def delete_message(seq: int, request: Request) -> Response:
 
     await anyio.to_thread.run_sync(_remove_files)
     notifier.publish()
-    return Response(status_code=204)
+    pending_token = await anyio.to_thread.run_sync(store.scrub_pending_token)
+    scrubbed = await anyio.to_thread.run_sync(
+        lambda: store.scrub(
+            deadline_s=max(
+                0.0,
+                _DELETE_SCRUB_DEADLINE_S - (time.monotonic() - commit_returned_at),
+            )
+        )
+    )
+    if scrubbed:
+        await anyio.to_thread.run_sync(
+            lambda: store.clear_scrub_pending(expected_token=pending_token)
+        )
+        return Response(status_code=204)
+    await anyio.to_thread.run_sync(store.mark_scrub_pending)
+    return JSONResponse(status_code=202, content={"scrubPending": True})
 
 
 @router.post("/wipe", response_model=None)
@@ -253,29 +332,35 @@ async def wipe_chat(body: WipeChatIn, request: Request) -> Response:
     paths: ProjectPaths = request.app.state.paths
     notifier: LiveChatNotifier = request.app.state.livechat_notifier
 
+    snapshot = await anyio.to_thread.run_sync(lambda: _snapshot_wipe_entries(paths))
     attachment_ids, upload_ids = await anyio.to_thread.run_sync(lambda: store.wipe(now=time.time()))
+    commit_returned_at = time.monotonic()
 
-    def _remove_files() -> None:
-        for attachment_id in attachment_ids:
-            shutil.rmtree(paths.server_attachment_media_dir(attachment_id), ignore_errors=True)
-            shutil.rmtree(paths.server_failed_dir(attachment_id), ignore_errors=True)
-        for upload_id in upload_ids:
-            shutil.rmtree(paths.server_upload_dir(upload_id), ignore_errors=True)
-        # Also clear untracked remnants and any directory created by a worker
-        # racing the wipe. The queue's post-finish check handles its own late
-        # output, while this removes every path already present at this point.
-        for root in (paths.server_media, paths.server_uploads, paths.server_failed):
-            if not root.is_dir():
-                continue
-            for child in root.iterdir():
-                if child.is_dir():
-                    shutil.rmtree(child, ignore_errors=True)
-                else:
-                    child.unlink(missing_ok=True)
-
-    await anyio.to_thread.run_sync(_remove_files)
+    await anyio.to_thread.run_sync(
+        lambda: _remove_wipe_entries(
+            paths,
+            attachment_ids=attachment_ids,
+            upload_ids=upload_ids,
+            snapshot=snapshot,
+        )
+    )
     notifier.publish()
-    return Response(status_code=204)
+    pending_token = await anyio.to_thread.run_sync(store.scrub_pending_token)
+    scrubbed = await anyio.to_thread.run_sync(
+        lambda: store.scrub(
+            deadline_s=max(
+                0.0,
+                _DELETE_SCRUB_DEADLINE_S - (time.monotonic() - commit_returned_at),
+            )
+        )
+    )
+    if scrubbed:
+        await anyio.to_thread.run_sync(
+            lambda: store.clear_scrub_pending(expected_token=pending_token)
+        )
+        return Response(status_code=204)
+    await anyio.to_thread.run_sync(store.mark_scrub_pending)
+    return JSONResponse(status_code=202, content={"scrubPending": True})
 
 
 # ---------------------------------------------------------------------------
@@ -330,53 +415,56 @@ async def _stream_events(
         # forever.
         cursor = max(event.event_seq for event in events)
 
-        # §17.2 A1: 'wiped' carries no message_seq (NULL), so it's tracked
-        # separately from the per-message groups below rather than colliding
-        # every 'wiped' event onto a fake `None` group key.
+        # Coalesce message events only within the region between wipes. A wipe
+        # is an ordering boundary: a later message in this batch must be sent
+        # after the wipe so clients never clear newer content or regress their
+        # event cursor.
+        batches: list[dict[int, list[EventRow]] | EventRow] = []
         groups: dict[int, list[EventRow]] = {}
-        order: list[int] = []
-        wiped_events: list[EventRow] = []
         for event in events:
             if event.type == "wiped":
-                wiped_events.append(event)
+                if groups:
+                    batches.append(groups)
+                    groups = {}
+                batches.append(event)
                 continue
             message_seq = event.message_seq
             assert message_seq is not None  # every non-'wiped' event carries one
             if message_seq not in groups:
                 groups[message_seq] = []
-                order.append(message_seq)
             groups[message_seq].append(event)
+        if groups:
+            batches.append(groups)
 
-        messages = await anyio.to_thread.run_sync(store.get_messages, order)
-        by_seq = {message.seq: message for message in messages}
         signer = MediaSigner.for_auth(secret, auth)
-
-        for message_seq in order:
-            group = groups[message_seq]
-            message = by_seq.get(message_seq)
-            event_id = max(e.event_seq for e in group)
-            if message is None:
-                # §17.2 A1: a genuine delete emits 'message_deleted'; a
-                # 'message'/'message_updated' whose row is now gone (deleted
-                # concurrently, e.g. by P8's future delete route) is SKIPPED
-                # entirely rather than sent with nothing to show.
-                if any(e.type == "message_deleted" for e in group):
-                    yield _format_sse("message_deleted", {"seq": message_seq}, event_id=event_id)
+        for batch in batches:
+            if isinstance(batch, EventRow):
+                yield _format_sse("wiped", {}, event_id=batch.event_seq)
                 continue
-            # "Coalescing per message": one SSE frame per message per batch,
-            # carrying the CURRENT full message JSON — a 'message' + a later
-            # 'message_updated' for the same message in one batch collapse into
-            # a single frame, typed 'message' (a genuinely new message matters
-            # more to the client than an attachment-status change riding along).
-            event_type = "message" if any(e.type == "message" for e in group) else "message_updated"
-            yield _format_sse(event_type, message_json(message, signer), event_id=event_id)
-
-        if wiped_events:
-            # Coalesced too: however many 'wiped' events landed in one batch
-            # (there should only ever be one), the client only needs to hear it
-            # once.
-            wiped_id = max(e.event_seq for e in wiped_events)
-            yield _format_sse("wiped", {}, event_id=wiped_id)
+            order = sorted(
+                batch,
+                key=lambda message_seq: max(event.event_seq for event in batch[message_seq]),
+            )
+            messages = await anyio.to_thread.run_sync(store.get_messages, order)
+            by_seq = {message.seq: message for message in messages}
+            for message_seq in order:
+                group = batch[message_seq]
+                message = by_seq.get(message_seq)
+                event_id = max(e.event_seq for e in group)
+                if message is None:
+                    # A genuine delete emits 'message_deleted'; a stale
+                    # message event whose row vanished is skipped.
+                    if any(e.type == "message_deleted" for e in group):
+                        yield _format_sse(
+                            "message_deleted", {"seq": message_seq}, event_id=event_id
+                        )
+                    continue
+                # Coalesce per message within this no-wipe region, carrying the
+                # current full message JSON.
+                event_type = (
+                    "message" if any(e.type == "message" for e in group) else "message_updated"
+                )
+                yield _format_sse(event_type, message_json(message, signer), event_id=event_id)
 
 
 @router.get("/stream")
@@ -416,6 +504,7 @@ async def usage(request: Request) -> JsonObject:
         "quotaBytes": quota_bytes,
         "freeBytes": max(0, quota_bytes - used_bytes),
         "mediaAvailable": media_available,
+        "scrubPending": await anyio.to_thread.run_sync(store.scrub_pending),
     }
 
 

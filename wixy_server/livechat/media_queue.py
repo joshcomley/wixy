@@ -180,7 +180,14 @@ def _archive_failed_original(
         ext = failed_extension(upload.mime if upload is not None else None)
         failed_dir = paths.server_failed_dir(att_id)
         failed_dir.mkdir(parents=True, exist_ok=True)
-        os.replace(src, failed_dir / f"original.{ext}")
+        try:
+            os.replace(src, failed_dir / f"original.{ext}")
+        except FileNotFoundError:
+            # A concurrent delete/wipe may remove the upload or failed
+            # directory after is_file()/mkdir(). It wins over archiving.
+            if store.get_attachment(att_id) is not None:
+                raise
+            shutil.rmtree(failed_dir, ignore_errors=True)
     store.delete_upload(att_id)
     shutil.rmtree(paths.server_upload_dir(att_id), ignore_errors=True)
 

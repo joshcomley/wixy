@@ -12,7 +12,7 @@ export interface ServerSettingsSheetDeps {
   hooks: LockHooks;
   win: Window;
   getSession: () => ServerSession | null;
-  onWipe: () => Promise<void>;
+  onWipe: () => Promise<boolean>;
   onNameChanged: () => void;
   onClose: () => void;
   document?: Document;
@@ -86,6 +86,45 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   const usageRow = documentRef.createElement("p");
   usageRow.className = "wx-srv-sheet-usage";
   usageRow.textContent = "Storage: loading…";
+  const wipeStatus = documentRef.createElement("p");
+  wipeStatus.className = "wx-srv-sheet-wipe-status";
+  wipeStatus.hidden = true;
+  let scrubPollGeneration = 0;
+  let scrubPollTimer: number | null = null;
+
+  function stopScrubPolling(): void {
+    scrubPollGeneration += 1;
+    if (scrubPollTimer !== null) {
+      win.clearTimeout(scrubPollTimer);
+      scrubPollTimer = null;
+    }
+  }
+
+  function startScrubPolling(session: ServerSession): void {
+    stopScrubPolling();
+    const generation = scrubPollGeneration;
+    const stopAt = Date.now() + 60_000;
+    wipeStatus.textContent = "Deleted. Erasing leftover traces…";
+    wipeStatus.hidden = false;
+
+    const poll = (): void => {
+      if (generation !== scrubPollGeneration || Date.now() >= stopAt) return;
+      scrubPollTimer = win.setTimeout(() => {
+        scrubPollTimer = null;
+        void getUsage(session)
+          .then((usage) => {
+            if (generation !== scrubPollGeneration) return;
+            if (!usage.scrubPending) {
+              wipeStatus.textContent = "Done";
+              return;
+            }
+            poll();
+          })
+          .catch(() => poll());
+      }, 1000);
+    };
+    poll();
+  }
 
   const pushSlot = documentRef.createElement("div");
   pushSlot.className = "wx-srv-sheet-push-slot";
@@ -123,12 +162,14 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   wipeConfirmButtons.append(wipeConfirmButton, wipeCancelButton);
   wipeConfirmation.append(wipeQuestion, wipeError, wipeConfirmButtons);
 
-  sheet.append(header, nameRow, usageRow, pushSlot, wipeButton, wipeConfirmation, lockButton);
+  sheet.append(header, nameRow, usageRow, wipeStatus, pushSlot, wipeButton, wipeConfirmation, lockButton);
   backdrop.appendChild(sheet);
 
   function close(): void {
     backdrop.hidden = true;
     wipeConfirmation.hidden = true;
+    wipeStatus.hidden = true;
+    stopScrubPolling();
     deps.onClose();
   }
 
@@ -163,7 +204,16 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   wipeConfirmButton.addEventListener("click", () => {
     wipeConfirmButton.disabled = true;
     void deps.onWipe()
-      .then(close)
+      .then((scrubPending) => {
+        if (scrubPending) {
+          wipeConfirmation.hidden = true;
+          const session = deps.getSession();
+          if (session !== null) startScrubPolling(session);
+          return;
+        }
+        wipeStatus.hidden = true;
+        close();
+      })
       .catch((error: unknown) => {
         if (error instanceof ServerLockedError) {
           hooks.lockNow("unauthorized");
@@ -185,9 +235,11 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     element: backdrop,
     pushSlot,
     open(): void {
+      stopScrubPolling();
       backdrop.hidden = false;
       wipeConfirmation.hidden = true;
       wipeError.hidden = true;
+      wipeStatus.hidden = true;
       nameInput.value = identity.getName() ?? "";
       usageRow.textContent = "Storage: loading…";
       const session = deps.getSession();
@@ -197,6 +249,10 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
             usageRow.textContent = usage.mediaAvailable
               ? `Storage: ${formatBytes(usage.usedBytes)} of ${formatBytes(usage.quotaBytes)} used`
               : "Storage: media isn't available on this server.";
+            if (usage.scrubPending) {
+              const session = deps.getSession();
+              if (session !== null) startScrubPolling(session);
+            }
           })
           .catch(() => {
             usageRow.textContent = "Storage: couldn't load.";
@@ -206,6 +262,7 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     },
     close,
     teardown(): void {
+      stopScrubPolling();
       win.document.removeEventListener("keydown", onKeydown);
     },
   };

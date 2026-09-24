@@ -158,3 +158,19 @@ class TestRunOnceIsIdempotent:
         second = janitor.run_once(store=store, paths=paths, now=now)
         assert first.stale_uploads == 1
         assert second.stale_uploads == 0
+
+    def test_scrubber_resumes_a_durable_pending_marker(self, store: LiveChatStore) -> None:
+        store.mark_scrub_pending()
+
+        assert janitor.scrub_once(store=store, deadline_s=1.0)
+        assert not store.scrub_pending()
+
+    def test_old_scrub_cannot_clear_a_newer_pending_marker(self, store: LiveChatStore) -> None:
+        first_token = store.mark_scrub_pending()
+        second_token = store.mark_scrub_pending()
+
+        assert second_token != first_token
+        assert not store.clear_scrub_pending(expected_token=first_token)
+        assert store.scrub_pending()
+        assert janitor.scrub_once(store=store, deadline_s=1.0)
+        assert not store.scrub_pending()

@@ -12,15 +12,19 @@
 - Wipe removes every message, attachment, upload, media file, failed-file entry, and event, then
   appends one `wiped` event. The two `seq` counters keep their AUTOINCREMENT high-water marks.
   Push subscriptions, `secret.key`, `vapid.json`, and localStorage identity values remain.
-- Every SQLite connection enables `PRAGMA secure_delete=ON`. A single delete runs a PASSIVE WAL
-  checkpoint; wipe runs a TRUNCATE checkpoint. Media files are unlinked. The feature does not
-  claim byte-level shredding on NTFS or SSD storage.
+- Every SQLite connection enables `PRAGMA secure_delete=ON`. Delete and wipe both run a TRUNCATE
+  checkpoint. A 204 requires a complete checkpoint and an empty WAL. If an active reader blocks
+  the 10-second deadline, the committed operation cleans media and publishes its event, durably
+  writes `server/scrub.pending`, and returns 202 `{"scrubPending":true}`. The background scrubber
+  resumes at startup and retries every two seconds; `/usage` exposes the pending state. Media
+  files are unlinked. The feature does not claim byte-level shredding on NTFS or SSD storage.
 - The media worker re-reads the attachment after finishing. If delete or wipe removed the row,
   the worker removes media, upload, and failed directories it may have recreated. Neither action
   dispatches push notifications.
-- `DELETE /api/admin/server/messages/{seq}` is authenticated, returns 204 when present or absent,
-  and deletes for everyone. `POST /api/admin/server/wipe` is authenticated and accepts exactly
-  `{"confirm":"WIPE"}`; every other body returns 422.
+- `DELETE /api/admin/server/messages/{seq}` is authenticated and returns 204 when scrubbed or
+  202 while durable background scrubbing remains; it deletes for everyone, including when the
+  message was already absent. `POST /api/admin/server/wipe` is authenticated and accepts exactly
+  `{"confirm":"WIPE"}`; every other body returns 422. It uses the same 204/202 scrub result.
 - SSE carries `message_deleted` with `{"seq":int}` and `wiped` with `{}`. Clients remove a
   matching bubble or clear history and pending echoes; the stream remains open.
 

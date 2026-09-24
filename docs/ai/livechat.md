@@ -192,9 +192,10 @@ skips a stale `message`/`message_updated` event if its message row has already v
 
 Any unlocked chat user may hard-delete any message for everyone. Deletion removes its message
 and attachment rows, media/upload/failed directories, and prior `message`/`message_updated`
-events, then appends one `message_deleted` event. Repeating a delete returns 204 and adds no
-second event. The client removes the bubble optimistically, restores it with an error line if
-the request fails, and removes remote bubbles from the same event.
+events, then appends one `message_deleted` event. Repeating a delete adds no second event and
+returns 204 or 202 according to the scrub result. The client removes the bubble optimistically,
+restores it with an error line if the request fails, and removes remote bubbles from the same
+event.
 
 The settings sheet's two-step **Delete all messages** action requires exactly
 `{"confirm":"WIPE"}`. Wipe clears messages, attachments, pending uploads, all events, and the
@@ -203,11 +204,15 @@ clears loaded history and pending echoes; the stream remains connected. Message/
 numbers, push subscriptions, `secret.key`, `vapid.json`, and localStorage identity values stay
 intact. Delete and wipe never dispatch push notifications.
 
-Both operations enable secure delete and checkpoint the WAL (`PASSIVE` after one message,
-`TRUNCATE` after wipe). Media files are unlinked; **NTFS/SSD byte-level shredding is not
-claimed**, since overwrite-in-place is not reliable on SSDs. If the media worker finishes after
-a concurrent delete/wipe has removed its row, its post-finish recheck removes the media,
-upload, and failed directories it may have recreated.
+Both operations enable secure delete and use `PRAGMA wal_checkpoint(TRUNCATE)`. A 204 means the
+WAL is empty and deleted text is absent from both database files. The route gives the scrub up
+to 10 seconds; if a reader still blocks it, the route writes durable `server/scrub.pending`
+before returning 202 `{"scrubPending":true}`. An app-lifetime scrubber retries every two seconds
+and resumes once at startup; `/usage` exposes `scrubPending` for the settings sheet to poll.
+Media files are unlinked; **NTFS/SSD byte-level shredding is not claimed**, since
+overwrite-in-place is not reliable on SSDs. If the media worker finishes after a concurrent
+delete/wipe has removed its row, its post-finish recheck removes the media, upload, and failed
+directories it may have recreated.
 
 ## 7. Web Push (`livechat/push.py`, `server/pushToggle.ts`)
 
@@ -310,12 +315,16 @@ and the queue worker's `QueueConfig`; when `None`, the queue task is never start
 (nothing valid to run it with) and the janitor still runs (pure DB/filesystem housekeeping,
 no ffmpeg dependency).
 
-**Janitor (`livechat/janitor.py`, P2b) — `run_once`/`run_forever`, hourly.** Ages out
+**Janitor (`livechat/janitor.py`, P2b/P8) — `run_once`/`run_forever`, hourly.** Ages out
 uploads >24h (`stale_upload_ids`), unreferenced attachments >24h (`orphan_attachment_ids`,
 keyed off `message_seq IS NULL` — never touches anything a message references, regardless of
 its processing status), and `failed/` entries >7 days (by directory `mtime`, since there's no
 DB row backing them). `run_once` takes an explicit `now`, never reads the clock — every age
 threshold is test-driven, not slept through.
+
+The same module's `run_scrubber_forever` is a separate app-lifetime task. It resumes a durable
+`scrub.pending` marker at startup and attempts `TRUNCATE` every two seconds until the WAL is
+empty, then removes the marker.
 
 **Media route (`routes_livechat_media.py`, P2b) — `GET /media/{attId}/{rendition}`, §5.6.**
 The one route besides `POST /unlock` that skips `require_server_token`, since

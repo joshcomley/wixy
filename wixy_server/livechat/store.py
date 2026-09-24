@@ -29,12 +29,13 @@ transaction-before-DML behavior.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
+import uuid
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Literal
 
 from wixy_server.livechat.models import (
     AttachmentKind,
@@ -463,7 +464,6 @@ class LiveChatStore:
                     "VALUES ('message_deleted', ?, ?)",
                     (seq, now),
                 )
-        self._checkpoint("PASSIVE")
         return attachment_ids
 
     def wipe(self, *, now: float) -> tuple[list[str], list[str]]:
@@ -485,13 +485,95 @@ class LiveChatStore:
                 "INSERT INTO events (type, message_seq, created_at) VALUES ('wiped', NULL, ?)",
                 (now,),
             )
-        self._checkpoint("TRUNCATE")
         return attachment_ids, upload_ids
 
-    def _checkpoint(self, mode: Literal["PASSIVE", "TRUNCATE"]) -> None:
+    @property
+    def scrub_pending_path(self) -> Path:
+        return self._db_path.parent / "scrub.pending"
+
+    def scrub_pending(self) -> bool:
+        return self.scrub_pending_path.exists()
+
+    def scrub_pending_token(self) -> str | None:
+        try:
+            return self.scrub_pending_path.read_text(encoding="ascii").strip()
+        except FileNotFoundError:
+            return None
+
+    def mark_scrub_pending(self) -> str:
+        """Durably record unfinished erasure before a 202 can be returned."""
+        path = self.scrub_pending_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        token = uuid.uuid4().hex
+        temp_path = path.with_name(f".{path.name}.{token}.tmp")
         conn = self._connect()
         try:
-            conn.execute(f"PRAGMA wal_checkpoint({mode})").fetchone()
+            conn.execute("BEGIN IMMEDIATE")
+            with temp_path.open("x", encoding="ascii") as handle:
+                handle.write(token)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_path, path)
+            conn.execute("COMMIT")
+            return token
+        except BaseException:
+            if temp_path.exists():
+                temp_path.unlink(missing_ok=True)
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
+        finally:
+            conn.close()
+
+    def clear_scrub_pending(self, *, expected_token: str | None) -> bool:
+        """Clear only the marker observed before this successful scrub began."""
+        if expected_token is None:
+            return False
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            current_token = self.scrub_pending_token()
+            if current_token != expected_token:
+                conn.execute("COMMIT")
+                return False
+            self.scrub_pending_path.unlink(missing_ok=True)
+            conn.execute("COMMIT")
+            return True
+        except BaseException:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
+        finally:
+            conn.close()
+
+    def scrub(self, *, deadline_s: float) -> bool:
+        """TRUNCATE the WAL on a fresh connection until it is physically empty.
+
+        The deadline includes SQLite's busy wait and the explicit retry delay.
+        ``False`` means a caller must persist ``scrub.pending`` before replying.
+        """
+        deadline = time.monotonic() + max(0.0, deadline_s)
+        conn = self._connect()
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                conn.execute(f"PRAGMA busy_timeout = {max(1, int(remaining * 1000))}")
+                result_row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+                assert result_row is not None
+                busy = int(result_row[0])
+                wal_path = Path(f"{self._db_path}-wal")
+                try:
+                    wal_empty = wal_path.stat().st_size == 0
+                except FileNotFoundError:
+                    wal_empty = True
+                if busy == 0 and wal_empty:
+                    return True
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                time.sleep(min(0.05, remaining))
         finally:
             conn.close()
 
@@ -499,6 +581,25 @@ class LiveChatStore:
 
     def create_attachment(self, *, att_id: str, kind: AttachmentKind, now: float) -> AttachmentRow:
         with self._write_txn() as conn:
+            conn.execute(
+                "INSERT INTO attachments "
+                "(id, kind, status, renditions, bytes_on_disk, created_at, updated_at) "
+                "VALUES (?, ?, 'processing', '[]', 0, ?, ?)",
+                (att_id, kind, now, now),
+            )
+            return _load_attachment(conn, att_id)
+
+    def create_attachment_from_upload(
+        self, *, att_id: str, kind: AttachmentKind, now: float
+    ) -> AttachmentRow | None:
+        """Promote an upload only if it survived a concurrent delete/wipe."""
+        with self._write_txn() as conn:
+            existing = conn.execute("SELECT id FROM attachments WHERE id = ?", (att_id,)).fetchone()
+            if existing is not None:
+                return _load_attachment(conn, att_id)
+            upload = conn.execute("SELECT 1 FROM uploads WHERE id = ?", (att_id,)).fetchone()
+            if upload is None:
+                return None
             conn.execute(
                 "INSERT INTO attachments "
                 "(id, kind, status, renditions, bytes_on_disk, created_at, updated_at) "

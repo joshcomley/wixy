@@ -273,6 +273,9 @@ def create_app(
         async def _run_janitor() -> None:
             await livechat_janitor.run_forever(store=livechat_store, paths=paths)
 
+        async def _run_scrubber() -> None:
+            await livechat_janitor.run_scrubber_forever(store=livechat_store)
+
         try:
             async with anyio.create_task_group() as tg:
                 # Exposed on `app.state` so route handlers (milestone 10's chat
@@ -281,6 +284,7 @@ def create_app(
                 # itself runs in, cancelled together at shutdown below.
                 _app.state.background_tasks = tg
                 tg.start_soon(_run_watcher)
+                tg.start_soon(_run_scrubber)
                 # Only started when the media pipeline actually resolved (see
                 # `livechat_queue_config` above) — nothing valid to hand it
                 # otherwise. The janitor runs regardless: it's pure DB/filesystem

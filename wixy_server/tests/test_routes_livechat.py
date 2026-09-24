@@ -26,12 +26,14 @@ from jwt.algorithms import RSAAlgorithm
 import wixy_server.app as wixy_app_module
 import wixy_server.routes_livechat as routes_livechat_module
 from wixy_server.app import create_app
+from wixy_server.livechat import janitor as livechat_janitor
 from wixy_server.livechat.models import AttachmentResult, PushSubscriptionRow, UploadRow
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import CmdPinVerifier
 from wixy_server.livechat.store import LiveChatStore
 from wixy_server.livechat.tokens import ServerAuth
 from wixy_server.routes_livechat import _stream_events
+from wixy_server.storage import ProjectPaths
 from wixy_server.tests.fake_cmd import FakeCmdState, create_fake_cmd_app
 
 TEST_APP_KEY = "wixy-livechat"
@@ -464,6 +466,7 @@ class TestSendHistoryUsage:
             assert body["usedBytes"] == 0
             assert body["freeBytes"] == body["quotaBytes"]
             assert body["mediaAvailable"] is True
+            assert body["scrubPending"] is False
         finally:
             client.__exit__(None, None, None)
 
@@ -719,6 +722,41 @@ class TestStreamEventsAmendmentA1:
         assert frame["event"] == "wiped"
         assert frame["data"] == {}
 
+    @pytest.mark.asyncio
+    async def test_wipe_precedes_later_message_in_same_batch(self, tmp_path: Path) -> None:
+        store = LiveChatStore(tmp_path / "server.db")
+        store.create_message(
+            client_id="before-wipe",
+            sender="Josh",
+            device_id="d" * 8,
+            by_email=None,
+            text="old",
+            attachment_ids=(),
+            now=1000.0,
+        )
+        store.wipe(now=1001.0)
+        store.create_message(
+            client_id="after-wipe",
+            sender="Purdy",
+            device_id="d" * 8,
+            by_email=None,
+            text="new",
+            attachment_ids=(),
+            now=1002.0,
+        )
+
+        gen = _stream_events(store, LiveChatNotifier(), _SECRET, _FIXED_AUTH, after=0)
+        try:
+            frames = [await _next_frame(gen), await _next_frame(gen)]
+        finally:
+            await gen.aclose()
+
+        assert [(frame["id"], frame["event"]) for frame in frames] == [
+            (2, "wiped"),
+            (3, "message"),
+        ]
+        assert frames[1]["data"]["text"] == "new"
+
 
 class TestDeleteWipeRoutes:
     def _new_app(
@@ -802,6 +840,170 @@ class TestDeleteWipeRoutes:
         assert not upload_dir.exists()
         assert not failed_dir.exists()
         assert push_calls == []
+
+    def test_delete_returns_202_until_reader_releases_old_wal_snapshot(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(routes_livechat_module, "_DELETE_SCRUB_DEADLINE_S", 0.1)
+        app = self._new_app(storage_root, wixy_repo_root, pin_verifier)
+        store: LiveChatStore = app.state.livechat_store
+        message, _ = store.create_message(
+            client_id="client-delete-active-reader",
+            sender="Josh",
+            device_id="device-delete-active-reader",
+            by_email=None,
+            text="delete-route-reader-marker-4f6a",
+            attachment_ids=(),
+            now=1.0,
+        )
+        reader = sqlite3.connect(str(store._db_path), isolation_level=None)
+        reader.execute("BEGIN")
+        assert (
+            reader.execute("SELECT text FROM messages").fetchone()[0]
+            == "delete-route-reader-marker-4f6a"
+        )
+        with TestClient(app) as client:
+            token = _unlock(client).json()["token"]
+            headers = {"X-Wixy-Server-Token": token}
+            try:
+                blocked = client.delete(
+                    f"/api/admin/server/messages/{message.seq}", headers=headers
+                )
+                assert blocked.status_code == 202
+                assert blocked.json() == {"scrubPending": True}
+                assert store.scrub_pending()
+                usage = client.get("/api/admin/server/usage", headers=headers)
+                assert usage.json()["scrubPending"] is True
+                assert store.get_messages([message.seq]) == []
+            finally:
+                reader.close()
+            if store.scrub_pending():
+                livechat_janitor.scrub_once(store=store, deadline_s=1.0)
+            assert not store.scrub_pending()
+            completed = client.delete(
+                f"/api/admin/server/messages/{message.seq}",
+                headers=headers,
+            )
+        assert completed.status_code == 204
+        raw = store._db_path.read_bytes()
+        wal_path = Path(f"{store._db_path}-wal")
+        if wal_path.exists():
+            raw += wal_path.read_bytes()
+        assert b"delete-route-reader-marker-4f6a" not in raw
+
+    def test_wipe_returns_202_and_scrubber_clears_marker_after_reader_releases(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(routes_livechat_module, "_DELETE_SCRUB_DEADLINE_S", 0.1)
+        app = self._new_app(storage_root, wixy_repo_root, pin_verifier)
+        store: LiveChatStore = app.state.livechat_store
+        message, _ = store.create_message(
+            client_id="client-wipe-active-reader",
+            sender="Josh",
+            device_id="device-wipe-active-reader",
+            by_email=None,
+            text="wipe-route-reader-marker-2bc1",
+            attachment_ids=(),
+            now=1.0,
+        )
+        reader = sqlite3.connect(str(store._db_path), isolation_level=None)
+        reader.execute("BEGIN")
+        assert (
+            reader.execute("SELECT text FROM messages").fetchone()[0]
+            == "wipe-route-reader-marker-2bc1"
+        )
+
+        with TestClient(app) as client:
+            token = _unlock(client).json()["token"]
+            headers = {"X-Wixy-Server-Token": token}
+            try:
+                response = client.post(
+                    "/api/admin/server/wipe", headers=headers, json={"confirm": "WIPE"}
+                )
+                assert response.status_code == 202
+                assert response.json() == {"scrubPending": True}
+                assert store.scrub_pending()
+                assert store.get_messages([message.seq]) == []
+            finally:
+                reader.close()
+
+            if store.scrub_pending():
+                livechat_janitor.scrub_once(store=store, deadline_s=1.0)
+            usage = client.get("/api/admin/server/usage", headers=headers)
+            assert usage.status_code == 200
+            assert usage.json()["scrubPending"] is False
+
+        raw = store._db_path.read_bytes()
+        wal_path = Path(f"{store._db_path}-wal")
+        if wal_path.exists():
+            raw += wal_path.read_bytes()
+        assert b"wipe-route-reader-marker-2bc1" not in raw
+
+    def test_wipe_cleanup_preserves_upload_created_after_its_commit(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        app = self._new_app(storage_root, wixy_repo_root, pin_verifier)
+        store: LiveChatStore = app.state.livechat_store
+        paths = app.state.paths
+        old_orphan = paths.server_upload_dir("old-orphan-before-wipe")
+        old_orphan.mkdir(parents=True)
+        (old_orphan / "chunk-000000").write_bytes(b"old")
+        original_cleanup = routes_livechat_module._remove_wipe_entries
+        post_wipe_id = "f" * 32
+
+        def _create_after_commit(
+            cleanup_paths: ProjectPaths,
+            *,
+            attachment_ids: list[str],
+            upload_ids: list[str],
+            snapshot: tuple[list[Path], list[Path], list[Path]],
+        ) -> None:
+            store.create_upload(
+                UploadRow(
+                    id=post_wipe_id,
+                    kind="photo",
+                    mime="image/jpeg",
+                    size_bytes=3,
+                    filename=None,
+                    by_email=None,
+                    created_at=time.time(),
+                )
+            )
+            new_upload = paths.server_upload_dir(post_wipe_id)
+            new_upload.mkdir(parents=True)
+            (new_upload / "chunk-000000").write_bytes(b"new")
+            original_cleanup(
+                cleanup_paths,
+                attachment_ids=attachment_ids,
+                upload_ids=upload_ids,
+                snapshot=snapshot,
+            )
+
+        monkeypatch.setattr(routes_livechat_module, "_remove_wipe_entries", _create_after_commit)
+        with TestClient(app) as client:
+            token = _unlock(client).json()["token"]
+            response = client.post(
+                "/api/admin/server/wipe",
+                headers={"X-Wixy-Server-Token": token},
+                json={"confirm": "WIPE"},
+            )
+
+        assert response.status_code == 204
+        assert store.get_upload(post_wipe_id) is not None
+        assert (paths.server_upload_dir(post_wipe_id) / "chunk-000000").read_bytes() == b"new"
+        assert not old_orphan.exists()
 
     def test_wipe_requires_exact_confirmation_and_clears_private_content_only(
         self,

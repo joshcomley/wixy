@@ -8,6 +8,7 @@ except `GET /media/*` (which uses a signed query string instead — an
 from __future__ import annotations
 
 import re
+import shutil
 import time
 from pathlib import Path
 from typing import Literal
@@ -122,6 +123,14 @@ async def put_chunk(upload_id: str, index: int, request: Request) -> Response:
         uploads.write_chunk(upload_dir, index, data)
 
     await anyio.to_thread.run_sync(_write)
+    upload_still_open = await anyio.to_thread.run_sync(lambda: store.get_upload(upload_id))
+    if upload_still_open is None:
+        attachment_exists = await anyio.to_thread.run_sync(
+            lambda: store.get_attachment(upload_id) is not None
+        )
+        if not attachment_exists:
+            await anyio.to_thread.run_sync(lambda: shutil.rmtree(upload_dir, ignore_errors=True))
+        raise HTTPException(status_code=404, detail="unknown upload")
     return Response(status_code=204)
 
 

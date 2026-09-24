@@ -14,26 +14,29 @@ deleted content out of the database/WAL and private media paths.
 ## Context + current state
 
 - Assigned to builder session `38e9c31a-9b91-48c9-ac20-9c5001a2f075` in build space `bs7`.
-- Initially started from feature-branch commit `4d0957f`; fast-forwarded to `11bedfd` when the
-  Architect's accepted server-chat spec update landed. The branch already contains A1 stream
-  event parsing and handling. P8 builds on that work.
+- Initially started from feature-branch commit `4d0957f`; the latest feature-branch merge is
+  `7d6584b` (accepted v1.5.3 scrub errata) and is in the bs7 history. The branch already contains
+  A1 stream event parsing and handling. P8 builds on that work.
 - Local decision number `00148` is already occupied by the multi-tap e2e rule; use `00149` and
   record the numbering conflict.
 - Earlier v1.4 E2E runs exposed the P8/R3 action-sheet conflict. The accepted v1.5.2 spec now
   requires gesture-boundary markers for causal surfaces; P8 E2E exercises open→pick→confirm
   without waits. Decision `00148`'s 400 ms waits still apply to unrelated tap pairs.
-- Verification: targeted Python tests 88 passed; full Python suite 1,660 passed; `mypy` 206
-  sources clean; `ruff check .` clean; strict admin typecheck passed; Vitest 1,073 passed; admin
-  bundles rebuilt; server-chat browser suite 7/7 passed on v1.5.2, with the causal open/pick/confirm
-  flow exercised at full speed.
+- The initial Sol review of `18fb1cf` found incomplete WAL scrubbing, SSE ordering, stale history
+  and duplicate-wipe races. The Architect's later v1.5.3 ruling superseded the v1.5.2 checkpoint
+  behavior; the implementation now uses durable pending scrubs and 202 responses.
+- Verification: full Python suite 1,675 passed; after formatting, the affected P8 backend slice
+  passed 130 tests. Full admin Vitest: 1,080 passed; strict admin typecheck; `mypy` over 206
+  sources; `ruff check .` and `ruff format --check .` clean; admin bundles rebuilt. Server-chat
+  Playwright: 7/7 at full speed, including nonempty wipe and mobile cross-client delete/wipe.
+  A fresh Sol review of the final candidate and formal audit remain before handoff.
 - Never merge or open a PR until the Delivery Manager clears the exact candidate SHA.
 
 ## Build baseline
 
-- Frozen source: `spec/server-chat/00-brief.md` §17, revised spec v1.5.2.
-- SHA-256: `E4CED461E4D60345A03D87C06F11D133CCB4D542BD9407E580753CE3B8583E76`.
-- Frozen at: 2026-09-24 00:12:48 UTC, after merging the accepted spec commits; source branch
-  head `11bedfd44ccaae6bdb2e5338285c231689d5bd5e`.
+- Frozen source: `spec/server-chat/00-brief.md` §17, revised spec v1.5.3.
+- SHA-256: `E9591AA45D572E69635212757B1CDDCA80EA15F4CC3E477F9A5D82AA7ED3BCB0`.
+- Source feature-branch head: `7d6584bfedaf409bef45f5d3e527df2b943ce0ce`.
 - Accepted prerequisites: P1, P2b and P5b are already on the feature branch. P6b's independent
   voice-note minimum-duration delta is outside this parcel and has been reported to the DM.
 
@@ -44,6 +47,9 @@ deleted content out of the database/WAL and private media paths.
   `data-srv-gesture-boundary`, primary-button filtering, and the `may close, never open` classifier.
 - v1.5.2 voice notes shorter than 1 second: affects P6b recording only, no P8 code. Status:
   **Waiting** for P6b owner; DM alerted.
+- v1.5.3 scrub errata: both operations TRUNCATE, 204 guarantees empty WAL, 202 persists
+  `scrub.pending` and resumes in the 2 s background scrubber; `/usage.scrubPending` drives UI
+  polling. Status: **Implemented** with token-conditional marker clearing.
 
 ## Relevant files + commits
 

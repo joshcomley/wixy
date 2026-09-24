@@ -285,27 +285,43 @@ def assemble(
         raise UnknownUploadError(upload_id)
 
     upload_dir = paths.server_upload_dir(upload_id)
-    count = expected_chunk_count(upload.size_bytes, chunk_bytes)
-    missing = [i for i in range(count) if not _chunk_path(upload_dir, i).is_file()]
-    if missing:
-        raise IncompleteUploadError(missing)
+    try:
+        count = expected_chunk_count(upload.size_bytes, chunk_bytes)
+        missing = [i for i in range(count) if not _chunk_path(upload_dir, i).is_file()]
+        if missing:
+            if store.get_upload(upload_id) is None:
+                shutil.rmtree(upload_dir, ignore_errors=True)
+                raise UnknownUploadError(upload_id)
+            raise IncompleteUploadError(missing)
 
-    assembled_path = upload_dir / "assembled"
-    tmp_path = upload_dir / "assembled.part"
-    total = 0
-    with tmp_path.open("wb") as out:
+        assembled_path = upload_dir / "assembled"
+        tmp_path = upload_dir / "assembled.part"
+        total = 0
+        with tmp_path.open("wb") as out:
+            for i in range(count):
+                data = _chunk_path(upload_dir, i).read_bytes()
+                out.write(data)
+                total += len(data)
+        if total != upload.size_bytes:
+            tmp_path.unlink(missing_ok=True)
+            if store.get_upload(upload_id) is None:
+                shutil.rmtree(upload_dir, ignore_errors=True)
+                raise UnknownUploadError(upload_id)
+            raise SizeMismatchError()
+        os.replace(tmp_path, assembled_path)
         for i in range(count):
-            data = _chunk_path(upload_dir, i).read_bytes()
-            out.write(data)
-            total += len(data)
-    if total != upload.size_bytes:
-        tmp_path.unlink(missing_ok=True)
-        raise SizeMismatchError()
-    os.replace(tmp_path, assembled_path)
-    for i in range(count):
-        _chunk_path(upload_dir, i).unlink(missing_ok=True)
+            _chunk_path(upload_dir, i).unlink(missing_ok=True)
+    except FileNotFoundError:
+        if store.get_upload(upload_id) is None:
+            shutil.rmtree(upload_dir, ignore_errors=True)
+            raise UnknownUploadError(upload_id) from None
+        raise
 
-    return store.create_attachment(att_id=upload_id, kind=upload.kind, now=now)
+    attachment = store.create_attachment_from_upload(att_id=upload_id, kind=upload.kind, now=now)
+    if attachment is None:
+        shutil.rmtree(upload_dir, ignore_errors=True)
+        raise UnknownUploadError(upload_id)
+    return attachment
 
 
 # ---------------------------------------------------------------------------

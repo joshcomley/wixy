@@ -184,7 +184,7 @@ human↔human messaging tool for admin users, disguised behind a "Server" nav ta
 | `processing.py` | pure photo/voice/video pipeline (Pillow+pillow-heif, ffmpeg) — magic-byte sniff, hardened subprocess calls, no DB/settings coupling |
 | `uploads.py` | chunked upload staging/assembly, quota + free-space enforcement |
 | `media_queue.py` | lease-based background worker turning a `processing` attachment into `ready`/`failed` |
-| `janitor.py` | hourly cleanup of stale uploads, orphaned attachments, expired `failed/` entries |
+| `janitor.py` | hourly cleanup of stale uploads/orphaned attachments/expired failures plus the 2 s durable WAL scrubber |
 
 `routes_livechat.py` and `routes_livechat_media.py` (not inside the package, alongside the
 other `routes_*.py` files) wire these together — the former owns unlock/history/send/stream/

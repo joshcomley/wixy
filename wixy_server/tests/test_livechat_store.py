@@ -396,6 +396,7 @@ class TestDeleteAndWipe:
         )
 
         assert store.delete_message(seq=message.seq, now=4.0) == [attachment.id]
+        assert store.scrub(deadline_s=10.0)
         assert store.get_messages([message.seq]) == []
         assert store.get_attachment(attachment.id) is None
         assert store.get_upload(attachment.id) is None
@@ -404,6 +405,7 @@ class TestDeleteAndWipe:
             ("message_deleted", message.seq)
         ]
         assert store.delete_message(seq=message.seq, now=5.0) == []
+        assert store.scrub(deadline_s=10.0)
         assert store.events_after(0) == events
         assert b"delete-marker-7d72c84d" not in self._raw_database_bytes(db_path)
 
@@ -466,6 +468,7 @@ class TestDeleteAndWipe:
         _messages, _has_more, old_cursor = store.list_messages(before=None, limit=10)
 
         attachment_ids, upload_ids = store.wipe(now=4.0)
+        assert store.scrub(deadline_s=10.0)
 
         assert attachment_ids == [attachment.id]
         assert upload_ids == [attachment.id, "pending-upload-1"]
@@ -488,12 +491,146 @@ class TestDeleteAndWipe:
         assert next_message.seq > last_seq
         assert b"wipe-marker-5121b943" not in self._raw_database_bytes(db_path)
 
+    def test_delete_persists_pending_scrub_until_reader_releases_old_wal_snapshot(
+        self, store: LiveChatStore, db_path: Path
+    ) -> None:
+        message, _ = store.create_message(
+            client_id="client-delete-reader",
+            sender="Josh",
+            device_id="device-delete-reader",
+            by_email=None,
+            text="delete-reader-marker-1e4c",
+            attachment_ids=(),
+            now=1.0,
+        )
+        reader = sqlite3.connect(str(db_path), isolation_level=None)
+        reader.execute("BEGIN")
+        assert (
+            reader.execute("SELECT text FROM messages").fetchone()[0] == "delete-reader-marker-1e4c"
+        )
+        try:
+            store.delete_message(seq=message.seq, now=2.0)
+            assert not store.scrub(deadline_s=0.1)
+            pending_token = store.mark_scrub_pending()
+            assert store.scrub_pending()
+            assert b"delete-reader-marker-1e4c" in self._raw_database_bytes(db_path)
+        finally:
+            reader.close()
+
+        assert store.scrub(deadline_s=10.0)
+        assert store.clear_scrub_pending(expected_token=pending_token)
+        assert not store.scrub_pending()
+        assert b"delete-reader-marker-1e4c" not in self._raw_database_bytes(db_path)
+
+    def test_wipe_persists_pending_scrub_until_reader_releases_old_wal_snapshot(
+        self, store: LiveChatStore, db_path: Path
+    ) -> None:
+        store.create_message(
+            client_id="client-wipe-reader",
+            sender="Josh",
+            device_id="device-wipe-reader",
+            by_email=None,
+            text="wipe-reader-marker-37bc",
+            attachment_ids=(),
+            now=1.0,
+        )
+        reader = sqlite3.connect(str(db_path), isolation_level=None)
+        reader.execute("BEGIN")
+        assert (
+            reader.execute("SELECT text FROM messages").fetchone()[0] == "wipe-reader-marker-37bc"
+        )
+        try:
+            store.wipe(now=2.0)
+            assert not store.scrub(deadline_s=0.1)
+            pending_token = store.mark_scrub_pending()
+            assert store.scrub_pending()
+            assert b"wipe-reader-marker-37bc" in self._raw_database_bytes(db_path)
+        finally:
+            reader.close()
+
+        assert store.scrub(deadline_s=10.0)
+        assert store.clear_scrub_pending(expected_token=pending_token)
+        assert b"wipe-reader-marker-37bc" not in self._raw_database_bytes(db_path)
+
+    def test_complete_passive_checkpoint_can_leave_deleted_text_in_wal(
+        self, store: LiveChatStore, db_path: Path
+    ) -> None:
+        store.list_messages(before=None, limit=1)
+        conn = sqlite3.connect(str(db_path), isolation_level=None)
+        conn.execute("PRAGMA journal_mode = WAL")
+        message, _ = store.create_message(
+            client_id="client-passive-characterization",
+            sender="Josh",
+            device_id="device-passive-characterization",
+            by_email=None,
+            text="passive-wal-marker-2e18",
+            attachment_ids=(),
+            now=1.0,
+        )
+        store.delete_message(seq=message.seq, now=2.0)
+        try:
+            busy, log_frames, checkpointed_frames = conn.execute(
+                "PRAGMA wal_checkpoint(PASSIVE)"
+            ).fetchone()
+            assert busy == 0
+            assert checkpointed_frames == log_frames
+            assert b"passive-wal-marker-2e18" in self._raw_database_bytes(db_path)
+            assert store.scrub(deadline_s=10.0)
+            assert b"passive-wal-marker-2e18" not in self._raw_database_bytes(db_path)
+        finally:
+            conn.close()
+
+    def test_read_methods_leave_no_snapshot_blocking_a_truncate_checkpoint(
+        self, store: LiveChatStore, db_path: Path
+    ) -> None:
+        store.create_message(
+            client_id="client-reader-invariant",
+            sender="Josh",
+            device_id="device-reader-invariant",
+            by_email=None,
+            text="short-lived read",
+            attachment_ids=(),
+            now=1.0,
+        )
+        store.list_messages(before=None, limit=10)
+        store.events_after(0)
+        store.get_messages([1])
+        conn = sqlite3.connect(str(db_path), isolation_level=None)
+        try:
+            conn.execute("PRAGMA busy_timeout = 0")
+            busy, _log_frames, _checkpointed_frames = conn.execute(
+                "PRAGMA wal_checkpoint(TRUNCATE)"
+            ).fetchone()
+            assert busy == 0
+        finally:
+            conn.close()
+
     def test_every_store_connection_enables_secure_delete(self, store: LiveChatStore) -> None:
         conn = store._connect()
         try:
             assert conn.execute("PRAGMA secure_delete").fetchone()[0] == 1
         finally:
             conn.close()
+
+    def test_upload_promotion_cannot_create_an_attachment_after_wipe(
+        self, store: LiveChatStore
+    ) -> None:
+        upload_id = "c" * 32
+        store.create_upload(
+            UploadRow(
+                id=upload_id,
+                kind="photo",
+                mime="image/jpeg",
+                size_bytes=1,
+                filename=None,
+                by_email=None,
+                created_at=1.0,
+            )
+        )
+        store.wipe(now=2.0)
+
+        assert store.create_attachment_from_upload(att_id=upload_id, kind="photo", now=3.0) is None
+        assert store.get_attachment(upload_id) is None
 
 
 class TestAttachmentLeasing:

@@ -557,6 +557,12 @@
   color: var(--wx-muted);
 }
 
+.wx-srv-sheet-wipe-status {
+  margin: 0;
+  color: var(--wx-muted, #888);
+  font-size: 0.9em;
+}
+
 .wx-srv-sheet-lock {
   align-self: flex-start;
   border-color: var(--wx-danger);

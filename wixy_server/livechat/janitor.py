@@ -20,6 +20,8 @@ STALE_UPLOAD_AGE_S = 24 * 60 * 60.0
 ORPHAN_ATTACHMENT_AGE_S = 24 * 60 * 60.0
 FAILED_RETENTION_S = 7 * 24 * 60 * 60.0
 SWEEP_INTERVAL_S = 60 * 60.0
+SCRUB_INTERVAL_S = 2.0
+SCRUB_TICK_DEADLINE_S = 1.5
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,3 +73,23 @@ async def run_forever(
 
         await anyio.to_thread.run_sync(_sweep)
         await anyio.sleep(interval_s)
+
+
+def scrub_once(*, store: LiveChatStore, deadline_s: float = SCRUB_TICK_DEADLINE_S) -> bool:
+    """Resume the durable WAL scrub if a prior delete/wipe exceeded its deadline."""
+    pending_token = store.scrub_pending_token()
+    if pending_token is None:
+        return False
+    if not store.scrub(deadline_s=deadline_s):
+        return False
+    return store.clear_scrub_pending(expected_token=pending_token)
+
+
+async def run_scrubber_forever(
+    *, store: LiveChatStore, interval_s: float = SCRUB_INTERVAL_S
+) -> None:
+    """Resume pending scrubs immediately at startup and then every two seconds."""
+    while True:
+        started_at = time.monotonic()
+        await anyio.to_thread.run_sync(lambda: scrub_once(store=store))
+        await anyio.sleep(max(0.0, interval_s - (time.monotonic() - started_at)))
