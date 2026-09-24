@@ -437,7 +437,19 @@ class LiveChatStore:
             ]
 
     def delete_message(self, *, seq: int, now: float) -> list[str]:
+        attachment_ids, _ = self._delete_message(seq=seq, now=now, mark_scrub_pending=False)
+        return attachment_ids
+
+    def delete_message_for_scrub(self, *, seq: int, now: float) -> tuple[list[str], str]:
+        attachment_ids, token = self._delete_message(seq=seq, now=now, mark_scrub_pending=True)
+        assert token is not None
+        return attachment_ids, token
+
+    def _delete_message(
+        self, *, seq: int, now: float, mark_scrub_pending: bool
+    ) -> tuple[list[str], str | None]:
         """Hard-delete one message and its attachments, then emit its tombstone-free event."""
+        pending_token: str | None = None
         with self._write_txn() as conn:
             exists = (
                 conn.execute("SELECT 1 FROM messages WHERE seq = ?", (seq,)).fetchone() is not None
@@ -464,10 +476,24 @@ class LiveChatStore:
                     "VALUES ('message_deleted', ?, ?)",
                     (seq, now),
                 )
-        return attachment_ids
+            if mark_scrub_pending:
+                pending_token = self._write_scrub_pending_marker(conn)
+        return attachment_ids, pending_token
 
     def wipe(self, *, now: float) -> tuple[list[str], list[str]]:
+        attachment_ids, upload_ids, _ = self._wipe(now=now, mark_scrub_pending=False)
+        return attachment_ids, upload_ids
+
+    def wipe_for_scrub(self, *, now: float) -> tuple[list[str], list[str], str]:
+        attachment_ids, upload_ids, token = self._wipe(now=now, mark_scrub_pending=True)
+        assert token is not None
+        return attachment_ids, upload_ids, token
+
+    def _wipe(
+        self, *, now: float, mark_scrub_pending: bool
+    ) -> tuple[list[str], list[str], str | None]:
         """Remove all chat content and append one cursor-preserving wipe event."""
+        pending_token: str | None = None
         with self._write_txn() as conn:
             attachment_ids = [
                 str(row["id"])
@@ -485,7 +511,9 @@ class LiveChatStore:
                 "INSERT INTO events (type, message_seq, created_at) VALUES ('wiped', NULL, ?)",
                 (now,),
             )
-        return attachment_ids, upload_ids
+            if mark_scrub_pending:
+                pending_token = self._write_scrub_pending_marker(conn)
+        return attachment_ids, upload_ids, pending_token
 
     @property
     def scrub_pending_path(self) -> Path:
@@ -502,28 +530,28 @@ class LiveChatStore:
 
     def mark_scrub_pending(self) -> str:
         """Durably record unfinished erasure before a 202 can be returned."""
+        with self._write_txn() as conn:
+            return self._write_scrub_pending_marker(conn)
+
+    def _write_scrub_pending_marker(self, conn: sqlite3.Connection) -> str:
+        """Write the marker while holding SQLite's writer lock for this mutation."""
+        if not conn.in_transaction:
+            raise RuntimeError("scrub marker must be written inside a SQLite transaction")
         path = self.scrub_pending_path
         path.parent.mkdir(parents=True, exist_ok=True)
         token = uuid.uuid4().hex
         temp_path = path.with_name(f".{path.name}.{token}.tmp")
-        conn = self._connect()
         try:
-            conn.execute("BEGIN IMMEDIATE")
             with temp_path.open("x", encoding="ascii") as handle:
                 handle.write(token)
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temp_path, path)
-            conn.execute("COMMIT")
             return token
         except BaseException:
             if temp_path.exists():
                 temp_path.unlink(missing_ok=True)
-            if conn.in_transaction:
-                conn.execute("ROLLBACK")
             raise
-        finally:
-            conn.close()
 
     def clear_scrub_pending(self, *, expected_token: str | None) -> bool:
         """Clear only the marker observed before this successful scrub began."""

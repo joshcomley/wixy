@@ -841,6 +841,95 @@ class TestDeleteWipeRoutes:
         assert not failed_dir.exists()
         assert push_calls == []
 
+    def test_delete_persists_scrub_marker_before_starting_checkpoint(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        app = self._new_app(storage_root, wixy_repo_root, pin_verifier)
+        store: LiveChatStore = app.state.livechat_store
+        message, _ = store.create_message(
+            client_id="client-delete-marker-before-scrub",
+            sender="Josh",
+            device_id="device-delete-marker-before-scrub",
+            by_email=None,
+            text="delete-marker-before-scrub-55f3",
+            attachment_ids=(),
+            now=1.0,
+        )
+        marker_states: list[bool] = []
+        marker_transactions: list[bool] = []
+        write_marker = store._write_scrub_pending_marker
+
+        def observe_write_transaction(conn: sqlite3.Connection) -> str:
+            marker_transactions.append(conn.in_transaction)
+            return write_marker(conn)
+
+        def observe_marker(*, deadline_s: float) -> bool:
+            marker_states.append(store.scrub_pending())
+            return True
+
+        monkeypatch.setattr(store, "_write_scrub_pending_marker", observe_write_transaction)
+        monkeypatch.setattr(store, "scrub", observe_marker)
+        with TestClient(app) as client:
+            token = _unlock(client).json()["token"]
+            response = client.delete(
+                f"/api/admin/server/messages/{message.seq}",
+                headers={"X-Wixy-Server-Token": token},
+            )
+
+        assert response.status_code == 204
+        assert marker_states == [True]
+        assert marker_transactions == [True]
+        assert not store.scrub_pending()
+
+    def test_wipe_persists_scrub_marker_before_starting_checkpoint(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        app = self._new_app(storage_root, wixy_repo_root, pin_verifier)
+        store: LiveChatStore = app.state.livechat_store
+        store.create_message(
+            client_id="client-wipe-marker-before-scrub",
+            sender="Josh",
+            device_id="device-wipe-marker-before-scrub",
+            by_email=None,
+            text="wipe-marker-before-scrub-a197",
+            attachment_ids=(),
+            now=1.0,
+        )
+        marker_states: list[bool] = []
+        marker_transactions: list[bool] = []
+        write_marker = store._write_scrub_pending_marker
+
+        def observe_write_transaction(conn: sqlite3.Connection) -> str:
+            marker_transactions.append(conn.in_transaction)
+            return write_marker(conn)
+
+        def observe_marker(*, deadline_s: float) -> bool:
+            marker_states.append(store.scrub_pending())
+            return True
+
+        monkeypatch.setattr(store, "_write_scrub_pending_marker", observe_write_transaction)
+        monkeypatch.setattr(store, "scrub", observe_marker)
+        with TestClient(app) as client:
+            token = _unlock(client).json()["token"]
+            response = client.post(
+                "/api/admin/server/wipe",
+                headers={"X-Wixy-Server-Token": token},
+                json={"confirm": "WIPE"},
+            )
+
+        assert response.status_code == 204
+        assert marker_states == [True]
+        assert marker_transactions == [True]
+        assert not store.scrub_pending()
+
     def test_delete_returns_202_until_reader_releases_old_wal_snapshot(
         self,
         storage_root: Path,

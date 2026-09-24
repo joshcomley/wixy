@@ -294,8 +294,8 @@ async def delete_message(seq: int, request: Request) -> Response:
     paths: ProjectPaths = request.app.state.paths
     notifier: LiveChatNotifier = request.app.state.livechat_notifier
 
-    attachment_ids = await anyio.to_thread.run_sync(
-        lambda: store.delete_message(seq=seq, now=time.time())
+    attachment_ids, pending_token = await anyio.to_thread.run_sync(
+        lambda: store.delete_message_for_scrub(seq=seq, now=time.time())
     )
     commit_returned_at = time.monotonic()
 
@@ -307,7 +307,6 @@ async def delete_message(seq: int, request: Request) -> Response:
 
     await anyio.to_thread.run_sync(_remove_files)
     notifier.publish()
-    pending_token = await anyio.to_thread.run_sync(store.scrub_pending_token)
     scrubbed = await anyio.to_thread.run_sync(
         lambda: store.scrub(
             deadline_s=max(
@@ -321,7 +320,9 @@ async def delete_message(seq: int, request: Request) -> Response:
             lambda: store.clear_scrub_pending(expected_token=pending_token)
         )
         return Response(status_code=204)
-    await anyio.to_thread.run_sync(store.mark_scrub_pending)
+    if await anyio.to_thread.run_sync(store.scrub_pending_token) is None:
+        # Another scrubber may have completed after this request's deadline.
+        return Response(status_code=204)
     return JSONResponse(status_code=202, content={"scrubPending": True})
 
 
@@ -333,7 +334,9 @@ async def wipe_chat(body: WipeChatIn, request: Request) -> Response:
     notifier: LiveChatNotifier = request.app.state.livechat_notifier
 
     snapshot = await anyio.to_thread.run_sync(lambda: _snapshot_wipe_entries(paths))
-    attachment_ids, upload_ids = await anyio.to_thread.run_sync(lambda: store.wipe(now=time.time()))
+    attachment_ids, upload_ids, pending_token = await anyio.to_thread.run_sync(
+        lambda: store.wipe_for_scrub(now=time.time())
+    )
     commit_returned_at = time.monotonic()
 
     await anyio.to_thread.run_sync(
@@ -345,7 +348,6 @@ async def wipe_chat(body: WipeChatIn, request: Request) -> Response:
         )
     )
     notifier.publish()
-    pending_token = await anyio.to_thread.run_sync(store.scrub_pending_token)
     scrubbed = await anyio.to_thread.run_sync(
         lambda: store.scrub(
             deadline_s=max(
@@ -359,7 +361,9 @@ async def wipe_chat(body: WipeChatIn, request: Request) -> Response:
             lambda: store.clear_scrub_pending(expected_token=pending_token)
         )
         return Response(status_code=204)
-    await anyio.to_thread.run_sync(store.mark_scrub_pending)
+    if await anyio.to_thread.run_sync(store.scrub_pending_token) is None:
+        # Another scrubber may have completed after this request's deadline.
+        return Response(status_code=204)
     return JSONResponse(status_code=202, content={"scrubPending": True})
 
 
