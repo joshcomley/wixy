@@ -1234,3 +1234,29 @@ fixed same-session.)
   will need to restart the 5x count against round 9's new SHA, since the acceptance bar is
   about the FINAL candidate, not an intermediate one already known to have 3 unfixed
   findings.
+
+## Update 2026-09-24 (DM `8e7bbea9`) — P8 round 9 final handoff; fresh worktree/harness/review all restarted on the correct SHA
+
+- **Luna's round-9 FINAL HANDOFF**: `240dc762e3549b3ac5c28badf8a51da7c0c0e3a9` on `bs7`,
+  committed (not pushed). Fixes all 3 round-8 findings: legacy-marker durable fallback row,
+  health-status 300s-quiet reset, janitor ready-original retention cleanup with tombstone
+  retry. Self-report: 3 new regressions confirmed red→green, 71-test focused slice, ruff/
+  format-check/mypy clean (208 files).
+- **DM independently confirmed** mechanical checks clean on `240dc76` (fresh worktree
+  `__review-p8-r9`, matches exactly). The Architect separately reviewed the round-9 diff
+  for conformance to their own containment ruling and confirmed it — unprompted, in
+  parallel with my own check.
+- **Correctly did NOT reuse the round-8 5x harness/review** (it was running against the
+  now-superseded `fb9f66f`, which has 3 known unfixed findings) — the Orchestrator AND the
+  Architect both independently flagged this exact risk unprompted, matching my own plan.
+  Stopped the stale round-8 harness task (was on run 3/5 clean before being stopped, but
+  irrelevant now) to avoid doubling hub CPU contention against the new run. Started a
+  FRESH 5x harness against `240dc76` specifically (run 1/5 in progress). Dispatched a
+  fresh Sol review brief to the reviewer's current live session (`e1b11e24`, successor of
+  `c80b7714`'s mid-review handover) pointed at the new worktree + SHA, asking it to clear
+  BOTH round 8 and round 9 together since round 9 completes round 8's open findings.
+- **Next**: wait for the 5x harness (auto-notifies) and Sol's consolidated verdict on
+  round 8+9 together. Only clear once both are clean on `240dc76` specifically. Then push
+  `bs7`, PR, CI, merge, mark delivery task done, resolve lane, then P7 → sec.13 audit
+  (DM-owned per the Architect, now covers the new background-task supervisor + migration
+  v6) → live `verify` → R14a squash delivery merge.
