@@ -1472,3 +1472,36 @@ fixed same-session.)
 - **Dependency #9 re-verified** (cmd PIN service + app key `wixy-livechat`): registered
   2026-09-14 under decision 973, never rotated, no lockouts (`pins_cli.py status`,
   read-only, no PIN attempt charged).
+
+## Update 2026-09-24 ~17:50 UTC (Orchestrator `b11567bc`) — sec.13 audit BLOCKED: C0 / H2 / M4 / L7
+
+- The opus-tier audit (relation `e971ce44`, Opus 5.5, round 3; the local and Sonnet rungs
+  were clean) is **blocked**. Full findings:
+  `D:\Servers\Cmd\Storage\relations\artifacts\e971ce44-6835-4f94-bdce-baf63bcbfa63\findings-3.json`.
+  Top-rung findings are fixed, never dismissed.
+- **HIGH F1 — push notifications can never be enabled**: `mountPushToggle` (P3b) exists but
+  nothing in app code calls it; the settings sheet renders an empty slot. The backend push
+  routes and service worker are live but unreachable, so the operator's "optional Android
+  push" requirement is not delivered, and the sec.11 server-push e2e spec is absent.
+- **HIGH F2 — photo processing corrupts palette images** (mode P/PA: every static GIF and
+  PNG-8): stored rendition and thumbnail come out wrong (typically black) and the original
+  is then deleted, so it is unrecoverable.
+- **MEDIUM F3** voice note does not send on stop (spec R9 says immediately, as its own
+  message); **F4** a lock during the first `GET /messages` leaves an orphan stream that can
+  later lock the wrong session; **F5** unlock error copy / attemptsLeft not per frozen
+  sec.5.1 (409/422 shown as "unavailable"); **F6** Inv 40's three named tests do not exist.
+- **LOW x7**: negative `sizeBytes` bypasses the quota; unlock 422 echoes the PIN entry;
+  a latin-1 token header raises instead of 401; a store write called directly in async
+  code; the client aborts delete/wipe at 10 s before the server's own deadline; the 204
+  raw-bytes tests do not hold a second connection; a missing pillow-heif is not reflected
+  in `media_available`.
+- **Plan (DM):** all 13 go to Luna 6 XL in parallel — backend `c47441cd`, frontend
+  `4c8e1355`, separate build spaces, briefs taken from the auditor's own text, red-then-green
+  per finding — then the DM's verification + a fresh Sol 6 review on each, merge, then
+  `POST /round` with the new range. P7 docs continues in parallel. Primary checkout stays
+  FROZEN until AUDIT END.
+- **Lesson:** ten review rounds and green CI missed two requirement-level gaps (F1, F3)
+  because the deep rounds were all about P8's concurrency and no test mapped an operator
+  requirement to proof. Orchestrator suggestion to the DM: before the final merge, have Sol
+  6 check every ORIGINAL operator requirement against a passing test or a manual live check
+  and list any with no proof.
