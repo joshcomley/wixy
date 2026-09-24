@@ -1207,3 +1207,30 @@ fixed same-session.)
   the 5x harness result. Given round 9 will move bs7's HEAD again, the 5x harness and any
   remaining Sol review should be re-run against round 9's SHA once it lands, not just
   patched on top mentally — don't clear on a stale SHA.
+
+## Update 2026-09-24 (DM `8e7bbea9`) — round-8 review: 3rd HIGH finding relayed; 5x harness run 1/5 clean
+
+- **3rd finding (HIGH)**, same class as the other two -- a narrow gap in an already-decided
+  pattern, not a new design question: `media_queue.py`'s `_do_work` success path sets
+  `status='ready'` (via `finish_attachment`) BEFORE calling `store.delete_upload` +
+  cleanup. If either of those then raises, round 8's new per-item isolation wrapper
+  (`_handle_claimed_isolated`) correctly protects sibling items but permanently swallows
+  the failure -- the attachment stays `ready` forever with its upload row + raw
+  `uploads/<id>/assembled` original still on disk, unprocessed (potentially with
+  EXIF/GPS). Nothing retries: `claim_processing` only sees `status='processing'`, and the
+  janitor's stale-upload sweep deliberately skips uploads with a linked attachment. Sol
+  proved it lingers past a simulated 9-day sweep. Lean fix relayed to Luna: mirror the
+  READY case on this same round's own `failed_original_archive_candidates()` /
+  `expire_failed_original_if_still_unarchived()` pattern, but WITHOUT the 7-day grace
+  window (a ready+processed item has no diagnostic reason to retain the raw original --
+  clean it up on the next janitor sweep).
+- All 3 round-9 items (legacy-marker HIGH, health-status MEDIUM, ready-original HIGH) now
+  fully relayed to Luna with lean fixes + red/green test asks, batched into ONE round-9
+  commit rather than 3 separate rounds. Luna confirmed receipt of all three and is
+  implementing.
+- **5x full-suite acceptance harness: run 1/5 PASSED clean** (1709 passed, 426s, hub).
+  4 more consecutive clean runs needed per the Architect's own bar. Continuing in
+  background. Note: once round 9 lands, this harness's result on `fb9f66f` becomes moot —
+  will need to restart the 5x count against round 9's new SHA, since the acceptance bar is
+  about the FINAL candidate, not an intermediate one already known to have 3 unfixed
+  findings.
