@@ -17,6 +17,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from wixy_server.app import create_app
+from wixy_server.livechat import janitor as livechat_janitor
 from wixy_server.livechat import uploads as uploads_module
 from wixy_server.livechat.pinclient import CmdPinVerifier
 from wixy_server.livechat.store import LiveChatStore
@@ -314,6 +315,44 @@ class TestChunkPut:
             )
             assert response.status_code == 404
             assert store.get_upload(upload_id) is None
+            assert not paths.server_upload_dir(upload_id).exists()
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_chunk_written_after_completed_delete_requeues_and_removes_it(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        app = cast(FastAPI, client.app)
+        store: LiveChatStore = app.state.livechat_store
+        paths = app.state.paths
+        upload_id = _init_upload(client, headers, size_bytes=3).json()["uploadId"]
+        write_chunk = uploads_module.write_chunk
+
+        def _delete_clean_then_write(upload_dir: Path, index: int, data: bytes) -> None:
+            store.delete_upload(upload_id)
+            assert not livechat_janitor.cleanup_deleted_storage_once(
+                store=store,
+                paths=paths,
+                only_items={("upload", upload_id)},
+            )
+            assert not store.pending_deleted_storage_items()
+            write_chunk(upload_dir, index, data)
+
+        monkeypatch.setattr(uploads_module, "write_chunk", _delete_clean_then_write)
+        try:
+            response = client.put(
+                f"/api/admin/server/uploads/{upload_id}/chunks/0",
+                content=b"abc",
+                headers={**headers, "Content-Type": "application/octet-stream"},
+            )
+            assert response.status_code == 404
+            assert store.get_upload(upload_id) is None
+            assert not store.pending_deleted_storage_items()
             assert not paths.server_upload_dir(upload_id).exists()
         finally:
             client.__exit__(None, None, None)

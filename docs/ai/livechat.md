@@ -225,7 +225,9 @@ overwrite-in-place is not reliable on SSDs. If the media worker finishes after d
 its row, its post-finish check re-queues cleanup for any paths it recreated. The worker scans
 unreferenced `media/`, `uploads/`, and `failed/` entries once at startup, then repeats that sweep
 only while a wipe-sweep token remains pending. Each sweep reads live attachment and upload IDs in
-one DB snapshot; a failed startup sweep creates a durable retry token.
+one DB snapshot; a failed startup sweep creates a durable retry token. Chunk writes shield the
+write-and-row-check sequence from cancellation. If a late write finds its upload deleted, it
+re-marks that upload for durable cleanup, even when an earlier cleanup already completed.
 
 ## 7. Web Push (`livechat/push.py`, `server/pushToggle.ts`)
 

@@ -121,19 +121,22 @@ async def put_chunk(upload_id: str, index: int, request: Request) -> Response:
     def _write() -> None:
         uploads.write_chunk(upload_dir, index, data)
 
-    await anyio.to_thread.run_sync(_write)
-    upload_still_open = await anyio.to_thread.run_sync(lambda: store.get_upload(upload_id))
-    if upload_still_open is None:
-        attachment_exists = await anyio.to_thread.run_sync(
-            lambda: store.get_attachment(upload_id) is not None
-        )
-        if not attachment_exists:
-            await anyio.to_thread.run_sync(
-                lambda: uploads.cleanup_deleted_upload(
-                    store=store, paths=paths, upload_id=upload_id
-                )
+    # Keep the filesystem write and its post-write row check in one shielded
+    # operation. A disconnect after the write must not skip the cleanup check.
+    with anyio.CancelScope(shield=True):
+        await anyio.to_thread.run_sync(_write)
+        upload_still_open = await anyio.to_thread.run_sync(lambda: store.get_upload(upload_id))
+        if upload_still_open is None:
+            attachment_exists = await anyio.to_thread.run_sync(
+                lambda: store.get_attachment(upload_id) is not None
             )
-        raise HTTPException(status_code=404, detail="unknown upload")
+            if not attachment_exists:
+                await anyio.to_thread.run_sync(
+                    lambda: uploads.cleanup_deleted_upload(
+                        store=store, paths=paths, upload_id=upload_id
+                    )
+                )
+            raise HTTPException(status_code=404, detail="unknown upload")
     return Response(status_code=204)
 
 

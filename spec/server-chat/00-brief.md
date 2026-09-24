@@ -1268,6 +1268,9 @@ one message, and wipe everything. The addendum is purely **additive**:
   - After `finish_attachment`, the queue re-reads `get_attachment`. If it's `None`, the queue
     `rmtree`s that attachment's media dir. `delete_message`/`wipe` also `rmtree`. Both are
     idempotent, so whichever runs last cleans up.
+  - A chunk write and its post-write upload-row check are shielded from request cancellation.
+    If a late write finds the upload row deleted, it re-marks the upload cleanup record before
+    retrying file removal, including when an earlier cleanup had already completed.
 - Delete and wipe never trigger a push.
 
 ### 17.2 Amendment A1 — to P1, only if P1 has NOT yet merged to the feature branch
@@ -1398,6 +1401,8 @@ dirs and the chat view, so it goes last to avoid colliding with in-flight work.
 - Prove unreferenced storage is scanned at startup and while a wipe token remains pending, not
   on ordinary ticks, and that the scan uses one batched live-ID read rather than per-entry DB
   connections.
+- Delete and fully clean an upload during an in-flight chunk request, then let the chunk write
+  land late; prove the post-write check requeues cleanup and the recreated bytes are removed.
 - a delete racing a processing attachment leaves no media dir behind
 - a stream spanning a delete emits `message_deleted`, and skips the stale `message` event on
   replay from an old cursor

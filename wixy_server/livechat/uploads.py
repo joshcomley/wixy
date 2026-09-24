@@ -131,7 +131,11 @@ class UnknownUploadError(UploadError):
 
 
 def cleanup_deleted_upload(*, store: LiveChatStore, paths: ProjectPaths, upload_id: str) -> None:
-    """Use the durable cleanup ledger for an upload that no longer has a live row."""
+    """Requeue and remove files recreated by a late write for a deleted upload."""
+    if not _UPLOAD_ID_RE.fullmatch(upload_id):
+        return
+
+    store.set_deleted_storage_pending(kind="upload", storage_id=upload_id, pending=True)
     from wixy_server.livechat.janitor import cleanup_deleted_storage_once
 
     cleanup_deleted_storage_once(store=store, paths=paths, only_items={("upload", upload_id)})
