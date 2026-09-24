@@ -397,3 +397,165 @@ describe("mountServerSettingsSheet wipe confirmation", () => {
     view.teardown();
   });
 });
+
+// The per-device "Extend auto-lock to 1 minute" checkbox. Device-local only:
+// the stored value lives in localStorage under `wx-srv-idle-extended` and
+// nothing about it ever goes to the server.
+describe("mountServerSettingsSheet auto-lock checkbox", () => {
+  const LABEL = "Extend auto-lock to 1 minute";
+
+  beforeEach(() => {
+    vi.useRealTimers();
+    getUsage.mockReset().mockResolvedValue({ mediaAvailable: true, usedBytes: 0, quotaBytes: 10, freeBytes: 10, erasurePending: false });
+    window.localStorage.clear();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    window.localStorage.clear();
+    document.body.innerHTML = "";
+  });
+
+  function mountSheet(lockHooks: LockHooks = hooks()): ReturnType<typeof mountServerSettingsSheet> {
+    const view = mountServerSettingsSheet({
+      identity: identity(),
+      hooks: lockHooks,
+      win: window,
+      getSession: () => SESSION,
+      onWipe: vi.fn(),
+      onNameChanged: vi.fn(),
+      onClose: vi.fn(),
+    });
+    document.body.appendChild(view.element);
+    return view;
+  }
+
+  function checkbox(view: ReturnType<typeof mountServerSettingsSheet>): HTMLInputElement {
+    const input = view.element.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (input === null) throw new Error("no checkbox rendered in the settings sheet");
+    return input;
+  }
+
+  it("renders exactly one real checkbox with a real <label for> reading exactly 'Extend auto-lock to 1 minute'", () => {
+    const view = mountSheet();
+    expect(view.element.querySelectorAll('input[type="checkbox"]')).toHaveLength(1);
+    const input = checkbox(view);
+    expect(input.id).not.toBe("");
+    const label = view.element.querySelector<HTMLLabelElement>(`label[for="${input.id}"]`);
+    expect(label).not.toBeNull();
+    expect(label?.textContent?.trim()).toBe(LABEL);
+    expect(input.labels).toHaveLength(1);
+    expect(input.labels?.[0]).toBe(label);
+    view.teardown();
+  });
+
+  it("gives every mounted sheet its own checkbox id, so the label always points at its own box", () => {
+    const first = mountSheet();
+    const second = mountSheet();
+    expect(checkbox(first).id).not.toBe(checkbox(second).id);
+    first.teardown();
+    second.teardown();
+  });
+
+  it("is unticked by default and keyboard reachable (enabled, in the tab order)", () => {
+    const view = mountSheet();
+    view.open();
+    const input = checkbox(view);
+    expect(input.checked).toBe(false);
+    expect(input.disabled).toBe(false);
+    expect(input.tabIndex).toBeGreaterThanOrEqual(0);
+    input.focus();
+    expect(document.activeElement).toBe(input);
+    view.teardown();
+  });
+
+  it("reflects the stored value every time the sheet opens", () => {
+    const view = mountSheet();
+    window.localStorage.setItem("wx-srv-idle-extended", "1");
+    view.open();
+    expect(checkbox(view).checked).toBe(true);
+    view.close();
+
+    window.localStorage.removeItem("wx-srv-idle-extended");
+    view.open();
+    expect(checkbox(view).checked).toBe(false);
+    view.close();
+
+    window.localStorage.setItem("wx-srv-idle-extended", "yes"); // any value but "1" is OFF
+    view.open();
+    expect(checkbox(view).checked).toBe(false);
+    view.teardown();
+  });
+
+  it("ticking persists '1' and announces the change; unticking removes the key", () => {
+    const changed = vi.fn();
+    window.addEventListener("wx-srv-idle-preference-changed", changed);
+    const view = mountSheet();
+    view.open();
+    const input = checkbox(view);
+
+    input.click();
+    expect(input.checked).toBe(true);
+    expect(window.localStorage.getItem("wx-srv-idle-extended")).toBe("1");
+    expect(changed).toHaveBeenCalledTimes(1);
+
+    input.click();
+    expect(input.checked).toBe(false);
+    expect(window.localStorage.getItem("wx-srv-idle-extended")).toBeNull();
+    expect(changed).toHaveBeenCalledTimes(2);
+
+    window.removeEventListener("wx-srv-idle-preference-changed", changed);
+    view.teardown();
+  });
+
+  it("clicking the label text toggles the box too", () => {
+    const view = mountSheet();
+    view.open();
+    const label = view.element.querySelector<HTMLLabelElement>(`label[for="${checkbox(view).id}"]`);
+    label?.click();
+    expect(checkbox(view).checked).toBe(true);
+    expect(window.localStorage.getItem("wx-srv-idle-extended")).toBe("1");
+    view.teardown();
+  });
+
+  it("stays on this device: toggling makes no network request and never locks or suspends", () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const lockHooks = hooks();
+    const view = mountSheet(lockHooks);
+    view.open();
+    getUsage.mockClear();
+    checkbox(view).click();
+    checkbox(view).click();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(getUsage).not.toHaveBeenCalled();
+    expect(lockHooks.lockNow).not.toHaveBeenCalled();
+    expect(lockHooks.suspend).not.toHaveBeenCalled();
+    view.teardown();
+  });
+
+  it("a refused write leaves the box honest: it snaps back to what is actually stored", () => {
+    const view = mountSheet();
+    view.open();
+    const input = checkbox(view);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("full", "QuotaExceededError");
+    });
+    input.click();
+    expect(window.localStorage.getItem("wx-srv-idle-extended")).toBeNull();
+    expect(input.checked).toBe(false);
+    view.teardown();
+  });
+
+  it("sits with the other settings rows, before the destructive wipe button and the Lock button", () => {
+    const view = mountSheet();
+    const children = Array.from(view.element.querySelector(".wx-srv-sheet")?.children ?? []);
+    const row = children.find((child) => child.querySelector('input[type="checkbox"]') !== null);
+    const wipe = children.find((child) => child.classList.contains("wx-srv-sheet-wipe"));
+    const lock = children.find((child) => child.classList.contains("wx-srv-sheet-lock"));
+    if (row === undefined || wipe === undefined || lock === undefined) throw new Error("expected rows missing");
+    expect(children.indexOf(row)).toBeLessThan(children.indexOf(wipe));
+    expect(children.indexOf(row)).toBeLessThan(children.indexOf(lock));
+    view.teardown();
+  });
+});

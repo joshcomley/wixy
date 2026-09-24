@@ -2,8 +2,16 @@
 // (spec/server-chat/00-brief.md §6). Every value here is quoted verbatim by
 // the frozen brief — do not retune without going back through the Architect.
 
-/** R6/R7: 10s with no qualifying activity (and no active suspension) locks. */
+/** R6/R7: 10s with no qualifying activity (and no active suspension) locks.
+ * This is the normal idle period AND the fixed one for the decoy's "Open
+ * server settings" re-hide and the PIN pad's idle close, which share the same
+ * timer but are never affected by the auto-lock checkbox. */
 export const IDLE_LOCK_MS = 10_000;
+
+/** The unlocked chat's idle period on a device whose owner ticked "Extend
+ * auto-lock to 1 minute" (`idlePreference.ts`). Lives ONLY here — `lockModel`
+ * receives the chosen duration as an input and never holds a second copy. */
+export const IDLE_LOCK_EXTENDED_MS = 60_000;
 
 /** R6: the chat text fades out over this long before the panel actually
  * detaches and falls back to the decoy — any activity during the fade

@@ -9,6 +9,7 @@ import {
   ServerWipeAbandonedError,
 } from "./api/http";
 import type { ServerIdentity } from "./identity";
+import { isIdleLockExtended, setIdleLockExtended } from "./idlePreference";
 import { isAndroidPushCapable, mountPushToggle, type PushToggle } from "./pushToggle";
 import type { LockHooks, ServerSession } from "./types";
 
@@ -46,6 +47,10 @@ function formatBytes(bytes: number): string {
   const unit = units[unitIndex] ?? "TB";
   return `${value >= 10 ? Math.round(value) : Math.round(value * 10) / 10} ${unit}`;
 }
+
+/** Gives each mounted sheet's checkbox its own id, so its <label for> always
+ * points at its own box even if two sheets ever share a document. */
+let idleCheckboxSequence = 0;
 
 export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerSettingsSheetView {
   const { identity, hooks, win } = deps;
@@ -87,6 +92,21 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   saveNameButton.className = "wx-srv-sheet-save-name";
   saveNameButton.textContent = "Save";
   nameRow.append(nameLabel, saveNameButton);
+
+  // "Extend auto-lock to 1 minute" — a per-DEVICE preference (localStorage,
+  // never sent anywhere). The whole row is the <label>, so the tap target is
+  // the full row width and at least 44px tall (chat.css).
+  const idleLabel = documentRef.createElement("label");
+  idleLabel.className = "wx-srv-sheet-idle";
+  const idleInput = documentRef.createElement("input");
+  idleInput.type = "checkbox";
+  idleInput.className = "wx-srv-sheet-idle-input";
+  idleInput.id = `wx-srv-idle-extended-${++idleCheckboxSequence}`;
+  idleLabel.htmlFor = idleInput.id;
+  const idleText = documentRef.createElement("span");
+  idleText.className = "wx-srv-sheet-idle-text";
+  idleText.textContent = "Extend auto-lock to 1 minute";
+  idleLabel.append(idleInput, idleText);
 
   const usageRow = documentRef.createElement("p");
   usageRow.className = "wx-srv-sheet-usage";
@@ -222,7 +242,7 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   wipeConfirmButtons.append(wipeConfirmButton, wipeCancelButton);
   wipeConfirmation.append(wipeQuestion, wipeError, wipeConfirmButtons);
 
-  sheet.append(header, nameRow, usageRow, wipeStatus, pushSlot, wipeButton, wipeConfirmation, lockButton);
+  sheet.append(header, nameRow, usageRow, wipeStatus, pushSlot, idleLabel, wipeButton, wipeConfirmation, lockButton);
   backdrop.appendChild(sheet);
 
   function close(): void {
@@ -247,6 +267,11 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     if (evt.target === backdrop) close();
   });
   saveNameButton.addEventListener("click", saveName);
+  idleInput.addEventListener("change", () => {
+    setIdleLockExtended(win, idleInput.checked);
+    // A refused write must not leave the box claiming a state that didn't stick.
+    idleInput.checked = isIdleLockExtended(win);
+  });
   nameInput.addEventListener("keydown", (evt) => {
     if (evt.key === "Enter") saveName();
   });
@@ -322,6 +347,7 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
       wipeError.hidden = true;
       wipeStatus.hidden = !wipeOutcomeUnknown;
       nameInput.value = identity.getName() ?? "";
+      idleInput.checked = isIdleLockExtended(win);
       usageRow.textContent = "Storage: loading…";
       const session = deps.getSession();
       mountPushToggleIfCapable(session);

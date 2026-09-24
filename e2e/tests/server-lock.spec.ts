@@ -21,7 +21,7 @@
 // needs a real reset (`POST /test/server/reset-pin-lockout`), not just
 // fast-forwarding the page.
 
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
 
 // Matches e2e/fixture_server.py's TEST_SERVER_PIN / TEST_SERVER_PIN_APP_KEY.
@@ -110,6 +110,37 @@ async function enterNameIfPrompted(page: Page): Promise<void> {
   await page.locator(".wx-srv-name-prompt-button").click();
   await expect(page.locator(".wx-srv-thread")).toBeVisible();
   await page.clock.runFor(401);
+}
+
+const AUTO_LOCK_LABEL = "Extend auto-lock to 1 minute";
+
+/** Opens the chat's settings sheet and returns its "Extend auto-lock to 1
+ * minute" checkbox, found the way a person (and a screen reader) finds it: by
+ * its label. Waits past R3's multi-tap window first so the gear tap and the
+ * tap before it never read as a panic double-tap under `page.clock`. */
+async function openSettingsAndFindAutoLockBox(page: Page): Promise<Locator> {
+  await page.clock.runFor(401);
+  await page.locator(".wx-srv-settings-button").click();
+  await expect(page.locator(".wx-srv-sheet")).toBeVisible();
+  return page.getByLabel(AUTO_LOCK_LABEL);
+}
+
+async function closeSettings(page: Page): Promise<void> {
+  await page.clock.runFor(401);
+  await page.locator(".wx-srv-sheet-close").click();
+  await expect(page.locator(".wx-srv-sheet")).toBeHidden();
+}
+
+/** Unlocks into the chat, ticks (or unticks) the auto-lock box, and closes the
+ * sheet — the close tap is the LAST user activity, so every clock assertion
+ * after it counts from that instant. */
+async function unlockAndSetAutoLock(page: Page, extended: boolean): Promise<void> {
+  await revealAndOpenPinPad(page);
+  await enterPin(page, TEST_PIN);
+  await expect(page.locator(".wx-srv-thread")).toBeVisible();
+  const box = await openSettingsAndFindAutoLockBox(page);
+  await box.setChecked(extended);
+  await closeSettings(page);
 }
 
 for (const profile of DEVICE_PROFILES) {
@@ -240,6 +271,104 @@ for (const profile of DEVICE_PROFILES) {
         await page.clock.runFor(1_900);
         await expect(page.locator(".wx-srv-thread")).toHaveCount(0);
         await expect(page.locator(".wx-srv-decoy")).toBeVisible();
+      });
+    });
+
+    test(`${profile.name}: auto-lock box unticked (the default) — locks 10s after the last activity: fading at 10.5s, gone by 10.9s`, async ({
+      browser,
+    }) => {
+      await withServerPage(browser, profile, async (page) => {
+        await unlockAndSetAutoLock(page, false);
+        const chatHost = page.locator(".wx-srv-chat-host");
+
+        await page.clock.runFor(9_000);
+        await expect(page.locator(".wx-srv-thread")).toBeVisible();
+        await expect(chatHost).not.toHaveClass(/wx-srv-fading/);
+
+        await page.clock.runFor(1_500); // t = 10.5s since the last activity
+        await expect(chatHost).toHaveClass(/wx-srv-fading/);
+
+        await page.clock.runFor(400); // t = 10.9s — the 800ms fade has finished
+        await expect(page.locator(".wx-srv-thread")).toHaveCount(0);
+        await expect(page.locator(".wx-srv-decoy")).toBeVisible();
+      });
+    });
+
+    test(`${profile.name}: auto-lock box ticked — still unlocked at 10s and 59s, locking at 60.5s, gone by 60.9s`, async ({
+      browser,
+    }) => {
+      await withServerPage(browser, profile, async (page) => {
+        await unlockAndSetAutoLock(page, true);
+        const chatHost = page.locator(".wx-srv-chat-host");
+
+        await page.clock.runFor(10_500); // well past the normal 10s
+        await expect(page.locator(".wx-srv-thread")).toBeVisible();
+        await expect(chatHost).not.toHaveClass(/wx-srv-fading/);
+
+        await page.clock.runFor(48_500); // t = 59s
+        await expect(page.locator(".wx-srv-thread")).toBeVisible();
+        await expect(chatHost).not.toHaveClass(/wx-srv-fading/);
+
+        await page.clock.runFor(1_500); // t = 60.5s
+        await expect(chatHost).toHaveClass(/wx-srv-fading/);
+
+        await page.clock.runFor(400); // t = 60.9s — fade finished, detached
+        await expect(page.locator(".wx-srv-thread")).toHaveCount(0);
+        await expect(page.locator(".wx-srv-decoy")).toBeVisible();
+      });
+    });
+
+    test(`${profile.name}: auto-lock box — the choice survives lock→unlock and a full reload; unticking restores 10s`, async ({
+      browser,
+    }) => {
+      await withServerPage(browser, profile, async (page) => {
+        await unlockAndSetAutoLock(page, true);
+        expect(await page.evaluate(() => window.localStorage.getItem("wx-srv-idle-extended"))).toBe("1");
+
+        // Lock (panic) then unlock again: the box still reads ticked.
+        await page.locator('.wx-srv-chat-host button[aria-label="Close"]').click();
+        await expect(page.locator(".wx-srv-thread")).toHaveCount(0);
+        await revealAndOpenPinPad(page);
+        await enterPin(page, TEST_PIN);
+        await expect(await openSettingsAndFindAutoLockBox(page)).toBeChecked();
+        await closeSettings(page);
+
+        // A full page reload: still ticked, and the 60s period governs the new page.
+        await page.reload();
+        await page.waitForSelector(".wx-srv-decoy");
+        await revealAndOpenPinPad(page);
+        await enterPin(page, TEST_PIN);
+        await expect(await openSettingsAndFindAutoLockBox(page)).toBeChecked();
+        await closeSettings(page);
+        await page.clock.runFor(30_000);
+        await expect(page.locator(".wx-srv-thread")).toBeVisible();
+
+        // Unticking clears the stored key and puts the normal 10s back.
+        const box = await openSettingsAndFindAutoLockBox(page);
+        await box.uncheck();
+        expect(await page.evaluate(() => window.localStorage.getItem("wx-srv-idle-extended"))).toBeNull();
+        await closeSettings(page);
+        await page.clock.runFor(10_500);
+        await expect(page.locator(".wx-srv-chat-host")).toHaveClass(/wx-srv-fading/);
+      });
+    });
+
+    test(`${profile.name}: auto-lock box — keyboard operable (Space toggles it) and toggling never locks the chat`, async ({
+      browser,
+    }) => {
+      await withServerPage(browser, profile, async (page) => {
+        await revealAndOpenPinPad(page);
+        await enterPin(page, TEST_PIN);
+        const box = await openSettingsAndFindAutoLockBox(page);
+        await expect(box).not.toBeChecked();
+        await box.focus();
+        await page.keyboard.press("Space");
+        await expect(box).toBeChecked();
+        await page.keyboard.press("Space");
+        await expect(box).not.toBeChecked();
+        // Two quick toggles (the same virtual instant) are not a panic double-tap.
+        await expect(page.locator(".wx-srv-sheet")).toBeVisible();
+        await expect(page.locator(".wx-srv-thread")).toBeVisible();
       });
     });
 
@@ -377,6 +506,47 @@ for (const profile of DEVICE_PROFILES) {
         await enterPin(page, TEST_PIN);
         await expect(page.locator(".wx-srv-chat-host textarea")).toHaveValue("an unsent thought");
       });
+    });
+  });
+}
+
+// The settings-sheet checkbox must be usable on the narrowest phone: a real
+// label, a row at least 44px tall, and text that WRAPS instead of truncating
+// or spilling out of the sheet. 375px is the classic small iPhone; 1280px is
+// desktop. Each run also leaves a screenshot in the test's output folder.
+const LAYOUT_PROFILES: readonly DeviceProfile[] = [
+  { name: "narrow-phone", viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true },
+  { name: "desktop", viewport: { width: 1280, height: 800 }, isMobile: false, hasTouch: false },
+];
+
+for (const profile of LAYOUT_PROFILES) {
+  test(`auto-lock box layout at ${profile.viewport.width}px: labelled, at least 44px tall, wraps, fits the sheet`, async ({
+    browser,
+  }, testInfo) => {
+    await withServerPage(browser, profile, async (page) => {
+      await revealAndOpenPinPad(page);
+      await enterPin(page, TEST_PIN);
+      const box = await openSettingsAndFindAutoLockBox(page);
+      await expect(box).toBeVisible();
+      await expect(box).toHaveAccessibleName(AUTO_LOCK_LABEL);
+
+      const rowBox = await page.locator(".wx-srv-sheet-idle").boundingBox();
+      const sheetBox = await page.locator(".wx-srv-sheet").boundingBox();
+      if (rowBox === null || sheetBox === null) throw new Error("sheet or row not laid out");
+      expect(rowBox.height).toBeGreaterThanOrEqual(44);
+      // Inside the sheet horizontally — never spilling past its edges.
+      expect(rowBox.x).toBeGreaterThanOrEqual(sheetBox.x - 0.5);
+      expect(rowBox.x + rowBox.width).toBeLessThanOrEqual(sheetBox.x + sheetBox.width + 0.5);
+      // The text is never clipped: its content fits its own box.
+      const text = page.locator(".wx-srv-sheet-idle-text");
+      await expect(text).toHaveText(AUTO_LOCK_LABEL);
+      expect(await text.evaluate((el) => el.scrollWidth > el.clientWidth + 1)).toBe(false);
+      // The sheet adds no sideways page scroll.
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1),
+      ).toBe(false);
+
+      await page.screenshot({ path: testInfo.outputPath(`auto-lock-sheet-${profile.viewport.width}.png`) });
     });
   });
 }

@@ -10,10 +10,18 @@
 
 import type { AdminApi } from "../api";
 import { unlock } from "./api/unlock";
-import { FADE_MS, IDLE_LOCK_MS, MULTI_TAP_INTERVAL_MS, PICKER_SUSPEND_MAX_MS } from "./constants";
+import { FADE_MS, MULTI_TAP_INTERVAL_MS, PICKER_SUSPEND_MAX_MS } from "./constants";
 import { mountDecoy, type DecoyView } from "./decoy";
 import { attachMultiTapListener, attachTapListener, createMultiTapDetector, createTapDetector } from "./gestures";
-import { INITIAL_STATE, reduce, type LockEffect, type LockEvent, type LockState } from "./lockModel";
+import { chatIdleLockMs, onIdleLockPreferenceChanged } from "./idlePreference";
+import {
+  idleRemainingMs,
+  INITIAL_STATE,
+  reduce,
+  type LockEffect,
+  type LockEvent,
+  type LockState,
+} from "./lockModel";
 import { mountPinPad, type PinPadView } from "./pinPad";
 import type {
   CreateServerChatView,
@@ -214,6 +222,11 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
    * concrete timer while this stays true, so `armIdleTimer` knows to
    * actually restart it once every suspension has released (R7). */
   let idleTimerArmed = false;
+  /** `performance.now()` at the last (re)start of the idle period — a real
+   * activity event, or a suspension ending. The deadline is always this plus
+   * the current state's idle timeout, so a settings change can re-schedule
+   * against it without ever restarting the clock. */
+  let idleStartedAtMs = 0;
   let fadeTimer: ReturnType<typeof win.setTimeout> | null = null;
   let expiryTimer: ReturnType<typeof win.setTimeout> | null = null;
 
@@ -222,14 +235,33 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
     dispatch({ type: "lock", cause: "idle" });
   }
 
-  function armIdleTimer(): void {
-    idleTimerArmed = true;
+  /** (Re)schedules the concrete idle timer for whatever is left of the
+   * current period: the last (re)start plus this state's idle timeout — the
+   * device's chosen duration in "chat", the fixed 10s in "revealed"/"pin" —
+   * read fresh from the preference every time. Never moves `idleStartedAtMs`. */
+  function scheduleIdleTimer(): void {
     if (idleTimer !== null) {
       win.clearTimeout(idleTimer);
       idleTimer = null;
     }
     if (totalSuspensionCount > 0) return; // stays paused — see `release()` below
-    idleTimer = win.setTimeout(fireIdle, IDLE_LOCK_MS);
+    const remainingMs = idleRemainingMs(state, chatIdleLockMs(win), idleStartedAtMs, win.performance.now());
+    idleTimer = win.setTimeout(fireIdle, remainingMs);
+  }
+
+  /** Real user activity (or a suspension ending): a FRESH full idle period. */
+  function armIdleTimer(): void {
+    idleTimerArmed = true;
+    idleStartedAtMs = win.performance.now();
+    scheduleIdleTimer();
+  }
+
+  /** The "Extend auto-lock to 1 minute" box changed (here, or in another tab):
+   * apply it at once, measured from the last activity — NOT a restart. While
+   * suspended (or with no idle timer wanted at all) there is nothing to
+   * re-schedule; the next real restart reads the new value itself. */
+  function onIdlePreferenceChanged(): void {
+    if (idleTimerArmed) scheduleIdleTimer();
   }
 
   function disarmIdleTimer(): void {
@@ -448,6 +480,8 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
   }
   win.document.addEventListener("visibilitychange", onVisibilityChange);
 
+  const detachIdlePreferenceListener = onIdleLockPreferenceChanged(win, onIdlePreferenceChanged);
+
   render();
 
   return {
@@ -466,6 +500,7 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
       chatView?.dispose();
       detachMultiTapListener();
       detachSingleTapListener();
+      detachIdlePreferenceListener();
       for (const off of detachActivityListeners) off();
       win.document.removeEventListener("keydown", onKeyDownForEscape);
       win.document.removeEventListener("visibilitychange", onVisibilityChange);

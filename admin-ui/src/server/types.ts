@@ -14,8 +14,9 @@ export interface ServerSession {
 
 /** R7 — the four reasons the idle timer pauses instead of counting down.
  * `suspend()` (see `LockHooks` below) is idempotent per reason and returns a
- * release function; the idle timer restarts fresh (a full IDLE_LOCK_MS) the
- * moment the LAST active suspension for a given reason ends. */
+ * release function; the idle timer restarts fresh (a full idle period — see
+ * `idleTimeoutMs`) the moment the LAST active suspension for a given reason
+ * ends. */
 export type SuspendReason = "recording" | "micPermission" | "filePicker" | "mediaPlaying";
 
 /** R6 — every distinct trigger that can force an instant lock (all eight of
@@ -40,8 +41,9 @@ export interface LockHooks {
   /** Pauses the idle timer for `reason`. Idempotent: calling it again for a
    * reason already active is a harmless no-op that returns its own release
    * (releasing either just un-suspends once every holder has released).
-   * Returns a release function — the idle timer restarts with a fresh
-   * IDLE_LOCK_MS once the last active suspension ends (R7). */
+   * Returns a release function — the idle timer restarts with a fresh full
+   * idle period (the device's configured duration) once the last active
+   * suspension ends (R7). */
   suspend(reason: SuspendReason): () => void;
   /** Forces an instant lock for `cause`, from any state. A no-op if already
    * locked. */

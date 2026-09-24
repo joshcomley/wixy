@@ -50,3 +50,21 @@ describe("server/chat.css: hidden elements must actually hide", () => {
     });
   }
 });
+
+describe("server/chat.css: the 'Extend auto-lock to 1 minute' row", () => {
+  it("is a flex row at least 44px tall (a comfortable phone tap target)", () => {
+    const row = baseRuleBody(chatCss, "wx-srv-sheet-idle");
+    expect(row, "no base rule for .wx-srv-sheet-idle").not.toBeNull();
+    expect(row).toMatch(/display\s*:\s*flex/);
+    const minHeight = /min-height\s*:\s*(\d+)px/.exec(row ?? "");
+    expect(Number(minHeight?.[1] ?? 0)).toBeGreaterThanOrEqual(44);
+  });
+
+  it("keeps the checkbox fixed-size and lets the label text wrap instead of truncating", () => {
+    const input = baseRuleBody(chatCss, "wx-srv-sheet-idle-input");
+    expect(input).toMatch(/flex\s*:\s*none/);
+    const text = baseRuleBody(chatCss, "wx-srv-sheet-idle-text");
+    expect(text).toMatch(/min-width\s*:\s*0/);
+    expect(text).not.toMatch(/text-overflow|white-space\s*:\s*nowrap/);
+  });
+});

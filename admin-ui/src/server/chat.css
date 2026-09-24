@@ -579,6 +579,35 @@
   color: var(--wx-muted);
 }
 
+/* "Extend auto-lock to 1 minute": the whole row is the <label>, so the tap
+   target is the full sheet width and at least 44px tall; the text wraps on a
+   narrow phone instead of truncating. */
+.wx-srv-sheet-idle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  font-size: 0.875rem;
+  line-height: 1.35;
+  color: var(--wx-ink);
+  cursor: pointer;
+}
+
+.wx-srv-sheet-idle-input {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--wx-brand-blue);
+  cursor: pointer;
+}
+
+.wx-srv-sheet-idle-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .wx-srv-sheet-save-name,
 .wx-srv-sheet-lock {
   font: 600 0.8125rem/1 system-ui, sans-serif;

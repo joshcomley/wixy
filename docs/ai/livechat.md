@@ -29,9 +29,10 @@ Numbered guarantees: [invariants.md](invariants.md) 40–45.
   thumbnail, P8 menu trigger, Delete for everyone item, and Delete all messages row are marked;
   final-action buttons and toggles are not. The exact classifier is in
   `admin-ui/src/server/gestures.ts` and is covered by `admin-ui/tests/server/gestures.test.ts`.
-- Once unlocked: 10s of no activity fades back to the decoy; a panic button, a multi-tap
-  inside the chat, `Escape`, tab-hidden, or routing away all lock instantly. A reload never
-  restores the unlocked state (Inv 42).
+- Once unlocked: 10 seconds of no activity fades back to the decoy — or 60 seconds on a
+  device where the owner ticked **Extend auto-lock to 1 minute** in the chat's settings sheet
+  (§11); a panic button, a multi-tap inside the chat, `Escape`, tab-hidden, or routing away
+  all lock instantly. A reload never restores the unlocked state (Inv 42).
 - Locking **detaches the chat subtree from the document** — nothing chat-shaped remains
   readable in the DOM once locked.
 
@@ -472,11 +473,13 @@ independent controls such as Send → 📎/🎤 keep normal cadence. The native 
 need a marker, and the mic start/stop toggle deliberately remains non-boundary.
 
 **`panel.ts`** owns everything `lockModel.ts` deliberately doesn't: the idle timer
-(`IDLE_LOCK_MS` = 10s) and fade timer (`FADE_MS` = 800ms), the token-expiry timer, R7's
+(`IDLE_LOCK_MS` = 10s, or `IDLE_LOCK_EXTENDED_MS` = 60s for the unlocked chat only — see
+"Extend auto-lock to 1 minute" below) and fade timer (`FADE_MS` = 800ms), the token-expiry
+timer, R7's
 suspension bookkeeping (`LockHooks.suspend(reason)` — reference-counted per call, the idle
-timer stays paused while ANY suspension is active and restarts with a FRESH 10s the moment
-the last one releases; `filePicker` alone carries a `PICKER_SUSPEND_MAX_MS` = 5-minute safety
-auto-release), the R7 activity listener set (`pointerdown`/`pointermove`/`touchstart`/
+timer stays paused while ANY suspension is active and restarts with a FRESH full idle period
+(10s, or the chat's configured 60s) the moment the last one releases; `filePicker` alone
+carries a `PICKER_SUSPEND_MAX_MS` = 5-minute safety auto-release), the R7 activity listener set (`pointerdown`/`pointermove`/`touchstart`/
 `touchmove`/`wheel`/`keydown`/`input` — deliberately NOT `scroll`, so a programmatic
 scroll-to-bottom on an incoming message can never keep the chat visible), a dedicated
 `document` `keydown` listener for `Escape`, and a `visibilitychange` listener whose `hidden`
@@ -494,6 +497,24 @@ FRESH `ServerSession` on each unlock, never a stale one.
 `panel.ts` calls the `createServerChatView` factory in `server/chatView.ts` after the first
 successful unlock. It retains that view through later lock/unlock cycles and disposes it only
 when routing away from `/admin/server`.
+
+**Extend auto-lock to 1 minute** is a per-device checkbox in the chat's settings sheet
+(`settingsSheet.ts`: a real `<label for>` row, at least 44px tall, default off). It stores `"1"`
+under the localStorage key `wx-srv-idle-extended` (`server/idlePreference.ts`; absent, an
+unreadable store, or any other value all mean off) and nothing about it is sent to the server.
+Only the **unlocked chat's** idle lock — the first-unlock name prompt included — becomes 60s:
+`lockModel.idleTimeoutMs(state, idleLockMs)` gives `chat` the duration the UI layer chose and
+every other state that runs the idle timer (the decoy's "Open server settings" re-hide, the PIN
+pad's idle close) the fixed 10s; the 60s value lives once, as `IDLE_LOCK_EXTENDED_MS` in
+`constants.ts`. The 800ms fade, R7 suspensions, every other lock cause and reload are
+unchanged. `panel.ts` reads the preference each time it (re)starts the idle timer and
+re-schedules when it changes (the sheet's window event, or another tab's `storage` event)
+against the recorded start of the current idle period, so a tick or untick applies at once but
+never restarts the clock — only real user activity, or a suspension ending, does. The unlock
+token lives 12 hours (`UNLOCK_TOKEN_TTL_S`), far past the longer idle window. Covered by
+`admin-ui/tests/server/{idlePreference,lockModel,panel}.test.ts`,
+`admin-ui/tests/serverSettingsSheet.test.ts` and the "auto-lock box" cases in
+`e2e/tests/server-lock.spec.ts`.
 
 Test coverage: `lockModel.ts` and `gestures.ts` both at 100% branch coverage
 (`admin-ui/tests/server/{lockModel,gestures}.test.ts`); `panel.test.ts` covers the full

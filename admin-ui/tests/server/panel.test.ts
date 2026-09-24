@@ -5,7 +5,14 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdminApi, ServerVersion, SystemStatus } from "../../src/api";
-import { FADE_MS, IDLE_LOCK_MS, MULTI_TAP_INTERVAL_MS, PICKER_SUSPEND_MAX_MS } from "../../src/server/constants";
+import {
+  FADE_MS,
+  IDLE_LOCK_EXTENDED_MS,
+  IDLE_LOCK_MS,
+  MULTI_TAP_INTERVAL_MS,
+  PICKER_SUSPEND_MAX_MS,
+} from "../../src/server/constants";
+import { IDLE_EXTENDED_KEY, setIdleLockExtended } from "../../src/server/idlePreference";
 import { mountServerPanel, type ServerPanelDeps } from "../../src/server/panel";
 import type { CreateServerChatView, LockHooks, ServerChatView, ServerSession } from "../../src/server/types";
 
@@ -79,6 +86,9 @@ describe("mountServerPanel", () => {
     vi.unstubAllGlobals();
     vi.useRealTimers();
     document.body.innerHTML = "";
+    // The "Extend auto-lock to 1 minute" preference is per-device localStorage —
+    // never let one test's tick leak into the next.
+    window.localStorage.clear();
   });
 
   async function flush(times = 10): Promise<void> {
@@ -456,6 +466,270 @@ describe("mountServerPanel", () => {
     await vi.advanceTimersByTimeAsync(1100); // crosses 10s total
     expect(chatHost.classList.contains("wx-srv-fading")).toBe(true);
     panel.teardown();
+  });
+
+  // -- "Extend auto-lock to 1 minute" (per-device preference) --------------------
+  //
+  // Architect ruling: ONLY the unlocked chat's idle lock takes the chosen
+  // duration; the decoy re-hide, the PIN pad's idle close, the 800ms fade, R7
+  // suspensions and every other lock cause are unchanged. A setting change
+  // applies at once but is measured from the LAST REAL ACTIVITY — toggling
+  // never restarts the clock.
+
+  async function unlockedChat(
+    deps: Partial<ServerPanelDeps> = {},
+  ): Promise<{ panel: ReturnType<typeof mountServerPanel>; chatHost: HTMLElement }> {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ token: "tok", expiresAt: expiresIn(3600) }));
+    const panel = mount(deps);
+    await openPinPad(panel.element);
+    await enterAndSubmitPin(panel.element, "1234");
+    return { panel, chatHost: panel.element.querySelector(".wx-srv-chat-host") as HTMLElement };
+  }
+
+  function isFading(chatHost: HTMLElement): boolean {
+    return chatHost.classList.contains("wx-srv-fading");
+  }
+
+  it("default (box unticked): fades at exactly 10s and detaches at 10.8s", async () => {
+    const { panel, chatHost } = await unlockedChat();
+    await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS - 1);
+    expect(isFading(chatHost)).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(isFading(chatHost)).toBe(true);
+    await vi.advanceTimersByTimeAsync(FADE_MS - 1);
+    expect(panel.element.querySelector(".wx-srv-thread")).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(panel.element.querySelector(".wx-srv-thread")).toBeNull();
+    panel.teardown();
+  });
+
+  it("ticked: nothing at 10s or 59.999s, fades at exactly 60s, detaches at 60.8s", async () => {
+    setIdleLockExtended(window, true);
+    const { panel, chatHost } = await unlockedChat();
+    await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS + 1);
+    expect(isFading(chatHost)).toBe(false);
+    expect(panel.element.querySelector(".wx-srv-thread")).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(IDLE_LOCK_EXTENDED_MS - IDLE_LOCK_MS - 2); // t = 59.999s
+    expect(isFading(chatHost)).toBe(false);
+    await vi.advanceTimersByTimeAsync(1); // t = 60.000s
+    expect(isFading(chatHost)).toBe(true);
+    await vi.advanceTimersByTimeAsync(FADE_MS - 1);
+    expect(panel.element.querySelector(".wx-srv-thread")).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(1); // t = 60.800s
+    expect(panel.element.querySelector(".wx-srv-thread")).toBeNull();
+    panel.teardown();
+  });
+
+  it("the stored value is the only switch: '1' extends, any other value is the normal 10s", async () => {
+    window.localStorage.setItem(IDLE_EXTENDED_KEY, "true");
+    const { panel, chatHost } = await unlockedChat();
+    await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS);
+    expect(isFading(chatHost)).toBe(true);
+    panel.teardown();
+  });
+
+  it("ticking while unlocked applies at once and is measured from the LAST ACTIVITY, not from the tick", async () => {
+    const { panel, chatHost } = await unlockedChat();
+    await vi.advanceTimersByTimeAsync(5_000);
+    setIdleLockExtended(window, true); // a settings change — NOT user activity
+    await vi.advanceTimersByTimeAsync(IDLE_LOCK_EXTENDED_MS - 5_000 - 1); // t = 59.999s
+    expect(isFading(chatHost)).toBe(false);
+    await vi.advanceTimersByTimeAsync(1); // t = 60.000s = last activity + 60s (NOT 65s)
+    expect(isFading(chatHost)).toBe(true);
+    panel.teardown();
+  });
+
+  it("unticking while unlocked applies at once, measured from the last activity", async () => {
+    setIdleLockExtended(window, true);
+    const { panel, chatHost } = await unlockedChat();
+    await vi.advanceTimersByTimeAsync(4_000);
+    setIdleLockExtended(window, false);
+    await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS - 4_000 - 1); // t = 9.999s
+    expect(isFading(chatHost)).toBe(false);
+    await vi.advanceTimersByTimeAsync(1); // t = 10.000s — NOT 14s (the untick did not restart the clock)
+    expect(isFading(chatHost)).toBe(true);
+    panel.teardown();
+  });
+
+  it("unticking after the shorter deadline has already passed locks at once (no restart, no grace)", async () => {
+    setIdleLockExtended(window, true);
+    const { panel, chatHost } = await unlockedChat();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(isFading(chatHost)).toBe(false);
+    setIdleLockExtended(window, false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(isFading(chatHost)).toBe(true);
+    panel.teardown();
+  });
+
+  it("changing the setting with no timer running (decoy) is harmless and starts nothing", async () => {
+    const panel = mount();
+    await flush(); // let the decoy's own async status poll settle first
+    // jsdom itself queues a setTimeout(0) per localStorage write (its storage
+    // event) — measure that overhead with an unrelated key so only the panel's
+    // OWN reaction to the preference change is compared.
+    const beforeControl = vi.getTimerCount();
+    window.localStorage.setItem("unrelated-key", "1");
+    window.localStorage.removeItem("unrelated-key");
+    const storageOverhead = vi.getTimerCount() - beforeControl;
+
+    const beforePreference = vi.getTimerCount();
+    setIdleLockExtended(window, true);
+    setIdleLockExtended(window, false);
+    expect(vi.getTimerCount() - beforePreference).toBe(storageOverhead);
+    panel.teardown();
+  });
+
+  it("real user activity restarts the full extended period", async () => {
+    setIdleLockExtended(window, true);
+    const { panel, chatHost } = await unlockedChat();
+    await vi.advanceTimersByTimeAsync(50_000);
+    document.dispatchEvent(new Event("pointermove", { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(IDLE_LOCK_EXTENDED_MS - 1);
+    expect(isFading(chatHost)).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(isFading(chatHost)).toBe(true);
+    panel.teardown();
+  });
+
+  it("a scroll event is still not activity when ticked — the original 60s window governs", async () => {
+    setIdleLockExtended(window, true);
+    const { panel, chatHost } = await unlockedChat();
+    await vi.advanceTimersByTimeAsync(50_000);
+    chatHost.dispatchEvent(new Event("scroll", { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(isFading(chatHost)).toBe(true);
+    panel.teardown();
+  });
+
+  it("a suspension pauses the extended timer, then restarts a FRESH full 60s on release", async () => {
+    setIdleLockExtended(window, true);
+    const chatFactory = trackedChatViewFactory();
+    const { panel, chatHost } = await unlockedChat({ createServerChatView: chatFactory.createServerChatView });
+    const hooks = chatFactory.hooks;
+    if (hooks === null) throw new Error("hooks not captured");
+
+    const release = hooks.suspend("recording");
+    await vi.advanceTimersByTimeAsync(IDLE_LOCK_EXTENDED_MS * 3); // must not fire while suspended
+    expect(isFading(chatHost)).toBe(false);
+
+    release();
+    await vi.advanceTimersByTimeAsync(IDLE_LOCK_EXTENDED_MS - 1); // not "whatever was left"
+    expect(isFading(chatHost)).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(isFading(chatHost)).toBe(true);
+    panel.teardown();
+  });
+
+  it("a suspension ending after a mid-suspension tick restarts the NEW duration; the tick itself starts nothing", async () => {
+    const chatFactory = trackedChatViewFactory();
+    const { panel, chatHost } = await unlockedChat({ createServerChatView: chatFactory.createServerChatView });
+    const hooks = chatFactory.hooks;
+    if (hooks === null) throw new Error("hooks not captured");
+
+    const release = hooks.suspend("mediaPlaying");
+    await vi.advanceTimersByTimeAsync(20_000);
+    setIdleLockExtended(window, true); // while suspended — must NOT start a timer
+    await vi.advanceTimersByTimeAsync(IDLE_LOCK_EXTENDED_MS * 2);
+    expect(isFading(chatHost)).toBe(false);
+
+    release();
+    await vi.advanceTimersByTimeAsync(IDLE_LOCK_EXTENDED_MS - 1);
+    expect(isFading(chatHost)).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(isFading(chatHost)).toBe(true);
+    panel.teardown();
+  });
+
+  it("the decoy's 'Open server settings' re-hide stays 10s even when the box is ticked", async () => {
+    setIdleLockExtended(window, true);
+    const panel = mount();
+    const affordance = panel.element.querySelector(".wx-srv-affordance") as HTMLElement;
+    openAffordance(panel.element);
+    expect(affordance.hidden).toBe(false);
+    await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS - 1);
+    expect(affordance.hidden).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(affordance.hidden).toBe(true);
+    panel.teardown();
+  });
+
+  it("the PIN pad's idle close stays 10s even when the box is ticked", async () => {
+    setIdleLockExtended(window, true);
+    const panel = mount();
+    await openPinPad(panel.element);
+    const pinPadHost = panel.element.querySelector(".wx-srv-pinpad-host") as HTMLElement;
+    expect(pinPadHost.hidden).toBe(false);
+    await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS - 1);
+    expect(pinPadHost.hidden).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(pinPadHost.hidden).toBe(true);
+    panel.teardown();
+  });
+
+  it("ticking while only the affordance/pin pad is up does not stretch their 10s", async () => {
+    const panel = mount();
+    const affordance = panel.element.querySelector(".wx-srv-affordance") as HTMLElement;
+    openAffordance(panel.element);
+    await vi.advanceTimersByTimeAsync(4_000);
+    setIdleLockExtended(window, true);
+    await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS - 4_000);
+    expect(affordance.hidden).toBe(true);
+    panel.teardown();
+  });
+
+  it("every other lock cause is unchanged when ticked: panic locks instantly, Escape locks instantly", async () => {
+    setIdleLockExtended(window, true);
+    const chatFactory = trackedChatViewFactory();
+    const { panel } = await unlockedChat({ createServerChatView: chatFactory.createServerChatView });
+    chatFactory.hooks?.lockNow("panic");
+    expect(panel.element.querySelector(".wx-srv-thread")).toBeNull();
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({ token: "tok2", expiresAt: expiresIn(3600) }));
+    await openPinPad(panel.element);
+    await enterAndSubmitPin(panel.element, "1234");
+    expect(panel.element.querySelector(".wx-srv-thread")).not.toBeNull();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(panel.element.querySelector(".wx-srv-thread")).toBeNull();
+    panel.teardown();
+  });
+
+  it("the preference is read afresh on every unlock — a tick made while locked applies to the next unlock", async () => {
+    const chatFactory = trackedChatViewFactory();
+    const { panel, chatHost } = await unlockedChat({ createServerChatView: chatFactory.createServerChatView });
+    chatFactory.hooks?.lockNow("panic");
+
+    setIdleLockExtended(window, true);
+    fetchMock.mockResolvedValueOnce(jsonResponse({ token: "tok2", expiresAt: expiresIn(3600) }));
+    await openPinPad(panel.element);
+    await enterAndSubmitPin(panel.element, "1234");
+    await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS * 3);
+    expect(isFading(chatHost)).toBe(false);
+    await vi.advanceTimersByTimeAsync(IDLE_LOCK_EXTENDED_MS - IDLE_LOCK_MS * 3);
+    expect(isFading(chatHost)).toBe(true);
+    panel.teardown();
+  });
+
+  it("another tab's change (a storage event for the key) applies at once, from the last activity", async () => {
+    const { panel, chatHost } = await unlockedChat();
+    await vi.advanceTimersByTimeAsync(5_000);
+    window.localStorage.setItem(IDLE_EXTENDED_KEY, "1");
+    window.dispatchEvent(new StorageEvent("storage", { key: IDLE_EXTENDED_KEY, newValue: "1" }));
+    await vi.advanceTimersByTimeAsync(IDLE_LOCK_EXTENDED_MS - 5_000 - 1);
+    expect(isFading(chatHost)).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(isFading(chatHost)).toBe(true);
+    panel.teardown();
+  });
+
+  it("teardown detaches the preference listeners (no leak after routing away)", async () => {
+    const removeSpy = vi.spyOn(window, "removeEventListener");
+    const panel = mount();
+    panel.teardown();
+    const removed = removeSpy.mock.calls.map(([type]) => type);
+    expect(removed).toContain("wx-srv-idle-preference-changed");
+    expect(removed).toContain("storage");
+    removeSpy.mockRestore();
   });
 
   // -- R7 suspension accounting (fake clock) -------------------------------------
