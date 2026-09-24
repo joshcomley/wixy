@@ -21,6 +21,7 @@ import type { ServerStreamEvent } from "./stream";
 import type { LockHooks, ServerSession } from "./types";
 
 const HISTORY_PAGE_SIZE = 50;
+const MIN_VOICE_DURATION_MS = 1_000;
 /** A pending echo unmatched by a real message this long is dropped rather
  * than kept forever — mirrors the AI chat's own ECHO_EXPIRY_MS. */
 const ECHO_EXPIRY_MS = 30_000;
@@ -211,6 +212,11 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       hooks,
       onTimer: (elapsedMs) => updateRecorderUi(elapsedMs),
       onStop: (recording) => {
+        if (recording.durationMs < MIN_VOICE_DURATION_MS) {
+          composer.setError("Too short. Record for at least one second.");
+          updateRecorderUi();
+          return;
+        }
         // MediaRecorder may add codec parameters (for example
         // `audio/webm;codecs=opus`), while §5.5's declared-MIME allowlist is
         // the container type (`audio/webm`). The bytes are still sniffed and
@@ -239,6 +245,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     if (currentSession === null) return;
     const recorder = activeRecorder();
     if (recorder.state === "idle") {
+      composer.setError(null);
       const started = recorder.start();
       updateRecorderUi();
       void started.finally(() => updateRecorderUi());

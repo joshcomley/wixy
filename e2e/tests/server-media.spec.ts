@@ -64,7 +64,9 @@ async function waitForUploads(page: Page, expectedCount: number): Promise<void> 
 
 async function waitForRenderedAttachments(page: Page, selector: string, expectedCount: number): Promise<void> {
   const attachments = page.locator(selector);
-  for (let attempt = 0; attempt < 60; attempt += 1) {
+  // The fixture's real FFmpeg queue runs asynchronously and can take longer
+  // when the media specs follow the full chat/lock matrix on a busy host.
+  for (let attempt = 0; attempt < 120; attempt += 1) {
     if (await attachments.count() === expectedCount) return;
     await page.mouse.move(24 + attempt, 24 + attempt);
     await page.waitForTimeout(250);
@@ -161,5 +163,21 @@ test.describe("server-media.spec.ts (P6b)", () => {
     await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
     await voice.getByRole("button", { name: "Play voice note" }).click();
     await expect.poll(() => audio.evaluate((node) => (node as HTMLAudioElement).currentTime)).toBeGreaterThan(0);
+  });
+
+  test("voice recordings shorter than one second are discarded", async ({ page }) => {
+    const uploadRequests: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/admin/server/uploads")) uploadRequests.push(request.url());
+    });
+    await unlockServer(page, "Quick tester");
+    await page.getByRole("button", { name: "Record a voice note" }).click();
+    await expect(page.getByRole("button", { name: "Stop recording" })).toBeVisible();
+    await page.waitForTimeout(650); // >400 ms tap window, but below the 1s minimum.
+    await page.getByRole("button", { name: "Stop recording" }).click();
+
+    await expect(page.locator(".wx-chat-composer-error")).toContainText("Too short");
+    await expect(page.locator(".wx-chat-attachment-chip")).toHaveCount(0);
+    expect(uploadRequests).toEqual([]);
   });
 });
