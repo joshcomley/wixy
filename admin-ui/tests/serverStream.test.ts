@@ -48,6 +48,7 @@ function fakeMessage(overrides: Partial<Message> = {}): Message {
     sender: "Josh",
     text: "hi",
     attachments: [],
+    reactions: [],
     createdAt: 1_700_000_000,
     ...overrides,
   };

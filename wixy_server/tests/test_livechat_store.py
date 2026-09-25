@@ -6,13 +6,26 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
 import pytest
 
-from wixy_server.livechat.models import AttachmentResult, PushSubscriptionRow, UploadRow
-from wixy_server.livechat.store import LiveChatStore, UnusableAttachmentError
+from wixy_server.livechat.models import (
+    AttachmentResult,
+    MessageRow,
+    PushSubscriptionRow,
+    ReactionSummary,
+    UploadRow,
+)
+from wixy_server.livechat.reactions import REACTION_EMOJIS
+from wixy_server.livechat.store import (
+    _LATEST_SCHEMA_VERSION,
+    LiveChatStore,
+    MessageNotFoundError,
+    UnusableAttachmentError,
+)
 
 # A scrub the test expects to SUCCEED gets a generous deadline: success returns as soon as the WAL
 # is truncated, so the number is only ever spent by a machine stall (decision 00159). Tests that
@@ -41,7 +54,7 @@ class TestMigrations:
         store.list_messages(before=None, limit=1)
         conn = sqlite3.connect(str(db_path))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == _LATEST_SCHEMA_VERSION
         finally:
             conn.close()
 
@@ -123,7 +136,7 @@ class TestMigrations:
         upgraded.list_messages(before=None, limit=1)
         conn = sqlite3.connect(str(db_path))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == _LATEST_SCHEMA_VERSION
             index = conn.execute(
                 "SELECT sql FROM sqlite_master "
                 "WHERE type = 'index' AND name = 'idx_deleted_storage_pending'"
@@ -160,7 +173,7 @@ class TestMigrations:
         conn.close()
         conn = sqlite3.connect(str(db_path))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == _LATEST_SCHEMA_VERSION
             columns = {row[1]: row for row in conn.execute("PRAGMA table_info(deleted_storage)")}
             assert columns["generation"][3] == 1
             assert (
@@ -215,7 +228,7 @@ class TestMigrations:
                 conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'events'").fetchone()[0]
                 == 13
             )
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == _LATEST_SCHEMA_VERSION
         finally:
             conn.close()
 
@@ -487,11 +500,338 @@ class TestListMessagesAndEvents:
         assert [m.seq for m in result] == [3, 1]
 
 
+THUMBS_UP = REACTION_EMOJIS[0]
+HEART = REACTION_EMOJIS[1]
+PRAY = REACTION_EMOJIS[5]
+
+
+def _plain_message(store: LiveChatStore, n: int = 1, *, now: float = 1.0) -> int:
+    message, _ = store.create_message(
+        client_id=f"client-react-{n:04d}",
+        sender="Josh",
+        device_id="device-react-1",
+        by_email=None,
+        text=f"message {n}",
+        attachment_ids=(),
+        now=now,
+    )
+    return message.seq
+
+
+def _react(
+    store: LiveChatStore,
+    seq: int,
+    *,
+    sender: str = "Purdy",
+    emoji: str = THUMBS_UP,
+    reacted: bool = True,
+    now: float = 2.0,
+    by_email: str | None = "purdy@example.com",
+) -> tuple[MessageRow, bool]:
+    return store.set_reaction(
+        seq=seq, sender=sender, by_email=by_email, emoji=emoji, reacted=reacted, now=now
+    )
+
+
+class TestReactions:
+    def test_react_adds_the_reaction_and_appends_one_message_updated_event(
+        self, store: LiveChatStore
+    ) -> None:
+        seq = _plain_message(store)
+        message, changed = _react(store, seq)
+        assert changed is True
+        assert message.reactions == (ReactionSummary(emoji=THUMBS_UP, senders=("Purdy",)),)
+        assert [(e.type, e.message_seq) for e in store.events_after(0)] == [
+            ("message", seq),
+            ("message_updated", seq),
+        ]
+
+    def test_a_repeated_react_is_a_no_op_that_writes_no_event(self, store: LiveChatStore) -> None:
+        seq = _plain_message(store)
+        _react(store, seq)
+        events = store.events_after(0)
+        message, changed = _react(store, seq, now=3.0)
+        assert changed is False
+        assert message.reactions == (ReactionSummary(emoji=THUMBS_UP, senders=("Purdy",)),)
+        assert store.events_after(0) == events
+
+    def test_unreact_removes_it_and_appends_an_event(self, store: LiveChatStore) -> None:
+        seq = _plain_message(store)
+        _react(store, seq)
+        message, changed = _react(store, seq, reacted=False, now=3.0)
+        assert changed is True
+        assert message.reactions == ()
+        assert [e.type for e in store.events_after(0)] == [
+            "message",
+            "message_updated",
+            "message_updated",
+        ]
+
+    def test_unreact_when_absent_is_a_no_op_that_writes_no_event(
+        self, store: LiveChatStore
+    ) -> None:
+        seq = _plain_message(store)
+        events = store.events_after(0)
+        message, changed = _react(store, seq, reacted=False)
+        assert changed is False
+        assert message.reactions == ()
+        assert store.events_after(0) == events
+
+    def test_identity_is_the_trimmed_case_insensitive_sender_name(
+        self, store: LiveChatStore
+    ) -> None:
+        seq = _plain_message(store)
+        _react(store, seq, sender="Purdy")
+        message, changed = _react(store, seq, sender="  PURDY ")
+        assert changed is False
+        assert message.reactions == (ReactionSummary(emoji=THUMBS_UP, senders=("Purdy",)),)
+        message, changed = _react(store, seq, sender="pUrDy", reacted=False)
+        assert changed is True
+        assert message.reactions == ()
+
+    def test_identity_folds_non_ascii_case_too(self, store: LiveChatStore) -> None:
+        # SQLite's NOCASE would treat these as two people; push self-exclusion (casefold)
+        # treats them as one, and so must reactions.
+        seq = _plain_message(store)
+        _react(store, seq, sender="Émilie")
+        message, changed = _react(store, seq, sender="éMILIE")
+        assert changed is False
+        assert message.reactions == (ReactionSummary(emoji=THUMBS_UP, senders=("Émilie",)),)
+
+    def test_reactions_group_by_emoji_in_allowlist_order_oldest_reactor_first(
+        self, store: LiveChatStore
+    ) -> None:
+        seq = _plain_message(store)
+        _react(store, seq, sender="Alice", emoji=PRAY, now=2.0)
+        _react(store, seq, sender="Bob", emoji=THUMBS_UP, now=3.0)
+        message, _ = _react(store, seq, sender="Alice", emoji=THUMBS_UP, now=4.0)
+        assert message.reactions == (
+            ReactionSummary(emoji=THUMBS_UP, senders=("Bob", "Alice")),
+            ReactionSummary(emoji=PRAY, senders=("Alice",)),
+        )
+
+    def test_one_person_can_hold_several_emoji_on_one_message(self, store: LiveChatStore) -> None:
+        seq = _plain_message(store)
+        _react(store, seq, emoji=THUMBS_UP)
+        message, changed = _react(store, seq, emoji=HEART)
+        assert changed is True
+        assert [r.emoji for r in message.reactions] == [THUMBS_UP, HEART]
+
+    def test_history_and_get_messages_carry_reactions(self, store: LiveChatStore) -> None:
+        first = _plain_message(store, 1)
+        second = _plain_message(store, 2, now=1.5)
+        _react(store, second, emoji=HEART)
+        messages, _has_more, _cursor = store.list_messages(before=None, limit=10)
+        assert [m.reactions for m in messages] == [
+            (),
+            (ReactionSummary(emoji=HEART, senders=("Purdy",)),),
+        ]
+        by_seq = {m.seq: m for m in store.get_messages([first, second])}
+        assert by_seq[first].reactions == ()
+        assert by_seq[second].reactions == (ReactionSummary(emoji=HEART, senders=("Purdy",)),)
+
+    def test_by_email_is_kept_for_audit_but_is_not_part_of_the_summary(
+        self, store: LiveChatStore, db_path: Path
+    ) -> None:
+        seq = _plain_message(store)
+        message, _ = _react(store, seq, by_email="purdy@example.com")
+        assert not hasattr(message.reactions[0], "by_email")
+        conn = sqlite3.connect(str(db_path))
+        try:
+            row = conn.execute("SELECT sender, sender_key, by_email FROM reactions").fetchone()
+        finally:
+            conn.close()
+        assert tuple(row) == ("Purdy", "purdy", "purdy@example.com")
+
+    def test_reacting_to_an_unknown_message_is_not_found_and_writes_nothing(
+        self, store: LiveChatStore
+    ) -> None:
+        with pytest.raises(MessageNotFoundError):
+            _react(store, 999)
+        with pytest.raises(MessageNotFoundError):
+            _react(store, 999, reacted=False)
+        assert store.events_after(0) == []
+
+    def test_reacting_to_a_deleted_message_is_not_found(self, store: LiveChatStore) -> None:
+        seq = _plain_message(store)
+        store.delete_message(seq=seq, now=3.0)
+        with pytest.raises(MessageNotFoundError):
+            _react(store, seq)
+        assert [e.type for e in store.events_after(0)] == ["message_deleted"]
+
+    def test_a_foreign_key_failure_inside_the_write_is_not_found_never_a_crash(
+        self, store: LiveChatStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seq = _plain_message(store)
+        real_connect = sqlite3.connect
+
+        class _FailingConnection(sqlite3.Connection):
+            def execute(self, sql: str, *args: object) -> sqlite3.Cursor:
+                if sql.lstrip().startswith("INSERT OR IGNORE INTO reactions"):
+                    raise sqlite3.IntegrityError("FOREIGN KEY constraint failed")
+                return super().execute(sql, *args)  # type: ignore[arg-type]
+
+        def connect(database: str, timeout: float, isolation_level: None) -> sqlite3.Connection:
+            # The store opens every connection as connect(path, timeout=…, isolation_level=None).
+            return real_connect(
+                database,
+                timeout=timeout,
+                isolation_level=isolation_level,
+                factory=_FailingConnection,
+            )
+
+        monkeypatch.setattr(sqlite3, "connect", connect)
+        with pytest.raises(MessageNotFoundError):
+            _react(store, seq)
+        monkeypatch.undo()
+        assert [e.type for e in store.events_after(0)] == ["message"]
+
+    def test_the_table_itself_refuses_a_reaction_for_a_missing_message(
+        self, store: LiveChatStore, db_path: Path
+    ) -> None:
+        store.list_messages(before=None, limit=1)
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.execute("PRAGMA foreign_keys = ON")
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO reactions "
+                    "(message_seq, sender_key, sender, emoji, by_email, created_at) "
+                    "VALUES (404, 'a', 'A', ?, NULL, 1.0)",
+                    (THUMBS_UP,),
+                )
+        finally:
+            conn.close()
+
+    def test_concurrent_identical_reacts_change_state_exactly_once(self, db_path: Path) -> None:
+        # Two store instances on one file = the blue/green overlap shape.
+        stores = [LiveChatStore(db_path) for _ in range(2)]
+        seq = _plain_message(stores[0])
+        outcomes: list[bool] = []
+
+        def worker(index: int) -> None:
+            for _ in range(5):
+                outcomes.append(_react(stores[index % 2], seq)[1])
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        assert outcomes.count(True) == 1
+        assert [e.type for e in stores[0].events_after(0)] == ["message", "message_updated"]
+
+    def test_concurrent_reactions_from_different_people_all_land(self, db_path: Path) -> None:
+        stores = [LiveChatStore(db_path) for _ in range(2)]
+        seq = _plain_message(stores[0])
+        names = [f"Person{i}" for i in range(8)]
+
+        def worker(index: int) -> None:
+            _react(stores[index % 2], seq, sender=names[index])
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        (message,) = stores[0].get_messages([seq])
+        assert sorted(message.reactions[0].senders) == sorted(names)
+        assert [e.type for e in stores[0].events_after(0)].count("message_updated") == 8
+
+    def test_a_v6_database_gets_the_reactions_table_and_keeps_its_messages(
+        self, db_path: Path
+    ) -> None:
+        store = LiveChatStore(db_path)
+        seq = _plain_message(store)
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.execute("DROP TABLE reactions")
+            conn.execute("PRAGMA user_version = 6")
+            conn.commit()
+        finally:
+            conn.close()
+
+        upgraded = LiveChatStore(db_path)
+        message, changed = _react(upgraded, seq)
+        assert changed is True
+        assert message.text == "message 1"
+        conn = sqlite3.connect(str(db_path))
+        try:
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == _LATEST_SCHEMA_VERSION
+        finally:
+            conn.close()
+
+
 class TestDeleteAndWipe:
     @staticmethod
     def _raw_database_bytes(db_path: Path) -> bytes:
         wal_path = Path(f"{db_path}-wal")
         return db_path.read_bytes() + (wal_path.read_bytes() if wal_path.exists() else b"")
+
+    def test_delete_removes_the_messages_reactions_including_their_bytes(
+        self, store: LiveChatStore, db_path: Path
+    ) -> None:
+        keep = _plain_message(store, 1)
+        seq = _plain_message(store, 2, now=1.5)
+        _react(store, seq, sender="Reactor-Marker-8c31f0e2", emoji=PRAY)
+        _react(store, keep, sender="Bystander", emoji=HEART)
+        raw = self._raw_database_bytes(db_path)
+        # Control: the search can find what it is looking for.
+        assert b"Reactor-Marker-8c31f0e2" in raw
+        assert PRAY.encode("utf-8") in raw
+
+        second_connection = sqlite3.connect(str(db_path), isolation_level=None)
+        second_connection.execute("SELECT 1")
+        try:
+            store.delete_message(seq=seq, now=4.0)
+            assert store.scrub(deadline_s=_SCRUB_SUCCESS_DEADLINE_S)
+            raw = self._raw_database_bytes(db_path)
+            assert b"Reactor-Marker-8c31f0e2" not in raw
+            assert b"reactor-marker-8c31f0e2" not in raw
+            assert PRAY.encode("utf-8") not in raw
+            (kept,) = store.get_messages([keep])
+            assert kept.reactions == (ReactionSummary(emoji=HEART, senders=("Bystander",)),)
+        finally:
+            second_connection.close()
+
+    def test_wipe_removes_every_reaction_including_their_bytes(
+        self, store: LiveChatStore, db_path: Path
+    ) -> None:
+        seq = _plain_message(store)
+        _react(store, seq, sender="Reactor-Marker-5b0d9a77", emoji=PRAY)
+        assert b"Reactor-Marker-5b0d9a77" in self._raw_database_bytes(db_path)
+
+        second_connection = sqlite3.connect(str(db_path), isolation_level=None)
+        second_connection.execute("SELECT 1")
+        try:
+            store.wipe(now=4.0)
+            assert store.scrub(deadline_s=_SCRUB_SUCCESS_DEADLINE_S)
+            raw = self._raw_database_bytes(db_path)
+            assert b"Reactor-Marker-5b0d9a77" not in raw
+            assert b"reactor-marker-5b0d9a77" not in raw
+            assert PRAY.encode("utf-8") not in raw
+            conn = sqlite3.connect(str(db_path))
+            try:
+                assert conn.execute("SELECT COUNT(*) FROM reactions").fetchone()[0] == 0
+            finally:
+                conn.close()
+        finally:
+            second_connection.close()
+
+    def test_an_older_process_that_never_heard_of_reactions_can_still_delete_a_message(
+        self, store: LiveChatStore, db_path: Path
+    ) -> None:
+        # Blue/green overlap: the old slot's delete is a plain DELETE FROM messages on a
+        # connection with foreign_keys=ON. The cascade must carry the reactions away.
+        seq = _plain_message(store)
+        _react(store, seq)
+        conn = sqlite3.connect(str(db_path), isolation_level=None)
+        try:
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("DELETE FROM messages WHERE seq = ?", (seq,))
+            assert conn.execute("SELECT COUNT(*) FROM reactions").fetchone()[0] == 0
+        finally:
+            conn.close()
 
     def test_delete_removes_message_attachments_and_old_events_and_is_idempotent(
         self, store: LiveChatStore, db_path: Path

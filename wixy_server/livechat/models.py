@@ -57,6 +57,15 @@ class AttachmentRow:
 
 
 @dataclass(frozen=True, slots=True)
+class ReactionSummary:
+    """One emoji on one message: who reacted, oldest first. `by_email` is deliberately
+    absent — it is an audit column and never leaves the store."""
+
+    emoji: str
+    senders: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class MessageRow:
     seq: int
     client_id: str
@@ -66,6 +75,7 @@ class MessageRow:
     text: str | None
     created_at: float
     attachments: tuple[AttachmentRow, ...] = ()
+    reactions: tuple[ReactionSummary, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,5 +154,9 @@ def message_json(row: MessageRow, signer: MediaUrlSigner) -> JsonObject:
         "sender": row.sender,
         "text": row.text,
         "attachments": [attachment_json(a, signer) for a in row.attachments],
+        "reactions": [
+            {"emoji": r.emoji, "count": len(r.senders), "senders": list(r.senders)}
+            for r in row.reactions
+        ],
         "createdAt": row.created_at,
     }
