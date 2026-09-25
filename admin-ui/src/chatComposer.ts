@@ -96,6 +96,20 @@ export interface ChatComposerOptions {
    * release is called on either `change` or `cancel`; server chat uses this
    * to pause its idle lock while the picker is open. */
   onFilePickerOpen?: (() => () => void) | undefined;
+  /** Sending never touches the input. `setBusy` then only arms the submit guard (it does not
+   * disable the textarea or the Send button), and pressing Send does not take focus from the
+   * input, so the caret - and on a phone the soft keyboard - never leaves. The caller pairs it
+   * with `takeDraft()` (clear the box at once) and `restoreDraft()` (put the draft back if the
+   * send fails). The AI chat omits this and keeps its disabled-while-busy input. */
+  keepInputLive?: boolean | undefined;
+}
+
+/** What `takeDraft()` lifted out of the composer: the caller owns it until it calls either
+ * `restoreDraft()` (the send failed) or `discardDraft()` (the send is done). */
+export interface ComposerDraft {
+  readonly text: string;
+  readonly attachmentIds: readonly string[];
+  readonly staged: readonly StagedAttachment[];
 }
 
 export interface ChatComposer {
@@ -117,6 +131,15 @@ export interface ChatComposer {
   /** Clears text + staged attachments after a successful submit and revokes
    * every preview URL. */
   reset(): void;
+  /** Lifts the text and staged attachments out and clears the composer at once (no busy
+   * state, no focus change), for the `keepInputLive` send flow. Preview URLs stay valid: the
+   * draft owns them until `restoreDraft()` or `discardDraft()`. */
+  takeDraft(): ComposerDraft;
+  /** Puts a draft back after a failed send. Text the user has typed since is kept, after the
+   * restored text; staged attachments go back in front of any newly staged ones. */
+  restoreDraft(draft: ComposerDraft): void;
+  /** Releases a draft whose message went through: revokes its preview URLs. */
+  discardDraft(draft: ComposerDraft): void;
   setError(message: string | null): void;
   focus(): void;
   teardown(): void;
@@ -271,8 +294,12 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
     return staged.some((a) => a.uploading);
   }
 
+  const keepInputLive = options.keepInputLive === true;
+
   function refreshSubmitState(): void {
-    submitButton.disabled = busy || anyUploading();
+    // keepInputLive: an in-flight send is guarded in `trySubmit`, never by disabling the button
+    // (a disabled control flashes, and drops focus if it happened to be focused).
+    submitButton.disabled = (keepInputLive ? false : busy) || anyUploading();
   }
 
   function defaultChipPreview(previewUrl: string): HTMLElement {
@@ -402,6 +429,12 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
   }
 
   submitButton.addEventListener("click", trySubmit);
+  if (keepInputLive) {
+    // Pressing a button moves focus to it by default, which blurs the input (and closes a
+    // phone's soft keyboard). Cancelling the mousedown keeps focus where it is; the click
+    // still fires. Touch taps reach here too, as the browser's compatibility mousedown.
+    submitButton.addEventListener("mousedown", (evt) => evt.preventDefault());
+  }
   textarea.addEventListener("keydown", (evt) => {
     if (evt.key === "Enter" && !evt.shiftKey) {
       evt.preventDefault();
@@ -440,7 +473,7 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
     },
     setBusy(nextBusy) {
       busy = nextBusy;
-      textarea.disabled = nextBusy;
+      if (!keepInputLive) textarea.disabled = nextBusy;
       refreshSubmitState();
     },
     reset() {
@@ -450,6 +483,33 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
       staged = [];
       renderChips();
       setError(null);
+    },
+    takeDraft() {
+      const draft: ComposerDraft = {
+        text: textarea.value.trim(),
+        attachmentIds: staged.map((a) => a.attachmentId).filter((id): id is string => id !== null),
+        staged,
+      };
+      textarea.value = "";
+      autogrow();
+      staged = [];
+      renderChips();
+      setError(null);
+      return draft;
+    },
+    restoreDraft(draft) {
+      const typedSince = textarea.value;
+      if (draft.text !== "") {
+        textarea.value = typedSince === "" ? draft.text : `${draft.text}
+${typedSince}`;
+      }
+      autogrow();
+      staged = [...draft.staged, ...staged];
+      renderChips();
+      refreshSubmitState();
+    },
+    discardDraft(draft) {
+      for (const attachment of draft.staged) URL.revokeObjectURL(attachment.previewUrl);
     },
     setError,
     focus() {

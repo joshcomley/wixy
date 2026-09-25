@@ -94,19 +94,25 @@ during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/
   fixture's `showcase.items` (whose item count several other specs assert exactly). Server chat
   coverage is `server-chat.spec.ts` (conversation, delete/wipe, and cross-client behavior),
   `server-media.spec.ts` (chunked photo/video/voice upload and rendering), and
-  `server-lock.spec.ts` (disguise, lock causes, and gestures), and `server-transcription.spec.ts`
-  (opt-in transcription at desktop and a 402px phone: nothing sent while cmd is not private, a
-  playing note survives its transcript, a failure and Retry, two devices agreeing, phone layout).
-  The fixture drives the fake cmd through `/test/server/transcribe-config` (private on/off, text,
-  status, `hold` to park requests, `reset` — which also gives every test a fresh rate limiter),
-  `/test/server/transcribe-stats`, `/test/server/seed-voice` (a ready note with real ffmpeg
-  audio) and `/test/server/delete-message` (the spec removes every note it seeds: the fixture runs ONE
-  chat for the whole suite and `server-media.spec.ts` asserts exactly one `.wx-srv-voice`).
+  `server-lock.spec.ts` (disguise, lock causes, and gestures), `server-tap-precision.spec.ts`
+  (R3 v1.7, mobile 390×844 with `hasTouch`: a scroll-shaped touch sequence never locks, a
+  genuine same-spot double-tap on a bubble still does — decisions/00163), and
+  `server-transcription.spec.ts` (opt-in transcription at desktop and a 402px phone: nothing sent
+  while cmd is not private, a playing note survives its transcript, a failure and Retry, two
+  devices agreeing, phone layout). The fixture drives the fake cmd through
+  `/test/server/transcribe-config` (private on/off, text, status, `hold` to park requests,
+  `reset` — which also gives every test a fresh rate limiter), `/test/server/transcribe-stats`,
+  `/test/server/seed-voice` (a ready note with real ffmpeg audio) and
+  `/test/server/delete-message` (the spec removes every note it seeds: the fixture runs ONE chat
+  for the whole suite and `server-media.spec.ts` asserts exactly one `.wx-srv-voice`).
 
 Server-chat unit coverage also lives in `admin-ui/tests/server/{gestures,lockModel,panel,http,unlock}.test.ts`.
 The lock browser spec uses Playwright `page.clock` to control the 400 ms multi-tap window,
-idle timeout, and suspensions. Media e2e uses fake microphone devices; voice readiness is
-polled from the rendered DOM rather than controlled by `page.clock`.
+idle timeout, and suspensions. `server-tap-precision.spec.ts` instead dispatches real
+`PointerEvent`s in the actual browser to exercise `MULTI_TAP_RADIUS_PX`/tap-zone matching end
+to end, since jsdom never lays anything out and can't stand in for "did the finger move". Media
+e2e uses fake microphone devices; voice readiness is polled from the rendered DOM rather than
+controlled by `page.clock`.
 CI installs the real `ffmpeg` binary in both the Python and e2e jobs: media-processing tests
 exercise actual voice/video conversion, and the e2e fixture needs it for uploaded media.
 Pillow is a core dependency; `pillow-heif` is installed by the server extra.

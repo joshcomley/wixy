@@ -34,6 +34,24 @@ export const MULTI_TAP_INTERVAL_MS = 400;
  * event instead. */
 export const MULTI_TAP_COUNT = 2;
 
+/** R3 v1.7 (operator report, round 2: two unrelated taps — a scroll flick, or two different
+ * menu items tapped quickly — were locking the chat). Each LATER tap in a multi-tap run must
+ * land within this many CSS px of the run's FIRST tap — about 5mm on a phone, comfortably
+ * covering finger wobble on a genuine same-spot double-tap while rejecting a tap a finger-width
+ * away. Anchored to the first tap (never "the previous tap"), so a run cannot walk across the
+ * screen. */
+export const MULTI_TAP_RADIUS_PX = 32;
+
+/** R3 v1.7: how far a pointer may move between its `pointerdown` and `pointerup` and still count
+ * as one TAP (not a drag or a scroll's initial flick). Matches `messageActions.ts`'s own
+ * `LONG_PRESS_MOVE_PX` — the same slop this codebase already uses for "did the finger move". */
+export const TAP_SLOP_PX = 10;
+
+/** R3 v1.7: how long a `pointerdown`→`pointerup` pair may span and still count as one TAP.
+ * Comfortably below `messageActions.ts`'s `LONG_PRESS_MS` (500ms, opens the action sheet), so a
+ * long-press is never also read as a tap. */
+export const TAP_MAX_MS = 300;
+
 /** R7: the file-picker suspension's safety cap — a picker left open (dialog
  * abandoned, app backgrounded) can't suspend the idle timer forever. */
 export const PICKER_SUSPEND_MAX_MS = 300_000;
