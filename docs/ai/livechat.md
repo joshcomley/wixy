@@ -6,7 +6,7 @@ storage, routes, and second auth gate, entirely separate from `chats.py`/`cmdcha
 `draft/media/`. Full decided design: [`spec/server-chat/00-brief.md`](../../spec/server-chat/00-brief.md).
 This manual describes the current implementation; where intent and code differ, follow the
 code and record the difference in `decisions/`.
-Numbered guarantees: [invariants.md](invariants.md) 40–47.
+Numbered guarantees: [invariants.md](invariants.md) 40–48.
 
 ## 1. The disguise (why it looks like nothing is here)
 
@@ -149,7 +149,14 @@ adds a per-tombstone generation so a late requeue cannot be cleared by an older 
 an age index for completed rows. The hourly janitor prunes completed tombstones after seven days;
 pending tombstones are never pruned. Schema v6 adds singleton `pending_scrub`, written in the same
 transaction as delete/wipe. Startup imports a legacy `scrub.pending` file into this row before
-trying to remove it; an access failure retains durable scrub work and the file for retry.
+trying to remove it; an access failure retains durable scrub work and the file for retry. Schema
+v7 adds `messages.reply_to_seq` (nullable, self-referencing, `REFERENCES messages(seq) ON DELETE
+SET NULL`) for reply-to-a-message (round 2 ruling item 10, Inv 48), plus the partial index
+`idx_messages_reply_to` — required, not tuning: `wipe()`'s bulk `DELETE FROM messages` searches
+this child column once per deleted row for the `SET NULL` action, and unindexed that measured
+17.6s vs 0.2s at 20,000 messages (one in three a reply). A reply persists only the target's seq;
+its quote (sender, a 300-code-point text snippet, and a media summary) is resolved at read time
+from the target's live row by `list_messages`/`get_messages`, one level only, and is never stored.
 Two transaction shapes:
 - `BEGIN IMMEDIATE` for writes needing a race-safe conditional check (an attachment's lease
   claim, `create_message`'s idempotent client-id insert) — serializes concurrent claimants
@@ -702,6 +709,54 @@ coverage is `e2e/tests/server-media.spec.ts` together with `server-chat.spec.ts`
 `server-lock.spec.ts`. The fixture server sets a 64 KiB chunk size so the photo case exercises
 multiple chunks. Voice coverage launches Chromium with fake media-device and permission
 flags and does not install the Playwright clock.
+
+### Reply to a message (round 2 ruling item 10, Inv 48)
+
+`server/replyTo.ts` is the one place both the composer's reply preview and every rendered quote
+build from: `replyToFromMessage(message)` mirrors the server's `reply_to_json` client-side (a
+required drift guard — both are asserted against the shared fixture
+`spec/server-chat/fixtures/reply-to-cases.json`, by `test_livechat_reply_to_driftguard.py` and
+`admin-ui/tests/server/replyTo.test.ts`), and `renderReplyQuoteContent` renders the shared inner
+quote block (accent bar, sender or "You", a 2-line-clamped snippet, and a 40px thumbnail or a text
+label) that every context wraps differently: a sent bubble wraps it in a `<button class="wx-srv-
+quote">` (tap-to-scroll, `data-srv-gesture-boundary`, an accessible name reading "Show the
+original message from <name>"); the composer's reply bar (`.wx-srv-reply-bar`, above the input
+row, hidden by default like the jump pill) and the optimistic echo wrap it in a plain, non-
+interactive `<div>`.
+
+`thread.ts` picks a target via the message action menu's "Reply" item (`messageActions.ts`, first
+above "Copy text" on every confirmed message); the target becomes part of the composer's own
+draft — a local `ServerComposerDraft` wraps `chatComposer.ts`'s frozen `takeDraft`/`restoreDraft`/
+`discardDraft` alongside the reply target, rather than widening that shared-with-the-AI-chat
+component's type, since only server chat uses its `keepInputLive` draft mechanism at all. A failed
+send restores the reply target with the text; a successful one discards it. A voice note captures
+the reply target the moment recording stops (the bar clears at once) and keeps it across retries
+(same `clientId`). Escape never cancels a reply (R3's panic lock is unrelated); only ✕, a send, the
+target's own deletion, and a wipe do. A lock (`detach()`) keeps the pending reply in memory exactly
+like the draft text, but does abort an in-flight scroll-to-original.
+
+Tapping a sent bubble's quote (`scrollToOriginal` in `thread.ts`) scrolls to the original, centres
+it, and highlights it for ~1.5s (`scrollIntoView`'s own `behavior` option is `"auto"` under
+`prefers-reduced-motion`, never a CSS `scroll-behavior` — that would also make `loadOlderPage`'s
+own precise `scrollTop` restoration animate, breaking its "never visually jump" guarantee). If the
+original isn't loaded yet, it pages backwards with the existing `before` cursor at its own larger
+page size (`SCROLL_TO_ORIGINAL_PAGE_SIZE`, 100 vs. the ordinary 50) via the same
+`loadOlderPage`, which returns one of `"loaded"|"blocked"|"exhausted"|"error"` rather than a bare
+boolean — `"blocked"` (another load, ordinary or a sibling scroll-to-original, holds the single
+history-load slot) is distinct from `"exhausted"` precisely so a second quote tapped mid-page
+retries instead of wrongly concluding its target was deleted. A `scrollToOriginalGeneration`
+counter aborts a stale run's continuation (never its underlying network call) on a lock, a wipe, or
+another tap; the quote shows busy (`.wx-srv-quote-busy`) meanwhile. Never found once paging
+exhausts (deleted in the meantime) removes the quote via the same path `message_deleted` uses.
+
+Client-side erasure (Inv 46/Inv 48): the server does not fan out `message_updated` for a reply on
+the target's delete, so `message_deleted{seq}` is the only signal — `removeQuotesTargeting(seq)`
+removes the `.wx-srv-quote` element IN PLACE from every loaded bubble and pending echo whose quote
+targets `seq`, and cancels the composer's pending reply if it targets `seq`, never re-rendering a
+whole bubble (the same voice/video cut-off trap Inv 46's own client mechanism avoids for delete).
+Quote freshness the other direction is a real `message_updated`, fanned out server-side by
+`finish_attachment` to every reply of the message whose attachment just finished — the client's
+existing per-message diffing patches just that bubble.
 
 ## 13. Delivery status
 

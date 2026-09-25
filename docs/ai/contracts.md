@@ -212,7 +212,7 @@ header.
 |---|---|---|---|---|
 | POST | `server/unlock` | `unlock` | `{"pin":str(4-16 ASCII digits)}` — first a CSRF guard (no token exists yet to gate this route): the request must be `Content-Type: application/json`, must carry `X-Wixy-Server-Unlock: 1`, and a `Sec-Fetch-Site` header that is present must be `same-origin`; each of those three headers must appear exactly once, and a duplicated line is refused rather than decided by whichever value comes first (`unlock_request_refusal` in `livechat/tokens.py`); a refusal happens before the body is read or cmd is contacted, charging nothing; then the route parses the raw JSON body itself — any other body or PIN (invalid/empty/non-UTF-8 JSON, a non-object, a missing or misspelled `pin`, a non-string or nested `pin`, a shorter/longer/non-digit PIN) is answered locally and wixy never calls cmd for it | 200 `{"token":str,"expiresAt":float}`; 415 `{"error":"unsupported_media_type"}` (body not JSON); 403 `{"error":"forbidden"}` (guard header missing, or `Sec-Fetch-Site` not `same-origin`); **422 `{"error":"invalid_pin"}`** (every rejected body/PIN shape above — one redacted body, the submitted value is never echoed or logged); 401 `{"error":"wrong_pin","attemptsLeft":int\|null}`; 429 `{"error":"locked_out","retryAfterS":int}` + `Retry-After` header; 409 `{"error":"pin_changed"}` (cmd's PIN rotated mid-check, nothing spent); 503 `{"error":"not_configured"}` (unknown app key, or no verifier on standalone) / `{"error":"pin_service_unavailable"}` (cmd unreachable/faulted) |
 | GET | `server/messages?before=&limit=` | `get_history` | query `before?:int`, `limit?:int(1-100,default 50)` | `{"messages":[<Message>], "hasMore":bool, "cursor":int}`, ascending by `seq`; 422 (`limit` out of range) |
-| POST | `server/messages` | `send_message` | `{"clientId":str(8-64),"sender":str(1-32,trimmed),"deviceId":str(8-64),"text":str\|null(≤4000),"attachmentIds":[hex32](0-10)}` | 201 `{"message":<Message>}` (200 + the SAME message on a replayed `clientId` — idempotent); 422 `{"error":"invalid","detail":str}` (empty text with no attachments, too long, bad sender, or an unknown/already-used/failed attachment id) |
+| POST | `server/messages` | `send_message` | `{"clientId":str(8-64),"sender":str(1-32,trimmed),"deviceId":str(8-64),"text":str\|null(≤4000),"attachmentIds":[hex32](0-10),"replyToSeq":int(≥1)?}` — `replyToSeq` optional, omitted for an ordinary message; a target that no longer exists (or never did) is silently dropped, sending as a plain message, never a 500 | 201 `{"message":<Message>}` (200 + the SAME message on a replayed `clientId` — idempotent); 422 `{"error":"invalid","detail":str}` (empty text with no attachments, too long, bad sender, an unknown/already-used/failed attachment id, or `replyToSeq` present and not an integer ≥1 — booleans rejected) |
 | DELETE | `server/messages/{seq}` | `delete_message` | — | 204 when DB scrub and media cleanup are complete; otherwise 202 `{"erasurePending":true}`; idempotent even when the message is already gone |
 | POST | `server/wipe` | `wipe_chat` | exactly `{"confirm":"WIPE"}` | 204 when DB scrub and media cleanup are complete; otherwise 202 `{"erasurePending":true}`; every other body, including extra keys, is 422 |
 | GET | `server/stream?after=` | `stream` | query `after?:int` (event cursor) | **SSE**, see §4 |
@@ -224,11 +224,24 @@ header.
 | GET | `server/media/{attId}/{rendition}?exp=&sig=` | `get_media` | `rendition ∈ full\|thumb\|poster\|play`; query `exp:int`, `sig:b64url` | 200/206 (Range-aware `FileResponse`, `Cache-Control: private, no-cache`, `X-Content-Type-Options: nosniff`, `Content-Disposition: inline`); 403 (bad/expired signature or email mismatch); 404 (malformed id, unknown rendition, deleted/unknown attachment, or missing file) |
 
 `<Message>` = `{seq:int, clientId:str, sender:str, text:str\|null, attachments:[<Attachment>],
-createdAt:float}`. `<Attachment>` = `{id:str, kind:"photo"\|"video"\|"voice",
+createdAt:float, replyTo:<ReplyTo>\|null}`. `<Attachment>` = `{id:str, kind:"photo"\|"video"\|"voice",
 status:"processing"\|"ready"\|"failed", width:int\|null, height:int\|null,
 durationS:float\|null, peaks:[float]\|null, urls:{full?,thumb?,poster?,play?}}` — `urls`
 carries only READY renditions, each a freshly per-response HMAC-signed path (never
 precomputed/stored).
+
+`<ReplyTo>` = `{seq:int, sender:str, text:str\|null, truncated:bool, media:<ReplyToMedia>\|null}`
+(round 2 ruling item 10 §(3), Inv 48) — built fresh from the target's LIVE row on every read,
+never stored on the reply itself. `text` is the target's text cut to 300 Unicode code points
+(`truncated` is true exactly when it was cut); `null` for an attachment-only target.
+`<ReplyToMedia>` = `{kind:"photo"\|"video"\|"voice"\|"mixed", count:int, durationS:float\|null,
+thumbUrl:str\|null}` — `null` for a text-only target; `kind` is the quoted attachments' shared
+kind or `"mixed"`; `durationS` is the single voice note's or video's duration only when
+`count===1`; `thumbUrl` is a freshly signed URL for the FIRST attachment's `thumb` (photo) or
+`poster` (video) rendition, only when that attachment is `ready` — never `full`/`play`, and
+never present for a voice note. One level only: `<ReplyTo>` never nests another `<ReplyTo>`.
+`GET media/*`'s signature/expiry rules apply to `thumbUrl` exactly as to any other signed media
+URL.
 
 ### Preview / versions / shell / public
 
@@ -378,13 +391,17 @@ Publish/Chat use — the client is a `fetch()` streaming reader carrying the
 - `event: message` / `id: <event_seq>` / `data: <Message>` (§2's `<Message>` shape) — a new
   message.
 - `event: message_updated` / `data: <Message>` — an attachment on an existing message
-  changed status (e.g. `processing` → `ready`).
+  changed status (e.g. `processing` → `ready`); also fired for every reply whose quote points at
+  that message, so its rendered quote picks up the new thumbnail (Inv 48). Never fired for a
+  reply on the TARGET's delete — see `message_deleted` below.
 - `event: locked` / `data: {}` — the token expired mid-stream; the server closes the
   connection right after sending this.
 - `: ping` (a bare comment line, no `event:`/`data:`) every 15s, to keep the connection
   alive through proxies.
 - `event: message_deleted` / `data: {"seq":int}` — the client removes that bubble if present;
-  a missing bubble is a no-op.
+  a missing bubble is a no-op. Also the sole signal a reply's quote needs to disappear (Inv 48):
+  the client removes the `.wx-srv-quote` element in place from every bubble/echo quoting that
+  seq, and cancels the composer's pending reply if it targets that seq.
 - `event: wiped` / `data: {}` — the client clears loaded history and pending echoes; the stream
   remains open.
 
