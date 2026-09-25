@@ -999,6 +999,32 @@ describe("mountServerThread", () => {
         document.body.innerHTML = "";
       });
 
+      it("a gateway 504 on the wipe is reconciled, not shown as a failure that invites a second wipe (M3)", async () => {
+        // The REAL wipeChat status mapping (only the mocked module boundary is replaced):
+        // a committed wipe answered with a gateway timeout looks exactly like this.
+        const { wipeChat: realWipeChat } = await vi.importActual<typeof import("../src/server/api/messages")>(
+          "../src/server/api/messages",
+        );
+        vi.stubGlobal("fetch", vi.fn(async () => new Response("gateway timeout", { status: 504 })));
+        wipeChat.mockImplementation((session: ServerSession) => realWipeChat(session));
+        getHistory
+          .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ text: "old before wipe" })] }))
+          .mockResolvedValueOnce(emptyHistory()); // the wipe DID commit
+        try {
+          const wipe = await startUnconfirmedWipe();
+          await vi.advanceTimersByTimeAsync(0);
+          expect(wipe.errorText() ?? "").not.toContain("try again");
+          expect(wipe.status()).toBe("Deleted. Erasing leftover traces…");
+          expect(wipe.wipeButton()?.disabled).toBe(false);
+          expect(wipe.view.element.textContent).not.toContain("old before wipe");
+          expect(vi.mocked(fetch)).toHaveBeenCalledOnce(); // one POST, never re-sent
+          wipe.sheet.teardown();
+          wipe.view.teardown();
+        } finally {
+          vi.unstubAllGlobals();
+        }
+      });
+
       it("keeps retrying the reconciliation with backoff, never the wipe, and stays 'checking' meanwhile", async () => {
         getHistory
           .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ text: "old before wipe" })] }))

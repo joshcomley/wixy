@@ -86,6 +86,45 @@ describe("destructive erasure requests", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  // M3 (reviewer): a wipe is not idempotent and Cloudflare sits in front of wixy, so a
+  // 502/504/524 can arrive AFTER the wipe committed. Showing that as a definite failure
+  // ("Couldn't delete everything - try again") invites a second wipe that would delete
+  // everything sent since. Any server-side or gateway failure is therefore an UNKNOWN
+  // outcome, reconciled against history; only a 4xx (the request was refused) is definite.
+  it.each([408, 500, 502, 503, 504, 520, 522, 524, 599])(
+    "a %i on the wipe is an unknown outcome, never a definite failure",
+    async (status) => {
+      fetchMock.mockResolvedValueOnce(new Response("gateway", { status }));
+      const outcome = await wipeChat(SESSION).then(
+        (value) => ({ kind: "resolved" as const, value }),
+        (error: unknown) => ({ kind: "rejected" as const, error }),
+      );
+      expect(outcome).toMatchObject({ kind: "rejected", error: { name: "ServerErasureOutcomeUnknownError" } });
+      expect(fetchMock).toHaveBeenCalledOnce(); // and never re-POSTed
+    },
+  );
+
+  it.each([400, 403, 404, 409, 422, 429])("a %i on the wipe is a definite refusal", async (status) => {
+    fetchMock.mockResolvedValueOnce(new Response("refused", { status }));
+    const error = await wipeChat(SESSION).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).name).not.toBe("ServerErasureOutcomeUnknownError");
+    expect((error as Error).message).toBe(`Couldn't delete messages (${status}).`);
+  });
+
+  it("a 401 on the wipe still locks", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 401 }));
+    await expect(wipeChat(SESSION)).rejects.toMatchObject({ name: "ServerLockedError" });
+  });
+
+  it("204 and 202 still resolve as before", async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(Response.json({ erasurePending: true }, { status: 202 }));
+    await expect(wipeChat(SESSION)).resolves.toBe(false);
+    await expect(wipeChat(SESSION)).resolves.toBe(true);
+  });
+
   it("never retries a wipe transport failure", async () => {
     fetchMock.mockRejectedValueOnce(new TypeError("network failure"));
     const outcome = await wipeChat(SESSION).then(
