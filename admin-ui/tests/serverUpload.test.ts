@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { ServerLockedError } from "../src/server/api/http";
 import { uploadFile, UploadError } from "../src/server/upload";
 
 function response(body: unknown, status = 200): Response {
@@ -59,6 +60,30 @@ describe("server upload", () => {
       sleep: async () => undefined,
     });
     expect(attempts).toBe(3);
+  });
+
+  // L6 (reviewer): serverFetch turns a 401 into ServerLockedError, but the chunk retry loop
+  // treated it as a retryable failure - three attempts, then a generic UploadError - so a
+  // dead token never locked the chat and the owner got a Retry that could not succeed.
+  it("a 401 (ServerLockedError) on a chunk PUT locks at once: no retries, and the error survives", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/uploads")) return initResponse();
+      if (url.includes("/chunks/")) throw new ServerLockedError();
+      return new Response(null, { status: 204 });
+    });
+    const sleep = vi.fn(async () => undefined);
+
+    await expect(uploadFile(new File(["x"], "x", { type: "audio/webm" }), "voice", {
+      fetch: fetchMock,
+      sleep,
+    })).rejects.toBeInstanceOf(ServerLockedError);
+
+    const chunkPuts = fetchMock.mock.calls.filter(([input]) => String(input).includes("/chunks/"));
+    expect(chunkPuts).toHaveLength(1); // not 3
+    expect(sleep).not.toHaveBeenCalled(); // no backoff wait either
+    // The half-finished upload session is still cleaned up on the way out.
+    expect(fetchMock.mock.calls.at(-1)?.[1]).toMatchObject({ method: "DELETE" });
   });
 
   it("fails after three chunk attempts", async () => {

@@ -1,5 +1,7 @@
 /** Client-side implementation of the server-chat chunked upload contract. */
 
+import { ServerLockedError } from "./api/http";
+
 export type UploadKind = "photo" | "video" | "voice";
 
 export const UPLOAD_MAX_BYTES: Readonly<Record<UploadKind, number>> = {
@@ -209,6 +211,9 @@ async function putChunkWithRetry(input: ChunkRequest): Promise<void> {
       lastError = error;
     } catch (error) {
       if (isAbortError(error) || input.signal?.aborted) throw error;
+      // A dead token is not a hiccup: retrying cannot help and would bury the lock signal
+      // under a generic failure, so the chat would never lock (L6).
+      if (error instanceof ServerLockedError) throw error;
       if (error instanceof UploadError && !RETRYABLE_STATUSES.has(error.status ?? -1)) throw error;
       lastError = error;
       if (attempt === MAX_CHUNK_ATTEMPTS - 1) break;
