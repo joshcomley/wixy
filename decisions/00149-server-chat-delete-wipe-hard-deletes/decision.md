@@ -51,8 +51,10 @@ erasure and then restored a message that no longer existed. The Architect's ruli
   newest sequence it knew when it sent the wipe. It never compares browser and server clocks:
   an earlier version did, and clock skew could make it misjudge the outcome. Any message at or
   before that boundary means the wipe did not commit and the thread is restored with a retry
-  message; otherwise the wipe counts as done and newer messages are kept. A `wiped` event
-  settles it either way.
+  message; otherwise the wipe counts as done and newer messages are kept. That comparison holds
+  only when the history had loaded before the wipe was sent: with no loaded history the boundary
+  is unknown (0), "nothing at or before it" would be vacuously true, and the only proof of a
+  commit is an empty history. A `wiped` event settles it either way.
 
 Details and the test map: [`docs/ai/livechat.md`](../../docs/ai/livechat.md) §6.
 

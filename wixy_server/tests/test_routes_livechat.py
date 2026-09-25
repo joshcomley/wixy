@@ -14,6 +14,8 @@ import sqlite3
 import subprocess
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +53,12 @@ from wixy_server.livechat.tokens import (
 from wixy_server.routes_livechat import _stream_events
 from wixy_server.storage import ProjectPaths
 from wixy_server.tests.fake_cmd import FakeCmdState, create_fake_cmd_app
+
+# A scrub the test expects to SUCCEED gets a generous deadline: success returns as soon as the WAL
+# is truncated, so the number is only ever spent by a machine stall (decision 00159). Tests that
+# expect a scrub to fail hold a blocking reader open, so they fail on state however long the
+# deadline is.
+_SCRUB_SUCCESS_DEADLINE_S = 30.0
 
 TEST_APP_KEY = "wixy-livechat"
 TEST_PIN = "482913"
@@ -1696,7 +1704,15 @@ class TestDeleteWipeRoutes:
         pin_verifier: CmdPinVerifier,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setattr(routes_livechat_module, "_DELETE_SCRUB_DEADLINE_S", 0.05)
+        # Nothing here bounds a wall-clock duration (decision 00159). The route's own work takes
+        # about 10 ms, so "answers within N ms" only measured how busy the machine was and failed
+        # once at 1.77 s against a 0.5 s bound. Instead the guard is held for far longer than any
+        # scheduling stall, and the two things that prove the route bounds its wait are asserted
+        # directly: it answered while the guard was still held, and every wait it made for the
+        # guard was capped by the deadline it had left.
+        deadline_s = 0.05
+        hold_s = 10.0
+        monkeypatch.setattr(routes_livechat_module, "_DELETE_SCRUB_DEADLINE_S", deadline_s)
         app = self._new_app(storage_root, wixy_repo_root, pin_verifier)
         store: LiveChatStore = app.state.livechat_store
         message, _ = store.create_message(
@@ -1712,33 +1728,55 @@ class TestDeleteWipeRoutes:
         request = _server_request(
             app, token, method="DELETE", path=f"/api/admin/server/messages/{message.seq}"
         )
+
+        real_scrub_guard = store.scrub_guard
+        guard_waits: list[float | None] = []
+
+        @contextmanager
+        def recording_scrub_guard(*, timeout_s: float | None = None) -> Iterator[bool]:
+            guard_waits.append(timeout_s)
+            with real_scrub_guard(timeout_s=timeout_s) as acquired:
+                yield acquired
+
+        monkeypatch.setattr(store, "scrub_guard", recording_scrub_guard)
+
         lock_entered = threading.Event()
         release_lock = threading.Event()
+        hold_expired = threading.Event()
         lock_done = threading.Event()
 
         def hold_scrub_guard() -> None:
-            with store.scrub_guard() as acquired:
+            with real_scrub_guard() as acquired:
                 assert acquired
                 lock_entered.set()
-                release_lock.wait(timeout=3.0)
+                # Set before the guard is released: a route that waited the whole hold out can
+                # only get the guard after this flag is visible.
+                if not release_lock.wait(timeout=hold_s):
+                    hold_expired.set()
             lock_done.set()
 
-        started_at = time.monotonic()
         try:
             async with anyio.create_task_group() as task_group:
                 task_group.start_soon(anyio.to_thread.run_sync, hold_scrub_guard)
-                assert await anyio.to_thread.run_sync(lock_entered.wait, 2.0)
+                assert await anyio.to_thread.run_sync(lock_entered.wait, hold_s)
                 response = await routes_livechat_module.delete_message(message.seq, request)
+                # The route answered while this test still held the guard: it stopped waiting at
+                # its own deadline instead of waiting the guard out.
+                assert not hold_expired.is_set()
+                assert not lock_done.is_set()
+                route_guard_waits = list(guard_waits)
+                release_lock.set()
                 assert response.status_code == 202
                 assert store.scrub_pending()
-                assert time.monotonic() - started_at < 0.5
-                release_lock.set()
-                assert await anyio.to_thread.run_sync(lock_done.wait, 2.0)
+                assert await anyio.to_thread.run_sync(lock_done.wait, hold_s)
                 task_group.cancel_scope.cancel()
         finally:
             release_lock.set()
 
-        assert livechat_janitor.scrub_once(store=store, deadline_s=1.0)
+        # Never unbounded (None) and never a fixed timeout longer than the deadline. (No wait at
+        # all is also valid: on a stalled machine the deadline can be spent before the first one.)
+        assert all(wait is not None and wait <= deadline_s for wait in route_guard_waits)
+        assert livechat_janitor.scrub_once(store=store, deadline_s=_SCRUB_SUCCESS_DEADLINE_S)
         assert not store.scrub_pending()
 
     def test_delete_requires_token_and_removes_message_files_without_push(
@@ -1814,7 +1852,7 @@ class TestDeleteWipeRoutes:
         if repeat.status_code == 202:
             assert any(repeat.json().values())
         livechat_janitor.cleanup_deleted_storage_once(store=store, paths=paths)
-        livechat_janitor.scrub_once(store=store, deadline_s=1.0)
+        livechat_janitor.scrub_once(store=store, deadline_s=_SCRUB_SUCCESS_DEADLINE_S)
         assert store.get_messages([message.seq]) == []
         assert store.events_after(0)[-1].type == "message_deleted"
         assert not store.storage_cleanup_pending()
@@ -2103,7 +2141,7 @@ class TestDeleteWipeRoutes:
             finally:
                 reader.close()
             if store.scrub_pending():
-                livechat_janitor.scrub_once(store=store, deadline_s=1.0)
+                livechat_janitor.scrub_once(store=store, deadline_s=_SCRUB_SUCCESS_DEADLINE_S)
             assert not store.scrub_pending()
             completed = client.delete(
                 f"/api/admin/server/messages/{message.seq}",
@@ -2157,7 +2195,7 @@ class TestDeleteWipeRoutes:
                 reader.close()
 
             if store.scrub_pending():
-                livechat_janitor.scrub_once(store=store, deadline_s=1.0)
+                livechat_janitor.scrub_once(store=store, deadline_s=_SCRUB_SUCCESS_DEADLINE_S)
             usage = client.get("/api/admin/server/usage", headers=headers)
             assert usage.status_code == 200
             assert usage.json()["erasurePending"] is False
@@ -2349,7 +2387,7 @@ class TestDeleteWipeRoutes:
         assert complete.status_code == 404
         livechat_janitor.cleanup_deleted_storage_once(store=store, paths=paths)
         livechat_janitor.cleanup_unreferenced_storage_once(store=store, paths=paths)
-        livechat_janitor.scrub_once(store=store, deadline_s=1.0)
+        livechat_janitor.scrub_once(store=store, deadline_s=_SCRUB_SUCCESS_DEADLINE_S)
         assert not store.storage_cleanup_pending()
         assert store.list_messages(before=None, limit=10)[0] == []
         assert store.events_after(old_cursor)[0].type == "wiped"

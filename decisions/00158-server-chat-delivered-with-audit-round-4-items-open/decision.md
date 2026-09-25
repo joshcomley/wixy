@@ -19,9 +19,9 @@ items, F14 to F17, when the operator directed that the feature be delivered anyw
 - The feature shipped as one squash commit, `6ca0d506` on `origin/main` (title "feat: Server
   page with private admin live chat (cmd workspace 29 delivery)"). Its tree is identical to the
   feature branch head `2d9d2cc`, so nothing beyond that head was delivered.
-- The fixes for F14 to F17 follow in a separate pull request onto `main`. The final docs pass
-  and the intermittent-test fix (decision 00157) also land as their own pull request after
-  delivery; neither is part of `6ca0d506`.
+- The fixes for F14 to F17 follow in a separate pull request onto `main`. The intermittent-test
+  fix (decision 00157, merged as `f307195`) and the final docs pass each landed as their own pull
+  request after delivery; neither is part of `6ca0d506`.
 
 ## Why
 
@@ -30,7 +30,8 @@ the time; it does not record his reasoning.
 
 ## Follow-up (F14–F17 now closed)
 
-Two commits on `main` closed all four items:
+Delivery `6ca0d506` was merged at 23:55 on 2026-09-24 (UK time). Two commits on `main`, made
+on 2026-09-25, closed all four items — `71cb2946` at 01:14 and `0a2f836` at 04:28:
 
 - `71cb2946` ("Server chat unlock CSRF guard, lockout countdown, wipe status, voice discard,
   audit round 4"): F14 — `unlock` now refuses a request before the body is read or cmd is

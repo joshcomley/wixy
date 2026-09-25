@@ -122,7 +122,7 @@ before declaring a verdict, fix the root cause, never skip/xfail/delete to go gr
 blocks merges. A rare full-suite-only flake is a box-level resource-contention characteristic
 (decisions/00025, 00027) — investigate, but never lower `-n 4` or add per-test retries.
 
-Three Server-chat delivery lessons set the acceptance bar:
+Four Server-chat delivery lessons set the acceptance bar:
 
 - For erasure or background-worker changes, require **five consecutive clean full-suite
   runs**, run alone. Never overlap pytest and e2e; Windows concurrent-file-access races fail
@@ -136,3 +136,10 @@ Three Server-chat delivery lessons set the acceptance bar:
   a 1970-dated row is reaped whenever the sweep lands mid-test (decisions/00157).
   `test_routes_livechat.py`'s autouse guard refuses such a seed; a new module that drives a live
   app and seeds directly needs the same guard.
+- Never put an absolute upper bound on elapsed time in a test of a route that touches SQLite or
+  threads. The delete route's own work is about 10 ms, yet a `< 0.5` s assertion failed once at
+  1.77 s in a full-suite run: it measured the machine, not the route. To test a deadline, hold
+  the contended resource far longer than any stall and assert what the code did (it answered
+  while the resource was still held; the timeout it passed was capped by its deadline). A scrub a
+  test expects to succeed gets `_SCRUB_SUCCESS_DEADLINE_S` (30 s), because success returns at
+  once and only a stall can spend the number (decisions/00159).
