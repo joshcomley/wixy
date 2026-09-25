@@ -216,19 +216,22 @@ header.
 | DELETE | `server/messages/{seq}` | `delete_message` | — | 204 when DB scrub and media cleanup are complete; otherwise 202 `{"erasurePending":true}`; idempotent even when the message is already gone |
 | POST | `server/wipe` | `wipe_chat` | exactly `{"confirm":"WIPE"}` | 204 when DB scrub and media cleanup are complete; otherwise 202 `{"erasurePending":true}`; every other body, including extra keys, is 422 |
 | GET | `server/stream?after=` | `stream` | query `after?:int` (event cursor) | **SSE**, see §4 |
-| GET | `server/usage` | `usage` | — | `{"usedBytes":int,"quotaBytes":int,"freeBytes":int,"mediaAvailable":bool,"erasurePending":bool}` |
+| GET | `server/usage` | `usage` | — | `{"usedBytes":int,"quotaBytes":int,"freeBytes":int,"mediaAvailable":bool,"erasurePending":bool,"transcriptionAvailable":bool}` — the last is true only while cmd's capability probe answers `{"private":true}` (cached 60 s; always false on the standalone edition); it is what shows the Transcribe control |
 | POST | `server/uploads` | `init_upload` | `{"kind":"photo"\|"video"\|"voice","mimeType":str,"sizeBytes":int(≥1),"filename":str\|null}` | 201 `{"uploadId":hex32,"chunkBytes":int,"maxBytes":int}`; 413 `{"error":"too_large","maxBytes":int}`; 415 `{"error":"unsupported_type"}`; 422 (FastAPI validation error — e.g. `sizeBytes` 0 or negative; nothing is reserved); 507 `{"error":"storage_full"}`; 503 `{"error":"media_unavailable"}` (ffmpeg, ffprobe or `pillow-heif` unavailable; text chat is unaffected) |
 | PUT | `server/uploads/{id}/chunks/{index}` | `put_chunk` | raw `application/octet-stream` body, ≤`chunkBytes` | 204; 413 `{"error":"too_large","maxBytes":int}`; 422 (index out of range); 404 (unknown upload) |
 | POST | `server/uploads/{id}/complete` | `complete_upload` | — | 202 `{"attachment":<Attachment>}` (status `processing`; idempotent on retry); 409 `{"error":"incomplete","missing":[int]}`; 422 `{"error":"size_mismatch"}`; 404 (unknown upload) |
 | DELETE | `server/uploads/{id}` | `delete_upload` | — | 204 (always — a no-op once already promoted to an attachment) |
+| POST | `server/attachments/{id}/transcribe` | `transcribe_attachment` | — (opt-in, one voice note; **asynchronous** — Cloudflare cuts a proxied response at 100 s) | 202 `{"transcript":{"status":"pending"}}` (a job was started, or one already owns it; the finished transcript arrives as a `message_updated` stream event); 200 `{"transcript":{"status":"done","text":str}}` (already stored — no cmd call); 404 `{"error":"not_found"}` (malformed/unknown id, not a voice attachment, or not yet sent in a message); 409 `{"error":"not_ready"}` (still processing / failed processing); 429 `{"error":"rate_limited","retryAfterS":int}` + `Retry-After` (more than 6 new jobs a minute for this identity); 503 `{"error":"not_configured"}` (cmd cannot promise its private mode, or standalone — nothing is sent anywhere). A `failed` transcript is retried by calling this again. Inv 50 |
 | GET | `server/media/{attId}/{rendition}?exp=&sig=` | `get_media` | `rendition ∈ full\|thumb\|poster\|play`; query `exp:int`, `sig:b64url` | 200/206 (Range-aware `FileResponse`, `Cache-Control: private, no-cache`, `X-Content-Type-Options: nosniff`, `Content-Disposition: inline`); 403 (bad/expired signature or email mismatch); 404 (malformed id, unknown rendition, deleted/unknown attachment, or missing file) |
 
 `<Message>` = `{seq:int, clientId:str, sender:str, text:str\|null, attachments:[<Attachment>],
 createdAt:float}`. `<Attachment>` = `{id:str, kind:"photo"\|"video"\|"voice",
 status:"processing"\|"ready"\|"failed", width:int\|null, height:int\|null,
-durationS:float\|null, peaks:[float]\|null, urls:{full?,thumb?,poster?,play?}}` — `urls`
+durationS:float\|null, peaks:[float]\|null, urls:{full?,thumb?,poster?,play?},
+transcript:null\|{status:"pending"}\|{status:"failed"}\|{status:"done",text:str}}` — `urls`
 carries only READY renditions, each a freshly per-response HMAC-signed path (never
-precomputed/stored).
+precomputed/stored). `transcript` is `null` until someone asks for one (voice notes only); the
+machine `failure` reason is never on the wire.
 
 ### Preview / versions / shell / public
 
@@ -378,7 +381,9 @@ Publish/Chat use — the client is a `fetch()` streaming reader carrying the
 - `event: message` / `id: <event_seq>` / `data: <Message>` (§2's `<Message>` shape) — a new
   message.
 - `event: message_updated` / `data: <Message>` — an attachment on an existing message
-  changed status (e.g. `processing` → `ready`).
+  changed status (e.g. `processing` → `ready`), or a voice note's transcript changed state
+  (`pending` when a job starts, then `done`/`failed`; also at startup for a job that died with its
+  process). The client patches a transcript-only change into the live bubble.
 - `event: locked` / `data: {}` — the token expired mid-stream; the server closes the
   connection right after sending this.
 - `: ping` (a bare comment line, no `event:`/`data:`) every 15s, to keep the connection

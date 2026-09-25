@@ -74,6 +74,7 @@ during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/
 | `test_robots_header.py` | `X-Robots-Tag: noindex` middleware (Inv 37) — the path allowlist as a pure-function unit test, plus integration coverage on both indexable states |
 | `test_livechat_pinclient.py`, `test_livechat_tokens.py`, `test_livechat_store.py`, `test_livechat_uploads.py`, `test_livechat_processing.py`, `test_livechat_media_queue.py`, `test_livechat_janitor.py`, `test_livechat_push.py` | PIN client and tokens; SQLite migrations and erasure; upload validation and chunking; media processing, queue, janitor, and push |
 | `test_routes_livechat.py`, `test_routes_livechat_media.py` | protected chat/upload routes, delete/wipe recovery, and signed media |
+| `test_livechat_transcribe.py`, `test_routes_livechat_transcription.py` (+ `TestTranscripts` in `test_livechat_store.py`) | opt-in voice-note transcription (Inv 50): the cmd private-mode client, probe and cache, the exact request fields, the async route and job, single-flight / one-at-a-time / rate limit, raw-byte erasure of a transcript sentinel on delete and wipe, startup recovery. They run against `fake_cmd.py`'s private-mode double (`transcribe_private_supported`, `transcribe_retained`, `transcribe_gate`); `wixy_server/tests/conftest.py` gives every un-injected `CmdTranscriber` an inert transport so no test can reach a real cmd |
 | `test_background.py`, `test_routes_system.py`, `test_settings.py` | contained loop/one-shot failures, media health status, and Server-chat environment settings |
 
 ### Frontend (vitest) & E2E (Playwright)
@@ -93,7 +94,13 @@ during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/
   fixture's `showcase.items` (whose item count several other specs assert exactly). Server chat
   coverage is `server-chat.spec.ts` (conversation, delete/wipe, and cross-client behavior),
   `server-media.spec.ts` (chunked photo/video/voice upload and rendering), and
-  `server-lock.spec.ts` (disguise, lock causes, and gestures).
+  `server-lock.spec.ts` (disguise, lock causes, and gestures), and `server-transcription.spec.ts`
+  (opt-in transcription at desktop and a 402px phone: nothing sent while cmd is not private, a
+  playing note survives its transcript, a failure and Retry, two devices agreeing, phone layout).
+  The fixture drives the fake cmd through `/test/server/transcribe-config` (private on/off, text,
+  status, `hold` to park requests, `reset` — which also gives every test a fresh rate limiter),
+  `/test/server/transcribe-stats`, and `/test/server/seed-voice` (a ready note with real ffmpeg
+  audio).
 
 Server-chat unit coverage also lives in `admin-ui/tests/server/{gestures,lockModel,panel,http,unlock}.test.ts`.
 The lock browser spec uses Playwright `page.clock` to control the 400 ms multi-tap window,

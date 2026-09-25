@@ -18,6 +18,11 @@ Brief + Architect ruling from the DM/Architect (peer, 2026-09-25). Owned ids: de
 cmd/workspace-00029-bs17, based on origin/main (NOT the stale cmd/workspace-00029). Migration number is assigned at
 merge (three builds add one in parallel): rebase on then-current main and take max+1 before the DM merges.
 
+BUILT (2026-09-25): backend (store table + joined attachment load, CmdTranscriber private-mode client + 60 s probe cache,
+TranscriptionRuntime job/limits, async route, usage flag, fake cmd double), frontend (transcript.ts block, in-place
+patch, stale-202 guard, CSS), tests (pytest, vitest, Playwright desktop + 402px phone), docs/spec/decisions/Inv 50.
+Found and fixed by the e2e suite: a fast job's stream update can beat the HTTP reply (decisions/00167 #10).
+Remaining: independent self-review, final full verification, rebase + take migration max+1, hand-off SHA to DM.
 ## Relevant files+commits
 Backend: wixy_server/livechat/{models,store,transcribe,transcription}.py, routes_livechat.py, app.py,
 tests/fake_cmd.py. Frontend: admin-ui/src/server/{mediaRender,thread,transcript,api/messages}.ts + CSS.

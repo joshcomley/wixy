@@ -161,6 +161,35 @@ unclaimed orphan attachments after 24 hours, removes raw upload sources for read
 retries archiving failed originals, expires an unarchived failed original after seven days, and
 prunes completed cleanup tombstones after seven days. Pending cleanup rows are not aged out.
 
+## Voice-note transcription (a cmd dependency, gated by a probe)
+
+The Transcribe control on voice notes ([livechat.md](livechat.md) §15, [Inv 50](invariants.md),
+decisions/00166) talks to cmd's on-box speech-to-text, and **only** through cmd's *private mode*:
+`GET http://127.0.0.1:9320/api/transcribe/capabilities` must answer `{"private": true}`, and every
+request is `POST /api/transcribe` with `private=1` and `cleanup=0`. cmd's plain route retains audio
+and transcripts (`dictation-audio/`, `asr-shadow.jsonl`), which is why the probe gates everything.
+There is no setting and no environment variable: the cmd base URL is a module constant, like the
+PIN service's, and the standalone edition (no cmd) is always unavailable.
+
+- **Off by default, self-enabling.** Until cmd's private mode is deployed the probe fails, the
+  Transcribe button is hidden, `GET /api/admin/server/usage` reports `transcriptionAvailable:false`
+  and the route answers 503 `not_configured`; no audio is ever sent. When cmd is updated, the
+  control appears within about a minute (the probe's cache) — no wixy restart or configuration.
+- **Check it live.** With a signed-in admin session, unlock the Server chat and read
+  `/api/admin/server/usage`: `transcriptionAvailable` must be `true`. Tap Transcribe on one test
+  note, and confirm **nothing new appears under cmd's `dictation-audio/` and no line is added to
+  `asr-shadow.jsonl`** — that is the acceptance test for the private mode itself.
+- **A note stays `Transcribing…` / a `failed` transcript.** Failures are logged without any text
+  (`livechat: cmd transcription …`); the reason is stored server-side as `failure` on the
+  `attachment_transcripts` row (`unavailable`, `warming`, `timeout`, `rejected`,
+  `invalid_response`, `media_missing`, `too_long`, `interrupted`, `error`). `warming` means the
+  speech models are still loading after a restart — Retry in a minute. After a wixy restart any
+  `pending` row is failed (`interrupted`) so it can be retried.
+- **Load.** It shares the hub's GPU/CPU with dictation; wixy runs one transcription at a time and
+  at most 6 new ones a minute per person. cmd's budget is 60 s plus half the note's length.
+- **Erasure.** The transcript is deleted with its message and by "Delete all messages"; nothing
+  needs cleaning in cmd (that is the point of the private mode).
+
 ## CI (`.github/workflows/ci.yml`, on push-to-main + all PRs)
 
 - **`python`** (ubuntu, py3.14): `pip install -e ".[server,dev]"` + `playwright install`;

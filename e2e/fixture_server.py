@@ -549,7 +549,9 @@ def main() -> None:
         return await anyio.to_thread.run_sync(_seed)
 
     def _transcribe_stats() -> dict[str, object]:
-        last = fake_cmd_state.transcribe_requests[-1] if fake_cmd_state.transcribe_requests else None
+        last = (
+            fake_cmd_state.transcribe_requests[-1] if fake_cmd_state.transcribe_requests else None
+        )
         return {
             "requests": len(fake_cmd_state.transcribe_requests),
             "retained": len(fake_cmd_state.transcribe_retained),

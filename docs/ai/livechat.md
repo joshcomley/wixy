@@ -6,7 +6,7 @@ storage, routes, and second auth gate, entirely separate from `chats.py`/`cmdcha
 `draft/media/`. Full decided design: [`spec/server-chat/00-brief.md`](../../spec/server-chat/00-brief.md).
 This manual describes the current implementation; where intent and code differ, follow the
 code and record the difference in `decisions/`.
-Numbered guarantees: [invariants.md](invariants.md) 40–47.
+Numbered guarantees: [invariants.md](invariants.md) 40–47, and 50 (transcription, §15).
 
 ## 1. The disguise (why it looks like nothing is here)
 
@@ -140,7 +140,9 @@ contention at the file level). Every method is **synchronous**; route handlers w
 call in `anyio.to_thread.run_sync`.
 
 Tables: `messages`, `attachments`, `events`, `uploads`, `push_subscriptions`, `deleted_storage`,
-`pending_wipe_cleanup`, and `pending_scrub`. Schema migrations are serialized under the SQLite writer lock.
+`pending_wipe_cleanup`, `pending_scrub`, and `attachment_transcripts` (a voice note's opt-in
+transcript, `ON DELETE CASCADE` from its attachment — §15). Schema migrations are serialized under
+the SQLite writer lock.
 `deleted_storage` retains internal attachment/upload tombstones and retry status; it is not a
 message/event tombstone and is never returned to chat clients. `pending_wipe_cleanup` records a
 wipe's filesystem sweep token so a crash cannot lose cleanup of orphaned paths. Schema v4 adds the
@@ -722,3 +724,54 @@ trailers, into the release commit. `routes_version.resolve_release_notes` runs p
 owner-facing update popup. After delivery, every commit touching Server chat must carry
 exactly `Release-note: General bug fixes and improvements.` and no release-note line may name
 the chat, messages, photos, video, voice, PIN, or locking.
+
+## 15. Voice-note transcription (opt-in, private)
+
+Spec: [`spec/server-chat/05-voice-transcription.md`](../../spec/server-chat/05-voice-transcription.md);
+privacy and cost note: [decisions/00166](../../decisions/00166-voice-transcription-privacy-and-cost/decision.md);
+design record: [decisions/00167](../../decisions/00167-voice-transcription-design/decision.md);
+guarantee: [Inv 50](invariants.md). A **Transcribe** button on a ready voice note; never automatic,
+never on upload.
+
+**The cmd hop (`livechat/transcribe.py`, `CmdTranscriber`).** cmd's plain `POST /api/transcribe`
+retains the audio and transcript (a rolling `dictation-audio/` buffer, the ASR shadow log), where
+delete and wipe cannot reach them, so wixy uses it only through cmd's **private mode**: form fields
+`private=1` and `cleanup=0` (no LLM sees the text), multipart `audio`, and **no `session_id`, no
+`context`**. It first calls `GET /api/transcribe/capabilities` and needs a literal
+`{"private": true}` (cached 60 s both ways; dropped on a transport/5xx failure). False, missing,
+malformed or unreachable ⇒ unavailable. Response mapping: 200 with `text` (or `raw`) → ok (an empty
+string is a valid "nothing said"; more than 200,000 characters is refused as invalid); 503
+`asr_warming` → `warming`; other 503/5xx/transport → `unavailable`; 400/413/415/422 → `rejected`;
+budget exceeded → `timeout`. No retries. `create_app(..., transcriber=)` is the injection seam
+(default `CmdTranscriber()` on the fleet, `None` on standalone); tests and the e2e fixture point it at
+`fake_cmd.py`'s double, whose `transcribe_private_supported=False` behaves like today's retaining cmd
+(it records what it would have kept in `transcribe_retained`, which the privacy tests assert empty).
+
+**Storage.** `attachment_transcripts(attachment_id PK → attachments(id) ON DELETE CASCADE, status
+pending|done|failed, text, failure, engine, created_at, updated_at)`. Every attachment load goes
+through one joined `SELECT` (`_SELECT_ATTACHMENT`), so `AttachmentRow.transcript` can never be
+missing. `begin_transcript` decides start/pending/done/gone in one write transaction and announces a
+new `pending` with `message_updated`; `finish_transcript` is an `UPDATE` whose row count says whether
+the row still exists (a result after delete/wipe is discarded, no event); `fail_stale_pending_
+transcripts` runs at startup. The `failure` code (`unavailable`, `warming`, `timeout`, `rejected`,
+`invalid_response`, `media_missing`, `too_long`, `interrupted`, `error`) is server-side only.
+
+**The route and job (`routes_livechat.py`, `livechat/transcription.py`).**
+`POST /attachments/{id}/transcribe` answers at once: 404 (not a sent voice note), 409 (not ready),
+200 (already `done`), 202 (already `pending`), 503 `not_configured`, 429 (6 new jobs a minute per
+identity), else a fresh `pending` row and a job on the contained group → 202. The job
+(`TranscriptionRuntime.run_job`) waits for the global one-at-a-time slot, reads
+`media/<id[:2]>/<id>/play.m4a`, re-checks the probe, sends it with a budget of **60 s + 0.5 × the
+note's seconds**, and records `done`/`failed`, which appends `message_updated`; the stream delivers
+`Attachment.transcript` to every device. `GET /usage` gains `transcriptionAvailable`.
+
+**Frontend (`admin-ui/src/server/transcript.ts`).** Per voice note, one `.wx-srv-transcript` block:
+Transcribe (only while `transcriptionAvailable`, read once per attach) → "Transcribing…" spinner →
+text + per-device Hide/Show (a `Set` in `thread.ts`, memory only) → or an error + Retry. A
+transcript-only `message_updated` is patched into the live bubble (`differOnlyInTranscripts` →
+`patchTranscriptBlocks`) so a playing `<audio>` is never disposed; anything else still rebuilds the
+bubble. A `202` reply cannot overwrite a newer stream update (a quick job's update can beat the
+reply). Text is set with `textContent`, never markup; the control is not a gesture boundary.
+
+**Operating it.** See [runbook.md](runbook.md) ("Voice-note transcription"): the feature stays hidden
+until cmd's private mode is deployed and the probe answers `true`; verify a real note end to end.
