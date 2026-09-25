@@ -772,3 +772,33 @@ identity and `currentTime`, stale/wipe/delete responses), and `e2e/tests/server-
 as old messages stop aligning right; there is no free-form emoji and no reaction history.
 Decisions: [00164](../../decisions/00164-server-chat-reactions/decision.md),
 [00165](../../decisions/00165-reactions-patch-in-place-stream-is-truth/decision.md).
+
+### Inv 50 — A voice note is transcribed only on request, only through cmd's private mode, and the text is erased with its message
+Transcription (spec/server-chat/05-voice-transcription.md, decisions/00166) is never automatic: the
+only trigger is `POST /api/admin/server/attachments/{id}/transcribe`, which answers 404 for anything
+that is not a sent voice note and 409 until it is ready. wixy talks to cmd's `/api/transcribe` **only
+with `private=1` and `cleanup=0`, with no `session_id` and no `context`, and only while cmd's
+`GET /api/transcribe/capabilities` has answered a literal `{"private": true}`** — from a 60 s cache
+when the request is accepted, and asked of cmd afresh (`available(fresh=True)`, never the cache)
+immediately before any audio leaves. Anything else (false, absent,
+malformed, unreachable, the standalone edition) is "unavailable": no audio is sent, the route answers
+503 `{"error":"not_configured"}` and the control is hidden. This exists because cmd's plain route
+retains the audio and transcript where delete and wipe can never reach them (Inv 40/46).
+The transcript lives only in `attachment_transcripts`, `ON DELETE CASCADE` from its attachment, so
+Inv 46's delete and wipe (with `secure_delete` and the WAL scrub) erase it with the message; a result
+that arrives after the message was deleted updates no row and is discarded. The text is never logged,
+never in a push payload and never in an error message. The job runs on the contained group (Inv 47),
+one at a time, single-flight per note, at most 6 new jobs a minute per identity; a `pending` row found
+at startup becomes `failed`.
+*Enforced by:* `wixy_server/tests/test_livechat_transcribe.py` (probe strictness and 60 s cache; the
+exact request fields; response mapping; no text in any log line),
+`test_routes_livechat_transcription.py` (nothing sent to a cmd that is not private, on every
+unavailability path incl. a rollback inside the probe-cache window between accept and send; the async flow; single-flight, one at a
+time and the rate limit; delete and wipe erase a transcript sentinel from the raw database and WAL
+bytes; a result after deletion is discarded; startup recovery), `test_livechat_store.py`
+(`TestTranscripts`: the state machine, racing begins, cascade), and
+`admin-ui/tests/serverTranscript.test.ts` + `e2e/tests/server-transcription.spec.ts` (opt-in only, a
+playing note survives its transcript, both devices agree, phone layout).
+*Known limit:* the no-retain half is cmd's promise, tested in cmd's repo; wixy can only refuse to talk
+to a cmd that does not make it. The feature is operator-visible only after one live end-to-end run
+shows nothing new under cmd's `dictation-audio/` or `asr-shadow.jsonl`.

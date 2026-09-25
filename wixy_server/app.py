@@ -46,6 +46,8 @@ from wixy_server.livechat.push import (
 from wixy_server.livechat.store import LiveChatStore
 from wixy_server.livechat.sw import server_sw_response
 from wixy_server.livechat.tokens import load_or_create_secret
+from wixy_server.livechat.transcribe import CmdTranscriber, Transcriber
+from wixy_server.livechat.transcription import TranscriptionRuntime
 from wixy_server.publisher import PublishJob
 from wixy_server.redirects import load_redirects
 from wixy_server.registry import load_registry
@@ -122,6 +124,7 @@ def create_app(
     github_client: GitHubClient | None = None,
     ai_backend: AIBackend | None = None,
     pin_verifier: PinVerifier | None = None,
+    transcriber: Transcriber | None = None,
 ) -> FastAPI:
     """Build the Wixy FastAPI app for one project.
 
@@ -159,6 +162,11 @@ def create_app(
     `POST /unlock` then always answers 503 `not_configured`) — overridable so
     tests point it at `fake_cmd.py`'s `/api/pins/<app_key>/verify` double instead, same
     injection seam as `cmdchat_client`/`ai_backend`/`github_client` above.
+    `transcriber` (spec/server-chat/05-voice-transcription.md): the private voice-
+    transcription hop to cmd. Same seam and same per-edition default as `pin_verifier`
+    (`CmdTranscriber()` on the fleet, `None` on standalone — the feature is then always
+    unavailable). It only ever talks to cmd through cmd's private mode, and only once cmd's
+    capability probe says `private: true`.
     """
     settings = load_settings(storage_root)
     registry = load_registry(wixy_repo_root)
@@ -232,6 +240,18 @@ def create_app(
         resolved_pin_verifier = None
     else:
         resolved_pin_verifier = CmdPinVerifier(app_key=settings.server_pin_app_key)
+    if transcriber is not None:
+        resolved_transcriber: Transcriber | None = transcriber
+    elif settings.edition == "standalone":
+        resolved_transcriber = None
+    else:
+        resolved_transcriber = CmdTranscriber()
+    livechat_transcription = TranscriptionRuntime(
+        store=livechat_store,
+        paths=paths,
+        notifier=livechat_notifier,
+        transcriber=resolved_transcriber,
+    )
 
     jwks = JwksCache(
         fetch=functools.partial(_fetch_jwks, settings.cf_access_team_domain),
@@ -262,6 +282,13 @@ def create_app(
         # Schema v6 moves the old file marker into SQLite. Retry an unlink that
         # failed during a previous process start before launching the scrubber.
         await anyio.to_thread.run_sync(livechat_store.import_legacy_scrub_marker)
+        # No transcription job can be running in a process that has only just started, so a
+        # `pending` row belongs to one that died with its process: fail it (the owner can
+        # retry) rather than leave a spinner up forever.
+        livechat_transcription.reset_loop_state()
+        await anyio.to_thread.run_sync(
+            lambda: livechat_store.fail_stale_pending_transcripts(now=time.time())
+        )
 
         async def _run_watcher() -> None:
             await watch_upstream(
@@ -307,6 +334,8 @@ def create_app(
             await gh_client.aclose()
             if resolved_pin_verifier is not None:
                 await resolved_pin_verifier.aclose()
+            if resolved_transcriber is not None:
+                await resolved_transcriber.aclose()
             # `CmdAIBackend.aclose()` is just a passthrough to `chat_client`
             # (already closed above) — closing it again would double-close
             # that same underlying httpx client, so only close
@@ -341,6 +370,7 @@ def create_app(
     app.state.livechat_media_available = livechat_media_available
     app.state.livechat_started_at = livechat_started_at
     app.state.livechat_pin_verifier = resolved_pin_verifier
+    app.state.livechat_transcription = livechat_transcription
 
     @app.exception_handler(FastAPIHTTPException)
     async def _http_exception_handler(_request: Request, exc: FastAPIHTTPException) -> JSONResponse:

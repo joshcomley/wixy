@@ -75,6 +75,7 @@ during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/
 | `test_livechat_pinclient.py`, `test_livechat_tokens.py`, `test_livechat_store.py`, `test_livechat_uploads.py`, `test_livechat_processing.py`, `test_livechat_media_queue.py`, `test_livechat_janitor.py`, `test_livechat_push.py` | PIN client and tokens; SQLite migrations and erasure; upload validation and chunking; media processing, queue, janitor, and push |
 | `test_routes_livechat.py`, `test_routes_livechat_media.py` | protected chat/upload routes, delete/wipe recovery, and signed media; `TestReactionRoutes` covers `PUT …/reactions` (auth, idempotence, no-op-writes-no-event, allowlist/sender/boolean 422s, 404 for unknown/deleted/oversized `seq`, raw-bytes erasure, stream frames) |
 | `test_livechat_reactions.py` | the reaction allowlist as exact code points, `reactor_key` folding, and the **drift guard** that parses `admin-ui/src/server/reactions.ts` and fails if it differs from `REACTION_EMOJIS` (Inv 49) |
+| `test_livechat_transcribe.py`, `test_routes_livechat_transcription.py` (+ `TestTranscripts` in `test_livechat_store.py`) | opt-in voice-note transcription (Inv 50): the cmd private-mode client, probe and cache, the exact request fields, the async route and job, single-flight / one-at-a-time / rate limit, raw-byte erasure of a transcript sentinel on delete and wipe, startup recovery. They run against `fake_cmd.py`'s private-mode double (`transcribe_private_supported`, `transcribe_retained`, `transcribe_gate`); `wixy_server/tests/conftest.py` gives every un-injected `CmdTranscriber` an inert transport so no test can reach a real cmd |
 | `test_background.py`, `test_routes_system.py`, `test_settings.py` | contained loop/one-shot failures, media health status, and Server-chat environment settings |
 
 ### Frontend (vitest) & E2E (Playwright)
@@ -96,10 +97,18 @@ during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/
   `server-media.spec.ts` (chunked photo/video/voice upload and rendering),
   `server-lock.spec.ts` (disguise, lock causes, and gestures), `server-tap-precision.spec.ts`
   (R3 v1.7, mobile 390×844 with `hasTouch`: a scroll-shaped touch sequence never locks, a
-  genuine same-spot double-tap on a bubble still does — decisions/00163), and
+  genuine same-spot double-tap on a bubble still does — decisions/00163),
   `server-reactions.spec.ts` (two people reacting live, delete taking reactions with it, a
   390 px and a 360 px phone leg, and the real-browser proof that a reaction never interrupts a
-  voice note that is playing).
+  voice note that is playing), and `server-transcription.spec.ts` (opt-in transcription at
+  desktop and a 402px phone: nothing sent while cmd is not private, a playing note survives its
+  transcript, a failure and Retry, two devices agreeing, phone layout). The fixture drives the
+  fake cmd through `/test/server/transcribe-config` (private on/off, text, status, `hold` to park
+  requests, `reset` — which also gives every test a fresh rate limiter),
+  `/test/server/transcribe-stats`, `/test/server/seed-voice` (a ready note with real ffmpeg
+  audio) and `/test/server/delete-message` (the spec removes every note it seeds: the fixture
+  runs ONE chat for the whole suite and `server-media.spec.ts` asserts exactly one
+  `.wx-srv-voice`).
 
 Server-chat unit coverage also lives in `admin-ui/tests/server/{gestures,lockModel,panel,http,unlock,reactions,setReaction}.test.ts`.
 `serverThread.test.ts` holds the reaction rendering and the in-place-patch tests (a playing

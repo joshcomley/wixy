@@ -8,7 +8,7 @@ import { UploadError, type UploadAttachment } from "../src/server/upload";
 import type { ServerStreamEvent } from "../src/server/stream";
 import type { LockHooks, ServerSession } from "../src/server/types";
 
-const { createVoiceRecorder, deleteMessage, getHistory, getUsage, sendMessage, setReaction, wipeChat, uploadServerAttachment } = vi.hoisted(() => ({
+const { createVoiceRecorder, deleteMessage, getHistory, getUsage, sendMessage, setReaction, transcribeAttachment, wipeChat, uploadServerAttachment } = vi.hoisted(() => ({
   createVoiceRecorder: vi.fn((options: {
     onStop?: (recording: { blob: Blob; durationMs: number; mimeType: string }) => void;
     onCancel?: () => void;
@@ -31,6 +31,7 @@ const { createVoiceRecorder, deleteMessage, getHistory, getUsage, sendMessage, s
   getUsage: vi.fn(),
   sendMessage: vi.fn(),
   setReaction: vi.fn(),
+  transcribeAttachment: vi.fn(),
   wipeChat: vi.fn(),
   uploadServerAttachment: vi.fn(),
 }));
@@ -41,6 +42,7 @@ vi.mock("../src/server/api/messages", async (importOriginal) => ({
   getUsage,
   sendMessage,
   setReaction,
+  transcribeAttachment,
   deleteMessage,
   wipeChat,
 }));
@@ -137,6 +139,7 @@ describe("mountServerThread", () => {
     });
     sendMessage.mockReset();
     setReaction.mockReset();
+    transcribeAttachment.mockReset();
     deleteMessage.mockReset();
     wipeChat.mockReset();
     uploadServerAttachment.mockReset();
@@ -1730,6 +1733,262 @@ describe("mountServerThread", () => {
       currentName = "Renamed";
       view.refreshNameChip();
       expect(view.element.querySelector(".wx-srv-name-chip")?.textContent).toBe("Renamed");
+      view.teardown();
+    });
+  });
+
+  describe("voice-note transcription", () => {
+    const VOICE_ID = "e".repeat(32);
+    type Transcript = NonNullable<Message["attachments"][number]["transcript"]>;
+    const voiceMessage = (transcript: Transcript | null = null, overrides: Partial<Message> = {}): Message =>
+      fakeMessage({
+        seq: 7,
+        clientId: "c7",
+        text: null,
+        createdAt: 1_700_000_000, // fixed: a real server repeats it on every update of the message
+        attachments: [{
+          id: VOICE_ID, kind: "voice", status: "ready", width: null, height: null,
+          durationS: 6, peaks: [0.2, 0.9], urls: { play: "/voice?exp=1&sig=a" }, transcript,
+        }],
+        ...overrides,
+      });
+    const usage = (flag: boolean | undefined) =>
+      getUsage.mockResolvedValue({
+        mediaAvailable: true, usedBytes: 0, quotaBytes: 10, freeBytes: 10, erasurePending: false,
+        ...(flag === undefined ? {} : { transcriptionAvailable: flag }),
+      });
+    const mount = (hooks: LockHooks = fakeHooks()) =>
+      mountServerThread({ identity: fakeIdentity(), hooks, win: fakeWindow(), onSettings: vi.fn() });
+
+    it("offers Transcribe only once the server says cmd's private mode is live", async () => {
+      usage(true);
+      getHistory.mockResolvedValue(emptyHistory({ messages: [voiceMessage()] }));
+      const view = mount();
+      await view.attach(SESSION);
+      await flush();
+      expect(view.element.querySelector(".wx-srv-transcript-start")?.textContent).toBe("Transcribe");
+      view.teardown();
+    });
+
+    it.each([
+      ["says it is not", false],
+      ["does not say", undefined],
+    ])("shows no control while the server %s available", async (_name, flag) => {
+      usage(flag);
+      getHistory.mockResolvedValue(emptyHistory({ messages: [voiceMessage()] }));
+      const view = mount();
+      await view.attach(SESSION);
+      await flush();
+      expect(view.element.querySelector(".wx-srv-transcript-start")).toBeNull();
+      expect(view.element.querySelector<HTMLElement>(".wx-srv-transcript")?.hidden).toBe(true);
+      view.teardown();
+    });
+
+    it("a failing usage read leaves the control hidden and never breaks the thread", async () => {
+      getUsage.mockRejectedValue(new Error("offline"));
+      getHistory.mockResolvedValue(emptyHistory({ messages: [voiceMessage()] }));
+      const hooks = fakeHooks();
+      const view = mount(hooks);
+      await view.attach(SESSION);
+      await flush();
+      expect(view.element.querySelector(".wx-srv-transcript-start")).toBeNull();
+      expect(view.element.querySelector(".wx-srv-voice")).not.toBeNull();
+      expect(hooks.lockNow).not.toHaveBeenCalled();
+      view.teardown();
+    });
+
+    it("a 401 while reading the flag locks the chat", async () => {
+      getUsage.mockRejectedValue(new ServerLockedError());
+      getHistory.mockResolvedValue(emptyHistory({ messages: [voiceMessage()] }));
+      const hooks = fakeHooks();
+      const view = mount(hooks);
+      await view.attach(SESSION);
+      await flush();
+      expect(hooks.lockNow).toHaveBeenCalledWith("unauthorized");
+      view.teardown();
+    });
+
+    it("clicking Transcribe asks the server for that note with the current session, and only then", async () => {
+      usage(true);
+      transcribeAttachment.mockResolvedValue({ kind: "started", transcript: { status: "pending" } });
+      getHistory.mockResolvedValue(emptyHistory({ messages: [voiceMessage()] }));
+      const view = mount();
+      await view.attach(SESSION);
+      await flush();
+      expect(transcribeAttachment).not.toHaveBeenCalled();
+
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-transcript-start")!.click();
+      await flush();
+
+      expect(transcribeAttachment).toHaveBeenCalledExactlyOnceWith(SESSION, VOICE_ID);
+      expect(view.element.querySelector(".wx-srv-transcript-pending")).not.toBeNull();
+      view.teardown();
+    });
+
+    it("a 401 on the request locks the chat", async () => {
+      usage(true);
+      transcribeAttachment.mockRejectedValue(new ServerLockedError());
+      getHistory.mockResolvedValue(emptyHistory({ messages: [voiceMessage()] }));
+      const hooks = fakeHooks();
+      const view = mount(hooks);
+      await view.attach(SESSION);
+      await flush();
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-transcript-start")!.click();
+      await flush();
+      expect(hooks.lockNow).toHaveBeenCalledWith("unauthorized");
+      view.teardown();
+    });
+
+    it("a transcript arriving over the stream never cuts off a note that is playing", async () => {
+      usage(true);
+      getHistory.mockResolvedValue(emptyHistory({ messages: [voiceMessage()] }));
+      const release = vi.fn();
+      const hooks: LockHooks = { suspend: vi.fn(() => release), lockNow: vi.fn() };
+      const view = mount(hooks);
+      await view.attach(SESSION);
+      await flush();
+
+      const bubble = view.element.querySelector<HTMLElement>('[data-message-seq="7"]')!;
+      const audio = view.element.querySelector<HTMLAudioElement>("audio")!;
+      const pause = vi.spyOn(audio, "pause").mockImplementation(() => {});
+      const load = vi.spyOn(audio, "load").mockImplementation(() => {});
+      Object.defineProperty(audio, "currentTime", { value: 3.5, writable: true });
+      audio.dispatchEvent(new Event("play"));
+
+      // pending (the other device asked), then done: each a NEW message object from the stream
+      view.handleStreamEvent({ type: "message_updated", message: voiceMessage({ status: "pending" }) });
+      expect(view.element.querySelector(".wx-srv-transcript-pending")).not.toBeNull();
+      view.handleStreamEvent({
+        type: "message_updated",
+        message: voiceMessage({ status: "done", text: "hello from the note" }),
+      });
+
+      expect(view.element.querySelector(".wx-srv-transcript-text")?.textContent).toBe("hello from the note");
+      expect(view.element.querySelector('[data-message-seq="7"]')).toBe(bubble);
+      expect(view.element.querySelector("audio")).toBe(audio);
+      expect(audio.currentTime).toBe(3.5);
+      expect(pause).not.toHaveBeenCalled();
+      expect(load).not.toHaveBeenCalled();
+      expect(release).not.toHaveBeenCalled();
+      expect(audio.getAttribute("src")).toBe("/voice?exp=1&sig=a");
+      view.teardown();
+    });
+
+    it("an update that changes more than the transcript still rebuilds the bubble", async () => {
+      usage(true);
+      getHistory.mockResolvedValue(emptyHistory({ messages: [voiceMessage()] }));
+      const view = mount();
+      await view.attach(SESSION);
+      await flush();
+      const bubble = view.element.querySelector('[data-message-seq="7"]')!;
+
+      view.handleStreamEvent({
+        type: "message_updated",
+        message: voiceMessage({ status: "done", text: "words" }, { text: "caption added" }),
+      });
+
+      expect(view.element.querySelector('[data-message-seq="7"]')).not.toBe(bubble);
+      expect(view.element.textContent).toContain("caption added");
+      expect(view.element.querySelector(".wx-srv-transcript-text")?.textContent).toBe("words");
+      view.teardown();
+    });
+
+    it("a failed transcript from the stream shows the error and Retry, and Retry asks again", async () => {
+      usage(true);
+      transcribeAttachment.mockResolvedValue({ kind: "started", transcript: { status: "pending" } });
+      getHistory.mockResolvedValue(emptyHistory({ messages: [voiceMessage()] }));
+      const view = mount();
+      await view.attach(SESSION);
+      await flush();
+
+      view.handleStreamEvent({ type: "message_updated", message: voiceMessage({ status: "failed" }) });
+      expect(view.element.querySelector(".wx-srv-transcript-error")?.textContent).toBe(
+        "Couldn't transcribe this voice note.",
+      );
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-transcript-retry")!.click();
+      await flush();
+      expect(transcribeAttachment).toHaveBeenCalledExactlyOnceWith(SESSION, VOICE_ID);
+      view.teardown();
+    });
+
+    it("Hide survives the next transcript-only update and a re-unlock's refreshed history", async () => {
+      usage(true);
+      getHistory.mockResolvedValue(
+        emptyHistory({ messages: [voiceMessage({ status: "done", text: "private words" })] }),
+      );
+      const view = mount();
+      await view.attach(SESSION);
+      await flush();
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-transcript-toggle")!.click();
+      expect(view.element.textContent).not.toContain("private words");
+
+      view.handleStreamEvent({
+        type: "message_updated",
+        message: voiceMessage({ status: "done", text: "private words" }),
+      });
+      expect(view.element.textContent).not.toContain("private words");
+
+      view.detach();
+      await view.attach(SESSION);
+      await flush();
+      expect(view.element.textContent).not.toContain("private words");
+      expect(view.element.querySelector(".wx-srv-transcript-toggle")?.textContent).toBe("Show transcript");
+      view.teardown();
+    });
+
+    describe("the New messages pill", () => {
+      async function mountScrolledUp(): Promise<ReturnType<typeof mount>> {
+        usage(true);
+        getHistory.mockResolvedValue(emptyHistory({ messages: [voiceMessage(null, { sender: "Purdy" })] }));
+        const view = mount();
+        await view.attach(SESSION);
+        await flush();
+        const thread = view.element.querySelector<HTMLElement>(".wx-srv-thread")!;
+        Object.defineProperty(thread, "scrollTop", { value: 0, configurable: true, writable: true });
+        Object.defineProperty(thread, "scrollHeight", { value: 2000, configurable: true });
+        Object.defineProperty(thread, "clientHeight", { value: 300, configurable: true });
+        thread.dispatchEvent(new Event("scroll")); // the reader is scrolled up
+        return view;
+      }
+      const pill = (view: ReturnType<typeof mount>) =>
+        view.element.querySelector<HTMLButtonElement>(".wx-srv-jump-pill")!;
+
+      it("is not raised by a transcript arriving on someone else's older note", async () => {
+        const view = await mountScrolledUp();
+        view.handleStreamEvent({
+          type: "message_updated",
+          message: voiceMessage({ status: "pending" }, { sender: "Purdy" }),
+        });
+        view.handleStreamEvent({
+          type: "message_updated",
+          message: voiceMessage({ status: "done", text: "words" }, { sender: "Purdy" }),
+        });
+        expect(pill(view).hidden).toBe(true);
+        view.teardown();
+      });
+
+      it("is still raised by a genuinely new message from someone else", async () => {
+        const view = await mountScrolledUp();
+        view.handleStreamEvent({
+          type: "message",
+          message: fakeMessage({ seq: 99, clientId: "c99", sender: "Purdy", text: "new" }),
+        });
+        expect(pill(view).hidden).toBe(false);
+        view.teardown();
+      });
+    });
+
+    it("a deleted message takes its transcript with it", async () => {
+      usage(true);
+      getHistory.mockResolvedValue(
+        emptyHistory({ messages: [voiceMessage({ status: "done", text: "gone soon" })] }),
+      );
+      const view = mount();
+      await view.attach(SESSION);
+      await flush();
+      expect(view.element.textContent).toContain("gone soon");
+      view.handleStreamEvent({ type: "message_deleted", seq: 7 });
+      expect(view.element.textContent).not.toContain("gone soon");
       view.teardown();
     });
   });

@@ -102,4 +102,57 @@ describe("server attachment rendering", () => {
     expect(audio.hasAttribute("src")).toBe(false);
     expect(video.hasAttribute("src")).toBe(false);
   });
+
+  describe("voice-note transcription control", () => {
+    const transcription = {
+      available: () => true,
+      request: vi.fn(),
+      markUnavailable: vi.fn(),
+      isHidden: () => false,
+      setHidden: vi.fn(),
+    };
+    const voiceNote: Attachment = {
+      ...base,
+      id: "v".repeat(32),
+      kind: "voice",
+      durationS: 3,
+      peaks: [0.5],
+      urls: { play: "/voice" },
+    };
+
+    it("adds a transcript block beneath each ready voice note when a context is supplied", () => {
+      const root = renderAttachments([voiceNote], { ...context(), transcription });
+      expect(Array.from(root.children).map((child) => child.className)).toEqual([
+        "wx-srv-voice",
+        "wx-srv-transcript",
+      ]);
+      expect(root.querySelector<HTMLElement>(".wx-srv-transcript")?.dataset["attachmentId"]).toBe(voiceNote.id);
+    });
+
+    it("renders no block without a context (older callers are unchanged)", () => {
+      const root = renderAttachments([voiceNote], context());
+      expect(root.querySelector(".wx-srv-transcript")).toBeNull();
+    });
+
+    it("never adds one for photos, video, or a voice note that is not ready", () => {
+      const root = renderAttachments(
+        [
+          base,
+          { ...base, id: "v2", kind: "video", urls: { play: "/video" } },
+          { ...voiceNote, id: "v3", status: "processing" },
+          { ...voiceNote, id: "v4", status: "failed" },
+        ],
+        { ...context(), transcription },
+      );
+      expect(root.querySelector(".wx-srv-transcript")).toBeNull();
+    });
+
+    it("seeds the block from the transcript the server sent", () => {
+      const root = renderAttachments(
+        [{ ...voiceNote, transcript: { status: "done", text: "seeded text" } }],
+        { ...context(), transcription },
+      );
+      expect(root.querySelector(".wx-srv-transcript-text")?.textContent).toBe("seeded text");
+    });
+  });
 });
