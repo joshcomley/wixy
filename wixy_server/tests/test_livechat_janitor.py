@@ -17,6 +17,12 @@ from wixy_server.storage import ProjectPaths
 
 _DAY_S = 24 * 60 * 60.0
 
+# A scrub the test expects to SUCCEED gets a generous deadline: success returns as soon as the WAL
+# is truncated, so the number is only ever spent by a machine stall (decision 00159). Tests that
+# expect a scrub to fail hold a blocking reader open, so they fail on state however long the
+# deadline is.
+_SCRUB_SUCCESS_DEADLINE_S = 30.0
+
 
 @pytest.fixture
 def store(tmp_path: Path) -> LiveChatStore:
@@ -464,7 +470,7 @@ class TestRunOnceIsIdempotent:
     def test_scrubber_resumes_a_durable_pending_marker(self, store: LiveChatStore) -> None:
         store.mark_scrub_pending()
 
-        assert janitor.scrub_once(store=store, deadline_s=1.0)
+        assert janitor.scrub_once(store=store, deadline_s=_SCRUB_SUCCESS_DEADLINE_S)
         assert not store.scrub_pending()
 
     def test_startup_sweep_removes_legacy_untracked_media_without_a_wipe_marker(
@@ -490,5 +496,5 @@ class TestRunOnceIsIdempotent:
         assert second_token != first_token
         assert not store.clear_scrub_pending(expected_token=first_token)
         assert store.scrub_pending()
-        assert janitor.scrub_once(store=store, deadline_s=1.0)
+        assert janitor.scrub_once(store=store, deadline_s=_SCRUB_SUCCESS_DEADLINE_S)
         assert not store.scrub_pending()

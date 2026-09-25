@@ -14,6 +14,12 @@ import pytest
 from wixy_server.livechat.models import AttachmentResult, PushSubscriptionRow, UploadRow
 from wixy_server.livechat.store import LiveChatStore, UnusableAttachmentError
 
+# A scrub the test expects to SUCCEED gets a generous deadline: success returns as soon as the WAL
+# is truncated, so the number is only ever spent by a machine stall (decision 00159). Tests that
+# expect a scrub to fail hold a blocking reader open, so they fail on state however long the
+# deadline is.
+_SCRUB_SUCCESS_DEADLINE_S = 30.0
+
 
 @pytest.fixture
 def db_path(tmp_path: Path) -> Path:
@@ -712,7 +718,7 @@ class TestDeleteAndWipe:
             return real_stat(path, follow_symlinks=follow_symlinks)
 
         monkeypatch.setattr(Path, "stat", deny_once)
-        assert store.scrub(deadline_s=1.0)
+        assert store.scrub(deadline_s=_SCRUB_SUCCESS_DEADLINE_S)
         assert denied
 
     def test_complete_passive_checkpoint_can_leave_deleted_text_in_wal(
