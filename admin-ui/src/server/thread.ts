@@ -305,6 +305,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     accept: "image/*,video/*",
     acceptFile: (file) => file.type.startsWith("image/") || file.type.startsWith("video/"),
     onFilePickerOpen: () => hooks.suspend("filePicker"),
+    // Sending never disables, blurs or resizes the input (operator report, round 2): the box is
+    // cleared at once by `takeDraft()` and the draft comes back on a failed send.
+    keepInputLive: true,
     extraButtons: [recordButton, cancelRecordingButton, recordingStatus],
     renderChipPreview: (file, previewUrl) => {
       if (file.type.startsWith("image/")) {
@@ -932,28 +935,18 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
 
   // -- Send / echo reconciliation ---------------------------------------------
 
-  /** `composer.setBusy(true)` disables the textarea for the duration of a send, and disabling a
-   * focused element drops its focus; re-enabling it never gives the focus back. So the caret
-   * vanished after every Send and the next message needed a tap or click first (operator report,
-   * 2026-09-25). Give it back once the send settles - on success (after the text is cleared) and
-   * on failure (the typed text is still there to retry) - but only while focus is still "lost":
-   * on the body, or on the composer's own controls (a click on Send moves focus to that button
-   * first). If the user moved to something else meanwhile (the settings gear, a message menu),
-   * that is theirs and is left alone. */
-  function restoreComposerFocus(): void {
-    const active = documentRef.activeElement;
-    if (active === null || active === documentRef.body || composer.element.contains(active)) {
-      composer.focus();
-    }
-  }
-
   function send(): void {
     if (currentSession === null) return;
     const session = currentSession;
     const requestGeneration = contentGeneration;
-    const text = composer.text();
+    // Lift the text and attachments out and clear the box at once: the optimistic echo below
+    // already says "sending...", so the input itself never needs a busy state. It is never
+    // disabled, blurred or resized (a disabled input drops focus, which on a phone closes and
+    // reopens the soft keyboard - the flicker the operator reported), and a failed send gets
+    // its draft back via `restoreDraft`.
+    const draft = composer.takeDraft();
+    const text = draft.text;
     composer.setBusy(true);
-    composer.setError(null);
     // §5.3: clientId is 8-64 chars — a single UUID (36 chars) both stays in
     // range and is already globally unique on its own; concatenating the
     // deviceId in front (measured live: 73 chars) blew the 64-char cap and
@@ -971,7 +964,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       sender: identity.getName() ?? "",
       deviceId: identity.getDeviceId(),
       text: text === "" ? null : text,
-      attachmentIds: composer.attachmentIds(),
+      attachmentIds: [...draft.attachmentIds],
     })
       .then((result) => {
         composer.setBusy(false);
@@ -979,31 +972,32 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           if (pendingClientId === clientId) pendingClientId = null;
           pendingEchoes = pendingEchoes.filter((e) => e.clientId !== clientId);
           renderThreadList(false);
+          if (result.ok) composer.discardDraft(draft);
+          else composer.restoreDraft(draft);
           return;
         }
         if (result.ok) {
           pendingClientId = null;
-          composer.reset();
+          composer.discardDraft(draft);
           addConfirmed(result.message);
           renderThreadList();
-          restoreComposerFocus();
           return;
         }
         pendingEchoes = pendingEchoes.filter((e) => e.clientId !== clientId);
         renderThreadList();
+        composer.restoreDraft(draft);
         composer.setError(result.kind === "invalid" ? result.detail : "Couldn't send — retry.");
-        restoreComposerFocus();
       })
       .catch((error: unknown) => {
+        composer.setBusy(false);
+        composer.restoreDraft(draft);
         if (error instanceof ServerLockedError) {
           hooks.lockNow("unauthorized");
           return;
         }
-        composer.setBusy(false);
         pendingEchoes = pendingEchoes.filter((e) => e.clientId !== clientId);
         renderThreadList();
         composer.setError(error instanceof Error ? error.message : "Couldn't send — retry.");
-        restoreComposerFocus();
       });
   }
 

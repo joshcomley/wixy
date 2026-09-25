@@ -65,6 +65,13 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   sheet.setAttribute("role", "dialog");
   sheet.setAttribute("aria-modal", "true");
   sheet.setAttribute("aria-label", "Server settings");
+  // Focusing a real text input on open pops a phone's soft keyboard the instant the sheet
+  // appears, before the owner has chosen to edit anything (operator report, round 2). Standard
+  // dialog-open focus practice, and the same pattern pinPad.ts already uses: a `tabIndex=-1`
+  // element is programmatically focusable (keeps Escape/focus-trap semantics working, and a
+  // screen reader still announces the dialog) but never invites the keyboard, since it isn't
+  // text-editable. Tapping into the name field afterwards still focuses and edits it normally.
+  sheet.tabIndex = -1;
 
   const header = documentRef.createElement("div");
   header.className = "wx-srv-sheet-header";
@@ -377,7 +384,7 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
             if (unknownWipeNeedsCheck()) startScrubPolling(session, true);
           });
       }
-      nameInput.focus();
+      sheet.focus();
     },
     close,
     teardown(): void {
