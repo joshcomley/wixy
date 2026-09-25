@@ -408,6 +408,23 @@
   box-shadow: var(--wx-shadow);
 }
 
+/* commit 9a8d8be made `.wx-srv-bubble-theirs`'s `align-self: flex-start`
+   actually take effect (the message list is now a real flex column), so a
+   short incoming bubble now shrink-wraps to its content instead of always
+   being ~80% of the card wide. The menu above still anchors 10rem (160px)
+   LEFTWARD of the bubble's own right edge unconditionally - fine for a wide
+   bubble, but a narrow "theirs" bubble's right edge can now be well under
+   160px from the card's left edge, pushing the whole menu off-screen with
+   no way to reach it. Anchor it from the LEFT edge instead for their
+   bubbles only (which hug the card's own left edge), so it extends
+   rightward into the card instead. `.wx-srv-bubble-mine` is unaffected: its
+   right edge sits near the card's right edge, so the existing right:0
+   anchor already stays on-screen. */
+.wx-srv-bubble-theirs .wx-srv-message-actions {
+  left: 0;
+  right: auto;
+}
+
 .wx-srv-message-actions[hidden],
 .wx-srv-message-delete-confirm[hidden],
 .wx-srv-message-action-error[hidden] {
