@@ -66,6 +66,15 @@ class MessageRow:
     text: str | None
     created_at: float
     attachments: tuple[AttachmentRow, ...] = ()
+    reply_to_seq: int | None = None
+    """The stored `messages.reply_to_seq` column — the ONLY thing a reply
+    persists (round 2 ruling item 10 §(2)). `None` for an ordinary message, or
+    for a reply whose target has since been deleted (`ON DELETE SET NULL`)."""
+    reply_to: "MessageRow | None" = None
+    """The target row, resolved at READ time in the same transaction as this
+    message (never stored, never copied) — `None` when `reply_to_seq` is
+    `None`. Loaded ONE LEVEL ONLY: a target's own `reply_to` is always `None`
+    here, so a quote never shows the target's own quote."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +145,57 @@ def attachment_json(row: AttachmentRow, signer: MediaUrlSigner) -> JsonObject:
     }
 
 
+_REPLY_QUOTE_TEXT_MAX_CODEPOINTS = 300
+"""Round 2 ruling item 10 §(3): a quote's text snippet is the target's own text
+cut to 300 Unicode CODE POINTS — Python `str` indexing is already codepoint-safe
+(never splits a surrogate pair), matching the TS side's `Array.from(text).
+slice(0, 300).join("")`."""
+
+
+def _reply_quote_media_json(
+    attachments: tuple[AttachmentRow, ...], signer: MediaUrlSigner
+) -> JsonObject | None:
+    """§(3)'s `media` member of a quote — `null` for a text-only target, else a
+    summary built from the target's OWN attachment rows (never a copy stored on
+    the reply). `thumbUrl` is minted fresh here, per response, exactly like
+    `attachment_json`'s own `urls` — never precomputed or stored."""
+    if not attachments:
+        return None
+    kinds = {a.kind for a in attachments}
+    kind = next(iter(kinds)) if len(kinds) == 1 else "mixed"
+    count = len(attachments)
+    first = attachments[0]
+    duration_s = first.duration_s if count == 1 else None
+    thumb_url: str | None = None
+    if first.status == "ready":
+        rendition = "thumb" if first.kind == "photo" else "poster" if first.kind == "video" else None
+        if rendition is not None and rendition in first.renditions:
+            thumb_url = signer.url_for(first.id, rendition)
+    return {"kind": kind, "count": count, "durationS": duration_s, "thumbUrl": thumb_url}
+
+
+def reply_to_json(target: MessageRow | None, signer: MediaUrlSigner) -> JsonObject | None:
+    """§(3)'s `replyTo` member of the `Message` wire shape — built fresh from
+    the LIVE target row every time (never a stored copy, per Inv 46/Inv 40's
+    erasure guarantee: deleting the target makes this `null` everywhere it was
+    quoted, with no chat-visible tombstone)."""
+    if target is None:
+        return None
+    text = target.text
+    snippet = text
+    truncated = False
+    if text is not None and len(text) > _REPLY_QUOTE_TEXT_MAX_CODEPOINTS:
+        snippet = text[:_REPLY_QUOTE_TEXT_MAX_CODEPOINTS]
+        truncated = True
+    return {
+        "seq": target.seq,
+        "sender": target.sender,
+        "text": snippet,
+        "truncated": truncated,
+        "media": _reply_quote_media_json(target.attachments, signer),
+    }
+
+
 def message_json(row: MessageRow, signer: MediaUrlSigner) -> JsonObject:
     """§5.9's `Message` wire shape."""
     return {
@@ -145,4 +205,5 @@ def message_json(row: MessageRow, signer: MediaUrlSigner) -> JsonObject:
         "text": row.text,
         "attachments": [attachment_json(a, signer) for a in row.attachments],
         "createdAt": row.created_at,
+        "replyTo": reply_to_json(row.reply_to, signer),
     }
