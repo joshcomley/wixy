@@ -117,14 +117,16 @@ for (const viewport of VIEWPORTS) {
       await input.click();
       await input.fill(marker);
       await input.press("Enter");
-      await expect(input).toBeDisabled();
+      // The send never disables the input (that was the flicker bug); the optimistic echo
+      // bubble is what proves the send is genuinely still in flight.
+      await expect(page.locator(".wx-srv-bubble-mine.wx-srv-echo", { hasText: marker })).toHaveCount(1);
+      await expect(input).toHaveValue("");
       // The user moves to the settings gear while the message is still sending.
       const gear = page.locator(".wx-srv-settings-button");
       await gear.focus();
       await expect(gear).toBeFocused();
       release();
       await expect(confirmedBubble(page, marker)).toHaveCount(1);
-      await expect(input).toBeEnabled();
       await expect(gear).toBeFocused();
     });
   });

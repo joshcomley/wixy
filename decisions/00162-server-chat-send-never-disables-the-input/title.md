@@ -1,0 +1,1 @@
+Sending a Server chat message no longer disables, blurs or resizes the input at all (the earlier "restore focus after" fix only masked the flicker); opening Settings no longer pops the phone keyboard on its own
