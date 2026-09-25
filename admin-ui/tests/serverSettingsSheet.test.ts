@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mountServerSettingsSheet } from "../src/server/settingsSheet";
-import { ServerErasureOutcomeUnknownError, ServerWipeNotCommittedError } from "../src/server/api/http";
+import {
+  ServerErasureOutcomeUnknownError,
+  ServerLockedError,
+  ServerWipeAbandonedError,
+  ServerWipeNotCommittedError,
+} from "../src/server/api/http";
 import type { ServerIdentity } from "../src/server/identity";
 import type { LockHooks, ServerSession } from "../src/server/types";
 
@@ -223,6 +228,64 @@ describe("mountServerSettingsSheet wipe confirmation", () => {
     expect(view.element.textContent).toContain("Couldn't confirm — checking…");
     expect(view.element.textContent).not.toContain("Deleted. Erasing leftover traces…");
     view.teardown();
+  });
+
+  describe("a wipe that ends without an answer (L4, L5)", () => {
+    async function submitWipeThatEnds(
+      end: (announceUnknown: () => void) => Promise<boolean>,
+    ): Promise<{ view: ReturnType<typeof mountServerSettingsSheet>; lockNow: ReturnType<typeof vi.fn> }> {
+      const sheetHooks = hooks();
+      const view = mountServerSettingsSheet({
+        identity: identity(),
+        hooks: sheetHooks,
+        win: window,
+        getSession: () => SESSION,
+        onWipe: end,
+        onNameChanged: vi.fn(),
+        onClose: vi.fn(),
+      });
+      document.body.appendChild(view.element);
+      view.open();
+      await flush();
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-sheet-wipe")?.click();
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-sheet-wipe-confirm-button")?.click();
+      await flush();
+      await flush();
+      return { view, lockNow: sheetHooks.lockNow as ReturnType<typeof vi.fn> };
+    }
+    const wipeButton = (view: { element: HTMLElement }) =>
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-sheet-wipe");
+    const statusHidden = (view: { element: HTMLElement }) =>
+      view.element.querySelector<HTMLElement>(".wx-srv-sheet-wipe-status")?.hidden;
+
+    it("a 401 while the outcome was unconfirmed locks AND resets the wipe control (L4)", async () => {
+      // The thread announces the unknown outcome, then its reconciliation hits a 401.
+      const { view, lockNow } = await submitWipeThatEnds((announceUnknown) => {
+        announceUnknown();
+        return Promise.reject(new ServerLockedError());
+      });
+
+      expect(lockNow).toHaveBeenCalledWith("unauthorized");
+      // Not left disabled on 'checking' for the next unlock to find (it used to self-heal
+      // only on reopen).
+      expect(wipeButton(view)?.disabled).toBe(false);
+      expect(statusHidden(view)).toBe(true);
+      view.teardown();
+    });
+
+    it("an abandoned reconciliation (a lock) resets quietly: no error line, control usable (L5)", async () => {
+      const { view, lockNow } = await submitWipeThatEnds((announceUnknown) => {
+        announceUnknown();
+        return Promise.reject(new ServerWipeAbandonedError());
+      });
+
+      expect(lockNow).not.toHaveBeenCalled(); // an abandon is not a lock trigger
+      expect(wipeButton(view)?.disabled).toBe(false);
+      expect(statusHidden(view)).toBe(true);
+      expect(view.element.querySelector<HTMLElement>(".wx-srv-sheet-wipe-error")?.hidden).toBe(true);
+      expect(view.element.querySelector<HTMLElement>(".wx-srv-sheet-wipe-confirm")?.hidden).toBe(true);
+      view.teardown();
+    });
   });
 
   describe("an unknown wipe outcome from a provider with no reconciler (F16)", () => {

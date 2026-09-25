@@ -749,7 +749,11 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
    * down. Resolves `true` (committed; the caller polls the erasure) or rejects with
    * `ServerWipeNotCommittedError` / `ServerLockedError` / `ServerWipeAbandonedError`,
    * which is what lets the settings sheet leave its "checking" state for good. */
-  function reconcileUnknownWipe(session: ServerSession, wipeBoundarySeq: number): Promise<boolean> {
+  function reconcileUnknownWipe(
+    session: ServerSession,
+    wipeBoundarySeq: number,
+    boundaryKnown: boolean,
+  ): Promise<boolean> {
     endWipeReconcile("abandoned");
     return new Promise<boolean>((resolve, reject) => {
       let finished = false;
@@ -789,7 +793,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         }
         if (finished) return;
 
-        if (history.some((message) => message.seq <= wipeBoundarySeq)) {
+        // The boundary is the newest message seq the client KNEW about. If the history never
+        // loaded, that is 0 and "nothing at or before it" is vacuously true, so a wipe that
+        // never committed would be reported as deleted while messages remain. With an
+        // unknown boundary the only safe proof of a commit is an EMPTY history (L3).
+        const notCommitted = boundaryKnown
+          ? history.some((message) => message.seq <= wipeBoundarySeq)
+          : history.length > 0;
+        if (notCommitted) {
           for (const message of history) addConfirmed(message);
           hasMoreHistory = false;
           renderThreadList(false);
@@ -816,13 +827,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     if (session === null) throw new Error("The server chat is locked.");
     const requestGeneration = contentGeneration;
     const wipeBoundarySeq = latestKnownMessageSeq;
+    const boundaryKnown = historyLoaded;
     let erasurePending: boolean;
     try {
       erasurePending = await wipeChat(session);
     } catch (error) {
       if (error instanceof ServerErasureOutcomeUnknownError) {
         onOutcomeUnknown?.();
-        return reconcileUnknownWipe(session, wipeBoundarySeq);
+        return reconcileUnknownWipe(session, wipeBoundarySeq, boundaryKnown);
       }
       throw error;
     }

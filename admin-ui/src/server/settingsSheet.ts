@@ -309,6 +309,11 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
       })
       .catch((error: unknown) => {
         if (error instanceof ServerLockedError) {
+          // Same reset as an abandoned reconciliation: the next unlock finds a normal
+          // sheet, not a wipe control stuck on "checking" (L4).
+          wipeOutcomeUnknown = false;
+          wipeButton.disabled = false;
+          wipeStatus.hidden = true;
           hooks.lockNow("unauthorized");
           return;
         }

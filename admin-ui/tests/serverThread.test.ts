@@ -1175,6 +1175,79 @@ describe("mountServerThread", () => {
         }
       });
 
+      // L5 (reviewer): behaviours that were correct but unpinned (mutants survived).
+      it("backs off 1, 2, 4, 8 s and then holds at a 15 s cap (not doubling forever)", async () => {
+        getHistory
+          .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ text: "old before wipe" })] }))
+          .mockRejectedValue(new Error("offline"));
+        const wipe = await startUnconfirmedWipe();
+        const reconciliations = () => getHistory.mock.calls.length - 1; // minus the attach load
+        expect(reconciliations()).toBe(1); // immediately
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(reconciliations()).toBe(2);
+        await vi.advanceTimersByTimeAsync(2_000);
+        expect(reconciliations()).toBe(3);
+        await vi.advanceTimersByTimeAsync(4_000);
+        expect(reconciliations()).toBe(4);
+        await vi.advanceTimersByTimeAsync(8_000);
+        expect(reconciliations()).toBe(5); // t = 15 s
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(reconciliations()).toBe(6); // capped: +15 s, not +16 s
+        await vi.advanceTimersByTimeAsync(14_999);
+        expect(reconciliations()).toBe(6);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(reconciliations()).toBe(7); // and again +15 s
+        wipe.sheet.teardown();
+        wipe.view.teardown();
+      });
+
+      it("teardown abandons the reconciliation: no more requests, and the caller is told", async () => {
+        getHistory
+          .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ text: "old before wipe" })] }))
+          .mockRejectedValue(new Error("offline"));
+        const identity = fakeIdentity();
+        const view = mountServerThread({ identity, hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+        await view.attach(SESSION);
+        wipeChat.mockRejectedValue(new ServerErasureOutcomeUnknownError());
+        const outcome = view.wipe().then(
+          () => "resolved",
+          (error: unknown) => (error as Error).name,
+        );
+        await vi.advanceTimersByTimeAsync(3_000);
+        const callsBefore = getHistory.mock.calls.length;
+
+        view.teardown();
+
+        await expect(outcome).resolves.toBe("ServerWipeAbandonedError");
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(getHistory.mock.calls.length).toBe(callsBefore);
+        expect(wipeChat).toHaveBeenCalledOnce();
+      });
+
+      it("a history response that lands AFTER a wiped event cannot resurrect the messages", async () => {
+        let resolveHistory!: (page: HistoryPage) => void;
+        getHistory
+          .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ seq: 1, text: "old before wipe" })] }))
+          .mockImplementationOnce(() => new Promise<HistoryPage>((resolve) => { resolveHistory = resolve; }));
+        const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+        await view.attach(SESSION);
+        wipeChat.mockRejectedValue(new ServerErasureOutcomeUnknownError());
+        const outcome = view.wipe().then(
+          (value) => ({ resolved: value }),
+          (error: unknown) => ({ rejected: (error as Error).name }),
+        );
+        await vi.advanceTimersByTimeAsync(0); // the first reconciliation request is now in flight
+
+        view.handleStreamEvent({ type: "wiped" } as ServerStreamEvent);
+        await expect(outcome).resolves.toEqual({ resolved: true });
+        // The stale answer (snapshotted BEFORE the wipe) arrives late: it must be ignored.
+        resolveHistory(emptyHistory({ messages: [fakeMessage({ seq: 1, text: "old before wipe" })] }));
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(view.element.textContent).not.toContain("old before wipe");
+        view.teardown();
+      });
+
       it("keeps retrying the reconciliation with backoff, never the wipe, and stays 'checking' meanwhile", async () => {
         getHistory
           .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ text: "old before wipe" })] }))
@@ -1288,6 +1361,51 @@ describe("mountServerThread", () => {
         expect(wipe.statusHidden()).toBe(true);
         wipe.sheet.teardown();
         wipe.view.teardown();
+      });
+    });
+
+    // L3 (reviewer): the wipe boundary is the newest seq the client KNEW about. When the
+    // history never loaded it is 0, so "nothing at or before 0" was vacuously true and a
+    // wipe that never committed was reported as deleted while messages remained.
+    describe("an unknown wipe boundary (L3)", () => {
+      it("history never loaded + messages still there: NOT reported as deleted", async () => {
+        getHistory
+          .mockRejectedValueOnce(new Error("offline")) // the attach load fails: boundary unknown
+          .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ seq: 5, text: "still here" })] }));
+        wipeChat.mockRejectedValue(new ServerErasureOutcomeUnknownError());
+        const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+        await view.attach(SESSION);
+
+        await expect(view.wipe()).rejects.toMatchObject({ name: "ServerWipeNotCommittedError" });
+
+        expect(view.element.textContent).toContain("still here");
+        expect(wipeChat).toHaveBeenCalledOnce();
+        view.teardown();
+      });
+
+      it("history never loaded + nothing left: the wipe did commit", async () => {
+        getHistory
+          .mockRejectedValueOnce(new Error("offline"))
+          .mockResolvedValueOnce(emptyHistory());
+        wipeChat.mockRejectedValue(new ServerErasureOutcomeUnknownError());
+        const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+        await view.attach(SESSION);
+
+        await expect(view.wipe()).resolves.toBe(true);
+        view.teardown();
+      });
+
+      it("history loaded but EMPTY: a message that appears afterwards is newer, so it is a commit", async () => {
+        getHistory
+          .mockResolvedValueOnce(emptyHistory())
+          .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ seq: 5, text: "sent after the wipe" })] }));
+        wipeChat.mockRejectedValue(new ServerErasureOutcomeUnknownError());
+        const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+        await view.attach(SESSION);
+
+        await expect(view.wipe()).resolves.toBe(true);
+        expect(view.element.textContent).toContain("sent after the wipe");
+        view.teardown();
       });
     });
 
