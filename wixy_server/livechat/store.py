@@ -45,8 +45,10 @@ from wixy_server.livechat.models import (
     EventRow,
     MessageRow,
     PushSubscriptionRow,
+    ReactionSummary,
     UploadRow,
 )
+from wixy_server.livechat.reactions import reaction_order, reactor_key
 
 _SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS messages(
@@ -118,7 +120,23 @@ CREATE TABLE IF NOT EXISTS pending_scrub(
   token TEXT NOT NULL);
 """
 
-_LATEST_SCHEMA_VERSION = 6
+# `ON DELETE CASCADE` is load-bearing (decisions/00164): every connection runs
+# with foreign_keys=ON, and during a blue/green overlap an OLDER process that knows
+# nothing about this table can still hard-delete a message. Without the cascade that
+# delete would die on a foreign-key error; with it, the reactions go with the message and
+# `secure_delete` zeroes them like any other deleted row (Inv 46).
+_SCHEMA_V7_REACTIONS = """
+CREATE TABLE IF NOT EXISTS reactions(
+  message_seq INTEGER NOT NULL REFERENCES messages(seq) ON DELETE CASCADE,
+  sender_key TEXT NOT NULL,
+  sender TEXT NOT NULL,
+  emoji TEXT NOT NULL,
+  by_email TEXT,
+  created_at REAL NOT NULL,
+  PRIMARY KEY(message_seq, sender_key, emoji));
+"""
+
+_LATEST_SCHEMA_VERSION = 7
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -138,6 +156,15 @@ class UnusableAttachmentError(LiveChatStoreError):
             "(unknown, already attached to a message, or failed processing)"
         )
         self.attachment_id = attachment_id
+
+
+class MessageNotFoundError(LiveChatStoreError):
+    """The message a request targets does not exist (never did, or was hard-deleted).
+    `routes_livechat.py` maps this to 404, never a 500."""
+
+    def __init__(self, seq: int) -> None:
+        super().__init__(f"message {seq} does not exist")
+        self.seq = seq
 
 
 def _row_to_attachment(row: sqlite3.Row) -> AttachmentRow:
@@ -163,7 +190,11 @@ def _row_to_attachment(row: sqlite3.Row) -> AttachmentRow:
     )
 
 
-def _row_to_message(row: sqlite3.Row, attachments: tuple[AttachmentRow, ...]) -> MessageRow:
+def _row_to_message(
+    row: sqlite3.Row,
+    attachments: tuple[AttachmentRow, ...],
+    reactions: tuple[ReactionSummary, ...] = (),
+) -> MessageRow:
     return MessageRow(
         seq=row["seq"],
         client_id=row["client_id"],
@@ -173,6 +204,7 @@ def _row_to_message(row: sqlite3.Row, attachments: tuple[AttachmentRow, ...]) ->
         text=row["text"],
         created_at=row["created_at"],
         attachments=attachments,
+        reactions=reactions,
     )
 
 
@@ -225,12 +257,37 @@ def _load_attachments_for(
     return by_message
 
 
+def _load_reactions_for(
+    conn: sqlite3.Connection, message_seqs: Sequence[int]
+) -> dict[int, tuple[ReactionSummary, ...]]:
+    """Reactions grouped per message and emoji: allowlist order across emoji, oldest
+    reaction first within one emoji."""
+    if not message_seqs:
+        return {}
+    by_message: dict[int, dict[str, list[str]]] = {seq: {} for seq in message_seqs}
+    placeholders = ",".join("?" for _ in message_seqs)
+    rows = conn.execute(
+        "SELECT message_seq, emoji, sender FROM reactions "
+        f"WHERE message_seq IN ({placeholders}) ORDER BY created_at, rowid",
+        tuple(message_seqs),
+    ).fetchall()
+    for row in rows:
+        by_message[row["message_seq"]].setdefault(row["emoji"], []).append(row["sender"])
+    return {
+        seq: tuple(
+            ReactionSummary(emoji=emoji, senders=tuple(senders))
+            for emoji, senders in sorted(emojis.items(), key=lambda item: reaction_order(item[0]))
+        )
+        for seq, emojis in by_message.items()
+    }
+
+
 def _load_message(conn: sqlite3.Connection, seq: int) -> MessageRow:
     row = conn.execute("SELECT * FROM messages WHERE seq = ?", (seq,)).fetchone()
     if row is None:
         raise KeyError(seq)
     attachments = _load_attachments_for(conn, [seq])[seq]
-    return _row_to_message(row, tuple(attachments))
+    return _row_to_message(row, tuple(attachments), _load_reactions_for(conn, [seq])[seq])
 
 
 _JOURNAL_MODE_SWITCH_RETRIES = 50
@@ -341,6 +398,13 @@ class LiveChatStore:
                     if statement.strip():
                         conn.execute(statement)
                 conn.execute("PRAGMA user_version = 6")
+                current = 6
+
+            if current < 7:
+                for statement in _SCHEMA_V7_REACTIONS.split(";"):
+                    if statement.strip():
+                        conn.execute(statement)
+                conn.execute("PRAGMA user_version = 7")
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
@@ -469,8 +533,13 @@ class LiveChatStore:
             ascending_rows = list(reversed(rows[:limit]))
             seqs = [row["seq"] for row in ascending_rows]
             attachments_by_seq = _load_attachments_for(conn, seqs)
+            reactions_by_seq = _load_reactions_for(conn, seqs)
             messages = [
-                _row_to_message(row, tuple(attachments_by_seq[row["seq"]]))
+                _row_to_message(
+                    row,
+                    tuple(attachments_by_seq[row["seq"]]),
+                    reactions_by_seq[row["seq"]],
+                )
                 for row in ascending_rows
             ]
             cursor_row = conn.execute("SELECT MAX(event_seq) AS m FROM events").fetchone()
@@ -487,13 +556,67 @@ class LiveChatStore:
             ).fetchall()
             by_seq = {row["seq"]: row for row in rows}
             attachments_by_seq = _load_attachments_for(conn, list(by_seq.keys()))
+            reactions_by_seq = _load_reactions_for(conn, list(by_seq.keys()))
             result: list[MessageRow] = []
             for seq in seqs:
                 row = by_seq.get(seq)
                 if row is None:
                     continue
-                result.append(_row_to_message(row, tuple(attachments_by_seq[seq])))
+                result.append(
+                    _row_to_message(row, tuple(attachments_by_seq[seq]), reactions_by_seq[seq])
+                )
             return result
+
+    def set_reaction(
+        self,
+        *,
+        seq: int,
+        sender: str,
+        by_email: str | None,
+        emoji: str,
+        reacted: bool,
+        now: float,
+    ) -> tuple[MessageRow, bool]:
+        """Set (not toggle) one reactor's emoji on one message — a retry after a dropped
+        response therefore cannot flip it back. Returns the current message and whether
+        anything changed; only a real change appends the `message_updated` event. The
+        caller has already validated `emoji` (allowlist) and `sender` (POST /messages rules).
+        """
+        key = reactor_key(sender)
+        with self._write_txn() as conn:
+            if conn.execute("SELECT 1 FROM messages WHERE seq = ?", (seq,)).fetchone() is None:
+                raise MessageNotFoundError(seq)
+            try:
+                if reacted:
+                    changed = (
+                        conn.execute(
+                            "INSERT OR IGNORE INTO reactions "
+                            "(message_seq, sender_key, sender, emoji, by_email, created_at) "
+                            "VALUES (?, ?, ?, ?, ?, ?)",
+                            (seq, key, sender.strip(), emoji, by_email, now),
+                        ).rowcount
+                        > 0
+                    )
+                else:
+                    changed = (
+                        conn.execute(
+                            "DELETE FROM reactions "
+                            "WHERE message_seq = ? AND sender_key = ? AND emoji = ?",
+                            (seq, key, emoji),
+                        ).rowcount
+                        > 0
+                    )
+            except sqlite3.IntegrityError as exc:
+                # The row was checked above under this write lock, so this is only a
+                # backstop: a message that vanished is "not found", never a 500.
+                raise MessageNotFoundError(seq) from exc
+            if changed:
+                conn.execute(
+                    "INSERT INTO events (type, message_seq, created_at) "
+                    "VALUES ('message_updated', ?, ?)",
+                    (seq, now),
+                )
+            return _load_message(conn, seq), changed
 
     def events_after(self, cursor: int, limit: int = 200) -> list[EventRow]:
         with self._read_txn() as conn:

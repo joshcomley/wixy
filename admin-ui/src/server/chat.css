@@ -380,6 +380,62 @@
   align-self: flex-end;
 }
 
+/* -- Reactions ------------------------------------------------------------ */
+
+.wx-srv-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.wx-srv-reactions[hidden] {
+  display: none;
+}
+
+.wx-srv-reaction-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 1.75rem;
+  padding: 2px 8px;
+  border: 1px solid var(--wx-border);
+  border-radius: 999px;
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font: 600 0.75rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.wx-srv-reaction-chip:focus-visible {
+  outline: 2px solid var(--wx-brand-blue-text);
+  outline-offset: 1px;
+}
+
+.wx-srv-reaction-emoji {
+  font-size: 0.9375rem;
+  line-height: 1;
+}
+
+.wx-srv-reaction-mine {
+  border-color: var(--wx-brand-blue-text);
+  background: var(--wx-brand-blue-tint);
+  color: var(--wx-brand-blue-text);
+}
+
+.wx-srv-reaction-pending {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.wx-srv-reaction-error {
+  flex: 1 0 100%;
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--wx-danger-text);
+}
+
 .wx-srv-message-actions-trigger {
   position: absolute;
   z-index: 2;
@@ -463,6 +519,30 @@
 .wx-srv-message-actions button:hover,
 .wx-srv-message-actions button:focus-visible {
   background: var(--wx-canvas);
+}
+
+/* The emoji row at the top of the menu: round 36px buttons that wrap inside the menu's own
+   width, so on a narrow phone the six still fit without overflowing the card. */
+.wx-srv-message-reactions-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-width: 15rem;
+}
+
+.wx-srv-message-actions button.wx-srv-message-react {
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border-radius: 50%;
+  text-align: center;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.wx-srv-message-actions button.wx-srv-message-react-on {
+  background: var(--wx-brand-blue-tint);
+  box-shadow: inset 0 0 0 1px var(--wx-brand-blue-text);
 }
 
 .wx-srv-message-delete-confirm p,
