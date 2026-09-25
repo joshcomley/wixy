@@ -818,3 +818,71 @@
   border-color: var(--wx-danger);
   color: var(--wx-danger-text);
 }
+
+/* -- Per-device lock preferences (03-permanent-unlock.md §4, §8) -------------------------
+   "Keep this device unlocked", "Sign out other devices" and the two "lock when I..." rows
+   reuse the auto-lock row's full-width, 44px-tall checkbox layout. */
+
+.wx-srv-sheet-keep,
+.wx-srv-sheet-lockprefs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* A row that cannot be used right now (auto-lock while the device is kept unlocked; the
+   screen-lock box in a browser that cannot report one): greyed and not clickable. */
+.wx-srv-sheet-row-disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.wx-srv-sheet-row-disabled .wx-srv-sheet-idle-input {
+  cursor: default;
+}
+
+.wx-srv-sheet-note {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--wx-muted);
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-sheet-note[hidden],
+.wx-srv-sheet-keep-pad[hidden] {
+  display: none;
+}
+
+/* The inline PIN pad is the same component as the unlock pad; inside the sheet it sits in
+   the flow instead of floating, so drop its own shadow and centre it. */
+.wx-srv-sheet-keep-pad {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.wx-srv-sheet-keep-pad .wx-srv-pinpad {
+  margin: 0;
+  box-shadow: none;
+}
+
+.wx-srv-sheet-signout {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--wx-muted);
+  font: inherit;
+  font-size: 0.8125rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.wx-srv-sheet-signout:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

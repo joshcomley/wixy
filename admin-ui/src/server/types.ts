@@ -21,7 +21,13 @@ export type SuspendReason = "recording" | "micPermission" | "filePicker" | "medi
 
 /** R6 — every distinct trigger that can force an instant lock (all eight of
  * R6's bullets except "a page reload", which needs no cause: unlock state is
- * never persisted, so a reload always starts fresh at the decoy). */
+ * never persisted, so a reload always starts fresh at the decoy — unless the
+ * device has "Keep this device unlocked" on, in which case the panel mints a
+ * fresh token from its device grant, `deviceGrant.ts`).
+ *
+ * `screenLock` (spec/server-chat/03-permanent-unlock.md §8) is the screen
+ * being locked while the page is still visible (a desktop Win+L), reported by
+ * the Idle Detection API. */
 export type LockCause =
   | "idle"
   | "panic"
@@ -30,7 +36,8 @@ export type LockCause =
   | "hidden"
   | "routeAway"
   | "unauthorized"
-  | "expired";
+  | "expired"
+  | "screenLock";
 
 /** The callback surface `panel.ts` hands to the mounted `ServerChatView` (and
  * anything it in turn mounts — uploader, recorder, media renderer) so those
@@ -70,7 +77,14 @@ export interface ServerApi {
 export interface ServerChatView {
   readonly element: HTMLElement;
   /** The panel has just inserted `element` into the document (unlocked) —
-   * load history / resume the live stream. */
+   * load history / resume the live stream.
+   *
+   * The panel may also call this AGAIN, without a `detach` between, with a
+   * renewed session (a device grant re-minting the token before it expires,
+   * 03-permanent-unlock.md §4): the view must adopt the new token, reopen its
+   * stream from where it left off, and refresh any signed media URLs, without
+   * showing any change. (`thread.ts`'s retry button already relies on the
+   * thread half of that being safe.) */
   attach(session: ServerSession): void;
   /** The panel calls this BEFORE removing `element` from the document
    * (locking): abort the stream, pause media, exit fullscreen, discard any

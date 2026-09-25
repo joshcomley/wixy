@@ -223,7 +223,7 @@ D:\Servers\Wixy\Storage\
     chats.json                 # AI conversation registry
     locks\publish.lock         # cross-process publish lock (self-heals after 600s)
     server\                    # PIN-protected admin live chat — PRIVATE, Inv 40
-      server.db (+ -wal, -shm) # SQLite, schema v6 — chat rows and private erasure journals (`deleted_storage`, `pending_wipe_cleanup`, `pending_scrub`)
+      server.db (+ -wal, -shm) # SQLite, schema v7 — chat rows, private erasure journals (`deleted_storage`, `pending_wipe_cleanup`, `pending_scrub`) and device grants (`device_grants`, hashes only)
       secret.key                # 32 random bytes (unlock-token + media-URL HMAC key)
       media\<id[:2]>\<id>\      # processed attachment renditions (P2)
       uploads\<uploadId>\       # in-progress chunked uploads (P2)

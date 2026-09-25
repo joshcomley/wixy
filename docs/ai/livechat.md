@@ -51,6 +51,10 @@ DB. There is no PIN field anywhere in `Settings` (`wixy_server/tests/test_routes
 ::TestSettingsHaveNoPinField` asserts this directly — a grep-style guard against ever adding
 one). The PIN is verified entirely by cmd; see §4.
 
+A device the owner has told to **keep itself unlocked** has a second way to obtain the unlock
+token: a device grant (§15), created only with the PIN, which mints the same token through
+`POST /unlock-with-grant`. It replaces typing the PIN — never the token, never CF Access.
+
 ## 3. Unlock tokens and signed media URLs (`livechat/tokens.py`)
 
 - `POST /api/admin/server/unlock` (§5.1 of the brief) mints an **unlock token** on a
@@ -140,7 +144,8 @@ contention at the file level). Every method is **synchronous**; route handlers w
 call in `anyio.to_thread.run_sync`.
 
 Tables: `messages`, `attachments`, `events`, `uploads`, `push_subscriptions`, `deleted_storage`,
-`pending_wipe_cleanup`, and `pending_scrub`. Schema migrations are serialized under the SQLite writer lock.
+`pending_wipe_cleanup`, `pending_scrub`, and `device_grants` (schema v7, §15 — auth credentials, not
+chat content, so delete/wipe leave them alone). Schema migrations are serialized under the SQLite writer lock.
 `deleted_storage` retains internal attachment/upload tombstones and retry status; it is not a
 message/event tombstone and is never returned to chat clients. `pending_wipe_cleanup` records a
 wipe's filesystem sweep token so a crash cannot lose cleanup of orphaned paths. Schema v4 adds the
@@ -526,7 +531,8 @@ leak across shell unit tests that never tear the panel down).
 **`lockModel.ts`** is a PURE reducer, `(state, event, now) => {state, effects[]}` — every
 decision about what state comes next lives here, with no DOM/timer/network access, so it has
 100% branch coverage in vitest. States: `decoy`, `revealed`, `pin` (with an optional
-`wrong`/`lockedOut`/`unavailable` error), `verifying`, `chat`, `fading`. One deliberate
+`wrong`/`lockedOut`/`unavailable` error), `verifying`, `chat`, `fading`, plus the two round-2 states
+`granting` and `shielded` (§15). One deliberate
 design choice: R6's eight lock triggers (`idle`, `panic`, `multiTap`, `escape`, `hidden`,
 `routeAway`, `unauthorized`, `expired`) are ALL modelled as one `{type:"lock", cause}` event
 rather than eight bespoke ones — `idle` is the sole exception, going through `fading` first
@@ -722,3 +728,102 @@ trailers, into the release commit. `routes_version.resolve_release_notes` runs p
 owner-facing update popup. After delivery, every commit touching Server chat must carry
 exactly `Release-note: General bug fixes and improvements.` and no release-note line may name
 the chat, messages, photos, video, voice, PIN, or locking.
+
+## 15. Device grants and the lock checkboxes (round 2, `spec/server-chat/03-permanent-unlock.md`)
+
+**What it is.** A per-device setting, switched on with the PIN from the settings sheet, that keeps
+the chat unlocked on that device until someone locks it on purpose. Spec §1 is the ruling and
+Inv 48 the rule; this section is the code as built.
+
+### Server
+
+- **Migration v7** (`store._SCHEMA_V7_DEVICE_GRANTS`, `_LATEST_SCHEMA_VERSION` — the one place the
+  version lives; tests import it) adds `device_grants(id, secret_hash, email, label, created_at,
+  last_used_at, revoked_at)`. `CREATE TABLE IF NOT EXISTS`, so it is idempotent across a blue/green
+  overlap. `livechat/grants.py` owns the constants (five live grants per identity, 30-day idle
+  expiry, seven-day revoked-row retention, the 10-failures-a-minute limit), `new_grant()`, the
+  strict canonical-base64url secret parser and the display-label cleaner.
+- **Routes** (contracts.md): `POST /device-grants` (guard → token → label → cmd PIN → create),
+  `POST /unlock-with-grant` (guard → failure limit → validate → redeem → mint),
+  `DELETE /device-grants/{id}` and `DELETE /device-grants` (guard → token → revoke). The PIN check is
+  the extracted `_verify_pin` helper `/unlock` also uses; `_request_guard_refusal` is the shared
+  guard. `LiveChatStore.redeem_device_grant` runs every check against a fixed dummy hash when the id
+  is unknown so an unknown id and a wrong secret cost the same, and stamps `last_used_at` only on
+  success.
+- **Failure limiter** (`GrantFailureLimiter`, `app.state.livechat_grant_limiter`): per identity, in
+  memory, per process. It stops a misbehaving client hammering the database; it is not the security
+  control (a 256-bit secret cannot be guessed).
+- **Janitor** (hourly, `janitor.run_once`): revokes live grants unused for 30 days, deletes rows
+  revoked for more than seven (`secure_delete` zeroes them).
+- **Other identity's grant = 404.** Revoking someone else's grant, or an unknown or malformed id, is
+  `404 {"error":"not_found"}` — indistinguishable. Revoking your own already-revoked grant is 204.
+  `Cache-Control: no-store` is set on the two responses that carry a credential.
+
+### Client (`admin-ui/src/server/`)
+
+- `deviceGrant.ts` — the two localStorage keys and their events; `api/grants.ts` — the four calls
+  (all send the guard headers; `createDeviceGrant` attaches the token by hand because a wrong PIN is
+  a 401 that must NOT be read as "locked").
+- `lockModel.ts` — the reducer takes `LockContext.grantActive` as an input (no second machine):
+  with it, `lock idle` and `lock routeAway` are ignored from `chat`/`fading`. New states:
+  `granting` (a mount is minting this visit's token — the panel shows NOTHING, not even the decoy)
+  and `shielded` (§8, below). Pure policy functions: `pausesGrant`, `hiddenPolicy`, `classifyHide`,
+  `shieldOutcome`, `effectiveLockSettings`.
+- `panel.ts` — **mount**: with the setting on and not paused, `startGrantUnlock` goes
+  `decoy → granting → chat` (no decoy, no PIN); a 401 `grant_invalid` clears both keys, anything
+  else (offline, 429) keeps the grant and shows the decoy. **Pausing**: panic, a multi-tap, Escape,
+  and a lock caused by a checkbox all set `wx-srv-grant-paused`; a correct PIN clears it before the
+  transition. **Renewal**: `armSessionTimers` schedules a re-mint `GRANT_RENEW_BEFORE_MS` (5 min)
+  before expiry and one last try at expiry; a renewal re-attaches the chat view with the new session
+  (`ServerChatView.attach` may be called again while attached — the view reopens its stream from
+  the saved cursor and refreshes the signed media URLs, which are bound to the OLD token's expiry).
+  A renewal is put off while a voice note or video is playing (it would restart), never past the
+  last minute. `hooks.lockNow("unauthorized")` renews instead of locking while a grant is active —
+  unless a renewal happened in the last 10 s (then the server is refusing tokens for a reason a
+  fresh one will not fix, so it locks). Failure with `grant_invalid` clears the keys and locks; a
+  transient failure retries every 30 s until the token really expires. **Unload**: a reload,
+  navigation or closing tab fires `pagehide` (`persisted` false) and then `visibilitychange → hidden`;
+  `panel.ts` ignores that hide (`unloading`), otherwise every reload would count as a tab change and
+  pause the grant (found by `server-permanent-unlock.spec.ts`; a unit test cannot see it because
+  jsdom never unloads). A page entering the back/forward cache (`persisted`) stays an ordinary
+  background switch.
+- `settingsSheet.ts` — the "Keep this device unlocked" row (ticking opens an inline PIN pad and
+  stores NOTHING until the server says yes; unticking clears locally FIRST, then a best-effort
+  `DELETE`), "Sign out other devices", the auto-lock row greyed out while the setting is on, and the
+  two lock rows below. The inline pad is marked `data-srv-gesture-exempt`, so tapping its digits in
+  quick succession never counts as R3's multi-tap.
+
+### "Lock when I change tab" / "Lock when I lock my screen" (§8)
+
+Both boxes are per device, always shown, ticked by default. A hidden document in an open chat:
+
+| tab | screen | on `hidden` | on return |
+|---|---|---|---|
+| on | on | lock at once | — |
+| off | off | nothing (idle still applies unless a grant is active) | — |
+| on | off | shield | restore only on a screen-lock event seen between hide and return |
+| off | on | shield | restore only on NO screen-lock event **and** a proven device |
+
+A **shield** puts the decoy up and detaches the chat like a lock, but keeps the in-memory session.
+On return the decoy stays up until a `screenState = "locked"` event arrives or `SHIELD_WAIT_MS`
+(500 ms) passes; then `classifyHide` gives `screenLock` (an event was seen), `tabChange` (none, on a
+device that has **proven** it reports them) or `ambiguous` (none, unproven), and `shieldOutcome`
+restores the chat only for a KNOWN cause whose own box is unticked. **Ambiguous always stays
+locked.** A device becomes proven (`wx-srv-screenlock-proven = "1"`) the first time a screen lock is
+seen during a hidden interval, and loses it when the permission goes or the detector stops. Until
+then "tab off + screen on" locks on every switch and the sheet says why. A screen lock while the page
+stays visible (desktop Win+L) locks at once if the screen box is ticked. A checkbox-caused lock
+pauses an active grant. R7's picker/mic exemption still prevents a lock or a shield.
+
+The only way to tell a screen lock from a tab switch is Chromium's Idle Detection API
+(`screenWatcher.ts`; not Safari or Firefox; a permission asked for from a tap, and only when the owner
+makes the two boxes differ). Where it is unsupported or denied the two boxes **follow each other**:
+`effectiveLockSettings` uses the tab box's value when they agree and locks when they disagree, so
+losing the detector can never quietly turn a lock the owner asked for into no lock. On return from
+a shield the idle period is checked against the wall clock: an idle period that ran out while away
+still locks unless a grant is active.
+
+**On-device timing is unverified.** How an Android phone orders `visibilitychange` and the detector's
+events across a power-button lock, an app switch and a tab switch has not been measured on the
+operator's phone. The design fails closed without that: an unproven device keeps locking on every
+switch. Verify on the phone before telling the owner the two boxes can differ there.

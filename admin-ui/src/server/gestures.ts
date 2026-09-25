@@ -27,7 +27,11 @@
 
 import { MULTI_TAP_COUNT, MULTI_TAP_INTERVAL_MS } from "./constants";
 
-const EXCLUDED_SELECTOR = "textarea, input, [contenteditable], audio, video";
+/** `[data-srv-gesture-exempt]` marks a control group whose taps must never count as a
+ * multi-tap: the inline "Keep this device unlocked" PIN pad, whose digit keys are tapped in
+ * quick succession by design. */
+export const GESTURE_EXEMPT_SELECTOR = "[data-srv-gesture-exempt]";
+const EXCLUDED_SELECTOR = `textarea, input, [contenteditable], audio, video, ${GESTURE_EXEMPT_SELECTOR}`;
 export const GESTURE_BOUNDARY_SELECTOR = "[data-srv-gesture-boundary]";
 
 /** Exported for direct unit testing — no DOM event plumbing needed to check

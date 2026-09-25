@@ -135,9 +135,13 @@ export const createServerChatView: CreateServerChatView = (deps) => {
       if (identity.getName() === null) {
         pendingSessionForNamePrompt = session;
         thread.element.hidden = true;
-        namePrompt.hidden = false;
-        namePromptInput.value = "";
-        namePromptInput.focus();
+        // A renewed session (types.ts: `attach` may be called again while attached) must not
+        // wipe a name that is half typed.
+        if (namePrompt.hidden) {
+          namePrompt.hidden = false;
+          namePromptInput.value = "";
+          namePromptInput.focus();
+        }
         return;
       }
       namePrompt.hidden = true;
@@ -147,6 +151,8 @@ export const createServerChatView: CreateServerChatView = (deps) => {
       currentSession = null;
       attachEpoch += 1;
       pendingSessionForNamePrompt = null;
+      // The next `attach` starts a fresh visit: it re-shows (and clears) the name prompt.
+      namePrompt.hidden = true;
       closeStream();
       thread.detach();
       settingsSheet.close();

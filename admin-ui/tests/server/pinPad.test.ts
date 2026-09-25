@@ -224,3 +224,39 @@ describe("Server PIN pad lockout copy and countdown (F15)", () => {
     pad.teardown();
   });
 });
+
+describe("Server PIN pad options", () => {
+  it("defaults its heading to 'Unlock server'", () => {
+    const pad = mountPinPad({ onSubmit: vi.fn(), onCancel: vi.fn() });
+    expect(pad.element.querySelector(".wx-srv-pinpad-title")?.textContent).toBe("Unlock server");
+    pad.teardown();
+  });
+
+  it("uses the title it is given", () => {
+    const pad = mountPinPad({
+      title: "Enter PIN to keep this device unlocked",
+      onSubmit: vi.fn(),
+      onCancel: vi.fn(),
+    });
+    expect(pad.element.querySelector(".wx-srv-pinpad-title")?.textContent).toBe(
+      "Enter PIN to keep this device unlocked",
+    );
+    pad.teardown();
+  });
+
+  it("is marked gesture-exempt only when asked, so its keys never count toward a multi-tap lock", () => {
+    const plain = mountPinPad({ onSubmit: vi.fn(), onCancel: vi.fn() });
+    const exempt = mountPinPad({ gestureExempt: true, onSubmit: vi.fn(), onCancel: vi.fn() });
+    expect(plain.element.hasAttribute("data-srv-gesture-exempt")).toBe(false);
+    expect(exempt.element.hasAttribute("data-srv-gesture-exempt")).toBe(true);
+    expect(exempt.element.querySelectorAll(".wx-srv-pinpad-key").length).toBeGreaterThan(0);
+    plain.teardown();
+    exempt.teardown();
+  });
+
+  it("an explicit gestureExempt: false is not marked", () => {
+    const pad = mountPinPad({ gestureExempt: false, onSubmit: vi.fn(), onCancel: vi.fn() });
+    expect(pad.element.hasAttribute("data-srv-gesture-exempt")).toBe(false);
+    pad.teardown();
+  });
+});

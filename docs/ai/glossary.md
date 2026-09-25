@@ -160,3 +160,15 @@ real provisioning failure (decisions/00031).
 `git clone` (never shallow — restore needs arbitrary history); `.git` present → `git fetch` +
 `git merge --ff-only`. A non-fast-forward local state is a hard `CheckoutError`, never forced
 (Invariant 8).
+
+- **Device grant** — the credential behind "Keep this device unlocked" (Inv 48): a random secret held
+  by ONE device, stored on the server only as a hash, created only with the PIN, bound to the CF
+  Access identity, revocable, expiring after 30 days unused. It mints an ordinary unlock token; it is
+  never itself one.
+- **Paused grant** — a grant set aside after a deliberate lock or a checkbox-caused lock
+  (`wx-srv-grant-paused = "1"`) until the PIN is entered again.
+- **Shield** — what a background switch does when the two lock checkboxes differ: the decoy goes up
+  and the chat detaches at once, but the in-memory session is kept for up to half a second after the
+  page returns so the cause can be worked out; only a known cause whose box is unticked restores it.
+- **Proven device** — a device that has delivered a screen-lock event during a hidden interval
+  (`wx-srv-screenlock-proven`). Only such a device may read "no screen-lock event" as "a tab switch".

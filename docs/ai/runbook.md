@@ -239,3 +239,15 @@ only `/admin*`/`/api/admin*` sit behind CF Access. This lives entirely in the **
 `Cf-Connecting-Ip` header (they answer loopback probes only — Inv 12); `/api/version` is public
 by design. With no `live.json` the public surface returns **503**, never a crash. Node index:
 `C:\Admin\Index.md` should list `Wixy :9380 (ca.cinnamons.uk)`.
+
+## Server chat device grants
+
+A device that kept itself unlocked (livechat.md §15) is trusted until its grant is revoked or is
+unused for 30 days. **Rotating the PIN at cmd does not revoke grants.** If the PIN was rotated
+because a device was lost, open the Server settings sheet on a device you still trust and use
+**Sign out other devices** (`DELETE /api/admin/server/device-grants`, which also signs out the device
+you are on); a device that was signed out shows the ordinary decoy on its next visit. There is no
+list of grants in the UI. To inspect them directly: `sqlite3 Storage/projects/<slug>/server/
+server.db "select id, email, label, datetime(last_used_at,'unixepoch'), revoked_at is not null from
+device_grants"` — ids, hashes and timestamps only, no secrets and no chat content. Do not delete rows
+by hand while the server is running; the janitor prunes revoked rows after a week.

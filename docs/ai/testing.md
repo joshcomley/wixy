@@ -74,6 +74,7 @@ during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/
 | `test_robots_header.py` | `X-Robots-Tag: noindex` middleware (Inv 37) — the path allowlist as a pure-function unit test, plus integration coverage on both indexable states |
 | `test_livechat_pinclient.py`, `test_livechat_tokens.py`, `test_livechat_store.py`, `test_livechat_uploads.py`, `test_livechat_processing.py`, `test_livechat_media_queue.py`, `test_livechat_janitor.py`, `test_livechat_push.py` | PIN client and tokens; SQLite migrations and erasure; upload validation and chunking; media processing, queue, janitor, and push |
 | `test_routes_livechat.py`, `test_routes_livechat_media.py` | protected chat/upload routes, delete/wipe recovery, and signed media |
+| `test_livechat_grants.py`, `test_routes_livechat_grants.py` | device grants (Inv 48): hash-only storage, the cap, the 30-day window, migration v7, the janitor, both gates on enrolment, one uniform 401, the rate limit, cmd never contacted, the request guard on all four routes, real-JWT identity binding |
 | `test_background.py`, `test_routes_system.py`, `test_settings.py` | contained loop/one-shot failures, media health status, and Server-chat environment settings |
 
 ### Frontend (vitest) & E2E (Playwright)
@@ -93,7 +94,10 @@ during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/
   fixture's `showcase.items` (whose item count several other specs assert exactly). Server chat
   coverage is `server-chat.spec.ts` (conversation, delete/wipe, and cross-client behavior),
   `server-media.spec.ts` (chunked photo/video/voice upload and rendering), and
-  `server-lock.spec.ts` (disguise, lock causes, and gestures).
+  `server-lock.spec.ts` (disguise, lock causes, and gestures) and `server-permanent-unlock.spec.ts`
+  ("Keep this device unlocked" end to end and the two lock checkboxes; it installs a stand-in for
+  Chromium's `IdleDetector` with an init script because a headless run cannot answer its permission
+  prompt).
 
 Server-chat unit coverage also lives in `admin-ui/tests/server/{gestures,lockModel,panel,http,unlock}.test.ts`.
 The lock browser spec uses Playwright `page.clock` to control the 400 ms multi-tap window,
