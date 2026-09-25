@@ -191,7 +191,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   retryVoiceButton.className = "wx-srv-retry-voice-button";
   retryVoiceButton.textContent = "Retry voice note";
   retryVoiceButton.hidden = true;
-  retryVoiceButton.setAttribute("aria-label", "Retry sending voice note");
+  // No aria-label: the visible text IS the accessible name (WCAG 2.5.3 label in name).
   const discardVoiceButton = documentRef.createElement("button");
   discardVoiceButton.type = "button";
   discardVoiceButton.className = "wx-srv-discard-voice-button";
@@ -395,10 +395,13 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
    * left for the server's janitor to reap: the client only holds the attachment id, and
    * the cancel route takes the upload id. */
   function discardPendingVoiceNote(message: string | null): void {
+    const focusWasInRow = voiceFailureRow.contains(documentRef.activeElement);
     pendingVoiceNote = null;
     setVoiceRetryOffered(false);
     composer.setError(message);
     updateRecorderUi();
+    // Hiding the focused button would drop focus to the top of the page.
+    if (focusWasInRow) recordButton.focus();
   }
 
   async function sendVoiceNote(): Promise<void> {
@@ -406,6 +409,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     const session = currentSession;
     if (pending === null || session === null || voiceSendBusy) return;
     voiceSendBusy = true;
+    const focusWasInRow = voiceFailureRow.contains(documentRef.activeElement);
     retryVoiceButton.disabled = true;
     setVoiceRetryOffered(false);
     recordingStatus.hidden = false;
@@ -467,6 +471,12 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       if (pendingVoiceNote === null) recordingStatus.hidden = true;
       else if (retryVoiceButton.hidden) recordingStatus.hidden = true;
       updateRecorderUi();
+      // Sending hid the Retry the user had focused. Put focus back where it still makes
+      // sense: on Retry if it failed again, otherwise on the (now free) mic.
+      if (focusWasInRow) {
+        if (!retryVoiceButton.hidden) retryVoiceButton.focus();
+        else recordButton.focus();
+      }
     }
   }
 

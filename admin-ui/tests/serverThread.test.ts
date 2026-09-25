@@ -679,6 +679,76 @@ describe("mountServerThread", () => {
       view.teardown();
     });
 
+    // L8 (reviewer): the accessible name of Retry ("Retry sending voice note") did not
+    // contain its visible text ("Retry voice note"), which breaks voice-control users
+    // (WCAG 2.5.3), and pressing Retry/Discard hid the focused button so keyboard and
+    // screen-reader focus fell back to the top of the page.
+    describe("accessibility of the failed-note controls (L8)", () => {
+      afterEach(() => {
+        document.body.innerHTML = "";
+      });
+
+      it("Retry and Discard are named by their visible text", async () => {
+        uploadServerAttachment.mockResolvedValue(voiceAttachment());
+        sendMessage.mockResolvedValue({ ok: false, kind: "unavailable" } satisfies SendMessageResult);
+        const view = await mountView();
+        await recordVoiceNote(view);
+
+        for (const control of [retry(view), discard(view)]) {
+          const visible = control?.textContent ?? "";
+          const label = control?.getAttribute("aria-label") ?? null;
+          expect(visible).not.toBe("");
+          // Either no aria-label (the text IS the name) or one that contains the visible text.
+          expect(label === null || label.includes(visible)).toBe(true);
+        }
+        view.teardown();
+      });
+
+      it("keeps focus on Retry when it fails again, and moves it to the mic once resolved", async () => {
+        uploadServerAttachment.mockResolvedValue(voiceAttachment());
+        sendMessage
+          .mockResolvedValueOnce({ ok: false, kind: "unavailable" } satisfies SendMessageResult)
+          .mockResolvedValueOnce({ ok: false, kind: "unavailable" } satisfies SendMessageResult)
+          .mockResolvedValueOnce({
+            ok: true,
+            message: fakeMessage({ seq: 21, clientId: "client-uuid-1", text: null }),
+          } satisfies SendMessageResult);
+        const view = await mountView();
+        document.body.appendChild(view.element);
+        await recordVoiceNote(view);
+
+        retry(view)?.focus();
+        retry(view)?.click();
+        await flush();
+        await flush();
+        expect(document.activeElement).toBe(retry(view)); // failed again: stay put
+
+        retry(view)?.focus();
+        retry(view)?.click();
+        await flush();
+        await flush();
+        expect(retry(view)?.hidden).toBe(true);
+        expect(document.activeElement).toBe(mic(view)); // sent: the mic is free
+        view.teardown();
+      });
+
+      it("Discard hands focus to the mic instead of dropping it", async () => {
+        uploadServerAttachment.mockResolvedValue(voiceAttachment());
+        sendMessage.mockResolvedValue({ ok: false, kind: "unavailable" } satisfies SendMessageResult);
+        const view = await mountView();
+        document.body.appendChild(view.element);
+        await recordVoiceNote(view);
+
+        discard(view)?.focus();
+        discard(view)?.click();
+        await flush();
+
+        expect(discard(view)?.hidden).toBe(true);
+        expect(document.activeElement).toBe(mic(view));
+        view.teardown();
+      });
+    });
+
     // M2: auto-discard is for a verdict on the FILE itself (400/413/415: it will be judged
     // the same way every time). A 403 (Cloudflare Access / WAF) or a 404/409/422 at the
     // upload stage is about the session or the gateway - the recording is still held
