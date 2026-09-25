@@ -98,8 +98,13 @@ adds nothing. All comparisons use `hmac.compare_digest`.
     guessed; the limit only stops noise.
 - **`DELETE /device-grants/{grantId}`** — token required; revokes it (sets `revoked_at`) →
   204, idempotent. Revocation is allowed only for grants of the requesting identity.
-- **`DELETE /device-grants`** — token required; revokes **all** of the requesting
-  identity's grants → 204. It backs the settings sheet's "Sign out other devices".
+- **`DELETE /device-grants`** — token required; ~~revokes **all** of the requesting
+  identity's grants~~ **amended by §9 (audit round 3, F4):** revokes all of the requesting
+  identity's live grants EXCEPT the one the caller's own token is bound to (if any) → 204.
+  It backs the settings sheet's "Sign out other devices".
+- **Amended by §9 (F4):** a token minted by `unlock-with-grant` or `POST /device-grants` is
+  BOUND to its grant, and revoking a grant ends every session and media link minted from it
+  within about 2 s.
 
 **Janitor (hourly):** grants unused for more than 30 days are revoked. Rows revoked more than
 7 days ago are deleted.
@@ -125,9 +130,12 @@ Unreadable or malformed storage means **off**, which fails safe to the normal PI
   `POST /device-grants`. The result is stored, and the row shows "On · Lock with the ✕ or
   a double-tap";
 - **turning it off** → `DELETE /device-grants/{id}` (a local clear happens even if the call
-  fails, and the server's 30-day expiry mops up), then both keys are removed;
-- a small link **"Sign out other devices"** → `DELETE /device-grants`. This device's grant is
-  revoked too, so it turns itself off here as well.
+  fails, and the server's 30-day expiry mops up), then both keys are removed. **Amended by §9
+  (F4):** the chat then locks at once, because its session was bound to that grant;
+- a small link **"Sign out other devices"** → `DELETE /device-grants`. ~~This device's grant
+  is revoked too, so it turns itself off here as well.~~ **Amended by §9 (F4):** this
+  device's own grant is spared when its session is bound to it, so the label is literally
+  true and this device stays on.
 
 **Lock model** (`lockModel.ts` + `panel.ts`):
 - **On panel mount:** if a grant exists and is not paused, skip the decoy and call
@@ -137,14 +145,17 @@ Unreadable or malformed storage means **off**, which fails safe to the normal PI
   - A network error → show the decoy. The user can still use the PIN.
 - **While the grant is active**, the automatic-lock inputs (the idle timer, `hidden`,
   `routeAway`) are **ignored**. The reducer takes `grantActive: boolean` as an input; there is
-  no second state machine.
+  no second state machine. **Amended by §9 (F4):** `grantActive` is true only while the
+  in-memory session is BOUND to the stored grant, never merely because the key is present.
 - **Token renewal:** 5 minutes before `expiresAt`, or on any 401 `locked`, call
   `unlock-with-grant` once, silently.
   - Success → swap the in-memory session, with no visible change.
   - Failure → lock normally, and clear the grant if the reason was `grant_invalid`.
 - **Deliberate locks** (panic, multi-tap, Escape) → lock as today **and** set
   `wx-srv-grant-paused = "1"`.
-- **A successful PIN unlock** (`/unlock`) clears `wx-srv-grant-paused`.
+- **A successful PIN unlock** (`/unlock`) clears `wx-srv-grant-paused`. **Amended by §9
+  (F4):** the client then exchanges at once via `unlock-with-grant` for a bound session; until
+  that arrives, the normal automatic locks apply.
 
 **Route-away while active:** the panel is torn down as today; nothing is detached into
 memory. On return, the mount path re-mints silently. Keeping the chat alive across routes
@@ -310,7 +321,8 @@ Tests:
   - a screen-lock event while visible locks.
 - e2e: covers visibility plus a stubbed `IdleDetector` via `addInitScript`.
 
-Live check (required before shipping the two-checkbox distinction):
+Live check (required before shipping the two-checkbox distinction; **amended by §9 (F2):**
+it gates the claim and the item being done, not the merge):
 - On the operator's Android phone, log the order and timing of `visibilitychange` and
   IdleDetector events for:
   1. a power-button lock and unlock;
@@ -319,6 +331,137 @@ Live check (required before shipping the two-checkbox distinction):
 - If the screen-lock evidence is not observed within the 500 ms window on return, ship the
   mirrored (combined) mode on that platform and tell the operator plainly that his phone
   can't tell the two apart.
+
+## 9. Audit round 3 rulings: revocation must end sessions (F4); the live check (F2)
+
+Architect ruling, 2026-09-25, on the opus audit of this feature (relation
+b75035a7-a867-4a6b-8817-8b41008f1963, round 3: two medium findings). Binding. It amends §3,
+§4 and §8 where marked.
+
+### F4 — "Sign out other devices" must actually sign them out: SERVER ENFORCEMENT
+
+**Finding (confirmed):** revoking a grant revoked only the grant. Unlock tokens are stateless
+12-hour HMACs, and the stream checks only `exp`. So a chat already open on a lost phone stayed
+usable for up to 12 hours after "Sign out other devices", and with permanent unlock on it never
+idle-locked. That is the exact case the button exists for.
+
+**Ruling: server enforcement (the Delivery Manager's option B), completed.** The client-only
+re-check (option A) is rejected. The server would keep honouring the token, a copied token
+would be untouched, and the bound would depend on a client that a thief is holding.
+
+1. **Bound tokens.** A token minted by `unlock-with-grant`, **or by `POST /device-grants`**,
+   carries the grant id as an optional payload key `"g"` (32 lowercase hex). The format stays
+   `v: 1`, so an older slot process still accepts it during a blue/green overlap.
+   - `verify_unlock_token` rejects a `"g"` that is not 32 lowercase hex.
+   - `POST /unlock` (the PIN) still mints unbound tokens.
+   - `POST /device-grants` mints a bound token because the device goes into permanent mode at
+     once. An unbound token there would reopen the hole for up to 12 hours.
+2. **Every request.** When the token carries `"g"`, `require_server_token` does one
+   primary-key lookup. The grant must exist, be unrevoked, have been used within 30 days, and
+   belong to the same CF email as the request.
+   - Anything else → 401 `{"error":"locked"}`, the existing lock contract.
+   - Run the lookup off the event loop, like every other store call.
+3. **The open stream.** `_stream_events` repeats that check on its existing loop, at most every
+   2 s. On failure it yields `locked` and returns.
+4. **Media links.** A bound session's media URLs are bound too: add `&g=<grantId>` to the URL
+   and `|{g}` to the HMAC message (`media|{attId}|{rendition}|{exp}|{email}|{g}`).
+   - `GET /media` verifies that signature and then the same grant-liveness lookup. A dead grant
+     → the route's existing refusal for an invalid link.
+   - Unbound URLs keep today's format.
+   - The Delivery Manager's stated residual (attachment links already handed out still load for
+     12 hours) is therefore CLOSED, not accepted.
+   - Honest remainder: bytes the browser already downloaded and cached cannot be recalled.
+5. **Result:** revoking a grant ends every session and every media link minted from it within
+   about 2 s (at the next request, or the next stream tick). PIN sessions are untouched.
+6. **The client's side of the bargain** (amends §4). `grantActive` means "the in-memory
+   session is bound to the stored grant", never "the key is present".
+   - After a PIN unlock on a device that holds an unpaused grant, the client exchanges at once
+     via `unlock-with-grant` and swaps to the bound session.
+   - Until that arrives (or if it fails with a network error), the normal automatic locks
+     apply.
+   - On `grant_invalid`, clear both keys and continue as an ordinary PIN session.
+   - Without this rule, a device that re-entered its PIN after a panic would run a
+     never-auto-locking chat on an unbound 12-hour token, which is the same hole by another
+     door.
+   - The existing handling needs no redesign: one silent re-mint on 401 `locked`, then lock and
+     forget on `grant_invalid`.
+7. **Which grants "Sign out other devices" revokes: sub-question answered (ii), done through
+   the token.**
+   - `DELETE /device-grants` revokes all of the caller's identity's live grants EXCEPT the one
+     the caller's own token is bound to. The server reads that grant from the token's `"g"`.
+   - There is NO `?keep=` parameter. It would be redundant, and a mismatch would have no safe
+     answer: refusing leaves the lost phone signed in, and ignoring it surprises the caller.
+   - An unbound caller → all of the identity's grants are revoked. Still 204, with no contract
+     change.
+   - The client keeps its own grant exactly when its session was bound to it, and otherwise
+     clears its keys.
+   - The label stays "Sign out other devices", and the copy "Done — your other devices are
+     signed out." is now literally true.
+   - Scope is unchanged: one identity's devices. One admin cannot sign out the other admin's
+     devices.
+8. **Turning the setting off locks the chat.** `DELETE /device-grants/{own id}` kills the
+   session bound to it. The client clears its keys and locks at once, and the row's help text
+   says so: "Turning this off locks the chat. You'll need the PIN next time."
+   - The server must NOT mint a replacement token on revoke. Any route that trades a bound
+     token for an unbound one would let a thief holding the phone escape a later sign-out.
+     That makes it a way around this very fix.
+9. **Invariant 48 gains:** "Revoking a grant ends, within about 2 seconds, every session and
+   media link minted from it. No route exchanges a grant-bound token for an unbound one."
+   - Update the runbook's lost-device steps.
+   - Known limit, stated there and not fixed here: a lost phone's push subscription still
+     receives the payload-less "new message" ping until it is removed. The ping shows no
+     content, and opening it needs the PIN.
+10. **Tests (required):**
+    - pytest:
+      - a bound token 401s at the next request after revocation, for both the single-grant
+        and the "all others" routes;
+      - an open stream yields `locked` within one tick of revocation;
+      - a bound media URL is refused after revocation, while an unbound one still works;
+      - "Sign out other devices" spares exactly the caller's bound grant, and spares nothing
+        for an unbound caller;
+      - `POST /device-grants` returns a bound token;
+      - a `"g"` of the wrong shape is rejected.
+    - vitest:
+      - after a PIN unlock with a stored grant, `grantActive` stays false until the bound
+        session arrives;
+      - turning the setting off locks.
+    - e2e: two browser contexts on the same identity. "Sign out other devices" in one locks
+      the other's open chat without a reload.
+
+### F2 — the live check on the operator's phone: POST-MERGE REQUIRED, not merge-gating
+
+**Ruling:** the live check gates the **claim** that the two boxes work separately on his
+phone, and the item being called **done**. It does not gate the merge. It remains required,
+and nothing may tell the operator the distinction works before it passes.
+
+Why merging first is safe:
+- Both boxes default to ticked, which is today's behaviour.
+- An unproven device fails closed and says so, and the self-proof is the automated form of the
+  fail-closed half of the check.
+- The only fail-open path needs the operator to choose "Lock when I change tab" ticked with
+  "Lock when I lock my screen" unticked, on a proven phone that ALSO reports a spurious
+  on-time screen lock during an app or tab switch. That spurious report is exactly what the
+  live check exists to rule out.
+
+After merge, the Delivery Manager asks the operator (`op-ask-question`, plain English) to run
+this checklist on the shipped feature, and records the result in a `decisions/` entry.
+- **Setting A:** "change tab" UNticked, "lock my screen" ticked.
+  1. Lock the phone with the power button, unlock it, return: the chat must be locked. (This
+     also proves the phone.)
+  2. Switch to another app and back: the chat must still be open.
+  3. Switch browser tab and back: the chat must still be open.
+- **Setting B:** "change tab" ticked, "lock my screen" UNticked.
+  4. Power-button lock, unlock, return: the chat must still be open.
+  5. Switch to another app and back: the chat must be locked.
+  6. Switch browser tab and back: the chat must be locked.
+
+Outcomes:
+- **Step 5 or 6 fails (the chat reopened):** fail-open on that phone. Ship the mirrored
+  (combined) mode for that platform as a code change straight away, and tell the operator
+  plainly.
+- **Step 1 never locks** (the phone never proves itself): the phone already behaves as
+  combined. Tell him plainly.
+- **Step 2, 3 or 4 fails:** a fail-closed nuisance. Record it and fix it as an ordinary bug.
 
 ## 7. Release notes
 
