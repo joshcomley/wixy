@@ -16,7 +16,8 @@ deleting transaction, compare-and-clear, publish first, 250 ms checkpoint slices
 pending), invariants 46–47, plus background containment (`01-background-containment-ruling.md`)
 and delivery by squash (R14a). **v1.6 (2026-09-25, post-delivery, both live on main) = the
 `/unlock` request guard (§5.1, audit round 4 F14) and the per-device "Extend auto-lock to
-1 minute" option (R6, §6; operator request).** Contracts in §5 are frozen — any change goes
+1 minute" option (R6, §6; operator request).** **v1.7 (2026-09-25) = R3 precision: a double-tap is two real taps (not scroll flicks), within
+32 px, on the same control or bubble.** Contracts in §5 are frozen — any change goes
 through the Architect (`ask-architect`). Rulings in §1 are binding.
 
 > ⚠️ **Editing this file:** ruff formats Python fenced blocks **inside markdown**, so
@@ -88,6 +89,65 @@ sends and then locks, which is acceptable because it fails closed. Detector:
 - Uses `performance.now()` so Playwright `page.clock` controls it.
 - Is attached to `document` in the capture phase while the panel is mounted.
 - The panel root gets `touch-action: manipulation`.
+- **v1.7 — precision** (operator report 2026-09-25: false locks on a quick scroll and on two
+  different menu items; his words: "very much in the same place, quite quick"):
+
+  A radius alone is not enough. The detector counts on `pointerdown`, before the browser knows a
+  touch is a scroll, so two quick flicks in the same area would still pair even with a radius.
+  The fix has three parts, all in `server/gestures.ts`, shared by BOTH detectors: the chat's
+  multi-tap lock and the decoy's single-tap reveal (R2).
+
+  1. What counts as a TAP:
+     - a primary-button (`button === 0`) `pointerdown` followed by its `pointerup` on the same
+       `pointerId`;
+     - moved ≤ `TAP_SLOP_PX = 10` CSS px from the down position;
+     - held ≤ `TAP_MAX_MS = 300` ms;
+     - NOT ended by `pointercancel`, which is what the browser fires when it takes a touch over
+       for scrolling.
+
+     Flicks, drags and long-presses (≥ 500 ms opens the action sheet) are therefore never
+     taps. A tap is registered on its `pointerup`, with the `pointerdown` time and position.
+  2. SAME PLACE: each later tap in a run must land within `MULTI_TAP_RADIUS_PX = 32` CSS px of
+     the run's FIRST tap. It is anchored to the first tap, so a run cannot "walk" across the
+     screen. 32 px is about 5 mm on a phone: it covers finger wobble on a genuine double-tap
+     and rejects taps a finger-width apart.
+  3. SAME THING: both taps must resolve to the same tap zone:
+     - `tapZoneOf(target)` = the nearest ancestor matching
+       `button, a[href], [role="button"], [role="menuitem"], label, .wx-srv-bubble`;
+     - otherwise the panel root.
+
+     Two different menu rows, or a bubble and the gap next to it, are different zones, so they
+     never pair even when a few pixels apart.
+
+  Timing is unchanged: taps whose `pointerdown` times are ≤ `MULTI_TAP_INTERVAL_MS = 400` ms apart,
+  `MULTI_TAP_COUNT = 2`. A tap that breaks any rule above starts a fresh run with itself as the
+  first tap; it does not just get dropped.
+
+  Everything else in R3 is unchanged:
+  - the exclusions (`textarea`, `input`, `[contenteditable]`, `audio`, `video`);
+  - the v1.5 gesture boundaries ("may close a run, never open one");
+  - primary button only;
+  - the v1.5.2 classification of causal chains versus independent taps.
+
+  The lock fires on the second tap's `pointerup`, a few ms later than before, which is
+  imperceptible.
+
+  Permanent unlock (03): unaffected in meaning. A double-tap is still a deliberate lock that
+  pauses the grant. It just no longer fires on scrolls or on two different controls.
+
+  Tests:
+  - vitest, synthetic PointerEvents plus an injected clock:
+    - same spot (5 px) ×2 within 400 ms → lock;
+    - 50 px apart → no lock;
+    - two adjacent menu rows 10 px apart → no lock (different zones);
+    - down → move 40 px → `pointercancel`, then a tap → not paired;
+    - down → up after 600 ms → not a tap;
+    - a mouse double-click in the same spot → lock;
+    - a third tap 40 px from the first (walking run) → fresh run;
+    - a boundary control closes a run but never opens one (the v1.5 rule survives);
+    - the decoy: a flick no longer reveals "Open server settings", a real tap does.
+  - e2e (mobile 390×844, `hasTouch`): a rapid two-finger-flick scroll of the thread never
+    locks; a genuine same-spot double-tap on a bubble still locks.
 - **v1.5 — gesture boundaries** (ruling on P8's question, 2026-09-24). A tap that
   *opens a new surface under the finger* is the start of a menu flow, not half of a
   double-tap. Measured on the branch: `gestures.ts` counted the ⋯ trigger tap plus the
