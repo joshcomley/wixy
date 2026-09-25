@@ -12,6 +12,7 @@ import {
   MULTI_TAP_INTERVAL_MS,
   PICKER_SUSPEND_MAX_MS,
 } from "../../src/server/constants";
+import { createServerChatView as createRealServerChatView } from "../../src/server/chatView";
 import { IDLE_EXTENDED_KEY, setIdleLockExtended } from "../../src/server/idlePreference";
 import { mountServerPanel, type ServerPanelDeps } from "../../src/server/panel";
 import type { CreateServerChatView, LockHooks, ServerChatView, ServerSession } from "../../src/server/types";
@@ -518,6 +519,30 @@ describe("mountServerPanel", () => {
     await vi.advanceTimersByTimeAsync(1); // t = 60.800s
     expect(panel.element.querySelector(".wx-srv-thread")).toBeNull();
     panel.teardown();
+  });
+
+  // The first unlock on a device shows a "What should we call you?" step INSIDE the
+  // chat view. The Architect ruled it takes the same idle period as the chat; it is
+  // still the panel's "chat" state, so this pins that with the REAL chat view.
+  it("the first-unlock name prompt is still chat: ticked it holds for 60s, unticked it locks at 10s", async () => {
+    for (const extended of [true, false]) {
+      window.localStorage.clear();
+      if (extended) setIdleLockExtended(window, true);
+      const { panel, chatHost } = await unlockedChat({ createServerChatView: createRealServerChatView });
+      const prompt = panel.element.querySelector<HTMLElement>(".wx-srv-name-prompt");
+      expect(prompt?.hidden, "the name prompt should be showing (no stored name)").toBe(false);
+
+      await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS);
+      expect(isFading(chatHost)).toBe(!extended);
+      if (extended) {
+        await vi.advanceTimersByTimeAsync(IDLE_LOCK_EXTENDED_MS - IDLE_LOCK_MS - 1);
+        expect(isFading(chatHost)).toBe(false);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(isFading(chatHost)).toBe(true);
+      }
+      panel.teardown();
+      document.body.innerHTML = "";
+    }
   });
 
   it("the stored value is the only switch: '1' extends, any other value is the normal 10s", async () => {

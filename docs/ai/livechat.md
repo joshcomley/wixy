@@ -475,11 +475,11 @@ need a marker, and the mic start/stop toggle deliberately remains non-boundary.
 **`panel.ts`** owns everything `lockModel.ts` deliberately doesn't: the idle timer
 (`IDLE_LOCK_MS` = 10s, or `IDLE_LOCK_EXTENDED_MS` = 60s for the unlocked chat only — see
 "Extend auto-lock to 1 minute" below) and fade timer (`FADE_MS` = 800ms), the token-expiry
-timer, R7's
-suspension bookkeeping (`LockHooks.suspend(reason)` — reference-counted per call, the idle
-timer stays paused while ANY suspension is active and restarts with a FRESH full idle period
-(10s, or the chat's configured 60s) the moment the last one releases; `filePicker` alone
-carries a `PICKER_SUSPEND_MAX_MS` = 5-minute safety auto-release), the R7 activity listener set (`pointerdown`/`pointermove`/`touchstart`/
+timer, R7's suspension bookkeeping (`LockHooks.suspend(reason)` — reference-counted per call,
+the idle timer stays paused while ANY suspension is active and restarts with a FRESH full idle
+period (10s, or the chat's configured 60s) the moment the last one releases; `filePicker`
+alone carries a `PICKER_SUSPEND_MAX_MS` = 5-minute safety auto-release), the R7 activity
+listener set (`pointerdown`/`pointermove`/`touchstart`/
 `touchmove`/`wheel`/`keydown`/`input` — deliberately NOT `scroll`, so a programmatic
 scroll-to-bottom on an incoming message can never keep the chat visible), a dedicated
 `document` `keydown` listener for `Escape`, and a `visibilitychange` listener whose `hidden`
@@ -511,10 +511,22 @@ unchanged. `panel.ts` reads the preference each time it (re)starts the idle time
 re-schedules when it changes (the sheet's window event, or another tab's `storage` event)
 against the recorded start of the current idle period, so a tick or untick applies at once but
 never restarts the clock — only real user activity, or a suspension ending, does. The unlock
-token lives 12 hours (`UNLOCK_TOKEN_TTL_S`), far past the longer idle window. Covered by
-`admin-ui/tests/server/{idlePreference,lockModel,panel}.test.ts`,
+token lives 12 hours (`UNLOCK_TOKEN_TTL_S`), far past the longer idle window. An open settings
+sheet also follows a change made in another tab, so its box never shows a stale "off" over an
+active 60s. Covered by `admin-ui/tests/server/{idlePreference,lockModel,panel}.test.ts`,
 `admin-ui/tests/serverSettingsSheet.test.ts` and the "auto-lock box" cases in
 `e2e/tests/server-lock.spec.ts`.
+
+**The settings sheet never outgrows its host** (`chat.css`). It is anchored to the bottom of
+the chat host and is capped to the host's height minus what its content-box adds on top
+(bottom padding, safe-area inset, borders — built from the same `--wx-srv-sheet-*` variables as
+the padding, so the two cannot drift), scrolls its own contents, and pins its header (with the
+close X) to the top of that scroll. Without that, on a short Android phone — where the push
+row makes the sheet tallest, at roughly 668px of viewport height or less, or any landscape
+phone — a content-height sheet grew upward past the host and its X ended up under the admin's
+navigation, unreachable. The "android settings sheet" cases in `e2e/tests/server-lock.spec.ts`
+use an Android user agent plus push stubs (so the push row really renders) and hit-test the X,
+Delete all messages and Lock at 360x800/668/640/600/560 and 640x360.
 
 Test coverage: `lockModel.ts` and `gestures.ts` both at 100% branch coverage
 (`admin-ui/tests/server/{lockModel,gestures}.test.ts`); `panel.test.ts` covers the full

@@ -559,3 +559,68 @@ describe("mountServerSettingsSheet auto-lock checkbox", () => {
     view.teardown();
   });
 });
+
+// A settings sheet that is already open must follow a change made in ANOTHER tab
+// of the same device. The dangerous direction is a stale UNTICKED box while the
+// stored value is on: the owner would believe the chat locks after 10 s and get 60.
+describe("mountServerSettingsSheet auto-lock checkbox follows other tabs", () => {
+  beforeEach(() => {
+    vi.useRealTimers();
+    getUsage.mockReset().mockResolvedValue({ mediaAvailable: true, usedBytes: 0, quotaBytes: 10, freeBytes: 10, erasurePending: false });
+    window.localStorage.clear();
+  });
+  afterEach(() => {
+    window.localStorage.clear();
+    document.body.innerHTML = "";
+  });
+
+  function mountOpenSheet(): ReturnType<typeof mountServerSettingsSheet> {
+    const view = mountServerSettingsSheet({
+      identity: identity(),
+      hooks: hooks(),
+      win: window,
+      getSession: () => SESSION,
+      onWipe: vi.fn(),
+      onNameChanged: vi.fn(),
+      onClose: vi.fn(),
+    });
+    document.body.appendChild(view.element);
+    view.open();
+    return view;
+  }
+
+  function box(view: ReturnType<typeof mountServerSettingsSheet>): HTMLInputElement {
+    return view.element.querySelector<HTMLInputElement>('input[type="checkbox"]') as HTMLInputElement;
+  }
+
+  it("re-syncs the open box when another tab ticks or unticks it", () => {
+    const view = mountOpenSheet();
+    expect(box(view).checked).toBe(false);
+
+    window.localStorage.setItem("wx-srv-idle-extended", "1");
+    window.dispatchEvent(new StorageEvent("storage", { key: "wx-srv-idle-extended", newValue: "1" }));
+    expect(box(view).checked).toBe(true);
+
+    window.localStorage.removeItem("wx-srv-idle-extended");
+    window.dispatchEvent(new StorageEvent("storage", { key: "wx-srv-idle-extended", newValue: null }));
+    expect(box(view).checked).toBe(false);
+    view.teardown();
+  });
+
+  it("ignores a storage event for some other key", () => {
+    const view = mountOpenSheet();
+    window.localStorage.setItem("wx-srv-idle-extended", "1"); // stored, but no event for OUR key
+    window.dispatchEvent(new StorageEvent("storage", { key: "wx-srv-name", newValue: "Josh" }));
+    expect(box(view).checked).toBe(false);
+    view.teardown();
+  });
+
+  it("stops following once the sheet is torn down (no leaked listener)", () => {
+    const view = mountOpenSheet();
+    const input = box(view);
+    view.teardown();
+    window.localStorage.setItem("wx-srv-idle-extended", "1");
+    window.dispatchEvent(new StorageEvent("storage", { key: "wx-srv-idle-extended", newValue: "1" }));
+    expect(input.checked).toBe(false);
+  });
+});

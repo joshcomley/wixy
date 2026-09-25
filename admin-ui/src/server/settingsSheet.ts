@@ -9,7 +9,7 @@ import {
   ServerWipeAbandonedError,
 } from "./api/http";
 import type { ServerIdentity } from "./identity";
-import { isIdleLockExtended, setIdleLockExtended } from "./idlePreference";
+import { isIdleLockExtended, onIdleLockPreferenceChanged, setIdleLockExtended } from "./idlePreference";
 import { isAndroidPushCapable, mountPushToggle, type PushToggle } from "./pushToggle";
 import type { LockHooks, ServerSession } from "./types";
 
@@ -267,9 +267,12 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     if (evt.target === backdrop) close();
   });
   saveNameButton.addEventListener("click", saveName);
-  idleInput.addEventListener("change", () => {
-    setIdleLockExtended(win, idleInput.checked);
-    // A refused write must not leave the box claiming a state that didn't stick.
+  idleInput.addEventListener("change", () => setIdleLockExtended(win, idleInput.checked));
+  // The box always shows what is actually stored: this also re-syncs it after a
+  // refused write (it snaps back), and follows a change made in another tab of
+  // this device while the sheet is open — a stale UNTICKED box over an active 60s
+  // lock is the one direction that would mislead the owner.
+  const detachIdlePreferenceListener = onIdleLockPreferenceChanged(win, () => {
     idleInput.checked = isIdleLockExtended(win);
   });
   nameInput.addEventListener("keydown", (evt) => {
@@ -373,6 +376,7 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     },
     close,
     teardown(): void {
+      detachIdlePreferenceListener();
       stopScrubPolling();
       unmountPushToggle();
       win.document.removeEventListener("keydown", onKeydown);

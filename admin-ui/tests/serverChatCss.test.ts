@@ -68,3 +68,42 @@ describe("server/chat.css: the 'Extend auto-lock to 1 minute' row", () => {
     expect(text).not.toMatch(/text-overflow|white-space\s*:\s*nowrap/);
   });
 });
+
+// The settings sheet is anchored to the bottom of its host. On a short Android
+// phone (where the push row makes it tallest) a content-height sheet used to grow
+// UPWARD past the host's top edge, taking its close X underneath the admin's own
+// navigation. These guard the rules that keep it inside the host (the real-browser
+// proof is the "android settings sheet" hit-tests in e2e/tests/server-lock.spec.ts).
+describe("server/chat.css: the settings sheet never outgrows its host", () => {
+  it("is capped to the host minus what its box adds on top, and scrolls its own contents", () => {
+    const sheet = baseRuleBody(chatCss, "wx-srv-sheet");
+    expect(sheet, "no base rule for .wx-srv-sheet").not.toBeNull();
+    expect(sheet).toMatch(/overflow-y\s*:\s*auto/);
+    // The box is content-box, so max-height caps the CONTENT: a bare 100% still
+    // overshoots the host by the bottom padding + safe-area inset + borders.
+    const maxHeight = /max-height\s*:\s*(calc\([^;]*\))\s*;/.exec(sheet ?? "")?.[1] ?? "";
+    expect(maxHeight, "max-height must be calc(100% - <what the box adds>)").toMatch(/^calc\(\s*100%\s*-/);
+    expect(maxHeight).toContain("env(safe-area-inset-bottom");
+    // The cap and the padding/border are built from the SAME variables, so they cannot drift apart.
+    const padding = /(?:^|[\s;])padding\s*:\s*([^;]*);/.exec(sheet ?? "")?.[1] ?? "";
+    const border = /(?:^|[\s;])border\s*:\s*([^;]*);/.exec(sheet ?? "")?.[1] ?? "";
+    expect(maxHeight).toContain("--wx-srv-sheet-pad");
+    expect(padding).toContain("--wx-srv-sheet-pad");
+    expect(maxHeight).toContain("--wx-srv-sheet-border");
+    expect(border).toContain("--wx-srv-sheet-border");
+  });
+
+  it("stays content-box: the calc() cap above is only right for that sizing model (and widths are unchanged)", () => {
+    const sheet = baseRuleBody(chatCss, "wx-srv-sheet");
+    expect(sheet).not.toMatch(/box-sizing/);
+  });
+
+  it("pins the header (with the close X) to the top of the sheet's own scroll", () => {
+    const header = baseRuleBody(chatCss, "wx-srv-sheet-header");
+    expect(header, "no base rule for .wx-srv-sheet-header").not.toBeNull();
+    expect(header).toMatch(/position\s*:\s*sticky/);
+    expect(header).toMatch(/top\s*:\s*0/);
+    // Opaque, or scrolled contents would show through behind the title and X.
+    expect(header).toMatch(/background\s*:/);
+  });
+});

@@ -550,3 +550,162 @@ for (const profile of LAYOUT_PROFILES) {
     });
   });
 }
+
+// The settings sheet on a real ANDROID phone. Android is where the optional push
+// row ALSO renders, making the sheet its tallest; the sheet used to be a
+// content-height box anchored to the bottom of its host, so on a short viewport
+// (<= ~668px tall portrait, or any landscape phone) it grew UPWARD past the top
+// of the host and its close X ended up underneath the admin's own navigation,
+// unreachable — with the sheet covering the whole host in portrait there is no
+// dim margin to tap either. The fix keeps the sheet inside its host, scrolls its
+// body internally and pins the header (with the X) to the top. These cases use an
+// Android user agent plus push capability stubs (the same shape as
+// server-push.spec.ts) so the push row really renders, and hit-test the controls
+// with `elementFromPoint` — a screenshot on a non-Android profile could never
+// see this.
+const ANDROID_UA =
+  "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/126.0.0.0 Mobile Safari/537.36";
+
+const ANDROID_VIEWPORTS: readonly { width: number; height: number }[] = [
+  { width: 360, height: 800 },
+  { width: 360, height: 668 },
+  { width: 360, height: 640 },
+  { width: 360, height: 600 },
+  { width: 360, height: 560 }, // already broken on main before the auto-lock row existed
+  { width: 640, height: 360 }, // landscape
+];
+
+async function withAndroidServerPage(
+  browser: Browser,
+  viewport: { width: number; height: number },
+  fn: (page: Page) => Promise<void>,
+): Promise<void> {
+  const context = await browser.newContext({
+    userAgent: ANDROID_UA,
+    viewport,
+    isMobile: true,
+    hasTouch: true,
+    deviceScaleFactor: 2,
+  });
+  const page = await context.newPage();
+  const errors = trackConsoleErrors(page);
+  await page.addInitScript(() => {
+    // Just enough of the Web Push surface for `isAndroidPushCapable` to be true
+    // and the toggle to render, exactly as on a real Android Chrome.
+    const subscription = {
+      toJSON: () => ({ endpoint: "https://fcm.googleapis.com/fcm/send/t", keys: { p256dh: "p", auth: "a" } }),
+      unsubscribe: async () => true,
+    };
+    const registration = {
+      pushManager: { subscribe: async () => subscription, getSubscription: async () => null },
+      unregister: async () => true,
+    };
+    Object.defineProperty(window, "PushManager", { configurable: true, value: class PushManager {} });
+    Object.defineProperty(window, "Notification", {
+      configurable: true,
+      value: { permission: "default", requestPermission: async () => "granted" },
+    });
+    Object.defineProperty(navigator, "serviceWorker", {
+      configurable: true,
+      value: { register: async () => registration, ready: Promise.resolve(registration) },
+    });
+  });
+  await page.clock.install();
+  await page.goto("/admin/server");
+  await page.waitForSelector(".wx-srv-decoy");
+  await fn(page);
+  expect(errors).toEqual([]);
+  await context.close();
+}
+
+interface ReachReport {
+  readonly inViewport: boolean;
+  readonly hitsItself: boolean;
+  readonly box: { top: number; bottom: number; left: number; right: number };
+  readonly viewport: { width: number; height: number };
+}
+
+/** Where `selector` sits right now and whether a real pointer at its centre would
+ * land on it (not on whatever is stacked over it). No scrolling is done here. */
+async function reach(page: Page, selector: string): Promise<ReachReport> {
+  return page.locator(selector).evaluate((el): ReachReport => {
+    const rect = el.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const hit = document.elementFromPoint(cx, cy);
+    const viewport = { width: window.innerWidth, height: window.innerHeight };
+    return {
+      inViewport: rect.top >= 0 && rect.left >= 0 && rect.bottom <= viewport.height && rect.right <= viewport.width,
+      hitsItself: hit !== null && el.contains(hit),
+      box: { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right },
+      viewport,
+    };
+  });
+}
+
+for (const viewport of ANDROID_VIEWPORTS) {
+  test(`android settings sheet at ${viewport.width}x${viewport.height}: push row shown; the X stays reachable and the Delete/Lock controls scroll into reach`, async ({
+    browser,
+  }, testInfo) => {
+    await withAndroidServerPage(browser, viewport, async (page) => {
+      await revealAndOpenPinPad(page);
+      await enterPin(page, TEST_PIN);
+      await openSettingsAndFindAutoLockBox(page);
+      // Proves this really is the Android-shaped (tallest) sheet.
+      await expect(page.locator(".wx-srv-push-toggle")).toBeVisible();
+      await expect(page.getByLabel(AUTO_LOCK_LABEL)).toBeVisible();
+
+      const sheet = ".wx-srv-sheet";
+      const close = ".wx-srv-sheet-close";
+
+      // The sheet never outgrows its host: it stays inside the dimmed backdrop that
+      // fills the host (this is what used to break — it spilled above the host's top
+      // edge), and its top is on screen. (A landscape phone's host can itself run
+      // below the fold, so "the whole sheet is in the viewport" is not the invariant.)
+      const containment = await page.evaluate(() => {
+        const sheetRect = document.querySelector(".wx-srv-sheet")?.getBoundingClientRect();
+        const backdropRect = document.querySelector(".wx-srv-sheet-backdrop")?.getBoundingClientRect();
+        if (sheetRect === undefined || backdropRect === undefined) return null;
+        return {
+          sheetTop: sheetRect.top,
+          sheetBottom: sheetRect.bottom,
+          backdropTop: backdropRect.top,
+          backdropBottom: backdropRect.bottom,
+        };
+      });
+      if (containment === null) throw new Error("sheet or backdrop missing");
+      expect(containment.sheetTop, `sheet ${JSON.stringify(containment)}`).toBeGreaterThanOrEqual(0);
+      expect(containment.sheetTop, `sheet ${JSON.stringify(containment)}`).toBeGreaterThanOrEqual(containment.backdropTop - 0.5);
+      expect(containment.sheetBottom, `sheet ${JSON.stringify(containment)}`).toBeLessThanOrEqual(containment.backdropBottom + 0.5);
+
+      // The X is reachable straight away, with no scrolling.
+      const closeAtRest = await reach(page, close);
+      expect(closeAtRest.inViewport, `X box ${JSON.stringify(closeAtRest.box)} in ${JSON.stringify(closeAtRest.viewport)}`).toBe(true);
+      expect(closeAtRest.hitsItself, "the X is covered by another element").toBe(true);
+
+      await page.screenshot({ path: testInfo.outputPath(`android-sheet-${viewport.width}x${viewport.height}-top.png`) });
+
+      // Scroll the sheet's own contents to the very bottom: the X is still pinned in
+      // reach, and the last controls (Delete all messages, Lock) can be brought
+      // into reach and hit-tested.
+      await page.locator(sheet).evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+      });
+      await page.screenshot({ path: testInfo.outputPath(`android-sheet-${viewport.width}x${viewport.height}-bottom.png`) });
+      const closeAfterScroll = await reach(page, close);
+      expect(closeAfterScroll.inViewport).toBe(true);
+      expect(closeAfterScroll.hitsItself, "the X is covered once the sheet is scrolled").toBe(true);
+      for (const selector of [".wx-srv-sheet-wipe", ".wx-srv-sheet-lock"]) {
+        await page.locator(selector).scrollIntoViewIfNeeded();
+        const report = await reach(page, selector);
+        expect(report.inViewport, `${selector} box ${JSON.stringify(report.box)}`).toBe(true);
+        expect(report.hitsItself, `${selector} is covered by another element`).toBe(true);
+      }
+
+      // And a real pointer can actually close it.
+      await page.clock.runFor(401);
+      await page.locator(close).click();
+      await expect(page.locator(sheet)).toBeHidden();
+    });
+  });
+}
