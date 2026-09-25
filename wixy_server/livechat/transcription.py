@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from typing import Final, Literal
 
 import anyio
-from anyio.abc import CapacityLimiter
+from anyio import CapacityLimiter
 
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.processing import VOICE_DURATION_CAP_S
