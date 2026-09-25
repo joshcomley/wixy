@@ -1912,6 +1912,64 @@ describe("mountServerPanel with a device grant and the lock checkboxes", () => {
     });
   });
 
+  describe("what the panel holds after a lock, and when the grant is switched on late", () => {
+    it("the chat view's session accessor is null after a lock: the token does not linger in memory", async () => {
+      storeGrant();
+      const chat = trackedChatViewFactory();
+      let accessor: (() => ServerSession | null) | null = null;
+      const panel = await mountSettled({
+        createServerChatView: (deps) => {
+          accessor = deps.session;
+          return chat.createServerChatView(deps);
+        },
+      });
+      expect(chatOpen(panel)).toBe(true);
+      expect(accessor).not.toBeNull();
+      expect((accessor as unknown as () => ServerSession | null)()?.token).toBe("grant-tok-1");
+
+      requireHooks(chat).lockNow("panic");
+
+      expect(chatOpen(panel)).toBe(false);
+      expect((accessor as unknown as () => ServerSession | null)()).toBeNull();
+    });
+
+    it("a renewal that lands after a lock never resurrects the session or re-arms its timers", async () => {
+      const { panel, chat } = await mountUnlockedByGrant();
+      const late = deferred<Response>();
+      grantAnswers.push(() => late.promise);
+      await vi.advanceTimersByTimeAsync(RENEW_AT_MS + 1);
+      expect(grantCalls).toHaveLength(2); // the mount's unlock and the renewal now in flight
+
+      // A lock that does not pause the grant (a 401 would renew instead), while it is out.
+      requireHooks(chat).lockNow("expired");
+      expect(chatOpen(panel)).toBe(false);
+      late.resolve(jsonResponse({ token: "late-token", expiresAt: expiresIn(TOKEN_LIFETIME_S) }));
+      await flush();
+
+      // Had the late answer been adopted, its renewal timer would fire and mint again.
+      await vi.advanceTimersByTimeAsync(2 * TOKEN_LIFETIME_S * 1000);
+      expect(grantCalls).toHaveLength(2);
+      expect(chatOpen(panel)).toBe(false);
+      expect(chat.attachCalls.map((session) => session.token)).not.toContain("late-token");
+    });
+
+    it("switching the grant on while the token is already inside its renewal window renews at once", async () => {
+      const { chat } = await mountUnlockedByPin();
+      // Keep the idle timer out of the way so the chat stays open for the whole token life.
+      requireHooks(chat).suspend("recording");
+      await vi.advanceTimersByTimeAsync(RENEW_AT_MS + 60_000);
+      expect(grantCalls).toHaveLength(0); // the early renewal fired with no grant: a no-op
+
+      storeGrant();
+      window.dispatchEvent(new Event("wx-srv-grant-state-changed"));
+      await vi.advanceTimersByTimeAsync(1); // the re-armed renewal is already due (a 0 ms timer)
+      await flush();
+
+      expect(grantCalls).toHaveLength(1);
+      expect(lastAttach(chat).token).toBe("grant-tok-1");
+    });
+  });
+
   describe("teardown", () => {
     it("leaves no timer running: nothing fires after a panel with a grant is torn down", async () => {
       const { panel } = await mountUnlockedByGrant();

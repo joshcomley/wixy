@@ -467,6 +467,26 @@ describe("settings sheet — per-device lock preferences", () => {
       expect(idleInput(view).disabled).toBe(false);
     });
 
+    it("revokes the orphaned server grant when a cancelled enrolment's request succeeds anyway", async () => {
+      const pending = deferred<Response>();
+      fetchMock.mockReturnValueOnce(pending.promise);
+      fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+      const view = openSheet();
+      keepInput(view).click();
+      enterPin(view, PIN);
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+      q<HTMLButtonElement>(keepPadHost(view), ".wx-srv-pinpad-cancel").click();
+      pending.resolve(created());
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+      // Nothing was stored on this device, so the server must not keep a grant no device holds.
+      expect(stored(DEVICE_GRANT_KEY)).toBeNull();
+      const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+      expect(url).toBe(`/api/admin/server/device-grants/${GRANT.grantId}`);
+      expect(init.method).toBe("DELETE");
+    });
+
     it("closes the pad without asking the server when the chat has no session any more", () => {
       const view = openSheet();
       keepInput(view).click();
