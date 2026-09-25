@@ -1,0 +1,1 @@
+The double-tap-to-lock gesture fired on two unrelated taps (a scroll flick, or two different menu items) because it only ever checked timing; it now also requires the same place and the same thing (Architect ruling R3 v1.7)

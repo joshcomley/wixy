@@ -681,23 +681,22 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
 
   // R3 (unchanged): a multi-tap ANYWHERE while the panel is mounted — only
   // "chat"/"fading" give the resulting event any meaning (lockModel.ts).
-  const multiTapDetector = createMultiTapDetector(
-    () => {
-      // A deliberate lock: it also pauses a device grant. Only from the states where the
-      // reducer really locks on it — it means nothing anywhere else.
-      if (state.kind === "chat" || state.kind === "fading") pauseGrantForLock("multiTap");
-      dispatch({ type: "multiTap" });
-    },
-    () => win.performance.now(),
+  const multiTapDetector = createMultiTapDetector(() => {
+    // A deliberate lock: it also pauses a device grant. Only from the states where the
+    // reducer really locks on it — it means nothing anywhere else.
+    if (state.kind === "chat" || state.kind === "fading") pauseGrantForLock("multiTap");
+    dispatch({ type: "multiTap" });
+  });
+  const detachMultiTapListener = attachMultiTapListener(win.document, multiTapDetector, () =>
+    win.performance.now(),
   );
-  const detachMultiTapListener = attachMultiTapListener(win.document, multiTapDetector);
 
   // R2 v1.3 (operator decision #974): a single tap, scoped to the panel's
   // OWN root — "inside the Server panel element, not nav/topbar" is free
   // here since anything outside `root`'s subtree never reaches a listener
   // attached to it (see gestures.ts's own note).
   const singleTapDetector = createTapDetector(() => dispatch({ type: "tap" }));
-  const detachSingleTapListener = attachTapListener(root, singleTapDetector);
+  const detachSingleTapListener = attachTapListener(root, singleTapDetector, () => win.performance.now());
 
   function onActivity(): void {
     dispatch({ type: "activity" });

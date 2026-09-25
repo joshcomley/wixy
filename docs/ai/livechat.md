@@ -550,11 +550,24 @@ media seeking never trigger either one) and both using `performance.now()` (so P
   no counting. `panel.ts` attaches this to the panel's OWN root element (not `document`) —
   "not nav/topbar" is free that way, since an event outside the root's subtree never reaches
   a listener attached to it.
-- `createMultiTapDetector`/`attachMultiTapListener` (R3) — two primary-button taps within
-  `MULTI_TAP_INTERVAL_MS` (400ms) count as one multi-tap. Attached to `document` in the
-  CAPTURE phase for the panel's whole mounted lifetime, so a tap inside a
-  `stopPropagation()`'d descendant is still seen; only the reducer's `chat`/`fading` states
-  give the resulting event any meaning.
+- `createMultiTapDetector`/`attachMultiTapListener` (R3, precision revised to v1.7 by
+  decisions/00163: a scroll flick or two different menu items were registering as a
+  panic lock) — two RECOGNIZED taps (see below) within `MULTI_TAP_INTERVAL_MS` (400ms),
+  `MULTI_TAP_RADIUS_PX` (32px) of each other and resolving to the same tap zone
+  (`tapZoneOf`: the nearest `button`/`a[href]`/`[role="button"]`/`[role="menuitem"]`/
+  `label`/`.wx-srv-bubble` ancestor, or a shared background zone) count as one
+  multi-tap. A gesture-boundary tap closing a run started elsewhere is exempt from the
+  radius/zone gates (v1.5's "may close, never open" is unchanged). Attached to
+  `document` in the CAPTURE phase for the panel's whole mounted lifetime, so a tap
+  inside a `stopPropagation()`'d descendant is still seen; only the reducer's
+  `chat`/`fading` states give the resulting event any meaning.
+
+Both detectors are fed by one shared `attachTapRecognizer`: what counts as a TAP at
+all (R3 v1.7 part 1) is a primary-button `pointerdown` followed by its own `pointerup`
+(same `pointerId`), moved ≤ `TAP_SLOP_PX` (10px) and held ≤ `TAP_MAX_MS` (300ms), never
+interrupted by `pointercancel` — what the browser fires when it takes a touch over for
+scrolling. A flick, a drag or a long-press is therefore never a tap for either
+detector, closing the same false-positive class on R2's decoy reveal too.
 
 Brief v1.5.2's `GESTURE_BOUNDARY_SELECTOR` reads `[data-srv-gesture-boundary]` from the
 pointer target or its ancestors. The boundary tap counts normally first, so it can still

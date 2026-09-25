@@ -307,11 +307,13 @@ describe("mountServerPanel with a device grant and the lock checkboxes", () => {
 
   function tap(button: HTMLButtonElement): void {
     button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    button.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
     button.click();
   }
 
   async function unlockWithPin(panel: ServerPanel): Promise<void> {
     panel.element.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    panel.element.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
     await vi.advanceTimersByTimeAsync(MULTI_TAP_INTERVAL_MS + 1);
     (panel.element.querySelector(".wx-srv-affordance") as HTMLButtonElement).click();
     for (const digit of "1234") tap(digitButton(panel.element, digit));
@@ -368,7 +370,9 @@ describe("mountServerPanel with a device grant and the lock checkboxes", () => {
   function twoTapsIn(panel: ServerPanel): void {
     const host = panel.element.querySelector(".wx-srv-chat-host") as HTMLElement;
     host.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    host.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
     host.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    host.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
   }
 
   // ============================================================================================
@@ -436,6 +440,7 @@ describe("mountServerPanel with a device grant and the lock checkboxes", () => {
       expect(window.localStorage.getItem(GRANT_PAUSED_KEY)).toBeNull();
       // ...and the decoy works as usual: one tap reveals the affordance.
       panel.element.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      panel.element.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
       expect((panel.element.querySelector(".wx-srv-affordance") as HTMLElement).hidden).toBe(false);
     });
 
@@ -637,6 +642,7 @@ describe("mountServerPanel with a device grant and the lock checkboxes", () => {
       grantAnswers.push(() => new TypeError("offline"));
       const panel = await mountSettled();
       panel.element.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      panel.element.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
       expect((panel.element.querySelector(".wx-srv-affordance") as HTMLElement).hidden).toBe(false);
 
       await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS + 10);
@@ -748,7 +754,9 @@ describe("mountServerPanel with a device grant and the lock checkboxes", () => {
       grantAnswers.push(() => new TypeError("offline"));
       const panel = await mountSettled();
       panel.element.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      panel.element.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
       panel.element.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      panel.element.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
       expect(paused()).toBe(false);
     });
 
@@ -1241,7 +1249,7 @@ describe("mountServerPanel with a device grant and the lock checkboxes", () => {
       expect(chatOpen(panel)).toBe(false);
     });
 
-    it("going away again before the wait ends keeps the shield; the next return starts a fresh wait", async () => {
+    it("going away again before the wait ends is a SECOND switch in one absence: the cause can no longer be read, so it stays locked on return", async () => {
       window.localStorage.setItem(LOCK_ON_TAB_KEY, "0");
       window.localStorage.setItem(SCREENLOCK_PROVEN_KEY, "1");
       rig = installIdleDetector("granted");
@@ -1253,11 +1261,10 @@ describe("mountServerPanel with a device grant and the lock checkboxes", () => {
       await vi.advanceTimersByTimeAsync(SHIELD_WAIT_MS * 2);
       expect(chatOpen(panel)).toBe(false);
 
+      // A single switch on this proven device would have restored; two do not.
       show();
-      await vi.advanceTimersByTimeAsync(SHIELD_WAIT_MS - 1);
+      await vi.advanceTimersByTimeAsync(SHIELD_WAIT_MS + 1);
       expect(chatOpen(panel)).toBe(false);
-      await vi.advanceTimersByTimeAsync(1);
-      expect(chatOpen(panel)).toBe(true);
     });
 
     it("Escape during the shield locks for good and pauses an active grant; the return brings nothing back", async () => {
@@ -1275,17 +1282,57 @@ describe("mountServerPanel with a device grant and the lock checkboxes", () => {
       expect(chatOpen(panel)).toBe(false);
     });
 
-    it("an active grant is NOT paused while the shield is undecided, only when it resolves to a lock", async () => {
+    it("an active grant is paused the moment the shield BEGINS, not when it resolves half a second after the owner is back", async () => {
       window.localStorage.setItem(LOCK_ON_TAB_KEY, "0");
       rig = installIdleDetector("granted"); // unproven: ambiguous, will stay locked
       await mountUnlockedByGrant();
       hide();
-      expect(paused()).toBe(false);
+      expect(paused()).toBe(true);
       show();
       await vi.advanceTimersByTimeAsync(SHIELD_WAIT_MS - 1);
-      expect(paused()).toBe(false);
+      expect(paused()).toBe(true);
       await vi.advanceTimersByTimeAsync(1);
       expect(paused()).toBe(true);
+    });
+
+    it("a page reloaded, closed or discarded while the shield is undecided finds the grant paused and asks for the PIN", async () => {
+      window.localStorage.setItem(LOCK_ON_TAB_KEY, "0");
+      window.localStorage.setItem(SCREENLOCK_PROVEN_KEY, "1"); // a switch with no event would RESTORE
+      rig = installIdleDetector("granted");
+      const { panel } = await mountUnlockedByGrant();
+      hide();
+      // The page never comes back to resolve anything (a discarded background tab).
+      panel.teardown();
+      document.body.innerHTML = "";
+      grantCalls.length = 0;
+      setHidden(false);
+
+      const reloaded = await mountSettled();
+
+      expect(grantCalls).toHaveLength(0);
+      expect(chatOpen(reloaded)).toBe(false);
+      expect(paused()).toBe(true);
+    });
+
+    it("a restore undoes the pause the shield wrote, so the setting is still on afterwards", async () => {
+      window.localStorage.setItem(LOCK_ON_TAB_KEY, "0");
+      window.localStorage.setItem(SCREENLOCK_PROVEN_KEY, "1");
+      rig = installIdleDetector("granted");
+      const { panel } = await mountUnlockedByGrant();
+      hide();
+      expect(paused()).toBe(true);
+      show();
+      await vi.advanceTimersByTimeAsync(SHIELD_WAIT_MS + 1);
+
+      expect(chatOpen(panel)).toBe(true);
+      expect(paused()).toBe(false);
+      // ...and the very next reload still opens straight into the chat.
+      panel.teardown();
+      document.body.innerHTML = "";
+      grantCalls.length = 0;
+      const reloaded = await mountSettled();
+      expect(grantCalls).toHaveLength(1);
+      expect(chatOpen(reloaded)).toBe(true);
     });
 
     it("a token that expires while shielded is never brought back on return (no grant)", async () => {
@@ -1383,8 +1430,10 @@ describe("mountServerPanel with a device grant and the lock checkboxes", () => {
       expect(window.localStorage.getItem(SCREENLOCK_PROVEN_KEY)).toBe("1");
       expect(chatOpen(panel)).toBe(false);
 
-      // 2. Unlock again. Now a switch with no event is a tab change, and the tab box is off.
+      // 2. Unlock again, well after that lock (so it is not the next hide's lead-in). Now a switch
+      // with no event is a tab change, and the tab box is off.
       await unlockWithPin(panel);
+      await vi.advanceTimersByTimeAsync(5_000);
       hide();
       show();
       await vi.advanceTimersByTimeAsync(SHIELD_WAIT_MS + 1);
@@ -1545,7 +1594,6 @@ describe("mountServerPanel with a device grant and the lock checkboxes", () => {
 
     it("starts the detector once the sheet announces the permission was granted", async () => {
       window.localStorage.setItem(LOCK_ON_TAB_KEY, "0");
-      window.localStorage.setItem(SCREENLOCK_PROVEN_KEY, "1");
       rig = installIdleDetector("prompt");
       const { panel } = await mountUnlockedByPin();
       expect(rig.detectors).toHaveLength(0);
@@ -1555,7 +1603,18 @@ describe("mountServerPanel with a device grant and the lock checkboxes", () => {
       await flush();
       expect(rig.running()).toHaveLength(1);
 
-      // Now the boxes are read as stored: tab off + proven device restores after a tab switch.
+      // Now the boxes are read as stored. The device is not proven yet: a real screen lock as it
+      // happens proves it (and the ticked screen box locks) ...
+      hide();
+      rig.lockScreen();
+      show();
+      await vi.advanceTimersByTimeAsync(SHIELD_WAIT_MS + 1);
+      expect(window.localStorage.getItem(SCREENLOCK_PROVEN_KEY)).toBe("1");
+      expect(chatOpen(panel)).toBe(false);
+
+      // ... after which tab off + a proven device restores after a plain tab switch.
+      await unlockWithPin(panel);
+      await vi.advanceTimersByTimeAsync(5_000);
       hide();
       show();
       await vi.advanceTimersByTimeAsync(SHIELD_WAIT_MS + 1);
@@ -1657,6 +1716,7 @@ describe("mountServerPanel with a device grant and the lock checkboxes", () => {
       window.localStorage.setItem(LOCK_ON_SCREEN_KEY, "0");
       const panel = await mountSettled();
       panel.element.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      panel.element.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
       await vi.advanceTimersByTimeAsync(MULTI_TAP_INTERVAL_MS + 1);
       (panel.element.querySelector(".wx-srv-affordance") as HTMLButtonElement).click();
       expect(pinPadShown(panel)).toBe(true);
@@ -1967,6 +2027,323 @@ describe("mountServerPanel with a device grant and the lock checkboxes", () => {
 
       expect(grantCalls).toHaveLength(1);
       expect(lastAttach(chat).token).toBe("grant-tok-1");
+    });
+  });
+
+  describe("the cause of a hide is judged from WHEN the lock event was dispatched (Architect ruling, §8)", () => {
+    it("the ruling's scenario: switch app, the phone auto-locks 30 s later, return -> locked, tab ON / screen OFF", async () => {
+      window.localStorage.setItem(LOCK_ON_SCREEN_KEY, "0");
+      rig = installIdleDetector("granted");
+      const { panel } = await mountUnlockedByPin();
+
+      hide();
+      await vi.advanceTimersByTimeAsync(30_000);
+      rig.lockScreen();
+      show();
+      await vi.advanceTimersByTimeAsync(SHIELD_WAIT_MS + 1);
+
+      expect(chatOpen(panel)).toBe(false);
+    });
+
+    it("the same absence on a PROVEN device with tab OFF / screen ON: the late event makes it ambiguous, so locked", async () => {
+      window.localStorage.setItem(LOCK_ON_TAB_KEY, "0");
+      window.localStorage.setItem(SCREENLOCK_PROVEN_KEY, "1");
+      rig = installIdleDetector("granted");
+      const { panel } = await mountUnlockedByPin();
+
+      hide();
+      await vi.advanceTimersByTimeAsync(30_000);
+      rig.lockScreen();
+      show();
+      await vi.advanceTimersByTimeAsync(SHIELD_WAIT_MS + 1);
+
+      expect(chatOpen(panel)).toBe(false);
+    });
+
+    it("a lock event 1.5 s after the hide is the cause: a screen lock, so tab ON / screen OFF restores, and the device is proven", async () => {
+      window.localStorage.setItem(LOCK_ON_SCREEN_KEY, "0");
+      rig = installIdleDetector("granted");
+      const { panel } = await mountUnlockedByPin();
+
+      hide();
+      await vi.advanceTimersByTimeAsync(1_500);
+      rig.lockScreen();
+      show();
+      await vi.advanceTimersByTimeAsync(SHIELD_WAIT_MS + 1);
+
+      expect(chatOpen(panel)).toBe(true);
+      expect(window.localStorage.getItem(SCREENLOCK_PROVEN_KEY)).toBe("1");
+    });
+
+    it("a lock event 0.8 s BEFORE the hide is the cause too (a device may report it just ahead of the page hiding)", async () => {
+      window.localStorage.setItem(LOCK_ON_SCREEN_KEY, "0");
+      rig = installIdleDetector("granted");
+      const { panel } = await mountUnlockedByPin();
+
+      rig.lockScreen(); // still visible, and the (unticked) screen box ignores it
+      expect(chatOpen(panel)).toBe(true);
+      await vi.advanceTimersByTimeAsync(800);
+      hide();
+      show();
+      await vi.advanceTimersByTimeAsync(SHIELD_WAIT_MS + 1);
+
+      expect(chatOpen(panel)).toBe(true);
+      expect(window.localStorage.getItem(SCREENLOCK_PROVEN_KEY)).toBe("1");
+    });
+
+    it("a lock event 1.5 s before the hide is too old to explain it: nothing is seen, the device is unproven, so locked", async () => {
+      window.localStorage.setItem(LOCK_ON_SCREEN_KEY, "0");
+      rig = installIdleDetector("granted");
+      const { panel } = await mountUnlockedByPin();
+
+      rig.lockScreen();
+      await vi.advanceTimersByTimeAsync(1_500);
+      hide();
+      show();
+      await vi.advanceTimersByTimeAsync(SHIELD_WAIT_MS + 1);
+
+      expect(chatOpen(panel)).toBe(false);
+      expect(window.localStorage.getItem(SCREENLOCK_PROVEN_KEY)).toBeNull();
+    });
+
+    it("a lock event batched at return (after a long absence) is ambiguous, so locked", async () => {
+      window.localStorage.setItem(LOCK_ON_SCREEN_KEY, "0");
+      rig = installIdleDetector("granted");
+      const { panel } = await mountUnlockedByPin();
+
+      hide();
+      await vi.advanceTimersByTimeAsync(10_000);
+      show();
+      rig.lockScreen(); // delivered as the frozen page resumes
+      await vi.advanceTimersByTimeAsync(SHIELD_WAIT_MS + 1);
+
+      expect(chatOpen(panel)).toBe(false);
+    });
+
+    it("a PROVEN device with no event at all reads the hide as a tab change, so tab OFF / screen ON restores", async () => {
+      window.localStorage.setItem(LOCK_ON_TAB_KEY, "0");
+      window.localStorage.setItem(SCREENLOCK_PROVEN_KEY, "1");
+      rig = installIdleDetector("granted");
+      const { panel } = await mountUnlockedByPin();
+
+      hide();
+      show();
+      await vi.advanceTimersByTimeAsync(SHIELD_WAIT_MS + 1);
+
+      expect(chatOpen(panel)).toBe(true);
+    });
+
+    it("a PROVEN device with a BATCHED event is ambiguous, not a tab change: locked", async () => {
+      window.localStorage.setItem(LOCK_ON_TAB_KEY, "0");
+      window.localStorage.setItem(SCREENLOCK_PROVEN_KEY, "1");
+      rig = installIdleDetector("granted");
+      const { panel } = await mountUnlockedByPin();
+
+      hide();
+      await vi.advanceTimersByTimeAsync(10_000);
+      show();
+      rig.lockScreen();
+      await vi.advanceTimersByTimeAsync(SHIELD_WAIT_MS + 1);
+
+      expect(chatOpen(panel)).toBe(false);
+    });
+
+    it("the proof is set by an in-window event and NOT by a batched one", async () => {
+      window.localStorage.setItem(LOCK_ON_TAB_KEY, "0");
+      rig = installIdleDetector("granted");
+      const { panel } = await mountUnlockedByPin();
+
+      hide();
+      await vi.advanceTimersByTimeAsync(10_000);
+      rig.lockScreen(); // dispatched long after the hide: says nothing about why it hid
+      show();
+      await vi.advanceTimersByTimeAsync(SHIELD_WAIT_MS + 1);
+      expect(window.localStorage.getItem(SCREENLOCK_PROVEN_KEY)).toBeNull();
+
+      await unlockWithPin(panel);
+      await vi.advanceTimersByTimeAsync(5_000);
+      hide();
+      await vi.advanceTimersByTimeAsync(500);
+      rig.lockScreen(); // half a second after the hide: reported as it happened
+      show();
+      await vi.advanceTimersByTimeAsync(SHIELD_WAIT_MS + 1);
+      expect(window.localStorage.getItem(SCREENLOCK_PROVEN_KEY)).toBe("1");
+    });
+
+    it("a stale proof is cleared when there is no detector to have earned it (permission not granted)", async () => {
+      window.localStorage.setItem(SCREENLOCK_PROVEN_KEY, "1");
+      rig = installIdleDetector("prompt");
+      await mountSettled();
+      expect(window.localStorage.getItem(SCREENLOCK_PROVEN_KEY)).toBeNull();
+    });
+
+    it("a stale proof is cleared in a browser with no Idle Detection API at all", async () => {
+      window.localStorage.setItem(SCREENLOCK_PROVEN_KEY, "1");
+      await mountSettled();
+      expect(window.localStorage.getItem(SCREENLOCK_PROVEN_KEY)).toBeNull();
+    });
+  });
+
+  describe("regressions from the independent review", () => {
+    function expiredTokenWithRenewalInFlight(): {
+      pending: ReturnType<typeof deferred<Response>>;
+    } {
+      const pending = deferred<Response>();
+      grantAnswers.push(() => pending.promise);
+      return { pending };
+    }
+
+    it("a SECOND switch while a restore waits for a renewal voids it: the renewal landing while away restores nothing", async () => {
+      window.localStorage.setItem(LOCK_ON_TAB_KEY, "0");
+      window.localStorage.setItem(SCREENLOCK_PROVEN_KEY, "1");
+      rig = installIdleDetector("granted");
+      const { panel } = await mountUnlockedByGrant();
+      const { pending } = expiredTokenWithRenewalInFlight();
+      hide();
+      await vi.advanceTimersByTimeAsync(TOKEN_LIFETIME_S * 1000 + MARGIN_MS);
+      vi.setSystemTime(Date.now() + MARGIN_MS);
+      show();
+      await vi.advanceTimersByTimeAsync(SHIELD_WAIT_MS + 1); // restore decided, waiting for a token
+      await flush();
+
+      hide(); // away again
+      pending.resolve(jsonResponse({ token: "renewed", expiresAt: expiresIn(TOKEN_LIFETIME_S) }));
+      await flush();
+      expect(chatOpen(panel)).toBe(false); // not restored behind the owner's back
+
+      show();
+      await vi.advanceTimersByTimeAsync(SHIELD_WAIT_MS + 1);
+      expect(chatOpen(panel)).toBe(false);
+      expect(paused()).toBe(true);
+    });
+
+    it("a screen lock while a restore waits for a renewal voids it and locks", async () => {
+      window.localStorage.setItem(LOCK_ON_TAB_KEY, "0");
+      window.localStorage.setItem(SCREENLOCK_PROVEN_KEY, "1");
+      rig = installIdleDetector("granted");
+      const { panel } = await mountUnlockedByGrant();
+      const { pending } = expiredTokenWithRenewalInFlight();
+      hide();
+      await vi.advanceTimersByTimeAsync(TOKEN_LIFETIME_S * 1000 + MARGIN_MS);
+      vi.setSystemTime(Date.now() + MARGIN_MS);
+      show();
+      await vi.advanceTimersByTimeAsync(SHIELD_WAIT_MS + 1);
+      await flush();
+
+      rig.lockScreen();
+      pending.resolve(jsonResponse({ token: "renewed", expiresAt: expiresIn(TOKEN_LIFETIME_S) }));
+      await flush();
+
+      expect(chatOpen(panel)).toBe(false);
+      expect(paused()).toBe(true);
+    });
+
+    it("an idle period that ran out while the page was away locks INSTANTLY: a touch on return cannot bring it back", async () => {
+      window.localStorage.setItem(LOCK_ON_TAB_KEY, "0");
+      window.localStorage.setItem(LOCK_ON_SCREEN_KEY, "0");
+      const { panel } = await mountUnlockedByPin();
+
+      hide(); // both boxes off: nothing locks, the idle timer keeps counting
+      vi.setSystemTime(Date.now() + 60_000); // a suspended page: the clock moved, no timer ran
+      show();
+      expect(chatOpen(panel)).toBe(false);
+
+      document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true }));
+      document.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      await flush();
+      expect(chatOpen(panel)).toBe(false);
+    });
+
+    it("an idle fade that began while the page was away is finished on return, not left for a touch to cancel", async () => {
+      window.localStorage.setItem(LOCK_ON_TAB_KEY, "0");
+      window.localStorage.setItem(LOCK_ON_SCREEN_KEY, "0");
+      const { panel } = await mountUnlockedByPin();
+
+      hide();
+      await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS + 100); // idle fired while away: fading, fade timer pending
+      expect(panel.element.querySelector(".wx-srv-chat-host")?.classList.contains("wx-srv-fading")).toBe(true);
+
+      show();
+      expect(chatOpen(panel)).toBe(false);
+    });
+
+    it("a 401 from unlock-with-grant that is NOT grant_invalid (the admin's own gate) never makes the device forget its grant", async () => {
+      storeGrant();
+      grantAnswers.push(() => jsonResponse({ error: "unauthorized" }, 401));
+
+      const panel = await mountSettled();
+
+      expect(chatOpen(panel)).toBe(false); // the decoy and the PIN flow
+      expect(window.localStorage.getItem(DEVICE_GRANT_KEY)).not.toBeNull();
+    });
+
+    it("the same 401 on a renewal keeps the grant and the open chat, and retries", async () => {
+      const { panel } = await mountUnlockedByGrant();
+      grantAnswers.push(() => jsonResponse({ error: "unauthorized" }, 401));
+
+      await vi.advanceTimersByTimeAsync(RENEW_AT_MS + 1);
+      await flush();
+
+      expect(window.localStorage.getItem(DEVICE_GRANT_KEY)).not.toBeNull();
+      expect(chatOpen(panel)).toBe(true);
+      await vi.advanceTimersByTimeAsync(GRANT_RENEW_RETRY_MS + 1);
+      await flush();
+      expect(grantCalls).toHaveLength(3); // mount, the refused renewal, the retry
+    });
+
+    it("a renewal still in flight when the panel is torn down never re-attaches the disposed chat or re-arms a timer", async () => {
+      const { panel, chat } = await mountUnlockedByGrant();
+      const { pending } = expiredTokenWithRenewalInFlight();
+      await vi.advanceTimersByTimeAsync(RENEW_AT_MS + 1);
+      expect(grantCalls).toHaveLength(2);
+
+      panel.teardown();
+      const attachesBefore = chat.attachCalls.length;
+      pending.resolve(jsonResponse({ token: "late", expiresAt: expiresIn(TOKEN_LIFETIME_S) }));
+      await flush();
+
+      expect(chat.attachCalls).toHaveLength(attachesBefore);
+      await vi.advanceTimersByTimeAsync(3 * TOKEN_LIFETIME_S * 1000);
+      expect(grantCalls).toHaveLength(2); // a dead panel does not keep renewing (or keep the grant fresh)
+    });
+
+    it("the token is not kept after a teardown with a grant active", async () => {
+      storeGrant();
+      const chat = trackedChatViewFactory();
+      let accessor: (() => ServerSession | null) | null = null;
+      const panel = await mountSettled({
+        createServerChatView: (deps) => {
+          accessor = deps.session;
+          return chat.createServerChatView(deps);
+        },
+      });
+      expect((accessor as unknown as () => ServerSession | null)()).not.toBeNull();
+
+      panel.teardown();
+
+      expect((accessor as unknown as () => ServerSession | null)()).toBeNull();
+    });
+
+    it("a hide while the grant unlock is still answering drops it, and the return tries again (without pausing the grant)", async () => {
+      storeGrant();
+      const answer = deferred<Response>();
+      grantAnswers.push(() => answer.promise);
+      const panel = mount();
+      await flush();
+      expect(granting(panel)).toBe(true);
+
+      hide();
+      expect(granting(panel)).toBe(false);
+      expect(paused()).toBe(false);
+      answer.resolve(jsonResponse({ token: "dropped", expiresAt: expiresIn(TOKEN_LIFETIME_S) }));
+      await flush();
+      expect(chatOpen(panel)).toBe(false); // the late answer is not adopted
+
+      show();
+      await flush();
+
+      expect(grantCalls).toHaveLength(2);
+      expect(chatOpen(panel)).toBe(true);
     });
   });
 

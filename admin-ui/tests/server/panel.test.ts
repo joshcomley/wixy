@@ -110,12 +110,14 @@ describe("mountServerPanel", () => {
     return button;
   }
 
-  /** A real tap fires `pointerdown` before `click` — jsdom's own `.click()`
-   * only synthesizes the `click` half, which would silently hide any bug in
-   * the (separately, document-level, capture-phase) `pointerdown` listener
-   * R3's `multiTapDetector` uses (see gestures.ts). */
+  /** A real tap fires `pointerdown` then `pointerup` before `click` — jsdom's own `.click()`
+   * only synthesizes the `click` half, which would silently hide any bug in the (separately,
+   * document-level, capture-phase) tap recognizer R3's `multiTapDetector` uses (see
+   * gestures.ts): since R3 v1.7, a genuine tap needs BOTH halves, same position, to be
+   * recognized at all. */
   function tap(button: HTMLButtonElement): void {
     button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    button.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
     button.click();
   }
 
@@ -129,6 +131,7 @@ describe("mountServerPanel", () => {
    * reveals the affordance — multi-tap has no meaning on the decoy. */
   function openAffordance(root: HTMLElement): void {
     root.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    root.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
   }
 
   /** Reveals, clears the "ignore a tap <400ms after reveal" debounce, then
@@ -314,7 +317,9 @@ describe("mountServerPanel", () => {
 
     const chatHost = panel.element.querySelector(".wx-srv-chat-host") as HTMLElement;
     chatHost.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    chatHost.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
     chatHost.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    chatHost.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
 
     expect(panel.element.querySelector(".wx-srv-thread")).toBeNull();
     panel.teardown();
@@ -337,6 +342,7 @@ describe("mountServerPanel", () => {
 
     const chatHost = panel.element.querySelector(".wx-srv-chat-host") as HTMLElement;
     chatHost.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    chatHost.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
 
     expect(panel.element.querySelector(".wx-srv-thread")).not.toBeNull(); // must NOT lock on one tap
     panel.teardown();
@@ -352,7 +358,9 @@ describe("mountServerPanel", () => {
     const textarea = document.createElement("textarea");
     chatHost.appendChild(textarea);
     textarea.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    textarea.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
     textarea.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    textarea.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
 
     expect(panel.element.querySelector(".wx-srv-thread")).not.toBeNull();
     panel.teardown();

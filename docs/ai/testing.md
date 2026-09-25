@@ -94,15 +94,20 @@ during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/
   fixture's `showcase.items` (whose item count several other specs assert exactly). Server chat
   coverage is `server-chat.spec.ts` (conversation, delete/wipe, and cross-client behavior),
   `server-media.spec.ts` (chunked photo/video/voice upload and rendering), and
-  `server-lock.spec.ts` (disguise, lock causes, and gestures) and `server-permanent-unlock.spec.ts`
-  ("Keep this device unlocked" end to end and the two lock checkboxes; it installs a stand-in for
-  Chromium's `IdleDetector` with an init script because a headless run cannot answer its permission
-  prompt).
+  `server-lock.spec.ts` (disguise, lock causes, and gestures), `server-tap-precision.spec.ts`
+  (R3 v1.7, mobile 390×844 with `hasTouch`: a scroll-shaped touch sequence never locks, a
+  genuine same-spot double-tap on a bubble still does — decisions/00163), and
+  `server-permanent-unlock.spec.ts` ("Keep this device unlocked" end to end and the two lock
+  checkboxes; it installs a stand-in for Chromium's `IdleDetector` with an init script because a
+  headless run cannot answer its permission prompt).
 
 Server-chat unit coverage also lives in `admin-ui/tests/server/{gestures,lockModel,panel,http,unlock}.test.ts`.
 The lock browser spec uses Playwright `page.clock` to control the 400 ms multi-tap window,
-idle timeout, and suspensions. Media e2e uses fake microphone devices; voice readiness is
-polled from the rendered DOM rather than controlled by `page.clock`.
+idle timeout, and suspensions. `server-tap-precision.spec.ts` instead dispatches real
+`PointerEvent`s in the actual browser to exercise `MULTI_TAP_RADIUS_PX`/tap-zone matching end
+to end, since jsdom never lays anything out and can't stand in for "did the finger move". Media
+e2e uses fake microphone devices; voice readiness is polled from the rendered DOM rather than
+controlled by `page.clock`.
 CI installs the real `ffmpeg` binary in both the Python and e2e jobs: media-processing tests
 exercise actual voice/video conversion, and the e2e fixture needs it for uploaded media.
 Pillow is a core dependency; `pillow-heif` is installed by the server extra.

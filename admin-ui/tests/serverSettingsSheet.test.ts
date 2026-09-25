@@ -545,6 +545,27 @@ describe("mountServerSettingsSheet auto-lock checkbox", () => {
     view.teardown();
   });
 
+  it("opening the sheet does not focus the name text field (no soft keyboard on open)", () => {
+    // Operator report, round 2: focusing a real text input the instant the sheet appears pops a
+    // phone's soft keyboard before the owner has chosen to edit anything. The dialog itself
+    // takes focus instead (matching pinPad.ts's own tabIndex=-1 pattern) - screen-reader
+    // announcement is unaffected, but nothing text-editable is focused.
+    const view = mountSheet();
+    document.body.appendChild(view.element);
+    view.open();
+    const nameInput = view.element.querySelector<HTMLInputElement>(".wx-srv-sheet-name-input");
+    expect(nameInput).not.toBeNull();
+    expect(document.activeElement).not.toBe(nameInput);
+    expect((document.activeElement as HTMLElement | null)?.tagName).not.toBe("INPUT");
+    // The dialog itself is what holds focus, so it's still announced and Escape/focus-trap
+    // handling keeps working.
+    expect(document.activeElement).toBe(view.element.querySelector('[role="dialog"]'));
+    // A deliberate tap still focuses and edits the field normally.
+    nameInput?.focus();
+    expect(document.activeElement).toBe(nameInput);
+    view.teardown();
+  });
+
   it("reflects the stored value every time the sheet opens", () => {
     const view = mountSheet();
     window.localStorage.setItem("wx-srv-idle-extended", "1");
