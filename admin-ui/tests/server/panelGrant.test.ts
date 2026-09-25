@@ -716,7 +716,11 @@ describe("mountServerPanel with a device grant and the lock checkboxes", () => {
       expect(window.localStorage.getItem(DEVICE_GRANT_KEY)).toBeNull();
     });
 
-    it("a network error on the exchange leaves the grant alone and the PIN session unaffected", async () => {
+    it("a network error on the exchange leaves the grant alone, retries, AND idle still locks meanwhile (audit F7)", async () => {
+      // §9 says "the normal automatic locks apply" while the exchange has not landed — this
+      // is the exact gap audit F7 found: `pendingGrantBind` was cleared on ANY settlement,
+      // including a network error, so `isGrantActive(win)` alone then read as "active" and
+      // idle stopped counting even though the session was still the unbound PIN token.
       storePausedGrant();
       const panel = await mountSettled();
       grantAnswers.push(() => new TypeError("offline"));
@@ -724,6 +728,49 @@ describe("mountServerPanel with a device grant and the lock checkboxes", () => {
 
       expect(chatOpen(panel)).toBe(true);
       expect(window.localStorage.getItem(DEVICE_GRANT_KEY)).not.toBeNull();
+      // No further answers queued: any retry also fails offline, forever — idle must still win.
+      grantAnswers.push(() => new TypeError("offline"));
+      grantAnswers.push(() => new TypeError("offline"));
+      grantAnswers.push(() => new TypeError("offline"));
+      await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS + FADE_MS + 10);
+      expect(chatOpen(panel)).toBe(false);
+    });
+
+    it("a 429 on the exchange also leaves idle counting until it actually lands", async () => {
+      storePausedGrant();
+      const panel = await mountSettled();
+      grantAnswers.push(() => jsonResponse({ error: "rate_limited", retryAfterS: 5 }, 429));
+      await unlockWithPin(panel);
+
+      expect(chatOpen(panel)).toBe(true);
+      grantAnswers.push(() => jsonResponse({ error: "rate_limited", retryAfterS: 5 }, 429));
+      grantAnswers.push(() => jsonResponse({ error: "rate_limited", retryAfterS: 5 }, 429));
+      await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS + FADE_MS + 10);
+      expect(chatOpen(panel)).toBe(false);
+    });
+
+    it("the exchange retries every GRANT_RENEW_RETRY_MS and eventually lands, silencing idle from then on", async () => {
+      // GRANT_RENEW_RETRY_MS (30s) is longer than IDLE_LOCK_MS (10s) — while unbound, idle is
+      // correctly still live (that IS the fix), so real activity (not just elapsed time) is
+      // what keeps this chat open long enough to prove the retry eventually lands.
+      storePausedGrant();
+      const panel = await mountSettled();
+      grantAnswers.push(() => new TypeError("offline"));
+      await unlockWithPin(panel);
+      expect(chatOpen(panel)).toBe(true);
+      expect(grantCalls).toHaveLength(1);
+
+      grantAnswers.push(() => jsonResponse({ token: "bound-on-retry", expiresAt: expiresIn(TOKEN_LIFETIME_S) }));
+      for (let elapsed = 0; elapsed < GRANT_RENEW_RETRY_MS + 1_000; elapsed += IDLE_LOCK_MS / 2) {
+        document.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+        await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS / 2);
+      }
+      expect(chatOpen(panel)).toBe(true);
+      expect(grantCalls).toHaveLength(2);
+
+      // Bound now: idle no longer counts, even well past its own timeout, with no more activity.
+      await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS * 6);
+      expect(chatOpen(panel)).toBe(true);
     });
 
     it("no stored grant at all: no exchange call, and idle behaves exactly as it always has", async () => {
@@ -732,6 +779,34 @@ describe("mountServerPanel with a device grant and the lock checkboxes", () => {
       expect(grantCalls).toHaveLength(0);
       await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS + FADE_MS + 10);
       expect(chatOpen(panel)).toBe(false);
+    });
+  });
+
+  describe("a grant that appears via a storage event (a sibling tab) while this session is unbound (audit F7)", () => {
+    it("tries to bind right away, but does not suppress idle until that exchange actually lands", async () => {
+      const { panel } = await mountUnlockedByPin();
+      expect(chatOpen(panel)).toBe(true);
+
+      const exchange = deferred<Response>();
+      grantAnswers.push(() => exchange.promise);
+      // A sibling tab of this SAME device just turned "Keep this device unlocked" on (or
+      // resumed an existing one) — the storage write alone must not suppress this tab's locks.
+      storeDeviceGrant(window, GRANT);
+      await flush();
+      expect(grantCalls).toHaveLength(1);
+
+      await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS + FADE_MS + 10);
+      expect(chatOpen(panel)).toBe(false);
+    });
+
+    it("once that exchange lands, idle stops counting", async () => {
+      const { panel } = await mountUnlockedByPin();
+      grantAnswers.push(() => jsonResponse({ token: "bound-via-sibling", expiresAt: expiresIn(TOKEN_LIFETIME_S) }));
+      storeDeviceGrant(window, GRANT);
+      await flush();
+
+      await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS * 6);
+      expect(chatOpen(panel)).toBe(true);
     });
   });
 

@@ -82,7 +82,12 @@ function identity(): ServerIdentity {
 }
 
 function makeHooks(): LockHooks {
-  return { suspend: vi.fn(() => () => {}), lockNow: vi.fn(), adoptBoundSession: vi.fn() };
+  return {
+    suspend: vi.fn(() => () => {}),
+    lockNow: vi.fn(),
+    adoptBoundSession: vi.fn(),
+    getBoundGrantId: vi.fn(() => null),
+  };
 }
 
 // -- A fake IdleDetector + permission API --------------------------------------------------
@@ -284,7 +289,10 @@ describe("settings sheet — per-device lock preferences", () => {
       // §9 (audit F4 ruling): the freshly BOUND token the route itself returns is adopted as
       // the live session — otherwise "Sign out other devices" moments later, with no reload in
       // between, would still see the old unbound caller and spare nothing.
-      expect(hooks.adoptBoundSession).toHaveBeenCalledExactlyOnceWith({ token: "fresh", expiresAt: 9_999_999_999 });
+      expect(hooks.adoptBoundSession).toHaveBeenCalledExactlyOnceWith(
+        { token: "fresh", expiresAt: 9_999_999_999 },
+        GRANT.grantId,
+      );
       window.removeEventListener(GRANT_STATE_CHANGED_EVENT, announcements);
     });
 
@@ -733,9 +741,12 @@ describe("settings sheet — per-device lock preferences", () => {
   // ===========================================================================================
   describe("Sign out other devices", () => {
     it("revokes every OTHER grant, spares this device's own, and says so", async () => {
-      // §9 (audit F4 ruling, sub-point ii): the server spares the caller's own bound grant, so
-      // the client must not clear it locally either — this device stays kept-unlocked.
+      // §9 (audit F4 ruling, sub-point ii; F7 fix): the server spares the caller's own bound
+      // grant, so the client must not clear it locally either — but ONLY when its live
+      // session really was bound to it (getBoundGrantId), never merely because a grant
+      // happens to be stored.
       seedGrant();
+      hooks.getBoundGrantId = vi.fn(() => GRANT.grantId);
       const pending = deferred<Response>();
       fetchMock.mockReturnValueOnce(pending.promise);
       const view = openSheet();
@@ -758,6 +769,24 @@ describe("settings sheet — per-device lock preferences", () => {
       expect(keepInput(view).checked).toBe(true);
       expect(idleInput(view).disabled).toBe(true);
       expect(signOutButton(view).disabled).toBe(false);
+    });
+
+    it("an UNBOUND caller holding a stored grant has it cleared too — the server spared nothing", async () => {
+      // §9.7 (audit F7 fix): a caller whose live session was never actually exchanged for the
+      // stored grant (a pending/failed bind, or a stale tab) is, per §9's own server rule, NOT
+      // spared — the server revoked this device's grant right along with everyone else's. The
+      // client must not keep showing "On" for a grant that no longer exists.
+      seedGrant();
+      // getBoundGrantId defaults to null (unbound) — deliberately NOT overridden here.
+      fetchMock.mockResolvedValueOnce(noContent());
+      const view = openSheet();
+
+      signOutButton(view).click();
+      await vi.waitFor(() => expect(signOutStatus(view).textContent).toBe("Done — the other devices are signed out."));
+
+      expect(stored(DEVICE_GRANT_KEY)).toBeNull();
+      expect(keepInput(view).checked).toBe(false);
+      expect(idleInput(view).disabled).toBe(false);
     });
 
     it("works when this device had no grant of its own", async () => {

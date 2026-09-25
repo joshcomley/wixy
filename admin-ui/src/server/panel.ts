@@ -195,14 +195,16 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
 
   let state: LockState = INITIAL_STATE;
   let session: ServerSession | null = null;
-  /** §9 (audit F4 ruling, spec §9 point 6): true for the brief window between a PIN unlock
-   * succeeding and `bindGrantAfterPinUnlock` settling. A PIN unlock never mints a BOUND
-   * session by itself — while this is true, `grantActive` reads false even though
-   * `isGrantActive(win)` (the stored grant's own on/paused state) may already say yes, so
-   * the automatic locks are not suppressed on the strength of a session that turns out not
-   * to be the grant-bound one. Everywhere else, `isGrantActive(win)` alone is unchanged —
-   * mounting via a grant and every renewal already only ever adopt a bound session. */
-  let pendingGrantBind = false;
+  /** §9 (audit F4 ruling; F7 fix): the id of the device grant `session` is ACTUALLY bound to,
+   * or null for a plain PIN session (including a PIN session still waiting on, or having
+   * failed, its bound exchange). This — never `isGrantActive(win)`, which only reflects
+   * whether a grant sits UNPAUSED IN STORAGE — is what "the in-memory session is bound to the
+   * stored grant" (spec §4) means, and it is the only thing that may suppress an automatic
+   * lock. Set only by `adoptSession`/`startGrantUnlock`'s own success path; cleared with
+   * `session` on every return to "decoy". `readDeviceGrant(win)` staying broad (storage-only)
+   * everywhere else is deliberate — pausing an unpaused stored grant, or a fresh mount's own
+   * first attempt to use one, must not depend on whether some EARLIER session got bound. */
+  let boundGrantId: string | null = null;
   let chatView: ServerChatView | null = null;
   let chatAttached = false;
   let verifyRequestSeq = 0;
@@ -289,13 +291,19 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
     dispatch({ type: "lock", cause: "idle" });
   }
 
+  /** §9 (audit F4 ruling; F7 fix): whether `session` is ACTUALLY the grant-bound one right
+   * now — `boundGrantId` set, still naming the SAME grant that is stored, and that grant not
+   * paused. This is the one true "is a device grant active" question for suppression
+   * purposes; see `boundGrantId`'s own comment for why storage presence alone is not enough. */
+  function sessionIsBoundAndActive(): boolean {
+    return boundGrantId !== null && boundGrantId === readDeviceGrant(win)?.grantId && !isDeviceGrantPaused(win);
+  }
+
   /** With a device grant active the open chat never idles out — no timer is scheduled at
    * all, rather than one that fires into a reducer that ignores it. The decoy's reveal
-   * button and the PIN pad keep their own idle re-hide either way. `!pendingGrantBind`
-   * (§9, audit F4): not yet, if the current session is a PIN unlock still waiting on its
-   * bound exchange — see `pendingGrantBind`'s own comment. */
+   * button and the PIN pad keep their own idle re-hide either way. */
   function idleSuppressedByGrant(): boolean {
-    return state.kind === "chat" && isGrantActive(win) && !pendingGrantBind;
+    return state.kind === "chat" && sessionIsBoundAndActive();
   }
 
   /** (Re)schedules the concrete idle timer for whatever is left of the
@@ -426,6 +434,7 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
       // the shield resolves, and every path out of it that is not a restore
       // ends here.)
       session = null;
+      boundGrantId = null;
       clearSessionTimers();
       renewalInFlight = false;
     }
@@ -434,7 +443,7 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
   function dispatch(event: LockEvent, contextOverride?: Partial<LockContext>): void {
     const previousKind = state.kind;
     const context: LockContext = {
-      grantActive: contextOverride?.grantActive ?? (isGrantActive(win) && !pendingGrantBind),
+      grantActive: contextOverride?.grantActive ?? sessionIsBoundAndActive(),
     };
     const result = reduce(state, event, Date.now(), context);
     state = result.state;
@@ -492,10 +501,20 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
    * `beginShield`). Only a restore undoes it. */
   let shieldPausedGrant = false;
 
-  /** A grant this panel can still use right now: active, or paused only by the shield that is
-   * in progress (which is what lets a shielded chat with an expired token still re-mint). */
+  /** A BOUND grant this panel can still renew right now: session actually bound and matching
+   * storage, or paused only by the shield that is in progress (which is what lets a shielded
+   * chat with an expired token still re-mint). §9/F7: narrow on purpose — renewing is for a
+   * session that WAS bound, never a plain PIN session that merely has a plausible-looking
+   * grant sitting in storage (that is `tryBindStoredGrant`'s job, and it never suppresses a
+   * lock while it works). */
   function grantUsable(): boolean {
-    return isGrantActive(win) || (state.kind === "shielded" && shieldPausedGrant && readDeviceGrant(win) !== null);
+    return (
+      sessionIsBoundAndActive() ||
+      (state.kind === "shielded" &&
+        shieldPausedGrant &&
+        boundGrantId !== null &&
+        boundGrantId === readDeviceGrant(win)?.grantId)
+    );
   }
 
   function mediaIsPlaying(): boolean {
@@ -506,9 +525,10 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
    * (reopening its stream from where it left off and refreshing the signed media URLs, which
    * are bound to the OLD token's expiry). A shielded chat has no view attached — it just
    * holds the new session until it is restored. */
-  function adoptSession(next: ServerSession): void {
+  function adoptSession(next: ServerSession, grantId: string): void {
     if (disposed) return;
     session = next;
+    boundGrantId = grantId;
     lastRenewedAtMs = win.performance.now();
     armSessionTimers(next.expiresAt);
     if (chatAttached && chatView !== null) chatView.attach(next);
@@ -551,7 +571,7 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
     // stale.
     if (disposed || session !== holding) return;
     if (result.ok) {
-      adoptSession({ token: result.token, expiresAt: result.expiresAt });
+      adoptSession({ token: result.token, expiresAt: result.expiresAt }, grant.grantId);
       return;
     }
     if (result.kind === "invalid") {
@@ -572,7 +592,12 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
   function startGrantUnlock(): void {
     const grant = readDeviceGrant(win);
     if (grant === null || !isGrantActive(win)) return;
-    dispatch({ type: "grantUnlock" });
+    // §9/F7: the reducer's OWN "grantUnlock" handler gates on `context.grantActive`, but there
+    // is no session yet to be "bound" at mount time — this is the one dispatch that means the
+    // OLDER, broader question ("does a plausible stored grant exist to try"), already just
+    // confirmed by the guard above, so it is passed explicitly rather than through the default
+    // (narrow, session-bound) computation every other dispatch uses.
+    dispatch({ type: "grantUnlock" }, { grantActive: true });
     if (state.kind !== "granting") return;
     const requestId = ++grantRequestSeq;
     void unlockWithGrant(grant).then((result) => {
@@ -580,6 +605,7 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
       if (disposed || requestId !== grantRequestSeq || state.kind !== "granting") return;
       if (result.ok) {
         session = { token: result.token, expiresAt: result.expiresAt };
+        boundGrantId = grant.grantId;
         armSessionTimers(result.expiresAt);
         lastRenewedAtMs = win.performance.now();
         dispatch({ type: "grantOk" });
@@ -590,36 +616,39 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
     });
   }
 
-  /** §9 (audit F4 ruling, spec §9 point 6): a PIN unlock never mints a BOUND session by
-   * itself — if the device also holds an unpaused grant, exchange for the bound one right
-   * away, so `grantActive` (via `pendingGrantBind`) reads false only for the brief window
-   * this takes, never forever. Until it settles (or on a network error, which leaves
-   * `pendingGrantBind` cleared but the session still unbound) the ordinary automatic locks
-   * apply — exactly the fail-safe direction: a device that re-entered its PIN after a panic
-   * must never run a never-auto-locking chat on an unbound 12h token. A `grant_invalid`
-   * result forgets the grant but never locks: the PIN session just obtained is still
-   * perfectly good on its own. Early-return paths (no grant, paused, superseded) all run
-   * synchronously before the first `await`, so `pendingGrantBind` is already cleared by the
-   * time this function's own promise is handed to `void` at the call site — there is no
-   * window where a "nothing to bind" mount leaves it stuck true. */
-  async function bindGrantAfterPinUnlock(): Promise<void> {
-    try {
-      if (disposed || state.kind !== "chat") return;
-      const grant = readDeviceGrant(win);
-      if (grant === null || isDeviceGrantPaused(win)) return;
-      const holding = session;
-      if (holding === null) return;
-      const result = await unlockWithGrant(grant);
-      // Superseded by a panic, a re-verify, or teardown while the request was out.
-      if (disposed || session !== holding) return;
-      if (result.ok) {
-        adoptSession({ token: result.token, expiresAt: result.expiresAt });
-        return;
-      }
-      if (result.kind === "invalid") clearDeviceGrant(win);
-    } finally {
-      pendingGrantBind = false;
+  /** §9 (audit F4 ruling; F7 fix): a session is NEVER treated as grant-active on the strength
+   * of a stored grant alone — `boundGrantId` only becomes non-null once this actually
+   * succeeds. Called right after a PIN unlock (the device may hold an unpaused grant it has
+   * not yet exchanged for) and from `onGrantChanged` (a grant that just appeared — enrolled,
+   * or resumed in another tab — while this session is still unbound). Until it lands, the
+   * ordinary automatic locks apply — the fail-safe direction: a device that re-entered its PIN
+   * after a panic must never run a never-auto-locking chat on an unbound 12h token, and
+   * neither must a second tab just because a SIBLING tab's storage write became visible to it.
+   * A `grant_invalid` result forgets the grant but never locks: whatever session is currently
+   * open is still perfectly good on its own. Any OTHER failure (offline, a proxy error, a rate
+   * limit) retries every `GRANT_RENEW_RETRY_MS` — the grant may still be good — for as long as
+   * the SAME session stays open and the SAME grant stays stored and unpaused; every check is
+   * re-read fresh on each call, so a lock, a re-verify, teardown, a pause, or the grant being
+   * cleared all stop it on their own with no separate cancellation needed. */
+  async function tryBindStoredGrant(): Promise<void> {
+    if (disposed || state.kind !== "chat") return;
+    const grant = readDeviceGrant(win);
+    if (grant === null || isDeviceGrantPaused(win)) return;
+    const holding = session;
+    if (holding === null) return;
+    if (boundGrantId !== null) return; // already bound — nothing to exchange for
+    const result = await unlockWithGrant(grant);
+    // Superseded by a lock, a re-verify, or teardown while the request was out.
+    if (disposed || session !== holding) return;
+    if (result.ok) {
+      adoptSession({ token: result.token, expiresAt: result.expiresAt }, grant.grantId);
+      return;
     }
+    if (result.kind === "invalid") {
+      clearDeviceGrant(win);
+      return;
+    }
+    win.setTimeout(() => void tryBindStoredGrant(), GRANT_RENEW_RETRY_MS);
   }
 
   /** The grant was turned on or off, paused or resumed (here or in another tab): the idle
@@ -627,6 +656,10 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
   function onGrantChanged(): void {
     if (idleTimerArmed) scheduleIdleTimer();
     if (session !== null) armSessionTimers(session.expiresAt);
+    // §9/F7: a grant that just became visible (enrolled here, or resumed in a sibling tab)
+    // while this session is still unbound is worth trying for — `tryBindStoredGrant` itself
+    // is what keeps every automatic lock working normally until it actually lands.
+    if (boundGrantId === null) void tryBindStoredGrant();
   }
 
   // -- R7 suspension bookkeeping ------------------------------------------------
@@ -680,20 +713,24 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
       pauseGrantForLock(cause);
       dispatch({ type: "lock", cause });
     },
-    adoptBoundSession(next: ServerSession): void {
+    adoptBoundSession(next: ServerSession, grantId: string): void {
       // Only meaningful while the chat this session belongs to is actually open — a stale
       // answer from an enrolment the owner already locked or cancelled out of is dropped, the
       // same staleness direction `adoptSession`'s own callers already take.
       if (state.kind !== "chat" && state.kind !== "fading") return;
-      adoptSession(next);
+      adoptSession(next, grantId);
+    },
+    getBoundGrantId(): string | null {
+      return boundGrantId;
     },
   };
 
   /** A 401 while a grant is active usually means the token ran out or was dropped: mint a new
    * one silently instead of locking. A 401 right after a renewal is not that — the server is
-   * refusing tokens for a reason a fresh one will not fix — so it locks. */
+   * refusing tokens for a reason a fresh one will not fix — so it locks. §9/F7: narrow — only
+   * a session actually bound gets the benefit of the doubt; an unbound one just locks. */
   function shouldRenewInsteadOfLocking(): boolean {
-    if (session === null || !isGrantActive(win)) return false;
+    if (session === null || !sessionIsBoundAndActive()) return false;
     if (state.kind !== "chat" && state.kind !== "fading") return false;
     if (renewalInFlight) return true;
     return lastRenewedAtMs === null || win.performance.now() - lastRenewedAtMs > GRANT_RENEW_LOOP_GUARD_MS;
@@ -711,19 +748,17 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
       if (requestId !== verifyRequestSeq || state.kind !== "verifying") return;
       if (result.ok) {
         session = { token: result.token, expiresAt: result.expiresAt };
+        // A PIN unlock is never itself bound (§9, spec point 6) — `boundGrantId` stays null
+        // (its own default) until `tryBindStoredGrant` below actually lands one, so THIS
+        // transition into "chat" already reads `grantActive: false` rather than suppressing
+        // idle/routeAway on the strength of a session that has not been exchanged yet.
         armSessionTimers(result.expiresAt);
         // A correct PIN ends a pause: a device that keeps itself unlocked is permanently
         // unlocked again (03-permanent-unlock.md §1). Cleared BEFORE the transition, so a
         // stored grant is eligible for the exchange below the instant it starts.
         setGrantPaused(win, false);
-        // §9 (audit F4 ruling, spec §9 point 6): a PIN unlock is never itself bound — set
-        // BEFORE the dispatch below, so THIS transition into "chat" already reads
-        // `grantActive: false` rather than suppressing idle/routeAway on the strength of a
-        // session that has not been exchanged yet. `bindGrantAfterPinUnlock` clears it once
-        // it knows the answer, one way or the other.
-        pendingGrantBind = true;
         dispatch({ type: "verifyOk" });
-        void bindGrantAfterPinUnlock();
+        void tryBindStoredGrant();
         return;
       }
       if (result.kind === "wrongPin") {
@@ -1085,6 +1120,7 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
       // With a grant active the reducer leaves an open chat alone above; this panel is gone, so
       // nothing may keep the token.
       session = null;
+      boundGrantId = null;
       screenWatcher.stop();
       chatView?.dispose();
       detachMultiTapListener();

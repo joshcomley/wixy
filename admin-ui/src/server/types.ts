@@ -64,11 +64,19 @@ export interface LockHooks {
   lockNow(cause: LockCause): void;
   /** §9 (audit F4 ruling): adopt a freshly BOUND session — the token `POST /device-grants`
    * itself returns on a successful enrolment — with no visible change, exactly like a silent
-   * renewal (`ServerChatView.attach` may be called again while attached). Without this the
+   * renewal (`ServerChatView.attach` may be called again while attached). `grantId` names the
+   * exact grant `session` is bound to (F7 fix — never inferred from storage). Without this the
    * live session stays whatever it was before enrolling (often an unbound PIN token), so
    * "Sign out other devices" called moments later would see an unbound caller and spare
    * nothing — the newly-created grant included. A no-op once the panel has been torn down. */
-  adoptBoundSession(session: ServerSession): void;
+  adoptBoundSession(session: ServerSession, grantId: string): void;
+  /** §9 (audit F4 ruling, F7 fix): the grant id the LIVE session is currently bound to, or
+   * null for a plain PIN session — including one whose bound exchange is still pending or has
+   * failed. Used by "Sign out other devices" (§9.7) to decide whether THIS device's own local
+   * grant keys survive the call: the server only spares the caller's grant when the caller's
+   * own token is bound to it, so the client must keep local state consistent with that same
+   * test rather than assuming "I have a grant" means "the server just spared it". */
+  getBoundGrantId(): string | null;
 }
 
 /** The server-chat HTTP API surface, assembled from each area's own client

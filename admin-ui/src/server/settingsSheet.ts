@@ -454,7 +454,7 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     // session actually becomes the one just bound — otherwise "Sign out other devices" called
     // moments later (with no reload in between) would still see the old, unbound caller and
     // spare nothing, the just-created grant included.
-    hooks.adoptBoundSession({ token: result.token, expiresAt: result.expiresAt });
+    hooks.adoptBoundSession({ token: result.token, expiresAt: result.expiresAt }, result.grant.grantId);
     closeEnrolment();
   }
 
@@ -489,10 +489,18 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     signOutStatus.textContent = "Signing out…";
     void revokeAllDeviceGrants(session)
       .then(() => {
-        // §9 (audit F4 ruling, sub-point (ii)): the server spares the caller's OWN bound
-        // grant, so THIS device is not among the ones just signed out — its local keys stay
-        // exactly as they were. (A caller with no grant at all has nothing here to clear
-        // either way.)
+        // §9.7 (audit F7 fix): the server spares the caller's grant ONLY when the caller's own
+        // token is bound to it — never merely because this device happens to have one stored.
+        // If THIS device's live session was not actually bound (a still-pending or failed
+        // exchange, or a stale second tab), the server just revoked this device's grant along
+        // with everyone else's — keep the local keys only when they still match what the
+        // server actually spared, and forget them otherwise.
+        const stored = readDeviceGrant(win);
+        const wasSpared = stored !== null && hooks.getBoundGrantId() === stored.grantId;
+        if (!wasSpared) {
+          clearDeviceGrant(win);
+          syncKeepRow();
+        }
         signOutStatus.textContent = "Done — the other devices are signed out.";
       })
       .catch((error: unknown) => {
