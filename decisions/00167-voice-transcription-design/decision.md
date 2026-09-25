@@ -78,6 +78,15 @@
     ignores the extra key. The control therefore appears within one unlock of cmd's private mode
     coming live (the idle lock is 10 s, so that is immediate in practice).
 
+14. **`attachment_transcripts`'s existence is checked independently of `PRAGMA user_version`.**
+    Three round-2 branches each independently claim the next schema version for their own new
+    table. If a database reaches that version through a *sibling* branch's migration — never
+    running this one — the version-gated ladder's early return (`current >=
+    _LATEST_SCHEMA_VERSION`) would otherwise leave it permanently missing this table. Every
+    connect now also checks `sqlite_master` directly (a plain read, free once the table exists)
+    and creates it if missing, regardless of the version number. Found by the independent
+    review, reproduced with a database force-set to `user_version=7` with the table dropped.
+
 ## Alternatives rejected
 
 - **Synchronous route with a long timeout** — 524 from Cloudflare on the notes that matter.

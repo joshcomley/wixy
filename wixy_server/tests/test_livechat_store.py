@@ -1093,6 +1093,38 @@ class TestTranscripts:
         wal_path = Path(f"{db_path}-wal")
         return db_path.read_bytes() + (wal_path.read_bytes() if wal_path.exists() else b"")
 
+    def test_a_sibling_branchs_migration_reaching_schema_7_without_this_table_is_recovered(
+        self, db_path: Path
+    ) -> None:
+        """Three round-2 branches each independently claim schema version 7 for their own new
+        table. A database that reached user_version=7 through a SIBLING branch's migration
+        (never running this one) must not be permanently missing `attachment_transcripts` just
+        because `_migrate`'s version-gated ladder saw `current >= _LATEST_SCHEMA_VERSION` and
+        returned early."""
+        store = LiveChatStore(db_path)
+        _seq, att_id = _ready_voice_message(store)
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.execute("DROP TABLE attachment_transcripts")
+            conn.execute("PRAGMA user_version = 7")  # a sibling's migration claimed this version
+            conn.commit()
+        finally:
+            conn.close()
+
+        recovered = LiveChatStore(db_path)
+        assert recovered.begin_transcript(att_id=att_id, now=2000.0).state == "started"
+        conn = sqlite3.connect(str(db_path))
+        try:
+            assert (
+                conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' "
+                    "AND name = 'attachment_transcripts'"
+                ).fetchone()
+                is not None
+            )
+        finally:
+            conn.close()
+
     def test_v6_database_upgrades_and_existing_attachments_have_no_transcript(
         self, db_path: Path
     ) -> None:

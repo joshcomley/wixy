@@ -753,14 +753,19 @@ budget exceeded → `timeout`. No retries. `create_app(..., transcriber=)` is th
 **Storage.** `attachment_transcripts(attachment_id PK → attachments(id) ON DELETE CASCADE, status
 pending|done|failed, text, failure, engine, created_at, updated_at)`. Every attachment load goes
 through one joined `SELECT` (`_SELECT_ATTACHMENT`), so `AttachmentRow.transcript` can never be
-missing. `begin_transcript` decides start/pending/done/gone in one write transaction and announces a
+missing. The table's existence is ALSO checked independently of `PRAGMA user_version` on every
+connect (a plain `sqlite_master` read, free once it exists) — three round-2 branches each
+independently claim the next schema version for their own new table, so a database that reached the
+current version through a sibling branch's migration must not be left permanently missing this one.
+`begin_transcript` decides start/pending/done/gone in one write transaction and announces a
 new `pending` with `message_updated`; `finish_transcript` is an `UPDATE` whose row count says whether
 the row still exists (a result after delete/wipe is discarded, no event); `fail_stale_pending_
 transcripts` runs at startup, and a job cancelled by shutdown records itself `failed` (`interrupted`)
 under a shield on its way out — only if the row is still `pending` (`only_if_pending`), so it can
 never erase a finished transcript. (Slots restarts Wixy in place with a forced stop, so in a real
-deploy the startup sweep, not this handler, is what clears such a row.) The `failure` code (`unavailable`, `warming`, `timeout`, `rejected`,
-`invalid_response`, `media_missing`, `too_long`, `interrupted`, `error`) is server-side only.
+deploy the startup sweep, not this handler, is what clears such a row.) The `failure` code
+(`unavailable`, `warming`, `timeout`, `rejected`, `invalid_response`, `media_missing`, `too_long`,
+`interrupted`, `error`) is server-side only.
 
 **The route and job (`routes_livechat.py`, `livechat/transcription.py`).**
 `POST /attachments/{id}/transcribe` answers at once: 404 (not a sent voice note), 409 (not ready),

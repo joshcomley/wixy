@@ -342,6 +342,7 @@ class LiveChatStore:
         # blue/green processes cannot both rebuild the events table.
         current = conn.execute("PRAGMA user_version").fetchone()[0]
         if current >= _LATEST_SCHEMA_VERSION:
+            self._ensure_attachment_transcripts_table(conn)
             return
 
         conn.execute("BEGIN IMMEDIATE")
@@ -394,6 +395,31 @@ class LiveChatStore:
                     if statement.strip():
                         conn.execute(statement)
                 conn.execute("PRAGMA user_version = 7")
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+        self._ensure_attachment_transcripts_table(conn)
+
+    @staticmethod
+    def _ensure_attachment_transcripts_table(conn: sqlite3.Connection) -> None:
+        """Independent of `PRAGMA user_version`. Three round-2 feature branches each
+        independently claim the next schema version for their own new table; whichever one a
+        given database reached that version through, this table must still exist. A plain read
+        against `sqlite_master` costs nothing once the table exists (the overwhelmingly common
+        case, checked on every connect same as the `user_version` read above); only a database
+        that genuinely lacks the table pays for the `CREATE TABLE IF NOT EXISTS`, which is itself
+        a no-op if a racing connection's own check-then-create won a concurrent race."""
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'attachment_transcripts'"
+        ).fetchone()
+        if exists is not None:
+            return
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            for statement in _SCHEMA_V7_ATTACHMENT_TRANSCRIPTS.split(";"):
+                if statement.strip():
+                    conn.execute(statement)
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
