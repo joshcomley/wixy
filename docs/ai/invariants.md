@@ -636,10 +636,42 @@ its failure handler (including a stale 401 lock), and every stream callback each
 epoch and the current session before acting. A lock or detach while history is loading can
 therefore never open a stream afterwards, and a late `locked` event or 401 from a previous unlock
 can never lock the next session.
+*Amended (round 2, Inv 48):* a device that has "Keep this device unlocked" switched on and not
+paused silences exactly two automatic locks from an open chat — idle and route-away — and answers
+token expiry and a 401 with a silent re-mint before it locks. Everything deliberate (panic, a
+multi-tap, Escape) still locks AND pauses the grant. A hidden document is governed by two
+per-device checkboxes, "Lock when I change tab" and "Lock when I lock my screen" (both ticked
+by default, stored as `"0"` under `wx-srv-lock-on-tab` / `wx-srv-lock-on-screen`; absent or
+unreadable is ticked): both ticked locks at once, both unticked never locks, and when they
+differ the chat is put behind the decoy at once (a shield holding the session in memory) and
+restored on return ONLY when the cause is known and its own box is unticked — an ambiguous
+cause always stays locked. Locking on either box, or by Escape/panic/multi-tap, pauses an
+active grant. A hidden document in any state other than an open chat still locks as before.
+A hide caused by the page being UNLOADED (a reload, a navigation, a closing tab — `pagehide`
+with `persisted` false, which browsers follow with `visibilitychange → hidden`) is not a
+background switch: it neither locks nor pauses, or every reload would undo "keep this device
+unlocked". A page entering the back/forward cache (`persisted` true) can be restored open, so
+that stays an ordinary background switch.
+*Amended again (round 2, independent review + Architect ruling on §8, decisions/00161):* "the
+cause is known" above means judged from WHEN a screen-lock event was DISPATCHED, not merely
+whether one happened during the absence — an event is CAUSAL only inside
+`[hideAt - 1000ms, hideAt + 2000ms]` (`screenLockEvidence` in `lockModel.ts`); one delivered only
+once the frozen page resumes (a batched event) is not evidence of what caused THIS hide, even on
+an otherwise-proven device, and the shield stays ambiguous. A SECOND background switch inside one
+absence taints the shield (the evidence window is anchored to the first hide, so a later switch's
+true cause becomes unreadable against it) and forces the eventual return to stay locked regardless
+of what the evidence says; the same taint applies if a lock event arrives while a restore is only
+waiting on a token renewal. The grant is paused the INSTANT a background switch begins the shield,
+not when the shield later resolves to a lock — a page reloaded, closed, or discarded before the
+500 ms window elapses is still found paused on the next mount. An idle period that ran out while
+the page was away locks the returning chat INSTANTLY (cause `idleAway`), before any touch gets a
+chance to be mistaken for activity that should have prevented it.
 *Enforced by:* `admin-ui/tests/serverChatView.test.ts` (no stream after a panic, idle or hidden
 lock while attach is pending; a late `locked` event or unauthorized attach failure from the
-previous unlock is ignored), `admin-ui/tests/server/panel.test.ts`, and
-`e2e/tests/server-lock.spec.ts`.
+previous unlock is ignored), `admin-ui/tests/server/panel.test.ts`,
+`admin-ui/tests/server/panelGrant.test.ts` and `lockModelGrant.test.ts` (the grant,
+shield and checkbox behaviour), and `e2e/tests/server-lock.spec.ts` +
+`server-permanent-unlock.spec.ts`.
 
 ### Inv 43 — Server-chat idle time is reset only by user input
 Only the defined user-input events count as activity. `scroll` events, incoming messages, and
@@ -651,7 +683,9 @@ an ordinary pointer event and so is activity in its own right — the period cou
 tap; a change that arrives any other way (another tab of the device) is measured from the
 last real activity, and can lock at once if that deadline has already passed. Only the
 unlocked chat's idle period is affected; the decoy's re-hide and the PIN pad's idle close
-stay 10 seconds.
+stay 10 seconds. With a device grant active there is no idle timer for the open chat at all; a
+return from the background compares the wall clock with the last activity (a suspended phone
+may not advance `performance.now()`), except while a suspension holds the timer paused.
 
 ### Inv 44 — Server-chat media is sniffed, bounded, and private
 Inspect magic bytes before any media subprocess. Every ffmpeg/ffprobe input uses the sniffed
@@ -746,6 +780,62 @@ running. A recovered loop's failure count reads as zero after five minutes witho
 failure. The wrapper exposes no raw `start_soon` method.
 *Enforced by:* `wixy_server/tests/test_background.py`, `test_routes_system.py`, worker-app tests,
 and strict mypy.
+
+### Inv 48 — A device grant only replaces typing the PIN, and only a verified PIN can create one
+"Keep this device unlocked" (`spec/server-chat/03-permanent-unlock.md`) rests on a **device
+grant**: a separate, revocable credential. `POST /device-grants` needs BOTH a valid unlock token
+(you are inside the unlocked chat) AND a PIN that cmd verifies at that moment — an attempt is
+charged exactly as for `/unlock`, through the same `_verify_pin` helper, so the 401/429/409/503/422
+mapping cannot drift. The server stores only `sha256(secret)` in `device_grants` (an id, the hash,
+the CF Access email that created it, a display label and three timestamps — never chat content,
+never the secret); the 32-byte secret reaches the browser once, base64url-encoded, in a
+`Cache-Control: no-store` response, and every comparison uses `hmac.compare_digest`.
+
+A grant is bound to the CF identity that created it, is individually revocable, is refused after
+30 days unused, and an identity holds at most five live ones (a sixth revokes the oldest). It
+**only ever mints a normal unlock token**, through `POST /unlock-with-grant` — no PIN, and cmd is
+never contacted; every chat route still requires that token in `X-Wixy-Server-Token`, and the
+token itself still never leaves JS memory (Inv 41 unchanged). Every way `unlock-with-grant` can
+fail — unknown id, wrong secret, revoked, idle over 30 days, another identity's grant, a malformed
+field — is the same reason-free `401 {"error":"grant_invalid"}`; ten failures per identity per
+minute answer 429. All four grant routes run the `unlock_request_refusal` guard first, so a
+cross-site page can neither spend a PIN attempt nor probe a grant. The janitor revokes grants unused
+for 30 days and deletes rows revoked for more than a week. A device label rejects a lone UTF-16
+surrogate BEFORE cmd is asked to verify (and charge) the PIN (audit F5) — the same class of check
+already applied to a sender name (§5.3) and a reaction, just missed here the first time.
+
+**Revocation ends live sessions, not just future ones (spec §9, audit F4).** A token minted by
+`unlock-with-grant`, or by `POST /device-grants` itself, is BOUND to that grant (payload key
+`"g"`, 32 lowercase hex): `require_server_token` re-checks the grant is still live on every
+request that carries one, `GET /stream`'s loop re-checks it on its existing ~2s tick, and a bound
+token's media URLs carry `&g=` and fold the grant id into their HMAC too. **Revoking a grant ends,
+within about 2 seconds, every session and media link minted from it. No route exchanges a
+grant-bound token for an unbound one** — a route that did would let a thief holding the device
+outlive its own revocation. `POST /unlock`'s PIN-minted tokens are never bound, so an ordinary PIN
+session is untouched by any of this. "Sign out other devices" revokes every OTHER live grant of
+the identity but spares the CALLER's own bound grant, so the button's promise is literally true
+and the click that fired it doesn't sign itself out; turning "Keep this device unlocked" off on
+the current device revokes that one grant and locks the chat at once, on purpose.
+
+On the device the grant lives in two `localStorage` keys: `wx-srv-device-grant` (present means the
+setting is on) and `wx-srv-grant-paused` (`"1"` after a deliberate or checkbox-caused lock; a PIN
+unlock clears it). Unreadable, malformed or unwritable storage means OFF, and a pause that cannot
+be written drops the grant, so a panic can never be undone by a reload. `grantActive` means the
+in-memory session is bound to the stored grant, never merely that the key is present: after a PIN
+unlock on a device holding an unpaused grant, the client exchanges for a bound session at once via
+`unlock-with-grant`, and the ordinary automatic locks apply until that arrives (or forever, on a
+network error) — without this, re-entering the PIN after a panic would run a never-auto-locking
+chat on an unbound 12h token, the same hole by another door. **Known limits:** rotating the PIN at
+cmd does not revoke grants (Sign out other devices does); a lost phone's push subscription still
+receives the payload-less "new message" ping until it is removed — the ping shows no content, and
+opening it still needs the PIN — see the runbook.
+*Enforced by:* `wixy_server/tests/test_livechat_grants.py` (hash-only storage, the cap, the 30-day
+window, identity binding, migration v9, the janitor, lone-surrogate labels), `test_routes_livechat_grants.py`
+(both gates on enrolment, the uniform 401, the rate limit, cmd never contacted, the guard on all
+four routes, real-JWT identity binding, bound-token revocation ending a session/stream/media link,
+"sign out other devices" sparing the caller's own grant), `admin-ui/tests/server/{deviceGrant,
+grantsApi,lockModelGrant,panelGrant,settingsSheetKeep}.test.ts`, and
+`e2e/tests/server-permanent-unlock.spec.ts`.
 
 ### Inv 49 — Server-chat reactions are a small, public, cascading mark
 A reaction is one row per (message, reactor, emoji). The reactor is the trimmed, **case-folded

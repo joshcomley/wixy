@@ -28,6 +28,7 @@ transaction-before-DML behavior.
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import sqlite3
@@ -147,7 +148,19 @@ CREATE TABLE IF NOT EXISTS attachment_transcripts(
   created_at REAL NOT NULL, updated_at REAL NOT NULL);
 """
 
-_LATEST_SCHEMA_VERSION = 8
+_SCHEMA_V9_DEVICE_GRANTS = """
+CREATE TABLE IF NOT EXISTS device_grants(
+  id TEXT PRIMARY KEY,
+  secret_hash TEXT NOT NULL,
+  email TEXT NOT NULL,
+  label TEXT,
+  created_at REAL NOT NULL,
+  last_used_at REAL NOT NULL,
+  revoked_at REAL);
+"""
+
+_LATEST_SCHEMA_VERSION = 9
+_UNKNOWN_GRANT_HASH = "0" * 64
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -459,6 +472,13 @@ class LiveChatStore:
                     if statement.strip():
                         conn.execute(statement)
                 conn.execute("PRAGMA user_version = 8")
+                current = 8
+
+            if current < 9:
+                for statement in _SCHEMA_V9_DEVICE_GRANTS.split(";"):
+                    if statement.strip():
+                        conn.execute(statement)
+                conn.execute("PRAGMA user_version = 9")
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
@@ -1466,3 +1486,140 @@ class LiveChatStore:
                     (device_id,),
                 ).fetchone()
                 return int(row["consecutive_failures"]) if row is not None else None
+
+    # -- device grants (03-permanent-unlock.md §3) -----------------------
+
+    def create_device_grant(
+        self,
+        *,
+        grant_id: str,
+        secret_hash: str,
+        email: str,
+        label: str | None,
+        now: float,
+        max_live: int,
+    ) -> list[str]:
+        """Insert one grant, then revoke the identity's OLDEST live grants beyond
+        `max_live` — "a sixth creation revokes the oldest". One write transaction, so
+        the cap holds even when two devices enroll at once. Returns the revoked ids."""
+        with self._write_txn() as conn:
+            conn.execute(
+                "INSERT INTO device_grants "
+                "(id, secret_hash, email, label, created_at, last_used_at, revoked_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, NULL)",
+                (grant_id, secret_hash, email, label, now, now),
+            )
+            live = conn.execute(
+                "SELECT id FROM device_grants WHERE email = ? AND revoked_at IS NULL "
+                "ORDER BY created_at DESC, rowid DESC",
+                (email,),
+            ).fetchall()
+            overflow = [str(row["id"]) for row in live[max_live:]]
+            for revoked_id in overflow:
+                conn.execute(
+                    "UPDATE device_grants SET revoked_at = ? WHERE id = ?", (now, revoked_id)
+                )
+            return overflow
+
+    def redeem_device_grant(
+        self, *, grant_id: str, secret_hash: str, email: str, now: float, max_idle_s: float
+    ) -> bool:
+        """Check a presented grant and, only if it is valid, stamp `last_used_at`.
+
+        Valid means: the id exists, the hash matches (constant-time), it is not revoked,
+        it was used within `max_idle_s`, and it belongs to `email`. Every failure is the
+        same `False` — the caller must never learn WHICH check failed. Each check runs
+        (no early return) against a fixed dummy hash when the id is unknown, so an
+        unknown id and a wrong secret cost the same."""
+        with self._write_txn() as conn:
+            row = conn.execute(
+                "SELECT secret_hash, email, last_used_at, revoked_at FROM device_grants "
+                "WHERE id = ?",
+                (grant_id,),
+            ).fetchone()
+            stored_hash = str(row["secret_hash"]) if row is not None else _UNKNOWN_GRANT_HASH
+            hash_matches = hmac.compare_digest(
+                stored_hash.encode("ascii"), secret_hash.encode("ascii")
+            )
+            valid = (
+                row is not None
+                and hash_matches
+                and row["revoked_at"] is None
+                and row["email"] == email
+                and now - float(row["last_used_at"]) <= max_idle_s
+            )
+            if not valid:
+                return False
+            conn.execute("UPDATE device_grants SET last_used_at = ? WHERE id = ?", (now, grant_id))
+            return True
+
+    def is_device_grant_live(
+        self, *, grant_id: str, email: str, now: float, max_idle_s: float
+    ) -> bool:
+        """Read-only liveness check for a token already bound to `grant_id` (spec §9, Inv 48):
+        exists, unrevoked, used within `max_idle_s`, and still belongs to `email`. Unlike
+        `redeem_device_grant` this never writes `last_used_at` — it runs on every request a
+        bound token makes (and every ~2s on an open stream), and re-stamping activity on a mere
+        liveness check would mask an identity mismatch behind a write nobody asked for."""
+        with self._read_txn() as conn:
+            row = conn.execute(
+                "SELECT email, last_used_at, revoked_at FROM device_grants WHERE id = ?",
+                (grant_id,),
+            ).fetchone()
+            return (
+                row is not None
+                and row["revoked_at"] is None
+                and row["email"] == email
+                and now - float(row["last_used_at"]) <= max_idle_s
+            )
+
+    def revoke_device_grant(self, *, grant_id: str, email: str, now: float) -> bool:
+        """Revoke one grant, only if it belongs to `email`. True when the grant exists and
+        is that identity's — revoking an already-revoked one is a successful no-op, which
+        is what makes the DELETE route idempotent. False for an unknown id AND for
+        another identity's grant (indistinguishable to the caller)."""
+        with self._write_txn() as conn:
+            row = conn.execute(
+                "SELECT email FROM device_grants WHERE id = ?", (grant_id,)
+            ).fetchone()
+            if row is None or row["email"] != email:
+                return False
+            conn.execute(
+                "UPDATE device_grants SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
+                (now, grant_id),
+            )
+            return True
+
+    def revoke_all_device_grants(
+        self, *, email: str, now: float, except_grant_id: str | None = None
+    ) -> int:
+        """Revoke every live grant for `email` — "Sign out other devices" — except
+        `except_grant_id` (spec §9 F4 sub-ruling (ii)): the caller's OWN grant, when its
+        session is bound to one, so the button's promise ("other devices") is literally true
+        and the caller isn't signed out of the request that clicked it."""
+        with self._write_txn() as conn:
+            cursor = conn.execute(
+                "UPDATE device_grants SET revoked_at = ? "
+                "WHERE email = ? AND revoked_at IS NULL AND id IS NOT ?",
+                (now, email, except_grant_id),
+            )
+            return cursor.rowcount
+
+    def revoke_idle_device_grants(self, *, idle_before: float, now: float) -> int:
+        """Janitor: revoke every live grant not used since `idle_before`."""
+        with self._write_txn() as conn:
+            cursor = conn.execute(
+                "UPDATE device_grants SET revoked_at = ? "
+                "WHERE revoked_at IS NULL AND last_used_at < ?",
+                (now, idle_before),
+            )
+            return cursor.rowcount
+
+    def delete_revoked_device_grants(self, *, revoked_before: float) -> int:
+        """Janitor: drop rows revoked before `revoked_before` (secure_delete zeroes them)."""
+        with self._write_txn() as conn:
+            cursor = conn.execute(
+                "DELETE FROM device_grants WHERE revoked_at IS NOT NULL AND revoked_at < ?",
+                (revoked_before,),
+            )
+            return cursor.rowcount

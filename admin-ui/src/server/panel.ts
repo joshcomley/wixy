@@ -7,22 +7,59 @@
 // event loop, `fetch`, or `setTimeout` for the lock machine — every decision
 // about WHAT state comes next lives in `lockModel.ts` instead, so it can be
 // tested without any of this.
+//
+// "Keep this device unlocked" (spec/server-chat/03-permanent-unlock.md) adds three things
+// here, all as INPUTS to that same machine rather than a second one: a device grant that
+// replaces typing the PIN (`deviceGrant.ts`, `api/grants.ts`), a silent re-mint of the
+// unlock token before it expires, and the two "lock when I change tab / lock my screen"
+// checkboxes (§8), which decide what a background switch does.
 
 import type { AdminApi } from "../api";
+import { unlockWithGrant } from "./api/grants";
 import { unlock } from "./api/unlock";
-import { FADE_MS, MULTI_TAP_INTERVAL_MS, PICKER_SUSPEND_MAX_MS } from "./constants";
+import {
+  FADE_MS,
+  GRANT_RENEW_BEFORE_MS,
+  GRANT_RENEW_LAST_CHANCE_MS,
+  GRANT_RENEW_LOOP_GUARD_MS,
+  GRANT_RENEW_MEDIA_DEFER_MS,
+  GRANT_RENEW_RETRY_MS,
+  MULTI_TAP_INTERVAL_MS,
+  PICKER_SUSPEND_MAX_MS,
+  SCREEN_LOCK_EVIDENCE_AFTER_MS,
+  SCREEN_LOCK_EVIDENCE_BEFORE_MS,
+  SHIELD_WAIT_MS,
+} from "./constants";
 import { mountDecoy, type DecoyView } from "./decoy";
+import {
+  clearDeviceGrant,
+  isDeviceGrantPaused,
+  isGrantActive,
+  onGrantStateChanged,
+  readDeviceGrant,
+  setGrantPaused,
+} from "./deviceGrant";
 import { attachMultiTapListener, attachTapListener, createMultiTapDetector, createTapDetector } from "./gestures";
 import { chatIdleLockMs, onIdleLockPreferenceChanged } from "./idlePreference";
 import {
+  classifyHide,
+  effectiveLockSettings,
+  hiddenPolicy,
   idleRemainingMs,
   INITIAL_STATE,
+  pausesGrant,
   reduce,
+  screenLockEvidence,
+  shieldOutcome,
+  type LockContext,
   type LockEffect,
   type LockEvent,
+  type LockSettings,
   type LockState,
 } from "./lockModel";
+import { isScreenLockProven, onLockSettingsChanged, readStoredLockSettings, setScreenLockProven } from "./lockSettings";
 import { mountPinPad, type PinPadView } from "./pinPad";
+import { createScreenWatcher } from "./screenWatcher";
 import type {
   CreateServerChatView,
   LockCause,
@@ -158,9 +195,21 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
 
   let state: LockState = INITIAL_STATE;
   let session: ServerSession | null = null;
+  /** §9 (audit F4 ruling; F7 fix): the id of the device grant `session` is ACTUALLY bound to,
+   * or null for a plain PIN session (including a PIN session still waiting on, or having
+   * failed, its bound exchange). This — never `isGrantActive(win)`, which only reflects
+   * whether a grant sits UNPAUSED IN STORAGE — is what "the in-memory session is bound to the
+   * stored grant" (spec §4) means, and it is the only thing that may suppress an automatic
+   * lock. Set only by `adoptSession`/`startGrantUnlock`'s own success path; cleared with
+   * `session` on every return to "decoy". `readDeviceGrant(win)` staying broad (storage-only)
+   * everywhere else is deliberate — pausing an unpaused stored grant, or a fresh mount's own
+   * first attempt to use one, must not depend on whether some EARLIER session got bound. */
+  let boundGrantId: string | null = null;
   let chatView: ServerChatView | null = null;
   let chatAttached = false;
   let verifyRequestSeq = 0;
+  /** Stale-response filter for the grant unlock a mount starts, like `verifyRequestSeq`. */
+  let grantRequestSeq = 0;
   /** R2 v1.3's reveal-affordance debounce (see the affordance click handler
    * above) — `dispatch` stamps this the instant a "tap" event actually
    * produces the decoy->revealed transition. */
@@ -183,6 +232,9 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
   function render(): void {
     const kind = state.kind;
     affordanceButton.hidden = kind !== "revealed";
+    // While a device grant is minting this visit's token nothing is shown, not even the
+    // decoy: a flash of disguise followed by the chat would tell a bystander which is which.
+    root.classList.toggle("wx-srv-granting", kind === "granting");
 
     const showPinPad = kind === "pin" || kind === "verifying";
     pinPadHost.hidden = !showPinPad;
@@ -227,12 +279,31 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
    * the current state's idle timeout, so a settings change can re-schedule
    * against it without ever restarting the clock. */
   let idleStartedAtMs = 0;
+  /** The same instant on the wall clock. `performance.now()` need not advance while a phone
+   * sleeps, so a return from the background compares this instead. */
+  let lastActivityWallMs = Date.now();
   let fadeTimer: ReturnType<typeof win.setTimeout> | null = null;
   let expiryTimer: ReturnType<typeof win.setTimeout> | null = null;
+  let renewTimer: ReturnType<typeof win.setTimeout> | null = null;
 
   function fireIdle(): void {
     idleTimer = null;
     dispatch({ type: "lock", cause: "idle" });
+  }
+
+  /** §9 (audit F4 ruling; F7 fix): whether `session` is ACTUALLY the grant-bound one right
+   * now — `boundGrantId` set, still naming the SAME grant that is stored, and that grant not
+   * paused. This is the one true "is a device grant active" question for suppression
+   * purposes; see `boundGrantId`'s own comment for why storage presence alone is not enough. */
+  function sessionIsBoundAndActive(): boolean {
+    return boundGrantId !== null && boundGrantId === readDeviceGrant(win)?.grantId && !isDeviceGrantPaused(win);
+  }
+
+  /** With a device grant active the open chat never idles out — no timer is scheduled at
+   * all, rather than one that fires into a reducer that ignores it. The decoy's reveal
+   * button and the PIN pad keep their own idle re-hide either way. */
+  function idleSuppressedByGrant(): boolean {
+    return state.kind === "chat" && sessionIsBoundAndActive();
   }
 
   /** (Re)schedules the concrete idle timer for whatever is left of the
@@ -245,6 +316,7 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
       idleTimer = null;
     }
     if (totalSuspensionCount > 0) return; // stays paused — see `release()` below
+    if (idleSuppressedByGrant()) return;
     const remainingMs = idleRemainingMs(state, chatIdleLockMs(win), idleStartedAtMs, win.performance.now());
     idleTimer = win.setTimeout(fireIdle, remainingMs);
   }
@@ -253,6 +325,7 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
   function armIdleTimer(): void {
     idleTimerArmed = true;
     idleStartedAtMs = win.performance.now();
+    lastActivityWallMs = Date.now();
     scheduleIdleTimer();
   }
 
@@ -287,17 +360,39 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
     }
   }
 
-  function armExpiryTimer(expiresAtEpochS: number): void {
-    clearExpiryTimer();
-    const delayMs = expiresAtEpochS * 1000 - Date.now();
-    expiryTimer = win.setTimeout(() => dispatch({ type: "lock", cause: "expired" }), Math.max(0, delayMs));
+  function msUntilExpiry(): number {
+    return session === null ? 0 : session.expiresAt * 1000 - Date.now();
   }
 
-  function clearExpiryTimer(): void {
+  /** The token's two deadlines: renewal `GRANT_RENEW_BEFORE_MS` early (acted on only if a
+   * grant is active when it fires), and expiry itself. Re-armed whenever the session or the
+   * grant changes. */
+  function armSessionTimers(expiresAtEpochS: number): void {
+    clearSessionTimers();
+    const untilExpiryMs = expiresAtEpochS * 1000 - Date.now();
+    expiryTimer = win.setTimeout(onExpiry, Math.max(0, untilExpiryMs));
+    renewTimer = win.setTimeout(() => void renewSession("scheduled"), Math.max(0, untilExpiryMs - GRANT_RENEW_BEFORE_MS));
+  }
+
+  function clearSessionTimers(): void {
     if (expiryTimer !== null) {
       win.clearTimeout(expiryTimer);
       expiryTimer = null;
     }
+    if (renewTimer !== null) {
+      win.clearTimeout(renewTimer);
+      renewTimer = null;
+    }
+  }
+
+  function onExpiry(): void {
+    expiryTimer = null;
+    // The token ran out. A grant gets one last silent try before the chat locks.
+    if (grantUsable() && session !== null) {
+      void renewSession("expiry");
+      return;
+    }
+    dispatch({ type: "lock", cause: "expired" });
   }
 
   function applyEffects(effects: readonly LockEffect[]): void {
@@ -327,17 +422,30 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
           break;
       }
     }
+    if (state.kind !== "shielded") {
+      cancelShieldResolve();
+      restoreAfterRenewal = false;
+      shieldPausedGrant = false;
+    }
     if (state.kind === "decoy") {
       // R4/R6: nothing sensitive survives a return to the decoy — the token
-      // is discarded and the expiry timer has nothing left to guard.
+      // is discarded and the expiry timer has nothing left to guard. (A
+      // "shielded" chat is deliberately NOT here: it holds the session until
+      // the shield resolves, and every path out of it that is not a restore
+      // ends here.)
       session = null;
-      clearExpiryTimer();
+      boundGrantId = null;
+      clearSessionTimers();
+      renewalInFlight = false;
     }
   }
 
-  function dispatch(event: LockEvent): void {
+  function dispatch(event: LockEvent, contextOverride?: Partial<LockContext>): void {
     const previousKind = state.kind;
-    const result = reduce(state, event, Date.now());
+    const context: LockContext = {
+      grantActive: contextOverride?.grantActive ?? sessionIsBoundAndActive(),
+    };
+    const result = reduce(state, event, Date.now(), context);
     state = result.state;
     if (previousKind === "decoy" && result.state.kind === "revealed") {
       // Stamped here, not inside `reduce` (a pure function with no clock of
@@ -361,6 +469,197 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
     }
     render();
     applyEffects(result.effects);
+  }
+
+  // -- Device grant: pausing, the mount unlock, and silent renewal ------------------------
+
+  /** A chat that was open (or opening) is being locked by something the owner did or asked
+   * for: pause the grant so the PIN is needed again, and a reload cannot undo it. Locks the
+   * grant exists to smooth over — idle, route-away, expiry, a 401 — never call this. */
+  function pauseGrantForLock(cause: LockCause): void {
+    if (!pausesGrant(cause)) return;
+    const chatWasOpen =
+      state.kind === "chat" || state.kind === "fading" || state.kind === "shielded" || state.kind === "granting";
+    if (chatWasOpen && isGrantActive(win)) setGrantPaused(win, true);
+  }
+
+  /** Locks even though a grant is active — for the moments the grant has run out of road
+   * (it was revoked, or the token expired and cannot be renewed). */
+  function forceLock(cause: LockCause): void {
+    dispatch({ type: "lock", cause }, { grantActive: false });
+  }
+
+  let renewalInFlight = false;
+  let lastRenewedAtMs: number | null = null;
+  /** A shield resolved to "restore" but the token had expired while away: the chat comes back
+   * the moment a renewal lands (see `adoptSession`); a failed one locks instead. */
+  let restoreAfterRenewal = false;
+  /** The panel has been torn down: no late answer (a renewal, a grant unlock, a detector
+   * start) may bring anything back to life. */
+  let disposed = false;
+  /** The grant was paused AT THE START of the current shield, by this panel (see
+   * `beginShield`). Only a restore undoes it. */
+  let shieldPausedGrant = false;
+
+  /** A BOUND grant this panel can still renew right now: session actually bound and matching
+   * storage, or paused only by the shield that is in progress (which is what lets a shielded
+   * chat with an expired token still re-mint). §9/F7: narrow on purpose — renewing is for a
+   * session that WAS bound, never a plain PIN session that merely has a plausible-looking
+   * grant sitting in storage (that is `tryBindStoredGrant`'s job, and it never suppresses a
+   * lock while it works). */
+  function grantUsable(): boolean {
+    return (
+      sessionIsBoundAndActive() ||
+      (state.kind === "shielded" &&
+        shieldPausedGrant &&
+        boundGrantId !== null &&
+        boundGrantId === readDeviceGrant(win)?.grantId)
+    );
+  }
+
+  function mediaIsPlaying(): boolean {
+    return (suspensionsByReason.get("mediaPlaying") ?? 0) > 0;
+  }
+
+  /** Swaps in the renewed token with no visible change: the chat view re-attaches with it
+   * (reopening its stream from where it left off and refreshing the signed media URLs, which
+   * are bound to the OLD token's expiry). A shielded chat has no view attached — it just
+   * holds the new session until it is restored. */
+  function adoptSession(next: ServerSession, grantId: string): void {
+    if (disposed) return;
+    session = next;
+    boundGrantId = grantId;
+    lastRenewedAtMs = win.performance.now();
+    armSessionTimers(next.expiresAt);
+    if (chatAttached && chatView !== null) chatView.attach(next);
+    // A shield that resolved to "restore" while the token had already run out was waiting for
+    // exactly this — whichever renewal it was, its own or one that was already in flight.
+    // Only while the page is still in front of the owner and nothing has voided the decision:
+    // a second switch or a screen lock since then means the cause can no longer be read.
+    if (
+      restoreAfterRenewal &&
+      state.kind === "shielded" &&
+      !shieldTainted &&
+      win.document.visibilityState !== "hidden" &&
+      msUntilExpiry() > 0
+    ) {
+      restoreAfterRenewal = false;
+      commitShieldRestore();
+    }
+  }
+
+  /** Mints a fresh token from the device grant. `scheduled` is the early renewal, `expiry`
+   * the last chance, `unauthorized` a 401 that arrived while the grant is active. */
+  async function renewSession(reason: "scheduled" | "expiry" | "unauthorized"): Promise<void> {
+    if (disposed || renewalInFlight || session === null) return;
+    const lockCause: LockCause = reason === "unauthorized" ? "unauthorized" : "expired";
+    const grant = grantUsable() ? readDeviceGrant(win) : null;
+    if (grant === null) {
+      if (reason !== "scheduled") forceLock(lockCause);
+      return;
+    }
+    if (reason === "scheduled" && mediaIsPlaying() && msUntilExpiry() > GRANT_RENEW_LAST_CHANCE_MS) {
+      // Refreshing the signed media URLs restarts a playing voice note or video: wait for it.
+      renewTimer = win.setTimeout(() => void renewSession("scheduled"), GRANT_RENEW_MEDIA_DEFER_MS);
+      return;
+    }
+    const holding = session;
+    renewalInFlight = true;
+    const result = await unlockWithGrant(grant);
+    renewalInFlight = false;
+    // Torn down, locked, or replaced by a PIN unlock while the request was out: this answer is
+    // stale.
+    if (disposed || session !== holding) return;
+    if (result.ok) {
+      adoptSession({ token: result.token, expiresAt: result.expiresAt }, grant.grantId);
+      return;
+    }
+    if (result.kind === "invalid") {
+      clearDeviceGrant(win); // revoked or expired on the server: this device forgets it
+      forceLock(lockCause);
+      return;
+    }
+    // Offline, a proxy error, or a rate limit: the grant may still be good.
+    if (reason === "scheduled" && msUntilExpiry() > 0) {
+      renewTimer = win.setTimeout(() => void renewSession("scheduled"), GRANT_RENEW_RETRY_MS);
+      return;
+    }
+    forceLock(lockCause);
+  }
+
+  /** A mount (or reload) with the setting on and not paused opens straight into the chat:
+   * no decoy step, no PIN. Anything short of a fresh token falls back to the decoy. */
+  function startGrantUnlock(): void {
+    const grant = readDeviceGrant(win);
+    if (grant === null || !isGrantActive(win)) return;
+    // §9/F7: the reducer's OWN "grantUnlock" handler gates on `context.grantActive`, but there
+    // is no session yet to be "bound" at mount time — this is the one dispatch that means the
+    // OLDER, broader question ("does a plausible stored grant exist to try"), already just
+    // confirmed by the guard above, so it is passed explicitly rather than through the default
+    // (narrow, session-bound) computation every other dispatch uses.
+    dispatch({ type: "grantUnlock" }, { grantActive: true });
+    if (state.kind !== "granting") return;
+    const requestId = ++grantRequestSeq;
+    void unlockWithGrant(grant).then((result) => {
+      // Locked, escaped or torn down while the request was out: never resurrect the chat.
+      if (disposed || requestId !== grantRequestSeq || state.kind !== "granting") return;
+      if (result.ok) {
+        session = { token: result.token, expiresAt: result.expiresAt };
+        boundGrantId = grant.grantId;
+        armSessionTimers(result.expiresAt);
+        lastRenewedAtMs = win.performance.now();
+        dispatch({ type: "grantOk" });
+        return;
+      }
+      if (result.kind === "invalid") clearDeviceGrant(win); // revoked or expired: forget it
+      dispatch({ type: "grantFailed" });
+    });
+  }
+
+  /** §9 (audit F4 ruling; F7 fix): a session is NEVER treated as grant-active on the strength
+   * of a stored grant alone — `boundGrantId` only becomes non-null once this actually
+   * succeeds. Called right after a PIN unlock (the device may hold an unpaused grant it has
+   * not yet exchanged for) and from `onGrantChanged` (a grant that just appeared — enrolled,
+   * or resumed in another tab — while this session is still unbound). Until it lands, the
+   * ordinary automatic locks apply — the fail-safe direction: a device that re-entered its PIN
+   * after a panic must never run a never-auto-locking chat on an unbound 12h token, and
+   * neither must a second tab just because a SIBLING tab's storage write became visible to it.
+   * A `grant_invalid` result forgets the grant but never locks: whatever session is currently
+   * open is still perfectly good on its own. Any OTHER failure (offline, a proxy error, a rate
+   * limit) retries every `GRANT_RENEW_RETRY_MS` — the grant may still be good — for as long as
+   * the SAME session stays open and the SAME grant stays stored and unpaused; every check is
+   * re-read fresh on each call, so a lock, a re-verify, teardown, a pause, or the grant being
+   * cleared all stop it on their own with no separate cancellation needed. */
+  async function tryBindStoredGrant(): Promise<void> {
+    if (disposed || state.kind !== "chat") return;
+    const grant = readDeviceGrant(win);
+    if (grant === null || isDeviceGrantPaused(win)) return;
+    const holding = session;
+    if (holding === null) return;
+    if (boundGrantId !== null) return; // already bound — nothing to exchange for
+    const result = await unlockWithGrant(grant);
+    // Superseded by a lock, a re-verify, or teardown while the request was out.
+    if (disposed || session !== holding) return;
+    if (result.ok) {
+      adoptSession({ token: result.token, expiresAt: result.expiresAt }, grant.grantId);
+      return;
+    }
+    if (result.kind === "invalid") {
+      clearDeviceGrant(win);
+      return;
+    }
+    win.setTimeout(() => void tryBindStoredGrant(), GRANT_RENEW_RETRY_MS);
+  }
+
+  /** The grant was turned on or off, paused or resumed (here or in another tab): the idle
+   * timer and the renewal schedule both depend on it. */
+  function onGrantChanged(): void {
+    if (idleTimerArmed) scheduleIdleTimer();
+    if (session !== null) armSessionTimers(session.expiresAt);
+    // §9/F7: a grant that just became visible (enrolled here, or resumed in a sibling tab)
+    // while this session is still unbound is worth trying for — `tryBindStoredGrant` itself
+    // is what keeps every automatic lock working normally until it actually lands.
+    if (boundGrantId === null) void tryBindStoredGrant();
   }
 
   // -- R7 suspension bookkeeping ------------------------------------------------
@@ -407,9 +706,35 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
       return release;
     },
     lockNow(cause: LockCause): void {
+      if (cause === "unauthorized" && shouldRenewInsteadOfLocking()) {
+        void renewSession("unauthorized");
+        return;
+      }
+      pauseGrantForLock(cause);
       dispatch({ type: "lock", cause });
     },
+    adoptBoundSession(next: ServerSession, grantId: string): void {
+      // Only meaningful while the chat this session belongs to is actually open — a stale
+      // answer from an enrolment the owner already locked or cancelled out of is dropped, the
+      // same staleness direction `adoptSession`'s own callers already take.
+      if (state.kind !== "chat" && state.kind !== "fading") return;
+      adoptSession(next, grantId);
+    },
+    getBoundGrantId(): string | null {
+      return boundGrantId;
+    },
   };
+
+  /** A 401 while a grant is active usually means the token ran out or was dropped: mint a new
+   * one silently instead of locking. A 401 right after a renewal is not that — the server is
+   * refusing tokens for a reason a fresh one will not fix — so it locks. §9/F7: narrow — only
+   * a session actually bound gets the benefit of the doubt; an unbound one just locks. */
+  function shouldRenewInsteadOfLocking(): boolean {
+    if (session === null || !sessionIsBoundAndActive()) return false;
+    if (state.kind !== "chat" && state.kind !== "fading") return false;
+    if (renewalInFlight) return true;
+    return lastRenewedAtMs === null || win.performance.now() - lastRenewedAtMs > GRANT_RENEW_LOOP_GUARD_MS;
+  }
 
   // -- Unlock -------------------------------------------------------------------
 
@@ -423,8 +748,17 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
       if (requestId !== verifyRequestSeq || state.kind !== "verifying") return;
       if (result.ok) {
         session = { token: result.token, expiresAt: result.expiresAt };
-        armExpiryTimer(result.expiresAt);
+        // A PIN unlock is never itself bound (§9, spec point 6) — `boundGrantId` stays null
+        // (its own default) until `tryBindStoredGrant` below actually lands one, so THIS
+        // transition into "chat" already reads `grantActive: false` rather than suppressing
+        // idle/routeAway on the strength of a session that has not been exchanged yet.
+        armSessionTimers(result.expiresAt);
+        // A correct PIN ends a pause: a device that keeps itself unlocked is permanently
+        // unlocked again (03-permanent-unlock.md §1). Cleared BEFORE the transition, so a
+        // stored grant is eligible for the exchange below the instant it starts.
+        setGrantPaused(win, false);
         dispatch({ type: "verifyOk" });
+        void tryBindStoredGrant();
         return;
       }
       if (result.kind === "wrongPin") {
@@ -447,7 +781,12 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
 
   // R3 (unchanged): a multi-tap ANYWHERE while the panel is mounted — only
   // "chat"/"fading" give the resulting event any meaning (lockModel.ts).
-  const multiTapDetector = createMultiTapDetector(() => dispatch({ type: "multiTap" }));
+  const multiTapDetector = createMultiTapDetector(() => {
+    // A deliberate lock: it also pauses a device grant. Only from the states where the
+    // reducer really locks on it — it means nothing anywhere else.
+    if (state.kind === "chat" || state.kind === "fading") pauseGrantForLock("multiTap");
+    dispatch({ type: "multiTap" });
+  });
   const detachMultiTapListener = attachMultiTapListener(win.document, multiTapDetector, () =>
     win.performance.now(),
   );
@@ -468,41 +807,332 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
   });
 
   function onKeyDownForEscape(event: KeyboardEvent): void {
-    if (event.key === "Escape") dispatch({ type: "lock", cause: "escape" });
+    if (event.key !== "Escape") return;
+    pauseGrantForLock("escape");
+    dispatch({ type: "lock", cause: "escape" });
   }
   win.document.addEventListener("keydown", onKeyDownForEscape);
 
-  function onVisibilityChange(): void {
-    if (win.document.visibilityState !== "hidden") return;
+  // -- Background switches and the two "lock when I…" checkboxes (§8) ---------------------
+
+  const screenWatcher = createScreenWatcher(win);
+  /** Whether a detector is running, i.e. this browser CAN tell a screen lock from a tab
+   * switch. Until it is (and whenever it is lost) the two boxes follow each other. */
+  let screenDistinct = false;
+  /** `performance.now()` at which each `screenState = "locked"` event was DISPATCHED, oldest
+   * first — the cause of a hide is judged from these (see `screenLockEvidence`). */
+  let screenLockTimes: number[] = [];
+  /** When the page last went to the background (`performance.now()`), or null. */
+  let lastHideAtMs: number | null = null;
+  /** The hide that began the current shield. */
+  let shieldHideAtMs = 0;
+  /** A SECOND background switch began before the current shield resolved. With two switches in
+   * one absence the cause can no longer be read, so it stays locked. */
+  let shieldTainted = false;
+  let shieldResolveTimer: ReturnType<typeof win.setTimeout> | null = null;
+  /** A hide dropped a grant unlock that was still answering: try again on return. */
+  let retryGrantUnlockOnVisible = false;
+  /** Lock events older than this are of no interest to any hide still to come. */
+  const SCREEN_LOCK_KEEP_MS = 10 * 60_000;
+
+  function currentLockSettings(): LockSettings {
+    return effectiveLockSettings(readStoredLockSettings(win), screenDistinct);
+  }
+
+  function cancelShieldResolve(): void {
+    if (shieldResolveTimer !== null) {
+      win.clearTimeout(shieldResolveTimer);
+      shieldResolveTimer = null;
+    }
+  }
+
+  function recordScreenLock(at: number): void {
+    screenLockTimes.push(at);
+    const oldest = at - SCREEN_LOCK_KEEP_MS;
+    screenLockTimes = screenLockTimes.filter((t) => t >= oldest).slice(-64);
+  }
+
+  /** A device is PROVEN only by a lock event dispatched within the causal window of a hide —
+   * i.e. it reported the lock as it happened. A phone that always freezes first, and delivers
+   * everything batched on return, never becomes proven (§8, Architect ruling). */
+  function proveIfCausal(): void {
+    if (!screenDistinct || lastHideAtMs === null) return;
+    if (screenLockEvidence(screenLockTimes, lastHideAtMs, Number.POSITIVE_INFINITY).causal) setScreenLockProven(win, true);
+  }
+
+  function onScreenLocked(): void {
+    const now = win.performance.now();
+    recordScreenLock(now);
+    const hidden = win.document.visibilityState === "hidden";
+    if (hidden || state.kind === "shielded") {
+      proveIfCausal();
+      if (state.kind === "shielded" && !hidden) {
+        if (shieldResolveTimer !== null) {
+          // Any event during the return shield settles it: causal -> screen lock, otherwise the
+          // cause is ambiguous. Either way there is nothing left to wait for.
+          resolveShield();
+        } else if (restoreAfterRenewal) {
+          // The decision to restore was already made and is only waiting for a token: a screen
+          // lock now voids it.
+          restoreAfterRenewal = false;
+          shieldTainted = true;
+          dispatch({ type: "lock", cause: "screenLock" });
+        }
+      }
+      return;
+    }
+    // The screen locked while the page stayed visible. Recorded above (a device may report it
+    // just BEFORE the page hides, and that lock then counts for that hide). A desktop Win+L may
+    // not hide the page at all: lock at once, if the owner asked for that.
+    if ((state.kind === "chat" || state.kind === "fading") && currentLockSettings().lockOnScreen) {
+      pauseGrantForLock("screenLock");
+      dispatch({ type: "lock", cause: "screenLock" });
+    }
+  }
+
+  function onScreenWatchLost(): void {
+    screenDistinct = false;
+    setScreenLockProven(win, false);
+  }
+
+  /** One start at a time. A request that arrives while one is in flight (the permission was
+   * granted a moment after the mount's own attempt read "prompt") is not dropped: it runs once
+   * more when the first finishes, but only if that first attempt did not succeed. */
+  let screenWatchStarting = false;
+  let screenWatchAgain = false;
+
+  async function refreshScreenWatch(): Promise<void> {
+    if (screenWatchStarting) {
+      screenWatchAgain = true;
+      return;
+    }
+    screenWatchStarting = true;
+    try {
+      do {
+        screenWatchAgain = false;
+        screenDistinct = await screenWatcher.start(onScreenLocked, onScreenWatchLost);
+        // Torn down while the start was in flight: leave nothing running.
+        if (disposed) screenWatcher.stop();
+      } while (screenWatchAgain && !screenDistinct && !disposed);
+      // No usable detector (no permission, unsupported, refused to start): a device that has no
+      // detector cannot be "proven". Announces only if the flag really changes, so this cannot loop.
+      if (!screenDistinct) setScreenLockProven(win, false);
+    } finally {
+      screenWatchStarting = false;
+    }
+  }
+
+  function beginShield(): void {
+    shieldHideAtMs = lastHideAtMs ?? win.performance.now();
+    shieldTainted = false;
+    cancelShieldResolve();
+    // The grant is paused NOW, not when the shield resolves half a second after the owner is
+    // back: a page that is closed, reloaded or DISCARDED while away never resolves it, and would
+    // otherwise re-open on the next visit with no PIN — exactly what the pause exists to prevent.
+    // Only a restore undoes it (`commitShieldRestore`).
+    shieldPausedGrant = false;
+    if (isGrantActive(win)) {
+      setGrantPaused(win, true);
+      shieldPausedGrant = true;
+    }
+    dispatch({ type: "shield" });
+  }
+
+  /** The shield resolved to "the cause was harmless": undo the pause it wrote (and ONLY that
+   * one), and bring the chat back. */
+  function commitShieldRestore(): void {
+    if (shieldPausedGrant) {
+      shieldPausedGrant = false;
+      setGrantPaused(win, false);
+    }
+    dispatch({ type: "shieldRestore" });
+  }
+
+  function resolveShield(): void {
+    shieldResolveTimer = null;
+    if (state.kind !== "shielded") return;
+    if (shieldTainted) {
+      // Two switches in one absence: the cause can no longer be read.
+      dispatch({ type: "lock", cause: "hidden" });
+      return;
+    }
+    const evidence = screenLockEvidence(screenLockTimes, shieldHideAtMs, win.performance.now());
+    const cause = classifyHide({
+      causalScreenLock: evidence.causal,
+      anyScreenLock: evidence.any,
+      deviceProven: screenDistinct && isScreenLockProven(win),
+    });
+    if (shieldOutcome(cause, currentLockSettings()) === "stayLocked") {
+      const lockCause: LockCause = cause === "screenLock" ? "screenLock" : "hidden";
+      pauseGrantForLock(lockCause);
+      dispatch({ type: "lock", cause: lockCause });
+      return;
+    }
+    restoreShield();
+  }
+
+  /** The cause was harmless: bring the same chat back, with the session it was holding —
+   * unless the idle period ran out while it was away (a grant excuses that), or the token
+   * did (only a grant can mint another one silently). */
+  function restoreShield(): void {
+    if (idleRanOutWhileAway()) {
+      dispatch({ type: "lock", cause: "idleAway" });
+      return;
+    }
+    if (msUntilExpiry() > 0) {
+      commitShieldRestore();
+      return;
+    }
+    if (!grantUsable()) {
+      dispatch({ type: "lock", cause: "expired" });
+      return;
+    }
+    restoreAfterRenewal = true;
+    void renewSession("expiry");
+  }
+
+  /** The idle period ended while the page was in the background. Never true with a grant
+   * active, or while something (a recording, playback, an upload picker) is legitimately
+   * holding the idle timer paused — R7 applies to a backgrounded page too. */
+  function idleRanOutWhileAway(): boolean {
+    if (grantUsable() || totalSuspensionCount > 0) return false;
+    return Date.now() - lastActivityWallMs >= chatIdleLockMs(win);
+  }
+
+  /** The page is being unloaded (a reload, a navigation, a closing tab), not sent to the
+   * background. Browsers fire `pagehide` and then `visibilitychange → hidden` for both, so
+   * without this a reload would count as "the owner changed tab", lock, and — with a device
+   * grant active — PAUSE the grant, undoing "keep this device unlocked" on every reload. The
+   * chat's memory is about to be discarded anyway. A page that goes into the back/forward
+   * cache (`persisted`) can be restored open, so it stays an ordinary background switch. */
+  let unloading = false;
+
+  function onPageHide(event: PageTransitionEvent): void {
+    unloading = !event.persisted;
+  }
+
+  function onPageShow(): void {
+    unloading = false;
+  }
+
+  function onHidden(): void {
+    if (unloading) return;
+    lastHideAtMs = win.performance.now();
+    // A lock event reported up to a second BEFORE the page hid belongs to this hide, and proves
+    // the device delivers them as they happen.
+    proveIfCausal();
+    // R7: an open file picker or a pending mic-permission prompt never lock, nor shield.
     if (isPickerOrMicOpen()) return;
-    dispatch({ type: "lock", cause: "hidden" });
+    if (state.kind === "shielded") {
+      // Away again before the last switch resolved. That is a second switch in one absence, so
+      // the cause can no longer be read: keep the decoy up, drop any pending restore, and lock
+      // when the page is next in front of the owner.
+      shieldTainted = true;
+      restoreAfterRenewal = false;
+      cancelShieldResolve();
+      return;
+    }
+    if (state.kind !== "chat") {
+      // Every state that is not an open chat locks on a background switch exactly as before.
+      // A grant unlock still answering when the page is hidden is dropped, and tried again on
+      // return (it is not a lock the owner asked for, so it does not pause the grant).
+      if (state.kind === "granting") retryGrantUnlockOnVisible = true;
+      dispatch({ type: "lock", cause: "hidden" });
+      return;
+    }
+    const policy = hiddenPolicy(currentLockSettings());
+    if (policy === "ignore") return;
+    if (policy === "lockNow") {
+      pauseGrantForLock("hidden");
+      dispatch({ type: "lock", cause: "hidden" });
+      return;
+    }
+    beginShield();
+  }
+
+  function onVisible(): void {
+    if (state.kind === "shielded") {
+      cancelShieldResolve();
+      // A switch that can no longer be read, or a lock event already seen (causal, or late and
+      // so ambiguous), needs no waiting; otherwise give queued IdleDetector events a moment to
+      // arrive before deciding.
+      const seen = screenLockEvidence(screenLockTimes, shieldHideAtMs, win.performance.now()).any;
+      if (shieldTainted || seen) resolveShield();
+      else shieldResolveTimer = win.setTimeout(resolveShield, SHIELD_WAIT_MS);
+      return;
+    }
+    if (state.kind === "fading") {
+      // An idle fade began while the page was away; its (throttled) timer may never have run.
+      // Nobody watched it, and a touch on return must not be able to cancel it.
+      dispatch({ type: "fadeComplete" });
+      return;
+    }
+    if (state.kind === "decoy" && retryGrantUnlockOnVisible) {
+      retryGrantUnlockOnVisible = false;
+      startGrantUnlock();
+      return;
+    }
+    // Timers can stall while a page is in the background: if the idle period ran out while
+    // away, lock NOW — instantly, with no fade a touch could cancel — instead of waiting for a
+    // timer that may never have fired.
+    if (state.kind === "chat" && idleRanOutWhileAway()) dispatch({ type: "lock", cause: "idleAway" });
+  }
+
+  function onVisibilityChange(): void {
+    if (win.document.visibilityState === "hidden") onHidden();
+    else onVisible();
   }
   win.document.addEventListener("visibilitychange", onVisibilityChange);
+  win.addEventListener("pagehide", onPageHide);
+  win.addEventListener("pageshow", onPageShow);
 
   const detachIdlePreferenceListener = onIdleLockPreferenceChanged(win, onIdlePreferenceChanged);
+  const detachGrantStateListener = onGrantStateChanged(win, onGrantChanged);
+  // The settings sheet may have just been granted the Idle Detection permission: start the
+  // detector then. A RUNNING one is left alone — restarting it on every settings write could
+  // drop the very events it is there to catch, and losing the permission is reported by the
+  // watcher itself.
+  const detachLockSettingsListener = onLockSettingsChanged(win, () => {
+    if (!screenDistinct) void refreshScreenWatch();
+  });
 
   render();
+  void refreshScreenWatch();
+  startGrantUnlock();
 
   return {
     element: root,
     teardown(): void {
+      disposed = true;
       // Routing away from `/admin/server` is itself one of R6's lock causes
       // — run it through the reducer (rather than skipping straight to
       // cleanup) so a mid-chat departure still detaches/aborts/pauses
-      // correctly, not just disappears mid-state.
+      // correctly, not just disappears mid-state. (With a device grant active the reducer
+      // leaves an open chat alone: the panel is destroyed below, and the next visit re-mints.)
       if (state.kind !== "decoy") {
         dispatch({ type: "lock", cause: "routeAway" });
       }
       disarmIdleTimer();
       disarmFadeTimer();
-      clearExpiryTimer();
+      cancelShieldResolve();
+      clearSessionTimers();
+      grantRequestSeq += 1;
+      // With a grant active the reducer leaves an open chat alone above; this panel is gone, so
+      // nothing may keep the token.
+      session = null;
+      boundGrantId = null;
+      screenWatcher.stop();
       chatView?.dispose();
       detachMultiTapListener();
       detachSingleTapListener();
       detachIdlePreferenceListener();
+      detachGrantStateListener();
+      detachLockSettingsListener();
       for (const off of detachActivityListeners) off();
       win.document.removeEventListener("keydown", onKeyDownForEscape);
       win.document.removeEventListener("visibilitychange", onVisibilityChange);
+      win.removeEventListener("pagehide", onPageHide);
+      win.removeEventListener("pageshow", onPageShow);
       decoy.teardown();
       pinPad.teardown();
     },

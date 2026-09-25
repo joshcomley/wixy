@@ -21,7 +21,14 @@ export type SuspendReason = "recording" | "micPermission" | "filePicker" | "medi
 
 /** R6 — every distinct trigger that can force an instant lock (all eight of
  * R6's bullets except "a page reload", which needs no cause: unlock state is
- * never persisted, so a reload always starts fresh at the decoy). */
+ * never persisted, so a reload always starts fresh at the decoy — unless the
+ * device has "Keep this device unlocked" on, in which case the panel mints a
+ * fresh token from its device grant, `deviceGrant.ts`).
+ *
+ * `screenLock` (spec/server-chat/03-permanent-unlock.md §8) is the screen
+ * being locked, reported by the Idle Detection API. `idleAway` is the idle period having run out
+ * while the page was in the background: an INSTANT lock (no fade — nobody is watching, and a
+ * touch on return must not be able to cancel it). */
 export type LockCause =
   | "idle"
   | "panic"
@@ -30,7 +37,14 @@ export type LockCause =
   | "hidden"
   | "routeAway"
   | "unauthorized"
-  | "expired";
+  | "expired"
+  | "screenLock"
+  | "idleAway"
+  /** §9 (audit F4 ruling): the owner turned "Keep this device unlocked" off from the
+   * settings sheet. Deliberate, like `panic`/`multiTap`/`escape`, but the grant behind it
+   * is being fully revoked and cleared right here (`turnKeepOff`), not merely paused — so
+   * it is intentionally absent from `pausesGrant`'s list. */
+  | "grantOff";
 
 /** The callback surface `panel.ts` hands to the mounted `ServerChatView` (and
  * anything it in turn mounts — uploader, recorder, media renderer) so those
@@ -48,6 +62,21 @@ export interface LockHooks {
   /** Forces an instant lock for `cause`, from any state. A no-op if already
    * locked. */
   lockNow(cause: LockCause): void;
+  /** §9 (audit F4 ruling): adopt a freshly BOUND session — the token `POST /device-grants`
+   * itself returns on a successful enrolment — with no visible change, exactly like a silent
+   * renewal (`ServerChatView.attach` may be called again while attached). `grantId` names the
+   * exact grant `session` is bound to (F7 fix — never inferred from storage). Without this the
+   * live session stays whatever it was before enrolling (often an unbound PIN token), so
+   * "Sign out other devices" called moments later would see an unbound caller and spare
+   * nothing — the newly-created grant included. A no-op once the panel has been torn down. */
+  adoptBoundSession(session: ServerSession, grantId: string): void;
+  /** §9 (audit F4 ruling, F7 fix): the grant id the LIVE session is currently bound to, or
+   * null for a plain PIN session — including one whose bound exchange is still pending or has
+   * failed. Used by "Sign out other devices" (§9.7) to decide whether THIS device's own local
+   * grant keys survive the call: the server only spares the caller's grant when the caller's
+   * own token is bound to it, so the client must keep local state consistent with that same
+   * test rather than assuming "I have a grant" means "the server just spared it". */
+  getBoundGrantId(): string | null;
 }
 
 /** The server-chat HTTP API surface, assembled from each area's own client
@@ -70,7 +99,14 @@ export interface ServerApi {
 export interface ServerChatView {
   readonly element: HTMLElement;
   /** The panel has just inserted `element` into the document (unlocked) —
-   * load history / resume the live stream. */
+   * load history / resume the live stream.
+   *
+   * The panel may also call this AGAIN, without a `detach` between, with a
+   * renewed session (a device grant re-minting the token before it expires,
+   * 03-permanent-unlock.md §4): the view must adopt the new token, reopen its
+   * stream from where it left off, and refresh any signed media URLs, without
+   * showing any change. (`thread.ts`'s retry button already relies on the
+   * thread half of that being safe.) */
   attach(session: ServerSession): void;
   /** The panel calls this BEFORE removing `element` from the document
    * (locking): abort the stream, pause media, exit fullscreen, discard any

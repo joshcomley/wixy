@@ -55,3 +55,37 @@ export const TAP_MAX_MS = 300;
 /** R7: the file-picker suspension's safety cap — a picker left open (dialog
  * abandoned, app backgrounded) can't suspend the idle timer forever. */
 export const PICKER_SUSPEND_MAX_MS = 300_000;
+
+/** 03-permanent-unlock.md §8: after a background switch whose cause isn't known yet, the
+ * decoy stays up this long once the page is visible again so IdleDetector events queued
+ * while it was away can arrive. */
+export const SHIELD_WAIT_MS = 500;
+
+/** 03-permanent-unlock.md §4: a device grant re-mints the unlock token this long before
+ * it expires (the token is 12 h; this is the only "silent renewal" schedule). */
+export const GRANT_RENEW_BEFORE_MS = 5 * 60_000;
+
+/** A renewal that failed for a reason other than a revoked grant (offline, cmd or the
+ * server briefly down) is retried this often until the token really expires. */
+export const GRANT_RENEW_RETRY_MS = 30_000;
+
+/** A renewal is put off this long while a voice note or video is playing: refreshing the
+ * signed media URLs restarts playback. It never runs past `GRANT_RENEW_LAST_CHANCE_MS`
+ * before expiry. */
+export const GRANT_RENEW_MEDIA_DEFER_MS = 15_000;
+export const GRANT_RENEW_LAST_CHANCE_MS = 60_000;
+
+/** A 401 straight after a renewal means the server is refusing tokens for a reason a fresh
+ * one will not fix — lock instead of renewing in a loop. */
+export const GRANT_RENEW_LOOP_GUARD_MS = 10_000;
+
+/** `IdleDetector`'s minimum threshold. Only `screenState` is used, which ignores it. */
+export const IDLE_DETECTOR_THRESHOLD_MS = 60_000;
+
+/** 03-permanent-unlock.md §8 (Architect ruling, 2026-09-25): a `screenState = "locked"` event is
+ * the CAUSE of a background switch only if it was DISPATCHED (on the monotonic
+ * `performance.now()` clock, which keeps counting while a page is frozen) within
+ * `[hideAt - BEFORE, hideAt + AFTER]` — i.e. delivered in real time, near the hide. An event
+ * dispatched later (or batched when a frozen page resumes) says nothing about WHY the page hid. */
+export const SCREEN_LOCK_EVIDENCE_BEFORE_MS = 1_000;
+export const SCREEN_LOCK_EVIDENCE_AFTER_MS = 2_000;

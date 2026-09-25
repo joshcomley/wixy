@@ -76,6 +76,8 @@ during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/
 | `test_routes_livechat.py`, `test_routes_livechat_media.py` | protected chat/upload routes, delete/wipe recovery, and signed media; `TestReactionRoutes` covers `PUT …/reactions` (auth, idempotence, no-op-writes-no-event, allowlist/sender/boolean 422s, 404 for unknown/deleted/oversized `seq`, raw-bytes erasure, stream frames) |
 | `test_livechat_reactions.py` | the reaction allowlist as exact code points, `reactor_key` folding, and the **drift guard** that parses `admin-ui/src/server/reactions.ts` and fails if it differs from `REACTION_EMOJIS` (Inv 49) |
 | `test_livechat_transcribe.py`, `test_routes_livechat_transcription.py` (+ `TestTranscripts` in `test_livechat_store.py`) | opt-in voice-note transcription (Inv 50): the cmd private-mode client, probe and cache, the exact request fields, the async route and job, single-flight / one-at-a-time / rate limit, raw-byte erasure of a transcript sentinel on delete and wipe, startup recovery. They run against `fake_cmd.py`'s private-mode double (`transcribe_private_supported`, `transcribe_retained`, `transcribe_gate`); `wixy_server/tests/conftest.py` gives every un-injected `CmdTranscriber` an inert transport so no test can reach a real cmd |
+| `test_livechat_grants.py`, `test_routes_livechat_grants.py` | device grants (Inv 48): hash-only storage, the cap, the 30-day window, migration v9, the janitor, both gates on enrolment, one uniform 401, the rate limit, cmd never contacted, the request guard on all four routes, real-JWT identity binding, lone-surrogate labels (audit F5). `TestBoundTokenRevocation`: revoking a grant 401s its bound token at the next request, "sign out other devices" spares exactly the caller's own bound grant and nothing for an unbound caller (audit F4) |
+| `TestStreamEvents` in `test_routes_livechat.py`, `TestMediaRoute` in `test_routes_livechat_media.py`, `TestUnlockToken`/`TestMediaSignature`/`TestMediaSigner` in `test_livechat_tokens.py` | §9 (audit F4) bound-token propagation: a `"g"`-bearing token round-trips and rejects a malformed grant id; an open SSE stream re-checks grant liveness on its own loop tick and sends `locked` within it; a bound media URL folds the grant id into its HMAC and is refused once the grant is revoked while an unbound URL for the same attachment is untouched |
 | `test_background.py`, `test_routes_system.py`, `test_settings.py` | contained loop/one-shot failures, media health status, and Server-chat environment settings |
 
 ### Frontend (vitest) & E2E (Playwright)
@@ -100,9 +102,12 @@ during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/
   genuine same-spot double-tap on a bubble still does — decisions/00163),
   `server-reactions.spec.ts` (two people reacting live, delete taking reactions with it, a
   390 px and a 360 px phone leg, and the real-browser proof that a reaction never interrupts a
-  voice note that is playing), and `server-transcription.spec.ts` (opt-in transcription at
+  voice note that is playing), `server-transcription.spec.ts` (opt-in transcription at
   desktop and a 402px phone: nothing sent while cmd is not private, a playing note survives its
-  transcript, a failure and Retry, two devices agreeing, phone layout). The fixture drives the
+  transcript, a failure and Retry, two devices agreeing, phone layout), and
+  `server-permanent-unlock.spec.ts` ("Keep this device unlocked" end to end and the two lock
+  checkboxes; it installs a stand-in for Chromium's `IdleDetector` with an init script because a
+  headless run cannot answer its permission prompt). The transcription fixture drives the
   fake cmd through `/test/server/transcribe-config` (private on/off, text, status, `hold` to park
   requests, `reset` — which also gives every test a fresh rate limiter),
   `/test/server/transcribe-stats`, `/test/server/seed-voice` (a ready note with real ffmpeg

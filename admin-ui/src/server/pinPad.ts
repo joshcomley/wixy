@@ -9,6 +9,11 @@ import type { PinError } from "./lockModel";
 
 export interface PinPadDeps {
   win?: Window;
+  /** The heading; defaults to "Unlock server". */
+  title?: string;
+  /** Marks the pad so its digit keys never count toward the multi-tap lock gesture
+   * (`gestures.ts`) — for a pad shown INSIDE the unlocked chat. */
+  gestureExempt?: boolean;
   onSubmit: (pin: string) => void;
   onCancel: () => void;
 }
@@ -70,10 +75,11 @@ export function mountPinPad(deps: PinPadDeps): PinPadView {
   const root = document.createElement("div");
   root.className = "wx-srv-pinpad";
   root.tabIndex = -1;
+  if (deps.gestureExempt === true) root.dataset["srvGestureExempt"] = "";
 
   const title = document.createElement("h2");
   title.className = "wx-srv-pinpad-title";
-  title.textContent = "Unlock server";
+  title.textContent = deps.title ?? "Unlock server";
   root.appendChild(title);
 
   const dots = document.createElement("div");

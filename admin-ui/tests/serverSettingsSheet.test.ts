@@ -27,7 +27,12 @@ function identity(): ServerIdentity {
 }
 
 function hooks(): LockHooks {
-  return { suspend: vi.fn(() => () => {}), lockNow: vi.fn() };
+  return {
+    suspend: vi.fn(() => () => {}),
+    lockNow: vi.fn(),
+    adoptBoundSession: vi.fn(),
+    getBoundGrantId: vi.fn(() => null),
+  };
 }
 
 async function flush(): Promise<void> {
@@ -499,9 +504,22 @@ describe("mountServerSettingsSheet auto-lock checkbox", () => {
     return input;
   }
 
-  it("renders exactly one real checkbox with a real <label for> reading exactly 'Extend auto-lock to 1 minute'", () => {
+  it("renders four real checkboxes, each with a real <label for> and its own id", () => {
     const view = mountSheet();
-    expect(view.element.querySelectorAll('input[type="checkbox"]')).toHaveLength(1);
+    const inputs = Array.from(view.element.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'));
+    expect(inputs.map((input) => view.element.querySelector(`label[for="${input.id}"]`)?.textContent?.trim())).toEqual([
+      LABEL,
+      "Keep this device unlocked",
+      "Lock when I change tab",
+      "Lock when I lock my screen",
+    ]);
+    expect(new Set(inputs.map((input) => input.id)).size).toBe(4);
+    expect(inputs.every((input) => input.labels?.length === 1)).toBe(true);
+    view.teardown();
+  });
+
+  it("puts the auto-lock checkbox first, with a real <label for> reading exactly 'Extend auto-lock to 1 minute'", () => {
+    const view = mountSheet();
     const input = checkbox(view);
     expect(input.id).not.toBe("");
     const label = view.element.querySelector<HTMLLabelElement>(`label[for="${input.id}"]`);

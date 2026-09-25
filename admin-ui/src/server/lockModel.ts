@@ -26,8 +26,20 @@
 // bespoke "idle" event with its own wiring) keeps that single exception
 // local to `reduceChat` instead of duplicated across every other state's
 // idle handling.
+//
+// Design note on device grants (spec/server-chat/03-permanent-unlock.md): "Keep this device
+// unlocked" is NOT a second state machine. It is one input, `LockContext.grantActive`, and
+// two extra states. While a grant is active the AUTOMATIC locks that would end the chat —
+// idle and routing away — are ignored from "chat"/"fading"; every deliberate lock (panic,
+// multi-tap, Escape) is unchanged. The other automatic locks are decided by the driver:
+// token expiry and a 401 are answered with a silent re-mint before locking, and a background
+// switch is governed by the two per-device checkboxes (§8) through `hiddenPolicy` /
+// `shieldOutcome` below. The extra states are "granting" (the grant is minting this visit's
+// first token; nothing is shown) and "shielded" (a background switch whose cause is not yet
+// known: the decoy is up and the chat is detached, but the in-memory session is kept so a
+// cause that turns out harmless can restore it).
 
-import { IDLE_LOCK_MS } from "./constants";
+import { IDLE_LOCK_MS, SCREEN_LOCK_EVIDENCE_AFTER_MS, SCREEN_LOCK_EVIDENCE_BEFORE_MS } from "./constants";
 import type { LockCause } from "./types";
 
 export type PinError =
@@ -52,7 +64,14 @@ export type LockState =
   | { readonly kind: "pin"; readonly error: PinError | null }
   | { readonly kind: "verifying" }
   | { readonly kind: "chat" }
-  | { readonly kind: "fading" };
+  | { readonly kind: "fading" }
+  /** A device grant is minting the first token of this visit (a mount or reload with the
+   * setting on and not paused). Nothing is shown — not even the decoy — until it answers. */
+  | { readonly kind: "granting" }
+  /** A background switch on an open chat whose cause is not yet known (§8). Looks like the
+   * decoy and has the chat detached, but the in-memory session is kept until the driver
+   * resolves the cause: restore silently, or lock. */
+  | { readonly kind: "shielded" };
 
 export type LockEvent =
   /** R2 v1.3: a single qualifying tap anywhere inside the panel. Reveals the
@@ -84,7 +103,21 @@ export type LockEvent =
   | { readonly type: "activity" }
   /** The 800ms fade timer elapsed without being cancelled. */
   | { readonly type: "fadeComplete" }
-  /** Any of R6's eight instant-lock causes — see the design note above for
+  /** The panel mounted with a device grant that is set and not paused: mint this visit's
+   * token from it instead of asking for the PIN. Ignored unless `grantActive`. */
+  | { readonly type: "grantUnlock" }
+  /** The grant minted a token. */
+  | { readonly type: "grantOk" }
+  /** The grant could not open the chat (revoked, offline, rate limited): the decoy and
+   * the PIN flow, exactly as if there were no grant. */
+  | { readonly type: "grantFailed" }
+  /** A background switch on an open chat whose cause is not known yet (§8): put the decoy
+   * up, detach the chat, keep the session. Only "chat" answers it. */
+  | { readonly type: "shield" }
+  /** The shield resolved to a cause whose checkbox is off: bring the chat back with the
+   * session it was holding. Only "shielded" answers it. */
+  | { readonly type: "shieldRestore" }
+  /** Any of R6's instant-lock causes — see the design note above for
    * why "idle" is included here rather than as its own event. */
   | { readonly type: "lock"; readonly cause: LockCause };
 
@@ -110,17 +143,48 @@ export interface LockTransitionResult {
   readonly effects: readonly LockEffect[];
 }
 
+/** The one input besides state and event: whether a device grant is set AND not paused. The
+ * driver reads it from storage each time it dispatches. */
+export interface LockContext {
+  readonly grantActive: boolean;
+}
+
+export const NO_GRANT: LockContext = { grantActive: false };
+
 export const INITIAL_STATE: LockState = { kind: "decoy" };
 
 const NO_OP = (state: LockState): LockTransitionResult => ({ state, effects: [] });
 
-function reduceDecoy(state: LockState, event: LockEvent): LockTransitionResult {
+/** The two automatic locks an active grant silences from an open chat. */
+function isQuietedByGrant(cause: LockCause): boolean {
+  return cause === "idle" || cause === "routeAway";
+}
+
+function reduceDecoy(state: LockState, event: LockEvent, context: LockContext): LockTransitionResult {
   if (event.type === "tap") {
     return { state: { kind: "revealed" }, effects: ["resetIdleTimer"] };
+  }
+  if (event.type === "grantUnlock" && context.grantActive) {
+    return { state: { kind: "granting" }, effects: [] };
   }
   // Already locked — every lock cause, a stray multiTap (no meaning here
   // per R2 v1.3), and anything else, is a no-op.
   return NO_OP(state);
+}
+
+function reduceGranting(state: LockState, event: LockEvent): LockTransitionResult {
+  switch (event.type) {
+    case "grantOk":
+      return { state: { kind: "chat" }, effects: ["resetIdleTimer"] };
+    case "grantFailed":
+    case "lock":
+      // A lock while the grant is still answering (a route change, a 401, Escape) wins: the
+      // driver drops the late answer, so nothing can resurrect the chat afterwards.
+      return { state: { kind: "decoy" }, effects: [] };
+    default:
+      // Taps, activity and gestures do nothing while nothing is showing.
+      return NO_OP(state);
+  }
 }
 
 function reduceRevealed(state: LockState, event: LockEvent): LockTransitionResult {
@@ -189,14 +253,20 @@ function reduceVerifying(state: LockState, event: LockEvent): LockTransitionResu
   }
 }
 
-function reduceChat(state: LockState, event: LockEvent): LockTransitionResult {
+function reduceChat(state: LockState, event: LockEvent, context: LockContext): LockTransitionResult {
   switch (event.type) {
     case "activity":
       return { state, effects: ["resetIdleTimer"] };
     case "multiTap":
       // R3: a multi-tap anywhere inside the chat view locks instantly.
       return { state: { kind: "decoy" }, effects: ["detachChat", "clearIdleTimer"] };
+    case "shield":
+      // §8: a background switch whose cause is not known yet. The decoy goes up and the chat
+      // is detached exactly as for a lock — the difference is only that the driver keeps the
+      // session, so a harmless cause can bring the same chat back.
+      return { state: { kind: "shielded" }, effects: ["detachChat", "clearIdleTimer"] };
     case "lock":
+      if (context.grantActive && isQuietedByGrant(event.cause)) return NO_OP(state);
       if (event.cause === "idle") {
         // The one non-instant cause: fade first (§6's diagram).
         return { state: { kind: "fading" }, effects: ["startFadeTimer", "clearIdleTimer"] };
@@ -207,7 +277,7 @@ function reduceChat(state: LockState, event: LockEvent): LockTransitionResult {
   }
 }
 
-function reduceFading(state: LockState, event: LockEvent): LockTransitionResult {
+function reduceFading(state: LockState, event: LockEvent, context: LockContext): LockTransitionResult {
   switch (event.type) {
     case "activity":
       // R7: any activity while fading cancels it and restores the chat.
@@ -215,13 +285,30 @@ function reduceFading(state: LockState, event: LockEvent): LockTransitionResult 
     case "fadeComplete":
       return { state: { kind: "decoy" }, effects: ["detachChat", "clearIdleTimer"] };
     case "multiTap":
+      return { state: { kind: "decoy" }, effects: ["detachChat", "clearFadeTimer", "clearIdleTimer"] };
     case "lock":
       // Defensive: correct regardless of the driver's event-dispatch order
       // (see gestures.ts's own note on why a real double-tap during a fade
       // never actually reaches this branch — activity fires first and
       // restores "chat", where the SAME multiTap/lock semantics apply).
+      if (context.grantActive && isQuietedByGrant(event.cause)) return NO_OP(state);
       return { state: { kind: "decoy" }, effects: ["detachChat", "clearFadeTimer", "clearIdleTimer"] };
     default:
+      return NO_OP(state);
+  }
+}
+
+function reduceShielded(state: LockState, event: LockEvent): LockTransitionResult {
+  switch (event.type) {
+    case "shieldRestore":
+      return { state: { kind: "chat" }, effects: ["resetIdleTimer"] };
+    case "lock":
+      // Any lock while shielded — including a route change or the token expiring — drops the
+      // held session (the driver discards it on every return to the decoy).
+      return { state: { kind: "decoy" }, effects: ["clearIdleTimer"] };
+    default:
+      // A tap or activity during the (at most half-second) shield does nothing: the decoy is
+      // up, and the shield resolves to the chat or to the ordinary decoy on its own.
       return NO_OP(state);
   }
 }
@@ -230,12 +317,20 @@ function reduceFading(state: LockState, event: LockEvent): LockTransitionResult 
  * effects[]}` signature; no branch here currently needs it (every timer is
  * driven by the caller's own clock via the `effects` it receives back) — kept
  * so a future transition can start depending on it without a signature
- * change every other module would need to follow. */
-export function reduce(state: LockState, event: LockEvent, now: number): LockTransitionResult {
+ * change every other module would need to follow. `context` is the one added
+ * input (see `LockContext`); omitting it means "no device grant". */
+export function reduce(
+  state: LockState,
+  event: LockEvent,
+  now: number,
+  context: LockContext = NO_GRANT,
+): LockTransitionResult {
   void now;
   switch (state.kind) {
     case "decoy":
-      return reduceDecoy(state, event);
+      return reduceDecoy(state, event, context);
+    case "granting":
+      return reduceGranting(state, event);
     case "revealed":
       return reduceRevealed(state, event);
     case "pin":
@@ -243,9 +338,11 @@ export function reduce(state: LockState, event: LockEvent, now: number): LockTra
     case "verifying":
       return reduceVerifying(state, event);
     case "chat":
-      return reduceChat(state, event);
+      return reduceChat(state, event, context);
     case "fading":
-      return reduceFading(state, event);
+      return reduceFading(state, event, context);
+    case "shielded":
+      return reduceShielded(state, event);
   }
 }
 
@@ -273,4 +370,108 @@ export function idleRemainingMs(
   nowMs: number,
 ): number {
   return Math.max(0, lastActivityAtMs + idleTimeoutMs(state, idleLockMs) - nowMs);
+}
+
+// -- Which locks pause a device grant (03-permanent-unlock.md §1, §8) --------------------
+
+/** A lock that PAUSES the device's grant until the PIN is entered again: the three
+ * deliberate ones (panic, a multi-tap, Escape) and the two checkbox-caused ones (`hidden`,
+ * `screenLock`). Without the pause the grant would re-mint on return and the lock would
+ * mean nothing. Idle, route-away, expiry and a 401 do NOT pause it: they are the very locks
+ * a grant exists to smooth over. */
+export function pausesGrant(cause: LockCause): boolean {
+  return (
+    cause === "panic" ||
+    cause === "multiTap" ||
+    cause === "escape" ||
+    cause === "hidden" ||
+    cause === "screenLock"
+  );
+}
+
+// -- "Lock when I change tab" / "Lock when I lock my screen" (§8) ------------------------
+
+export interface LockSettings {
+  readonly lockOnTab: boolean;
+  readonly lockOnScreen: boolean;
+}
+
+/** Both boxes ticked: today's behaviour, fail-closed for a disguised chat. */
+export const DEFAULT_LOCK_SETTINGS: LockSettings = { lockOnTab: true, lockOnScreen: true };
+
+/** The settings the driver should act on. When this browser can tell a screen lock from a
+ * tab switch they are the stored ones. When it cannot (no `IdleDetector`, or permission
+ * denied) the two boxes follow each other; if the stored values disagree the safe reading is
+ * used — lock if EITHER box is ticked — so losing the detector can never quietly turn a
+ * lock the owner asked for into no lock. */
+export function effectiveLockSettings(stored: LockSettings, screenDistinct: boolean): LockSettings {
+  if (screenDistinct) return stored;
+  const lock = stored.lockOnTab || stored.lockOnScreen;
+  return { lockOnTab: lock, lockOnScreen: lock };
+}
+
+/** What a `visibilitychange → hidden` on an open chat does:
+ * - both boxes ticked: lock at once (today's behaviour);
+ * - both unticked: nothing (the idle timer still applies unless a grant is active);
+ * - they differ: the cause is unknown until the page is back, so lock at once and fail
+ *   closed — a "shield" — then decide on return. */
+export type HiddenPolicy = "ignore" | "lockNow" | "shield";
+
+export function hiddenPolicy(settings: LockSettings): HiddenPolicy {
+  if (settings.lockOnTab && settings.lockOnScreen) return "lockNow";
+  if (!settings.lockOnTab && !settings.lockOnScreen) return "ignore";
+  return "shield";
+}
+
+/** What the screen-lock events dispatched around one hide say about it. `causal`: one was
+ * dispatched within `[hideAt - BEFORE, hideAt + AFTER]` — delivered in real time, near the hide.
+ * `any`: one was dispatched at any time from `hideAt - BEFORE` until `endAt` (the end of the
+ * return shield), including a late one or one batched when a frozen page resumed. All times are
+ * `performance.now()` values, which keep counting while a page is frozen. */
+export interface ScreenLockEvidence {
+  readonly causal: boolean;
+  readonly any: boolean;
+}
+
+export function screenLockEvidence(lockTimes: readonly number[], hideAt: number, endAt: number): ScreenLockEvidence {
+  const from = hideAt - SCREEN_LOCK_EVIDENCE_BEFORE_MS;
+  const causalUntil = hideAt + SCREEN_LOCK_EVIDENCE_AFTER_MS;
+  let causal = false;
+  let any = false;
+  for (const at of lockTimes) {
+    if (at < from || at > endAt) continue;
+    any = true;
+    if (at <= causalUntil) causal = true;
+  }
+  return { causal, any };
+}
+
+/** Why the page went to the background, as far as it can be told (Architect ruling, §8):
+ * - "screenLock": a lock event was dispatched near the hide — positive, CAUSAL evidence;
+ * - "tabChange": NO lock event of any kind (batched ones included) around the absence AND this
+ *   device has proven it reports screen locks as they happen — there is never positive evidence
+ *   of a TAB switch, only of a screen lock, so "no event" can only be read as "tab" on a device
+ *   that has shown it would have reported one;
+ * - "ambiguous": everything else — a lock event outside the causal window (later in the
+ *   absence, or batched on return), or no event on a device that has not proven itself. */
+export type HideCause = "screenLock" | "tabChange" | "ambiguous";
+
+export function classifyHide(input: {
+  readonly causalScreenLock: boolean;
+  readonly anyScreenLock: boolean;
+  readonly deviceProven: boolean;
+}): HideCause {
+  if (input.causalScreenLock) return "screenLock";
+  if (input.anyScreenLock) return "ambiguous";
+  return input.deviceProven ? "tabChange" : "ambiguous";
+}
+
+/** After a shield: restore the chat silently only when the cause is KNOWN and its own box is
+ * unticked. A ticked box, or an ambiguous cause, stays locked. */
+export type ShieldOutcome = "restore" | "stayLocked";
+
+export function shieldOutcome(cause: HideCause, settings: LockSettings): ShieldOutcome {
+  if (cause === "ambiguous") return "stayLocked";
+  const boxTicked = cause === "screenLock" ? settings.lockOnScreen : settings.lockOnTab;
+  return boxTicked ? "stayLocked" : "restore";
 }

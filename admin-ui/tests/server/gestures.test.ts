@@ -700,3 +700,60 @@ describe("attachTapListener", () => {
     root.remove();
   });
 });
+
+describe("[data-srv-gesture-exempt] (the inline PIN pad inside the unlocked chat)", () => {
+  function exemptGroup(): { readonly group: HTMLDivElement; readonly key: HTMLButtonElement } {
+    const group = document.createElement("div");
+    group.setAttribute("data-srv-gesture-exempt", "");
+    const key = document.createElement("button");
+    group.appendChild(key);
+    return { group, key };
+  }
+
+  it("excludes the marked element and every descendant from tap detection", () => {
+    const { group, key } = exemptGroup();
+    expect(isExcludedTapTarget(group)).toBe(true);
+    expect(isExcludedTapTarget(key)).toBe(true);
+    expect(isExcludedTapTarget(document.createElement("button"))).toBe(false);
+  });
+
+  it("taps inside the group never count toward a multi-tap, however fast", () => {
+    const onMultiTap = vi.fn();
+    const detector = createMultiTapDetector(onMultiTap);
+    const { key } = exemptGroup();
+    for (let i = 0; i < MULTI_TAP_COUNT * 4; i++) {
+      detector.handleTap(fakeTap(key, { at: i * 10 }));
+    }
+    expect(onMultiTap).not.toHaveBeenCalled();
+  });
+
+  it("an exempt tap neither completes a pair with an ordinary tap nor breaks the run", () => {
+    const onMultiTap = vi.fn();
+    const detector = createMultiTapDetector(onMultiTap);
+    const { key } = exemptGroup();
+    const other = document.createElement("button");
+    detector.handleTap(fakeTap(other, { at: 0 }));
+    detector.handleTap(fakeTap(key, { at: 10 }));
+    expect(onMultiTap).not.toHaveBeenCalled();
+    detector.handleTap(fakeTap(other, { at: 20 }));
+    expect(onMultiTap).toHaveBeenCalledTimes(1);
+  });
+
+  it("the single-tap detector ignores the group too", () => {
+    const onTap = vi.fn();
+    const detector = createTapDetector(onTap);
+    const { key } = exemptGroup();
+    detector.handleTap(fakeTap(key));
+    expect(onTap).not.toHaveBeenCalled();
+  });
+
+  it("taps outside the group still count", () => {
+    const onMultiTap = vi.fn();
+    const detector = createMultiTapDetector(onMultiTap);
+    const target = document.createElement("button");
+    for (let i = 0; i < MULTI_TAP_COUNT; i++) {
+      detector.handleTap(fakeTap(target, { at: i * (MULTI_TAP_INTERVAL_MS - 1) }));
+    }
+    expect(onMultiTap).toHaveBeenCalledTimes(1);
+  });
+});

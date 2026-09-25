@@ -127,6 +127,20 @@ class PushSubscriptionRow:
 
 
 @dataclass(frozen=True, slots=True)
+class DeviceGrantRow:
+    """spec/server-chat/03-permanent-unlock.md §3: ids and a hash only — never the
+    secret itself, and never chat content."""
+
+    id: str
+    secret_hash: str
+    email: str
+    label: str | None
+    created_at: float
+    last_used_at: float
+    revoked_at: float | None
+
+
+@dataclass(frozen=True, slots=True)
 class AttachmentResult:
     """What P2's `processing.py` hands back to `LiveChatStore.finish_attachment` —
     everything a completed (or failed) processing run learned about one attachment."""

@@ -1,16 +1,24 @@
 // The Server chat's settings sheet (spec/server-chat/00-brief.md §10 P5b):
 // name, storage used (`/usage`), a push-notification slot P3b mounts its
-// toggle into, and a Lock button.
+// toggle into, and a Lock button. Round 2 adds the per-device lock preferences
+// (spec/server-chat/03-permanent-unlock.md): "Keep this device unlocked" with its inline
+// PIN pad and "Sign out other devices", and the two "lock when I…" checkboxes (§8).
 
+import { createDeviceGrant, revokeAllDeviceGrants, revokeDeviceGrant, type CreateGrantResult } from "./api/grants";
 import { getUsage } from "./api/messages";
 import {
   ServerErasureOutcomeUnknownError,
   ServerLockedError,
   ServerWipeAbandonedError,
 } from "./api/http";
+import { clearDeviceGrant, deviceLabel, onGrantStateChanged, readDeviceGrant, storeDeviceGrant } from "./deviceGrant";
 import type { ServerIdentity } from "./identity";
 import { isIdleLockExtended, onIdleLockPreferenceChanged, setIdleLockExtended } from "./idlePreference";
+import { effectiveLockSettings, type PinError } from "./lockModel";
+import { isScreenLockProven, onLockSettingsChanged, readStoredLockSettings, setLockSettings } from "./lockSettings";
+import { mountPinPad, type PinPadView } from "./pinPad";
 import { isAndroidPushCapable, mountPushToggle, type PushToggle } from "./pushToggle";
+import { createScreenWatcher, type ScreenWatchStatus } from "./screenWatcher";
 import type { LockHooks, ServerSession } from "./types";
 
 export interface ServerSettingsSheetDeps {
@@ -104,7 +112,7 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   // never sent anywhere). The whole row is the <label>, so the tap target is
   // the full row width and at least 44px tall (chat.css).
   const idleLabel = documentRef.createElement("label");
-  idleLabel.className = "wx-srv-sheet-idle";
+  idleLabel.className = "wx-srv-sheet-idle wx-srv-sheet-idle-row";
   const idleInput = documentRef.createElement("input");
   idleInput.type = "checkbox";
   idleInput.className = "wx-srv-sheet-idle-input";
@@ -114,6 +122,90 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   idleText.className = "wx-srv-sheet-idle-text";
   idleText.textContent = "Extend auto-lock to 1 minute";
   idleLabel.append(idleInput, idleText);
+  const idleNote = documentRef.createElement("p");
+  idleNote.className = "wx-srv-sheet-note wx-srv-sheet-idle-note";
+  idleNote.id = `wx-srv-idle-note-${idleCheckboxSequence}`;
+  idleNote.setAttribute("role", "status");
+  idleNote.hidden = true;
+  idleNote.textContent = "Off — nothing to extend while this device is kept unlocked.";
+  idleInput.setAttribute("aria-describedby", idleNote.id);
+
+  // -- "Keep this device unlocked" (03-permanent-unlock.md §4) -------------------------------
+
+  const keepGroup = documentRef.createElement("div");
+  keepGroup.className = "wx-srv-sheet-keep";
+  const keepLabel = documentRef.createElement("label");
+  keepLabel.className = "wx-srv-sheet-idle wx-srv-sheet-keep-row";
+  const keepInput = documentRef.createElement("input");
+  keepInput.type = "checkbox";
+  keepInput.className = "wx-srv-sheet-idle-input wx-srv-sheet-keep-input";
+  keepInput.id = `wx-srv-keep-unlocked-${idleCheckboxSequence}`;
+  keepLabel.htmlFor = keepInput.id;
+  const keepText = documentRef.createElement("span");
+  keepText.className = "wx-srv-sheet-idle-text";
+  keepText.textContent = "Keep this device unlocked";
+  keepLabel.append(keepInput, keepText);
+  const keepNote = documentRef.createElement("p");
+  keepNote.className = "wx-srv-sheet-note wx-srv-sheet-keep-note";
+  keepNote.id = `wx-srv-keep-note-${idleCheckboxSequence}`;
+  keepNote.setAttribute("role", "status");
+  keepNote.hidden = true;
+  keepInput.setAttribute("aria-describedby", keepNote.id);
+  const keepPadHost = documentRef.createElement("div");
+  keepPadHost.className = "wx-srv-sheet-keep-pad";
+  keepPadHost.hidden = true;
+  const keepPad: PinPadView = mountPinPad({
+    win,
+    title: "Enter PIN to keep this device unlocked",
+    gestureExempt: true,
+    onSubmit: (pin) => void submitEnrolment(pin),
+    onCancel: () => closeEnrolment(),
+  });
+  keepPadHost.appendChild(keepPad.element);
+  const signOutButton = documentRef.createElement("button");
+  signOutButton.type = "button";
+  signOutButton.className = "wx-srv-sheet-signout";
+  signOutButton.textContent = "Sign out other devices";
+  const signOutStatus = documentRef.createElement("p");
+  signOutStatus.className = "wx-srv-sheet-note wx-srv-sheet-signout-status";
+  signOutStatus.setAttribute("role", "status");
+  signOutStatus.hidden = true;
+  keepGroup.append(keepLabel, keepNote, keepPadHost, signOutButton, signOutStatus);
+
+  // -- "Lock when I change tab" / "Lock when I lock my screen" (§8) -------------------------
+
+  const lockGroup = documentRef.createElement("div");
+  lockGroup.className = "wx-srv-sheet-lockprefs";
+  const lockTabLabel = documentRef.createElement("label");
+  lockTabLabel.className = "wx-srv-sheet-idle wx-srv-sheet-locktab-row";
+  const lockTabInput = documentRef.createElement("input");
+  lockTabInput.type = "checkbox";
+  lockTabInput.className = "wx-srv-sheet-idle-input wx-srv-sheet-locktab-input";
+  lockTabInput.id = `wx-srv-lock-on-tab-${idleCheckboxSequence}`;
+  lockTabLabel.htmlFor = lockTabInput.id;
+  const lockTabText = documentRef.createElement("span");
+  lockTabText.className = "wx-srv-sheet-idle-text";
+  lockTabText.textContent = "Lock when I change tab";
+  lockTabLabel.append(lockTabInput, lockTabText);
+  const lockScreenLabel = documentRef.createElement("label");
+  lockScreenLabel.className = "wx-srv-sheet-idle wx-srv-sheet-lockscreen-row";
+  const lockScreenInput = documentRef.createElement("input");
+  lockScreenInput.type = "checkbox";
+  lockScreenInput.className = "wx-srv-sheet-idle-input wx-srv-sheet-lockscreen-input";
+  lockScreenInput.id = `wx-srv-lock-on-screen-${idleCheckboxSequence}`;
+  lockScreenLabel.htmlFor = lockScreenInput.id;
+  const lockScreenText = documentRef.createElement("span");
+  lockScreenText.className = "wx-srv-sheet-idle-text";
+  lockScreenText.textContent = "Lock when I lock my screen";
+  lockScreenLabel.append(lockScreenInput, lockScreenText);
+  const lockNote = documentRef.createElement("p");
+  lockNote.className = "wx-srv-sheet-note wx-srv-sheet-lockprefs-note";
+  lockNote.id = `wx-srv-lockprefs-note-${idleCheckboxSequence}`;
+  lockNote.setAttribute("role", "status");
+  lockNote.hidden = true;
+  lockTabInput.setAttribute("aria-describedby", lockNote.id);
+  lockScreenInput.setAttribute("aria-describedby", lockNote.id);
+  lockGroup.append(lockTabLabel, lockScreenLabel, lockNote);
 
   const usageRow = documentRef.createElement("p");
   usageRow.className = "wx-srv-sheet-usage";
@@ -249,10 +341,260 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   wipeConfirmButtons.append(wipeConfirmButton, wipeCancelButton);
   wipeConfirmation.append(wipeQuestion, wipeError, wipeConfirmButtons);
 
-  sheet.append(header, nameRow, usageRow, wipeStatus, pushSlot, idleLabel, wipeButton, wipeConfirmation, lockButton);
+  sheet.append(
+    header,
+    nameRow,
+    usageRow,
+    wipeStatus,
+    pushSlot,
+    idleLabel,
+    idleNote,
+    keepGroup,
+    lockGroup,
+    wipeButton,
+    wipeConfirmation,
+    lockButton,
+  );
   backdrop.appendChild(sheet);
 
+  // -- Keep this device unlocked: behaviour -------------------------------------------------
+
+  /** The inline PIN pad is open (or its request is in flight): the box shows ticked without
+   * anything having been stored yet. */
+  let enrolling = false;
+  let enrolmentSeq = 0;
+
+  function syncKeepRow(): void {
+    const on = readDeviceGrant(win) !== null;
+    if (!enrolling) keepInput.checked = on;
+    keepNote.hidden = !on || enrolling;
+    keepNote.textContent = on
+      ? "On · Lock with the ✕ or a double-tap. Turning this off locks the chat — you'll need the PIN next time."
+      : "";
+    // With the device kept unlocked there is no idle period left to extend.
+    idleInput.disabled = on;
+    idleLabel.classList.toggle("wx-srv-sheet-row-disabled", on);
+    idleNote.hidden = !on;
+  }
+
+  function openEnrolment(): void {
+    enrolling = true;
+    keepPad.reset();
+    keepPadHost.hidden = false;
+    keepInput.checked = true;
+    keepNote.hidden = true;
+    keepPad.focus();
+  }
+
+  function closeEnrolment(): void {
+    enrolmentSeq += 1;
+    enrolling = false;
+    keepPadHost.hidden = true;
+    keepPad.reset();
+    syncKeepRow();
+  }
+
+  function padErrorFor(result: Exclude<CreateGrantResult, { readonly ok: true }>): PinError {
+    switch (result.kind) {
+      case "wrongPin":
+        return { kind: "wrong", attemptsLeft: result.attemptsLeft };
+      case "lockedOut":
+        return { kind: "lockedOut", retryAfterS: result.retryAfterS };
+      case "pinChanged":
+        return { kind: "pinChanged" };
+      case "invalid":
+        return { kind: "invalid" };
+      case "unexpected":
+        return { kind: "unexpected" };
+      case "unavailable":
+        return { kind: "unavailable" };
+    }
+  }
+
+  async function submitEnrolment(pin: string): Promise<void> {
+    const session = deps.getSession();
+    if (session === null) {
+      closeEnrolment();
+      return;
+    }
+    const seq = ++enrolmentSeq;
+    keepPad.setBusy(true);
+    let result: CreateGrantResult;
+    try {
+      result = await createDeviceGrant(session, pin, deviceLabel(win));
+    } catch (error) {
+      if (seq !== enrolmentSeq) return;
+      keepPad.setBusy(false);
+      if (error instanceof ServerLockedError) {
+        hooks.lockNow("unauthorized");
+        return;
+      }
+      keepPad.setError({ kind: "unavailable" });
+      return;
+    }
+    if (seq !== enrolmentSeq) {
+      // Cancelled (or the sheet closed) while the request was out, and the server said yes
+      // anyway: nothing was stored here, so do not leave a grant behind that no device holds.
+      if (result.ok) void revokeDeviceGrant(session, result.grant.grantId).catch(() => {});
+      return;
+    }
+    keepPad.setBusy(false);
+    if (!result.ok) {
+      keepPad.setError(padErrorFor(result));
+      return;
+    }
+    if (!storeDeviceGrant(win, result.grant)) {
+      // The browser would not keep it: say so, and do not leave a grant on the server that
+      // this device cannot use.
+      void revokeDeviceGrant(session, result.grant.grantId).catch(() => {});
+      keepPad.setError({ kind: "unexpected" });
+      return;
+    }
+    // §9 (audit F4 ruling): adopt the BOUND token this route itself returns, so the live
+    // session actually becomes the one just bound — otherwise "Sign out other devices" called
+    // moments later (with no reload in between) would still see the old, unbound caller and
+    // spare nothing, the just-created grant included.
+    hooks.adoptBoundSession({ token: result.token, expiresAt: result.expiresAt }, result.grant.grantId);
+    closeEnrolment();
+  }
+
+  function turnKeepOff(): void {
+    const grant = readDeviceGrant(win);
+    const session = deps.getSession();
+    // Local first: forgetting the grant is what makes the automatic locks resume, and it
+    // must happen even if the server cannot be reached (its 30-day expiry mops up).
+    clearDeviceGrant(win);
+    syncKeepRow();
+    // §9 (audit F4 ruling, spec §9 point 8): turning the setting off locks the chat AT ONCE,
+    // on purpose — the row's own note says so. The server never re-mints a replacement token
+    // on revoke, so there is nothing here that could undo this by minting a fresh one.
+    hooks.lockNow("grantOff");
+    if (grant === null || session === null) return;
+    void revokeDeviceGrant(session, grant.grantId).catch((error: unknown) => {
+      if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+    });
+  }
+
+  keepInput.addEventListener("change", () => {
+    if (keepInput.checked) openEnrolment();
+    else if (enrolling) closeEnrolment();
+    else turnKeepOff();
+  });
+
+  signOutButton.addEventListener("click", () => {
+    const session = deps.getSession();
+    if (session === null) return;
+    // §9.7 (audit F8 fix): capture what the server will actually use for its except_grant_id
+    // decision — the binding AT SEND TIME, not whatever it happens to be when the response
+    // lands. A tryBindStoredGrant exchange (or a panic/lock) racing the in-flight request must
+    // not change which grant this handler decides was spared.
+    const boundAtSend = hooks.getBoundGrantId();
+    signOutButton.disabled = true;
+    signOutStatus.hidden = false;
+    signOutStatus.textContent = "Signing out…";
+    void revokeAllDeviceGrants(session)
+      .then(() => {
+        // §9.7 (audit F7 fix): the server spares the caller's grant ONLY when the caller's own
+        // token is bound to it — never merely because this device happens to have one stored.
+        // If THIS device's live session was not actually bound (a still-pending or failed
+        // exchange, or a stale second tab), the server just revoked this device's grant along
+        // with everyone else's — keep the local keys only when they still match what the
+        // server actually spared, and forget them otherwise.
+        const stored = readDeviceGrant(win);
+        const wasSpared = boundAtSend !== null && boundAtSend === stored?.grantId;
+        if (!wasSpared) {
+          clearDeviceGrant(win);
+          syncKeepRow();
+        }
+        signOutStatus.textContent = "Done — the other devices are signed out.";
+      })
+      .catch((error: unknown) => {
+        if (error instanceof ServerLockedError) {
+          hooks.lockNow("unauthorized");
+          return;
+        }
+        signOutStatus.textContent = "Couldn't sign the other devices out — try again.";
+      })
+      .finally(() => {
+        signOutButton.disabled = false;
+      });
+  });
+
+  // -- Lock when I change tab / lock my screen: behaviour ----------------------------------
+
+  // The sheet has its own watcher only to read and request the permission; the panel owns the
+  // one that actually listens, and starts it when this announces the settings changed.
+  const screenWatcher = createScreenWatcher(win);
+  let screenStatus: ScreenWatchStatus = screenWatcher.supported ? "prompt" : "unsupported";
+
+  function syncLockRows(): void {
+    const distinct = screenStatus === "granted";
+    const shown = effectiveLockSettings(readStoredLockSettings(win), distinct);
+    lockTabInput.checked = shown.lockOnTab;
+    lockScreenInput.checked = shown.lockOnScreen;
+    const canDistinguish = screenStatus === "granted" || screenStatus === "prompt";
+    lockScreenInput.disabled = !canDistinguish;
+    lockScreenLabel.classList.toggle("wx-srv-sheet-row-disabled", !canDistinguish);
+    if (!canDistinguish) {
+      lockNote.textContent =
+        "This browser can't tell a screen lock from a tab switch, so both follow 'Lock when I change tab'.";
+      lockNote.hidden = false;
+    } else if (distinct && !shown.lockOnTab && shown.lockOnScreen && !isScreenLockProven(win)) {
+      lockNote.textContent =
+        "Lock your screen once so this phone can learn to tell a screen lock from a tab switch — until then, switching away also locks.";
+      lockNote.hidden = false;
+    } else {
+      lockNote.textContent = "";
+      lockNote.hidden = true;
+    }
+  }
+
+  function refreshScreenStatus(): void {
+    void screenWatcher.status().then((status) => {
+      screenStatus = status;
+      syncLockRows();
+    });
+  }
+
+  function onLockBoxChanged(changed: "tab" | "screen"): void {
+    const before = effectiveLockSettings(readStoredLockSettings(win), screenStatus === "granted");
+    const next = {
+      lockOnTab: changed === "tab" ? lockTabInput.checked : before.lockOnTab,
+      lockOnScreen: changed === "screen" ? lockScreenInput.checked : before.lockOnScreen,
+    };
+    if (screenStatus === "granted" || next.lockOnTab === next.lockOnScreen) {
+      // Either the browser can tell the two apart, or the boxes agree and nothing needs to.
+      setLockSettings(win, next);
+      syncLockRows();
+      return;
+    }
+    if (screenStatus === "prompt") {
+      // The owner just made the two differ: only now is the permission worth asking for.
+      // Called straight from the tap (no await before it), which the browser requires.
+      void screenWatcher.requestPermission().then((status) => {
+        screenStatus = status;
+        if (status === "granted") setLockSettings(win, next);
+        else {
+          // Denied: the two follow the tab box, as they do in a browser without the API.
+          const follow = changed === "tab" ? next.lockOnTab : before.lockOnTab;
+          setLockSettings(win, { lockOnTab: follow, lockOnScreen: follow });
+        }
+        syncLockRows();
+      });
+      return;
+    }
+    // Unsupported or denied: the screen box is disabled, so only the tab box moves both.
+    setLockSettings(win, { lockOnTab: next.lockOnTab, lockOnScreen: next.lockOnTab });
+    syncLockRows();
+  }
+  lockTabInput.addEventListener("change", () => onLockBoxChanged("tab"));
+  lockScreenInput.addEventListener("change", () => onLockBoxChanged("screen"));
+
+  const detachGrantStateListener = onGrantStateChanged(win, syncKeepRow);
+  const detachLockSettingsListener = onLockSettingsChanged(win, syncLockRows);
+
   function close(): void {
+    closeEnrolment();
     backdrop.hidden = true;
     wipeConfirmation.hidden = true;
     wipeStatus.hidden = !wipeOutcomeUnknown;
@@ -363,6 +705,10 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
       wipeStatus.hidden = !wipeOutcomeUnknown;
       nameInput.value = identity.getName() ?? "";
       idleInput.checked = isIdleLockExtended(win);
+      signOutStatus.hidden = true;
+      syncKeepRow();
+      syncLockRows();
+      refreshScreenStatus();
       usageRow.textContent = "Storage: loading…";
       const session = deps.getSession();
       mountPushToggleIfCapable(session);
@@ -389,6 +735,9 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     close,
     teardown(): void {
       detachIdlePreferenceListener();
+      detachGrantStateListener();
+      detachLockSettingsListener();
+      keepPad.teardown();
       stopScrubPolling();
       unmountPushToggle();
       win.document.removeEventListener("keydown", onKeydown);

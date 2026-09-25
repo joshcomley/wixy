@@ -6,7 +6,8 @@ storage, routes, and second auth gate, entirely separate from `chats.py`/`cmdcha
 `draft/media/`. Full decided design: [`spec/server-chat/00-brief.md`](../../spec/server-chat/00-brief.md).
 This manual describes the current implementation; where intent and code differ, follow the
 code and record the difference in `decisions/`.
-Numbered guarantees: [invariants.md](invariants.md) 40–47, 49 (reactions) and 50 (transcription, §15).
+Numbered guarantees: [invariants.md](invariants.md) 40–47, 48 (permanent unlock), 49 (reactions)
+and 50 (transcription, §15).
 
 ## 1. The disguise (why it looks like nothing is here)
 
@@ -50,6 +51,10 @@ panels talk to.
 DB. There is no PIN field anywhere in `Settings` (`wixy_server/tests/test_routes_livechat.py
 ::TestSettingsHaveNoPinField` asserts this directly — a grep-style guard against ever adding
 one). The PIN is verified entirely by cmd; see §4.
+
+A device the owner has told to **keep itself unlocked** has a second way to obtain the unlock
+token: a device grant (§16), created only with the PIN, which mints the same token through
+`POST /unlock-with-grant`. It replaces typing the PIN — never the token, never CF Access.
 
 ## 3. Unlock tokens and signed media URLs (`livechat/tokens.py`)
 
@@ -140,9 +145,10 @@ contention at the file level). Every method is **synchronous**; route handlers w
 call in `anyio.to_thread.run_sync`.
 
 Tables: `messages`, `attachments`, `events`, `uploads`, `push_subscriptions`, `reactions`,
-`deleted_storage`, `pending_wipe_cleanup`, `pending_scrub`, and `attachment_transcripts` (a voice
-note's opt-in transcript, `ON DELETE CASCADE` from its attachment — §15). Schema migrations are
-serialized under the SQLite writer lock.
+`deleted_storage`, `pending_wipe_cleanup`, `pending_scrub`, `attachment_transcripts` (a voice
+note's opt-in transcript, `ON DELETE CASCADE` from its attachment — §15), and `device_grants`
+(schema v9, §16 — auth credentials, not chat content, so delete/wipe leave them alone). Schema
+migrations are serialized under the SQLite writer lock.
 `deleted_storage` retains internal attachment/upload tombstones and retry status; it is not a
 message/event tombstone and is never returned to chat clients. `pending_wipe_cleanup` records a
 wipe's filesystem sweep token so a crash cannot lose cleanup of orphaned paths. Schema v4 adds the
@@ -156,6 +162,7 @@ adds `reactions` (decisions/00164), described under "Reactions" in §6. Schema v
 `attachment_transcripts` (decisions/00166/00167), described in §15; a database that reaches v8
 through a migration path older than this table's own step still gets it via
 `_ensure_attachment_transcripts_table`'s idempotent `sqlite_master` check on every connect.
+Schema v9 adds `device_grants` (Inv 48), described in §16.
 Two transaction shapes:
 - `BEGIN IMMEDIATE` for writes needing a race-safe conditional check (an attachment's lease
   claim, `create_message`'s idempotent client-id insert) — serializes concurrent claimants
@@ -570,7 +577,8 @@ leak across shell unit tests that never tear the panel down).
 **`lockModel.ts`** is a PURE reducer, `(state, event, now) => {state, effects[]}` — every
 decision about what state comes next lives here, with no DOM/timer/network access, so it has
 100% branch coverage in vitest. States: `decoy`, `revealed`, `pin` (with an optional
-`wrong`/`lockedOut`/`unavailable` error), `verifying`, `chat`, `fading`. One deliberate
+`wrong`/`lockedOut`/`unavailable` error), `verifying`, `chat`, `fading`, plus the two round-2 states
+`granting` and `shielded` (§16). One deliberate
 design choice: R6's eight lock triggers (`idle`, `panic`, `multiTap`, `escape`, `hidden`,
 `routeAway`, `unauthorized`, `expired`) are ALL modelled as one `{type:"lock", cause}` event
 rather than eight bespoke ones — `idle` is the sole exception, going through `fading` first
@@ -863,3 +871,178 @@ reply). Text is set with `textContent`, never markup; the control is not a gestu
 
 **Operating it.** See [runbook.md](runbook.md) ("Voice-note transcription"): the feature stays hidden
 until cmd's private mode is deployed and the probe answers `true`; verify a real note end to end.
+
+## 16. Device grants and the lock checkboxes (round 2, `spec/server-chat/03-permanent-unlock.md`)
+
+**What it is.** A per-device setting, switched on with the PIN from the settings sheet, that keeps
+the chat unlocked on that device until someone locks it on purpose. Spec §1 is the ruling and
+Inv 48 the rule; this section is the code as built.
+
+### Server
+
+- **Migration v9** (`store._SCHEMA_V9_DEVICE_GRANTS`, `_LATEST_SCHEMA_VERSION` — the one place the
+  version lives; tests import it) adds `device_grants(id, secret_hash, email, label, created_at,
+  last_used_at, revoked_at)`. `CREATE TABLE IF NOT EXISTS`, so it is idempotent across a blue/green
+  overlap. `livechat/grants.py` owns the constants (five live grants per identity, 30-day idle
+  expiry, seven-day revoked-row retention, the 10-failures-a-minute limit), `new_grant()`, the
+  strict canonical-base64url secret parser and the display-label cleaner.
+- **Routes** (contracts.md): `POST /device-grants` (guard → token → label → cmd PIN → create),
+  `POST /unlock-with-grant` (guard → failure limit → validate → redeem → mint),
+  `DELETE /device-grants/{id}` and `DELETE /device-grants` (guard → token → revoke). The PIN check is
+  the extracted `_verify_pin` helper `/unlock` also uses; `_request_guard_refusal` is the shared
+  guard. `LiveChatStore.redeem_device_grant` runs every check against a fixed dummy hash when the id
+  is unknown so an unknown id and a wrong secret cost the same, and stamps `last_used_at` only on
+  success.
+- **Failure limiter** (`GrantFailureLimiter`, `app.state.livechat_grant_limiter`): per identity, in
+  memory, per process. It stops a misbehaving client hammering the database; it is not the security
+  control (a 256-bit secret cannot be guessed).
+- **Janitor** (hourly, `janitor.run_once`): revokes live grants unused for 30 days, deletes rows
+  revoked for more than seven (`secure_delete` zeroes them).
+- **Other identity's grant = 404.** Revoking someone else's grant, or an unknown or malformed id, is
+  `404 {"error":"not_found"}` — indistinguishable. Revoking your own already-revoked grant is 204
+  *while its row still exists* — the janitor deletes it after 7 days, past which a repeat DELETE is
+  404 like an unknown id (audit F3, accepted: the client already clears its local keys on any
+  non-2xx response here, so this is harmless in practice). `Cache-Control: no-store` is set on the
+  two responses that carry a credential.
+- **Bound tokens end their session on revoke (§9, audit F4).** `POST /device-grants` and
+  `POST /unlock-with-grant` both mint a token carrying the grant id as payload key `"g"` (32
+  lowercase hex; `POST /unlock`'s PIN-minted tokens never carry it). `require_server_token`
+  re-checks a `"g"`-bearing token's grant is still live (`store.is_device_grant_live`, a read-only
+  PK lookup, no write) on every request; `GET /stream`'s loop repeats the same check on its
+  existing ~2s tick; a bound `GET /media` URL carries `&g=` and folds the grant id into its HMAC
+  (`media|{attId}|{rendition}|{exp}|{email}|{g}`), so it dies with the grant too. Revoking a grant
+  therefore ends every session and media link minted from it within about 2 seconds — not just
+  future mints. **No route ever exchanges a bound token for an unbound one** — that would be a way
+  around this fix. `DELETE /device-grants` ("Sign out other devices") revokes every OTHER live
+  grant of the identity, reading the caller's OWN grant off its own token's `"g"` and sparing it
+  (an unbound caller — a plain PIN session — spares nothing, so it revokes all of them); the copy
+  "Done — your other devices are signed out." is therefore literally true. `DELETE
+  /device-grants/{ownId}` — turning the setting off — kills the session bound to it at once, on
+  purpose.
+
+### Client (`admin-ui/src/server/`)
+
+- `deviceGrant.ts` — the two localStorage keys and their events; `api/grants.ts` — the four calls
+  (all send the guard headers; `createDeviceGrant` attaches the token by hand because a wrong PIN is
+  a 401 that must NOT be read as "locked").
+- `lockModel.ts` — the reducer takes `LockContext.grantActive` as an input (no second machine):
+  with it, `lock idle` and `lock routeAway` are ignored from `chat`/`fading`. New states:
+  `granting` (a mount is minting this visit's token — the panel shows NOTHING, not even the decoy)
+  and `shielded` (§8, below). Pure policy functions: `pausesGrant`, `hiddenPolicy`, `classifyHide`,
+  `shieldOutcome`, `effectiveLockSettings`.
+- `panel.ts` — **mount**: with the setting on and not paused, `startGrantUnlock` goes
+  `decoy → granting → chat` (no decoy, no PIN); a 401 whose body is `{"error":"grant_invalid"}`
+  clears both keys, ANY OTHER 401/failure (an edge/guard failure the route itself never sends,
+  offline, 429) keeps the grant and
+  shows the decoy without forgetting it. A hide while `granting` drops the in-flight attempt
+  (`retryGrantUnlockOnVisible = true`) rather than adopting a late answer; the next return to the
+  decoy retries the mint from scratch. **Pausing**: panic, a multi-tap, Escape, and a lock caused by
+  a checkbox all set `wx-srv-grant-paused` immediately. A background switch pauses at the MOMENT the
+  shield begins (`beginShield` sets `shieldPausedGrant`), not when it later resolves — a page
+  reloaded, closed or discarded mid-shield is found paused, never silently left unlocked. Only a
+  restore (`commitShieldRestore`) undoes that pause; `grantUsable()` still treats a shielded-but-not-
+  yet-resolved chat as active so a token due to expire while shielded can keep renewing. A correct
+  PIN clears the pause before the transition. **Renewal**: `armSessionTimers` schedules a re-mint
+  `GRANT_RENEW_BEFORE_MS` (5 min) before expiry and one last try at expiry; a renewal re-attaches the
+  chat view with the new session (`ServerChatView.attach` may be called again while attached — the
+  view reopens its stream from the saved cursor and refreshes the signed media URLs, which are bound
+  to the OLD token's expiry). A renewal is put off while a voice note or video is playing (it would
+  restart), never past the last minute. `hooks.lockNow("unauthorized")` renews instead of locking
+  while a grant is active — unless a renewal happened in the last 10 s (then the server is refusing
+  tokens for a reason a fresh one will not fix, so it locks). Failure with `grant_invalid` clears the
+  keys and locks; any other failure retries every 30 s until the token really expires (a departure
+  from the original brief, found necessary by the independent review — a transient renewal failure
+  must not strand an active grant locked). A `disposed` flag is set in `teardown()` and checked by
+  every async continuation (`adoptSession`, the renewal callback, the shield resolver) so a renewal
+  or shield outcome landing after teardown never re-attaches a torn-down chat or re-arms a timer.
+  **Unload**: a reload, navigation or closing tab fires `pagehide` (`persisted` false) and then
+  `visibilitychange → hidden`; `panel.ts` ignores that hide (`unloading`), otherwise every reload
+  would count as a tab change and pause the grant (found by `server-permanent-unlock.spec.ts`; a unit
+  test cannot see it because jsdom never unloads). A page entering the back/forward cache
+  (`persisted`) stays an ordinary background switch. **Idle while away**: the idle period is checked
+  on return against the wall clock, not a timer (a suspended tab runs no timers); if it already ran
+  out, the lock fires with cause `idleAway` INSTANTLY on return — a touch does not get a chance to
+  restore what was already idle. An idle fade already in progress when the page went away is
+  completed on return (`onVisible` finishes it) rather than left for a stray touch to cancel.
+  **A PIN unlock is never itself bound (§9, audit F4):** `grantActive` reads false for the brief
+  window between a successful PIN verify and `bindGrantAfterPinUnlock` settling
+  (`pendingGrantBind`), even if a stored grant is present and unpaused — otherwise a device that
+  re-entered its PIN after a panic would run a never-auto-locking chat on an unbound 12h token, the
+  same hole by another door. That function fires right after `verifyOk`: if the device holds an
+  unpaused grant it exchanges via `unlock-with-grant` at once (the pause was already cleared, so
+  the grant is eligible the instant the exchange starts); success adopts the bound session
+  (`adoptSession`, same as a renewal); `grant_invalid` forgets the grant but never locks the PIN
+  session just obtained; a network error leaves both alone. Early-return paths (no grant, paused,
+  superseded by a lock/re-verify/teardown) all run before the function's first `await`, so
+  `pendingGrantBind` is never left stuck true.
+- `settingsSheet.ts` — the "Keep this device unlocked" row (ticking opens an inline PIN pad and
+  stores NOTHING until the server says yes; unticking clears locally FIRST, **locks the chat at
+  once via `hooks.lockNow("grantOff")` (§9, audit F4 — the server never re-mints on revoke, so
+  nothing could undo this)**, then a best-effort `DELETE`), "Sign out other devices", the auto-lock
+  row greyed out while the setting is on, and the two lock rows below. The "On" note reads "On ·
+  Lock with the ✕ or a double-tap. Turning this off locks the chat — you'll need the PIN next
+  time." — the consequence stated plainly before the tap that causes it. The inline pad is marked `data-srv-gesture-exempt`, so tapping its digits in
+  quick succession never counts as R3's multi-tap. The greyed-out auto-lock row carries its own note
+  ("Off — nothing to extend while this device is kept unlocked") so the reason is not silent; each
+  dynamic note (`keepNote`, the auto-lock note, `lockNote`, `signOutStatus`) is `role="status"` and
+  linked from its checkbox(es) via `aria-describedby` (`lockNote` is shared by both lock checkboxes,
+  since one note explains the pair) — a screen reader announces WHY a row changed state, not just
+  that it did (reviewer finding, round 2).
+
+### "Lock when I change tab" / "Lock when I lock my screen" (§8)
+
+Both boxes are per device, always shown, ticked by default. A hidden document in an open chat:
+
+| tab | screen | on `hidden` | on return |
+|---|---|---|---|
+| on | on | lock at once | — |
+| off | off | nothing (idle still applies unless a grant is active) | — |
+| on | off | shield | restore only on a screen-lock event seen between hide and return |
+| off | on | shield | restore only on NO screen-lock event **and** a proven device |
+
+A **shield** puts the decoy up and detaches the chat like a lock, but keeps the in-memory session.
+On return the decoy stays up until a `screenState = "locked"` event arrives or `SHIELD_WAIT_MS`
+(500 ms) passes.
+
+**The cause of a hide is judged from WHEN the lock event was dispatched, not merely whether one
+happened (Architect ruling, §8, full text linked from decisions/00161)**: `screenLockEvidence`
+(`lockModel.ts`) takes every screen-lock event's `performance.now()` timestamp plus the hide and
+end times and asks two questions — CAUSAL (an event landed in
+`[hideAt - SCREEN_LOCK_EVIDENCE_BEFORE_MS, hideAt + SCREEN_LOCK_EVIDENCE_AFTER_MS]` = `[hideAt -
+1000, hideAt + 2000]` ms — a device may report the lock just ahead of the page actually hiding, so
+the window opens 1 s early) and ANY (an event landed anywhere in `[hideAt, endAt]`, including one
+batched and delivered only once the frozen page resumes). `classifyHide` then gives `screenLock`
+(causal evidence), `tabChange` (device **proven** and NO event at all, causal or batched, in the
+whole window) or `ambiguous` (anything else — including a proven device with a merely-batched
+event, which says nothing about why THIS hide happened) and `shieldOutcome` restores the chat only
+for a KNOWN cause whose own box is unticked. **Ambiguous always stays locked.** The proof
+(`wx-srv-screenlock-proven = "1"`) is set ONLY by a causal event, never a batched one, and is
+cleared on mount whenever there is no detector able to have earned it (permission not granted, or
+no Idle Detection API at all) — a stale proof from a since-revoked permission cannot keep restoring
+chats a device can no longer actually prove.
+
+**A second background switch inside one absence taints the shield** (`shieldTainted`): the evidence
+window is anchored to the ORIGINAL hide, so a hide → show → hide before the first shield resolves
+makes the cause of the second hide unreadable against it. The taint makes the eventual return stay
+locked regardless of what the evidence says, and is also set if a lock event fires while a restore
+is only waiting on a token renewal (`restoreAfterRenewal`) — a screen lock arriving mid-renewal
+must win over a renewal that happens to land first.
+
+A device becomes proven the first time a CAUSAL screen lock is seen during a hidden interval, and
+loses it when the permission goes or the detector stops. Until then "tab off + screen on" locks on
+every switch and the sheet says why. A screen lock while the page stays visible (desktop Win+L)
+locks at once if the screen box is ticked. A checkbox-caused lock pauses an active grant — see
+"Pausing" above for exactly when. R7's picker/mic exemption still prevents a lock or a shield.
+
+The only way to tell a screen lock from a tab switch is Chromium's Idle Detection API
+(`screenWatcher.ts`; not Safari or Firefox; a permission asked for from a tap, and only when the owner
+makes the two boxes differ). Where it is unsupported or denied the two boxes **follow each other**:
+`effectiveLockSettings` uses the tab box's value when they agree and locks when they disagree, so
+losing the detector can never quietly turn a lock the owner asked for into no lock. On return from
+a shield the idle period is checked against the wall clock: an idle period that ran out while away
+still locks unless a grant is active.
+
+**On-device timing is unverified.** How an Android phone orders `visibilitychange` and the detector's
+events across a power-button lock, an app switch and a tab switch has not been measured on the
+operator's phone. The design fails closed without that: an unproven device keeps locking on every
+switch. Verify on the phone before telling the owner the two boxes can differ there.

@@ -281,3 +281,11 @@
     max-height: 64px;
   }
 }
+
+/* -- A device grant is minting this visit's token ------------------------------------------
+   Nothing shows, not even the decoy: a flash of disguise followed by the chat would tell a
+   bystander which is which. The chat host and every overlay stay hidden by their own rules. */
+
+.wx-srv-panel.wx-srv-granting .wx-srv-decoy {
+  visibility: hidden;
+}

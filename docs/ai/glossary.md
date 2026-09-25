@@ -166,3 +166,27 @@ real provisioning failure (decisions/00031).
 `git clone` (never shallow — restore needs arbitrary history); `.git` present → `git fetch` +
 `git merge --ff-only`. A non-fast-forward local state is a hard `CheckoutError`, never forced
 (Invariant 8).
+
+- **Device grant** — the credential behind "Keep this device unlocked" (Inv 48): a random secret held
+  by ONE device, stored on the server only as a hash, created only with the PIN, bound to the CF
+  Access identity, revocable, expiring after 30 days unused. It mints an ordinary unlock token; it is
+  never itself one.
+- **Paused grant** — a grant set aside after a deliberate lock or a checkbox-caused lock
+  (`wx-srv-grant-paused = "1"`) until the PIN is entered again. Set the INSTANT a background switch
+  begins a shield (not when the shield later resolves), so a page reloaded, closed or discarded
+  mid-shield is still found paused on the next mount.
+- **Shield** — what a background switch does when the two lock checkboxes differ: the decoy goes up
+  and the chat detaches at once, but the in-memory session is kept for up to half a second after the
+  page returns so the cause can be worked out; only a known cause whose box is unticked restores it.
+  A SECOND switch inside one shielded absence taints it (`shieldTainted`) — the evidence window is
+  anchored to the first hide, so a later switch's cause is unreadable against it — and forces the
+  eventual return to stay locked regardless of what the evidence says.
+- **Causal evidence** — the Architect's ruling on what "an event was seen" means (§8, decisions/00161):
+  a screen-lock event counts as the CAUSE of a hide only if its dispatch time falls inside
+  `[hideAt-1000ms, hideAt+2000ms]`; one delivered only once the page resumes (a batched event, seen
+  anywhere later in the absence) is evidence the device CAN report locks, but not evidence of why
+  THIS hide happened, and never restores or locks the current shield on its own.
+- **Proven device** — a device that has delivered a CAUSAL screen-lock event during a hidden interval
+  (`wx-srv-screenlock-proven`). Only such a device may read "no event, causal or batched" as "a tab
+  switch". The proof is cleared on mount whenever there is no detector left able to have earned it
+  (permission revoked, or no Idle Detection API at all).

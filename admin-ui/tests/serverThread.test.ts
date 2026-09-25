@@ -66,6 +66,8 @@ function fakeHooks(): LockHooks {
   return {
     suspend: vi.fn(() => () => {}),
     lockNow: vi.fn(),
+    adoptBoundSession: vi.fn(),
+    getBoundGrantId: vi.fn(() => null),
   };
 }
 
@@ -251,7 +253,12 @@ describe("mountServerThread", () => {
       }],
     })] }));
     const release = vi.fn();
-    const hooks: LockHooks = { suspend: vi.fn(() => release), lockNow: vi.fn() };
+    const hooks: LockHooks = {
+      suspend: vi.fn(() => release),
+      lockNow: vi.fn(),
+      adoptBoundSession: vi.fn(),
+      getBoundGrantId: vi.fn(() => null),
+    };
     const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks, win: fakeWindow(), onSettings: vi.fn() });
     await view.attach(SESSION);
 
@@ -1843,7 +1850,12 @@ describe("mountServerThread", () => {
       usage(true);
       getHistory.mockResolvedValue(emptyHistory({ messages: [voiceMessage()] }));
       const release = vi.fn();
-      const hooks: LockHooks = { suspend: vi.fn(() => release), lockNow: vi.fn() };
+      const hooks: LockHooks = {
+      suspend: vi.fn(() => release),
+      lockNow: vi.fn(),
+      adoptBoundSession: vi.fn(),
+      getBoundGrantId: vi.fn(() => null),
+    };
       const view = mount(hooks);
       await view.attach(SESSION);
       await flush();
@@ -2230,7 +2242,12 @@ describe("mountServerThread reactions", () => {
     it("keeps a PLAYING voice note's <audio> element, its position, its suspension and an open menu across a reaction", async () => {
       const voice = fakeMessage({ seq: 1, sender: "Purdy", text: null, attachments: [VOICE_ATTACHMENT] });
       const release = vi.fn();
-      const hooks: LockHooks = { suspend: vi.fn(() => release), lockNow: vi.fn() };
+      const hooks: LockHooks = {
+      suspend: vi.fn(() => release),
+      lockNow: vi.fn(),
+      adoptBoundSession: vi.fn(),
+      getBoundGrantId: vi.fn(() => null),
+    };
       const view = await mountWith([voice], { hooks });
 
       const audio = view.element.querySelector<HTMLAudioElement>("audio")!;
@@ -2281,7 +2298,12 @@ describe("mountServerThread reactions", () => {
     it("still rebuilds the bubble when something OTHER than the reactions changed", async () => {
       const voice = fakeMessage({ seq: 1, sender: "Purdy", text: null, attachments: [VOICE_ATTACHMENT] });
       const release = vi.fn();
-      const hooks: LockHooks = { suspend: vi.fn(() => release), lockNow: vi.fn() };
+      const hooks: LockHooks = {
+      suspend: vi.fn(() => release),
+      lockNow: vi.fn(),
+      adoptBoundSession: vi.fn(),
+      getBoundGrantId: vi.fn(() => null),
+    };
       const view = await mountWith([voice], { hooks });
       const audio = view.element.querySelector<HTMLAudioElement>("audio")!;
       vi.spyOn(audio, "pause").mockImplementation(() => {});

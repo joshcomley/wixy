@@ -655,6 +655,62 @@ class TestMediaRoute:
         finally:
             client.__exit__(None, None, None)
 
+    def test_a_bound_url_is_refused_after_its_grant_is_revoked(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        """§9 (audit F4): a media URL minted from a bound session dies with its grant, the
+        same as the session's own token — otherwise a link handed out before "Sign out
+        other devices" would keep loading for the rest of its 12h `exp`."""
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            att_id, secret = self._ready_attachment(client, headers)
+            store: LiveChatStore = client.app.state.livechat_store  # type: ignore[attr-defined]
+            grant_id = "a" * 32
+            store.create_device_grant(
+                grant_id=grant_id,
+                secret_hash="h",
+                email="",
+                label=None,
+                now=time.time(),
+                max_live=5,
+            )
+            exp = int(time.time()) + 3600
+            sig = sign_media_url(
+                secret, attachment_id=att_id, rendition="full", exp=exp, email="", grant_id=grant_id
+            )
+            url = f"/api/admin/server/media/{att_id}/full?exp={exp}&sig={sig}&g={grant_id}"
+            assert client.get(url).status_code == 200
+
+            store.revoke_device_grant(grant_id=grant_id, email="", now=time.time())
+            revoked_response = client.get(url)
+            assert revoked_response.status_code == 403
+
+            # An UNBOUND URL for the same attachment is untouched by the revocation.
+            unbound_sig = sign_media_url(
+                secret, attachment_id=att_id, rendition="full", exp=exp, email=""
+            )
+            unbound_response = client.get(
+                f"/api/admin/server/media/{att_id}/full?exp={exp}&sig={unbound_sig}"
+            )
+            assert unbound_response.status_code == 200
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_a_malformed_g_is_403(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            att_id, secret = self._ready_attachment(client, headers)
+            exp = int(time.time()) + 3600
+            sig = sign_media_url(secret, attachment_id=att_id, rendition="full", exp=exp, email="")
+            response = client.get(
+                f"/api/admin/server/media/{att_id}/full?exp={exp}&sig={sig}&g=not-hex"
+            )
+            assert response.status_code == 403
+        finally:
+            client.__exit__(None, None, None)
+
     def test_expired_signature_is_403(
         self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
     ) -> None:
