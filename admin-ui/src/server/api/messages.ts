@@ -24,6 +24,31 @@ export interface Attachment {
   };
 }
 
+/** Round 2 ruling item 10 §(3): the `media` member of a quote — `null` for a
+ * text-only target. `kind` is the quoted attachments' shared kind, or
+ * `"mixed"`; `durationS` is the single voice note's or video's duration only
+ * when `count === 1`; `thumbUrl` is a freshly signed URL for the FIRST
+ * attachment's `thumb` (photo) or `poster` (video) rendition, only when that
+ * attachment is `ready` — never `full`/`play`, and never present for voice. */
+export interface ReplyToMedia {
+  readonly kind: AttachmentKind | "mixed";
+  readonly count: number;
+  readonly durationS: number | null;
+  readonly thumbUrl: string | null;
+}
+
+/** Round 2 ruling item 10 §(3): the `replyTo` member of the `Message` wire
+ * shape — `null` for an ordinary message. Built fresh by the server from the
+ * LIVE target row on every read (Inv 40/Inv 46): deleting the target makes
+ * this `null` everywhere it was quoted, with no chat-visible tombstone. */
+export interface ReplyTo {
+  readonly seq: number;
+  readonly sender: string;
+  readonly text: string | null;
+  readonly truncated: boolean;
+  readonly media: ReplyToMedia | null;
+}
+
 export interface Message {
   readonly seq: number;
   readonly clientId: string;
@@ -31,6 +56,7 @@ export interface Message {
   readonly text: string | null;
   readonly attachments: readonly Attachment[];
   readonly createdAt: number;
+  readonly replyTo: ReplyTo | null;
 }
 
 export interface HistoryPage {
@@ -59,6 +85,9 @@ export interface SendMessageInput {
   readonly deviceId: string;
   readonly text: string | null;
   readonly attachmentIds: readonly string[];
+  /** Round 2 ruling item 10 §(3): omit the key entirely for an ordinary
+   * message — never send it as `undefined` explicitly. */
+  readonly replyToSeq?: number;
 }
 
 export type SendMessageResult =

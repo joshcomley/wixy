@@ -246,7 +246,7 @@ function stateElement(text: string, state: "processing" | "failed", documentRef:
   return element;
 }
 
-function formatDuration(seconds: number): string {
+export function formatDuration(seconds: number): string {
   const safeSeconds = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));
   const minutes = Math.floor(safeSeconds / 60);
   return `${minutes}:${String(safeSeconds % 60).padStart(2, "0")}`;

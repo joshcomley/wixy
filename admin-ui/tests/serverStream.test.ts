@@ -49,6 +49,7 @@ function fakeMessage(overrides: Partial<Message> = {}): Message {
     text: "hi",
     attachments: [],
     createdAt: 1_700_000_000,
+    replyTo: null,
     ...overrides,
   };
 }

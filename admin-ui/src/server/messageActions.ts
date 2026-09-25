@@ -9,6 +9,9 @@ export interface MessageActionsDeps {
   readonly win: Window;
   readonly document?: Document;
   readonly onDelete: (message: Message) => Promise<void>;
+  /** Round 2 ruling item 10 §(4): "Reply" is the FIRST item, above "Copy
+   * text", on every confirmed message — text or media, mine or theirs. */
+  readonly onReply: (message: Message) => void;
 }
 
 export interface MessageActionsController {
@@ -58,6 +61,17 @@ export function mountMessageActions(deps: MessageActionsDeps): MessageActionsCon
     trigger.setAttribute("aria-expanded", "true");
     bubble.classList.add("wx-srv-message-actions-open");
   }
+
+  const reply = documentRef.createElement("button");
+  reply.type = "button";
+  reply.className = "wx-srv-message-action-reply";
+  reply.textContent = "Reply";
+  reply.setAttribute("role", "menuitem");
+  reply.addEventListener("click", () => {
+    close();
+    deps.onReply(message);
+  });
+  actions.appendChild(reply);
 
   if (message.text !== null && message.text !== "") {
     const copy = documentRef.createElement("button");
