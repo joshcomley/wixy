@@ -470,6 +470,8 @@ def process_photo(src: Path, *, output_dir: Path) -> PhotoResult:
 # ---------------------------------------------------------------------------
 
 _VOICE_DURATION_CAP_S = 15 * 60.0
+VOICE_DURATION_CAP_S = _VOICE_DURATION_CAP_S
+"""R11's 15-minute voice cap, exported for the transcription job's own bounds."""
 _VOICE_PEAK_BUCKETS = 64
 _VOICE_PEAK_SAMPLE_RATE = 8000
 _DURATION_TOLERANCE_S = 0.5

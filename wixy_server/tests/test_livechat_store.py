@@ -1385,3 +1385,394 @@ class TestPushSubscriptions:
         fetched = store.get_push_subscription("device-aaaaaaaa")
         assert fetched is not None
         assert fetched.consecutive_failures == 2
+
+
+def _ready_voice_message(
+    store: LiveChatStore, *, att_id: str = "voice-att-1", client_id: str = "client-voice-1"
+) -> tuple[int, str]:
+    """A sent, ready voice note; returns (message_seq, attachment_id)."""
+    store.create_attachment(att_id=att_id, kind="voice", now=1000.0)
+    store.claim_processing(owner="worker-1", now=1000.0, lease_s=120.0)
+    store.finish_attachment(
+        att_id=att_id,
+        owner="worker-1",
+        result=AttachmentResult(
+            status="ready",
+            mime="audio/mp4",
+            width=None,
+            height=None,
+            duration_s=3.0,
+            peaks=(0.1, 0.2),
+            renditions=("play",),
+            bytes_on_disk=10,
+            failure=None,
+        ),
+        now=1000.0,
+    )
+    message, _ = store.create_message(
+        client_id=client_id,
+        sender="Josh",
+        device_id="device-voice-1",
+        by_email=None,
+        text=None,
+        attachment_ids=(att_id,),
+        now=1001.0,
+    )
+    return message.seq, att_id
+
+
+class TestTranscripts:
+    """spec/server-chat/05-voice-transcription.md — the `attachment_transcripts` table."""
+
+    @staticmethod
+    def _raw(db_path: Path) -> bytes:
+        wal_path = Path(f"{db_path}-wal")
+        return db_path.read_bytes() + (wal_path.read_bytes() if wal_path.exists() else b"")
+
+    def test_a_sibling_branchs_migration_reaching_schema_7_without_this_table_is_recovered(
+        self, db_path: Path
+    ) -> None:
+        """Three round-2 branches each independently claim schema version 7 for their own new
+        table. A database that reached user_version=7 through a SIBLING branch's migration
+        (never running this one) must not be permanently missing `attachment_transcripts` just
+        because `_migrate`'s version-gated ladder saw `current >= _LATEST_SCHEMA_VERSION` and
+        returned early."""
+        store = LiveChatStore(db_path)
+        _seq, att_id = _ready_voice_message(store)
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.execute("DROP TABLE attachment_transcripts")
+            conn.execute("PRAGMA user_version = 7")  # a sibling's migration claimed this version
+            conn.commit()
+        finally:
+            conn.close()
+
+        recovered = LiveChatStore(db_path)
+        assert recovered.begin_transcript(att_id=att_id, now=2000.0).state == "started"
+        conn = sqlite3.connect(str(db_path))
+        try:
+            assert (
+                conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' "
+                    "AND name = 'attachment_transcripts'"
+                ).fetchone()
+                is not None
+            )
+        finally:
+            conn.close()
+
+    def test_v6_database_upgrades_and_existing_attachments_have_no_transcript(
+        self, db_path: Path
+    ) -> None:
+        store = LiveChatStore(db_path)
+        _seq, att_id = _ready_voice_message(store)
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.execute("DROP TABLE attachment_transcripts")
+            conn.execute("PRAGMA user_version = 6")
+            conn.commit()
+        finally:
+            conn.close()
+
+        upgraded = LiveChatStore(db_path)
+        attachment = upgraded.get_attachment(att_id)
+        assert attachment is not None
+        assert attachment.transcript is None
+        assert upgraded.begin_transcript(att_id=att_id, now=2000.0).state == "started"
+        conn = sqlite3.connect(str(db_path))
+        try:
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == _LATEST_SCHEMA_VERSION
+        finally:
+            conn.close()
+
+    @pytest.mark.parametrize("case", ["unknown", "photo", "unsent", "processing"])
+    def test_only_a_sent_ready_voice_note_can_begin(self, store: LiveChatStore, case: str) -> None:
+        if case == "photo":
+            store.create_attachment(att_id="photo-1", kind="photo", now=1.0)
+            store.claim_processing(owner="w", now=1.0, lease_s=60.0)
+            store.finish_attachment(
+                att_id="photo-1",
+                owner="w",
+                result=AttachmentResult(
+                    "ready", "image/jpeg", 1, 1, None, None, ("full",), 1, None
+                ),
+                now=1.0,
+            )
+            store.create_message(
+                client_id="client-photo-1",
+                sender="Josh",
+                device_id="device-photo-1",
+                by_email=None,
+                text=None,
+                attachment_ids=("photo-1",),
+                now=2.0,
+            )
+            att_id = "photo-1"
+        elif case == "unsent":
+            store.create_attachment(att_id="voice-unsent", kind="voice", now=1.0)
+            store.claim_processing(owner="w", now=1.0, lease_s=60.0)
+            store.finish_attachment(
+                att_id="voice-unsent",
+                owner="w",
+                result=AttachmentResult(
+                    "ready", "audio/mp4", None, None, 1.0, None, ("play",), 1, None
+                ),
+                now=1.0,
+            )
+            att_id = "voice-unsent"
+        elif case == "processing":
+            store.create_attachment(att_id="voice-processing", kind="voice", now=1.0)
+            store.create_message(
+                client_id="client-processing-1",
+                sender="Josh",
+                device_id="device-processing-1",
+                by_email=None,
+                text=None,
+                attachment_ids=("voice-processing",),
+                now=2.0,
+            )
+            att_id = "voice-processing"
+        else:
+            att_id = "no-such-attachment"
+        assert store.begin_transcript(att_id=att_id, now=5.0).state == "gone"
+        assert store.get_transcript(att_id) is None
+
+    def test_begin_finish_state_machine(self, store: LiveChatStore) -> None:
+        seq, att_id = _ready_voice_message(store)
+        baseline = store.events_after(0)
+
+        first = store.begin_transcript(att_id=att_id, now=2000.0)
+        assert first.state == "started"
+        assert first.transcript is not None and first.transcript.status == "pending"
+        # A second request while the first is pending starts nothing.
+        assert store.begin_transcript(att_id=att_id, now=2001.0).state == "pending"
+        # `pending` is announced so the other device shows its spinner too.
+        assert [(e.type, e.message_seq) for e in store.events_after(0)[len(baseline) :]] == [
+            ("message_updated", seq)
+        ]
+
+        assert store.finish_transcript(
+            att_id=att_id,
+            status="done",
+            text="hello world",
+            failure=None,
+            engine="parakeet",
+            now=2002.0,
+        )
+        message = store.get_messages([seq])[0]
+        transcript = message.attachments[0].transcript
+        assert transcript is not None
+        assert (transcript.status, transcript.text, transcript.engine) == (
+            "done",
+            "hello world",
+            "parakeet",
+        )
+        assert [e.type for e in store.events_after(0)[len(baseline) :]] == [
+            "message_updated",
+            "message_updated",
+        ]
+        # A done transcript is returned as-is: no new job, no event.
+        again = store.begin_transcript(att_id=att_id, now=2003.0)
+        assert again.state == "done"
+        assert again.transcript is not None and again.transcript.text == "hello world"
+        assert len(store.events_after(0)) == len(baseline) + 2
+
+    def test_failed_row_is_reset_by_begin_and_never_keeps_text(self, store: LiveChatStore) -> None:
+        _seq, att_id = _ready_voice_message(store)
+        store.begin_transcript(att_id=att_id, now=2000.0)
+        assert store.finish_transcript(
+            att_id=att_id,
+            status="failed",
+            text="must-not-be-kept",
+            failure="timeout",
+            engine=None,
+            now=2001.0,
+        )
+        failed = store.get_transcript(att_id)
+        assert failed is not None
+        assert (failed.status, failed.text, failed.failure) == ("failed", None, "timeout")
+
+        retry = store.begin_transcript(att_id=att_id, now=2002.0)
+        assert retry.state == "started"
+        assert retry.transcript is not None
+        assert (retry.transcript.status, retry.transcript.failure, retry.transcript.text) == (
+            "pending",
+            None,
+            None,
+        )
+
+    def test_a_late_result_can_still_land_after_startup_failed_the_row(
+        self, store: LiveChatStore
+    ) -> None:
+        """Blue/green overlap: the new process fails the old one's `pending` row at startup, but
+        the old process's live job may still finish — its result must not be thrown away."""
+        _seq, att_id = _ready_voice_message(store)
+        store.begin_transcript(att_id=att_id, now=2000.0)
+        assert store.fail_stale_pending_transcripts(now=2001.0) == 1
+        assert store.finish_transcript(
+            att_id=att_id,
+            status="done",
+            text="late but valid",
+            failure=None,
+            engine=None,
+            now=2002.0,
+        )
+        row = store.get_transcript(att_id)
+        assert row is not None and (row.status, row.text) == ("done", "late but valid")
+
+    def test_fail_stale_pending_fails_only_pending_rows_and_announces_each_message(
+        self, store: LiveChatStore
+    ) -> None:
+        seq_a, att_a = _ready_voice_message(store, att_id="voice-a", client_id="client-a-aaaa")
+        seq_b, att_b = _ready_voice_message(store, att_id="voice-b", client_id="client-b-bbbb")
+        _seq_c, att_c = _ready_voice_message(store, att_id="voice-c", client_id="client-c-cccc")
+        for att in (att_a, att_b, att_c):
+            store.begin_transcript(att_id=att, now=2000.0)
+        store.finish_transcript(
+            att_id=att_c, status="done", text="finished", failure=None, engine=None, now=2001.0
+        )
+        cursor = store.events_after(0)[-1].event_seq
+
+        assert store.fail_stale_pending_transcripts(now=3000.0) == 2
+        for att in (att_a, att_b):
+            row = store.get_transcript(att)
+            assert row is not None and (row.status, row.failure) == ("failed", "interrupted")
+        done = store.get_transcript(att_c)
+        assert done is not None and done.status == "done"
+        assert sorted(e.message_seq or 0 for e in store.events_after(cursor)) == sorted(
+            [seq_a, seq_b]
+        )
+        assert store.fail_stale_pending_transcripts(now=3001.0) == 0
+
+    def test_finish_after_the_message_was_deleted_is_discarded_without_an_event(
+        self, store: LiveChatStore
+    ) -> None:
+        seq, att_id = _ready_voice_message(store)
+        store.begin_transcript(att_id=att_id, now=2000.0)
+        store.delete_message(seq=seq, now=2001.0)
+        events_before = store.events_after(0)
+
+        assert not store.finish_transcript(
+            att_id=att_id, status="done", text="too late", failure=None, engine=None, now=2002.0
+        )
+        assert store.get_transcript(att_id) is None
+        assert store.events_after(0) == events_before
+
+    def test_delete_erases_the_transcript_from_the_database_bytes(
+        self, store: LiveChatStore, db_path: Path
+    ) -> None:
+        seq, att_id = _ready_voice_message(store)
+        store.begin_transcript(att_id=att_id, now=2000.0)
+        store.finish_transcript(
+            att_id=att_id,
+            status="done",
+            text="transcript-sentinel-3f9c1d7a",
+            failure=None,
+            engine=None,
+            now=2001.0,
+        )
+        assert b"transcript-sentinel-3f9c1d7a" in self._raw(db_path)
+
+        store.delete_message_for_scrub(seq=seq, now=2002.0)
+        assert store.scrub(deadline_s=_SCRUB_SUCCESS_DEADLINE_S)
+
+        assert store.get_transcript(att_id) is None
+        assert b"transcript-sentinel-3f9c1d7a" not in self._raw(db_path)
+
+    def test_wipe_erases_the_transcript_from_the_database_bytes(
+        self, store: LiveChatStore, db_path: Path
+    ) -> None:
+        _seq, att_id = _ready_voice_message(store)
+        store.begin_transcript(att_id=att_id, now=2000.0)
+        store.finish_transcript(
+            att_id=att_id,
+            status="done",
+            text="wipe-transcript-sentinel-8e2b6a40",
+            failure=None,
+            engine=None,
+            now=2001.0,
+        )
+        assert b"wipe-transcript-sentinel-8e2b6a40" in self._raw(db_path)
+
+        store.wipe_for_scrub(now=2002.0)
+        assert store.scrub(deadline_s=_SCRUB_SUCCESS_DEADLINE_S)
+
+        assert store.get_transcript(att_id) is None
+        assert b"wipe-transcript-sentinel-8e2b6a40" not in self._raw(db_path)
+
+    def test_racing_begins_start_exactly_one_job(self, db_path: Path) -> None:
+        """Two processes (blue/green overlap) — or two requests — asking at once: the write
+        lock serialises them, so exactly one gets `started` and the rest see its pending row."""
+        import threading
+
+        stores = [LiveChatStore(db_path) for _ in range(8)]
+        _seq, att_id = _ready_voice_message(stores[0])
+        barrier = threading.Barrier(len(stores))
+        states: list[str] = []
+
+        def attempt(store: LiveChatStore) -> None:
+            barrier.wait()
+            states.append(store.begin_transcript(att_id=att_id, now=2000.0).state)
+
+        threads = [threading.Thread(target=attempt, args=(store,)) for store in stores]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+        assert sorted(states) == ["pending"] * 7 + ["started"]
+
+    def test_restart_pending_starts_over_only_when_asked(self, store: LiveChatStore) -> None:
+        _seq, att_id = _ready_voice_message(store)
+        store.begin_transcript(att_id=att_id, now=2000.0)
+        assert store.begin_transcript(att_id=att_id, now=2001.0).state == "pending"
+        restarted = store.begin_transcript(att_id=att_id, now=2002.0, restart_pending=True)
+        assert restarted.state == "started"
+        assert restarted.transcript is not None and restarted.transcript.updated_at == 2002.0
+
+    def test_restart_pending_never_touches_a_finished_transcript(
+        self, store: LiveChatStore
+    ) -> None:
+        _seq, att_id = _ready_voice_message(store)
+        store.begin_transcript(att_id=att_id, now=2000.0)
+        store.finish_transcript(
+            att_id=att_id, status="done", text="keep me", failure=None, engine=None, now=2001.0
+        )
+        again = store.begin_transcript(att_id=att_id, now=2002.0, restart_pending=True)
+        assert again.state == "done"
+        assert again.transcript is not None and again.transcript.text == "keep me"
+
+    def test_an_interrupted_record_only_ever_turns_pending_into_failed(
+        self, store: LiveChatStore
+    ) -> None:
+        _seq, att_id = _ready_voice_message(store)
+        store.begin_transcript(att_id=att_id, now=2000.0)
+        store.finish_transcript(
+            att_id=att_id, status="done", text="finished", failure=None, engine=None, now=2001.0
+        )
+        assert not store.finish_transcript(
+            att_id=att_id,
+            status="failed",
+            text=None,
+            failure="interrupted",
+            engine=None,
+            now=2002.0,
+            only_if_pending=True,
+        )
+        kept = store.get_transcript(att_id)
+        assert kept is not None and (kept.status, kept.text) == ("done", "finished")
+
+        store.finish_transcript(
+            att_id=att_id, status="failed", text=None, failure="timeout", engine=None, now=2004.0
+        )
+        store.begin_transcript(att_id=att_id, now=2005.0)  # a retry: pending again
+        assert store.finish_transcript(
+            att_id=att_id,
+            status="failed",
+            text=None,
+            failure="interrupted",
+            engine=None,
+            now=2006.0,
+            only_if_pending=True,
+        )
+        row = store.get_transcript(att_id)
+        assert row is not None and (row.status, row.failure) == ("failed", "interrupted")

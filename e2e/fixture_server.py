@@ -31,6 +31,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -60,6 +61,8 @@ from wixy_server.checkout import current_sha, ensure_checkout  # noqa: E402
 from wixy_server.cmdchat import CmdChatClient  # noqa: E402
 from wixy_server.livechat.pinclient import CmdPinVerifier  # noqa: E402
 from wixy_server.livechat.store import LiveChatStore  # noqa: E402
+from wixy_server.livechat.transcribe import CmdTranscriber  # noqa: E402
+from wixy_server.livechat.transcription import SlidingWindowRateLimiter  # noqa: E402
 from wixy_server.registry import load_registry  # noqa: E402
 from wixy_server.site_source import build_site_source  # noqa: E402
 from wixy_server.storage import ProjectPaths, ensure_project_dirs, project_paths  # noqa: E402
@@ -377,10 +380,19 @@ def main() -> None:
         base_url=f"http://127.0.0.1:{fake_pin_port}",
     )
 
+    # spec/server-chat/05-voice-transcription.md: the transcription hop is pointed at the SAME
+    # fake cmd as the PIN service (never the real one — `create_app`'s default would talk to
+    # 127.0.0.1:9320). It starts as a cmd WITHOUT the private mode, so every spec that does not
+    # care sees no Transcribe control; `server-transcription.spec.ts` flips it through
+    # `/test/server/transcribe-config`.
+    fake_cmd_state.transcribe_private_supported = False
+    transcriber = CmdTranscriber(base_url=f"http://127.0.0.1:{fake_pin_port}")
+
     app = create_app(
         storage_root=storage_root,
         wixy_repo_root=wixy_repo_root,
         pin_verifier=pin_verifier,
+        transcriber=transcriber,
         # No E2E flow depends on the PERIODIC watcher tick (spec/04 §7) — E2E 6's
         # own simulated upstream commit fetches directly (this file's
         # `/test/simulate-upstream-commit`, decisions/00030), never waiting on
@@ -535,6 +547,143 @@ def main() -> None:
             return {"seq": message.seq, "attachmentId": attachment_id}
 
         return await anyio.to_thread.run_sync(_seed)
+
+    def _transcribe_stats() -> dict[str, object]:
+        last = (
+            fake_cmd_state.transcribe_requests[-1] if fake_cmd_state.transcribe_requests else None
+        )
+        return {
+            "requests": len(fake_cmd_state.transcribe_requests),
+            "retained": len(fake_cmd_state.transcribe_retained),
+            "maxInFlight": fake_cmd_state.transcribe_max_in_flight,
+            "lastFields": last.fields if last is not None else None,
+            "lastAudioBytes": len(last.audio) if last is not None else 0,
+            "lastAudioIsMp4": bool(last is not None and last.audio[4:8] == b"ftyp"),
+        }
+
+    @app.post("/test/server/transcribe-config", include_in_schema=False)
+    async def _post_transcribe_config(payload: dict[str, object]) -> dict[str, object]:
+        """server-transcription.spec.ts drives the fake cmd's private mode from the browser test:
+        `private` (whether cmd honours it), `text` (the transcript), `status` (make cmd fail),
+        `hold` (True parks every transcription request at cmd until False), `reset` (forget the
+        recorded requests). Always drops the probe cache so a flip is seen at once."""
+        private = payload.get("private")
+        if isinstance(private, bool):
+            fake_cmd_state.transcribe_private_supported = private
+        text = payload.get("text")
+        if isinstance(text, str):
+            fake_cmd_state.transcribe_text = text
+        status = payload.get("status")
+        if isinstance(status, int):
+            fake_cmd_state.transcribe_status_code = status
+        hold = payload.get("hold")
+        if hold is True:
+            fake_cmd_state.transcribe_gate = threading.Event()
+        elif hold is False and fake_cmd_state.transcribe_gate is not None:
+            fake_cmd_state.transcribe_gate.set()
+            fake_cmd_state.transcribe_gate = None
+        if payload.get("reset") is True:
+            fake_cmd_state.transcribe_requests.clear()
+            fake_cmd_state.transcribe_retained.clear()
+            fake_cmd_state.transcribe_max_in_flight = 0
+            # Every spec shares one identity, and the real 6-a-minute budget would throttle a
+            # busy suite; a fresh limiter per test keeps each test independent of the last.
+            app.state.livechat_transcription.rate_limiter = SlidingWindowRateLimiter()
+        transcriber.invalidate_probe()
+        return _transcribe_stats()
+
+    @app.post("/test/server/transcribe-stats", include_in_schema=False)
+    async def _post_transcribe_stats() -> dict[str, object]:
+        return _transcribe_stats()
+
+    @app.post("/test/server/seed-voice", include_in_schema=False)
+    async def _post_seed_server_voice(payload: dict[str, object]) -> dict[str, object]:
+        """Seed one READY voice note with real, playable AAC audio (a `seconds`-long tone made
+        with ffmpeg, the same tool the real queue uses) — deterministic, and long enough that
+        "the note is still playing when its transcript arrives" is a real browser check."""
+        sender = payload.get("sender", "Purdy")
+        seconds = payload.get("seconds", 12)
+        assert isinstance(sender, str) and isinstance(seconds, int) and 1 <= seconds <= 60
+        store: LiveChatStore = app.state.livechat_store
+        paths: ProjectPaths = app.state.paths
+        ffmpeg = os.environ.get("WIXY_FFMPEG") or shutil.which("ffmpeg")
+        assert ffmpeg, "the e2e voice fixture needs ffmpeg (as the real media queue does)"
+
+        def _seed() -> dict[str, object]:
+            now = time.time()
+            attachment_id = uuid.uuid4().hex
+            media_dir = paths.server_attachment_media_dir(attachment_id)
+            media_dir.mkdir(parents=True, exist_ok=True)
+            play = media_dir / "play.m4a"
+            subprocess.run(
+                [
+                    ffmpeg,
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    f"sine=frequency=330:duration={seconds}",
+                    "-ac",
+                    "1",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "32k",
+                    str(play),
+                ],
+                check=True,
+                capture_output=True,
+            )
+            conn = store._connect()
+            try:
+                conn.execute(
+                    "INSERT INTO attachments "
+                    "(id, kind, status, mime, duration_s, peaks, renditions, bytes_on_disk, "
+                    "created_at, updated_at) "
+                    "VALUES (?, 'voice', 'ready', 'audio/mp4', ?, ?, '[\"play\"]', ?, ?, ?)",
+                    (
+                        attachment_id,
+                        float(seconds),
+                        json.dumps([0.2, 0.6, 0.9, 0.4, 0.7, 0.3] * 8),
+                        play.stat().st_size,
+                        now,
+                        now,
+                    ),
+                )
+            finally:
+                conn.close()
+            message, _created = store.create_message(
+                client_id=f"seed-voice-{uuid.uuid4().hex}",
+                sender=sender,
+                device_id=f"seed-device-{uuid.uuid4().hex[:16]}",
+                by_email=None,
+                text=None,
+                attachment_ids=(attachment_id,),
+                now=now,
+            )
+            app.state.livechat_notifier.publish()
+            return {"seq": message.seq, "attachmentId": attachment_id}
+
+        return await anyio.to_thread.run_sync(_seed)
+
+    @app.post("/test/server/delete-message", include_in_schema=False)
+    async def _post_delete_server_message(payload: dict[str, object]) -> dict[str, bool]:
+        """Remove one seeded message and its files, so a spec that seeds into the ONE shared chat
+        (this fixture runs a single project for the whole suite) leaves nothing behind for the
+        next spec's exact-count assertions (server-media asserts exactly one `.wx-srv-voice`)."""
+        seq = payload["seq"]
+        assert isinstance(seq, int)
+        store: LiveChatStore = app.state.livechat_store
+        paths: ProjectPaths = app.state.paths
+
+        def _delete() -> bool:
+            attachment_ids = store.delete_message(seq=seq, now=time.time())
+            for attachment_id in attachment_ids:
+                shutil.rmtree(paths.server_attachment_media_dir(attachment_id), ignore_errors=True)
+            app.state.livechat_notifier.publish()
+            return True
+
+        return {"deleted": await anyio.to_thread.run_sync(_delete)}
 
     @app.post("/test/server/reset-pin-lockout", include_in_schema=False)
     async def _post_reset_pin_lockout() -> dict[str, bool]:

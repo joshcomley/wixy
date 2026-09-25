@@ -45,7 +45,7 @@ pluggable AI, HTML setup guide) is now **in progress** — see `spec/independenc
 
 | Store | Tables / purpose |
 |---|---|
-| `wixy_server/livechat/store.py` (`server.db`, schema v7) | `messages`, `attachments`, `events`, `uploads`, `push_subscriptions`, `reactions` (cascades on message delete, Inv 49), `deleted_storage`, `pending_wipe_cleanup`, `pending_scrub`; the last three are private erasure-recovery state (ids and tokens only), not chat-visible tombstones. See [`docs/ai/livechat.md`](docs/ai/livechat.md). |
+| `wixy_server/livechat/store.py` (`server.db`, schema version = `_LATEST_SCHEMA_VERSION`) | `messages`, `attachments`, `events`, `uploads`, `push_subscriptions`, `reactions` (cascades on message delete, Inv 49), `attachment_transcripts` (a voice note's opt-in transcript, `ON DELETE CASCADE`), `deleted_storage`, `pending_wipe_cleanup`, `pending_scrub`; the last three are private erasure-recovery state (ids and tokens only), not chat-visible tombstones. See [`docs/ai/livechat.md`](docs/ai/livechat.md). |
 
 ## Dev commands
 
@@ -119,6 +119,10 @@ npx playwright test
   number + that milestone's review checklist, and merge only after an explicit
   approval reply — never auto-merge those on green CI alone. Milestone 9 additionally
   needs a full Fable acceptance review before the phase is called done.
+- Server-chat **voice-note transcription** goes only through cmd's `private=1` mode, and only while
+  cmd's `GET /api/transcribe/capabilities` answers `{"private": true}` ([Inv 50](docs/ai/invariants.md),
+  decisions/00166). Never send chat audio to cmd's plain `/api/transcribe` — it retains the audio and
+  the text where the chat's delete and wipe can never reach them.
 - `WIXY_EDITION=standalone` is the one operator-decided exception to the
   no-direct-Anthropic-API rule above (spec/independence/05 §2, milestone 6) — scoped
   to that backend only; the fleet edition (`WIXY_EDITION=fleet`, the default) keeps
