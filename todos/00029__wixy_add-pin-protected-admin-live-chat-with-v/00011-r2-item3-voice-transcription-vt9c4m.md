@@ -33,3 +33,6 @@ Acceptance: full pytest, ruff check + `ruff format --check` (never plain `ruff f
 vitest + build with zero drift, Playwright e2e at desktop AND a 402px phone; raw-bytes erasure tests (delete + wipe)
 with a transcript sentinel; a playing voice note must survive a transcript arriving. Hand-off = full head SHA to DM
 `b584352d`.
+
+
+UPDATE 2026-09-25: New DM session (707d6dec) returned candidate 417e6cd NOT CLEARED — 1 HIGH blocking (H1: a lone UTF-16 surrogate in cmd's transcript text crashed the SQLite bind, swallowed, left the row pending forever with no Retry). Fixed in _parse_success (transcribe.py) with a UTF-8 round-trip check, mapped onto the existing invalid outcome; proven with a red-first client test AND a full end-to-end route-level reproduction, both mutation-checked. Also addressed M1 (docs wording, two independent limiters) and L1 (fake_cmd docstring note). Rebased onto current main (real conflict in thread.ts resolved cleanly, bundle rebuilt, both branches' e2e specs run together clean 25/25). Backend pytest 1909/1909, admin-ui vitest 1377/1377, all clean. FINAL HANDOFF #2 sent to DM (candidate ccc3526). Awaiting re-review + clearance.
