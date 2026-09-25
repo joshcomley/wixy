@@ -122,7 +122,7 @@ before declaring a verdict, fix the root cause, never skip/xfail/delete to go gr
 blocks merges. A rare full-suite-only flake is a box-level resource-contention characteristic
 (decisions/00025, 00027) — investigate, but never lower `-n 4` or add per-test retries.
 
-Two Server-chat delivery lessons set the acceptance bar:
+Three Server-chat delivery lessons set the acceptance bar:
 
 - For erasure or background-worker changes, require **five consecutive clean full-suite
   runs**, run alone. Never overlap pytest and e2e; Windows concurrent-file-access races fail
@@ -130,3 +130,9 @@ Two Server-chat delivery lessons set the acceptance bar:
 - Do not dismiss a Server-chat e2e failure as host load based on a small number of retries.
   Require **10/10 passes on an unloaded node** before classifying a hub-only failure as
   host-load-only. Any failure in that unloaded control run means a real bug needs investigation.
+- A test that seeds an attachment or upload directly into the store of a live app (`create_app`
+  under `TestClient`) must stamp it with the real clock. The app's janitor sweeps at startup and
+  hourly, and it deletes unreferenced attachments and unpromoted uploads older than 24 hours, so
+  a 1970-dated row is reaped whenever the sweep lands mid-test (decisions/00157).
+  `test_routes_livechat.py`'s autouse guard refuses such a seed; a new module that drives a live
+  app and seeds directly needs the same guard.

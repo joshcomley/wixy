@@ -117,8 +117,10 @@ queue also requires both `ffmpeg` and `ffprobe` on `PATH`. `WIXY_FFMPEG` and `WI
 can each point to an existing executable file instead. A bad explicit path does not fall back
 to `PATH`. If either binary is missing, startup logs `server-chat media pipeline unavailable`,
 `server.mediaProcessing` reports `unavailable`, and media upload initialization returns 503;
-text chat remains available. Install/fix the binaries and restart Wixy to resolve the startup
-configuration.
+text chat remains available. The same happens when `pillow-heif` cannot be imported (startup
+logs `pillow-heif is unavailable; Server chat media uploads are disabled`): the media queue is
+not started and uploads return 503. Install/fix the missing dependency and restart Wixy to
+resolve the startup configuration.
 
 Server-chat settings are read by `wixy_server/settings.py`:
 
@@ -137,11 +139,11 @@ when an upload is initialized. cmd must have the PIN app registered under the co
 fails closed with 503 if it is missing or unreachable. See [livechat.md](livechat.md) for
 the media pipeline and HTTP details.
 
-`GET /api/admin/system/status` includes `server.mediaProcessing`: `unavailable` when media
-binaries were not resolved, `degraded` after at least three consecutive failures in the media
-queue or erasure worker, and `ok` when media is available without that failure threshold.
-Health reads reset to zero after five minutes without another failure. The decoy displays this
-real status and never displays chat activity.
+`GET /api/admin/system/status` includes `server.mediaProcessing`: `unavailable` when ffmpeg,
+ffprobe or `pillow-heif` is unavailable, `degraded` after at least three consecutive failures
+in the media queue or erasure worker, and `ok` when media is available without that failure
+threshold. Health reads reset to zero after five minutes without another failure. The decoy
+displays this real status and never displays chat activity.
 
 The erasure worker starts immediately and retries every two seconds. It resumes `deleted_storage`
 file removals and `pending_scrub` WAL work, and runs the full orphan-path sweep at startup and
