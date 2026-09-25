@@ -508,8 +508,11 @@ async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
         if (
             isinstance(body.replyToSeq, bool)
             or not isinstance(body.replyToSeq, int)
-            or body.replyToSeq < 1
+            or not (1 <= body.replyToSeq <= _SQLITE_MAX_INTEGER)
         ):
+            # audit F7: a crafted replyToSeq >= 2**63 must 422 like any other
+            # invalid shape, never reach SQLite and raise an OverflowError (500) —
+            # the same range this file's own set_reaction route already guards.
             return _invalid("replyToSeq must be an integer >= 1")
         reply_to_seq = body.replyToSeq
 

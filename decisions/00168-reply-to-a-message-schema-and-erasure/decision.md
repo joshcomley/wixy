@@ -18,9 +18,12 @@ into the schema.
 ## Decision
 
 1. **Schema**: `messages.reply_to_seq INTEGER REFERENCES messages(seq) ON DELETE SET NULL`
-   (schema v7), plus the partial index `idx_messages_reply_to`. A nullable self-referencing column,
-   not a mapping table — a message quotes at most one message, fixed at send and never edited.
-   Reactions (a future item) need a table because one message can have many; a reply doesn't.
+   (schema v10 — assigned at merge, after v7-v9 were claimed by reactions, voice transcription and
+   device grants, which all shipped while this feature was being built), plus the partial index
+   `idx_messages_reply_to`. A nullable self-referencing column, not a mapping table — a message
+   quotes at most one message, fixed at send and never edited. Reactions
+   (`decisions/00164-server-chat-reactions`, shipped earlier this round) need a table because one
+   message can have many; a reply doesn't.
 2. **Erasure**: the reply row stores ONLY the seq. The quote (sender, a 300-code-point text
    snippet, a media summary) is computed at READ time from the target's live row, in the SAME
    transaction as the page that returns it (`LiveChatStore.list_messages`/`get_messages`), one
@@ -78,5 +81,39 @@ into the schema.
   `idx_messages_reply_to`'s cost lesson first: an unindexed child column on a table `wipe()` bulk-
   deletes is an O(n) tax per row, not a rare edge case.
 - The drift-guard fixture (`spec/server-chat/fixtures/reply-to-cases.json`) is the first instance
-  of a JSON fixture shared between pytest and vitest in this repo — if the reactions feature (round
-  2 item 2) needs the same pattern for its emoji allowlist, this is the precedent to follow.
+  of a JSON fixture shared between pytest and vitest in this repo. Reactions (shipped earlier this
+  round) used a different drift-guard shape instead — `test_livechat_reactions.py` parses
+  `admin-ui/src/server/reactions.ts` directly rather than sharing a JSON fixture — so this pattern
+  has no precedent to follow yet, only to set for whatever needs it next.
+- This folder was renumbered `00164` -> `00168` at merge: the builder's own PR used `00164`, which
+  by then collided with `decisions/00164-server-chat-reactions` (reactions merged to `main` first).
+  Same discipline as the schema-version bump above — decision numbers are assigned at merge from
+  the current max, never hard-coded in a stale branch.
+
+## Audit refinements (opus audit, relation `443a3ba7`, round 4 — all fixed at merge)
+
+The merge onto `main` (commit `369292a`) combined this feature's client-side rendering with
+reactions' own "patch in place, don't rebuild" optimization (`sameExceptReactions`), which exposed
+gaps neither feature's own build had reason to find in isolation:
+
+- **`sameExceptReactions` didn't know about `replyTo`.** A reply bubble kept alive by that
+  optimization (its own text/attachments unchanged) never picked up a target's deletion (still
+  showing the deleted quote) or a target's attachment finishing processing (thumbnail never
+  arrived). Fixed by a new `patchQuote` patched alongside `patchReactions` on the same branch.
+- **A pending (not-yet-sent) reply's target deleted during a lock** was never re-checked on
+  reattach — the live stream's `message_deleted` cancellation never fires across a lock (the stream
+  resumes from a fresh cursor). Fixed in `attach()`, reusing the same "was this seq retained but not
+  refreshed" check the history-reconciliation logic already does.
+- **Three narrower races** (a stale history page arriving after a delete, a failed-send draft
+  restore, a failed-delete restore) could each put a deleted target's words back into a quote or
+  the reply bar. Fixed by sanitizing `replyTo` against `deletedSeqs` at `addConfirmed` (the single
+  choke point for the first and third) and in `restoreServerDraft` (the second).
+- **`scrollToOriginal`'s "blocked" retry was `await Promise.resolve()`** — a microtask-only yield
+  that never let a sibling load's in-flight network fetch actually resolve, freezing the tab.
+  Fixed to yield via a real macrotask (`setTimeout`).
+- **A paging `"error"` (network/auth failure) was treated the same as `"exhausted"`** (genuinely
+  ran out of history), wrongly removing a quote whose target might still exist. Fixed by tracking
+  which of the two actually happened.
+- A crafted `replyToSeq >= 2**63` caused an unhandled `OverflowError` (500) instead of the promised
+  422 — SQLite's integer range wasn't guarded here the way the sibling `set_reaction` route already
+  guards it. Fixed with the same `_SQLITE_MAX_INTEGER` check.

@@ -63,6 +63,11 @@ const WIPE_RECONCILE_MAX_DELAY_MS = 15_000;
 const SCROLL_TO_ORIGINAL_PAGE_SIZE = 100;
 /** §(4): "highlights it for about 1.5 s." */
 const SCROLL_TO_ORIGINAL_HIGHLIGHT_MS = 1_500;
+/** Audit F2: when a sibling load owns the single history-load slot, retry
+ * after a real macrotask, not just `await Promise.resolve()` — a microtask-only
+ * yield never lets the in-flight fetch (a network macrotask) get a turn to
+ * resolve, so `historyLoading` never clears and the loop spins forever. */
+const SCROLL_TO_ORIGINAL_RETRY_MS = 50;
 
 export interface ServerThreadDeps {
   identity: ServerIdentity;
@@ -126,10 +131,15 @@ function formatDaySeparator(epochS: number, now: Date): string {
   });
 }
 
-/** True when two versions of a message differ at most in their reactions — so the bubble
- * can be patched in place instead of rebuilt. A rebuild disposes the bubble's media, and a
- * reaction must never cut off a voice note or video someone is playing. The attachments are
- * compared whole, including their signed URLs: fresh URLs (a new unlock token) mean a rebuild. */
+/** True when two versions of a message differ at most in their reactions and/or their
+ * (server-resolved-fresh-on-every-read) `replyTo` — so the bubble can be patched in place
+ * instead of rebuilt. A rebuild disposes the bubble's media, and neither a reaction nor a
+ * reply-target update (the target's own delete/wipe, or its attachment finishing processing)
+ * must ever cut off a voice note or video someone is playing. `replyTo` is deliberately NOT
+ * compared here: the caller (`renderThreadList`) always calls `patchQuote` alongside
+ * `patchReactions` on this branch, so a `replyTo` change is still reflected (audit F3/F4) —
+ * it just never forces a full rebuild on its own. The attachments are compared whole,
+ * including their signed URLs: fresh URLs (a new unlock token) mean a rebuild. */
 function sameExceptReactions(a: Message, b: Message): boolean {
   return (
     a.seq === b.seq &&
@@ -539,7 +549,15 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     if (deletedSeqs.has(incoming.seq)) return;
     // During a blue/green swap this page can briefly talk to a server that predates
     // reactions; its messages carry no `reactions`. Read that as "none", not a crash.
-    const message = Array.isArray(incoming.reactions) ? incoming : { ...incoming, reactions: [] };
+    let message = Array.isArray(incoming.reactions) ? incoming : { ...incoming, reactions: [] };
+    // Audit F5: a message whose `replyTo` still points at a seq THIS client already
+    // knows is deleted must not resurrect that target's words — the server's own
+    // copy is correct (it resolves the quote fresh from the live row), but a page
+    // read before the delete and RECEIVED after it, or a failed-delete/failed-send
+    // restore of a stale in-memory snapshot, can carry the pre-delete quote here.
+    if (message.replyTo !== null && deletedSeqs.has(message.replyTo.seq)) {
+      message = { ...message, replyTo: null };
+    }
     confirmedBySeq.set(message.seq, message);
     latestKnownMessageSeq = Math.max(latestKnownMessageSeq, message.seq);
     confirmedClientIds.add(message.clientId);
@@ -762,6 +780,31 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     if (container !== null) fillReactions(container, rendered.message);
   }
 
+  /** Audit F3/F4: `sameExceptReactions` ignores `replyTo` on purpose (a reply's
+   * OWN target never changes), but the "safe patch, keep the bubble" path it
+   * gates must still reflect the target's CURRENT state — resolved fresh by the
+   * server on every read — or a target deleted/wiped while this bubble was kept
+   * in place (its own text/attachments unchanged) keeps showing the deleted
+   * quote forever, and a target's attachment finishing processing never gains
+   * its thumbnail. Never rebuilds the bubble — same media-cutoff trap as
+   * reactions. */
+  function patchQuote(seq: number): void {
+    const rendered = renderedMessages.get(seq);
+    if (rendered === undefined) return;
+    const existing = rendered.element.querySelector<HTMLButtonElement>(".wx-srv-quote");
+    const replyTo = rendered.message.replyTo;
+    if (replyTo === null) {
+      existing?.remove();
+      return;
+    }
+    const next = renderReplyQuoteButton(replyTo);
+    if (existing !== null) {
+      existing.replaceWith(next);
+    } else {
+      rendered.element.insertBefore(next, rendered.element.firstChild);
+    }
+  }
+
   function setReactionError(seq: number, text: string): void {
     reactionErrors.set(seq, text);
     const previous = reactionErrorTimers.get(seq);
@@ -968,11 +1011,12 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         rendered.message !== message &&
         sameExceptReactions(rendered.message, message)
       ) {
-        // Only the reactions changed: keep the bubble node, its media and any open menu.
+        // Reactions and/or the reply quote changed: keep the bubble node, its media and any open menu.
         rendered = { message, element: rendered.element };
         renderedMessages.set(message.seq, rendered);
         messageActionControllers.get(message.seq)?.update(message);
         patchReactions(message.seq);
+        patchQuote(message.seq);
       }
       if (rendered !== undefined && rendered.message !== message) {
         teardownMessageActions(message.seq);
@@ -1363,24 +1407,35 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     button.classList.add("wx-srv-quote-busy");
     button.setAttribute("aria-busy", "true");
     try {
+      // Audit F6: only "exhausted" (paging genuinely ran out of history) means
+      // the target was deleted — a network/auth "error" must leave the quote
+      // alone, since `loadOlderPage` swallows every exception and the original
+      // may well still exist.
+      let genuinelyNotFound = false;
       while (!renderedMessages.has(seq)) {
-        if (!hasMoreHistory) break;
+        if (!hasMoreHistory) {
+          genuinelyNotFound = true;
+          break;
+        }
         const result = await loadOlderPage(SCROLL_TO_ORIGINAL_PAGE_SIZE);
         if (generation !== scrollToOriginalGeneration) return;
         if (result === "loaded") continue;
         if (result === "blocked") {
           // A sibling load (ordinary scroll paging, or another
           // scrollToOriginal run) owns the single history-load slot right
-          // now — yield and retry rather than treating this as exhausted.
-          await Promise.resolve();
+          // now — yield to a REAL macrotask and retry rather than treating
+          // this as exhausted (audit F2: a microtask-only yield never lets
+          // the sibling's in-flight fetch actually resolve).
+          await new Promise<void>((resolve) => win.setTimeout(resolve, SCROLL_TO_ORIGINAL_RETRY_MS));
           continue;
         }
-        break; // "exhausted" or "error" — nothing more to try.
+        if (result === "exhausted") genuinelyNotFound = true;
+        break; // "exhausted" -> genuinely not found; "error" -> give up silently.
       }
       if (generation !== scrollToOriginalGeneration) return;
       const rendered = renderedMessages.get(seq);
       if (rendered === undefined) {
-        removeQuotesTargeting(seq);
+        if (genuinelyNotFound) removeQuotesTargeting(seq);
         return;
       }
       const targetElement = rendered.element;
@@ -1438,8 +1493,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   function restoreServerDraft(draft: ServerComposerDraft): void {
     composer.restoreDraft(draft.base);
     // Never clobber a different reply the owner picked while the failed
-    // send was in flight.
-    if (draft.replyTo !== null && pendingReply === null) {
+    // send was in flight. Audit F5: nor resurrect a reply bar for a target
+    // that was deleted while the send was in flight.
+    if (draft.replyTo !== null && pendingReply === null && !deletedSeqs.has(draft.replyTo.seq)) {
       setPendingReply(draft.replyTo);
     }
   }
@@ -1570,6 +1626,19 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         // the newer event cursor, or those events would be skipped on resume.
         for (const seq of retainedSeqsAtAttach) {
           if (seq >= oldestSeqAtAttach && !refreshedMessages.has(seq)) confirmedBySeq.delete(seq);
+        }
+        // Audit F3: a pending (not-yet-sent) reply's target is chosen from an
+        // already-loaded, already-rendered bubble, so it was necessarily in
+        // `retainedSeqsAtAttach`. The live stream's `message_deleted` handler
+        // normally cancels a pending reply whose target is deleted, but that
+        // event is never delivered across a lock (the stream resumes from a
+        // FRESH cursor on reattach) — so re-check the same way here.
+        if (
+          pendingReply !== null &&
+          retainedSeqsAtAttach.has(pendingReply.seq) &&
+          !refreshedMessages.has(pendingReply.seq)
+        ) {
+          setPendingReply(null);
         }
       }
       for (const message of refreshedMessages.values()) addConfirmed(message);

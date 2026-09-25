@@ -195,7 +195,11 @@ class TestReplyToSendContract:
 
     @pytest.mark.parametrize(
         "bad_value",
-        [True, False, 0, -1, 1.5, "1", [1], {"seq": 1}],
+        # audit F7: 2**63 and 10**30 are the boundary/beyond-boundary cases —
+        # both raised an unhandled OverflowError (500) at 369292a, since
+        # SQLite's INTEGER column tops out at 2**63-1 and nothing here checked
+        # an upper bound, only isinstance/positivity.
+        [True, False, 0, -1, 1.5, "1", [1], {"seq": 1}, 2**63, 10**30],
     )
     def test_reply_to_seq_rejects_anything_that_is_not_a_positive_int(
         self,
@@ -214,6 +218,27 @@ class TestReplyToSendContract:
                 reply_to_seq=bad_value,
             )
             assert response.status_code == 422
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_reply_to_seq_at_the_sqlite_integer_ceiling_is_accepted_not_a_500(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        """Audit F7's other boundary: 2**63-1 is the largest value SQLite's INTEGER
+        column can hold. It's a dangling target (never a real message seq), so this
+        sends as plain (201, replyTo null) rather than 422 — proving the fix's upper
+        bound is exactly at, not before, the true ceiling."""
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            response = _send(
+                client,
+                headers,
+                client_id="client-ceiling-reply",
+                text="at the ceiling",
+                reply_to_seq=2**63 - 1,
+            )
+            assert response.status_code == 201
+            assert response.json()["message"]["replyTo"] is None
         finally:
             client.__exit__(None, None, None)
 

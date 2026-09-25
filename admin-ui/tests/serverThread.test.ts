@@ -2752,6 +2752,60 @@ describe("reply to a message (round 2 ruling item 10)", () => {
       expect(getHistory).toHaveBeenCalledTimes(2);
       view.teardown();
     });
+
+    it(
+      "a second tap on the SAME quote while the first is still paging does not freeze (audit F2)",
+      async () => {
+        // The old retry for "blocked" was `await Promise.resolve()` — a microtask-only
+        // yield that never lets a REAL in-flight fetch (a macrotask) get a turn to
+        // resolve, so `historyLoading` never clears and the loop spins forever. Using
+        // a real `setTimeout` here (not a directly-resolved Promise, which settles via
+        // microtask and would hide the bug — see the previous test's own comment) is
+        // what actually exercises that starvation.
+        const target = fakeMessage({ seq: 1, sender: "Purdy", text: "old original" });
+        const reply = fakeMessage({ seq: 5, clientId: "c5", sender: "Josh", text: "the reply", replyTo: replyToOf(target) });
+        getHistory.mockResolvedValueOnce(emptyHistory({ messages: [reply], hasMore: true, cursor: 5 }));
+        const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+        await view.attach(SESSION);
+
+        getHistory.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              setTimeout(() => resolve(emptyHistory({ messages: [target], hasMore: false, cursor: 5 })), 20);
+            }),
+        );
+        const quote = view.element.querySelector<HTMLButtonElement>(".wx-srv-quote")!;
+        quote.click(); // starts paging, historyLoading=true, in flight for a real 20ms
+        await flush();
+        quote.click(); // a second tap on the SAME quote while the first is still in flight
+
+        await vi.waitFor(
+          () => expect(view.element.querySelector('[data-message-seq="1"]')).not.toBeNull(),
+          { timeout: 2_000 },
+        );
+        view.teardown();
+      },
+      4_000,
+    );
+
+    it("a network error while paging leaves the quote alone, unlike genuinely running out of history (audit F6)", async () => {
+      const reply = fakeMessage({ seq: 5, sender: "Josh", text: "the reply", replyTo: { seq: 1, sender: "Purdy", text: "still there", truncated: false, media: null } });
+      getHistory
+        .mockResolvedValueOnce(emptyHistory({ messages: [reply], hasMore: true, cursor: 5 }))
+        .mockRejectedValueOnce(new Error("network down"));
+      const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-quote")?.click();
+      await flush();
+
+      // loadOlderPage's own catch swallows the error and returns "error", not
+      // "exhausted" -- the quote must survive, since the target may well still
+      // exist; only genuinely running out of history (the sibling test above)
+      // means "not found".
+      expect(view.element.querySelector(".wx-srv-quote")).not.toBeNull();
+      view.teardown();
+    });
   });
 
   it("wipe cancels the pending reply", async () => {
@@ -2864,6 +2918,153 @@ describe("reply to a message (round 2 ruling item 10)", () => {
       expect(view.element.querySelector<HTMLElement>(".wx-srv-reply-bar")?.hidden).toBe(false);
 
       view.handleStreamEvent({ type: "message_deleted", seq: 1 } as ServerStreamEvent);
+      expect(view.element.querySelector<HTMLElement>(".wx-srv-reply-bar")?.hidden).toBe(true);
+      view.teardown();
+    });
+  });
+
+  it("message_updated for a replyTo-only change (a target's attachment finishing) patches the quote in place (audit F4)", async () => {
+    const target = fakeMessage({
+      seq: 1, sender: "Purdy", text: null,
+      attachments: [{
+        id: "vid-1", kind: "video", status: "processing", width: null, height: null,
+        durationS: null, peaks: null, urls: {},
+      }],
+    });
+    const processingReplyTo = { seq: 1, sender: "Purdy", text: null, truncated: false, media: { kind: "video" as const, count: 1, durationS: null, thumbUrl: null } };
+    const reply = fakeMessage({
+      seq: 2, clientId: "c2", sender: "Josh", text: null, replyTo: processingReplyTo,
+      attachments: [{
+        id: "voice-1", kind: "voice", status: "ready", width: null, height: null,
+        durationS: 5, peaks: null, urls: { play: "/voice" },
+      }],
+    });
+    getHistory.mockResolvedValue(emptyHistory({ messages: [target, reply], cursor: 2 }));
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+    await view.attach(SESSION);
+
+    const replyBubble = view.element.querySelector('[data-message-seq="2"]')!;
+    const audio = replyBubble.querySelector<HTMLAudioElement>("audio")!;
+    expect(replyBubble.querySelector(".wx-srv-quote-thumb")).toBeNull();
+
+    // Only replyTo changed (the target's video finished processing) -- text,
+    // attachments, sender and createdAt on the REPLY itself are unchanged, so
+    // sameExceptReactions is true and the safe-patch branch runs.
+    const readyReplyTo = { ...processingReplyTo, media: { ...processingReplyTo.media, thumbUrl: "/poster.jpg" } };
+    view.handleStreamEvent({
+      type: "message_updated",
+      message: { ...reply, replyTo: readyReplyTo },
+    } as ServerStreamEvent);
+
+    expect(view.element.querySelector('[data-message-seq="2"]')).toBe(replyBubble); // same node
+    expect(replyBubble.querySelector<HTMLAudioElement>("audio")).toBe(audio); // media untouched
+    const thumb = replyBubble.querySelector<HTMLImageElement>(".wx-srv-quote-thumb");
+    expect(thumb).not.toBeNull();
+    expect(thumb?.src).toContain("/poster.jpg");
+    view.teardown();
+  });
+
+  describe("reattach after a lock re-validates reply data the missed stream events can't (audit F3)", () => {
+    it("a reply bubble kept alive across reattach drops a quote whose target was deleted during the lock", async () => {
+      const target = fakeMessage({ seq: 1, sender: "Purdy", text: "will be deleted while locked" });
+      const reply = fakeMessage({ seq: 2, clientId: "c2", sender: "Josh", text: "quoting it", replyTo: replyToOf(target) });
+      getHistory.mockResolvedValueOnce(emptyHistory({ messages: [target, reply], cursor: 2 }));
+      const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+      const replyBubble = view.element.querySelector('[data-message-seq="2"]')!;
+      expect(replyBubble.querySelector(".wx-srv-quote")).not.toBeNull();
+
+      view.detach();
+      // The target was deleted while locked -- the stream's own message_deleted
+      // never arrives (the stream resumes from a fresh cursor on reattach), but
+      // the server resolves replyTo fresh on every read, so the refreshed page
+      // already carries replyTo: null for the reply. The reply's own text and
+      // attachments are unchanged, so it's a "safe patch" candidate, not a rebuild.
+      getHistory.mockResolvedValueOnce(
+        emptyHistory({ messages: [{ ...reply, replyTo: null }], cursor: 2 }),
+      );
+      await view.attach(SESSION);
+
+      expect(view.element.querySelector('[data-message-seq="2"]')).toBe(replyBubble); // same node
+      expect(replyBubble.querySelector(".wx-srv-quote")).toBeNull();
+      expect(replyBubble.querySelector(".wx-srv-bubble-text")?.textContent).toBe("quoting it");
+      view.teardown();
+    });
+
+    it("a pending (not-yet-sent) reply targeting a message deleted during the lock is cancelled on reattach", async () => {
+      const target = fakeMessage({ seq: 1, sender: "Purdy", text: "quote me" });
+      getHistory.mockResolvedValueOnce(emptyHistory({ messages: [target], cursor: 1 }));
+      const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-actions-trigger")?.click();
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-action-reply")?.click();
+      expect(view.element.querySelector<HTMLElement>(".wx-srv-reply-bar")?.hidden).toBe(false);
+
+      view.detach();
+      // Target gone from the refreshed history -- deleted while locked.
+      getHistory.mockResolvedValueOnce(emptyHistory({ messages: [], cursor: 1 }));
+      await view.attach(SESSION);
+
+      expect(view.element.querySelector<HTMLElement>(".wx-srv-reply-bar")?.hidden).toBe(true);
+      view.teardown();
+    });
+
+    it("a lock with no deletions during it leaves a pending reply exactly as it was", async () => {
+      const target = fakeMessage({ seq: 1, sender: "Purdy", text: "quote me" });
+      getHistory.mockResolvedValue(emptyHistory({ messages: [target], cursor: 1 }));
+      const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-actions-trigger")?.click();
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-action-reply")?.click();
+
+      view.detach();
+      await view.attach(SESSION); // same target still in every refreshed page
+
+      expect(view.element.querySelector<HTMLElement>(".wx-srv-reply-bar")?.hidden).toBe(false);
+      view.teardown();
+    });
+  });
+
+  describe("in-flight data can never resurrect a deleted target's words (audit F5)", () => {
+    it("a message arriving (e.g. a stale history page) whose replyTo targets an already-deleted seq has that replyTo stripped", async () => {
+      const target = fakeMessage({ seq: 1, sender: "Purdy", text: "will be deleted" });
+      getHistory.mockResolvedValue(emptyHistory({ messages: [target], cursor: 1 }));
+      const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+
+      view.handleStreamEvent({ type: "message_deleted", seq: 1 } as ServerStreamEvent);
+
+      // A page read before the delete but delivered after it -- exactly what a
+      // slow/racing fetch or a queued stream frame looks like.
+      view.handleStreamEvent({
+        type: "message",
+        message: fakeMessage({ seq: 2, clientId: "c2", sender: "Josh", text: "quoting it", replyTo: replyToOf(target) }),
+      } as ServerStreamEvent);
+
+      expect(view.element.querySelector('[data-message-seq="2"] .wx-srv-quote')).toBeNull();
+      view.teardown();
+    });
+
+    it("a failed send does not restore the reply bar for a target deleted while the send was in flight", async () => {
+      const target = fakeMessage({ seq: 1, sender: "Purdy", text: "quote me" });
+      getHistory.mockResolvedValue(emptyHistory({ messages: [target], cursor: 1 }));
+      let resolveSend!: (result: SendMessageResult) => void;
+      sendMessage.mockReturnValue(new Promise((resolve) => { resolveSend = resolve; }));
+      const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-actions-trigger")?.click();
+      view.element.querySelector<HTMLButtonElement>(".wx-srv-message-action-reply")?.click();
+      const textarea = view.element.querySelector<HTMLTextAreaElement>("textarea")!;
+      textarea.value = "a reply";
+      view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")?.click();
+      await flush();
+      expect(view.element.querySelector<HTMLElement>(".wx-srv-reply-bar")?.hidden).toBe(true); // cleared while sending
+
+      // The target is deleted while the send is still in flight.
+      view.handleStreamEvent({ type: "message_deleted", seq: 1 } as ServerStreamEvent);
+      resolveSend({ ok: false, kind: "unavailable" });
+      await flush();
+
       expect(view.element.querySelector<HTMLElement>(".wx-srv-reply-bar")?.hidden).toBe(true);
       view.teardown();
     });
