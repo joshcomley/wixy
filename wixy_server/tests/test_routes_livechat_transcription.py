@@ -389,6 +389,42 @@ class TestTranscribeFlow:
             _wait_for(_finished(env, voice.att_id))
         assert seen == [60.0 + 0.5 * 600.0]
 
+    def test_a_lone_surrogate_from_cmd_fails_cleanly_instead_of_spinning_forever(
+        self, make_env: Callable[..., Env]
+    ) -> None:
+        """H1 (independent review): cmd can legitimately return a response whose JSON body
+        decodes into a Python string holding an unpaired UTF-16 surrogate; storing that text
+        crashes SQLite's bind. Full pipeline: the route accepts, the job talks to a transport
+        that actually returns the poisoned wire bytes (not a mocked-away outcome), and the row
+        must end up `failed` with a `message_updated` event — never stuck `pending` forever."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/api/transcribe/capabilities":
+                return httpx.Response(200, json={"private": True})
+            return httpx.Response(200, content=b'{"text": "hello \\ud800 world"}')
+
+        env = make_env(transcriber=CmdTranscriber(transport=httpx.MockTransport(handler)))
+        voice = _seed_voice(env)
+        with TestClient(env.app) as client:
+            headers = _unlock(client)
+            assert client.post(TRANSCRIBE.format(voice.att_id), headers=headers).status_code == 202
+            _wait_for(_finished(env, voice.att_id))
+            wire = _message_attachment(client, headers, voice.att_id)["transcript"]
+            row = env.store.get_transcript(voice.att_id)
+            assert row is not None and (row.status, row.text, row.failure) == (
+                "failed",
+                None,
+                "invalid_response",
+            )
+            assert wire == {"status": "failed"}
+            # Retry must genuinely be possible (the whole point: a spinner that never resolves
+            # has no way back in) — a second attempt against the same poisoned transport still
+            # fails cleanly rather than crashing.
+            assert client.post(TRANSCRIBE.format(voice.att_id), headers=headers).status_code == 202
+            _wait_for(_finished(env, voice.att_id))
+            again = env.store.get_transcript(voice.att_id)
+            assert again is not None and again.status == "failed"
+
     def test_a_missing_audio_file_fails_the_job(self, make_env: Callable[..., Env]) -> None:
         env = make_env()
         voice = _seed_voice(env, audio=None)

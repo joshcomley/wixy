@@ -220,6 +220,34 @@ class TestResponseMapping:
         await transcriber.aclose()
 
     @pytest.mark.asyncio
+    async def test_a_lone_utf16_surrogate_in_the_text_is_invalid_not_stored(self) -> None:
+        """cmd can legitimately hand back a response whose JSON body decodes, via
+        `response.json()`, into a Python `str` holding an unpaired UTF-16 surrogate — no
+        malformed JSON required, just the ASCII escape sequence `\\ud800`. Storing that string
+        later crashes SQLite's text bind with `UnicodeEncodeError`; it must never reach `ok`."""
+        response = httpx.Response(
+            200, content=b'{"text": "hello \\ud800 world", "engine": "parakeet"}'
+        )
+        assert "\ud800" in response.json()["text"]  # the wire bytes are ordinary ASCII;
+        # only the DECODED Python string carries the poison — confirms the repro is real.
+        transcriber = _mock_transcriber(httpx.MockTransport(lambda _r: response))
+        result = await transcriber.transcribe(
+            audio=b"x", filename="play.m4a", content_type="audio/mp4", timeout_s=5.0
+        )
+        assert (result.outcome, result.text) == ("invalid", None)
+        await transcriber.aclose()
+
+    @pytest.mark.asyncio
+    async def test_a_lone_surrogate_after_stripping_whitespace_is_still_caught(self) -> None:
+        response = httpx.Response(200, content=b'{"text": "  \\ud800  "}')
+        transcriber = _mock_transcriber(httpx.MockTransport(lambda _r: response))
+        result = await transcriber.transcribe(
+            audio=b"x", filename="play.m4a", content_type="audio/mp4", timeout_s=5.0
+        )
+        assert result.outcome == "invalid"
+        await transcriber.aclose()
+
+    @pytest.mark.asyncio
     async def test_asr_warming_is_its_own_outcome_and_keeps_the_probe(self) -> None:
         state = FakeCmdState(transcribe_status_code=503, transcribe_error="asr_warming")
         transcriber, _ = _transcriber(state)

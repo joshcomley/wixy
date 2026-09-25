@@ -183,6 +183,19 @@ def _json_object(response: httpx.Response) -> JsonObject | None:
     return data if isinstance(data, dict) else None
 
 
+def _has_lone_surrogate(text: str) -> bool:
+    """A plain JSON body containing e.g. `"\\ud800"` decodes, via `response.json()`, into a real
+    Python `str` holding an unpaired UTF-16 surrogate code point — no malformed JSON required.
+    Such a string crashes at the SQLite text bind with `UnicodeEncodeError` when a later caller
+    tries to store it, which is far from this narrow boundary; reject it here instead, where the
+    failure maps cleanly onto the existing `invalid` outcome (a working Retry, no stuck spinner)."""
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return True
+    return False
+
+
 def _parse_success(response: httpx.Response) -> TranscribeResult:
     data = _json_object(response)
     if data is None:
@@ -192,9 +205,12 @@ def _parse_success(response: httpx.Response) -> TranscribeResult:
         text = data.get("raw")
     if not isinstance(text, str) or len(text) > MAX_TRANSCRIPT_CHARS:
         return TranscribeResult("invalid")
+    text = text.strip()
+    if _has_lone_surrogate(text):
+        return TranscribeResult("invalid")
     engine = data.get("engine")
     return TranscribeResult(
         "ok",
-        text=text.strip(),
+        text=text,
         engine=engine if isinstance(engine, str) and _ENGINE_RE.match(engine) else None,
     )

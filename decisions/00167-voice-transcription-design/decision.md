@@ -37,10 +37,16 @@
    startup sweep is what clears the row.) A `pending` row in a process that has only just started
    belongs to a job that died without doing that (a hard kill); without the `message_updated` event a
    reconnecting client would keep a spinner up forever.
-5. **One transcription in flight globally, single-flight per attachment, 6 new jobs a minute per
-   identity, in memory.** The box's GPU/CPU is shared with dictation. Extra jobs wait (their rows
-   stay `pending`) rather than being refused, because the queue is bounded by the rate limit. The
-   limiter is per process; a blue/green overlap briefly doubles it, which is harmless.
+5. **Two independent, non-conflicting gates: a 6-a-minute-per-identity rate limit at ACCEPT time,
+   and a global one-at-a-time concurrency limit while RUNNING.** The box's GPU/CPU is shared with
+   dictation. The rate limiter (`SlidingWindowRateLimiter.hit`) refuses (429) a NEW request once
+   an identity has started 6 jobs in the last 60 s — it never touches an already-accepted job. The
+   `CapacityLimiter(1)` is unrelated: once a request clears the rate limiter and gets a `pending`
+   row, its job simply queues behind whatever is already running (unbounded queue depth, bounded
+   concurrency) — it is never refused for this reason, only delayed. So a burst under the 6/min
+   cap can still queue several jobs one after another; the rate limiter is what stops it from
+   being unbounded. Both limiters are per process; a blue/green overlap briefly doubles each,
+   which is harmless.
 6. **The probe is checked twice**: from the 60 s cache when the request is accepted (cheap), and
    **fresh from cmd** (`available(fresh=True)`, one extra loopback GET per job) immediately before the
    audio is sent. A cmd rolled back to a retaining build inside the cache window gets nothing and the

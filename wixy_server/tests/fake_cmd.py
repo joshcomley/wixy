@@ -371,7 +371,14 @@ def create_fake_cmd_app(state: FakeCmdState | None = None) -> FastAPI:
     @app.post("/api/transcribe")
     async def transcribe(request: Request) -> Response:
         """cmd's `POST /api/transcribe`: multipart `audio` + form fields, JSON
-        `{raw, text, ..., engine}` back. Records exactly what arrived."""
+        `{raw, text, ..., engine}` back. Records exactly what arrived.
+
+        This double does NOT itself reject a request missing `private=1`/`cleanup=0` or
+        carrying `session_id`/`context` — it only RECORDS what arrived (`transcribe_requests`,
+        asserted against by the tests) and tracks what a genuinely retaining cmd would have kept
+        (`transcribe_retained`). That is not a live gap: `CmdTranscriber.transcribe`'s own
+        signature has no parameter through which a caller could send those fields in the first
+        place (spotted by the independent review, spec/server-chat/05-voice-transcription.md)."""
         form = await request.form()
         upload = form.get("audio")
         audio = b""
