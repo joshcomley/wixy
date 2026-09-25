@@ -27,3 +27,19 @@
   decision).
 - Not yet done: the Architect's full permanent-unlock design; the DM's new delivery record (`POST /deliveries`)
   and task list; moving the workspace `discussing -> building` once that exists.
+
+## Update 2026-09-25 ~12:05 UTC (Orchestrator `bf07245f`) — round 2 in progress; new operator request
+
+- **Real work confirmed** (the operator asked "has any actual work been done?"): item 1 (panel not filling
+  available height) is fixed and its PR (#248) is open with checks running. Three builders are actively coding:
+  reaction emojis, click-to-transcribe voice notes, and the permanent-unlock feature (item 4). The two merges
+  so far (#246, #247) were the plan and the Architect's design doc, not feature code - that's why early
+  progress read as "nothing happening".
+- **New operator request** (verbatim): "We need checkboxes for: - Lock when I change tab - Lock when I lock my
+  screen." This lands on `03-permanent-unlock.md` sec 1's suppressed-triggers list, which currently treats
+  `visibilitychange -> hidden` (covers BOTH tab-switch and screen-lock - the web platform has no separate
+  signal for the two) as unconditionally suppressed while a device grant is active. Routed to the Architect
+  (`96bd8091`) for a ruling before the item-4 builder (`41f2ad09`) finalises that part of the logic; everything
+  else in that item and all other items are unaffected and continue. My question to the Architect: is one
+  checkbox (not two, given the platform constraint) the right answer, and is it a per-trigger override inside
+  the permanent-unlock settings sheet, default off?
