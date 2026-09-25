@@ -532,23 +532,49 @@
   display: none;
 }
 
+/* The sheet is anchored to the bottom of its host and must NEVER outgrow it: on a
+   short phone (Android, where the push row makes it tallest) a content-height
+   sheet grew UPWARD past the host's top edge and its close X ended up under the
+   admin's own navigation, unreachable. So it is capped to the host, scrolls its
+   own contents, and the header (with the X) is pinned to the top of that scroll.
+   The header carries the sheet's top padding so it can stick flush.
+
+   The box is content-box (it always was — width/max-width are unchanged), so
+   max-height caps the CONTENT and the cap must leave room for everything the box
+   adds on top of it: the bottom padding (with the safe-area inset) and the two
+   borders. Without that the sheet still overshoots its host by exactly that much. */
 .wx-srv-sheet {
+  --wx-srv-sheet-pad: 16px;
+  --wx-srv-sheet-border: 1px;
   width: 100%;
   max-width: 420px;
+  max-height: calc(
+    100% - var(--wx-srv-sheet-pad) - env(safe-area-inset-bottom, 0px) - 2 * var(--wx-srv-sheet-border)
+  );
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-top: 3.5rem;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+  padding: 0 var(--wx-srv-sheet-pad) calc(var(--wx-srv-sheet-pad) + env(safe-area-inset-bottom));
   background: var(--wx-surface);
-  border: 1px solid var(--wx-border);
+  border: var(--wx-srv-sheet-border) solid var(--wx-border);
   border-radius: var(--wx-radius) var(--wx-radius) 0 0;
   box-shadow: var(--wx-shadow);
 }
 
 .wx-srv-sheet-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  margin: 0 calc(-1 * var(--wx-srv-sheet-pad));
+  padding: var(--wx-srv-sheet-pad) var(--wx-srv-sheet-pad) 0;
+  background: var(--wx-surface);
 }
 
 .wx-srv-sheet-header h3 {
@@ -577,6 +603,35 @@
   gap: 4px;
   font-size: 0.75rem;
   color: var(--wx-muted);
+}
+
+/* "Extend auto-lock to 1 minute": the whole row is the <label>, so the tap
+   target is the full sheet width and at least 44px tall; the text wraps on a
+   narrow phone instead of truncating. */
+.wx-srv-sheet-idle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  font-size: 0.875rem;
+  line-height: 1.35;
+  color: var(--wx-ink);
+  cursor: pointer;
+}
+
+.wx-srv-sheet-idle-input {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--wx-brand-blue);
+  cursor: pointer;
+}
+
+.wx-srv-sheet-idle-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .wx-srv-sheet-save-name,

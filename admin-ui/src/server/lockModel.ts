@@ -27,6 +27,7 @@
 // local to `reduceChat` instead of duplicated across every other state's
 // idle handling.
 
+import { IDLE_LOCK_MS } from "./constants";
 import type { LockCause } from "./types";
 
 export type PinError =
@@ -88,7 +89,8 @@ export type LockEvent =
   | { readonly type: "lock"; readonly cause: LockCause };
 
 export type LockEffect =
-  /** (Re)start the 10s idle timer from now. */
+  /** (Re)start the idle timer from now — its duration for the current state is
+   * `idleTimeoutMs` (10s, or the device's chosen chat duration in "chat"). */
   | "resetIdleTimer"
   /** Stop the idle timer — nothing left to time out from. */
   | "clearIdleTimer"
@@ -245,4 +247,30 @@ export function reduce(state: LockState, event: LockEvent, now: number): LockTra
     case "fading":
       return reduceFading(state, event);
   }
+}
+
+/** How long the idle timer runs while the machine sits in `state`.
+ *
+ * ONLY the unlocked chat (name prompt included — it is still "chat") takes
+ * `idleLockMs`, the duration the UI layer chose for this device ("Extend
+ * auto-lock to 1 minute" — see `idlePreference.ts`). Every other state that
+ * runs the idle timer — the decoy's revealed "Open server settings" button
+ * and the PIN pad — stays on the fixed `IDLE_LOCK_MS` no matter what was
+ * chosen. The chosen duration is an INPUT: no second idle constant lives here. */
+export function idleTimeoutMs(state: LockState, idleLockMs: number): number {
+  return state.kind === "chat" ? idleLockMs : IDLE_LOCK_MS;
+}
+
+/** Milliseconds left on the idle timer: `lastActivityAtMs` + the state's idle
+ * timeout − `nowMs`, floored at 0 ("the deadline has passed — lock now").
+ * Measuring from the LAST ACTIVITY (not from whenever a timer happened to be
+ * scheduled) is what lets a settings change apply at once without ever
+ * restarting the clock — only real user activity does that. */
+export function idleRemainingMs(
+  state: LockState,
+  idleLockMs: number,
+  lastActivityAtMs: number,
+  nowMs: number,
+): number {
+  return Math.max(0, lastActivityAtMs + idleTimeoutMs(state, idleLockMs) - nowMs);
 }

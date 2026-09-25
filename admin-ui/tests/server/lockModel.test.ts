@@ -6,7 +6,15 @@
 // matters here.
 
 import { describe, expect, it } from "vitest";
-import { INITIAL_STATE, reduce, type LockEvent, type LockState } from "../../src/server/lockModel";
+import { IDLE_LOCK_EXTENDED_MS, IDLE_LOCK_MS } from "../../src/server/constants";
+import {
+  idleRemainingMs,
+  idleTimeoutMs,
+  INITIAL_STATE,
+  reduce,
+  type LockEvent,
+  type LockState,
+} from "../../src/server/lockModel";
 import type { LockCause } from "../../src/server/types";
 
 const NOW = 1_000_000;
@@ -359,5 +367,59 @@ describe("a full round trip (decoy -> ... -> chat -> ... -> decoy)", () => {
     state = run(state, { type: "submit" }).state;
     state = run(state, { type: "verifyWrong", attemptsLeft: 4 }).state;
     expect(state).toEqual({ kind: "pin", error: { kind: "wrong", attemptsLeft: 4 } });
+  });
+});
+
+// "Extend auto-lock to 1 minute" (Architect ruling on the checkbox): ONLY the
+// unlocked chat's idle lock takes the device's chosen duration. The decoy's
+// re-hide ("revealed") and the PIN pad's idle close share the same timer but
+// must stay on the fixed short one, and the duration is an INPUT to the model
+// — the 60s value lives once, in constants.ts, never inside lockModel.
+describe("idleTimeoutMs", () => {
+  const nonChatStates: readonly LockState[] = [
+    { kind: "decoy" },
+    { kind: "revealed" },
+    { kind: "pin", error: null },
+    { kind: "pin", error: { kind: "wrong", attemptsLeft: 2 } },
+    { kind: "verifying" },
+    { kind: "fading" },
+  ];
+
+  it("the unlocked chat takes exactly the chosen idle duration", () => {
+    expect(idleTimeoutMs({ kind: "chat" }, IDLE_LOCK_MS)).toBe(10_000);
+    expect(idleTimeoutMs({ kind: "chat" }, IDLE_LOCK_EXTENDED_MS)).toBe(60_000);
+    expect(idleTimeoutMs({ kind: "chat" }, 12_345)).toBe(12_345);
+  });
+
+  it("every other state stays on the fixed 10s no matter what duration is chosen", () => {
+    for (const state of nonChatStates) {
+      expect(idleTimeoutMs(state, IDLE_LOCK_MS)).toBe(IDLE_LOCK_MS);
+      expect(idleTimeoutMs(state, IDLE_LOCK_EXTENDED_MS)).toBe(IDLE_LOCK_MS);
+    }
+  });
+
+  it("the two configured durations are exactly 10s and 60s", () => {
+    expect(IDLE_LOCK_MS).toBe(10_000);
+    expect(IDLE_LOCK_EXTENDED_MS).toBe(60_000);
+  });
+});
+
+describe("idleRemainingMs", () => {
+  const chat: LockState = { kind: "chat" };
+
+  it("is the deadline (last activity + duration) minus now", () => {
+    expect(idleRemainingMs(chat, IDLE_LOCK_MS, 1_000, 1_000)).toBe(10_000);
+    expect(idleRemainingMs(chat, IDLE_LOCK_MS, 1_000, 5_000)).toBe(6_000);
+    expect(idleRemainingMs(chat, IDLE_LOCK_EXTENDED_MS, 1_000, 5_000)).toBe(56_000);
+  });
+
+  it("never goes negative — a deadline already in the past is 0, i.e. lock now", () => {
+    expect(idleRemainingMs(chat, IDLE_LOCK_MS, 0, 30_000)).toBe(0);
+    expect(idleRemainingMs(chat, IDLE_LOCK_MS, 0, 10_000)).toBe(0);
+  });
+
+  it("uses the fixed 10s for the decoy re-hide even when the chat duration is 60s", () => {
+    expect(idleRemainingMs({ kind: "revealed" }, IDLE_LOCK_EXTENDED_MS, 0, 4_000)).toBe(6_000);
+    expect(idleRemainingMs({ kind: "pin", error: null }, IDLE_LOCK_EXTENDED_MS, 0, 4_000)).toBe(6_000);
   });
 });

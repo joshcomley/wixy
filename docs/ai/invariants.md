@@ -603,7 +603,8 @@ can echo the submitted request input. Do not treat the no-echo guarantee as impl
 F8 is merged and verified; the target rule above remains unchanged.
 
 ### Inv 42 — Server-chat lock is fail-closed
-Every R6 lock cause locks the chat: idle timeout, panic, multi-tap, Escape, hidden document,
+Every R6 lock cause locks the chat: idle timeout (10 seconds, or 60 seconds on a device where
+the owner ticked "Extend auto-lock to 1 minute"), panic, multi-tap, Escape, hidden document,
 route-away, unauthorized response, or token expiry. The target behavior detaches the chat
 subtree from the document, aborts the stream, pauses media, and discards an unfinished
 recording. A hidden document is exempt only while the file picker or microphone permission
@@ -617,7 +618,14 @@ cancellation across that pending-history race as pending until F4 is merged and 
 ### Inv 43 — Server-chat idle time is reset only by user input
 Only the defined user-input events count as activity. `scroll` events, incoming messages, and
 programmatic scrolling do not reset the idle timer; an incoming message cannot keep a locked-
-eligible chat visible.
+eligible chat visible. Changing the "Extend auto-lock to 1 minute" setting does not restart the
+clock either: the panel re-measures the idle deadline (last activity + 10 or 60 seconds)
+without moving the last-activity time. From the sheet itself, the tap that toggles the box is
+an ordinary pointer event and so is activity in its own right — the period counts from that
+tap; a change that arrives any other way (another tab of the device) is measured from the
+last real activity, and can lock at once if that deadline has already passed. Only the
+unlocked chat's idle period is affected; the decoy's re-hide and the PIN pad's idle close
+stay 10 seconds.
 
 ### Inv 44 — Server-chat media is sniffed, bounded, and private
 Inspect magic bytes before any media subprocess. Every ffmpeg/ffprobe input uses the sniffed

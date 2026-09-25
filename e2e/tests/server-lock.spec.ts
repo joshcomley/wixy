@@ -21,7 +21,7 @@
 // needs a real reset (`POST /test/server/reset-pin-lockout`), not just
 // fast-forwarding the page.
 
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
 
 // Matches e2e/fixture_server.py's TEST_SERVER_PIN / TEST_SERVER_PIN_APP_KEY.
@@ -110,6 +110,37 @@ async function enterNameIfPrompted(page: Page): Promise<void> {
   await page.locator(".wx-srv-name-prompt-button").click();
   await expect(page.locator(".wx-srv-thread")).toBeVisible();
   await page.clock.runFor(401);
+}
+
+const AUTO_LOCK_LABEL = "Extend auto-lock to 1 minute";
+
+/** Opens the chat's settings sheet and returns its "Extend auto-lock to 1
+ * minute" checkbox, found the way a person (and a screen reader) finds it: by
+ * its label. Waits past R3's multi-tap window first so the gear tap and the
+ * tap before it never read as a panic double-tap under `page.clock`. */
+async function openSettingsAndFindAutoLockBox(page: Page): Promise<Locator> {
+  await page.clock.runFor(401);
+  await page.locator(".wx-srv-settings-button").click();
+  await expect(page.locator(".wx-srv-sheet")).toBeVisible();
+  return page.getByLabel(AUTO_LOCK_LABEL);
+}
+
+async function closeSettings(page: Page): Promise<void> {
+  await page.clock.runFor(401);
+  await page.locator(".wx-srv-sheet-close").click();
+  await expect(page.locator(".wx-srv-sheet")).toBeHidden();
+}
+
+/** Unlocks into the chat, ticks (or unticks) the auto-lock box, and closes the
+ * sheet — the close tap is the LAST user activity, so every clock assertion
+ * after it counts from that instant. */
+async function unlockAndSetAutoLock(page: Page, extended: boolean): Promise<void> {
+  await revealAndOpenPinPad(page);
+  await enterPin(page, TEST_PIN);
+  await expect(page.locator(".wx-srv-thread")).toBeVisible();
+  const box = await openSettingsAndFindAutoLockBox(page);
+  await box.setChecked(extended);
+  await closeSettings(page);
 }
 
 for (const profile of DEVICE_PROFILES) {
@@ -240,6 +271,104 @@ for (const profile of DEVICE_PROFILES) {
         await page.clock.runFor(1_900);
         await expect(page.locator(".wx-srv-thread")).toHaveCount(0);
         await expect(page.locator(".wx-srv-decoy")).toBeVisible();
+      });
+    });
+
+    test(`${profile.name}: auto-lock box unticked (the default) — locks 10s after the last activity: fading at 10.5s, gone by 10.9s`, async ({
+      browser,
+    }) => {
+      await withServerPage(browser, profile, async (page) => {
+        await unlockAndSetAutoLock(page, false);
+        const chatHost = page.locator(".wx-srv-chat-host");
+
+        await page.clock.runFor(9_000);
+        await expect(page.locator(".wx-srv-thread")).toBeVisible();
+        await expect(chatHost).not.toHaveClass(/wx-srv-fading/);
+
+        await page.clock.runFor(1_500); // t = 10.5s since the last activity
+        await expect(chatHost).toHaveClass(/wx-srv-fading/);
+
+        await page.clock.runFor(400); // t = 10.9s — the 800ms fade has finished
+        await expect(page.locator(".wx-srv-thread")).toHaveCount(0);
+        await expect(page.locator(".wx-srv-decoy")).toBeVisible();
+      });
+    });
+
+    test(`${profile.name}: auto-lock box ticked — still unlocked at 10s and 59s, locking at 60.5s, gone by 60.9s`, async ({
+      browser,
+    }) => {
+      await withServerPage(browser, profile, async (page) => {
+        await unlockAndSetAutoLock(page, true);
+        const chatHost = page.locator(".wx-srv-chat-host");
+
+        await page.clock.runFor(10_500); // well past the normal 10s
+        await expect(page.locator(".wx-srv-thread")).toBeVisible();
+        await expect(chatHost).not.toHaveClass(/wx-srv-fading/);
+
+        await page.clock.runFor(48_500); // t = 59s
+        await expect(page.locator(".wx-srv-thread")).toBeVisible();
+        await expect(chatHost).not.toHaveClass(/wx-srv-fading/);
+
+        await page.clock.runFor(1_500); // t = 60.5s
+        await expect(chatHost).toHaveClass(/wx-srv-fading/);
+
+        await page.clock.runFor(400); // t = 60.9s — fade finished, detached
+        await expect(page.locator(".wx-srv-thread")).toHaveCount(0);
+        await expect(page.locator(".wx-srv-decoy")).toBeVisible();
+      });
+    });
+
+    test(`${profile.name}: auto-lock box — the choice survives lock→unlock and a full reload; unticking restores 10s`, async ({
+      browser,
+    }) => {
+      await withServerPage(browser, profile, async (page) => {
+        await unlockAndSetAutoLock(page, true);
+        expect(await page.evaluate(() => window.localStorage.getItem("wx-srv-idle-extended"))).toBe("1");
+
+        // Lock (panic) then unlock again: the box still reads ticked.
+        await page.locator('.wx-srv-chat-host button[aria-label="Close"]').click();
+        await expect(page.locator(".wx-srv-thread")).toHaveCount(0);
+        await revealAndOpenPinPad(page);
+        await enterPin(page, TEST_PIN);
+        await expect(await openSettingsAndFindAutoLockBox(page)).toBeChecked();
+        await closeSettings(page);
+
+        // A full page reload: still ticked, and the 60s period governs the new page.
+        await page.reload();
+        await page.waitForSelector(".wx-srv-decoy");
+        await revealAndOpenPinPad(page);
+        await enterPin(page, TEST_PIN);
+        await expect(await openSettingsAndFindAutoLockBox(page)).toBeChecked();
+        await closeSettings(page);
+        await page.clock.runFor(30_000);
+        await expect(page.locator(".wx-srv-thread")).toBeVisible();
+
+        // Unticking clears the stored key and puts the normal 10s back.
+        const box = await openSettingsAndFindAutoLockBox(page);
+        await box.uncheck();
+        expect(await page.evaluate(() => window.localStorage.getItem("wx-srv-idle-extended"))).toBeNull();
+        await closeSettings(page);
+        await page.clock.runFor(10_500);
+        await expect(page.locator(".wx-srv-chat-host")).toHaveClass(/wx-srv-fading/);
+      });
+    });
+
+    test(`${profile.name}: auto-lock box — keyboard operable (Space toggles it) and toggling never locks the chat`, async ({
+      browser,
+    }) => {
+      await withServerPage(browser, profile, async (page) => {
+        await revealAndOpenPinPad(page);
+        await enterPin(page, TEST_PIN);
+        const box = await openSettingsAndFindAutoLockBox(page);
+        await expect(box).not.toBeChecked();
+        await box.focus();
+        await page.keyboard.press("Space");
+        await expect(box).toBeChecked();
+        await page.keyboard.press("Space");
+        await expect(box).not.toBeChecked();
+        // Two quick toggles (the same virtual instant) are not a panic double-tap.
+        await expect(page.locator(".wx-srv-sheet")).toBeVisible();
+        await expect(page.locator(".wx-srv-thread")).toBeVisible();
       });
     });
 
@@ -377,6 +506,206 @@ for (const profile of DEVICE_PROFILES) {
         await enterPin(page, TEST_PIN);
         await expect(page.locator(".wx-srv-chat-host textarea")).toHaveValue("an unsent thought");
       });
+    });
+  });
+}
+
+// The settings-sheet checkbox must be usable on the narrowest phone: a real
+// label, a row at least 44px tall, and text that WRAPS instead of truncating
+// or spilling out of the sheet. 375px is the classic small iPhone; 1280px is
+// desktop. Each run also leaves a screenshot in the test's output folder.
+const LAYOUT_PROFILES: readonly DeviceProfile[] = [
+  { name: "narrow-phone", viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true },
+  { name: "desktop", viewport: { width: 1280, height: 800 }, isMobile: false, hasTouch: false },
+];
+
+for (const profile of LAYOUT_PROFILES) {
+  test(`auto-lock box layout at ${profile.viewport.width}px: labelled, at least 44px tall, wraps, fits the sheet`, async ({
+    browser,
+  }, testInfo) => {
+    await withServerPage(browser, profile, async (page) => {
+      await revealAndOpenPinPad(page);
+      await enterPin(page, TEST_PIN);
+      const box = await openSettingsAndFindAutoLockBox(page);
+      await expect(box).toBeVisible();
+      await expect(box).toHaveAccessibleName(AUTO_LOCK_LABEL);
+
+      const rowBox = await page.locator(".wx-srv-sheet-idle").boundingBox();
+      const sheetBox = await page.locator(".wx-srv-sheet").boundingBox();
+      if (rowBox === null || sheetBox === null) throw new Error("sheet or row not laid out");
+      expect(rowBox.height).toBeGreaterThanOrEqual(44);
+      // Inside the sheet horizontally — never spilling past its edges.
+      expect(rowBox.x).toBeGreaterThanOrEqual(sheetBox.x - 0.5);
+      expect(rowBox.x + rowBox.width).toBeLessThanOrEqual(sheetBox.x + sheetBox.width + 0.5);
+      // The text is never clipped: its content fits its own box.
+      const text = page.locator(".wx-srv-sheet-idle-text");
+      await expect(text).toHaveText(AUTO_LOCK_LABEL);
+      expect(await text.evaluate((el) => el.scrollWidth > el.clientWidth + 1)).toBe(false);
+      // The sheet adds no sideways page scroll.
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1),
+      ).toBe(false);
+
+      await page.screenshot({ path: testInfo.outputPath(`auto-lock-sheet-${profile.viewport.width}.png`) });
+    });
+  });
+}
+
+// The settings sheet on a real ANDROID phone. Android is where the optional push
+// row ALSO renders, making the sheet its tallest; the sheet used to be a
+// content-height box anchored to the bottom of its host, so on a short viewport
+// (<= ~668px tall portrait, or any landscape phone) it grew UPWARD past the top
+// of the host and its close X ended up underneath the admin's own navigation,
+// unreachable — with the sheet covering the whole host in portrait there is no
+// dim margin to tap either. The fix keeps the sheet inside its host, scrolls its
+// body internally and pins the header (with the X) to the top. These cases use an
+// Android user agent plus push capability stubs (the same shape as
+// server-push.spec.ts) so the push row really renders, and hit-test the controls
+// with `elementFromPoint` — a screenshot on a non-Android profile could never
+// see this.
+const ANDROID_UA =
+  "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/126.0.0.0 Mobile Safari/537.36";
+
+const ANDROID_VIEWPORTS: readonly { width: number; height: number }[] = [
+  { width: 360, height: 800 },
+  { width: 360, height: 668 },
+  { width: 360, height: 640 },
+  { width: 360, height: 600 },
+  { width: 360, height: 560 }, // already broken on main before the auto-lock row existed
+  { width: 640, height: 360 }, // landscape
+];
+
+async function withAndroidServerPage(
+  browser: Browser,
+  viewport: { width: number; height: number },
+  fn: (page: Page) => Promise<void>,
+): Promise<void> {
+  const context = await browser.newContext({
+    userAgent: ANDROID_UA,
+    viewport,
+    isMobile: true,
+    hasTouch: true,
+    deviceScaleFactor: 2,
+  });
+  const page = await context.newPage();
+  const errors = trackConsoleErrors(page);
+  await page.addInitScript(() => {
+    // Just enough of the Web Push surface for `isAndroidPushCapable` to be true
+    // and the toggle to render, exactly as on a real Android Chrome.
+    const subscription = {
+      toJSON: () => ({ endpoint: "https://fcm.googleapis.com/fcm/send/t", keys: { p256dh: "p", auth: "a" } }),
+      unsubscribe: async () => true,
+    };
+    const registration = {
+      pushManager: { subscribe: async () => subscription, getSubscription: async () => null },
+      unregister: async () => true,
+    };
+    Object.defineProperty(window, "PushManager", { configurable: true, value: class PushManager {} });
+    Object.defineProperty(window, "Notification", {
+      configurable: true,
+      value: { permission: "default", requestPermission: async () => "granted" },
+    });
+    Object.defineProperty(navigator, "serviceWorker", {
+      configurable: true,
+      value: { register: async () => registration, ready: Promise.resolve(registration) },
+    });
+  });
+  await page.clock.install();
+  await page.goto("/admin/server");
+  await page.waitForSelector(".wx-srv-decoy");
+  await fn(page);
+  expect(errors).toEqual([]);
+  await context.close();
+}
+
+interface ReachReport {
+  readonly inViewport: boolean;
+  readonly hitsItself: boolean;
+  readonly box: { top: number; bottom: number; left: number; right: number };
+  readonly viewport: { width: number; height: number };
+}
+
+/** Where `selector` sits right now and whether a real pointer at its centre would
+ * land on it (not on whatever is stacked over it). No scrolling is done here. */
+async function reach(page: Page, selector: string): Promise<ReachReport> {
+  return page.locator(selector).evaluate((el): ReachReport => {
+    const rect = el.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const hit = document.elementFromPoint(cx, cy);
+    const viewport = { width: window.innerWidth, height: window.innerHeight };
+    return {
+      inViewport: rect.top >= 0 && rect.left >= 0 && rect.bottom <= viewport.height && rect.right <= viewport.width,
+      hitsItself: hit !== null && el.contains(hit),
+      box: { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right },
+      viewport,
+    };
+  });
+}
+
+for (const viewport of ANDROID_VIEWPORTS) {
+  test(`android settings sheet at ${viewport.width}x${viewport.height}: push row shown; the X stays reachable and the Delete/Lock controls scroll into reach`, async ({
+    browser,
+  }, testInfo) => {
+    await withAndroidServerPage(browser, viewport, async (page) => {
+      await revealAndOpenPinPad(page);
+      await enterPin(page, TEST_PIN);
+      await openSettingsAndFindAutoLockBox(page);
+      // Proves this really is the Android-shaped (tallest) sheet.
+      await expect(page.locator(".wx-srv-push-toggle")).toBeVisible();
+      await expect(page.getByLabel(AUTO_LOCK_LABEL)).toBeVisible();
+
+      const sheet = ".wx-srv-sheet";
+      const close = ".wx-srv-sheet-close";
+
+      // The sheet never outgrows its host: it stays inside the dimmed backdrop that
+      // fills the host (this is what used to break — it spilled above the host's top
+      // edge), and its top is on screen. (A landscape phone's host can itself run
+      // below the fold, so "the whole sheet is in the viewport" is not the invariant.)
+      const containment = await page.evaluate(() => {
+        const sheetRect = document.querySelector(".wx-srv-sheet")?.getBoundingClientRect();
+        const backdropRect = document.querySelector(".wx-srv-sheet-backdrop")?.getBoundingClientRect();
+        if (sheetRect === undefined || backdropRect === undefined) return null;
+        return {
+          sheetTop: sheetRect.top,
+          sheetBottom: sheetRect.bottom,
+          backdropTop: backdropRect.top,
+          backdropBottom: backdropRect.bottom,
+        };
+      });
+      if (containment === null) throw new Error("sheet or backdrop missing");
+      expect(containment.sheetTop, `sheet ${JSON.stringify(containment)}`).toBeGreaterThanOrEqual(0);
+      expect(containment.sheetTop, `sheet ${JSON.stringify(containment)}`).toBeGreaterThanOrEqual(containment.backdropTop - 0.5);
+      expect(containment.sheetBottom, `sheet ${JSON.stringify(containment)}`).toBeLessThanOrEqual(containment.backdropBottom + 0.5);
+
+      // The X is reachable straight away, with no scrolling.
+      const closeAtRest = await reach(page, close);
+      expect(closeAtRest.inViewport, `X box ${JSON.stringify(closeAtRest.box)} in ${JSON.stringify(closeAtRest.viewport)}`).toBe(true);
+      expect(closeAtRest.hitsItself, "the X is covered by another element").toBe(true);
+
+      await page.screenshot({ path: testInfo.outputPath(`android-sheet-${viewport.width}x${viewport.height}-top.png`) });
+
+      // Scroll the sheet's own contents to the very bottom: the X is still pinned in
+      // reach, and the last controls (Delete all messages, Lock) can be brought
+      // into reach and hit-tested.
+      await page.locator(sheet).evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+      });
+      await page.screenshot({ path: testInfo.outputPath(`android-sheet-${viewport.width}x${viewport.height}-bottom.png`) });
+      const closeAfterScroll = await reach(page, close);
+      expect(closeAfterScroll.inViewport).toBe(true);
+      expect(closeAfterScroll.hitsItself, "the X is covered once the sheet is scrolled").toBe(true);
+      for (const selector of [".wx-srv-sheet-wipe", ".wx-srv-sheet-lock"]) {
+        await page.locator(selector).scrollIntoViewIfNeeded();
+        const report = await reach(page, selector);
+        expect(report.inViewport, `${selector} box ${JSON.stringify(report.box)}`).toBe(true);
+        expect(report.hitsItself, `${selector} is covered by another element`).toBe(true);
+      }
+
+      // And a real pointer can actually close it.
+      await page.clock.runFor(401);
+      await page.locator(close).click();
+      await expect(page.locator(sheet)).toBeHidden();
     });
   });
 }
