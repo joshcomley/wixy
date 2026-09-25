@@ -230,11 +230,24 @@ Decision rule (a pure function in lockModel, inputs `lockOnTab`, `lockOnScreen`,
 - **The two differ:** `hidden` → lock at once and **fail closed** (a "shield"). On return
   (`visible`), keep the decoy up for up to **500 ms** so queued IdleDetector events can
   arrive. Then the cause is:
-  - **"screen lock"** — if a `screenState = "locked"` was observed between the hide and now.
-    This is positive evidence.
-  - **"tab change"** — only if there is no such event **and this device is proven** (see
-    below).
-  - **"ambiguous"** — no event, and the device is not proven.
+  - **"screen lock"** — a `screenState = "locked"` event was **dispatched within
+    `[hideAt − 1000 ms, hideAt + 2000 ms]`** on the monotonic `performance.now()` clock,
+    which keeps counting while a page is frozen. That means it was delivered in real time
+    at the moment of the hide: causal, positive evidence. Constants:
+    `SCREEN_LOCK_EVIDENCE_BEFORE_MS = 1000` and `SCREEN_LOCK_EVIDENCE_AFTER_MS = 2000`.
+  - **"tab change"** — the device is proven **and no lock event of any kind** was
+    dispatched from `hideAt − 1000 ms` to the end of the return shield. A batched delivery
+    at return counts as a lock event.
+  - **"ambiguous"** — everything else:
+    - a lock event outside the causal window (one that happened later during the
+      absence, or one batched on return);
+    - an unproven device with no event.
+
+  (Amended 2026-09-25 on builder 41f2ad09's catch. "Observed anywhere between the hide
+  and now" blamed a *later* screen lock for an earlier tab switch — switch app, the phone
+  auto-locks, return — and reopened a chat whose "change tab" box was ticked. A frozen
+  phone batches both events on return, so only real-time delivery near the hide can prove
+  cause.)
 
   **Restore silently only when the cause is known and its box is OFF:** re-attach the
   detached view with the in-memory session, or re-mint via the grant. If the cause's box is
@@ -247,8 +260,16 @@ Decision rule (a pure function in lockModel, inputs `lockOnTab`, `lockOnScreen`,
   - **Why proof is needed:** there is never positive evidence of a *tab* switch, only of a
     screen lock. So "no event means tab change" can only be trusted on a device that has
     shown it really does deliver screen-lock events across a hide-and-return cycle.
-  - **When the key is set:** the first time a `screenState = "locked"` event is observed
-    during a hidden interval (permission granted), set the key.
+  - **When the key is set:** only by a lock event **inside the causal window** (permission
+    granted), so it means "this phone reports screen locks at the moment they happen".
+    A batched event never proves a device. A phone that always freezes first never
+    becomes proven, so both differing combinations fail closed on it.
+  - **Grant pause at shield time** (builder's addition, approved): the shield writes the
+    grant pause immediately, and only a restore clears it. A reload or tab discard
+    mid-shield can therefore never skip the PIN.
+  - **The only residual fail-open, stated honestly:** on a proven device, if the detector
+    drops a screen-lock event *entirely* (no delivery at all, not even batched), that hide
+    reads as a tab change.
   - **When it is cleared:** whenever the IdleDetector permission is lost or the detector
     becomes unavailable.
   - **Until proven**, the combination "change tab OFF + lock my screen ON" still locks on
@@ -273,8 +294,16 @@ Tests:
     unproven device;
   - an ambiguous cause always stays locked, including "change tab OFF + screen ON" on an
     unproven device — the regression test for the fail-open gap;
-  - the proof key is set on the first observed hidden-interval screen lock, and cleared
-    when the permission is lost;
+  - the proof key is set only by an in-window lock event (never by a batched one), and
+    cleared when the permission is lost;
+  - **causal window:**
+    - a lock event at hide + 1.5 s → screen lock;
+    - one at hide − 0.8 s → screen lock;
+    - one at hide + 30 s, or batched at return → ambiguous → locked, for both differing
+      combinations (the regression test for the "later auto-lock" fail-open);
+    - a proven device with no event → tab change;
+    - a proven device with a batched event → ambiguous;
+  - a reload mid-shield leaves the grant paused;
   - the shield holds for 500 ms, then restores or stays locked;
   - a checkbox lock pauses an active grant;
   - an unsupported or denied detector gives the mirrored behaviour;
