@@ -84,6 +84,27 @@ one `message` frame carrying both.
 The push hooks fire only for a created message, so a reaction never notifies anyone. Delete and
 wipe already never notify; reactions follow.
 
+## Fixes from independent review (round 1, both red-first)
+
+- **H1 (high, blocking).** A `sender` containing a lone UTF-16 surrogate (U+D800-U+DFFF) — a
+  valid Python `str` code point with no UTF-8 encoding — reached a SQLite bind (or, on the
+  push-subscription route, the same bind in `upsert_push_subscription`) and crashed with an
+  uncaught `UnicodeEncodeError`: a bare 500 on all three sender-accepting routes
+  (`POST /messages`, `PUT /messages/{seq}/reactions`, `PUT /push/subscriptions/{deviceId}`),
+  directly contradicting the ruling's "never a 500" for the reactions route. `_CONTROL_CHAR_RE`
+  never covered it (surrogates aren't C0/C1 control characters) and Pydantic's plain `str`
+  field doesn't validate UTF-8 encodability. A normal client can never type one, but a raw
+  JSON body escaping it as `\uD800` decodes straight into a Python string carrying it — proven
+  by three tests that build the request body by hand (`json.dumps(..., ensure_ascii=True)`,
+  bypassing `httpx`'s own `json=` kwarg, which fails client-side on the very same string before
+  a request is even built). Fixed with one shared `_valid_sender()` (`routes_livechat.py`),
+  used by all three routes, that rejects the length/control-character rule from before plus any
+  unpaired surrogate — before the value reaches the store.
+- **M1 (recommended).** `reactor_key` case-folded without normalizing first, so a precomposed
+  (NFC) and a decomposed (NFD) encoding of the same accented name — visually and semantically
+  identical, different code points — were two different reactors, contradicting "same person,
+  one reactor". Fixed with `unicodedata.normalize("NFC", ...)` before `casefold()`.
+
 ## What to watch for
 
 - **Migration numbers collide across parallel builds.** Round 2 has three builds adding a table

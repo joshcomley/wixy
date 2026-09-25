@@ -62,6 +62,27 @@ _DELETE_SCRUB_DEADLINE_S = 10.0
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 
+def _has_unpaired_surrogate(text: str) -> bool:
+    """A lone UTF-16 surrogate (U+D800-U+DFFF) is a valid Python `str` code point but has no
+    UTF-8 encoding, so it crashes a SQLite bind (or `json.dumps`) with an uncaught
+    `UnicodeEncodeError` — a bare 500 — the instant it reaches one. A normal client can never
+    type one, but `json.loads` happily decodes a `\\uXXXX` escape for one out of any request
+    body, so the check has to run before the value goes anywhere near the store (reviewer
+    H1: reproduced live against both `POST /messages` and `PUT .../reactions`)."""
+    return any(0xD800 <= ord(ch) <= 0xDFFF for ch in text)
+
+
+def _valid_sender(sender: str) -> bool:
+    """§5.3's sender rule (1-32 characters, trimmed, no control characters), plus the
+    surrogate check above. Shared by every route that accepts a display name:
+    `send_message`, `set_reaction`, and `put_push_subscription`."""
+    return (
+        1 <= len(sender) <= 32
+        and _CONTROL_CHAR_RE.search(sender) is None
+        and not _has_unpaired_surrogate(sender)
+    )
+
+
 def _invalid(detail: str) -> JSONResponse:
     """§5.3's 422 shape — literal `{"error":"invalid","detail":...}`, not FastAPI's
     default per-field validation-error array. Used for every BUSINESS rule (empty
@@ -278,7 +299,7 @@ async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
     if not (8 <= len(body.deviceId) <= 64):
         return _invalid("deviceId must be 8-64 characters")
     sender = body.sender.strip()
-    if not (1 <= len(sender) <= 32) or _CONTROL_CHAR_RE.search(sender):
+    if not _valid_sender(sender):
         return _invalid("sender must be 1-32 characters with no control characters")
     text = body.text
     if text is not None and len(text) > 4000:
@@ -341,7 +362,7 @@ async def set_reaction(seq: int, body: SetReactionIn, request: Request) -> JSONR
     if not is_allowed_reaction(body.emoji):
         return _invalid("emoji is not one of the allowed reactions")
     sender = body.sender.strip()
-    if not (1 <= len(sender) <= 32) or _CONTROL_CHAR_RE.search(sender):
+    if not _valid_sender(sender):
         return _invalid("sender must be 1-32 characters with no control characters")
     if not (0 < seq <= _SQLITE_MAX_INTEGER):
         return JSONResponse(status_code=404, content={"error": "not_found"})
@@ -603,7 +624,7 @@ async def put_push_subscription(
 ) -> Response:
     require_server_token(request)
     sender = body.sender.strip()
-    if not (1 <= len(sender) <= 32) or _CONTROL_CHAR_RE.search(sender):
+    if not _valid_sender(sender):
         return _invalid("sender must be 1-32 characters with no control characters")
     try:
         validate_push_endpoint(body.subscription.endpoint)

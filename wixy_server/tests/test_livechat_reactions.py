@@ -75,6 +75,16 @@ class TestReactorKey:
     def test_different_names_stay_different(self) -> None:
         assert reactor_key("Josh") != reactor_key("Purdy")
 
+    def test_nfc_and_nfd_forms_of_the_same_name_are_the_same_reactor(self) -> None:
+        """Reviewer M1: an accented name typed (or auto-composed) as precomposed NFC
+        ("é" — a single code point) versus decomposed NFD ("e" + a combining acute accent
+        — two code points) looks and reads identically but was, before NFC normalization, two
+        different `sender_key` values — silently splitting one reactor into two."""
+        nfc = "Émilie"  # "Émilie" as a single precomposed code point
+        nfd = "Émilie"  # "Émilie" as "E" + a combining acute accent (U+0301)
+        assert nfc != nfd  # the raw strings really do differ
+        assert reactor_key(nfc) == reactor_key(nfd)
+
 
 class TestClientListMatchesServerList:
     """`admin-ui/src/server/reactions.ts` is the browser's copy of the allowlist. It has to

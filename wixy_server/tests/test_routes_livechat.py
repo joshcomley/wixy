@@ -987,6 +987,31 @@ class TestSendHistoryUsage:
         finally:
             client.__exit__(None, None, None)
 
+    def test_a_sender_with_a_lone_utf16_surrogate_is_422_never_a_500(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        """Reviewer-reported H1 (see the matching reactions test for the full story): the same
+        gap in `send_message`'s sender validation — a lone surrogate reaches `create_message`'s
+        SQLite bind and crashes with an uncaught `UnicodeEncodeError`."""
+        client, headers = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            response = _raw_json_request(
+                client,
+                "POST",
+                "/api/admin/server/messages",
+                {
+                    "clientId": "surrogate-sender-client",
+                    "sender": "A\ud800B",
+                    "deviceId": "device-aaaaaaaa",
+                    "text": "hi",
+                },
+                headers,
+            )
+            assert response.status_code == 422, response.text
+            assert response.json()["error"] == "invalid"
+        finally:
+            client.__exit__(None, None, None)
+
     @pytest.mark.parametrize(
         ("client_id_length", "expected_status"), [(8, 201), (64, 201), (65, 422)]
     )
@@ -1349,6 +1374,23 @@ THUMBS_UP = REACTION_EMOJIS[0]
 HEART = REACTION_EMOJIS[1]
 
 
+def _raw_json_request(
+    client: TestClient, method: str, path: str, body: dict[str, object], headers: dict[str, str]
+) -> Any:
+    """Posts a body built by hand from `json.dumps(..., ensure_ascii=True).encode("utf-8")`,
+    bypassing `httpx`'s own `json=` kwarg — which, for a string containing a lone UTF-16
+    surrogate, fails CLIENT-side with its own `UnicodeEncodeError` before a request is even
+    built (verified directly against `httpx.Request(json=...)`). `ensure_ascii=True` escapes a
+    surrogate as `\\uXXXX` text, so the ENCODED BYTES are plain ASCII and travel over the wire
+    with no encoding error at all; the surrogate reappears as a real code point only once the
+    SERVER'S `json.loads` decodes it back — exactly the shape a real client's own worst-case
+    encoding (or a deliberately malicious request) can produce."""
+    raw = json.dumps(body, ensure_ascii=True).encode("utf-8")
+    return client.request(
+        method, path, content=raw, headers={"Content-Type": "application/json", **headers}
+    )
+
+
 class TestReactionRoutes:
     """`PUT /messages/{seq}/reactions` (spec/server-chat/04-reactions.md): desired-state, one
     reactor + one emoji per call, `message_updated` on a real change only."""
@@ -1463,6 +1505,29 @@ class TestReactionRoutes:
             ]
             removed = self._put(client, headers, seq, sender="purdy", reacted=False)
             assert removed.json()["message"]["reactions"] == []
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_a_sender_with_a_lone_utf16_surrogate_is_422_never_a_500(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        """Reviewer-reported H1: a lone surrogate reaches `set_reaction`'s SQLite bind
+        (`store.py`'s `INSERT OR IGNORE INTO reactions`) and crashes with an uncaught
+        `UnicodeEncodeError` — a bare 500, contradicting the ruling's "never a 500" for this
+        route. It must be rejected as a plain 422 before the store is ever called."""
+        client, headers, seq = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            response = _raw_json_request(
+                client,
+                "PUT",
+                f"/api/admin/server/messages/{seq}/reactions",
+                {"emoji": THUMBS_UP, "sender": "A\ud800B", "reacted": True},
+                headers,
+            )
+            assert response.status_code == 422, response.text
+            assert response.json()["error"] == "invalid"
+            # The rejection happened before the store was ever touched.
+            assert self._event_types(client) == ["message"]
         finally:
             client.__exit__(None, None, None)
 
@@ -3127,6 +3192,34 @@ class TestPushRoutes:
             assert worker.headers["content-type"].startswith("text/javascript")
             assert worker.headers["cache-control"] == "no-cache"
             assert worker.headers["service-worker-allowed"] == "/admin/"
+
+    def test_a_sender_with_a_lone_utf16_surrogate_is_422_never_a_500(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        """The third site the reviewer asked to be checked for H1's gap: `put_push_subscription`
+        binds `sender` into `upsert_push_subscription`'s INSERT exactly like the other two
+        routes, so the same lone-surrogate crash was reachable here too."""
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        with TestClient(app) as client:
+            token = _unlock(client).json()["token"]
+            headers = {"X-Wixy-Server-Token": token}
+            response = _raw_json_request(
+                client,
+                "PUT",
+                "/api/admin/server/push/subscriptions/device-123456",
+                {
+                    "sender": "A\ud800B",
+                    "subscription": {
+                        "endpoint": "https://fcm.googleapis.com/fcm/send/token",
+                        "keys": {"p256dh": "public", "auth": "secret"},
+                    },
+                },
+                headers,
+            )
+            assert response.status_code == 422, response.text
+            assert response.json()["error"] == "invalid"
 
     def test_push_routes_require_unlock_token(
         self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier

@@ -1342,6 +1342,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       deleteFadeTimers.clear();
       for (const timer of reactionErrorTimers.values()) win.clearTimeout(timer);
       reactionErrorTimers.clear();
+      reactionErrors.clear();
+      pendingReactions.clear();
       voiceRecorder?.detach();
       voiceRecorder = null;
       disposeAttachmentMedia(messageList);

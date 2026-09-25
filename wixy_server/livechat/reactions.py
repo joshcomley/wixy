@@ -9,6 +9,8 @@ that file and fails if the two drift.
 
 from __future__ import annotations
 
+import unicodedata
+
 REACTION_EMOJIS: tuple[str, ...] = (
     "\U0001f44d",  # thumbs up
     "❤️",  # red heart, with the variation selector
@@ -31,10 +33,14 @@ def reaction_order(emoji: str) -> int:
 
 
 def reactor_key(sender: str) -> str:
-    """The identity a reaction is keyed on: the trimmed sender name, case-folded.
+    """The identity a reaction is keyed on: the trimmed sender name, Unicode-normalized and
+    case-folded.
 
     Same folding as push self-exclusion (`push.py`), so "mine" means the same thing for a
     message, a push and a reaction. `casefold()` rather than SQLite's `NOCASE`, which only
-    folds ASCII letters.
+    folds ASCII letters. NFC normalization first (reviewer M1) means an NFC- and an
+    NFD-encoded form of the same accented name — visually and semantically identical, but
+    different code-point sequences — are the same reactor; without it, a name typed on a
+    platform that composes accents differently would silently split into two people.
     """
-    return sender.strip().casefold()
+    return unicodedata.normalize("NFC", sender.strip()).casefold()
