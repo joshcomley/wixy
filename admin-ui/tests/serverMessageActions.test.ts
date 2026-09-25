@@ -12,6 +12,7 @@ function message(text: string | null): Message {
     attachments: [],
     reactions: [],
     createdAt: 1_800_000_000,
+    replyTo: null,
   };
 }
 
@@ -20,6 +21,7 @@ function mount(text: string | null, isReacted: (message: Message, emoji: string)
   document.body.appendChild(bubble);
   const onDelete = vi.fn(async () => {});
   const onReact = vi.fn();
+  const onReply = vi.fn();
   const controller = mountMessageActions({
     message: message(text),
     bubble,
@@ -27,8 +29,9 @@ function mount(text: string | null, isReacted: (message: Message, emoji: string)
     onDelete,
     onReact,
     isReacted,
+    onReply,
   });
-  return { bubble, controller, onDelete, onReact };
+  return { bubble, controller, onDelete, onReact, onReply };
 }
 
 async function flush(): Promise<void> {
@@ -55,6 +58,34 @@ describe("Server message action menu proof", () => {
     expect(menu?.querySelector('[role="menuitem"][class*="copy"]')?.textContent).toBe("Copy text");
     expect(onDelete).not.toHaveBeenCalled();
     controller.teardown();
+  });
+
+  it("round 2 ruling item 10 §(4): Reply is the FIRST item, above Copy text", () => {
+    const { bubble, controller, onReply } = mount("hello from Purdy");
+    bubble.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+
+    const list = bubble.querySelector<HTMLElement>(".wx-srv-message-actions-list");
+    const items = list ? Array.from(list.children) : [];
+    expect(items[0]?.textContent).toBe("Reply");
+    expect(items[0]?.getAttribute("role")).toBe("menuitem");
+
+    const replyIndex = items.findIndex((el) => el.textContent === "Reply");
+    const copyIndex = items.findIndex((el) => el.textContent === "Copy text");
+    expect(replyIndex).toBeLessThan(copyIndex);
+
+    items[0]?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onReply).toHaveBeenCalledTimes(1);
+    expect(bubble.querySelector<HTMLElement>(".wx-srv-message-actions")?.hidden).toBe(true); // closes the menu
+    controller.teardown();
+  });
+
+  it("Reply appears on a media-only message too (no text)", () => {
+    const { bubble, onReply } = mount(null);
+    bubble.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    const reply = bubble.querySelector<HTMLButtonElement>(".wx-srv-message-action-reply");
+    expect(reply?.textContent).toBe("Reply");
+    reply?.click();
+    expect(onReply).toHaveBeenCalledTimes(1);
   });
 
   it("copies exact text and closes the action menu", async () => {
@@ -100,12 +131,13 @@ describe("Server message action menu: the reaction row", () => {
     document.body.innerHTML = "";
   });
 
-  it("puts the six reactions first, in list order, as gesture-boundary menu checkboxes", () => {
+  it("puts Reply first (round 2 ruling item 10 §(4)), then the six reactions in list order, as gesture-boundary menu checkboxes", () => {
     const { bubble, controller } = mount("hello");
     bubble.querySelector<HTMLButtonElement>(".wx-srv-message-actions-trigger")?.click();
 
     const list = bubble.querySelector<HTMLElement>(".wx-srv-message-actions-list")!;
-    expect(list.firstElementChild).toBe(bubble.querySelector(".wx-srv-message-reactions-picker"));
+    expect(list.firstElementChild).toBe(bubble.querySelector(".wx-srv-message-action-reply"));
+    expect(list.children[1]).toBe(bubble.querySelector(".wx-srv-message-reactions-picker"));
     const buttons = [...bubble.querySelectorAll<HTMLButtonElement>(".wx-srv-message-react")];
     expect(buttons.map((b) => b.textContent)).toEqual([...REACTION_EMOJIS]);
     for (const button of buttons) {

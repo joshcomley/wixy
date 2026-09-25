@@ -18,7 +18,7 @@ import math
 import re
 import time
 from collections.abc import AsyncGenerator, AsyncIterator
-from typing import Literal
+from typing import Any, Literal
 
 import anyio
 from fastapi import APIRouter, HTTPException, Request
@@ -459,6 +459,13 @@ class SendMessageIn(BaseModel):
     deviceId: str
     text: str | None = None
     attachmentIds: list[str] = Field(default_factory=list)
+    # Typed loosely (round 2 ruling item 10 §(3)) rather than `int | None`:
+    # pydantic v2 silently coerces `True`/`False` to `1`/`0` for an `int`
+    # field (measured 2026-09-25), which would make a boolean indistinguishable
+    # from a real seq by the time this model is built. The route below does
+    # every real check by hand, exactly like every other business rule in this
+    # handler (`_invalid(...)`, not FastAPI's generic per-field 422).
+    replyToSeq: Any = None
 
 
 class WipeChatIn(BaseModel):
@@ -496,6 +503,18 @@ async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
         return _invalid("a message needs text or at least one attachment")
     if len(body.attachmentIds) > 10:
         return _invalid("at most 10 attachments per message")
+    reply_to_seq: int | None = None
+    if body.replyToSeq is not None:
+        if (
+            isinstance(body.replyToSeq, bool)
+            or not isinstance(body.replyToSeq, int)
+            or not (1 <= body.replyToSeq <= _SQLITE_MAX_INTEGER)
+        ):
+            # audit F7: a crafted replyToSeq >= 2**63 must 422 like any other
+            # invalid shape, never reach SQLite and raise an OverflowError (500) —
+            # the same range this file's own set_reaction route already guards.
+            return _invalid("replyToSeq must be an integer >= 1")
+        reply_to_seq = body.replyToSeq
 
     store: LiveChatStore = request.app.state.livechat_store
     notifier: LiveChatNotifier = request.app.state.livechat_notifier
@@ -512,6 +531,7 @@ async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
             by_email=auth.email or None,
             text=text,
             attachment_ids=body.attachmentIds,
+            reply_to_seq=reply_to_seq,
             now=now,
         )
 

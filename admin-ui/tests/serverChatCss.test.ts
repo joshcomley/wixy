@@ -28,6 +28,7 @@ const HIDDEN_TOGGLED_CLASSES = [
   "wx-srv-jump-pill",
   "wx-srv-sheet-backdrop",
   "wx-srv-reactions",
+  "wx-srv-reply-bar",
 ] as const;
 
 function escapeRegExp(text: string): string {

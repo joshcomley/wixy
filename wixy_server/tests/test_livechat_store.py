@@ -152,8 +152,17 @@ class TestMigrations:
         db_path.parent.mkdir(parents=True)
         conn = sqlite3.connect(str(db_path))
         try:
+            # `messages` is part of this "v4 snapshot" purely so schema v10's
+            # migration (which touches it) has a realistic target — a genuine
+            # v4-era database always has it, since v1 creates every table
+            # together in one step.
             conn.executescript(
                 """
+                CREATE TABLE messages(
+                  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                  client_id TEXT NOT NULL UNIQUE,
+                  sender TEXT NOT NULL, device_id TEXT NOT NULL, by_email TEXT,
+                  text TEXT, created_at REAL NOT NULL);
                 CREATE TABLE deleted_storage(
                   kind TEXT NOT NULL, id TEXT NOT NULL,
                   cleanup_pending INTEGER NOT NULL, deleted_at REAL NOT NULL,
@@ -196,8 +205,17 @@ class TestMigrations:
         db_path.parent.mkdir(parents=True)
         conn = sqlite3.connect(str(db_path))
         try:
+            # `messages` is part of this "v1 snapshot" purely so schema v10's
+            # migration (which touches it) has a realistic target — a genuine
+            # v1-era database always has it, since v1 creates every table
+            # together in one step.
             conn.executescript(
                 """
+                CREATE TABLE messages(
+                  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                  client_id TEXT NOT NULL UNIQUE,
+                  sender TEXT NOT NULL, device_id TEXT NOT NULL, by_email TEXT,
+                  text TEXT, created_at REAL NOT NULL);
                 CREATE TABLE events(
                   event_seq INTEGER PRIMARY KEY AUTOINCREMENT,
                   type TEXT NOT NULL CHECK(type IN ('message','message_updated')),

@@ -763,8 +763,10 @@ connection is held open, so a WAL that was not truncated would fail them),
 `test_routes_livechat.py` (auth, confirmation, held-file cleanup and old signed-URL 404),
 `test_livechat_media_queue.py` (delete/processing race), `admin-ui/tests/server/erasureRequests.test.ts`
 and `admin-ui/tests/serverThread.test.ts` (the client's timeout, retry and reconciliation rules),
-and `e2e/tests/server-chat.spec.ts` (cross-client deletion, a 12-second-delayed delete, old-media
-404, wipe replay, and mobile gesture behavior).
+`e2e/tests/server-chat.spec.ts` (cross-client deletion, a 12-second-delayed delete, old-media
+404, wipe replay, and mobile gesture behavior), and — for a reply's quote specifically (Inv 51) —
+`test_livechat_reply_to.py`'s `TestReplyErasure` (the same raw-byte proof extended to a target
+with replies, plus a bare `DELETE FROM messages` from a simulated older-process connection).
 *Known limits:* filesystem overwrite is not a reliable shred guarantee on NTFS/SSD. A 202
 response means chat content is already deleted and broadcast while database-byte or media-file
 cleanup continues durably in the background.
@@ -892,3 +894,71 @@ playing note survives its transcript, both devices agree, phone layout).
 *Known limit:* the no-retain half is cmd's promise, tested in cmd's repo; wixy can only refuse to talk
 to a cmd that does not make it. The feature is operator-visible only after one live end-to-end run
 shows nothing new under cmd's `dictation-audio/` or `asr-shadow.jsonl`.
+
+### Inv 51 — a reply stores only the quoted message's seq
+A reply to a message (round 2 ruling item 10, spec/server-chat/04-round2-rulings.md) persists
+nothing but `messages.reply_to_seq` — a nullable, self-referencing column with
+`ON DELETE SET NULL`, indexed by `idx_messages_reply_to`. The quote (the target's sender, a text
+snippet cut to 300 code points, and a media summary) is derived at READ time from the target's
+LIVE row, in the same transaction as the page that returns it (`LiveChatStore.list_messages`/
+`get_messages`, one level only — a target's own quote is never resolved). Copying the quoted
+content into the reply row is forbidden: it would let a deleted message's words survive inside
+every reply to it, breaking Inv 46. Deleting or wiping the target therefore erases its words
+everywhere it was quoted, and it vanishes with the original — with no chat-visible tombstone (no
+"Original message deleted" line); a reply to a since-deleted message simply becomes an ordinary
+message. This holds for every deletion path, including a bare `DELETE FROM messages WHERE seq = ?`
+issued by an older slot process unaware of this column, because the erasure lives in the schema's
+foreign key, not in application code. `POST /messages`'s optional `replyToSeq` never raises a raw
+`IntegrityError` into a 500: `create_message` checks the target's existence inside its own
+`BEGIN IMMEDIATE` transaction and silently stores `NULL` (sending as a plain message) when it is
+missing, exactly what would have happened had the delete landed a moment later. The index is
+required, not tuning: `wipe()`'s bulk `DELETE FROM messages` must search this child column once
+per deleted row for the `SET NULL` action, and unindexed that is O(n) per row (measured 2026-09-25:
+17.6s vs 0.2s at 20,000 messages, one in three a reply). A reply's own `sender`/`device_id`/
+`by_email` are ordinary message fields — nothing new is added for identity or audit.
+
+On the client, a reply's quote is kept honest by THREE mechanisms, not one (audit F3/F9 — an
+earlier version of this doc claimed `message_deleted` was the only/sole one, which is false and
+was itself a near-miss: reading it that way is exactly what would make removing the other two
+look like safe, redundant cleanup):
+1. **Live, while connected and unlocked:** `message_deleted{seq}` (the server does not
+   additionally fan out `message_updated` for replies on delete) — `thread.ts` removes the
+   `.wx-srv-quote` element in place from every loaded bubble and pending echo that quotes `seq`,
+   and cancels the composer's pending reply if it targets `seq`.
+2. **Across a lock:** the live stream resumes from a FRESH cursor on reattach, so a
+   `message_deleted` fired while locked is never delivered. This is covered instead because the
+   server always resolves `replyTo` fresh from the live target row on every read (§(2)) — a
+   refreshed message that comes back with `replyTo: null` is patched via `patchQuote`, on the
+   same "safe patch, don't rebuild" branch as `patchReactions` (`sameExceptReactions` deliberately
+   ignores `replyTo` for the rebuild-vs-patch decision, precisely so this stays a patch, not a
+   full re-render).
+3. **A pending, not-yet-sent reply's target, across a lock:** `attach()` re-checks a pending
+   reply's target the same way it already reconciles retained history rows (a pending reply's
+   target must have been loaded when Reply was clicked, so it is always in the retained set) and
+   cancels the pending reply if the target didn't come back.
+None of these three ever re-renders a whole bubble — the same voice/video cut-off trap Inv 46's
+reactions-adjacent guard protects against — and cancelling a pending reply always clears the
+composer bar's own text/quote content, not merely its `hidden` flag (audit F8: a hidden node still
+containing the deleted target's words is not erasure).
+Quote freshness the other direction — an attachment finishing processing — is a real
+`message_updated`: `finish_attachment` also appends one for every message whose `reply_to_seq`
+points at the message that owns the finished attachment, so a quote gains its thumbnail the moment
+the target's video or photo becomes ready; the same `patchQuote` branch above patches it in place.
+*Enforced by:* `wixy_server/tests/test_livechat_reply_to.py` (schema/migration, one-level
+resolution, target-exists/missing/idempotent `create_message` behaviour, the
+`finish_attachment` cascade, and the erasure raw-byte tests — delete, wipe, and a bare
+`DELETE FROM messages` from a simulated older-process connection), `test_routes_livechat_reply_to.py`
+(the `POST /messages` wire contract, including `replyToSeq` validation — an integer >= 1,
+booleans rejected, and never a 500 even at SQLite's own integer ceiling), `test_livechat_reply_to_driftguard.py`
+(Python) and `admin-ui/tests/server/replyTo.test.ts` (TypeScript) — both asserted against the same
+shared fixture `spec/server-chat/fixtures/reply-to-cases.json` so the server's `reply_to_json` and
+the client's `replyToFromMessage` can never silently drift apart — and
+`admin-ui/tests/serverThread.test.ts`'s "reply to a message" suite (the composer bar, draft
+carry-through on a failed send, the sent bubble's quote button and its scroll-to-original paging
+including that a paging error never removes a quote genuine exhaustion would, and the in-place
+quote removal on `message_deleted`, including that a playing `<audio>` element in the reply keeps
+its identity and `currentTime`), plus its "reattach after a lock" and "in-flight data can never
+resurrect a deleted target's words" suites (mechanisms 2 and 3 above, and the three narrower races
+— a stale history page, a failed send restore, a failed delete restore — that could otherwise
+reintroduce a deleted target's words).
+Decisions: [00168](../../decisions/00168-reply-to-a-message-schema-and-erasure/decision.md).

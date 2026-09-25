@@ -159,7 +159,29 @@ CREATE TABLE IF NOT EXISTS device_grants(
   revoked_at REAL);
 """
 
-_LATEST_SCHEMA_VERSION = 9
+# Round 2 ruling item 10 §(1): a nullable self-referencing column, not a
+# mapping table — a message quotes at most one message, fixed at send and
+# never edited. The index is REQUIRED, not tuning: `DELETE FROM messages`
+# (what `wipe()` runs) must search this child column for every deleted row's
+# `ON DELETE SET NULL` action, and unindexed that is O(n) per row (measured
+# 2026-09-25: 17.6s vs 0.2s at 20,000 messages, one in three a reply).
+# SQLite has no `ADD COLUMN IF NOT EXISTS`, so the column add is guarded by
+# hand below (`_migrate`) — unlike every other statement here, which is
+# already idempotent (`CREATE ... IF NOT EXISTS`) for the same reason this
+# file's own cold-start note gives: a racing duplicate migration attempt
+# (two blue/green processes, or — as `test_v3_database_gets_pending_storage_
+# index_in_v4` proves — a `user_version` that legitimately lags a table that
+# already has the column) must be a harmless no-op, not an OperationalError.
+_SCHEMA_V10_REPLY_TO_COLUMN = (
+    "ALTER TABLE messages ADD COLUMN reply_to_seq INTEGER "
+    "REFERENCES messages(seq) ON DELETE SET NULL"
+)
+_SCHEMA_V10_REPLY_TO_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_messages_reply_to
+  ON messages(reply_to_seq) WHERE reply_to_seq IS NOT NULL;
+"""
+
+_LATEST_SCHEMA_VERSION = 10
 _UNKNOWN_GRANT_HASH = "0" * 64
 _LOGGER = logging.getLogger(__name__)
 
@@ -253,6 +275,8 @@ def _row_to_message(
     row: sqlite3.Row,
     attachments: tuple[AttachmentRow, ...],
     reactions: tuple[ReactionSummary, ...] = (),
+    *,
+    reply_to: MessageRow | None = None,
 ) -> MessageRow:
     return MessageRow(
         seq=row["seq"],
@@ -264,6 +288,8 @@ def _row_to_message(
         created_at=row["created_at"],
         attachments=attachments,
         reactions=reactions,
+        reply_to_seq=row["reply_to_seq"],
+        reply_to=reply_to,
     )
 
 
@@ -341,12 +367,37 @@ def _load_reactions_for(
     }
 
 
+def _load_reply_targets(
+    conn: sqlite3.Connection, reply_to_seqs: Sequence[int | None]
+) -> dict[int, MessageRow]:
+    """Round 2 ruling item 10 §(2): resolve reply targets at READ time, in the
+    same transaction as the messages that quote them — never a stored copy.
+    Loaded ONE LEVEL ONLY (each target's own `reply_to` is left `None`), so a
+    quote never shows the target's own quote (§(3))."""
+    unique_seqs = sorted({seq for seq in reply_to_seqs if seq is not None})
+    if not unique_seqs:
+        return {}
+    placeholders = ",".join("?" for _ in unique_seqs)
+    rows = conn.execute(
+        f"SELECT * FROM messages WHERE seq IN ({placeholders})", tuple(unique_seqs)
+    ).fetchall()
+    by_seq = {row["seq"]: row for row in rows}
+    attachments_by_seq = _load_attachments_for(conn, list(by_seq.keys()))
+    return {
+        seq: _row_to_message(row, tuple(attachments_by_seq[seq])) for seq, row in by_seq.items()
+    }
+
+
 def _load_message(conn: sqlite3.Connection, seq: int) -> MessageRow:
     row = conn.execute("SELECT * FROM messages WHERE seq = ?", (seq,)).fetchone()
     if row is None:
         raise KeyError(seq)
     attachments = _load_attachments_for(conn, [seq])[seq]
-    return _row_to_message(row, tuple(attachments), _load_reactions_for(conn, [seq])[seq])
+    reactions = _load_reactions_for(conn, [seq])[seq]
+    reply_to_seq = row["reply_to_seq"]
+    reply_targets = _load_reply_targets(conn, [reply_to_seq])
+    reply_to = reply_targets.get(reply_to_seq) if reply_to_seq is not None else None
+    return _row_to_message(row, tuple(attachments), reactions, reply_to=reply_to)
 
 
 _JOURNAL_MODE_SWITCH_RETRIES = 50
@@ -479,6 +530,16 @@ class LiveChatStore:
                     if statement.strip():
                         conn.execute(statement)
                 conn.execute("PRAGMA user_version = 9")
+                current = 9
+
+            if current < 10:
+                existing_columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
+                if "reply_to_seq" not in existing_columns:
+                    conn.execute(_SCHEMA_V10_REPLY_TO_COLUMN)
+                for statement in _SCHEMA_V10_REPLY_TO_INDEX.split(";"):
+                    if statement.strip():
+                        conn.execute(statement)
+                conn.execute("PRAGMA user_version = 10")
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
@@ -573,6 +634,7 @@ class LiveChatStore:
         by_email: str | None,
         text: str | None,
         attachment_ids: Sequence[str],
+        reply_to_seq: int | None = None,
         now: float,
     ) -> tuple[MessageRow, bool]:
         with self._write_txn() as conn:
@@ -581,6 +643,21 @@ class LiveChatStore:
             ).fetchone()
             if existing is not None:
                 return _load_message(conn, existing["seq"]), False
+
+            # §(3): resolved inside this IMMEDIATE transaction, so there is no
+            # race with a concurrent delete between the check and the insert.
+            # A target that no longer exists (deleted a moment earlier, or
+            # never existed) silently sends this as a plain message — exactly
+            # what would have happened had the delete landed a moment later —
+            # rather than ever letting the FK raise `IntegrityError`.
+            stored_reply_to_seq: int | None = None
+            if reply_to_seq is not None:
+                target_exists = (
+                    conn.execute("SELECT 1 FROM messages WHERE seq = ?", (reply_to_seq,)).fetchone()
+                    is not None
+                )
+                if target_exists:
+                    stored_reply_to_seq = reply_to_seq
 
             if attachment_ids:
                 placeholders = ",".join("?" for _ in attachment_ids)
@@ -599,9 +676,10 @@ class LiveChatStore:
                         raise UnusableAttachmentError(att_id)
 
             cursor = conn.execute(
-                "INSERT INTO messages (client_id, sender, device_id, by_email, text, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (client_id, sender, device_id, by_email, text, now),
+                "INSERT INTO messages "
+                "(client_id, sender, device_id, by_email, text, created_at, reply_to_seq) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (client_id, sender, device_id, by_email, text, now, stored_reply_to_seq),
             )
             seq = cursor.lastrowid
             assert seq is not None
@@ -634,11 +712,18 @@ class LiveChatStore:
             seqs = [row["seq"] for row in ascending_rows]
             attachments_by_seq = _load_attachments_for(conn, seqs)
             reactions_by_seq = _load_reactions_for(conn, seqs)
+            # §(2): targets are resolved by seq, including ones OUTSIDE this
+            # page — a reply near the top of a page may quote a message that
+            # paged off already.
+            reply_targets = _load_reply_targets(
+                conn, [row["reply_to_seq"] for row in ascending_rows]
+            )
             messages = [
                 _row_to_message(
                     row,
                     tuple(attachments_by_seq[row["seq"]]),
                     reactions_by_seq[row["seq"]],
+                    reply_to=reply_targets.get(row["reply_to_seq"]),
                 )
                 for row in ascending_rows
             ]
@@ -657,13 +742,21 @@ class LiveChatStore:
             by_seq = {row["seq"]: row for row in rows}
             attachments_by_seq = _load_attachments_for(conn, list(by_seq.keys()))
             reactions_by_seq = _load_reactions_for(conn, list(by_seq.keys()))
+            reply_targets = _load_reply_targets(
+                conn, [row["reply_to_seq"] for row in by_seq.values()]
+            )
             result: list[MessageRow] = []
             for seq in seqs:
                 row = by_seq.get(seq)
                 if row is None:
                     continue
                 result.append(
-                    _row_to_message(row, tuple(attachments_by_seq[seq]), reactions_by_seq[seq])
+                    _row_to_message(
+                        row,
+                        tuple(attachments_by_seq[seq]),
+                        reactions_by_seq[seq],
+                        reply_to=reply_targets.get(row["reply_to_seq"]),
+                    )
                 )
             return result
 
@@ -1159,6 +1252,19 @@ class LiveChatStore:
                     "VALUES ('message_updated', ?, ?)",
                     (message_seq, now),
                 )
+                # §(3): a quote's media summary is derived from the target's
+                # LIVE attachment state, so a reply's rendered quote must
+                # refresh too once processing finishes (e.g. it gains a
+                # thumbnail). `idx_messages_reply_to` serves this lookup.
+                reply_rows = conn.execute(
+                    "SELECT seq FROM messages WHERE reply_to_seq = ?", (message_seq,)
+                ).fetchall()
+                for reply_row in reply_rows:
+                    conn.execute(
+                        "INSERT INTO events (type, message_seq, created_at) "
+                        "VALUES ('message_updated', ?, ?)",
+                        (reply_row["seq"], now),
+                    )
 
     def get_attachment(self, att_id: str) -> AttachmentRow | None:
         with self._read_txn() as conn:
