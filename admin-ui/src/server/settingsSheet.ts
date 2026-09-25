@@ -484,6 +484,11 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   signOutButton.addEventListener("click", () => {
     const session = deps.getSession();
     if (session === null) return;
+    // §9.7 (audit F8 fix): capture what the server will actually use for its except_grant_id
+    // decision — the binding AT SEND TIME, not whatever it happens to be when the response
+    // lands. A tryBindStoredGrant exchange (or a panic/lock) racing the in-flight request must
+    // not change which grant this handler decides was spared.
+    const boundAtSend = hooks.getBoundGrantId();
     signOutButton.disabled = true;
     signOutStatus.hidden = false;
     signOutStatus.textContent = "Signing out…";
@@ -496,7 +501,7 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
         // with everyone else's — keep the local keys only when they still match what the
         // server actually spared, and forget them otherwise.
         const stored = readDeviceGrant(win);
-        const wasSpared = stored !== null && hooks.getBoundGrantId() === stored.grantId;
+        const wasSpared = boundAtSend !== null && boundAtSend === stored?.grantId;
         if (!wasSpared) {
           clearDeviceGrant(win);
           syncKeepRow();

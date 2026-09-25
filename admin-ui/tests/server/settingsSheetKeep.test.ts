@@ -789,6 +789,32 @@ describe("settings sheet — per-device lock preferences", () => {
       expect(idleInput(view).disabled).toBe(false);
     });
 
+    it("decides from the binding AT SEND TIME, not whatever it is once the response lands (audit F8)", async () => {
+      // F8: the server's except_grant_id decision is made from the token the request carried,
+      // not from anything that happens afterwards. A tryBindStoredGrant exchange racing the
+      // in-flight DELETE must not flip this handler's answer — it has to keep agreeing with
+      // what the server actually decided at request time, even if the live binding changes
+      // before the response comes back.
+      seedGrant();
+      hooks.getBoundGrantId = vi.fn(() => null); // unbound when the click fires
+      const pending = deferred<Response>();
+      fetchMock.mockReturnValueOnce(pending.promise);
+      const view = openSheet();
+
+      signOutButton(view).click();
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+      // The exchange lands mid-flight: the live session is now bound to the stored grant —
+      // too late to change what the server already decided for this in-flight request.
+      hooks.getBoundGrantId = vi.fn(() => GRANT.grantId);
+
+      pending.resolve(noContent());
+      await vi.waitFor(() => expect(signOutStatus(view).textContent).toBe("Done — the other devices are signed out."));
+
+      expect(stored(DEVICE_GRANT_KEY)).toBeNull();
+      expect(keepInput(view).checked).toBe(false);
+    });
+
     it("works when this device had no grant of its own", async () => {
       fetchMock.mockResolvedValueOnce(noContent());
       const view = openSheet();
