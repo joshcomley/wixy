@@ -7,7 +7,18 @@
 
 .wx-srv-panel {
   position: relative;
-  min-height: 60vh;
+  /* `.wx-main` (style.css) is `flex: 1` inside `.wx-shell`'s flex column, so it
+     always has a DEFINITE height — `height: 100%` here fills exactly that,
+     the same pattern the AI chat's `.wx-chat-conversation-view` already uses
+     (decisions/00110). A `min-height: 60vh` floor here (operator report,
+     2026-09-25) left `.wx-srv-panel` short of `.wx-main`'s real available
+     height on every ordinary viewport — 60vh of a 900px desktop window is
+     540px against ~786px available, and 60vh of an 870px phone is 522px
+     against ~762px — an empty gap below the whole panel (and so below the
+     composer) on both. `.wx-srv-chat-host`'s `position: absolute; inset: 0`
+     (below) fills whatever height this box ends up being, so the fix is
+     entirely here. */
+  height: 100%;
   /* R3: taps must resolve as Pointer Events without the browser's own
      double-tap-to-zoom/300ms-delay gesture handling getting in the way of
      the multi-tap detector. */
