@@ -6,7 +6,7 @@ storage, routes, and second auth gate, entirely separate from `chats.py`/`cmdcha
 `draft/media/`. Full decided design: [`spec/server-chat/00-brief.md`](../../spec/server-chat/00-brief.md).
 This manual describes the current implementation; where intent and code differ, follow the
 code and record the difference in `decisions/`.
-Numbered guarantees: [invariants.md](invariants.md) 40–47, and 50 (transcription, §15).
+Numbered guarantees: [invariants.md](invariants.md) 40–47, 49 (reactions) and 50 (transcription, §15).
 
 ## 1. The disguise (why it looks like nothing is here)
 
@@ -139,10 +139,10 @@ blue/green slot-swap overlap, since WAL + `busy_timeout=5000` handle cross-proce
 contention at the file level). Every method is **synchronous**; route handlers wrap each
 call in `anyio.to_thread.run_sync`.
 
-Tables: `messages`, `attachments`, `events`, `uploads`, `push_subscriptions`, `deleted_storage`,
-`pending_wipe_cleanup`, `pending_scrub`, and `attachment_transcripts` (a voice note's opt-in
-transcript, `ON DELETE CASCADE` from its attachment — §15). Schema migrations are serialized under
-the SQLite writer lock.
+Tables: `messages`, `attachments`, `events`, `uploads`, `push_subscriptions`, `reactions`,
+`deleted_storage`, `pending_wipe_cleanup`, `pending_scrub`, and `attachment_transcripts` (a voice
+note's opt-in transcript, `ON DELETE CASCADE` from its attachment — §15). Schema migrations are
+serialized under the SQLite writer lock.
 `deleted_storage` retains internal attachment/upload tombstones and retry status; it is not a
 message/event tombstone and is never returned to chat clients. `pending_wipe_cleanup` records a
 wipe's filesystem sweep token so a crash cannot lose cleanup of orphaned paths. Schema v4 adds the
@@ -151,7 +151,11 @@ adds a per-tombstone generation so a late requeue cannot be cleared by an older 
 an age index for completed rows. The hourly janitor prunes completed tombstones after seven days;
 pending tombstones are never pruned. Schema v6 adds singleton `pending_scrub`, written in the same
 transaction as delete/wipe. Startup imports a legacy `scrub.pending` file into this row before
-trying to remove it; an access failure retains durable scrub work and the file for retry.
+trying to remove it; an access failure retains durable scrub work and the file for retry. Schema v7
+adds `reactions` (decisions/00164), described under "Reactions" in §6. Schema v8 adds
+`attachment_transcripts` (decisions/00166/00167), described in §15; a database that reaches v8
+through a migration path older than this table's own step still gets it via
+`_ensure_attachment_transcripts_table`'s idempotent `sqlite_master` check on every connect.
 Two transaction shapes:
 - `BEGIN IMMEDIATE` for writes needing a race-safe conditional check (an attachment's lease
   claim, `create_message`'s idempotent client-id insert) — serializes concurrent claimants
@@ -298,6 +302,44 @@ Route-owned and background WAL scrubs serialize under `LiveChatStore.scrub_guard
 current marker after acquiring the guard; a route skips its scrub if the worker already cleared it.
 Media cleanup clears a pending row only if its generation is unchanged; a late requeue increments
 the generation so an older cleanup pass cannot lose it.
+
+### Reactions
+
+Full design: [`spec/server-chat/04-reactions.md`](../../spec/server-chat/04-reactions.md);
+decisions [00164](../../decisions/00164-server-chat-reactions/decision.md) (server) and
+[00165](../../decisions/00165-reactions-patch-in-place-stream-is-truth/decision.md) (client);
+guarantees: Inv 49. Not part of the AI chat (`chats.py`/`cmdchat.py`) — decisions/00110's split stands.
+
+A reaction is one row of `reactions(message_seq, sender_key, sender, emoji, by_email, created_at)`,
+primary key `(message_seq, sender_key, emoji)`. The reactor is `sender_key`, the trimmed, case-folded
+sender name (`livechat/reactions.py::reactor_key`) — the same identity as "mine" and push
+self-exclusion, not the device, so one person on two devices is one reactor. `sender` keeps the
+spelling first typed; `by_email` is audit only and never returned. The `message_seq` foreign key is
+`ON DELETE CASCADE`: with `foreign_keys=ON` on every connection, an OLDER slot process that has never
+heard of the table can still hard-delete a message during a blue/green overlap, and the cascade
+carries the reactions away (and `secure_delete` zeroes them), so delete and wipe stay erasing
+(Inv 46). `_delete_message`/`_wipe` deliberately do not mention the table.
+
+`LiveChatStore.set_reaction(seq, sender, by_email, emoji, reacted, now)` runs in one `BEGIN
+IMMEDIATE` transaction: it checks the message exists (else `MessageNotFoundError`, and an
+`IntegrityError` from the write maps to the same error), then `INSERT OR IGNORE` / `DELETE`, and
+appends a `message_updated` event **only when a row actually changed**. It returns the current message
+and whether anything changed. `list_messages`, `get_messages` and `_load_message` all load reactions
+through `_load_reactions_for` (allowlist order across emoji, oldest reactor first within one), so
+history, the send response and the stream all carry `reactions` via `message_json`.
+
+The six allowed emoji are `REACTION_EMOJIS`, each an exact code-point sequence (the heart is U+2764
+U+FE0F) compared with no normalisation. `admin-ui/src/server/reactions.ts` is the browser's copy and
+`test_livechat_reactions.py` parses it and fails on any difference.
+
+`PUT /api/admin/server/messages/{seq}/reactions` (`routes_livechat.py::set_reaction`, contract in
+[contracts.md](contracts.md)) takes `{emoji, sender, reacted}` — the DESIRED state, so a retry after a
+dropped response cannot flip it back. It validates the token, then the emoji, then the sender (the
+`POST /messages` rules), then the `seq` (0 or beyond SQLite's integer range is a 404, since the
+integer would otherwise raise `OverflowError` and become a 500). On a change it calls
+`notifier.publish()`. It dispatches no push: the message hooks fire only for a created message. The
+stream needs no change: a `message_updated` is re-read and coalesced like any other, and a message
+plus its reaction in one batch collapse into one `message` frame.
 
 ## 7. Web Push (`livechat/push.py`, `server/pushToggle.ts`)
 
@@ -698,6 +740,25 @@ playback. Replaced or deleted rows dispose their own media; lock detach pauses a
 clears their sources, and releases each `mediaPlaying` suspension. These files and signed media
 URLs remain separate from the site's `draft/media/` and public build, as documented in
 [media.md](media.md#private-live-chat-attachments).
+
+**Reactions in the thread** (`thread.ts`, `messageActions.ts`, `reactions.ts`). Under a message's
+text and attachments, `renderBubble` adds a `.wx-srv-reactions` row (hidden when empty) of chip
+buttons — glyph and count, `aria-pressed` for the reader's own, a `title` listing who reacted. Tapping
+a chip calls `toggleReaction(seq, emoji)`, which sends `PUT …/reactions` with the opposite of the
+reader's current state and the reader's display name; the menu's new emoji row (six round buttons at
+the top of the ⋯ menu and the long-press sheet, `menuitemcheckbox`, each carrying
+`data-srv-gesture-boundary` because it appears from the tap that opened the menu) calls the same
+function. Chips are **not** gesture boundaries. A tapped chip dims and disables until the answer; a
+reaction being added shows at once as a dimmed chip of one; a failure shows one line for five seconds
+and a 401 locks. The trap the design answers: when a message differs from its rendered version only in
+its reactions (`sameExceptReactions`), `renderThreadList` patches the row in place and calls the open
+menu's `update()`, instead of rebuilding the bubble — a rebuild disposes media and would cut off a voice
+note or video someone is playing on every reaction. A `PUT` response is applied only if no newer
+message state arrived while it was out (`contentRevision`) and the chat was not wiped meanwhile
+(`contentGeneration`); otherwise the stream supplies the state. A message from a server that predates
+reactions (a blue/green swap) is read as having none. Covered by `admin-ui/tests/serverThread.test.ts`,
+`serverMessageActions.test.ts`, `tests/server/{reactions,setReaction}.test.ts` and
+`e2e/tests/server-reactions.spec.ts`.
 
 Verification: `admin-ui/` runs `npm run typecheck` and `npm test`; the integrated browser
 coverage is `e2e/tests/server-media.spec.ts` together with `server-chat.spec.ts` and

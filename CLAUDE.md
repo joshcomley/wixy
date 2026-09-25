@@ -45,7 +45,7 @@ pluggable AI, HTML setup guide) is now **in progress** — see `spec/independenc
 
 | Store | Tables / purpose |
 |---|---|
-| `wixy_server/livechat/store.py` (`server.db`, schema version = `_LATEST_SCHEMA_VERSION`) | `messages`, `attachments`, `events`, `uploads`, `push_subscriptions`, `attachment_transcripts` (a voice note's opt-in transcript, `ON DELETE CASCADE`), `deleted_storage`, `pending_wipe_cleanup`, `pending_scrub`; the last three are private erasure-recovery state (ids and tokens only), not chat-visible tombstones. See [`docs/ai/livechat.md`](docs/ai/livechat.md). |
+| `wixy_server/livechat/store.py` (`server.db`, schema version = `_LATEST_SCHEMA_VERSION`) | `messages`, `attachments`, `events`, `uploads`, `push_subscriptions`, `reactions` (cascades on message delete, Inv 49), `attachment_transcripts` (a voice note's opt-in transcript, `ON DELETE CASCADE`), `deleted_storage`, `pending_wipe_cleanup`, `pending_scrub`; the last three are private erasure-recovery state (ids and tokens only), not chat-visible tombstones. See [`docs/ai/livechat.md`](docs/ai/livechat.md). |
 
 ## Dev commands
 

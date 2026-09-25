@@ -23,7 +23,7 @@ from typing import Literal
 import anyio
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from builder.jsontypes import JsonObject
 from wixy_server.background import ContainedTaskGroup
@@ -40,8 +40,10 @@ from wixy_server.livechat.models import (
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import PinVerifier
 from wixy_server.livechat.push import PushEndpointError, validate_push_endpoint
+from wixy_server.livechat.reactions import is_allowed_reaction
 from wixy_server.livechat.store import (
     LiveChatStore,
+    MessageNotFoundError,
     UnusableAttachmentError,
 )
 from wixy_server.livechat.tokens import (
@@ -63,6 +65,27 @@ _NOTIFIER_WAIT_S = 2.0
 _DELETE_SCRUB_DEADLINE_S = 10.0
 _ATTACHMENT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _has_unpaired_surrogate(text: str) -> bool:
+    """A lone UTF-16 surrogate (U+D800-U+DFFF) is a valid Python `str` code point but has no
+    UTF-8 encoding, so it crashes a SQLite bind (or `json.dumps`) with an uncaught
+    `UnicodeEncodeError` — a bare 500 — the instant it reaches one. A normal client can never
+    type one, but `json.loads` happily decodes a `\\uXXXX` escape for one out of any request
+    body, so the check has to run before the value goes anywhere near the store (reviewer
+    H1: reproduced live against both `POST /messages` and `PUT .../reactions`)."""
+    return any(0xD800 <= ord(ch) <= 0xDFFF for ch in text)
+
+
+def _valid_sender(sender: str) -> bool:
+    """§5.3's sender rule (1-32 characters, trimmed, no control characters), plus the
+    surrogate check above. Shared by every route that accepts a display name:
+    `send_message`, `set_reaction`, and `put_push_subscription`."""
+    return (
+        1 <= len(sender) <= 32
+        and _CONTROL_CHAR_RE.search(sender) is None
+        and not _has_unpaired_surrogate(sender)
+    )
 
 
 def _invalid(detail: str) -> JSONResponse:
@@ -261,6 +284,17 @@ class WipeChatIn(BaseModel):
     confirm: Literal["WIPE"]
 
 
+class SetReactionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    emoji: str
+    sender: str
+    reacted: StrictBool
+
+
+_SQLITE_MAX_INTEGER = 2**63 - 1
+
+
 @router.post("/messages", response_model=None)
 async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
     auth = require_server_token(request)
@@ -270,7 +304,7 @@ async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
     if not (8 <= len(body.deviceId) <= 64):
         return _invalid("deviceId must be 8-64 characters")
     sender = body.sender.strip()
-    if not (1 <= len(sender) <= 32) or _CONTROL_CHAR_RE.search(sender):
+    if not _valid_sender(sender):
         return _invalid("sender must be 1-32 characters with no control characters")
     text = body.text
     if text is not None and len(text) > 4000:
@@ -321,6 +355,46 @@ async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
         status_code=201 if created else 200,
         content={"message": message_json(message, signer)},
     )
+
+
+@router.put("/messages/{seq}/reactions", response_model=None)
+async def set_reaction(seq: int, body: SetReactionIn, request: Request) -> JSONResponse:
+    """Set one reactor's emoji on a message to present or absent (desired state, not a
+    toggle, so a retry after a dropped response cannot flip it back). Reuses the
+    `message_updated` event; a request that changes nothing writes no event."""
+    auth = require_server_token(request)
+
+    if not is_allowed_reaction(body.emoji):
+        return _invalid("emoji is not one of the allowed reactions")
+    sender = body.sender.strip()
+    if not _valid_sender(sender):
+        return _invalid("sender must be 1-32 characters with no control characters")
+    if not (0 < seq <= _SQLITE_MAX_INTEGER):
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+
+    store: LiveChatStore = request.app.state.livechat_store
+    notifier: LiveChatNotifier = request.app.state.livechat_notifier
+    secret: bytes = request.app.state.livechat_secret
+
+    def _set() -> tuple[MessageRow, bool]:
+        return store.set_reaction(
+            seq=seq,
+            sender=sender,
+            by_email=auth.email or None,
+            emoji=body.emoji,
+            reacted=body.reacted,
+            now=time.time(),
+        )
+
+    try:
+        message, changed = await anyio.to_thread.run_sync(_set)
+    except MessageNotFoundError:
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+
+    if changed:
+        notifier.publish()
+    signer = MediaSigner.for_auth(secret, auth)
+    return JSONResponse(status_code=200, content={"message": message_json(message, signer)})
 
 
 @router.delete("/messages/{seq}", response_model=None)
@@ -632,7 +706,7 @@ async def put_push_subscription(
 ) -> Response:
     require_server_token(request)
     sender = body.sender.strip()
-    if not (1 <= len(sender) <= 32) or _CONTROL_CHAR_RE.search(sender):
+    if not _valid_sender(sender):
         return _invalid("sender must be 1-32 characters with no control characters")
     try:
         validate_push_endpoint(body.subscription.endpoint)

@@ -29,12 +29,20 @@ export interface Attachment {
   readonly transcript?: AttachmentTranscript | null;
 }
 
+/** One emoji on one message: who reacted, oldest first (spec/server-chat/04-reactions.md). */
+export interface Reaction {
+  readonly emoji: string;
+  readonly count: number;
+  readonly senders: readonly string[];
+}
+
 export interface Message {
   readonly seq: number;
   readonly clientId: string;
   readonly sender: string;
   readonly text: string | null;
   readonly attachments: readonly Attachment[];
+  readonly reactions: readonly Reaction[];
   readonly createdAt: number;
 }
 
@@ -119,6 +127,46 @@ export async function sendMessage(
     return { ok: false, kind: "rejected", status: response.status };
   }
   return { ok: false, kind: "unavailable" };
+}
+
+/** The server refused or could not apply a reaction (a 401 never gets here: `serverFetch`
+ * turns it into a lock). `status` 404 means the message is gone. */
+export class ReactionRequestError extends Error {
+  readonly status: number;
+
+  constructor(status: number) {
+    super(`Couldn't update the reaction (${status}).`);
+    this.name = "ReactionRequestError";
+    this.status = status;
+  }
+}
+
+export interface SetReactionInput {
+  readonly emoji: string;
+  readonly sender: string;
+  /** The DESIRED state, not a toggle: a retry after a dropped response can't flip it back. */
+  readonly reacted: boolean;
+}
+
+/** Sets one reactor's emoji on one message and returns the message as the server now
+ * holds it. */
+export async function setReaction(
+  session: ServerSession,
+  seq: number,
+  input: SetReactionInput,
+): Promise<Message> {
+  const response = await serverFetch(
+    `/messages/${encodeURIComponent(String(seq))}/reactions`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    },
+    session,
+  );
+  if (!response.ok) throw new ReactionRequestError(response.status);
+  const body = (await response.json()) as { message: Message };
+  return body.message;
 }
 
 const DELETE_UNKNOWN_RETRY_MS = [1_000, 2_000, 4_000] as const;
