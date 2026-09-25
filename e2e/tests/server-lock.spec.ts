@@ -530,7 +530,7 @@ for (const profile of LAYOUT_PROFILES) {
       await expect(box).toBeVisible();
       await expect(box).toHaveAccessibleName(AUTO_LOCK_LABEL);
 
-      const rowBox = await page.locator(".wx-srv-sheet-idle").boundingBox();
+      const rowBox = await page.locator(".wx-srv-sheet-idle-row").boundingBox();
       const sheetBox = await page.locator(".wx-srv-sheet").boundingBox();
       if (rowBox === null || sheetBox === null) throw new Error("sheet or row not laid out");
       expect(rowBox.height).toBeGreaterThanOrEqual(44);
@@ -538,7 +538,7 @@ for (const profile of LAYOUT_PROFILES) {
       expect(rowBox.x).toBeGreaterThanOrEqual(sheetBox.x - 0.5);
       expect(rowBox.x + rowBox.width).toBeLessThanOrEqual(sheetBox.x + sheetBox.width + 0.5);
       // The text is never clipped: its content fits its own box.
-      const text = page.locator(".wx-srv-sheet-idle-text");
+      const text = page.locator(".wx-srv-sheet-idle-row .wx-srv-sheet-idle-text");
       await expect(text).toHaveText(AUTO_LOCK_LABEL);
       expect(await text.evaluate((el) => el.scrollWidth > el.clientWidth + 1)).toBe(false);
       // The sheet adds no sideways page scroll.

@@ -112,7 +112,7 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   // never sent anywhere). The whole row is the <label>, so the tap target is
   // the full row width and at least 44px tall (chat.css).
   const idleLabel = documentRef.createElement("label");
-  idleLabel.className = "wx-srv-sheet-idle";
+  idleLabel.className = "wx-srv-sheet-idle wx-srv-sheet-idle-row";
   const idleInput = documentRef.createElement("input");
   idleInput.type = "checkbox";
   idleInput.className = "wx-srv-sheet-idle-input";

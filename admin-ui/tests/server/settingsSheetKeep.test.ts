@@ -190,7 +190,7 @@ describe("settings sheet — per-device lock preferences", () => {
   const keepPadHost = (v: View) => q<HTMLElement>(v.element, ".wx-srv-sheet-keep-pad");
   const padMessage = (v: View) => q<HTMLElement>(keepPadHost(v), ".wx-srv-pinpad-message");
   const idleInput = (v: View) => q<HTMLInputElement>(v.element, 'input[type="checkbox"]');
-  const idleLabel = (v: View) => q<HTMLLabelElement>(v.element, ".wx-srv-sheet-idle:not(.wx-srv-sheet-keep-row):not(.wx-srv-sheet-locktab-row):not(.wx-srv-sheet-lockscreen-row)");
+  const idleLabel = (v: View) => q<HTMLLabelElement>(v.element, ".wx-srv-sheet-idle-row");
   const idleNote = (v: View) => q<HTMLElement>(v.element, ".wx-srv-sheet-idle-note");
   const signOutButton = (v: View) => q<HTMLButtonElement>(v.element, ".wx-srv-sheet-signout");
   const signOutStatus = (v: View) => q<HTMLElement>(v.element, ".wx-srv-sheet-signout-status");
