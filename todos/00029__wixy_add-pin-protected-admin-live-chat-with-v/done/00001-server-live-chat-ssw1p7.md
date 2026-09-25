@@ -1540,3 +1540,40 @@ fixed same-session.)
   ZERO livechat files (verified 21:37 UTC); nothing is live.
 - **Orchestrator handover:** this seat hands over at 59% context. The successor must read
   `handover/` (newest by NAME) in the primary checkout, and keep the edit-freeze rule.
+
+## Update 2026-09-24 ~23:05 UTC (Orchestrator `bf07245f`) — DELIVERED and LIVE; follow-ups running
+
+- **DELIVERED.** PR #235 (feature -> main) squash-merged as `6ca0d506` (head-pinned to `2d9d2cc4`, all 6
+  checks green, R14a body verified: exactly ONE `Release-note:` line, the Server-page sentence).
+  Slots swapped blue->green; `ca.cinnamons.uk/api/version` = `6ca0d506`, count 241, Wixy healthy on :9380.
+- **Merged with audit round 4 still BLOCKED (C0/H0/M1/L3) — on the operator's explicit, human-origin order**
+  (queued message in the DM's JSONL, 22:44:28Z): *"No, it's not blocked. Merge immediately and fix afterwards.
+  ... Merge, merge, merge, merge now."* Round 4 = 13 prior findings all verified fixed; NEW: **F14 (medium)**
+  `/unlock` lacks a cross-site defence (any page the admin visits can fire blind PIN guesses at cmd's verify -
+  burns attempts / lockout, cannot read the result); **F15** lockout copy hard-codes "2 minutes" and ignores
+  `retryAfterS`; **F16** wipe-outcome-unknown latch disables "Delete all messages" until panel reload;
+  **F17** a failed voice-note resend can never be discarded (mic stays disabled). Relation `e971ce44` stays
+  OPEN for round 5 after the fixes land. Only C0/H0/M0/L0 is merge-clean: the fixes are OWED, not optional.
+- **The Orchestrator briefly overrode this** (hold on #235) before finding the operator's message; the hold
+  was withdrawn at once and cost ~2 minutes. Lesson: before countermanding an "operator said X" relayed by
+  the DM, read the DM's raw JSONL for `origin.kind == "human"` queued_command entries (peer_check hides them).
+- **Live verification done so far (no PIN needed):** no-token calls to `/api/admin/server/{messages,usage,
+  stream,push/config}` = 401 `{"error":"locked"}`; `admin.js` bundle (452 KB) contains the Server chat
+  (delete-all, attemptsLeft, push toggle); pillow-heif 1.7.0 + ffmpeg/ffprobe present in the green venv;
+  and the **operator's own real session is in the Wixy log**: `POST /api/admin/server/unlock` 200, messages 200,
+  stream 200, `POST /messages` 201 x2, push config/usage 200, `PUT /push/subscriptions/<id>` 204. So a REAL
+  PIN unlock, send and Android push opt-in worked on production. NOT yet verified by us: two-device exchange,
+  photo/video/voice on production, panic button, 10 s idle fade, double-tap lock. One unexplained log line:
+  `GET /static/admin/server-sw.js` 404 (the client registers `/admin/server-sw.js`, which is 200) - low, watch.
+- **Operator decisions today:** documentation is NOT a gate ("docs can happen after we go live", 22:37Z);
+  then "floor is yours": fix everything (F14-F17), THEN add a checkbox **"Extend auto-lock to 1 minute"**,
+  THEN he has visual changes. All builders Claude (sonnet-5/xhigh): `e733e688` F14-F17 (bs12),
+  `0e5ced21` docs + the flaky-test fix (bs11; the test seeded 1970 timestamps the janitor sweeps),
+  `99c6d3ef` auto-lock checkbox (bs13), reviewer `4d1c8a10`. Merge order to avoid churn on the committed
+  `wixy_server/static/admin/admin.js` bundle: security fix first, then auto-lock, then docs; each rebuilds
+  the bundle after merging the moved base. Every post-delivery commit that touches Server chat carries
+  exactly `Release-note: General bug fixes and improvements.` (R14a). Workspace `delivery_state` still reads
+  `building` (merged by hand via gh, workspace merge endpoint not called) - deliberate while follow-ups run.
+- **Ops notes:** Cloudflare 403s Python's default `urllib` User-Agent on ca.cinnamons.uk (curl and a browser
+  UA are fine) - matters for any watcher script. Old "Sol"/"Luna" Codex seats auto-revive on quota recovery
+  (known fleet gap, tell the operator once things settle).
