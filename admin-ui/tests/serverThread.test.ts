@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HistoryPage, Message, SendMessageResult } from "../src/server/api/messages";
-import { ServerErasureOutcomeUnknownError } from "../src/server/api/http";
+import { ServerErasureOutcomeUnknownError, ServerLockedError } from "../src/server/api/http";
 import type { ServerIdentity } from "../src/server/identity";
 import { mountServerSettingsSheet } from "../src/server/settingsSheet";
 import { mountServerThread } from "../src/server/thread";
@@ -65,9 +65,9 @@ function fakeHooks(): LockHooks {
   };
 }
 
-function fakeWindow(): Window {
+function fakeWindow(randomUUID: () => string = () => "generated-uuid-1234"): Window {
   return {
-    crypto: { randomUUID: () => "generated-uuid-1234" },
+    crypto: { randomUUID },
     localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {}, clear: () => {} },
     setTimeout: globalThis.setTimeout.bind(globalThis),
     clearTimeout: globalThis.clearTimeout.bind(globalThis),
@@ -435,12 +435,116 @@ describe("mountServerThread", () => {
       await flush();
     }
 
-    async function mountView() {
+    // An INCREMENTING UUID (L7): with the shared constant, "same clientId" assertions were
+    // vacuous - a mutant that minted a fresh clientId on every retry survived.
+    async function mountView(hooks: LockHooks = fakeHooks()) {
       getHistory.mockResolvedValue(emptyHistory());
-      const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      let minted = 0;
+      const view = mountServerThread({
+        identity: fakeIdentity("Josh"),
+        hooks,
+        win: fakeWindow(() => `client-uuid-${++minted}`),
+        onSettings: vi.fn(),
+      });
       await view.attach(SESSION);
       return view;
     }
+    const sentInputs = () =>
+      sendMessage.mock.calls.map((call) => call[1] as { clientId: string; attachmentIds: string[] });
+
+    // M1 (reviewer): the 401 path is the property that matters most - a dead token must
+    // lock the chat and KEEP the recording, which the next unlock resends automatically.
+    // It was only covered at the sendMessage level, so a refactor that dropped lockNow or
+    // discarded the note on ServerLockedError still passed every test.
+    describe("a 401 while a voice note is going out (M1)", () => {
+      const okSend = (seq: number): SendMessageResult => ({
+        ok: true,
+        message: fakeMessage({ seq, clientId: "client-uuid-1", text: null }),
+      });
+
+      it("on the SEND: locks, keeps the note, and the next unlock resends it with the same clientId and attachment", async () => {
+        uploadServerAttachment.mockResolvedValue(voiceAttachment());
+        sendMessage.mockRejectedValueOnce(new ServerLockedError()).mockResolvedValueOnce(okSend(11));
+        const hooks = fakeHooks();
+        const view = await mountView(hooks);
+        await recordVoiceNote(view);
+
+        expect(hooks.lockNow).toHaveBeenCalledOnce();
+        expect(hooks.lockNow).toHaveBeenCalledWith("unauthorized");
+        // Kept, not discarded: no discard message, no second recording while it is pending.
+        expect(composerError(view)).toBe("");
+        expect(mic(view)?.disabled).toBe(true);
+
+        view.detach(); // the lock
+        await view.attach({ token: "fresh", expiresAt: 9_999_999_999 }); // the next unlock
+        await flush();
+        await flush();
+
+        const inputs = sentInputs();
+        expect(inputs).toHaveLength(2);
+        expect(inputs[1]?.clientId).toBe(inputs[0]?.clientId);
+        expect(inputs[0]?.attachmentIds).toEqual(["voice-id"]);
+        expect(inputs[1]?.attachmentIds).toEqual(["voice-id"]);
+        expect(uploadServerAttachment).toHaveBeenCalledOnce(); // not re-uploaded
+        expect(sendMessage.mock.calls[1]?.[0]).toMatchObject({ token: "fresh" });
+        expect(mic(view)?.disabled).toBe(false);
+        expect(view.element.querySelectorAll(".wx-srv-bubble-mine")).toHaveLength(1);
+        view.teardown();
+      });
+
+      it("on the UPLOAD: locks, keeps the recording, and the next unlock uploads and sends it", async () => {
+        uploadServerAttachment
+          .mockRejectedValueOnce(new ServerLockedError())
+          .mockResolvedValueOnce(voiceAttachment());
+        sendMessage.mockResolvedValueOnce(okSend(12));
+        const hooks = fakeHooks();
+        const view = await mountView(hooks);
+        await recordVoiceNote(view);
+
+        expect(hooks.lockNow).toHaveBeenCalledWith("unauthorized");
+        expect(composerError(view)).toBe("");
+        expect(sendMessage).not.toHaveBeenCalled();
+
+        view.detach();
+        await view.attach({ token: "fresh", expiresAt: 9_999_999_999 });
+        await flush();
+        await flush();
+
+        expect(uploadServerAttachment).toHaveBeenCalledTimes(2); // the same recording, uploaded afresh
+        expect(sentInputs()).toHaveLength(1);
+        expect(mic(view)?.disabled).toBe(false);
+        view.teardown();
+      });
+
+      it("on a RETRY after a transient failure: locks and still keeps the note", async () => {
+        uploadServerAttachment.mockResolvedValue(voiceAttachment());
+        sendMessage
+          .mockResolvedValueOnce({ ok: false, kind: "unavailable" } satisfies SendMessageResult)
+          .mockRejectedValueOnce(new ServerLockedError())
+          .mockResolvedValueOnce(okSend(13));
+        const hooks = fakeHooks();
+        const view = await mountView(hooks);
+        await recordVoiceNote(view);
+        expect(retry(view)?.hidden).toBe(false);
+
+        retry(view)?.click();
+        await flush();
+        await flush();
+        expect(hooks.lockNow).toHaveBeenCalledWith("unauthorized");
+        expect(composerError(view)).toBe("");
+
+        view.detach();
+        await view.attach({ token: "fresh", expiresAt: 9_999_999_999 });
+        await flush();
+        await flush();
+
+        const inputs = sentInputs();
+        expect(inputs).toHaveLength(3);
+        expect(new Set(inputs.map((input) => input.clientId)).size).toBe(1);
+        expect(uploadServerAttachment).toHaveBeenCalledOnce();
+        view.teardown();
+      });
+    });
 
     it("offers Discard next to Retry after a transient failure, and discarding frees the mic for a new note", async () => {
       uploadServerAttachment.mockResolvedValue(voiceAttachment());
