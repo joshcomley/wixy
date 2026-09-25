@@ -753,7 +753,8 @@ through one joined `SELECT` (`_SELECT_ATTACHMENT`), so `AttachmentRow.transcript
 missing. `begin_transcript` decides start/pending/done/gone in one write transaction and announces a
 new `pending` with `message_updated`; `finish_transcript` is an `UPDATE` whose row count says whether
 the row still exists (a result after delete/wipe is discarded, no event); `fail_stale_pending_
-transcripts` runs at startup. The `failure` code (`unavailable`, `warming`, `timeout`, `rejected`,
+transcripts` runs at startup, and a job cancelled by shutdown records itself `failed` (`interrupted`)
+under a shield on its way out. The `failure` code (`unavailable`, `warming`, `timeout`, `rejected`,
 `invalid_response`, `media_missing`, `too_long`, `interrupted`, `error`) is server-side only.
 
 **The route and job (`routes_livechat.py`, `livechat/transcription.py`).**

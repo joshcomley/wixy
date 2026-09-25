@@ -109,8 +109,10 @@ cap (15 minutes, R11), not a new number.
 
 On completion the job sets `done` or `failed` and appends the **existing** `message_updated` event.
 `Attachment` gains `transcript: null | {status, text?}`, so both devices render from the stream.
-At startup, stale `pending` rows (a job that died with its process) become `failed`, each announced
-with a `message_updated`, so the owner can retry. `GET /usage` gains `transcriptionAvailable`.
+A job cancelled by shutdown (a deploy, a slot swap stopping the old process) records itself as
+`failed` (`interrupted`) under a shield on its way out; and at startup any stale `pending` row (a job
+that died with its process without getting to do that) becomes `failed`, each announced with a
+`message_updated`, so the owner can retry. `GET /usage` gains `transcriptionAvailable`.
 
 ## 7. The UI
 

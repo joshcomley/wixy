@@ -27,9 +27,12 @@
    still being `pending`: at startup the new process fails stale `pending` rows, but during a
    blue/green overlap the *old* process's job may still be alive and finish; its (valid) result must
    land.
-4. **Startup fails stale `pending` rows and announces each one.** A `pending` row in a process that
-   has only just started belongs to a job that died with its process. Without the `message_updated`
-   event a reconnecting client would keep a spinner up forever.
+4. **A stopped job marks itself failed; startup fails any stale `pending` row and announces each one.**
+   A job cancelled by shutdown (a deploy, a slot swap stopping the old process) records `failed`
+   (`interrupted`) under a cancel shield before the cancellation propagates, so no spinner outlives
+   its process even when no restart follows. A `pending` row in a process that has only just started
+   belongs to a job that died without doing that (a hard kill); without the `message_updated` event a
+   reconnecting client would keep a spinner up forever.
 5. **One transcription in flight globally, single-flight per attachment, 6 new jobs a minute per
    identity, in memory.** The box's GPU/CPU is shared with dictation. Extra jobs wait (their rows
    stay `pending`) rather than being refused, because the queue is bounded by the rate limit. The
