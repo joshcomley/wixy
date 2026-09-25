@@ -13,7 +13,10 @@ that device until someone locks it **on purpose**.
 
 - **Suppressed while it is on — every automatic lock:**
   - the idle fade: 10 s, or 60 s with "Extend auto-lock to 1 minute";
-  - the tab or app going to the background (`visibilitychange` → hidden);
+  - ~~the tab or app going to the background (`visibilitychange` → hidden)~~ — **amended
+    by §8 (2026-09-25):** going to the background is now governed by the two per-device
+    checkboxes "Lock when I change tab" and "Lock when I lock my screen" in both modes,
+    and a lock they cause pauses the grant;
   - navigating away from `/admin/server`;
   - a page reload or a discarded tab;
   - unlock-token expiry: the token is renewed silently, with no PIN.
@@ -186,6 +189,81 @@ signed in can open the chat without the PIN. That is exactly what the operator a
 his chosen device. A script running in the admin origin could read the grant; that is the
 same exposure class as reading an unlocked chat's DOM. Panic and multi-tap still close the
 chat instantly and keep it closed across reloads until the PIN is entered.
+
+## 8. "Lock when I change tab" / "Lock when I lock my screen" (operator request, 2026-09-25)
+
+Operator request (verbatim): "We need checkboxes for: - Lock when I change tab - Lock when I lock my screen."
+
+(1) PLATFORM — confirmed, with one real exception
+- No standard, universally supported API tells a tab or app switch from a screen lock. Both
+  fire the same `visibilitychange → hidden`. On desktop, a Windows screen lock may fire
+  nothing at all.
+- The one real technique is the **Idle Detection API** (`IdleDetector`). It reports
+  `screenState: "locked" | "unlocked"` in Chrome/Edge on desktop and Android (not Safari,
+  not Firefox). It needs a one-time permission (`IdleDetector.requestPermission()`, from a
+  tap) and `threshold >= 60000` ms; the threshold only affects `userState`, and we use
+  `screenState` only.
+- Its event timing while a page is backgrounded on Android is **not proven**, so it must be
+  measured on the operator's phone before we claim it works (see "Live check").
+
+(2) SEMANTICS — two independent per-device checkboxes, always shown, both modes
+- Both live in the settings sheet: **"Lock when I change tab"** and **"Lock when I lock my
+  screen"**.
+- **Default ON**, which is today's behaviour: fail-closed for a disguised chat. The operator
+  unticks what he doesn't want.
+- Keys: `wx-srv-lock-on-tab` and `wx-srv-lock-on-screen`, set to `"0"` meaning off.
+  Absent or unreadable → ON.
+- **They govern the `hidden` trigger in BOTH modes.** This AMENDS 03 §1: permanent unlock no
+  longer blanket-suppresses "tab or app going to the background". It still suppresses idle,
+  route-away, reload and token expiry.
+- **A checkbox-caused lock while a device grant is active PAUSES the grant**, exactly like a
+  deliberate lock, so the PIN is needed on return. Otherwise the grant would silently
+  re-mint on return and the lock would mean nothing.
+- The R7 exemptions still apply: the file picker being open, or the mic-permission prompt,
+  never lock.
+
+Decision rule (a pure function in lockModel, inputs `lockOnTab`, `lockOnScreen`,
+`screenEvidence`):
+- **Both ON:** `hidden` → lock at once, as today.
+- **Both OFF:** `hidden` → never lock. The idle timer still applies unless permanent unlock
+  is on.
+- **The two differ:** `hidden` → lock at once and **fail closed** (a "shield"). On return
+  (`visible`), keep the decoy up for up to **500 ms** so queued IdleDetector events can
+  arrive. Then the cause is:
+  - "screen lock" if a `screenState = "locked"` was observed between the hide and now;
+  - otherwise "tab change".
+
+  If the setting for that cause is OFF, restore silently: re-attach the detached view with
+  the in-memory session, or re-mint via the grant. If it is ON, stay locked (and pause the
+  grant if one is active).
+- An IdleDetector **`screenState → "locked"` event while visible** (desktop Win+L, which may
+  not fire `hidden` at all) locks immediately when "Lock when I lock my screen" is ON.
+
+Permission and availability:
+- The IdleDetector permission is requested only when the user makes the two settings
+  **differ**, from that tap.
+- **Unsupported browser, or permission denied:** the screen checkbox is disabled and follows
+  the tab checkbox. Show the plain line "This browser can't tell a screen lock from a tab
+  switch, so both follow 'Lock when I change tab'." Never pretend the distinction works.
+
+Tests:
+- vitest with a fake IdleDetector and a fake clock:
+  - every setting combination × cause;
+  - the shield holds for 500 ms, then restores or stays locked;
+  - a checkbox lock pauses an active grant;
+  - an unsupported or denied detector gives the mirrored behaviour;
+  - a screen-lock event while visible locks.
+- e2e: covers visibility plus a stubbed `IdleDetector` via `addInitScript`.
+
+Live check (required before shipping the two-checkbox distinction):
+- On the operator's Android phone, log the order and timing of `visibilitychange` and
+  IdleDetector events for:
+  1. a power-button lock and unlock;
+  2. an app switch;
+  3. a tab switch.
+- If the screen-lock evidence is not observed within the 500 ms window on return, ship the
+  mirrored (combined) mode on that platform and tell the operator plainly that his phone
+  can't tell the two apart.
 
 ## 7. Release notes
 
