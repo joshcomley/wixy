@@ -1,0 +1,4 @@
+
+[notice] A new release of pip is available: 25.3 -> 26.2.1
+[notice] To update, run: C:\Users\josh\AppData\Local\Python\pythoncore-3.14-64\python.exe -m pip install --upgrade pip
+pip exit 0

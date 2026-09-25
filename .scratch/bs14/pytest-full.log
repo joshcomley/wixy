@@ -1,0 +1,104 @@
+C:\Users\josh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\cupy\_environment.py:286: UserWarning: CUDA path could not be detected. Set CUDA_PATH environment variable if CuPy fails to load.
+  warnings.warn(
+============================= test session starts =============================
+platform win32 -- Python 3.14.3, pytest-9.1.1, pluggy-1.6.0
+Using --randomly-seed=2337583822
+rootdir: D:\Servers\Cmd\Storage\clones\wixy__worktrees\00029__wixy_add-pin-protected-admin-live-chat-with-v__bs14\wixy
+configfile: pyproject.toml
+testpaths: builder/tests, wixy_server/tests, guide/tests
+plugins: anyio-4.14.2, asyncio-1.4.0, cov-7.1.0, instafail-0.5.0, mock-3.15.1, randomly-5.0.0, timeout-2.4.0, xdist-3.8.0, zarr-3.2.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+created: 4/4 workers
+C:\Users\josh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\cupy\_environment.py:286: UserWarning: CUDA path could not be detected. Set CUDA_PATH environment variable if CuPy fails to load.
+  warnings.warn(
+C:\Users\josh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\cupy\_environment.py:286: UserWarning: CUDA path could not be detected. Set CUDA_PATH environment variable if CuPy fails to load.
+  warnings.warn(
+C:\Users\josh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\cupy\_environment.py:286: UserWarning: CUDA path could not be detected. Set CUDA_PATH environment variable if CuPy fails to load.
+  warnings.warn(
+C:\Users\josh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\cupy\_environment.py:286: UserWarning: CUDA path could not be detected. Set CUDA_PATH environment variable if CuPy fails to load.
+  warnings.warn(
+4 workers [1767 items]
+
+........................................................................ [  4%]
+........................................................................ [  8%]
+........................................................................ [ 12%]
+........................................................................ [ 16%]
+........................................................................ [ 20%]
+........................................................................ [ 24%]
+........................................................................ [ 28%]
+........................................................................ [ 32%]
+........................................................................ [ 36%]
+........................................................................ [ 40%]
+........................................................................ [ 44%]
+........................................................................ [ 48%]
+........................................................................ [ 52%]
+........................................................................ [ 57%]
+.............................................................F.......... [ 61%]
+........................................................................ [ 65%]
+........................................................................ [ 69%]
+........................................................................ [ 73%]
+........................................................................ [ 77%]
+........................................................................ [ 81%]
+........................................................................ [ 85%]
+........................................................................ [ 89%]
+........................................................................ [ 93%]
+........................................................................ [ 97%]
+.......................................                                  [100%]
+================================== FAILURES ===================================
+________ TestSendHistoryUsage.test_attachment_count_boundaries[10-201] ________
+[gw0] win32 -- Python 3.14.3 C:\Users\josh\AppData\Local\Python\pythoncore-3.14-64\python.exe
+
+self = <wixy_server.tests.test_routes_livechat.TestSendHistoryUsage object at 0x000001920543A410>
+attachment_count = 10, expected_status = 201
+storage_root = WindowsPath('C:/Users/josh/AppData/Local/Temp/pytest-of-SYSTEM/pytest-463/popen-gw0/test_attachment_count_boundari0/storage')
+wixy_repo_root = WindowsPath('C:/Users/josh/AppData/Local/Temp/pytest-of-SYSTEM/pytest-463/popen-gw0/test_attachment_count_boundari0/wixy-repo')
+pin_verifier = <wixy_server.livechat.pinclient.CmdPinVerifier object at 0x0000019209B0B1C0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001920AEC7690>
+
+    @pytest.mark.parametrize(("attachment_count", "expected_status"), [(10, 201), (11, 422)])
+    def test_attachment_count_boundaries(
+        self,
+        attachment_count: int,
+        expected_status: int,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(livechat_media_queue, "resolve_binaries", lambda *_args: None)
+        client, headers = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            store: LiveChatStore = client.app.state.livechat_store  # type: ignore[attr-defined]
+            attachment_ids = [f"{index + 1:032x}" for index in range(attachment_count)]
+            for index, attachment_id in enumerate(attachment_ids):
+                store.create_attachment(att_id=attachment_id, kind="photo", now=float(index))
+            response = client.post(
+                "/api/admin/server/messages",
+                json={
+                    "clientId": "attachment-boundary-client",
+                    "sender": "Josh",
+                    "deviceId": "device-aaaaaaaa",
+                    "text": "attachments",
+                    "attachmentIds": attachment_ids,
+                },
+                headers=headers,
+            )
+>           assert response.status_code == expected_status, response.text
+E           AssertionError: {"error":"invalid","detail":"attachment 00000000000000000000000000000001 is unknown, already used, or failed"}
+E           assert 422 == 201
+E            +  where 422 = <Response [422 Unprocessable Entity]>.status_code
+
+wixy_server\tests\test_routes_livechat.py:637: AssertionError
+============================== warnings summary ===============================
+C:\Users\josh\AppData\Roaming\Python\Python314\site-packages\fastapi\testclient.py:1
+C:\Users\josh\AppData\Roaming\Python\Python314\site-packages\fastapi\testclient.py:1
+C:\Users\josh\AppData\Roaming\Python\Python314\site-packages\fastapi\testclient.py:1
+C:\Users\josh\AppData\Roaming\Python\Python314\site-packages\fastapi\testclient.py:1
+  C:\Users\josh\AppData\Roaming\Python\Python314\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED wixy_server/tests/test_routes_livechat.py::TestSendHistoryUsage::test_attachment_count_boundaries[10-201]
+=========== 1 failed, 1766 passed, 4 warnings in 586.07s (0:09:46) ============
+pytest exit 1

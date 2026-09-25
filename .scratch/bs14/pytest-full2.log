@@ -1,0 +1,57 @@
+C:\Users\josh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\cupy\_environment.py:286: UserWarning: CUDA path could not be detected. Set CUDA_PATH environment variable if CuPy fails to load.
+  warnings.warn(
+============================= test session starts =============================
+platform win32 -- Python 3.14.3, pytest-9.1.1, pluggy-1.6.0
+Using --randomly-seed=1404308233
+rootdir: D:\Servers\Cmd\Storage\clones\wixy__worktrees\00029__wixy_add-pin-protected-admin-live-chat-with-v__bs14\wixy
+configfile: pyproject.toml
+testpaths: builder/tests, wixy_server/tests, guide/tests
+plugins: anyio-4.14.2, asyncio-1.4.0, cov-7.1.0, instafail-0.5.0, mock-3.15.1, randomly-5.0.0, timeout-2.4.0, xdist-3.8.0, zarr-3.2.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+created: 4/4 workers
+C:\Users\josh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\cupy\_environment.py:286: UserWarning: CUDA path could not be detected. Set CUDA_PATH environment variable if CuPy fails to load.
+  warnings.warn(
+C:\Users\josh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\cupy\_environment.py:286: UserWarning: CUDA path could not be detected. Set CUDA_PATH environment variable if CuPy fails to load.
+  warnings.warn(
+C:\Users\josh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\cupy\_environment.py:286: UserWarning: CUDA path could not be detected. Set CUDA_PATH environment variable if CuPy fails to load.
+  warnings.warn(
+C:\Users\josh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\cupy\_environment.py:286: UserWarning: CUDA path could not be detected. Set CUDA_PATH environment variable if CuPy fails to load.
+  warnings.warn(
+4 workers [1767 items]
+
+........................................................................ [  4%]
+........................................................................ [  8%]
+........................................................................ [ 12%]
+........................................................................ [ 16%]
+........................................................................ [ 20%]
+........................................................................ [ 24%]
+........................................................................ [ 28%]
+........................................................................ [ 32%]
+........................................................................ [ 36%]
+........................................................................ [ 40%]
+........................................................................ [ 44%]
+........................................................................ [ 48%]
+........................................................................ [ 52%]
+........................................................................ [ 57%]
+........................................................................ [ 61%]
+........................................................................ [ 65%]
+........................................................................ [ 69%]
+........................................................................ [ 73%]
+........................................................................ [ 77%]
+........................................................................ [ 81%]
+........................................................................ [ 85%]
+........................................................................ [ 89%]
+........................................................................ [ 93%]
+........................................................................ [ 97%]
+.......................................                                  [100%]
+============================== warnings summary ===============================
+C:\Users\josh\AppData\Roaming\Python\Python314\site-packages\fastapi\testclient.py:1
+C:\Users\josh\AppData\Roaming\Python\Python314\site-packages\fastapi\testclient.py:1
+C:\Users\josh\AppData\Roaming\Python\Python314\site-packages\fastapi\testclient.py:1
+C:\Users\josh\AppData\Roaming\Python\Python314\site-packages\fastapi\testclient.py:1
+  C:\Users\josh\AppData\Roaming\Python\Python314\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================ 1767 passed, 4 warnings in 769.96s (0:12:49) =================
+pytest exit 0

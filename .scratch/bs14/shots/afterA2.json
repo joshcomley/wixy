@@ -1,0 +1,648 @@
+{
+  "375": {
+    "rects": {
+      "statusbar": {
+        "l": 0,
+        "r": 375,
+        "t": 0,
+        "b": 27.19,
+        "w": 375,
+        "h": 27.19
+      },
+      "navrow": {
+        "l": 0,
+        "r": 375,
+        "t": 27.19,
+        "b": 84.19,
+        "w": 375,
+        "h": 57
+      },
+      "nav": {
+        "l": 0,
+        "r": 323,
+        "t": 27.19,
+        "b": 83.19,
+        "w": 323,
+        "h": 56
+      },
+      "main": {
+        "l": 0,
+        "r": 375,
+        "t": 84.19,
+        "b": 812,
+        "w": 375,
+        "h": 727.81
+      },
+      "panel": {
+        "l": 12,
+        "r": 363,
+        "t": 96.19,
+        "b": 583.38,
+        "w": 351,
+        "h": 487.19
+      },
+      "host": {
+        "l": 12,
+        "r": 363,
+        "t": 96.19,
+        "b": 583.38,
+        "w": 351,
+        "h": 487.19
+      },
+      "view": {
+        "l": 12,
+        "r": 363,
+        "t": 96.19,
+        "b": 583.38,
+        "w": 351,
+        "h": 487.19
+      },
+      "header": {
+        "l": 12,
+        "r": 363,
+        "t": 96.19,
+        "b": 140.19,
+        "w": 351,
+        "h": 44
+      },
+      "title": {
+        "l": 12,
+        "r": 58.19,
+        "t": 102.98,
+        "b": 125.38,
+        "w": 46.19,
+        "h": 22.39
+      },
+      "chip": {
+        "l": 68.19,
+        "r": 271,
+        "t": 105.78,
+        "b": 122.58,
+        "w": 202.81,
+        "h": 16.8
+      },
+      "cog": {
+        "l": 281,
+        "r": 317,
+        "t": 96.19,
+        "b": 132.19,
+        "w": 36,
+        "h": 36
+      },
+      "close": {
+        "l": 327,
+        "r": 363,
+        "t": 96.19,
+        "b": 132.19,
+        "w": 36,
+        "h": 36
+      },
+      "wrap": {
+        "l": 12,
+        "r": 363,
+        "t": 140.19,
+        "b": 524.38,
+        "w": 351,
+        "h": 384.19
+      },
+      "card": {
+        "l": 12,
+        "r": 363,
+        "t": 140.19,
+        "b": 524.38,
+        "w": 351,
+        "h": 384.19
+      },
+      "daysep": {
+        "l": 112.22,
+        "r": 262.77,
+        "t": 150.19,
+        "b": 169.19,
+        "w": 150.55,
+        "h": 19
+      },
+      "firstBubble": {
+        "l": 25,
+        "r": 311,
+        "t": 173.19,
+        "b": 242.19,
+        "w": 286,
+        "h": 69
+      },
+      "composer": {
+        "l": 12,
+        "r": 363,
+        "t": 532.38,
+        "b": 583.38,
+        "w": 351,
+        "h": 51
+      },
+      "inputRow": {
+        "l": 12,
+        "r": 363,
+        "t": 532.38,
+        "b": 583.38,
+        "w": 351,
+        "h": 51
+      },
+      "attach": {
+        "l": 12,
+        "r": 56,
+        "t": 539.38,
+        "b": 583.38,
+        "w": 44,
+        "h": 44
+      },
+      "mic": {
+        "l": 64,
+        "r": 108,
+        "t": 539.38,
+        "b": 583.38,
+        "w": 44,
+        "h": 44
+      },
+      "input": {
+        "l": 317.33,
+        "r": 339.33,
+        "t": 539.38,
+        "b": 583.38,
+        "w": 22,
+        "h": 44
+      },
+      "send": {
+        "l": 347.33,
+        "r": 410.73,
+        "t": 539.38,
+        "b": 583.38,
+        "w": 63.41,
+        "h": 44
+      }
+    },
+    "style": {
+      "main": {
+        "padding-top": "12px",
+        "padding-left": "12px",
+        "padding-right": "12px",
+        "padding-bottom": "12px"
+      },
+      "panel": {
+        "min-height": "487.2px",
+        "height": "487.188px",
+        "padding-top": "0px"
+      },
+      "header": {
+        "padding": "0px 0px 8px",
+        "gap": "10px"
+      },
+      "wrap": {
+        "margin": "0px 0px 8px"
+      },
+      "card": {
+        "padding": "8px 12px",
+        "gap": "0px"
+      },
+      "composer": {
+        "padding": "0px",
+        "margin": "0px"
+      },
+      "daysep": {
+        "margin": "0px 0px 4px"
+      },
+      "send": {
+        "height": "44px",
+        "min-height": "44px",
+        "padding": "0px 16px",
+        "align-self": "flex-end",
+        "display": "flex"
+      },
+      "input": {
+        "height": "44px",
+        "min-height": "44px",
+        "padding": "9px 10px"
+      },
+      "attach": {
+        "height": "44px",
+        "min-height": "44px",
+        "width": "44px",
+        "padding": "0px",
+        "align-self": "flex-end"
+      },
+      "mic": {
+        "height": "44px",
+        "min-height": "44px",
+        "width": "44px",
+        "align-self": "auto"
+      }
+    },
+    "derived": {
+      "vw": 375,
+      "docScrollW": 375,
+      "mainScrollW": 411,
+      "mainClientW": 375,
+      "leftInset": {
+        "header": 12,
+        "headerTitle": 12,
+        "card": 12,
+        "composer": 12,
+        "attach": 12
+      },
+      "rightInset": {
+        "header": 12,
+        "close": 12,
+        "card": 12,
+        "composer": 12,
+        "send": -35.73
+      },
+      "controlHeights": {
+        "attach": 44,
+        "mic": 44,
+        "input": 44,
+        "send": 44
+      },
+      "controlTops": {
+        "attach": 539.38,
+        "mic": 539.38,
+        "input": 539.38,
+        "send": 539.38
+      },
+      "controlWidths": {
+        "attach": 44,
+        "mic": 44,
+        "send": 63.41
+      },
+      "controlCenters": {
+        "attach": 561.38,
+        "mic": 561.38,
+        "input": 561.38,
+        "send": 561.38
+      },
+      "gaps": {
+        "cardTopToFirstContent": 10,
+        "navBottomToHeaderTop": 12,
+        "navBottomToCogTop": 12,
+        "navBottomToTitleTop": 18.79,
+        "mainTopToCogTop": 12,
+        "bubbleToBubble": 0,
+        "headerBottomToCardTop": 0,
+        "cardBottomToComposerTop": 8,
+        "composerBottomToViewportBottom": 228.62,
+        "headerControlGap": 10
+      },
+      "row": {
+        "cancel": {
+          "l": 116,
+          "r": 173.1,
+          "t": 539.4,
+          "h": 44,
+          "w": 57.1
+        },
+        "status": {
+          "l": 236.9,
+          "r": 309.3,
+          "t": 551.3,
+          "h": 13.2,
+          "w": 72.4
+        },
+        "retry": {
+          "l": 181.1,
+          "r": 228.9,
+          "t": 532.4,
+          "h": 51,
+          "w": 47.9
+        },
+        "input": {
+          "l": 317.3,
+          "r": 339.3,
+          "t": 539.4,
+          "h": 44,
+          "w": 22
+        },
+        "rowScrollW": 399,
+        "rowClientW": 351
+      }
+    }
+  },
+  "402": {
+    "rects": {
+      "statusbar": {
+        "l": 0,
+        "r": 402,
+        "t": 0,
+        "b": 27.19,
+        "w": 402,
+        "h": 27.19
+      },
+      "navrow": {
+        "l": 0,
+        "r": 402,
+        "t": 27.19,
+        "b": 84.19,
+        "w": 402,
+        "h": 57
+      },
+      "nav": {
+        "l": 0,
+        "r": 350,
+        "t": 27.19,
+        "b": 83.19,
+        "w": 350,
+        "h": 56
+      },
+      "main": {
+        "l": 0,
+        "r": 402,
+        "t": 84.19,
+        "b": 870,
+        "w": 402,
+        "h": 785.81
+      },
+      "panel": {
+        "l": 12,
+        "r": 390,
+        "t": 96.19,
+        "b": 618.19,
+        "w": 378,
+        "h": 522
+      },
+      "host": {
+        "l": 12,
+        "r": 390,
+        "t": 96.19,
+        "b": 618.19,
+        "w": 378,
+        "h": 522
+      },
+      "view": {
+        "l": 12,
+        "r": 390,
+        "t": 96.19,
+        "b": 618.19,
+        "w": 378,
+        "h": 522
+      },
+      "header": {
+        "l": 12,
+        "r": 390,
+        "t": 96.19,
+        "b": 140.19,
+        "w": 378,
+        "h": 44
+      },
+      "title": {
+        "l": 12,
+        "r": 58.19,
+        "t": 102.98,
+        "b": 125.38,
+        "w": 46.19,
+        "h": 22.39
+      },
+      "chip": {
+        "l": 68.19,
+        "r": 298,
+        "t": 105.78,
+        "b": 122.58,
+        "w": 229.81,
+        "h": 16.8
+      },
+      "cog": {
+        "l": 308,
+        "r": 344,
+        "t": 96.19,
+        "b": 132.19,
+        "w": 36,
+        "h": 36
+      },
+      "close": {
+        "l": 354,
+        "r": 390,
+        "t": 96.19,
+        "b": 132.19,
+        "w": 36,
+        "h": 36
+      },
+      "wrap": {
+        "l": 12,
+        "r": 390,
+        "t": 140.19,
+        "b": 559.19,
+        "w": 378,
+        "h": 419
+      },
+      "card": {
+        "l": 12,
+        "r": 390,
+        "t": 140.19,
+        "b": 559.19,
+        "w": 378,
+        "h": 419
+      },
+      "daysep": {
+        "l": 125.72,
+        "r": 276.27,
+        "t": 150.19,
+        "b": 169.19,
+        "w": 150.55,
+        "h": 19
+      },
+      "firstBubble": {
+        "l": 25,
+        "r": 332.59,
+        "t": 173.19,
+        "b": 242.19,
+        "w": 307.59,
+        "h": 69
+      },
+      "composer": {
+        "l": 12,
+        "r": 390,
+        "t": 567.19,
+        "b": 618.19,
+        "w": 378,
+        "h": 51
+      },
+      "inputRow": {
+        "l": 12,
+        "r": 390,
+        "t": 567.19,
+        "b": 618.19,
+        "w": 378,
+        "h": 51
+      },
+      "attach": {
+        "l": 12,
+        "r": 56,
+        "t": 574.19,
+        "b": 618.19,
+        "w": 44,
+        "h": 44
+      },
+      "mic": {
+        "l": 64,
+        "r": 108,
+        "t": 574.19,
+        "b": 618.19,
+        "w": 44,
+        "h": 44
+      },
+      "input": {
+        "l": 317.33,
+        "r": 339.33,
+        "t": 574.19,
+        "b": 618.19,
+        "w": 22,
+        "h": 44
+      },
+      "send": {
+        "l": 347.33,
+        "r": 410.73,
+        "t": 574.19,
+        "b": 618.19,
+        "w": 63.41,
+        "h": 44
+      }
+    },
+    "style": {
+      "main": {
+        "padding-top": "12px",
+        "padding-left": "12px",
+        "padding-right": "12px",
+        "padding-bottom": "12px"
+      },
+      "panel": {
+        "min-height": "522px",
+        "height": "522px",
+        "padding-top": "0px"
+      },
+      "header": {
+        "padding": "0px 0px 8px",
+        "gap": "10px"
+      },
+      "wrap": {
+        "margin": "0px 0px 8px"
+      },
+      "card": {
+        "padding": "8px 12px",
+        "gap": "0px"
+      },
+      "composer": {
+        "padding": "0px",
+        "margin": "0px"
+      },
+      "daysep": {
+        "margin": "0px 0px 4px"
+      },
+      "send": {
+        "height": "44px",
+        "min-height": "44px",
+        "padding": "0px 16px",
+        "align-self": "flex-end",
+        "display": "flex"
+      },
+      "input": {
+        "height": "44px",
+        "min-height": "44px",
+        "padding": "9px 10px"
+      },
+      "attach": {
+        "height": "44px",
+        "min-height": "44px",
+        "width": "44px",
+        "padding": "0px",
+        "align-self": "flex-end"
+      },
+      "mic": {
+        "height": "44px",
+        "min-height": "44px",
+        "width": "44px",
+        "align-self": "auto"
+      }
+    },
+    "derived": {
+      "vw": 402,
+      "docScrollW": 402,
+      "mainScrollW": 411,
+      "mainClientW": 402,
+      "leftInset": {
+        "header": 12,
+        "headerTitle": 12,
+        "card": 12,
+        "composer": 12,
+        "attach": 12
+      },
+      "rightInset": {
+        "header": 12,
+        "close": 12,
+        "card": 12,
+        "composer": 12,
+        "send": -8.73
+      },
+      "controlHeights": {
+        "attach": 44,
+        "mic": 44,
+        "input": 44,
+        "send": 44
+      },
+      "controlTops": {
+        "attach": 574.19,
+        "mic": 574.19,
+        "input": 574.19,
+        "send": 574.19
+      },
+      "controlWidths": {
+        "attach": 44,
+        "mic": 44,
+        "send": 63.41
+      },
+      "controlCenters": {
+        "attach": 596.19,
+        "mic": 596.19,
+        "input": 596.19,
+        "send": 596.19
+      },
+      "gaps": {
+        "cardTopToFirstContent": 10,
+        "navBottomToHeaderTop": 12,
+        "navBottomToCogTop": 12,
+        "navBottomToTitleTop": 18.79,
+        "mainTopToCogTop": 12,
+        "bubbleToBubble": 0,
+        "headerBottomToCardTop": 0,
+        "cardBottomToComposerTop": 8,
+        "composerBottomToViewportBottom": 251.81,
+        "headerControlGap": 10
+      },
+      "row": {
+        "cancel": {
+          "l": 116,
+          "r": 173.1,
+          "t": 574.2,
+          "h": 44,
+          "w": 57.1
+        },
+        "status": {
+          "l": 236.9,
+          "r": 309.3,
+          "t": 586.1,
+          "h": 13.2,
+          "w": 72.4
+        },
+        "retry": {
+          "l": 181.1,
+          "r": 228.9,
+          "t": 567.2,
+          "h": 51,
+          "w": 47.9
+        },
+        "input": {
+          "l": 317.3,
+          "r": 339.3,
+          "t": 574.2,
+          "h": 44,
+          "w": 22
+        },
+        "rowScrollW": 399,
+        "rowClientW": 378
+      }
+    }
+  }
+}

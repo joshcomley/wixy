@@ -1,0 +1,34 @@
+/* candidate 1 - live-injected; scoped to the Server chat only */
+.wx-srv-thread-view { --wx-srv-control-h: 36px; }
+@media (max-width: 720px) { .wx-srv-thread-view { --wx-srv-control-h: 44px; } }
+
+/* 1. one gutter: header / card / composer all sit on .wx-main's own padding */
+.wx-srv-thread-header { padding: 0 0 8px; }
+.wx-srv-thread-wrap { margin: 0 0 8px; }
+
+/* 3. top of the card */
+.wx-srv-thread { gap: 0; padding: 8px 12px; }
+.wx-srv-history-error { margin-bottom: 8px; }
+.wx-srv-day-separator { margin: 0; }
+.wx-srv-message-list { display: flex; flex-direction: column; gap: 8px; }
+
+/* 2. composer row */
+.wx-srv-thread-view .wx-chatc-input-row { align-items: flex-end; gap: 8px; }
+.wx-srv-thread-view .wx-chat-attach-button,
+.wx-srv-thread-view .wx-srv-record-button {
+  box-sizing: border-box; flex: none; width: var(--wx-srv-control-h); height: var(--wx-srv-control-h);
+  min-height: var(--wx-srv-control-h); padding: 0; display: inline-flex; align-items: center; justify-content: center;
+}
+.wx-srv-thread-view .wx-chat-attach-button[hidden] { display: none; }
+.wx-srv-thread-view .wx-chat-send-button {
+  box-sizing: border-box; height: var(--wx-srv-control-h); min-height: var(--wx-srv-control-h);
+  padding: 0 16px; display: inline-flex; align-items: center; justify-content: center;
+}
+.wx-srv-thread-view .wx-chat-composer-input,
+.wx-srv-thread-view .wx-chat-input-empty {
+  min-height: var(--wx-srv-control-h);
+}
+.wx-srv-thread-view .wx-chat-input-empty { height: var(--wx-srv-control-h); max-height: var(--wx-srv-control-h); }
+@media (max-width: 720px) {
+  .wx-srv-thread-view .wx-chat-composer-input { padding-top: 9px; padding-bottom: 9px; }
+}

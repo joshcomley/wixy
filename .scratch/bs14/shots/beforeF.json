@@ -1,0 +1,1222 @@
+{
+  "375": {
+    "rects": {
+      "statusbar": {
+        "l": 0,
+        "r": 375,
+        "t": 0,
+        "b": 27.19,
+        "w": 375,
+        "h": 27.19
+      },
+      "navrow": {
+        "l": 0,
+        "r": 375,
+        "t": 27.19,
+        "b": 84.19,
+        "w": 375,
+        "h": 57
+      },
+      "nav": {
+        "l": 0,
+        "r": 323,
+        "t": 27.19,
+        "b": 83.19,
+        "w": 323,
+        "h": 56
+      },
+      "main": {
+        "l": 0,
+        "r": 375,
+        "t": 84.19,
+        "b": 812,
+        "w": 375,
+        "h": 727.81
+      },
+      "panel": {
+        "l": 12,
+        "r": 363,
+        "t": 96.19,
+        "b": 583.38,
+        "w": 351,
+        "h": 487.19
+      },
+      "host": {
+        "l": 12,
+        "r": 363,
+        "t": 96.19,
+        "b": 583.38,
+        "w": 351,
+        "h": 487.19
+      },
+      "view": {
+        "l": 12,
+        "r": 363,
+        "t": 96.19,
+        "b": 583.38,
+        "w": 351,
+        "h": 487.19
+      },
+      "header": {
+        "l": 12,
+        "r": 363,
+        "t": 96.19,
+        "b": 152.19,
+        "w": 351,
+        "h": 56
+      },
+      "title": {
+        "l": 24,
+        "r": 70.19,
+        "t": 112.98,
+        "b": 135.38,
+        "w": 46.19,
+        "h": 22.39
+      },
+      "chip": {
+        "l": 80.19,
+        "r": 259,
+        "t": 115.78,
+        "b": 132.58,
+        "w": 178.81,
+        "h": 16.8
+      },
+      "cog": {
+        "l": 269,
+        "r": 305,
+        "t": 106.19,
+        "b": 142.19,
+        "w": 36,
+        "h": 36
+      },
+      "close": {
+        "l": 315,
+        "r": 351,
+        "t": 106.19,
+        "b": 142.19,
+        "w": 36,
+        "h": 36
+      },
+      "wrap": {
+        "l": 24,
+        "r": 351,
+        "t": 152.19,
+        "b": 529.38,
+        "w": 327,
+        "h": 377.19
+      },
+      "card": {
+        "l": 24,
+        "r": 351,
+        "t": 152.19,
+        "b": 529.38,
+        "w": 327,
+        "h": 377.19
+      },
+      "daysep": {
+        "l": 112.22,
+        "r": 262.77,
+        "t": 178.19,
+        "b": 197.19,
+        "w": 150.55,
+        "h": 19
+      },
+      "firstBubble": {
+        "l": 37,
+        "r": 303.8,
+        "t": 201.19,
+        "b": 270.19,
+        "w": 266.8,
+        "h": 69
+      },
+      "composer": {
+        "l": 12,
+        "r": 363,
+        "t": 539.38,
+        "b": 583.38,
+        "w": 351,
+        "h": 44
+      },
+      "inputRow": {
+        "l": 12,
+        "r": 363,
+        "t": 539.38,
+        "b": 583.38,
+        "w": 351,
+        "h": 44
+      },
+      "attach": {
+        "l": 12,
+        "r": 55.97,
+        "t": 547.38,
+        "b": 583.38,
+        "w": 43.97,
+        "h": 36
+      },
+      "mic": {
+        "l": 63.97,
+        "r": 99.97,
+        "t": 543.38,
+        "b": 579.38,
+        "w": 36,
+        "h": 36
+      },
+      "input": {
+        "l": 107.97,
+        "r": 291.59,
+        "t": 543.38,
+        "b": 579.38,
+        "w": 183.63,
+        "h": 36
+      },
+      "send": {
+        "l": 299.59,
+        "r": 363,
+        "t": 539.38,
+        "b": 583.38,
+        "w": 63.41,
+        "h": 44
+      }
+    },
+    "style": {
+      "main": {
+        "padding-top": "12px",
+        "padding-left": "12px",
+        "padding-right": "12px",
+        "padding-bottom": "12px"
+      },
+      "panel": {
+        "min-height": "487.2px",
+        "height": "487.188px",
+        "padding-top": "0px"
+      },
+      "header": {
+        "padding": "10px 12px",
+        "gap": "10px"
+      },
+      "wrap": {
+        "margin": "0px 12px 10px"
+      },
+      "card": {
+        "padding": "12px",
+        "gap": "8px"
+      },
+      "composer": {
+        "padding": "0px",
+        "margin": "0px"
+      },
+      "daysep": {
+        "margin": "4px 0px"
+      },
+      "send": {
+        "height": "44px",
+        "min-height": "44px",
+        "padding": "8px 16px",
+        "align-self": "flex-end",
+        "display": "flex"
+      },
+      "input": {
+        "height": "36px",
+        "min-height": "36px",
+        "padding": "7px 10px"
+      },
+      "attach": {
+        "height": "36px",
+        "min-height": "36px",
+        "width": "43.9688px",
+        "padding": "8px 10px",
+        "align-self": "flex-end"
+      },
+      "mic": {
+        "height": "36px",
+        "min-height": "36px",
+        "width": "36px",
+        "align-self": "auto"
+      }
+    },
+    "derived": {
+      "vw": 375,
+      "docScrollW": 375,
+      "mainScrollW": 375,
+      "mainClientW": 375,
+      "leftInset": {
+        "header": 12,
+        "headerTitle": 24,
+        "card": 24,
+        "composer": 12,
+        "attach": 12
+      },
+      "rightInset": {
+        "header": 12,
+        "close": 24,
+        "card": 24,
+        "composer": 12,
+        "send": 12
+      },
+      "controlHeights": {
+        "attach": 36,
+        "mic": 36,
+        "input": 36,
+        "send": 44
+      },
+      "controlTops": {
+        "attach": 547.38,
+        "mic": 543.38,
+        "input": 543.38,
+        "send": 539.38
+      },
+      "controlWidths": {
+        "attach": 43.97,
+        "mic": 36,
+        "send": 63.41
+      },
+      "controlCenters": {
+        "attach": 565.38,
+        "mic": 561.38,
+        "input": 561.38,
+        "send": 561.38
+      },
+      "gaps": {
+        "cardTopToFirstContent": 26,
+        "navBottomToHeaderTop": 12,
+        "navBottomToCogTop": 22,
+        "navBottomToTitleTop": 28.79,
+        "mainTopToCogTop": 22,
+        "bubbleToBubble": 0,
+        "headerBottomToCardTop": 0,
+        "cardBottomToComposerTop": 10,
+        "composerBottomToViewportBottom": 228.62,
+        "headerControlGap": 10
+      },
+      "row": {
+        "cancel": null,
+        "status": null,
+        "retry": null,
+        "input": {
+          "l": 108,
+          "r": 291.6,
+          "t": 543.4,
+          "h": 36,
+          "w": 183.6
+        },
+        "rowScrollW": 351,
+        "rowClientW": 351
+      }
+    }
+  },
+  "402": {
+    "rects": {
+      "statusbar": {
+        "l": 0,
+        "r": 402,
+        "t": 0,
+        "b": 27.19,
+        "w": 402,
+        "h": 27.19
+      },
+      "navrow": {
+        "l": 0,
+        "r": 402,
+        "t": 27.19,
+        "b": 84.19,
+        "w": 402,
+        "h": 57
+      },
+      "nav": {
+        "l": 0,
+        "r": 350,
+        "t": 27.19,
+        "b": 83.19,
+        "w": 350,
+        "h": 56
+      },
+      "main": {
+        "l": 0,
+        "r": 402,
+        "t": 84.19,
+        "b": 870,
+        "w": 402,
+        "h": 785.81
+      },
+      "panel": {
+        "l": 12,
+        "r": 390,
+        "t": 96.19,
+        "b": 618.19,
+        "w": 378,
+        "h": 522
+      },
+      "host": {
+        "l": 12,
+        "r": 390,
+        "t": 96.19,
+        "b": 618.19,
+        "w": 378,
+        "h": 522
+      },
+      "view": {
+        "l": 12,
+        "r": 390,
+        "t": 96.19,
+        "b": 618.19,
+        "w": 378,
+        "h": 522
+      },
+      "header": {
+        "l": 12,
+        "r": 390,
+        "t": 96.19,
+        "b": 152.19,
+        "w": 378,
+        "h": 56
+      },
+      "title": {
+        "l": 24,
+        "r": 70.19,
+        "t": 112.98,
+        "b": 135.38,
+        "w": 46.19,
+        "h": 22.39
+      },
+      "chip": {
+        "l": 80.19,
+        "r": 286,
+        "t": 115.78,
+        "b": 132.58,
+        "w": 205.81,
+        "h": 16.8
+      },
+      "cog": {
+        "l": 296,
+        "r": 332,
+        "t": 106.19,
+        "b": 142.19,
+        "w": 36,
+        "h": 36
+      },
+      "close": {
+        "l": 342,
+        "r": 378,
+        "t": 106.19,
+        "b": 142.19,
+        "w": 36,
+        "h": 36
+      },
+      "wrap": {
+        "l": 24,
+        "r": 378,
+        "t": 152.19,
+        "b": 564.19,
+        "w": 354,
+        "h": 412
+      },
+      "card": {
+        "l": 24,
+        "r": 378,
+        "t": 152.19,
+        "b": 564.19,
+        "w": 354,
+        "h": 412
+      },
+      "daysep": {
+        "l": 125.72,
+        "r": 276.27,
+        "t": 178.19,
+        "b": 197.19,
+        "w": 150.55,
+        "h": 19
+      },
+      "firstBubble": {
+        "l": 37,
+        "r": 325.39,
+        "t": 201.19,
+        "b": 270.19,
+        "w": 288.39,
+        "h": 69
+      },
+      "composer": {
+        "l": 12,
+        "r": 390,
+        "t": 574.19,
+        "b": 618.19,
+        "w": 378,
+        "h": 44
+      },
+      "inputRow": {
+        "l": 12,
+        "r": 390,
+        "t": 574.19,
+        "b": 618.19,
+        "w": 378,
+        "h": 44
+      },
+      "attach": {
+        "l": 12,
+        "r": 55.97,
+        "t": 582.19,
+        "b": 618.19,
+        "w": 43.97,
+        "h": 36
+      },
+      "mic": {
+        "l": 63.97,
+        "r": 99.97,
+        "t": 578.19,
+        "b": 614.19,
+        "w": 36,
+        "h": 36
+      },
+      "input": {
+        "l": 107.97,
+        "r": 318.59,
+        "t": 578.19,
+        "b": 614.19,
+        "w": 210.63,
+        "h": 36
+      },
+      "send": {
+        "l": 326.59,
+        "r": 390,
+        "t": 574.19,
+        "b": 618.19,
+        "w": 63.41,
+        "h": 44
+      }
+    },
+    "style": {
+      "main": {
+        "padding-top": "12px",
+        "padding-left": "12px",
+        "padding-right": "12px",
+        "padding-bottom": "12px"
+      },
+      "panel": {
+        "min-height": "522px",
+        "height": "522px",
+        "padding-top": "0px"
+      },
+      "header": {
+        "padding": "10px 12px",
+        "gap": "10px"
+      },
+      "wrap": {
+        "margin": "0px 12px 10px"
+      },
+      "card": {
+        "padding": "12px",
+        "gap": "8px"
+      },
+      "composer": {
+        "padding": "0px",
+        "margin": "0px"
+      },
+      "daysep": {
+        "margin": "4px 0px"
+      },
+      "send": {
+        "height": "44px",
+        "min-height": "44px",
+        "padding": "8px 16px",
+        "align-self": "flex-end",
+        "display": "flex"
+      },
+      "input": {
+        "height": "36px",
+        "min-height": "36px",
+        "padding": "7px 10px"
+      },
+      "attach": {
+        "height": "36px",
+        "min-height": "36px",
+        "width": "43.9688px",
+        "padding": "8px 10px",
+        "align-self": "flex-end"
+      },
+      "mic": {
+        "height": "36px",
+        "min-height": "36px",
+        "width": "36px",
+        "align-self": "auto"
+      }
+    },
+    "derived": {
+      "vw": 402,
+      "docScrollW": 402,
+      "mainScrollW": 402,
+      "mainClientW": 402,
+      "leftInset": {
+        "header": 12,
+        "headerTitle": 24,
+        "card": 24,
+        "composer": 12,
+        "attach": 12
+      },
+      "rightInset": {
+        "header": 12,
+        "close": 24,
+        "card": 24,
+        "composer": 12,
+        "send": 12
+      },
+      "controlHeights": {
+        "attach": 36,
+        "mic": 36,
+        "input": 36,
+        "send": 44
+      },
+      "controlTops": {
+        "attach": 582.19,
+        "mic": 578.19,
+        "input": 578.19,
+        "send": 574.19
+      },
+      "controlWidths": {
+        "attach": 43.97,
+        "mic": 36,
+        "send": 63.41
+      },
+      "controlCenters": {
+        "attach": 600.19,
+        "mic": 596.19,
+        "input": 596.19,
+        "send": 596.19
+      },
+      "gaps": {
+        "cardTopToFirstContent": 26,
+        "navBottomToHeaderTop": 12,
+        "navBottomToCogTop": 22,
+        "navBottomToTitleTop": 28.79,
+        "mainTopToCogTop": 22,
+        "bubbleToBubble": 0,
+        "headerBottomToCardTop": 0,
+        "cardBottomToComposerTop": 10,
+        "composerBottomToViewportBottom": 251.81,
+        "headerControlGap": 10
+      },
+      "row": {
+        "cancel": null,
+        "status": null,
+        "retry": null,
+        "input": {
+          "l": 108,
+          "r": 318.6,
+          "t": 578.2,
+          "h": 36,
+          "w": 210.6
+        },
+        "rowScrollW": 378,
+        "rowClientW": 378
+      }
+    }
+  },
+  "768": {
+    "rects": {
+      "statusbar": {
+        "l": 0,
+        "r": 768,
+        "t": 0,
+        "b": 28.59,
+        "w": 768,
+        "h": 28.59
+      },
+      "navrow": {
+        "l": 0,
+        "r": 0,
+        "t": 0,
+        "b": 0,
+        "w": 0,
+        "h": 0
+      },
+      "nav": {
+        "l": 0,
+        "r": 185,
+        "t": 73.59,
+        "b": 1024,
+        "w": 185,
+        "h": 950.41
+      },
+      "main": {
+        "l": 185,
+        "r": 768,
+        "t": 73.59,
+        "b": 1024,
+        "w": 583,
+        "h": 950.41
+      },
+      "panel": {
+        "l": 205,
+        "r": 748,
+        "t": 93.59,
+        "b": 707.98,
+        "w": 543,
+        "h": 614.39
+      },
+      "host": {
+        "l": 205,
+        "r": 748,
+        "t": 93.59,
+        "b": 707.98,
+        "w": 543,
+        "h": 614.39
+      },
+      "view": {
+        "l": 205,
+        "r": 748,
+        "t": 93.59,
+        "b": 707.98,
+        "w": 543,
+        "h": 614.39
+      },
+      "header": {
+        "l": 205,
+        "r": 748,
+        "t": 93.59,
+        "b": 149.59,
+        "w": 543,
+        "h": 56
+      },
+      "title": {
+        "l": 217,
+        "r": 263.19,
+        "t": 110.39,
+        "b": 132.78,
+        "w": 46.19,
+        "h": 22.39
+      },
+      "chip": {
+        "l": 273.19,
+        "r": 644,
+        "t": 113.19,
+        "b": 129.98,
+        "w": 370.81,
+        "h": 16.8
+      },
+      "cog": {
+        "l": 654,
+        "r": 690,
+        "t": 103.59,
+        "b": 139.59,
+        "w": 36,
+        "h": 36
+      },
+      "close": {
+        "l": 700,
+        "r": 736,
+        "t": 103.59,
+        "b": 139.59,
+        "w": 36,
+        "h": 36
+      },
+      "wrap": {
+        "l": 217,
+        "r": 736,
+        "t": 149.59,
+        "b": 661.98,
+        "w": 519,
+        "h": 512.39
+      },
+      "card": {
+        "l": 217,
+        "r": 736,
+        "t": 149.59,
+        "b": 661.98,
+        "w": 519,
+        "h": 512.39
+      },
+      "daysep": {
+        "l": 401.22,
+        "r": 551.77,
+        "t": 175.59,
+        "b": 194.59,
+        "w": 150.55,
+        "h": 19
+      },
+      "firstBubble": {
+        "l": 230,
+        "r": 650.39,
+        "t": 198.59,
+        "b": 267.59,
+        "w": 420.39,
+        "h": 69
+      },
+      "composer": {
+        "l": 205,
+        "r": 748,
+        "t": 671.98,
+        "b": 707.98,
+        "w": 543,
+        "h": 36
+      },
+      "inputRow": {
+        "l": 205,
+        "r": 748,
+        "t": 671.98,
+        "b": 707.98,
+        "w": 543,
+        "h": 36
+      },
+      "attach": {
+        "l": 205,
+        "r": 248.97,
+        "t": 671.98,
+        "b": 707.98,
+        "w": 43.97,
+        "h": 36
+      },
+      "mic": {
+        "l": 256.97,
+        "r": 292.97,
+        "t": 671.98,
+        "b": 707.98,
+        "w": 36,
+        "h": 36
+      },
+      "input": {
+        "l": 300.97,
+        "r": 676.59,
+        "t": 671.98,
+        "b": 707.98,
+        "w": 375.63,
+        "h": 36
+      },
+      "send": {
+        "l": 684.59,
+        "r": 748,
+        "t": 671.98,
+        "b": 707.98,
+        "w": 63.41,
+        "h": 36
+      }
+    },
+    "style": {
+      "main": {
+        "padding-top": "20px",
+        "padding-left": "20px",
+        "padding-right": "20px",
+        "padding-bottom": "20px"
+      },
+      "panel": {
+        "min-height": "614.4px",
+        "height": "614.391px",
+        "padding-top": "0px"
+      },
+      "header": {
+        "padding": "10px 12px",
+        "gap": "10px"
+      },
+      "wrap": {
+        "margin": "0px 12px 10px"
+      },
+      "card": {
+        "padding": "12px",
+        "gap": "8px"
+      },
+      "composer": {
+        "padding": "0px",
+        "margin": "0px"
+      },
+      "daysep": {
+        "margin": "4px 0px"
+      },
+      "send": {
+        "height": "36px",
+        "min-height": "36px",
+        "padding": "8px 16px",
+        "align-self": "flex-end",
+        "display": "block"
+      },
+      "input": {
+        "height": "36px",
+        "min-height": "36px",
+        "padding": "7px 10px"
+      },
+      "attach": {
+        "height": "36px",
+        "min-height": "36px",
+        "width": "43.9688px",
+        "padding": "8px 10px",
+        "align-self": "flex-end"
+      },
+      "mic": {
+        "height": "36px",
+        "min-height": "36px",
+        "width": "36px",
+        "align-self": "auto"
+      }
+    },
+    "derived": {
+      "vw": 768,
+      "docScrollW": 768,
+      "mainScrollW": 583,
+      "mainClientW": 583,
+      "leftInset": {
+        "header": 205,
+        "headerTitle": 217,
+        "card": 217,
+        "composer": 205,
+        "attach": 205
+      },
+      "rightInset": {
+        "header": 20,
+        "close": 32,
+        "card": 32,
+        "composer": 20,
+        "send": 20
+      },
+      "controlHeights": {
+        "attach": 36,
+        "mic": 36,
+        "input": 36,
+        "send": 36
+      },
+      "controlTops": {
+        "attach": 671.98,
+        "mic": 671.98,
+        "input": 671.98,
+        "send": 671.98
+      },
+      "controlWidths": {
+        "attach": 43.97,
+        "mic": 36,
+        "send": 63.41
+      },
+      "controlCenters": {
+        "attach": 689.98,
+        "mic": 689.98,
+        "input": 689.98,
+        "send": 689.98
+      },
+      "gaps": {
+        "cardTopToFirstContent": 26,
+        "navBottomToHeaderTop": 93.59,
+        "navBottomToCogTop": 103.59,
+        "navBottomToTitleTop": 110.39,
+        "mainTopToCogTop": 30,
+        "bubbleToBubble": 0,
+        "headerBottomToCardTop": 0,
+        "cardBottomToComposerTop": 10,
+        "composerBottomToViewportBottom": 316.02,
+        "headerControlGap": 10
+      },
+      "row": {
+        "cancel": null,
+        "status": null,
+        "retry": null,
+        "input": {
+          "l": 301,
+          "r": 676.6,
+          "t": 672,
+          "h": 36,
+          "w": 375.6
+        },
+        "rowScrollW": 543,
+        "rowClientW": 543
+      }
+    }
+  },
+  "1280": {
+    "rects": {
+      "statusbar": {
+        "l": 0,
+        "r": 1280,
+        "t": 0,
+        "b": 28.59,
+        "w": 1280,
+        "h": 28.59
+      },
+      "navrow": {
+        "l": 0,
+        "r": 0,
+        "t": 0,
+        "b": 0,
+        "w": 0,
+        "h": 0
+      },
+      "nav": {
+        "l": 0,
+        "r": 185,
+        "t": 73.59,
+        "b": 800,
+        "w": 185,
+        "h": 726.41
+      },
+      "main": {
+        "l": 185,
+        "r": 1280,
+        "t": 73.59,
+        "b": 800,
+        "w": 1095,
+        "h": 726.41
+      },
+      "panel": {
+        "l": 205,
+        "r": 1260,
+        "t": 93.59,
+        "b": 573.59,
+        "w": 1055,
+        "h": 480
+      },
+      "host": {
+        "l": 205,
+        "r": 1260,
+        "t": 93.59,
+        "b": 573.59,
+        "w": 1055,
+        "h": 480
+      },
+      "view": {
+        "l": 205,
+        "r": 1260,
+        "t": 93.59,
+        "b": 573.59,
+        "w": 1055,
+        "h": 480
+      },
+      "header": {
+        "l": 205,
+        "r": 1260,
+        "t": 93.59,
+        "b": 149.59,
+        "w": 1055,
+        "h": 56
+      },
+      "title": {
+        "l": 217,
+        "r": 263.19,
+        "t": 110.39,
+        "b": 132.78,
+        "w": 46.19,
+        "h": 22.39
+      },
+      "chip": {
+        "l": 273.19,
+        "r": 1156,
+        "t": 113.19,
+        "b": 129.98,
+        "w": 882.81,
+        "h": 16.8
+      },
+      "cog": {
+        "l": 1166,
+        "r": 1202,
+        "t": 103.59,
+        "b": 139.59,
+        "w": 36,
+        "h": 36
+      },
+      "close": {
+        "l": 1212,
+        "r": 1248,
+        "t": 103.59,
+        "b": 139.59,
+        "w": 36,
+        "h": 36
+      },
+      "wrap": {
+        "l": 217,
+        "r": 1248,
+        "t": 149.59,
+        "b": 527.59,
+        "w": 1031,
+        "h": 378
+      },
+      "card": {
+        "l": 217,
+        "r": 1248,
+        "t": 149.59,
+        "b": 527.59,
+        "w": 1031,
+        "h": 378
+      },
+      "daysep": {
+        "l": 657.22,
+        "r": 807.77,
+        "t": 175.59,
+        "b": 194.59,
+        "w": 150.55,
+        "h": 19
+      },
+      "firstBubble": {
+        "l": 230,
+        "r": 1060,
+        "t": 198.59,
+        "b": 267.59,
+        "w": 830,
+        "h": 69
+      },
+      "composer": {
+        "l": 205,
+        "r": 1260,
+        "t": 537.59,
+        "b": 573.59,
+        "w": 1055,
+        "h": 36
+      },
+      "inputRow": {
+        "l": 205,
+        "r": 1260,
+        "t": 537.59,
+        "b": 573.59,
+        "w": 1055,
+        "h": 36
+      },
+      "attach": {
+        "l": 205,
+        "r": 248.97,
+        "t": 537.59,
+        "b": 573.59,
+        "w": 43.97,
+        "h": 36
+      },
+      "mic": {
+        "l": 256.97,
+        "r": 292.97,
+        "t": 537.59,
+        "b": 573.59,
+        "w": 36,
+        "h": 36
+      },
+      "input": {
+        "l": 300.97,
+        "r": 1188.59,
+        "t": 537.59,
+        "b": 573.59,
+        "w": 887.63,
+        "h": 36
+      },
+      "send": {
+        "l": 1196.59,
+        "r": 1260,
+        "t": 537.59,
+        "b": 573.59,
+        "w": 63.41,
+        "h": 36
+      }
+    },
+    "style": {
+      "main": {
+        "padding-top": "20px",
+        "padding-left": "20px",
+        "padding-right": "20px",
+        "padding-bottom": "20px"
+      },
+      "panel": {
+        "min-height": "480px",
+        "height": "480px",
+        "padding-top": "0px"
+      },
+      "header": {
+        "padding": "10px 12px",
+        "gap": "10px"
+      },
+      "wrap": {
+        "margin": "0px 12px 10px"
+      },
+      "card": {
+        "padding": "12px",
+        "gap": "8px"
+      },
+      "composer": {
+        "padding": "0px",
+        "margin": "0px"
+      },
+      "daysep": {
+        "margin": "4px 0px"
+      },
+      "send": {
+        "height": "36px",
+        "min-height": "36px",
+        "padding": "8px 16px",
+        "align-self": "flex-end",
+        "display": "block"
+      },
+      "input": {
+        "height": "36px",
+        "min-height": "36px",
+        "padding": "7px 10px"
+      },
+      "attach": {
+        "height": "36px",
+        "min-height": "36px",
+        "width": "43.9688px",
+        "padding": "8px 10px",
+        "align-self": "flex-end"
+      },
+      "mic": {
+        "height": "36px",
+        "min-height": "36px",
+        "width": "36px",
+        "align-self": "auto"
+      }
+    },
+    "derived": {
+      "vw": 1280,
+      "docScrollW": 1280,
+      "mainScrollW": 1095,
+      "mainClientW": 1095,
+      "leftInset": {
+        "header": 205,
+        "headerTitle": 217,
+        "card": 217,
+        "composer": 205,
+        "attach": 205
+      },
+      "rightInset": {
+        "header": 20,
+        "close": 32,
+        "card": 32,
+        "composer": 20,
+        "send": 20
+      },
+      "controlHeights": {
+        "attach": 36,
+        "mic": 36,
+        "input": 36,
+        "send": 36
+      },
+      "controlTops": {
+        "attach": 537.59,
+        "mic": 537.59,
+        "input": 537.59,
+        "send": 537.59
+      },
+      "controlWidths": {
+        "attach": 43.97,
+        "mic": 36,
+        "send": 63.41
+      },
+      "controlCenters": {
+        "attach": 555.59,
+        "mic": 555.59,
+        "input": 555.59,
+        "send": 555.59
+      },
+      "gaps": {
+        "cardTopToFirstContent": 26,
+        "navBottomToHeaderTop": 93.59,
+        "navBottomToCogTop": 103.59,
+        "navBottomToTitleTop": 110.39,
+        "mainTopToCogTop": 30,
+        "bubbleToBubble": 0,
+        "headerBottomToCardTop": 0,
+        "cardBottomToComposerTop": 10,
+        "composerBottomToViewportBottom": 226.41,
+        "headerControlGap": 10
+      },
+      "row": {
+        "cancel": null,
+        "status": null,
+        "retry": null,
+        "input": {
+          "l": 301,
+          "r": 1188.6,
+          "t": 537.6,
+          "h": 36,
+          "w": 887.6
+        },
+        "rowScrollW": 1055,
+        "rowClientW": 1055
+      }
+    }
+  }
+}

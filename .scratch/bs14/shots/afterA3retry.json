@@ -1,0 +1,313 @@
+{
+  "375": {
+    "rects": {
+      "statusbar": {
+        "l": 0,
+        "r": 375,
+        "t": 0,
+        "b": 27.19,
+        "w": 375,
+        "h": 27.19
+      },
+      "navrow": {
+        "l": 0,
+        "r": 375,
+        "t": 27.19,
+        "b": 84.19,
+        "w": 375,
+        "h": 57
+      },
+      "nav": {
+        "l": 0,
+        "r": 323,
+        "t": 27.19,
+        "b": 83.19,
+        "w": 323,
+        "h": 56
+      },
+      "main": {
+        "l": 0,
+        "r": 375,
+        "t": 84.19,
+        "b": 812,
+        "w": 375,
+        "h": 727.81
+      },
+      "panel": {
+        "l": 12,
+        "r": 363,
+        "t": 96.19,
+        "b": 583.38,
+        "w": 351,
+        "h": 487.19
+      },
+      "host": {
+        "l": 12,
+        "r": 363,
+        "t": 96.19,
+        "b": 583.38,
+        "w": 351,
+        "h": 487.19
+      },
+      "view": {
+        "l": 12,
+        "r": 363,
+        "t": 96.19,
+        "b": 583.38,
+        "w": 351,
+        "h": 487.19
+      },
+      "header": {
+        "l": 12,
+        "r": 363,
+        "t": 96.19,
+        "b": 140.19,
+        "w": 351,
+        "h": 44
+      },
+      "title": {
+        "l": 12,
+        "r": 58.19,
+        "t": 102.98,
+        "b": 125.38,
+        "w": 46.19,
+        "h": 22.39
+      },
+      "chip": {
+        "l": 68.19,
+        "r": 271,
+        "t": 105.78,
+        "b": 122.58,
+        "w": 202.81,
+        "h": 16.8
+      },
+      "cog": {
+        "l": 281,
+        "r": 317,
+        "t": 96.19,
+        "b": 132.19,
+        "w": 36,
+        "h": 36
+      },
+      "close": {
+        "l": 327,
+        "r": 363,
+        "t": 96.19,
+        "b": 132.19,
+        "w": 36,
+        "h": 36
+      },
+      "wrap": {
+        "l": 12,
+        "r": 363,
+        "t": 140.19,
+        "b": 531.38,
+        "w": 351,
+        "h": 391.19
+      },
+      "card": {
+        "l": 12,
+        "r": 363,
+        "t": 140.19,
+        "b": 531.38,
+        "w": 351,
+        "h": 391.19
+      },
+      "daysep": {
+        "l": 112.22,
+        "r": 262.77,
+        "t": 150.19,
+        "b": 169.19,
+        "w": 150.55,
+        "h": 19
+      },
+      "firstBubble": {
+        "l": 25,
+        "r": 311,
+        "t": 173.19,
+        "b": 242.19,
+        "w": 286,
+        "h": 69
+      },
+      "composer": {
+        "l": 12,
+        "r": 363,
+        "t": 539.38,
+        "b": 583.38,
+        "w": 351,
+        "h": 44
+      },
+      "inputRow": {
+        "l": 12,
+        "r": 363,
+        "t": 539.38,
+        "b": 583.38,
+        "w": 351,
+        "h": 44
+      },
+      "attach": {
+        "l": 12,
+        "r": 56,
+        "t": 539.38,
+        "b": 583.38,
+        "w": 44,
+        "h": 44
+      },
+      "mic": {
+        "l": 64,
+        "r": 108,
+        "t": 539.38,
+        "b": 583.38,
+        "w": 44,
+        "h": 44
+      },
+      "input": {
+        "l": 236.33,
+        "r": 291.59,
+        "t": 539.38,
+        "b": 583.38,
+        "w": 55.27,
+        "h": 44
+      },
+      "send": {
+        "l": 299.59,
+        "r": 363,
+        "t": 539.38,
+        "b": 583.38,
+        "w": 63.41,
+        "h": 44
+      }
+    },
+    "style": {
+      "main": {
+        "padding-top": "12px",
+        "padding-left": "12px",
+        "padding-right": "12px",
+        "padding-bottom": "12px"
+      },
+      "panel": {
+        "min-height": "487.2px",
+        "height": "487.188px",
+        "padding-top": "0px"
+      },
+      "header": {
+        "padding": "0px 0px 8px",
+        "gap": "10px"
+      },
+      "wrap": {
+        "margin": "0px 0px 8px"
+      },
+      "card": {
+        "padding": "8px 12px",
+        "gap": "0px"
+      },
+      "composer": {
+        "padding": "0px",
+        "margin": "0px"
+      },
+      "daysep": {
+        "margin": "0px 0px 4px"
+      },
+      "send": {
+        "height": "44px",
+        "min-height": "44px",
+        "padding": "0px 16px",
+        "align-self": "flex-end",
+        "display": "flex"
+      },
+      "input": {
+        "height": "44px",
+        "min-height": "44px",
+        "padding": "9px 10px"
+      },
+      "attach": {
+        "height": "44px",
+        "min-height": "44px",
+        "width": "44px",
+        "padding": "0px",
+        "align-self": "flex-end"
+      },
+      "mic": {
+        "height": "44px",
+        "min-height": "44px",
+        "width": "44px",
+        "align-self": "auto"
+      }
+    },
+    "derived": {
+      "vw": 375,
+      "docScrollW": 375,
+      "mainScrollW": 375,
+      "mainClientW": 375,
+      "leftInset": {
+        "header": 12,
+        "headerTitle": 12,
+        "card": 12,
+        "composer": 12,
+        "attach": 12
+      },
+      "rightInset": {
+        "header": 12,
+        "close": 12,
+        "card": 12,
+        "composer": 12,
+        "send": 12
+      },
+      "controlHeights": {
+        "attach": 44,
+        "mic": 44,
+        "input": 44,
+        "send": 44
+      },
+      "controlTops": {
+        "attach": 539.38,
+        "mic": 539.38,
+        "input": 539.38,
+        "send": 539.38
+      },
+      "controlWidths": {
+        "attach": 44,
+        "mic": 44,
+        "send": 63.41
+      },
+      "controlCenters": {
+        "attach": 561.38,
+        "mic": 561.38,
+        "input": 561.38,
+        "send": 561.38
+      },
+      "gaps": {
+        "cardTopToFirstContent": 10,
+        "navBottomToHeaderTop": 12,
+        "navBottomToCogTop": 12,
+        "navBottomToTitleTop": 18.79,
+        "mainTopToCogTop": 12,
+        "bubbleToBubble": 0,
+        "headerBottomToCardTop": 0,
+        "cardBottomToComposerTop": 8,
+        "composerBottomToViewportBottom": 228.62,
+        "headerControlGap": 10
+      },
+      "row": {
+        "cancel": null,
+        "status": null,
+        "retry": {
+          "l": 116,
+          "r": 228.3,
+          "t": 539.4,
+          "h": 44,
+          "w": 112.3
+        },
+        "input": {
+          "l": 236.3,
+          "r": 291.6,
+          "t": 539.4,
+          "h": 44,
+          "w": 55.3
+        },
+        "rowScrollW": 351,
+        "rowClientW": 351
+      }
+    }
+  }
+}
