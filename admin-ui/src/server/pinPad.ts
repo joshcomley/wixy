@@ -30,12 +30,28 @@ export interface PinPadView {
 const MIN_PIN_LENGTH = 4;
 const MAX_PIN_LENGTH = 16;
 
-function errorMessageFor(error: PinError): string {
+function plural(count: number, unit: string): string {
+  return `${count} ${unit}${count === 1 ? "" : "s"}`;
+}
+
+/** A lockout wait as the owner reads it: whole seconds under a minute, whole minutes
+ * under an hour, then hours (plus leftover minutes). Always rounds UP, so the copy never
+ * tells someone to retry before cmd will let them, and never shows less than a second.
+ * cmd's ladder runs from 60 s up to a 24 h cap, so all three units occur (F15). */
+export function formatRetryDuration(totalSeconds: number): string {
+  const seconds = Math.max(1, Math.ceil(Number.isFinite(totalSeconds) ? totalSeconds : 1));
+  if (seconds < 60) return plural(seconds, "second");
+  const totalMinutes = Math.ceil(seconds / 60);
+  if (totalMinutes < 60) return plural(totalMinutes, "minute");
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes === 0 ? plural(hours, "hour") : `${plural(hours, "hour")} ${plural(minutes, "minute")}`;
+}
+
+function errorMessageFor(error: Exclude<PinError, { kind: "lockedOut" }>): string {
   switch (error.kind) {
     case "wrong":
       return error.attemptsLeft === null ? "Wrong PIN" : `Wrong PIN — ${error.attemptsLeft} attempts left`;
-    case "lockedOut":
-      return "Too many wrong tries. Try again in 2 minutes.";
     case "pinChanged":
       return "Please try again.";
     case "invalid":
@@ -77,6 +93,7 @@ export function mountPinPad(deps: PinPadDeps): PinPadView {
   let currentError: PinError | null = null;
   let lockedOutUntilMs = 0;
   let countdownTimer: ReturnType<typeof win.setInterval> | null = null;
+  let countdownEl: HTMLSpanElement | null = null;
 
   function stopCountdown(): void {
     if (countdownTimer !== null) {
@@ -94,19 +111,45 @@ export function mountPinPad(deps: PinPadDeps): PinPadView {
     }
   }
 
-  function renderMessage(): void {
-    if (currentError === null) {
-      message.textContent = "";
+  function setPlainMessage(text: string): void {
+    countdownEl = null;
+    message.textContent = text;
+  }
+
+  /** The lockout copy keeps sec.5.1's wording but states cmd's real wait, and only the
+   * duration inside it changes on each tick. It sits in its own `aria-live="off"` span so
+   * a screen reader hears the alert once instead of every second. */
+  function renderLockoutMessage(remainingS: number): void {
+    const duration = formatRetryDuration(remainingS);
+    if (countdownEl !== null && countdownEl.parentNode === message) {
+      if (countdownEl.textContent !== duration) countdownEl.textContent = duration;
       return;
     }
-    const remaining =
-      currentError.kind === "lockedOut" ? Math.max(0, Math.ceil((lockedOutUntilMs - Date.now()) / 1000)) : 0;
-    message.textContent = errorMessageFor(currentError);
-    if (currentError.kind === "lockedOut" && remaining <= 0) {
-      currentError = null;
-      stopCountdown();
-      message.textContent = "";
+    const el = document.createElement("span");
+    el.className = "wx-srv-pinpad-countdown";
+    el.setAttribute("aria-live", "off");
+    el.textContent = duration;
+    message.replaceChildren("Too many wrong tries. Try again in ", el, ".");
+    countdownEl = el;
+  }
+
+  function renderMessage(): void {
+    if (currentError === null) {
+      setPlainMessage("");
+      return;
     }
+    if (currentError.kind === "lockedOut") {
+      const remaining = Math.ceil((lockedOutUntilMs - Date.now()) / 1000);
+      if (remaining <= 0) {
+        currentError = null;
+        stopCountdown();
+        setPlainMessage("");
+        return;
+      }
+      renderLockoutMessage(remaining);
+      return;
+    }
+    setPlainMessage(errorMessageFor(currentError));
   }
 
   function renderKeysState(): void {

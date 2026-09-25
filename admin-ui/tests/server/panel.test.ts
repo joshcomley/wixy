@@ -222,17 +222,17 @@ describe("mountServerPanel", () => {
     panel.teardown();
   });
 
-  it("a lockout shows the frozen copy until the retry period expires", async () => {
+  it("a lockout shows the real wait, counting down, until the retry period expires (F15)", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ error: "locked_out", retryAfterS: 5 }, 429));
     const panel = mount();
     await openPinPad(panel.element);
     await enterAndSubmitPin(panel.element, "0000");
     expect(panel.element.querySelector(".wx-srv-pinpad-message")?.textContent).toBe(
-      "Too many wrong tries. Try again in 2 minutes.",
+      "Too many wrong tries. Try again in 5 seconds.",
     );
     await vi.advanceTimersByTimeAsync(2000);
     expect(panel.element.querySelector(".wx-srv-pinpad-message")?.textContent).toBe(
-      "Too many wrong tries. Try again in 2 minutes.",
+      "Too many wrong tries. Try again in 3 seconds.",
     );
     await vi.advanceTimersByTimeAsync(3000);
     expect(panel.element.querySelector(".wx-srv-pinpad-message")?.textContent).toBe("");

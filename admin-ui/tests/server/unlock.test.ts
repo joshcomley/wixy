@@ -34,6 +34,22 @@ describe("unlock", () => {
     expect(new Headers(init.headers).has("X-Wixy-Server-Token")).toBe(false);
   });
 
+  it("sends the JSON content type and the custom CSRF-guard header (F14)", async () => {
+    // /unlock has no token yet, so this header is what makes a cross-origin call a
+    // non-"simple" request the browser must preflight (and wixy never grants).
+    fetchMock.mockResolvedValueOnce(jsonResponse({ token: "tok", expiresAt: 123 }, 200));
+    await unlock("1234");
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const headers = new Headers(init.headers);
+    expect(headers.get("Content-Type")).toBe("application/json");
+    expect(headers.get("X-Wixy-Server-Unlock")).toBe("1");
+  });
+
+  it.each([403, 415])("a %i refusal fails closed as unexpected (generic retry copy)", async (status) => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ error: "forbidden" }, status));
+    await expect(unlock("1234")).resolves.toEqual({ ok: false, kind: "unexpected" });
+  });
+
   it("200 -> ok with the token and expiresAt", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ token: "tok-abc", expiresAt: 999 }, 200));
     await expect(unlock("1234")).resolves.toEqual({ ok: true, token: "tok-abc", expiresAt: 999 });

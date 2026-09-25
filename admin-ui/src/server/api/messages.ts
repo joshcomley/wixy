@@ -64,10 +64,20 @@ export interface SendMessageInput {
 export type SendMessageResult =
   | { readonly ok: true; readonly message: Message }
   | { readonly ok: false; readonly kind: "invalid"; readonly detail: string }
+  /** Any other 4xx except the transient 408/429: the server has judged this exact
+   * payload and will judge it the same way again, so a retry cannot succeed. */
+  | { readonly ok: false; readonly kind: "rejected"; readonly status: number }
   /** Any transport failure, or a status this client doesn't have a specific
    * mapping for — the composer surfaces a generic "couldn't send" error and
    * keeps the draft (retry reuses the same `clientId`, §5.3's idempotency). */
   | { readonly ok: false; readonly kind: "unavailable" };
+
+/** A 4xx other than the transient 408 (timeout) and 429 (rate limit) is a definitive
+ * verdict on the request, not a hiccup. (A 401 never gets here: `serverFetch` turns it
+ * into a lock.) */
+export function isDefinitiveRejectionStatus(status: number | null): boolean {
+  return status !== null && status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
 
 export async function sendMessage(
   session: ServerSession,
@@ -97,6 +107,9 @@ export async function sendMessage(
   if (response.status === 422) {
     const body = (await response.json().catch(() => null)) as { detail?: string } | null;
     return { ok: false, kind: "invalid", detail: body?.detail ?? "Couldn't send that message." };
+  }
+  if (isDefinitiveRejectionStatus(response.status)) {
+    return { ok: false, kind: "rejected", status: response.status };
   }
   return { ok: false, kind: "unavailable" };
 }

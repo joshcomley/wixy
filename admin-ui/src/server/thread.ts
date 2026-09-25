@@ -13,9 +13,17 @@ import { mountLightbox, type Lightbox } from "../lightbox";
 import {
   ServerErasureOutcomeUnknownError,
   ServerLockedError,
+  ServerWipeAbandonedError,
   ServerWipeNotCommittedError,
 } from "./api/http";
-import { deleteMessage, getHistory, sendMessage, wipeChat, type Message } from "./api/messages";
+import {
+  deleteMessage,
+  getHistory,
+  isDefinitiveRejectionStatus,
+  sendMessage,
+  wipeChat,
+  type Message,
+} from "./api/messages";
 import { uploadServerAttachment } from "./api/uploads";
 import type { ServerIdentity } from "./identity";
 import { linkifyInto } from "./linkify";
@@ -24,6 +32,7 @@ import { disposeAttachmentMedia, renderAttachments } from "./mediaRender";
 import { createVoiceRecorder, type VoiceRecorder } from "./recorder";
 import type { ServerStreamEvent } from "./stream";
 import type { LockHooks, ServerSession } from "./types";
+import { UPLOAD_GENERIC_FAILURE_MESSAGE, UploadError } from "./upload";
 
 const HISTORY_PAGE_SIZE = 50;
 const MIN_VOICE_DURATION_MS = 1_000;
@@ -31,6 +40,9 @@ const MIN_VOICE_DURATION_MS = 1_000;
  * than kept forever — mirrors the AI chat's own ECHO_EXPIRY_MS. */
 const ECHO_EXPIRY_MS = 30_000;
 const DELETE_FADE_MS = 160;
+/** Backoff for reconciling an unconfirmed wipe against history: 1 s, 2 s, 4 s … capped. */
+const WIPE_RECONCILE_BASE_DELAY_MS = 1_000;
+const WIPE_RECONCILE_MAX_DELAY_MS = 15_000;
 
 export interface ServerThreadDeps {
   identity: ServerIdentity;
@@ -187,6 +199,19 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   retryVoiceButton.textContent = "Retry voice note";
   retryVoiceButton.hidden = true;
   retryVoiceButton.setAttribute("aria-label", "Retry sending voice note");
+  const discardVoiceButton = documentRef.createElement("button");
+  discardVoiceButton.type = "button";
+  discardVoiceButton.className = "wx-srv-discard-voice-button";
+  discardVoiceButton.textContent = "Discard";
+  discardVoiceButton.hidden = true;
+  discardVoiceButton.setAttribute("aria-label", "Discard voice note");
+  // Their own row under the composer's error line, shown only while there is a failed
+  // note to act on: in the input row they would squeeze the text field to nothing on a
+  // phone.
+  const voiceFailureRow = documentRef.createElement("div");
+  voiceFailureRow.className = "wx-srv-voice-failure-row";
+  voiceFailureRow.hidden = true;
+  voiceFailureRow.append(retryVoiceButton, discardVoiceButton);
 
   function formatRecordingTime(milliseconds: number): string {
     const seconds = Math.floor(Math.max(0, milliseconds) / 1000);
@@ -287,7 +312,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     accept: "image/*,video/*",
     acceptFile: (file) => file.type.startsWith("image/") || file.type.startsWith("video/"),
     onFilePickerOpen: () => hooks.suspend("filePicker"),
-    extraButtons: [recordButton, cancelRecordingButton, retryVoiceButton, recordingStatus],
+    extraButtons: [recordButton, cancelRecordingButton, recordingStatus],
     renderChipPreview: (file, previewUrl) => {
       if (file.type.startsWith("image/")) {
         const thumb = documentRef.createElement("img");
@@ -326,6 +351,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     attachButton.title = "Attach a photo or video";
     attachButton.setAttribute("aria-label", "Attach a photo or video");
   }
+  composer.element.appendChild(voiceFailureRow);
   element.appendChild(composer.element);
 
   // -- State ---------------------------------------------------------------
@@ -359,13 +385,36 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     contentRevision += 1;
   }
 
+  /** A failed voice note stays pending so it can be retried (same `clientId`, and the same
+   * uploaded attachment once it has one) — and can always be thrown away. */
+  function setVoiceRetryOffered(offered: boolean): void {
+    retryVoiceButton.hidden = !offered;
+    discardVoiceButton.hidden = !offered;
+    voiceFailureRow.hidden = !offered;
+  }
+
+  function offerVoiceRetry(): void {
+    setVoiceRetryOffered(true);
+  }
+
+  /** Drops the pending voice note for good and frees the recorder, so the owner is never
+   * stuck behind a note that cannot be sent (F17). If it had uploaded, that attachment is
+   * left for the server's janitor to reap: the client only holds the attachment id, and
+   * the cancel route takes the upload id. */
+  function discardPendingVoiceNote(message: string | null): void {
+    pendingVoiceNote = null;
+    setVoiceRetryOffered(false);
+    composer.setError(message);
+    updateRecorderUi();
+  }
+
   async function sendVoiceNote(): Promise<void> {
     const pending = pendingVoiceNote;
     const session = currentSession;
     if (pending === null || session === null || voiceSendBusy) return;
     voiceSendBusy = true;
     retryVoiceButton.disabled = true;
-    retryVoiceButton.hidden = true;
+    setVoiceRetryOffered(false);
     recordingStatus.hidden = false;
     recordingStatus.textContent = "Sending voice note…";
     composer.setError(null);
@@ -391,10 +440,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         attachmentIds: [pending.attachmentId],
       });
       if (!result.ok) {
-        composer.setError(result.kind === "invalid"
-          ? result.detail
-          : "Couldn't send voice note. Try again.");
-        retryVoiceButton.hidden = false;
+        if (result.kind === "invalid" || result.kind === "rejected") {
+          // The server judged this exact note (the attachment failed processing, or was
+          // reaped) and will judge it the same way again: a retry can never succeed.
+          discardPendingVoiceNote("The server couldn't accept that voice note, so it was discarded. Record it again.");
+          return;
+        }
+        composer.setError("Couldn't send voice note. Try again.");
+        offerVoiceRetry();
         return;
       }
       if (pendingVoiceNote !== pending) return;
@@ -404,11 +457,16 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     } catch (error) {
       if (error instanceof ServerLockedError) {
         hooks.lockNow("unauthorized");
+      } else if (error instanceof UploadError && isDefinitiveRejectionStatus(error.status)) {
+        const reason = error.message === UPLOAD_GENERIC_FAILURE_MESSAGE
+          ? "The server couldn't accept that voice note."
+          : error.message;
+        discardPendingVoiceNote(`${reason} The voice note was discarded — record it again.`);
       } else {
         composer.setError(error instanceof Error && error.message !== ""
           ? `Couldn't send voice note: ${error.message}`
           : "Couldn't send voice note. Try again.");
-        retryVoiceButton.hidden = false;
+        offerVoiceRetry();
       }
     } finally {
       voiceSendBusy = false;
@@ -420,6 +478,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   }
 
   retryVoiceButton.addEventListener("click", () => void sendVoiceNote());
+  discardVoiceButton.addEventListener("click", () => {
+    if (voiceSendBusy) return;
+    discardPendingVoiceNote(null);
+  });
 
   function teardownMessageActions(seq: number): void {
     messageActionControllers.get(seq)?.teardown();
@@ -673,31 +735,87 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     }
   }
 
-  async function reconcileUnknownWipe(session: ServerSession, wipeBoundarySeq: number): Promise<boolean> {
-    let history: readonly Message[];
-    try {
-      history = await getAllHistory(session);
-    } catch (error) {
-      if (error instanceof ServerLockedError) throw error;
-      throw new ServerErasureOutcomeUnknownError();
-    }
+  /** The one unconfirmed-wipe reconciliation that may be running (F16). `end` settles it
+   * from outside: the stream's `wiped` event proves it committed; a lock or teardown
+   * abandons it. */
+  interface WipeReconcile {
+    end(reason: "committed" | "abandoned"): void;
+  }
+  let pendingWipeReconcile: WipeReconcile | null = null;
 
-    if (history.some((message) => message.seq <= wipeBoundarySeq)) {
-      for (const message of history) addConfirmed(message);
-      hasMoreHistory = false;
-      renderThreadList(false);
-      throw new ServerWipeNotCommittedError();
-    }
+  function endWipeReconcile(reason: "committed" | "abandoned"): void {
+    pendingWipeReconcile?.end(reason);
+  }
 
-    const messagesArrivingDuringReconciliation = Array.from(confirmedBySeq.values())
-      .filter((message) => message.seq > wipeBoundarySeq);
-    clearAfterWipe();
-    for (const message of messagesArrivingDuringReconciliation) addConfirmed(message);
-    for (const message of history) addConfirmed(message);
-    historyLoaded = true;
-    hasMoreHistory = false;
-    renderThreadList(false);
-    return true;
+  /** A wipe whose request timed out or dropped may or may not have committed, and a wipe
+   * is never re-POSTed (it would delete anything sent since). So the thread reconciles
+   * against the server's history instead — and keeps doing so, with backoff, until it gets
+   * a definite answer: history with nothing at or before the wipe boundary means it
+   * committed, history that still holds older messages means it did not, and the stream's
+   * `wiped` event settles it either way. It gives up only when the chat locks or is torn
+   * down. Resolves `true` (committed; the caller polls the erasure) or rejects with
+   * `ServerWipeNotCommittedError` / `ServerLockedError` / `ServerWipeAbandonedError`,
+   * which is what lets the settings sheet leave its "checking" state for good. */
+  function reconcileUnknownWipe(session: ServerSession, wipeBoundarySeq: number): Promise<boolean> {
+    endWipeReconcile("abandoned");
+    return new Promise<boolean>((resolve, reject) => {
+      let finished = false;
+      let attempts = 0;
+      let timer: number | null = null;
+
+      const finish = (settle: () => void): void => {
+        if (finished) return;
+        finished = true;
+        if (timer !== null) win.clearTimeout(timer);
+        timer = null;
+        if (pendingWipeReconcile === handle) pendingWipeReconcile = null;
+        settle();
+      };
+      const handle: WipeReconcile = {
+        end: (reason) =>
+          finish(reason === "committed" ? () => resolve(true) : () => reject(new ServerWipeAbandonedError())),
+      };
+      pendingWipeReconcile = handle;
+
+      const attempt = async (): Promise<void> => {
+        timer = null;
+        if (finished) return;
+        let history: readonly Message[];
+        try {
+          history = await getAllHistory(session);
+        } catch (error) {
+          if (finished) return;
+          if (error instanceof ServerLockedError) {
+            finish(() => reject(error));
+            return;
+          }
+          const delayMs = Math.min(WIPE_RECONCILE_BASE_DELAY_MS * 2 ** attempts, WIPE_RECONCILE_MAX_DELAY_MS);
+          attempts += 1;
+          timer = win.setTimeout(() => void attempt(), delayMs);
+          return;
+        }
+        if (finished) return;
+
+        if (history.some((message) => message.seq <= wipeBoundarySeq)) {
+          for (const message of history) addConfirmed(message);
+          hasMoreHistory = false;
+          renderThreadList(false);
+          finish(() => reject(new ServerWipeNotCommittedError()));
+          return;
+        }
+
+        const messagesArrivingDuringReconciliation = Array.from(confirmedBySeq.values())
+          .filter((message) => message.seq > wipeBoundarySeq);
+        clearAfterWipe();
+        for (const message of messagesArrivingDuringReconciliation) addConfirmed(message);
+        for (const message of history) addConfirmed(message);
+        historyLoaded = true;
+        hasMoreHistory = false;
+        renderThreadList(false);
+        finish(() => resolve(true));
+      };
+      void attempt();
+    });
   }
 
   async function wipe(onOutcomeUnknown?: () => void): Promise<boolean> {
@@ -933,6 +1051,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     attach,
     detach(): void {
       currentSession = null;
+      endWipeReconcile("abandoned");
       for (const controller of messageActionControllers.values()) controller.close();
       voiceRecorder?.detach();
       voiceRecorder = null;
@@ -966,6 +1085,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           return;
         case "wiped":
           clearAfterWipe();
+          // Truth arrives over the stream: if an unconfirmed wipe was still being
+          // reconciled, this settles it as committed (F16).
+          endWipeReconcile("committed");
           return;
         case "locked":
           // The stream's own `locked` event is handled by the caller
@@ -978,6 +1100,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     refreshNameChip,
     teardown(): void {
       currentSession = null;
+      endWipeReconcile("abandoned");
       for (const controller of messageActionControllers.values()) controller.teardown();
       messageActionControllers.clear();
       for (const timer of deleteFadeTimers.values()) win.clearTimeout(timer);

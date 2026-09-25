@@ -26,10 +26,17 @@ import secrets
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 from fastapi import HTTPException, Request
 
 SERVER_TOKEN_HEADER = "X-Wixy-Server-Token"
+# `POST /unlock` runs before any token exists, so the token header cannot be its
+# CSRF guard. This custom header is: a cross-origin request that carries it is not
+# a CORS "simple" request, so the browser must preflight it first, and wixy grants
+# no cross-origin access (audit round 4, F14).
+UNLOCK_GUARD_HEADER = "X-Wixy-Server-Unlock"
+UNLOCK_GUARD_VALUE = "1"
 UNLOCK_TOKEN_TTL_S = 12 * 60 * 60.0  # §5.1: "The TTL is 12 h absolute."
 _SECRET_BYTES = 32
 
@@ -183,6 +190,47 @@ def require_server_token(request: Request) -> ServerAuth:
         return verify_unlock_token(secret, token, email=email, now=time.time())
     except InvalidTokenError:
         raise _locked_401() from None
+
+
+class UnlockRefusal(NamedTuple):
+    """Why `POST /unlock` was refused before cmd was contacted (audit round 4, F14).
+    `error` is the wire code; `reason` is the log-only detail (never a request value)."""
+
+    status_code: int
+    error: str
+    reason: str
+
+
+def unlock_request_refusal(request: Request) -> UnlockRefusal | None:
+    """The CSRF guard for `POST /unlock`, run BEFORE the body is read or cmd is called.
+
+    Every other mutation is protected by needing `X-Wixy-Server-Token`, a custom header
+    that makes a cross-origin request non-"simple" so the browser preflights it first and
+    wixy grants no cross-origin access. `/unlock` runs before a token exists, so without
+    this a page the admin merely visits could post `{"pin": ...}` as a `text/plain` form
+    (no preflight) and — because cmd charges an attempt before it checks — burn the
+    owner's attempts and trip cmd's lockout. Three independent layers:
+
+    1. `Sec-Fetch-Site`, when the browser sends it, must be `same-origin`. `*.cinnamons.uk`
+       hosts are same-SITE but different-ORIGIN, so anything looser than `same-origin`
+       (including `same-site` and `none`) is refused. Absent on old browsers and non-browser
+       clients, which then rely on layers 2 and 3.
+    2. The body must be declared `application/json` (parameters such as `charset` are
+       fine). `text/plain`, urlencoded and multipart — the only bodies a cross-site form
+       can send without a preflight — are refused.
+    3. The custom `X-Wixy-Server-Unlock: 1` header, which the admin UI sends and a
+       cross-origin page cannot add without a preflight.
+
+    A refusal never echoes the request and never reaches cmd, so it charges nothing."""
+    fetch_site = request.headers.get("sec-fetch-site")
+    if fetch_site is not None and fetch_site.strip().lower() != "same-origin":
+        return UnlockRefusal(403, "forbidden", "cross_origin")
+    media_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if media_type != "application/json":
+        return UnlockRefusal(415, "unsupported_media_type", "content_type")
+    if request.headers.get(UNLOCK_GUARD_HEADER) != UNLOCK_GUARD_VALUE:
+        return UnlockRefusal(403, "forbidden", "missing_guard_header")
+    return None
 
 
 @dataclass(frozen=True, slots=True)

@@ -103,6 +103,38 @@
   font: 0.75rem/1 system-ui, sans-serif;
 }
 
+/* A failed voice note's Retry / Discard: their own row under the composer's error
+   line (thread.ts), never in the input row, so a 360px phone keeps its text field.
+   `[hidden]` ties the display rule below on specificity, so it needs its own line. */
+.wx-srv-voice-failure-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.wx-srv-voice-failure-row[hidden] {
+  display: none;
+}
+
+.wx-srv-retry-voice-button,
+.wx-srv-discard-voice-button {
+  flex: none;
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font: 0.8125rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.wx-srv-retry-voice-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .wx-srv-record-status {
   color: var(--wx-muted);
   font: 0.6875rem/1.2 system-ui, sans-serif;

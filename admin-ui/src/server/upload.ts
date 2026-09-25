@@ -57,6 +57,9 @@ export interface UploadOptions {
   readonly sleep?: (milliseconds: number) => Promise<void>;
 }
 
+/** The message an `UploadError` carries when the server gave no more specific reason. */
+export const UPLOAD_GENERIC_FAILURE_MESSAGE = "The upload could not be completed. Please try again.";
+
 export class UploadError extends Error {
   readonly status: number | null;
 
@@ -205,7 +208,7 @@ async function putChunkWithRetry(input: ChunkRequest): Promise<void> {
   }
 
   if (lastError instanceof UploadError) throw lastError;
-  throw new UploadError("The upload could not be completed. Please try again.", null);
+  throw new UploadError(UPLOAD_GENERIC_FAILURE_MESSAGE, null);
 }
 
 async function uploadResponseError(response: Response): Promise<UploadError> {
@@ -234,7 +237,7 @@ async function uploadResponseError(response: Response): Promise<UploadError> {
     const payloadMessage = payloadMessages[serverError.error];
     if (payloadMessage) return new UploadError(payloadMessage, response.status);
   }
-  return new UploadError("The upload could not be completed. Please try again.", response.status);
+  return new UploadError(UPLOAD_GENERIC_FAILURE_MESSAGE, response.status);
 }
 
 async function parseJson<T>(response: Response): Promise<T> {

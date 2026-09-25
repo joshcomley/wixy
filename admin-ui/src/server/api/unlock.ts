@@ -29,6 +29,13 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+/** `/unlock` has no token yet, so the token header cannot be its CSRF guard. This custom
+ * header is: a cross-origin request that carries it must be preflighted first, and wixy
+ * grants no cross-origin access. The server refuses `/unlock` without it (audit round 4,
+ * F14), so it must be sent on every unlock, next to a strict JSON content type. */
+export const UNLOCK_GUARD_HEADER = "X-Wixy-Server-Unlock";
+const UNLOCK_GUARD_VALUE = "1";
+
 export async function unlock(pin: string): Promise<UnlockResult> {
   let response: Response;
   try {
@@ -36,7 +43,7 @@ export async function unlock(pin: string): Promise<UnlockResult> {
       "/unlock",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", [UNLOCK_GUARD_HEADER]: UNLOCK_GUARD_VALUE },
         body: JSON.stringify({ pin }),
       },
       null,

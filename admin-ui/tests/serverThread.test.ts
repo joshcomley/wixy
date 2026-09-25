@@ -4,7 +4,7 @@ import { ServerErasureOutcomeUnknownError } from "../src/server/api/http";
 import type { ServerIdentity } from "../src/server/identity";
 import { mountServerSettingsSheet } from "../src/server/settingsSheet";
 import { mountServerThread } from "../src/server/thread";
-import type { UploadAttachment } from "../src/server/upload";
+import { UploadError, type UploadAttachment } from "../src/server/upload";
 import type { ServerStreamEvent } from "../src/server/stream";
 import type { LockHooks, ServerSession } from "../src/server/types";
 
@@ -411,6 +411,185 @@ describe("mountServerThread", () => {
     view.teardown();
   });
 
+  // F17 (audit round 4): a failed voice note used to disable the mic until the owner
+  // routed away and back (which also locks). A resend that can never succeed — a 422
+  // because the attachment failed processing or was reaped — left "Retry voice note"
+  // failing forever with no way out.
+  describe("a voice note that cannot be sent (F17)", () => {
+    const voiceAttachment = (id = "voice-id"): UploadAttachment => ({
+      id, kind: "voice", status: "processing", width: null, height: null, durationS: 2, peaks: null, urls: {},
+    });
+    const button = (view: { element: HTMLElement }, selector: string) =>
+      view.element.querySelector<HTMLButtonElement>(selector);
+    const mic = (view: { element: HTMLElement }) => button(view, ".wx-srv-record-button");
+    const retry = (view: { element: HTMLElement }) => button(view, ".wx-srv-retry-voice-button");
+    const discard = (view: { element: HTMLElement }) => button(view, ".wx-srv-discard-voice-button");
+    const composerError = (view: { element: HTMLElement }) =>
+      view.element.querySelector(".wx-chat-composer-error")?.textContent ?? "";
+
+    async function recordVoiceNote(view: { element: HTMLElement }): Promise<void> {
+      mic(view)?.click();
+      await flush();
+      mic(view)?.click();
+      await flush();
+      await flush();
+    }
+
+    async function mountView() {
+      getHistory.mockResolvedValue(emptyHistory());
+      const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+      return view;
+    }
+
+    it("offers Discard next to Retry after a transient failure, and discarding frees the mic for a new note", async () => {
+      uploadServerAttachment.mockResolvedValue(voiceAttachment());
+      sendMessage
+        .mockResolvedValueOnce({ ok: false, kind: "unavailable" } satisfies SendMessageResult)
+        .mockResolvedValueOnce({
+          ok: true,
+          message: fakeMessage({ seq: 5, clientId: "generated-uuid-1234", text: null }),
+        } satisfies SendMessageResult);
+      const view = await mountView();
+      await recordVoiceNote(view);
+
+      expect(retry(view)?.hidden).toBe(false);
+      expect(discard(view)?.hidden).toBe(false);
+      expect(discard(view)?.textContent).toBe("Discard");
+      expect(mic(view)?.disabled).toBe(true); // a note is pending: no second recording yet
+
+      discard(view)?.click();
+      await flush();
+
+      expect(retry(view)?.hidden).toBe(true);
+      expect(discard(view)?.hidden).toBe(true);
+      expect(composerError(view)).toBe("");
+      expect(mic(view)?.disabled).toBe(false);
+      expect(view.element.querySelector(".wx-srv-record-status")?.hasAttribute("hidden")).toBe(true);
+
+      await recordVoiceNote(view);
+      expect(uploadServerAttachment).toHaveBeenCalledTimes(2); // the discarded note is not resent
+      expect(sendMessage).toHaveBeenCalledTimes(2);
+      expect(discard(view)?.hidden).toBe(true);
+      expect(mic(view)?.disabled).toBe(false);
+      view.teardown();
+    });
+
+    it("a transient failure keeps the retry path: same clientId, no second upload", async () => {
+      uploadServerAttachment.mockResolvedValue(voiceAttachment());
+      sendMessage
+        .mockResolvedValueOnce({ ok: false, kind: "unavailable" } satisfies SendMessageResult)
+        .mockResolvedValueOnce({ ok: false, kind: "unavailable" } satisfies SendMessageResult)
+        .mockResolvedValueOnce({
+          ok: true,
+          message: fakeMessage({ seq: 6, clientId: "generated-uuid-1234", text: null }),
+        } satisfies SendMessageResult);
+      const view = await mountView();
+      await recordVoiceNote(view);
+      retry(view)?.click();
+      await flush();
+      await flush();
+      // A second transient failure: still retryable, still discardable.
+      expect(retry(view)?.hidden).toBe(false);
+      expect(discard(view)?.hidden).toBe(false);
+      expect(composerError(view)).toBe("Couldn't send voice note. Try again.");
+
+      retry(view)?.click();
+      await flush();
+      await flush();
+
+      const inputs = sendMessage.mock.calls.map((call) => call[1] as { clientId: string; attachmentIds: string[] });
+      expect(inputs).toHaveLength(3);
+      expect(new Set(inputs.map((input) => input.clientId)).size).toBe(1);
+      expect(inputs.every((input) => input.attachmentIds[0] === "voice-id")).toBe(true);
+      expect(uploadServerAttachment).toHaveBeenCalledOnce();
+      expect(retry(view)?.hidden).toBe(true);
+      expect(discard(view)?.hidden).toBe(true);
+      expect(mic(view)?.disabled).toBe(false);
+      view.teardown();
+    });
+
+    it.each([
+      ["a 422 (the attachment failed processing or was reaped)",
+        { ok: false, kind: "invalid", detail: "attachment voice-id is unknown, already used, or failed" }],
+      ["a 404", { ok: false, kind: "rejected", status: 404 }],
+    ] as const)("%s on the retry is definitive: it is discarded with a clear message and the mic is free", async (_name, rejection) => {
+      uploadServerAttachment.mockResolvedValue(voiceAttachment());
+      sendMessage
+        .mockResolvedValueOnce({ ok: false, kind: "unavailable" } satisfies SendMessageResult)
+        .mockResolvedValueOnce(rejection as SendMessageResult)
+        .mockResolvedValueOnce({
+          ok: true,
+          message: fakeMessage({ seq: 7, clientId: "generated-uuid-1234", text: null }),
+        } satisfies SendMessageResult);
+      const view = await mountView();
+      await recordVoiceNote(view);
+      expect(retry(view)?.hidden).toBe(false);
+
+      retry(view)?.click();
+      await flush();
+      await flush();
+
+      expect(composerError(view)).toBe(
+        "The server couldn't accept that voice note, so it was discarded. Record it again.",
+      );
+      expect(composerError(view)).not.toContain("voice-id"); // no raw server detail / ids
+      expect(retry(view)?.hidden).toBe(true);
+      expect(discard(view)?.hidden).toBe(true);
+      expect(mic(view)?.disabled).toBe(false);
+
+      await recordVoiceNote(view);
+      expect(uploadServerAttachment).toHaveBeenCalledTimes(2);
+      expect(sendMessage).toHaveBeenCalledTimes(3);
+      expect(composerError(view)).toBe("");
+      view.teardown();
+    });
+
+    it("a definitive rejection on the FIRST send is discarded straight away, not left to retry forever", async () => {
+      uploadServerAttachment.mockResolvedValue(voiceAttachment());
+      sendMessage.mockResolvedValue({ ok: false, kind: "invalid", detail: "bad attachment" } satisfies SendMessageResult);
+      const view = await mountView();
+      await recordVoiceNote(view);
+
+      expect(retry(view)?.hidden).toBe(true);
+      expect(discard(view)?.hidden).toBe(true);
+      expect(mic(view)?.disabled).toBe(false);
+      expect(composerError(view)).toBe(
+        "The server couldn't accept that voice note, so it was discarded. Record it again.",
+      );
+      view.teardown();
+    });
+
+    it("an upload the server rejects (413) is discarded with the upload's own message", async () => {
+      uploadServerAttachment.mockRejectedValue(new UploadError("This file is too large.", 413));
+      const view = await mountView();
+      await recordVoiceNote(view);
+
+      expect(composerError(view)).toBe(
+        "This file is too large. The voice note was discarded — record it again.",
+      );
+      expect(retry(view)?.hidden).toBe(true);
+      expect(discard(view)?.hidden).toBe(true);
+      expect(mic(view)?.disabled).toBe(false);
+      expect(sendMessage).not.toHaveBeenCalled();
+      view.teardown();
+    });
+
+    it("an upload that fails without a verdict (network) stays retryable and discardable", async () => {
+      uploadServerAttachment.mockRejectedValue(new TypeError("Failed to fetch"));
+      const view = await mountView();
+      await recordVoiceNote(view);
+
+      expect(composerError(view)).toContain("Couldn't send voice note");
+      expect(retry(view)?.hidden).toBe(false);
+      expect(discard(view)?.hidden).toBe(false);
+      discard(view)?.click();
+      await flush();
+      expect(mic(view)?.disabled).toBe(false);
+      view.teardown();
+    });
+  });
+
   describe("send() — optimistic echo", () => {
     it("paints an echo instantly, reconciled away once the send resolves", async () => {
       getHistory.mockResolvedValue(emptyHistory());
@@ -773,6 +952,168 @@ describe("mountServerThread", () => {
         view.teardown();
       },
     );
+
+    // F16 (audit round 4): a wipe whose outcome cannot be confirmed used to leave the
+    // sheet on "Couldn't confirm — checking…" with the wipe control disabled for good,
+    // because nothing told it about the stream's `wiped` event or a later successful
+    // history load. These drive the REAL thread + REAL sheet together.
+    describe("an unconfirmed wipe that cannot be reconciled straight away (F16)", () => {
+      const CHECKING = "Couldn't confirm — checking…";
+
+      async function startUnconfirmedWipe() {
+        const identity = fakeIdentity();
+        const hooks = fakeHooks();
+        const view = mountServerThread({ identity, hooks, win: fakeWindow(), onSettings: vi.fn() });
+        await view.attach(SESSION);
+        const sheet = mountServerSettingsSheet({
+          identity,
+          hooks,
+          win: window,
+          getSession: () => SESSION,
+          onWipe: (onOutcomeUnknown) => view.wipe(onOutcomeUnknown),
+          onNameChanged: vi.fn(),
+          onClose: vi.fn(),
+        });
+        document.body.appendChild(sheet.element);
+        sheet.open();
+        await vi.advanceTimersByTimeAsync(0);
+        sheet.element.querySelector<HTMLButtonElement>(".wx-srv-sheet-wipe")?.click();
+        sheet.element.querySelector<HTMLButtonElement>(".wx-srv-sheet-wipe-confirm-button")?.click();
+        await vi.advanceTimersByTimeAsync(0);
+        return {
+          view,
+          sheet,
+          status: () => sheet.element.querySelector(".wx-srv-sheet-wipe-status")?.textContent,
+          statusHidden: () => sheet.element.querySelector<HTMLElement>(".wx-srv-sheet-wipe-status")?.hidden,
+          wipeButton: () => sheet.element.querySelector<HTMLButtonElement>(".wx-srv-sheet-wipe"),
+          confirmHidden: () => sheet.element.querySelector<HTMLElement>(".wx-srv-sheet-wipe-confirm")?.hidden,
+          errorText: () => sheet.element.querySelector(".wx-srv-sheet-wipe-error")?.textContent,
+        };
+      }
+
+      beforeEach(() => {
+        vi.useFakeTimers();
+        wipeChat.mockRejectedValue(new ServerErasureOutcomeUnknownError());
+      });
+      afterEach(() => {
+        document.body.innerHTML = "";
+      });
+
+      it("keeps retrying the reconciliation with backoff, never the wipe, and stays 'checking' meanwhile", async () => {
+        getHistory
+          .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ text: "old before wipe" })] }))
+          .mockRejectedValue(new Error("offline"));
+        const wipe = await startUnconfirmedWipe();
+        expect(wipe.status()).toBe(CHECKING);
+        expect(wipe.wipeButton()?.disabled).toBe(true);
+        const afterFirstAttempt = getHistory.mock.calls.length;
+
+        await vi.advanceTimersByTimeAsync(1_000);
+        await vi.advanceTimersByTimeAsync(2_000);
+        await vi.advanceTimersByTimeAsync(4_000);
+        expect(getHistory.mock.calls.length).toBeGreaterThan(afterFirstAttempt + 1);
+        expect(getHistory.mock.calls.length).toBeLessThan(afterFirstAttempt + 5); // backoff, not a hot loop
+        expect(wipe.status()).toBe(CHECKING);
+        expect(wipe.wipeButton()?.disabled).toBe(true);
+        expect(wipeChat).toHaveBeenCalledOnce();
+        wipe.sheet.teardown();
+        wipe.view.teardown();
+      });
+
+      it("a wiped stream event settles it: the sheet leaves 'checking' and the wipe control is usable again", async () => {
+        getHistory
+          .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ text: "old before wipe" })] }))
+          .mockRejectedValue(new Error("offline"));
+        const wipe = await startUnconfirmedWipe();
+        await vi.advanceTimersByTimeAsync(3_000);
+        expect(wipe.status()).toBe(CHECKING);
+        expect(wipe.wipeButton()?.disabled).toBe(true);
+
+        wipe.view.handleStreamEvent({ type: "wiped" } as ServerStreamEvent);
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(wipe.status()).toBe("Deleted. Erasing leftover traces…");
+        expect(wipe.wipeButton()?.disabled).toBe(false);
+        expect(wipe.confirmHidden()).toBe(true);
+        expect(wipe.view.element.textContent).not.toContain("old before wipe");
+        // Settled means settled: no more reconciliation requests, no re-POST.
+        const settledCalls = getHistory.mock.calls.length;
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(getHistory.mock.calls.length).toBe(settledCalls);
+        expect(wipe.status()).toBe("Done");
+        expect(wipeChat).toHaveBeenCalledOnce();
+        wipe.sheet.teardown();
+        wipe.view.teardown();
+      });
+
+      it("a later successful history load settles it as committed", async () => {
+        getHistory
+          .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ text: "old before wipe" })] }))
+          .mockRejectedValueOnce(new Error("offline")) // first reconciliation, immediately
+          .mockRejectedValueOnce(new Error("offline")) // after 1 s
+          .mockResolvedValueOnce(emptyHistory()); // after 2 s more
+        const wipe = await startUnconfirmedWipe();
+        expect(wipe.status()).toBe(CHECKING);
+
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(wipe.status()).toBe(CHECKING);
+        expect(wipe.wipeButton()?.disabled).toBe(true);
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        expect(wipe.status()).toBe("Deleted. Erasing leftover traces…");
+        expect(wipe.wipeButton()?.disabled).toBe(false);
+        expect(getHistory).toHaveBeenCalledTimes(4);
+        expect(wipe.view.element.textContent).not.toContain("old before wipe");
+        expect(wipeChat).toHaveBeenCalledOnce();
+        wipe.sheet.teardown();
+        wipe.view.teardown();
+      });
+
+      it("a later history load that still holds older messages settles it as NOT committed and offers a retry", async () => {
+        const old = fakeMessage({ seq: 1, text: "still here" });
+        getHistory
+          .mockResolvedValueOnce(emptyHistory({ messages: [old] }))
+          .mockRejectedValueOnce(new Error("offline"))
+          .mockResolvedValueOnce(emptyHistory({ messages: [old] }));
+        const wipe = await startUnconfirmedWipe();
+        expect(wipe.status()).toBe(CHECKING);
+
+        await vi.advanceTimersByTimeAsync(1_000);
+
+        expect(wipe.errorText()).toBe("Couldn't delete everything — try again");
+        expect(wipe.confirmHidden()).toBe(false);
+        expect(wipe.wipeButton()?.disabled).toBe(false);
+        expect(wipe.statusHidden()).toBe(true);
+        expect(wipe.view.element.textContent).toContain("still here");
+        expect(wipeChat).toHaveBeenCalledOnce();
+        wipe.sheet.teardown();
+        wipe.view.teardown();
+      });
+
+      it("locking while the outcome is unconfirmed stops reconciling and leaves the wipe control usable", async () => {
+        getHistory
+          .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ text: "old before wipe" })] }))
+          .mockRejectedValue(new Error("offline"));
+        const wipe = await startUnconfirmedWipe();
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(wipe.wipeButton()?.disabled).toBe(true);
+
+        wipe.view.detach();
+        wipe.sheet.close();
+        await vi.advanceTimersByTimeAsync(0);
+        const callsAtLock = getHistory.mock.calls.length;
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(getHistory.mock.calls.length).toBe(callsAtLock);
+
+        // The next unlock finds an ordinary sheet, not a control stuck on 'checking'.
+        wipe.sheet.open();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(wipe.wipeButton()?.disabled).toBe(false);
+        expect(wipe.statusHidden()).toBe(true);
+        wipe.sheet.teardown();
+        wipe.view.teardown();
+      });
+    });
 
     it("reconciles an unknown wipe to empty history without re-POSTing", async () => {
       getHistory
