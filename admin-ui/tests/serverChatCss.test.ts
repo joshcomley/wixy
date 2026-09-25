@@ -107,3 +107,14 @@ describe("server/chat.css: the settings sheet never outgrows its host", () => {
     expect(header).toMatch(/background\s*:/);
   });
 });
+
+describe("server/chat.css: message text keeps its line breaks", () => {
+  // Real rendering is pinned by e2e/tests/server-message-text.spec.ts (innerText + geometry);
+  // this is the fast guard on the one declaration that makes it work: the text is plain text
+  // nodes, so without `pre-wrap` every typed line break collapses to a space.
+  it(".wx-srv-bubble-text preserves typed newlines with white-space: pre-wrap", () => {
+    const rule = baseRuleBody(chatCss, "wx-srv-bubble-text");
+    expect(rule, "no base rule for .wx-srv-bubble-text").not.toBeNull();
+    expect(rule).toMatch(/white-space\s*:\s*pre-wrap/);
+  });
+});

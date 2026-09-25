@@ -358,6 +358,17 @@
   color: var(--wx-muted);
 }
 
+/* The message text is plain text (thread.ts appends it as text nodes via
+   linkify.ts, never markup), so a typed line break is a literal "\n". Under the
+   default `white-space: normal` every one collapsed to a space and a message
+   typed on several lines read as one run-on paragraph (operator report,
+   2026-09-25). `pre-wrap` keeps each "\n" (and a blank line between
+   paragraphs) while still wrapping long lines; the bubble's
+   `overflow-wrap: anywhere` above keeps a long unbroken run from overflowing. */
+.wx-srv-bubble-text {
+  white-space: pre-wrap;
+}
+
 .wx-srv-bubble-text a {
   color: inherit;
   text-decoration: underline;

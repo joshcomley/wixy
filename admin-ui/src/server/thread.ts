@@ -1003,6 +1003,21 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
 
   // -- Send / echo reconciliation ---------------------------------------------
 
+  /** `composer.setBusy(true)` disables the textarea for the duration of a send, and disabling a
+   * focused element drops its focus; re-enabling it never gives the focus back. So the caret
+   * vanished after every Send and the next message needed a tap or click first (operator report,
+   * 2026-09-25). Give it back once the send settles - on success (after the text is cleared) and
+   * on failure (the typed text is still there to retry) - but only while focus is still "lost":
+   * on the body, or on the composer's own controls (a click on Send moves focus to that button
+   * first). If the user moved to something else meanwhile (the settings gear, a message menu),
+   * that is theirs and is left alone. */
+  function restoreComposerFocus(): void {
+    const active = documentRef.activeElement;
+    if (active === null || active === documentRef.body || composer.element.contains(active)) {
+      composer.focus();
+    }
+  }
+
   function send(): void {
     if (currentSession === null) return;
     const session = currentSession;
@@ -1042,11 +1057,13 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           composer.reset();
           addConfirmed(result.message);
           renderThreadList();
+          restoreComposerFocus();
           return;
         }
         pendingEchoes = pendingEchoes.filter((e) => e.clientId !== clientId);
         renderThreadList();
         composer.setError(result.kind === "invalid" ? result.detail : "Couldn't send — retry.");
+        restoreComposerFocus();
       })
       .catch((error: unknown) => {
         if (error instanceof ServerLockedError) {
@@ -1057,6 +1074,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         pendingEchoes = pendingEchoes.filter((e) => e.clientId !== clientId);
         renderThreadList();
         composer.setError(error instanceof Error ? error.message : "Couldn't send — retry.");
+        restoreComposerFocus();
       });
   }
 
