@@ -17,6 +17,7 @@ from pathlib import Path
 
 import anyio
 
+from wixy_server.livechat.grants import GRANT_IDLE_EXPIRY_S, REVOKED_ROW_RETENTION_S
 from wixy_server.livechat.store import LiveChatStore
 from wixy_server.storage import ProjectPaths
 
@@ -35,6 +36,8 @@ class JanitorReport:
     stale_uploads: int
     orphan_attachments: int
     expired_failed: int
+    revoked_grants: int = 0
+    deleted_grants: int = 0
 
 
 def run_once(*, store: LiveChatStore, paths: ProjectPaths, now: float) -> JanitorReport:
@@ -96,10 +99,19 @@ def run_once(*, store: LiveChatStore, paths: ProjectPaths, now: float) -> Janito
 
     store.prune_completed_deleted_storage(older_than=now - FAILED_RETENTION_S)
 
+    # 03-permanent-unlock.md §3: a device grant unused for 30 days is revoked; a revoked
+    # row is kept a week (so a revoke stays visible to a racing request), then dropped.
+    revoked_grants = store.revoke_idle_device_grants(idle_before=now - GRANT_IDLE_EXPIRY_S, now=now)
+    deleted_grants = store.delete_revoked_device_grants(
+        revoked_before=now - REVOKED_ROW_RETENTION_S
+    )
+
     return JanitorReport(
         stale_uploads=stale_uploads,
         orphan_attachments=orphan_attachments,
         expired_failed=expired_failed,
+        revoked_grants=revoked_grants,
+        deleted_grants=deleted_grants,
     )
 
 

@@ -36,6 +36,7 @@ from wixy_server.github import GitHubClient
 from wixy_server.livechat import janitor as livechat_janitor
 from wixy_server.livechat import media_queue as livechat_media_queue
 from wixy_server.livechat import processing as livechat_processing
+from wixy_server.livechat.grants import GrantFailureLimiter
 from wixy_server.livechat.models import MessageHook, MessageRow
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import CmdPinVerifier, PinVerifier
@@ -341,6 +342,7 @@ def create_app(
     app.state.livechat_media_available = livechat_media_available
     app.state.livechat_started_at = livechat_started_at
     app.state.livechat_pin_verifier = resolved_pin_verifier
+    app.state.livechat_grant_limiter = GrantFailureLimiter()
 
     @app.exception_handler(FastAPIHTTPException)
     async def _http_exception_handler(_request: Request, exc: FastAPIHTTPException) -> JSONResponse:

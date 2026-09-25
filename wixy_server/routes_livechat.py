@@ -27,6 +27,16 @@ from pydantic import BaseModel, ConfigDict, Field
 from builder.jsontypes import JsonObject
 from wixy_server.background import ContainedTaskGroup
 from wixy_server.livechat import janitor as livechat_janitor
+from wixy_server.livechat.grants import (
+    GRANT_ID_RE,
+    GRANT_IDLE_EXPIRY_S,
+    MAX_LIVE_GRANTS_PER_IDENTITY,
+    GrantFailureLimiter,
+    InvalidLabelError,
+    clean_label,
+    new_grant,
+    secret_hash_from_wire,
+)
 from wixy_server.livechat.models import (
     EventRow,
     MessageHook,
@@ -143,27 +153,39 @@ async def _finish_committed_erasure(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/unlock", response_model=None)
-async def unlock(request: Request) -> JSONResponse:
-    # No token yet, so the token header cannot be this route's CSRF guard: refuse a
-    # request a cross-site page could have sent BEFORE reading the body or calling cmd,
-    # which charges an attempt before it checks (audit round 4, F14).
+def _request_guard_refusal(request: Request, route: str) -> JSONResponse | None:
+    """Refuse a request a cross-site page could have sent, BEFORE the body is read, cmd is
+    called or a store is touched (audit round 4, F14). Shared by `/unlock` and every
+    device-grant route (03-permanent-unlock.md §3), each of which either charges a PIN
+    attempt or hands out a token."""
     refusal = unlock_request_refusal(request)
-    if refusal is not None:
-        _LOGGER.warning("Server chat unlock refused before cmd was contacted: %s", refusal.reason)
-        return JSONResponse(status_code=refusal.status_code, content={"error": refusal.error})
+    if refusal is None:
+        return None
+    _LOGGER.warning("Server chat %s refused before doing anything: %s", route, refusal.reason)
+    return JSONResponse(status_code=refusal.status_code, content={"error": refusal.error})
+
+
+async def _json_object(request: Request) -> dict[str, object] | None:
+    """The request body as a JSON object, or `None` for anything else (not JSON, not
+    UTF-8, or not an object). Callers turn `None` into their own 422."""
     try:
         body = await request.json()
     except json.JSONDecodeError:
-        return JSONResponse(status_code=422, content={"error": "invalid_pin"})
+        return None
     except UnicodeDecodeError:
-        return JSONResponse(status_code=422, content={"error": "invalid_pin"})
+        return None
     if not isinstance(body, dict):
-        return JSONResponse(status_code=422, content={"error": "invalid_pin"})
+        return None
+    return body
 
+
+async def _verify_pin(request: Request, pin: object) -> JSONResponse | None:
+    """§5.1's PIN check — shape validation, cmd's verify, and the outcome -> status
+    mapping — shared by `POST /unlock` and `POST /device-grants` (03 §3: "the same
+    PinVerifier path ... the same 401/429/409/503/422 mapping and copy apply"). Returns
+    the error response, or `None` when cmd said the PIN is right."""
     verifier: PinVerifier | None = request.app.state.livechat_pin_verifier
     access_email = getattr(request.state, "access_email", None) or ""
-    pin = body.get("pin")
     if (
         not isinstance(pin, str)
         or not pin.isascii()
@@ -180,9 +202,7 @@ async def unlock(request: Request) -> JSONResponse:
     result = await verifier.verify(pin=pin, subject=access_email)
 
     if result.outcome == "ok":
-        secret: bytes = request.app.state.livechat_secret
-        token, expires_at = mint_unlock_token(secret, email=access_email, now=time.time())
-        return JSONResponse(status_code=200, content={"token": token, "expiresAt": expires_at})
+        return None
     if result.outcome == "wrong_pin":
         return JSONResponse(
             status_code=401,
@@ -209,6 +229,165 @@ async def unlock(request: Request) -> JSONResponse:
     if result.outcome == "not_configured":
         return JSONResponse(status_code=503, content={"error": "not_configured"})
     return JSONResponse(status_code=503, content={"error": "pin_service_unavailable"})
+
+
+@router.post("/unlock", response_model=None)
+async def unlock(request: Request) -> JSONResponse:
+    # No token yet, so the token header cannot be this route's CSRF guard: refuse a
+    # request a cross-site page could have sent BEFORE reading the body or calling cmd,
+    # which charges an attempt before it checks (audit round 4, F14).
+    refused = _request_guard_refusal(request, "unlock")
+    if refused is not None:
+        return refused
+    body = await _json_object(request)
+    if body is None:
+        return JSONResponse(status_code=422, content={"error": "invalid_pin"})
+
+    error = await _verify_pin(request, body.get("pin"))
+    if error is not None:
+        return error
+    secret: bytes = request.app.state.livechat_secret
+    access_email = getattr(request.state, "access_email", None) or ""
+    token, expires_at = mint_unlock_token(secret, email=access_email, now=time.time())
+    return JSONResponse(status_code=200, content={"token": token, "expiresAt": expires_at})
+
+
+# ---------------------------------------------------------------------------
+# Device grants (03-permanent-unlock.md §3, Inv 48) — "Keep this device unlocked".
+# ---------------------------------------------------------------------------
+
+_GRANT_INVALID = {"error": "grant_invalid"}
+# These two responses carry a credential (the one-time secret, a fresh unlock token).
+_NO_STORE = {"Cache-Control": "no-store"}
+
+
+@router.post("/device-grants", response_model=None)
+async def create_device_grant(request: Request) -> JSONResponse:
+    """Enroll this device. Needs BOTH a valid unlock token (you are inside the unlocked
+    chat) AND a PIN that cmd verifies right now — an attempt is charged exactly as for
+    `/unlock`. The secret is returned here and nowhere else."""
+    refused = _request_guard_refusal(request, "device-grants")
+    if refused is not None:
+        return refused
+    auth = require_server_token(request)
+    body = await _json_object(request)
+    if body is None:
+        return JSONResponse(status_code=422, content={"error": "invalid_pin"})
+    try:
+        label = clean_label(body.get("label"))
+    except InvalidLabelError as exc:
+        return _invalid(str(exc))
+
+    error = await _verify_pin(request, body.get("pin"))
+    if error is not None:
+        return error
+
+    store: LiveChatStore = request.app.state.livechat_store
+    secret: bytes = request.app.state.livechat_secret
+    grant = new_grant()
+    now = time.time()
+    await anyio.to_thread.run_sync(
+        lambda: store.create_device_grant(
+            grant_id=grant.grant_id,
+            secret_hash=grant.secret_hash,
+            email=auth.email,
+            label=label,
+            now=now,
+            max_live=MAX_LIVE_GRANTS_PER_IDENTITY,
+        )
+    )
+    token, expires_at = mint_unlock_token(secret, email=auth.email, now=now)
+    return JSONResponse(
+        status_code=201,
+        content={
+            "grantId": grant.grant_id,
+            "secret": grant.secret,
+            "token": token,
+            "expiresAt": expires_at,
+        },
+        headers=_NO_STORE,
+    )
+
+
+@router.post("/unlock-with-grant", response_model=None)
+async def unlock_with_grant(request: Request) -> JSONResponse:
+    """Mint a normal unlock token from a device grant. No PIN, and cmd is never
+    contacted. Every way this can fail is the same reason-free 401 `grant_invalid`."""
+    refused = _request_guard_refusal(request, "unlock-with-grant")
+    if refused is not None:
+        return refused
+    body = await _json_object(request)
+    if body is None:
+        return _invalid("expected a JSON object with grantId and secret")
+
+    limiter: GrantFailureLimiter = request.app.state.livechat_grant_limiter
+    store: LiveChatStore = request.app.state.livechat_store
+    access_email = getattr(request.state, "access_email", None) or ""
+    mono_now = time.monotonic()
+    retry_after = limiter.retry_after_s(access_email, mono_now)
+    if retry_after is not None:
+        return JSONResponse(
+            status_code=429,
+            content={"error": "rate_limited", "retryAfterS": retry_after},
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    grant_id = body.get("grantId")
+    secret_hash = secret_hash_from_wire(body.get("secret"))
+    now = time.time()
+    valid = False
+    if isinstance(grant_id, str) and GRANT_ID_RE.fullmatch(grant_id) and secret_hash is not None:
+        valid = await anyio.to_thread.run_sync(
+            lambda: store.redeem_device_grant(
+                grant_id=grant_id,
+                secret_hash=secret_hash,
+                email=access_email,
+                now=now,
+                max_idle_s=GRANT_IDLE_EXPIRY_S,
+            )
+        )
+    if not valid:
+        limiter.record_failure(access_email, mono_now)
+        return JSONResponse(status_code=401, content=_GRANT_INVALID)
+
+    secret: bytes = request.app.state.livechat_secret
+    token, expires_at = mint_unlock_token(secret, email=access_email, now=now)
+    return JSONResponse(
+        status_code=200,
+        content={"token": token, "expiresAt": expires_at},
+        headers=_NO_STORE,
+    )
+
+
+@router.delete("/device-grants/{grant_id}", response_model=None)
+async def revoke_device_grant(grant_id: str, request: Request) -> Response:
+    refused = _request_guard_refusal(request, "device-grants")
+    if refused is not None:
+        return refused
+    auth = require_server_token(request)
+    store: LiveChatStore = request.app.state.livechat_store
+    found = False
+    if GRANT_ID_RE.fullmatch(grant_id):
+        found = await anyio.to_thread.run_sync(
+            lambda: store.revoke_device_grant(grant_id=grant_id, email=auth.email, now=time.time())
+        )
+    if not found:
+        # An unknown id and another identity's grant look exactly alike.
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+    return Response(status_code=204)
+
+
+@router.delete("/device-grants", response_model=None)
+async def revoke_all_device_grants(request: Request) -> Response:
+    refused = _request_guard_refusal(request, "device-grants")
+    if refused is not None:
+        return refused
+    auth = require_server_token(request)
+    store: LiveChatStore = request.app.state.livechat_store
+    await anyio.to_thread.run_sync(
+        lambda: store.revoke_all_device_grants(email=auth.email, now=time.time())
+    )
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------

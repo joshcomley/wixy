@@ -12,7 +12,11 @@ from pathlib import Path
 import pytest
 
 from wixy_server.livechat.models import AttachmentResult, PushSubscriptionRow, UploadRow
-from wixy_server.livechat.store import LiveChatStore, UnusableAttachmentError
+from wixy_server.livechat.store import (
+    _LATEST_SCHEMA_VERSION,
+    LiveChatStore,
+    UnusableAttachmentError,
+)
 
 # A scrub the test expects to SUCCEED gets a generous deadline: success returns as soon as the WAL
 # is truncated, so the number is only ever spent by a machine stall (decision 00159). Tests that
@@ -41,7 +45,7 @@ class TestMigrations:
         store.list_messages(before=None, limit=1)
         conn = sqlite3.connect(str(db_path))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == _LATEST_SCHEMA_VERSION
         finally:
             conn.close()
 
@@ -123,7 +127,7 @@ class TestMigrations:
         upgraded.list_messages(before=None, limit=1)
         conn = sqlite3.connect(str(db_path))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == _LATEST_SCHEMA_VERSION
             index = conn.execute(
                 "SELECT sql FROM sqlite_master "
                 "WHERE type = 'index' AND name = 'idx_deleted_storage_pending'"
@@ -160,7 +164,7 @@ class TestMigrations:
         conn.close()
         conn = sqlite3.connect(str(db_path))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == _LATEST_SCHEMA_VERSION
             columns = {row[1]: row for row in conn.execute("PRAGMA table_info(deleted_storage)")}
             assert columns["generation"][3] == 1
             assert (
@@ -215,7 +219,7 @@ class TestMigrations:
                 conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'events'").fetchone()[0]
                 == 13
             )
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == _LATEST_SCHEMA_VERSION
         finally:
             conn.close()
 
