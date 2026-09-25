@@ -384,8 +384,7 @@ def _load_reply_targets(
     by_seq = {row["seq"]: row for row in rows}
     attachments_by_seq = _load_attachments_for(conn, list(by_seq.keys()))
     return {
-        seq: _row_to_message(row, tuple(attachments_by_seq[seq]))
-        for seq, row in by_seq.items()
+        seq: _row_to_message(row, tuple(attachments_by_seq[seq])) for seq, row in by_seq.items()
     }
 
 
@@ -534,9 +533,7 @@ class LiveChatStore:
                 current = 9
 
             if current < 10:
-                existing_columns = {
-                    row[1] for row in conn.execute("PRAGMA table_info(messages)")
-                }
+                existing_columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
                 if "reply_to_seq" not in existing_columns:
                     conn.execute(_SCHEMA_V10_REPLY_TO_COLUMN)
                 for statement in _SCHEMA_V10_REPLY_TO_INDEX.split(";"):
@@ -656,9 +653,7 @@ class LiveChatStore:
             stored_reply_to_seq: int | None = None
             if reply_to_seq is not None:
                 target_exists = (
-                    conn.execute(
-                        "SELECT 1 FROM messages WHERE seq = ?", (reply_to_seq,)
-                    ).fetchone()
+                    conn.execute("SELECT 1 FROM messages WHERE seq = ?", (reply_to_seq,)).fetchone()
                     is not None
                 )
                 if target_exists:

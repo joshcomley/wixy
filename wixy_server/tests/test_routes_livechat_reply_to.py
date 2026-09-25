@@ -268,9 +268,9 @@ class TestReplyToSendContract:
     ) -> None:
         client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
         try:
-            target = _send(
-                client, headers, client_id="client-replay-target", text="target"
-            ).json()["message"]
+            target = _send(client, headers, client_id="client-replay-target", text="target").json()[
+                "message"
+            ]
             body = {
                 "clientId": "client-replay-reply",
                 "sender": "Purdi",
@@ -316,9 +316,9 @@ class TestReplyToSurvivesTargetDeletion:
     ) -> None:
         client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
         try:
-            target = _send(
-                client, headers, client_id="client-delete-target", text="doomed"
-            ).json()["message"]
+            target = _send(client, headers, client_id="client-delete-target", text="doomed").json()[
+                "message"
+            ]
             reply = _send(
                 client,
                 headers,
