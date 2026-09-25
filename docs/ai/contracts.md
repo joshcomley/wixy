@@ -418,9 +418,13 @@ Publish/Chat use — the client is a `fetch()` streaming reader carrying the
 - `: ping` (a bare comment line, no `event:`/`data:`) every 15s, to keep the connection
   alive through proxies.
 - `event: message_deleted` / `data: {"seq":int}` — the client removes that bubble if present;
-  a missing bubble is a no-op. Also the sole signal a reply's quote needs to disappear (Inv 51):
-  the client removes the `.wx-srv-quote` element in place from every bubble/echo quoting that
-  seq, and cancels the composer's pending reply if it targets that seq.
+  a missing bubble is a no-op. Also the LIVE-path signal a reply's quote needs to disappear
+  (Inv 51 — one of three mechanisms, not the only one; see Inv 51's own text): the client
+  removes the `.wx-srv-quote` element in place from every bubble/echo quoting that seq, and
+  cancels the composer's pending reply if it targets that seq. This event is never delivered
+  across a lock (the stream resumes from a fresh cursor on reattach); a reattach that refreshes a
+  reply with `replyTo: null`, and `attach()`'s own check of a pending reply's target, cover that
+  case instead.
 - `event: wiped` / `data: {}` — the client clears loaded history and pending echoes; the stream
   remains open.
 

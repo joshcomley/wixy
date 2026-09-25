@@ -917,26 +917,48 @@ per deleted row for the `SET NULL` action, and unindexed that is O(n) per row (m
 17.6s vs 0.2s at 20,000 messages, one in three a reply). A reply's own `sender`/`device_id`/
 `by_email` are ordinary message fields — nothing new is added for identity or audit.
 
-On the client, `message_deleted{seq}` is the only signal a reply's quote ever needs to disappear
-(the server does not additionally fan out `message_updated` for replies on delete): `thread.ts`
-removes the `.wx-srv-quote` element in place from every loaded bubble and pending echo that quotes
-`seq`, and cancels the composer's pending reply if it targets `seq` — never a full bubble
-re-render, the same voice/video cut-off trap Inv 46's reactions-adjacent guard protects against.
+On the client, a reply's quote is kept honest by THREE mechanisms, not one (audit F3/F9 — an
+earlier version of this doc claimed `message_deleted` was the only/sole one, which is false and
+was itself a near-miss: reading it that way is exactly what would make removing the other two
+look like safe, redundant cleanup):
+1. **Live, while connected and unlocked:** `message_deleted{seq}` (the server does not
+   additionally fan out `message_updated` for replies on delete) — `thread.ts` removes the
+   `.wx-srv-quote` element in place from every loaded bubble and pending echo that quotes `seq`,
+   and cancels the composer's pending reply if it targets `seq`.
+2. **Across a lock:** the live stream resumes from a FRESH cursor on reattach, so a
+   `message_deleted` fired while locked is never delivered. This is covered instead because the
+   server always resolves `replyTo` fresh from the live target row on every read (§(2)) — a
+   refreshed message that comes back with `replyTo: null` is patched via `patchQuote`, on the
+   same "safe patch, don't rebuild" branch as `patchReactions` (`sameExceptReactions` deliberately
+   ignores `replyTo` for the rebuild-vs-patch decision, precisely so this stays a patch, not a
+   full re-render).
+3. **A pending, not-yet-sent reply's target, across a lock:** `attach()` re-checks a pending
+   reply's target the same way it already reconciles retained history rows (a pending reply's
+   target must have been loaded when Reply was clicked, so it is always in the retained set) and
+   cancels the pending reply if the target didn't come back.
+None of these three ever re-renders a whole bubble — the same voice/video cut-off trap Inv 46's
+reactions-adjacent guard protects against — and cancelling a pending reply always clears the
+composer bar's own text/quote content, not merely its `hidden` flag (audit F8: a hidden node still
+containing the deleted target's words is not erasure).
 Quote freshness the other direction — an attachment finishing processing — is a real
 `message_updated`: `finish_attachment` also appends one for every message whose `reply_to_seq`
 points at the message that owns the finished attachment, so a quote gains its thumbnail the moment
-the target's video or photo becomes ready.
+the target's video or photo becomes ready; the same `patchQuote` branch above patches it in place.
 *Enforced by:* `wixy_server/tests/test_livechat_reply_to.py` (schema/migration, one-level
 resolution, target-exists/missing/idempotent `create_message` behaviour, the
 `finish_attachment` cascade, and the erasure raw-byte tests — delete, wipe, and a bare
 `DELETE FROM messages` from a simulated older-process connection), `test_routes_livechat_reply_to.py`
 (the `POST /messages` wire contract, including `replyToSeq` validation — an integer >= 1,
-booleans rejected — and never a 500), `test_livechat_reply_to_driftguard.py` (Python) and
-`admin-ui/tests/server/replyTo.test.ts` (TypeScript) — both asserted against the same shared
-fixture `spec/server-chat/fixtures/reply-to-cases.json` so the server's `reply_to_json` and the
-client's `replyToFromMessage` can never silently drift apart — and
+booleans rejected, and never a 500 even at SQLite's own integer ceiling), `test_livechat_reply_to_driftguard.py`
+(Python) and `admin-ui/tests/server/replyTo.test.ts` (TypeScript) — both asserted against the same
+shared fixture `spec/server-chat/fixtures/reply-to-cases.json` so the server's `reply_to_json` and
+the client's `replyToFromMessage` can never silently drift apart — and
 `admin-ui/tests/serverThread.test.ts`'s "reply to a message" suite (the composer bar, draft
-carry-through on a failed send, the sent bubble's quote button and its scroll-to-original paging,
-and the in-place quote removal on `message_deleted`, including that a playing `<audio>` element in
-the reply keeps its identity and `currentTime`).
+carry-through on a failed send, the sent bubble's quote button and its scroll-to-original paging
+including that a paging error never removes a quote genuine exhaustion would, and the in-place
+quote removal on `message_deleted`, including that a playing `<audio>` element in the reply keeps
+its identity and `currentTime`), plus its "reattach after a lock" and "in-flight data can never
+resurrect a deleted target's words" suites (mechanisms 2 and 3 above, and the three narrower races
+— a stale history page, a failed send restore, a failed delete restore — that could otherwise
+reintroduce a deleted target's words).
 Decisions: [00168](../../decisions/00168-reply-to-a-message-schema-and-erasure/decision.md).

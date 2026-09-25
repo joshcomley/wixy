@@ -2908,17 +2908,24 @@ describe("reply to a message (round 2 ruling item 10)", () => {
       view.teardown();
     });
 
-    it("cancels the composer's pending reply if it targets the deleted message", async () => {
-      const target = fakeMessage({ seq: 1, sender: "Purdy", text: "will be deleted" });
+    it("cancels the composer's pending reply if it targets the deleted message, clearing the bar's content, not just hiding it (audit F8)", async () => {
+      const target = fakeMessage({ seq: 1, sender: "Purdy", text: "SENTINEL-WILL-BE-DELETED" });
       getHistory.mockResolvedValue(emptyHistory({ messages: [target], cursor: 1 }));
       const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
       await view.attach(SESSION);
       view.element.querySelector<HTMLButtonElement>(".wx-srv-message-actions-trigger")?.click();
       view.element.querySelector<HTMLButtonElement>(".wx-srv-message-action-reply")?.click();
       expect(view.element.querySelector<HTMLElement>(".wx-srv-reply-bar")?.hidden).toBe(false);
+      expect(view.element.querySelector(".wx-srv-reply-bar-quote")?.textContent).toContain("SENTINEL-WILL-BE-DELETED");
 
       view.handleStreamEvent({ type: "message_deleted", seq: 1 } as ServerStreamEvent);
+
       expect(view.element.querySelector<HTMLElement>(".wx-srv-reply-bar")?.hidden).toBe(true);
+      // Hidden is not erased: ruling item 10 (2) requires no DOM node contain the
+      // sentinel at all, and a hidden node whose content survives is exactly what
+      // audit F8 found (three separate cancel paths all missed this).
+      expect(view.element.querySelector(".wx-srv-reply-bar-label")?.textContent).toBe("");
+      expect(view.element.querySelector(".wx-srv-reply-bar-quote")?.textContent).toBe("");
       view.teardown();
     });
   });

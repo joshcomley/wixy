@@ -820,14 +820,20 @@ counter aborts a stale run's continuation (never its underlying network call) on
 another tap; the quote shows busy (`.wx-srv-quote-busy`) meanwhile. Never found once paging
 exhausts (deleted in the meantime) removes the quote via the same path `message_deleted` uses.
 
-Client-side erasure (Inv 46/Inv 51): the server does not fan out `message_updated` for a reply on
-the target's delete, so `message_deleted{seq}` is the only signal — `removeQuotesTargeting(seq)`
-removes the `.wx-srv-quote` element IN PLACE from every loaded bubble and pending echo whose quote
-targets `seq`, and cancels the composer's pending reply if it targets `seq`, never re-rendering a
-whole bubble (the same voice/video cut-off trap Inv 46's own client mechanism avoids for delete).
-Quote freshness the other direction is a real `message_updated`, fanned out server-side by
-`finish_attachment` to every reply of the message whose attachment just finished — the client's
-existing per-message diffing patches just that bubble.
+Client-side erasure (Inv 46/Inv 51) — see Inv 51's own text for the full three-mechanism picture
+(audit F3/F9: an earlier version of this doc called `message_deleted` the "only signal", which is
+false and reads as an invitation to delete the other two as redundant). Live and unlocked, the
+server does not fan out `message_updated` for a reply on the target's delete, so
+`message_deleted{seq}` is what `removeQuotesTargeting(seq)` reacts to: it removes the
+`.wx-srv-quote` element IN PLACE from every loaded bubble and pending echo whose quote targets
+`seq`, and cancels the composer's pending reply if it targets `seq`, never re-rendering a whole
+bubble (the same voice/video cut-off trap Inv 46's own client mechanism avoids for delete) —
+clearing the pending reply's bar content too, not merely hiding it (F8). Across a lock, where that
+event is never delivered (the stream resumes from a fresh cursor on reattach), `patchQuote` and
+`attach()`'s own pending-reply check do the equivalent job, because the server always resolves
+`replyTo` fresh on every read. Quote freshness the other direction is a real `message_updated`,
+fanned out server-side by `finish_attachment` to every reply of the message whose attachment just
+finished — the same `patchQuote` path patches just that bubble's quote, in place.
 
 ## 13. Delivery status
 

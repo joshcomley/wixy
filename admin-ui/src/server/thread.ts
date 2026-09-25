@@ -532,6 +532,12 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     pendingReply = target;
     if (target === null) {
       replyBar.hidden = true;
+      // Audit F8: hiding the bar isn't erasure — every cancel path
+      // (message_deleted, a reattach whose target is gone, a wipe, a failed
+      // send restore) must leave no DOM node containing the target's words,
+      // not merely one the CSS currently hides.
+      replyBarLabel.textContent = "";
+      replyBarQuote.replaceChildren();
     } else {
       replyBarLabel.textContent = `Replying to ${identity.isMine(target.quote.sender) ? "You" : target.quote.sender}`;
       replyBarQuote.replaceChildren(
