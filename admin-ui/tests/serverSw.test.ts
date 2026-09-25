@@ -34,7 +34,7 @@ describe("Server service worker", () => {
     });
   });
 
-  it("does not notify while a visible focused Server page is open", async () => {
+  it("notifies silently while a visible focused Server page is open to satisfy userVisibleOnly", async () => {
     const target = targetWith([
       { type: "window", url: "https://example.test/admin/server/thread", focused: true, visibilityState: "visible" },
     ]);
@@ -42,7 +42,12 @@ describe("Server service worker", () => {
 
     await handlePush(target as unknown as ServiceWorkerGlobalScope);
 
-    expect(target.registration.showNotification).not.toHaveBeenCalled();
+    expect(target.registration.showNotification).toHaveBeenCalledWith("Server", {
+      body: "New activity",
+      tag: "wixy-server",
+      renotify: false,
+      silent: true,
+    });
   });
 
   it("focuses an existing admin window and navigates it to Server", async () => {

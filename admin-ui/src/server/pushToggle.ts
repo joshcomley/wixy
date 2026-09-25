@@ -40,6 +40,32 @@ export function isAndroidPushCapable(win?: Window): boolean {
     && "Notification" in browserWindow;
 }
 
+export function mountUnsupportedPushNotice(host: HTMLElement, win?: Window): PushToggle {
+  const browserWindow = win ?? (typeof window === "undefined" ? undefined : window);
+  const navigator = browserWindow?.navigator as NavigatorWithUserAgentData | undefined;
+  const isAndroid = navigator?.userAgentData?.platform === "Android"
+    || (navigator?.userAgent !== undefined && /Android/i.test(navigator.userAgent));
+
+  const root = document.createElement("section");
+  root.className = "wx-srv-push-unsupported";
+  const title = document.createElement("h3");
+  title.textContent = "Notifications";
+  const explanation = document.createElement("p");
+  explanation.className = "wx-srv-push-explanation";
+  explanation.textContent = isAndroid
+    ? "Notifications are not supported by this browser."
+    : "Notifications are currently supported on Android devices only.";
+  root.append(title, explanation);
+  host.appendChild(root);
+
+  return {
+    element: root,
+    teardown(): void {
+      root.remove();
+    },
+  };
+}
+
 export function mountPushToggle(host: HTMLElement, deps: PushToggleDeps): PushToggle {
   const browserWindow = (deps.win ?? window) as BrowserWindow;
   const request = deps.fetch ?? browserWindow.fetch.bind(browserWindow);

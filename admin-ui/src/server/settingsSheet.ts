@@ -17,7 +17,7 @@ import { isIdleLockExtended, onIdleLockPreferenceChanged, setIdleLockExtended } 
 import { effectiveLockSettings, type PinError } from "./lockModel";
 import { isScreenLockProven, onLockSettingsChanged, readStoredLockSettings, setLockSettings } from "./lockSettings";
 import { mountPinPad, type PinPadView } from "./pinPad";
-import { isAndroidPushCapable, mountPushToggle, type PushToggle } from "./pushToggle";
+import { isAndroidPushCapable, mountPushToggle, mountUnsupportedPushNotice, type PushToggle } from "./pushToggle";
 import { createScreenWatcher, type ScreenWatchStatus } from "./screenWatcher";
 import type { LockHooks, ServerSession } from "./types";
 
@@ -228,15 +228,19 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
 
   function mountPushToggleIfCapable(session: ServerSession | null): void {
     unmountPushToggle();
-    if (session === null || !isAndroidPushCapable(win)) return;
+    if (session === null) return;
     const sender = identity.getName();
     if (sender === null) return;
-    pushToggle = mountPushToggle(pushSlot, {
-      deviceId: identity.getDeviceId(),
-      sender,
-      win,
-      getToken: () => deps.getSession()?.token ?? null,
-    });
+    if (isAndroidPushCapable(win)) {
+      pushToggle = mountPushToggle(pushSlot, {
+        deviceId: identity.getDeviceId(),
+        sender,
+        win,
+        getToken: () => deps.getSession()?.token ?? null,
+      });
+    } else {
+      pushToggle = mountUnsupportedPushNotice(pushSlot, win);
+    }
   }
 
   function stopScrubPolling(): void {
