@@ -115,6 +115,12 @@ Domain terms and status machines. The normative source for the content-model ter
   exceptions.
 - **Attachment status** — `processing` while a queued upload is normalized; `ready` when its
   private renditions can be served; `failed` when processing cannot produce renditions.
+- **Transcript status** — a voice note's opt-in transcript is absent (`null`) until someone taps
+  Transcribe; then `pending` while the job runs, `done` (with the text) or `failed` (retryable). A
+  `pending` row found at startup becomes `failed`. It is erased with its message (Inv 50).
+- **Private mode (cmd)** — cmd's `POST /api/transcribe` with `private=1`: no audio or transcript is
+  saved or logged. wixy sends a voice note to cmd only in this mode and only while
+  `GET /api/transcribe/capabilities` answers `{"private": true}`.
 - **Erasure pending** — `erasurePending: true` means a committed delete or wipe still has
   database-byte or filesystem cleanup to finish. The routes return 202; they return 204 only
   when no erasure work remains.

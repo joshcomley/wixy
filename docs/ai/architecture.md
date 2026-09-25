@@ -177,10 +177,12 @@ human↔human messaging tool for admin users, disguised behind a "Server" nav ta
 | Module | Responsibility |
 |---|---|
 | `models.py` | frozen row dataclasses (`MessageRow`, `AttachmentRow`, `EventRow`, …) + the `message_json`/`attachment_json` wire serializers |
-| `store.py` | `LiveChatStore` — SQLite (WAL), messages/attachments/events/uploads/push subscriptions plus durable `deleted_storage`, `pending_wipe_cleanup`, and `pending_scrub` records |
+| `store.py` | `LiveChatStore` — SQLite (WAL), messages/attachments/events/uploads/push subscriptions, voice-note transcripts (`attachment_transcripts`, cascade-deleted with the attachment) plus durable `deleted_storage`, `pending_wipe_cleanup`, and `pending_scrub` records |
 | `background.py` | `ContainedTaskGroup` — supervised app-lifetime loops, contained one-shot tasks, and health state |
 | `tokens.py` | the per-project HMAC secret, unlock-token mint/verify, signed media-URL signing/verification, `require_server_token` |
 | `pinclient.py` | `PinVerifier` protocol + `CmdPinVerifier` — the zero-PIN-state hop to cmd's PIN-verify service |
+| `transcribe.py` | `Transcriber` protocol + `CmdTranscriber` — the private-mode hop to cmd's on-box speech-to-text (capability probe, `private=1` + `cleanup=0` only; Inv 50) |
+| `transcription.py` | `TranscriptionRuntime` — the opt-in transcription job (one at a time, single-flight per note), its 6-a-minute rate limiter, and the timeout formula |
 | `notifier.py` | `LiveChatNotifier` — in-process SSE wake-up (`anyio.Event` swap) |
 | `processing.py` | pure photo/voice/video pipeline (Pillow+pillow-heif, ffmpeg) — magic-byte sniff, hardened subprocess calls, no DB/settings coupling |
 | `uploads.py` | chunked upload staging/assembly, quota + free-space enforcement |
@@ -189,7 +191,7 @@ human↔human messaging tool for admin users, disguised behind a "Server" nav ta
 
 `routes_livechat.py` and `routes_livechat_media.py` (not inside the package, alongside the
 other `routes_*.py` files) wire these together — the former owns unlock/history/send/stream/
-usage, the latter owns uploads + the signed `GET media/*` route. `settings.py` carries the
+usage and the opt-in `attachments/{id}/transcribe` route, the latter owns uploads + the signed `GET media/*` route. `settings.py` carries the
 feature's config (`server_pin_app_key`, media-quota/free-space/upload-chunk sizing,
 ffmpeg/ffprobe paths) — deliberately **no PIN value anywhere** (R4: wixy holds zero PIN
 state; cmd owns the registered PIN itself).
@@ -223,7 +225,7 @@ D:\Servers\Wixy\Storage\
     chats.json                 # AI conversation registry
     locks\publish.lock         # cross-process publish lock (self-heals after 600s)
     server\                    # PIN-protected admin live chat — PRIVATE, Inv 40
-      server.db (+ -wal, -shm) # SQLite, schema v7 — chat rows, private erasure journals (`deleted_storage`, `pending_wipe_cleanup`, `pending_scrub`) and device grants (`device_grants`, hashes only)
+      server.db (+ -wal, -shm) # SQLite — chat rows, reactions, opt-in voice-note transcripts (`attachment_transcripts`), device grants (`device_grants`, hashes only) and private erasure journals (`deleted_storage`, `pending_wipe_cleanup`, `pending_scrub`)
       secret.key                # 32 random bytes (unlock-token + media-URL HMAC key)
       media\<id[:2]>\<id>\      # processed attachment renditions (P2)
       uploads\<uploadId>\       # in-progress chunked uploads (P2)

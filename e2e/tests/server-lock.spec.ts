@@ -252,6 +252,25 @@ for (const profile of DEVICE_PROFILES) {
       });
     });
 
+    test(`${profile.name}: a PIN-pad key registers a tap anywhere in its square cell, not just its visible circle`, async ({
+      browser,
+    }) => {
+      // Operator report (round 2): taps near the edge of a digit key missed.
+      // The key's box (56px/64px square) is rendered with border-radius:50%,
+      // and the browser clips hit-testing to that rounded shape, so a tap in
+      // a corner of the square cell — well within the visible layout slot —
+      // silently does nothing. Clicking 2px inside the box's true corner
+      // must register exactly like clicking dead centre.
+      await withServerPage(browser, profile, async (page) => {
+        await revealAndOpenPinPad(page);
+        const key5 = page.locator(".wx-srv-pinpad").getByRole("button", { name: "5", exact: true });
+        const box = await key5.boundingBox();
+        if (box === null) throw new Error("pinpad key 5 has no bounding box");
+        await page.mouse.click(box.x + 2, box.y + 2);
+        await expect(page.locator(".wx-srv-pinpad-dot")).toHaveCount(1);
+      });
+    });
+
     test(`${profile.name}: idle timing — 9s visible, activity extends it, locks ~10.8s after the LAST activity`, async ({
       browser,
     }) => {

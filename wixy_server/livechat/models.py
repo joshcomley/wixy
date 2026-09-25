@@ -14,6 +14,7 @@ from builder.jsontypes import JsonObject
 
 AttachmentKind = Literal["photo", "video", "voice"]
 AttachmentStatus = Literal["processing", "ready", "failed"]
+TranscriptStatus = Literal["pending", "done", "failed"]
 EventType = Literal["message", "message_updated", "message_deleted", "wiped"]
 """§17.2 amendment A1: `message_deleted`/`wiped` are P8's future events (delete a
 message / wipe the chat) — P1 only widens the schema + stream so v1 never needs a
@@ -36,6 +37,21 @@ class MediaUrlSigner(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class TranscriptRow:
+    """One voice note's opt-in transcript (spec/server-chat/05-voice-transcription.md).
+    `text` is message-derived private content: it exists only in this row (erased with
+    its attachment by `ON DELETE CASCADE`) and on the wire — never in a log line."""
+
+    attachment_id: str
+    status: TranscriptStatus
+    text: str | None
+    failure: str | None
+    engine: str | None
+    created_at: float
+    updated_at: float
+
+
+@dataclass(frozen=True, slots=True)
 class AttachmentRow:
     id: str
     kind: AttachmentKind
@@ -54,6 +70,16 @@ class AttachmentRow:
     lease_expires_at: float | None
     created_at: float
     updated_at: float
+    transcript: TranscriptRow | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ReactionSummary:
+    """One emoji on one message: who reacted, oldest first. `by_email` is deliberately
+    absent — it is an audit column and never leaves the store."""
+
+    emoji: str
+    senders: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +92,7 @@ class MessageRow:
     text: str | None
     created_at: float
     attachments: tuple[AttachmentRow, ...] = ()
+    reactions: tuple[ReactionSummary, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +156,17 @@ class AttachmentResult:
     failure: str | None
 
 
+def transcript_json(row: TranscriptRow | None) -> JsonObject | None:
+    """The `Attachment.transcript` wire shape: `null` (never asked) or `{status}` with
+    `text` only once `done`. A failed row carries no reason on the wire — the machine-readable
+    `failure` code stays server-side."""
+    if row is None:
+        return None
+    if row.status == "done":
+        return {"status": "done", "text": row.text if row.text is not None else ""}
+    return {"status": row.status}
+
+
 def attachment_json(row: AttachmentRow, signer: MediaUrlSigner) -> JsonObject:
     """§5.9's `Attachment` wire shape. `urls` carries only READY renditions — a
     processing/failed attachment has nothing safe to link to yet (Inv 41: a token in
@@ -147,6 +185,7 @@ def attachment_json(row: AttachmentRow, signer: MediaUrlSigner) -> JsonObject:
         "durationS": row.duration_s,
         "peaks": list(row.peaks) if row.peaks is not None else None,
         "urls": urls,
+        "transcript": transcript_json(row.transcript),
     }
 
 
@@ -158,5 +197,9 @@ def message_json(row: MessageRow, signer: MediaUrlSigner) -> JsonObject:
         "sender": row.sender,
         "text": row.text,
         "attachments": [attachment_json(a, signer) for a in row.attachments],
+        "reactions": [
+            {"emoji": r.emoji, "count": len(r.senders), "senders": list(r.senders)}
+            for r in row.reactions
+        ],
         "createdAt": row.created_at,
     }

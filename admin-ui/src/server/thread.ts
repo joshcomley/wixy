@@ -16,14 +16,32 @@ import {
   ServerWipeAbandonedError,
   ServerWipeNotCommittedError,
 } from "./api/http";
-import { deleteMessage, getHistory, sendMessage, wipeChat, type Message } from "./api/messages";
+import {
+  ReactionRequestError,
+  deleteMessage,
+  getHistory,
+  getUsage,
+  sendMessage,
+  setReaction,
+  transcribeAttachment,
+  wipeChat,
+  type Message,
+  type TranscribeAnswer,
+} from "./api/messages";
 import { uploadServerAttachment } from "./api/uploads";
 import type { ServerIdentity } from "./identity";
 import { linkifyInto } from "./linkify";
 import { mountMessageActions, type MessageActionsController } from "./messageActions";
 import { disposeAttachmentMedia, renderAttachments } from "./mediaRender";
+import { reactionLabel, reactionOrder } from "./reactions";
 import { createVoiceRecorder, type VoiceRecorder } from "./recorder";
 import type { ServerStreamEvent } from "./stream";
+import {
+  differOnlyInTranscripts,
+  patchTranscriptBlocks,
+  refreshTranscriptBlocks,
+  type TranscriptionContext,
+} from "./transcript";
 import type { LockHooks, ServerSession } from "./types";
 import { UPLOAD_GENERIC_FAILURE_MESSAGE, UploadError, isDefinitiveUploadRejection } from "./upload";
 
@@ -33,6 +51,8 @@ const MIN_VOICE_DURATION_MS = 1_000;
  * than kept forever — mirrors the AI chat's own ECHO_EXPIRY_MS. */
 const ECHO_EXPIRY_MS = 30_000;
 const DELETE_FADE_MS = 160;
+/** How long a "couldn't update the reaction" line stays under its message. */
+const REACTION_ERROR_MS = 5_000;
 /** Backoff for reconciling an unconfirmed wipe against history: 1 s, 2 s, 4 s … capped. */
 const WIPE_RECONCILE_BASE_DELAY_MS = 1_000;
 const WIPE_RECONCILE_MAX_DELAY_MS = 15_000;
@@ -88,6 +108,21 @@ function formatDaySeparator(epochS: number, now: Date): string {
     day: "numeric",
     year: day < today - 300 * oneDayMs ? "numeric" : undefined,
   });
+}
+
+/** True when two versions of a message differ at most in their reactions — so the bubble
+ * can be patched in place instead of rebuilt. A rebuild disposes the bubble's media, and a
+ * reaction must never cut off a voice note or video someone is playing. The attachments are
+ * compared whole, including their signed URLs: fresh URLs (a new unlock token) mean a rebuild. */
+function sameExceptReactions(a: Message, b: Message): boolean {
+  return (
+    a.seq === b.seq &&
+    a.clientId === b.clientId &&
+    a.sender === b.sender &&
+    a.text === b.text &&
+    a.createdAt === b.createdAt &&
+    JSON.stringify(a.attachments) === JSON.stringify(b.attachments)
+  );
 }
 
 function formatTime(epochS: number): string {
@@ -362,7 +397,58 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   const deleteEventsDuringRequest = new Set<number>();
   const deleteFadeTimers = new Map<number, number>();
   const messageActionControllers = new Map<number, MessageActionsController>();
+  /** Reaction requests in flight, keyed by `<seq>|<emoji>`: the state that was asked for. */
+  const pendingReactions = new Map<
+    string,
+    { readonly seq: number; readonly emoji: string; readonly reacted: boolean }
+  >();
+  const reactionErrors = new Map<number, string>();
+  const reactionErrorTimers = new Map<number, number>();
   const renderedMessages = new Map<number, { readonly message: Message; readonly element: HTMLElement }>();
+
+  // -- Opt-in voice-note transcription (spec/server-chat/05-voice-transcription.md) ------
+  // `transcriptionAvailable` mirrors `GET /usage`'s flag (cmd's private mode is live); the
+  // Transcribe control is hidden until the server says so. Hide/Show is a per-device choice
+  // kept in memory only.
+  let transcriptionAvailable = false;
+  const hiddenTranscripts = new Set<string>();
+  const transcription: TranscriptionContext = {
+    available: () => transcriptionAvailable,
+    request: requestTranscription,
+    markUnavailable(): void {
+      transcriptionAvailable = false;
+      refreshTranscriptBlocks(messageList);
+    },
+    isHidden: (attachmentId) => hiddenTranscripts.has(attachmentId),
+    setHidden(attachmentId, hidden): void {
+      if (hidden) hiddenTranscripts.add(attachmentId);
+      else hiddenTranscripts.delete(attachmentId);
+    },
+  };
+
+  async function requestTranscription(attachmentId: string): Promise<TranscribeAnswer> {
+    const session = currentSession;
+    if (session === null) return { kind: "failed" };
+    try {
+      return await transcribeAttachment(session, attachmentId);
+    } catch (error) {
+      if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+      return { kind: "failed" };
+    }
+  }
+
+  async function refreshTranscriptionAvailability(session: ServerSession): Promise<void> {
+    try {
+      const usage = await getUsage(session);
+      const available = usage.transcriptionAvailable === true;
+      if (currentSession !== session || available === transcriptionAvailable) return;
+      transcriptionAvailable = available;
+      refreshTranscriptBlocks(messageList);
+    } catch (error) {
+      // Not being able to read the flag only leaves the control hidden.
+      if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+    }
+  }
   const daySeparators = new Map<number, HTMLElement>();
   const renderedEchoes = new Map<string, { readonly echo: PendingEcho; readonly element: HTMLElement }>();
   let emptyState: HTMLElement | null = null;
@@ -373,8 +459,11 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   let contentRevision = 0;
   let latestKnownMessageSeq = 0;
 
-  function addConfirmed(message: Message): void {
-    if (deletedSeqs.has(message.seq)) return;
+  function addConfirmed(incoming: Message): void {
+    if (deletedSeqs.has(incoming.seq)) return;
+    // During a blue/green swap this page can briefly talk to a server that predates
+    // reactions; its messages carry no `reactions`. Read that as "none", not a crash.
+    const message = Array.isArray(incoming.reactions) ? incoming : { ...incoming, reactions: [] };
     confirmedBySeq.set(message.seq, message);
     latestKnownMessageSeq = Math.max(latestKnownMessageSeq, message.seq);
     confirmedClientIds.add(message.clientId);
@@ -499,8 +588,163 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     return renderAttachments(message.attachments, {
       hooks,
       openLightbox: (src, alt) => lightbox.open(src, alt),
+      transcription,
       document: documentRef,
     });
+  }
+
+  // -- Reactions ---------------------------------------------------------
+
+  function reactionKey(seq: number, emoji: string): string {
+    return `${seq}|${emoji}`;
+  }
+
+  function reactedByMe(message: Message, emoji: string): boolean {
+    return message.reactions.some(
+      (reaction) =>
+        reaction.emoji === emoji && reaction.senders.some((sender) => identity.isMine(sender)),
+    );
+  }
+
+  interface ReactionChip {
+    readonly emoji: string;
+    readonly count: number;
+    readonly senders: readonly string[];
+    readonly mine: boolean;
+  }
+
+  /** Rebuilds one bubble's reactions row from its message. Only this row changes: the rest of
+   * the bubble (and any media playing in it) is left alone. */
+  function fillReactions(container: HTMLElement, message: Message): void {
+    container.replaceChildren();
+    const chips: ReactionChip[] = message.reactions.map((reaction) => ({
+      emoji: reaction.emoji,
+      count: reaction.count,
+      senders: reaction.senders,
+      mine: reactedByMe(message, reaction.emoji),
+    }));
+    // A reaction being ADDED shows at once as a dimmed chip, before the server has answered.
+    for (const pending of pendingReactions.values()) {
+      if (pending.seq !== message.seq || !pending.reacted) continue;
+      if (!chips.some((chip) => chip.emoji === pending.emoji)) {
+        chips.push({ emoji: pending.emoji, count: 1, senders: [], mine: true });
+      }
+    }
+    chips.sort((a, b) => reactionOrder(a.emoji) - reactionOrder(b.emoji));
+
+    for (const chip of chips) {
+      const pending = pendingReactions.has(reactionKey(message.seq, chip.emoji));
+      const button = documentRef.createElement("button");
+      button.type = "button";
+      button.className = "wx-srv-reaction-chip";
+      button.classList.toggle("wx-srv-reaction-mine", chip.mine);
+      button.classList.toggle("wx-srv-reaction-pending", pending);
+      button.dataset["reaction"] = chip.emoji;
+      button.setAttribute("aria-pressed", String(chip.mine));
+      if (pending) {
+        button.setAttribute("aria-busy", "true");
+        button.disabled = true;
+      }
+      button.title = chip.senders.join(", ");
+      button.setAttribute(
+        "aria-label",
+        `${reactionLabel(chip.emoji)}, ${chip.count} ${chip.count === 1 ? "reaction" : "reactions"}` +
+          `${chip.mine ? ", including yours. Tap to remove yours" : ". Tap to add yours"}`,
+      );
+      const glyph = documentRef.createElement("span");
+      glyph.className = "wx-srv-reaction-emoji";
+      glyph.setAttribute("aria-hidden", "true");
+      glyph.textContent = chip.emoji;
+      const count = documentRef.createElement("span");
+      count.className = "wx-srv-reaction-count";
+      count.setAttribute("aria-hidden", "true");
+      count.textContent = String(chip.count);
+      button.append(glyph, count);
+      button.addEventListener("click", () => void toggleReaction(message.seq, chip.emoji));
+      container.appendChild(button);
+    }
+
+    const errorText = reactionErrors.get(message.seq);
+    if (errorText !== undefined) {
+      const line = documentRef.createElement("p");
+      line.className = "wx-srv-reaction-error";
+      line.setAttribute("role", "status");
+      line.textContent = errorText;
+      container.appendChild(line);
+    }
+    container.hidden = container.childElementCount === 0;
+  }
+
+  function patchReactions(seq: number): void {
+    const rendered = renderedMessages.get(seq);
+    if (rendered === undefined) return;
+    const container = rendered.element.querySelector<HTMLElement>(".wx-srv-reactions");
+    if (container !== null) fillReactions(container, rendered.message);
+  }
+
+  function setReactionError(seq: number, text: string): void {
+    reactionErrors.set(seq, text);
+    const previous = reactionErrorTimers.get(seq);
+    if (previous !== undefined) win.clearTimeout(previous);
+    reactionErrorTimers.set(
+      seq,
+      win.setTimeout(() => {
+        reactionErrorTimers.delete(seq);
+        reactionErrors.delete(seq);
+        patchReactions(seq);
+        threadScroll.afterContentChange(false);
+      }, REACTION_ERROR_MS),
+    );
+  }
+
+  function clearReactionError(seq: number): void {
+    const timer = reactionErrorTimers.get(seq);
+    if (timer !== undefined) win.clearTimeout(timer);
+    reactionErrorTimers.delete(seq);
+    reactionErrors.delete(seq);
+  }
+
+  async function toggleReaction(seq: number, emoji: string): Promise<void> {
+    const session = currentSession;
+    const name = identity.getName();
+    const message = confirmedBySeq.get(seq);
+    if (session === null || name === null || message === undefined) return;
+    const key = reactionKey(seq, emoji);
+    if (pendingReactions.has(key)) return;
+
+    const reacted = !reactedByMe(message, emoji);
+    const requestGeneration = contentGeneration;
+    const startRevision = contentRevision;
+    clearReactionError(seq);
+    pendingReactions.set(key, { seq, emoji, reacted });
+    patchReactions(seq);
+    threadScroll.afterContentChange(false);
+    try {
+      const updated = await setReaction(session, seq, { emoji, sender: name, reacted });
+      // The stream is the single ordered source of truth. The response is applied only when no
+      // newer message state arrived while the request was out (contentRevision unchanged) and
+      // the chat wasn't wiped meanwhile — otherwise it could overwrite fresher state, or bring
+      // a wiped message back. When it is skipped, the stream's own frame supplies the state.
+      if (requestGeneration === contentGeneration && startRevision === contentRevision) {
+        addConfirmed(updated);
+        renderThreadList(false);
+      }
+    } catch (error) {
+      if (error instanceof ServerLockedError) {
+        hooks.lockNow("unauthorized");
+      } else if (requestGeneration === contentGeneration) {
+        setReactionError(
+          seq,
+          error instanceof ReactionRequestError && error.status === 404
+            ? "That message was deleted."
+            : "Couldn't update the reaction. Try again.",
+        );
+      }
+    } finally {
+      pendingReactions.delete(key);
+      patchReactions(seq);
+      threadScroll.afterContentChange(false);
+    }
   }
 
   function renderBubble(message: Message, mine: boolean): HTMLElement {
@@ -521,6 +765,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     }
     const attachmentsEl = renderAttachmentsFor(message);
     if (attachmentsEl !== null) bubble.appendChild(attachmentsEl);
+    const reactionsEl = documentRef.createElement("div");
+    reactionsEl.className = "wx-srv-reactions";
+    fillReactions(reactionsEl, message);
+    bubble.appendChild(reactionsEl);
     const time = documentRef.createElement("span");
     time.className = "wx-srv-bubble-time";
     time.textContent = formatTime(message.createdAt);
@@ -533,6 +781,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         win,
         document: documentRef,
         onDelete: deleteForEveryone,
+        onReact: (target, emoji) => void toggleReaction(target.seq, emoji),
+        isReacted: reactedByMe,
       }),
     );
     return bubble;
@@ -580,12 +830,35 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       }
 
       let rendered = renderedMessages.get(message.seq);
-      if (rendered === undefined || rendered.message !== message) {
-        if (rendered !== undefined) {
-          teardownMessageActions(message.seq);
-          disposeAttachmentMedia(rendered.element);
-          rendered.element.remove();
-        }
+      if (
+        rendered !== undefined &&
+        rendered.message !== message &&
+        differOnlyInTranscripts(rendered.message, message)
+      ) {
+        // Only a transcript changed: patch its block in place. Rebuilding the bubble would
+        // dispose the `<audio>` and cut off a voice note that is playing right now.
+        patchTranscriptBlocks(rendered.element, message.attachments);
+        rendered = { message, element: rendered.element };
+        renderedMessages.set(message.seq, rendered);
+      }
+      if (
+        rendered !== undefined &&
+        rendered.message !== message &&
+        sameExceptReactions(rendered.message, message)
+      ) {
+        // Only the reactions changed: keep the bubble node, its media and any open menu.
+        rendered = { message, element: rendered.element };
+        renderedMessages.set(message.seq, rendered);
+        messageActionControllers.get(message.seq)?.update(message);
+        patchReactions(message.seq);
+      }
+      if (rendered !== undefined && rendered.message !== message) {
+        teardownMessageActions(message.seq);
+        disposeAttachmentMedia(rendered.element);
+        rendered.element.remove();
+        rendered = undefined;
+      }
+      if (rendered === undefined) {
         rendered = { message, element: renderBubble(message, identity.isMine(message.sender)) };
         renderedMessages.set(message.seq, rendered);
       }
@@ -716,6 +989,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     contentRevision += 1;
     for (const timer of deleteFadeTimers.values()) win.clearTimeout(timer);
     deleteFadeTimers.clear();
+    for (const timer of reactionErrorTimers.values()) win.clearTimeout(timer);
+    reactionErrorTimers.clear();
+    reactionErrors.clear();
     confirmedBySeq.clear();
     deletedSeqs.clear();
     confirmedClientIds.clear();
@@ -1057,6 +1333,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       historyLoaded = true;
       renderThreadList();
       ensureObserver();
+      void refreshTranscriptionAvailability(session);
       if (pendingVoiceNote !== null) void sendVoiceNote();
       return cursor;
     } catch (error) {
@@ -1095,10 +1372,16 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     handleStreamEvent(event: ServerStreamEvent): void {
       switch (event.type) {
         case "message":
-        case "message_updated":
+        case "message_updated": {
+          // An update to a message already on screen (a transcript, media finishing) is not an
+          // arrival, so it never raises the "New messages" pill.
+          const isArrival = !confirmedBySeq.has(event.message.seq);
           addConfirmed(event.message);
-          renderThreadList(event.message.sender !== "" && !identity.isMine(event.message.sender));
+          renderThreadList(
+            isArrival && event.message.sender !== "" && !identity.isMine(event.message.sender),
+          );
           return;
+        }
         case "message_deleted":
           deletedSeqs.add(event.seq);
           contentRevision += 1;
@@ -1132,6 +1415,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       messageActionControllers.clear();
       for (const timer of deleteFadeTimers.values()) win.clearTimeout(timer);
       deleteFadeTimers.clear();
+      for (const timer of reactionErrorTimers.values()) win.clearTimeout(timer);
+      reactionErrorTimers.clear();
+      reactionErrors.clear();
+      pendingReactions.clear();
       voiceRecorder?.detach();
       voiceRecorder = null;
       disposeAttachmentMedia(messageList);

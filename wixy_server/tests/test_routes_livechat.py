@@ -42,6 +42,7 @@ from wixy_server.livechat.models import (
 )
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import CmdPinVerifier
+from wixy_server.livechat.reactions import REACTION_EMOJIS
 from wixy_server.livechat.store import LiveChatStore
 from wixy_server.livechat.tokens import (
     UNLOCK_GUARD_HEADER,
@@ -986,6 +987,31 @@ class TestSendHistoryUsage:
         finally:
             client.__exit__(None, None, None)
 
+    def test_a_sender_with_a_lone_utf16_surrogate_is_422_never_a_500(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        """Reviewer-reported H1 (see the matching reactions test for the full story): the same
+        gap in `send_message`'s sender validation — a lone surrogate reaches `create_message`'s
+        SQLite bind and crashes with an uncaught `UnicodeEncodeError`."""
+        client, headers = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            response = _raw_json_request(
+                client,
+                "POST",
+                "/api/admin/server/messages",
+                {
+                    "clientId": "surrogate-sender-client",
+                    "sender": "A\ud800B",
+                    "deviceId": "device-aaaaaaaa",
+                    "text": "hi",
+                },
+                headers,
+            )
+            assert response.status_code == 422, response.text
+            assert response.json()["error"] == "invalid"
+        finally:
+            client.__exit__(None, None, None)
+
     @pytest.mark.parametrize(
         ("client_id_length", "expected_status"), [(8, 201), (64, 201), (65, 422)]
     )
@@ -1342,6 +1368,380 @@ class TestStreamEvents:
 
         assert frame["event"] == "message"
         assert frame["data"]["text"] == "from the sibling process"
+
+
+THUMBS_UP = REACTION_EMOJIS[0]
+HEART = REACTION_EMOJIS[1]
+
+
+def _raw_json_request(
+    client: TestClient, method: str, path: str, body: dict[str, object], headers: dict[str, str]
+) -> Any:
+    """Posts a body built by hand from `json.dumps(..., ensure_ascii=True).encode("utf-8")`,
+    bypassing `httpx`'s own `json=` kwarg — which, for a string containing a lone UTF-16
+    surrogate, fails CLIENT-side with its own `UnicodeEncodeError` before a request is even
+    built (verified directly against `httpx.Request(json=...)`). `ensure_ascii=True` escapes a
+    surrogate as `\\uXXXX` text, so the ENCODED BYTES are plain ASCII and travel over the wire
+    with no encoding error at all; the surrogate reappears as a real code point only once the
+    SERVER'S `json.loads` decodes it back — exactly the shape a real client's own worst-case
+    encoding (or a deliberately malicious request) can produce."""
+    raw = json.dumps(body, ensure_ascii=True).encode("utf-8")
+    return client.request(
+        method, path, content=raw, headers={"Content-Type": "application/json", **headers}
+    )
+
+
+class TestReactionRoutes:
+    """`PUT /messages/{seq}/reactions` (spec/server-chat/04-reactions.md): desired-state, one
+    reactor + one emoji per call, `message_updated` on a real change only."""
+
+    def _unlocked_client(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> tuple[TestClient, dict[str, str], int]:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        client = TestClient(app)
+        client.__enter__()
+        token = _unlock(client).json()["token"]
+        headers = {"X-Wixy-Server-Token": token}
+        sent = client.post(
+            "/api/admin/server/messages",
+            json={
+                "clientId": "client-react-route",
+                "sender": "Josh",
+                "deviceId": "device-react-route",
+                "text": "react to me",
+            },
+            headers=headers,
+        )
+        return client, headers, int(sent.json()["message"]["seq"])
+
+    @staticmethod
+    def _put(
+        client: TestClient,
+        headers: dict[str, str],
+        seq: int,
+        *,
+        emoji: str = THUMBS_UP,
+        sender: str = "Purdy",
+        reacted: object = True,
+    ) -> Any:
+        return client.put(
+            f"/api/admin/server/messages/{seq}/reactions",
+            json={"emoji": emoji, "sender": sender, "reacted": reacted},
+            headers=headers,
+        )
+
+    @staticmethod
+    def _event_types(client: TestClient) -> list[str]:
+        store: LiveChatStore = client.app.state.livechat_store  # type: ignore[attr-defined]
+        return [event.type for event in store.events_after(0)]
+
+    def test_without_a_token_it_is_401_locked(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, _headers, seq = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            response = self._put(client, {}, seq)
+            assert response.status_code == 401
+            assert response.json() == {"error": "locked"}
+            assert self._event_types(client) == ["message"]
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_react_returns_the_current_message_with_its_reactions_and_no_audit_fields(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers, seq = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            response = self._put(client, headers, seq)
+            assert response.status_code == 200
+            message = response.json()["message"]
+            assert message["seq"] == seq
+            assert message["reactions"] == [{"emoji": THUMBS_UP, "count": 1, "senders": ["Purdy"]}]
+            assert "by_email" not in response.text
+            assert "byEmail" not in response.text
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_a_repeat_is_idempotent_and_writes_no_second_event(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers, seq = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            first = self._put(client, headers, seq)
+            second = self._put(client, headers, seq)
+            assert first.status_code == second.status_code == 200
+            assert first.json() == second.json()
+            assert self._event_types(client) == ["message", "message_updated"]
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_reacted_false_removes_it_and_a_second_removal_is_a_no_op(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers, seq = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            self._put(client, headers, seq)
+            removed = self._put(client, headers, seq, reacted=False)
+            assert removed.status_code == 200
+            assert removed.json()["message"]["reactions"] == []
+            again = self._put(client, headers, seq, reacted=False)
+            assert again.status_code == 200
+            assert self._event_types(client) == ["message", "message_updated", "message_updated"]
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_the_sender_is_trimmed_and_matched_case_insensitively(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers, seq = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            self._put(client, headers, seq, sender="  Purdy ")
+            same_person = self._put(client, headers, seq, sender="PURDY")
+            assert same_person.json()["message"]["reactions"] == [
+                {"emoji": THUMBS_UP, "count": 1, "senders": ["Purdy"]}
+            ]
+            removed = self._put(client, headers, seq, sender="purdy", reacted=False)
+            assert removed.json()["message"]["reactions"] == []
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_a_sender_with_a_lone_utf16_surrogate_is_422_never_a_500(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        """Reviewer-reported H1: a lone surrogate reaches `set_reaction`'s SQLite bind
+        (`store.py`'s `INSERT OR IGNORE INTO reactions`) and crashes with an uncaught
+        `UnicodeEncodeError` — a bare 500, contradicting the ruling's "never a 500" for this
+        route. It must be rejected as a plain 422 before the store is ever called."""
+        client, headers, seq = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            response = _raw_json_request(
+                client,
+                "PUT",
+                f"/api/admin/server/messages/{seq}/reactions",
+                {"emoji": THUMBS_UP, "sender": "A\ud800B", "reacted": True},
+                headers,
+            )
+            assert response.status_code == 422, response.text
+            assert response.json()["error"] == "invalid"
+            # The rejection happened before the store was ever touched.
+            assert self._event_types(client) == ["message"]
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_history_carries_the_reactions(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers, seq = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            self._put(client, headers, seq, emoji=HEART)
+            history = client.get("/api/admin/server/messages", headers=headers).json()
+            assert history["messages"][0]["reactions"] == [
+                {"emoji": HEART, "count": 1, "senders": ["Purdy"]}
+            ]
+        finally:
+            client.__exit__(None, None, None)
+
+    @pytest.mark.parametrize(
+        "emoji",
+        [
+            "",
+            "\U0001f44e",  # thumbs down: not on the list
+            "❤",  # the heart WITHOUT its variation selector: exact code points only
+            THUMBS_UP + THUMBS_UP,
+            THUMBS_UP + "️",
+            "thumbs_up",
+            " " + THUMBS_UP,
+        ],
+    )
+    def test_an_emoji_off_the_allowlist_is_422_and_changes_nothing(
+        self,
+        emoji: str,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        client, headers, seq = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            response = self._put(client, headers, seq, emoji=emoji)
+            assert response.status_code == 422
+            assert response.json()["error"] == "invalid"
+            assert self._event_types(client) == ["message"]
+        finally:
+            client.__exit__(None, None, None)
+
+    @pytest.mark.parametrize(
+        ("sender", "expected_status"),
+        [("J", 200), ("J" * 32, 200), ("", 422), ("   ", 422), ("J" * 33, 422), ("J\x01", 422)],
+    )
+    def test_sender_follows_the_same_rules_as_send(
+        self,
+        sender: str,
+        expected_status: int,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        client, headers, seq = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            response = self._put(client, headers, seq, sender=sender)
+            assert response.status_code == expected_status, response.text
+        finally:
+            client.__exit__(None, None, None)
+
+    @pytest.mark.parametrize("reacted", ["true", 1, None])
+    def test_reacted_must_be_a_real_boolean(
+        self,
+        reacted: object,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        client, headers, seq = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            assert self._put(client, headers, seq, reacted=reacted).status_code == 422
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_an_unknown_field_is_422(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers, seq = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            response = client.put(
+                f"/api/admin/server/messages/{seq}/reactions",
+                json={"emoji": THUMBS_UP, "sender": "Purdy", "reacted": True, "extra": 1},
+                headers=headers,
+            )
+            assert response.status_code == 422
+        finally:
+            client.__exit__(None, None, None)
+
+    @pytest.mark.parametrize("seq", [999, 0, -1, 2**63, 2**80])
+    def test_an_unknown_message_is_404_never_a_500(
+        self,
+        seq: int,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        client, headers, _seq = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            for reacted in (True, False):
+                response = self._put(client, headers, seq, reacted=reacted)
+                assert response.status_code == 404
+                assert response.json() == {"error": "not_found"}
+            assert self._event_types(client) == ["message"]
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_reacting_to_a_deleted_message_is_404(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers, seq = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            self._put(client, headers, seq)
+            assert client.delete(
+                f"/api/admin/server/messages/{seq}", headers=headers
+            ).status_code in (
+                202,
+                204,
+            )
+            response = self._put(client, headers, seq)
+            assert response.status_code == 404
+            assert response.json() == {"error": "not_found"}
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_deleting_the_message_leaves_no_reaction_bytes_behind(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers, seq = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            self._put(client, headers, seq, sender="Route-Reactor-3e9a1c40")
+            store: LiveChatStore = client.app.state.livechat_store  # type: ignore[attr-defined]
+            assert b"Route-Reactor-3e9a1c40" in _raw_server_database_bytes(store)
+            assert client.delete(
+                f"/api/admin/server/messages/{seq}", headers=headers
+            ).status_code in (
+                202,
+                204,
+            )
+            assert store.scrub(deadline_s=_SCRUB_SUCCESS_DEADLINE_S)
+            raw = _raw_server_database_bytes(store)
+            assert b"Route-Reactor-3e9a1c40" not in raw
+            assert b"route-reactor-3e9a1c40" not in raw
+        finally:
+            client.__exit__(None, None, None)
+
+    @pytest.mark.asyncio
+    async def test_a_reaction_streams_as_message_updated_carrying_the_reactions(
+        self, tmp_path: Path
+    ) -> None:
+        store = LiveChatStore(tmp_path / "server.db")
+        message, _ = store.create_message(
+            client_id="c1",
+            sender="Josh",
+            device_id="d" * 8,
+            by_email=None,
+            text="hello",
+            attachment_ids=(),
+            now=1000.0,
+        )
+        store.set_reaction(
+            seq=message.seq,
+            sender="Purdy",
+            by_email=None,
+            emoji=THUMBS_UP,
+            reacted=True,
+            now=1001.0,
+        )
+        gen = _stream_events(store, LiveChatNotifier(), _SECRET, _FIXED_AUTH, after=1)
+        try:
+            frame = await _next_frame(gen)
+        finally:
+            await gen.aclose()
+        assert frame["event"] == "message_updated"
+        assert frame["id"] == 2
+        assert frame["data"]["reactions"] == [
+            {"emoji": THUMBS_UP, "count": 1, "senders": ["Purdy"]}
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_new_message_and_its_reaction_coalesce_into_one_message_frame(
+        self, tmp_path: Path
+    ) -> None:
+        store = LiveChatStore(tmp_path / "server.db")
+        message, _ = store.create_message(
+            client_id="c1",
+            sender="Josh",
+            device_id="d" * 8,
+            by_email=None,
+            text="hello",
+            attachment_ids=(),
+            now=1000.0,
+        )
+        store.set_reaction(
+            seq=message.seq,
+            sender="Purdy",
+            by_email=None,
+            emoji=HEART,
+            reacted=True,
+            now=1001.0,
+        )
+        gen = _stream_events(store, LiveChatNotifier(), _SECRET, _FIXED_AUTH, after=0)
+        try:
+            frame = await _next_frame(gen)
+            assert frame["event"] == "message"
+            assert frame["data"]["reactions"] == [
+                {"emoji": HEART, "count": 1, "senders": ["Purdy"]}
+            ]
+            with pytest.raises(TimeoutError):
+                await _next_frame(gen, timeout_s=0.3)
+        finally:
+            await gen.aclose()
 
 
 class TestStreamEventsAmendmentA1:
@@ -2792,6 +3192,34 @@ class TestPushRoutes:
             assert worker.headers["content-type"].startswith("text/javascript")
             assert worker.headers["cache-control"] == "no-cache"
             assert worker.headers["service-worker-allowed"] == "/admin/"
+
+    def test_a_sender_with_a_lone_utf16_surrogate_is_422_never_a_500(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        """The third site the reviewer asked to be checked for H1's gap: `put_push_subscription`
+        binds `sender` into `upsert_push_subscription`'s INSERT exactly like the other two
+        routes, so the same lone-surrogate crash was reachable here too."""
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        with TestClient(app) as client:
+            token = _unlock(client).json()["token"]
+            headers = {"X-Wixy-Server-Token": token}
+            response = _raw_json_request(
+                client,
+                "PUT",
+                "/api/admin/server/push/subscriptions/device-123456",
+                {
+                    "sender": "A\ud800B",
+                    "subscription": {
+                        "endpoint": "https://fcm.googleapis.com/fcm/send/token",
+                        "keys": {"p256dh": "public", "auth": "secret"},
+                    },
+                },
+                headers,
+            )
+            assert response.status_code == 422, response.text
+            assert response.json()["error"] == "invalid"
 
     def test_push_routes_require_unlock_token(
         self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier

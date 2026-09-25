@@ -1,8 +1,17 @@
 /** DOM renderers for server-chat photo, video and voice attachments. */
 
+import { renderTranscriptBlock, type TranscriptionContext } from "./transcript";
+
 export type AttachmentKind = "photo" | "video" | "voice";
 export type AttachmentStatus = "processing" | "ready" | "failed";
 export type SuspendReason = "recording" | "micPermission" | "filePicker" | "mediaPlaying";
+
+/** A voice note's opt-in transcript (spec/server-chat/05-voice-transcription.md): absent/`null`
+ * until someone asks; `text` only once `done`. */
+export type AttachmentTranscript =
+  | { readonly status: "pending" }
+  | { readonly status: "failed" }
+  | { readonly status: "done"; readonly text: string };
 
 export interface Attachment {
   readonly id: string;
@@ -18,6 +27,7 @@ export interface Attachment {
     readonly poster?: string;
     readonly play?: string;
   };
+  readonly transcript?: AttachmentTranscript | null;
 }
 
 export interface MediaRenderHooks {
@@ -28,6 +38,8 @@ export interface MediaRenderContext {
   readonly hooks: MediaRenderHooks;
   /** P5a supplies the shared lightbox opener; this module never owns a second one. */
   readonly openLightbox?: (source: string, alt: string) => void;
+  /** When present, every ready voice note gets the opt-in Transcribe control beneath it. */
+  readonly transcription?: TranscriptionContext;
   readonly document?: Document;
 }
 
@@ -51,6 +63,9 @@ export function renderAttachments(
       photoGrid.appendChild(renderPhotoButton(attachment, context, documentRef));
     } else {
       container.appendChild(renderAttachment(attachment, context, documentRef));
+      if (attachment.kind === "voice" && attachment.status === "ready" && context.transcription) {
+        container.appendChild(renderTranscriptBlock(attachment, context.transcription, documentRef));
+      }
     }
   }
   return container;

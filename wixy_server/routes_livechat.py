@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import time
 from collections.abc import AsyncGenerator, AsyncIterator
@@ -22,7 +23,7 @@ from typing import Literal
 import anyio
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from builder.jsontypes import JsonObject
 from wixy_server.background import ContainedTaskGroup
@@ -42,13 +43,17 @@ from wixy_server.livechat.models import (
     MessageHook,
     MessageRow,
     PushSubscriptionRow,
+    TranscriptRow,
     message_json,
+    transcript_json,
 )
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import PinVerifier
 from wixy_server.livechat.push import PushEndpointError, validate_push_endpoint
+from wixy_server.livechat.reactions import is_allowed_reaction
 from wixy_server.livechat.store import (
     LiveChatStore,
+    MessageNotFoundError,
     UnusableAttachmentError,
 )
 from wixy_server.livechat.tokens import (
@@ -58,6 +63,7 @@ from wixy_server.livechat.tokens import (
     require_server_token,
     unlock_request_refusal,
 )
+from wixy_server.livechat.transcription import TranscriptionRuntime
 from wixy_server.settings import Settings
 from wixy_server.storage import ProjectPaths
 
@@ -67,7 +73,29 @@ _LOGGER = logging.getLogger(__name__)
 _PING_INTERVAL_S = 15.0
 _NOTIFIER_WAIT_S = 2.0
 _DELETE_SCRUB_DEADLINE_S = 10.0
+_ATTACHMENT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _has_unpaired_surrogate(text: str) -> bool:
+    """A lone UTF-16 surrogate (U+D800-U+DFFF) is a valid Python `str` code point but has no
+    UTF-8 encoding, so it crashes a SQLite bind (or `json.dumps`) with an uncaught
+    `UnicodeEncodeError` — a bare 500 — the instant it reaches one. A normal client can never
+    type one, but `json.loads` happily decodes a `\\uXXXX` escape for one out of any request
+    body, so the check has to run before the value goes anywhere near the store (reviewer
+    H1: reproduced live against both `POST /messages` and `PUT .../reactions`)."""
+    return any(0xD800 <= ord(ch) <= 0xDFFF for ch in text)
+
+
+def _valid_sender(sender: str) -> bool:
+    """§5.3's sender rule (1-32 characters, trimmed, no control characters), plus the
+    surrogate check above. Shared by every route that accepts a display name:
+    `send_message`, `set_reaction`, and `put_push_subscription`."""
+    return (
+        1 <= len(sender) <= 32
+        and _CONTROL_CHAR_RE.search(sender) is None
+        and not _has_unpaired_surrogate(sender)
+    )
 
 
 def _invalid(detail: str) -> JSONResponse:
@@ -435,6 +463,17 @@ class WipeChatIn(BaseModel):
     confirm: Literal["WIPE"]
 
 
+class SetReactionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    emoji: str
+    sender: str
+    reacted: StrictBool
+
+
+_SQLITE_MAX_INTEGER = 2**63 - 1
+
+
 @router.post("/messages", response_model=None)
 async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
     auth = require_server_token(request)
@@ -444,7 +483,7 @@ async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
     if not (8 <= len(body.deviceId) <= 64):
         return _invalid("deviceId must be 8-64 characters")
     sender = body.sender.strip()
-    if not (1 <= len(sender) <= 32) or _CONTROL_CHAR_RE.search(sender):
+    if not _valid_sender(sender):
         return _invalid("sender must be 1-32 characters with no control characters")
     text = body.text
     if text is not None and len(text) > 4000:
@@ -495,6 +534,46 @@ async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
         status_code=201 if created else 200,
         content={"message": message_json(message, signer)},
     )
+
+
+@router.put("/messages/{seq}/reactions", response_model=None)
+async def set_reaction(seq: int, body: SetReactionIn, request: Request) -> JSONResponse:
+    """Set one reactor's emoji on a message to present or absent (desired state, not a
+    toggle, so a retry after a dropped response cannot flip it back). Reuses the
+    `message_updated` event; a request that changes nothing writes no event."""
+    auth = require_server_token(request)
+
+    if not is_allowed_reaction(body.emoji):
+        return _invalid("emoji is not one of the allowed reactions")
+    sender = body.sender.strip()
+    if not _valid_sender(sender):
+        return _invalid("sender must be 1-32 characters with no control characters")
+    if not (0 < seq <= _SQLITE_MAX_INTEGER):
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+
+    store: LiveChatStore = request.app.state.livechat_store
+    notifier: LiveChatNotifier = request.app.state.livechat_notifier
+    secret: bytes = request.app.state.livechat_secret
+
+    def _set() -> tuple[MessageRow, bool]:
+        return store.set_reaction(
+            seq=seq,
+            sender=sender,
+            by_email=auth.email or None,
+            emoji=body.emoji,
+            reacted=body.reacted,
+            now=time.time(),
+        )
+
+    try:
+        message, changed = await anyio.to_thread.run_sync(_set)
+    except MessageNotFoundError:
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+
+    if changed:
+        notifier.publish()
+    signer = MediaSigner.for_auth(secret, auth)
+    return JSONResponse(status_code=200, content={"message": message_json(message, signer)})
 
 
 @router.delete("/messages/{seq}", response_model=None)
@@ -674,6 +753,7 @@ async def usage(request: Request) -> JsonObject:
     store: LiveChatStore = request.app.state.livechat_store
     settings: Settings = request.app.state.settings
     media_available: bool = request.app.state.livechat_media_available
+    transcription: TranscriptionRuntime = request.app.state.livechat_transcription
 
     used_bytes = await anyio.to_thread.run_sync(store.media_bytes_used)
     quota_bytes = settings.server_media_quota_bytes
@@ -685,7 +765,83 @@ async def usage(request: Request) -> JsonObject:
         "erasurePending": await anyio.to_thread.run_sync(
             lambda: store.scrub_pending() or store.storage_cleanup_pending()
         ),
+        "transcriptionAvailable": await transcription.available(),
     }
+
+
+# ---------------------------------------------------------------------------
+# POST /attachments/{id}/transcribe — opt-in voice-note transcription
+# (spec/server-chat/05-voice-transcription.md). Asynchronous: Cloudflare cuts a proxied
+# origin response at 100 s, and a long note can take longer than that.
+# ---------------------------------------------------------------------------
+
+
+@router.post("/attachments/{att_id}/transcribe", response_model=None)
+async def transcribe_attachment(att_id: str, request: Request) -> JSONResponse:
+    auth = require_server_token(request)
+    store: LiveChatStore = request.app.state.livechat_store
+    runtime: TranscriptionRuntime = request.app.state.livechat_transcription
+    notifier: LiveChatNotifier = request.app.state.livechat_notifier
+    background: ContainedTaskGroup = request.app.state.background_tasks
+
+    def _not_found() -> JSONResponse:
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+
+    def _stored(transcript: TranscriptRow | None, *, status_code: int) -> JSONResponse:
+        return JSONResponse(
+            status_code=status_code, content={"transcript": transcript_json(transcript)}
+        )
+
+    if not _ATTACHMENT_ID_RE.match(att_id):
+        return _not_found()
+    attachment = await anyio.to_thread.run_sync(store.get_attachment, att_id)
+    if attachment is None or attachment.kind != "voice" or attachment.message_seq is None:
+        return _not_found()
+    if attachment.status != "ready":
+        return JSONResponse(status_code=409, content={"error": "not_ready"})
+
+    def _pending() -> JSONResponse:
+        return JSONResponse(status_code=202, content={"transcript": {"status": "pending"}})
+
+    existing = attachment.transcript
+    if existing is not None and existing.status == "done":
+        return _stored(existing, status_code=200)  # reading a stored transcript needs no cmd
+    if att_id in runtime.inflight:
+        return _pending()  # single-flight: this process already has a job for the note
+
+    if not await runtime.available():
+        return JSONResponse(status_code=503, content={"error": "not_configured"})
+    if att_id in runtime.inflight:  # a concurrent request claimed it while we probed
+        return _pending()
+    retry_after = runtime.rate_limiter.hit(auth.email)
+    if retry_after is not None:
+        seconds = max(1, math.ceil(retry_after))
+        return JSONResponse(
+            status_code=429,
+            content={"error": "rate_limited", "retryAfterS": seconds},
+            headers={"Retry-After": str(seconds)},
+        )
+
+    # Claim the note BEFORE the next await (nothing has been awaited since the check above), so a
+    # concurrent request sees it in flight. A `pending` row with no claim here belongs to a job
+    # that is gone (its outcome could not be recorded), so it is restarted rather than left
+    # answering 202 forever.
+    runtime.inflight.add(att_id)
+    try:
+        begin = await anyio.to_thread.run_sync(
+            lambda: store.begin_transcript(att_id=att_id, now=time.time(), restart_pending=True)
+        )
+        if begin.state == "started":
+            notifier.publish()  # the other device's spinner
+            background.spawn("livechat-transcription", runtime.run_job, att_id)
+            return _stored(begin.transcript, status_code=202)
+    except BaseException:
+        runtime.inflight.discard(att_id)
+        raise
+    runtime.inflight.discard(att_id)
+    if begin.state == "done":
+        return _stored(begin.transcript, status_code=200)
+    return _not_found()  # "gone": deleted while we were deciding
 
 
 # ---------------------------------------------------------------------------
@@ -729,7 +885,7 @@ async def put_push_subscription(
 ) -> Response:
     require_server_token(request)
     sender = body.sender.strip()
-    if not (1 <= len(sender) <= 32) or _CONTROL_CHAR_RE.search(sender):
+    if not _valid_sender(sender):
         return _invalid("sender must be 1-32 characters with no control characters")
     try:
         validate_push_endpoint(body.subscription.endpoint)
