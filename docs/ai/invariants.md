@@ -604,9 +604,20 @@ costs an attempt. Every malformed shape returns the same redacted `422 {"error":
 invalid, empty, truncated or non-UTF-8 JSON; a top-level array or other non-object; a missing or
 misspelled key; a non-string or nested-object `pin`; and a `pin` outside 4–16 ASCII digits. No
 response or log line carries the submitted value.
+
+`POST /unlock` has no token to gate it, so it carries its own CSRF guard
+(`unlock_request_refusal` in `livechat/tokens.py`, called first thing in the route): a
+`Sec-Fetch-Site` header, when the browser sends one, must be `same-origin`; `Content-Type` must be
+`application/json`; and the custom header `X-Wixy-Server-Unlock: 1` must be present. Each of the
+three is read as a list and a duplicated line is refused, not resolved by whichever value comes
+first. A refusal (403 `forbidden` or 415 `unsupported_media_type`) is decided before the body is
+read and before cmd is contacted, so a hostile cross-site page can never spend the owner's PIN
+attempts; a simple cross-site POST cannot set the custom header without a CORS preflight, which
+wixy does not grant. Decision 00158 records why this guard exists.
 *Enforced by:* `wixy_server/tests/test_routes_livechat.py::TestUnlockMapping` (the malformed-shape
 and unparseable-body cases assert the exact 422 body, no PIN in the response or in captured
-logs, and zero attempts charged at the fake cmd; too-short and too-long PINs likewise) and
+logs, and zero attempts charged at the fake cmd; too-short and too-long PINs likewise),
+`TestUnlockRequestGuard` (the CSRF guard: every refusal shape, charging nothing) and
 `TestSettingsHaveNoPinField`.
 
 ### Inv 42 — Server-chat lock is fail-closed

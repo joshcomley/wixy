@@ -220,7 +220,11 @@ truth.
 30-second timeout (`serverFetch` in `admin-ui/src/server/api/http.ts`; ordinary chat requests
 keep 10 seconds and upload chunks 120), so a slow but successful erasure is not abandoned by
 the client. A timeout or network failure of either request is an *unknown outcome*
-(`ServerErasureOutcomeUnknownError`), distinct from a definite HTTP failure:
+(`ServerErasureOutcomeUnknownError`), distinct from a definite HTTP failure. For the wipe the
+class is broader: `wipeChat` (`api/messages.ts`, `isUnknownOutcomeStatus`) also treats a 408 or
+any 5xx as unknown, because Cloudflare answers for the origin and a gateway status says nothing
+about whether wixy's commit landed. `deleteMessage` still treats any non-OK status as a definite
+failure:
 
 - **Delete** is idempotent, so `deleteMessage` (`api/messages.ts`) retries an unknown outcome up
   to three times, after 1, 2 and 4 seconds (at most four requests). If it still cannot be
@@ -229,16 +233,25 @@ the client. A timeout or network failure of either request is an *unknown outcom
   message. Try again."; a 401 locks the chat. If the delete did commit, its `message_deleted`
   event removes the bubble anyway, even after a restore.
 - **Wipe** is never retried, because a repeat would delete anything sent since. A definite
-  failure keeps the two-step confirmation open with "Couldn't delete everything — try again".
-  On an unknown outcome the settings sheet shows "Couldn't confirm — checking…" immediately,
-  before any history request. `thread.ts` then pages the whole history and compares server
-  message sequence numbers against the newest sequence the client knew when it sent the wipe;
-  browser and server clocks are never compared. If any message at or before that boundary is
-  still there, the wipe did not commit: the history is restored and the retry message is shown.
-  Otherwise the wipe counts as done, messages newer than the boundary are kept, and the
-  `/usage` erasure poll starts. If the history request itself fails, the sheet keeps polling
-  `/usage` and ends with "Status unclear. Check the messages to confirm." A `wiped` event from
-  the stream settles either case.
+  failure (a 4xx) keeps the two-step confirmation open with "Couldn't delete everything — try
+  again". On an unknown outcome the settings sheet shows "Couldn't confirm — checking…"
+  immediately, before any history request. `thread.ts` (`reconcileUnknownWipe`) then pages the
+  whole history and compares server message sequence numbers against the newest sequence the
+  client knew when it sent the wipe; browser and server clocks are never compared. That
+  boundary is only trustworthy if the history had loaded when the wipe was sent (`boundaryKnown`
+  in `thread.ts`). If it had, any message at or before the boundary means the wipe did not
+  commit; if it had not, the boundary is 0 and "nothing at or before it" would be vacuously
+  true, so the only proof of a commit is an **empty** history. When the wipe did not commit the
+  history is restored and the retry message is shown. Otherwise the wipe counts as done,
+  messages newer than the boundary are kept, and the `/usage` erasure poll starts. If the
+  history request itself fails, the thread keeps retrying that request — never the wipe — after
+  1, 2, 4 and 8 seconds and then every 15 seconds, until it gets a definite answer, sees a
+  `wiped` event on the stream, or the chat locks. A lock or teardown abandons the check
+  (`ServerWipeAbandonedError`) and the sheet resets its control quietly. The sheet's own
+  `/usage` poll and its "Status unclear. Check the messages to confirm." ending
+  (`settingsSheet.ts`) apply only if `onWipe` itself rejects with an unknown outcome and no
+  reconciler exists, which the real thread never does. A `wiped` event from the stream settles
+  any of these cases.
 
 Covered by `admin-ui/tests/server/erasureRequests.test.ts`,
 `admin-ui/tests/serverThread.test.ts` and `admin-ui/tests/serverSettingsSheet.test.ts`, and by
@@ -628,6 +641,18 @@ flow. Locking calls the recorder's `detach()` to discard an unfinished recording
 the microphone. A new recorder is created on the next attach because a detached recorder is
 terminal. Recordings shorter than one second are discarded with a “Too short” hint and never
 uploaded.
+
+A voice note that fails to send stays pending in `thread.ts` (`pendingVoiceNote`) with **Retry**
+and **Discard** buttons side by side, so the owner is never stuck behind a note that cannot be
+sent. Retry reuses the same `clientId` and, once the upload finished, the same attachment, so it
+can never post a duplicate. The note is discarded automatically only on a verdict about the note
+itself: at the upload stage a 400, 413 or 415 (`isDefinitiveUploadRejection` in
+`server/upload.ts`); at the send stage a 422 or any other 4xx except 403, 408 and 429
+(`isDefinitiveSendRejectionStatus` in `api/messages.ts`). Anything else (a network block, a
+timeout, a 5xx, a gateway 403) keeps the note and offers Retry. A 401 locks the chat and also
+keeps the note. An uploaded attachment left
+behind by a discard is reaped by the server's janitor. Covered by
+`admin-ui/tests/serverThread.test.ts`.
 
 `server/api/uploads.ts` adapts `server/upload.ts` to the authenticated `serverFetch` wrapper.
 It captures the current `ServerSession` when an upload starts, sends the chunked
