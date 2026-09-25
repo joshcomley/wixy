@@ -99,8 +99,9 @@ during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/
   playing note survives its transcript, a failure and Retry, two devices agreeing, phone layout).
   The fixture drives the fake cmd through `/test/server/transcribe-config` (private on/off, text,
   status, `hold` to park requests, `reset` — which also gives every test a fresh rate limiter),
-  `/test/server/transcribe-stats`, and `/test/server/seed-voice` (a ready note with real ffmpeg
-  audio).
+  `/test/server/transcribe-stats`, `/test/server/seed-voice` (a ready note with real ffmpeg
+  audio) and `/test/server/delete-message` (the spec removes every note it seeds: the fixture runs ONE
+  chat for the whole suite and `server-media.spec.ts` asserts exactly one `.wx-srv-voice`).
 
 Server-chat unit coverage also lives in `admin-ui/tests/server/{gestures,lockModel,panel,http,unlock}.test.ts`.
 The lock browser spec uses Playwright `page.clock` to control the 400 ms multi-tap window,

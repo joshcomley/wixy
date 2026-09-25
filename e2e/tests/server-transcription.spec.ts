@@ -31,10 +31,16 @@ async function stats(page: Page): Promise<Stats> {
   return (await (await page.request.post("/test/server/transcribe-stats")).json()) as Stats;
 }
 
+// The fixture runs ONE chat for the whole suite, and other specs assert exact counts (server-media
+// expects exactly one `.wx-srv-voice`), so every note this spec seeds is removed again.
+const seededSeqs: number[] = [];
+
 async function seedVoice(page: Page, sender: string, seconds = 12): Promise<number> {
   const response = await page.request.post("/test/server/seed-voice", { data: { sender, seconds } });
   expect(response.ok()).toBe(true);
-  return ((await response.json()) as { seq: number }).seq;
+  const seq = ((await response.json()) as { seq: number }).seq;
+  seededSeqs.push(seq);
+  return seq;
 }
 
 async function openPinPad(page: Page): Promise<void> {
@@ -86,6 +92,10 @@ test.beforeEach(async ({ page }) => {
 
 test.afterEach(async ({ page }) => {
   await configure(page, { private: false, hold: false, status: 200 });
+  for (const seq of seededSeqs.splice(0)) {
+    const response = await page.request.post("/test/server/delete-message", { data: { seq } });
+    expect(response.ok()).toBe(true);
+  }
 });
 
 for (const [label, viewport] of [
@@ -200,7 +210,9 @@ test.describe("server-transcription.spec.ts (two devices)", () => {
       await keepAwake(phone.page);
       await expect(onDesktop.locator(".wx-srv-transcript-pending")).toBeVisible();
       await expect(onPhone.locator(".wx-srv-transcript-pending")).toBeVisible(); // told by the stream
-      expect((await stats(page)).requests).toBe(1);
+      // The spinner shows once the pending row is committed, a moment before the job's request
+      // reaches cmd — so wait for it (parked at cmd by `hold`) rather than asserting instantly.
+      await expect.poll(async () => (await stats(page)).requests).toBe(1);
 
       await configure(page, { hold: false });
       await keepAwake(desktop.page);

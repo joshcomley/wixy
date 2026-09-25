@@ -666,6 +666,25 @@ def main() -> None:
 
         return await anyio.to_thread.run_sync(_seed)
 
+    @app.post("/test/server/delete-message", include_in_schema=False)
+    async def _post_delete_server_message(payload: dict[str, object]) -> dict[str, bool]:
+        """Remove one seeded message and its files, so a spec that seeds into the ONE shared chat
+        (this fixture runs a single project for the whole suite) leaves nothing behind for the
+        next spec's exact-count assertions (server-media asserts exactly one `.wx-srv-voice`)."""
+        seq = payload["seq"]
+        assert isinstance(seq, int)
+        store: LiveChatStore = app.state.livechat_store
+        paths: ProjectPaths = app.state.paths
+
+        def _delete() -> bool:
+            attachment_ids = store.delete_message(seq=seq, now=time.time())
+            for attachment_id in attachment_ids:
+                shutil.rmtree(paths.server_attachment_media_dir(attachment_id), ignore_errors=True)
+            app.state.livechat_notifier.publish()
+            return True
+
+        return {"deleted": await anyio.to_thread.run_sync(_delete)}
+
     @app.post("/test/server/reset-pin-lockout", include_in_schema=False)
     async def _post_reset_pin_lockout() -> dict[str, bool]:
         """spec/server-chat/00-brief.md §11: `server-lock.spec.ts`'s lockout
