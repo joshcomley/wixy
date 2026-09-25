@@ -22,7 +22,8 @@ BUILT (2026-09-25): backend (store table + joined attachment load, CmdTranscribe
 TranscriptionRuntime job/limits, async route, usage flag, fake cmd double), frontend (transcript.ts block, in-place
 patch, stale-202 guard, CSS), tests (pytest, vitest, Playwright desktop + 402px phone), docs/spec/decisions/Inv 50.
 Found and fixed by the e2e suite: a fast job's stream update can beat the HTTP reply (decisions/00167 #10).
-Remaining: independent self-review, final full verification, rebase + take migration max+1, hand-off SHA to DM.
+Independent adversarial review found 1 high + 2 medium + 3 low (0 critical); all fixed with new mutation-checked tests: probe re-check now genuinely bypasses the 60s cache before sending; attachment_transcripts existence checked independent of schema version (3 sibling round-2 branches each claim v7); TranscriptionRuntime.inflight is now the real single-flight authority and a job-less pending row is restarted; only_if_pending guard on the shutdown record; New-messages pill no longer raised by a transcript update. Full pytest 1906/1906, admin-ui vitest 1358/1358, e2e 85/85 (every server-*.spec.ts), all clean after merging today's main.
+FINAL HANDOFF sent to DM 2026-09-25 (base c55e8ba, candidate 417e6cd). Awaiting exact-SHA clearance before PR/merge.
 ## Relevant files+commits
 Backend: wixy_server/livechat/{models,store,transcribe,transcription}.py, routes_livechat.py, app.py,
 tests/fake_cmd.py. Frontend: admin-ui/src/server/{mediaRender,thread,transcript,api/messages}.ts + CSS.
