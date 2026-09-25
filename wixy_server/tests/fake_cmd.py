@@ -108,6 +108,18 @@ class FakePinApp:
 
 
 @dataclass
+class FakeTranscribeRequest:
+    """One `POST /api/transcribe` the fake received: what wixy actually put on the wire."""
+
+    audio: bytes
+    filename: str | None
+    content_type: str | None
+    fields: dict[str, str]
+    """Every non-file form field, verbatim — tests assert wixy sends exactly `private=1` and
+    `cleanup=0` and never a `session_id` or `context`."""
+
+
+@dataclass
 class FakeCmdState:
     sessions: dict[str, FakeSession] = field(default_factory=dict)
     next_session_n: int = 1
@@ -139,6 +151,30 @@ class FakeCmdState:
     """spec/server-chat/00-brief.md §5.1: the PIN-verify double's app-key
     registry — `register_pin_app` populates it; an unregistered `app_key`
     404s, mirroring cmd's real "unknown app key" answer."""
+
+    transcribe_private_supported: bool = True
+    """spec/server-chat/05-voice-transcription.md: whether this fake cmd has the private mode.
+    The capability probe answers `{"private": <this>}`. When False the fake behaves like
+    today's cmd — it IGNORES a `private` field and RETAINS every clip (see
+    `transcribe_retained`) — so a test can prove wixy never sends audio to such a cmd."""
+    transcribe_capabilities_status: int = 200
+    transcribe_status_code: int = 200
+    """A non-200 makes `POST /api/transcribe` fail with that status (503 + `asr_warming` when
+    `transcribe_error` is set to it)."""
+    transcribe_error: str | None = None
+    transcribe_text: str = "hello from the fake transcriber"
+    transcribe_engine: str | None = "parakeet"
+    transcribe_delay_s: float = 0.0
+    transcribe_gate: threading.Event | None = None
+    """When set, `POST /api/transcribe` blocks until the test sets it — holds a job in flight
+    so single-flight / one-at-a-time behaviour can be observed."""
+    transcribe_requests: list[FakeTranscribeRequest] = field(default_factory=list)
+    transcribe_probe_count: int = 0
+    transcribe_in_flight: int = 0
+    transcribe_max_in_flight: int = 0
+    transcribe_retained: list[bytes] = field(default_factory=list)
+    """The clips a RETAINING cmd would have persisted (a request without an honoured
+    `private=1`) — the privacy tests assert this stays empty."""
 
     def register_pin_app(
         self, app_key: str, pin: str, *, lockout_after: int = 5, lockout_seconds: float = 60.0
@@ -321,6 +357,65 @@ def create_fake_cmd_app(state: FakeCmdState | None = None) -> FastAPI:
                 "retry_after_seconds": 0,
             },
         )
+
+    @app.get("/api/transcribe/capabilities")
+    async def transcribe_capabilities() -> Response:
+        """The probe wixy checks before ever sending audio: `{"private": true}` means cmd
+        honours `private=1` (no debug save, no transcript in any log, ASR not shadowed,
+        bytes in memory only)."""
+        state.transcribe_probe_count += 1
+        if state.transcribe_capabilities_status != 200:
+            return Response(status_code=state.transcribe_capabilities_status)
+        return JSONResponse({"private": state.transcribe_private_supported})
+
+    @app.post("/api/transcribe")
+    async def transcribe(request: Request) -> Response:
+        """cmd's `POST /api/transcribe`: multipart `audio` + form fields, JSON
+        `{raw, text, ..., engine}` back. Records exactly what arrived."""
+        form = await request.form()
+        upload = form.get("audio")
+        audio = b""
+        filename: str | None = None
+        content_type: str | None = None
+        if upload is not None and not isinstance(upload, str):
+            audio = await upload.read()
+            filename = upload.filename
+            content_type = upload.content_type
+        fields = {k: v for k, v in form.items() if isinstance(v, str)}
+        state.transcribe_requests.append(
+            FakeTranscribeRequest(
+                audio=audio, filename=filename, content_type=content_type, fields=fields
+            )
+        )
+        if not (fields.get("private") == "1" and state.transcribe_private_supported):
+            state.transcribe_retained.append(audio)
+        state.transcribe_in_flight += 1
+        state.transcribe_max_in_flight = max(
+            state.transcribe_max_in_flight, state.transcribe_in_flight
+        )
+        try:
+            gate = state.transcribe_gate
+            while gate is not None and not gate.is_set():
+                await asyncio.sleep(0.01)
+            if state.transcribe_delay_s:
+                await asyncio.sleep(state.transcribe_delay_s)
+        finally:
+            state.transcribe_in_flight -= 1
+        if state.transcribe_status_code != 200:
+            content: JsonObject = {"error": state.transcribe_error or "transcription failed"}
+            return JSONResponse(status_code=state.transcribe_status_code, content=content)
+        body: JsonObject = {
+            "raw": state.transcribe_text,
+            "text": state.transcribe_text,
+            "tone": {},
+            "ms_asr": 5,
+            "ms_tone": 0,
+            "ms_cleanup": 0,
+            "cleaned": False,
+        }
+        if state.transcribe_engine is not None:
+            body["engine"] = state.transcribe_engine
+        return JSONResponse(body)
 
     @app.post("/api/project/{project}/new-chat")
     async def new_chat(project: str, request: Request) -> Response:

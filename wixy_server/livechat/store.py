@@ -36,7 +36,9 @@ import time
 import uuid
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from wixy_server.livechat.models import (
     AttachmentKind,
@@ -45,6 +47,7 @@ from wixy_server.livechat.models import (
     EventRow,
     MessageRow,
     PushSubscriptionRow,
+    TranscriptRow,
     UploadRow,
 )
 
@@ -118,7 +121,15 @@ CREATE TABLE IF NOT EXISTS pending_scrub(
   token TEXT NOT NULL);
 """
 
-_LATEST_SCHEMA_VERSION = 6
+_SCHEMA_V7_ATTACHMENT_TRANSCRIPTS = """
+CREATE TABLE IF NOT EXISTS attachment_transcripts(
+  attachment_id TEXT PRIMARY KEY REFERENCES attachments(id) ON DELETE CASCADE,
+  status TEXT NOT NULL CHECK(status IN ('pending','done','failed')),
+  text TEXT, failure TEXT, engine TEXT,
+  created_at REAL NOT NULL, updated_at REAL NOT NULL);
+"""
+
+_LATEST_SCHEMA_VERSION = 7
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -138,6 +149,40 @@ class UnusableAttachmentError(LiveChatStoreError):
             "(unknown, already attached to a message, or failed processing)"
         )
         self.attachment_id = attachment_id
+
+
+@dataclass(frozen=True, slots=True)
+class TranscriptBegin:
+    """What `begin_transcript` decided: `started` (a fresh `pending` row — the caller must
+    run the job), `pending` (a job already owns it), `done` (nothing to do; `transcript`
+    holds the stored text) or `gone` (unknown, not a sent ready voice note, or deleted)."""
+
+    state: Literal["started", "pending", "done", "gone"]
+    transcript: TranscriptRow | None = None
+
+
+_SELECT_ATTACHMENT = (
+    "SELECT a.*, t.status AS tr_status, t.text AS tr_text, t.failure AS tr_failure, "
+    "t.engine AS tr_engine, t.created_at AS tr_created_at, t.updated_at AS tr_updated_at "
+    "FROM attachments AS a LEFT JOIN attachment_transcripts AS t ON t.attachment_id = a.id"
+)
+"""Every `AttachmentRow` load goes through this one join, so a transcript can never be
+missing from an attachment a client is shown (`_row_to_attachment` reads the `tr_*` columns)."""
+
+
+def _row_to_transcript(row: sqlite3.Row) -> TranscriptRow | None:
+    status = row["tr_status"]
+    if status is None:
+        return None
+    return TranscriptRow(
+        attachment_id=row["id"],
+        status=status,
+        text=row["tr_text"],
+        failure=row["tr_failure"],
+        engine=row["tr_engine"],
+        created_at=row["tr_created_at"],
+        updated_at=row["tr_updated_at"],
+    )
 
 
 def _row_to_attachment(row: sqlite3.Row) -> AttachmentRow:
@@ -160,6 +205,7 @@ def _row_to_attachment(row: sqlite3.Row) -> AttachmentRow:
         lease_expires_at=row["lease_expires_at"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        transcript=_row_to_transcript(row),
     )
 
 
@@ -202,7 +248,7 @@ def _row_to_push_subscription(row: sqlite3.Row) -> PushSubscriptionRow:
 
 
 def _load_attachment(conn: sqlite3.Connection, att_id: str) -> AttachmentRow:
-    row = conn.execute("SELECT * FROM attachments WHERE id = ?", (att_id,)).fetchone()
+    row = conn.execute(f"{_SELECT_ATTACHMENT} WHERE a.id = ?", (att_id,)).fetchone()
     if row is None:
         raise KeyError(att_id)
     return _row_to_attachment(row)
@@ -216,8 +262,8 @@ def _load_attachments_for(
         return by_message
     placeholders = ",".join("?" for _ in message_seqs)
     rows = conn.execute(
-        f"SELECT * FROM attachments WHERE message_seq IN ({placeholders}) "
-        "ORDER BY message_seq, ordinal",
+        f"{_SELECT_ATTACHMENT} WHERE a.message_seq IN ({placeholders}) "
+        "ORDER BY a.message_seq, a.ordinal",
         tuple(message_seqs),
     ).fetchall()
     for row in rows:
@@ -341,6 +387,13 @@ class LiveChatStore:
                     if statement.strip():
                         conn.execute(statement)
                 conn.execute("PRAGMA user_version = 6")
+                current = 6
+
+            if current < 7:
+                for statement in _SCHEMA_V7_ATTACHMENT_TRANSCRIPTS.split(";"):
+                    if statement.strip():
+                        conn.execute(statement)
+                conn.execute("PRAGMA user_version = 7")
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
@@ -939,7 +992,7 @@ class LiveChatStore:
 
     def get_attachment(self, att_id: str) -> AttachmentRow | None:
         with self._read_txn() as conn:
-            row = conn.execute("SELECT * FROM attachments WHERE id = ?", (att_id,)).fetchone()
+            row = conn.execute(f"{_SELECT_ATTACHMENT} WHERE a.id = ?", (att_id,)).fetchone()
             return _row_to_attachment(row) if row is not None else None
 
     def media_bytes_used(self) -> int:
@@ -972,6 +1025,114 @@ class LiveChatStore:
                 return False
             self._queue_deleted_storage(conn, kind="attachment", ids=[att_id], now=now)
             return True
+
+    # -- voice-note transcripts (spec/server-chat/05-voice-transcription.md) --------
+
+    def _append_message_updated(self, conn: sqlite3.Connection, att_id: str, now: float) -> None:
+        row = conn.execute("SELECT message_seq FROM attachments WHERE id = ?", (att_id,)).fetchone()
+        if row is not None and row["message_seq"] is not None:
+            conn.execute(
+                "INSERT INTO events (type, message_seq, created_at) "
+                "VALUES ('message_updated', ?, ?)",
+                (row["message_seq"], now),
+            )
+
+    def get_transcript(self, att_id: str) -> TranscriptRow | None:
+        attachment = self.get_attachment(att_id)
+        return attachment.transcript if attachment is not None else None
+
+    def begin_transcript(self, *, att_id: str, now: float) -> TranscriptBegin:
+        """Atomically decide whether a transcription job should start for `att_id`.
+
+        Everything is checked under one write lock, so two racing requests can never both
+        get `started`: the loser sees the winner's `pending` row. A missing row and a
+        `failed` row both become a fresh `pending` one (a failed row is the retry), and the
+        `pending` state is announced as a `message_updated` event so the other device shows
+        its spinner too. Because the attachment's existence is verified inside the same
+        transaction that inserts the row, the foreign key can never fail here.
+        """
+        with self._write_txn() as conn:
+            attachment = conn.execute(
+                "SELECT kind, status, message_seq FROM attachments WHERE id = ?", (att_id,)
+            ).fetchone()
+            if (
+                attachment is None
+                or attachment["kind"] != "voice"
+                or attachment["status"] != "ready"
+                or attachment["message_seq"] is None
+            ):
+                return TranscriptBegin("gone")
+            existing = _load_attachment(conn, att_id).transcript
+            if existing is not None and existing.status == "done":
+                return TranscriptBegin("done", existing)
+            if existing is not None and existing.status == "pending":
+                return TranscriptBegin("pending", existing)
+            if existing is None:
+                conn.execute(
+                    "INSERT INTO attachment_transcripts "
+                    "(attachment_id, status, created_at, updated_at) VALUES (?, 'pending', ?, ?)",
+                    (att_id, now, now),
+                )
+            else:
+                conn.execute(
+                    "UPDATE attachment_transcripts SET status = 'pending', text = NULL, "
+                    "failure = NULL, engine = NULL, updated_at = ? WHERE attachment_id = ?",
+                    (now, att_id),
+                )
+            self._append_message_updated(conn, att_id, now)
+            return TranscriptBegin("started", _load_attachment(conn, att_id).transcript)
+
+    def finish_transcript(
+        self,
+        *,
+        att_id: str,
+        status: Literal["done", "failed"],
+        text: str | None,
+        failure: str | None,
+        engine: str | None,
+        now: float,
+    ) -> bool:
+        """Record a job's outcome. Returns False when the row is gone (the message was
+        deleted or the chat wiped while the job ran — `ON DELETE CASCADE` removed it): the
+        result is discarded and no event is emitted, so a late transcript can never
+        resurrect erased content. Deliberately not conditional on the row still being
+        `pending`, so a live job in a sibling blue/green process can still land its result
+        after this process's startup marked the row `failed`."""
+        with self._write_txn() as conn:
+            cursor = conn.execute(
+                "UPDATE attachment_transcripts SET status = ?, text = ?, failure = ?, "
+                "engine = ?, updated_at = ? WHERE attachment_id = ?",
+                (status, text if status == "done" else None, failure, engine, now, att_id),
+            )
+            if cursor.rowcount != 1:
+                return False
+            self._append_message_updated(conn, att_id, now)
+            return True
+
+    def fail_stale_pending_transcripts(self, *, now: float) -> int:
+        """Startup recovery: a `pending` row at process start belongs to a job that died with
+        its process, so it becomes `failed` (the user can retry) and each affected message
+        gets a `message_updated` event so a reconnecting client leaves its spinner."""
+        with self._write_txn() as conn:
+            rows = conn.execute(
+                "SELECT t.attachment_id AS id, a.message_seq AS message_seq "
+                "FROM attachment_transcripts AS t JOIN attachments AS a ON a.id = t.attachment_id "
+                "WHERE t.status = 'pending'"
+            ).fetchall()
+            if not rows:
+                return 0
+            conn.execute(
+                "UPDATE attachment_transcripts SET status = 'failed', text = NULL, "
+                "failure = 'interrupted', updated_at = ? WHERE status = 'pending'",
+                (now,),
+            )
+            for message_seq in sorted({r["message_seq"] for r in rows if r["message_seq"]}):
+                conn.execute(
+                    "INSERT INTO events (type, message_seq, created_at) "
+                    "VALUES ('message_updated', ?, ?)",
+                    (message_seq, now),
+                )
+            return len(rows)
 
     # -- uploads (P2) -------------------------------------------------------
 

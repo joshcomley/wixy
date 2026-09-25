@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import time
 from collections.abc import AsyncGenerator, AsyncIterator
@@ -32,7 +33,9 @@ from wixy_server.livechat.models import (
     MessageHook,
     MessageRow,
     PushSubscriptionRow,
+    TranscriptRow,
     message_json,
+    transcript_json,
 )
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import PinVerifier
@@ -48,6 +51,7 @@ from wixy_server.livechat.tokens import (
     require_server_token,
     unlock_request_refusal,
 )
+from wixy_server.livechat.transcription import TranscriptionRuntime
 from wixy_server.settings import Settings
 from wixy_server.storage import ProjectPaths
 
@@ -57,6 +61,7 @@ _LOGGER = logging.getLogger(__name__)
 _PING_INTERVAL_S = 15.0
 _NOTIFIER_WAIT_S = 2.0
 _DELETE_SCRUB_DEADLINE_S = 10.0
+_ATTACHMENT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 
@@ -495,6 +500,7 @@ async def usage(request: Request) -> JsonObject:
     store: LiveChatStore = request.app.state.livechat_store
     settings: Settings = request.app.state.settings
     media_available: bool = request.app.state.livechat_media_available
+    transcription: TranscriptionRuntime = request.app.state.livechat_transcription
 
     used_bytes = await anyio.to_thread.run_sync(store.media_bytes_used)
     quota_bytes = settings.server_media_quota_bytes
@@ -506,7 +512,70 @@ async def usage(request: Request) -> JsonObject:
         "erasurePending": await anyio.to_thread.run_sync(
             lambda: store.scrub_pending() or store.storage_cleanup_pending()
         ),
+        "transcriptionAvailable": media_available and await transcription.available(),
     }
+
+
+# ---------------------------------------------------------------------------
+# POST /attachments/{id}/transcribe — opt-in voice-note transcription
+# (spec/server-chat/05-voice-transcription.md). Asynchronous: Cloudflare cuts a proxied
+# origin response at 100 s, and a long note can take longer than that.
+# ---------------------------------------------------------------------------
+
+
+@router.post("/attachments/{att_id}/transcribe", response_model=None)
+async def transcribe_attachment(att_id: str, request: Request) -> JSONResponse:
+    auth = require_server_token(request)
+    store: LiveChatStore = request.app.state.livechat_store
+    runtime: TranscriptionRuntime = request.app.state.livechat_transcription
+    notifier: LiveChatNotifier = request.app.state.livechat_notifier
+    background: ContainedTaskGroup = request.app.state.background_tasks
+
+    def _not_found() -> JSONResponse:
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+
+    def _stored(transcript: TranscriptRow | None, *, status_code: int) -> JSONResponse:
+        return JSONResponse(
+            status_code=status_code, content={"transcript": transcript_json(transcript)}
+        )
+
+    if not _ATTACHMENT_ID_RE.match(att_id):
+        return _not_found()
+    attachment = await anyio.to_thread.run_sync(store.get_attachment, att_id)
+    if attachment is None or attachment.kind != "voice" or attachment.message_seq is None:
+        return _not_found()
+    if attachment.status != "ready":
+        return JSONResponse(status_code=409, content={"error": "not_ready"})
+
+    existing = attachment.transcript
+    if existing is not None and existing.status == "done":
+        return _stored(existing, status_code=200)  # reading a stored transcript needs no cmd
+    if existing is not None and existing.status == "pending":
+        return _stored(existing, status_code=202)  # single-flight: a job already owns it
+
+    if not await runtime.available():
+        return JSONResponse(status_code=503, content={"error": "not_configured"})
+    retry_after = runtime.rate_limiter.hit(auth.email)
+    if retry_after is not None:
+        seconds = max(1, math.ceil(retry_after))
+        return JSONResponse(
+            status_code=429,
+            content={"error": "rate_limited", "retryAfterS": seconds},
+            headers={"Retry-After": str(seconds)},
+        )
+
+    begin = await anyio.to_thread.run_sync(
+        lambda: store.begin_transcript(att_id=att_id, now=time.time())
+    )
+    if begin.state == "gone":
+        return _not_found()
+    if begin.state == "done":
+        return _stored(begin.transcript, status_code=200)
+    if begin.state == "started":
+        runtime.inflight.add(att_id)
+        notifier.publish()  # the other device's spinner
+        background.spawn("livechat-transcription", runtime.run_job, att_id)
+    return _stored(begin.transcript, status_code=202)
 
 
 # ---------------------------------------------------------------------------
