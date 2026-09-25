@@ -230,12 +230,33 @@ Decision rule (a pure function in lockModel, inputs `lockOnTab`, `lockOnScreen`,
 - **The two differ:** `hidden` → lock at once and **fail closed** (a "shield"). On return
   (`visible`), keep the decoy up for up to **500 ms** so queued IdleDetector events can
   arrive. Then the cause is:
-  - "screen lock" if a `screenState = "locked"` was observed between the hide and now;
-  - otherwise "tab change".
+  - **"screen lock"** — if a `screenState = "locked"` was observed between the hide and now.
+    This is positive evidence.
+  - **"tab change"** — only if there is no such event **and this device is proven** (see
+    below).
+  - **"ambiguous"** — no event, and the device is not proven.
 
-  If the setting for that cause is OFF, restore silently: re-attach the detached view with
-  the in-memory session, or re-mint via the grant. If it is ON, stay locked (and pause the
-  grant if one is active).
+  **Restore silently only when the cause is known and its box is OFF:** re-attach the
+  detached view with the in-memory session, or re-mint via the grant. If the cause's box is
+  ON, **or the cause is ambiguous**, stay locked and pause the grant if one is active.
+  **Fail closed on ambiguity** (amended 2026-09-25 on the Orchestrator's catch: the first
+  version defaulted a missing event to "tab change", so a real screen lock the phone did not
+  report in time would have reopened the chat).
+
+  **A proven device** (`wx-srv-screenlock-proven = "1"`):
+  - **Why proof is needed:** there is never positive evidence of a *tab* switch, only of a
+    screen lock. So "no event means tab change" can only be trusted on a device that has
+    shown it really does deliver screen-lock events across a hide-and-return cycle.
+  - **When the key is set:** the first time a `screenState = "locked"` event is observed
+    during a hidden interval (permission granted), set the key.
+  - **When it is cleared:** whenever the IdleDetector permission is lost or the detector
+    becomes unavailable.
+  - **Until proven**, the combination "change tab OFF + lock my screen ON" still locks on
+    every switch, fail-closed. The row says so plainly: "Lock your screen once so this phone
+    can learn to tell a screen lock from a tab switch — until then, switching away also
+    locks." The note disappears once the device is proven.
+  - The combination "change tab ON + lock my screen OFF" needs no proof: it restores only on
+    positive screen-lock evidence.
 - An IdleDetector **`screenState → "locked"` event while visible** (desktop Win+L, which may
   not fire `hidden` at all) locks immediately when "Lock when I lock my screen" is ON.
 
@@ -248,7 +269,12 @@ Permission and availability:
 
 Tests:
 - vitest with a fake IdleDetector and a fake clock:
-  - every setting combination × cause;
+  - every setting combination × cause (screen lock / tab change / ambiguous) × proven or
+    unproven device;
+  - an ambiguous cause always stays locked, including "change tab OFF + screen ON" on an
+    unproven device — the regression test for the fail-open gap;
+  - the proof key is set on the first observed hidden-interval screen lock, and cleared
+    when the permission is lost;
   - the shield holds for 500 ms, then restores or stays locked;
   - a checkbox lock pauses an active grant;
   - an unsupported or denied detector gives the mirrored behaviour;
