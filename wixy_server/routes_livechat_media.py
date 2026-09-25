@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from wixy_server.livechat import uploads
+from wixy_server.livechat.grants import GRANT_ID_RE, GRANT_IDLE_EXPIRY_S
 from wixy_server.livechat.models import AttachmentRow, UploadRow, attachment_json
 from wixy_server.livechat.store import LiveChatStore
 from wixy_server.livechat.tokens import MediaSigner, require_server_token, verify_media_signature
@@ -40,7 +41,7 @@ class InitUploadIn(BaseModel):
 
 @router.post("/uploads", response_model=None)
 async def init_upload(body: InitUploadIn, request: Request) -> JSONResponse:
-    auth = require_server_token(request)
+    auth = await require_server_token(request)
     store: LiveChatStore = request.app.state.livechat_store
     paths: ProjectPaths = request.app.state.paths
     settings: Settings = request.app.state.settings
@@ -92,7 +93,7 @@ async def init_upload(body: InitUploadIn, request: Request) -> JSONResponse:
 
 @router.put("/uploads/{upload_id}/chunks/{index}", response_model=None)
 async def put_chunk(upload_id: str, index: int, request: Request) -> Response:
-    require_server_token(request)
+    await require_server_token(request)
     store: LiveChatStore = request.app.state.livechat_store
     paths: ProjectPaths = request.app.state.paths
     settings: Settings = request.app.state.settings
@@ -159,7 +160,7 @@ async def put_chunk(upload_id: str, index: int, request: Request) -> Response:
 
 @router.post("/uploads/{upload_id}/complete", response_model=None)
 async def complete_upload(upload_id: str, request: Request) -> JSONResponse:
-    auth = require_server_token(request)
+    auth = await require_server_token(request)
     store: LiveChatStore = request.app.state.livechat_store
     paths: ProjectPaths = request.app.state.paths
     settings: Settings = request.app.state.settings
@@ -198,7 +199,7 @@ async def complete_upload(upload_id: str, request: Request) -> JSONResponse:
 
 @router.delete("/uploads/{upload_id}", response_model=None)
 async def delete_upload(upload_id: str, request: Request) -> Response:
-    require_server_token(request)
+    await require_server_token(request)
     store: LiveChatStore = request.app.state.livechat_store
     paths: ProjectPaths = request.app.state.paths
 
@@ -244,16 +245,23 @@ def _resolve_rendition_path(paths: ProjectPaths, att_id: str, rendition: str) ->
 
 
 @router.get("/media/{att_id}/{rendition}", response_model=None)
-async def get_media(att_id: str, rendition: str, request: Request, exp: int, sig: str) -> Response:
+async def get_media(
+    att_id: str, rendition: str, request: Request, exp: int, sig: str, g: str | None = None
+) -> Response:
     # §2: "IDs are validated as 32 hex characters" — checked before the
     # signature math even runs, as cheap defense in depth (a forged/tampered id
     # can never pass `verify_media_signature` anyway, since it's covered by the
     # HMAC, but this fails a malformed id fast without touching the filesystem).
     if not _ATTACHMENT_ID_RE.match(att_id) or rendition not in _RENDITION_FILENAMES:
         raise HTTPException(status_code=404)
+    # A `g` of the wrong shape can never match a real signature (it's part of the HMAC
+    # message), but reject it here so a malformed value never reaches the grant lookup below.
+    if g is not None and not GRANT_ID_RE.fullmatch(g):
+        raise HTTPException(status_code=403)
 
     secret: bytes = request.app.state.livechat_secret
     access_email = getattr(request.state, "access_email", None) or ""
+    store: LiveChatStore = request.app.state.livechat_store
     if not verify_media_signature(
         secret,
         attachment_id=att_id,
@@ -262,11 +270,26 @@ async def get_media(att_id: str, rendition: str, request: Request, exp: int, sig
         email=access_email,
         signature=sig,
         now=time.time(),
+        grant_id=g,
     ):
         raise HTTPException(status_code=403)
+    bound_grant_id = g
+    if bound_grant_id is not None:
+        # §9 (audit F4): a bound media URL re-checks grant liveness on every fetch, the same
+        # way a bound token does — otherwise a link handed out before "Sign out other
+        # devices" would keep loading for the rest of its 12h `exp`.
+        live = await anyio.to_thread.run_sync(
+            lambda: store.is_device_grant_live(
+                grant_id=bound_grant_id,
+                email=access_email,
+                now=time.time(),
+                max_idle_s=GRANT_IDLE_EXPIRY_S,
+            )
+        )
+        if not live:
+            raise HTTPException(status_code=403)
 
     paths: ProjectPaths = request.app.state.paths
-    store: LiveChatStore = request.app.state.livechat_store
     attachment = await anyio.to_thread.run_sync(lambda: store.get_attachment(att_id))
     if attachment is None:
         # Deletion is authoritative even if Windows could not unlink an open

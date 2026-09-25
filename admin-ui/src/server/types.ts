@@ -39,7 +39,12 @@ export type LockCause =
   | "unauthorized"
   | "expired"
   | "screenLock"
-  | "idleAway";
+  | "idleAway"
+  /** §9 (audit F4 ruling): the owner turned "Keep this device unlocked" off from the
+   * settings sheet. Deliberate, like `panic`/`multiTap`/`escape`, but the grant behind it
+   * is being fully revoked and cleared right here (`turnKeepOff`), not merely paused — so
+   * it is intentionally absent from `pausesGrant`'s list. */
+  | "grantOff";
 
 /** The callback surface `panel.ts` hands to the mounted `ServerChatView` (and
  * anything it in turn mounts — uploader, recorder, media renderer) so those
@@ -57,6 +62,13 @@ export interface LockHooks {
   /** Forces an instant lock for `cause`, from any state. A no-op if already
    * locked. */
   lockNow(cause: LockCause): void;
+  /** §9 (audit F4 ruling): adopt a freshly BOUND session — the token `POST /device-grants`
+   * itself returns on a successful enrolment — with no visible change, exactly like a silent
+   * renewal (`ServerChatView.attach` may be called again while attached). Without this the
+   * live session stays whatever it was before enrolling (often an unbound PIN token), so
+   * "Sign out other devices" called moments later would see an unbound caller and spare
+   * nothing — the newly-created grant included. A no-op once the panel has been torn down. */
+  adoptBoundSession(session: ServerSession): void;
 }
 
 /** The server-chat HTTP API surface, assembled from each area's own client

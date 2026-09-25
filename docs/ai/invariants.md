@@ -800,18 +800,42 @@ fail — unknown id, wrong secret, revoked, idle over 30 days, another identity'
 field — is the same reason-free `401 {"error":"grant_invalid"}`; ten failures per identity per
 minute answer 429. All four grant routes run the `unlock_request_refusal` guard first, so a
 cross-site page can neither spend a PIN attempt nor probe a grant. The janitor revokes grants unused
-for 30 days and deletes rows revoked for more than a week.
+for 30 days and deletes rows revoked for more than a week. A device label rejects a lone UTF-16
+surrogate BEFORE cmd is asked to verify (and charge) the PIN (audit F5) — the same class of check
+already applied to a sender name (§5.3) and a reaction, just missed here the first time.
+
+**Revocation ends live sessions, not just future ones (spec §9, audit F4).** A token minted by
+`unlock-with-grant`, or by `POST /device-grants` itself, is BOUND to that grant (payload key
+`"g"`, 32 lowercase hex): `require_server_token` re-checks the grant is still live on every
+request that carries one, `GET /stream`'s loop re-checks it on its existing ~2s tick, and a bound
+token's media URLs carry `&g=` and fold the grant id into their HMAC too. **Revoking a grant ends,
+within about 2 seconds, every session and media link minted from it. No route exchanges a
+grant-bound token for an unbound one** — a route that did would let a thief holding the device
+outlive its own revocation. `POST /unlock`'s PIN-minted tokens are never bound, so an ordinary PIN
+session is untouched by any of this. "Sign out other devices" revokes every OTHER live grant of
+the identity but spares the CALLER's own bound grant, so the button's promise is literally true
+and the click that fired it doesn't sign itself out; turning "Keep this device unlocked" off on
+the current device revokes that one grant and locks the chat at once, on purpose.
 
 On the device the grant lives in two `localStorage` keys: `wx-srv-device-grant` (present means the
 setting is on) and `wx-srv-grant-paused` (`"1"` after a deliberate or checkbox-caused lock; a PIN
 unlock clears it). Unreadable, malformed or unwritable storage means OFF, and a pause that cannot
-be written drops the grant, so a panic can never be undone by a reload. **Known limit:** rotating
-the PIN at cmd does not revoke grants (Sign out other devices does) — see the runbook.
+be written drops the grant, so a panic can never be undone by a reload. `grantActive` means the
+in-memory session is bound to the stored grant, never merely that the key is present: after a PIN
+unlock on a device holding an unpaused grant, the client exchanges for a bound session at once via
+`unlock-with-grant`, and the ordinary automatic locks apply until that arrives (or forever, on a
+network error) — without this, re-entering the PIN after a panic would run a never-auto-locking
+chat on an unbound 12h token, the same hole by another door. **Known limits:** rotating the PIN at
+cmd does not revoke grants (Sign out other devices does); a lost phone's push subscription still
+receives the payload-less "new message" ping until it is removed — the ping shows no content, and
+opening it still needs the PIN — see the runbook.
 *Enforced by:* `wixy_server/tests/test_livechat_grants.py` (hash-only storage, the cap, the 30-day
-window, identity binding, migration v9, the janitor), `test_routes_livechat_grants.py` (both gates
-on enrolment, the uniform 401, the rate limit, cmd never contacted, the guard on all four routes,
-real-JWT identity binding), `admin-ui/tests/server/{deviceGrant,grantsApi,lockModelGrant,
-panelGrant,settingsSheetKeep}.test.ts`, and `e2e/tests/server-permanent-unlock.spec.ts`.
+window, identity binding, migration v9, the janitor, lone-surrogate labels), `test_routes_livechat_grants.py`
+(both gates on enrolment, the uniform 401, the rate limit, cmd never contacted, the guard on all
+four routes, real-JWT identity binding, bound-token revocation ending a session/stream/media link,
+"sign out other devices" sparing the caller's own grant), `admin-ui/tests/server/{deviceGrant,
+grantsApi,lockModelGrant,panelGrant,settingsSheetKeep}.test.ts`, and
+`e2e/tests/server-permanent-unlock.spec.ts`.
 
 ### Inv 49 — Server-chat reactions are a small, public, cascading mark
 A reaction is one row per (message, reactor, emoji). The reactor is the trimmed, **case-folded

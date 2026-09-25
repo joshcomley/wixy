@@ -146,7 +146,9 @@ async function keepDeviceUnlocked(page: Page): Promise<void> {
   );
   await enterPinOn(page, ".wx-srv-sheet-keep-pad .wx-srv-pinpad", TEST_PIN, "/api/admin/server/device-grants");
   await expect(page.locator(".wx-srv-sheet-keep-pad")).toBeHidden();
-  await expect(page.locator(".wx-srv-sheet-keep-note")).toHaveText("On · Lock with the ✕ or a double-tap");
+  await expect(page.locator(".wx-srv-sheet-keep-note")).toHaveText(
+    "On · Lock with the ✕ or a double-tap. Turning this off locks the chat — you'll need the PIN next time.",
+  );
   await closeSettings(page);
 }
 
@@ -321,26 +323,33 @@ for (const profile of DEVICE_PROFILES) {
       });
     });
 
-    test(`${profile.name}: turning it off removes both keys and a reload shows the decoy`, async ({ browser }) => {
+    test(`${profile.name}: turning it off clears both keys and locks the chat at once, no reload needed`, async ({
+      browser,
+    }) => {
       await withServerPage(browser, profile, async (page) => {
         await unlockWithPin(page);
         await keepDeviceUnlocked(page);
 
         await openSettings(page);
-        await page.getByLabel(KEEP_LABEL).uncheck();
-        await expect(page.getByLabel(KEEP_LABEL)).not.toBeChecked();
+        // §9 (audit F4 ruling): unchecking locks the chat AT ONCE, tearing down the settings
+        // sheet (and this very checkbox) as a direct, synchronous result — `.click()`, not
+        // `.uncheck()`, since `.uncheck()`'s own post-action verification re-queries this same
+        // now-gone element and would wait out the whole test timeout for it to reappear.
+        await page.getByLabel(KEEP_LABEL).click();
         expect(
           await page.evaluate((keys) => keys.map((key) => window.localStorage.getItem(key)), [GRANT_KEY, PAUSED_KEY]),
         ).toEqual([null, null]);
-        await closeSettings(page);
+        await chatIsGone(page);
+        await expect(page.locator(".wx-srv-decoy")).toBeVisible();
 
+        // And it survives a reload too: the ordinary decoy, no lingering grant.
         await reloadOnServerPage(page);
         await chatIsGone(page);
         await expect(page.locator(".wx-srv-decoy")).toBeVisible();
       });
     });
 
-    test(`${profile.name}: Sign out other devices revokes the grant and the next reload shows the decoy`, async ({
+    test(`${profile.name}: Sign out other devices spares THIS device's own grant (§9 sub-ruling ii)`, async ({
       browser,
     }) => {
       await withServerPage(browser, profile, async (page) => {
@@ -354,40 +363,106 @@ for (const profile of DEVICE_PROFILES) {
         await page.getByRole("button", { name: "Sign out other devices" }).click();
         expect((await revoked).status()).toBe(204);
         await expect(page.locator(".wx-srv-sheet-signout-status")).toHaveText(/Done/);
-        // This device's own grant went with the rest, so it turned itself off here too.
-        await expect(page.getByLabel(KEEP_LABEL)).not.toBeChecked();
+        // The button signs out OTHER devices — this one, the caller, stays on: the setting is
+        // still checked, and its own grant is still in local storage.
+        await expect(page.getByLabel(KEEP_LABEL)).toBeChecked();
         await closeSettings(page);
 
         await reloadOnServerPage(page);
-        await chatIsGone(page);
-        await expect(page.locator(".wx-srv-decoy")).toBeVisible();
+        await chatIsOpen(page);
+        expect(await page.evaluate((key) => window.localStorage.getItem(key) !== null, GRANT_KEY)).toBe(true);
       });
     });
 
-    test(`${profile.name}: a revoked grant is forgotten on the next open and shows the ordinary decoy`, async ({
+    test(`${profile.name}: sign-out from an UNBOUND caller (a different device) revokes this one too, and the next open shows the ordinary decoy`, async ({
       browser,
+      request,
     }) => {
       await withServerPage(browser, profile, async (page) => {
         await unlockWithPin(page);
         await keepDeviceUnlocked(page);
-        // Revoke it behind the device's back (the owner signed out from another phone).
         const grant = await page.evaluate((key) => window.localStorage.getItem(key), GRANT_KEY);
         expect(grant).not.toBeNull();
-        await openSettings(page);
-        await page.getByRole("button", { name: "Sign out other devices" }).click();
-        await expect(page.locator(".wx-srv-sheet-signout-status")).toHaveText(/Done/);
-        await closeSettings(page);
-        // Put the (now revoked) grant back, as a stale second device would still hold it.
-        await page.evaluate(([key, value]) => window.localStorage.setItem(key as string, value as string), [
-          GRANT_KEY,
-          grant,
-        ]);
 
+        // Simulate the owner signing everyone out from a device that is NOT this one: a fresh
+        // PIN unlock (never bound to a grant) so this call spares nothing — §9 sub-ruling (ii)
+        // only spares the CALLER's own bound grant, and a plain PIN session has none.
+        const unlockResponse = await request.post("/api/admin/server/unlock", {
+          headers: { "X-Wixy-Server-Unlock": "1", "Content-Type": "application/json" },
+          data: { pin: TEST_PIN },
+        });
+        expect(unlockResponse.ok()).toBe(true);
+        const otherDeviceToken = (await unlockResponse.json()).token as string;
+        const revokeResponse = await request.delete("/api/admin/server/device-grants", {
+          headers: {
+            "X-Wixy-Server-Unlock": "1",
+            "Content-Type": "application/json",
+            "X-Wixy-Server-Token": otherDeviceToken,
+          },
+        });
+        expect(revokeResponse.status()).toBe(204);
+
+        // This device does not know yet — its stored grant is now stale.
         await reloadOnServerPage(page);
         await chatIsGone(page);
         await expect(page.locator(".wx-srv-decoy")).toBeVisible();
         expect(await page.evaluate((key) => window.localStorage.getItem(key), GRANT_KEY)).toBeNull();
       });
+    });
+
+    test(`${profile.name}: Sign out other devices locks a SIBLING device's already-open chat live, with no reload`, async ({
+      browser,
+    }) => {
+      // §9 (audit F4 ruling): revocation ends a live session within about 2s, via the open
+      // stream's own liveness re-check — not merely at the sibling's next fresh request. Two
+      // real browser contexts on the SAME identity, each with its OWN device grant.
+      const newCtx = () =>
+        browser.newContext({
+          viewport: profile.viewport,
+          isMobile: profile.isMobile,
+          hasTouch: profile.hasTouch,
+          deviceScaleFactor: profile.isMobile ? 3 : 1,
+        });
+      const contextA = await newCtx();
+      const contextB = await newCtx();
+      await contextA.addInitScript(installIdleDetectorStub);
+      await contextB.addInitScript(installIdleDetectorStub);
+      const pageA = await contextA.newPage();
+      const pageB = await contextB.newPage();
+      const errorsA = trackConsoleErrors(pageA);
+      const errorsB = trackConsoleErrors(pageB);
+      await pageA.clock.install();
+      await pageB.clock.install();
+      await pageA.goto("/admin/server");
+      await pageB.goto("/admin/server");
+      await pageA.waitForSelector(".wx-srv-decoy");
+      await pageB.waitForSelector(".wx-srv-decoy");
+
+      await unlockWithPin(pageA);
+      await keepDeviceUnlocked(pageA);
+      await unlockWithPin(pageB);
+      await keepDeviceUnlocked(pageB);
+      await chatIsOpen(pageB);
+
+      await openSettings(pageA);
+      const revoked = pageA.waitForResponse(
+        (res) => res.url().endsWith("/api/admin/server/device-grants") && res.request().method() === "DELETE",
+      );
+      await pageA.getByRole("button", { name: "Sign out other devices" }).click();
+      expect((await revoked).status()).toBe(204);
+      await closeSettings(pageA);
+
+      // B never reloads and takes no action of its own — the lock arrives live, over its
+      // already-open SSE stream, within a few seconds (the stream's ~2s liveness tick).
+      await expect(pageB.locator(".wx-srv-thread")).toHaveCount(0, { timeout: 10_000 });
+      await expect(pageB.locator(".wx-srv-decoy")).toBeVisible();
+      // A, the caller, is entirely unaffected — its own grant was spared.
+      await chatIsOpen(pageA);
+
+      expect(errorsA).toEqual([]);
+      expect(errorsB).toEqual([]);
+      await contextA.close();
+      await contextB.close();
     });
 
     test(`${profile.name}: a wrong PIN on the inline pad shows the attempts left and stores nothing`, async ({
@@ -407,13 +482,22 @@ for (const profile of DEVICE_PROFILES) {
       });
     });
 
-    test(`${profile.name}: while it is on, "Extend auto-lock to 1 minute" is greyed out`, async ({ browser }) => {
+    test(`${profile.name}: while it is on, "Extend auto-lock to 1 minute" is greyed out; it works again once turned off`, async ({
+      browser,
+    }) => {
       await withServerPage(browser, profile, async (page) => {
         await unlockWithPin(page);
         await keepDeviceUnlocked(page);
         await openSettings(page);
         await expect(page.getByLabel("Extend auto-lock to 1 minute")).toBeDisabled();
-        await page.getByLabel(KEEP_LABEL).uncheck();
+
+        // Turning it off locks the chat at once (§9, audit F4) — there is no more sheet here
+        // to keep inspecting in the same breath. Unlock again with the PIN (the setting is
+        // off, so the ordinary decoy/PIN flow applies) and check the row from there.
+        await page.getByLabel(KEEP_LABEL).click();
+        await chatIsGone(page);
+        await unlockWithPin(page);
+        await openSettings(page);
         await expect(page.getByLabel("Extend auto-lock to 1 minute")).toBeEnabled();
       });
     });

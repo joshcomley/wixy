@@ -415,6 +415,21 @@ class TestEnrolment:
         assert env.spy.calls == 0
         assert _rows(env) == []
 
+    @pytest.mark.parametrize("escape", ["\\ud800", "\\udfff", "x\\ud83d"])
+    def test_a_lone_surrogate_label_is_a_422_before_cmd_is_asked(
+        self, env: Env, escape: str
+    ) -> None:
+        # `json.loads` decodes a `\uXXXX` escape into a real lone surrogate, which has no UTF-8
+        # form: past validation it would crash the SQLite bind with a bare 500 AFTER cmd had
+        # already verified (and charged) the PIN.
+        body = f'{{"pin": "{TEST_PIN}", "label": "{escape}"}}'.encode("ascii")
+        response = env.client.post(f"{_BASE}/device-grants", content=body, headers=env.headers())
+        assert response.status_code == 422
+        assert response.json()["error"] == "invalid"
+        assert env.spy.calls == 0
+        assert env.cmd.pin_apps[TEST_APP_KEY].attempts == {}
+        assert _rows(env) == []
+
     def test_a_sixth_grant_revokes_the_oldest(self, env: Env) -> None:
         grants = [_enroll(env) for _ in range(MAX_LIVE_GRANTS_PER_IDENTITY)]
         assert all(_redeem(env, g).status_code == 200 for g in grants)
@@ -603,6 +618,105 @@ class TestRedemption:
 # ---------------------------------------------------------------------------
 # DELETE /device-grants/{id} and DELETE /device-grants
 # ---------------------------------------------------------------------------
+
+
+class TestBoundTokenRevocation:
+    """§9 (audit F4): a token minted by enrolment or redemption is BOUND to its grant —
+    revoking that grant must end the session the very next request makes with it, not
+    merely stop minting new ones."""
+
+    def test_device_grants_returns_a_token_bound_to_its_own_grant(self, env: Env) -> None:
+        grant = _enroll(env)
+        assert (
+            env.client.get(
+                f"{_BASE}/messages", headers={"X-Wixy-Server-Token": grant["token"]}
+            ).status_code
+            == 200
+        )
+        env.client.delete(f"{_BASE}/device-grants/{grant['grantId']}", headers=env.headers())
+        response = env.client.get(
+            f"{_BASE}/messages", headers={"X-Wixy-Server-Token": grant["token"]}
+        )
+        assert response.status_code == 401
+        assert response.json() == {"error": "locked"}
+
+    def test_unlock_with_grant_returns_a_token_bound_to_the_redeemed_grant(self, env: Env) -> None:
+        grant = _enroll(env)
+        redeemed = _redeem(env, grant).json()
+        assert redeemed["token"] != grant["token"]
+        assert (
+            env.client.get(
+                f"{_BASE}/messages", headers={"X-Wixy-Server-Token": redeemed["token"]}
+            ).status_code
+            == 200
+        )
+        env.client.delete(f"{_BASE}/device-grants/{grant['grantId']}", headers=env.headers())
+        response = env.client.get(
+            f"{_BASE}/messages", headers={"X-Wixy-Server-Token": redeemed["token"]}
+        )
+        assert response.status_code == 401
+        assert response.json() == {"error": "locked"}
+
+    def test_revoking_one_grant_does_not_lock_a_different_bound_token(self, env: Env) -> None:
+        keep, drop = _enroll(env), _enroll(env)
+        env.client.delete(f"{_BASE}/device-grants/{drop['grantId']}", headers=env.headers())
+        response = env.client.get(
+            f"{_BASE}/messages", headers={"X-Wixy-Server-Token": keep["token"]}
+        )
+        assert response.status_code == 200
+
+    def test_an_unbound_pin_token_is_never_touched_by_any_grant_revocation(self, env: Env) -> None:
+        grant = _enroll(env)
+        env.client.delete(f"{_BASE}/device-grants/{grant['grantId']}", headers=env.headers())
+        assert env.client.get(f"{_BASE}/messages", headers=env.headers()).status_code == 200
+
+    def test_sign_out_others_locks_a_bound_token_from_a_different_grant(self, env: Env) -> None:
+        caller, other = _enroll(env), _enroll(env)
+        env.client.delete(
+            f"{_BASE}/device-grants",
+            headers={**env.headers(), "X-Wixy-Server-Token": caller["token"]},
+        )
+        response = env.client.get(
+            f"{_BASE}/messages", headers={"X-Wixy-Server-Token": other["token"]}
+        )
+        assert response.status_code == 401
+
+    def test_sign_out_others_spares_the_bound_callers_own_grant(self, env: Env) -> None:
+        """§9 sub-ruling (ii): the button signs out OTHER devices, not the one that clicked it."""
+        caller, other = _enroll(env), _enroll(env)
+        response = env.client.delete(
+            f"{_BASE}/device-grants",
+            headers={**env.headers(), "X-Wixy-Server-Token": caller["token"]},
+        )
+        assert response.status_code == 204
+        assert (
+            env.client.get(
+                f"{_BASE}/messages", headers={"X-Wixy-Server-Token": caller["token"]}
+            ).status_code
+            == 200
+        )
+        assert (
+            env.client.get(
+                f"{_BASE}/messages", headers={"X-Wixy-Server-Token": other["token"]}
+            ).status_code
+            == 401
+        )
+        rows = {row["id"]: row["revoked_at"] for row in _rows(env)}
+        assert rows[caller["grantId"]] is None
+        assert rows[other["grantId"]] is not None
+
+    def test_sign_out_everywhere_with_an_unbound_caller_spares_nothing(self, env: Env) -> None:
+        grants = [_enroll(env) for _ in range(3)]
+        response = env.client.delete(f"{_BASE}/device-grants", headers=env.headers())
+        assert response.status_code == 204
+        assert all(row["revoked_at"] is not None for row in _rows(env))
+        assert all(
+            env.client.get(
+                f"{_BASE}/messages", headers={"X-Wixy-Server-Token": g["token"]}
+            ).status_code
+            == 401
+            for g in grants
+        )
 
 
 class TestRevocation:

@@ -53,7 +53,7 @@ DB. There is no PIN field anywhere in `Settings` (`wixy_server/tests/test_routes
 one). The PIN is verified entirely by cmd; see §4.
 
 A device the owner has told to **keep itself unlocked** has a second way to obtain the unlock
-token: a device grant (§15), created only with the PIN, which mints the same token through
+token: a device grant (§16), created only with the PIN, which mints the same token through
 `POST /unlock-with-grant`. It replaces typing the PIN — never the token, never CF Access.
 
 ## 3. Unlock tokens and signed media URLs (`livechat/tokens.py`)
@@ -578,7 +578,7 @@ leak across shell unit tests that never tear the panel down).
 decision about what state comes next lives here, with no DOM/timer/network access, so it has
 100% branch coverage in vitest. States: `decoy`, `revealed`, `pin` (with an optional
 `wrong`/`lockedOut`/`unavailable` error), `verifying`, `chat`, `fading`, plus the two round-2 states
-`granting` and `shielded` (§15). One deliberate
+`granting` and `shielded` (§16). One deliberate
 design choice: R6's eight lock triggers (`idle`, `panic`, `multiTap`, `escape`, `hidden`,
 `routeAway`, `unauthorized`, `expired`) are ALL modelled as one `{type:"lock", cause}` event
 rather than eight bespoke ones — `idle` is the sole exception, going through `fading` first
@@ -899,8 +899,26 @@ Inv 48 the rule; this section is the code as built.
 - **Janitor** (hourly, `janitor.run_once`): revokes live grants unused for 30 days, deletes rows
   revoked for more than seven (`secure_delete` zeroes them).
 - **Other identity's grant = 404.** Revoking someone else's grant, or an unknown or malformed id, is
-  `404 {"error":"not_found"}` — indistinguishable. Revoking your own already-revoked grant is 204.
-  `Cache-Control: no-store` is set on the two responses that carry a credential.
+  `404 {"error":"not_found"}` — indistinguishable. Revoking your own already-revoked grant is 204
+  *while its row still exists* — the janitor deletes it after 7 days, past which a repeat DELETE is
+  404 like an unknown id (audit F3, accepted: the client already clears its local keys on any
+  non-2xx response here, so this is harmless in practice). `Cache-Control: no-store` is set on the
+  two responses that carry a credential.
+- **Bound tokens end their session on revoke (§9, audit F4).** `POST /device-grants` and
+  `POST /unlock-with-grant` both mint a token carrying the grant id as payload key `"g"` (32
+  lowercase hex; `POST /unlock`'s PIN-minted tokens never carry it). `require_server_token`
+  re-checks a `"g"`-bearing token's grant is still live (`store.is_device_grant_live`, a read-only
+  PK lookup, no write) on every request; `GET /stream`'s loop repeats the same check on its
+  existing ~2s tick; a bound `GET /media` URL carries `&g=` and folds the grant id into its HMAC
+  (`media|{attId}|{rendition}|{exp}|{email}|{g}`), so it dies with the grant too. Revoking a grant
+  therefore ends every session and media link minted from it within about 2 seconds — not just
+  future mints. **No route ever exchanges a bound token for an unbound one** — that would be a way
+  around this fix. `DELETE /device-grants` ("Sign out other devices") revokes every OTHER live
+  grant of the identity, reading the caller's OWN grant off its own token's `"g"` and sparing it
+  (an unbound caller — a plain PIN session — spares nothing, so it revokes all of them); the copy
+  "Done — your other devices are signed out." is therefore literally true. `DELETE
+  /device-grants/{ownId}` — turning the setting off — kills the session bound to it at once, on
+  purpose.
 
 ### Client (`admin-ui/src/server/`)
 
@@ -946,10 +964,24 @@ Inv 48 the rule; this section is the code as built.
   out, the lock fires with cause `idleAway` INSTANTLY on return — a touch does not get a chance to
   restore what was already idle. An idle fade already in progress when the page went away is
   completed on return (`onVisible` finishes it) rather than left for a stray touch to cancel.
+  **A PIN unlock is never itself bound (§9, audit F4):** `grantActive` reads false for the brief
+  window between a successful PIN verify and `bindGrantAfterPinUnlock` settling
+  (`pendingGrantBind`), even if a stored grant is present and unpaused — otherwise a device that
+  re-entered its PIN after a panic would run a never-auto-locking chat on an unbound 12h token, the
+  same hole by another door. That function fires right after `verifyOk`: if the device holds an
+  unpaused grant it exchanges via `unlock-with-grant` at once (the pause was already cleared, so
+  the grant is eligible the instant the exchange starts); success adopts the bound session
+  (`adoptSession`, same as a renewal); `grant_invalid` forgets the grant but never locks the PIN
+  session just obtained; a network error leaves both alone. Early-return paths (no grant, paused,
+  superseded by a lock/re-verify/teardown) all run before the function's first `await`, so
+  `pendingGrantBind` is never left stuck true.
 - `settingsSheet.ts` — the "Keep this device unlocked" row (ticking opens an inline PIN pad and
-  stores NOTHING until the server says yes; unticking clears locally FIRST, then a best-effort
-  `DELETE`), "Sign out other devices", the auto-lock row greyed out while the setting is on, and the
-  two lock rows below. The inline pad is marked `data-srv-gesture-exempt`, so tapping its digits in
+  stores NOTHING until the server says yes; unticking clears locally FIRST, **locks the chat at
+  once via `hooks.lockNow("grantOff")` (§9, audit F4 — the server never re-mints on revoke, so
+  nothing could undo this)**, then a best-effort `DELETE`), "Sign out other devices", the auto-lock
+  row greyed out while the setting is on, and the two lock rows below. The "On" note reads "On ·
+  Lock with the ✕ or a double-tap. Turning this off locks the chat — you'll need the PIN next
+  time." — the consequence stated plainly before the tap that causes it. The inline pad is marked `data-srv-gesture-exempt`, so tapping its digits in
   quick succession never counts as R3's multi-tap. The greyed-out auto-lock row carries its own note
   ("Off — nothing to extend while this device is kept unlocked") so the reason is not silent; each
   dynamic note (`keepNote`, the auto-lock note, `lockNote`, `signOutStatus`) is `role="status"` and

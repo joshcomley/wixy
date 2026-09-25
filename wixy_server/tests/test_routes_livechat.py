@@ -1296,6 +1296,73 @@ class TestStreamEvents:
             await gen.aclose()
 
     @pytest.mark.asyncio
+    async def test_a_revoked_bound_grant_sends_locked_and_the_generator_ends(
+        self, tmp_path: Path
+    ) -> None:
+        """§9 (audit F4): a stream whose token is bound to a device grant re-checks that
+        grant's liveness on its own loop tick — a revocation reaches an OPEN connection,
+        not just the next fresh request."""
+        store = LiveChatStore(tmp_path / "server.db")
+        store.create_device_grant(
+            grant_id="a" * 32,
+            secret_hash="h",
+            email="josh@example.com",
+            label=None,
+            now=1000.0,
+            max_live=5,
+        )
+        notifier = LiveChatNotifier()
+        bound_auth = ServerAuth(
+            email="josh@example.com", exp=int(time.time()) + 3600, grant_id="a" * 32
+        )
+        gen = _stream_events(store, notifier, _SECRET, bound_auth, after=0)
+        try:
+            # Revoked before the generator is ever pumped — the very first loop tick's
+            # liveness check must catch it, with no need to wait out a notifier cycle.
+            store.revoke_device_grant(grant_id="a" * 32, email="josh@example.com", now=time.time())
+            frame = await _next_frame(gen)
+            assert frame["event"] == "locked"
+            assert frame["data"] == {}
+            with pytest.raises(StopAsyncIteration):
+                await gen.__anext__()
+        finally:
+            await gen.aclose()
+
+    @pytest.mark.asyncio
+    async def test_an_unrevoked_bound_grant_streams_normally(self, tmp_path: Path) -> None:
+        """The liveness re-check must not false-positive on a live grant — a bound stream
+        keeps working exactly like an unbound one until its grant is actually revoked."""
+        store = LiveChatStore(tmp_path / "server.db")
+        store.create_device_grant(
+            grant_id="a" * 32,
+            secret_hash="h",
+            email="josh@example.com",
+            label=None,
+            now=time.time(),
+            max_live=5,
+        )
+        store.create_message(
+            client_id="c1",
+            sender="Josh",
+            device_id="d" * 8,
+            by_email=None,
+            text="hi",
+            attachment_ids=(),
+            now=1000.0,
+        )
+        notifier = LiveChatNotifier()
+        bound_auth = ServerAuth(
+            email="josh@example.com", exp=int(time.time()) + 3600, grant_id="a" * 32
+        )
+        gen = _stream_events(store, notifier, _SECRET, bound_auth, after=0)
+        try:
+            frame = await _next_frame(gen)
+            assert frame["event"] == "message"
+            assert frame["data"]["text"] == "hi"
+        finally:
+            await gen.aclose()
+
+    @pytest.mark.asyncio
     async def test_expired_token_sends_locked_and_the_generator_ends(self, tmp_path: Path) -> None:
         store = LiveChatStore(tmp_path / "server.db")
         notifier = LiveChatNotifier()

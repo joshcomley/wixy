@@ -82,7 +82,7 @@ function identity(): ServerIdentity {
 }
 
 function makeHooks(): LockHooks {
-  return { suspend: vi.fn(() => () => {}), lockNow: vi.fn() };
+  return { suspend: vi.fn(() => () => {}), lockNow: vi.fn(), adoptBoundSession: vi.fn() };
 }
 
 // -- A fake IdleDetector + permission API --------------------------------------------------
@@ -276,9 +276,15 @@ describe("settings sheet — per-device lock preferences", () => {
       expect(keepPadHost(view).hidden).toBe(true);
       expect(keepInput(view).checked).toBe(true);
       expect(keepNote(view).hidden).toBe(false);
-      expect(keepNote(view).textContent).toBe("On · Lock with the ✕ or a double-tap");
+      expect(keepNote(view).textContent).toBe(
+        "On · Lock with the ✕ or a double-tap. Turning this off locks the chat — you'll need the PIN next time.",
+      );
       expect(announcements).toHaveBeenCalled();
       expect(hooks.lockNow).not.toHaveBeenCalled();
+      // §9 (audit F4 ruling): the freshly BOUND token the route itself returns is adopted as
+      // the live session — otherwise "Sign out other devices" moments later, with no reload in
+      // between, would still see the old unbound caller and spare nothing.
+      expect(hooks.adoptBoundSession).toHaveBeenCalledExactlyOnceWith({ token: "fresh", expiresAt: 9_999_999_999 });
       window.removeEventListener(GRANT_STATE_CHANGED_EVENT, announcements);
     });
 
@@ -547,7 +553,9 @@ describe("settings sheet — per-device lock preferences", () => {
       const view = openSheet();
       expect(keepInput(view).checked).toBe(true);
       expect(keepNote(view).hidden).toBe(false);
-      expect(keepNote(view).textContent).toBe("On · Lock with the ✕ or a double-tap");
+      expect(keepNote(view).textContent).toBe(
+        "On · Lock with the ✕ or a double-tap. Turning this off locks the chat — you'll need the PIN next time.",
+      );
       expect(keepPadHost(view).hidden).toBe(true);
       expect(idleInput(view).disabled).toBe(true);
       expect(idleLabel(view).classList.contains("wx-srv-sheet-row-disabled")).toBe(true);
@@ -640,12 +648,16 @@ describe("settings sheet — per-device lock preferences", () => {
 
       keepInput(view).click();
 
-      // Nothing has been answered yet, and the device has already let go.
+      // Nothing has been answered yet, and the device has already let go — including the
+      // lock itself (§9, audit F4 ruling): turning the setting off locks the chat AT ONCE,
+      // whether or not the server can be reached.
       expect(stored(DEVICE_GRANT_KEY)).toBeNull();
       expect(stored(GRANT_PAUSED_KEY)).toBeNull();
       expect(keepInput(view).checked).toBe(false);
       expect(keepNote(view).hidden).toBe(true);
       expect(idleInput(view).disabled).toBe(false);
+      expect(hooks.lockNow).toHaveBeenCalledTimes(1);
+      expect(hooks.lockNow).toHaveBeenCalledWith("grantOff");
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
       const { url, init, headers } = lastFetch();
       expect(url).toBe(`/api/admin/server/device-grants/${GRANT.grantId}`);
@@ -654,7 +666,9 @@ describe("settings sheet — per-device lock preferences", () => {
 
       pending.resolve(noContent());
       await new Promise((resolve) => setTimeout(resolve, 10));
-      expect(hooks.lockNow).not.toHaveBeenCalled();
+      // Still exactly the one lock — a successful revoke never re-mints, so there is nothing
+      // that could call `lockNow` a second time.
+      expect(hooks.lockNow).toHaveBeenCalledTimes(1);
       expect(keepInput(view).checked).toBe(false);
     });
 
@@ -663,11 +677,12 @@ describe("settings sheet — per-device lock preferences", () => {
       fetchMock.mockResolvedValueOnce(jsonResponse({ error: "x" }, 500));
       const view = openSheet();
       keepInput(view).click();
+      expect(hooks.lockNow).toHaveBeenCalledWith("grantOff");
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
       await new Promise((resolve) => setTimeout(resolve, 10));
       expect(stored(DEVICE_GRANT_KEY)).toBeNull();
       expect(keepInput(view).checked).toBe(false);
-      expect(hooks.lockNow).not.toHaveBeenCalled();
+      expect(hooks.lockNow).toHaveBeenCalledTimes(1);
     });
 
     it("stays off when the network fails", async () => {
@@ -675,17 +690,19 @@ describe("settings sheet — per-device lock preferences", () => {
       fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
       const view = openSheet();
       keepInput(view).click();
+      expect(hooks.lockNow).toHaveBeenCalledWith("grantOff");
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
       await new Promise((resolve) => setTimeout(resolve, 10));
       expect(stored(DEVICE_GRANT_KEY)).toBeNull();
-      expect(hooks.lockNow).not.toHaveBeenCalled();
+      expect(hooks.lockNow).toHaveBeenCalledTimes(1);
     });
 
-    it("locks the chat if the revoke comes back 401, and the grant is still gone", async () => {
+    it("locks the chat immediately, then again if the revoke itself comes back 401", async () => {
       seedGrant();
       fetchMock.mockResolvedValueOnce(jsonResponse({ error: "locked" }, 401));
       const view = openSheet();
       keepInput(view).click();
+      expect(hooks.lockNow).toHaveBeenCalledWith("grantOff");
       await vi.waitFor(() => expect(hooks.lockNow).toHaveBeenCalledWith("unauthorized"));
       expect(stored(DEVICE_GRANT_KEY)).toBeNull();
     });
@@ -695,25 +712,29 @@ describe("settings sheet — per-device lock preferences", () => {
       fetchMock.mockResolvedValueOnce(jsonResponse({ error: "not_found" }, 404));
       const view = openSheet();
       keepInput(view).click();
+      expect(hooks.lockNow).toHaveBeenCalledWith("grantOff");
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
       await new Promise((resolve) => setTimeout(resolve, 10));
-      expect(hooks.lockNow).not.toHaveBeenCalled();
+      expect(hooks.lockNow).toHaveBeenCalledTimes(1);
       expect(keepInput(view).checked).toBe(false);
     });
 
-    it("clears the grant locally without a request when the chat has no session", () => {
+    it("clears the grant locally without a request when the chat has no session, and still locks", () => {
       seedGrant();
       const view = openSheet();
       session = null;
       keepInput(view).click();
       expect(stored(DEVICE_GRANT_KEY)).toBeNull();
       expect(fetchMock).not.toHaveBeenCalled();
+      expect(hooks.lockNow).toHaveBeenCalledWith("grantOff");
     });
   });
 
   // ===========================================================================================
   describe("Sign out other devices", () => {
-    it("revokes every grant, clears this device's own, and says so", async () => {
+    it("revokes every OTHER grant, spares this device's own, and says so", async () => {
+      // §9 (audit F4 ruling, sub-point ii): the server spares the caller's own bound grant, so
+      // the client must not clear it locally either — this device stays kept-unlocked.
       seedGrant();
       const pending = deferred<Response>();
       fetchMock.mockReturnValueOnce(pending.promise);
@@ -729,14 +750,13 @@ describe("settings sheet — per-device lock preferences", () => {
       expect(url).toBe("/api/admin/server/device-grants");
       expect(init.method).toBe("DELETE");
       expectGuardAndToken(headers);
-      // Still in flight: this device's grant is not forgotten until the server has answered.
       expect(stored(DEVICE_GRANT_KEY)).not.toBeNull();
 
       pending.resolve(noContent());
       await vi.waitFor(() => expect(signOutStatus(view).textContent).toBe("Done — the other devices are signed out."));
-      expect(stored(DEVICE_GRANT_KEY)).toBeNull();
-      expect(keepInput(view).checked).toBe(false);
-      expect(idleInput(view).disabled).toBe(false);
+      expect(stored(DEVICE_GRANT_KEY)).not.toBeNull();
+      expect(keepInput(view).checked).toBe(true);
+      expect(idleInput(view).disabled).toBe(true);
       expect(signOutButton(view).disabled).toBe(false);
     });
 

@@ -26,9 +26,15 @@ import secrets
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
+import anyio.to_thread
 from fastapi import HTTPException, Request
+
+from wixy_server.livechat.grants import GRANT_ID_RE, GRANT_IDLE_EXPIRY_S
+
+if TYPE_CHECKING:
+    from wixy_server.livechat.store import LiveChatStore
 
 SERVER_TOKEN_HEADER = "X-Wixy-Server-Token"
 # `POST /unlock` runs before any token exists, so the token header cannot be its
@@ -74,6 +80,11 @@ class ServerAuth:
 
     email: str
     exp: int
+    grant_id: str | None = None
+    """spec 03 §9: set only when this token was minted BOUND to a device grant (via
+    `unlock-with-grant`, or `POST /device-grants` itself). `require_server_token` re-checks
+    the grant is still live on every call when this is set — that is how revoking a grant
+    ends every session and media link minted from it, not just future ones."""
 
 
 def load_or_create_secret(path: Path) -> bytes:
@@ -104,14 +115,31 @@ def load_or_create_secret(path: Path) -> bytes:
 
 
 def mint_unlock_token(
-    secret: bytes, *, email: str, now: float, ttl_s: float = UNLOCK_TOKEN_TTL_S
+    secret: bytes,
+    *,
+    email: str,
+    now: float,
+    ttl_s: float = UNLOCK_TOKEN_TTL_S,
+    grant_id: str | None = None,
 ) -> tuple[str, float]:
-    """§5.1 token format: `b64url(json{v,e,iat,exp,n}) + "." + b64url(HMAC-SHA256(
+    """§5.1 token format: `b64url(json{v,e,iat,exp,n[,g]}) + "." + b64url(HMAC-SHA256(
     secret, b"unlock|" + payload_b64))`. Returns `(token, expiresAt)` — the response
-    body's own two fields (§5.1's `200 {"token": str, "expiresAt": float}`)."""
+    body's own two fields (§5.1's `200 {"token": str, "expiresAt": float}`).
+
+    `grant_id`, when given, binds the token to that device grant (spec §9): the format
+    stays `v: 1` (an older slot process during a blue/green overlap still accepts the
+    token, just without re-checking the grant), so this is additive, not a version bump."""
     iat = int(now)
     exp = int(now + ttl_s)
-    payload = {"v": 1, "e": email, "iat": iat, "exp": exp, "n": secrets.token_hex(8)}
+    payload: dict[str, object] = {
+        "v": 1,
+        "e": email,
+        "iat": iat,
+        "exp": exp,
+        "n": secrets.token_hex(8),
+    }
+    if grant_id is not None:
+        payload["g"] = grant_id
     payload_b64 = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
     signature = hmac.new(secret, b"unlock|" + payload_b64.encode("ascii"), hashlib.sha256).digest()
     return f"{payload_b64}.{_b64url_encode(signature)}", float(exp)
@@ -154,7 +182,13 @@ def verify_unlock_token(secret: bytes, token: str, *, email: str, now: float) ->
         raise InvalidTokenError("token expired")
     if token_email != email:
         raise InvalidTokenError("token bound to a different email")
-    return ServerAuth(email=token_email, exp=exp)
+    grant_id: str | None = None
+    if "g" in payload:
+        raw_grant_id = payload["g"]
+        if not isinstance(raw_grant_id, str) or not GRANT_ID_RE.fullmatch(raw_grant_id):
+            raise InvalidTokenError("malformed 'g'")
+        grant_id = raw_grant_id
+    return ServerAuth(email=token_email, exp=exp, grant_id=grant_id)
 
 
 def _b64url_decode_signature(value: str) -> bytes:
@@ -168,7 +202,7 @@ def _b64url_decode_signature(value: str) -> bytes:
         return b""
 
 
-def require_server_token(request: Request) -> ServerAuth:
+async def require_server_token(request: Request) -> ServerAuth:
     """The auth gate every server-chat route (except `POST /unlock` and
     `GET /media/*`, which use a signed query-string instead) calls first. Reads
     ONLY the `X-Wixy-Server-Token` header — a token passed as a query parameter is
@@ -180,6 +214,12 @@ def require_server_token(request: Request) -> ServerAuth:
     `request.app.state`/`request.state` directly rather than via the DI graph, and
     this follows the same convention: call it explicitly as the first line of each
     handler that needs it.
+
+    §9 (audit F4): when the token is bound to a device grant (`ServerAuth.grant_id`), this
+    ALSO re-checks that grant is still live — one primary-key store lookup, off the event
+    loop — so a revoked grant ends the session at its very next request, not merely stops
+    minting new ones. An unbound token (from `POST /unlock`'s PIN, never a grant) skips
+    this and costs nothing extra.
     """
     token = request.headers.get(SERVER_TOKEN_HEADER)
     if not token:
@@ -187,9 +227,23 @@ def require_server_token(request: Request) -> ServerAuth:
     secret: bytes = request.app.state.livechat_secret
     email = getattr(request.state, "access_email", None) or ""
     try:
-        return verify_unlock_token(secret, token, email=email, now=time.time())
+        auth = verify_unlock_token(secret, token, email=email, now=time.time())
     except InvalidTokenError:
         raise _locked_401() from None
+    grant_id = auth.grant_id
+    if grant_id is not None:
+        store: LiveChatStore = request.app.state.livechat_store
+        live = await anyio.to_thread.run_sync(
+            lambda: store.is_device_grant_live(
+                grant_id=grant_id,
+                email=auth.email,
+                now=time.time(),
+                max_idle_s=GRANT_IDLE_EXPIRY_S,
+            )
+        )
+        if not live:
+            raise _locked_401()
+    return auth
 
 
 class UnlockRefusal(NamedTuple):
@@ -240,18 +294,25 @@ def unlock_request_refusal(request: Request) -> UnlockRefusal | None:
 
 @dataclass(frozen=True, slots=True)
 class MediaSigner:
-    """§5.6: `sig = b64url(HMAC(secret, f"media|{attId}|{rendition}|{exp}|{email}"))`,
-    with `exp` fixed to the REQUESTING token's own expiry — bound once per request via
-    `for_auth`, then handed to `models.message_json`/`attachment_json` so every
-    attachment in a response mints its URLs against the same (email, exp) pair."""
+    """§5.6: `sig = b64url(HMAC(secret, f"media|{attId}|{rendition}|{exp}|{email}[|{g}]"))`,
+    with `exp` (and, for a bound session, the grant id) fixed to the REQUESTING token's own —
+    bound once per request via `for_auth`, then handed to `models.message_json`/
+    `attachment_json` so every attachment in a response mints its URLs against the same
+    (email, exp, grant) triple.
+
+    §9 (audit F4): when the minting token is bound to a device grant, its media URLs are
+    bound too (`grant_id` set) — otherwise a media link handed out before a "Sign out other
+    devices" would keep loading for the rest of its 12h `exp`, the same hole by another door.
+    An unbound token (a plain PIN session) keeps today's unbound URL format exactly."""
 
     secret: bytes
     email: str
     exp: int
+    grant_id: str | None = None
 
     @classmethod
     def for_auth(cls, secret: bytes, auth: ServerAuth) -> MediaSigner:
-        return cls(secret=secret, email=auth.email, exp=auth.exp)
+        return cls(secret=secret, email=auth.email, exp=auth.exp, grant_id=auth.grant_id)
 
     def url_for(self, attachment_id: str, rendition: str) -> str:
         signature = sign_media_url(
@@ -260,15 +321,27 @@ class MediaSigner:
             rendition=rendition,
             exp=self.exp,
             email=self.email,
+            grant_id=self.grant_id,
         )
-        return f"/api/admin/server/media/{attachment_id}/{rendition}?exp={self.exp}&sig={signature}"
+        url = f"/api/admin/server/media/{attachment_id}/{rendition}?exp={self.exp}&sig={signature}"
+        if self.grant_id is not None:
+            url += f"&g={self.grant_id}"
+        return url
 
 
 def sign_media_url(
-    secret: bytes, *, attachment_id: str, rendition: str, exp: int, email: str
+    secret: bytes,
+    *,
+    attachment_id: str,
+    rendition: str,
+    exp: int,
+    email: str,
+    grant_id: str | None = None,
 ) -> str:
-    message = f"media|{attachment_id}|{rendition}|{exp}|{email}".encode()
-    return _b64url_encode(hmac.new(secret, message, hashlib.sha256).digest())
+    message = f"media|{attachment_id}|{rendition}|{exp}|{email}"
+    if grant_id is not None:
+        message += f"|{grant_id}"
+    return _b64url_encode(hmac.new(secret, message.encode(), hashlib.sha256).digest())
 
 
 def verify_media_signature(
@@ -280,15 +353,24 @@ def verify_media_signature(
     email: str,
     signature: str,
     now: float,
+    grant_id: str | None = None,
 ) -> bool:
     """§5.6: "403 for a bad or expired signature or an email mismatch." `email` here
     is the CURRENT request's CF Access identity — the signature was minted bound to
     the email that requested it, so this call re-derives the expected signature for
-    THAT SAME email and only accepts a match. Used by P2b's `GET /media/*` route."""
+    THAT SAME email and only accepts a match. `grant_id`, when the caller supplies one via
+    the URL's `g` param, must match what the signature was minted with — a caller cannot
+    add or strip `g` from a URL it didn't mint, since either changes the signed message.
+    Used by P2b's `GET /media/*` route, which separately re-checks grant liveness (§9)."""
     if exp <= now:
         return False
     expected = sign_media_url(
-        secret, attachment_id=attachment_id, rendition=rendition, exp=exp, email=email
+        secret,
+        attachment_id=attachment_id,
+        rendition=rendition,
+        exp=exp,
+        email=email,
+        grant_id=grant_id,
     )
     try:
         provided = _b64url_decode(signature)

@@ -1553,6 +1553,26 @@ class LiveChatStore:
             conn.execute("UPDATE device_grants SET last_used_at = ? WHERE id = ?", (now, grant_id))
             return True
 
+    def is_device_grant_live(
+        self, *, grant_id: str, email: str, now: float, max_idle_s: float
+    ) -> bool:
+        """Read-only liveness check for a token already bound to `grant_id` (spec §9, Inv 48):
+        exists, unrevoked, used within `max_idle_s`, and still belongs to `email`. Unlike
+        `redeem_device_grant` this never writes `last_used_at` — it runs on every request a
+        bound token makes (and every ~2s on an open stream), and re-stamping activity on a mere
+        liveness check would mask an identity mismatch behind a write nobody asked for."""
+        with self._read_txn() as conn:
+            row = conn.execute(
+                "SELECT email, last_used_at, revoked_at FROM device_grants WHERE id = ?",
+                (grant_id,),
+            ).fetchone()
+            return (
+                row is not None
+                and row["revoked_at"] is None
+                and row["email"] == email
+                and now - float(row["last_used_at"]) <= max_idle_s
+            )
+
     def revoke_device_grant(self, *, grant_id: str, email: str, now: float) -> bool:
         """Revoke one grant, only if it belongs to `email`. True when the grant exists and
         is that identity's — revoking an already-revoked one is a successful no-op, which
@@ -1570,11 +1590,18 @@ class LiveChatStore:
             )
             return True
 
-    def revoke_all_device_grants(self, *, email: str, now: float) -> int:
+    def revoke_all_device_grants(
+        self, *, email: str, now: float, except_grant_id: str | None = None
+    ) -> int:
+        """Revoke every live grant for `email` — "Sign out other devices" — except
+        `except_grant_id` (spec §9 F4 sub-ruling (ii)): the caller's OWN grant, when its
+        session is bound to one, so the button's promise ("other devices") is literally true
+        and the caller isn't signed out of the request that clicked it."""
         with self._write_txn() as conn:
             cursor = conn.execute(
-                "UPDATE device_grants SET revoked_at = ? WHERE email = ? AND revoked_at IS NULL",
-                (now, email),
+                "UPDATE device_grants SET revoked_at = ? "
+                "WHERE email = ? AND revoked_at IS NULL AND id IS NOT ?",
+                (now, email, except_grant_id),
             )
             return cursor.rowcount
 

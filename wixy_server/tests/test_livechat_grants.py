@@ -172,6 +172,14 @@ class TestCleanLabel:
         with pytest.raises(InvalidLabelError):
             clean_label(bad)
 
+    @pytest.mark.parametrize("bad", ["\ud800", "ok\udfff", "a\ud83d", "\ude00b"])
+    def test_a_lone_surrogate_label_is_refused(self, bad: str) -> None:
+        with pytest.raises(InvalidLabelError):
+            clean_label(bad)
+
+    def test_a_real_emoji_label_is_kept(self) -> None:
+        assert clean_label("Phone \U0001f4f1") == "Phone \U0001f4f1"
+
 
 class TestGrantFailureLimiter:
     def test_allows_up_to_the_limit_then_refuses(self) -> None:

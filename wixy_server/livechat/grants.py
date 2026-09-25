@@ -19,6 +19,8 @@ import uuid
 from collections import deque
 from dataclasses import dataclass
 
+from wixy_server.livechat.textcheck import has_unpaired_surrogate
+
 MAX_LIVE_GRANTS_PER_IDENTITY = 5
 GRANT_IDLE_EXPIRY_S = 30 * 24 * 60 * 60.0
 REVOKED_ROW_RETENTION_S = 7 * 24 * 60 * 60.0
@@ -67,17 +69,22 @@ def secret_hash_from_wire(secret: object) -> str | None:
 
 
 class InvalidLabelError(ValueError):
-    """The client's device label is not text, or is longer than `MAX_LABEL_CHARS`."""
+    """The client's device label is not text, is longer than `MAX_LABEL_CHARS`, or holds a
+    lone UTF-16 surrogate."""
 
 
 def clean_label(label: object) -> str | None:
     """A display-only device label: control characters dropped, whitespace trimmed, at
     most `MAX_LABEL_CHARS`. `None`/blank means "no label"; anything else that is not a
-    short string raises `InvalidLabelError`."""
+    short string raises `InvalidLabelError`. A lone surrogate is refused HERE, before cmd is
+    asked to verify (and charge) the PIN: it has no UTF-8 form, so it would otherwise crash
+    the store's INSERT with a bare 500 after the attempt was already spent."""
     if label is None:
         return None
     if not isinstance(label, str):
         raise InvalidLabelError("label must be text")
+    if has_unpaired_surrogate(label):
+        raise InvalidLabelError("label contains an invalid character")
     cleaned = _CONTROL_CHAR_RE.sub("", label).strip()
     if len(cleaned) > MAX_LABEL_CHARS:
         raise InvalidLabelError(f"label is longer than {MAX_LABEL_CHARS} characters")

@@ -368,7 +368,9 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     const on = readDeviceGrant(win) !== null;
     if (!enrolling) keepInput.checked = on;
     keepNote.hidden = !on || enrolling;
-    keepNote.textContent = on ? "On · Lock with the ✕ or a double-tap" : "";
+    keepNote.textContent = on
+      ? "On · Lock with the ✕ or a double-tap. Turning this off locks the chat — you'll need the PIN next time."
+      : "";
     // With the device kept unlocked there is no idle period left to extend.
     idleInput.disabled = on;
     idleLabel.classList.toggle("wx-srv-sheet-row-disabled", on);
@@ -448,6 +450,11 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
       keepPad.setError({ kind: "unexpected" });
       return;
     }
+    // §9 (audit F4 ruling): adopt the BOUND token this route itself returns, so the live
+    // session actually becomes the one just bound — otherwise "Sign out other devices" called
+    // moments later (with no reload in between) would still see the old, unbound caller and
+    // spare nothing, the just-created grant included.
+    hooks.adoptBoundSession({ token: result.token, expiresAt: result.expiresAt });
     closeEnrolment();
   }
 
@@ -458,6 +465,10 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     // must happen even if the server cannot be reached (its 30-day expiry mops up).
     clearDeviceGrant(win);
     syncKeepRow();
+    // §9 (audit F4 ruling, spec §9 point 8): turning the setting off locks the chat AT ONCE,
+    // on purpose — the row's own note says so. The server never re-mints a replacement token
+    // on revoke, so there is nothing here that could undo this by minting a fresh one.
+    hooks.lockNow("grantOff");
     if (grant === null || session === null) return;
     void revokeDeviceGrant(session, grant.grantId).catch((error: unknown) => {
       if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
@@ -478,9 +489,10 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     signOutStatus.textContent = "Signing out…";
     void revokeAllDeviceGrants(session)
       .then(() => {
-        // This device's own grant was revoked with the rest, so it turns itself off here too.
-        clearDeviceGrant(win);
-        syncKeepRow();
+        // §9 (audit F4 ruling, sub-point (ii)): the server spares the caller's OWN bound
+        // grant, so THIS device is not among the ones just signed out — its local keys stay
+        // exactly as they were. (A caller with no grant at all has nothing here to clear
+        // either way.)
         signOutStatus.textContent = "Done — the other devices are signed out.";
       })
       .catch((error: unknown) => {

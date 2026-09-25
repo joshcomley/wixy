@@ -651,6 +651,91 @@ describe("mountServerPanel with a device grant and the lock checkboxes", () => {
   });
 
   // ============================================================================================
+  // §9 (audit F4 ruling): a PIN unlock is never itself bound
+  // ============================================================================================
+
+  describe("a PIN unlock exchanges for the bound session when the device holds a paused grant", () => {
+    /** A paused grant (e.g. left over from an earlier panic) means the mount shows the
+     * ordinary PIN flow rather than auto-unlocking — exactly the case §9 point 6 describes:
+     * "a device that re-entered its PIN after a panic". */
+    function storePausedGrant(): void {
+      storeGrant();
+      window.localStorage.setItem(GRANT_PAUSED_KEY, "1");
+    }
+
+    it("submits /unlock-with-grant right after the PIN succeeds, and clears the pause first", async () => {
+      storePausedGrant();
+      const panel = await mountSettled();
+      expect(chatOpen(panel)).toBe(false);
+
+      const exchange = deferred<Response>();
+      grantAnswers.push(() => exchange.promise);
+      await unlockWithPin(panel);
+
+      expect(chatOpen(panel)).toBe(true);
+      expect(pinCalls).toHaveLength(1);
+      expect(grantCalls).toHaveLength(1);
+      expect(paused()).toBe(false);
+    });
+
+    it("grantActive stays false while the exchange is pending: idle keeps counting down", async () => {
+      storePausedGrant();
+      const panel = await mountSettled();
+      const exchange = deferred<Response>();
+      grantAnswers.push(() => exchange.promise);
+      await unlockWithPin(panel);
+      expect(chatOpen(panel)).toBe(true);
+
+      // Never resolved: the exchange stays pending for the rest of this test.
+      await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS + FADE_MS + 10);
+      expect(chatOpen(panel)).toBe(false);
+    });
+
+    it("once the exchange lands, grantActive becomes true and idle stops counting", async () => {
+      storePausedGrant();
+      const panel = await mountSettled();
+      const exchange = deferred<Response>();
+      grantAnswers.push(() => exchange.promise);
+      await unlockWithPin(panel);
+      expect(chatOpen(panel)).toBe(true);
+
+      exchange.resolve(jsonResponse({ token: "bound-after-pin", expiresAt: expiresIn(TOKEN_LIFETIME_S) }));
+      await flush();
+
+      await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS * 6);
+      expect(chatOpen(panel)).toBe(true);
+    });
+
+    it("a grant_invalid exchange forgets the grant but never locks the PIN session it just got", async () => {
+      storePausedGrant();
+      const panel = await mountSettled();
+      grantAnswers.push(() => jsonResponse({ error: "grant_invalid" }, 401));
+      await unlockWithPin(panel);
+
+      expect(chatOpen(panel)).toBe(true);
+      expect(window.localStorage.getItem(DEVICE_GRANT_KEY)).toBeNull();
+    });
+
+    it("a network error on the exchange leaves the grant alone and the PIN session unaffected", async () => {
+      storePausedGrant();
+      const panel = await mountSettled();
+      grantAnswers.push(() => new TypeError("offline"));
+      await unlockWithPin(panel);
+
+      expect(chatOpen(panel)).toBe(true);
+      expect(window.localStorage.getItem(DEVICE_GRANT_KEY)).not.toBeNull();
+    });
+
+    it("no stored grant at all: no exchange call, and idle behaves exactly as it always has", async () => {
+      const panel = await mountSettled();
+      await unlockWithPin(panel);
+      expect(grantCalls).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS + FADE_MS + 10);
+      expect(chatOpen(panel)).toBe(false);
+    });
+  });
+
+  // ============================================================================================
   // Pausing the grant
   // ============================================================================================
 

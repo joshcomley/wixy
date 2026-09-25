@@ -27,7 +27,7 @@ function identity(): ServerIdentity {
 }
 
 function hooks(): LockHooks {
-  return { suspend: vi.fn(() => () => {}), lockNow: vi.fn() };
+  return { suspend: vi.fn(() => () => {}), lockNow: vi.fn(), adoptBoundSession: vi.fn() };
 }
 
 async function flush(): Promise<void> {

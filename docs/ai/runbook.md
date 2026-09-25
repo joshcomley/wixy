@@ -274,11 +274,18 @@ by design. With no `live.json` the public surface returns **503**, never a crash
 ## Server chat device grants
 
 A device that kept itself unlocked (livechat.md §16) is trusted until its grant is revoked or is
-unused for 30 days. **Rotating the PIN at cmd does not revoke grants.** If the PIN was rotated
-because a device was lost, open the Server settings sheet on a device you still trust and use
-**Sign out other devices** (`DELETE /api/admin/server/device-grants`, which also signs out the device
-you are on); a device that was signed out shows the ordinary decoy on its next visit. There is no
-list of grants in the UI. To inspect them directly: `sqlite3 Storage/projects/<slug>/server/
-server.db "select id, email, label, datetime(last_used_at,'unixepoch'), revoked_at is not null from
-device_grants"` — ids, hashes and timestamps only, no secrets and no chat content. Do not delete rows
-by hand while the server is running; the janitor prunes revoked rows after a week.
+unused for 30 days. **Rotating the PIN at cmd does not revoke grants.** If a device was lost, open
+the Server settings sheet on a device you still trust and use **Sign out other devices** (`DELETE
+/api/admin/server/device-grants`). This revokes every OTHER live grant of your identity and spares
+the one the device you clicked it on is itself using — the copy "Done — your other devices are
+signed out." is literal, not the device you are on too. Revocation ends a lost device's session
+(and any media link it had open) within about **2 seconds** — the next request it makes, or the
+next tick of its open chat stream — not merely stops it minting a fresh token (spec §9, audit F4,
+Inv 48). **Known residual, stated honestly:** the lost device's push subscription still receives
+the payload-less "new message" ping until it is separately removed; the ping shows no content, and
+opening it still needs the PIN. A device that was signed out shows the ordinary decoy on its next
+visit. There is no list of grants in the UI. To inspect them directly: `sqlite3
+Storage/projects/<slug>/server/server.db "select id, email, label,
+datetime(last_used_at,'unixepoch'), revoked_at is not null from device_grants"` — ids, hashes and
+timestamps only, no secrets and no chat content. Do not delete rows by hand while the server is
+running; the janitor prunes revoked rows after a week.
