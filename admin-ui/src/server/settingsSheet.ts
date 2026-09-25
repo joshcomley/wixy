@@ -122,6 +122,13 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   idleText.className = "wx-srv-sheet-idle-text";
   idleText.textContent = "Extend auto-lock to 1 minute";
   idleLabel.append(idleInput, idleText);
+  const idleNote = documentRef.createElement("p");
+  idleNote.className = "wx-srv-sheet-note wx-srv-sheet-idle-note";
+  idleNote.id = `wx-srv-idle-note-${idleCheckboxSequence}`;
+  idleNote.setAttribute("role", "status");
+  idleNote.hidden = true;
+  idleNote.textContent = "Off — nothing to extend while this device is kept unlocked.";
+  idleInput.setAttribute("aria-describedby", idleNote.id);
 
   // -- "Keep this device unlocked" (03-permanent-unlock.md §4) -------------------------------
 
@@ -140,7 +147,10 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   keepLabel.append(keepInput, keepText);
   const keepNote = documentRef.createElement("p");
   keepNote.className = "wx-srv-sheet-note wx-srv-sheet-keep-note";
+  keepNote.id = `wx-srv-keep-note-${idleCheckboxSequence}`;
+  keepNote.setAttribute("role", "status");
   keepNote.hidden = true;
+  keepInput.setAttribute("aria-describedby", keepNote.id);
   const keepPadHost = documentRef.createElement("div");
   keepPadHost.className = "wx-srv-sheet-keep-pad";
   keepPadHost.hidden = true;
@@ -158,6 +168,7 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   signOutButton.textContent = "Sign out other devices";
   const signOutStatus = documentRef.createElement("p");
   signOutStatus.className = "wx-srv-sheet-note wx-srv-sheet-signout-status";
+  signOutStatus.setAttribute("role", "status");
   signOutStatus.hidden = true;
   keepGroup.append(keepLabel, keepNote, keepPadHost, signOutButton, signOutStatus);
 
@@ -189,7 +200,11 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   lockScreenLabel.append(lockScreenInput, lockScreenText);
   const lockNote = documentRef.createElement("p");
   lockNote.className = "wx-srv-sheet-note wx-srv-sheet-lockprefs-note";
+  lockNote.id = `wx-srv-lockprefs-note-${idleCheckboxSequence}`;
+  lockNote.setAttribute("role", "status");
   lockNote.hidden = true;
+  lockTabInput.setAttribute("aria-describedby", lockNote.id);
+  lockScreenInput.setAttribute("aria-describedby", lockNote.id);
   lockGroup.append(lockTabLabel, lockScreenLabel, lockNote);
 
   const usageRow = documentRef.createElement("p");
@@ -333,6 +348,7 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     wipeStatus,
     pushSlot,
     idleLabel,
+    idleNote,
     keepGroup,
     lockGroup,
     wipeButton,
@@ -356,6 +372,7 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     // With the device kept unlocked there is no idle period left to extend.
     idleInput.disabled = on;
     idleLabel.classList.toggle("wx-srv-sheet-row-disabled", on);
+    idleNote.hidden = !on;
   }
 
   function openEnrolment(): void {

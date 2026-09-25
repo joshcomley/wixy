@@ -63,6 +63,64 @@ deliberate. Inv 48 is the rule; livechat.md §15 is the tour.
   disguise followed by the chat would tell a bystander which is which.
 - `LockCause` gained `screenLock`; a multi-tap is a deliberate lock and pauses the grant like panic.
 
+**Round 2b: an independent opus review and an Architect ruling, both against the built code above**
+
+Before delivery, an independent reviewer (a second opus-tier read of the same diff) found eight
+issues, two of them real security-relevant fail-open bugs; the Architect separately ruled on one
+question the review raised that the spec itself did not answer. Every fix below shipped in the
+same PR as the original build, so Inv 42/48 and livechat.md §15 already describe the AS-BUILT
+(post-fix) behaviour — this records WHY it changed from the first draft.
+
+- **(CRITICAL, reviewer) The shield was pausing the grant only when it RESOLVED, not when it
+  BEGAN.** A page reloaded, closed, or discarded mid-shield (before the 500 ms window elapsed)
+  found the grant still marked active on the next mount and opened straight into the chat with no
+  PIN — exactly the state "keep this device unlocked" must never allow after an unresolved
+  background switch. Fixed: `beginShield` writes the pause immediately; only a completed restore
+  (`commitShieldRestore`) undoes it. `grantUsable()` was widened to still treat a shielded-but-
+  paused chat as active, purely so a token due to expire mid-shield can keep renewing — the pause
+  and "is renewal owed" are separate questions.
+- **(HIGH, reviewer) A pending restore-after-renewal ignored a second hide or screen lock.** If the
+  shield was waiting on a token renewal to complete a restore and the owner switched away again (or
+  a screen lock fired) before it landed, the renewal would land and restore the chat behind the
+  owner's back. Fixed: `shieldTainted`, set by a second hide or a lock event arriving mid-wait,
+  forces the eventual return to stay locked regardless of what the evidence otherwise says.
+- **(HIGH, Architect ruling) The spec's "an event was seen during the absence" test does not say
+  WHEN it must have been dispatched, and that gap is exploitable both ways**: a screen lock reported
+  hours after an unrelated return (a batched, out-of-order event) would wrongly prove a device or
+  wrongly restore a chat it says nothing about. Ruled (full text:
+  `GET http://127.0.0.1:9321/intercomm/609d16c6a9074e82a1147b6a8f79ef9c`, 2026-09-25): the cause
+  must be judged from the event's `performance.now()` dispatch time — CAUSAL only inside
+  `[hideAt-1000ms, hideAt+2000ms]` (the 1 s pre-hide allowance because a device may report a lock
+  just ahead of the page actually hiding); a tab change requires PROVEN plus NO event of any kind,
+  causal or batched, anywhere in the window; everything else is ambiguous and stays locked. The
+  proof itself is now earned only by a causal event, never a batched one. Implemented as the pure
+  `screenLockEvidence` + `classifyHide` functions in `lockModel.ts` so the rule is unit-testable
+  without a fake clock driving the whole panel.
+- **(MEDIUM, reviewer) Any 401 from `unlock-with-grant`, not only `grant_invalid`, was clearing the
+  grant.** The route's own contract only ever sends `401 {"error":"grant_invalid"}` (contracts.md),
+  but the client sits behind Cloudflare Access and a shared fetch layer, so a 401 the app itself
+  never produced (an edge failure, a malformed response) is not impossible, and was previously
+  read exactly like a real `grant_invalid` and silently forgot a working grant. Fixed: only a JSON
+  body of exactly `{"error":"grant_invalid"}` clears the keys; every other 401/failure keeps the
+  grant and shows the decoy.
+- **(MEDIUM, reviewer) A renewal still in flight at teardown could resurrect a disposed chat.** A
+  `disposed` flag, set in `teardown()` and checked by every async continuation that touches the
+  session or the DOM, closes this off.
+- **Departure, found necessary while fixing the above (not in the original brief): a transient
+  renewal failure (anything but `grant_invalid`) now retries every 30 s until the token actually
+  expires**, instead of locking on the first failure. A renewal can fail for reasons that have
+  nothing to do with the grant (a dropped request, a 5xx); locking on the first blip would defeat
+  the point of the feature for a device with a flaky connection.
+- Low findings, also fixed: the screen-lock proof is cleared on mount when there is no detector able
+  to have earned it (permission revoked, or no Idle Detection API at all); a hide while `granting`
+  drops the in-flight mint and retries once the decoy is visible again
+  (`retryGrantUnlockOnVisible`) instead of adopting whatever answer eventually arrives; an idle
+  period that ran out while the page was away now locks the returning chat INSTANTLY (`idleAway`)
+  rather than waiting for a touch that could otherwise be mistaken for activity; an idle fade
+  already in progress when the page went away is completed on return, not left for a touch to
+  cancel; the settings sheet's dynamic notes (`keepNote`, the auto-lock note, `lockNote`,
+  `signOutStatus`) are `role="status"` and linked from their checkbox(es) via `aria-describedby`.
+
 ## Not done, and why
 
 - **The on-device timing check on the operator's Android phone** (order and timing of

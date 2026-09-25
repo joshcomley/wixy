@@ -652,6 +652,20 @@ with `persisted` false, which browsers follow with `visibilitychange → hidden`
 background switch: it neither locks nor pauses, or every reload would undo "keep this device
 unlocked". A page entering the back/forward cache (`persisted` true) can be restored open, so
 that stays an ordinary background switch.
+*Amended again (round 2, independent review + Architect ruling on §8, decisions/00161):* "the
+cause is known" above means judged from WHEN a screen-lock event was DISPATCHED, not merely
+whether one happened during the absence — an event is CAUSAL only inside
+`[hideAt - 1000ms, hideAt + 2000ms]` (`screenLockEvidence` in `lockModel.ts`); one delivered only
+once the frozen page resumes (a batched event) is not evidence of what caused THIS hide, even on
+an otherwise-proven device, and the shield stays ambiguous. A SECOND background switch inside one
+absence taints the shield (the evidence window is anchored to the first hide, so a later switch's
+true cause becomes unreadable against it) and forces the eventual return to stay locked regardless
+of what the evidence says; the same taint applies if a lock event arrives while a restore is only
+waiting on a token renewal. The grant is paused the INSTANT a background switch begins the shield,
+not when the shield later resolves to a lock — a page reloaded, closed, or discarded before the
+500 ms window elapses is still found paused on the next mount. An idle period that ran out while
+the page was away locks the returning chat INSTANTLY (cause `idleAway`), before any touch gets a
+chance to be mistaken for activity that should have prevented it.
 *Enforced by:* `admin-ui/tests/serverChatView.test.ts` (no stream after a panic, idle or hidden
 lock while attach is pending; a late `locked` event or unauthorized attach failure from the
 previous unlock is ignored), `admin-ui/tests/server/panel.test.ts`,

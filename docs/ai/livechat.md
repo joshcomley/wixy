@@ -783,28 +783,49 @@ Inv 48 the rule; this section is the code as built.
   and `shielded` (§8, below). Pure policy functions: `pausesGrant`, `hiddenPolicy`, `classifyHide`,
   `shieldOutcome`, `effectiveLockSettings`.
 - `panel.ts` — **mount**: with the setting on and not paused, `startGrantUnlock` goes
-  `decoy → granting → chat` (no decoy, no PIN); a 401 `grant_invalid` clears both keys, anything
-  else (offline, 429) keeps the grant and shows the decoy. **Pausing**: panic, a multi-tap, Escape,
-  and a lock caused by a checkbox all set `wx-srv-grant-paused`; a correct PIN clears it before the
-  transition. **Renewal**: `armSessionTimers` schedules a re-mint `GRANT_RENEW_BEFORE_MS` (5 min)
-  before expiry and one last try at expiry; a renewal re-attaches the chat view with the new session
-  (`ServerChatView.attach` may be called again while attached — the view reopens its stream from
-  the saved cursor and refreshes the signed media URLs, which are bound to the OLD token's expiry).
-  A renewal is put off while a voice note or video is playing (it would restart), never past the
-  last minute. `hooks.lockNow("unauthorized")` renews instead of locking while a grant is active —
-  unless a renewal happened in the last 10 s (then the server is refusing tokens for a reason a
-  fresh one will not fix, so it locks). Failure with `grant_invalid` clears the keys and locks; a
-  transient failure retries every 30 s until the token really expires. **Unload**: a reload,
-  navigation or closing tab fires `pagehide` (`persisted` false) and then `visibilitychange → hidden`;
-  `panel.ts` ignores that hide (`unloading`), otherwise every reload would count as a tab change and
-  pause the grant (found by `server-permanent-unlock.spec.ts`; a unit test cannot see it because
-  jsdom never unloads). A page entering the back/forward cache (`persisted`) stays an ordinary
-  background switch.
+  `decoy → granting → chat` (no decoy, no PIN); a 401 whose body is `{"error":"grant_invalid"}`
+  clears both keys, ANY OTHER 401/failure (an edge/guard failure the route itself never sends,
+  offline, 429) keeps the grant and
+  shows the decoy without forgetting it. A hide while `granting` drops the in-flight attempt
+  (`retryGrantUnlockOnVisible = true`) rather than adopting a late answer; the next return to the
+  decoy retries the mint from scratch. **Pausing**: panic, a multi-tap, Escape, and a lock caused by
+  a checkbox all set `wx-srv-grant-paused` immediately. A background switch pauses at the MOMENT the
+  shield begins (`beginShield` sets `shieldPausedGrant`), not when it later resolves — a page
+  reloaded, closed or discarded mid-shield is found paused, never silently left unlocked. Only a
+  restore (`commitShieldRestore`) undoes that pause; `grantUsable()` still treats a shielded-but-not-
+  yet-resolved chat as active so a token due to expire while shielded can keep renewing. A correct
+  PIN clears the pause before the transition. **Renewal**: `armSessionTimers` schedules a re-mint
+  `GRANT_RENEW_BEFORE_MS` (5 min) before expiry and one last try at expiry; a renewal re-attaches the
+  chat view with the new session (`ServerChatView.attach` may be called again while attached — the
+  view reopens its stream from the saved cursor and refreshes the signed media URLs, which are bound
+  to the OLD token's expiry). A renewal is put off while a voice note or video is playing (it would
+  restart), never past the last minute. `hooks.lockNow("unauthorized")` renews instead of locking
+  while a grant is active — unless a renewal happened in the last 10 s (then the server is refusing
+  tokens for a reason a fresh one will not fix, so it locks). Failure with `grant_invalid` clears the
+  keys and locks; any other failure retries every 30 s until the token really expires (a departure
+  from the original brief, found necessary by the independent review — a transient renewal failure
+  must not strand an active grant locked). A `disposed` flag is set in `teardown()` and checked by
+  every async continuation (`adoptSession`, the renewal callback, the shield resolver) so a renewal
+  or shield outcome landing after teardown never re-attaches a torn-down chat or re-arms a timer.
+  **Unload**: a reload, navigation or closing tab fires `pagehide` (`persisted` false) and then
+  `visibilitychange → hidden`; `panel.ts` ignores that hide (`unloading`), otherwise every reload
+  would count as a tab change and pause the grant (found by `server-permanent-unlock.spec.ts`; a unit
+  test cannot see it because jsdom never unloads). A page entering the back/forward cache
+  (`persisted`) stays an ordinary background switch. **Idle while away**: the idle period is checked
+  on return against the wall clock, not a timer (a suspended tab runs no timers); if it already ran
+  out, the lock fires with cause `idleAway` INSTANTLY on return — a touch does not get a chance to
+  restore what was already idle. An idle fade already in progress when the page went away is
+  completed on return (`onVisible` finishes it) rather than left for a stray touch to cancel.
 - `settingsSheet.ts` — the "Keep this device unlocked" row (ticking opens an inline PIN pad and
   stores NOTHING until the server says yes; unticking clears locally FIRST, then a best-effort
   `DELETE`), "Sign out other devices", the auto-lock row greyed out while the setting is on, and the
   two lock rows below. The inline pad is marked `data-srv-gesture-exempt`, so tapping its digits in
-  quick succession never counts as R3's multi-tap.
+  quick succession never counts as R3's multi-tap. The greyed-out auto-lock row carries its own note
+  ("Off — nothing to extend while this device is kept unlocked") so the reason is not silent; each
+  dynamic note (`keepNote`, the auto-lock note, `lockNote`, `signOutStatus`) is `role="status"` and
+  linked from its checkbox(es) via `aria-describedby` (`lockNote` is shared by both lock checkboxes,
+  since one note explains the pair) — a screen reader announces WHY a row changed state, not just
+  that it did (reviewer finding, round 2).
 
 ### "Lock when I change tab" / "Lock when I lock my screen" (§8)
 
@@ -819,14 +840,37 @@ Both boxes are per device, always shown, ticked by default. A hidden document in
 
 A **shield** puts the decoy up and detaches the chat like a lock, but keeps the in-memory session.
 On return the decoy stays up until a `screenState = "locked"` event arrives or `SHIELD_WAIT_MS`
-(500 ms) passes; then `classifyHide` gives `screenLock` (an event was seen), `tabChange` (none, on a
-device that has **proven** it reports them) or `ambiguous` (none, unproven), and `shieldOutcome`
-restores the chat only for a KNOWN cause whose own box is unticked. **Ambiguous always stays
-locked.** A device becomes proven (`wx-srv-screenlock-proven = "1"`) the first time a screen lock is
-seen during a hidden interval, and loses it when the permission goes or the detector stops. Until
-then "tab off + screen on" locks on every switch and the sheet says why. A screen lock while the page
-stays visible (desktop Win+L) locks at once if the screen box is ticked. A checkbox-caused lock
-pauses an active grant. R7's picker/mic exemption still prevents a lock or a shield.
+(500 ms) passes.
+
+**The cause of a hide is judged from WHEN the lock event was dispatched, not merely whether one
+happened (Architect ruling, §8, full text linked from decisions/00161)**: `screenLockEvidence`
+(`lockModel.ts`) takes every screen-lock event's `performance.now()` timestamp plus the hide and
+end times and asks two questions — CAUSAL (an event landed in
+`[hideAt - SCREEN_LOCK_EVIDENCE_BEFORE_MS, hideAt + SCREEN_LOCK_EVIDENCE_AFTER_MS]` = `[hideAt -
+1000, hideAt + 2000]` ms — a device may report the lock just ahead of the page actually hiding, so
+the window opens 1 s early) and ANY (an event landed anywhere in `[hideAt, endAt]`, including one
+batched and delivered only once the frozen page resumes). `classifyHide` then gives `screenLock`
+(causal evidence), `tabChange` (device **proven** and NO event at all, causal or batched, in the
+whole window) or `ambiguous` (anything else — including a proven device with a merely-batched
+event, which says nothing about why THIS hide happened) and `shieldOutcome` restores the chat only
+for a KNOWN cause whose own box is unticked. **Ambiguous always stays locked.** The proof
+(`wx-srv-screenlock-proven = "1"`) is set ONLY by a causal event, never a batched one, and is
+cleared on mount whenever there is no detector able to have earned it (permission not granted, or
+no Idle Detection API at all) — a stale proof from a since-revoked permission cannot keep restoring
+chats a device can no longer actually prove.
+
+**A second background switch inside one absence taints the shield** (`shieldTainted`): the evidence
+window is anchored to the ORIGINAL hide, so a hide → show → hide before the first shield resolves
+makes the cause of the second hide unreadable against it. The taint makes the eventual return stay
+locked regardless of what the evidence says, and is also set if a lock event fires while a restore
+is only waiting on a token renewal (`restoreAfterRenewal`) — a screen lock arriving mid-renewal
+must win over a renewal that happens to land first.
+
+A device becomes proven the first time a CAUSAL screen lock is seen during a hidden interval, and
+loses it when the permission goes or the detector stops. Until then "tab off + screen on" locks on
+every switch and the sheet says why. A screen lock while the page stays visible (desktop Win+L)
+locks at once if the screen box is ticked. A checkbox-caused lock pauses an active grant — see
+"Pausing" above for exactly when. R7's picker/mic exemption still prevents a lock or a shield.
 
 The only way to tell a screen lock from a tab switch is Chromium's Idle Detection API
 (`screenWatcher.ts`; not Safari or Firefox; a permission asked for from a tap, and only when the owner

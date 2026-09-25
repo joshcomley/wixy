@@ -34,3 +34,16 @@ sheet, `screenWatcher.ts` for the Idle Detection API). Rule: Inv 48. As-built ch
    Fixed: the flag announces only on a real change, and the refresh is single-flight.
 3. A shield resolving while a renewal was already in flight stranded the chat behind the decoy.
    Fixed: `restoreAfterRenewal`, honoured by `adoptSession`.
+
+## Round 2b: independent review + Architect ruling on §8 (before delivery)
+
+An independent opus review of the built diff found 8 issues (2 CRITICAL/HIGH, fail-open); the
+Architect separately ruled on a gap the spec left open (when a screen-lock event counts as the
+CAUSE of a hide, not merely "seen during the absence"). All fixed in the same PR — see
+`decisions/00161` §"Round 2b" for the full list (pause-at-shield-time, `shieldTainted`, the causal
+evidence window, only-`grant_invalid` clears the grant, the `disposed` teardown guard, `idleAway`,
+30 s renewal retry, and the settings-sheet `aria-describedby`/`role="status"` wiring). Green:
+backend `pytest` 1970 passed, `ruff`/`mypy` clean; frontend `npm run typecheck` clean, `npx vitest
+run` 1843 passed; bundle rebuild is a no-op. Still owed before FINAL HANDOFF: the e2e Playwright
+suite and mutation testing on the review-fix code paths (see the DM delivery task for the current
+status).

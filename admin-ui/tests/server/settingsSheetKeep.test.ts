@@ -191,6 +191,7 @@ describe("settings sheet — per-device lock preferences", () => {
   const padMessage = (v: View) => q<HTMLElement>(keepPadHost(v), ".wx-srv-pinpad-message");
   const idleInput = (v: View) => q<HTMLInputElement>(v.element, 'input[type="checkbox"]');
   const idleLabel = (v: View) => q<HTMLLabelElement>(v.element, ".wx-srv-sheet-idle:not(.wx-srv-sheet-keep-row):not(.wx-srv-sheet-locktab-row):not(.wx-srv-sheet-lockscreen-row)");
+  const idleNote = (v: View) => q<HTMLElement>(v.element, ".wx-srv-sheet-idle-note");
   const signOutButton = (v: View) => q<HTMLButtonElement>(v.element, ".wx-srv-sheet-signout");
   const signOutStatus = (v: View) => q<HTMLElement>(v.element, ".wx-srv-sheet-signout-status");
   const tabInput = (v: View) => q<HTMLInputElement>(v.element, ".wx-srv-sheet-locktab-input");
@@ -550,6 +551,8 @@ describe("settings sheet — per-device lock preferences", () => {
       expect(keepPadHost(view).hidden).toBe(true);
       expect(idleInput(view).disabled).toBe(true);
       expect(idleLabel(view).classList.contains("wx-srv-sheet-row-disabled")).toBe(true);
+      expect(idleNote(view).hidden).toBe(false);
+      expect(idleNote(view).textContent).toBe("Off — nothing to extend while this device is kept unlocked.");
     });
 
     it("a paused grant still counts as on — the setting is on, only the unlocking is paused", () => {
@@ -563,6 +566,7 @@ describe("settings sheet — per-device lock preferences", () => {
       const view = openSheet();
       expect(idleInput(view).disabled).toBe(false);
       expect(idleLabel(view).classList.contains("wx-srv-sheet-row-disabled")).toBe(false);
+      expect(idleNote(view).hidden).toBe(true);
     });
 
     it("a malformed stored grant reads as off", () => {
@@ -579,10 +583,50 @@ describe("settings sheet — per-device lock preferences", () => {
       expect(keepInput(view).checked).toBe(true);
       expect(keepNote(view).hidden).toBe(false);
       expect(idleInput(view).disabled).toBe(true);
+      expect(idleNote(view).hidden).toBe(false);
       clearDeviceGrant(window);
       expect(keepInput(view).checked).toBe(false);
       expect(keepNote(view).hidden).toBe(true);
       expect(idleInput(view).disabled).toBe(false);
+      expect(idleNote(view).hidden).toBe(true);
+    });
+  });
+
+  // ===========================================================================================
+  describe("accessibility — describedby and live-region wiring (reviewer finding, round 2)", () => {
+    it("keepNote is a live region and the keep checkbox is described by it", () => {
+      const view = openSheet();
+      expect(keepNote(view).getAttribute("role")).toBe("status");
+      expect(keepInput(view).getAttribute("aria-describedby")).toBe(keepNote(view).id);
+      expect(keepNote(view).id).not.toBe("");
+    });
+
+    it("lockNote is a live region and BOTH lock checkboxes are described by the same note", () => {
+      const view = openSheet();
+      expect(lockNote(view).getAttribute("role")).toBe("status");
+      expect(lockNote(view).id).not.toBe("");
+      expect(tabInput(view).getAttribute("aria-describedby")).toBe(lockNote(view).id);
+      expect(screenInput(view).getAttribute("aria-describedby")).toBe(lockNote(view).id);
+    });
+
+    it("signOutStatus is a live region", () => {
+      const view = openSheet();
+      expect(signOutStatus(view).getAttribute("role")).toBe("status");
+    });
+
+    it("the auto-lock checkbox is described by the greyed-out reason note, even while it is hidden", () => {
+      const view = openSheet();
+      expect(idleInput(view).getAttribute("aria-describedby")).toBe(idleNote(view).id);
+      expect(idleNote(view).id).not.toBe("");
+      expect(idleNote(view).hidden).toBe(true); // no grant yet — the reason does not apply
+    });
+
+    it("two sheets mounted at once never collide on an id (each gets its own sequence number)", () => {
+      const a = openSheet();
+      const b = openSheet();
+      expect(keepNote(a).id).not.toBe(keepNote(b).id);
+      expect(lockNote(a).id).not.toBe(lockNote(b).id);
+      expect(idleNote(a).id).not.toBe(idleNote(b).id);
     });
   });
 
