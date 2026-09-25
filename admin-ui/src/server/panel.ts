@@ -26,6 +26,8 @@ import {
   GRANT_RENEW_RETRY_MS,
   MULTI_TAP_INTERVAL_MS,
   PICKER_SUSPEND_MAX_MS,
+  SCREEN_LOCK_EVIDENCE_AFTER_MS,
+  SCREEN_LOCK_EVIDENCE_BEFORE_MS,
   SHIELD_WAIT_MS,
 } from "./constants";
 import { mountDecoy, type DecoyView } from "./decoy";
@@ -40,6 +42,7 @@ import {
   INITIAL_STATE,
   pausesGrant,
   reduce,
+  screenLockEvidence,
   shieldOutcome,
   type LockContext,
   type LockEffect,
@@ -360,7 +363,7 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
   function onExpiry(): void {
     expiryTimer = null;
     // The token ran out. A grant gets one last silent try before the chat locks.
-    if (isGrantActive(win) && session !== null) {
+    if (grantUsable() && session !== null) {
       void renewSession("expiry");
       return;
     }
@@ -397,6 +400,7 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
     if (state.kind !== "shielded") {
       cancelShieldResolve();
       restoreAfterRenewal = false;
+      shieldPausedGrant = false;
     }
     if (state.kind === "decoy") {
       // R4/R6: nothing sensitive survives a return to the decoy — the token
@@ -462,6 +466,18 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
   /** A shield resolved to "restore" but the token had expired while away: the chat comes back
    * the moment a renewal lands (see `adoptSession`); a failed one locks instead. */
   let restoreAfterRenewal = false;
+  /** The panel has been torn down: no late answer (a renewal, a grant unlock, a detector
+   * start) may bring anything back to life. */
+  let disposed = false;
+  /** The grant was paused AT THE START of the current shield, by this panel (see
+   * `beginShield`). Only a restore undoes it. */
+  let shieldPausedGrant = false;
+
+  /** A grant this panel can still use right now: active, or paused only by the shield that is
+   * in progress (which is what lets a shielded chat with an expired token still re-mint). */
+  function grantUsable(): boolean {
+    return isGrantActive(win) || (state.kind === "shielded" && shieldPausedGrant && readDeviceGrant(win) !== null);
+  }
 
   function mediaIsPlaying(): boolean {
     return (suspensionsByReason.get("mediaPlaying") ?? 0) > 0;
@@ -472,24 +488,33 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
    * are bound to the OLD token's expiry). A shielded chat has no view attached — it just
    * holds the new session until it is restored. */
   function adoptSession(next: ServerSession): void {
+    if (disposed) return;
     session = next;
     lastRenewedAtMs = win.performance.now();
     armSessionTimers(next.expiresAt);
     if (chatAttached && chatView !== null) chatView.attach(next);
     // A shield that resolved to "restore" while the token had already run out was waiting for
     // exactly this — whichever renewal it was, its own or one that was already in flight.
-    if (restoreAfterRenewal && state.kind === "shielded" && msUntilExpiry() > 0) {
+    // Only while the page is still in front of the owner and nothing has voided the decision:
+    // a second switch or a screen lock since then means the cause can no longer be read.
+    if (
+      restoreAfterRenewal &&
+      state.kind === "shielded" &&
+      !shieldTainted &&
+      win.document.visibilityState !== "hidden" &&
+      msUntilExpiry() > 0
+    ) {
       restoreAfterRenewal = false;
-      dispatch({ type: "shieldRestore" });
+      commitShieldRestore();
     }
   }
 
   /** Mints a fresh token from the device grant. `scheduled` is the early renewal, `expiry`
    * the last chance, `unauthorized` a 401 that arrived while the grant is active. */
   async function renewSession(reason: "scheduled" | "expiry" | "unauthorized"): Promise<void> {
-    if (renewalInFlight || session === null) return;
+    if (disposed || renewalInFlight || session === null) return;
     const lockCause: LockCause = reason === "unauthorized" ? "unauthorized" : "expired";
-    const grant = isGrantActive(win) ? readDeviceGrant(win) : null;
+    const grant = grantUsable() ? readDeviceGrant(win) : null;
     if (grant === null) {
       if (reason !== "scheduled") forceLock(lockCause);
       return;
@@ -503,8 +528,9 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
     renewalInFlight = true;
     const result = await unlockWithGrant(grant);
     renewalInFlight = false;
-    // Locked, or replaced by a PIN unlock, while the request was out: this answer is stale.
-    if (session !== holding) return;
+    // Torn down, locked, or replaced by a PIN unlock while the request was out: this answer is
+    // stale.
+    if (disposed || session !== holding) return;
     if (result.ok) {
       adoptSession({ token: result.token, expiresAt: result.expiresAt });
       return;
@@ -532,7 +558,7 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
     const requestId = ++grantRequestSeq;
     void unlockWithGrant(grant).then((result) => {
       // Locked, escaped or torn down while the request was out: never resurrect the chat.
-      if (requestId !== grantRequestSeq || state.kind !== "granting") return;
+      if (disposed || requestId !== grantRequestSeq || state.kind !== "granting") return;
       if (result.ok) {
         session = { token: result.token, expiresAt: result.expiresAt };
         armSessionTimers(result.expiresAt);
@@ -694,9 +720,21 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
   /** Whether a detector is running, i.e. this browser CAN tell a screen lock from a tab
    * switch. Until it is (and whenever it is lost) the two boxes follow each other. */
   let screenDistinct = false;
-  /** A `screenState = "locked"` was seen since the current background switch began. */
-  let shieldEvidence = false;
+  /** `performance.now()` at which each `screenState = "locked"` event was DISPATCHED, oldest
+   * first — the cause of a hide is judged from these (see `screenLockEvidence`). */
+  let screenLockTimes: number[] = [];
+  /** When the page last went to the background (`performance.now()`), or null. */
+  let lastHideAtMs: number | null = null;
+  /** The hide that began the current shield. */
+  let shieldHideAtMs = 0;
+  /** A SECOND background switch began before the current shield resolved. With two switches in
+   * one absence the cause can no longer be read, so it stays locked. */
+  let shieldTainted = false;
   let shieldResolveTimer: ReturnType<typeof win.setTimeout> | null = null;
+  /** A hide dropped a grant unlock that was still answering: try again on return. */
+  let retryGrantUnlockOnVisible = false;
+  /** Lock events older than this are of no interest to any hide still to come. */
+  const SCREEN_LOCK_KEEP_MS = 10 * 60_000;
 
   function currentLockSettings(): LockSettings {
     return effectiveLockSettings(readStoredLockSettings(win), screenDistinct);
@@ -709,19 +747,44 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
     }
   }
 
+  function recordScreenLock(at: number): void {
+    screenLockTimes.push(at);
+    const oldest = at - SCREEN_LOCK_KEEP_MS;
+    screenLockTimes = screenLockTimes.filter((t) => t >= oldest).slice(-64);
+  }
+
+  /** A device is PROVEN only by a lock event dispatched within the causal window of a hide —
+   * i.e. it reported the lock as it happened. A phone that always freezes first, and delivers
+   * everything batched on return, never becomes proven (§8, Architect ruling). */
+  function proveIfCausal(): void {
+    if (!screenDistinct || lastHideAtMs === null) return;
+    if (screenLockEvidence(screenLockTimes, lastHideAtMs, Number.POSITIVE_INFINITY).causal) setScreenLockProven(win, true);
+  }
+
   function onScreenLocked(): void {
+    const now = win.performance.now();
+    recordScreenLock(now);
     const hidden = win.document.visibilityState === "hidden";
     if (hidden || state.kind === "shielded") {
-      // Evidence from between the hide and now. The first time a device gives any, it has
-      // proven it reports screen locks across a hide and return — the only thing that lets
-      // "no event" later be read as "a tab switch" (§8).
-      shieldEvidence = true;
-      if (screenDistinct) setScreenLockProven(win, true);
-      if (state.kind === "shielded" && !hidden && shieldResolveTimer !== null) resolveShield();
+      proveIfCausal();
+      if (state.kind === "shielded" && !hidden) {
+        if (shieldResolveTimer !== null) {
+          // Any event during the return shield settles it: causal -> screen lock, otherwise the
+          // cause is ambiguous. Either way there is nothing left to wait for.
+          resolveShield();
+        } else if (restoreAfterRenewal) {
+          // The decision to restore was already made and is only waiting for a token: a screen
+          // lock now voids it.
+          restoreAfterRenewal = false;
+          shieldTainted = true;
+          dispatch({ type: "lock", cause: "screenLock" });
+        }
+      }
       return;
     }
-    // The screen locked while the page stayed visible (a desktop Win+L): lock at once, if the
-    // owner asked for that.
+    // The screen locked while the page stayed visible. Recorded above (a device may report it
+    // just BEFORE the page hides, and that lock then counts for that hide). A desktop Win+L may
+    // not hide the page at all: lock at once, if the owner asked for that.
     if ((state.kind === "chat" || state.kind === "fading") && currentLockSettings().lockOnScreen) {
       pauseGrantForLock("screenLock");
       dispatch({ type: "lock", cause: "screenLock" });
@@ -749,23 +812,55 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
       do {
         screenWatchAgain = false;
         screenDistinct = await screenWatcher.start(onScreenLocked, onScreenWatchLost);
-      } while (screenWatchAgain && !screenDistinct);
+        // Torn down while the start was in flight: leave nothing running.
+        if (disposed) screenWatcher.stop();
+      } while (screenWatchAgain && !screenDistinct && !disposed);
+      // No usable detector (no permission, unsupported, refused to start): a device that has no
+      // detector cannot be "proven". Announces only if the flag really changes, so this cannot loop.
+      if (!screenDistinct) setScreenLockProven(win, false);
     } finally {
       screenWatchStarting = false;
     }
   }
 
   function beginShield(): void {
-    shieldEvidence = false;
+    shieldHideAtMs = lastHideAtMs ?? win.performance.now();
+    shieldTainted = false;
     cancelShieldResolve();
+    // The grant is paused NOW, not when the shield resolves half a second after the owner is
+    // back: a page that is closed, reloaded or DISCARDED while away never resolves it, and would
+    // otherwise re-open on the next visit with no PIN — exactly what the pause exists to prevent.
+    // Only a restore undoes it (`commitShieldRestore`).
+    shieldPausedGrant = false;
+    if (isGrantActive(win)) {
+      setGrantPaused(win, true);
+      shieldPausedGrant = true;
+    }
     dispatch({ type: "shield" });
+  }
+
+  /** The shield resolved to "the cause was harmless": undo the pause it wrote (and ONLY that
+   * one), and bring the chat back. */
+  function commitShieldRestore(): void {
+    if (shieldPausedGrant) {
+      shieldPausedGrant = false;
+      setGrantPaused(win, false);
+    }
+    dispatch({ type: "shieldRestore" });
   }
 
   function resolveShield(): void {
     shieldResolveTimer = null;
     if (state.kind !== "shielded") return;
+    if (shieldTainted) {
+      // Two switches in one absence: the cause can no longer be read.
+      dispatch({ type: "lock", cause: "hidden" });
+      return;
+    }
+    const evidence = screenLockEvidence(screenLockTimes, shieldHideAtMs, win.performance.now());
     const cause = classifyHide({
-      screenEvidence: shieldEvidence,
+      causalScreenLock: evidence.causal,
+      anyScreenLock: evidence.any,
       deviceProven: screenDistinct && isScreenLockProven(win),
     });
     if (shieldOutcome(cause, currentLockSettings()) === "stayLocked") {
@@ -782,14 +877,14 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
    * did (only a grant can mint another one silently). */
   function restoreShield(): void {
     if (idleRanOutWhileAway()) {
-      dispatch({ type: "lock", cause: "idle" });
+      dispatch({ type: "lock", cause: "idleAway" });
       return;
     }
     if (msUntilExpiry() > 0) {
-      dispatch({ type: "shieldRestore" });
+      commitShieldRestore();
       return;
     }
-    if (!isGrantActive(win)) {
+    if (!grantUsable()) {
       dispatch({ type: "lock", cause: "expired" });
       return;
     }
@@ -801,7 +896,7 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
    * active, or while something (a recording, playback, an upload picker) is legitimately
    * holding the idle timer paused — R7 applies to a backgrounded page too. */
   function idleRanOutWhileAway(): boolean {
-    if (isGrantActive(win) || totalSuspensionCount > 0) return false;
+    if (grantUsable() || totalSuspensionCount > 0) return false;
     return Date.now() - lastActivityWallMs >= chatIdleLockMs(win);
   }
 
@@ -823,15 +918,26 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
 
   function onHidden(): void {
     if (unloading) return;
+    lastHideAtMs = win.performance.now();
+    // A lock event reported up to a second BEFORE the page hid belongs to this hide, and proves
+    // the device delivers them as they happen.
+    proveIfCausal();
     // R7: an open file picker or a pending mic-permission prompt never lock, nor shield.
     if (isPickerOrMicOpen()) return;
     if (state.kind === "shielded") {
-      // Away again before the last switch resolved: keep the shield, wait for the next return.
+      // Away again before the last switch resolved. That is a second switch in one absence, so
+      // the cause can no longer be read: keep the decoy up, drop any pending restore, and lock
+      // when the page is next in front of the owner.
+      shieldTainted = true;
+      restoreAfterRenewal = false;
       cancelShieldResolve();
       return;
     }
     if (state.kind !== "chat") {
       // Every state that is not an open chat locks on a background switch exactly as before.
+      // A grant unlock still answering when the page is hidden is dropped, and tried again on
+      // return (it is not a lock the owner asked for, so it does not pause the grant).
+      if (state.kind === "granting") retryGrantUnlockOnVisible = true;
       dispatch({ type: "lock", cause: "hidden" });
       return;
     }
@@ -848,15 +954,29 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
   function onVisible(): void {
     if (state.kind === "shielded") {
       cancelShieldResolve();
-      // A cause already known needs no waiting; otherwise give queued IdleDetector events a
-      // moment to arrive before deciding.
-      if (shieldEvidence) resolveShield();
+      // A switch that can no longer be read, or a lock event already seen (causal, or late and
+      // so ambiguous), needs no waiting; otherwise give queued IdleDetector events a moment to
+      // arrive before deciding.
+      const seen = screenLockEvidence(screenLockTimes, shieldHideAtMs, win.performance.now()).any;
+      if (shieldTainted || seen) resolveShield();
       else shieldResolveTimer = win.setTimeout(resolveShield, SHIELD_WAIT_MS);
       return;
     }
+    if (state.kind === "fading") {
+      // An idle fade began while the page was away; its (throttled) timer may never have run.
+      // Nobody watched it, and a touch on return must not be able to cancel it.
+      dispatch({ type: "fadeComplete" });
+      return;
+    }
+    if (state.kind === "decoy" && retryGrantUnlockOnVisible) {
+      retryGrantUnlockOnVisible = false;
+      startGrantUnlock();
+      return;
+    }
     // Timers can stall while a page is in the background: if the idle period ran out while
-    // away, lock now instead of waiting for a timer that may never have fired.
-    if (state.kind === "chat" && idleRanOutWhileAway()) dispatch({ type: "lock", cause: "idle" });
+    // away, lock NOW — instantly, with no fade a touch could cancel — instead of waiting for a
+    // timer that may never have fired.
+    if (state.kind === "chat" && idleRanOutWhileAway()) dispatch({ type: "lock", cause: "idleAway" });
   }
 
   function onVisibilityChange(): void {
@@ -884,6 +1004,7 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
   return {
     element: root,
     teardown(): void {
+      disposed = true;
       // Routing away from `/admin/server` is itself one of R6's lock causes
       // — run it through the reducer (rather than skipping straight to
       // cleanup) so a mid-chat departure still detaches/aborts/pauses
@@ -897,6 +1018,9 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
       cancelShieldResolve();
       clearSessionTimers();
       grantRequestSeq += 1;
+      // With a grant active the reducer leaves an open chat alone above; this panel is gone, so
+      // nothing may keep the token.
+      session = null;
       screenWatcher.stop();
       chatView?.dispose();
       detachMultiTapListener();

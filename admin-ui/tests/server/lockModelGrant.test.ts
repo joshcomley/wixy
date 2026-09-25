@@ -13,6 +13,7 @@ import {
   NO_GRANT,
   pausesGrant,
   reduce,
+  screenLockEvidence,
   shieldOutcome,
   type HideCause,
   type LockContext,
@@ -39,6 +40,7 @@ const ALL_CAUSES: readonly LockCause[] = [
   "unauthorized",
   "expired",
   "screenLock",
+  "idleAway",
 ];
 
 /** The two automatic locks an active grant silences from an open chat. */
@@ -388,6 +390,8 @@ describe("pausesGrant", () => {
 
   it("covers every cause exactly once (adding a cause forces a decision here)", () => {
     expect(ALL_CAUSES.filter(pausesGrant).sort()).toEqual(["escape", "hidden", "multiTap", "panic", "screenLock"]);
+    // An idle that ran out while away is an instant lock, but it is not one the owner asked for.
+    expect(pausesGrant("idleAway")).toBe(false);
   });
 });
 
@@ -417,18 +421,71 @@ describe("hiddenPolicy (§8 decision rule)", () => {
   });
 });
 
+describe("screenLockEvidence (Architect ruling: evidence must be CAUSAL, judged from dispatch times)", () => {
+  const HIDE = 100_000;
+
+  it("no lock event: neither causal nor any", () => {
+    expect(screenLockEvidence([], HIDE, HIDE + 500)).toEqual({ causal: false, any: false });
+  });
+
+  it("an event at the moment of the hide is causal", () => {
+    expect(screenLockEvidence([HIDE], HIDE, HIDE + 500)).toEqual({ causal: true, any: true });
+  });
+
+  it("an event 0.8 s BEFORE the hide is causal (the lead-in window is one second)", () => {
+    expect(screenLockEvidence([HIDE - 800], HIDE, HIDE + 500)).toEqual({ causal: true, any: true });
+  });
+
+  it("an event 1.5 s AFTER the hide is causal (the window runs two seconds after)", () => {
+    expect(screenLockEvidence([HIDE + 1500], HIDE, HIDE + 5000)).toEqual({ causal: true, any: true });
+  });
+
+  it("the window's edges are inclusive at exactly -1000 ms and +2000 ms, and exclusive just outside", () => {
+    expect(screenLockEvidence([HIDE - 1000], HIDE, HIDE + 500).causal).toBe(true);
+    expect(screenLockEvidence([HIDE + 2000], HIDE, HIDE + 5000).causal).toBe(true);
+    expect(screenLockEvidence([HIDE + 2001], HIDE, HIDE + 5000).causal).toBe(false);
+    expect(screenLockEvidence([HIDE - 1001], HIDE, HIDE + 500)).toEqual({ causal: false, any: false });
+  });
+
+  it("the architect's scenario — switch app, the phone auto-locks 30 s later — is 'any' but NOT causal", () => {
+    expect(screenLockEvidence([HIDE + 30_000], HIDE, HIDE + 31_000)).toEqual({ causal: false, any: true });
+  });
+
+  it("an event batched at return (the absence was long) is 'any' but NOT causal", () => {
+    expect(screenLockEvidence([HIDE + 600_000], HIDE, HIDE + 600_400)).toEqual({ causal: false, any: true });
+  });
+
+  it("an event dispatched AFTER the shield ended is ignored", () => {
+    expect(screenLockEvidence([HIDE + 700], HIDE, HIDE + 600)).toEqual({ causal: false, any: false });
+  });
+
+  it("an old event well before the hide is ignored", () => {
+    expect(screenLockEvidence([HIDE - 60_000], HIDE, HIDE + 500)).toEqual({ causal: false, any: false });
+  });
+
+  it("a causal event among late ones makes it causal; the late ones alone would not", () => {
+    expect(screenLockEvidence([HIDE + 500, HIDE + 30_000], HIDE, HIDE + 31_000)).toEqual({ causal: true, any: true });
+    expect(screenLockEvidence([HIDE + 30_000, HIDE + 40_000], HIDE, HIDE + 41_000)).toEqual({ causal: false, any: true });
+  });
+});
+
 describe("classifyHide", () => {
-  it("a screen-lock event is positive evidence, proven device or not", () => {
-    expect(classifyHide({ screenEvidence: true, deviceProven: true })).toBe("screenLock");
-    expect(classifyHide({ screenEvidence: true, deviceProven: false })).toBe("screenLock");
+  it("a causal screen-lock event is the cause, proven device or not", () => {
+    expect(classifyHide({ causalScreenLock: true, anyScreenLock: true, deviceProven: true })).toBe("screenLock");
+    expect(classifyHide({ causalScreenLock: true, anyScreenLock: true, deviceProven: false })).toBe("screenLock");
   });
 
-  it("no event on a device that has proven it reports them reads as a tab change", () => {
-    expect(classifyHide({ screenEvidence: false, deviceProven: true })).toBe("tabChange");
+  it("no event of any kind on a device that has proven it reports them live reads as a tab change", () => {
+    expect(classifyHide({ causalScreenLock: false, anyScreenLock: false, deviceProven: true })).toBe("tabChange");
   });
 
-  it("no event on a device that has NOT proven it is ambiguous — silence is not proof of a tab switch", () => {
-    expect(classifyHide({ screenEvidence: false, deviceProven: false })).toBe("ambiguous");
+  it("no event on a device that has NOT proven itself is ambiguous — silence is not proof of a tab switch", () => {
+    expect(classifyHide({ causalScreenLock: false, anyScreenLock: false, deviceProven: false })).toBe("ambiguous");
+  });
+
+  it("a lock event OUTSIDE the causal window is ambiguous, even on a proven device (a batched delivery is 'a lock event')", () => {
+    expect(classifyHide({ causalScreenLock: false, anyScreenLock: true, deviceProven: true })).toBe("ambiguous");
+    expect(classifyHide({ causalScreenLock: false, anyScreenLock: true, deviceProven: false })).toBe("ambiguous");
   });
 });
 

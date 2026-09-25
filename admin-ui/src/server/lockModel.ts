@@ -39,7 +39,7 @@
 // known: the decoy is up and the chat is detached, but the in-memory session is kept so a
 // cause that turns out harmless can restore it).
 
-import { IDLE_LOCK_MS } from "./constants";
+import { IDLE_LOCK_MS, SCREEN_LOCK_EVIDENCE_AFTER_MS, SCREEN_LOCK_EVIDENCE_BEFORE_MS } from "./constants";
 import type { LockCause } from "./types";
 
 export type PinError =
@@ -423,17 +423,46 @@ export function hiddenPolicy(settings: LockSettings): HiddenPolicy {
   return "shield";
 }
 
-/** Why the page went to the background, as far as it can be told:
- * - "screenLock": a `screenState = "locked"` was observed between the hide and now — positive
- *   evidence;
- * - "tabChange": no such event AND this device has proven it delivers them — because there is
- *   never positive evidence of a TAB switch, only of a screen lock, "no event" can only be
- *   read as "tab" on a device that has shown it would have reported one;
- * - "ambiguous": no event on a device that has not proven itself. */
+/** What the screen-lock events dispatched around one hide say about it. `causal`: one was
+ * dispatched within `[hideAt - BEFORE, hideAt + AFTER]` — delivered in real time, near the hide.
+ * `any`: one was dispatched at any time from `hideAt - BEFORE` until `endAt` (the end of the
+ * return shield), including a late one or one batched when a frozen page resumed. All times are
+ * `performance.now()` values, which keep counting while a page is frozen. */
+export interface ScreenLockEvidence {
+  readonly causal: boolean;
+  readonly any: boolean;
+}
+
+export function screenLockEvidence(lockTimes: readonly number[], hideAt: number, endAt: number): ScreenLockEvidence {
+  const from = hideAt - SCREEN_LOCK_EVIDENCE_BEFORE_MS;
+  const causalUntil = hideAt + SCREEN_LOCK_EVIDENCE_AFTER_MS;
+  let causal = false;
+  let any = false;
+  for (const at of lockTimes) {
+    if (at < from || at > endAt) continue;
+    any = true;
+    if (at <= causalUntil) causal = true;
+  }
+  return { causal, any };
+}
+
+/** Why the page went to the background, as far as it can be told (Architect ruling, §8):
+ * - "screenLock": a lock event was dispatched near the hide — positive, CAUSAL evidence;
+ * - "tabChange": NO lock event of any kind (batched ones included) around the absence AND this
+ *   device has proven it reports screen locks as they happen — there is never positive evidence
+ *   of a TAB switch, only of a screen lock, so "no event" can only be read as "tab" on a device
+ *   that has shown it would have reported one;
+ * - "ambiguous": everything else — a lock event outside the causal window (later in the
+ *   absence, or batched on return), or no event on a device that has not proven itself. */
 export type HideCause = "screenLock" | "tabChange" | "ambiguous";
 
-export function classifyHide(input: { readonly screenEvidence: boolean; readonly deviceProven: boolean }): HideCause {
-  if (input.screenEvidence) return "screenLock";
+export function classifyHide(input: {
+  readonly causalScreenLock: boolean;
+  readonly anyScreenLock: boolean;
+  readonly deviceProven: boolean;
+}): HideCause {
+  if (input.causalScreenLock) return "screenLock";
+  if (input.anyScreenLock) return "ambiguous";
   return input.deviceProven ? "tabChange" : "ambiguous";
 }
 

@@ -63,3 +63,11 @@ export const GRANT_RENEW_LOOP_GUARD_MS = 10_000;
 
 /** `IdleDetector`'s minimum threshold. Only `screenState` is used, which ignores it. */
 export const IDLE_DETECTOR_THRESHOLD_MS = 60_000;
+
+/** 03-permanent-unlock.md §8 (Architect ruling, 2026-09-25): a `screenState = "locked"` event is
+ * the CAUSE of a background switch only if it was DISPATCHED (on the monotonic
+ * `performance.now()` clock, which keeps counting while a page is frozen) within
+ * `[hideAt - BEFORE, hideAt + AFTER]` — i.e. delivered in real time, near the hide. An event
+ * dispatched later (or batched when a frozen page resumes) says nothing about WHY the page hid. */
+export const SCREEN_LOCK_EVIDENCE_BEFORE_MS = 1_000;
+export const SCREEN_LOCK_EVIDENCE_AFTER_MS = 2_000;

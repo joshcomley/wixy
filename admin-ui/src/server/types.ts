@@ -26,8 +26,9 @@ export type SuspendReason = "recording" | "micPermission" | "filePicker" | "medi
  * fresh token from its device grant, `deviceGrant.ts`).
  *
  * `screenLock` (spec/server-chat/03-permanent-unlock.md §8) is the screen
- * being locked while the page is still visible (a desktop Win+L), reported by
- * the Idle Detection API. */
+ * being locked, reported by the Idle Detection API. `idleAway` is the idle period having run out
+ * while the page was in the background: an INSTANT lock (no fade — nobody is watching, and a
+ * touch on return must not be able to cancel it). */
 export type LockCause =
   | "idle"
   | "panic"
@@ -37,7 +38,8 @@ export type LockCause =
   | "routeAway"
   | "unauthorized"
   | "expired"
-  | "screenLock";
+  | "screenLock"
+  | "idleAway";
 
 /** The callback surface `panel.ts` hands to the mounted `ServerChatView` (and
  * anything it in turn mounts — uploader, recorder, media renderer) so those

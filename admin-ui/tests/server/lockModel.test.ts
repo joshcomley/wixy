@@ -33,6 +33,7 @@ const ALL_CAUSES: readonly LockCause[] = [
   "unauthorized",
   "expired",
   "screenLock",
+  "idleAway",
 ];
 
 describe("INITIAL_STATE", () => {
@@ -270,8 +271,8 @@ describe("chat", () => {
 
   it("every OTHER lock cause locks instantly and detaches the chat subtree", () => {
     const instantCauses = ALL_CAUSES.filter((c) => c !== "idle");
-    // R6's seven instant causes plus `screenLock` (03-permanent-unlock.md §8).
-    expect(instantCauses).toHaveLength(8);
+    // R6's seven instant causes plus `screenLock` (03-permanent-unlock.md §8) and `idleAway`.
+    expect(instantCauses).toHaveLength(9);
     for (const cause of instantCauses) {
       const result = run(chat, { type: "lock", cause });
       expect(result.state).toEqual({ kind: "decoy" });

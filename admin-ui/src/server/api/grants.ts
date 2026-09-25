@@ -126,7 +126,13 @@ export async function unlockWithGrant(grant: StoredDeviceGrant): Promise<GrantUn
     if (typeof token === "string" && isFiniteNumber(expiresAt)) return { ok: true, token, expiresAt };
     return { ok: false, kind: "unavailable" };
   }
-  if (response.status === 401) return { ok: false, kind: "invalid" };
+  if (response.status === 401) {
+    // ONLY the server's own `grant_invalid` means the grant is dead. Any other 401 (the admin's
+    // CF Access gate rejecting a token during clock skew or a key rotation is one) says nothing
+    // about the grant, and must not make every device forget it.
+    const body = asRecord(await response.json().catch(() => null));
+    return body?.["error"] === "grant_invalid" ? { ok: false, kind: "invalid" } : { ok: false, kind: "unavailable" };
+  }
   if (response.status === 429) {
     const body = asRecord(await response.json().catch(() => null));
     const bodyRetry = body?.["retryAfterS"];
