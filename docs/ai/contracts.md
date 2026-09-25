@@ -217,7 +217,7 @@ header.
 | DELETE | `server/device-grants/{grantId}` | `revoke_device_grant` | — (the guard headers, INCLUDING `Content-Type: application/json` even with no body, plus the token) | 204 (idempotent: revoking an already-revoked own grant is 204 again *while its row still exists* — see the known limit below); 404 `{"error":"not_found"}` for an unknown id, a malformed id, and another identity's grant — indistinguishable; 401 locked; 403/415. Revoking the grant a BOUND token is itself bound to ends that session too (§9/audit F4): the server never mints a replacement token here, so the client locks and re-asks for the PIN. **Known limit (audit F3, accepted, not fixed):** the janitor deletes a revoked row after 7 days; a repeat DELETE for that same now-gone id past that point is 404 `not_found`, indistinguishable from an id that never existed — idempotency in practice, not in the literal response code, past that window. Harmless: the client already clears its local keys on ANY non-2xx response to this route |
 | DELETE | `server/device-grants` | `revoke_all_device_grants` | — (guard headers + token) | 204 — revokes every OTHER live grant of the requesting identity ("Sign out other devices"); a caller whose OWN token is bound to a grant keeps that one grant (§9/audit F4 sub-ruling (ii) — the button signs out *other* devices, not the one that clicked it); an unbound caller (a plain PIN session) revokes all of them; 401 locked; 403/415 |
 | GET | `server/messages?before=&limit=` | `get_history` | query `before?:int`, `limit?:int(1-100,default 50)` | `{"messages":[<Message>], "hasMore":bool, "cursor":int}`, ascending by `seq`; 422 (`limit` out of range) |
-| POST | `server/messages` | `send_message` | `{"clientId":str(8-64),"sender":str(1-32,trimmed),"deviceId":str(8-64),"text":str\|null(≤4000),"attachmentIds":[hex32](0-10)}` | 201 `{"message":<Message>}` (200 + the SAME message on a replayed `clientId` — idempotent); 422 `{"error":"invalid","detail":str}` (empty text with no attachments, too long, bad sender, or an unknown/already-used/failed attachment id) |
+| POST | `server/messages` | `send_message` | `{"clientId":str(8-64),"sender":str(1-32,trimmed),"deviceId":str(8-64),"text":str\|null(≤4000),"attachmentIds":[hex32](0-10),"replyToSeq":int(≥1)?}` — `replyToSeq` optional, omitted for an ordinary message; a target that no longer exists (or never did) is silently dropped, sending as a plain message, never a 500 | 201 `{"message":<Message>}` (200 + the SAME message on a replayed `clientId` — idempotent); 422 `{"error":"invalid","detail":str}` (empty text with no attachments, too long, bad sender, an unknown/already-used/failed attachment id, or `replyToSeq` present and not an integer ≥1 — booleans rejected) |
 | PUT | `server/messages/{seq}/reactions` | `set_reaction` | `{"emoji":str,"sender":str(1-32,trimmed,no control chars),"reacted":bool}` — no other keys; `emoji` must be one of the six in `livechat/reactions.py`, compared as exact code points (the heart is U+2764 U+FE0F); `reacted` is the DESIRED state, not a toggle | 200 `{"message":<Message>}` — the message as the server now holds it; a request that changes nothing is still 200 but writes **no** `message_updated` event; 404 `{"error":"not_found"}` (unknown, deleted, or too-large `seq`; never a 500); 422 `{"error":"invalid","detail":str}` (emoji off the list, bad sender) or FastAPI's validation shape (unknown key, non-boolean `reacted`); 401 `{"error":"locked"}` |
 | DELETE | `server/messages/{seq}` | `delete_message` | — | 204 when DB scrub and media cleanup are complete; otherwise 202 `{"erasurePending":true}`; idempotent even when the message is already gone |
 | POST | `server/wipe` | `wipe_chat` | exactly `{"confirm":"WIPE"}` | 204 when DB scrub and media cleanup are complete; otherwise 202 `{"erasurePending":true}`; every other body, including extra keys, is 422 |
@@ -231,15 +231,29 @@ header.
 | GET | `server/media/{attId}/{rendition}?exp=&sig=[&g=]` | `get_media` | `rendition ∈ full\|thumb\|poster\|play`; query `exp:int`, `sig:b64url`, `g?:hex32` — present only on a URL minted from a BOUND session (§9/audit F4), and part of the signed message (`media\|{attId}\|{rendition}\|{exp}\|{email}\|{g}`), so a caller can neither add nor strip it | 200/206 (Range-aware `FileResponse`, `Cache-Control: private, no-cache`, `X-Content-Type-Options: nosniff`, `Content-Disposition: inline`); 403 (bad/expired signature, email mismatch, malformed `g`, or — when `g` is present — the grant it names is no longer live); 404 (malformed id, unknown rendition, deleted/unknown attachment, or missing file) |
 
 `<Message>` = `{seq:int, clientId:str, sender:str, text:str\|null, attachments:[<Attachment>],
-reactions:[<Reaction>], createdAt:float}`. `<Reaction>` = `{emoji:str, count:int, senders:[str]}` —
-only emoji with at least one reactor, in the allowlist's order, `senders` oldest first; the
-reactor's `by_email` audit value is never returned. `<Attachment>` = `{id:str, kind:"photo"\|"video"\|"voice",
+reactions:[<Reaction>], createdAt:float, replyTo:<ReplyTo>\|null}`. `<Reaction>` =
+`{emoji:str, count:int, senders:[str]}` — only emoji with at least one reactor, in the
+allowlist's order, `senders` oldest first; the reactor's `by_email` audit value is never
+returned. `<Attachment>` = `{id:str, kind:"photo"\|"video"\|"voice",
 status:"processing"\|"ready"\|"failed", width:int\|null, height:int\|null,
 durationS:float\|null, peaks:[float]\|null, urls:{full?,thumb?,poster?,play?},
 transcript:null\|{status:"pending"}\|{status:"failed"}\|{status:"done",text:str}}` — `urls`
 carries only READY renditions, each a freshly per-response HMAC-signed path (never
 precomputed/stored). `transcript` is `null` until someone asks for one (voice notes only); the
 machine `failure` reason is never on the wire.
+
+`<ReplyTo>` = `{seq:int, sender:str, text:str\|null, truncated:bool, media:<ReplyToMedia>\|null}`
+(round 2 ruling item 10 §(3), Inv 51) — built fresh from the target's LIVE row on every read,
+never stored on the reply itself. `text` is the target's text cut to 300 Unicode code points
+(`truncated` is true exactly when it was cut); `null` for an attachment-only target.
+`<ReplyToMedia>` = `{kind:"photo"\|"video"\|"voice"\|"mixed", count:int, durationS:float\|null,
+thumbUrl:str\|null}` — `null` for a text-only target; `kind` is the quoted attachments' shared
+kind or `"mixed"`; `durationS` is the single voice note's or video's duration only when
+`count===1`; `thumbUrl` is a freshly signed URL for the FIRST attachment's `thumb` (photo) or
+`poster` (video) rendition, only when that attachment is `ready` — never `full`/`play`, and
+never present for a voice note. One level only: `<ReplyTo>` never nests another `<ReplyTo>`.
+`GET media/*`'s signature/expiry rules apply to `thumbUrl` exactly as to any other signed media
+URL.
 
 ### Preview / versions / shell / public
 
@@ -391,9 +405,12 @@ Publish/Chat use — the client is a `fetch()` streaming reader carrying the
 - `event: message_updated` / `data: <Message>` — an existing message's current state changed: an
   attachment changed status (e.g. `processing` → `ready`), a voice note's transcript changed state
   (`pending` when a job starts, then `done`/`failed`; also at startup for a job that died with its
-  process), or someone added or removed a reaction (the frame carries the full current `reactions`;
-  a `PUT …/reactions` that changes nothing emits no event). The client patches a transcript-only or
-  reactions-only change into the live bubble in place.
+  process), someone added or removed a reaction (the frame carries the full current `reactions`;
+  a `PUT …/reactions` that changes nothing emits no event), or an attachment finished processing on
+  a message that some OTHER message quotes — fired for every reply whose quote points at that
+  message, so its rendered quote picks up the new thumbnail (Inv 51). Never fired for a reply on
+  the TARGET's delete — see `message_deleted` below. The client patches a transcript-only,
+  reactions-only, or quote-thumbnail-only change into the live bubble in place.
 - `event: locked` / `data: {}` — the token expired mid-stream, OR (§9/audit F4) the
   connection's token is bound to a device grant that was revoked since the connection
   opened — checked on the same ~2s loop tick as the poll below; the server closes the
@@ -401,7 +418,9 @@ Publish/Chat use — the client is a `fetch()` streaming reader carrying the
 - `: ping` (a bare comment line, no `event:`/`data:`) every 15s, to keep the connection
   alive through proxies.
 - `event: message_deleted` / `data: {"seq":int}` — the client removes that bubble if present;
-  a missing bubble is a no-op.
+  a missing bubble is a no-op. Also the sole signal a reply's quote needs to disappear (Inv 51):
+  the client removes the `.wx-srv-quote` element in place from every bubble/echo quoting that
+  seq, and cancels the composer's pending reply if it targets that seq.
 - `event: wiped` / `data: {}` — the client clears loaded history and pending echoes; the stream
   remains open.
 

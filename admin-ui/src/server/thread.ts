@@ -6,7 +6,7 @@
 // mirrors the Inv 24 corollary: a flex column, the thread is the only scroll
 // region, the composer is pinned by layout.
 
-import type { ChatComposer } from "../chatComposer";
+import type { ChatComposer, ComposerDraft } from "../chatComposer";
 import { mountChatComposer } from "../chatComposer";
 import { mountChatThreadScroll, type ChatThreadScroll } from "../chatThreadScroll";
 import { mountLightbox, type Lightbox } from "../lightbox";
@@ -26,6 +26,7 @@ import {
   transcribeAttachment,
   wipeChat,
   type Message,
+  type ReplyTo,
   type TranscribeAnswer,
 } from "./api/messages";
 import { uploadServerAttachment } from "./api/uploads";
@@ -35,6 +36,7 @@ import { mountMessageActions, type MessageActionsController } from "./messageAct
 import { disposeAttachmentMedia, renderAttachments } from "./mediaRender";
 import { reactionLabel, reactionOrder } from "./reactions";
 import { createVoiceRecorder, type VoiceRecorder } from "./recorder";
+import { renderReplyQuoteContent, replyToFromMessage } from "./replyTo";
 import type { ServerStreamEvent } from "./stream";
 import {
   differOnlyInTranscripts,
@@ -56,6 +58,11 @@ const REACTION_ERROR_MS = 5_000;
 /** Backoff for reconciling an unconfirmed wipe against history: 1 s, 2 s, 4 s … capped. */
 const WIPE_RECONCILE_BASE_DELAY_MS = 1_000;
 const WIPE_RECONCILE_MAX_DELAY_MS = 15_000;
+/** Round 2 ruling item 10 §(4): paging backwards to find a quote's original
+ * message uses its own, larger page size than ordinary history scrolling. */
+const SCROLL_TO_ORIGINAL_PAGE_SIZE = 100;
+/** §(4): "highlights it for about 1.5 s." */
+const SCROLL_TO_ORIGINAL_HIGHLIGHT_MS = 1_500;
 
 export interface ServerThreadDeps {
   identity: ServerIdentity;
@@ -88,6 +95,15 @@ interface PendingEcho {
   readonly clientId: string;
   readonly text: string | null;
   readonly sentAt: number;
+  readonly replyTo: ReplyTo | null;
+}
+
+/** The composer's current reply target (round 2 ruling item 10 §(4)) — part
+ * of the composer draft, so `takeServerDraft`/`restoreServerDraft` carry it
+ * exactly like the text and staged attachments. */
+interface PendingReplyTarget {
+  readonly seq: number;
+  readonly quote: ReplyTo;
 }
 
 function startOfLocalDay(epochS: number): number {
@@ -202,7 +218,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   let voiceRecorder: VoiceRecorder | null = null;
   let composer: ChatComposer;
   const voiceDurations = new WeakMap<File, number>();
-  let pendingVoiceNote: { readonly file: File; readonly clientId: string; attachmentId: string | null } | null = null;
+  let pendingVoiceNote:
+    | {
+        readonly file: File;
+        readonly clientId: string;
+        attachmentId: string | null;
+        readonly replyTo: PendingReplyTarget | null;
+      }
+    | null = null;
   let voiceSendBusy = false;
 
   const recordButton = documentRef.createElement("button");
@@ -297,7 +320,16 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         const extension = mimeType.includes("mp4") ? "m4a" : mimeType.includes("ogg") ? "ogg" : "webm";
         const file = new File([recording.blob], `voice-note.${extension}`, { type: mimeType });
         voiceDurations.set(file, recording.durationMs / 1000);
-        pendingVoiceNote = { file, clientId: cryptoRandomId(win), attachmentId: null };
+        // §(4): "A voice note captures the reply target at the moment
+        // recording stops: the note becomes a reply and the bar clears."
+        const capturedReplyTo = pendingReply;
+        setPendingReply(null);
+        pendingVoiceNote = {
+          file,
+          clientId: cryptoRandomId(win),
+          attachmentId: null,
+          replyTo: capturedReplyTo,
+        };
         void sendVoiceNote();
         updateRecorderUi();
       },
@@ -383,6 +415,28 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     attachButton.setAttribute("aria-label", "Attach a photo or video");
   }
   composer.element.appendChild(voiceFailureRow);
+
+  // -- Reply bar (round 2 ruling item 10 §(4)) ------------------------------
+  // Above the input row. Hidden by default (mount/hide, not append/remove —
+  // matches the jump pill's and history-error row's own convention in this
+  // file), so cancelling never disturbs layout beyond a plain [hidden] flip.
+
+  const replyBar = documentRef.createElement("div");
+  replyBar.className = "wx-srv-reply-bar";
+  replyBar.hidden = true;
+  const replyBarLabel = documentRef.createElement("span");
+  replyBarLabel.className = "wx-srv-reply-bar-label";
+  const replyBarQuote = documentRef.createElement("div");
+  replyBarQuote.className = "wx-srv-reply-bar-quote";
+  const replyBarCancel = documentRef.createElement("button");
+  replyBarCancel.type = "button";
+  replyBarCancel.className = "wx-srv-reply-bar-cancel";
+  replyBarCancel.textContent = "✕";
+  replyBarCancel.setAttribute("aria-label", "Cancel reply");
+  replyBarCancel.addEventListener("click", () => setPendingReply(null));
+  replyBar.append(replyBarLabel, replyBarQuote, replyBarCancel);
+
+  element.appendChild(replyBar);
   element.appendChild(composer.element);
 
   // -- State ---------------------------------------------------------------
@@ -458,6 +512,28 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   let contentGeneration = 0;
   let contentRevision = 0;
   let latestKnownMessageSeq = 0;
+  let pendingReply: PendingReplyTarget | null = null;
+  /** Bumped by a lock (detach), a wipe, or another scroll-to-original tap —
+   * §(4): "Abort on a lock, a wipe or another tap." */
+  let scrollToOriginalGeneration = 0;
+
+  function setPendingReply(target: PendingReplyTarget | null): void {
+    const wasStuck = threadScroll.stuck;
+    pendingReply = target;
+    if (target === null) {
+      replyBar.hidden = true;
+    } else {
+      replyBarLabel.textContent = `Replying to ${identity.isMine(target.quote.sender) ? "You" : target.quote.sender}`;
+      replyBarQuote.replaceChildren(
+        renderReplyQuoteContent(target.quote, { isMine: identity.isMine, document: documentRef }),
+      );
+      replyBar.hidden = false;
+    }
+    // §(4): "If the thread is at the bottom when the bar appears or
+    // disappears, it stays at the bottom." `afterContentChange(false)` never
+    // reveals the jump pill — this is a layout shift, not new content.
+    threadScroll.afterContentChange(false);
+  }
 
   function addConfirmed(incoming: Message): void {
     if (deletedSeqs.has(incoming.seq)) return;
@@ -527,6 +603,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         deviceId: identity.getDeviceId(),
         text: null,
         attachmentIds: [pending.attachmentId],
+        // §(4): "Its retries keep it (same clientId)" — the reply target
+        // captured when recording stopped, independent of whatever the
+        // composer bar shows now.
+        ...(pending.replyTo !== null ? { replyToSeq: pending.replyTo.seq } : {}),
       });
       if (!result.ok) {
         if (result.kind === "invalid" || result.kind === "rejected") {
@@ -747,10 +827,40 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     }
   }
 
+  // -- Reply quotes --------------------------------------------------------
+
+  function replyQuoteDisplayName(sender: string): string {
+    return identity.isMine(sender) ? "You" : sender;
+  }
+
+  /** §(4): a `<button>` whose accessible name reads like "Show the original
+   * message from <name>"; tapping it scrolls to the original (paging
+   * backwards to find it if needed). It carries `data-srv-gesture-boundary`
+   * — its tap makes a different control (the original) appear under the
+   * finger, so a double-tap on a quote never locks either. */
+  function renderReplyQuoteButton(replyTo: ReplyTo): HTMLButtonElement {
+    const button = documentRef.createElement("button");
+    button.type = "button";
+    button.className = "wx-srv-quote";
+    button.dataset["srvGestureBoundary"] = "";
+    button.setAttribute(
+      "aria-label",
+      `Show the original message from ${replyQuoteDisplayName(replyTo.sender)}`,
+    );
+    button.appendChild(
+      renderReplyQuoteContent(replyTo, { isMine: identity.isMine, document: documentRef }),
+    );
+    button.addEventListener("click", () => void scrollToOriginal(replyTo.seq, button));
+    return button;
+  }
+
   function renderBubble(message: Message, mine: boolean): HTMLElement {
     const bubble = documentRef.createElement("div");
     bubble.className = `wx-srv-bubble ${mine ? "wx-srv-bubble-mine" : "wx-srv-bubble-theirs"}`;
     bubble.dataset["messageSeq"] = String(message.seq);
+    if (message.replyTo !== null) {
+      bubble.appendChild(renderReplyQuoteButton(message.replyTo));
+    }
     if (!mine) {
       const sender = documentRef.createElement("span");
       sender.className = "wx-srv-bubble-sender";
@@ -783,6 +893,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         onDelete: deleteForEveryone,
         onReact: (target, emoji) => void toggleReaction(target.seq, emoji),
         isReacted: reactedByMe,
+        onReply: (target) => {
+          setPendingReply({ seq: target.seq, quote: replyToFromMessage(target) });
+          composer.focus();
+        },
       }),
     );
     return bubble;
@@ -791,6 +905,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   function renderEchoBubble(echo: PendingEcho): HTMLElement {
     const bubble = documentRef.createElement("div");
     bubble.className = "wx-srv-bubble wx-srv-bubble-mine wx-srv-echo";
+    if (echo.replyTo !== null) {
+      const quote = documentRef.createElement("div");
+      quote.className = "wx-srv-quote";
+      quote.appendChild(
+        renderReplyQuoteContent(echo.replyTo, { isMine: identity.isMine, document: documentRef }),
+      );
+      bubble.appendChild(quote);
+    }
     if (echo.text !== null && echo.text !== "") {
       const textEl = documentRef.createElement("div");
       textEl.className = "wx-srv-bubble-text";
@@ -987,6 +1109,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   function clearAfterWipe(): void {
     contentGeneration += 1;
     contentRevision += 1;
+    scrollToOriginalGeneration += 1; // §(4): a wipe aborts any in-flight scroll-to-original
     for (const timer of deleteFadeTimers.values()) win.clearTimeout(timer);
     deleteFadeTimers.clear();
     for (const timer of reactionErrorTimers.values()) win.clearTimeout(timer);
@@ -998,6 +1121,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     pendingEchoes = [];
     pendingClientId = null;
     hasMoreHistory = false;
+    // §(4): a wipe cancels the pending reply, same as ✕, a send, or the
+    // target's own deletion.
+    setPendingReply(null);
     renderThreadList(false);
   }
 
@@ -1164,16 +1290,27 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     return oldest;
   }
 
-  async function loadOlderPage(): Promise<void> {
-    if (currentSession === null || historyLoading || !hasMoreHistory) return;
+  /** `"blocked"` — a DIFFERENT load (ordinary scroll paging, or a sibling
+   * `scrollToOriginal` run) is already in flight — is distinct from
+   * `"exhausted"` (`hasMoreHistory` is false) precisely so a caller racing
+   * another load (§(4): "another tap") can retell them apart: worth
+   * retrying vs. genuinely nothing more to page. `limit` defaults to the
+   * ordinary scroll-driven page size; `scrollToOriginal` passes its own
+   * larger one. */
+  async function loadOlderPage(
+    limit: number = HISTORY_PAGE_SIZE,
+  ): Promise<"loaded" | "blocked" | "exhausted" | "error"> {
+    if (currentSession === null) return "error";
+    if (historyLoading) return "blocked";
+    if (!hasMoreHistory) return "exhausted";
     const requestGeneration = contentGeneration;
     const session = currentSession;
     const before = oldestLoadedSeq();
-    if (before === null) return;
+    if (before === null) return "exhausted";
     historyLoading = true;
     try {
-      const page = await getHistory(session, { before, limit: HISTORY_PAGE_SIZE });
-      if (requestGeneration !== contentGeneration) return;
+      const page = await getHistory(session, { before, limit });
+      if (requestGeneration !== contentGeneration) return "error";
       const wasStuck = threadScroll.stuck;
       const prevScrollHeight = thread.scrollHeight;
       const prevScrollTop = thread.scrollTop;
@@ -1185,11 +1322,81 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         // restore the same distance from the (now-taller) top.
         thread.scrollTop = prevScrollTop + (thread.scrollHeight - prevScrollHeight);
       }
+      return "loaded";
     } catch {
       // Best-effort — the sentinel simply becomes visible again on the next
       // scroll-near-top and retries.
+      return "error";
     } finally {
       historyLoading = false;
+    }
+  }
+
+  /** §(2)'s client mechanism for erasure, and §(4)'s "not found" fallback for
+   * a scroll-to-original that never finds its target: remove the quote
+   * element IN PLACE from every loaded bubble and pending echo that quotes
+   * `seq`, and cancel the composer's pending reply if it targets `seq`.
+   * Never re-renders a whole bubble — the same voice/video cut-off trap as
+   * reactions. */
+  function removeQuotesTargeting(seq: number): void {
+    for (const rendered of renderedMessages.values()) {
+      if (rendered.message.replyTo?.seq === seq) {
+        rendered.element.querySelector(".wx-srv-quote")?.remove();
+      }
+    }
+    for (const rendered of renderedEchoes.values()) {
+      if (rendered.echo.replyTo?.seq === seq) {
+        rendered.element.querySelector(".wx-srv-quote")?.remove();
+      }
+    }
+    if (pendingReply?.seq === seq) setPendingReply(null);
+  }
+
+  /** §(4): tapping a quote scrolls to the original, paging backwards (the
+   * quote shows busy meanwhile) if it isn't loaded yet. Not found after
+   * paging exhausts → the target was deleted meanwhile; remove the quote.
+   * Aborts on a lock, a wipe, or another tap — all three bump
+   * `scrollToOriginalGeneration`. */
+  async function scrollToOriginal(seq: number, button: HTMLButtonElement): Promise<void> {
+    scrollToOriginalGeneration += 1;
+    const generation = scrollToOriginalGeneration;
+    button.classList.add("wx-srv-quote-busy");
+    button.setAttribute("aria-busy", "true");
+    try {
+      while (!renderedMessages.has(seq)) {
+        if (!hasMoreHistory) break;
+        const result = await loadOlderPage(SCROLL_TO_ORIGINAL_PAGE_SIZE);
+        if (generation !== scrollToOriginalGeneration) return;
+        if (result === "loaded") continue;
+        if (result === "blocked") {
+          // A sibling load (ordinary scroll paging, or another
+          // scrollToOriginal run) owns the single history-load slot right
+          // now — yield and retry rather than treating this as exhausted.
+          await Promise.resolve();
+          continue;
+        }
+        break; // "exhausted" or "error" — nothing more to try.
+      }
+      if (generation !== scrollToOriginalGeneration) return;
+      const rendered = renderedMessages.get(seq);
+      if (rendered === undefined) {
+        removeQuotesTargeting(seq);
+        return;
+      }
+      const targetElement = rendered.element;
+      const prefersReducedMotion =
+        win.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
+      targetElement.scrollIntoView({
+        behavior: prefersReducedMotion ? "auto" : "smooth",
+        block: "center",
+      });
+      targetElement.classList.add("wx-srv-bubble-highlighted");
+      win.setTimeout(() => {
+        targetElement.classList.remove("wx-srv-bubble-highlighted");
+      }, SCROLL_TO_ORIGINAL_HIGHLIGHT_MS);
+    } finally {
+      button.classList.remove("wx-srv-quote-busy");
+      button.removeAttribute("aria-busy");
     }
   }
 
@@ -1211,6 +1418,36 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
 
   // -- Send / echo reconciliation ---------------------------------------------
 
+  /** §(4): "the reply target is part of the composer draft." A thin wrapper
+   * around `chatComposer.ts`'s own (frozen, shared-with-the-AI-chat)
+   * `takeDraft`/`restoreDraft`/`discardDraft` — only server chat uses
+   * `keepInputLive`'s draft mechanism at all, so the reply target is carried
+   * alongside it here rather than widening that shared component's type. */
+  interface ServerComposerDraft {
+    readonly base: ComposerDraft;
+    readonly replyTo: PendingReplyTarget | null;
+  }
+
+  function takeServerDraft(): ServerComposerDraft {
+    const base = composer.takeDraft();
+    const replyTo = pendingReply;
+    setPendingReply(null);
+    return { base, replyTo };
+  }
+
+  function restoreServerDraft(draft: ServerComposerDraft): void {
+    composer.restoreDraft(draft.base);
+    // Never clobber a different reply the owner picked while the failed
+    // send was in flight.
+    if (draft.replyTo !== null && pendingReply === null) {
+      setPendingReply(draft.replyTo);
+    }
+  }
+
+  function discardServerDraft(draft: ServerComposerDraft): void {
+    composer.discardDraft(draft.base);
+  }
+
   function send(): void {
     if (currentSession === null) return;
     const session = currentSession;
@@ -1220,8 +1457,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     // disabled, blurred or resized (a disabled input drops focus, which on a phone closes and
     // reopens the soft keyboard - the flicker the operator reported), and a failed send gets
     // its draft back via `restoreDraft`.
-    const draft = composer.takeDraft();
-    const text = draft.text;
+    const draft = takeServerDraft();
+    const text = draft.base.text;
     composer.setBusy(true);
     // §5.3: clientId is 8-64 chars — a single UUID (36 chars) both stays in
     // range and is already globally unique on its own; concatenating the
@@ -1229,7 +1466,12 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     // made every real send 422 while the optimistic echo masked it.
     pendingClientId ??= cryptoRandomId(win);
     const clientId = pendingClientId;
-    const echo: PendingEcho = { clientId, text: text === "" ? null : text, sentAt: now() };
+    const echo: PendingEcho = {
+      clientId,
+      text: text === "" ? null : text,
+      sentAt: now(),
+      replyTo: draft.replyTo?.quote ?? null,
+    };
     pendingEchoes.push(echo);
     contentRevision += 1;
     threadScroll.scrollToBottom();
@@ -1240,7 +1482,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       sender: identity.getName() ?? "",
       deviceId: identity.getDeviceId(),
       text: text === "" ? null : text,
-      attachmentIds: [...draft.attachmentIds],
+      attachmentIds: [...draft.base.attachmentIds],
+      ...(draft.replyTo !== null ? { replyToSeq: draft.replyTo.seq } : {}),
     })
       .then((result) => {
         composer.setBusy(false);
@@ -1248,25 +1491,25 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           if (pendingClientId === clientId) pendingClientId = null;
           pendingEchoes = pendingEchoes.filter((e) => e.clientId !== clientId);
           renderThreadList(false);
-          if (result.ok) composer.discardDraft(draft);
-          else composer.restoreDraft(draft);
+          if (result.ok) discardServerDraft(draft);
+          else restoreServerDraft(draft);
           return;
         }
         if (result.ok) {
           pendingClientId = null;
-          composer.discardDraft(draft);
+          discardServerDraft(draft);
           addConfirmed(result.message);
           renderThreadList();
           return;
         }
         pendingEchoes = pendingEchoes.filter((e) => e.clientId !== clientId);
         renderThreadList();
-        composer.restoreDraft(draft);
+        restoreServerDraft(draft);
         composer.setError(result.kind === "invalid" ? result.detail : "Couldn't send — retry.");
       })
       .catch((error: unknown) => {
         composer.setBusy(false);
-        composer.restoreDraft(draft);
+        restoreServerDraft(draft);
         if (error instanceof ServerLockedError) {
           hooks.lockNow("unauthorized");
           return;
@@ -1356,6 +1599,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     detach(): void {
       currentSession = null;
       endWipeReconcile("abandoned");
+      // §(4): a lock aborts an in-flight scroll-to-original, but the pending
+      // reply itself survives a lock exactly like the draft text (§(4)'s own
+      // "A lock keeps it in memory exactly like the draft text").
+      scrollToOriginalGeneration += 1;
       for (const controller of messageActionControllers.values()) controller.close();
       voiceRecorder?.detach();
       voiceRecorder = null;
@@ -1386,6 +1633,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           deletedSeqs.add(event.seq);
           contentRevision += 1;
           confirmedBySeq.delete(event.seq);
+          // §(2)'s client mechanism: this seq's quote vanishes everywhere it
+          // was shown, patched in place — the server does NOT fan out a
+          // message_updated for replies on delete.
+          removeQuotesTargeting(event.seq);
           if (inFlightDeletes.has(event.seq)) {
             deleteEventsDuringRequest.add(event.seq);
             renderThreadList(false);
