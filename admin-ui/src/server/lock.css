@@ -211,15 +211,41 @@
   gap: 10px;
 }
 
+/* Chromium clips a rounded element's hit-testing to its visible border-radius
+   shape, not its full layout box — a border-radius:50% button is only
+   clickable inside the inscribed circle (operator report, round 2: taps near
+   a key's corner, well inside its square cell, silently did nothing;
+   measured live via Playwright: corner offsets up to 6-8px missed, matching
+   the circle's own radius exactly). The button itself stays a square (full
+   hit area); the round look is drawn by ::before instead, which isn't part
+   of hit-testing. */
 .wx-srv-pinpad-key {
+  --wx-srv-pinpad-key-bg: var(--wx-btn-bg);
+  --wx-srv-pinpad-key-border: var(--wx-border);
+  position: relative;
+  /* z-index:0 (any explicit value, not auto) makes this button its own
+     stacking context, so ::before's z-index:-1 stays confined behind THIS
+     button's own text instead of escaping to the page's root stacking
+     context and painting behind the whole panel. */
+  z-index: 0;
   width: 56px;
   height: 56px;
-  border-radius: 50%;
-  border: 1px solid var(--wx-border);
-  background: var(--wx-btn-bg);
+  border: none;
+  border-radius: 0;
+  background: none;
   color: var(--wx-ink);
   font-size: 1.125rem;
   cursor: pointer;
+}
+
+.wx-srv-pinpad-key::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 50%;
+  border: 1px solid var(--wx-srv-pinpad-key-border);
+  background: var(--wx-srv-pinpad-key-bg);
 }
 
 .wx-srv-pinpad-key:disabled {
@@ -228,9 +254,9 @@
 }
 
 .wx-srv-pinpad-key-submit {
-  background: var(--wx-brand-blue);
+  --wx-srv-pinpad-key-bg: var(--wx-brand-blue);
+  --wx-srv-pinpad-key-border: transparent;
   color: #fff;
-  border-color: transparent;
 }
 
 .wx-srv-pinpad-cancel {
