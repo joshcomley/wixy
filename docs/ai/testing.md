@@ -73,7 +73,8 @@ during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/
 | `test_routes_*.py` | HTTP surface per router (admin_api / chat / public / internal / version) |
 | `test_robots_header.py` | `X-Robots-Tag: noindex` middleware (Inv 37) — the path allowlist as a pure-function unit test, plus integration coverage on both indexable states |
 | `test_livechat_pinclient.py`, `test_livechat_tokens.py`, `test_livechat_store.py`, `test_livechat_uploads.py`, `test_livechat_processing.py`, `test_livechat_media_queue.py`, `test_livechat_janitor.py`, `test_livechat_push.py` | PIN client and tokens; SQLite migrations and erasure; upload validation and chunking; media processing, queue, janitor, and push |
-| `test_routes_livechat.py`, `test_routes_livechat_media.py` | protected chat/upload routes, delete/wipe recovery, and signed media |
+| `test_routes_livechat.py`, `test_routes_livechat_media.py` | protected chat/upload routes, delete/wipe recovery, and signed media; `TestReactionRoutes` covers `PUT …/reactions` (auth, idempotence, no-op-writes-no-event, allowlist/sender/boolean 422s, 404 for unknown/deleted/oversized `seq`, raw-bytes erasure, stream frames) |
+| `test_livechat_reactions.py` | the reaction allowlist as exact code points, `reactor_key` folding, and the **drift guard** that parses `admin-ui/src/server/reactions.ts` and fails if it differs from `REACTION_EMOJIS` (Inv 49) |
 | `test_background.py`, `test_routes_system.py`, `test_settings.py` | contained loop/one-shot failures, media health status, and Server-chat environment settings |
 
 ### Frontend (vitest) & E2E (Playwright)
@@ -92,12 +93,19 @@ during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/
   so both files have a real hidden item to exercise without touching the shared mini-site
   fixture's `showcase.items` (whose item count several other specs assert exactly). Server chat
   coverage is `server-chat.spec.ts` (conversation, delete/wipe, and cross-client behavior),
-  `server-media.spec.ts` (chunked photo/video/voice upload and rendering), and
-  `server-lock.spec.ts` (disguise, lock causes, and gestures), and `server-tap-precision.spec.ts`
+  `server-media.spec.ts` (chunked photo/video/voice upload and rendering),
+  `server-lock.spec.ts` (disguise, lock causes, and gestures), `server-tap-precision.spec.ts`
   (R3 v1.7, mobile 390×844 with `hasTouch`: a scroll-shaped touch sequence never locks, a
-  genuine same-spot double-tap on a bubble still does — decisions/00163).
+  genuine same-spot double-tap on a bubble still does — decisions/00163), and
+  `server-reactions.spec.ts` (two people reacting live, delete taking reactions with it, a
+  390 px and a 360 px phone leg, and the real-browser proof that a reaction never interrupts a
+  voice note that is playing).
 
-Server-chat unit coverage also lives in `admin-ui/tests/server/{gestures,lockModel,panel,http,unlock}.test.ts`.
+Server-chat unit coverage also lives in `admin-ui/tests/server/{gestures,lockModel,panel,http,unlock,reactions,setReaction}.test.ts`.
+`serverThread.test.ts` holds the reaction rendering and the in-place-patch tests (a playing
+`<audio>` keeps its identity and `currentTime`; a stale response never overwrites a newer frame).
+jsdom's selector engine mishandles astral-plane emoji inside an attribute selector, so those tests
+find emoji buttons through `dataset`; real-browser specs may use the selector.
 The lock browser spec uses Playwright `page.clock` to control the 400 ms multi-tap window,
 idle timeout, and suspensions. `server-tap-precision.spec.ts` instead dispatches real
 `PointerEvent`s in the actual browser to exercise `MULTI_TAP_RADIUS_PX`/tap-zone matching end

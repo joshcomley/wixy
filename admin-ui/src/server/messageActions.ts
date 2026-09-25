@@ -1,4 +1,5 @@
 import type { Message } from "./api/messages";
+import { REACTION_EMOJIS, reactionLabel } from "./reactions";
 
 const LONG_PRESS_MS = 500;
 const LONG_PRESS_MOVE_PX = 10;
@@ -9,16 +10,25 @@ export interface MessageActionsDeps {
   readonly win: Window;
   readonly document?: Document;
   readonly onDelete: (message: Message) => Promise<void>;
+  /** The reader tapped an emoji in the menu's reaction row (the thread decides whether
+   * that adds or removes their reaction). */
+  readonly onReact: (message: Message, emoji: string) => void;
+  /** Whether the reader currently holds `emoji` on `message` — drives each emoji's checked state. */
+  readonly isReacted: (message: Message, emoji: string) => boolean;
 }
 
 export interface MessageActionsController {
   close(): void;
+  /** The message changed in place (a reaction landed): refresh the emoji row without
+   * closing an open menu. */
+  update(message: Message): void;
   teardown(): void;
 }
 
 /** Adds the desktop menu and touch long-press action sheet to one message bubble. */
 export function mountMessageActions(deps: MessageActionsDeps): MessageActionsController {
-  const { message, bubble, win } = deps;
+  const { bubble, win } = deps;
+  let message = deps.message;
   const documentRef = deps.document ?? document;
   const trigger = documentRef.createElement("button");
   trigger.type = "button";
@@ -45,6 +55,39 @@ export function mountMessageActions(deps: MessageActionsDeps): MessageActionsCon
   copyError.hidden = true;
   let deleteButton: HTMLButtonElement | null = null;
 
+  // The reaction row. Each emoji is opened by the tap that opened this menu, so it is a
+  // causal flow and carries the gesture boundary (R3 v1.5.2) — unlike a reaction chip, which
+  // is an independent control.
+  const picker = documentRef.createElement("div");
+  picker.className = "wx-srv-message-reactions-picker";
+  picker.setAttribute("role", "group");
+  picker.setAttribute("aria-label", "React to this message");
+  const pickerButtons: HTMLButtonElement[] = [];
+  for (const emoji of REACTION_EMOJIS) {
+    const button = documentRef.createElement("button");
+    button.type = "button";
+    button.className = "wx-srv-message-react";
+    button.dataset["reaction"] = emoji;
+    button.textContent = emoji;
+    button.setAttribute("role", "menuitemcheckbox");
+    button.setAttribute("aria-label", reactionLabel(emoji));
+    button.dataset["srvGestureBoundary"] = "";
+    button.addEventListener("click", () => {
+      deps.onReact(message, emoji);
+      close();
+    });
+    pickerButtons.push(button);
+    picker.appendChild(button);
+  }
+  function syncPicker(): void {
+    for (const button of pickerButtons) {
+      const reacted = deps.isReacted(message, button.dataset["reaction"] ?? "");
+      button.setAttribute("aria-checked", String(reacted));
+      button.classList.toggle("wx-srv-message-react-on", reacted);
+    }
+  }
+  syncPicker();
+
   function close(): void {
     menu.hidden = true;
     confirmation.hidden = true;
@@ -58,6 +101,8 @@ export function mountMessageActions(deps: MessageActionsDeps): MessageActionsCon
     trigger.setAttribute("aria-expanded", "true");
     bubble.classList.add("wx-srv-message-actions-open");
   }
+
+  actions.appendChild(picker);
 
   if (message.text !== null && message.text !== "") {
     const copy = documentRef.createElement("button");
@@ -173,6 +218,10 @@ export function mountMessageActions(deps: MessageActionsDeps): MessageActionsCon
 
   return {
     close,
+    update(next: Message): void {
+      message = next;
+      syncPicker();
+    },
     teardown(): void {
       close();
       clearPress();

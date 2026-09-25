@@ -692,8 +692,8 @@ subscription, disabling deletes it and unregisters), `admin-ui/tests/serverSetti
 
 ### Inv 46 — Server chat delete and wipe are hard deletes, without chat-visible tombstones
 Any unlocked user can delete any message for everyone. Delete removes the message, its
-attachments, media/upload/failed files, and earlier message events, then emits one
-`message_deleted`; repeating the delete is idempotent. Wipe removes all messages, attachments,
+attachments, its reactions (by cascade, Inv 49), media/upload/failed files, and earlier message
+events, then emits one `message_deleted`; repeating the delete is idempotent. Wipe removes all messages, attachments,
 uploads, files, and events, then emits one `wiped`. Clients remove content on those events. A
 client's delete and wipe requests wait up to 30 seconds; an unknown outcome is settled by
 retrying the idempotent delete, or for a wipe — which is never re-sent — by comparing server
@@ -746,3 +746,29 @@ running. A recovered loop's failure count reads as zero after five minutes witho
 failure. The wrapper exposes no raw `start_soon` method.
 *Enforced by:* `wixy_server/tests/test_background.py`, `test_routes_system.py`, worker-app tests,
 and strict mypy.
+
+### Inv 49 — Server-chat reactions are a small, public, cascading mark
+A reaction is one row per (message, reactor, emoji). The reactor is the trimmed, **case-folded
+sender name** (`reactor_key`, the same folding as push self-exclusion), never the device. The emoji
+must be one of the six in `livechat/reactions.py`, each an exact code-point sequence compared as a
+plain string with no normalisation (the heart is U+2764 U+FE0F). Setting a reaction is a **desired
+state** (`PUT /messages/{seq}/reactions` with `reacted: bool`), never a toggle; a request that
+changes nothing writes no event; a reaction for an unknown or deleted message is a 404, never a 500.
+A change appends the existing `message_updated` event; a reaction never sends push. `by_email` is an
+audit column and never leaves the store.
+The `reactions` table cascades on `messages` delete (`ON DELETE CASCADE`) — deliberately, because an
+older slot process can hard-delete a message during a blue/green overlap with foreign keys on — so
+delete and wipe erase reactions with the message and Inv 46's raw-bytes guarantee covers the reactor
+name and the emoji. In the browser, a change that touches only a message's reactions patches the
+reactions row in place: it must never rebuild the bubble, because that disposes media that may be
+playing. The stream is the one ordered source of truth; a PUT response is applied only when no newer
+state arrived while it was in flight and the chat was not wiped meanwhile.
+*Enforced by:* `test_livechat_store.py` (`TestReactions`, the reaction delete/wipe raw-bytes cases and
+the older-process cascade case — mutation-checked against removing the cascade),
+`test_routes_livechat.py::TestReactionRoutes`, `test_livechat_reactions.py` (allowlist + the TS/Python
+drift guard), `admin-ui/tests/serverThread.test.ts` (in-place patch, a playing `<audio>` keeps its
+identity and `currentTime`, stale/wipe/delete responses), and `e2e/tests/server-reactions.spec.ts`.
+*Known limits:* renaming yourself orphans your old reactions (they read as someone else's), exactly
+as old messages stop aligning right; there is no free-form emoji and no reaction history.
+Decisions: [00164](../../decisions/00164-server-chat-reactions/decision.md),
+[00165](../../decisions/00165-reactions-patch-in-place-stream-is-truth/decision.md).
