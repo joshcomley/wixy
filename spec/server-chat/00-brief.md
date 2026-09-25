@@ -14,7 +14,9 @@ per-item tombstones written in the same transaction as the delete (covers WAL + 
 `scrubPending` → `erasurePending`, and media serving checks the row. v1.5.5 = §17 rewritten to the as-built, verified erasure model (owed-work records in the
 deleting transaction, compare-and-clear, publish first, 250 ms checkpoint slices, 204 = nothing
 pending), invariants 46–47, plus background containment (`01-background-containment-ruling.md`)
-and delivery by squash (R14a). Contracts in §5 are frozen — any change goes
+and delivery by squash (R14a). **v1.6 (2026-09-25, post-delivery, both live on main) = the
+`/unlock` request guard (§5.1, audit round 4 F14) and the per-device "Extend auto-lock to
+1 minute" option (R6, §6; operator request).** Contracts in §5 are frozen — any change goes
 through the Architect (`ask-architect`). Rulings in §1 are binding.
 
 > ⚠️ **Editing this file:** ruff formats Python fenced blocks **inside markdown**, so
@@ -181,7 +183,9 @@ sends and then locks, which is acceptable because it fails closed. Detector:
   slot-swap overlap (two processes, one SQLite file) can never strand a message.
 
 **R6 — Lock is fail-closed and client-authoritative for display.** Lock triggers:
-- 10 s with no user input (unless suspended, R7)
+- 10 s with no user input (unless suspended, R7) — **or 60 s in the unlocked chat when this
+  device has ticked "Extend auto-lock to 1 minute"** (v1.6, §6). Every other trigger
+  below is unaffected by that option.
 - the panic button
 - a multi-tap in chat
 - the `Escape` key
@@ -497,9 +501,27 @@ lives in P1's `livechat/tokens.py`. In dev-no-auth mode the email is `""`.
 - 503 `{"error":"not_configured"}` when the app key is unknown to cmd, or there's no
   verifier (standalone edition).
 - 503 `{"error":"pin_service_unavailable"}` when cmd is unreachable, times out, or faults.
-- 422 when the body is malformed. wixy validates **4–16 digits locally and does not call cmd
-  below that**, because cmd charges an attempt before checking and a stray keypress must
-  never burn one.
+- 422 `{"error":"invalid_pin"}` when the body is malformed. It **never echoes the
+  input** (no framework validation detail that could repeat the typed digits). wixy
+  validates **4–16 digits locally and does not call cmd below that**, because cmd charges
+  an attempt before checking and a stray keypress must never burn one.
+- **v1.6 — the request guard** (audit round 4, F14; `livechat/tokens.py`
+  `unlock_request_refusal`).
+  - **Why:** every other mutation is protected against cross-site requests by needing
+    `X-Wixy-Server-Token`. `/unlock` runs before a token exists. Without a guard, a page
+    the admin merely visits could post a `text/plain` form (no preflight), and because
+    cmd charges an attempt *before* checking, it could burn the owner's attempts and trip
+    the lockout.
+  - **The guard runs first**, before the body is read or cmd is contacted. A refusal
+    therefore **charges zero attempts**, echoes nothing, and is logged at WARNING with
+    the reason. Three independent layers:
+    1. `Sec-Fetch-Site`, **when the browser sends it**, must be exactly `same-origin` →
+       otherwise **403 `{"error":"forbidden"}`**. `same-site` is refused too, because
+       sibling `*.cinnamons.uk` hosts are same-site but a different origin.
+    2. `Content-Type` must be `application/json` (parameters such as `charset` are
+       fine) → otherwise **415 `{"error":"unsupported_media_type"}`**.
+    3. The custom header **`X-Wixy-Server-Unlock: 1`**, which the admin UI always sends
+       → otherwise **403 `{"error":"forbidden"}`**.
 
 **v1.4 — the real cmd contract** (cmd workspace #875, PR #3068; supersedes the earlier
 strawman. Frozen from cmd's side pending only a possible security-review diff. Not merged,
@@ -544,7 +566,10 @@ cmd refuses a request that arrived through Cloudflare with 403 `same_box_only`.
 
 **PIN-pad copy** (P4; never reveals the PIN's length, and never says which scope locked):
 - 401 → "Wrong PIN — 3 attempts left" (drop the tail when `attemptsLeft` is null)
-- 429 → "Too many wrong tries. Try again in 2 minutes."
+- 429 → "Too many wrong tries. Try again in 2 minutes." — the time is the real
+  `retryAfterS`, shown as a **live countdown** (v1.6, F15), never a fixed phrase.
+- 403 / 415 (the v1.6 guard) are client bugs, not user errors → "Couldn't unlock — try
+  again."
 - 409 → "Please try again."
 - 503 → "Server settings unavailable."
 - any unexpected status → "Couldn't unlock — try again."
@@ -689,9 +714,32 @@ decoy ──tap(panel)──▶ revealed ──tapAffordance(≥400ms after reve
   there too.
 - Constants live in `server/constants.ts`:
   - `IDLE_LOCK_MS = 10_000`
+  - `IDLE_LOCK_EXTENDED_MS = 60_000` (v1.6)
   - `FADE_MS = 800`
   - `MULTI_TAP_INTERVAL_MS = 400`
   - `MULTI_TAP_COUNT = 2`
+- **"Extend auto-lock to 1 minute" (v1.6, operator request; ruling 2026-09-25):**
+  - **Where:** a checkbox row in the unlocked chat's settings sheet. The whole row is the
+    `<label>`, so it is easy to tap on a phone.
+  - **Storage:** per device, in `localStorage["wx-srv-idle-extended"]` (`"1"` = on; key
+    removed = off). Missing, unreadable or blocked storage reads as **off**, which fails
+    safe to the 10 s lock. `server/idlePreference.ts` owns the key
+    (`isIdleLockExtended`, `chatIdleLockMs`, `setIdleLockExtended`) and announces a change
+    with a `wx-srv-idle-preference-changed` event.
+  - **Scope:** only the unlocked chat — the `chat` state, including the name prompt —
+    uses the chosen duration. These all keep `IDLE_LOCK_MS`:
+    - the decoy's revealed "Open server settings" button (re-hides after 10 s);
+    - the PIN pad's idle close;
+    - the 800 ms fade, the R7 suspensions, and every other R6 lock trigger (panic,
+      multi-tap, Escape, hidden tab, route change, reload, 401, token expiry).
+  - **One timer, not two:** `lockModel.idleTimeoutMs(state, idleLockMs)` and
+    `idleRemainingMs(state, idleLockMs, lastActivityAtMs, nowMs)` are pure functions that
+    take the chosen duration as an **input**. No second idle constant lives in the model.
+  - **Toggling applies at once, measured from the last user activity.** It never restarts
+    the clock — only real activity does (R7).
+  - **Layout:** the added row must never push the sheet's Close button off-screen on a
+    short phone. The sheet has a `calc()`-derived `max-height` and scrolls internally
+    (found by review before merge, fixed, and mutation-tested).
   - `PICKER_SUSPEND_MAX_MS = 300_000`
 
 **Interfaces** (frozen, so P4, P5, P6 and P3 can build concurrently):
@@ -1109,6 +1157,16 @@ and a mobile leg** (390×844, `isMobile`, `hasTouch`).
    textarea does **not** lock. Escape locks.
 6. Routing away and back locks; reload locks; a synthetic hidden `visibilitychange` locks.
 7. Drafts survive: type, panic, unlock → the text is restored.
+
+8. **Auto-lock option (v1.6):**
+   - Option off: fading at 10.5 s, and the chat subtree is detached by 10.9 s.
+   - Option on: still visible at 59 s, fading at 60.5 s, detached by 60.9 s.
+   - Toggling it mid-idle keeps the time already elapsed since the last activity.
+   - The revealed decoy button and the PIN pad still close after 10 s with the option on.
+   - On a short phone viewport, the settings sheet's Close button stays reachable.
+9. **Unlock guard (v1.6):** a `text/plain` post, a missing `X-Wixy-Server-Unlock`, or
+   `Sec-Fetch-Site: same-site` is refused (403/415), and the fake cmd records **zero**
+   verify calls.
 
 **`server-chat.spec.ts` (P5)** — two browser contexts with different names:
 - A→B live delivery within 3 s; alignment is correct.
