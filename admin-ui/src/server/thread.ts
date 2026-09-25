@@ -16,14 +16,7 @@ import {
   ServerWipeAbandonedError,
   ServerWipeNotCommittedError,
 } from "./api/http";
-import {
-  deleteMessage,
-  getHistory,
-  isDefinitiveRejectionStatus,
-  sendMessage,
-  wipeChat,
-  type Message,
-} from "./api/messages";
+import { deleteMessage, getHistory, sendMessage, wipeChat, type Message } from "./api/messages";
 import { uploadServerAttachment } from "./api/uploads";
 import type { ServerIdentity } from "./identity";
 import { linkifyInto } from "./linkify";
@@ -32,7 +25,7 @@ import { disposeAttachmentMedia, renderAttachments } from "./mediaRender";
 import { createVoiceRecorder, type VoiceRecorder } from "./recorder";
 import type { ServerStreamEvent } from "./stream";
 import type { LockHooks, ServerSession } from "./types";
-import { UPLOAD_GENERIC_FAILURE_MESSAGE, UploadError } from "./upload";
+import { UPLOAD_GENERIC_FAILURE_MESSAGE, UploadError, isDefinitiveUploadRejection } from "./upload";
 
 const HISTORY_PAGE_SIZE = 50;
 const MIN_VOICE_DURATION_MS = 1_000;
@@ -457,7 +450,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     } catch (error) {
       if (error instanceof ServerLockedError) {
         hooks.lockNow("unauthorized");
-      } else if (error instanceof UploadError && isDefinitiveRejectionStatus(error.status)) {
+      } else if (error instanceof UploadError && isDefinitiveUploadRejection(error)) {
         const reason = error.message === UPLOAD_GENERIC_FAILURE_MESSAGE
           ? "The server couldn't accept that voice note."
           : error.message;

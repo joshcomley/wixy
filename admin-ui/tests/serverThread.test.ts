@@ -575,6 +575,52 @@ describe("mountServerThread", () => {
       view.teardown();
     });
 
+    // M2: auto-discard is for a verdict on the FILE itself (400/413/415: it will be judged
+    // the same way every time). A 403 (Cloudflare Access / WAF) or a 404/409/422 at the
+    // upload stage is about the session or the gateway - the recording is still held
+    // locally, so a fresh upload can succeed and the note must be kept for Retry.
+    it.each([403, 404, 409, 422])(
+      "an upload refused with a %i keeps the recording for Retry instead of discarding it",
+      async (status) => {
+        uploadServerAttachment
+          .mockRejectedValueOnce(new UploadError("The upload could not be completed. Please try again.", status))
+          .mockResolvedValueOnce(voiceAttachment());
+        sendMessage.mockResolvedValue({
+          ok: true,
+          message: fakeMessage({ seq: 9, clientId: "generated-uuid-1234", text: null }),
+        } satisfies SendMessageResult);
+        const view = await mountView();
+        await recordVoiceNote(view);
+
+        expect(retry(view)?.hidden).toBe(false);
+        expect(discard(view)?.hidden).toBe(false);
+        expect(composerError(view)).toContain("Couldn't send voice note");
+        expect(composerError(view)).not.toContain("discarded");
+
+        retry(view)?.click();
+        await flush();
+        await flush();
+        expect(uploadServerAttachment).toHaveBeenCalledTimes(2); // the SAME recording, re-uploaded
+        expect(sendMessage).toHaveBeenCalledOnce();
+        expect(retry(view)?.hidden).toBe(true);
+        expect(mic(view)?.disabled).toBe(false);
+        view.teardown();
+      },
+    );
+
+    it.each([400, 413, 415])("an upload refused with a %i (a verdict on the file) is discarded", async (status) => {
+      uploadServerAttachment.mockRejectedValue(new UploadError("This file type isn't supported.", status));
+      const view = await mountView();
+      await recordVoiceNote(view);
+
+      expect(composerError(view)).toBe(
+        "This file type isn't supported. The voice note was discarded — record it again.",
+      );
+      expect(retry(view)?.hidden).toBe(true);
+      expect(mic(view)?.disabled).toBe(false);
+      view.teardown();
+    });
+
     it("an upload that fails without a verdict (network) stays retryable and discardable", async () => {
       uploadServerAttachment.mockRejectedValue(new TypeError("Failed to fetch"));
       const view = await mountView();

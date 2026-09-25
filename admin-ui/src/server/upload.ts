@@ -70,6 +70,15 @@ export class UploadError extends Error {
   }
 }
 
+/** A verdict on the FILE itself — too large (413), unsupported type (415), or a malformed
+ * request (400) — which the server will give again for the same bytes. The other 4xx are
+ * about the upload SESSION (a 404/409 for one that expired or already completed, a 422)
+ * or the gateway (a 403 from Cloudflare Access / a WAF): a fresh upload of the recording
+ * the client still holds can succeed, so those stay retryable. */
+export function isDefinitiveUploadRejection(error: UploadError): boolean {
+  return error.status === 400 || error.status === 413 || error.status === 415;
+}
+
 export function validateUploadSize(kind: UploadKind, sizeBytes: number): void {
   const maxBytes = UPLOAD_MAX_BYTES[kind];
   if (!Number.isFinite(sizeBytes) || sizeBytes < 0) {
