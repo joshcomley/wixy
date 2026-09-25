@@ -121,6 +121,22 @@ same PR as the original build, so Inv 42/48 and livechat.md §15 already describ
   cancel; the settings sheet's dynamic notes (`keepNote`, the auto-lock note, `lockNote`,
   `signOutStatus`) are `role="status"` and linked from their checkbox(es) via `aria-describedby`.
 
+**Mutation testing on the round 2b fixes** (`scratch/mutate_frontend.py`, kept alongside this
+decision): 90 mutants, 87 killed, 3 documented equivalents —
+- P27 (`resolveShield`'s stay-locked branch also calls `pauseGrantForLock`): redundant since P30's
+  fix already pauses the grant when the shield BEGINS, not when it resolves.
+- P32 (`onScreenLocked`'s mid-renewal-wait branch sets `shieldTainted`): the very next line already
+  dispatches a synchronous lock that ends the shield for this cycle; the write would only matter to
+  a future shield, and `beginShield` (P29) unconditionally resets the flag for every new one anyway.
+- P33 (`adoptSession`'s own `disposed` check): its one call site (`renewSession`) already guards on
+  `disposed` two lines above with no `await` in between, so `disposed` is provably always false by
+  the time `adoptSession` runs.
+
+All three are kept as defence-in-depth (same precedent as decision 00150's M24) rather than removed,
+in case a future change adds a second caller or reorders the pause. `E01`/`E02` cover the causal
+evidence window's bounds (`screenLockEvidence`); `P34`/`P35` cover the proof being earned only by a
+causal event and cleared when no detector remains to have earned it.
+
 ## Not done, and why
 
 - **The on-device timing check on the operator's Android phone** (order and timing of

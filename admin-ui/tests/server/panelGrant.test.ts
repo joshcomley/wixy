@@ -1267,6 +1267,30 @@ describe("mountServerPanel with a device grant and the lock checkboxes", () => {
       expect(chatOpen(panel)).toBe(false);
     });
 
+    it("a taint from a resolved shield does not leak into the next one: a clean single switch afterwards restores normally", async () => {
+      window.localStorage.setItem(LOCK_ON_TAB_KEY, "0");
+      window.localStorage.setItem(SCREENLOCK_PROVEN_KEY, "1");
+      rig = installIdleDetector("granted");
+      const { panel } = await mountUnlockedByPin();
+
+      // Taint this shield with a second switch in one absence; it resolves locked.
+      hide();
+      show();
+      await vi.advanceTimersByTimeAsync(300);
+      hide();
+      show();
+      await vi.advanceTimersByTimeAsync(SHIELD_WAIT_MS + 1);
+      expect(chatOpen(panel)).toBe(false);
+
+      // Unlock, then one ordinary tab switch: a fresh shield must not inherit the old taint.
+      await unlockWithPin(panel);
+      expect(chatOpen(panel)).toBe(true);
+      hide();
+      show();
+      await vi.advanceTimersByTimeAsync(SHIELD_WAIT_MS + 1);
+      expect(chatOpen(panel)).toBe(true);
+    });
+
     it("Escape during the shield locks for good and pauses an active grant; the return brings nothing back", async () => {
       window.localStorage.setItem(LOCK_ON_TAB_KEY, "0");
       window.localStorage.setItem(SCREENLOCK_PROVEN_KEY, "1");
