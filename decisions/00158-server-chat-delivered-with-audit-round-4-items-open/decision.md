@@ -28,12 +28,29 @@ items, F14 to F17, when the operator directed that the feature be delivered anyw
 The operator directed it. This entry records the fact of that direction and what was open at
 the time; it does not record his reasoning.
 
+## Follow-up (F14–F17 now closed)
+
+Two commits on `main` closed all four items:
+
+- `71cb2946` ("Server chat unlock CSRF guard, lockout countdown, wipe status, voice discard,
+  audit round 4"): F14 — `unlock` now refuses a request before the body is read or cmd is
+  contacted unless it is `Content-Type: application/json`, carries the custom header
+  `X-Wixy-Server-Unlock: 1`, and (when present) a `Sec-Fetch-Site` of `same-origin`; a cross-site
+  simple request cannot satisfy the custom-header requirement without a CORS preflight, which
+  wixy does not grant. Also fixed as part of the same commit: the lockout screen's countdown, an
+  unconfirmed wipe leaving the delete control stuck, and a failed voice note with no discard
+  path.
+- `0a2f836` ("follow-up fixes from the round-4 audit review"): closed the independent reviewer's
+  further findings on that same commit — a voice recording no longer discarded on a network
+  block that is not a definite rejection, a wipe that committed but timed out no longer shown as
+  failed, the lockout screen no longer clearing silently on a malformed response, and a stale
+  unlock token locking immediately instead of sticking on retry.
+
+`docs/ai/invariants.md` (Inv 41) and `docs/ai/contracts.md` now describe the guard as built; see
+[`docs/ai/livechat.md`](../../docs/ai/livechat.md) §4.
+
 ## What to watch for
 
-- Until the F14 fix merges, `main` carries the open F14 behaviour described above. The `unlock`
-  route reads the request body with `request.json()` and does not check the `Content-Type`
-  header (`wixy_server/routes_livechat.py`, `unlock`); this is an observation from the code,
-  not a root-cause analysis, which the fix pull request should record.
-- When the F14 to F17 fixes land, update [`docs/ai/invariants.md`](../../docs/ai/invariants.md)
-  (Inv 41), [`docs/ai/contracts.md`](../../docs/ai/contracts.md) and this entry's status if the
-  behaviour they describe changes.
+None of F14–F17 remain open. If a future change to `POST /unlock`'s guard, the lockout display,
+wipe-outcome handling, or voice-note failure handling contradicts `docs/ai/invariants.md` or
+`docs/ai/contracts.md`, update those files and record the change here or in a new entry.
