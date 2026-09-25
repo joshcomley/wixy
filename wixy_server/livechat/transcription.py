@@ -132,32 +132,43 @@ class TranscriptionRuntime:
         return self._limiter
 
     async def run_job(self, att_id: str) -> None:
-        """Run one job to a recorded outcome. Never raises for a job failure (the row becomes
-        `failed`); only cancellation (shutdown) escapes, leaving the row `pending` for the next
-        startup's recovery to fail."""
+        """Run one job to a recorded outcome. A job failure never raises: the row becomes `failed`.
+        Cancellation (shutdown, or a slot swap stopping this process) marks the row `failed`
+        (`interrupted`) under a shield — so no spinner outlives its process, even when no later
+        startup would sweep it — and then propagates."""
         result: _JobResult | None
         try:
             async with self._global_limiter():
                 result = await self._transcribe(att_id)
         except anyio.get_cancelled_exc_class():
+            with anyio.CancelScope(shield=True):
+                await self._record(att_id, _JobResult("failed", failure="interrupted"))
             raise
         except Exception:
             _LOGGER.exception("livechat: transcription job for %s failed unexpectedly", att_id)
             result = _JobResult("failed", failure="error")
         finally:
             self.inflight.discard(att_id)
-        if result is None:
-            return  # the attachment was deleted while the job ran: nothing to record
-        stored = await anyio.to_thread.run_sync(
-            lambda: self.store.finish_transcript(
-                att_id=att_id,
-                status=result.status,
-                text=result.text,
-                failure=result.failure,
-                engine=result.engine,
-                now=time.time(),
+        if result is not None:  # None: the attachment was deleted while the job ran
+            await self._record(att_id, result)
+
+    async def _record(self, att_id: str, result: _JobResult) -> None:
+        try:
+            stored = await anyio.to_thread.run_sync(
+                lambda: self.store.finish_transcript(
+                    att_id=att_id,
+                    status=result.status,
+                    text=result.text,
+                    failure=result.failure,
+                    engine=result.engine,
+                    now=time.time(),
+                )
             )
-        )
+        except Exception:
+            # The row stays `pending` until the next startup fails it; nothing here may raise
+            # (on the cancellation path that would replace the cancellation itself).
+            _LOGGER.exception("livechat: could not record the transcription outcome for %s", att_id)
+            return
         if stored:
             self.notifier.publish()
 

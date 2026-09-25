@@ -775,6 +775,28 @@ class TestStartupRecovery:
             assert client.post(TRANSCRIBE.format(voice.att_id), headers=headers).status_code == 202
             _wait_for(_finished(env, voice.att_id))
 
+    def test_a_job_cancelled_by_shutdown_leaves_no_spinner_behind(
+        self, make_env: Callable[..., Env], cmd_state: FakeCmdState
+    ) -> None:
+        """A process stopped mid-job (a slot swap, a deploy) marks the note failed on its way
+        out, rather than leaving `pending` for some later startup to sweep."""
+        import threading
+
+        gate = threading.Event()
+        cmd_state.transcribe_gate = gate
+        env = make_env()
+        voice = _seed_voice(env)
+        with TestClient(env.app) as client:
+            headers = _unlock(client)
+            assert client.post(TRANSCRIBE.format(voice.att_id), headers=headers).status_code == 202
+            _wait_for(lambda: len(cmd_state.transcribe_requests) == 1)
+            # Leaving the block cancels the app's task group while the job waits on cmd.
+        gate.set()
+
+        row = env.store.get_transcript(voice.att_id)
+        assert row is not None and (row.status, row.failure) == ("failed", "interrupted")
+        assert env.app.state.livechat_transcription.inflight == set()
+
     def test_an_old_database_is_upgraded_when_the_app_starts(
         self, make_env: Callable[..., Env]
     ) -> None:
