@@ -175,6 +175,29 @@ describe("Server PIN pad lockout copy and countdown (F15)", () => {
     pad.teardown();
   });
 
+  // L1 (reviewer): a 429 with no parseable wait (a proxy/WAF 429 with no JSON body and no
+  // Retry-After) reached the pad as retryAfterS 0, which read as an already-expired lock:
+  // the digits cleared and the owner saw nothing at all. It must show a generic wait.
+  it.each([0, -3, Number.NaN, Number.POSITIVE_INFINITY])(
+    "a lockout with no usable wait (%s) still says so and holds the keys for a generic wait",
+    (retryAfterS) => {
+      const { pad, message, onSubmit } = mountLocked(retryAfterS);
+      expect(message.textContent).toBe("Too many wrong tries. Try again in 30 seconds.");
+      const digits = [...pad.element.querySelectorAll<HTMLButtonElement>(".wx-srv-pinpad-key-digit")];
+      expect(digits.every((button) => button.disabled)).toBe(true);
+      pad.element.dispatchEvent(new KeyboardEvent("keydown", { key: "1", bubbles: true }));
+      pad.element.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      expect(onSubmit).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(29_000);
+      expect(message.textContent).toBe("Too many wrong tries. Try again in 1 second.");
+      vi.advanceTimersByTime(1_000);
+      expect(message.textContent).toBe("");
+      expect(digits.every((button) => !button.disabled)).toBe(true);
+      pad.teardown();
+    },
+  );
+
   it("a fresh lockout restarts the countdown from the new wait", () => {
     const { pad, message } = mountLocked(30);
     vi.advanceTimersByTime(10_000);

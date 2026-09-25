@@ -250,6 +250,21 @@ describe("mountServerPanel", () => {
     panel.teardown();
   });
 
+  it("a proxy 429 with no body and no Retry-After still shows a lockout, not silent cleared digits (L1)", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 429 }));
+    const panel = mount();
+    await openPinPad(panel.element);
+    await enterAndSubmitPin(panel.element, "0000");
+    expect(panel.element.querySelector(".wx-srv-pinpad-message")?.textContent).toBe(
+      "Too many wrong tries. Try again in 30 seconds.",
+    );
+    const keys = [...panel.element.querySelectorAll<HTMLButtonElement>(".wx-srv-pinpad-key-digit")];
+    expect(keys.every((button) => button.disabled)).toBe(true);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(panel.element.querySelector(".wx-srv-pinpad-message")?.textContent).toBe("");
+    panel.teardown();
+  });
+
   it("cmd unreachable (503) shows exactly 'Server settings unavailable.'", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ error: "pin_service_unavailable" }, 503));
     const panel = mount();
