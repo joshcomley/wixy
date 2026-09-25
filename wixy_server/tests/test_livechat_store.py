@@ -41,7 +41,7 @@ class TestMigrations:
         store.list_messages(before=None, limit=1)
         conn = sqlite3.connect(str(db_path))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         finally:
             conn.close()
 
@@ -123,7 +123,7 @@ class TestMigrations:
         upgraded.list_messages(before=None, limit=1)
         conn = sqlite3.connect(str(db_path))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
             index = conn.execute(
                 "SELECT sql FROM sqlite_master "
                 "WHERE type = 'index' AND name = 'idx_deleted_storage_pending'"
@@ -139,8 +139,17 @@ class TestMigrations:
         db_path.parent.mkdir(parents=True)
         conn = sqlite3.connect(str(db_path))
         try:
+            # `messages` is part of this "v4 snapshot" purely so schema v7's
+            # migration (which touches it) has a realistic target — a genuine
+            # v4-era database always has it, since v1 creates every table
+            # together in one step.
             conn.executescript(
                 """
+                CREATE TABLE messages(
+                  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                  client_id TEXT NOT NULL UNIQUE,
+                  sender TEXT NOT NULL, device_id TEXT NOT NULL, by_email TEXT,
+                  text TEXT, created_at REAL NOT NULL);
                 CREATE TABLE deleted_storage(
                   kind TEXT NOT NULL, id TEXT NOT NULL,
                   cleanup_pending INTEGER NOT NULL, deleted_at REAL NOT NULL,
@@ -160,7 +169,7 @@ class TestMigrations:
         conn.close()
         conn = sqlite3.connect(str(db_path))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
             columns = {row[1]: row for row in conn.execute("PRAGMA table_info(deleted_storage)")}
             assert columns["generation"][3] == 1
             assert (
@@ -183,8 +192,17 @@ class TestMigrations:
         db_path.parent.mkdir(parents=True)
         conn = sqlite3.connect(str(db_path))
         try:
+            # `messages` is part of this "v1 snapshot" purely so schema v7's
+            # migration (which touches it) has a realistic target — a genuine
+            # v1-era database always has it, since v1 creates every table
+            # together in one step.
             conn.executescript(
                 """
+                CREATE TABLE messages(
+                  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                  client_id TEXT NOT NULL UNIQUE,
+                  sender TEXT NOT NULL, device_id TEXT NOT NULL, by_email TEXT,
+                  text TEXT, created_at REAL NOT NULL);
                 CREATE TABLE events(
                   event_seq INTEGER PRIMARY KEY AUTOINCREMENT,
                   type TEXT NOT NULL CHECK(type IN ('message','message_updated')),
@@ -215,7 +233,7 @@ class TestMigrations:
                 conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'events'").fetchone()[0]
                 == 13
             )
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         finally:
             conn.close()
 

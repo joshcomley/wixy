@@ -1,0 +1,182 @@
+{
+  "_comment": "Round 2 ruling item 10 (spec/server-chat/04-round2-rulings.md) §(3) drift guard: both wixy_server/tests/test_livechat_reply_to_driftguard.py (pytest, reply_to_json) and admin-ui/tests/server/replyTo.test.ts (vitest, replyToFromMessage) assert against these exact cases so the two independent reply-quote builders can never silently drift apart. thumbUrlPresent describes whether the case expects a thumb/poster URL, never a literal URL string (server HMAC-signs it per response; the client passes through whatever the server already signed) — each side supplies its own stand-in.",
+  "cases": [
+    {
+      "name": "text-under-300",
+      "target": {
+        "sender": "Josh",
+        "text": "hello there, this is a short reply target",
+        "attachments": []
+      },
+      "expected": {
+        "sender": "Josh",
+        "text": "hello there, this is a short reply target",
+        "truncated": false,
+        "media": null
+      }
+    },
+    {
+      "name": "text-exactly-300",
+      "target": {
+        "sender": "Josh",
+        "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "attachments": []
+      },
+      "expected": {
+        "sender": "Josh",
+        "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "truncated": false,
+        "media": null
+      }
+    },
+    {
+      "name": "text-over-300-emoji-astride-boundary",
+      "target": {
+        "sender": "Josh",
+        "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa🎉bbbbb",
+        "attachments": []
+      },
+      "expected": {
+        "sender": "Josh",
+        "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa🎉",
+        "truncated": true,
+        "media": null
+      }
+    },
+    {
+      "name": "attachment-only-single-photo-ready",
+      "target": {
+        "sender": "Purdi",
+        "text": null,
+        "attachments": [
+          {
+            "kind": "photo",
+            "status": "ready",
+            "durationS": null
+          }
+        ]
+      },
+      "expected": {
+        "sender": "Purdi",
+        "text": null,
+        "truncated": false,
+        "media": {
+          "kind": "photo",
+          "count": 1,
+          "durationS": null,
+          "thumbUrlPresent": true
+        }
+      }
+    },
+    {
+      "name": "attachment-only-multiple-same-kind",
+      "target": {
+        "sender": "Purdi",
+        "text": null,
+        "attachments": [
+          {
+            "kind": "photo",
+            "status": "ready",
+            "durationS": null
+          },
+          {
+            "kind": "photo",
+            "status": "ready",
+            "durationS": null
+          }
+        ]
+      },
+      "expected": {
+        "sender": "Purdi",
+        "text": null,
+        "truncated": false,
+        "media": {
+          "kind": "photo",
+          "count": 2,
+          "durationS": null,
+          "thumbUrlPresent": true
+        }
+      }
+    },
+    {
+      "name": "attachment-only-mixed-kinds",
+      "target": {
+        "sender": "Purdi",
+        "text": null,
+        "attachments": [
+          {
+            "kind": "photo",
+            "status": "ready",
+            "durationS": null
+          },
+          {
+            "kind": "video",
+            "status": "ready",
+            "durationS": 12.5
+          }
+        ]
+      },
+      "expected": {
+        "sender": "Purdi",
+        "text": null,
+        "truncated": false,
+        "media": {
+          "kind": "mixed",
+          "count": 2,
+          "durationS": null,
+          "thumbUrlPresent": true
+        }
+      }
+    },
+    {
+      "name": "attachment-processing-has-no-thumb-yet",
+      "target": {
+        "sender": "Purdi",
+        "text": null,
+        "attachments": [
+          {
+            "kind": "video",
+            "status": "processing",
+            "durationS": null
+          }
+        ]
+      },
+      "expected": {
+        "sender": "Purdi",
+        "text": null,
+        "truncated": false,
+        "media": {
+          "kind": "video",
+          "count": 1,
+          "durationS": null,
+          "thumbUrlPresent": false
+        }
+      }
+    },
+    {
+      "name": "voice-note-duration",
+      "target": {
+        "sender": "Josh",
+        "text": null,
+        "attachments": [
+          {
+            "kind": "voice",
+            "status": "ready",
+            "durationS": 42.75
+          }
+        ]
+      },
+      "expected": {
+        "sender": "Josh",
+        "text": null,
+        "truncated": false,
+        "media": {
+          "kind": "voice",
+          "count": 1,
+          "durationS": 42.75,
+          "thumbUrlPresent": false
+        }
+      }
+    }
+  ]
+}

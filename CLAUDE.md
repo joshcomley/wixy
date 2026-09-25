@@ -45,7 +45,7 @@ pluggable AI, HTML setup guide) is now **in progress** — see `spec/independenc
 
 | Store | Tables / purpose |
 |---|---|
-| `wixy_server/livechat/store.py` (`server.db`, schema v6) | `messages`, `attachments`, `events`, `uploads`, `push_subscriptions`, `deleted_storage`, `pending_wipe_cleanup`, `pending_scrub`; the last three are private erasure-recovery state (ids and tokens only), not chat-visible tombstones. See [`docs/ai/livechat.md`](docs/ai/livechat.md). |
+| `wixy_server/livechat/store.py` (`server.db`, schema v7) | `messages`, `attachments`, `events`, `uploads`, `push_subscriptions`, `deleted_storage`, `pending_wipe_cleanup`, `pending_scrub`; the last three are private erasure-recovery state (ids and tokens only), not chat-visible tombstones. Schema v7 adds `messages.reply_to_seq` (nullable, self-referencing, `ON DELETE SET NULL`) for reply-to-a-message — the reply stores only the quoted seq, never a copy. See [`docs/ai/livechat.md`](docs/ai/livechat.md). |
 
 ## Dev commands
 
