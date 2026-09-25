@@ -576,6 +576,97 @@
   color: var(--wx-muted);
 }
 
+/* -- Voice-note transcript (spec/server-chat/05-voice-transcription.md) ------
+   One block beneath a voice note: a Transcribe button, a spinner while the job
+   runs, then the text with Hide/Show, or a plain error with Retry. It sits in the
+   bubble's own column, so long text wraps inside the bubble (never widens it) on
+   a 402px phone as on desktop. Buttons use the row's control height, so the tap
+   target is 44px on a phone. */
+
+.wx-srv-transcript {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.wx-srv-transcript[hidden] {
+  display: none;
+}
+
+.wx-srv-transcript-text {
+  margin: 0;
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--wx-ink);
+}
+
+.wx-srv-transcript-empty,
+.wx-srv-transcript-error {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--wx-muted);
+}
+
+.wx-srv-transcript-error {
+  color: var(--wx-danger-text);
+}
+
+.wx-srv-transcript-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--wx-muted);
+}
+
+.wx-srv-transcript-spinner {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  border: 2px solid var(--wx-border);
+  border-top-color: var(--wx-muted);
+  border-radius: 50%;
+  animation: wx-srv-transcript-spin 0.9s linear infinite;
+}
+
+@keyframes wx-srv-transcript-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wx-srv-transcript-spinner {
+    animation-duration: 3s;
+  }
+}
+
+.wx-srv-transcript-action {
+  min-height: var(--wx-srv-control-h);
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.wx-srv-transcript-toggle {
+  padding: 0 4px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--wx-muted);
+  text-decoration: underline;
+}
+
 .wx-srv-attachment-processing,
 .wx-srv-attachment-failed {
   font-size: 0.75rem;

@@ -5,8 +5,11 @@
 import { ServerErasureOutcomeUnknownError, ServerLockedError, serverFetch } from "./http";
 import type { ServerSession } from "../types";
 
+import type { AttachmentTranscript } from "../mediaRender";
+
 export type AttachmentKind = "photo" | "video" | "voice";
 export type AttachmentStatus = "processing" | "ready" | "failed";
+export type { AttachmentTranscript };
 
 export interface Attachment {
   readonly id: string;
@@ -22,6 +25,8 @@ export interface Attachment {
     readonly poster?: string;
     readonly play?: string;
   };
+  /** Absent on a server that predates transcripts; `null` until someone asks for one. */
+  readonly transcript?: AttachmentTranscript | null;
 }
 
 export interface Message {
@@ -178,10 +183,73 @@ export interface UsageInfo {
   readonly freeBytes: number;
   readonly mediaAvailable: boolean;
   readonly erasurePending: boolean;
+  /** cmd's private transcription mode is live, so the Transcribe control may be offered. */
+  readonly transcriptionAvailable?: boolean;
 }
 
 export async function getUsage(session: ServerSession): Promise<UsageInfo> {
   const response = await serverFetch("/usage", { method: "GET" }, session);
   if (!response.ok) throw new Error(`Couldn't load storage usage (${response.status}).`);
   return (await response.json()) as UsageInfo;
+}
+
+/** What asking the server to transcribe a voice note came back with. */
+export type TranscribeAnswer =
+  /** 202: a job is running (or was already); `transcript` is `pending`. */
+  | { readonly kind: "started"; readonly transcript: AttachmentTranscript }
+  /** 200: a stored transcript, served straight back. */
+  | { readonly kind: "done"; readonly transcript: AttachmentTranscript }
+  /** 503: cmd cannot promise private mode (or this is the standalone edition). */
+  | { readonly kind: "unavailable" }
+  /** 429: too many new transcripts this minute. */
+  | { readonly kind: "rate_limited"; readonly retryAfterS: number }
+  /** 404: the note no longer exists (deleted, or never a sent voice note). */
+  | { readonly kind: "gone" }
+  /** 409: the note is still being processed. */
+  | { readonly kind: "not_ready" }
+  /** Anything else, including a dropped connection: nothing is known to have started. */
+  | { readonly kind: "failed" };
+
+function parseTranscript(value: unknown): AttachmentTranscript | null {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as { status?: unknown; text?: unknown };
+  if (record.status === "pending" || record.status === "failed") return { status: record.status };
+  if (record.status === "done" && typeof record.text === "string") {
+    return { status: "done", text: record.text };
+  }
+  return null;
+}
+
+/** `POST /attachments/{id}/transcribe` — asynchronous: the server answers at once (202) and the
+ * finished transcript arrives as a `message_updated` stream event. A 401 propagates as a lock. */
+export async function transcribeAttachment(
+  session: ServerSession,
+  attachmentId: string,
+): Promise<TranscribeAnswer> {
+  let response: Response;
+  try {
+    response = await serverFetch(
+      `/attachments/${encodeURIComponent(attachmentId)}/transcribe`,
+      { method: "POST" },
+      session,
+    );
+  } catch (error) {
+    if (error instanceof ServerLockedError) throw error;
+    return { kind: "failed" };
+  }
+  if (response.status === 200 || response.status === 202) {
+    const body = (await response.json().catch(() => null)) as { transcript?: unknown } | null;
+    const transcript = parseTranscript(body?.transcript);
+    if (transcript === null) return { kind: "failed" };
+    return { kind: response.status === 200 ? "done" : "started", transcript };
+  }
+  if (response.status === 503) return { kind: "unavailable" };
+  if (response.status === 404) return { kind: "gone" };
+  if (response.status === 409) return { kind: "not_ready" };
+  if (response.status === 429) {
+    const body = (await response.json().catch(() => null)) as { retryAfterS?: unknown } | null;
+    const retryAfterS = typeof body?.retryAfterS === "number" ? body.retryAfterS : 60;
+    return { kind: "rate_limited", retryAfterS };
+  }
+  return { kind: "failed" };
 }

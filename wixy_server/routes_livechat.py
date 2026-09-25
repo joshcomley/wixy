@@ -512,7 +512,7 @@ async def usage(request: Request) -> JsonObject:
         "erasurePending": await anyio.to_thread.run_sync(
             lambda: store.scrub_pending() or store.storage_cleanup_pending()
         ),
-        "transcriptionAvailable": media_available and await transcription.available(),
+        "transcriptionAvailable": await transcription.available(),
     }
 
 

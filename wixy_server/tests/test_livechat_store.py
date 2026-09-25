@@ -1331,3 +1331,24 @@ class TestTranscripts:
 
         assert store.get_transcript(att_id) is None
         assert b"wipe-transcript-sentinel-8e2b6a40" not in self._raw(db_path)
+
+    def test_racing_begins_start_exactly_one_job(self, db_path: Path) -> None:
+        """Two processes (blue/green overlap) — or two requests — asking at once: the write
+        lock serialises them, so exactly one gets `started` and the rest see its pending row."""
+        import threading
+
+        stores = [LiveChatStore(db_path) for _ in range(8)]
+        _seq, att_id = _ready_voice_message(stores[0])
+        barrier = threading.Barrier(len(stores))
+        states: list[str] = []
+
+        def attempt(store: LiveChatStore) -> None:
+            barrier.wait()
+            states.append(store.begin_transcript(att_id=att_id, now=2000.0).state)
+
+        threads = [threading.Thread(target=attempt, args=(store,)) for store in stores]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+        assert sorted(states) == ["pending"] * 7 + ["started"]

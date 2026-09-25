@@ -16,7 +16,16 @@ import {
   ServerWipeAbandonedError,
   ServerWipeNotCommittedError,
 } from "./api/http";
-import { deleteMessage, getHistory, sendMessage, wipeChat, type Message } from "./api/messages";
+import {
+  deleteMessage,
+  getHistory,
+  getUsage,
+  sendMessage,
+  transcribeAttachment,
+  wipeChat,
+  type Message,
+  type TranscribeAnswer,
+} from "./api/messages";
 import { uploadServerAttachment } from "./api/uploads";
 import type { ServerIdentity } from "./identity";
 import { linkifyInto } from "./linkify";
@@ -24,6 +33,12 @@ import { mountMessageActions, type MessageActionsController } from "./messageAct
 import { disposeAttachmentMedia, renderAttachments } from "./mediaRender";
 import { createVoiceRecorder, type VoiceRecorder } from "./recorder";
 import type { ServerStreamEvent } from "./stream";
+import {
+  differOnlyInTranscripts,
+  patchTranscriptBlocks,
+  refreshTranscriptBlocks,
+  type TranscriptionContext,
+} from "./transcript";
 import type { LockHooks, ServerSession } from "./types";
 import { UPLOAD_GENERIC_FAILURE_MESSAGE, UploadError, isDefinitiveUploadRejection } from "./upload";
 
@@ -360,6 +375,50 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   const deleteFadeTimers = new Map<number, number>();
   const messageActionControllers = new Map<number, MessageActionsController>();
   const renderedMessages = new Map<number, { readonly message: Message; readonly element: HTMLElement }>();
+
+  // -- Opt-in voice-note transcription (spec/server-chat/05-voice-transcription.md) ------
+  // `transcriptionAvailable` mirrors `GET /usage`'s flag (cmd's private mode is live); the
+  // Transcribe control is hidden until the server says so. Hide/Show is a per-device choice
+  // kept in memory only.
+  let transcriptionAvailable = false;
+  const hiddenTranscripts = new Set<string>();
+  const transcription: TranscriptionContext = {
+    available: () => transcriptionAvailable,
+    request: requestTranscription,
+    markUnavailable(): void {
+      transcriptionAvailable = false;
+      refreshTranscriptBlocks(messageList);
+    },
+    isHidden: (attachmentId) => hiddenTranscripts.has(attachmentId),
+    setHidden(attachmentId, hidden): void {
+      if (hidden) hiddenTranscripts.add(attachmentId);
+      else hiddenTranscripts.delete(attachmentId);
+    },
+  };
+
+  async function requestTranscription(attachmentId: string): Promise<TranscribeAnswer> {
+    const session = currentSession;
+    if (session === null) return { kind: "failed" };
+    try {
+      return await transcribeAttachment(session, attachmentId);
+    } catch (error) {
+      if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+      return { kind: "failed" };
+    }
+  }
+
+  async function refreshTranscriptionAvailability(session: ServerSession): Promise<void> {
+    try {
+      const usage = await getUsage(session);
+      const available = usage.transcriptionAvailable === true;
+      if (currentSession !== session || available === transcriptionAvailable) return;
+      transcriptionAvailable = available;
+      refreshTranscriptBlocks(messageList);
+    } catch (error) {
+      // Not being able to read the flag only leaves the control hidden.
+      if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+    }
+  }
   const daySeparators = new Map<number, HTMLElement>();
   const renderedEchoes = new Map<string, { readonly echo: PendingEcho; readonly element: HTMLElement }>();
   let emptyState: HTMLElement | null = null;
@@ -496,6 +555,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     return renderAttachments(message.attachments, {
       hooks,
       openLightbox: (src, alt) => lightbox.open(src, alt),
+      transcription,
       document: documentRef,
     });
   }
@@ -577,6 +637,17 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       }
 
       let rendered = renderedMessages.get(message.seq);
+      if (
+        rendered !== undefined &&
+        rendered.message !== message &&
+        differOnlyInTranscripts(rendered.message, message)
+      ) {
+        // Only a transcript changed: patch its block in place. Rebuilding the bubble would
+        // dispose the `<audio>` and cut off a voice note that is playing right now.
+        patchTranscriptBlocks(rendered.element, message.attachments);
+        rendered = { message, element: rendered.element };
+        renderedMessages.set(message.seq, rendered);
+      }
       if (rendered === undefined || rendered.message !== message) {
         if (rendered !== undefined) {
           teardownMessageActions(message.seq);
@@ -1045,6 +1116,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       historyLoaded = true;
       renderThreadList();
       ensureObserver();
+      void refreshTranscriptionAvailability(session);
       if (pendingVoiceNote !== null) void sendVoiceNote();
       return cursor;
     } catch (error) {
