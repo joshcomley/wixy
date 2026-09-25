@@ -29,6 +29,8 @@ export interface PinPadView {
 /** §5.1 validates the allowed 4–16 digit range locally. */
 const MIN_PIN_LENGTH = 4;
 const MAX_PIN_LENGTH = 16;
+/** The wait shown for a lockout that carries no usable retry time (a proxy/WAF 429). */
+const UNKNOWN_LOCKOUT_WAIT_S = 30;
 
 function plural(count: number, unit: string): string {
   return `${count} ${unit}${count === 1 ? "" : "s"}`;
@@ -246,7 +248,12 @@ export function mountPinPad(deps: PinPadDeps): PinPadView {
       currentError = error;
       stopCountdown();
       if (error?.kind === "lockedOut") {
-        lockedOutUntilMs = Date.now() + error.retryAfterS * 1000;
+        // A 429 from a proxy or WAF can arrive with no parseable wait (retryAfterS 0). That
+        // is still a lockout, not an expired one: hold the keys for a generic wait and say
+        // so, rather than silently clearing the digits.
+        const waitS =
+          Number.isFinite(error.retryAfterS) && error.retryAfterS > 0 ? error.retryAfterS : UNKNOWN_LOCKOUT_WAIT_S;
+        lockedOutUntilMs = Date.now() + waitS * 1000;
         countdownTimer = win.setInterval(() => {
           renderMessage();
           renderKeysState();

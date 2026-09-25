@@ -16,14 +16,7 @@ import {
   ServerWipeAbandonedError,
   ServerWipeNotCommittedError,
 } from "./api/http";
-import {
-  deleteMessage,
-  getHistory,
-  isDefinitiveRejectionStatus,
-  sendMessage,
-  wipeChat,
-  type Message,
-} from "./api/messages";
+import { deleteMessage, getHistory, sendMessage, wipeChat, type Message } from "./api/messages";
 import { uploadServerAttachment } from "./api/uploads";
 import type { ServerIdentity } from "./identity";
 import { linkifyInto } from "./linkify";
@@ -32,7 +25,7 @@ import { disposeAttachmentMedia, renderAttachments } from "./mediaRender";
 import { createVoiceRecorder, type VoiceRecorder } from "./recorder";
 import type { ServerStreamEvent } from "./stream";
 import type { LockHooks, ServerSession } from "./types";
-import { UPLOAD_GENERIC_FAILURE_MESSAGE, UploadError } from "./upload";
+import { UPLOAD_GENERIC_FAILURE_MESSAGE, UploadError, isDefinitiveUploadRejection } from "./upload";
 
 const HISTORY_PAGE_SIZE = 50;
 const MIN_VOICE_DURATION_MS = 1_000;
@@ -198,7 +191,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   retryVoiceButton.className = "wx-srv-retry-voice-button";
   retryVoiceButton.textContent = "Retry voice note";
   retryVoiceButton.hidden = true;
-  retryVoiceButton.setAttribute("aria-label", "Retry sending voice note");
+  // No aria-label: the visible text IS the accessible name (WCAG 2.5.3 label in name).
   const discardVoiceButton = documentRef.createElement("button");
   discardVoiceButton.type = "button";
   discardVoiceButton.className = "wx-srv-discard-voice-button";
@@ -402,10 +395,13 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
    * left for the server's janitor to reap: the client only holds the attachment id, and
    * the cancel route takes the upload id. */
   function discardPendingVoiceNote(message: string | null): void {
+    const focusWasInRow = voiceFailureRow.contains(documentRef.activeElement);
     pendingVoiceNote = null;
     setVoiceRetryOffered(false);
     composer.setError(message);
     updateRecorderUi();
+    // Hiding the focused button would drop focus to the top of the page.
+    if (focusWasInRow) recordButton.focus();
   }
 
   async function sendVoiceNote(): Promise<void> {
@@ -413,6 +409,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     const session = currentSession;
     if (pending === null || session === null || voiceSendBusy) return;
     voiceSendBusy = true;
+    const focusWasInRow = voiceFailureRow.contains(documentRef.activeElement);
     retryVoiceButton.disabled = true;
     setVoiceRetryOffered(false);
     recordingStatus.hidden = false;
@@ -457,7 +454,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     } catch (error) {
       if (error instanceof ServerLockedError) {
         hooks.lockNow("unauthorized");
-      } else if (error instanceof UploadError && isDefinitiveRejectionStatus(error.status)) {
+      } else if (error instanceof UploadError && isDefinitiveUploadRejection(error)) {
         const reason = error.message === UPLOAD_GENERIC_FAILURE_MESSAGE
           ? "The server couldn't accept that voice note."
           : error.message;
@@ -474,6 +471,12 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       if (pendingVoiceNote === null) recordingStatus.hidden = true;
       else if (retryVoiceButton.hidden) recordingStatus.hidden = true;
       updateRecorderUi();
+      // Sending hid the Retry the user had focused. Put focus back where it still makes
+      // sense: on Retry if it failed again, otherwise on the (now free) mic.
+      if (focusWasInRow) {
+        if (!retryVoiceButton.hidden) retryVoiceButton.focus();
+        else recordButton.focus();
+      }
     }
   }
 
@@ -756,7 +759,11 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
    * down. Resolves `true` (committed; the caller polls the erasure) or rejects with
    * `ServerWipeNotCommittedError` / `ServerLockedError` / `ServerWipeAbandonedError`,
    * which is what lets the settings sheet leave its "checking" state for good. */
-  function reconcileUnknownWipe(session: ServerSession, wipeBoundarySeq: number): Promise<boolean> {
+  function reconcileUnknownWipe(
+    session: ServerSession,
+    wipeBoundarySeq: number,
+    boundaryKnown: boolean,
+  ): Promise<boolean> {
     endWipeReconcile("abandoned");
     return new Promise<boolean>((resolve, reject) => {
       let finished = false;
@@ -796,7 +803,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         }
         if (finished) return;
 
-        if (history.some((message) => message.seq <= wipeBoundarySeq)) {
+        // The boundary is the newest message seq the client KNEW about. If the history never
+        // loaded, that is 0 and "nothing at or before it" is vacuously true, so a wipe that
+        // never committed would be reported as deleted while messages remain. With an
+        // unknown boundary the only safe proof of a commit is an EMPTY history (L3).
+        const notCommitted = boundaryKnown
+          ? history.some((message) => message.seq <= wipeBoundarySeq)
+          : history.length > 0;
+        if (notCommitted) {
           for (const message of history) addConfirmed(message);
           hasMoreHistory = false;
           renderThreadList(false);
@@ -823,13 +837,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     if (session === null) throw new Error("The server chat is locked.");
     const requestGeneration = contentGeneration;
     const wipeBoundarySeq = latestKnownMessageSeq;
+    const boundaryKnown = historyLoaded;
     let erasurePending: boolean;
     try {
       erasurePending = await wipeChat(session);
     } catch (error) {
       if (error instanceof ServerErasureOutcomeUnknownError) {
         onOutcomeUnknown?.();
-        return reconcileUnknownWipe(session, wipeBoundarySeq);
+        return reconcileUnknownWipe(session, wipeBoundarySeq, boundaryKnown);
       }
       throw error;
     }

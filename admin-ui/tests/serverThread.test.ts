@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HistoryPage, Message, SendMessageResult } from "../src/server/api/messages";
-import { ServerErasureOutcomeUnknownError } from "../src/server/api/http";
+import { ServerErasureOutcomeUnknownError, ServerLockedError } from "../src/server/api/http";
 import type { ServerIdentity } from "../src/server/identity";
 import { mountServerSettingsSheet } from "../src/server/settingsSheet";
 import { mountServerThread } from "../src/server/thread";
@@ -65,9 +65,9 @@ function fakeHooks(): LockHooks {
   };
 }
 
-function fakeWindow(): Window {
+function fakeWindow(randomUUID: () => string = () => "generated-uuid-1234"): Window {
   return {
-    crypto: { randomUUID: () => "generated-uuid-1234" },
+    crypto: { randomUUID },
     localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {}, clear: () => {} },
     setTimeout: globalThis.setTimeout.bind(globalThis),
     clearTimeout: globalThis.clearTimeout.bind(globalThis),
@@ -435,12 +435,116 @@ describe("mountServerThread", () => {
       await flush();
     }
 
-    async function mountView() {
+    // An INCREMENTING UUID (L7): with the shared constant, "same clientId" assertions were
+    // vacuous - a mutant that minted a fresh clientId on every retry survived.
+    async function mountView(hooks: LockHooks = fakeHooks()) {
       getHistory.mockResolvedValue(emptyHistory());
-      const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      let minted = 0;
+      const view = mountServerThread({
+        identity: fakeIdentity("Josh"),
+        hooks,
+        win: fakeWindow(() => `client-uuid-${++minted}`),
+        onSettings: vi.fn(),
+      });
       await view.attach(SESSION);
       return view;
     }
+    const sentInputs = () =>
+      sendMessage.mock.calls.map((call) => call[1] as { clientId: string; attachmentIds: string[] });
+
+    // M1 (reviewer): the 401 path is the property that matters most - a dead token must
+    // lock the chat and KEEP the recording, which the next unlock resends automatically.
+    // It was only covered at the sendMessage level, so a refactor that dropped lockNow or
+    // discarded the note on ServerLockedError still passed every test.
+    describe("a 401 while a voice note is going out (M1)", () => {
+      const okSend = (seq: number): SendMessageResult => ({
+        ok: true,
+        message: fakeMessage({ seq, clientId: "client-uuid-1", text: null }),
+      });
+
+      it("on the SEND: locks, keeps the note, and the next unlock resends it with the same clientId and attachment", async () => {
+        uploadServerAttachment.mockResolvedValue(voiceAttachment());
+        sendMessage.mockRejectedValueOnce(new ServerLockedError()).mockResolvedValueOnce(okSend(11));
+        const hooks = fakeHooks();
+        const view = await mountView(hooks);
+        await recordVoiceNote(view);
+
+        expect(hooks.lockNow).toHaveBeenCalledOnce();
+        expect(hooks.lockNow).toHaveBeenCalledWith("unauthorized");
+        // Kept, not discarded: no discard message, no second recording while it is pending.
+        expect(composerError(view)).toBe("");
+        expect(mic(view)?.disabled).toBe(true);
+
+        view.detach(); // the lock
+        await view.attach({ token: "fresh", expiresAt: 9_999_999_999 }); // the next unlock
+        await flush();
+        await flush();
+
+        const inputs = sentInputs();
+        expect(inputs).toHaveLength(2);
+        expect(inputs[1]?.clientId).toBe(inputs[0]?.clientId);
+        expect(inputs[0]?.attachmentIds).toEqual(["voice-id"]);
+        expect(inputs[1]?.attachmentIds).toEqual(["voice-id"]);
+        expect(uploadServerAttachment).toHaveBeenCalledOnce(); // not re-uploaded
+        expect(sendMessage.mock.calls[1]?.[0]).toMatchObject({ token: "fresh" });
+        expect(mic(view)?.disabled).toBe(false);
+        expect(view.element.querySelectorAll(".wx-srv-bubble-mine")).toHaveLength(1);
+        view.teardown();
+      });
+
+      it("on the UPLOAD: locks, keeps the recording, and the next unlock uploads and sends it", async () => {
+        uploadServerAttachment
+          .mockRejectedValueOnce(new ServerLockedError())
+          .mockResolvedValueOnce(voiceAttachment());
+        sendMessage.mockResolvedValueOnce(okSend(12));
+        const hooks = fakeHooks();
+        const view = await mountView(hooks);
+        await recordVoiceNote(view);
+
+        expect(hooks.lockNow).toHaveBeenCalledWith("unauthorized");
+        expect(composerError(view)).toBe("");
+        expect(sendMessage).not.toHaveBeenCalled();
+
+        view.detach();
+        await view.attach({ token: "fresh", expiresAt: 9_999_999_999 });
+        await flush();
+        await flush();
+
+        expect(uploadServerAttachment).toHaveBeenCalledTimes(2); // the same recording, uploaded afresh
+        expect(sentInputs()).toHaveLength(1);
+        expect(mic(view)?.disabled).toBe(false);
+        view.teardown();
+      });
+
+      it("on a RETRY after a transient failure: locks and still keeps the note", async () => {
+        uploadServerAttachment.mockResolvedValue(voiceAttachment());
+        sendMessage
+          .mockResolvedValueOnce({ ok: false, kind: "unavailable" } satisfies SendMessageResult)
+          .mockRejectedValueOnce(new ServerLockedError())
+          .mockResolvedValueOnce(okSend(13));
+        const hooks = fakeHooks();
+        const view = await mountView(hooks);
+        await recordVoiceNote(view);
+        expect(retry(view)?.hidden).toBe(false);
+
+        retry(view)?.click();
+        await flush();
+        await flush();
+        expect(hooks.lockNow).toHaveBeenCalledWith("unauthorized");
+        expect(composerError(view)).toBe("");
+
+        view.detach();
+        await view.attach({ token: "fresh", expiresAt: 9_999_999_999 });
+        await flush();
+        await flush();
+
+        const inputs = sentInputs();
+        expect(inputs).toHaveLength(3);
+        expect(new Set(inputs.map((input) => input.clientId)).size).toBe(1);
+        expect(uploadServerAttachment).toHaveBeenCalledOnce();
+        view.teardown();
+      });
+    });
 
     it("offers Discard next to Retry after a transient failure, and discarding frees the mic for a new note", async () => {
       uploadServerAttachment.mockResolvedValue(voiceAttachment());
@@ -572,6 +676,122 @@ describe("mountServerThread", () => {
       expect(discard(view)?.hidden).toBe(true);
       expect(mic(view)?.disabled).toBe(false);
       expect(sendMessage).not.toHaveBeenCalled();
+      view.teardown();
+    });
+
+    // L8 (reviewer): the accessible name of Retry ("Retry sending voice note") did not
+    // contain its visible text ("Retry voice note"), which breaks voice-control users
+    // (WCAG 2.5.3), and pressing Retry/Discard hid the focused button so keyboard and
+    // screen-reader focus fell back to the top of the page.
+    describe("accessibility of the failed-note controls (L8)", () => {
+      afterEach(() => {
+        document.body.innerHTML = "";
+      });
+
+      it("Retry and Discard are named by their visible text", async () => {
+        uploadServerAttachment.mockResolvedValue(voiceAttachment());
+        sendMessage.mockResolvedValue({ ok: false, kind: "unavailable" } satisfies SendMessageResult);
+        const view = await mountView();
+        await recordVoiceNote(view);
+
+        for (const control of [retry(view), discard(view)]) {
+          const visible = control?.textContent ?? "";
+          const label = control?.getAttribute("aria-label") ?? null;
+          expect(visible).not.toBe("");
+          // Either no aria-label (the text IS the name) or one that contains the visible text.
+          expect(label === null || label.includes(visible)).toBe(true);
+        }
+        view.teardown();
+      });
+
+      it("keeps focus on Retry when it fails again, and moves it to the mic once resolved", async () => {
+        uploadServerAttachment.mockResolvedValue(voiceAttachment());
+        sendMessage
+          .mockResolvedValueOnce({ ok: false, kind: "unavailable" } satisfies SendMessageResult)
+          .mockResolvedValueOnce({ ok: false, kind: "unavailable" } satisfies SendMessageResult)
+          .mockResolvedValueOnce({
+            ok: true,
+            message: fakeMessage({ seq: 21, clientId: "client-uuid-1", text: null }),
+          } satisfies SendMessageResult);
+        const view = await mountView();
+        document.body.appendChild(view.element);
+        await recordVoiceNote(view);
+
+        retry(view)?.focus();
+        retry(view)?.click();
+        await flush();
+        await flush();
+        expect(document.activeElement).toBe(retry(view)); // failed again: stay put
+
+        retry(view)?.focus();
+        retry(view)?.click();
+        await flush();
+        await flush();
+        expect(retry(view)?.hidden).toBe(true);
+        expect(document.activeElement).toBe(mic(view)); // sent: the mic is free
+        view.teardown();
+      });
+
+      it("Discard hands focus to the mic instead of dropping it", async () => {
+        uploadServerAttachment.mockResolvedValue(voiceAttachment());
+        sendMessage.mockResolvedValue({ ok: false, kind: "unavailable" } satisfies SendMessageResult);
+        const view = await mountView();
+        document.body.appendChild(view.element);
+        await recordVoiceNote(view);
+
+        discard(view)?.focus();
+        discard(view)?.click();
+        await flush();
+
+        expect(discard(view)?.hidden).toBe(true);
+        expect(document.activeElement).toBe(mic(view));
+        view.teardown();
+      });
+    });
+
+    // M2: auto-discard is for a verdict on the FILE itself (400/413/415: it will be judged
+    // the same way every time). A 403 (Cloudflare Access / WAF) or a 404/409/422 at the
+    // upload stage is about the session or the gateway - the recording is still held
+    // locally, so a fresh upload can succeed and the note must be kept for Retry.
+    it.each([403, 404, 409, 422])(
+      "an upload refused with a %i keeps the recording for Retry instead of discarding it",
+      async (status) => {
+        uploadServerAttachment
+          .mockRejectedValueOnce(new UploadError("The upload could not be completed. Please try again.", status))
+          .mockResolvedValueOnce(voiceAttachment());
+        sendMessage.mockResolvedValue({
+          ok: true,
+          message: fakeMessage({ seq: 9, clientId: "generated-uuid-1234", text: null }),
+        } satisfies SendMessageResult);
+        const view = await mountView();
+        await recordVoiceNote(view);
+
+        expect(retry(view)?.hidden).toBe(false);
+        expect(discard(view)?.hidden).toBe(false);
+        expect(composerError(view)).toContain("Couldn't send voice note");
+        expect(composerError(view)).not.toContain("discarded");
+
+        retry(view)?.click();
+        await flush();
+        await flush();
+        expect(uploadServerAttachment).toHaveBeenCalledTimes(2); // the SAME recording, re-uploaded
+        expect(sendMessage).toHaveBeenCalledOnce();
+        expect(retry(view)?.hidden).toBe(true);
+        expect(mic(view)?.disabled).toBe(false);
+        view.teardown();
+      },
+    );
+
+    it.each([400, 413, 415])("an upload refused with a %i (a verdict on the file) is discarded", async (status) => {
+      uploadServerAttachment.mockRejectedValue(new UploadError("This file type isn't supported.", status));
+      const view = await mountView();
+      await recordVoiceNote(view);
+
+      expect(composerError(view)).toBe(
+        "This file type isn't supported. The voice note was discarded — record it again.",
+      );
+      expect(retry(view)?.hidden).toBe(true);
+      expect(mic(view)?.disabled).toBe(false);
       view.teardown();
     });
 
@@ -999,6 +1219,105 @@ describe("mountServerThread", () => {
         document.body.innerHTML = "";
       });
 
+      it("a gateway 504 on the wipe is reconciled, not shown as a failure that invites a second wipe (M3)", async () => {
+        // The REAL wipeChat status mapping (only the mocked module boundary is replaced):
+        // a committed wipe answered with a gateway timeout looks exactly like this.
+        const { wipeChat: realWipeChat } = await vi.importActual<typeof import("../src/server/api/messages")>(
+          "../src/server/api/messages",
+        );
+        vi.stubGlobal("fetch", vi.fn(async () => new Response("gateway timeout", { status: 504 })));
+        wipeChat.mockImplementation((session: ServerSession) => realWipeChat(session));
+        getHistory
+          .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ text: "old before wipe" })] }))
+          .mockResolvedValueOnce(emptyHistory()); // the wipe DID commit
+        try {
+          const wipe = await startUnconfirmedWipe();
+          await vi.advanceTimersByTimeAsync(0);
+          expect(wipe.errorText() ?? "").not.toContain("try again");
+          expect(wipe.status()).toBe("Deleted. Erasing leftover traces…");
+          expect(wipe.wipeButton()?.disabled).toBe(false);
+          expect(wipe.view.element.textContent).not.toContain("old before wipe");
+          expect(vi.mocked(fetch)).toHaveBeenCalledOnce(); // one POST, never re-sent
+          wipe.sheet.teardown();
+          wipe.view.teardown();
+        } finally {
+          vi.unstubAllGlobals();
+        }
+      });
+
+      // L5 (reviewer): behaviours that were correct but unpinned (mutants survived).
+      it("backs off 1, 2, 4, 8 s and then holds at a 15 s cap (not doubling forever)", async () => {
+        getHistory
+          .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ text: "old before wipe" })] }))
+          .mockRejectedValue(new Error("offline"));
+        const wipe = await startUnconfirmedWipe();
+        const reconciliations = () => getHistory.mock.calls.length - 1; // minus the attach load
+        expect(reconciliations()).toBe(1); // immediately
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(reconciliations()).toBe(2);
+        await vi.advanceTimersByTimeAsync(2_000);
+        expect(reconciliations()).toBe(3);
+        await vi.advanceTimersByTimeAsync(4_000);
+        expect(reconciliations()).toBe(4);
+        await vi.advanceTimersByTimeAsync(8_000);
+        expect(reconciliations()).toBe(5); // t = 15 s
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(reconciliations()).toBe(6); // capped: +15 s, not +16 s
+        await vi.advanceTimersByTimeAsync(14_999);
+        expect(reconciliations()).toBe(6);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(reconciliations()).toBe(7); // and again +15 s
+        wipe.sheet.teardown();
+        wipe.view.teardown();
+      });
+
+      it("teardown abandons the reconciliation: no more requests, and the caller is told", async () => {
+        getHistory
+          .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ text: "old before wipe" })] }))
+          .mockRejectedValue(new Error("offline"));
+        const identity = fakeIdentity();
+        const view = mountServerThread({ identity, hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+        await view.attach(SESSION);
+        wipeChat.mockRejectedValue(new ServerErasureOutcomeUnknownError());
+        const outcome = view.wipe().then(
+          () => "resolved",
+          (error: unknown) => (error as Error).name,
+        );
+        await vi.advanceTimersByTimeAsync(3_000);
+        const callsBefore = getHistory.mock.calls.length;
+
+        view.teardown();
+
+        await expect(outcome).resolves.toBe("ServerWipeAbandonedError");
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(getHistory.mock.calls.length).toBe(callsBefore);
+        expect(wipeChat).toHaveBeenCalledOnce();
+      });
+
+      it("a history response that lands AFTER a wiped event cannot resurrect the messages", async () => {
+        let resolveHistory!: (page: HistoryPage) => void;
+        getHistory
+          .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ seq: 1, text: "old before wipe" })] }))
+          .mockImplementationOnce(() => new Promise<HistoryPage>((resolve) => { resolveHistory = resolve; }));
+        const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+        await view.attach(SESSION);
+        wipeChat.mockRejectedValue(new ServerErasureOutcomeUnknownError());
+        const outcome = view.wipe().then(
+          (value) => ({ resolved: value }),
+          (error: unknown) => ({ rejected: (error as Error).name }),
+        );
+        await vi.advanceTimersByTimeAsync(0); // the first reconciliation request is now in flight
+
+        view.handleStreamEvent({ type: "wiped" } as ServerStreamEvent);
+        await expect(outcome).resolves.toEqual({ resolved: true });
+        // The stale answer (snapshotted BEFORE the wipe) arrives late: it must be ignored.
+        resolveHistory(emptyHistory({ messages: [fakeMessage({ seq: 1, text: "old before wipe" })] }));
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(view.element.textContent).not.toContain("old before wipe");
+        view.teardown();
+      });
+
       it("keeps retrying the reconciliation with backoff, never the wipe, and stays 'checking' meanwhile", async () => {
         getHistory
           .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ text: "old before wipe" })] }))
@@ -1112,6 +1431,51 @@ describe("mountServerThread", () => {
         expect(wipe.statusHidden()).toBe(true);
         wipe.sheet.teardown();
         wipe.view.teardown();
+      });
+    });
+
+    // L3 (reviewer): the wipe boundary is the newest seq the client KNEW about. When the
+    // history never loaded it is 0, so "nothing at or before 0" was vacuously true and a
+    // wipe that never committed was reported as deleted while messages remained.
+    describe("an unknown wipe boundary (L3)", () => {
+      it("history never loaded + messages still there: NOT reported as deleted", async () => {
+        getHistory
+          .mockRejectedValueOnce(new Error("offline")) // the attach load fails: boundary unknown
+          .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ seq: 5, text: "still here" })] }));
+        wipeChat.mockRejectedValue(new ServerErasureOutcomeUnknownError());
+        const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+        await view.attach(SESSION);
+
+        await expect(view.wipe()).rejects.toMatchObject({ name: "ServerWipeNotCommittedError" });
+
+        expect(view.element.textContent).toContain("still here");
+        expect(wipeChat).toHaveBeenCalledOnce();
+        view.teardown();
+      });
+
+      it("history never loaded + nothing left: the wipe did commit", async () => {
+        getHistory
+          .mockRejectedValueOnce(new Error("offline"))
+          .mockResolvedValueOnce(emptyHistory());
+        wipeChat.mockRejectedValue(new ServerErasureOutcomeUnknownError());
+        const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+        await view.attach(SESSION);
+
+        await expect(view.wipe()).resolves.toBe(true);
+        view.teardown();
+      });
+
+      it("history loaded but EMPTY: a message that appears afterwards is newer, so it is a commit", async () => {
+        getHistory
+          .mockResolvedValueOnce(emptyHistory())
+          .mockResolvedValueOnce(emptyHistory({ messages: [fakeMessage({ seq: 5, text: "sent after the wipe" })] }));
+        wipeChat.mockRejectedValue(new ServerErasureOutcomeUnknownError());
+        const view = mountServerThread({ identity: fakeIdentity(), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+        await view.attach(SESSION);
+
+        await expect(view.wipe()).resolves.toBe(true);
+        expect(view.element.textContent).toContain("sent after the wipe");
+        view.teardown();
       });
     });
 

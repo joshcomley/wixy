@@ -216,7 +216,7 @@ test.describe("server-media.spec.ts (P6b)", () => {
     await unlockServer(page, `Retry ${Date.now()}`);
 
     const record = page.getByRole("button", { name: "Record a voice note" });
-    const retry = page.getByRole("button", { name: "Retry sending voice note" });
+    const retry = page.getByRole("button", { name: "Retry voice note" });
     const discard = page.getByRole("button", { name: "Discard voice note" });
     const draft = page.locator(".wx-chat-composer textarea");
 
@@ -290,7 +290,7 @@ test.describe("server-media.spec.ts (P6b)", () => {
     await discard.click();
 
     await expect(discard).toBeHidden();
-    await expect(page.getByRole("button", { name: "Retry sending voice note" })).toBeHidden();
+    await expect(page.getByRole("button", { name: "Retry voice note" })).toBeHidden();
     await expect(page.locator(".wx-chat-composer-error")).toBeHidden();
     await expect(record).toBeEnabled();
   });

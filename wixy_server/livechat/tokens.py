@@ -222,13 +222,18 @@ def unlock_request_refusal(request: Request) -> UnlockRefusal | None:
        cross-origin page cannot add without a preflight.
 
     A refusal never echoes the request and never reaches cmd, so it charges nothing."""
-    fetch_site = request.headers.get("sec-fetch-site")
-    if fetch_site is not None and fetch_site.strip().lower() != "same-origin":
+    # `getlist`, not `get`: a browser sends each of these headers once, so a duplicated line
+    # is refused outright rather than decided by whichever value happens to come first.
+    fetch_sites = request.headers.getlist("sec-fetch-site")
+    if fetch_sites and (len(fetch_sites) > 1 or fetch_sites[0].strip().lower() != "same-origin"):
         return UnlockRefusal(403, "forbidden", "cross_origin")
-    media_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
-    if media_type != "application/json":
+    content_types = request.headers.getlist("content-type")
+    if (
+        len(content_types) != 1
+        or content_types[0].split(";", 1)[0].strip().lower() != "application/json"
+    ):
         return UnlockRefusal(415, "unsupported_media_type", "content_type")
-    if request.headers.get(UNLOCK_GUARD_HEADER) != UNLOCK_GUARD_VALUE:
+    if request.headers.getlist(UNLOCK_GUARD_HEADER) != [UNLOCK_GUARD_VALUE]:
         return UnlockRefusal(403, "forbidden", "missing_guard_header")
     return None
 

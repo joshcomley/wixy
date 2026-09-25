@@ -548,6 +548,71 @@ _REFUSED_SHAPES: list[Any] = [
         )
         for site in ("cross-site", "same-site", "none", "not-a-real-value")
     ],
+    # Duplicated header lines (audit review L9). `headers.get` sees only the first value, so
+    # a duplicate could be decided by whichever line comes first. A legitimate browser sends
+    # each of these once, so a duplicate is refused outright.
+    pytest.param(
+        lambda pin: {
+            "content": _form_style_json(pin),
+            "headers": [
+                ("Content-Type", "application/json"),
+                (UNLOCK_GUARD_HEADER, UNLOCK_GUARD_VALUE),
+                ("Sec-Fetch-Site", "same-origin"),
+                ("Sec-Fetch-Site", "cross-site"),
+            ],
+        },
+        403,
+        id="duplicate-sec-fetch-site-same-origin-first",
+    ),
+    pytest.param(
+        lambda pin: {
+            "content": _form_style_json(pin),
+            "headers": [
+                ("Content-Type", "application/json"),
+                (UNLOCK_GUARD_HEADER, UNLOCK_GUARD_VALUE),
+                ("Sec-Fetch-Site", "same-origin"),
+                ("Sec-Fetch-Site", "same-origin"),
+            ],
+        },
+        403,
+        id="duplicate-sec-fetch-site-both-same-origin",
+    ),
+    pytest.param(
+        lambda pin: {
+            "content": _form_style_json(pin),
+            "headers": [
+                ("Content-Type", "application/json"),
+                ("Content-Type", "text/plain"),
+                (UNLOCK_GUARD_HEADER, UNLOCK_GUARD_VALUE),
+            ],
+        },
+        415,
+        id="duplicate-content-type-json-first",
+    ),
+    pytest.param(
+        lambda pin: {
+            "content": _form_style_json(pin),
+            "headers": [
+                ("Content-Type", "application/json"),
+                (UNLOCK_GUARD_HEADER, UNLOCK_GUARD_VALUE),
+                (UNLOCK_GUARD_HEADER, "0"),
+            ],
+        },
+        403,
+        id="duplicate-guard-header-valid-first",
+    ),
+    pytest.param(
+        lambda pin: {
+            "content": _form_style_json(pin),
+            "headers": [
+                ("Content-Type", "application/json"),
+                (UNLOCK_GUARD_HEADER, UNLOCK_GUARD_VALUE),
+                (UNLOCK_GUARD_HEADER, UNLOCK_GUARD_VALUE),
+            ],
+        },
+        403,
+        id="duplicate-guard-header-both-valid",
+    ),
 ]
 
 

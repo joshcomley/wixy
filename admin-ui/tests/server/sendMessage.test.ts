@@ -43,6 +43,15 @@ describe("sendMessage status mapping", () => {
     await expect(sendMessage(SESSION, INPUT)).resolves.toEqual({ ok: false, kind: "rejected", status });
   });
 
+  // M2 (reviewer): wixy's own send route never answers 403, so a 403 here is Cloudflare
+  // Access or a WAF in front of it (an expired Access session, a false positive) - the
+  // recording is fine and can be retried after a refresh. Auto-discarding it destroyed up
+  // to 15 minutes of audio.
+  it("a 403 (Cloudflare Access / WAF, never wixy itself) stays retryable", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("blocked", { status: 403 }));
+    await expect(sendMessage(SESSION, INPUT)).resolves.toEqual({ ok: false, kind: "unavailable" });
+  });
+
   it.each([408, 429, 500, 502, 503, 504])("a %i stays transient (retryable)", async (status) => {
     fetchMock.mockResolvedValueOnce(new Response("later", { status }));
     await expect(sendMessage(SESSION, INPUT)).resolves.toEqual({ ok: false, kind: "unavailable" });

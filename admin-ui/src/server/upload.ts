@@ -1,5 +1,7 @@
 /** Client-side implementation of the server-chat chunked upload contract. */
 
+import { ServerLockedError } from "./api/http";
+
 export type UploadKind = "photo" | "video" | "voice";
 
 export const UPLOAD_MAX_BYTES: Readonly<Record<UploadKind, number>> = {
@@ -68,6 +70,15 @@ export class UploadError extends Error {
     this.name = "UploadError";
     this.status = status;
   }
+}
+
+/** A verdict on the FILE itself — too large (413), unsupported type (415), or a malformed
+ * request (400) — which the server will give again for the same bytes. The other 4xx are
+ * about the upload SESSION (a 404/409 for one that expired or already completed, a 422)
+ * or the gateway (a 403 from Cloudflare Access / a WAF): a fresh upload of the recording
+ * the client still holds can succeed, so those stay retryable. */
+export function isDefinitiveUploadRejection(error: UploadError): boolean {
+  return error.status === 400 || error.status === 413 || error.status === 415;
 }
 
 export function validateUploadSize(kind: UploadKind, sizeBytes: number): void {
@@ -200,6 +211,9 @@ async function putChunkWithRetry(input: ChunkRequest): Promise<void> {
       lastError = error;
     } catch (error) {
       if (isAbortError(error) || input.signal?.aborted) throw error;
+      // A dead token is not a hiccup: retrying cannot help and would bury the lock signal
+      // under a generic failure, so the chat would never lock (L6).
+      if (error instanceof ServerLockedError) throw error;
       if (error instanceof UploadError && !RETRYABLE_STATUSES.has(error.status ?? -1)) throw error;
       lastError = error;
       if (attempt === MAX_CHUNK_ATTEMPTS - 1) break;

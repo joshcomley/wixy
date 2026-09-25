@@ -72,11 +72,13 @@ export type SendMessageResult =
    * keeps the draft (retry reuses the same `clientId`, §5.3's idempotency). */
   | { readonly ok: false; readonly kind: "unavailable" };
 
-/** A 4xx other than the transient 408 (timeout) and 429 (rate limit) is a definitive
- * verdict on the request, not a hiccup. (A 401 never gets here: `serverFetch` turns it
- * into a lock.) */
-export function isDefinitiveRejectionStatus(status: number | null): boolean {
-  return status !== null && status >= 400 && status < 500 && status !== 408 && status !== 429;
+/** A verdict on the SEND: a 4xx other than the transient 408 (timeout) and 429 (rate limit)
+ * — and other than 403, which wixy's own send route never answers, so it can only come
+ * from Cloudflare Access or a WAF in front of it (an expired session, a false positive)
+ * and says nothing about the recording. (A 401 never gets here: `serverFetch` turns it into
+ * a lock.) */
+export function isDefinitiveSendRejectionStatus(status: number): boolean {
+  return status >= 400 && status < 500 && status !== 403 && status !== 408 && status !== 429;
 }
 
 export async function sendMessage(
@@ -108,7 +110,7 @@ export async function sendMessage(
     const body = (await response.json().catch(() => null)) as { detail?: string } | null;
     return { ok: false, kind: "invalid", detail: body?.detail ?? "Couldn't send that message." };
   }
-  if (isDefinitiveRejectionStatus(response.status)) {
+  if (isDefinitiveSendRejectionStatus(response.status)) {
     return { ok: false, kind: "rejected", status: response.status };
   }
   return { ok: false, kind: "unavailable" };
@@ -141,6 +143,13 @@ export async function deleteMessage(session: ServerSession, seq: number): Promis
   }
 }
 
+/** After a request was sent, a 408 or any 5xx says nothing about whether the server acted
+ * on it: wixy's own commit may have landed, and Cloudflare (502/504/524...) sits in front
+ * and answers for the origin. Only a 4xx says the request was refused. */
+function isUnknownOutcomeStatus(status: number): boolean {
+  return status === 408 || status >= 500;
+}
+
 export async function wipeChat(session: ServerSession): Promise<boolean> {
   const response = await serverFetch(
     "/wipe",
@@ -151,6 +160,10 @@ export async function wipeChat(session: ServerSession): Promise<boolean> {
     },
     session,
   );
+  // A wipe is not idempotent: reporting a committed wipe as a definite failure would invite
+  // a second one that deletes everything sent since. Treat it like a dropped connection and
+  // let the thread reconcile against history (never re-POSTing).
+  if (isUnknownOutcomeStatus(response.status)) throw new ServerErasureOutcomeUnknownError();
   if (!response.ok) throw new Error(`Couldn't delete messages (${response.status}).`);
   if (response.status === 202) {
     const body = (await response.json()) as { erasurePending: boolean };
