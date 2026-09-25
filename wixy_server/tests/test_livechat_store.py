@@ -1352,3 +1352,59 @@ class TestTranscripts:
         for thread in threads:
             thread.join(timeout=30)
         assert sorted(states) == ["pending"] * 7 + ["started"]
+
+    def test_restart_pending_starts_over_only_when_asked(self, store: LiveChatStore) -> None:
+        _seq, att_id = _ready_voice_message(store)
+        store.begin_transcript(att_id=att_id, now=2000.0)
+        assert store.begin_transcript(att_id=att_id, now=2001.0).state == "pending"
+        restarted = store.begin_transcript(att_id=att_id, now=2002.0, restart_pending=True)
+        assert restarted.state == "started"
+        assert restarted.transcript is not None and restarted.transcript.updated_at == 2002.0
+
+    def test_restart_pending_never_touches_a_finished_transcript(
+        self, store: LiveChatStore
+    ) -> None:
+        _seq, att_id = _ready_voice_message(store)
+        store.begin_transcript(att_id=att_id, now=2000.0)
+        store.finish_transcript(
+            att_id=att_id, status="done", text="keep me", failure=None, engine=None, now=2001.0
+        )
+        again = store.begin_transcript(att_id=att_id, now=2002.0, restart_pending=True)
+        assert again.state == "done"
+        assert again.transcript is not None and again.transcript.text == "keep me"
+
+    def test_an_interrupted_record_only_ever_turns_pending_into_failed(
+        self, store: LiveChatStore
+    ) -> None:
+        _seq, att_id = _ready_voice_message(store)
+        store.begin_transcript(att_id=att_id, now=2000.0)
+        store.finish_transcript(
+            att_id=att_id, status="done", text="finished", failure=None, engine=None, now=2001.0
+        )
+        assert not store.finish_transcript(
+            att_id=att_id,
+            status="failed",
+            text=None,
+            failure="interrupted",
+            engine=None,
+            now=2002.0,
+            only_if_pending=True,
+        )
+        kept = store.get_transcript(att_id)
+        assert kept is not None and (kept.status, kept.text) == ("done", "finished")
+
+        store.finish_transcript(
+            att_id=att_id, status="failed", text=None, failure="timeout", engine=None, now=2004.0
+        )
+        store.begin_transcript(att_id=att_id, now=2005.0)  # a retry: pending again
+        assert store.finish_transcript(
+            att_id=att_id,
+            status="failed",
+            text=None,
+            failure="interrupted",
+            engine=None,
+            now=2006.0,
+            only_if_pending=True,
+        )
+        row = store.get_transcript(att_id)
+        assert row is not None and (row.status, row.failure) == ("failed", "interrupted")

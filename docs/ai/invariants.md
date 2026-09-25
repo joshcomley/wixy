@@ -752,8 +752,9 @@ Transcription (spec/server-chat/05-voice-transcription.md, decisions/00166) is n
 only trigger is `POST /api/admin/server/attachments/{id}/transcribe`, which answers 404 for anything
 that is not a sent voice note and 409 until it is ready. wixy talks to cmd's `/api/transcribe` **only
 with `private=1` and `cleanup=0`, with no `session_id` and no `context`, and only while cmd's
-`GET /api/transcribe/capabilities` has answered a literal `{"private": true}`** — checked when the
-request is accepted and again immediately before any audio leaves. Anything else (false, absent,
+`GET /api/transcribe/capabilities` has answered a literal `{"private": true}`** — from a 60 s cache
+when the request is accepted, and asked of cmd afresh (`available(fresh=True)`, never the cache)
+immediately before any audio leaves. Anything else (false, absent,
 malformed, unreachable, the standalone edition) is "unavailable": no audio is sent, the route answers
 503 `{"error":"not_configured"}` and the control is hidden. This exists because cmd's plain route
 retains the audio and transcript where delete and wipe can never reach them (Inv 40/46).
@@ -766,7 +767,7 @@ at startup becomes `failed`.
 *Enforced by:* `wixy_server/tests/test_livechat_transcribe.py` (probe strictness and 60 s cache; the
 exact request fields; response mapping; no text in any log line),
 `test_routes_livechat_transcription.py` (nothing sent to a cmd that is not private, on every
-unavailability path incl. a rollback between accept and send; the async flow; single-flight, one at a
+unavailability path incl. a rollback inside the probe-cache window between accept and send; the async flow; single-flight, one at a
 time and the rate limit; delete and wipe erase a transcript sentinel from the raw database and WAL
 bytes; a result after deletion is discarded; startup recovery), `test_livechat_store.py`
 (`TestTranscripts`: the state machine, racing begins, cascade), and

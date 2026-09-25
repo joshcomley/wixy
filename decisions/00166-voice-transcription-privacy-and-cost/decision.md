@@ -28,7 +28,8 @@ So wixy calls cmd **only** in cmd's *private mode* (`POST /api/transcribe` with 
 cmd promises means: no debug-buffer save, no transcript text in any log, the speech service told not
 to shadow or log text, and the bytes held in memory only (any temp file deleted in `finally`). wixy
 checks `GET /api/transcribe/capabilities` for a literal `{"private": true}` first (cached 60 s) and
-**again immediately before any audio leaves**; a cmd that does not answer it — or is down, or is an
+**asks cmd again — a fresh request, never the cached answer — immediately before any audio
+leaves**; a cmd that does not answer it — or is down, or is an
 older version — receives nothing, the button is hidden and the route answers 503.
 
 cmd's tests for the mode (cmd's repo, not wixy's): with `private=1`, nothing is added under

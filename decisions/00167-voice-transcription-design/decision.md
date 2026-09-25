@@ -19,27 +19,36 @@
    blue/green process — which knows nothing of transcripts — hard-deletes a message (foreign keys
    are on for every connection). Storing the transcript on the `attachments` row would have worked
    too but would have meant touching every attachment write path; a side table leaves them alone.
-3. **`begin_transcript` is one write transaction; `finish_transcript` is a plain `UPDATE … WHERE
+3. **`begin_transcript` is one write transaction, this process's in-flight set is the single-flight
+   authority, and `finish_transcript` is a plain `UPDATE … WHERE
    attachment_id = ?` whose row count means "still exists".** Two racing requests cannot both get
    `started` (the loser sees the winner's `pending` row). A result for a deleted message updates
    zero rows and is discarded — no foreign-key error is ever reachable, so nothing can become a 500
    and nothing can resurrect erased text. `finish` is deliberately **not** conditional on the row
-   still being `pending`: at startup the new process fails stale `pending` rows, but during a
-   blue/green overlap the *old* process's job may still be alive and finish; its (valid) result must
-   land.
+   still being `pending`: at startup the new process fails stale `pending` rows, but if another
+   process's job is still alive and finishes, its (valid) result should land. Slots restarts Wixy in
+   place (`nssm_restart`), so two live processes are not expected; the store is still written to
+   tolerate it, and the one write that must not clobber anything — the cancelled job's `interrupted`
+   record — is conditional on the row still being `pending` (`only_if_pending`).
 4. **A stopped job marks itself failed; startup fails any stale `pending` row and announces each one.**
-   A job cancelled by shutdown (a deploy, a slot swap stopping the old process) records `failed`
+   A job cancelled by a graceful shutdown records `failed`
    (`interrupted`) under a cancel shield before the cancellation propagates, so no spinner outlives
-   its process even when no restart follows. A `pending` row in a process that has only just started
+   its process even when no restart follows. (A fleet deploy force-kills the service, so there the
+   startup sweep is what clears the row.) A `pending` row in a process that has only just started
    belongs to a job that died without doing that (a hard kill); without the `message_updated` event a
    reconnecting client would keep a spinner up forever.
 5. **One transcription in flight globally, single-flight per attachment, 6 new jobs a minute per
    identity, in memory.** The box's GPU/CPU is shared with dictation. Extra jobs wait (their rows
    stay `pending`) rather than being refused, because the queue is bounded by the rate limit. The
    limiter is per process; a blue/green overlap briefly doubles it, which is harmless.
-6. **The probe is checked twice**: when the request is accepted, and again immediately before the
-   audio is sent. A cmd that stopped promising private mode in between gets nothing and the job
-   fails `unavailable`. Cached 60 s both ways, dropped on any transport/5xx failure.
+6. **The probe is checked twice**: from the 60 s cache when the request is accepted (cheap), and
+   **fresh from cmd** (`available(fresh=True)`, one extra loopback GET per job) immediately before the
+   audio is sent. A cmd rolled back to a retaining build inside the cache window gets nothing and the
+   job fails `unavailable`. (An early version re-checked the *cached* answer, which protected
+   nothing; the independent review caught it and the test now flips the fake with the cache warm.)
+   The cache holds both answers for 60 s and is dropped on a transport failure or any unexpected
+   status (404/401/5xx other than `asr_warming`), not on a timeout, a rejection or `warming`. The
+   probe itself has a whole-call time limit, so a slow cmd cannot stall `GET /usage` or the queue.
 7. **No retries in the client.** A lost response that was in fact received would run the note
    through the shared engine twice. The user's Retry button is the retry.
 8. **The stored transcript is text only; failure detail stays server-side.** The wire carries
@@ -56,7 +65,15 @@
     HTTP reply to the POST, and applying that reply's `pending` afterwards leaves a spinner forever.
     The block counts stream updates applied since it sent the request and ignores a `started` reply
     if any arrived.
-11. **The availability flag rides on `GET /usage`** (`transcriptionAvailable`), read once per attach,
+11. **A `pending` row with no job behind it is restarted.** If a job's outcome cannot be recorded
+    (a database locked past its busy timeout, a spawn that failed after the row committed) the row is
+    `pending` with nothing running. The route treats "not in this process's in-flight set" as "no job"
+    (`begin_transcript(restart_pending=True)`), claiming the note before its first `await` so racing
+    requests still start exactly one job; otherwise the spinner would outlive everything until the next
+    restart.
+12. **A transcript update on a message already on screen never raises the "New messages" pill**
+    (`thread.ts`): it is not an arrival.
+13. **The availability flag rides on `GET /usage`** (`transcriptionAvailable`), read once per attach,
     rather than on the history payload: the history contract stays untouched and an old client
     ignores the extra key. The control therefore appears within one unlock of cmd's private mode
     coming live (the idle lock is 10 s, so that is immediate in practice).

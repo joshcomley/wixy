@@ -738,8 +738,11 @@ retains the audio and transcript (a rolling `dictation-audio/` buffer, the ASR s
 delete and wipe cannot reach them, so wixy uses it only through cmd's **private mode**: form fields
 `private=1` and `cleanup=0` (no LLM sees the text), multipart `audio`, and **no `session_id`, no
 `context`**. It first calls `GET /api/transcribe/capabilities` and needs a literal
-`{"private": true}` (cached 60 s both ways; dropped on a transport/5xx failure). False, missing,
-malformed or unreachable ⇒ unavailable. Response mapping: 200 with `text` (or `raw`) → ok (an empty
+`{"private": true}` (cached 60 s both ways; the cache is dropped on a transport failure or any
+unexpected status — 404, 401, a 5xx other than `asr_warming` — but not on a timeout, a rejection or
+`warming`; the probe has a whole-call time limit). False, missing, malformed or unreachable ⇒
+unavailable. `available(fresh=True)` skips the cache: a job uses it immediately before any audio
+leaves. Response mapping: 200 with `text` (or `raw`) → ok (an empty
 string is a valid "nothing said"; more than 200,000 characters is refused as invalid); 503
 `asr_warming` → `warming`; other 503/5xx/transport → `unavailable`; 400/413/415/422 → `rejected`;
 budget exceeded → `timeout`. No retries. `create_app(..., transcriber=)` is the injection seam
@@ -754,15 +757,20 @@ missing. `begin_transcript` decides start/pending/done/gone in one write transac
 new `pending` with `message_updated`; `finish_transcript` is an `UPDATE` whose row count says whether
 the row still exists (a result after delete/wipe is discarded, no event); `fail_stale_pending_
 transcripts` runs at startup, and a job cancelled by shutdown records itself `failed` (`interrupted`)
-under a shield on its way out. The `failure` code (`unavailable`, `warming`, `timeout`, `rejected`,
+under a shield on its way out — only if the row is still `pending` (`only_if_pending`), so it can
+never erase a finished transcript. (Slots restarts Wixy in place with a forced stop, so in a real
+deploy the startup sweep, not this handler, is what clears such a row.) The `failure` code (`unavailable`, `warming`, `timeout`, `rejected`,
 `invalid_response`, `media_missing`, `too_long`, `interrupted`, `error`) is server-side only.
 
 **The route and job (`routes_livechat.py`, `livechat/transcription.py`).**
 `POST /attachments/{id}/transcribe` answers at once: 404 (not a sent voice note), 409 (not ready),
-200 (already `done`), 202 (already `pending`), 503 `not_configured`, 429 (6 new jobs a minute per
-identity), else a fresh `pending` row and a job on the contained group → 202. The job
+200 (already `done`), 202 (this process already has a job for it — `TranscriptionRuntime.inflight`
+is the single-flight authority), 503 `not_configured`, 429 (6 new jobs a minute per identity), else
+the note is claimed in process before the first `await`, a `pending` row is written and a job runs on
+the contained group → 202. A `pending` row with no job behind it (its outcome could not be recorded)
+is restarted by the next request (`begin_transcript(restart_pending=True)`). The job
 (`TranscriptionRuntime.run_job`) waits for the global one-at-a-time slot, reads
-`media/<id[:2]>/<id>/play.m4a`, re-checks the probe, sends it with a budget of **60 s + 0.5 × the
+`media/<id[:2]>/<id>/play.m4a`, asks cmd afresh whether it still promises private mode, sends it with a budget of **60 s + 0.5 × the
 note's seconds**, and records `done`/`failed`, which appends `message_updated`; the stream delivers
 `Attachment.transcript` to every device. `GET /usage` gains `transcriptionAvailable`.
 

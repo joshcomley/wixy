@@ -142,7 +142,9 @@ class TranscriptionRuntime:
                 result = await self._transcribe(att_id)
         except anyio.get_cancelled_exc_class():
             with anyio.CancelScope(shield=True):
-                await self._record(att_id, _JobResult("failed", failure="interrupted"))
+                await self._record(
+                    att_id, _JobResult("failed", failure="interrupted"), only_if_pending=True
+                )
             raise
         except Exception:
             _LOGGER.exception("livechat: transcription job for %s failed unexpectedly", att_id)
@@ -152,7 +154,9 @@ class TranscriptionRuntime:
         if result is not None:  # None: the attachment was deleted while the job ran
             await self._record(att_id, result)
 
-    async def _record(self, att_id: str, result: _JobResult) -> None:
+    async def _record(
+        self, att_id: str, result: _JobResult, *, only_if_pending: bool = False
+    ) -> None:
         try:
             stored = await anyio.to_thread.run_sync(
                 lambda: self.store.finish_transcript(
@@ -162,6 +166,7 @@ class TranscriptionRuntime:
                     failure=result.failure,
                     engine=result.engine,
                     now=time.time(),
+                    only_if_pending=only_if_pending,
                 )
             )
         except Exception:
@@ -192,9 +197,10 @@ class TranscriptionRuntime:
             gone = await anyio.to_thread.run_sync(self.store.get_attachment, att_id) is None
             return None if gone else _JobResult("failed", failure="media_missing")
 
-        # The probe is re-checked right before any audio leaves: a cmd that stopped promising
-        # private mode since the request was accepted must not receive it.
-        if not await transcriber.available():
+        # Asked of cmd NOW, not answered from the 60 s cache: a cmd that stopped promising private
+        # mode since the request was accepted (a rollback to a retaining build) must not receive
+        # the audio.
+        if not await transcriber.available(fresh=True):
             return _JobResult("failed", failure="unavailable")
         response = await transcriber.transcribe(
             audio=audio,

@@ -547,14 +547,19 @@ async def transcribe_attachment(att_id: str, request: Request) -> JSONResponse:
     if attachment.status != "ready":
         return JSONResponse(status_code=409, content={"error": "not_ready"})
 
+    def _pending() -> JSONResponse:
+        return JSONResponse(status_code=202, content={"transcript": {"status": "pending"}})
+
     existing = attachment.transcript
     if existing is not None and existing.status == "done":
         return _stored(existing, status_code=200)  # reading a stored transcript needs no cmd
-    if existing is not None and existing.status == "pending":
-        return _stored(existing, status_code=202)  # single-flight: a job already owns it
+    if att_id in runtime.inflight:
+        return _pending()  # single-flight: this process already has a job for the note
 
     if not await runtime.available():
         return JSONResponse(status_code=503, content={"error": "not_configured"})
+    if att_id in runtime.inflight:  # a concurrent request claimed it while we probed
+        return _pending()
     retry_after = runtime.rate_limiter.hit(auth.email)
     if retry_after is not None:
         seconds = max(1, math.ceil(retry_after))
@@ -564,18 +569,26 @@ async def transcribe_attachment(att_id: str, request: Request) -> JSONResponse:
             headers={"Retry-After": str(seconds)},
         )
 
-    begin = await anyio.to_thread.run_sync(
-        lambda: store.begin_transcript(att_id=att_id, now=time.time())
-    )
-    if begin.state == "gone":
-        return _not_found()
+    # Claim the note BEFORE the next await (nothing has been awaited since the check above), so a
+    # concurrent request sees it in flight. A `pending` row with no claim here belongs to a job
+    # that is gone (its outcome could not be recorded), so it is restarted rather than left
+    # answering 202 forever.
+    runtime.inflight.add(att_id)
+    try:
+        begin = await anyio.to_thread.run_sync(
+            lambda: store.begin_transcript(att_id=att_id, now=time.time(), restart_pending=True)
+        )
+        if begin.state == "started":
+            notifier.publish()  # the other device's spinner
+            background.spawn("livechat-transcription", runtime.run_job, att_id)
+            return _stored(begin.transcript, status_code=202)
+    except BaseException:
+        runtime.inflight.discard(att_id)
+        raise
+    runtime.inflight.discard(att_id)
     if begin.state == "done":
         return _stored(begin.transcript, status_code=200)
-    if begin.state == "started":
-        runtime.inflight.add(att_id)
-        notifier.publish()  # the other device's spinner
-        background.spawn("livechat-transcription", runtime.run_job, att_id)
-    return _stored(begin.transcript, status_code=202)
+    return _not_found()  # "gone": deleted while we were deciding
 
 
 # ---------------------------------------------------------------------------

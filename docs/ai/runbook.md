@@ -174,7 +174,9 @@ PIN service's, and the standalone edition (no cmd) is always unavailable.
 - **Off by default, self-enabling.** Until cmd's private mode is deployed the probe fails, the
   Transcribe button is hidden, `GET /api/admin/server/usage` reports `transcriptionAvailable:false`
   and the route answers 503 `not_configured`; no audio is ever sent. When cmd is updated, the
-  control appears within about a minute (the probe's cache) — no wixy restart or configuration.
+  control appears the next time someone unlocks the chat once the probe's 60 s cache has turned
+  `true` (the client reads `transcriptionAvailable` once per unlock, and hides the control if the
+  server answers 503) — no wixy restart or configuration.
 - **Check it live.** With a signed-in admin session, unlock the Server chat and read
   `/api/admin/server/usage`: `transcriptionAvailable` must be `true`. Tap Transcribe on one test
   note, and confirm **nothing new appears under cmd's `dictation-audio/` and no line is added to

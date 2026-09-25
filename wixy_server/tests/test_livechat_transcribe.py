@@ -97,6 +97,44 @@ class TestProbe:
         await transcriber.aclose()
 
 
+class TestFreshProbe:
+    @pytest.mark.asyncio
+    async def test_fresh_ignores_the_cache_and_refreshes_it(self) -> None:
+        state = FakeCmdState(transcribe_private_supported=True)
+        transcriber, _ = _transcriber(state)
+        assert await transcriber.available() is True
+        assert await transcriber.available() is True
+        assert state.transcribe_probe_count == 1  # cached
+
+        state.transcribe_private_supported = False  # a rollback, inside the 60 s window
+        assert await transcriber.available() is True  # the cache still says yes...
+        assert await transcriber.available(fresh=True) is False  # ...cmd, asked now, says no
+        assert state.transcribe_probe_count == 2
+        assert await transcriber.available() is False  # and the cache now agrees
+        assert state.transcribe_probe_count == 2
+        await transcriber.aclose()
+
+    @pytest.mark.asyncio
+    async def test_a_probe_that_never_finishes_is_unavailable_within_its_budget(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import asyncio
+
+        import wixy_server.livechat.transcribe as transcribe_module
+
+        monkeypatch.setattr(transcribe_module, "PROBE_TIMEOUT_S", 0.1)
+
+        async def stall(request: httpx.Request) -> httpx.Response:
+            await asyncio.sleep(30)
+            return httpx.Response(200, json={"private": True})
+
+        transcriber = _mock_transcriber(httpx.MockTransport(stall))
+        started = asyncio.get_running_loop().time()
+        assert await transcriber.available() is False
+        assert asyncio.get_running_loop().time() - started < 5
+        await transcriber.aclose()
+
+
 class TestRequestShape:
     @pytest.mark.asyncio
     async def test_sends_private_and_cleanup_off_and_nothing_about_the_chat(self) -> None:

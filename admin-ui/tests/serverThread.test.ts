@@ -1932,6 +1932,48 @@ describe("mountServerThread", () => {
       view.teardown();
     });
 
+    describe("the New messages pill", () => {
+      async function mountScrolledUp(): Promise<ReturnType<typeof mount>> {
+        usage(true);
+        getHistory.mockResolvedValue(emptyHistory({ messages: [voiceMessage(null, { sender: "Purdy" })] }));
+        const view = mount();
+        await view.attach(SESSION);
+        await flush();
+        const thread = view.element.querySelector<HTMLElement>(".wx-srv-thread")!;
+        Object.defineProperty(thread, "scrollTop", { value: 0, configurable: true, writable: true });
+        Object.defineProperty(thread, "scrollHeight", { value: 2000, configurable: true });
+        Object.defineProperty(thread, "clientHeight", { value: 300, configurable: true });
+        thread.dispatchEvent(new Event("scroll")); // the reader is scrolled up
+        return view;
+      }
+      const pill = (view: ReturnType<typeof mount>) =>
+        view.element.querySelector<HTMLButtonElement>(".wx-srv-jump-pill")!;
+
+      it("is not raised by a transcript arriving on someone else's older note", async () => {
+        const view = await mountScrolledUp();
+        view.handleStreamEvent({
+          type: "message_updated",
+          message: voiceMessage({ status: "pending" }, { sender: "Purdy" }),
+        });
+        view.handleStreamEvent({
+          type: "message_updated",
+          message: voiceMessage({ status: "done", text: "words" }, { sender: "Purdy" }),
+        });
+        expect(pill(view).hidden).toBe(true);
+        view.teardown();
+      });
+
+      it("is still raised by a genuinely new message from someone else", async () => {
+        const view = await mountScrolledUp();
+        view.handleStreamEvent({
+          type: "message",
+          message: fakeMessage({ seq: 99, clientId: "c99", sender: "Purdy", text: "new" }),
+        });
+        expect(pill(view).hidden).toBe(false);
+        view.teardown();
+      });
+    });
+
     it("a deleted message takes its transcript with it", async () => {
       usage(true);
       getHistory.mockResolvedValue(

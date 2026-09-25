@@ -57,7 +57,10 @@ class TranscribeResult:
 
 
 class Transcriber(Protocol):
-    async def available(self) -> bool: ...
+    async def available(self, *, fresh: bool = False) -> bool:
+        """Whether cmd currently promises private mode. `fresh=True` ignores the cached answer
+        and asks cmd now — required immediately before any audio is sent."""
+        ...
 
     async def transcribe(
         self, *, audio: bytes, filename: str, content_type: str, timeout_s: float
@@ -69,7 +72,10 @@ class Transcriber(Protocol):
 class CmdTranscriber:
     """`POST {base}/api/transcribe` (multipart `audio`, form `private=1` + `cleanup=0`) gated
     by `GET {base}/api/transcribe/capabilities`, whose answer is cached for `probe_ttl_s`
-    (both ways — a down cmd is not hammered on every usage poll).
+    (both ways — a down cmd is not hammered on every usage poll). The cache is for the cheap
+    "should the button show / may a request be accepted" questions; a job asks `fresh=True`
+    immediately before it sends any audio, so a cmd that has just stopped promising private mode
+    receives nothing even inside the 60 s window.
 
     No retries: a transcription is GPU/CPU work on a shared box, and repeating one whose
     response was merely lost would just do it twice; the user's Retry button is the retry.
@@ -96,8 +102,8 @@ class CmdTranscriber:
     def invalidate_probe(self) -> None:
         self._probe_result = None
 
-    async def available(self) -> bool:
-        if self._probe_result is not None and self._clock() < self._probe_expires_at:
+    async def available(self, *, fresh: bool = False) -> bool:
+        if not fresh and self._probe_result is not None and self._clock() < self._probe_expires_at:
             return self._probe_result
         result = await self._probe()
         self._probe_result = result
@@ -106,9 +112,14 @@ class CmdTranscriber:
 
     async def _probe(self) -> bool:
         try:
-            response = await self._client.get(
-                f"{self._base_url}/api/transcribe/capabilities", timeout=PROBE_TIMEOUT_S
-            )
+            # `httpx` timeouts are per phase; `fail_after` bounds the whole probe, so a cmd that
+            # trickles bytes cannot stall `GET /usage` or a job waiting for its turn.
+            with anyio.fail_after(PROBE_TIMEOUT_S):
+                response = await self._client.get(
+                    f"{self._base_url}/api/transcribe/capabilities", timeout=PROBE_TIMEOUT_S
+                )
+        except TimeoutError:
+            return False
         except httpx.HTTPError:
             return False
         if response.status_code != 200:

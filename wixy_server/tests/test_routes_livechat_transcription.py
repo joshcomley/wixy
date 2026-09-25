@@ -498,8 +498,9 @@ class TestPrivateModeGate:
             _wait_for(lambda: len(cmd_state.transcribe_requests) == 1)
             assert client.post(TRANSCRIBE.format(second.att_id), headers=headers).status_code == 202
 
-            cmd_state.transcribe_private_supported = False  # a rollback of cmd, mid-flight
-            env.app.state.livechat_transcription.transcriber.invalidate_probe()
+            # A rollback of cmd to a retaining build, INSIDE the 60 s probe-cache window: the
+            # cached answer is still `true`, so only a fresh probe at send time can catch it.
+            cmd_state.transcribe_private_supported = False
             gate.set()
             _wait_for(_finished(env, first.att_id))
             _wait_for(_finished(env, second.att_id))
@@ -614,6 +615,83 @@ class TestLimits:
             gate.set()
             _wait_for(_finished(env, voice.att_id))
         assert len(cmd_state.transcribe_requests) == 1
+
+    def test_two_simultaneous_requests_start_one_job(
+        self, make_env: Callable[..., Env], cmd_state: FakeCmdState
+    ) -> None:
+        """The note is claimed before anything is awaited, so racing requests (two devices, a
+        double tap) cannot both start a job."""
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        gate = threading.Event()
+        cmd_state.transcribe_gate = gate
+        env = make_env()
+        voice = _seed_voice(env)
+        with TestClient(env.app) as client:
+            headers = _unlock(client)
+            barrier = threading.Barrier(6)
+
+            def post() -> int:
+                barrier.wait()
+                return int(
+                    client.post(TRANSCRIBE.format(voice.att_id), headers=headers).status_code
+                )
+
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                codes = list(pool.map(lambda _i: post(), range(6)))
+            assert codes == [202] * 6
+            _wait_for(lambda: len(cmd_state.transcribe_requests) >= 1)
+            time.sleep(0.3)
+            gate.set()
+            _wait_for(_finished(env, voice.att_id))
+        assert len(cmd_state.transcribe_requests) == 1
+
+    def test_a_pending_row_with_no_job_behind_it_is_restarted_not_left_spinning(
+        self, make_env: Callable[..., Env]
+    ) -> None:
+        """If a job's outcome could not be recorded (a locked database) the row is `pending`
+        with nothing running. The next request must start over rather than answer 202 forever."""
+        env = make_env()
+        voice = _seed_voice(env)
+        with TestClient(env.app) as client:
+            headers = _unlock(client)
+            begun = env.store.begin_transcript(att_id=voice.att_id, now=time.time())
+            assert begun.state == "started"  # a row, but no job in this process
+            assert env.app.state.livechat_transcription.inflight == set()
+
+            response = client.post(TRANSCRIBE.format(voice.att_id), headers=headers)
+            assert response.status_code == 202
+            _wait_for(_finished(env, voice.att_id))
+            assert _message_attachment(client, headers, voice.att_id)["transcript"] == {
+                "status": "done",
+                "text": SENTINEL,
+            }
+        assert len(env.state.transcribe_requests) == 1
+
+    def test_a_failed_spawn_releases_the_claim(
+        self, make_env: Callable[..., Env], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        env = make_env()
+        voice = _seed_voice(env)
+        with TestClient(env.app, raise_server_exceptions=False) as client:
+            headers = _unlock(client)
+            background = env.app.state.background_tasks
+            real_spawn = background.spawn
+            calls = {"n": 0}
+
+            def failing_spawn(name: str, fn: Any, *args: Any) -> None:
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise RuntimeError("task group is closing")
+                real_spawn(name, fn, *args)
+
+            monkeypatch.setattr(background, "spawn", failing_spawn)
+            assert client.post(TRANSCRIBE.format(voice.att_id), headers=headers).status_code == 500
+            assert env.app.state.livechat_transcription.inflight == set()
+            # the row is `pending` with no job, and the next request restarts it
+            assert client.post(TRANSCRIBE.format(voice.att_id), headers=headers).status_code == 202
+            _wait_for(_finished(env, voice.att_id))
 
     def test_only_one_transcription_runs_at_a_time(
         self, make_env: Callable[..., Env], cmd_state: FakeCmdState
@@ -796,6 +874,34 @@ class TestStartupRecovery:
         row = env.store.get_transcript(voice.att_id)
         assert row is not None and (row.status, row.failure) == ("failed", "interrupted")
         assert env.app.state.livechat_transcription.inflight == set()
+
+    def test_the_shutdown_record_never_overwrites_a_finished_transcript(
+        self, make_env: Callable[..., Env], cmd_state: FakeCmdState
+    ) -> None:
+        """A cancelled job only turns a still-`pending` row into `failed`: if another process's
+        result already landed, that transcript is not erased on the way out."""
+        import threading
+
+        gate = threading.Event()
+        cmd_state.transcribe_gate = gate
+        env = make_env()
+        voice = _seed_voice(env)
+        with TestClient(env.app) as client:
+            headers = _unlock(client)
+            assert client.post(TRANSCRIBE.format(voice.att_id), headers=headers).status_code == 202
+            _wait_for(lambda: len(cmd_state.transcribe_requests) == 1)
+            assert env.store.finish_transcript(
+                att_id=voice.att_id,
+                status="done",
+                text="landed from elsewhere",
+                failure=None,
+                engine=None,
+                now=time.time(),
+            )
+        gate.set()
+
+        row = env.store.get_transcript(voice.att_id)
+        assert row is not None and (row.status, row.text) == ("done", "landed from elsewhere")
 
     def test_an_old_database_is_upgraded_when_the_app_starts(
         self, make_env: Callable[..., Env]

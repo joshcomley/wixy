@@ -1041,8 +1041,15 @@ class LiveChatStore:
         attachment = self.get_attachment(att_id)
         return attachment.transcript if attachment is not None else None
 
-    def begin_transcript(self, *, att_id: str, now: float) -> TranscriptBegin:
+    def begin_transcript(
+        self, *, att_id: str, now: float, restart_pending: bool = False
+    ) -> TranscriptBegin:
         """Atomically decide whether a transcription job should start for `att_id`.
+
+        `restart_pending=True` treats an existing `pending` row like a `failed` one and starts
+        over: the route passes it only when THIS process has no job in flight for the note, so
+        the row belongs to a job that is gone (its outcome could not be recorded, or it was
+        started by a process that died) — never to a live one.
 
         Everything is checked under one write lock, so two racing requests can never both
         get `started`: the loser sees the winner's `pending` row. A missing row and a
@@ -1065,7 +1072,7 @@ class LiveChatStore:
             existing = _load_attachment(conn, att_id).transcript
             if existing is not None and existing.status == "done":
                 return TranscriptBegin("done", existing)
-            if existing is not None and existing.status == "pending":
+            if existing is not None and existing.status == "pending" and not restart_pending:
                 return TranscriptBegin("pending", existing)
             if existing is None:
                 conn.execute(
@@ -1091,17 +1098,22 @@ class LiveChatStore:
         failure: str | None,
         engine: str | None,
         now: float,
+        only_if_pending: bool = False,
     ) -> bool:
         """Record a job's outcome. Returns False when the row is gone (the message was
         deleted or the chat wiped while the job ran — `ON DELETE CASCADE` removed it): the
         result is discarded and no event is emitted, so a late transcript can never
-        resurrect erased content. Deliberately not conditional on the row still being
-        `pending`, so a live job in a sibling blue/green process can still land its result
-        after this process's startup marked the row `failed`."""
+        resurrect erased content. Ordinarily not conditional on the row still being
+        `pending`, so a live job in another process can still land its result after this
+        process's startup marked the row `failed`. `only_if_pending=True` is for the
+        "interrupted" record a cancelled job writes on its way out: it must only ever turn a
+        still-`pending` row into `failed`, never overwrite a `done` transcript or a newer
+        attempt's outcome."""
         with self._write_txn() as conn:
             cursor = conn.execute(
                 "UPDATE attachment_transcripts SET status = ?, text = ?, failure = ?, "
-                "engine = ?, updated_at = ? WHERE attachment_id = ?",
+                "engine = ?, updated_at = ? WHERE attachment_id = ?"
+                + (" AND status = 'pending'" if only_if_pending else ""),
                 (status, text if status == "done" else None, failure, engine, now, att_id),
             )
             if cursor.rowcount != 1:

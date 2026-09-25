@@ -1173,10 +1173,16 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     handleStreamEvent(event: ServerStreamEvent): void {
       switch (event.type) {
         case "message":
-        case "message_updated":
+        case "message_updated": {
+          // An update to a message already on screen (a transcript, media finishing) is not an
+          // arrival, so it never raises the "New messages" pill.
+          const isArrival = !confirmedBySeq.has(event.message.seq);
           addConfirmed(event.message);
-          renderThreadList(event.message.sender !== "" && !identity.isMine(event.message.sender));
+          renderThreadList(
+            isArrival && event.message.sender !== "" && !identity.isMine(event.message.sender),
+          );
           return;
+        }
         case "message_deleted":
           deletedSeqs.add(event.seq);
           contentRevision += 1;

@@ -57,8 +57,9 @@ file.
   unreachable ⇒ the feature is unavailable**: the Transcribe control is hidden and the route
   answers 503 `{"error":"not_configured"}`. The standalone edition has no cmd and is always
   unavailable;
-- the probe is re-checked immediately before any audio leaves (a cmd that stopped promising the
-  mode in between receives nothing and the job fails);
+- the probe is asked of cmd **afresh** (not answered from the cache) immediately before any audio
+  leaves, so a cmd rolled back to a retaining build inside the 60 s window receives nothing and the
+  job fails `unavailable`;
 - the request is exactly `private=1` and `cleanup=0` (no LLM ever sees the text) with the note's
   processed audio rendition, and **no `session_id` and no `context`** — nothing about the chat is
   disclosed;
@@ -98,10 +99,10 @@ route never waits for the transcript.
 | unknown id, not a **voice** attachment, or not yet sent in a message | 404 `{"error":"not_found"}` |
 | the note is still processing / failed processing | 409 `{"error":"not_ready"}` |
 | a transcript is already `done` | 200 `{"transcript":{"status":"done","text":…}}` (no cmd call, works even if cmd is later gone) |
-| a job is already `pending` (single-flight) | 202 `{"transcript":{"status":"pending"}}` |
+| this process already has a job for the note (single-flight) | 202 `{"transcript":{"status":"pending"}}` |
 | cmd cannot promise private mode / standalone | 503 `{"error":"not_configured"}` |
 | more than 6 new jobs in a minute for this identity | 429 `{"error":"rate_limited","retryAfterS":n}` + `Retry-After` |
-| otherwise (none, or `failed` ⇒ the retry) | upsert a `pending` row, append `message_updated`, run the job on the contained background group (Inv 47) → 202 `{"transcript":{"status":"pending"}}` |
+| otherwise (none, `failed` ⇒ the retry, or a `pending` row with no job behind it — its outcome could not be recorded) | claim the note in process, upsert a `pending` row, append `message_updated`, run the job on the contained background group (Inv 47) → 202 `{"transcript":{"status":"pending"}}` |
 
 Limits: single-flight per attachment; **one transcription in flight globally** (further jobs wait,
 their rows `pending`); 6 new jobs a minute per identity; the maximum duration is the existing voice
