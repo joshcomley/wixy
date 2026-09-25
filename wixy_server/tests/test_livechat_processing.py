@@ -391,10 +391,11 @@ class TestProcessPhoto:
         with Image.open(src) as original:
             if kind == "gray16-png":
                 expected_gray = Image.new("L", original.size)
+                # The source holds only 0 and 32768, which scale to the literals 0 and 128.
                 expected_gray.putdata(
                     [
-                        round(int(original.getpixel((x, y))) * 255 / 65535)
-                        for y in range(original.height)
+                        0 if x < 20 else 128
+                        for _y in range(original.height)
                         for x in range(original.width)
                     ]
                 )
@@ -432,7 +433,7 @@ class TestProcessPhoto:
             [0 if x < 13 else 32768 if x < 27 else 65535 for _y in range(20) for x in range(40)]
         )
         image.save(src, format="PNG")
-        expected_midtone = round(32768 * 255 / 65535)
+        expected_midtone = 128  # 32768 of 65535 is 127.5 of 255, rounded half up
 
         result = processing.process_photo(src, output_dir=tmp_path / "out")
 
@@ -538,6 +539,36 @@ class TestProcessPhoto:
         assert getattr(reopened, "is_animated", False) is True
         # A thumbnail is still produced even though the full rendition is untouched.
         assert result.renditions["thumb"].is_file()
+
+    @pytest.mark.parametrize(
+        ("transparent", "thumb_name"), [(False, "thumb.jpg"), (True, "thumb.png")]
+    )
+    def test_animated_gif_thumbnail_format_follows_first_frame_transparency(
+        self, transparent: bool, thumb_name: str, tmp_path: Path
+    ) -> None:
+        src = tmp_path / "in.gif"
+        frames = [
+            Image.new("RGB", (40, 20), colour).convert("P", palette=Image.Palette.ADAPTIVE)
+            for colour in ("red", "green", "blue")
+        ]
+        if transparent:
+            frames[0].save(
+                src,
+                format="GIF",
+                save_all=True,
+                append_images=frames[1:],
+                duration=100,
+                transparency=0,
+            )
+        else:
+            frames[0].save(src, format="GIF", save_all=True, append_images=frames[1:], duration=100)
+
+        result = processing.process_photo(src, output_dir=tmp_path / "out")
+
+        assert result.renditions["full"].name == "full.gif"
+        assert result.renditions["full"].read_bytes() == src.read_bytes()
+        assert result.renditions["thumb"].name == thumb_name
+        assert (result.width, result.height) == (40, 20)
 
     def test_static_gif_becomes_lossless_png(self, tmp_path: Path) -> None:
         src = _static_gif(tmp_path / "in.gif")
