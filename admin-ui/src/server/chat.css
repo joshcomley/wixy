@@ -15,11 +15,23 @@
 }
 
 .wx-srv-thread-view {
+  /* ONE height for every control in the composer row (attach, mic, input,
+     Send): 44px on a phone (a proper tap target), 36px on desktop. The
+     header/card/composer carry NO side inset of their own — the shell's
+     `.wx-main` padding is the single shared gutter (12px phone, 20px
+     desktop), so all three edges line up. */
+  --wx-srv-control-h: 36px;
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
   padding-bottom: env(safe-area-inset-bottom);
+}
+
+@media (max-width: 720px) {
+  .wx-srv-thread-view {
+    --wx-srv-control-h: 44px;
+  }
 }
 
 /* chatView.ts hides this behind the first-unlock name prompt with `.hidden`;
@@ -39,7 +51,10 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
+  /* No top or side padding: `.wx-main` already provides the gutter (adding
+     12px here put the title/cog/close 24px in from the edge while the
+     composer sat at 12px, and stacked another 10px under the tab strip). */
+  padding: 0 0 8px;
 }
 
 .wx-srv-thread-title {
@@ -76,7 +91,7 @@
 .wx-srv-record-button,
 .wx-srv-record-cancel {
   flex: none;
-  min-height: 36px;
+  min-height: var(--wx-srv-control-h);
   border: 1px solid var(--wx-border);
   border-radius: var(--wx-radius);
   background: var(--wx-surface);
@@ -85,7 +100,9 @@
 }
 
 .wx-srv-record-button {
-  width: 36px;
+  box-sizing: border-box;
+  width: var(--wx-srv-control-h);
+  height: var(--wx-srv-control-h);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -136,9 +153,73 @@
 }
 
 .wx-srv-record-status {
+  align-self: center;
   color: var(--wx-muted);
   font: 0.6875rem/1.2 system-ui, sans-serif;
   white-space: nowrap;
+}
+
+/* -- Composer row ----------------------------------------------------------
+   The composer itself is the AI chat's shared `mountChatComposer`, so its
+   rules live in style.css (and stay untouched there); everything below is
+   scoped to the Server view. Attach, mic, input and Send all share
+   `--wx-srv-control-h`, icon buttons are square at that height, and the row
+   pins the controls to the bottom edge so they stay level with each other
+   (and with the input's last line) when a long message grows the input. */
+
+.wx-srv-thread-view .wx-chatc-input-row {
+  align-items: flex-end;
+}
+
+.wx-srv-thread-view .wx-chat-attach-button {
+  box-sizing: border-box;
+  width: var(--wx-srv-control-h);
+  height: var(--wx-srv-control-h);
+  min-height: var(--wx-srv-control-h);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* `display` above would otherwise beat the base rule's `[hidden]` override. */
+.wx-srv-thread-view .wx-chat-attach-button[hidden] {
+  display: none;
+}
+
+.wx-srv-thread-view .wx-chat-send-button {
+  box-sizing: border-box;
+  height: var(--wx-srv-control-h);
+  min-height: var(--wx-srv-control-h);
+  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* chatComposer.ts's auto-grow floors the input at 36px and the empty state
+   pins it there; both must follow the row's control height instead. */
+.wx-srv-thread-view .wx-chat-composer-input {
+  min-height: var(--wx-srv-control-h);
+}
+
+.wx-srv-thread-view .wx-chat-input-empty {
+  height: var(--wx-srv-control-h);
+  max-height: var(--wx-srv-control-h);
+}
+
+.wx-srv-thread-view .wx-srv-retry-voice-button {
+  min-height: var(--wx-srv-control-h);
+}
+
+@media (max-width: 720px) {
+  /* Phone: the input's 16px font (style.css, avoids focus-zoom) is taller
+     than the 7px-padding line box centred in 36px; 9px centres a single line
+     in the 44px control. */
+  .wx-srv-thread-view .wx-chat-composer-input {
+    padding-top: 9px;
+    padding-bottom: 9px;
+  }
 }
 
 /* -- Thread + jump pill --------------------------------------------------- */
@@ -149,7 +230,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  margin: 0 12px 10px;
+  margin: 0 0 8px;
 }
 
 .wx-srv-thread {
@@ -159,8 +240,11 @@
   overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
+  /* No flex `gap`: it put 8px between the 1px paging sentinel and the first
+     message (26px of dead space above the first day chip). Spacing between
+     the rows that can show is set on the rows themselves. */
+  gap: 0;
+  padding: 8px 12px;
   background: var(--wx-surface);
   border: 1px solid var(--wx-border);
   border-radius: var(--wx-radius);
@@ -169,6 +253,17 @@
 .wx-srv-thread-sentinel {
   flex: none;
   height: 1px;
+}
+
+/* thread.ts renders every day chip / bubble / echo as a direct child of this
+   wrapper. It was a plain block, so `.wx-srv-bubble-mine/-theirs`'s
+   `align-self` never applied (own messages sat on the left) and bubbles
+   touched each other with no gap; a flex column gives the rows the 8px rhythm
+   and the left/right alignment those rules were written for. */
+.wx-srv-message-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .wx-srv-thread-empty {
@@ -181,6 +276,7 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
+  margin-bottom: 8px;
   font-size: 0.75rem;
   color: var(--wx-danger-text);
 }
@@ -192,7 +288,6 @@
 .wx-srv-day-separator {
   display: flex;
   justify-content: center;
-  margin: 4px 0;
 }
 
 .wx-srv-day-separator span {
@@ -311,6 +406,23 @@
   background: var(--wx-surface);
   color: var(--wx-ink);
   box-shadow: var(--wx-shadow);
+}
+
+/* commit 9a8d8be made `.wx-srv-bubble-theirs`'s `align-self: flex-start`
+   actually take effect (the message list is now a real flex column), so a
+   short incoming bubble now shrink-wraps to its content instead of always
+   being ~80% of the card wide. The menu above still anchors 10rem (160px)
+   LEFTWARD of the bubble's own right edge unconditionally - fine for a wide
+   bubble, but a narrow "theirs" bubble's right edge can now be well under
+   160px from the card's left edge, pushing the whole menu off-screen with
+   no way to reach it. Anchor it from the LEFT edge instead for their
+   bubbles only (which hug the card's own left edge), so it extends
+   rightward into the card instead. `.wx-srv-bubble-mine` is unaffected: its
+   right edge sits near the card's right edge, so the existing right:0
+   anchor already stays on-screen. */
+.wx-srv-bubble-theirs .wx-srv-message-actions {
+  left: 0;
+  right: auto;
 }
 
 .wx-srv-message-actions[hidden],
