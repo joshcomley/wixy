@@ -228,7 +228,12 @@ themed reload-confirmation dialog — detailed in the status-bar paragraph above
 media/chat/history/settings/section/social/server — the last of these is the disguised
 "Server" live-chat panel, deliberately placed LAST in `NAV_ROUTES` and documented in full in
 [livechat.md](livechat.md) rather than here, since it's a whole separate subsystem with its
-own auth gate, not an editor/admin-UI feature); `pagesPanel.ts` + `pageSettingsDrawer.ts` (`meta.*` editing);
+own auth gate, not an editor/admin-UI feature — its pen tool (drawing live on the thread) is
+[livechat.md](livechat.md) §19;
+the one piece of it in shared admin code is `chatThreadScroll.ts`'s `hold()`, which keeps a
+thread exactly where it is until released (the pen holds it for one stroke, so a message
+arriving mid-stroke shows the jump pill instead of moving the chat under the finger; the AI
+chat never calls it)); `pagesPanel.ts` + `pageSettingsDrawer.ts` (`meta.*` editing);
 `socialImagesPanel.ts` (`/admin/social`, decisions/00134) — the bulk, one-screen twin of
 `pageSettingsDrawer.ts`'s per-page "Social image" field: every page in one table (thumbnail,
 label falling back to slug, a per-row "Choose image" button), plus a "Use one image for all

@@ -1,0 +1,1 @@
+The pen (live drawing, client): header Pen button, drawings as inert per-anchor SVGs re-read from the live DOM, a lossy paced live channel, an idempotent per-drawing store queue, fetch-is-the-only-authority reconciliation with an epoch rule, and geometric Pointer-Event selection.

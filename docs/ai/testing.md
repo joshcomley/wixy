@@ -115,10 +115,17 @@ during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/
   390 px and a 360 px phone leg, and the real-browser proof that a reaction never interrupts a
   voice note that is playing), `server-transcription.spec.ts` (opt-in transcription at
   desktop and a 402px phone: nothing sent while cmd is not private, a playing note survives its
-  transcript, a failure and Retry, two devices agreeing, phone layout), and
+  transcript, a failure and Retry, two devices agreeing, phone layout),
   `server-permanent-unlock.spec.ts` ("Keep this device unlocked" end to end and the two lock
   checkboxes; it installs a stand-in for Chromium's `IdleDetector` with an init script because a
-  headless run cannot answer its permission prompt). The transcription fixture drives the
+  headless run cannot answer its permission prompt), and `server-drawing.spec.ts` (the pen,
+  two identities: a stroke seen live before the drawer lifts and then stored in the same place,
+  scrolling with its message, Select-mode delete for both, the anchor's deletion taking it,
+  rapid dots never locking while Escape does, and 390/360 px phones with touch where every
+  control is hit-tested and two fingers scroll without drawing; the fixture runs one chat per
+  worker, so it scopes every assertion to its own anchor via
+  `svg.wx-srv-drawing[data-anchor-seq="N"]` and acts at a human pace between separate
+  controls, or R3's boundary rule locks). The transcription fixture drives the
   fake cmd through `/test/server/transcribe-config` (private on/off, text, status, `hold` to park
   requests, `reset` — which also gives every test a fresh rate limiter),
   `/test/server/transcribe-stats`, `/test/server/seed-voice` (a ready note with real ffmpeg
@@ -127,6 +134,10 @@ during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/
   `.wx-srv-voice`).
 
 Server-chat unit coverage also lives in `admin-ui/tests/server/{gestures,lockModel,panel,http,unlock,reactions,setReaction}.test.ts`.
+The pen's (livechat.md §19) is `admin-ui/tests/server/{drawings,drawingGeometry,drawGesture,drawingLive,drawingModel,drawingSync,drawingsApi,drawingLayer,threadDrawing}.test.ts`
+— `drawings.test.ts` is the TS half of the palette drift guard (it parses
+`wixy_server/livechat/drawings.py`), and `drawingLayer.test.ts` stubs every measured box
+because jsdom lays nothing out.
 `serverThread.test.ts` holds the reaction rendering and the in-place-patch tests (a playing
 `<audio>` keeps its identity and `currentTime`; a stale response never overwrites a newer frame).
 jsdom's selector engine mishandles astral-plane emoji inside an attribute selector, so those tests
