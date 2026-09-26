@@ -46,6 +46,12 @@ describe("isExcludedTapTarget", () => {
     }
   });
 
+  it("does not exclude view-once viewer video element (Item 10)", () => {
+    const video = document.createElement("video");
+    video.className = "wx-srv-view-once-video";
+    expect(isExcludedTapTarget(video)).toBe(false);
+  });
+
   it("excludes a descendant of an excluded element too (e.g. native media controls)", () => {
     const video = document.createElement("video");
     const child = document.createElement("span");

@@ -315,6 +315,11 @@ def create_app(
         async def _run_scrubber() -> None:
             await livechat_janitor.run_scrubber_forever(store=livechat_store, paths=paths)
 
+        async def _run_view_once_backstop() -> None:
+            await livechat_janitor.run_view_once_backstop_forever(
+                store=livechat_store, paths=paths, notifier=livechat_notifier
+            )
+
         try:
             async with anyio.create_task_group() as tg:
                 background = ContainedTaskGroup(tg, BackgroundTaskHealth())
@@ -324,6 +329,7 @@ def create_app(
                 _app.state.background_health = background.health
                 background.supervise("watcher", _run_watcher)
                 background.supervise("livechat-erasure", _run_scrubber)
+                background.supervise("livechat-view-once-backstop", _run_view_once_backstop)
                 # Only started when the media pipeline actually resolved (see
                 # `livechat_queue_config` above) — nothing valid to hand it
                 # otherwise. The janitor runs regardless: it's pure DB/filesystem

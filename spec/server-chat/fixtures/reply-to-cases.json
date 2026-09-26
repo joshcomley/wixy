@@ -177,6 +177,33 @@
           "thumbUrlPresent": false
         }
       }
+    },
+    {
+      "name": "view-once-photo",
+      "target": {
+        "sender": "Josh",
+        "text": null,
+        "viewOnce": true,
+        "attachments": [
+          {
+            "kind": "photo",
+            "status": "ready",
+            "durationS": null
+          }
+        ]
+      },
+      "expected": {
+        "sender": "Josh",
+        "text": null,
+        "truncated": false,
+        "media": {
+          "kind": "photo",
+          "count": 1,
+          "durationS": null,
+          "thumbUrlPresent": false,
+          "viewOnce": true
+        }
+      }
     }
   ]
 }

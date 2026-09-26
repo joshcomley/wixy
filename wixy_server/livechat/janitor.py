@@ -18,6 +18,7 @@ from pathlib import Path
 import anyio
 
 from wixy_server.livechat.grants import GRANT_IDLE_EXPIRY_S, REVOKED_ROW_RETENTION_S
+from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.store import LiveChatStore
 from wixy_server.storage import ProjectPaths
 
@@ -307,3 +308,52 @@ async def run_scrubber_forever(
         )
         startup_scan = False
         await anyio.sleep(max(0.0, interval_s - (time.monotonic() - started_at)))
+
+
+def cleanup_expired_view_once_messages(
+    *,
+    store: LiveChatStore,
+    paths: ProjectPaths,
+    now: float | None = None,
+) -> list[int]:
+    """Erases view-once messages whose claims are older than 600 s via the ordinary delete path."""
+    current_time = time.time() if now is None else now
+    cutoff = current_time - 600.0
+    expired_seqs = store.expired_claimed_view_once_seqs(older_than=cutoff)
+    erased: list[int] = []
+    for seq in expired_seqs:
+        attachment_ids, _ = store.delete_message_for_scrub(seq=seq, now=current_time)
+        items = {
+            item
+            for storage_id in attachment_ids
+            for item in (("attachment", storage_id), ("upload", storage_id))
+        }
+        cleanup_deleted_storage_once(store=store, paths=paths, only_items=items)
+        erased.append(seq)
+    if erased:
+        scrub_once(store=store)
+    return erased
+
+
+async def run_view_once_backstop_forever(
+    *,
+    store: LiveChatStore,
+    paths: ProjectPaths,
+    notifier: LiveChatNotifier,
+    interval_s: float = 30.0,
+) -> None:
+    """Inv 47: contained loop running once at startup and at least every 30 s."""
+    while True:
+        started_at = time.monotonic()
+        erased = await anyio.to_thread.run_sync(
+            partial(
+                cleanup_expired_view_once_messages,
+                store=store,
+                paths=paths,
+                now=None,
+            )
+        )
+        if erased:
+            notifier.publish()
+        elapsed = time.monotonic() - started_at
+        await anyio.sleep(max(0.0, interval_s - elapsed))

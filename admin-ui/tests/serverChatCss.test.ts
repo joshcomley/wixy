@@ -29,6 +29,7 @@ const HIDDEN_TOGGLED_CLASSES = [
   "wx-srv-sheet-backdrop",
   "wx-srv-reactions",
   "wx-srv-reply-bar",
+  "wx-srv-view-once-controls",
 ] as const;
 
 function escapeRegExp(text: string): string {
@@ -118,5 +119,13 @@ describe("server/chat.css: message text keeps its line breaks", () => {
     const rule = baseRuleBody(chatCss, "wx-srv-bubble-text");
     expect(rule, "no base rule for .wx-srv-bubble-text").not.toBeNull();
     expect(rule).toMatch(/white-space\s*:\s*pre-wrap/);
+  });
+});
+
+describe("server/chat.css: view-once controls", () => {
+  it(".wx-srv-view-once-controls sits in normal flex flow below canvas, not position: absolute", () => {
+    const controls = baseRuleBody(chatCss, "wx-srv-view-once-controls");
+    expect(controls, "no base rule for .wx-srv-view-once-controls").not.toBeNull();
+    expect(controls).not.toMatch(/position\s*:\s*absolute/);
   });
 });

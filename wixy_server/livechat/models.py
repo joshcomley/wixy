@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-from builder.jsontypes import JsonObject
+from builder.jsontypes import JsonObject, JsonValue
 
 AttachmentKind = Literal["photo", "video", "voice"]
 AttachmentStatus = Literal["processing", "ready", "failed"]
@@ -71,6 +71,7 @@ class AttachmentRow:
     created_at: float
     updated_at: float
     transcript: TranscriptRow | None = None
+    view_once_renditions: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +103,11 @@ class MessageRow:
     message (never stored, never copied) — `None` when `reply_to_seq` is
     `None`. Loaded ONE LEVEL ONLY: a target's own `reply_to` is always `None`
     here, so a quote never shows the target's own quote."""
+    view_once_s: int | None = None
+    view_spotlight: int = 0
+    view_claim_id: str | None = None
+    view_claimed_at: float | None = None
+    view_claim_email: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,7 +212,7 @@ slice(0, 300).join("")`."""
 
 
 def _reply_quote_media_json(
-    attachments: tuple[AttachmentRow, ...], signer: MediaUrlSigner
+    attachments: tuple[AttachmentRow, ...], signer: MediaUrlSigner, *, view_once: bool = False
 ) -> JsonObject | None:
     """§(3)'s `media` member of a quote — `null` for a text-only target, else a
     summary built from the target's OWN attachment rows (never a copy stored on
@@ -220,7 +226,7 @@ def _reply_quote_media_json(
     first = attachments[0]
     duration_s = first.duration_s if count == 1 else None
     thumb_url: str | None = None
-    if first.status == "ready":
+    if not view_once and first.status == "ready":
         rendition: str | None = None
         if first.kind == "photo":
             rendition = "thumb"
@@ -228,7 +234,15 @@ def _reply_quote_media_json(
             rendition = "poster"
         if rendition is not None and rendition in first.renditions:
             thumb_url = signer.url_for(first.id, rendition)
-    return {"kind": kind, "count": count, "durationS": duration_s, "thumbUrl": thumb_url}
+    res: JsonObject = {
+        "kind": kind,
+        "count": count,
+        "durationS": duration_s,
+        "thumbUrl": thumb_url,
+    }
+    if view_once:
+        res["viewOnce"] = True
+    return res
 
 
 def reply_to_json(target: MessageRow | None, signer: MediaUrlSigner) -> JsonObject | None:
@@ -244,17 +258,26 @@ def reply_to_json(target: MessageRow | None, signer: MediaUrlSigner) -> JsonObje
     if text is not None and len(text) > _REPLY_QUOTE_TEXT_MAX_CODEPOINTS:
         snippet = text[:_REPLY_QUOTE_TEXT_MAX_CODEPOINTS]
         truncated = True
+    view_once = target.view_once_s is not None
     return {
         "seq": target.seq,
         "sender": target.sender,
         "text": snippet,
         "truncated": truncated,
-        "media": _reply_quote_media_json(target.attachments, signer),
+        "media": _reply_quote_media_json(target.attachments, signer, view_once=view_once),
     }
 
 
 def message_json(row: MessageRow, signer: MediaUrlSigner) -> JsonObject:
     """§5.9's `Message` wire shape."""
+    view_once: dict[str, JsonValue] | None = (
+        None
+        if row.view_once_s is None
+        else {
+            "durationS": None if row.view_once_s == 0 else row.view_once_s,
+            "spotlight": bool(row.view_spotlight),
+        }
+    )
     return {
         "seq": row.seq,
         "clientId": row.client_id,
@@ -267,4 +290,5 @@ def message_json(row: MessageRow, signer: MediaUrlSigner) -> JsonObject:
         ],
         "createdAt": row.created_at,
         "replyTo": reply_to_json(row.reply_to, signer),
+        "viewOnce": view_once,
     }

@@ -58,6 +58,7 @@ from wixy_server.livechat.push import (
 )
 from wixy_server.livechat.reactions import is_allowed_reaction
 from wixy_server.livechat.store import (
+    AttachmentNotReadyError,
     LiveChatStore,
     MessageNotFoundError,
     UnusableAttachmentError,
@@ -74,6 +75,7 @@ from wixy_server.livechat.transcription import (
     SlidingWindowRateLimiter,
     TranscriptionRuntime,
 )
+from wixy_server.routes_livechat_media import _MEDIA_TYPE_BY_SUFFIX, _resolve_rendition_path
 from wixy_server.settings import Settings
 from wixy_server.storage import ProjectPaths
 
@@ -84,6 +86,7 @@ _PING_INTERVAL_S = 15.0
 _NOTIFIER_WAIT_S = 2.0
 _DELETE_SCRUB_DEADLINE_S = 10.0
 _ATTACHMENT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+_CLAIM_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 
@@ -566,6 +569,213 @@ async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
     return JSONResponse(
         status_code=201 if created else 200,
         content={"message": message_json(message, signer)},
+    )
+
+
+class SendViewOnceMessageIn(BaseModel):
+    clientId: str
+    sender: str
+    deviceId: str
+    attachmentId: str
+    durationS: int | None = None
+    spotlight: StrictBool = False
+    replyToSeq: Any = None
+
+
+class OpenViewOnceIn(BaseModel):
+    claimId: str
+    sender: str
+
+
+@router.post("/messages/view-once", response_model=None)
+async def send_view_once_message(body: SendViewOnceMessageIn, request: Request) -> JSONResponse:
+    auth = await require_server_token(request)
+
+    if not (8 <= len(body.clientId) <= 64):
+        return _invalid("clientId must be 8-64 characters")
+    if not (8 <= len(body.deviceId) <= 64):
+        return _invalid("deviceId must be 8-64 characters")
+    sender = body.sender.strip()
+    if not _valid_sender(sender):
+        return _invalid("sender must be 1-32 characters with no control characters")
+    if not _ATTACHMENT_ID_RE.match(body.attachmentId):
+        return _invalid("attachmentId must be a 32-character hex string")
+    if isinstance(body.durationS, bool) or body.durationS not in (None, 2, 5, 30):
+        return _invalid("durationS must be 2, 5, 30, or null")
+
+    reply_to_seq: int | None = None
+    if body.replyToSeq is not None:
+        if (
+            isinstance(body.replyToSeq, bool)
+            or not isinstance(body.replyToSeq, int)
+            or not (1 <= body.replyToSeq <= _SQLITE_MAX_INTEGER)
+        ):
+            return _invalid("replyToSeq must be an integer >= 1")
+        reply_to_seq = body.replyToSeq
+
+    store: LiveChatStore = request.app.state.livechat_store
+    notifier: LiveChatNotifier = request.app.state.livechat_notifier
+    hooks: list[MessageHook] = request.app.state.livechat_message_hooks
+    background: ContainedTaskGroup = request.app.state.background_tasks
+    secret: bytes = request.app.state.livechat_secret
+    now = time.time()
+
+    def _create() -> tuple[MessageRow, bool]:
+        return store.create_view_once_message(
+            client_id=body.clientId,
+            sender=sender,
+            device_id=body.deviceId,
+            by_email=auth.email or None,
+            attachment_id=body.attachmentId,
+            duration_s=body.durationS,
+            spotlight=body.spotlight,
+            reply_to_seq=reply_to_seq,
+            now=now,
+        )
+
+    try:
+        message, created = await anyio.to_thread.run_sync(_create)
+    except AttachmentNotReadyError:
+        return JSONResponse(status_code=422, content={"error": "not_ready"})
+    except UnusableAttachmentError as exc:
+        return _invalid(
+            f"attachment {exc.attachment_id} is unknown, already used, or invalid for view-once"
+        )
+
+    if created:
+        notifier.publish()
+        for hook in hooks:
+
+            async def _dispatch(h: MessageHook = hook) -> None:
+                await h(message)
+
+            background.spawn("livechat-push-dispatch", _dispatch)
+
+    signer = MediaSigner.for_auth(secret, auth)
+    return JSONResponse(
+        status_code=201 if created else 200,
+        content={"message": message_json(message, signer)},
+    )
+
+
+@router.post("/messages/{seq}/view-once/open", response_model=None)
+async def open_view_once(seq: int, body: OpenViewOnceIn, request: Request) -> JSONResponse:
+    auth = await require_server_token(request)
+    if not (0 < seq <= _SQLITE_MAX_INTEGER):
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+
+    if not _CLAIM_ID_RE.match(body.claimId):
+        return _invalid("claimId must be 32 lowercase hex characters")
+    sender = body.sender.strip()
+    if not _valid_sender(sender):
+        return _invalid("sender must be 1-32 characters with no control characters")
+
+    store: LiveChatStore = request.app.state.livechat_store
+    now = time.time()
+
+    outcome, msg, att = await anyio.to_thread.run_sync(
+        lambda: store.claim_view_once(
+            seq=seq,
+            claim_id=body.claimId,
+            email=auth.email or "",
+            sender=sender,
+            now=now,
+        )
+    )
+    if outcome == "not_found":
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+    if outcome == "own_message":
+        return JSONResponse(status_code=403, content={"error": "own_message"})
+    if outcome == "already_opened":
+        return JSONResponse(status_code=409, content={"error": "already_opened"})
+
+    assert msg is not None and att is not None
+    duration_s = None if msg.view_once_s == 0 else msg.view_once_s
+    return JSONResponse(
+        status_code=200,
+        content={
+            "durationS": duration_s,
+            "spotlight": bool(msg.view_spotlight),
+            "kind": att.kind,
+            "mime": att.mime,
+        },
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.get("/messages/{seq}/view-once/content", response_model=None)
+async def get_view_once_content(seq: int, request: Request) -> Response:
+    auth = await require_server_token(request)
+    if not (0 < seq <= _SQLITE_MAX_INTEGER):
+        raise HTTPException(status_code=404, detail={"error": "not_found"})
+    claim_id = request.headers.get("X-Wixy-View-Claim")
+    if not claim_id or not _CLAIM_ID_RE.match(claim_id):
+        raise HTTPException(status_code=403, detail={"error": "forbidden"})
+
+    store: LiveChatStore = request.app.state.livechat_store
+    paths: ProjectPaths = request.app.state.paths
+    now = time.time()
+    outcome, msg, att = await anyio.to_thread.run_sync(
+        lambda: store.get_view_once_content_info(
+            seq=seq, claim_id=claim_id, email=auth.email or "", now=now
+        )
+    )
+    if outcome == "not_found":
+        raise HTTPException(status_code=404, detail={"error": "not_found"})
+    if outcome == "forbidden":
+        raise HTTPException(status_code=403, detail={"error": "forbidden"})
+    if outcome == "expired":
+        return JSONResponse(status_code=410, content={"error": "expired"})
+
+    assert att is not None
+    rendition = "full" if att.kind == "photo" else "play"
+    if att.view_once_renditions is None or rendition not in att.view_once_renditions:
+        raise HTTPException(status_code=404, detail={"error": "not_found"})
+    path = await anyio.to_thread.run_sync(lambda: _resolve_rendition_path(paths, att.id, rendition))
+    if path is None or not path.is_file():
+        raise HTTPException(status_code=404, detail={"error": "not_found"})
+
+    media_type = _MEDIA_TYPE_BY_SUFFIX.get(path.suffix, "application/octet-stream")
+    notifier: LiveChatNotifier = request.app.state.livechat_notifier
+    background: ContainedTaskGroup = request.app.state.background_tasks
+
+    async def _content_stream() -> AsyncIterator[bytes]:
+        completed = False
+        try:
+            async with await anyio.open_file(path, "rb") as f:
+                while True:
+                    chunk = await f.read(16 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+            completed = True
+        finally:
+            if completed:
+
+                async def _erase() -> None:
+                    attachment_ids, _ = await anyio.to_thread.run_sync(
+                        lambda: store.delete_message_for_scrub(seq=seq, now=time.time())
+                    )
+                    commit_returned_at = time.monotonic()
+                    await _finish_committed_erasure(
+                        store=store,
+                        paths=paths,
+                        notifier=notifier,
+                        attachment_ids=attachment_ids,
+                        upload_ids=[],
+                        wipe_token=None,
+                        deadline_at=commit_returned_at + _DELETE_SCRUB_DEADLINE_S,
+                    )
+
+                background.spawn("livechat-view-once-erase", _erase)
+
+    return StreamingResponse(
+        _content_stream(),
+        media_type=media_type,
+        headers={
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 

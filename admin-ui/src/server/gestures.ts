@@ -55,7 +55,7 @@ import { MULTI_TAP_COUNT, MULTI_TAP_INTERVAL_MS, MULTI_TAP_RADIUS_PX, TAP_MAX_MS
  * multi-tap: the inline "Keep this device unlocked" PIN pad, whose digit keys are tapped in
  * quick succession by design. */
 export const GESTURE_EXEMPT_SELECTOR = "[data-srv-gesture-exempt]";
-const EXCLUDED_SELECTOR = `textarea, input, [contenteditable], audio, video, ${GESTURE_EXEMPT_SELECTOR}`;
+const EXCLUDED_SELECTOR = `textarea, input, [contenteditable], audio, video:not(.wx-srv-view-once-video), ${GESTURE_EXEMPT_SELECTOR}`;
 export const GESTURE_BOUNDARY_SELECTOR = "[data-srv-gesture-boundary]";
 
 /** R3 v1.7's "SAME THING" test: the nearest ancestor a tap is meaningfully "on". A message

@@ -74,6 +74,7 @@ def _target_row_from_case(case_target: dict[str, Any]) -> MessageRow:
     attachments = tuple(
         _attachment_row_from_case(i, a) for i, a in enumerate(case_target["attachments"])
     )
+    view_once_s = 5 if case_target.get("viewOnce") else None
     return MessageRow(
         seq=1,
         client_id="fixture-client-id",
@@ -83,6 +84,7 @@ def _target_row_from_case(case_target: dict[str, Any]) -> MessageRow:
         text=case_target["text"],
         created_at=0.0,
         attachments=attachments,
+        view_once_s=view_once_s,
     )
 
 
@@ -114,6 +116,8 @@ def test_reply_to_json_matches_the_shared_fixture(case: dict[str, Any]) -> None:
     # fresh HMAC-signed one per response (§(3)); only the client's stand-in for
     # "the server already signed this" is comparable across languages.
     assert (media["thumbUrl"] is not None) == expected_media["thumbUrlPresent"]
+    if "viewOnce" in expected_media:
+        assert media.get("viewOnce") == expected_media["viewOnce"]
 
 
 def test_fixture_has_at_least_the_required_case_shapes() -> None:
@@ -131,6 +135,7 @@ def test_fixture_has_at_least_the_required_case_shapes() -> None:
         "mixed",
         "processing",
         "voice-note-duration",
+        "view-once",
     ]
     for substring in required_substrings:
         assert any(substring in name for name in names), f"fixture is missing a {substring!r} case"

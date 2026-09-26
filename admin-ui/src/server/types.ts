@@ -12,12 +12,12 @@ export interface ServerSession {
   readonly expiresAt: number;
 }
 
-/** R7 — the four reasons the idle timer pauses instead of counting down.
+/** R7 — the five reasons the idle timer pauses instead of counting down.
  * `suspend()` (see `LockHooks` below) is idempotent per reason and returns a
  * release function; the idle timer restarts fresh (a full idle period — see
  * `idleTimeoutMs`) the moment the LAST active suspension for a given reason
  * ends. */
-export type SuspendReason = "recording" | "micPermission" | "filePicker" | "mediaPlaying";
+export type SuspendReason = "recording" | "micPermission" | "filePicker" | "mediaPlaying" | "viewOnce";
 
 /** R6 — every distinct trigger that can force an instant lock (all eight of
  * R6's bullets except "a page reload", which needs no cause: unlock state is

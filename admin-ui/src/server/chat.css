@@ -1222,6 +1222,312 @@ button.wx-srv-quote:focus-visible {
   cursor: default;
 }
 
+/* -- View Once (spec/server-chat/06-view-once-media.md) -------------------- */
+
+.wx-srv-chip-content {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wx-srv-view-once-chip-btn {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 4px;
+  border-radius: 10px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font: 600 0.6875rem/1 system-ui, sans-serif;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 2;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.wx-srv-view-once-chip-btn.wx-srv-view-once-chip-active {
+  background: var(--wx-brand-blue);
+  color: #fff;
+  border-color: var(--wx-brand-blue);
+}
+
+.wx-srv-view-once-picker {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+  border: 1px solid var(--wx-border);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  font: 0.8125rem/1.3 system-ui, sans-serif;
+  color: var(--wx-ink);
+  width: 220px;
+}
+
+.wx-srv-view-once-picker-title {
+  font-weight: 600;
+  font-size: 0.8125rem;
+}
+
+.wx-srv-view-once-durations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.wx-srv-view-once-dur-btn {
+  flex: 1 1 calc(50% - 4px);
+  min-height: 28px;
+  padding: 4px 6px;
+  border-radius: calc(var(--wx-radius) / 2);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-canvas);
+  color: var(--wx-ink);
+  font: 0.75rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.wx-srv-view-once-dur-btn.active {
+  background: var(--wx-brand-blue-tint);
+  border-color: var(--wx-brand-blue);
+  color: var(--wx-brand-blue-text);
+  font-weight: 600;
+}
+
+.wx-srv-view-once-spotlight-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.8125rem;
+}
+
+.wx-srv-view-once-note {
+  font-size: 0.6875rem;
+  line-height: 1.3;
+  color: var(--wx-muted);
+}
+
+.wx-srv-view-once-sender-card {
+  font-style: italic;
+  color: var(--wx-muted);
+  font-size: 0.8125rem;
+  padding: 4px 0;
+}
+
+.wx-srv-view-once-recipient-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.wx-srv-view-once-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+  flex-wrap: wrap;
+}
+
+.wx-srv-view-once-card-icon {
+  font-size: 1rem;
+}
+
+.wx-srv-view-once-card-title {
+  font-weight: 600;
+}
+
+.wx-srv-view-once-card-sub {
+  color: var(--wx-muted);
+}
+
+.wx-srv-view-once-spotlight-badge {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--wx-brand-blue-tint);
+  color: var(--wx-brand-blue-text);
+}
+
+.wx-srv-view-once-tap-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 6px 12px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-brand-blue);
+  color: #fff;
+  font: 600 0.8125rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.wx-srv-view-once-tap-btn:hover {
+  filter: brightness(1.1);
+}
+
+.wx-srv-view-once-card-warning {
+  margin-top: 6px;
+  font-size: 0.75rem;
+  color: var(--wx-text-muted);
+}
+
+/* Fullscreen Viewer Overlay */
+.wx-srv-view-once-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.wx-srv-view-once-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  z-index: 10;
+}
+
+.wx-srv-view-once-close {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  font-size: 1.125rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.wx-srv-view-once-close:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.wx-srv-view-once-ring-wrap {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wx-srv-view-once-ring-svg {
+  width: 36px;
+  height: 36px;
+  transform: rotate(-90deg);
+}
+
+.wx-srv-view-once-ring-bg {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.2);
+  stroke-width: 3;
+}
+
+.wx-srv-view-once-ring-fg {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.wx-srv-view-once-countdown {
+  position: absolute;
+  font: 600 0.75rem/1 system-ui, sans-serif;
+  color: #fff;
+}
+
+.wx-srv-view-once-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.wx-srv-view-once-status {
+  color: #fff;
+  font-size: 1rem;
+  text-align: center;
+}
+
+.wx-srv-view-once-status-notice {
+  margin-top: 8px;
+  font-size: 0.8125rem;
+  opacity: 0.75;
+}
+
+.wx-srv-view-once-canvas {
+  max-width: 100%;
+  max-height: 100%;
+  touch-action: none;
+}
+
+.wx-srv-view-once-video {
+  max-width: 100%;
+  max-height: 100%;
+  pointer-events: none;
+}
+
+.wx-srv-view-once-controls {
+  flex-shrink: 0;
+  padding: 20px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 10;
+}
+
+.wx-srv-view-once-controls[hidden] {
+  display: none;
+}
+
+.wx-srv-view-once-slider {
+  width: 200px;
+  accent-color: #fff;
+}
+
+.wx-srv-view-once-play-btn {
+  padding: 10px 24px;
+  font-size: 1rem;
+  font-weight: 600;
+  border-radius: 999px;
+  background: #fff;
+  color: #000;
+  border: none;
+  cursor: pointer;
+}
+
 .wx-srv-push-test-button {
   padding: 8px 16px;
   border-radius: var(--wx-radius);
@@ -1255,4 +1561,3 @@ button.wx-srv-quote:focus-visible {
   margin: 0;
   color: var(--wx-muted);
 }
-
