@@ -431,7 +431,11 @@ flush), defers to `focusout` while a field inside the panel holds focus, and —
 00118 — ALSO defers while the panel is dirty (any local edit not yet Saved), re-attempting
 once she saves, undoes, or discards; in practice a `refresh()` almost never lands on a dirty
 panel (Publish auto-saves first), but this covers the race where another tab/device/the AI
-assistant triggers one while she's mid-edit here. Per item:
+assistant triggers one while she's mid-edit here. Those checks run TWICE — when the re-read is
+requested and again when its answer arrives (`load({ refresh: true })`, decisions/00178): a
+re-read that went out while the panel was clean must not apply an answer that predates an edit
+she made while it was in flight (measured: a switch flipped just after a publish snapped back
+and the Save bar vanished); it is deferred again instead, never dropped. Per item:
 an `image`-kind field opens the shared `mediaDialog.ts` picker (writes `{src, alt}` —
 `contentSrc`, never a served `url`, per decisions/00095's fix). Displaying that stored
 value back as a thumbnail/preview `<img>` — outside the live-preview iframe, which alone
