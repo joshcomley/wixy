@@ -1755,3 +1755,355 @@ button.wx-srv-quote:focus-visible {
   margin: 0;
   color: var(--wx-muted);
 }
+
+/* -- Live drawing: the pen (spec/server-chat/07-live-drawing.md) ------------------------------
+   drawingLayer.ts. The drawings are laid over the thread in `.wx-srv-drawing-layer`, which sits
+   inside `.wx-srv-thread-content` (the message list's positioned wrapper) so it scrolls and
+   moves with the list; each drawing is one absolutely positioned `<svg>` placed from its anchor
+   bubble's live position. They never take pointer events (§5: "completely inert" outside the
+   pen; Select mode hit-tests them geometrically instead). */
+
+.wx-srv-thread-content {
+  position: relative;
+  flex: none;
+}
+
+.wx-srv-drawing-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  z-index: 1;
+  pointer-events: none;
+  /* A drawing must never be picked as the browser's scroll anchor. */
+  overflow-anchor: none;
+}
+
+.wx-srv-drawing {
+  position: absolute;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.wx-srv-drawing-selection {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px dashed var(--wx-brand-blue);
+  border-radius: 6px;
+  pointer-events: none;
+}
+
+.wx-srv-drawing-selection[hidden] {
+  display: none;
+}
+
+/* The Draw surface covers the thread in Draw mode: one finger draws, two fingers scroll
+   (drawingLayer.ts does the pan), and the browser's own panning and pinch-zoom are off. */
+.wx-srv-draw-surface {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  z-index: 1;
+  touch-action: none;
+  cursor: crosshair;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.wx-srv-thread-selecting {
+  cursor: pointer;
+}
+
+/* The header's Pen button: a 44px tap target whose visible face is the same 36px box as ⚙ and ✕
+   beside it. The -4px margin lays the 44px button out in the face's 36px, so the header row
+   keeps its height and spacing. */
+.wx-srv-pen-button {
+  flex: none;
+  box-sizing: border-box;
+  width: 44px;
+  height: 44px;
+  margin: -4px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.wx-srv-pen-face {
+  box-sizing: border-box;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font-size: 1.125rem;
+  line-height: 1;
+}
+
+.wx-srv-pen-button[aria-pressed="true"] .wx-srv-pen-face {
+  background: var(--wx-brand-blue-tint);
+  border-color: var(--wx-brand-blue-text);
+  color: var(--wx-brand-blue-text);
+}
+
+.wx-srv-pen-button:focus-visible {
+  outline: none;
+}
+
+.wx-srv-pen-button:focus-visible .wx-srv-pen-face {
+  outline: 2px solid var(--wx-brand-blue);
+  outline-offset: 2px;
+}
+
+/* The toolbar under the header while the pen is on. It wraps onto a second line on a phone
+   rather than overflowing (§5); every control is at least 44px tall, and the colour and
+   thickness buttons share their row's width down to 36px wide. */
+.wx-srv-pen-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 0 0 8px;
+}
+
+.wx-srv-pen-toolbar[hidden] {
+  display: none;
+}
+
+.wx-srv-pen-colors {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: calc(8 * 44px);
+}
+
+.wx-srv-pen-colors[hidden] {
+  display: none;
+}
+
+.wx-srv-pen-widths {
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.wx-srv-pen-widths[hidden] {
+  display: none;
+}
+
+.wx-srv-pen-swatch,
+.wx-srv-pen-width {
+  flex: 1 1 0;
+  box-sizing: border-box;
+  min-width: 36px;
+  max-width: 44px;
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: var(--wx-radius);
+  background: transparent;
+  cursor: pointer;
+}
+
+.wx-srv-pen-swatch-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.3);
+}
+
+.wx-srv-pen-swatch[aria-pressed="true"] .wx-srv-pen-swatch-dot {
+  box-shadow:
+    inset 0 0 0 1px rgb(0 0 0 / 0.3),
+    0 0 0 2px var(--wx-surface),
+    0 0 0 4px var(--wx-ink);
+}
+
+.wx-srv-pen-width-dot {
+  border-radius: 50%;
+  background: var(--wx-srv-pen-color, var(--wx-ink));
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.3);
+}
+
+.wx-srv-pen-width[aria-pressed="true"] {
+  background: var(--wx-brand-blue-tint);
+  box-shadow: inset 0 0 0 2px var(--wx-brand-blue-text);
+}
+
+.wx-srv-pen-select {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wx-srv-pen-select[hidden] {
+  display: none;
+}
+
+.wx-srv-pen-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wx-srv-pen-confirm[hidden] {
+  display: none;
+}
+
+/* The hint and the delete question sit BESIDE their buttons and wrap within their own space, so
+   every mode of the toolbar keeps the same two lines on a phone (a mode switch never moves the
+   thread). */
+.wx-srv-pen-hint {
+  flex: 1 1 8em;
+  min-width: 0;
+  font: 0.75rem/1.3 system-ui, sans-serif;
+  color: var(--wx-muted);
+}
+
+.wx-srv-pen-confirm-question {
+  flex: 1 1 8em;
+  min-width: 0;
+  margin: 0;
+  font: 600 0.8125rem/1.3 system-ui, sans-serif;
+  color: var(--wx-ink);
+}
+
+.wx-srv-pen-modes {
+  display: flex;
+  flex: none;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  overflow: hidden;
+}
+
+.wx-srv-pen-mode,
+.wx-srv-pen-done,
+.wx-srv-pen-next,
+.wx-srv-pen-delete,
+.wx-srv-pen-confirm-delete,
+.wx-srv-pen-confirm-cancel {
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 0 12px;
+  font: 600 0.8125rem/1 system-ui, sans-serif;
+  color: var(--wx-ink);
+  background: var(--wx-surface);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wx-srv-pen-mode {
+  border: none;
+}
+
+.wx-srv-pen-mode + .wx-srv-pen-mode {
+  border-left: 1px solid var(--wx-border);
+}
+
+.wx-srv-pen-mode[aria-pressed="true"] {
+  background: var(--wx-brand-blue-tint);
+  color: var(--wx-brand-blue-text);
+}
+
+.wx-srv-pen-done,
+.wx-srv-pen-next,
+.wx-srv-pen-delete,
+.wx-srv-pen-confirm-delete,
+.wx-srv-pen-confirm-cancel {
+  flex: none;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+}
+
+.wx-srv-pen-done {
+  margin-left: auto;
+}
+
+.wx-srv-pen-delete,
+.wx-srv-pen-confirm-delete {
+  color: var(--wx-danger-text);
+}
+
+.wx-srv-pen-delete:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.wx-srv-pen-status {
+  flex: 1 1 100%;
+  margin: 0;
+  font: 0.75rem/1.35 system-ui, sans-serif;
+  color: var(--wx-danger-text);
+}
+
+.wx-srv-pen-status[hidden] {
+  display: none;
+}
+
+.wx-srv-pen-toolbar button:focus-visible {
+  outline: 2px solid var(--wx-brand-blue);
+  outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+  /* Phone: the colours take the whole first line; thicknesses, Draw | Select and Done share the
+     second (measured at 390px: 8 x 44px colours, then 176 + 109 + 54px). */
+  .wx-srv-pen-colors {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  .wx-srv-pen-toolbar {
+    gap: 2px 6px;
+  }
+
+  .wx-srv-pen-mode,
+  .wx-srv-pen-done,
+  .wx-srv-pen-next,
+  .wx-srv-pen-delete,
+  .wx-srv-pen-confirm-delete,
+  .wx-srv-pen-confirm-cancel {
+    padding: 0 10px;
+  }
+}
+
+@media (max-width: 380px) {
+  /* A 360px phone has 336px: 44px-wide thicknesses plus Draw | Select and Done need 363px and
+     pushed Done onto a third line (measured). Thicknesses go 40px wide there — still 44px tall —
+     and the switch loses a little padding, which keeps two lines with room to spare. */
+  .wx-srv-pen-width {
+    flex: 0 0 40px;
+    width: 40px;
+    min-width: 40px;
+    max-width: 40px;
+  }
+
+  .wx-srv-pen-mode {
+    padding: 0 9px;
+  }
+}
