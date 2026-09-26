@@ -1,0 +1,289 @@
+# Server chat — view-once photos and videos, and the spotlight reveal
+
+Architect ruling, 2026-09-26. Binding for workspace 29 round 2, item 13 (delivery task
+2d47f11e). The Builder may write a feature spec on top of this file but must not contradict it.
+
+**Operator request (via the Delivery Manager):**
+1. A photo or video can be sent **view-once**, with a display time of 2 s, 5 s, 30 s or no time
+   limit. Once the other person has viewed it, the server permanently deletes it through the
+   SAME erasure path that Inv 46 already guarantees.
+2. A **spotlight** way of viewing a photo. The photo starts blacked out, a round cut-out moves
+   around it by itself as soon as it opens, and a slider changes the cut-out's size.
+
+## 1. What "viewed" means (ruling)
+
+**A view-once item is used up the moment the server hands its bytes over, once.** The server
+erases the message straight after that. The display time (2 s / 5 s / 30 s / no limit) is only
+how long the viewer shows it.
+
+- **Rejected: first paint and dwell time.** The server can observe neither. A "viewed" report
+  from the client can be delayed or never sent, so the server copy would outlive the view.
+  With this ruling, the server copy is already gone while the recipient is still looking.
+- It is **stronger than the request**, never weaker: the operator asked for deletion after
+  viewing, and this deletes after delivery, which is earlier.
+- **Opening uses it up.** If the recipient taps "Tap to view" and then closes the tab before
+  it has loaded, it is gone. The viewer says so in plain words ("Opening it uses it up").
+- The display time is not a security control. The bytes are on the recipient's device while
+  they are shown (§6, honest limits).
+
+## 2. Server
+
+### 2.1 Schema (migration number assigned at merge)
+
+```sql
+ALTER TABLE messages ADD COLUMN view_once_s INTEGER
+  CHECK(view_once_s IS NULL OR view_once_s IN (0, 2, 5, 30));   -- NULL = ordinary; 0 = no limit
+ALTER TABLE messages ADD COLUMN view_spotlight INTEGER NOT NULL DEFAULT 0
+  CHECK(view_spotlight IN (0, 1));
+ALTER TABLE messages ADD COLUMN view_claim_id TEXT;             -- 32 lowercase hex, from the client
+ALTER TABLE messages ADD COLUMN view_claimed_at REAL;           -- epoch seconds
+ALTER TABLE messages ADD COLUMN view_claim_email TEXT;          -- CF identity of the claimant
+CREATE INDEX IF NOT EXISTS idx_messages_view_claimed
+  ON messages(view_claimed_at) WHERE view_claimed_at IS NOT NULL;
+ALTER TABLE attachments ADD COLUMN view_once_renditions TEXT;   -- JSON list, view-once only
+```
+
+- A view-once message holds **exactly one** attachment, of kind photo or video, and **no
+  text**. It may be a reply (`replyToSeq`, 04-round2-rulings item 10).
+- `view_spotlight = 1` only for a photo.
+
+### 2.2 No ordinary link may ever exist for a view-once item (NEW INVARIANT)
+
+In the same transaction that creates the message, the store:
+1. copies the attachment's `renditions` list into `view_once_renditions`;
+2. sets `renditions = '[]'`.
+
+The `renditions` column now means "the renditions that may be linked". Consequences:
+- `attachment_json` mints **no URLs** for a view-once attachment, and nor does the item-10
+  quote's `thumbUrl`. This holds in every code path, **including an older slot process during
+  a blue/green overlap**, because old code also mints URLs only from `renditions`.
+- `GET /media/{attId}/{rendition}` additionally answers **404** for any attachment whose
+  message is view-once. That covers URLs minted before the send, such as the sender's own
+  composer preview.
+- **The attachment must be `ready` before a view-once send** (422 `not_ready`). Media
+  processing therefore never runs after the flag is set, so an older process's
+  `finish_attachment` can never write the rendition list back.
+
+### 2.3 Routes (under `/api/admin/server`, token required)
+
+**`POST /messages/view-once`** — sends. A SEPARATE route, never a field on `POST /messages`:
+an older slot process answers 404/405 instead of silently creating an ordinary, fully visible
+photo (the old body model ignores unknown fields). This fails closed.
+- Body: `{clientId, sender, deviceId, attachmentId, durationS: 2|5|30|null, spotlight: bool,
+  replyToSeq?: int|null}`.
+- `clientId`, `sender`, `deviceId` and `replyToSeq` are validated exactly like `POST
+  /messages`, and a repeated `clientId` returns the stored row.
+- 422 `invalid` for:
+  - not exactly one attachment;
+  - kind not photo/video;
+  - `spotlight` on a video;
+  - a `durationS` outside the set.
+- 422 `not_ready` when the attachment is not ready.
+- It otherwise behaves like a send: the `message` event, and the payload-less push hook.
+- The Message JSON gains `viewOnce: null | {durationS: 2|5|30|null, spotlight: bool}`. Its
+  single attachment appears with `urls: {}`.
+
+**`POST /messages/{seq}/view-once/open`** — claims the single view.
+- Body: `{claimId: hex32, sender}`.
+- `claimId` is generated by the client per open attempt and reused only for retries of that
+  same attempt, exactly like `clientId`.
+- Responses:
+  - 404 `not_found` — the message is missing or not view-once;
+  - 403 `own_message` — the requester sent it: same CF email when both are non-empty,
+    otherwise the same trimmed, case-insensitive sender name (R8). The sender's other devices
+    can therefore never use up the view;
+  - 409 `already_opened` — a different claim holds it;
+  - **200 `{durationS, spotlight, kind, mime}`** — this claim holds it. A repeat of the same
+    `claimId` and email returns 200 again (a lost response is retryable).
+- **Race-free across tabs, devices and blue/green processes:** one conditional write inside
+  `BEGIN IMMEDIATE`: `UPDATE messages SET view_claim_id=?, view_claimed_at=?,
+  view_claim_email=? WHERE seq=? AND view_once_s IS NOT NULL AND view_claim_id IS NULL`. It
+  either changes one row or none, so there is exactly one winner.
+
+**`GET /messages/{seq}/view-once/content`** — delivers the bytes, once.
+- Headers: `X-Wixy-Server-Token` and `X-Wixy-View-Claim: <claimId>`. The client uses
+  `fetch()`, never an `<img>`/`<video>` src, so a header works.
+- Checks:
+  - the row exists;
+  - `hmac.compare_digest` of the claim;
+  - the same email as the claim;
+  - `now < view_claimed_at + 600`, else 410 `expired`.
+- Serves the photo's `full` or the video's `play` rendition from `view_once_renditions`:
+  - the full body only, with `Range` ignored;
+  - `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, and no filename.
+- **When the body has been sent completely, the message is erased through the ordinary
+  delete path.** This is exactly what `DELETE /messages/{seq}` runs:
+  `delete_message_for_scrub` + `_finish_committed_erasure`, spawned on the contained task
+  group (Inv 47). It is idempotent.
+  - A download that breaks part-way erases nothing, so the same claim may retry inside the
+    window.
+  - After a complete download, every further request is 404.
+- **Backstop:** a contained loop (Inv 47), at least every 30 s and once at startup, erases
+  every view-once message whose claim is older than 600 s, again through the same delete path.
+  That covers a claim whose download never completed.
+- **No second erasure mechanism anywhere.** Delete and wipe of a view-once message are the
+  ordinary ones. Unopened view-once messages do not expire (not requested); the sender can
+  delete them.
+
+## 3. Client
+
+### 3.1 Sending
+- The attachment chip for a photo or video in the composer gets a **"View once"** control. It
+  opens a small picker:
+  - the choices 2 s / 5 s / 30 s / No time limit;
+  - for a photo only, a **"Spotlight"** switch;
+  - the plain note: "It disappears once they open it. They could still take a screenshot."
+- A view-once item is sent **on its own**, with no text. If the composer holds other chips or
+  text, those go as a separate ordinary message first.
+- Send stays disabled with "Preparing…" until the attachment is ready.
+- Sending goes to `POST /messages/view-once`. A 404/405 (an older server during a deploy)
+  shows "Couldn't send as view-once. Try again in a moment." Nothing is sent.
+
+### 3.2 In the thread
+- **Recipient's bubble:** a placeholder card with no preview. It shows the icon and "Photo" or
+  "Video", then "View once · 5 s" (or "View once"), "Spotlight" if set, and a **"Tap to view"**
+  button.
+- **Sender's bubble:** "View-once photo · 5 s · Not opened yet". No preview and no button.
+  The menu keeps Reply and "Delete for everyone".
+- When the item is used up, `message_deleted` removes the bubble on every device, with no
+  placeholder (Inv 46). Its disappearing is the sender's signal that it was opened (or
+  deleted).
+- An item-10 quote of a view-once message shows "View-once photo" or "View-once video",
+  never an image.
+
+### 3.3 The viewer (a new component; not the existing lightbox)
+- **Tap to view** → generate a `claimId` → open → a full-screen overlay showing "Loading…"
+  and a ✕.
+  - Download the content into a `Blob` and retry on a network error while the window is
+    open.
+  - 409 → "Already opened". 404/410 → "No longer available".
+- **Photos are drawn on a `<canvas>`** from `createImageBitmap(blob)`, never as an `<img>`, so
+  there is no long-press "Save image".
+- **Videos:**
+  - play from an object URL in a `<video>` with no controls, `playsinline`,
+    `disablePictureInPicture` and `controlsList="nodownload noremoteplayback"`;
+  - if `play()` is refused because the tap's activation has lapsed, show one "Play" button;
+  - a video plays once and closes when it ends or when its timer runs out, whichever is first.
+- The overlay also blocks `contextmenu`, text selection and `-webkit-touch-callout`.
+- **The timer starts at the first painted frame** and shows a countdown ring.
+- **The viewer closes on:**
+  - the timer ending;
+  - ✕;
+  - Escape (which locks anyway);
+  - `visibilitychange` → hidden, whatever the lock checkboxes say, because leaving the app
+    ends the view;
+  - any lock;
+  - a wipe.
+- **It does NOT close on `message_deleted` for its own message.** That event is expected to
+  arrive while the item is on screen, because the server erases straight after the download.
+- **On close**, release everything:
+  - `ImageBitmap.close()` and clear the canvas;
+  - revoke the object URL, and remove the video's src and call `load()`;
+  - drop every reference to the Blob;
+  - remove the overlay.
+  The item can never be reopened.
+- **Idle lock (R7, Inv 43):**
+  - a **timed** view holds a new suspension reason, `viewOnce`, for its length (at most 30 s),
+    released on close;
+  - a video also holds the existing `mediaPlaying` while it plays;
+  - a **no-limit photo holds no suspension**, so the normal idle lock closes it unless the
+    viewer is touching or dragging.
+  Record this in Inv 43's text as the R7 suspension list growing by one.
+- Permanent unlock changes none of this.
+
+## 4. Spotlight (photos, and only for view-once)
+
+**Why only for view-once:** an ordinary photo is already on screen as a thumbnail and in the
+lightbox, so there is nothing for a tease to hide. Hiding ordinary photos would be a
+different feature.
+
+It is the **sender's** choice. The recipient cannot switch it off; they control only the
+cut-out's size and position.
+- **Renderer:** one canvas with the image letterboxed to fit.
+  - Over it goes an opaque black layer with a circular hole, whose outer 15 % of radius is
+    feathered with a radial gradient.
+  - The canvas is `devicePixelRatio`-aware, capped at 2×.
+  - It redraws on `requestAnimationFrame` only while something moves.
+- **Automatic movement (the self-demo):**
+  - It starts at the first painted frame and follows a Lissajous path over the drawn image:
+    `x = cx + Ax·sin(3θ + π/2)`, `y = cy + Ay·sin(2θ)`, with one full cycle every 16 s.
+  - `Ax` and `Ay` are half the drawn width and height minus the radius, so the cut-out stays
+    on the image and passes over every region. The path is deterministic, and tests drive it
+    with fake time.
+- **Dragging:** a finger or mouse on the canvas moves the cut-out's centre under the pointer,
+  clamped to the image, and pauses the path. 1.5 s after release, the path resumes from where
+  the cut-out is, easing over 600 ms, with no jump.
+- **Slider:** `<input type="range">` below the image (aria-label "Spotlight size").
+  - The radius runs from **6 % to 35 %** of the drawn image's shorter side, default 12 %.
+  - The maximum can never uncover the whole picture; that is the point of a tease.
+- **Reduced motion** (`prefers-reduced-motion`): no automatic movement. The cut-out starts
+  centred, and dragging and the slider still work.
+- The timer runs as for any view-once.
+
+## 5. Taps and the double-tap lock (R3 v1.5.2 / v1.7)
+- **"Tap to view"** carries `data-srv-gesture-boundary`, because it opens a new surface under
+  the finger.
+- **The viewer's ✕** is a plain button.
+- **Dragging the spotlight is not a tap** (it moves more than the slop allowance), so it never
+  counts.
+- **The slider is an `input`,** and taps on it are already excluded.
+- **A genuine double-tap on the viewer still locks.** The panic lock stays available while
+  something is being viewed, and locking closes the view.
+
+## 6. Honest limits (put these in `docs/ai/livechat.md`, and the first one in the picker's note)
+- A screenshot, screen recording or second camera cannot be prevented by a web page.
+- While it is shown, the bytes are in the recipient's browser memory. A modified client could
+  keep them. View-once guarantees that the SERVER keeps nothing and that the ordinary app
+  never shows it twice.
+- The phone's app-switcher snapshot may be taken as the page hides. The viewer closes on
+  hide, but the operating system's snapshot is outside our control.
+
+## 7. Tests (required)
+**pytest:**
+- **Send route:** the validation matrix; `not_ready`; `clientId` idempotency; and, in the same
+  transaction, `renditions = '[]'` with `view_once_renditions` filled.
+- **No links:**
+  - `message_json` and the item-10 quote carry no URL;
+  - a signed media URL minted before the send is refused (404) after it;
+  - an old-style serializer run on the row (`renditions` = `[]`) mints nothing.
+- **Claim:**
+  - two concurrent claims through two store connections → exactly one 200 and one 409;
+  - the same `claimId` again → 200;
+  - the sender's own identity → 403.
+- **Content:**
+  - a wrong claim or email is refused, and an expired one → 410;
+  - a complete download returns the bytes with `no-store`, then the ordinary delete path
+    runs. Assert the `message_deleted` event, the files queued or removed, the existing
+    raw-bytes assertions, and that a second open or content request → 404;
+  - a broken download erases nothing and a retry succeeds.
+- **Backstop:** a claim older than 600 s is erased by the loop.
+
+**vitest:**
+- the viewer closes on timer, ✕, hidden, lock and wipe, and not on `message_deleted`;
+- every resource is released;
+- the `viewOnce` suspension is held only for timed views and released on close;
+- spotlight: the path is deterministic under fake time and clamped; reduced motion gives a
+  static cut-out; the slider's bounds; drag pauses and resumes without a jump.
+
+**e2e** (two identities, desktop and mobile viewports):
+- send a 2 s view-once photo; the recipient opens it, sees the canvas, and it closes by
+  itself; the message vanishes on both sides;
+- the sender has no "Tap to view";
+- a second tab of the recipient gets "Already opened";
+- a spotlight photo renders its cut-out, and the slider changes it.
+
+## 8. Process
+- **Opus audit required before merge,** with this file as the acceptance criteria. It adds a
+  schema migration, a new content route, a cross-process claim race, and it drives the Inv 46
+  erasure path from a new trigger.
+- **New invariant** (the next free number at merge, 52 today): "A view-once attachment is never
+  linkable: from the moment its message exists its `renditions` list is empty. Its bytes
+  leave the server once, through a claim-bound route, and the message is then erased by the
+  ordinary delete path."
+- Also amend:
+  - Inv 43 (the `viewOnce` suspension);
+  - Inv 44 (media privacy: the new route);
+  - Inv 46's *Enforced by*.
+- Update `docs/ai/livechat.md`, `contracts.md`, `invariants.md` and the CLAUDE.md store-schema
+  table in the same PR.
+- Every commit: `Release-note: General bug fixes and improvements.` (R14a).
