@@ -3124,7 +3124,7 @@ describe("reply to a message (round 2 ruling item 10)", () => {
         peaks: null,
         urls: {},
       }],
-      viewOnce: { durationS: 5, spotlight: true },
+      viewOnce: { durationS: 5, tease: true },
     });
     getHistory.mockResolvedValue(emptyHistory({ messages: [voMsg], cursor: 201 }));
     const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: window, onSettings: vi.fn() });
@@ -3133,7 +3133,7 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     const card = view.element.querySelector(".wx-srv-view-once-recipient-card");
     expect(card).toBeTruthy();
     expect(card?.textContent).toContain("View once · 5 s");
-    expect(card?.textContent).toContain("Spotlight");
+    expect(card?.textContent).toContain("Tease");
 
     const tapBtn = card?.querySelector<HTMLButtonElement>(".wx-srv-view-once-tap-btn");
     expect(tapBtn).toBeTruthy();
@@ -3162,7 +3162,7 @@ describe("reply to a message (round 2 ruling item 10)", () => {
         peaks: null,
         urls: {},
       }],
-      viewOnce: { durationS: 30, spotlight: false },
+      viewOnce: { durationS: 30, tease: false },
     });
     getHistory.mockResolvedValue(emptyHistory({ messages: [voMsg], cursor: 202 }));
     const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: window, onSettings: vi.fn() });
@@ -3192,7 +3192,7 @@ describe("reply to a message (round 2 ruling item 10)", () => {
         peaks: null,
         urls: {},
       }],
-      viewOnce: { durationS: 5, spotlight: false },
+      viewOnce: { durationS: 5, tease: false },
     });
     getHistory.mockResolvedValue(emptyHistory({ messages: [voMsg], cursor: 203 }));
     const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: window, onSettings: vi.fn() });
@@ -3239,7 +3239,7 @@ describe("reply to a message (round 2 ruling item 10)", () => {
         peaks: null,
         urls: {},
       }],
-      viewOnce: { durationS: 5, spotlight: false },
+      viewOnce: { durationS: 5, tease: false },
     });
     getHistory.mockResolvedValue(emptyHistory({ messages: [voMsg], cursor: 204 }));
     const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: window, onSettings: vi.fn() });
@@ -3483,8 +3483,8 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     await flush();
 
     // Bypass UI: force both chips to have view-once enabled
-    injectedVoSettings.set(photoA, { enabled: true, durationS: 5, spotlight: false });
-    injectedVoSettings.set(photoB, { enabled: true, durationS: 5, spotlight: false });
+    injectedVoSettings.set(photoA, { enabled: true, durationS: 5, tease: false });
+    injectedVoSettings.set(photoB, { enabled: true, durationS: 5, tease: false });
 
     // Reset mocks to monitor what gets sent
     sendMessage.mockClear();

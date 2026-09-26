@@ -1,6 +1,6 @@
-// E2E for view-once photos/videos and the spotlight reveal (spec/server-chat/06-view-once-media.md).
+// E2E for view-once photos/videos and the tease reveal (spec/server-chat/06-view-once-media.md).
 // Verifies two identities, desktop and mobile viewports, automatic disappearance after display,
-// recipient vs sender cards, 409 already-opened race, and spotlight slider interaction.
+// recipient vs sender cards, 409 already-opened race, and tease slider interaction.
 
 import { expect, test } from "../fixtures";
 import type { BrowserContext, Locator, Page } from "@playwright/test";
@@ -84,7 +84,7 @@ test.describe("server-view-once.spec.ts (spec/06-view-once-media)", () => {
         deviceId: "device-alice-e2e",
         attachmentId,
         durationS: 2,
-        spotlight: false,
+        tease: false,
       },
     });
     expect(sendRes.status()).toBe(201);
@@ -145,7 +145,7 @@ test.describe("server-view-once.spec.ts (spec/06-view-once-media)", () => {
         sender: "Alice",
         by_email: "alice@example.com",
         view_once_s: 30,
-        spotlight: false,
+        tease: false,
       },
     });
     const { seq } = (await seedRes.json()) as { seq: number };
@@ -197,7 +197,7 @@ test.describe("server-view-once.spec.ts (spec/06-view-once-media)", () => {
     await contextBob.close();
   });
 
-  test("mobile: spotlight photo renders cut-out and slider changes it", async ({ browser }) => {
+  test("mobile: tease photo renders cut-out and slider changes it", async ({ browser }) => {
     const contextAlice = await browser.newContext({
       extraHTTPHeaders: { "CF-Access-Authenticated-User-Email": "alice@example.com" },
     });
@@ -214,26 +214,26 @@ test.describe("server-view-once.spec.ts (spec/06-view-once-media)", () => {
     await unlockServer(pageAlice, "Alice");
     await unlockServer(pageBob, "Bob");
 
-    // Seed a 30s spotlight photo
+    // Seed a 30s tease photo
     const seedRes = await pageAlice.request.post("/test/server/seed-photo", {
       data: {
         sender: "Alice",
         by_email: "alice@example.com",
         view_once_s: 30,
-        spotlight: true,
+        tease: true,
       },
     });
     const { seq } = (await seedRes.json()) as { seq: number };
 
-    // Bob sees recipient bubble with Spotlight badge
+    // Bob sees recipient bubble with Tease badge
     const bobBubble = pageBob.locator(`[data-message-seq="${seq}"]`);
     await expect(bobBubble).toBeVisible({ timeout: 5000 });
-    await expect(bobBubble.locator(".wx-srv-view-once-spotlight-badge")).toContainText("Spotlight");
+    await expect(bobBubble.locator(".wx-srv-view-once-tease-badge")).toContainText("Tease");
 
     // Bob taps to view
     await bobBubble.locator(".wx-srv-view-once-tap-btn").click();
 
-    // Spotlight overlay renders canvas and slider
+    // Tease overlay renders canvas and slider
     const overlay = pageBob.locator(".wx-srv-view-once-overlay");
     await expect(overlay).toBeVisible();
     await expect(overlay.locator("canvas")).toBeVisible();
@@ -244,7 +244,7 @@ test.describe("server-view-once.spec.ts (spec/06-view-once-media)", () => {
     await expect(slider).toHaveAttribute("max", "35");
     await expect(slider).toHaveValue("12");
 
-    // Pin spotlight to center (187, 333) with pointerdown on canvas
+    // Pin tease to center (187, 333) with pointerdown on canvas
     const canvas = overlay.locator("canvas");
     await canvas.dispatchEvent("pointerdown", { clientX: 187, clientY: 333 });
 
@@ -291,7 +291,7 @@ test.describe("server-view-once.spec.ts (spec/06-view-once-media)", () => {
       };
     });
     expect(expandedSample).not.toBeNull();
-    // Mid point is now inside the expanded spotlight hole (shows image color!)
+    // Mid point is now inside the expanded tease hole (shows image color!)
     expect(expandedSample!.mid[2]).toBeGreaterThan(100);
 
     // Close viewer via close button

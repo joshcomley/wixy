@@ -56,6 +56,7 @@ from wixy_server.livechat.grants import (
     secret_hash_from_wire,
 )
 from wixy_server.livechat.models import (
+    LEGACY_TEASE_WIRE_KEY,
     DrawingRow,
     EventRow,
     MessageHook,
@@ -599,7 +600,11 @@ class SendViewOnceMessageIn(BaseModel):
     deviceId: str
     attachmentId: str
     durationS: int | None = None
-    spotlight: StrictBool = False
+    tease: StrictBool = False
+    # TRANSITIONAL — REMOVE after 2026-10-27 (decisions/00172). A tab loaded before the
+    # spotlight -> tease rename still sends the old key; without this, pydantic would
+    # silently drop it and the photo would go out with Tease OFF (the full picture visible).
+    spotlight: StrictBool | None = None
     replyToSeq: Any = None
 
 
@@ -649,7 +654,7 @@ async def send_view_once_message(body: SendViewOnceMessageIn, request: Request) 
             by_email=auth.email or None,
             attachment_id=body.attachmentId,
             duration_s=body.durationS,
-            spotlight=body.spotlight,
+            tease=body.tease or body.spotlight is True,
             reply_to_seq=reply_to_seq,
             now=now,
         )
@@ -716,7 +721,8 @@ async def open_view_once(seq: int, body: OpenViewOnceIn, request: Request) -> JS
         status_code=200,
         content={
             "durationS": duration_s,
-            "spotlight": bool(msg.view_spotlight),
+            "tease": bool(msg.view_tease),
+            LEGACY_TEASE_WIRE_KEY: bool(msg.view_tease),
             "kind": att.kind,
             "mime": att.mime,
         },

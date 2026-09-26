@@ -538,7 +538,7 @@ def main() -> None:
                     by_email=str(payload.get("by_email")) if payload.get("by_email") else None,
                     attachment_id=attachment_id,
                     duration_s=duration_s,
-                    spotlight=bool(payload.get("spotlight", False)),
+                    tease=bool(payload.get("tease", False)),
                     now=now,
                 )
             else:

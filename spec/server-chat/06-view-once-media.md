@@ -1,4 +1,4 @@
-# Server chat — view-once photos and videos, and the spotlight reveal
+# Server chat — view-once photos and videos, and the tease reveal
 
 Architect ruling, 2026-09-26. Binding for workspace 29 round 2, item 13 (delivery task
 2d47f11e). The Builder may write a feature spec on top of this file but must not contradict it.
@@ -7,7 +7,7 @@ Architect ruling, 2026-09-26. Binding for workspace 29 round 2, item 13 (deliver
 1. A photo or video can be sent **view-once**, with a display time of 2 s, 5 s, 30 s or no time
    limit. Once the other person has viewed it, the server permanently deletes it through the
    SAME erasure path that Inv 46 already guarantees.
-2. A **spotlight** way of viewing a photo. The photo starts blacked out, a round cut-out moves
+2. A **tease** way of viewing a photo. The photo starts blacked out, a round cut-out moves
    around it by itself as soon as it opens, and a slider changes the cut-out's size.
 
 ## 1. What "viewed" means (ruling)
@@ -33,8 +33,8 @@ how long the viewer shows it.
 ```sql
 ALTER TABLE messages ADD COLUMN view_once_s INTEGER
   CHECK(view_once_s IS NULL OR view_once_s IN (0, 2, 5, 30));   -- NULL = ordinary; 0 = no limit
-ALTER TABLE messages ADD COLUMN view_spotlight INTEGER NOT NULL DEFAULT 0
-  CHECK(view_spotlight IN (0, 1));
+ALTER TABLE messages ADD COLUMN view_tease INTEGER NOT NULL DEFAULT 0
+  CHECK(view_tease IN (0, 1));
 ALTER TABLE messages ADD COLUMN view_claim_id TEXT;             -- 32 lowercase hex, from the client
 ALTER TABLE messages ADD COLUMN view_claimed_at REAL;           -- epoch seconds
 ALTER TABLE messages ADD COLUMN view_claim_email TEXT;          -- CF identity of the claimant
@@ -45,7 +45,7 @@ ALTER TABLE attachments ADD COLUMN view_once_renditions TEXT;   -- JSON list, vi
 
 - A view-once message holds **exactly one** attachment, of kind photo or video, and **no
   text**. It may be a reply (`replyToSeq`, 04-round2-rulings item 10).
-- `view_spotlight = 1` only for a photo.
+- `view_tease = 1` only for a photo.
 
 ### 2.2 No ordinary link may ever exist for a view-once item (NEW INVARIANT)
 
@@ -69,18 +69,18 @@ The `renditions` column now means "the renditions that may be linked". Consequen
 **`POST /messages/view-once`** — sends. A SEPARATE route, never a field on `POST /messages`:
 an older slot process answers 404/405 instead of silently creating an ordinary, fully visible
 photo (the old body model ignores unknown fields). This fails closed.
-- Body: `{clientId, sender, deviceId, attachmentId, durationS: 2|5|30|null, spotlight: bool,
+- Body: `{clientId, sender, deviceId, attachmentId, durationS: 2|5|30|null, tease: bool,
   replyToSeq?: int|null}`.
 - `clientId`, `sender`, `deviceId` and `replyToSeq` are validated exactly like `POST
   /messages`, and a repeated `clientId` returns the stored row.
 - 422 `invalid` for:
   - not exactly one attachment;
   - kind not photo/video;
-  - `spotlight` on a video;
+  - `tease` on a video;
   - a `durationS` outside the set.
 - 422 `not_ready` when the attachment is not ready.
 - It otherwise behaves like a send: the `message` event, and the payload-less push hook.
-- The Message JSON gains `viewOnce: null | {durationS: 2|5|30|null, spotlight: bool}`. Its
+- The Message JSON gains `viewOnce: null | {durationS: 2|5|30|null, tease: bool}`. Its
   single attachment appears with `urls: {}`.
 
 **`POST /messages/{seq}/view-once/open`** — claims the single view.
@@ -93,7 +93,7 @@ photo (the old body model ignores unknown fields). This fails closed.
     otherwise the same trimmed, case-insensitive sender name (R8). The sender's other devices
     can therefore never use up the view;
   - 409 `already_opened` — a different claim holds it;
-  - **200 `{durationS, spotlight, kind, mime}`** — this claim holds it. A repeat of the same
+  - **200 `{durationS, tease, kind, mime}`** — this claim holds it. A repeat of the same
     `claimId` and email returns 200 again (a lost response is retryable).
 - **Race-free across tabs, devices and blue/green processes:** one conditional write inside
   `BEGIN IMMEDIATE`: `UPDATE messages SET view_claim_id=?, view_claimed_at=?,
@@ -167,7 +167,7 @@ photo (the old body model ignores unknown fields). This fails closed.
     `position: fixed` or attached to the body, never nested inside a clipped container.
 - The sheet holds:
   - the choices 2 s / 5 s / 30 s / No time limit;
-  - for a photo only, a **"Spotlight"** switch;
+  - for a photo only, a **"Tease"** switch;
   - the plain note: "It disappears once they open it. They could still take a screenshot."
 - A view-once item is sent **on its own**, with no text. If the composer holds other chips or
   text, those go as a separate ordinary message first.
@@ -177,7 +177,7 @@ photo (the old body model ignores unknown fields). This fails closed.
 
 ### 3.2 In the thread
 - **Recipient's bubble:** a placeholder card with no preview. It shows the icon and "Photo" or
-  "Video", then "View once · 5 s" (or "View once"), "Spotlight" if set, and a **"Tap to view"**
+  "Video", then "View once · 5 s" (or "View once"), "Tease" if set, and a **"Tap to view"**
   button.
 - **Sender's bubble:** "View-once photo · 5 s · Not opened yet". No preview and no button.
   The menu keeps Reply and "Delete for everyone".
@@ -227,7 +227,7 @@ photo (the old body model ignores unknown fields). This fails closed.
   Record this in Inv 43's text as the R7 suspension list growing by one.
 - Permanent unlock changes none of this.
 
-## 4. Spotlight (photos, and only for view-once)
+## 4. Tease (photos, and only for view-once)
 
 **Why only for view-once:** an ordinary photo is already on screen as a thumbnail and in the
 lightbox, so there is nothing for a tease to hide. Hiding ordinary photos would be a
@@ -249,7 +249,7 @@ cut-out's size and position.
 - **Dragging:** a finger or mouse on the canvas moves the cut-out's centre under the pointer,
   clamped to the image, and pauses the path. 1.5 s after release, the path resumes from where
   the cut-out is, easing over 600 ms, with no jump.
-- **Slider:** `<input type="range">` below the image (aria-label "Spotlight size").
+- **Slider:** `<input type="range">` below the image (aria-label "Tease size").
   - The radius runs from **6 % to 35 %** of the drawn image's shorter side, default 12 %.
   - The maximum can never uncover the whole picture; that is the point of a tease.
 - **Reduced motion** (`prefers-reduced-motion`): no automatic movement. The cut-out starts
@@ -260,7 +260,7 @@ cut-out's size and position.
 - **"Tap to view"** carries `data-srv-gesture-boundary`, because it opens a new surface under
   the finger.
 - **The viewer's ✕** is a plain button.
-- **Dragging the spotlight is not a tap** (it moves more than the slop allowance), so it never
+- **Dragging the tease is not a tap** (it moves more than the slop allowance), so it never
   counts.
 - **The slider is an `input`,** and taps on it are already excluded.
 - **A genuine double-tap on the viewer still locks.** The panic lock stays available while
@@ -298,7 +298,7 @@ cut-out's size and position.
 - the viewer closes on timer, ✕, hidden, lock and wipe, and not on `message_deleted`;
 - every resource is released;
 - the `viewOnce` suspension is held only for timed views and released on close;
-- spotlight: the path is deterministic under fake time and clamped; reduced motion gives a
+- tease: the path is deterministic under fake time and clamped; reduced motion gives a
   static cut-out; the slider's bounds; drag pauses and resumes without a jump.
 
 **e2e** (two identities, desktop and mobile viewports):
@@ -306,7 +306,7 @@ cut-out's size and position.
   itself; the message vanishes on both sides;
 - the sender has no "Tap to view";
 - a second tab of the recipient gets "Already opened";
-- a spotlight photo renders its cut-out, and the slider changes it.
+- a tease photo renders its cut-out, and the slider changes it.
 
 ## 8. Process
 - **Opus audit required before merge,** with this file as the acceptance criteria. It adds a

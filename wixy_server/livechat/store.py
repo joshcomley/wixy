@@ -200,6 +200,13 @@ CREATE INDEX IF NOT EXISTS idx_messages_view_claimed
 """
 _SCHEMA_V11_VIEW_ONCE_ATTACHMENTS = "ALTER TABLE attachments ADD COLUMN view_once_renditions TEXT"
 
+# Pure rename (decisions/00172): the "Spotlight" view-once mode became "Tease" —
+# zero behavior change, only the name. SQLite 3.25+ rewrites the column's own CHECK
+# constraint text on RENAME COLUMN, so `CHECK(view_spotlight IN (0, 1))` becomes
+# `CHECK(view_tease IN (0, 1))` automatically (verified by
+# `test_migrates_v11_database_renames_spotlight_column_to_tease`).
+_SCHEMA_V12_RENAME_TEASE_COLUMN = "ALTER TABLE messages RENAME COLUMN view_spotlight TO view_tease"
+
 # `ON DELETE CASCADE` on both tables is load-bearing for the SAME reason as reactions'
 # (decisions/00164, `_SCHEMA_V7_REACTIONS` above): an older blue/green-overlap process that
 # knows nothing about drawings can still hard-delete a message, and the cascade — not that
@@ -207,7 +214,7 @@ _SCHEMA_V11_VIEW_ONCE_ATTACHMENTS = "ALTER TABLE attachments ADD COLUMN view_onc
 # are index-covered (the reply-to lesson two migrations up: 17.6s vs 0.2s at 20,000 rows) —
 # `idx_drawings_anchor` for `drawings.anchor_message_seq`, and `drawing_strokes`'s own primary
 # key (which leads with `drawing_id`) for its FK to `drawings.id`.
-_SCHEMA_V12_DRAWINGS = """
+_SCHEMA_V13_DRAWINGS = """
 CREATE TABLE IF NOT EXISTS drawings(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   client_id TEXT NOT NULL UNIQUE,
@@ -227,7 +234,7 @@ CREATE TABLE IF NOT EXISTS drawing_strokes(
   PRIMARY KEY(drawing_id, stroke_id));
 """
 
-_LATEST_SCHEMA_VERSION = 12
+_LATEST_SCHEMA_VERSION = 13
 _UNKNOWN_GRANT_HASH = "0" * 64
 _LOGGER = logging.getLogger(__name__)
 
@@ -377,7 +384,7 @@ def _row_to_message(
         reply_to_seq=row["reply_to_seq"],
         reply_to=reply_to,
         view_once_s=row["view_once_s"],
-        view_spotlight=row["view_spotlight"],
+        view_tease=row["view_tease"],
         view_claim_id=row["view_claim_id"],
         view_claimed_at=row["view_claimed_at"],
         view_claim_email=row["view_claim_email"],
@@ -732,11 +739,18 @@ class LiveChatStore:
                 current = 11
 
             if current < 12:
-                for statement in _SCHEMA_V12_DRAWINGS.split(";"):
-                    if statement.strip():
-                        conn.execute(statement)
+                existing_msg_cols = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
+                if "view_spotlight" in existing_msg_cols and "view_tease" not in existing_msg_cols:
+                    conn.execute(_SCHEMA_V12_RENAME_TEASE_COLUMN)
                 conn.execute("PRAGMA user_version = 12")
                 current = 12
+
+            if current < 13:
+                for statement in _SCHEMA_V13_DRAWINGS.split(";"):
+                    if statement.strip():
+                        conn.execute(statement)
+                conn.execute("PRAGMA user_version = 13")
+                current = 13
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
@@ -900,7 +914,7 @@ class LiveChatStore:
         by_email: str | None,
         attachment_id: str,
         duration_s: int | None,
-        spotlight: bool,
+        tease: bool,
         reply_to_seq: int | None = None,
         now: float,
     ) -> tuple[MessageRow, bool]:
@@ -933,7 +947,7 @@ class LiveChatStore:
                 candidate is None
                 or candidate["message_seq"] is not None
                 or candidate["kind"] not in ("photo", "video")
-                or (spotlight and candidate["kind"] != "photo")
+                or (tease and candidate["kind"] != "photo")
                 or candidate["status"] not in ("processing", "ready")
             ):
                 raise UnusableAttachmentError(attachment_id)
@@ -951,12 +965,12 @@ class LiveChatStore:
 
             # In DB: view_once_s: NULL = ordinary; 0 = no limit; 2, 5, 30.
             stored_duration_s = 0 if duration_s is None else duration_s
-            view_spotlight = 1 if spotlight else 0
+            view_tease = 1 if tease else 0
 
             cursor = conn.execute(
                 "INSERT INTO messages "
                 "(client_id, sender, device_id, by_email, text, created_at, "
-                "reply_to_seq, view_once_s, view_spotlight) "
+                "reply_to_seq, view_once_s, view_tease) "
                 "VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)",
                 (
                     client_id,
@@ -966,7 +980,7 @@ class LiveChatStore:
                     now,
                     stored_reply_to_seq,
                     stored_duration_s,
-                    view_spotlight,
+                    view_tease,
                 ),
             )
             seq = cursor.lastrowid

@@ -1,9 +1,10 @@
-"""`LiveChatStore` and route tests for view-once media and spotlight reveal
+"""`LiveChatStore` and route tests for view-once media and tease reveal
 (spec/server-chat/06-view-once-media.md).
 
 Tests cover:
-- Schema migration to v11 (messages.view_once_s, view_spotlight, view_claim_id,
-  view_claimed_at, view_claim_email, idx_messages_view_claimed, attachments.view_once_renditions).
+- Schema migration to v11 (messages.view_once_s, view_tease, view_claim_id,
+  view_claimed_at, view_claim_email, idx_messages_view_claimed, attachments.view_once_renditions),
+  and the v12 rename of that column from view_spotlight to view_tease (decisions/00172).
 - Invariant 52: No ordinary link may ever exist for a view-once item.
 - Send route: POST /api/admin/server/messages/view-once (validation, not_ready, idempotency).
 - Claim route: POST /api/admin/server/messages/{seq}/view-once/open
@@ -220,7 +221,7 @@ class _FakeSigner:
 
 
 class TestSchemaMigration:
-    def test_migrates_to_v11_and_creates_view_once_columns(
+    def test_migrates_to_latest_schema_and_creates_view_once_columns(
         self, store: LiveChatStore, db_path: Path
     ) -> None:
         store.list_messages(before=None, limit=1)
@@ -231,7 +232,7 @@ class TestSchemaMigration:
 
             msg_cols = {row[1] for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
             assert "view_once_s" in msg_cols
-            assert "view_spotlight" in msg_cols
+            assert "view_tease" in msg_cols
             assert "view_claim_id" in msg_cols
             assert "view_claimed_at" in msg_cols
             assert "view_claim_email" in msg_cols
@@ -268,12 +269,55 @@ class TestSchemaMigration:
                     "VALUES ('client-invalid-s', 'Josh', 'dev1', 1.0, 10)"
                 )
 
-            # view_spotlight can only be 0 or 1
+            # view_tease can only be 0 or 1
             with pytest.raises(sqlite3.IntegrityError):
                 conn.execute(
                     "INSERT INTO messages "
-                    "(client_id, sender, device_id, created_at, view_spotlight) "
-                    "VALUES ('client-invalid-spot', 'Josh', 'dev1', 1.0, 2)"
+                    "(client_id, sender, device_id, created_at, view_tease) "
+                    "VALUES ('client-invalid-tease', 'Josh', 'dev1', 1.0, 2)"
+                )
+        finally:
+            conn.close()
+
+    def test_migrates_v11_database_renames_spotlight_column_to_tease(
+        self, store: LiveChatStore, db_path: Path
+    ) -> None:
+        """A database already fully migrated under the OLD `view_spotlight` name
+        (schema v11) upgrades cleanly to v12: the column is RENAMED (not dropped
+        and recreated — no data loss), and SQLite's RENAME COLUMN (3.25+) rewrites
+        the column's own CHECK constraint text so it still fires under the new
+        name (decisions/00172 — a pure rename, no behavior change)."""
+        store.list_messages(before=None, limit=1)
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.execute("ALTER TABLE messages RENAME COLUMN view_tease TO view_spotlight")
+            conn.execute("PRAGMA user_version = 11")
+            conn.commit()
+        finally:
+            conn.close()
+
+        upgraded = LiveChatStore(db_path)
+        upgraded.list_messages(before=None, limit=1)
+        conn = sqlite3.connect(str(db_path))
+        try:
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == _LATEST_SCHEMA_VERSION
+            assert _LATEST_SCHEMA_VERSION >= 12
+
+            msg_cols = {row[1] for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
+            assert "view_tease" in msg_cols
+            assert "view_spotlight" not in msg_cols
+
+            table_sql = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'messages'"
+            ).fetchone()[0]
+            assert "view_spotlight" not in table_sql
+            assert "CHECK(view_tease IN (0, 1))" in table_sql
+
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO messages "
+                    "(client_id, sender, device_id, created_at, view_tease) "
+                    "VALUES ('client-invalid-tease-post-rename', 'Josh', 'dev1', 1.0, 2)"
                 )
         finally:
             conn.close()
@@ -299,7 +343,7 @@ class TestViewOnceNoLinksInvariant:
             by_email="josh@example.com",
             attachment_id="att1",
             duration_s=5,
-            spotlight=False,
+            tease=False,
             now=now,
         )
 
@@ -319,7 +363,7 @@ class TestViewOnceNoLinksInvariant:
         msg_wire = message_json(msg, signer)
         attachments_wire = cast(list[dict[str, Any]], msg_wire["attachments"])
         assert attachments_wire[0]["urls"] == {}
-        assert msg_wire["viewOnce"] == {"durationS": 5, "spotlight": False}
+        assert msg_wire["viewOnce"] == {"durationS": 5, "tease": False, "spotlight": False}
 
         # Item-10 quote of a view-once message produces thumbUrl: None
         quote_wire = reply_to_json(msg, signer)
@@ -347,7 +391,7 @@ class TestViewOnceNoLinksInvariant:
             by_email="josh@example.com",
             attachment_id="att2",
             duration_s=None,
-            spotlight=True,
+            tease=True,
             now=now,
         )
         att = msg.attachments[0]
@@ -355,7 +399,7 @@ class TestViewOnceNoLinksInvariant:
         old_urls = {r: f"https://example.invalid/{att.id}/{r}" for r in att.renditions}
         assert old_urls == {}
         assert msg.view_once_s == 0
-        assert msg.view_spotlight == 1
+        assert msg.view_tease == 1
 
     def test_signed_media_url_minted_before_send_returns_404_after_send(
         self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
@@ -379,7 +423,7 @@ class TestViewOnceNoLinksInvariant:
                     "deviceId": "device-client-1",
                     "attachmentId": att_id,
                     "durationS": 5,
-                    "spotlight": False,
+                    "tease": False,
                 },
                 headers=headers,
             )
@@ -409,7 +453,7 @@ class TestSendRoute:
                     "deviceId": "device-1234",
                     "attachmentId": att_id,
                     "durationS": 5,
-                    "spotlight": False,
+                    "tease": False,
                 },
                 headers=headers,
             )
@@ -425,7 +469,7 @@ class TestSendRoute:
                     "deviceId": "device-1234",
                     "attachmentId": att_id,
                     "durationS": 10,
-                    "spotlight": False,
+                    "tease": False,
                 },
                 headers=headers,
             )
@@ -441,7 +485,7 @@ class TestSendRoute:
                     "deviceId": "device-1234",
                     "attachmentId": "not-a-hex-id",
                     "durationS": 5,
-                    "spotlight": False,
+                    "tease": False,
                 },
                 headers=headers,
             )
@@ -457,7 +501,7 @@ class TestSendRoute:
                     "deviceId": "device-1234",
                     "attachmentId": att_id,
                     "durationS": 5,
-                    "spotlight": False,
+                    "tease": False,
                 },
                 headers=headers,
             )
@@ -473,7 +517,7 @@ class TestSendRoute:
                     "deviceId": "device-1234",
                     "attachmentId": att_id,
                     "durationS": 5,
-                    "spotlight": False,
+                    "tease": False,
                     "replyToSeq": -1,
                 },
                 headers=headers,
@@ -490,7 +534,7 @@ class TestSendRoute:
                     "deviceId": "short",
                     "attachmentId": att_id,
                     "durationS": 5,
-                    "spotlight": False,
+                    "tease": False,
                 },
                 headers=headers,
             )
@@ -506,14 +550,14 @@ class TestSendRoute:
                     "deviceId": "d" * 65,
                     "attachmentId": att_id,
                     "durationS": 5,
-                    "spotlight": False,
+                    "tease": False,
                 },
                 headers=headers,
             )
             assert res.status_code == 422
             assert res.json()["error"] == "invalid"
 
-            # Spotlight on a video attachment
+            # Tease on a video attachment
             now = time.time()
             store: LiveChatStore = client.app.state.livechat_store  # type: ignore[attr-defined]
             with store._write_txn() as conn:
@@ -535,12 +579,12 @@ class TestSendRoute:
             res = client.post(
                 "/api/admin/server/messages/view-once",
                 json={
-                    "clientId": "client-spotlight-video",
+                    "clientId": "client-tease-video",
                     "sender": "Josh",
                     "deviceId": "device-1234",
                     "attachmentId": "att-video-val-001",
                     "durationS": 5,
-                    "spotlight": True,
+                    "tease": True,
                 },
                 headers=headers,
             )
@@ -556,7 +600,7 @@ class TestSendRoute:
                     "deviceId": "device-1234",
                     "attachmentId": "att-voice-val-001",
                     "durationS": 5,
-                    "spotlight": False,
+                    "tease": False,
                 },
                 headers=headers,
             )
@@ -572,7 +616,7 @@ class TestSendRoute:
                     "deviceId": "device-1234",
                     "attachmentId": "9" * 32,
                     "durationS": 5,
-                    "spotlight": False,
+                    "tease": False,
                 },
                 headers=headers,
             )
@@ -588,7 +632,7 @@ class TestSendRoute:
                     "deviceId": "device-1234",
                     "attachmentId": att_id,
                     "durationS": 5,
-                    "spotlight": False,
+                    "tease": False,
                 },
                 headers=headers,
             )
@@ -602,7 +646,7 @@ class TestSendRoute:
                     "deviceId": "device-1234",
                     "attachmentId": att_id,
                     "durationS": 5,
-                    "spotlight": False,
+                    "tease": False,
                 },
                 headers=headers,
             )
@@ -630,7 +674,7 @@ class TestSendRoute:
                     "deviceId": "device-1234",
                     "attachmentId": att_id,
                     "durationS": 5,
-                    "spotlight": False,
+                    "tease": False,
                     "replyToSeq": invalid_val,
                 },
                 headers=headers,
@@ -667,7 +711,7 @@ class TestSendRoute:
                     "deviceId": "device-1234",
                     "attachmentId": att_id1,
                     "durationS": 5,
-                    "spotlight": False,
+                    "tease": False,
                     "replyToSeq": target_seq,
                 },
                 headers=headers,
@@ -688,7 +732,7 @@ class TestSendRoute:
                     "deviceId": "device-1234",
                     "attachmentId": att_id2,
                     "durationS": 5,
-                    "spotlight": False,
+                    "tease": False,
                     "replyToSeq": 999999,
                 },
                 headers=headers,
@@ -722,7 +766,7 @@ class TestSendRoute:
                     "deviceId": "device-1234",
                     "attachmentId": att_id,
                     "durationS": 5,
-                    "spotlight": False,
+                    "tease": False,
                 },
                 headers=headers,
             )
@@ -754,7 +798,7 @@ class TestSendRoute:
                     "deviceId": "device-1234",
                     "attachmentId": att_id,
                     "durationS": 5,
-                    "spotlight": False,
+                    "tease": False,
                 },
                 headers=headers,
             )
@@ -775,14 +819,14 @@ class TestSendRoute:
                 "deviceId": "device-1234",
                 "attachmentId": att_id,
                 "durationS": 30,
-                "spotlight": True,
+                "tease": True,
             }
             res1 = client.post(
                 "/api/admin/server/messages/view-once", json=payload, headers=headers
             )
             assert res1.status_code == 201
             data1 = res1.json()["message"]
-            assert data1["viewOnce"] == {"durationS": 30, "spotlight": True}
+            assert data1["viewOnce"] == {"durationS": 30, "tease": True, "spotlight": True}
 
             # Second send with same clientId returns 200 and same message
             res2 = client.post(
@@ -790,6 +834,38 @@ class TestSendRoute:
             )
             assert res2.status_code == 200
             assert res2.json()["message"]["seq"] == data1["seq"]
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_stale_tab_sending_the_old_spotlight_key_still_gets_a_tease(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        """TRANSITIONAL (decisions/00172, remove with the alias after 2026-10-27): a browser
+        tab loaded before the spotlight -> tease rename still sends `spotlight`. Ignoring it
+        would send the photo with Tease OFF, i.e. the recipient sees the FULL picture the
+        sender meant to tease. The old key must therefore still switch Tease on."""
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            for name, legacy_value in (("on", True), ("off", False)):
+                att_id, _ = _create_ready_photo(client, headers)
+                res = client.post(
+                    "/api/admin/server/messages/view-once",
+                    json={
+                        "clientId": f"client-stale-{name}-1",
+                        "sender": "Josh",
+                        "deviceId": "device-1234",
+                        "attachmentId": att_id,
+                        "durationS": 5,
+                        "spotlight": legacy_value,
+                    },
+                    headers=headers,
+                )
+                assert res.status_code == 201
+                assert res.json()["message"]["viewOnce"] == {
+                    "durationS": 5,
+                    "tease": legacy_value,
+                    "spotlight": legacy_value,
+                }
         finally:
             client.__exit__(None, None, None)
 
@@ -845,7 +921,7 @@ class TestClaimRoute:
                     "deviceId": "device-1234",
                     "attachmentId": att_id,
                     "durationS": 2,
-                    "spotlight": False,
+                    "tease": False,
                 },
                 headers=headers,
             )
@@ -903,7 +979,7 @@ class TestClaimRoute:
                     "deviceId": "device-1234",
                     "attachmentId": att_id,
                     "durationS": 2,
-                    "spotlight": False,
+                    "tease": False,
                 },
                 headers=sender_headers,
             )
@@ -941,7 +1017,7 @@ class TestClaimRoute:
                     "deviceId": "device-1234",
                     "attachmentId": att_id,
                     "durationS": 5,
-                    "spotlight": False,
+                    "tease": False,
                 },
                 headers=sender_headers,
             )
@@ -957,6 +1033,7 @@ class TestClaimRoute:
             assert open_res.status_code == 200
             assert open_res.json() == {
                 "durationS": 5,
+                "tease": False,
                 "spotlight": False,
                 "kind": "photo",
                 "mime": "image/jpeg",
@@ -1002,7 +1079,7 @@ class TestClaimRoute:
             by_email="josh@example.com",
             attachment_id="att-conc",
             duration_s=5,
-            spotlight=False,
+            tease=False,
             now=now,
         )
 
@@ -1047,7 +1124,7 @@ class TestContentRoute:
                     "deviceId": "device-1234",
                     "attachmentId": att_id,
                     "durationS": 5,
-                    "spotlight": False,
+                    "tease": False,
                 },
                 headers=sender_headers,
             )
@@ -1157,7 +1234,7 @@ class TestContentRoute:
                     "deviceId": "device-1234",
                     "attachmentId": att_id,
                     "durationS": 5,
-                    "spotlight": False,
+                    "tease": False,
                 },
                 headers=sender_headers,
             )
@@ -1261,7 +1338,7 @@ class TestContentRoute:
                     "deviceId": "device-1234",
                     "attachmentId": att_id,
                     "durationS": 2,
-                    "spotlight": False,
+                    "tease": False,
                 },
                 headers=sender_headers,
             )
@@ -1346,7 +1423,7 @@ class TestContentRoute:
                     "deviceId": "dev-1234",
                     "attachmentId": att_id,
                     "durationS": 5,
-                    "spotlight": False,
+                    "tease": False,
                 },
                 headers=sender_headers,
             )
@@ -1401,7 +1478,7 @@ class TestBackstop:
             by_email="josh@example.com",
             attachment_id="att-backstop",
             duration_s=5,
-            spotlight=False,
+            tease=False,
             now=now,
         )
 
@@ -1462,7 +1539,7 @@ class TestBackstop:
             by_email="josh@example.com",
             attachment_id="att-backstop-async",
             duration_s=5,
-            spotlight=False,
+            tease=False,
             now=now,
         )
         store.claim_view_once(
@@ -1519,7 +1596,7 @@ class TestBackstop:
             by_email="josh@example.com",
             attachment_id="att-backstop-exp",
             duration_s=5,
-            spotlight=False,
+            tease=False,
             now=now,
         )
         msg_fresh, _ = store.create_view_once_message(
@@ -1529,7 +1606,7 @@ class TestBackstop:
             by_email="josh@example.com",
             attachment_id="att-backstop-fresh",
             duration_s=5,
-            spotlight=False,
+            tease=False,
             now=now,
         )
 

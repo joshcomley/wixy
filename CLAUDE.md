@@ -45,7 +45,7 @@ pluggable AI, HTML setup guide) is now **in progress** — see `spec/independenc
 
 | Store | Tables / purpose |
 |---|---|
-| `wixy_server/livechat/store.py` (`server.db`, schema version = `_LATEST_SCHEMA_VERSION`) | `messages` (incl. `reply_to_seq`, nullable self-referencing, `ON DELETE SET NULL`, for reply-to-a-message — Inv 51, the reply stores only the quoted seq, never a copy; and view-once columns `view_once_s`, `view_spotlight`, `view_claim_id`, `view_claimed_at`, `view_claim_email` — Inv 52), `attachments` (incl. `view_once_renditions`), `events`, `uploads`, `push_subscriptions`, `reactions` (cascades on message delete, Inv 49), `attachment_transcripts` (a voice note's opt-in transcript, `ON DELETE CASCADE`), `device_grants` (per-device "keep unlocked" credentials, Inv 48), `deleted_storage`, `pending_wipe_cleanup`, `pending_scrub`; the last three are private erasure-recovery state (ids and tokens only), not chat-visible tombstones. See [`docs/ai/livechat.md`](docs/ai/livechat.md). |
+| `wixy_server/livechat/store.py` (`server.db`, schema version = `_LATEST_SCHEMA_VERSION`) | `messages` (incl. `reply_to_seq`, nullable self-referencing, `ON DELETE SET NULL`, for reply-to-a-message — Inv 51, the reply stores only the quoted seq, never a copy; and view-once columns `view_once_s`, `view_tease`, `view_claim_id`, `view_claimed_at`, `view_claim_email` — Inv 52), `attachments` (incl. `view_once_renditions`), `events`, `uploads`, `push_subscriptions`, `reactions` (cascades on message delete, Inv 49), `attachment_transcripts` (a voice note's opt-in transcript, `ON DELETE CASCADE`), `device_grants` (per-device "keep unlocked" credentials, Inv 48), `deleted_storage`, `pending_wipe_cleanup`, `pending_scrub`; the last three are private erasure-recovery state (ids and tokens only), not chat-visible tombstones. See [`docs/ai/livechat.md`](docs/ai/livechat.md). |
 
 ## Dev commands
 
@@ -91,7 +91,10 @@ npx playwright test
   inference goes through cmd (`spec/06-ai-chat.md`).
 - Frontend bundles are committed; CI fails on drift (`git diff --exit-code` after a
   rebuild) — always run `npm run build` after touching `admin-ui/src` or `editor/src`
-  and commit the output alongside the source change.
+  and commit the output alongside the source change. On Windows, first make sure the
+  working files are LF: a tool that writes CRLF (`git ls-files --eol | grep w/crlf`)
+  puts Windows line endings into the `.map` files' embedded source text, and CI's Linux
+  rebuild then differs (seen on the Tease rename, PR #284). Convert to LF, rebuild, commit.
 - Tests parallelize via pytest-xdist with the fixed `-n 4` cap in `pyproject.toml`'s
   `addopts` — never pass `-n auto`.
 - **Every commit message carries a `Release-note:` trailer** (decisions/00112): ONE
