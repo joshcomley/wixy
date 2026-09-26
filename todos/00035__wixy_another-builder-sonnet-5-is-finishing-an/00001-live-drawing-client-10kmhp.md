@@ -28,3 +28,13 @@ delete it; pen colour and thickness; the other person can draw too.
 ## Progress
 - 2026-09-26: client built (039f2c5). Handover to a new session. Delete-while-create-unknown
   gap found in review and fixed red/green (decisions/00176 item 8). Docs + decision written.
+- 2026-09-26: DRAFT PR #286 opened (typecheck clean; vitest 89 files / 2338 passed; builds
+  no drift; full e2e 227/227 with the local GET fix). Driver notified.
+
+## Remaining
+1. When `origin/cmd/workspace-00029-live-drawing` gains the server's `response_model=None`
+   fix: confirm `git diff wixy_server/routes_livechat.py` is only that line, restore the local
+   copy, merge their branch, then `origin/main`; LF check; rebuild both bundles (no drift);
+   typecheck; vitest; full e2e; push.
+2. When the server PR merges to `main`: merge `main`, re-verify, mark #286 ready for review.
+3. Answer the driver's review and the Opus 5.5 audit findings. Never merge from here.
