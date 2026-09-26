@@ -41,6 +41,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from wixy_server.livechat.drawings import MAX_DRAWINGS_PER_ANCHOR, MAX_STROKES_PER_DRAWING
 from wixy_server.livechat.models import (
     AttachmentKind,
     AttachmentResult,
@@ -55,7 +56,6 @@ from wixy_server.livechat.models import (
     TranscriptRow,
     UploadRow,
 )
-from wixy_server.livechat.drawings import MAX_DRAWINGS_PER_ANCHOR, MAX_STROKES_PER_DRAWING
 from wixy_server.livechat.reactions import reaction_order, reactor_key
 
 _SCHEMA_V1 = """

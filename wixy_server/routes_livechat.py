@@ -32,13 +32,11 @@ from wixy_server.livechat import janitor as livechat_janitor
 from wixy_server.livechat.drawing_broker import DrawingBroker, LiveDrawingQueue
 from wixy_server.livechat.drawings import (
     MAX_COLUMN_WIDTH,
-    MAX_DRAWINGS_PER_ANCHOR,
     MAX_LIVE_BATCHES_PER_SECOND,
     MAX_LIVE_POINTS_PER_BATCH,
     MAX_POINT_X_PAD,
     MAX_POINT_Y_ABS,
     MAX_POINTS_PER_STROKE,
-    MAX_STROKES_PER_DRAWING,
     MIN_COLUMN_WIDTH,
     MIN_POINT_X,
     MIN_POINTS_PER_STROKE,
@@ -1201,7 +1199,6 @@ async def _stream_events(
         for frame in queue.drain():
             yield _format_sse("drawing_live", frame)
 
-
         if auth.exp <= time.time():
             # §6 R6: reaching the token's expiresAt locks. §5.4: "the token
             # expired mid-stream; the server closes after it."
@@ -1237,9 +1234,7 @@ async def _stream_events(
             # `live_queue`'s own event alongside it (spec 07 §4: "The stream loop waits
             # on the notifier OR its queue") means a live drawing frame is drained on
             # the very next tick rather than waiting out the rest of this timeout.
-            await wait_on_any(
-                [notifier.current_event, queue.event], timeout_s=_NOTIFIER_WAIT_S
-            )
+            await wait_on_any([notifier.current_event, queue.event], timeout_s=_NOTIFIER_WAIT_S)
             continue
 
         # Forward progress first, regardless of what's emitted below — an event
