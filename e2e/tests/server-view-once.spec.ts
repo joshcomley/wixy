@@ -2,7 +2,8 @@
 // Verifies two identities, desktop and mobile viewports, automatic disappearance after display,
 // recipient vs sender cards, 409 already-opened race, and spotlight slider interaction.
 
-import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
+import { expect, test } from "../fixtures";
+import type { BrowserContext, Locator, Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 
 const MULTI_TAP_INTERVAL_MS = 400;
@@ -373,18 +374,24 @@ test.describe("server-view-once.spec.ts (spec/06-view-once-media)", () => {
       } else {
         await expect(viewOnceButton).toBeHidden();
       }
-      const emptyDraftWidth = (await draftBox.boundingBox())!.width;
+      const emptyDraft = (await draftBox.boundingBox())!;
+      await draftBox.focus();
 
       await pageAlice.locator('input[type="file"]').setInputFiles(PHOTO);
 
       await expect(viewOnceButton).toHaveText("⏱ View once");
       // The button must not cost the text box its usable width (F17 in server-media.spec.ts
       // guards the same floor: 120px at 360px). A phone gives it its own line instead.
-      const stagedDraftWidth = (await draftBox.boundingBox())!.width;
-      expect(stagedDraftWidth).toBeGreaterThan(120);
+      const stagedDraft = (await draftBox.boundingBox())!;
+      expect(stagedDraft.width).toBeGreaterThan(120);
       if (viewport.width <= 480) {
-        expect(stagedDraftWidth).toBeGreaterThanOrEqual(emptyDraftWidth - 1);
+        expect(stagedDraft.width).toBeGreaterThanOrEqual(emptyDraft.width - 1);
       }
+      // Architect keep-rule (spec 06 s3.1): showing the control never disables, blurs or resizes
+      // the input.
+      expect(Math.abs(stagedDraft.height - emptyDraft.height)).toBeLessThan(1);
+      await expect(draftBox).toBeEnabled();
+      await expect(draftBox).toBeFocused();
       expect(await pageAlice.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
       await assertRealClickTarget(
         pageAlice,
