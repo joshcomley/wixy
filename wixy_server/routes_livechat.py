@@ -12,6 +12,7 @@ PIN attempts against the owner.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -24,11 +25,27 @@ import anyio
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 
 from builder.jsontypes import JsonObject
 from wixy_server.background import ContainedTaskGroup
 from wixy_server.livechat import janitor as livechat_janitor
+from wixy_server.livechat.drawing_broker import DrawingBroker, LiveDrawingQueue
+from wixy_server.livechat.drawings import (
+    MAX_COLUMN_WIDTH,
+    MAX_LIVE_ANCHOR_SEQ,
+    MAX_LIVE_BATCH_INDEX,
+    MAX_LIVE_BATCHES_PER_SECOND,
+    MAX_LIVE_POINTS_PER_BATCH,
+    MAX_POINT_X_PAD,
+    MAX_POINT_Y_ABS,
+    MAX_POINTS_PER_STROKE,
+    MIN_COLUMN_WIDTH,
+    MIN_POINT_X,
+    MIN_POINTS_PER_STROKE,
+    is_allowed_drawing_color,
+    is_allowed_drawing_width,
+)
 from wixy_server.livechat.grants import (
     GRANT_ID_RE,
     GRANT_IDLE_EXPIRY_S,
@@ -41,15 +58,17 @@ from wixy_server.livechat.grants import (
 )
 from wixy_server.livechat.models import (
     LEGACY_TEASE_WIRE_KEY,
+    DrawingRow,
     EventRow,
     MessageHook,
     MessageRow,
     PushSubscriptionRow,
     TranscriptRow,
+    drawing_json,
     message_json,
     transcript_json,
 )
-from wixy_server.livechat.notifier import LiveChatNotifier
+from wixy_server.livechat.notifier import LiveChatNotifier, wait_on_any
 from wixy_server.livechat.pinclient import PinVerifier
 from wixy_server.livechat.push import (
     PushEndpointError,
@@ -60,12 +79,17 @@ from wixy_server.livechat.push import (
 from wixy_server.livechat.reactions import is_allowed_reaction
 from wixy_server.livechat.store import (
     AttachmentNotReadyError,
+    DrawingAnchorNotFoundError,
+    DrawingLimitExceededError,
+    DrawingNotFoundError,
+    DrawingPointsOutOfBoundsError,
     LiveChatStore,
     MessageNotFoundError,
     UnusableAttachmentError,
 )
 from wixy_server.livechat.textcheck import has_unpaired_surrogate
 from wixy_server.livechat.tokens import (
+    SERVER_TOKEN_HEADER,
     MediaSigner,
     ServerAuth,
     mint_unlock_token,
@@ -828,6 +852,8 @@ async def set_reaction(seq: int, body: SetReactionIn, request: Request) -> JSONR
 @router.delete("/messages/{seq}", response_model=None)
 async def delete_message(seq: int, request: Request) -> Response:
     await require_server_token(request)
+    if not (0 < seq <= _SQLITE_MAX_INTEGER):
+        return Response(status_code=204)  # no such message can exist; the delete is idempotent
     store: LiveChatStore = request.app.state.livechat_store
     paths: ProjectPaths = request.app.state.paths
     notifier: LiveChatNotifier = request.app.state.livechat_notifier
@@ -870,6 +896,323 @@ async def wipe_chat(body: WipeChatIn, request: Request) -> Response:
 
 
 # ---------------------------------------------------------------------------
+# Live drawing — the pen tool (spec/server-chat/07-live-drawing.md).
+#
+# Persisted state (create/append/delete) rides the EXISTING event machinery: every
+# change appends one `message_updated` row for the anchor, exactly as a reaction does.
+# The Message JSON carries only a summary (`drawings: [{id, rev}]`); a client fetches
+# bodies with GET /messages/{seq}/drawings when it sees a summary entry it lacks or a
+# newer `rev`. In-progress strokes are a SEPARATE, deliberately lossy channel that never
+# touches the database (`drawing_broker.py`) — see `_stream_events` below for how the
+# two are interleaved on one connection.
+# ---------------------------------------------------------------------------
+
+
+class CreateDrawingStrokeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    strokeId: str
+    color: str
+    width: int
+    points: list[list[StrictInt]]
+
+
+class CreateDrawingIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    clientId: str
+    anchorSeq: int
+    columnWidth: float
+    sender: str
+    deviceId: str
+    stroke: CreateDrawingStrokeIn
+
+
+class AppendDrawingStrokeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    strokeId: str
+    color: str
+    width: int
+    points: list[list[StrictInt]]
+
+
+class LiveDrawingIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    drawingClientId: str
+    anchorSeq: int
+    columnWidth: float
+    strokeId: str
+    batch: int
+    color: str
+    width: int
+    points: list[list[StrictInt]] = Field(default_factory=list)
+    cancel: StrictBool = False
+
+
+def _validate_drawing_points(
+    points: list[list[int]], *, x_upper_bound: float, min_count: int, max_count: int
+) -> str | None:
+    """spec §3: bounds are checked after the CLIENT's own simplification (Ramer-Douglas-
+    Peucker) — the server only re-checks the result is sane, never re-simplifies."""
+    if not (min_count <= len(points) <= max_count):
+        return f"points must have {min_count}-{max_count} pairs"
+    for point in points:
+        if len(point) != 2:
+            return "each point must be an [x, y] pair"
+        x, y = point
+        if not (MIN_POINT_X <= x <= x_upper_bound):
+            return "a point's x is out of bounds for this column width"
+        if not (-MAX_POINT_Y_ABS <= y <= MAX_POINT_Y_ABS):
+            return "a point's y is out of bounds"
+    return None
+
+
+@router.post("/drawings", response_model=None)
+async def create_drawing(body: CreateDrawingIn, request: Request) -> JSONResponse:
+    auth = await require_server_token(request)
+
+    if not (8 <= len(body.clientId) <= 64):
+        return _invalid("clientId must be 8-64 characters")
+    if not (8 <= len(body.deviceId) <= 64):
+        return _invalid("deviceId must be 8-64 characters")
+    sender = body.sender.strip()
+    if not _valid_sender(sender):
+        return _invalid("sender must be 1-32 characters with no control characters")
+    if not (0 < body.anchorSeq <= _SQLITE_MAX_INTEGER):
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+    if not (MIN_COLUMN_WIDTH <= body.columnWidth <= MAX_COLUMN_WIDTH):
+        return _invalid(f"columnWidth must be {MIN_COLUMN_WIDTH:.0f}-{MAX_COLUMN_WIDTH:.0f}")
+    if not (8 <= len(body.stroke.strokeId) <= 64):
+        return _invalid("strokeId must be 8-64 characters")
+    if not is_allowed_drawing_color(body.stroke.color):
+        return _invalid("color is not one of the allowed drawing colours")
+    if not is_allowed_drawing_width(body.stroke.width):
+        return _invalid("width is not one of the allowed drawing widths")
+    points_error = _validate_drawing_points(
+        body.stroke.points,
+        x_upper_bound=body.columnWidth + MAX_POINT_X_PAD,
+        min_count=MIN_POINTS_PER_STROKE,
+        max_count=MAX_POINTS_PER_STROKE,
+    )
+    if points_error is not None:
+        return _invalid(points_error)
+
+    store: LiveChatStore = request.app.state.livechat_store
+    notifier: LiveChatNotifier = request.app.state.livechat_notifier
+    now = time.time()
+
+    def _create() -> tuple[DrawingRow, bool]:
+        return store.create_drawing(
+            client_id=body.clientId,
+            anchor_seq=body.anchorSeq,
+            column_width=body.columnWidth,
+            sender=sender,
+            device_id=body.deviceId,
+            by_email=auth.email or None,
+            stroke_id=body.stroke.strokeId,
+            color=body.stroke.color,
+            width=body.stroke.width,
+            points=[(p[0], p[1]) for p in body.stroke.points],
+            now=now,
+        )
+
+    try:
+        drawing, created = await anyio.to_thread.run_sync(_create)
+    except DrawingAnchorNotFoundError:
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+    except DrawingLimitExceededError:
+        return JSONResponse(status_code=409, content={"error": "full"})
+
+    if created:
+        notifier.publish()
+    return JSONResponse(
+        status_code=201 if created else 200,
+        content={"id": drawing.id, "rev": drawing.rev},
+    )
+
+
+@router.post("/drawings/{drawing_id}/strokes", response_model=None)
+async def append_drawing_stroke(
+    drawing_id: int, body: AppendDrawingStrokeIn, request: Request
+) -> JSONResponse:
+    await require_server_token(request)
+    if not (0 < drawing_id <= _SQLITE_MAX_INTEGER):
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+
+    if not (8 <= len(body.strokeId) <= 64):
+        return _invalid("strokeId must be 8-64 characters")
+    if not is_allowed_drawing_color(body.color):
+        return _invalid("color is not one of the allowed drawing colours")
+    if not is_allowed_drawing_width(body.width):
+        return _invalid("width is not one of the allowed drawing widths")
+    # This route's body carries no columnWidth (spec §4), so the cheap pre-check here can
+    # only apply the global maximum; the drawing's OWN stored width is applied inside
+    # `store.append_stroke`, in the transaction that already reads the drawing (audit F7).
+    points_error = _validate_drawing_points(
+        body.points,
+        x_upper_bound=MAX_COLUMN_WIDTH + MAX_POINT_X_PAD,
+        min_count=MIN_POINTS_PER_STROKE,
+        max_count=MAX_POINTS_PER_STROKE,
+    )
+    if points_error is not None:
+        return _invalid(points_error)
+
+    store: LiveChatStore = request.app.state.livechat_store
+    notifier: LiveChatNotifier = request.app.state.livechat_notifier
+    now = time.time()
+
+    def _append() -> DrawingRow:
+        return store.append_stroke(
+            drawing_id=drawing_id,
+            stroke_id=body.strokeId,
+            color=body.color,
+            width=body.width,
+            points=[(p[0], p[1]) for p in body.points],
+            now=now,
+        )
+
+    try:
+        drawing = await anyio.to_thread.run_sync(_append)
+    except DrawingNotFoundError:
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+    except DrawingLimitExceededError:
+        return JSONResponse(status_code=409, content={"error": "full"})
+    except DrawingPointsOutOfBoundsError:
+        return _invalid("a point's x is out of bounds for this drawing's column width")
+
+    notifier.publish()
+    return JSONResponse(status_code=200, content={"rev": drawing.rev})
+
+
+@router.delete("/drawings/{drawing_id}", response_model=None)
+async def delete_drawing(drawing_id: int, request: Request) -> Response:
+    """Either person may delete any drawing (Inv 46's "Delete for everyone" pattern).
+
+    Erasure, like `DELETE /messages/{seq}` (spec 07 §6, Inv 53): the delete and the "a WAL scrub
+    is owed" marker commit together, then the scrub runs before the answer, so `204` means the
+    strokes' bytes are gone from `server.db` and its WAL. `202 {"erasurePending": true}` means the
+    delete committed and the background scrubber owes the rest (audit F4)."""
+    await require_server_token(request)
+    if not (0 < drawing_id <= _SQLITE_MAX_INTEGER):
+        return Response(status_code=204)  # no such drawing can exist; deleting it is idempotent
+    store: LiveChatStore = request.app.state.livechat_store
+    paths: ProjectPaths = request.app.state.paths
+    notifier: LiveChatNotifier = request.app.state.livechat_notifier
+
+    await anyio.to_thread.run_sync(
+        lambda: store.delete_drawing_for_scrub(drawing_id=drawing_id, now=time.time())
+    )
+    commit_returned_at = time.monotonic()
+    return await _finish_committed_erasure(
+        store=store,
+        paths=paths,
+        notifier=notifier,
+        attachment_ids=[],
+        upload_ids=[],
+        wipe_token=None,
+        deadline_at=commit_returned_at + _DELETE_SCRUB_DEADLINE_S,
+    )
+
+
+@router.get("/messages/{seq}/drawings", response_model=None)
+async def get_message_drawings(seq: int, request: Request) -> JsonObject:
+    await require_server_token(request)
+    if not (0 < seq <= _SQLITE_MAX_INTEGER):
+        return {"drawings": []}
+    store: LiveChatStore = request.app.state.livechat_store
+    drawings = await anyio.to_thread.run_sync(lambda: store.get_drawings_for_message(seq=seq))
+    return {"drawings": [drawing_json(d) for d in drawings]}
+
+
+_drawing_live_limiter = SlidingWindowRateLimiter(
+    max_events=MAX_LIVE_BATCHES_PER_SECOND, window_s=1.0
+)
+
+
+def _live_relay_budget_key(request: Request, auth: ServerAuth) -> str:
+    """Whose 30-batches-a-second budget a live POST spends (spec 07 §4: "per device").
+
+    It is the AUTHENTICATED identity, never anything in the body: a token holder chooses every
+    body field, so a budget keyed by `drawingClientId` is reset by inventing a new id per
+    request, and its table then grows by one key per request (audit F1). A device-bound token
+    spends its grant's budget (re-unlocking with the grant cannot reset it); a PIN-unlocked token
+    spends its own, and a fresh one costs a PIN entry. Two people drawing at once are two
+    tokens, so neither throttles the other. The token is hashed so the table never keeps a
+    usable credential."""
+    if auth.grant_id is not None:
+        return f"grant:{auth.grant_id}"
+    token = request.headers.get(SERVER_TOKEN_HEADER, "")
+    return "token:" + hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+@router.post("/drawings/live", response_model=None)
+async def post_drawing_live(body: LiveDrawingIn, request: Request) -> JSONResponse:
+    """Relays an in-progress stroke's latest points to EVERY open stream (the drawer's own
+    other tabs included; the client ignores frames for a drawing it is drawing), without
+    ever touching the database, a file, or a log line (spec §4 — live points are chat
+    content, so Inv 40/46 apply). `POST /drawings/live` requires the token like every
+    other route, and revocation/lock behaviour is unchanged: the relay rides the same
+    stream connections those already gate."""
+    auth = await require_server_token(request)
+
+    limiter: SlidingWindowRateLimiter = getattr(
+        request.app.state, "livechat_drawing_live_limiter", _drawing_live_limiter
+    )
+    retry_after = limiter.hit(_live_relay_budget_key(request, auth))
+    if retry_after is not None:
+        seconds = max(1, math.ceil(retry_after))
+        return JSONResponse(
+            status_code=429,
+            content={"error": "rate_limited", "retryAfterS": seconds},
+            headers={"Retry-After": str(seconds)},
+        )
+
+    # Every field below is copied verbatim into up to 64 queued frames per open stream, so each
+    # one is bounded like its create/append twin (audit F3): ids 8-64 characters, anchorSeq a
+    # real message seq, batch a sane counter.
+    if not (8 <= len(body.drawingClientId) <= 64):
+        return _invalid("drawingClientId must be 8-64 characters")
+    if not (8 <= len(body.strokeId) <= 64):
+        return _invalid("strokeId must be 8-64 characters")
+    if not (1 <= body.anchorSeq <= MAX_LIVE_ANCHOR_SEQ):
+        return _invalid("anchorSeq must be a message seq")
+    if not (0 <= body.batch <= MAX_LIVE_BATCH_INDEX):
+        return _invalid(f"batch must be 0-{MAX_LIVE_BATCH_INDEX}")
+    if not (MIN_COLUMN_WIDTH <= body.columnWidth <= MAX_COLUMN_WIDTH):
+        return _invalid(f"columnWidth must be {MIN_COLUMN_WIDTH:.0f}-{MAX_COLUMN_WIDTH:.0f}")
+    if not body.cancel:
+        if not is_allowed_drawing_color(body.color):
+            return _invalid("color is not one of the allowed drawing colours")
+        if not is_allowed_drawing_width(body.width):
+            return _invalid("width is not one of the allowed drawing widths")
+        points_error = _validate_drawing_points(
+            body.points,
+            x_upper_bound=body.columnWidth + MAX_POINT_X_PAD,
+            min_count=1,
+            max_count=MAX_LIVE_POINTS_PER_BATCH,
+        )
+        if points_error is not None:
+            return _invalid(points_error)
+
+    broker: DrawingBroker = request.app.state.livechat_drawing_broker
+    frame: JsonObject = {
+        "drawingClientId": body.drawingClientId,
+        "anchorSeq": body.anchorSeq,
+        "columnWidth": body.columnWidth,
+        "strokeId": body.strokeId,
+        "batch": body.batch,
+        "color": body.color,
+        "width": body.width,
+        "points": [list(p) for p in body.points],
+        "cancel": body.cancel,
+    }
+    broker.publish(frame)
+    return JSONResponse(status_code=200, content={"ok": True})
+
+
+# ---------------------------------------------------------------------------
 # GET /stream (§5.4, §3's SSE loop) — SSE over fetch(), not EventSource/WebSocket.
 # ---------------------------------------------------------------------------
 
@@ -889,15 +1232,34 @@ async def _stream_events(
     secret: bytes,
     auth: ServerAuth,
     after: int,
+    live_queue: LiveDrawingQueue | None = None,
 ) -> AsyncGenerator[str]:
     """§3's per-connection loop. Typed as the more specific `AsyncGenerator` (not
     just `AsyncIterator`) so a test can drive this directly and `.aclose()` it —
-    same reasoning as `routes_chat.py::_stream_events`'s own note."""
+    same reasoning as `routes_chat.py::_stream_events`'s own note.
+
+    `live_queue` (spec/server-chat/07-live-drawing.md §4) is this connection's own
+    in-progress-drawing relay, entirely separate from `notifier`/`events_after`: it
+    never advances `cursor` and never touches the database. Draining it happens FIRST
+    on every tick, before the persisted-event work below, so a live frame's latency
+    is never held up by a coalescing pass over unrelated messages. Defaults to a
+    fresh, unregistered queue (never receives anything) so every EXISTING caller of
+    this function — this file's own `stream()` route aside — keeps working unchanged;
+    only `stream()` passes the broker-registered one that can actually receive frames."""
     cursor = after
     last_ping = anyio.current_time()
     grant_id = auth.grant_id
+    queue = live_queue if live_queue is not None else LiveDrawingQueue()
 
     while True:
+        # Capture BOTH wake-up events before the checks, the queue drain and every awaited read
+        # below (audit F2). `queue.push` and `notifier.publish` each swap in a fresh event and set
+        # the old one, so an event read only at the wait, after the grant check and `events_after`
+        # have yielded to the loop, is already the fresh unset one: a frame pushed in that gap
+        # would sit in the queue for the whole 2 s timeout. Captured here, the old event is the
+        # one that gets set, and the wait below returns at once.
+        wake_events = (notifier.current_event, queue.event)
+
         if auth.exp <= time.time():
             # §6 R6: reaching the token's expiresAt locks. §5.4: "the token
             # expired mid-stream; the server closes after it."
@@ -920,6 +1282,12 @@ async def _stream_events(
                 yield _format_sse("locked", {})
                 return
 
+        # Live frames go out only AFTER the expiry and grant checks above (audit F6): spec 07 §4
+        # says the grant check, token expiry and `locked` apply unchanged to the relay, and the
+        # persisted path below also checks before it emits.
+        for frame in queue.drain():
+            yield _format_sse("drawing_live", frame)
+
         if anyio.current_time() - last_ping >= _PING_INTERVAL_S:
             last_ping = anyio.current_time()
             yield ": ping\n\n"
@@ -929,8 +1297,11 @@ async def _stream_events(
         if not events:
             # §3 step 3: the 2 s re-check is what covers a sibling process's
             # write during a blue/green overlap (`notifier` only wakes THIS
-            # process's own waiters — see notifier.py's own docstring).
-            await notifier.wait(timeout_s=_NOTIFIER_WAIT_S)
+            # process's own waiters — see notifier.py's own docstring). Racing
+            # `live_queue`'s own event alongside it (spec 07 §4: "The stream loop waits
+            # on the notifier OR its queue") means a live drawing frame is drained on
+            # the very next tick rather than waiting out the rest of this timeout.
+            await wait_on_any(wake_events, timeout_s=_NOTIFIER_WAIT_S)
             continue
 
         # Forward progress first, regardless of what's emitted below — an event
@@ -996,10 +1367,18 @@ async def stream(request: Request, after: int = 0) -> StreamingResponse:
     store: LiveChatStore = request.app.state.livechat_store
     notifier: LiveChatNotifier = request.app.state.livechat_notifier
     secret: bytes = request.app.state.livechat_secret
+    broker: DrawingBroker = request.app.state.livechat_drawing_broker
 
     async def _events() -> AsyncIterator[str]:
-        async for payload in _stream_events(store, notifier, secret, auth, after):
-            yield payload
+        conn_id, live_queue = broker.register()
+        try:
+            async for payload in _stream_events(store, notifier, secret, auth, after, live_queue):
+                yield payload
+        finally:
+            # Runs on client disconnect too: Starlette closes this generator
+            # (`GeneratorExit`) when the response body finishes for any reason, which
+            # this `try/finally` catches like any other cleanup.
+            broker.unregister(conn_id)
 
     return StreamingResponse(
         _events(),

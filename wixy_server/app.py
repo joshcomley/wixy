@@ -36,6 +36,8 @@ from wixy_server.github import GitHubClient
 from wixy_server.livechat import janitor as livechat_janitor
 from wixy_server.livechat import media_queue as livechat_media_queue
 from wixy_server.livechat import processing as livechat_processing
+from wixy_server.livechat.drawing_broker import DrawingBroker
+from wixy_server.livechat.drawings import MAX_LIVE_BATCHES_PER_SECOND
 from wixy_server.livechat.grants import GrantFailureLimiter
 from wixy_server.livechat.models import MessageHook, MessageRow
 from wixy_server.livechat.notifier import LiveChatNotifier
@@ -214,6 +216,13 @@ def create_app(
     livechat_push_test_limiter = SlidingWindowRateLimiter(max_events=1, window_s=5.0)
     livechat_notifier = LiveChatNotifier()
     livechat_message_hooks: list[MessageHook] = []
+    # spec/server-chat/07-live-drawing.md §4: an in-progress stroke's points relay
+    # through this in-process broker, never through the notifier (which carries no
+    # data) or the database (Inv 40/46 — live points are chat content).
+    livechat_drawing_broker = DrawingBroker()
+    livechat_drawing_live_limiter = SlidingWindowRateLimiter(
+        max_events=MAX_LIVE_BATCHES_PER_SECOND, window_s=1.0
+    )
 
     async def dispatch_server_push(message: MessageRow) -> None:
         await dispatch_push_notifications(
@@ -385,6 +394,8 @@ def create_app(
     app.state.livechat_pin_verifier = resolved_pin_verifier
     app.state.livechat_grant_limiter = GrantFailureLimiter()
     app.state.livechat_transcription = livechat_transcription
+    app.state.livechat_drawing_broker = livechat_drawing_broker
+    app.state.livechat_drawing_live_limiter = livechat_drawing_live_limiter
 
     @app.exception_handler(FastAPIHTTPException)
     async def _http_exception_handler(_request: Request, exc: FastAPIHTTPException) -> JSONResponse:

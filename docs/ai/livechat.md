@@ -7,7 +7,8 @@ storage, routes, and second auth gate, entirely separate from `chats.py`/`cmdcha
 This manual describes the current implementation; where intent and code differ, follow the
 code and record the difference in `decisions/`.
 Numbered guarantees: [invariants.md](invariants.md) 40–47, 48 (permanent unlock), 49 (reactions),
-50 (transcription, §15), 51 (reply to a message, §12) and 52 (view-once media, §17).
+50 (transcription, §15), 51 (reply to a message, §12), 52 (view-once media, §17) and
+53 (live drawing, §18).
 
 ## 1. The disguise (why it looks like nothing is here)
 
@@ -146,9 +147,10 @@ call in `anyio.to_thread.run_sync`.
 
 Tables: `messages`, `attachments`, `events`, `uploads`, `push_subscriptions`, `reactions`,
 `deleted_storage`, `pending_wipe_cleanup`, `pending_scrub`, `attachment_transcripts` (a voice
-note's opt-in transcript, `ON DELETE CASCADE` from its attachment — §15), and `device_grants`
-(schema v9, §16 — auth credentials, not chat content, so delete/wipe leave them alone). Schema
-migrations are serialized under the SQLite writer lock.
+note's opt-in transcript, `ON DELETE CASCADE` from its attachment — §15), `device_grants`
+(schema v9, §16 — auth credentials, not chat content, so delete/wipe leave them alone), and
+`drawings`/`drawing_strokes` (schema v13, Inv 53, §18 — cascade on the anchor message, exactly
+like reactions). Schema migrations are serialized under the SQLite writer lock.
 `deleted_storage` retains internal attachment/upload tombstones and retry status; it is not a
 message/event tombstone and is never returned to chat clients. `pending_wipe_cleanup` records a
 wipe's filesystem sweep token so a crash cannot lose cleanup of orphaned paths. Schema v4 adds the
@@ -170,6 +172,9 @@ this child column once per deleted row for the `SET NULL` action, and unindexed 
 17.6s vs 0.2s at 20,000 messages (one in three a reply). A reply persists only the target's seq;
 its quote (sender, a 300-code-point text snippet, and a media summary) is resolved at read time
 from the target's live row by `list_messages`/`get_messages`, one level only, and is never stored.
+Schema v13 adds `drawings`/`drawing_strokes` (Inv 53, live drawing — the pen tool), described in
+§18; the number is 13, not 11 or 12, because those were already spent by view-once media and the
+Spotlight→Tease rename (decisions/00172) by the time this feature landed.
 Two transaction shapes:
 - `BEGIN IMMEDIATE` for writes needing a race-safe conditional check (an attachment's lease
   claim, `create_message`'s idempotent client-id insert) — serializes concurrent claimants
@@ -1224,3 +1229,401 @@ Consequences:
 - A screenshot, screen recording, or external camera cannot be prevented by a web application.
 - While displayed, bytes reside in recipient browser memory. View-once guarantees the server retains nothing and the ordinary client never shows it twice.
 - OS app-switcher snapshots may be captured when hiding. The viewer closes on hide, but the operating system's snapshot mechanism is outside browser control.
+
+## 18. Live drawing: the server (spec/server-chat/07-live-drawing.md, Architect ruling
+2026-09-26, Inv 53)
+
+The pen tool: either person draws freehand on top of the thread, live, and the drawing
+sticks to the message it was drawn near and scrolls with the chat. This section is the
+SERVER half (schema, routes, the live relay); the client half (the drawing surface,
+gestures, rendering) is §19.
+
+### Anchoring and coordinates (the client's job, stored verbatim)
+A drawing anchors to one message (`anchor_message_seq`) and stores its geometry in *draw
+space*, the drawer's own thread-column width in CSS px (`column_width`, `CHECK BETWEEN
+200 AND 4000`): `x` from the column's left edge, `y` from the anchor bubble's top edge,
+both integers. The server never computes or re-derives a position — it stores exactly what
+the client measured and validated, and a viewer rescales by `viewer column width /
+column_width` entirely client-side (spec §1).
+
+### A drawing is a session; each stroke is its own row (F2)
+A **drawing** (`drawings` table) is every stroke made from turning the pen on to turning it
+off (or the session ending). It carries `client_id` (the create idempotency key, exactly
+`create_message`'s own `clientId` pattern), the anchor, `sender`/`device_id`/`by_email`
+(audit only, never on the wire), `column_width`, and a `rev` that increments on every
+stroke appended. Each **stroke** (`drawing_strokes`, primary key `(drawing_id,
+stroke_id)`) is stored the moment it ends (pointerup) — colour and width are per-stroke,
+because the operator can change the pen mid-drawing — never batched until the session ends,
+so a closed tab loses at most the stroke under the finger. `stroke_id` is the append
+idempotency key: a repeat is a no-op that changes nothing and appends no event, the exact
+shape as `set_reaction`'s "only a real change appends the event" rule.
+
+### Schema v13 (`_SCHEMA_V13_DRAWINGS`, `wixy_server/livechat/store.py`)
+```sql
+CREATE TABLE drawings(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, client_id TEXT NOT NULL UNIQUE,
+  anchor_message_seq INTEGER NOT NULL REFERENCES messages(seq) ON DELETE CASCADE,
+  sender TEXT NOT NULL, device_id TEXT NOT NULL, by_email TEXT,
+  column_width REAL NOT NULL CHECK(column_width BETWEEN 200 AND 4000),
+  rev INTEGER NOT NULL DEFAULT 1, created_at REAL NOT NULL, updated_at REAL NOT NULL);
+CREATE INDEX idx_drawings_anchor ON drawings(anchor_message_seq);
+CREATE TABLE drawing_strokes(
+  drawing_id INTEGER NOT NULL REFERENCES drawings(id) ON DELETE CASCADE,
+  stroke_id TEXT NOT NULL, ord INTEGER NOT NULL,
+  color TEXT NOT NULL, width INTEGER NOT NULL, points TEXT NOT NULL,
+  created_at REAL NOT NULL, PRIMARY KEY(drawing_id, stroke_id));
+```
+The number is **13**, not the spec's original placeholder of 12 — the Spotlight→Tease
+rename (decisions/00172) landed first and took v12, so this feature's migration was
+renumbered past it at build time; the spec text is amended in place to say 13, marked as an
+amendment, rather than left wrong. Both foreign keys are index-covered — `idx_drawings_anchor`
+for `drawings.anchor_message_seq`, and `drawing_strokes`'s own primary key (which leads with
+`drawing_id`) for its FK to `drawings.id` — the same lesson reply-to's schema v10 measured
+(17.6s vs 0.2s at 20,000 rows). `ON DELETE CASCADE` on both is load-bearing for the same
+reason as reactions' (decisions/00164): an older blue/green-overlap process that has never
+heard of these tables can still hard-delete a message, and the cascade — not that older
+process — removes the drawing and its strokes with it (Inv 46/49/53).
+
+### Persistence rides the existing event machinery (F3, no new event type)
+A create, an appended stroke, or a delete each appends exactly one EXISTING
+`message_updated` event for the anchor — identical in shape to a reaction changing. The
+`Message` wire shape carries only a summary, `drawings:[{id,rev}]` (`DrawingSummary`,
+`models.py`), never the strokes: a history page of 50 messages must not carry megabytes of
+points. A client that sees a summary entry it lacks, or a newer `rev` than it has, fetches
+the body with `GET /messages/{seq}/drawings` — `{"drawings":[{id,rev,sender,columnWidth,
+strokes:[{strokeId,color,width,points}]}]}`. The `events` table itself is untouched: no
+rebuild, no new `EventType`, so replay/coalescing/reconnect/blue-green behaviour are
+unchanged for every OTHER consumer of that table.
+
+### Routes (`routes_livechat.py`, token required on every one)
+`POST /drawings` (create + first stroke, idempotent on `clientId`, 404 on an unknown/deleted
+`anchorSeq`, 409 `full` past 20 drawings on one anchor); `POST /drawings/{id}/strokes`
+(append, idempotent on `strokeId`, 404 on an unknown/deleted drawing, 409 `full` past 200
+strokes); `DELETE /drawings/{id}` (204, always, idempotent — either person may delete any
+drawing, Inv 46's pattern, no ownership check); `GET /messages/{seq}/drawings` (every
+drawing for that anchor, with strokes; `[]` rather than 404 for an unknown `seq`, since the
+summary already told the client whether to bother asking). Validation (422 `invalid`):
+colour is one of the 8 hex values in `livechat/drawings.py` (`DRAWING_COLORS`), width is one
+of `{2,4,8,14}` (`DRAWING_WIDTHS`) — both shared with the browser's own copy
+(`admin-ui/src/server/drawings.ts`) through the reaction-emoji drift guard's own pattern,
+enforced by `test_livechat_drawings.py`; points are 2-1000 integer pairs with `x` in
+`[-50, columnWidth+50]` and `y` in `[-20000, 20000]`, checked as the RESULT of the client's
+own Ramer-Douglas-Peucker simplification, never re-simplified server-side. Full contract:
+[contracts.md](contracts.md) §2/§4.
+
+### The live relay: a separate, deliberately lossy channel (F3, Inv 53)
+`POST /drawings/live` batches a stroke's in-progress points (~every 50ms client-side, at
+most 200 points/batch and 30 batches/second per DEVICE — `SlidingWindowRateLimiter`,
+429 `rate_limited` + `Retry-After` past the cap; the budget is the authenticated identity
+(`_live_relay_budget_key`: the device grant when the token is grant-bound, else a hash of the
+token), never a body field, because a token holder chooses every body field and a budget keyed
+by `drawingClientId` is reset by inventing a new id per request; two people drawing at once are
+two tokens, so neither throttles the other; the limiter drops idle keys once a window, so its
+table stays bounded by the keys active within one window). Every id and counter in the body is
+bounded like its create/append twin (`drawingClientId`/`strokeId` 8-64 characters, `anchorSeq`
+1..2^53-1, `batch` 0..10,000,000, else 422), because a frame is copied verbatim into up to 64
+queued frames per open stream. The relay is a NEW in-memory
+`DrawingBroker` (`livechat/drawing_broker.py`) — deliberately NOT the `LiveChatNotifier`,
+which carries no payload and only means "re-read the database". Each open `/stream`
+connection registers its own `LiveDrawingQueue` (a `deque(maxlen=64)`, oldest dropped past
+capacity — the "bounded queue of 64 items, overflow drops the oldest" the spec asks for) via
+`broker.register()`, drains it every stream-loop tick (before the ordinary persisted-event
+poll, so a live frame's latency is never held up by a coalescing pass over unrelated
+messages), and unregisters on disconnect. `LiveDrawingQueue.event` is raced against
+`LiveChatNotifier.current_event` through a shared `wait_on_any` helper (`notifier.py`), so
+the stream loop wakes on either wire without needing two poll loops. Both events are
+captured at the TOP of each loop iteration, before the queue is drained and before any
+awaited read: a `push`/`publish` swaps in a fresh event and sets the old one, so an event read
+only at the wait (after the grant check and `events_after` have yielded) is already the fresh
+unset one, and a frame pushed in that gap would sit for the whole 2 s re-check. The relay is sent to
+EVERY open connection, including the posting tab's own — the client, not the
+server, ignores a frame for a drawing it is itself drawing, matched by `drawingClientId`.
+The loop checks token expiry and grant liveness BEFORE it drains the queue, so a locked stream is
+never handed a queued frame.
+A final `{...,"cancel":true}` withdraws a stroke; `cancel:true` skips colour/width/points
+validation entirely (a withdrawal carries no real stroke to validate).
+**Nothing about a live batch ever reaches `server.db`, a file, or a log line** — the broker
+holds a frame only as long as it takes to hand it to each queue; live points are chat
+content exactly like a stored stroke, so Inv 40/46/53 apply to them too. The SSE frame
+itself carries **no `id:` line**, so it can never advance anyone's replay cursor (wire shape:
+[contracts.md](contracts.md) §4). Revocation, token expiry, and the `locked` event apply
+unchanged, because the relay rides the same stream connections those already gate — `POST
+/drawings/live` requires the token like every other route.
+**Honest limit:** during a blue/green overlap, a live frame reaches only streams on the SAME
+process, because the broker is in-process — a deploy overlap lasts minutes, and stored
+strokes still reach everyone within 2s through the existing cross-process database re-check
+(§6 above). No push notification for drawings, exactly like reactions.
+
+### Erasure (F4, Inv 53)
+Deleting the anchor message cascades to its drawings and strokes (the schema's own FK, not
+application code — proven directly by deleting the anchor through a raw `DELETE FROM
+messages` connection that has never imported the drawing store methods at all). Deleting a
+drawing removes its row and, by cascade, its strokes. A wipe explicitly clears both tables
+in the same transaction as every other one, even though the cascade already covers it, so
+the wipe's intent is never implicit. There are no drawing files (rendering is client-side
+SVG), so nothing is queued in `deleted_storage`.
+
+### Privacy (Inv 40)
+Drawings live only in the private Server-chat `server.db`, under
+`Storage/projects/<slug>/server/` — nothing about them (not even a hint of their existence)
+reaches the site repo, a build, a publish, a `reports.py` diagnostic bundle, or a backup
+snapshot; `wixy_server/tests/test_reports.py` pins a drawing-specific sentinel absent from
+the report bundle alongside the existing whole-`server_dir` exclusion.
+
+### Tests
+`wixy_server/tests/test_livechat_drawings.py` (palette allowlist, the TS/Python drift
+guard, migration v12→v13 on a database frozen at v12 and on a fresh database, store
+create/append/delete idempotency and limits, `CHECK` constraint enforcement, ordering, a
+concurrency test with two `LiveChatStore` connections appending to the same drawing at
+once, and the cascade-erasure raw-bytes proofs) and
+`wixy_server/tests/test_routes_livechat_drawings.py` (auth on every route, the full
+validation matrix, every error code, the live relay's rate limit and per-connection
+isolation, the bounded queue's drop-oldest policy, and the `drawing_live` SSE frame never
+disturbing the replay cursor).
+
+## 19. Live drawing: the client (the pen) (round 2, `spec/server-chat/07-live-drawing.md`)
+
+Either person can draw freehand on the thread with the pen. A drawing sits on the message it
+was drawn on and scrolls with it. It appears live on the other screen while it is being
+drawn, is stored stroke by stroke, and can be selected and deleted for everyone. The server
+side (schema, routes, the live relay and erasure) is §18. This section covers the client
+(`admin-ui/src/server/`). The design decisions are in decisions/00176.
+
+### Module map
+- `drawings.ts`: the palette (`DRAWING_COLORS`, 8 hex values), the thicknesses
+  (`DRAWING_WIDTHS` = 2/4/8/14), their spoken labels, the server's limits mirrored as
+  constants, and the client tuning (`RDP_EPSILON_PX`, `LIVE_BATCH_INTERVAL_MS`,
+  `LIVE_STROKE_TIMEOUT_MS`, `LIVE_KEEPALIVE_MS`, `SECOND_FINGER_WINDOW_MS`/`_SLOP_PX`,
+  `SELECT_HIT_RADIUS_PX`, `DRAWING_Y_SPLIT_PX`). **Drift guard both ways:** the two lists are
+  each one `export const NAME = [...] as const;` line. The server's
+  `test_livechat_drawings.py` parses them, and `tests/server/drawings.test.ts` parses
+  `wixy_server/livechat/drawings.py` (the reaction-emoji guard's pattern, Inv 49).
+- `drawingGeometry.ts` (pure): draw space ↔ viewer space, `chooseAnchor`, RDP simplification
+  and `prepareStoredPoints`, `strokesBounds`/`svgBox`, `pathData`, `hitTestDrawings`.
+- `drawGesture.ts` (pure, the caller supplies every timestamp): the pointer state machine
+  (idle / stroke / pan / draining) that turns Pointer Events into stroke and pan effects.
+- `drawingLive.ts`: the lossy live channel. `createLiveSender` belongs to the drawer and
+  `createLiveReceiver` to every other screen.
+- `drawingModel.ts` (pure data): this client's record of stored and pending drawings, and the
+  rules that reconcile it with the server.
+- `drawingSync.ts`: storing strokes, deleting drawings, and fetching what a summary says is new.
+- `drawingLayer.ts`: everything in the DOM: the Pen button, the toolbar, the Draw surface, the
+  `<svg>`s, live previews, Select mode and the lifecycle. `thread.ts` mounts it.
+- `api/drawings.ts`: the routes, the verdict mapping, and validation of everything read back
+  (`parseStoredDrawing`, `parseDrawingSummaries`, `parseLiveFrame`). Path data is built only
+  from these checked integers, never from a server string (§1).
+
+### The Pen button and the toolbar
+- **The Pen button is in the chat HEADER** (`.wx-srv-pen-button`, "✎", before ⚙), not the
+  composer: a third composer control pushed the text box under its 120 px floor on a 360 px
+  phone (decisions/00169). It is a 44×44 px button whose visible 36 px face
+  (`.wx-srv-pen-face`) matches ⚙ and ✕. A `-4px` margin keeps the header row's 36 px layout.
+  It carries `data-srv-gesture-boundary` and `aria-pressed`. It does nothing while locked.
+- **The toolbar** (`.wx-srv-pen-toolbar`, `role="toolbar"`) sits between the header and the
+  thread. It holds the 8 colour swatches and the 4 thicknesses (in Draw mode), a **Draw |
+  Select** switch, and **Done** (which turns the pen off). In Select mode it shows the hint,
+  **Next drawing** (the keyboard route to a drawing) and **Delete drawing**
+  (`data-srv-gesture-boundary`, since it opens the confirmation). "Delete this drawing for
+  everyone?" then replaces them with Delete / Cancel. Notices use the status line
+  (`role="status"`, cleared after 5 s).
+- **On a phone (≤ 480 px) it is two fixed lines in every mode, whatever the device's font**
+  (`chat.css`, the `max-width: 480px` block):
+  - Line 1 is what the mode acts on: the colours, the selection's two buttons, or the delete
+    question with Delete / Cancel.
+  - Line 2 is always **Draw | Select, then the mode's slot** (the thicknesses in Draw mode, the
+    hint in Select mode, nothing during the question), **then Done**. The switch comes first,
+    so it never moves under the finger when the mode changes.
+  - The slot is the only part that gives. The thicknesses start at 28 px wide each (always
+    44 px tall) and grow back towards 44 px into the room the labels leave, and the hint wraps
+    inside it (at most three lines fit the 44 px line).
+  - DOM order is the desktop line's (and so the keyboard's). CSS `order` arranges the phone's
+    two lines, and the hint is a direct child of the toolbar, not of the select group.
+- **Why it is built this way (measured, decisions/00176 #13):** the first layout gave line 2
+  fixed-width thicknesses. It fitted two lines in Windows' Segoe UI but needed THREE (146 px)
+  in Ubuntu's DejaVu Sans, which is what CI's runner draws `system-ui` with, and in Verdana,
+  on both a 360 and a 390 px phone. Its Select mode also pushed "Delete drawing" onto a line of
+  its own, and the switch jumped from after the thicknesses to the line's start on every mode
+  change.
+- **Measured now (real Chromium):** 100 px, two lines, in every mode at 390 and 360 px, in
+  Segoe UI, DejaVu Sans, Arial (the same letter widths as Linux's Liberation Sans) and Verdana,
+  with nothing clipped or overflowing. The thicknesses measure 40–44 px wide in Segoe UI or
+  Arial and 35–42 px in DejaVu Sans or Verdana. On desktop the toolbar is one line, 54 px.
+  `server-drawing.spec.ts` checks all of this in every mode, with the device's own font and
+  again with a forced wide one (`useWideFont`: Verdana, or else DejaVu Sans). Only a font far
+  larger than any default would wrap line 2, and it would still never overflow.
+- **The thread stays where it is** (`keepThreadInPlace`): any change in the toolbar's height
+  (pen on or off, a mode switch, a notice, the question) adds that change to
+  `thread.scrollTop`. Without this, the newest messages slid under the composer when the pen
+  came on, and a view stuck to the bottom later jumped about 90 px.
+
+### Layout and anchoring (§1)
+- `thread.ts` wraps `.wx-srv-message-list` in `div.wx-srv-thread-content` (`position:
+  relative`). The drawing layer (`.wx-srv-drawing-layer`: `z-index: 1`, `pointer-events:
+  none`, `overflow-anchor: none`) is the list's sibling inside that wrapper, **never inside the
+  list**, because `renderThreadList` removes children of the list that it does not know about.
+- Each drawing is one `<svg class="wx-srv-drawing" data-anchor-seq="N">` (`aria-hidden`).
+  Its `viewBox` is in draw space. Its box is the anchor's top plus the bounds × the scale
+  `s = viewer column width / columnWidth`, so the browser scales x, y and the stroke width
+  uniformly and a circle stays a circle. The box is clipped to the thread's visible width, so
+  there is never a sideways scrollbar. Vertically it is never clipped, so a drawing below the
+  last bubble grows the scroll area.
+- **Positions are always read from the live DOM**, never copied. They are re-read on every
+  `renderThreadList` (`drawingLayer.syncMessages`, called before the stick-to-bottom
+  decision), by a ResizeObserver on the column and the thread (images loading, rotation, the
+  toolbar), and once per frame during a stroke.
+- **The anchor** is the confirmed bubble whose top is the nearest one at or above the first
+  stroke's start. A start above every bubble anchors to the topmost bubble, with a negative
+  offset. Anchors come from `drawingAnchors()`/`drawingAnchorElement()` in `thread.ts`: only
+  confirmed, connected bubbles, never an optimistic echo or a bubble fading out after a
+  delete. A new drawing declares `columnWidth` = the measured column, clamped to 200–4000.
+- **One drawing per pen session (§2):** later strokes join the session's drawing. A stroke
+  starts a new drawing on its own nearest anchor if it starts more than
+  `DRAWING_Y_SPLIT_PX` (16 000 px of draw space) from the first anchor, so no point can
+  cross the server's ±20 000 bound, or if the drawing already has 200 strokes. The session
+  ends when the pen turns off, on any lock, when the page is hidden (the pen stays on), or on
+  a wipe.
+
+### The Draw surface and gestures (§5)
+- In Draw mode, `div.wx-srv-draw-surface` lies over the thread inside `.wx-srv-thread-wrap`:
+  `z-index: 1` (below the jump pill's 2), `touch-action: none`, pointer capture, and a right
+  inset that leaves a desktop scrollbar draggable. It carries `data-srv-gesture-exempt`, so
+  the multi-tap lock ignores it and rapid dots never lock. Escape and ✕ still lock at once.
+- **One finger, pen or mouse draws.** A second TOUCH finger that lands within 150 ms of the
+  first and before the first has moved 12 px cancels the stroke (a live `cancel`, nothing
+  stored) and starts a two-finger pan that scrolls by the centroid's movement. Any other extra
+  pointer is ignored until every pointer lifts (`drawGesture.ts`).
+- The mouse wheel over the surface is passed on to the thread. A ctrl+wheel is a trackpad
+  pinch and is swallowed, so zoom stays off.
+- For the length of one stroke the thread is held in place (`ChatThreadScroll.hold()` in
+  `admin-ui/src/chatThreadScroll.ts`, shared with the AI chat). A message arriving
+  mid-stroke then shows the jump pill instead of sliding the chat out from under the finger.
+- A finished stroke is simplified with RDP at 0.75 px, rounded to integers inside the
+  server's bounds, and deduplicated (`prepareStoredPoints`). A tap becomes a two-point dot. A
+  stroke still over 1 000 points is simplified again with a doubled tolerance, and evenly
+  thinned as a last resort, so it is never refused for its length.
+
+### Live strokes (§4, `drawingLive.ts`)
+- **Sender:** at most one `POST /drawings/live` in flight, at least 50 ms apart (so at most 20
+  a second, inside the server's 30) and at most 200 points each. Each batch after a stroke's
+  first starts with the previous batch's last point, so the receiver draws connected pieces
+  and a lost batch shows as a gap. `batch` increases per stroke. A 429 pauses sending for the
+  server's `retryAfterS` (clamped to 0.25–10 s). A finger held still re-sends its last point
+  every 2 s. A cancel frame goes out only if something was sent. Live posts time out after
+  4 s rather than the usual 10. The timer always re-arms to the earliest thing owed: a stale
+  keepalive timer once held a new stroke's preview back by up to 2 s (red/green tested).
+- **Receiver:** it ignores frames for this screen's own drawings (the server relays to every
+  stream), frames for a stroke already stored or cancelled (remembered for 60 s), and batches
+  older than one already drawn. A stroke with no update for 5 s is dropped. Previews are
+  their own `<svg class="wx-srv-drawing wx-srv-drawing-live">`. The stored stroke replaces
+  the preview when a fetch brings it (`finish`), and a late frame never brings it back.
+- An incoming frame is not input: watching someone draw does not keep the chat awake
+  (Inv 43).
+
+### Storing, retries and delete (`drawingSync.ts`)
+- **Each own drawing has a FIFO queue**, with one write in flight at a time. The first
+  stroke is `POST /drawings` (the create, idempotent by `clientId`). The rest are `POST
+  /drawings/{id}/strokes` (idempotent by `strokeId`). A write with an unknown outcome (a
+  network error, a timeout, a 5xx, 408, 429, or a 403, which only Cloudflare Access or a WAF
+  can send here) is retried with the SAME keys after 1, 2, 4 and 8 s, then every 15 s.
+- **Verdicts:** 404 drops the drawing and tombstones its id. 409 on create means the message
+  already has 20 drawings (a notice). 409 on append moves the remaining strokes into a new
+  drawing on the same anchor (`model.split`), and the pen session continues there. 422 drops
+  only that stroke ("Couldn't save part of the drawing."). A 401 locks the chat.
+- **A lock pauses everything:** timers are cleared and nothing new is sent with a token that
+  was let go. The next unlock resumes with the fresh token. Answers already in flight still
+  apply.
+- **Delete** (Select mode): the drawing leaves the screen at once, and its id is tombstoned.
+  - A drawing with an id is deleted by that id (`DELETE`, retried after 1, 2 and 4 s). Its
+    unsent strokes are held back. An append already in flight is harmless: it either lands
+    before the delete (which removes it too) or after it (and gets a 404).
+  - A drawing whose create has not answered yet may or may not exist on the server, and only
+    that create's verdict can say. The create alone is carried on, retried with the same
+    `clientId` on the usual backoff and through locks, until it answers. The drawing is then
+    deleted by the id it gives. If the create is refused outright, nothing was made.
+  - If the delete fails ("Couldn't delete the drawing. Try again."), or a lock interrupts
+    it, the drawing comes back whole. Its held-back strokes are queued again and stored, and
+    a refetch brings the server's version.
+
+### Reconciliation (`drawingModel.ts`)
+- **A summary only triggers a fetch; the GET is the only authority.** When a message's
+  `drawings: [{id, rev}]` summary lists something unknown or newer, or leaves out an id this
+  client knows, one `GET /messages/{seq}/drawings` runs after 60 ms. The need is checked
+  again when the timer fires: usually the drawer's own create answer has arrived by then. At
+  most one fetch runs per message (a newer summary re-runs it once afterwards), and at most 4
+  overall. A missing or malformed `drawings` field means "unknown", never "none", as in a
+  blue/green overlap with an older server.
+- **The epoch rule:** a fetch removes a drawing for being absent only if this client knew
+  that drawing before the fetch was sent. Otherwise a fetch the server answered just before
+  this client's own create committed would delete the drawing it had just made.
+- An answer older than one already applied for the same message is dropped. Own drawings are
+  matched to fetched ones by `strokeId`, so a fetch that beats the create's answer adopts the
+  drawing and never shows it twice. Tombstones are drawing ids only, never content.
+- **The drawer never re-fetches its own strokes:** for an own drawing, every revision up to
+  the number of strokes SENT is already accounted for (verified in e2e: the drawer makes no
+  GET). Only the other screen's drawings trigger stick-to-bottom
+  (`onRemoteContent` → `afterContentChange(false)`); this screen's own confirmations never do.
+
+### Select mode
+- Drawings stay `pointer-events: none` even in Select mode. The spec allows them to take
+  pointer events there, but they are instead hit-tested geometrically: a tap within 12 viewer
+  px of a stroke's visible edge (thickness included) selects the whole drawing, and the
+  closest drawing wins. A selection therefore never blocks scrolling.
+- A tap is recognised from Pointer Events with the lock recognizer's own rule (moved at most
+  `TAP_SLOP_PX` = 10 px, held at most `TAP_MAX_MS` = 300 ms), in capture listeners on the
+  thread, and never from `click`. Measured in Chromium's phone emulation, a touch tap produced
+  `pointerup` and no click at all. A tap that selects swallows its follow-on click for 700 ms,
+  so a link or photo underneath does not also act. Selecting shows a dashed outline
+  (`.wx-srv-drawing-selection`).
+- **Accepted hazard (driver ruling, KEEP AS SPEC):** a select tap followed within 400 ms by
+  "Delete drawing" locks the chat, because the button is a gesture boundary and the tap is an
+  ordinary one. The same pattern exists today for a bubble tap followed by ⚙. The e2e acts
+  at a human pace between controls.
+
+### Lock, lifecycle and erasure
+- `thread.ts` calls `drawingLayer.detach()` FIRST in its own `detach()`. The pen turns off,
+  and a stroke in progress is withdrawn with a live cancel posted at once, while this unlock's
+  token is still in hand (`liveSender.shutdown()`). The surface, live previews, observers and
+  every timer then go. Stored and pending drawings stay in memory, like the thread's messages
+  and draft.
+- `attach(session)` resumes the store queue and fetches with the fresh token. `teardown()`
+  (leaving the panel) drops everything.
+- `messageDeleted(seq)` (both the optimistic delete and the `message_deleted` event) removes
+  that message's drawings and previews in place. A message that disappears from the rendered
+  list does the same. `wiped()` turns the pen off and drops every drawing, preview, queue and
+  fetch.
+- A drawing is patched in place: the same `<svg>` and the same `<path>` per `strokeId`. A
+  bubble is never re-rendered for a drawing, so the voice/video cut-off trap from reactions
+  cannot happen here.
+
+### Tests
+- vitest: `admin-ui/tests/server/{drawings,drawingGeometry,drawGesture,drawingLive,
+  drawingModel,drawingSync,drawingsApi,drawingLayer,threadDrawing}.test.ts`, plus
+  `serverStream.test.ts` (the `drawing_live` frame, no cursor move) and
+  `serverChatCss.test.ts` (the pen classes that are toggled hidden).
+- e2e: `e2e/tests/server-drawing.spec.ts`, with two identities, desktop, and 390 and 360 px
+  phones with touch. B sees A's stroke live before A lifts, then stored in the same place,
+  and it survives a reload. The drawing scrolls with its message and follows it when the
+  message above grows. B selects and deletes it and it vanishes for both. Deleting the anchor
+  message removes it. Rapid dots never lock, and Escape mid-stroke locks at once and B's
+  preview goes. At phone widths every control is hit-tested with `elementFromPoint`, one
+  finger draws, and two fingers scroll without drawing. The fixture runs ONE chat per worker
+  with no reset, so assertions are scoped per anchor
+  (`svg.wx-srv-drawing[data-anchor-seq="N"]`).
+
+### Honest limits
+- **Text re-wraps at other widths (spec §1).** A drawing stays on the right message, but on a
+  much narrower or wider screen a circle drawn around particular words may not sit exactly on
+  them. Both people mostly use phones of similar widths, where the scale is about 1.
+- **Blue/green overlap:** live frames reach only streams on the same server process. Stored
+  strokes still reach everyone through the database re-check.
+- **A reconnect mid-stroke** misses that stroke's live preview. The stored stroke arrives
+  with the next `message_updated`.
+- **On a narrow phone with a wide font the thickness buttons get narrower**: 35–36 px wide at
+  360 px in DejaVu Sans or Verdana, never below 28 px, and always 44 px tall.
+- **The select-then-delete boundary hazard** described above.
+- **A lost create answer can re-create a drawing the other person has just deleted.**
+  Deletes keep no record of client ids (the same tombstone-free design as messages, Inv 46).
+  So if a create's answer is lost and the other person deletes the drawing before the retry
+  arrives, the retry creates it again.
+- **Leaving the panel stops a pending delete:** a delete still waiting on its create (above)
+  ends if the panel is torn down before that create answers.

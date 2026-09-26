@@ -225,6 +225,11 @@ header.
 | GET | `server/messages/{seq}/view-once/content` | `get_view_once_content` | — (`X-Wixy-View-Claim: <claimId>` header required; verified against claim and claimant identity; expires after 600s) | 200 raw stream (`Cache-Control: no-store`, `X-Content-Type-Options: nosniff`); erased via Inv 46 upon complete delivery; 403 `{"error":"forbidden"}` (missing/malformed/wrong claim header or wrong email); 404 `{"error":"not_found"}`; 410 `{"error":"expired"}` |
 | POST | `server/wipe` | `wipe_chat` | exactly `{"confirm":"WIPE"}` | 204 when DB scrub and media cleanup are complete; otherwise 202 `{"erasurePending":true}`; every other body, including extra keys, is 422 |
 | GET | `server/stream?after=` | `stream` | query `after?:int` (event cursor) | **SSE**, see §4 |
+| POST | `server/drawings` | `create_drawing` | `{"clientId":str(8-64),"anchorSeq":int(1-Sqlite max),"columnWidth":float(200-4000),"sender":str(1-32,trimmed),"deviceId":str(8-64),"stroke":{"strokeId":str(8-64),"color":str(one of the 8 in `livechat/drawings.py`),"width":2\|4\|8\|14,"points":[[int,int]](2-1000 pairs, x∈[-50,columnWidth+50], y∈[-20000,20000])}}` — `clientId` is the idempotency key (spec/server-chat/07-live-drawing.md §3/§4) | 201 `{"id":int,"rev":int}` (a fresh drawing); 200 (same body, a replayed `clientId` — the same drawing, unchanged); 404 `{"error":"not_found"}` (`anchorSeq` unknown or deleted); 409 `{"error":"full"}` (the anchor already has 20 drawings); 422 `{"error":"invalid","detail":str}`; 401 locked |
+| POST | `server/drawings/{id}/strokes` | `append_drawing_stroke` | `{"strokeId":str(8-64),"color":str,"width":2\|4\|8\|14,"points":[[int,int]]}` — `strokeId` is the idempotency key | 200 `{"rev":int}` (a repeated `strokeId` is a no-op 200 with the CURRENT rev, unchanged); 404 `{"error":"not_found"}` (unknown, deleted or out-of-range drawing id); 409 `{"error":"full"}` (the drawing already has 200 strokes); 422 `{"error":"invalid","detail":str}` (a point's x is bounded by THIS drawing's stored `column_width`+50, applied by the store inside the append transaction because the body carries no `columnWidth`; the route's own pre-check only applies the global maximum); 401 locked |
+| DELETE | `server/drawings/{id}` | `delete_drawing` | — | 204, idempotent (an unknown or out-of-range id is 204 too; either person may delete any drawing — Inv 46's "Delete for everyone" pattern, no ownership check). Erasure like `DELETE server/messages/{seq}` (spec 07 §6, Inv 53): the delete and the "a WAL scrub is owed" marker commit together, then the scrub runs BEFORE the answer, so **204 means the strokes' bytes are gone from `server.db` and its WAL**; **202 `{"erasurePending":true}`** means the delete committed and the background scrubber owes the rest (a client treats any 2xx as deleted); 401 locked |
+| GET | `server/messages/{seq}/drawings` | `get_message_drawings` | — | 200 `{"drawings":[<Drawing>]}`, oldest `id` first, `[]` for a message with none or an unknown or out-of-range `seq` (never 404 — the summary already told the client whether to bother calling this); 401 locked |
+| POST | `server/drawings/live` | `post_drawing_live` | `{"drawingClientId":str,"anchorSeq":int,"columnWidth":float,"strokeId":str,"batch":int,"color":str,"width":int,"points":[[int,int]](≤200 pairs),"cancel":bool(default false)}` — `cancel:true` skips `color`/`width`/`points` validation entirely (a withdrawal carries no real stroke); relayed through the in-memory `DrawingBroker` to EVERY open `/stream` connection (the posting tab's own included) as an id-less `drawing_live` frame (§4) — **never persisted, logged, or written to a file** (Inv 40/46/53) | 200 `{"ok":true}`; 429 `{"error":"rate_limited","retryAfterS":int}` + `Retry-After` header (more than 30 batches/second for this device: its grant when the token is grant-bound, else this unlocked session's token, never a body field); 422 `{"error":"invalid","detail":str}` (also: `drawingClientId`/`strokeId` not 8-64 characters, `anchorSeq` not 1..2^53-1, `batch` not 0..10,000,000); 401 locked |
 | GET | `server/usage` | `usage` | — | `{"usedBytes":int,"quotaBytes":int,"freeBytes":int,"mediaAvailable":bool,"erasurePending":bool,"transcriptionAvailable":bool}` — the last is true only while cmd's capability probe answers `{"private":true}` (cached 60 s; always false on the standalone edition); it is what shows the Transcribe control |
 | POST | `server/uploads` | `init_upload` | `{"kind":"photo"\|"video"\|"voice","mimeType":str,"sizeBytes":int(≥1),"filename":str\|null}` | 201 `{"uploadId":hex32,"chunkBytes":int,"maxBytes":int}`; 413 `{"error":"too_large","maxBytes":int}`; 415 `{"error":"unsupported_type"}`; 422 (FastAPI validation error — e.g. `sizeBytes` 0 or negative; nothing is reserved); 507 `{"error":"storage_full"}`; 503 `{"error":"media_unavailable"}` (ffmpeg, ffprobe or `pillow-heif` unavailable; text chat is unaffected) |
 | PUT | `server/uploads/{id}/chunks/{index}` | `put_chunk` | raw `application/octet-stream` body, ≤`chunkBytes` | 204; 413 `{"error":"too_large","maxBytes":int}`; 422 (index out of range); 404 (unknown upload) |
@@ -240,7 +245,14 @@ header.
 
 `<Message>` = `{seq:int, clientId:str, sender:str, text:str\|null, attachments:[<Attachment>],
 reactions:[<Reaction>], createdAt:float, replyTo:<ReplyTo>\|null,
-viewOnce:{durationS:int\|null, tease:bool, spotlight:bool}\|null}` (`spotlight` = transitional alias of `tease`, remove after 2026-10-27, decisions/00172). `<Reaction>` =
+viewOnce:{durationS:int\|null, tease:bool, spotlight:bool}\|null, drawings:[<DrawingSummary>]}`
+(`spotlight` = transitional alias of `tease`, remove after 2026-10-27, decisions/00172).
+`<DrawingSummary>` = `{id:int, rev:int}` — never the strokes themselves (spec/server-chat/
+07-live-drawing.md §4); a client that sees an entry it lacks, or a newer `rev` than it has,
+fetches the body with `GET server/messages/{seq}/drawings`. `<Drawing>` (that route's own
+per-drawing shape) = `{id:int, rev:int, sender:str, columnWidth:float, strokes:[<DrawingStroke>]}`;
+`<DrawingStroke>` = `{strokeId:str, color:str, width:int, points:[[int,int]]}`, ordered by the
+stroke's own creation order. `<Reaction>` =
 `{emoji:str, count:int, senders:[str]}` — only emoji with at least one reactor, in the
 allowlist's order, `senders` oldest first; the reactor's `by_email` audit value is never
 returned. `<Attachment>` = `{id:str, kind:"photo"\|"video"\|"voice",
@@ -436,6 +448,19 @@ Publish/Chat use — the client is a `fetch()` streaming reader carrying the
   case instead.
 - `event: wiped` / `data: {}` — the client clears loaded history and pending echoes; the stream
   remains open.
+- `event: drawing_live` / **no `id:` line** / `data: {"drawingClientId":str,"anchorSeq":int,
+  "columnWidth":float,"strokeId":str,"batch":int,"color":str,"width":int,"points":[[int,int]],
+  "cancel":bool}` — spec/server-chat/07-live-drawing.md §4, Inv 53. An in-progress stroke
+  relayed from `POST server/drawings/live` through the in-process `DrawingBroker`, entirely
+  separate from `events_after`/the notifier: it **never advances the reconnect cursor** (the
+  loop drains this connection's own bounded `LiveDrawingQueue` first, every tick, before
+  polling the database) and is **never persisted, logged, or written to any file** — a
+  client's own in-progress handwriting is chat content. The queue holds at most 64 frames per
+  connection; past that, the OLDEST is dropped (live preview is deliberately lossy). Sent to
+  EVERY open connection, including the posting tab's own (the client ignores a frame for a
+  `drawingClientId` it is itself drawing; do not remove that filter). A client drops a live stroke
+  it has not seen updated for 5s. The stored stroke this preview stands in for arrives, as
+  usual, via a `message_updated` frame once `POST server/drawings` or `.../strokes` commits.
 
 Per-connection loop: read `events_after(cursor)`; if any, look up each event's CURRENT
 message content and emit one frame per distinct message (**coalescing** — a `message` +

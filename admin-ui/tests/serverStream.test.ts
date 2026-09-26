@@ -88,6 +88,39 @@ describe("mapSseEvent", () => {
   it("returns null for malformed JSON instead of throwing", () => {
     expect(mapSseEvent({ id: 1, event: "message", data: "{not json" })).toBeNull();
   });
+
+  // spec/server-chat/07-live-drawing.md §4: another screen's stroke while it is being drawn.
+  const LIVE = {
+    drawingClientId: "drawing-client-1",
+    anchorSeq: 12,
+    columnWidth: 310,
+    strokeId: "stroke-1",
+    batch: 3,
+    color: "#ff3b30",
+    width: 4,
+    points: [[1, 2], [3, 4]],
+    cancel: false,
+  };
+
+  it("maps a drawing_live frame after validating it", () => {
+    expect(mapSseEvent({ id: null, event: "drawing_live", data: JSON.stringify(LIVE) })).toEqual({
+      type: "drawing_live",
+      frame: LIVE,
+    });
+  });
+
+  it("skips a drawing_live frame that fails validation, instead of rendering from it", () => {
+    for (const bad of [
+      { ...LIVE, color: "red" },
+      { ...LIVE, width: 5 },
+      { ...LIVE, points: [[1.5, 2]] },
+      { ...LIVE, points: "M0 0 L9 9" },
+      { ...LIVE, batch: -1 },
+    ]) {
+      expect(mapSseEvent({ id: null, event: "drawing_live", data: JSON.stringify(bad) })).toBeNull();
+    }
+    expect(mapSseEvent({ id: null, event: "drawing_live", data: "{not json" })).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -184,6 +217,37 @@ describe("openServerStream", () => {
     expect(handle.getCursor()).toBe(5);
     handle.close();
     expect(handle.getCursor()).toBe(5); // survives close(), for the next attach() to resume from
+  });
+
+  it("a drawing_live frame (sent with no id: line) is dispatched but never moves the replay cursor", async () => {
+    const frame = {
+      drawingClientId: "drawing-client-1",
+      anchorSeq: 5,
+      columnWidth: 310,
+      strokeId: "stroke-1",
+      batch: 0,
+      color: "#0a84ff",
+      width: 8,
+      points: [[1, 2]],
+      cancel: false,
+    };
+    const events: ServerStreamEvent[] = [];
+    const fetchImpl = vi.fn(async () =>
+      okResponse(
+        sseBody(
+          `id: 5
+event: message
+data: ${JSON.stringify(fakeMessage({ seq: 5 }))}`,
+          `event: drawing_live
+data: ${JSON.stringify(frame)}`,
+        ),
+      ),
+    );
+    const handle = openServerStream(SESSION, 2, (e) => events.push(e), { fetchImpl });
+    await flush();
+    expect(events.map((e) => e.type)).toEqual(["message", "drawing_live"]);
+    expect(handle.getCursor()).toBe(5);
+    handle.close();
   });
 
   it("a 401 dispatches locked and does not reconnect", async () => {

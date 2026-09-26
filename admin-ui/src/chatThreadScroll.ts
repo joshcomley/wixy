@@ -18,13 +18,23 @@ export interface ChatThreadScroll {
   /** Call right after the thread's content changes (e.g. a re-render): if the
    * viewer was already stuck to the bottom, keeps them there; otherwise, when
    * `revealPill` is true, shows the jump pill. `revealPill` is the caller's
-   * call — e.g. the AI panel never reveals it for the owner's own messages. */
+   * call — e.g. the AI panel never reveals it for the owner's own messages.
+   * While a `hold` is active a stuck viewer is NOT moved (the pill still shows
+   * for `revealPill`), because something is being done at a fixed spot. */
   afterContentChange(revealPill: boolean): void;
+  /** Keeps the thread exactly where it is until the returned release runs —
+   * the Server chat's pen (spec/server-chat/07-live-drawing.md) holds it for
+   * the length of one stroke, so a message arriving mid-stroke can never slide
+   * the chat out from under the finger. Releasing moves nothing either; the
+   * next content change re-sticks a stuck viewer as usual. Releasing twice is
+   * harmless. */
+  hold(): () => void;
   teardown(): void;
 }
 
 export function mountChatThreadScroll(thread: HTMLElement, jumpPill: HTMLElement): ChatThreadScroll {
   let stuck = true;
+  let holds = 0;
 
   function scrollToBottom(): void {
     thread.scrollTop = thread.scrollHeight;
@@ -51,11 +61,20 @@ export function mountChatThreadScroll(thread: HTMLElement, jumpPill: HTMLElement
     },
     scrollToBottom,
     afterContentChange(revealPill: boolean): void {
-      if (stuck) {
+      if (stuck && holds === 0) {
         thread.scrollTop = thread.scrollHeight;
       } else if (revealPill) {
         jumpPill.hidden = false;
       }
+    },
+    hold(): () => void {
+      holds += 1;
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        holds -= 1;
+      };
     },
     teardown(): void {
       thread.removeEventListener("scroll", onScroll);

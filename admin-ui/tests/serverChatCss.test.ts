@@ -31,6 +31,15 @@ const HIDDEN_TOGGLED_CLASSES = [
   "wx-srv-reply-bar",
   "wx-srv-view-once-controls",
   "wx-srv-tease-preview",
+  // The pen (drawingLayer.ts, spec/server-chat/07-live-drawing.md).
+  "wx-srv-pen-toolbar",
+  "wx-srv-pen-colors",
+  "wx-srv-pen-widths",
+  "wx-srv-pen-hint",
+  "wx-srv-pen-select",
+  "wx-srv-pen-confirm",
+  "wx-srv-pen-status",
+  "wx-srv-drawing-selection",
 ] as const;
 
 function escapeRegExp(text: string): string {

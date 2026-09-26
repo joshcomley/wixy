@@ -3,6 +3,7 @@
 // the token/401 handling stays in one place (`http.ts`'s own docstring).
 
 import { ServerErasureOutcomeUnknownError, ServerLockedError, serverFetch } from "./http";
+import type { DrawingSummary } from "./drawings";
 import type { ServerSession } from "../types";
 
 import type { AttachmentTranscript } from "../mediaRender";
@@ -77,6 +78,10 @@ export interface Message {
   readonly createdAt: number;
   readonly replyTo: ReplyTo | null;
   readonly viewOnce?: ViewOnceInfo | null;
+  /** spec/server-chat/07-live-drawing.md §4: a summary of the drawings anchored to this message
+   * (never their strokes). Absent from a server that predates drawings — read as "unknown",
+   * never as "none" (`parseDrawingSummaries`). */
+  readonly drawings?: readonly DrawingSummary[];
 }
 
 export interface HistoryPage {
