@@ -37,6 +37,7 @@ import uuid
 from pathlib import Path
 
 import anyio
+import httpx
 
 E2E_DIR = Path(__file__).resolve().parent
 WIXY_REPO_ROOT = E2E_DIR.parent
@@ -409,6 +410,14 @@ def main() -> None:
         # incidents (decisions/00030).
         watcher_interval_s=3600.0,
         cmdchat_client=cmdchat_client,
+    )
+
+    def _fake_push_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(201)
+
+    app.state.livechat_push_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(_fake_push_handler),
+        timeout=10.0,
     )
 
     delete_response_delay_s = 0.0
