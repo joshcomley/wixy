@@ -29,6 +29,8 @@ test("desktop browser does not show the optional push control", async ({ page })
   await page.locator(".wx-srv-settings-button").click();
   await expect(page.locator(".wx-srv-sheet")).toBeVisible();
   await expect(page.locator(".wx-srv-push-toggle")).toHaveCount(0);
+  await expect(page.locator(".wx-srv-push-unsupported")).toBeVisible();
+  await expect(page.locator(".wx-srv-push-unsupported")).toContainText("Android devices only");
 });
 
 test.describe("Android browser", () => {
