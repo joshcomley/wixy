@@ -1221,3 +1221,38 @@ button.wx-srv-quote:focus-visible {
   opacity: 0.55;
   cursor: default;
 }
+
+.wx-srv-push-test-button {
+  padding: 8px 16px;
+  border-radius: var(--wx-radius);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  background: var(--wx-surface);
+  border: 1px solid var(--wx-border);
+  color: var(--wx-text);
+  margin-top: 4px;
+}
+
+.wx-srv-push-test-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.wx-srv-push-test-status {
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  margin-top: 4px;
+}
+
+.wx-srv-push-test-message {
+  margin: 0 0 4px 0;
+  color: var(--wx-text);
+  font-weight: 500;
+}
+
+.wx-srv-push-test-hint {
+  margin: 0;
+  color: var(--wx-muted);
+}
+
