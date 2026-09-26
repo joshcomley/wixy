@@ -22,11 +22,12 @@ const worker = self as unknown as ServiceWorkerGlobalScope;
 
 export async function handlePush(target: ServiceWorkerGlobalScope): Promise<void> {
   const clients = await target.clients.matchAll({ type: "window", includeUncontrolled: true });
-  if (clients.some(isFocusedServerClient)) return;
-  const options: NotificationOptions & { renotify: boolean } = {
+  const isFocused = clients.some(isFocusedServerClient);
+  const options: NotificationOptions & { renotify: boolean; silent?: boolean } = {
     body: "New activity",
     tag: "wixy-server",
-    renotify: true,
+    renotify: !isFocused,
+    ...(isFocused ? { silent: true } : {}),
   };
   await target.registration.showNotification("Server", options);
 }

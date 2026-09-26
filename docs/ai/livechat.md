@@ -366,9 +366,10 @@ VAPID key pair is persisted race-safely in the private server directory's `vapid
 The opt-in is reachable from the UI. Each time the settings sheet opens, `settingsSheet.ts`
 mounts `pushToggle.ts` into its push slot — only on an Android-capable browser (an Android user
 agent with `PushManager`, `serviceWorker` and `Notification`) and only once the chat has a
-display name; the sheet unmounts it on close. Desktop and other browsers never see the control.
-`e2e/tests/server-push.spec.ts` proves both: a desktop browser shows no control, and an Android
-browser enables and disables the subscription through the sheet.
+display name; the sheet unmounts it on close. Desktop and other browsers see an
+informative note that notifications are currently supported on Android devices only.
+`e2e/tests/server-push.spec.ts` proves both: a desktop browser shows no toggle control,
+and an Android browser enables and disables the subscription through the sheet.
 
 After a message commits, the registered dispatch hook sends a payloadless Web Push
 request to every subscription except the message's device and case-insensitive sender.
@@ -377,8 +378,9 @@ four. A 201 records success; 404/410 deletes the subscription; other failures ar
 counted and the subscription is deleted after ten consecutive failures.
 
 The service worker is served at `/admin/server-sw.js` before the admin SPA catch-all.
-It emits only the generic `Server` / `New activity` notification, suppresses it for a
-visible focused Server page, and routes notification clicks to `/admin/server`. It has
+It emits only the generic `Server` / `New activity` notification, issues it silently for
+a visible focused Server page to satisfy the browser's `userVisibleOnly` push contract
+without disrupting the user, and routes notification clicks to `/admin/server`. It has
 no fetch handler. `server/pushToggle.ts` keeps enablement in the settings sheet's
 caller: permission, worker registration, subscription, and protected PUT all happen
 from the enable click; disable unsubscribes, deletes the server row, and unregisters.

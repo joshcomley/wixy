@@ -95,6 +95,8 @@ describe("mountServerSettingsSheet wipe confirmation", () => {
     });
     desktopView.open();
     expect(desktopView.pushSlot.querySelector(".wx-srv-push-toggle")).toBeNull();
+    expect(desktopView.pushSlot.querySelector(".wx-srv-push-unsupported")).not.toBeNull();
+    expect(desktopView.pushSlot.textContent).toContain("Android devices only");
     desktopView.teardown();
   });
 
