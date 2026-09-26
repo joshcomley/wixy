@@ -21,6 +21,7 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from typing import Any, Literal
 
 import anyio
+import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
@@ -49,7 +50,12 @@ from wixy_server.livechat.models import (
 )
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import PinVerifier
-from wixy_server.livechat.push import PushEndpointError, validate_push_endpoint
+from wixy_server.livechat.push import (
+    PushEndpointError,
+    VapidKeys,
+    send_payloadless_push,
+    validate_push_endpoint,
+)
 from wixy_server.livechat.reactions import is_allowed_reaction
 from wixy_server.livechat.store import (
     LiveChatStore,
@@ -64,7 +70,10 @@ from wixy_server.livechat.tokens import (
     require_server_token,
     unlock_request_refusal,
 )
-from wixy_server.livechat.transcription import TranscriptionRuntime
+from wixy_server.livechat.transcription import (
+    SlidingWindowRateLimiter,
+    TranscriptionRuntime,
+)
 from wixy_server.settings import Settings
 from wixy_server.storage import ProjectPaths
 
@@ -917,7 +926,10 @@ async def push_subscription_status(device_id: str, request: Request) -> JsonObje
     await require_server_token(request)
     store: LiveChatStore = request.app.state.livechat_store
     subscription = await anyio.to_thread.run_sync(store.get_push_subscription, device_id)
-    return {"subscribed": subscription is not None}
+    return {
+        "subscribed": subscription is not None,
+        "endpoint": subscription.endpoint if subscription is not None else None,
+    }
 
 
 @router.put("/push/subscriptions/{device_id}", response_model=None)
@@ -954,3 +966,79 @@ async def delete_push_subscription(device_id: str, request: Request) -> Response
     store: LiveChatStore = request.app.state.livechat_store
     await anyio.to_thread.run_sync(store.delete_push_subscription, device_id)
     return Response(status_code=204)
+
+
+_PUSH_TEST_RATE_LIMIT_S = 5.0
+_push_test_limiter = SlidingWindowRateLimiter(max_events=1, window_s=_PUSH_TEST_RATE_LIMIT_S)
+
+
+@router.post("/push/subscriptions/{device_id}/test", response_model=None)
+@router.post("/push/test/{device_id}", response_model=None)
+async def post_push_test(device_id: str, request: Request) -> JSONResponse:
+    await require_server_token(request)
+    limiter: SlidingWindowRateLimiter = getattr(
+        request.app.state, "livechat_push_test_limiter", _push_test_limiter
+    )
+    retry_after = limiter.hit(device_id)
+    if retry_after is not None:
+        seconds = max(1, math.ceil(retry_after))
+        return JSONResponse(
+            status_code=429,
+            content={"error": "rate_limited", "retryAfterS": seconds},
+            headers={"Retry-After": str(seconds)},
+        )
+
+    store: LiveChatStore = request.app.state.livechat_store
+    subscription = await anyio.to_thread.run_sync(store.get_push_subscription, device_id)
+    if subscription is None:
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+
+    try:
+        validate_push_endpoint(subscription.endpoint)
+    except PushEndpointError as exc:
+        return _invalid(str(exc))
+
+    keys: VapidKeys = request.app.state.livechat_vapid_keys
+    project = request.app.state.project
+    project_domain = project.domain
+    push_client: httpx.AsyncClient | None = getattr(request.app.state, "livechat_push_client", None)
+    close_client = False
+    if push_client is None:
+        push_client = httpx.AsyncClient(timeout=10.0)
+        close_client = True
+
+    try:
+        result = await send_payloadless_push(
+            push_client,
+            subscription.endpoint,
+            project_domain,
+            keys,
+        )
+    except httpx.HTTPError:
+        return JSONResponse(
+            status_code=200,
+            content={"ok": False, "statusCode": 502},
+        )
+    finally:
+        if close_client:
+            await push_client.aclose()
+
+    if result.delete_subscription:
+        await anyio.to_thread.run_sync(store.delete_push_subscription, subscription.device_id)
+    elif result.ok:
+        await anyio.to_thread.run_sync(
+            lambda: store.record_push_result(
+                device_id=subscription.device_id, ok=True, now=time.time()
+            )
+        )
+    else:
+        await anyio.to_thread.run_sync(
+            lambda: store.record_push_result(
+                device_id=subscription.device_id, ok=False, now=time.time()
+            )
+        )
+
+    return JSONResponse(
+        status_code=200,
+        content={"ok": result.ok, "statusCode": result.status_code},
+    )
