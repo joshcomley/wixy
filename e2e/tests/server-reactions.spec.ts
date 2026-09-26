@@ -269,7 +269,12 @@ test.describe("server-reactions.spec.ts", () => {
 
     await unlockServer(pageA, sender);
     await unlockServer(pageB, "Purdy");
-    const keepBAlive = setInterval(() => void pageB.mouse.move(40 + Math.random() * 30, 40), 2_000);
+    // A key press, never a mouse move: this timer runs while the test hovers a bubble and clicks
+    // its ⋯ trigger, which takes pointer events only while the bubble is hovered. A move landing
+    // between the hover and the click drags the pointer off the bubble for good, and the click
+    // then retries against the bubble until the test times out. Shift is R7 activity (a real
+    // keydown) and does nothing else in the chat.
+    const keepBAlive = setInterval(() => void pageB.keyboard.press("Shift"), 2_000);
     try {
       // A records an ~8 second note (long enough that it is still playing when B reacts).
       await pageA.getByRole("button", { name: "Record a voice note" }).click();
