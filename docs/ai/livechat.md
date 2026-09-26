@@ -1420,10 +1420,13 @@ side (schema, routes, the live relay and erasure) is §18. This section covers t
   composer: a third composer control pushed the text box under its 120 px floor on a 360 px
   phone (decisions/00169). It is a 44×44 px button whose visible 36 px face
   (`.wx-srv-pen-face`) matches ⚙ and ✕. A `-4px` margin keeps the header row's 36 px layout.
-  It carries `data-srv-gesture-boundary` and `aria-pressed`. It does nothing while locked.
+  It carries `data-srv-gesture-boundary`, `aria-pressed` (pen on/off), and `aria-expanded` (toolbar open/collapsed).
+  It does nothing while locked. While the pen is on, tapping the Pen button toggles the toolbar open or collapsed
+  without turning the pen off.
 - **The toolbar** (`.wx-srv-pen-toolbar`, `role="toolbar"`) sits between the header and the
   thread. It holds the 8 colour swatches and the 4 thicknesses (in Draw mode), a **Draw |
-  Select** switch, and **Done** (which turns the pen off). In Select mode it shows the hint,
+  Select** switch, **Collapse** (in Draw mode, `.wx-srv-pen-collapse`, which tucks the toolbar away so the full thread
+  area is drawable while strokes stay live), and **Done** (which exits pen mode). In Select mode it shows the hint,
   **Next drawing** (the keyboard route to a drawing) and **Delete drawing**
   (`data-srv-gesture-boundary`, since it opens the confirmation). "Delete this drawing for
   everyone?" then replaces them with Delete / Cancel. Notices use the status line
@@ -1433,11 +1436,11 @@ side (schema, routes, the live relay and erasure) is §18. This section covers t
   - Line 1 is what the mode acts on: the colours, the selection's two buttons, or the delete
     question with Delete / Cancel.
   - Line 2 is always **Draw | Select, then the mode's slot** (the thicknesses in Draw mode, the
-    hint in Select mode, nothing during the question), **then Done**. The switch comes first,
-    so it never moves under the finger when the mode changes.
-  - The slot is the only part that gives. The thicknesses start at 28 px wide each (always
+    hint in Select mode, nothing during the question), **then Collapse (in Draw mode), then Done**.
+    The switch comes first, so it never moves under the finger when the mode changes.
+  - The slot is the only part that gives. The thicknesses start at 24 px wide each (always
     44 px tall) and grow back towards 44 px into the room the labels leave, and the hint wraps
-    inside it (at most three lines fit the 44 px line).
+    inside it (at most three lines fit the 44 px line). Collapse displays an icon without its label on phone widths.
   - DOM order is the desktop line's (and so the keyboard's). CSS `order` arranges the phone's
     two lines, and the hint is a direct child of the toolbar, not of the select group.
 - **Why it is built this way (measured, decisions/00176 #13):** the first layout gave line 2

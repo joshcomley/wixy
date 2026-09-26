@@ -127,6 +127,8 @@ export interface DrawingLayer {
   readonly penButton: HTMLButtonElement;
   /** The pen toolbar, placed between the header and the thread. */
   readonly toolbar: HTMLElement;
+  /** The collapse affordance on the toolbar. */
+  readonly collapseButton: HTMLButtonElement;
   attach(session: ServerSession): void;
   detach(): void;
   teardown(): void;
@@ -218,6 +220,7 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
   penButton.title = "Draw on the chat";
   penButton.setAttribute("aria-label", "Pen");
   penButton.setAttribute("aria-pressed", "false");
+  penButton.setAttribute("aria-expanded", "false");
   // §5: turning the pen on opens a new mode and toolbar under the finger.
   penButton.setAttribute("data-srv-gesture-boundary", "");
 
@@ -332,6 +335,21 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
   selectModeButton.addEventListener("click", () => setMode("select"));
   modeGroup.append(drawModeButton, selectModeButton);
 
+  const collapseButton = documentRef.createElement("button");
+  collapseButton.type = "button";
+  collapseButton.className = "wx-srv-pen-collapse";
+  collapseButton.innerHTML =
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<polyline points="18 15 12 9 6 15"/>' +
+    '</svg>' +
+    '<span class="wx-srv-pen-collapse-label">Collapse</span>';
+  collapseButton.title = "Collapse toolbar";
+  collapseButton.setAttribute("aria-label", "Collapse toolbar");
+  collapseButton.addEventListener("click", () => {
+    setToolbarCollapsed(true);
+    penButton.focus();
+  });
+
   const doneButton = documentRef.createElement("button");
   doneButton.type = "button";
   doneButton.className = "wx-srv-pen-done";
@@ -349,7 +367,7 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
 
   // DOM order is the desktop line's order (and so the keyboard's); on a phone chat.css arranges
   // the same controls into two fixed lines.
-  toolbar.append(colorGroup, widthGroup, selectHint, selectGroup, confirmGroup, modeGroup, doneButton, statusLine);
+  toolbar.append(colorGroup, widthGroup, selectHint, selectGroup, confirmGroup, modeGroup, collapseButton, doneButton, statusLine);
 
   const layer = documentRef.createElement("div");
   layer.className = "wx-srv-drawing-layer";
@@ -361,8 +379,15 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
   content.appendChild(layer);
 
   let surface: HTMLElement | null = null;
+  let toolbarCollapsed = false;
 
-  penButton.addEventListener("click", () => setPen(!penOn));
+  penButton.addEventListener("click", () => {
+    if (!penOn) {
+      setPen(true);
+    } else {
+      setToolbarCollapsed(!toolbarCollapsed);
+    }
+  });
 
   // -- Timers and observers ------------------------------------------------------------------
 
@@ -1208,6 +1233,7 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
     const drawing = mode === "draw";
     colorGroup.hidden = !drawing;
     widthGroup.hidden = !drawing;
+    collapseButton.hidden = !drawing;
     selectHint.hidden = drawing || confirmingDelete;
     selectGroup.hidden = drawing || confirmingDelete;
     confirmGroup.hidden = !confirmingDelete;
@@ -1242,11 +1268,24 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
     keepThreadInPlace(syncToolbar);
   }
 
+  function setToolbarCollapsed(collapsed: boolean): void {
+    if (!penOn) return;
+    if (toolbarCollapsed === collapsed) return;
+    toolbarCollapsed = collapsed;
+    penButton.setAttribute("aria-expanded", String(!collapsed));
+    keepThreadInPlace(() => {
+      toolbar.hidden = collapsed;
+    });
+    relayout();
+  }
+
   function setPen(on: boolean): void {
     if (on === penOn) return;
     if (on && session === null) return;
     penOn = on;
+    toolbarCollapsed = false;
     penButton.setAttribute("aria-pressed", String(on));
+    penButton.setAttribute("aria-expanded", String(on));
     penButton.classList.toggle("wx-srv-pen-button-on", on);
     keepThreadInPlace(() => {
       if (on) {
@@ -1298,6 +1337,7 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
   return {
     penButton,
     toolbar,
+    collapseButton,
     attach(next: ServerSession): void {
       if (torndown) return;
       session = next;

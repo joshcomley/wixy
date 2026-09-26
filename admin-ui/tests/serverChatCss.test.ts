@@ -36,6 +36,7 @@ const HIDDEN_TOGGLED_CLASSES = [
   "wx-srv-pen-toolbar",
   "wx-srv-pen-colors",
   "wx-srv-pen-widths",
+  "wx-srv-pen-collapse",
   "wx-srv-pen-hint",
   "wx-srv-pen-select",
   "wx-srv-pen-confirm",

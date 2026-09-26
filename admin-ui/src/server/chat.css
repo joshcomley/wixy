@@ -2070,6 +2070,7 @@ button.wx-srv-quote:focus-visible {
 
 .wx-srv-pen-mode,
 .wx-srv-pen-done,
+.wx-srv-pen-collapse,
 .wx-srv-pen-next,
 .wx-srv-pen-delete,
 .wx-srv-pen-confirm-delete,
@@ -2098,6 +2099,7 @@ button.wx-srv-quote:focus-visible {
 }
 
 .wx-srv-pen-done,
+.wx-srv-pen-collapse,
 .wx-srv-pen-next,
 .wx-srv-pen-delete,
 .wx-srv-pen-confirm-delete,
@@ -2107,8 +2109,20 @@ button.wx-srv-quote:focus-visible {
   border-radius: var(--wx-radius);
 }
 
-.wx-srv-pen-done {
+.wx-srv-pen-collapse {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.wx-srv-pen-collapse[hidden] {
+  display: none;
+}
+
+.wx-srv-pen-collapse svg {
+  flex: none;
 }
 
 .wx-srv-pen-delete,
@@ -2142,8 +2156,8 @@ button.wx-srv-quote:focus-visible {
      - Line 1 is what the mode acts on: the colours, the selection's two buttons, or the delete
        question with its buttons.
      - Line 2 is always Draw | Select, then the mode's slot (the thicknesses, or the hint), then
-       Done. The switch is first, so it never moves under the finger when the mode changes.
-     The slot is the only part that gives: the thicknesses start from 28px wide each (still 44px
+       Collapse, then Done. The switch is first, so it never moves under the finger when the mode changes.
+     The slot is the only part that gives: the thicknesses start from 24px wide each (still 44px
      tall) and grow back to 44px into whatever the labels leave, and the hint wraps inside it. So
      a wider font takes width from the slot instead of pushing Done onto a third line — measured:
      with Ubuntu's DejaVu Sans (and with Verdana) the old fixed-width line needed three lines on
@@ -2170,22 +2184,32 @@ button.wx-srv-quote:focus-visible {
     order: 2;
   }
 
-  .wx-srv-pen-done {
+  .wx-srv-pen-collapse {
     order: 3;
+    margin-left: 0;
+    padding: 0 10px;
   }
 
-  .wx-srv-pen-status {
+  .wx-srv-pen-done {
     order: 4;
   }
 
+  .wx-srv-pen-status {
+    order: 5;
+  }
+
   .wx-srv-pen-widths {
-    flex: 1 1 calc(4 * 28px);
+    flex: 1 1 calc(4 * 24px);
     max-width: calc(4 * 44px);
   }
 
   .wx-srv-pen-width {
-    min-width: 28px;
+    min-width: 24px;
     width: auto;
+  }
+
+  .wx-srv-pen-collapse-label {
+    display: none;
   }
 
   /* At most three lines of it fit the 44px line (3 x 14.4px). */
@@ -2196,6 +2220,7 @@ button.wx-srv-quote:focus-visible {
 
   .wx-srv-pen-mode,
   .wx-srv-pen-done,
+  .wx-srv-pen-collapse,
   .wx-srv-pen-next,
   .wx-srv-pen-delete,
   .wx-srv-pen-confirm-delete,

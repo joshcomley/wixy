@@ -571,4 +571,76 @@ test.describe("server-drawing.spec.ts", () => {
       await context.close();
     });
   }
+
+  test("collapsible pen toolbar: collapses while drawing stays active, tap Pen re-opens, Done exits (desktop and phone)", async ({ browser }) => {
+    for (const viewport of [{ width: 1280, height: 800, isMobile: false }, { width: 360, height: 740, isMobile: true }]) {
+      const context = await browser.newContext({
+        viewport: { width: viewport.width, height: viewport.height },
+        isMobile: viewport.isMobile,
+        hasTouch: viewport.isMobile,
+      });
+      const page = await context.newPage();
+      const label = `draw-col-${viewport.width}-${Date.now()}`;
+      await seed(page, label, 3);
+      await unlockServer(page, "Alice");
+      const target = bubbleWith(page, `${label} #2`);
+      await expect(target).toBeVisible();
+
+      const penButton = page.locator(".wx-srv-pen-button");
+      const toolbar = page.locator(".wx-srv-pen-toolbar");
+      const surface = page.locator(".wx-srv-draw-surface");
+      const collapseButton = page.locator(".wx-srv-pen-collapse");
+      const doneButton = page.locator(".wx-srv-pen-done");
+
+      // 1. Pen on -> toolbar visible, real click targets
+      await penButton.click();
+      await expect(toolbar).toBeVisible();
+      await expect(surface).toBeVisible();
+      await expect(penButton).toHaveAttribute("aria-pressed", "true");
+      await expect(penButton).toHaveAttribute("aria-expanded", "true");
+      await assertRealClickTarget(page, collapseButton, viewport.width, viewport.height);
+      await assertRealClickTarget(page, doneButton, viewport.width, viewport.height);
+
+      // 2. Collapse toolbar -> toolbar hidden, surface remains live
+      await collapseButton.click();
+      await expect(toolbar).toBeHidden();
+      await expect(penButton).toHaveAttribute("aria-pressed", "true");
+      await expect(penButton).toHaveAttribute("aria-expanded", "false");
+      await expect(surface).toBeVisible();
+
+      // 3. Draw a stroke while collapsed -> works and area is unobstructed
+      await mouseStroke(page, target, true);
+      const stored = await storedOn(page, target);
+      await eventually([page], async () => (await stored.count()) === 1, "drawing stored while collapsed");
+
+      // 4. Tap Pen button while collapsed -> re-opens toolbar
+      await humanPause(page);
+      await penButton.click();
+      await expect(toolbar).toBeVisible();
+      await expect(penButton).toHaveAttribute("aria-pressed", "true");
+      await expect(penButton).toHaveAttribute("aria-expanded", "true");
+
+      // 5. Tap Pen button while open -> collapses toolbar
+      await humanPause(page);
+      await penButton.click();
+      await expect(toolbar).toBeHidden();
+      await expect(penButton).toHaveAttribute("aria-pressed", "true");
+      await expect(penButton).toHaveAttribute("aria-expanded", "false");
+
+      // 6. Tap Pen button again -> re-opens toolbar
+      await humanPause(page);
+      await penButton.click();
+      await expect(toolbar).toBeVisible();
+
+      // 7. Done exits draw mode
+      await humanPause(page);
+      await doneButton.click();
+      await expect(toolbar).toBeHidden();
+      await expect(surface).toHaveCount(0);
+      await expect(penButton).toHaveAttribute("aria-pressed", "false");
+      await expect(penButton).toHaveAttribute("aria-expanded", "false");
+
+      await context.close();
+    }
+  });
 });

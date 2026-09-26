@@ -240,19 +240,90 @@ describe("drawingLayer: the Pen button and toolbar (§5)", () => {
     s.layer.attach(SESSION);
     expect(isGestureBoundaryTarget(s.layer.penButton)).toBe(true);
     expect(s.layer.penButton.getAttribute("aria-pressed")).toBe("false");
+    expect(s.layer.penButton.getAttribute("aria-expanded")).toBe("false");
     expect(s.layer.toolbar.hidden).toBe(true);
     expect(s.surface()).toBeNull();
 
     s.layer.penButton.click();
     expect(s.layer.penButton.getAttribute("aria-pressed")).toBe("true");
+    expect(s.layer.penButton.getAttribute("aria-expanded")).toBe("true");
     expect(s.layer.toolbar.hidden).toBe(false);
     expect(s.surface()).not.toBeNull();
 
     s.toolbarButton(".wx-srv-pen-done").click();
     expect(s.layer.penButton.getAttribute("aria-pressed")).toBe("false");
+    expect(s.layer.penButton.getAttribute("aria-expanded")).toBe("false");
     expect(s.layer.toolbar.hidden).toBe(true);
     expect(s.surface()).toBeNull();
     expect(document.activeElement).toBe(s.layer.penButton);
+  });
+
+  it("collapses the toolbar via the collapse button while drawing stays live and strokes land", async () => {
+    const s = setup();
+    s.addBubble(2, 300);
+    s.layer.attach(SESSION);
+    s.layer.penButton.click();
+    expect(s.layer.toolbar.hidden).toBe(false);
+    expect(s.layer.penButton.getAttribute("aria-pressed")).toBe("true");
+    expect(s.layer.penButton.getAttribute("aria-expanded")).toBe("true");
+    expect(s.surface()).not.toBeNull();
+
+    // Collapse the toolbar
+    const collapseButton = s.layer.collapseButton ?? s.toolbarButton(".wx-srv-pen-collapse");
+    collapseButton.click();
+    expect(s.layer.toolbar.hidden).toBe(true);
+    expect(s.layer.penButton.getAttribute("aria-pressed")).toBe("true");
+    expect(s.layer.penButton.getAttribute("aria-expanded")).toBe("false");
+    // Draw surface remains mounted and active
+    expect(s.surface()).not.toBeNull();
+    expect(document.activeElement).toBe(s.layer.penButton);
+
+    // Drawing a stroke still works
+    drawMouseStroke(s, [[40, 320], [60, 330]]);
+    await flush();
+    expect(s.api.createDrawing).toHaveBeenCalledTimes(1);
+    expect(s.svgs()).toHaveLength(1);
+  });
+
+  it("tapping the pen button toggles toolbar open/collapsed while pen is on (never turns pen off)", () => {
+    const s = setup();
+    s.layer.attach(SESSION);
+    // 1. Initial click: turns pen on and opens toolbar
+    s.layer.penButton.click();
+    expect(s.layer.penButton.getAttribute("aria-pressed")).toBe("true");
+    expect(s.layer.penButton.getAttribute("aria-expanded")).toBe("true");
+    expect(s.layer.toolbar.hidden).toBe(false);
+    expect(s.surface()).not.toBeNull();
+
+    // 2. Second click: collapses toolbar while pen stays on
+    s.layer.penButton.click();
+    expect(s.layer.penButton.getAttribute("aria-pressed")).toBe("true");
+    expect(s.layer.penButton.getAttribute("aria-expanded")).toBe("false");
+    expect(s.layer.toolbar.hidden).toBe(true);
+    expect(s.surface()).not.toBeNull();
+
+    // 3. Third click: re-opens toolbar while pen stays on
+    s.layer.penButton.click();
+    expect(s.layer.penButton.getAttribute("aria-pressed")).toBe("true");
+    expect(s.layer.penButton.getAttribute("aria-expanded")).toBe("true");
+    expect(s.layer.toolbar.hidden).toBe(false);
+    expect(s.surface()).not.toBeNull();
+
+    // 4. Collapse again via collapse button, then tap pen button to re-open
+    const collapseButton = s.layer.collapseButton ?? s.toolbarButton(".wx-srv-pen-collapse");
+    collapseButton.click();
+    expect(s.layer.toolbar.hidden).toBe(true);
+    expect(s.layer.penButton.getAttribute("aria-expanded")).toBe("false");
+    s.layer.penButton.click();
+    expect(s.layer.toolbar.hidden).toBe(false);
+    expect(s.layer.penButton.getAttribute("aria-expanded")).toBe("true");
+
+    // 5. Done button exits draw mode
+    s.toolbarButton(".wx-srv-pen-done").click();
+    expect(s.layer.penButton.getAttribute("aria-pressed")).toBe("false");
+    expect(s.layer.penButton.getAttribute("aria-expanded")).toBe("false");
+    expect(s.layer.toolbar.hidden).toBe(true);
+    expect(s.surface()).toBeNull();
   });
 
   it("keeps the thread's content where it was when the toolbar appears, changes height, or goes", () => {
@@ -419,7 +490,7 @@ describe("drawingLayer: drawing a stroke (§1, §2, §4)", () => {
     s.layer.penButton.click();
     drawMouseStroke(s, [[40, 320], [60, 330]]);
     await flush();
-    s.layer.penButton.click();
+    s.toolbarButton(".wx-srv-pen-done").click();
     s.layer.penButton.click();
     drawMouseStroke(s, [[40, 340], [60, 350]], 2);
     await flush();
@@ -1003,7 +1074,7 @@ describe("drawingLayer: Select mode (§5)", () => {
     s.toolbarButton(".wx-srv-pen-confirm-cancel").click();
     expect(shown()).toEqual(["wx-srv-pen-hint", "wx-srv-pen-select", "wx-srv-pen-modes", "wx-srv-pen-done"]);
     s.toolbarButton('.wx-srv-pen-mode[data-mode="draw"]').click();
-    expect(shown()).toEqual(["wx-srv-pen-colors", "wx-srv-pen-widths", "wx-srv-pen-modes", "wx-srv-pen-done"]);
+    expect(shown()).toEqual(["wx-srv-pen-colors", "wx-srv-pen-widths", "wx-srv-pen-modes", "wx-srv-pen-collapse", "wx-srv-pen-done"]);
     s.layer.detach();
   });
 
