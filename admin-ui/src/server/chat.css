@@ -1283,6 +1283,27 @@ button.wx-srv-quote:focus-visible {
   cursor: default;
 }
 
+/* Narrow phones (360px is tested): the input row already holds attach, mic, the text box and
+   Send, and a third control there steals ~40px from the text box (it fell under the 120px floor
+   `server-media.spec.ts` protects) and was squeezed until its label clipped. So on a phone the
+   button takes its own full-width line above the row while a photo/video is staged, and is not
+   rendered at all while disabled (nothing to apply it to, and no spare room to show it greyed).
+   Wider screens keep it in the row, always visible, greyed out when nothing is staged. */
+@media (max-width: 480px) {
+  .wx-srv-thread-view .wx-chatc-input-row {
+    flex-wrap: wrap;
+  }
+
+  .wx-srv-view-once-toggle-button {
+    order: -1;
+    flex: 1 0 100%;
+  }
+
+  .wx-srv-view-once-toggle-button:disabled {
+    display: none;
+  }
+}
+
 .wx-srv-view-once-sheet-thumb {
   flex: none;
   width: 44px;

@@ -333,6 +333,10 @@ test.describe("server-view-once.spec.ts (spec/06-view-once-media)", () => {
       { x: centerX, y: centerY, selector: matchSelector },
     );
     expect(hitsControl).toBe(true);
+    // A control squeezed until its label clips (it was 30px wide on a 360px phone) still has a
+    // non-empty bounding box and still passes `toBeVisible()`, so check the content fits too.
+    const labelFits = await locator.evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
+    expect(labelFits).toBe(true);
   }
 
   for (const viewport of [
@@ -359,10 +363,29 @@ test.describe("server-view-once.spec.ts (spec/06-view-once-media)", () => {
       await unlockServer(pageAlice, "Alice");
       await unlockServer(pageBob, "Bob");
 
+      const viewOnceButton = pageAlice.locator(".wx-srv-view-once-toggle-button");
+      const draftBox = pageAlice.locator(".wx-chat-composer textarea");
+      // Nothing staged: on wide screens the button is in the row but greyed out (its position
+      // never jumps); on a phone there is no spare room, so it is not rendered until needed.
+      await expect(viewOnceButton).toBeDisabled();
+      if (viewport.width > 480) {
+        await expect(viewOnceButton).toBeVisible();
+      } else {
+        await expect(viewOnceButton).toBeHidden();
+      }
+      const emptyDraftWidth = (await draftBox.boundingBox())!.width;
+
       await pageAlice.locator('input[type="file"]').setInputFiles(PHOTO);
 
-      const viewOnceButton = pageAlice.locator(".wx-srv-view-once-toggle-button");
       await expect(viewOnceButton).toHaveText("⏱ View once");
+      // The button must not cost the text box its usable width (F17 in server-media.spec.ts
+      // guards the same floor: 120px at 360px). A phone gives it its own line instead.
+      const stagedDraftWidth = (await draftBox.boundingBox())!.width;
+      expect(stagedDraftWidth).toBeGreaterThan(120);
+      if (viewport.width <= 480) {
+        expect(stagedDraftWidth).toBeGreaterThanOrEqual(emptyDraftWidth - 1);
+      }
+      expect(await pageAlice.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
       await assertRealClickTarget(
         pageAlice,
         viewOnceButton,
