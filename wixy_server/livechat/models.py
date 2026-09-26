@@ -84,6 +84,49 @@ class ReactionSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class DrawingSummary:
+    """spec/server-chat/07-live-drawing.md §4: what a `Message` carries about its
+    drawings — enough for a client to notice "there's a drawing here I don't have, or
+    it changed" and fetch the body with `GET /messages/{seq}/drawings`. Never the
+    strokes themselves: a history page of 50 messages must not carry megabytes of
+    points."""
+
+    id: int
+    rev: int
+
+
+@dataclass(frozen=True, slots=True)
+class DrawingStrokeRow:
+    stroke_id: str
+    ord: int
+    color: str
+    width: int
+    points: tuple[tuple[int, int], ...]
+    created_at: float
+
+
+@dataclass(frozen=True, slots=True)
+class DrawingRow:
+    """One drawing (spec §2: every stroke made in one pen session, from turning the pen
+    on to turning it off) anchored to a message. `strokes` is ordered by `ord`."""
+
+    id: int
+    client_id: str
+    anchor_message_seq: int
+    sender: str
+    device_id: str
+    by_email: str | None
+    column_width: float
+    rev: int
+    created_at: float
+    updated_at: float
+    strokes: tuple[DrawingStrokeRow, ...] = ()
+
+    def summary(self) -> DrawingSummary:
+        return DrawingSummary(id=self.id, rev=self.rev)
+
+
+@dataclass(frozen=True, slots=True)
 class MessageRow:
     seq: int
     client_id: str
@@ -94,6 +137,7 @@ class MessageRow:
     created_at: float
     attachments: tuple[AttachmentRow, ...] = ()
     reactions: tuple[ReactionSummary, ...] = ()
+    drawings: tuple[DrawingSummary, ...] = ()
     reply_to_seq: int | None = None
     """The stored `messages.reply_to_seq` column — the ONLY thing a reply
     persists (round 2 ruling item 10 §(2)). `None` for an ordinary message, or
@@ -291,4 +335,25 @@ def message_json(row: MessageRow, signer: MediaUrlSigner) -> JsonObject:
         "createdAt": row.created_at,
         "replyTo": reply_to_json(row.reply_to, signer),
         "viewOnce": view_once,
+        "drawings": [{"id": d.id, "rev": d.rev} for d in row.drawings],
+    }
+
+
+def drawing_stroke_json(row: DrawingStrokeRow) -> JsonObject:
+    return {
+        "strokeId": row.stroke_id,
+        "color": row.color,
+        "width": row.width,
+        "points": [list(point) for point in row.points],
+    }
+
+
+def drawing_json(row: DrawingRow) -> JsonObject:
+    """§4's per-drawing shape inside `GET /messages/{seq}/drawings`."""
+    return {
+        "id": row.id,
+        "rev": row.rev,
+        "sender": row.sender,
+        "columnWidth": row.column_width,
+        "strokes": [drawing_stroke_json(s) for s in row.strokes],
     }

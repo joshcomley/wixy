@@ -45,6 +45,9 @@ from wixy_server.livechat.models import (
     AttachmentKind,
     AttachmentResult,
     AttachmentRow,
+    DrawingRow,
+    DrawingStrokeRow,
+    DrawingSummary,
     EventRow,
     MessageRow,
     PushSubscriptionRow,
@@ -52,6 +55,7 @@ from wixy_server.livechat.models import (
     TranscriptRow,
     UploadRow,
 )
+from wixy_server.livechat.drawings import MAX_DRAWINGS_PER_ANCHOR, MAX_STROKES_PER_DRAWING
 from wixy_server.livechat.reactions import reaction_order, reactor_key
 
 _SCHEMA_V1 = """
@@ -196,7 +200,34 @@ CREATE INDEX IF NOT EXISTS idx_messages_view_claimed
 """
 _SCHEMA_V11_VIEW_ONCE_ATTACHMENTS = "ALTER TABLE attachments ADD COLUMN view_once_renditions TEXT"
 
-_LATEST_SCHEMA_VERSION = 11
+# `ON DELETE CASCADE` on both tables is load-bearing for the SAME reason as reactions'
+# (decisions/00164, `_SCHEMA_V7_REACTIONS` above): an older blue/green-overlap process that
+# knows nothing about drawings can still hard-delete a message, and the cascade — not that
+# older process — is what removes the drawing and its strokes with it (spec 07 §6). Both FKs
+# are index-covered (the reply-to lesson two migrations up: 17.6s vs 0.2s at 20,000 rows) —
+# `idx_drawings_anchor` for `drawings.anchor_message_seq`, and `drawing_strokes`'s own primary
+# key (which leads with `drawing_id`) for its FK to `drawings.id`.
+_SCHEMA_V12_DRAWINGS = """
+CREATE TABLE IF NOT EXISTS drawings(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id TEXT NOT NULL UNIQUE,
+  anchor_message_seq INTEGER NOT NULL REFERENCES messages(seq) ON DELETE CASCADE,
+  sender TEXT NOT NULL, device_id TEXT NOT NULL, by_email TEXT,
+  column_width REAL NOT NULL CHECK(column_width BETWEEN 200 AND 4000),
+  rev INTEGER NOT NULL DEFAULT 1,
+  created_at REAL NOT NULL, updated_at REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_drawings_anchor ON drawings(anchor_message_seq);
+CREATE TABLE IF NOT EXISTS drawing_strokes(
+  drawing_id INTEGER NOT NULL REFERENCES drawings(id) ON DELETE CASCADE,
+  stroke_id TEXT NOT NULL,
+  ord INTEGER NOT NULL,
+  color TEXT NOT NULL, width INTEGER NOT NULL,
+  points TEXT NOT NULL,
+  created_at REAL NOT NULL,
+  PRIMARY KEY(drawing_id, stroke_id));
+"""
+
+_LATEST_SCHEMA_VERSION = 12
 _UNKNOWN_GRANT_HASH = "0" * 64
 _LOGGER = logging.getLogger(__name__)
 
@@ -235,6 +266,32 @@ class MessageNotFoundError(LiveChatStoreError):
     def __init__(self, seq: int) -> None:
         super().__init__(f"message {seq} does not exist")
         self.seq = seq
+
+
+class DrawingAnchorNotFoundError(LiveChatStoreError):
+    """`POST /drawings` named an `anchorSeq` that does not exist (never did, or was
+    hard-deleted between the client loading it and posting). `routes_livechat.py` maps
+    this to 404 — spec 07 §4: "An unknown or deleted anchorSeq → 404 (map the FK
+    error; never 500)."."""
+
+    def __init__(self, anchor_seq: int) -> None:
+        super().__init__(f"message {anchor_seq} does not exist")
+        self.anchor_seq = anchor_seq
+
+
+class DrawingNotFoundError(LiveChatStoreError):
+    """The drawing a request targets does not exist (never did, or was deleted — by
+    either person, or cascaded away with its anchor message). `routes_livechat.py`
+    maps this to 404."""
+
+    def __init__(self, drawing_id: int) -> None:
+        super().__init__(f"drawing {drawing_id} does not exist")
+        self.drawing_id = drawing_id
+
+
+class DrawingLimitExceededError(LiveChatStoreError):
+    """spec 07 §3: "at most 200 strokes per drawing and 20 drawings per anchor message,
+    else 409 full." `routes_livechat.py` maps this to 409 {"error": "full"}."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -302,6 +359,7 @@ def _row_to_message(
     row: sqlite3.Row,
     attachments: tuple[AttachmentRow, ...],
     reactions: tuple[ReactionSummary, ...] = (),
+    drawings: tuple[DrawingSummary, ...] = (),
     *,
     reply_to: MessageRow | None = None,
 ) -> MessageRow:
@@ -315,6 +373,7 @@ def _row_to_message(
         created_at=row["created_at"],
         attachments=attachments,
         reactions=reactions,
+        drawings=drawings,
         reply_to_seq=row["reply_to_seq"],
         reply_to=reply_to,
         view_once_s=row["view_once_s"],
@@ -399,6 +458,70 @@ def _load_reactions_for(
     }
 
 
+def _row_to_drawing_stroke(row: sqlite3.Row) -> DrawingStrokeRow:
+    points_raw = json.loads(row["points"])
+    return DrawingStrokeRow(
+        stroke_id=row["stroke_id"],
+        ord=row["ord"],
+        color=row["color"],
+        width=row["width"],
+        points=tuple((int(point[0]), int(point[1])) for point in points_raw),
+        created_at=row["created_at"],
+    )
+
+
+def _row_to_drawing(row: sqlite3.Row, strokes: tuple[DrawingStrokeRow, ...] = ()) -> DrawingRow:
+    return DrawingRow(
+        id=row["id"],
+        client_id=row["client_id"],
+        anchor_message_seq=row["anchor_message_seq"],
+        sender=row["sender"],
+        device_id=row["device_id"],
+        by_email=row["by_email"],
+        column_width=row["column_width"],
+        rev=row["rev"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        strokes=strokes,
+    )
+
+
+def _load_strokes_for(
+    conn: sqlite3.Connection, drawing_ids: Sequence[int]
+) -> dict[int, tuple[DrawingStrokeRow, ...]]:
+    by_drawing: dict[int, list[DrawingStrokeRow]] = {did: [] for did in drawing_ids}
+    if not drawing_ids:
+        return {}
+    placeholders = ",".join("?" for _ in drawing_ids)
+    rows = conn.execute(
+        f"SELECT * FROM drawing_strokes WHERE drawing_id IN ({placeholders}) "
+        "ORDER BY drawing_id, ord",
+        tuple(drawing_ids),
+    ).fetchall()
+    for row in rows:
+        by_drawing[row["drawing_id"]].append(_row_to_drawing_stroke(row))
+    return {did: tuple(strokes) for did, strokes in by_drawing.items()}
+
+
+def _load_drawing_summaries_for(
+    conn: sqlite3.Connection, message_seqs: Sequence[int]
+) -> dict[int, tuple[DrawingSummary, ...]]:
+    """Drawing summaries per anchor message, oldest first — the `Message` wire shape's
+    `drawings: [{id, rev}]` (spec/server-chat/07-live-drawing.md §4)."""
+    if not message_seqs:
+        return {}
+    by_message: dict[int, list[DrawingSummary]] = {seq: [] for seq in message_seqs}
+    placeholders = ",".join("?" for _ in message_seqs)
+    rows = conn.execute(
+        "SELECT id, anchor_message_seq, rev FROM drawings "
+        f"WHERE anchor_message_seq IN ({placeholders}) ORDER BY id",
+        tuple(message_seqs),
+    ).fetchall()
+    for row in rows:
+        by_message[row["anchor_message_seq"]].append(DrawingSummary(id=row["id"], rev=row["rev"]))
+    return {seq: tuple(summaries) for seq, summaries in by_message.items()}
+
+
 def _load_reply_targets(
     conn: sqlite3.Connection, reply_to_seqs: Sequence[int | None]
 ) -> dict[int, MessageRow]:
@@ -426,10 +549,19 @@ def _load_message(conn: sqlite3.Connection, seq: int) -> MessageRow:
         raise KeyError(seq)
     attachments = _load_attachments_for(conn, [seq])[seq]
     reactions = _load_reactions_for(conn, [seq])[seq]
+    drawings = _load_drawing_summaries_for(conn, [seq])[seq]
     reply_to_seq = row["reply_to_seq"]
     reply_targets = _load_reply_targets(conn, [reply_to_seq])
     reply_to = reply_targets.get(reply_to_seq) if reply_to_seq is not None else None
-    return _row_to_message(row, tuple(attachments), reactions, reply_to=reply_to)
+    return _row_to_message(row, tuple(attachments), reactions, drawings, reply_to=reply_to)
+
+
+def _load_drawing(conn: sqlite3.Connection, drawing_id: int) -> DrawingRow:
+    row = conn.execute("SELECT * FROM drawings WHERE id = ?", (drawing_id,)).fetchone()
+    if row is None:
+        raise DrawingNotFoundError(drawing_id)
+    strokes = _load_strokes_for(conn, [drawing_id])[drawing_id]
+    return _row_to_drawing(row, strokes)
 
 
 _JOURNAL_MODE_SWITCH_RETRIES = 50
@@ -598,6 +730,13 @@ class LiveChatStore:
                     conn.execute(_SCHEMA_V11_VIEW_ONCE_ATTACHMENTS)
                 conn.execute("PRAGMA user_version = 11")
                 current = 11
+
+            if current < 12:
+                for statement in _SCHEMA_V12_DRAWINGS.split(";"):
+                    if statement.strip():
+                        conn.execute(statement)
+                conn.execute("PRAGMA user_version = 12")
+                current = 12
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
@@ -981,6 +1120,7 @@ class LiveChatStore:
             seqs = [row["seq"] for row in ascending_rows]
             attachments_by_seq = _load_attachments_for(conn, seqs)
             reactions_by_seq = _load_reactions_for(conn, seqs)
+            drawings_by_seq = _load_drawing_summaries_for(conn, seqs)
             # §(2): targets are resolved by seq, including ones OUTSIDE this
             # page — a reply near the top of a page may quote a message that
             # paged off already.
@@ -992,6 +1132,7 @@ class LiveChatStore:
                     row,
                     tuple(attachments_by_seq[row["seq"]]),
                     reactions_by_seq[row["seq"]],
+                    drawings_by_seq[row["seq"]],
                     reply_to=reply_targets.get(row["reply_to_seq"]),
                 )
                 for row in ascending_rows
@@ -1011,6 +1152,7 @@ class LiveChatStore:
             by_seq = {row["seq"]: row for row in rows}
             attachments_by_seq = _load_attachments_for(conn, list(by_seq.keys()))
             reactions_by_seq = _load_reactions_for(conn, list(by_seq.keys()))
+            drawings_by_seq = _load_drawing_summaries_for(conn, list(by_seq.keys()))
             reply_targets = _load_reply_targets(
                 conn, [row["reply_to_seq"] for row in by_seq.values()]
             )
@@ -1024,6 +1166,7 @@ class LiveChatStore:
                         row,
                         tuple(attachments_by_seq[seq]),
                         reactions_by_seq[seq],
+                        drawings_by_seq[seq],
                         reply_to=reply_targets.get(row["reply_to_seq"]),
                     )
                 )
@@ -1079,6 +1222,170 @@ class LiveChatStore:
                     (seq, now),
                 )
             return _load_message(conn, seq), changed
+
+    def create_drawing(
+        self,
+        *,
+        client_id: str,
+        anchor_seq: int,
+        column_width: float,
+        sender: str,
+        device_id: str,
+        by_email: str | None,
+        stroke_id: str,
+        color: str,
+        width: int,
+        points: Sequence[tuple[int, int]],
+        now: float,
+    ) -> tuple[DrawingRow, bool]:
+        """Creates a drawing with its first stroke (spec/server-chat/07-live-drawing.md
+        §3/§4). `client_id` is the idempotency key, exactly like `create_message`'s own
+        `clientId`: a repeat returns the existing drawing unchanged, never a second row."""
+        with self._write_txn() as conn:
+            existing = conn.execute(
+                "SELECT id FROM drawings WHERE client_id = ?", (client_id,)
+            ).fetchone()
+            if existing is not None:
+                return _load_drawing(conn, existing["id"]), False
+
+            if (
+                conn.execute("SELECT 1 FROM messages WHERE seq = ?", (anchor_seq,)).fetchone()
+                is None
+            ):
+                raise DrawingAnchorNotFoundError(anchor_seq)
+
+            count = conn.execute(
+                "SELECT COUNT(*) AS n FROM drawings WHERE anchor_message_seq = ?", (anchor_seq,)
+            ).fetchone()["n"]
+            if count >= MAX_DRAWINGS_PER_ANCHOR:
+                raise DrawingLimitExceededError(
+                    f"anchor message {anchor_seq} already has {MAX_DRAWINGS_PER_ANCHOR} drawings"
+                )
+
+            try:
+                cursor = conn.execute(
+                    "INSERT INTO drawings (client_id, anchor_message_seq, sender, device_id, "
+                    "by_email, column_width, rev, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                    (client_id, anchor_seq, sender, device_id, by_email, column_width, now, now),
+                )
+            except sqlite3.IntegrityError as exc:
+                # The anchor was checked above under this write lock, so this is only a
+                # backstop: one that vanished mid-transaction is "not found", never a 500
+                # (same shape as set_reaction's own IntegrityError backstop).
+                raise DrawingAnchorNotFoundError(anchor_seq) from exc
+            drawing_id = cursor.lastrowid
+            assert drawing_id is not None
+            conn.execute(
+                "INSERT INTO drawing_strokes "
+                "(drawing_id, stroke_id, ord, color, width, points, created_at) "
+                "VALUES (?, ?, 0, ?, ?, ?, ?)",
+                (drawing_id, stroke_id, color, width, json.dumps([list(p) for p in points]), now),
+            )
+            conn.execute(
+                "INSERT INTO events (type, message_seq, created_at) "
+                "VALUES ('message_updated', ?, ?)",
+                (anchor_seq, now),
+            )
+            return _load_drawing(conn, drawing_id), True
+
+    def append_stroke(
+        self,
+        *,
+        drawing_id: int,
+        stroke_id: str,
+        color: str,
+        width: int,
+        points: Sequence[tuple[int, int]],
+        now: float,
+    ) -> DrawingRow:
+        """Appends one stroke to an existing drawing. `stroke_id` is the idempotency key:
+        a repeat is a no-op that changes nothing and appends no event (spec §4: "A
+        repeated strokeId is a no-op 200"), exactly `set_reaction`'s "only a real change
+        appends the event" rule."""
+        with self._write_txn() as conn:
+            drawing_row = conn.execute(
+                "SELECT anchor_message_seq, rev FROM drawings WHERE id = ?", (drawing_id,)
+            ).fetchone()
+            if drawing_row is None:
+                raise DrawingNotFoundError(drawing_id)
+
+            if (
+                conn.execute(
+                    "SELECT 1 FROM drawing_strokes WHERE drawing_id = ? AND stroke_id = ?",
+                    (drawing_id, stroke_id),
+                ).fetchone()
+                is not None
+            ):
+                return _load_drawing(conn, drawing_id)
+
+            stroke_count = conn.execute(
+                "SELECT COUNT(*) AS n FROM drawing_strokes WHERE drawing_id = ?", (drawing_id,)
+            ).fetchone()["n"]
+            if stroke_count >= MAX_STROKES_PER_DRAWING:
+                raise DrawingLimitExceededError(
+                    f"drawing {drawing_id} already has {MAX_STROKES_PER_DRAWING} strokes"
+                )
+
+            try:
+                conn.execute(
+                    "INSERT INTO drawing_strokes "
+                    "(drawing_id, stroke_id, ord, color, width, points, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        drawing_id,
+                        stroke_id,
+                        stroke_count,
+                        color,
+                        width,
+                        json.dumps([list(p) for p in points]),
+                        now,
+                    ),
+                )
+            except sqlite3.IntegrityError:
+                # A racing duplicate append for the same stroke_id (two retries in
+                # flight): the (drawing_id, stroke_id) primary key rejects the second;
+                # treat it the same as the idempotent no-op checked above.
+                return _load_drawing(conn, drawing_id)
+
+            conn.execute(
+                "UPDATE drawings SET rev = rev + 1, updated_at = ? WHERE id = ?",
+                (now, drawing_id),
+            )
+            conn.execute(
+                "INSERT INTO events (type, message_seq, created_at) "
+                "VALUES ('message_updated', ?, ?)",
+                (drawing_row["anchor_message_seq"], now),
+            )
+            return _load_drawing(conn, drawing_id)
+
+    def delete_drawing(self, *, drawing_id: int, now: float) -> bool:
+        """Either person may delete any drawing (Inv 46's "Delete for everyone" pattern,
+        spec §4). Idempotent: deleting an already-gone drawing is a no-op that returns
+        `False` and appends no event."""
+        with self._write_txn() as conn:
+            row = conn.execute(
+                "SELECT anchor_message_seq FROM drawings WHERE id = ?", (drawing_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            anchor_seq = row["anchor_message_seq"]
+            conn.execute("DELETE FROM drawing_strokes WHERE drawing_id = ?", (drawing_id,))
+            conn.execute("DELETE FROM drawings WHERE id = ?", (drawing_id,))
+            conn.execute(
+                "INSERT INTO events (type, message_seq, created_at) "
+                "VALUES ('message_updated', ?, ?)",
+                (anchor_seq, now),
+            )
+            return True
+
+    def get_drawings_for_message(self, *, seq: int) -> list[DrawingRow]:
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM drawings WHERE anchor_message_seq = ? ORDER BY id", (seq,)
+            ).fetchall()
+            strokes_by_drawing = _load_strokes_for(conn, [row["id"] for row in rows])
+            return [_row_to_drawing(row, strokes_by_drawing[row["id"]]) for row in rows]
 
     def events_after(self, cursor: int, limit: int = 200) -> list[EventRow]:
         with self._read_txn() as conn:
@@ -1176,6 +1483,11 @@ class LiveChatStore:
                 (wipe_token,),
             )
             conn.execute("DELETE FROM attachments")
+            # The FK cascade on `drawings.anchor_message_seq` (like reactions' own) already
+            # removes these when `messages` rows go; explicit here anyway (spec 07 §6) so the
+            # wipe's intent to clear every drawing is not left implicit in a constraint.
+            conn.execute("DELETE FROM drawing_strokes")
+            conn.execute("DELETE FROM drawings")
             conn.execute("DELETE FROM messages")
             conn.execute("DELETE FROM uploads")
             conn.execute("DELETE FROM events")
