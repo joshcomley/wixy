@@ -156,7 +156,7 @@ rebuild of the `events` table.**
   On a 360 px phone it wraps onto two lines rather than overflowing (real-click visibility
   test at 360/390 px, as for 06 §3.1).
 - **Draw mode (touch):** one finger draws and **two fingers scroll the thread.**
-  - The drawing surface uses `touch-action: none` with pointer capture, as the spotlight
+  - The drawing surface uses `touch-action: none` with pointer capture, as the tease
     drag does.
   - When a second finger lands within 150 ms of the first, and before the first has moved
     12 px, the first finger's stroke is cancelled (a live `cancel`, nothing stored) and

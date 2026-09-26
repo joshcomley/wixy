@@ -83,7 +83,7 @@ function messageFromFixtureTarget(target: FixtureCase["target"]): Message {
     reactions: [],
     createdAt: 0,
     replyTo: null,
-    viewOnce: target.viewOnce ? { durationS: 5, spotlight: false } : null,
+    viewOnce: target.viewOnce ? { durationS: 5, tease: false } : null,
   };
 }
 
