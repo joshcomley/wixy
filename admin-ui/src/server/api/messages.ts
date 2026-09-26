@@ -64,7 +64,7 @@ export interface ReplyTo {
 
 export interface ViewOnceInfo {
   readonly durationS: 2 | 5 | 30 | null;
-  readonly spotlight: boolean;
+  readonly tease: boolean;
 }
 
 export interface Message {
@@ -344,7 +344,7 @@ export interface SendViewOnceInput {
   readonly deviceId: string;
   readonly attachmentId: string;
   readonly durationS: 2 | 5 | 30 | null;
-  readonly spotlight: boolean;
+  readonly tease: boolean;
   readonly replyToSeq?: number;
 }
 
@@ -397,7 +397,7 @@ export async function sendViewOnceMessage(
 
 export interface OpenViewOnceSuccess {
   readonly durationS: 2 | 5 | 30 | null;
-  readonly spotlight: boolean;
+  readonly tease: boolean;
   readonly kind: "photo" | "video";
   readonly mime: string;
 }

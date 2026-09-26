@@ -1,6 +1,6 @@
 // View-once media viewer (spec/server-chat/06-view-once-media.md §3.3 & §4).
 // Full-screen overlay component for viewing view-once photos (with optional
-// spotlight reveal) and videos. Closes permanently after the view; the server
+// tease reveal) and videos. Closes permanently after the view; the server
 // deletes the content straight after bytes are handed over.
 
 import {
@@ -50,17 +50,17 @@ export function generateClaimId(win: Window): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export const SPOTLIGHT_CYCLE_MS = 16_000;
-export const SPOTLIGHT_DRAG_RESUME_DELAY_MS = 1_500;
-export const SPOTLIGHT_EASE_DURATION_MS = 600;
+export const TEASE_CYCLE_MS = 16_000;
+export const TEASE_DRAG_RESUME_DELAY_MS = 1_500;
+export const TEASE_EASE_DURATION_MS = 600;
 export const RING_RADIUS = 15;
 export const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
-export function computeSpotlightRadius(sliderValue: number, minSide: number): number {
+export function computeTeaseRadius(sliderValue: number, minSide: number): number {
   return (sliderValue / 100) * minSide;
 }
 
-export interface SpotlightCoordsParams {
+export interface TeaseCoordsParams {
   cx: number;
   cy: number;
   Ax: number;
@@ -81,7 +81,7 @@ export interface SpotlightCoordsParams {
   now?: number;
 }
 
-export function computeSpotlightCoords(params: SpotlightCoordsParams): { x: number; y: number } {
+export function computeTeaseCoords(params: TeaseCoordsParams): { x: number; y: number } {
   const {
     cx,
     cy,
@@ -114,7 +114,7 @@ export function computeSpotlightCoords(params: SpotlightCoordsParams): { x: numb
     return { x: spotX, y: spotY };
   }
 
-  const theta = (2 * Math.PI * (elapsedMs % SPOTLIGHT_CYCLE_MS)) / SPOTLIGHT_CYCLE_MS;
+  const theta = (2 * Math.PI * (elapsedMs % TEASE_CYCLE_MS)) / TEASE_CYCLE_MS;
   const autoX = cx + Ax * Math.sin(3 * theta + Math.PI / 2);
   const autoY = cy + Ay * Math.sin(2 * theta);
 
@@ -126,11 +126,11 @@ export function computeSpotlightCoords(params: SpotlightCoordsParams): { x: numb
 
   if (dragReleaseTime > 0) {
     const timeSinceRelease = now - dragReleaseTime;
-    if (timeSinceRelease < SPOTLIGHT_DRAG_RESUME_DELAY_MS) {
+    if (timeSinceRelease < TEASE_DRAG_RESUME_DELAY_MS) {
       return { x: dragReleaseX, y: dragReleaseY };
     }
-    const easeElapsed = timeSinceRelease - SPOTLIGHT_DRAG_RESUME_DELAY_MS;
-    const progress = Math.min(1, easeElapsed / SPOTLIGHT_EASE_DURATION_MS);
+    const easeElapsed = timeSinceRelease - TEASE_DRAG_RESUME_DELAY_MS;
+    const progress = Math.min(1, easeElapsed / TEASE_EASE_DURATION_MS);
     const ease = 0.5 - 0.5 * Math.cos(Math.PI * progress);
     const spotX = (1 - ease) * dragReleaseX + ease * autoX;
     const spotY = (1 - ease) * dragReleaseY + ease * autoY;
@@ -228,7 +228,7 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
   statusEl.append(statusText, statusNotice);
   body.appendChild(statusEl);
 
-  // Controls container (slider for spotlight, or play button for video)
+  // Controls container (slider for tease, or play button for video)
   const controlsEl = doc.createElement("div");
   controlsEl.className = "wx-srv-view-once-controls";
   controlsEl.hidden = true;
@@ -370,7 +370,7 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
 
   // Setup viewer content once claim and blob are loaded
   async function setupContent(
-    claimData: { durationS: 2 | 5 | 30 | null; spotlight: boolean; kind: "photo" | "video"; mime: string },
+    claimData: { durationS: 2 | 5 | 30 | null; tease: boolean; kind: "photo" | "video"; mime: string },
     blob: Blob,
   ): Promise<void> {
     if (closed) return;
@@ -380,7 +380,7 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
     if (claimData.kind === "video") {
       setupVideo(claimData.durationS, blob);
     } else {
-      await setupPhoto(claimData.durationS, claimData.spotlight, blob);
+      await setupPhoto(claimData.durationS, claimData.tease, blob);
     }
   }
 
@@ -483,7 +483,7 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
 
   async function setupPhoto(
     durationS: number | null,
-    isSpotlight: boolean,
+    isTease: boolean,
     blob: Blob,
   ): Promise<void> {
     const canvas = doc.createElement("canvas");
@@ -513,7 +513,7 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
     activeBitmap = bitmap;
 
     let sliderValue = 12; // 6 to 35, default 12%
-    if (isSpotlight) {
+    if (isTease) {
       controlsEl.hidden = false;
       const slider = doc.createElement("input");
       slider.type = "range";
@@ -522,7 +522,7 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
       slider.max = "35";
       slider.value = "12";
       slider.step = "1";
-      slider.setAttribute("aria-label", "Spotlight size");
+      slider.setAttribute("aria-label", "Tease size");
       slider.addEventListener("input", () => {
         sliderValue = Number(slider.value);
         renderFrame();
@@ -551,7 +551,7 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
     }
 
     function onPointerDown(evt: PointerEvent): void {
-      if (!isSpotlight) return;
+      if (!isTease) return;
       isDragging = true;
       const pos = getPointerPos(evt);
       dragX = pos.x;
@@ -560,7 +560,7 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
     }
 
     function onPointerMove(evt: PointerEvent): void {
-      if (!isSpotlight || !isDragging) return;
+      if (!isTease || !isDragging) return;
       const pos = getPointerPos(evt);
       dragX = pos.x;
       dragY = pos.y;
@@ -568,7 +568,7 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
     }
 
     function onPointerUp(): void {
-      if (!isSpotlight || !isDragging) return;
+      if (!isTease || !isDragging) return;
       isDragging = false;
       dragReleaseTime = (win.performance?.now?.() ?? Date.now());
       renderFrame();
@@ -631,15 +631,15 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
         // Fallback for jsdom without canvas implementation
       }
 
-      if (isSpotlight) {
-        const radius = computeSpotlightRadius(sliderValue, minSide);
+      if (isTease) {
+        const radius = computeTeaseRadius(sliderValue, minSide);
         const Ax = Math.max(0, drawW / 2 - radius);
         const Ay = Math.max(0, drawH / 2 - radius);
 
         const now = (win.performance?.now?.() ?? Date.now());
         const elapsed = now - paintedAt;
 
-        const coords = computeSpotlightCoords({
+        const coords = computeTeaseCoords({
           cx,
           cy,
           Ax,
@@ -665,7 +665,7 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
           dragReleaseY = coords.y;
         } else if (
           dragReleaseTime > 0 &&
-          now - dragReleaseTime >= SPOTLIGHT_DRAG_RESUME_DELAY_MS + SPOTLIGHT_EASE_DURATION_MS
+          now - dragReleaseTime >= TEASE_DRAG_RESUME_DELAY_MS + TEASE_EASE_DURATION_MS
         ) {
           dragReleaseTime = 0;
         }
@@ -673,7 +673,7 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
         const spotX = coords.x;
         const spotY = coords.y;
 
-        // Apply spotlight mask:
+        // Apply tease mask:
         // Opaque black layer with circular hole; outer 15% feathered with radial gradient.
         try {
           ctx.save();
@@ -716,14 +716,14 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
     function loop(): void {
       if (closed) return;
       renderFrame();
-      // Redraw continuously if spotlight is moving
-      if (isSpotlight && !prefersReducedMotion) {
+      // Redraw continuously if tease is moving
+      if (isTease && !prefersReducedMotion) {
         rafId = win.requestAnimationFrame?.(loop) ?? null;
       }
     }
 
     renderFrame();
-    if (isSpotlight && !prefersReducedMotion) {
+    if (isTease && !prefersReducedMotion) {
       rafId = win.requestAnimationFrame?.(loop) ?? null;
     }
   }

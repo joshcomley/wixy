@@ -104,7 +104,7 @@ class MessageRow:
     `None`. Loaded ONE LEVEL ONLY: a target's own `reply_to` is always `None`
     here, so a quote never shows the target's own quote."""
     view_once_s: int | None = None
-    view_spotlight: int = 0
+    view_tease: int = 0
     view_claim_id: str | None = None
     view_claimed_at: float | None = None
     view_claim_email: str | None = None
@@ -268,6 +268,15 @@ def reply_to_json(target: MessageRow | None, signer: MediaUrlSigner) -> JsonObje
     }
 
 
+# TRANSITIONAL WIRE ALIAS — REMOVE after 2026-10-27 (decisions/00172). The feature's wire
+# key was renamed spotlight -> tease, but a browser tab loaded BEFORE that deploy keeps
+# running the old bundle (stale bundles survive deploys for days — decisions/00069), and an
+# old bundle that finds no `spotlight` key silently shows the recipient the FULL photo the
+# sender meant as a Tease. Emitting the old key beside the new one keeps stale tabs honouring
+# the sender's intent until they reload. Never read this key in current code.
+LEGACY_TEASE_WIRE_KEY = "spotlight"
+
+
 def message_json(row: MessageRow, signer: MediaUrlSigner) -> JsonObject:
     """§5.9's `Message` wire shape."""
     view_once: dict[str, JsonValue] | None = (
@@ -275,7 +284,8 @@ def message_json(row: MessageRow, signer: MediaUrlSigner) -> JsonObject:
         if row.view_once_s is None
         else {
             "durationS": None if row.view_once_s == 0 else row.view_once_s,
-            "spotlight": bool(row.view_spotlight),
+            "tease": bool(row.view_tease),
+            LEGACY_TEASE_WIRE_KEY: bool(row.view_tease),
         }
     )
     return {

@@ -75,7 +75,7 @@ const SCROLL_TO_ORIGINAL_RETRY_MS = 50;
 export interface ViewOnceDraftSettings {
   enabled: boolean;
   durationS: 2 | 5 | 30 | null;
-  spotlight: boolean;
+  tease: boolean;
 }
 
 export interface ServerThreadDeps {
@@ -403,7 +403,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
 
     let settings = fileViewOnceSettings.get(file);
     if (!settings) {
-      settings = { enabled: false, durationS: 5, spotlight: false };
+      settings = { enabled: false, durationS: 5, tease: false };
       fileViewOnceSettings.set(file, settings);
     }
     const isImage = file.type.startsWith("image/");
@@ -492,17 +492,17 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     sheet.appendChild(durationsWrap);
 
     if (isImage) {
-      const spotlightLabel = documentRef.createElement("label");
-      spotlightLabel.className = "wx-srv-view-once-spotlight-label";
+      const teaseLabel = documentRef.createElement("label");
+      teaseLabel.className = "wx-srv-view-once-tease-label";
       const checkbox = documentRef.createElement("input");
       checkbox.type = "checkbox";
-      checkbox.checked = settings.spotlight;
+      checkbox.checked = settings.tease;
       checkbox.addEventListener("change", () => {
-        settings!.spotlight = checkbox.checked;
+        settings!.tease = checkbox.checked;
         fileViewOnceSettings.set(file, settings!);
       });
-      spotlightLabel.append(checkbox, documentRef.createTextNode("Spotlight"));
-      sheet.appendChild(spotlightLabel);
+      teaseLabel.append(checkbox, documentRef.createTextNode("Tease"));
+      sheet.appendChild(teaseLabel);
     }
 
     // Condition #4: "the sheet offers 'Send normally' to clear the choice" — only shown once
@@ -1234,10 +1234,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
 
         header.append(icon, title, sub);
 
-        if (message.viewOnce.spotlight) {
+        if (message.viewOnce.tease) {
           const badge = documentRef.createElement("span");
-          badge.className = "wx-srv-view-once-spotlight-badge";
-          badge.textContent = "Spotlight";
+          badge.className = "wx-srv-view-once-tease-badge";
+          badge.textContent = "Tease";
           header.appendChild(badge);
         }
 
@@ -2009,7 +2009,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
             deviceId: identity.getDeviceId(),
             attachmentId: voAttachmentId,
             durationS: voSettings.durationS,
-            spotlight: voSettings.spotlight,
+            tease: voSettings.tease,
             ...(voReplyToSeq !== undefined ? { replyToSeq: voReplyToSeq } : {}),
           });
         } catch (error) {

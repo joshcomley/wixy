@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  computeSpotlightCoords,
-  computeSpotlightRadius,
+  computeTeaseCoords,
+  computeTeaseRadius,
   generateClaimId,
   mountViewOnceViewer,
   RING_CIRCUMFERENCE,
-  SPOTLIGHT_CYCLE_MS,
-  SPOTLIGHT_DRAG_RESUME_DELAY_MS,
-  SPOTLIGHT_EASE_DURATION_MS,
+  TEASE_CYCLE_MS,
+  TEASE_DRAG_RESUME_DELAY_MS,
+  TEASE_EASE_DURATION_MS,
 } from "../../src/server/viewOnceViewer";
 import type { LockHooks, ServerSession } from "../../src/server/types";
 import type { ServerIdentity } from "../../src/server/identity";
@@ -60,7 +60,7 @@ function fakeIdentity(name = "Josh"): ServerIdentity {
   };
 }
 
-describe("Server Chat View-Once & Spotlight", () => {
+describe("Server Chat View-Once & Tease", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     window.createImageBitmap = vi.fn(async () => ({
@@ -99,7 +99,7 @@ describe("Server Chat View-Once & Spotlight", () => {
         onClose,
         openClaim: async () => ({
           ok: true,
-          data: { durationS: 5, spotlight: false, kind: "photo", mime: "image/jpeg" },
+          data: { durationS: 5, tease: false, kind: "photo", mime: "image/jpeg" },
         }),
         fetchContent: async () => ({
           ok: true,
@@ -128,7 +128,7 @@ describe("Server Chat View-Once & Spotlight", () => {
         onClose,
         openClaim: async () => ({
           ok: true,
-          data: { durationS: null, spotlight: false, kind: "photo", mime: "image/jpeg" },
+          data: { durationS: null, tease: false, kind: "photo", mime: "image/jpeg" },
         }),
         fetchContent: async () => ({
           ok: true,
@@ -156,7 +156,7 @@ describe("Server Chat View-Once & Spotlight", () => {
         onClose,
         openClaim: async () => ({
           ok: true,
-          data: { durationS: 30, spotlight: false, kind: "photo", mime: "image/jpeg" },
+          data: { durationS: 30, tease: false, kind: "photo", mime: "image/jpeg" },
         }),
         fetchContent: async () => ({
           ok: true,
@@ -188,7 +188,7 @@ describe("Server Chat View-Once & Spotlight", () => {
         onClose,
         openClaim: async () => ({
           ok: true,
-          data: { durationS: 2, spotlight: false, kind: "photo", mime: "image/jpeg" },
+          data: { durationS: 2, tease: false, kind: "photo", mime: "image/jpeg" },
         }),
         fetchContent: async () => ({
           ok: true,
@@ -232,7 +232,7 @@ describe("Server Chat View-Once & Spotlight", () => {
         win: window,
         openClaim: async () => ({
           ok: true,
-          data: { durationS: 5, spotlight: false, kind: "photo", mime: "image/jpeg" },
+          data: { durationS: 5, tease: false, kind: "photo", mime: "image/jpeg" },
         }),
         fetchContent: async () => ({
           ok: true,
@@ -269,7 +269,7 @@ describe("Server Chat View-Once & Spotlight", () => {
         win: window,
         openClaim: async () => ({
           ok: true,
-          data: { durationS: 5, spotlight: false, kind: "video", mime: "video/mp4" },
+          data: { durationS: 5, tease: false, kind: "video", mime: "video/mp4" },
         }),
         fetchContent: async () => ({
           ok: true,
@@ -304,7 +304,7 @@ describe("Server Chat View-Once & Spotlight", () => {
         win: window,
         openClaim: async () => ({
           ok: true,
-          data: { durationS: 5, spotlight: false, kind: "photo", mime: "image/jpeg" },
+          data: { durationS: 5, tease: false, kind: "photo", mime: "image/jpeg" },
         }),
         fetchContent: async () => ({
           ok: true,
@@ -333,7 +333,7 @@ describe("Server Chat View-Once & Spotlight", () => {
         win: window,
         openClaim: async () => ({
           ok: true,
-          data: { durationS: null, spotlight: false, kind: "photo", mime: "image/jpeg" },
+          data: { durationS: null, tease: false, kind: "photo", mime: "image/jpeg" },
         }),
         fetchContent: async () => ({
           ok: true,
@@ -359,7 +359,7 @@ describe("Server Chat View-Once & Spotlight", () => {
         win: window,
         openClaim: async () => ({
           ok: true,
-          data: { durationS: 5, spotlight: false, kind: "video", mime: "video/mp4" },
+          data: { durationS: 5, tease: false, kind: "video", mime: "video/mp4" },
         }),
         fetchContent: async () => ({
           ok: true,
@@ -395,7 +395,7 @@ describe("Server Chat View-Once & Spotlight", () => {
         win: window,
         openClaim: async () => ({
           ok: true,
-          data: { durationS: 5, spotlight: false, kind: "video", mime: "video/mp4" },
+          data: { durationS: 5, tease: false, kind: "video", mime: "video/mp4" },
         }),
         fetchContent: async () => ({
           ok: true,
@@ -447,7 +447,7 @@ describe("Server Chat View-Once & Spotlight", () => {
           win: window,
           openClaim: async () => ({
             ok: true,
-            data: { durationS: 5, spotlight: false, kind: "video", mime: "video/mp4" },
+            data: { durationS: 5, tease: false, kind: "video", mime: "video/mp4" },
           }),
           fetchContent: async () => ({
             ok: true,
@@ -487,12 +487,12 @@ describe("Server Chat View-Once & Spotlight", () => {
     });
   });
 
-  describe("Spotlight calculations & interaction guarantees", () => {
+  describe("Tease calculations & interaction guarantees", () => {
     it("calculates radius from slider percentage bounded between 6% and 35%", () => {
       const minSide = 500;
-      expect(computeSpotlightRadius(6, minSide)).toBe(30);
-      expect(computeSpotlightRadius(12, minSide)).toBe(60);
-      expect(computeSpotlightRadius(35, minSide)).toBe(175);
+      expect(computeTeaseRadius(6, minSide)).toBe(30);
+      expect(computeTeaseRadius(12, minSide)).toBe(60);
+      expect(computeTeaseRadius(35, minSide)).toBe(175);
     });
 
     it("follows a deterministic Lissajous path under fake time", () => {
@@ -518,26 +518,26 @@ describe("Server Chat View-Once & Spotlight", () => {
       // At t=0 ms (theta = 0)
       // autoX = cx + Ax * sin(pi/2) = cx + Ax
       // autoY = cy + Ay * sin(0) = cy
-      const p0 = computeSpotlightCoords({ ...baseParams, elapsedMs: 0 });
+      const p0 = computeTeaseCoords({ ...baseParams, elapsedMs: 0 });
       expect(p0.x).toBeCloseTo(cx + Ax);
       expect(p0.y).toBeCloseTo(cy);
 
       // At t=4000 ms (1/4 of 16000ms cycle: theta = pi/2)
       // autoX = cx + Ax * sin(3pi/2 + pi/2) = cx + Ax * sin(2pi) = cx
       // autoY = cy + Ay * sin(pi) = cy
-      const p4k = computeSpotlightCoords({ ...baseParams, elapsedMs: 4000 });
+      const p4k = computeTeaseCoords({ ...baseParams, elapsedMs: 4000 });
       expect(p4k.x).toBeCloseTo(cx);
       expect(p4k.y).toBeCloseTo(cy);
 
       // At t=8000 ms (theta = pi)
       // autoX = cx + Ax * sin(3pi + pi/2) = cx + Ax * sin(7pi/2) = cx - Ax
       // autoY = cy + Ay * sin(2pi) = cy
-      const p8k = computeSpotlightCoords({ ...baseParams, elapsedMs: 8000 });
+      const p8k = computeTeaseCoords({ ...baseParams, elapsedMs: 8000 });
       expect(p8k.x).toBeCloseTo(cx - Ax);
       expect(p8k.y).toBeCloseTo(cy);
 
       // At t=16000 ms (full cycle: theta = 2pi -> identical to t=0)
-      const p16k = computeSpotlightCoords({ ...baseParams, elapsedMs: 16000 });
+      const p16k = computeTeaseCoords({ ...baseParams, elapsedMs: 16000 });
       expect(p16k.x).toBeCloseTo(p0.x);
       expect(p16k.y).toBeCloseTo(p0.y);
     });
@@ -553,8 +553,8 @@ describe("Server Chat View-Once & Spotlight", () => {
       const Ax = drawW / 2 - radius;
       const Ay = drawH / 2 - radius;
 
-      for (let t = 0; t <= SPOTLIGHT_CYCLE_MS; t += 250) {
-        const p = computeSpotlightCoords({
+      for (let t = 0; t <= TEASE_CYCLE_MS; t += 250) {
+        const p = computeTeaseCoords({
           cx,
           cy,
           Ax,
@@ -594,7 +594,7 @@ describe("Server Chat View-Once & Spotlight", () => {
       };
 
       for (let t = 0; t <= 16000; t += 1000) {
-        const p = computeSpotlightCoords({ ...params, elapsedMs: t });
+        const p = computeTeaseCoords({ ...params, elapsedMs: t });
         expect(p.x).toBe(cx);
         expect(p.y).toBe(cy);
       }
@@ -610,7 +610,7 @@ describe("Server Chat View-Once & Spotlight", () => {
       const radius = 50;
 
       // Drag to a valid inside point
-      const pInside = computeSpotlightCoords({
+      const pInside = computeTeaseCoords({
         cx,
         cy,
         Ax: 200,
@@ -630,7 +630,7 @@ describe("Server Chat View-Once & Spotlight", () => {
       expect(pInside.y).toBe(220);
 
       // Drag outside the image bounds clamps to edge - radius
-      const pOutside = computeSpotlightCoords({
+      const pOutside = computeTeaseCoords({
         cx,
         cy,
         Ax: 200,
@@ -666,7 +666,7 @@ describe("Server Chat View-Once & Spotlight", () => {
       const dragReleaseY = 200;
 
       // During 1.5s pause (e.g. 500ms after release at now = 10500)
-      const pPaused = computeSpotlightCoords({
+      const pPaused = computeTeaseCoords({
         cx,
         cy,
         Ax,
@@ -688,7 +688,7 @@ describe("Server Chat View-Once & Spotlight", () => {
       expect(pPaused.y).toBe(dragReleaseY);
 
       // Exactly at pause end (now = 11500, dt = 1500)
-      const pEaseStart = computeSpotlightCoords({
+      const pEaseStart = computeTeaseCoords({
         cx,
         cy,
         Ax,
@@ -710,7 +710,7 @@ describe("Server Chat View-Once & Spotlight", () => {
       expect(pEaseStart.y).toBeCloseTo(dragReleaseY);
 
       // Halfway through easing (dt = 1800 -> 300ms of 600ms easing)
-      const pMid = computeSpotlightCoords({
+      const pMid = computeTeaseCoords({
         cx,
         cy,
         Ax,
@@ -728,7 +728,7 @@ describe("Server Chat View-Once & Spotlight", () => {
         dragReleaseY,
         now: 11_800,
       });
-      const autoPath5k = computeSpotlightCoords({
+      const autoPath5k = computeTeaseCoords({
         cx,
         cy,
         Ax,
@@ -747,7 +747,7 @@ describe("Server Chat View-Once & Spotlight", () => {
       expect(pMid.y).toBeCloseTo((dragReleaseY + autoPath5k.y) / 2);
 
       // At end of easing (dt = 2100 -> 600ms easing complete)
-      const pEaseEnd = computeSpotlightCoords({
+      const pEaseEnd = computeTeaseCoords({
         cx,
         cy,
         Ax,
@@ -851,7 +851,7 @@ describe("Server Chat View-Once & Spotlight", () => {
         win: window,
         openClaim: async () => ({
           ok: true,
-          data: { durationS: 5, spotlight: false, kind: "photo", mime: "image/jpeg" },
+          data: { durationS: 5, tease: false, kind: "photo", mime: "image/jpeg" },
         }),
         fetchContent: async () => {
           attempts++;
@@ -890,7 +890,7 @@ describe("Server Chat View-Once & Spotlight", () => {
         win: window,
         openClaim: async () => ({
           ok: true,
-          data: { durationS: 5, spotlight: false, kind: "photo", mime: "image/jpeg" },
+          data: { durationS: 5, tease: false, kind: "photo", mime: "image/jpeg" },
         }),
         fetchContent: async () => ({
           ok: true,
@@ -907,7 +907,7 @@ describe("Server Chat View-Once & Spotlight", () => {
     });
   });
 
-  describe("Spotlight UI component interactions", () => {
+  describe("Tease UI component interactions", () => {
     it("renders slider and canvas, responding to range input and pointer events", async () => {
       const arcCalls: Array<{ x: number; y: number; radius: number }> = [];
       const stubCtx = {
@@ -937,7 +937,7 @@ describe("Server Chat View-Once & Spotlight", () => {
         win: window,
         openClaim: async () => ({
           ok: true,
-          data: { durationS: 5, spotlight: true, kind: "photo", mime: "image/jpeg" },
+          data: { durationS: 5, tease: true, kind: "photo", mime: "image/jpeg" },
         }),
         fetchContent: async () => ({
           ok: true,
@@ -957,7 +957,7 @@ describe("Server Chat View-Once & Spotlight", () => {
       expect(slider?.min).toBe("6");
       expect(slider?.max).toBe("35");
       expect(slider?.value).toBe("12");
-      expect(slider?.getAttribute("aria-label")).toBe("Spotlight size");
+      expect(slider?.getAttribute("aria-label")).toBe("Tease size");
 
       expect(arcCalls.length).toBeGreaterThan(0);
       const initialRadius = arcCalls[0]!.radius;
@@ -995,7 +995,7 @@ describe("Server Chat View-Once & Spotlight", () => {
         win: window,
         openClaim: async () => ({
           ok: true,
-          data: { durationS: 5, spotlight: false, kind: "video", mime: "video/mp4" },
+          data: { durationS: 5, tease: false, kind: "video", mime: "video/mp4" },
         }),
         fetchContent: async () => ({
           ok: true,
@@ -1024,7 +1024,7 @@ describe("Server Chat View-Once & Spotlight", () => {
       const { hooks } = createMockHooks();
       const openClaimSpy = vi.fn(async () => ({
         ok: true as const,
-        data: { durationS: 5 as const, spotlight: false, kind: "photo" as const, mime: "image/jpeg" },
+        data: { durationS: 5 as const, tease: false, kind: "photo" as const, mime: "image/jpeg" },
       }));
 
       let fetchCount = 0;
@@ -1093,7 +1093,7 @@ describe("Server Chat View-Once & Spotlight", () => {
         win: window,
         openClaim: async () => ({
           ok: true as const,
-          data: { durationS: 5, spotlight: false, kind: "photo" as const, mime: "image/jpeg" },
+          data: { durationS: 5, tease: false, kind: "photo" as const, mime: "image/jpeg" },
         }),
       });
 
@@ -1132,7 +1132,7 @@ describe("Server Chat View-Once & Spotlight", () => {
         }
         return {
           ok: true as const,
-          data: { durationS: 5 as const, spotlight: false, kind: "photo" as const, mime: "image/jpeg" },
+          data: { durationS: 5 as const, tease: false, kind: "photo" as const, mime: "image/jpeg" },
         };
       });
 
@@ -1181,7 +1181,7 @@ describe("Server Chat View-Once & Spotlight", () => {
     });
   });
 
-  describe("Spotlight integrated viewer tests (Item 9)", () => {
+  describe("Tease integrated viewer tests (Item 9)", () => {
     let origGetContext: typeof HTMLCanvasElement.prototype.getContext;
     let stubCtx: any;
     let arcCalls: Array<{ x: number; y: number; radius: number }>;
@@ -1221,7 +1221,7 @@ describe("Server Chat View-Once & Spotlight", () => {
         win: window,
         openClaim: async () => ({
           ok: true,
-          data: { durationS: null, spotlight: true, kind: "photo", mime: "image/jpeg" },
+          data: { durationS: null, tease: true, kind: "photo", mime: "image/jpeg" },
         }),
         fetchContent: async () => ({
           ok: true,
@@ -1261,7 +1261,7 @@ describe("Server Chat View-Once & Spotlight", () => {
         win: window,
         openClaim: async () => ({
           ok: true,
-          data: { durationS: 5, spotlight: true, kind: "photo", mime: "image/jpeg" },
+          data: { durationS: 5, tease: true, kind: "photo", mime: "image/jpeg" },
         }),
         fetchContent: async () => ({
           ok: true,
@@ -1277,7 +1277,7 @@ describe("Server Chat View-Once & Spotlight", () => {
       const firstArc = arcCalls[0]!;
       const expectedCy = canvas.height / 2;
       const minSide = Math.min(canvas.width, canvas.height);
-      const expectedRadius = computeSpotlightRadius(12, minSide);
+      const expectedRadius = computeTeaseRadius(12, minSide);
       const expectedCx = canvas.width / 2;
       const expectedAx = expectedCx - expectedRadius;
       const expectedX = expectedCx + expectedAx;
@@ -1310,7 +1310,7 @@ describe("Server Chat View-Once & Spotlight", () => {
         win: window,
         openClaim: async () => ({
           ok: true,
-          data: { durationS: 5, spotlight: true, kind: "photo", mime: "image/jpeg" },
+          data: { durationS: 5, tease: true, kind: "photo", mime: "image/jpeg" },
         }),
         fetchContent: async () => ({
           ok: true,
@@ -1357,7 +1357,7 @@ describe("Server Chat View-Once & Spotlight", () => {
         win: window,
         openClaim: async () => ({
           ok: true,
-          data: { durationS: 5, spotlight: true, kind: "photo", mime: "image/jpeg" },
+          data: { durationS: 5, tease: true, kind: "photo", mime: "image/jpeg" },
         }),
         fetchContent: async () => ({
           ok: true,
@@ -1393,7 +1393,7 @@ describe("Server Chat View-Once & Spotlight", () => {
         win: window,
         openClaim: async () => ({
           ok: true,
-          data: { durationS: 5, spotlight: true, kind: "photo", mime: "image/jpeg" },
+          data: { durationS: 5, tease: true, kind: "photo", mime: "image/jpeg" },
         }),
         fetchContent: async () => ({
           ok: true,
@@ -1430,7 +1430,7 @@ describe("Server Chat View-Once & Spotlight", () => {
         win: window,
         openClaim: async () => ({
           ok: true,
-          data: { durationS: 5, spotlight: false, kind: "video", mime: "video/mp4" },
+          data: { durationS: 5, tease: false, kind: "video", mime: "video/mp4" },
         }),
         fetchContent: async () => ({
           ok: true,
@@ -1480,7 +1480,7 @@ describe("Server Chat View-Once & Spotlight", () => {
         win: window,
         openClaim: async () => ({
           ok: true,
-          data: { durationS: 5, spotlight: false, kind: "photo", mime: "image/jpeg" },
+          data: { durationS: 5, tease: false, kind: "photo", mime: "image/jpeg" },
         }),
         fetchContent: async () => {
           throw new ServerLockedError();

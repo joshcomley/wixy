@@ -993,5 +993,5 @@ write transaction that creates the message, the store copies the attachment's `r
 *Enforced by:* `wixy_server/tests/test_livechat_view_once.py` (schema migration v11, validation matrix,
 atomic single-winner claim race, streaming download, post-delivery erasure, broken download retry safety,
 backstop cleanup, and fail-closed linklessness), `admin-ui/tests/server/viewOnce.test.ts` (lifecycle triggers,
-resource release, `viewOnce` idle suspension, and spotlight math/clamping/easing), and `admin-ui/tests/serverThread.test.ts`
+resource release, `viewOnce` idle suspension, and tease math/clamping/easing), and `admin-ui/tests/serverThread.test.ts`
 (bubble cards, tap to view, non-closure on `message_deleted`, wipe, and detach).
