@@ -1322,6 +1322,17 @@ button.wx-srv-quote:focus-visible {
   color: var(--wx-muted);
 }
 
+.wx-srv-view-once-hint {
+  margin: 4px 0 0;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  color: var(--wx-muted);
+}
+
+.wx-srv-view-once-hint[hidden] {
+  display: none;
+}
+
 .wx-srv-view-once-sender-card {
   font-style: italic;
   color: var(--wx-muted);

@@ -316,40 +316,70 @@ describe("Server push toggle", () => {
       return { host, testButton, testStatus, toggle, request };
     }
 
-    it("confirms test notification when service worker confirms push was shown", async () => {
+    it("counts down for 10s before sending, so there is real time to switch away from Chrome (operator request, round 2)", async () => {
+      vi.useFakeTimers();
       const { testButton, testStatus, toggle, request } = await mountHealthyOn();
 
       testButton.click();
-      await vi.waitFor(() => expect(request).toHaveBeenCalledWith(
+      expect(testButton.textContent).toBe("Sending in 10s…");
+      expect(testStatus.textContent).toContain("Sending in 10s — you can switch away from Chrome now.");
+      expect(request).not.toHaveBeenCalledWith(
+        expect.stringContaining("/test"),
+        expect.objectContaining({ method: "POST" }),
+      );
+
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(testButton.textContent).toBe("Sending in 7s…");
+      expect(request).not.toHaveBeenCalledWith(
+        expect.stringContaining("/test"),
+        expect.objectContaining({ method: "POST" }),
+      );
+
+      await vi.advanceTimersByTimeAsync(7_000);
+      expect(request).toHaveBeenCalledWith(
         expect.stringContaining("/subscriptions/device-123456/test"),
         expect.objectContaining({ method: "POST" }),
-      ));
+      );
+
+      toggle.teardown();
+      vi.useRealTimers();
+    });
+
+    it("confirms test notification when service worker confirms push was shown", async () => {
+      vi.useFakeTimers();
+      const { testButton, testStatus, toggle } = await mountHealthyOn();
+
+      testButton.click();
+      await vi.advanceTimersByTimeAsync(10_000);
 
       // Simulate service worker sending push-shown message
       navigator.serviceWorker.dispatchEvent(new MessageEvent("message", {
         data: { type: "push-shown" },
       }));
+      await vi.advanceTimersByTimeAsync(0);
 
-      await vi.waitFor(() =>
-        expect(testStatus.textContent).toContain("Your phone received the test and showed it.")
-      );
+      expect(testStatus.textContent).toContain("Your phone received the test and showed it.");
       expect(testStatus.textContent).toContain("Chrome -> Settings -> Site settings -> Notifications must allow this site");
       expect(testButton.disabled).toBe(false);
       toggle.teardown();
+      vi.useRealTimers();
     });
 
-    it("shows timeout message with troubleshooting hints when confirmation does not arrive within 10s", async () => {
+    it("shows timeout message with troubleshooting hints when confirmation does not arrive within 60s (extended from 10s after a live investigation could not tell late from never)", async () => {
       vi.useFakeTimers();
       const { testButton, testStatus, toggle } = await mountHealthyOn();
 
       testButton.click();
-      await vi.advanceTimersByTimeAsync(100);
+      await vi.advanceTimersByTimeAsync(10_000);
       expect(testStatus.textContent).toContain("Google accepted it. Waiting for phone confirmation");
 
-      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(59_000);
+      expect(testStatus.textContent).toContain("Google accepted it. Waiting for phone confirmation");
+
+      await vi.advanceTimersByTimeAsync(1_000);
 
       expect(testStatus.textContent).toContain(
-        "Google accepted it but your phone did not confirm within ~10 seconds."
+        "Google accepted it but your phone did not confirm within ~60 seconds."
       );
       expect(testStatus.textContent).toContain("Android Settings -> Apps -> Chrome -> Notifications is On");
       expect(testStatus.textContent).toContain("battery saver");
@@ -360,6 +390,7 @@ describe("Server push toggle", () => {
     });
 
     it("displays error when push service rejects the test request", async () => {
+      vi.useFakeTimers();
       const { testButton, testStatus, toggle, request } = await mountHealthyOn();
       request.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
@@ -371,14 +402,16 @@ describe("Server push toggle", () => {
       });
 
       testButton.click();
-      await vi.waitFor(() =>
-        expect(testStatus.textContent).toContain("The push service rejected it (status 410).")
-      );
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(testStatus.textContent).toContain("The push service rejected it (status 410).");
       expect(testButton.disabled).toBe(false);
       toggle.teardown();
+      vi.useRealTimers();
     });
 
     it("displays friendly message when rate limited", async () => {
+      vi.useFakeTimers();
       const { testButton, testStatus, toggle, request } = await mountHealthyOn();
       request.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
@@ -393,11 +426,12 @@ describe("Server push toggle", () => {
       });
 
       testButton.click();
-      await vi.waitFor(() =>
-        expect(testStatus.textContent).toContain("Please wait a few seconds before requesting another test notification.")
-      );
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(testStatus.textContent).toContain("Please wait a few seconds before requesting another test notification.");
       expect(testButton.disabled).toBe(false);
       toggle.teardown();
+      vi.useRealTimers();
     });
   });
 });

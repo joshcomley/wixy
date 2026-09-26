@@ -389,8 +389,8 @@ to confirm display.
 1. `Notification.permission === "denied"` immediately yields a `blocked` state with guidance to allow notifications in site settings.
 2. If the server says subscribed, the browser verifies that a service worker registration exists at scope `/admin/` and that `pushManager.getSubscription()` returns an active subscription whose endpoint equals the server's stored endpoint.
 3. If the server says subscribed but the browser lacks permission, lacks a registration, or has a mismatched/missing subscription, the toggle enters a `needs_re-enabling` state with a single-tap repair button ("Re-enable notifications") that re-subscribes and updates the server.
-4. When enabled, a "Send me a test notification" button allows verification. Tapping it calls `POST /api/admin/server/push/subscriptions/{deviceId}/test` (token-gated, rate-limited to 1 request per 5 seconds per device). This route sends one payloadless push to the calling device's own subscription only (bypassing sender exclusion) after re-validating the endpoint.
-5. Round-trip evidence: If the service worker confirms display within ~10 seconds via BroadcastChannel or client postMessage, the UI reports "Your phone received the test and showed it." If the push service accepts the request (201) but the phone does not confirm within 10 seconds, it reports "Google accepted it but your phone did not confirm within ~10 seconds" alongside plain-English troubleshooting hints (check Android Settings -> Apps -> Chrome -> Notifications is On; Chrome -> Settings -> Site settings -> Notifications must allow this site; battery saver / "restrict background" can delay or drop them). If the push service rejects the request, it reports "The push service rejected it (status N)".
+4. When enabled, a "Send me a test notification" button allows verification. Tapping it starts a visible 10-second countdown ("Sending in 10s… you can switch away from Chrome now") before the request fires (operator report, round 2: dispatching immediately made it impossible to actually leave the foreground before the push arrived, so a foreground-only failure could never be distinguished from a true backgrounded-delivery failure). After the countdown, it calls `POST /api/admin/server/push/subscriptions/{deviceId}/test` (token-gated, rate-limited to 1 request per 5 seconds per device). This route sends one payloadless push to the calling device's own subscription only (bypassing sender exclusion) after re-validating the endpoint.
+5. Round-trip evidence: If the service worker confirms display within ~60 seconds via BroadcastChannel or client postMessage, the UI reports "Your phone received the test and showed it." If the push service accepts the request (201) but the phone does not confirm within that window, it reports "Google accepted it but your phone did not confirm within ~60 seconds" alongside plain-English troubleshooting hints (check Android Settings -> Apps -> Chrome -> Notifications is On; Chrome -> Settings -> Site settings -> Notifications must allow this site; battery saver / "restrict background" can delay or drop them). The wait was originally 10 seconds; extended after a live investigation (round 2) on a real device could not tell "arrives late" apart from "never arrives" in that window. If the push service rejects the request, it reports "The push service rejected it (status N)".
 
 ## 8. Media processing, chunked uploads and the queue (P2a/P2b)
 
@@ -1151,6 +1151,21 @@ Consequences:
 - `GET /messages/{seq}/view-once/content`: Requires header `X-Wixy-View-Claim: <claimId>`. Verifies digest match and expiration (`now < view_claimed_at + 600`, else 410 `expired`). Streams the raw photo/video rendition with `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`.
 - **Post-download erasure:** When the response body has been delivered completely, the server erases the message via `delete_message_for_scrub` and `_finish_committed_erasure` on the contained task group (Inv 47). A broken connection erases nothing, allowing retry.
 - **Backstop janitor:** Supervised loop running at least every 30 s erases claimed view-once messages older than 600 s.
+
+### Client: sending
+- The view-once control is NOT a separate composer button — it appears as a small "①" badge in
+  the corner of an already-staged photo/video chip (`thread.ts`'s `renderChipPreview`), opening a
+  picker (2 s / 5 s / 30 s / no limit, plus a Spotlight switch for photos). Tapping it lights the
+  badge and shows the chosen duration on it (e.g. "① 5s").
+- A persistent caption (`.wx-srv-view-once-hint`, "Tap ① on a photo or video below to send it as
+  disappearing") appears the moment any staged file is a photo or video and disappears once none
+  remain — added after an operator report that the bare glyph was undiscoverable with no prior
+  cue. It is driven by `ChatComposerOptions.onChipsRendered`, a generic hook (fires on every chip
+  re-render, including the last chip's removal) any composer caller can use without reaching into
+  the shared component's internal DOM.
+- Only ONE chip may be flagged view-once at a time (flagging a second clears the first); a hard
+  guard in `sendViewOnceDraft` refuses to send if a flagged chip would otherwise go out as an
+  ordinary, fully visible attachment.
 
 ### Client: viewer and spotlight reveal
 - Fullscreen overlay (`viewOnceViewer.ts`):

@@ -21,7 +21,16 @@ function isFocusedServerClient(client: Client): client is WindowClient {
 const worker = self as unknown as ServiceWorkerGlobalScope;
 
 export async function handlePush(target: ServiceWorkerGlobalScope): Promise<void> {
-  const clients = await target.clients.matchAll({ type: "window", includeUncontrolled: true });
+  // Inv 45/item 12: every push must end in showNotification, or Chrome can throttle/revoke this
+  // origin's notification permission over time for violating userVisibleOnly. matchAll() failing
+  // must not skip that call — fall back to "no known clients" (the safe, non-silent default) and
+  // still show the notification.
+  let clients: readonly Client[] = [];
+  try {
+    clients = await target.clients.matchAll({ type: "window", includeUncontrolled: true });
+  } catch {
+    // Fall through with the empty default.
+  }
   const isFocused = clients.some(isFocusedServerClient);
   const options: NotificationOptions & { renotify: boolean; silent?: boolean } = {
     body: "New activity",
