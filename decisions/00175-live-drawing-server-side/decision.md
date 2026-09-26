@@ -53,8 +53,8 @@ Built exactly to spec 07, in the shape the Architect ruled:
   bounded `LiveDrawingQueue` (`deque(maxlen=64)`, oldest dropped past capacity) and drains
   it every loop tick, before the ordinary persisted-event poll. The SSE frame is `event:
   drawing_live` with **no `id:` line**, so it can never advance the replay cursor.
-  Rate-limited (30 batches/sec per `drawingClientId`, `SlidingWindowRateLimiter`, 429 past
-  the cap). Nothing about a live batch is ever written to `server.db`, a file, or a log
+  Rate-limited (30 batches/sec per authenticated device, `SlidingWindowRateLimiter`, 429 past
+  the cap; see the audit amendments below). Nothing about a live batch is ever written to `server.db`, a file, or a log
   line — this is the new invariant, Inv 53.
 - **Cascade erasure (F4):** covered above by the schema's own FK; a wipe additionally issues
   explicit `DELETE FROM drawing_strokes; DELETE FROM drawings` in the same transaction as
@@ -97,6 +97,36 @@ things this entry flags explicitly rather than leaving implicit:
    visually), never a correctness or security issue — flagged for the audit, not treated as
    a defect to fix unilaterally, since tightening it would mean adding a field the spec
    doesn't ask for.
+
+## Audit amendments (Opus 5.5 audit of PR #286, first round)
+
+The audit found three defects in the live relay, each red/green proven in
+`test_routes_livechat_drawings.py` by reintroducing the defect and watching the new tests fail.
+
+- **F1 (medium): the rate limit was keyed by the client-chosen `drawingClientId`.** A token
+  holder picks every body field, so inventing a new id per request reset the budget, and the
+  limiter's table grew by one key per request. Spec 07 §4 says "per device": the key is now the
+  authenticated identity (`_live_relay_budget_key`: the grant id when the token is bound to a
+  device grant, so re-unlocking with the grant cannot reset it, else a SHA-256 of the token, so
+  the table never holds a usable credential; a fresh PIN-unlocked token costs a PIN entry). Two
+  people drawing together are two tokens and never throttle each other. `SlidingWindowRateLimiter`
+  also drops idle keys once per window (behaviour-preserving: a key with no event in the window
+  is indistinguishable from a new one), so the table is bounded by the keys active within one
+  window. The old test `test_rate_limit_is_keyed_per_drawing_client_id` encoded the flaw and was
+  replaced.
+- **F2 (medium): a lost wake-up in the stream loop.** `LiveDrawingQueue.push` and
+  `LiveChatNotifier.publish` each swap in a fresh event and set the old one, and
+  `notifier.current_event`'s own docstring says to capture it BEFORE the guarded check; the loop
+  read both events only at the wait, after the awaited grant check and `events_after`. A frame
+  pushed in that gap (a live POST runs on the event loop, so it lands exactly there) left the loop
+  waiting the full 2 s: a stroke's last batch or its cancel reached the other person up to 2 s late.
+  The same window existed for a message committed by this process. Both events are now captured at
+  the top of each iteration. Cost: at most one extra spin when a push lands between the capture
+  and the drain.
+- **F3 (low): unbounded fields on `POST /drawings/live`.** `drawingClientId`, `strokeId`,
+  `anchorSeq` and `batch` were unchecked yet copied into up to 64 queued frames per open stream.
+  They are now bounded like the create/append routes (ids 8-64 characters, `anchorSeq` 1..2^53-1,
+  `batch` 0..10,000,000, else 422 before anything is relayed).
 
 ## What to watch for
 

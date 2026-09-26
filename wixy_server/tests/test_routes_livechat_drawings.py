@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -25,12 +26,13 @@ from wixy_server.livechat.drawings import (
     MAX_DRAWINGS_PER_ANCHOR,
     MAX_STROKES_PER_DRAWING,
 )
+from wixy_server.livechat.models import EventRow
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import CmdPinVerifier
 from wixy_server.livechat.store import LiveChatStore
 from wixy_server.livechat.tokens import UNLOCK_GUARD_HEADER, UNLOCK_GUARD_VALUE, ServerAuth
 from wixy_server.livechat.transcription import SlidingWindowRateLimiter
-from wixy_server.routes_livechat import _stream_events
+from wixy_server.routes_livechat import _live_relay_budget_key, _stream_events
 from wixy_server.tests.fake_cmd import FakeCmdState, create_fake_cmd_app
 
 TEST_APP_KEY = "wixy-livechat"
@@ -879,31 +881,154 @@ class TestLiveDrawingRoute:
         finally:
             client.__exit__(None, None, None)
 
-    def test_rate_limit_is_keyed_per_drawing_client_id(
+    def test_rotating_the_drawing_client_id_does_not_reset_the_budget(
         self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
     ) -> None:
-        """spec §4: 30 batches/second is a per-drawer budget — a second drawer on the
-        same anchor must not be throttled by the first one's usage."""
+        """Audit F1: the budget is the AUTHENTICATED device's, not the body's. A token holder
+        picks every body field, so a budget keyed by `drawingClientId` was reset by inventing
+        a new id per request (and its table grew by one key each time)."""
         client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
         try:
-            seq = _send_anchor(client, headers, client_id="client-live-per-key")
+            seq = _send_anchor(client, headers, client_id="client-live-rotate")
+            client.app.state.livechat_drawing_live_limiter = SlidingWindowRateLimiter(  # type: ignore[attr-defined]
+                max_events=2, window_s=60.0
+            )
+            statuses = [
+                client.post(
+                    "/api/admin/server/drawings/live",
+                    json=_live_body(anchor_seq=seq, drawing_client_id=f"draw-client-rot-{n:04d}"),
+                    headers=headers,
+                ).status_code
+                for n in range(4)
+            ]
+            assert statuses == [200, 200, 429, 429]
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_each_unlocked_session_has_its_own_budget(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        """spec §4: 30 batches/second is a per-DEVICE budget: two people drawing at once are
+        two unlocked sessions, and one must not throttle the other."""
+        client, first_headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            second_headers = {"X-Wixy-Server-Token": _unlock(client).json()["token"]}
+            assert second_headers != first_headers
+            seq = _send_anchor(client, first_headers, client_id="client-live-two-sessions")
             client.app.state.livechat_drawing_live_limiter = SlidingWindowRateLimiter(  # type: ignore[attr-defined]
                 max_events=1, window_s=60.0
             )
-            first_drawer = client.post(
-                "/api/admin/server/drawings/live",
-                json=_live_body(anchor_seq=seq, drawing_client_id="draw-client-a"),
-                headers=headers,
+            body = _live_body(anchor_seq=seq)
+            first = client.post("/api/admin/server/drawings/live", json=body, headers=first_headers)
+            second = client.post(
+                "/api/admin/server/drawings/live", json=body, headers=second_headers
             )
-            second_drawer = client.post(
-                "/api/admin/server/drawings/live",
-                json=_live_body(anchor_seq=seq, drawing_client_id="draw-client-b"),
-                headers=headers,
-            )
-            assert first_drawer.status_code == 200
-            assert second_drawer.status_code == 200
+            again = client.post("/api/admin/server/drawings/live", json=body, headers=first_headers)
+            assert (first.status_code, second.status_code, again.status_code) == (200, 200, 429)
         finally:
             client.__exit__(None, None, None)
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            pytest.param("drawingClientId", "short", id="drawing-id-too-short"),
+            pytest.param("drawingClientId", "d" * 65, id="drawing-id-65"),
+            pytest.param("drawingClientId", "d" * 100_000, id="drawing-id-100k"),
+            pytest.param("strokeId", "short", id="stroke-id-too-short"),
+            pytest.param("strokeId", "s" * 65, id="stroke-id-65"),
+            pytest.param("strokeId", "s" * 100_000, id="stroke-id-100k"),
+            pytest.param("anchorSeq", 0, id="anchor-0"),
+            pytest.param("anchorSeq", -1, id="anchor-negative"),
+            pytest.param("anchorSeq", 2**53, id="anchor-2-53"),
+            pytest.param("batch", -1, id="batch-negative"),
+            pytest.param("batch", 10_000_001, id="batch-over-cap"),
+        ],
+    )
+    def test_unbounded_ids_and_counters_are_refused_before_relaying(
+        self,
+        field: str,
+        value: object,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        """Audit F3: every field is copied verbatim into up to 64 queued frames per open
+        stream, so each is bounded like its create/append twin, and a refused frame is never
+        relayed."""
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-live-bounds")
+            broker: DrawingBroker = client.app.state.livechat_drawing_broker  # type: ignore[attr-defined]
+            conn_id, queue = broker.register()
+            try:
+                body = _live_body(anchor_seq=seq)
+                body[field] = value
+                response = client.post(
+                    "/api/admin/server/drawings/live", json=body, headers=headers
+                )
+                assert response.status_code == 422, response.text
+                assert response.json()["error"] == "invalid"
+                assert queue.drain() == []
+            finally:
+                broker.unregister(conn_id)
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_the_largest_legal_ids_and_counters_are_relayed(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-live-max-legal")
+            broker: DrawingBroker = client.app.state.livechat_drawing_broker  # type: ignore[attr-defined]
+            conn_id, queue = broker.register()
+            try:
+                body = _live_body(
+                    anchor_seq=seq,
+                    drawing_client_id="d" * 64,
+                    stroke_id="s" * 8,
+                    batch=10_000_000,
+                )
+                response = client.post(
+                    "/api/admin/server/drawings/live", json=body, headers=headers
+                )
+                assert response.status_code == 200, response.text
+                assert len(queue.drain()) == 1
+            finally:
+                broker.unregister(conn_id)
+        finally:
+            client.__exit__(None, None, None)
+
+
+class _StubRequest:
+    """Just the `headers` a budget key reads."""
+
+    def __init__(self, token: str) -> None:
+        self.headers = {"X-Wixy-Server-Token": token}
+
+
+class TestLiveRelayBudgetKey:
+    def test_a_grant_bound_session_spends_its_grants_budget_whatever_token_it_holds(self) -> None:
+        auth = ServerAuth(email="", exp=1, grant_id="g" * 32)
+        first = _live_relay_budget_key(_StubRequest("token-one"), auth)  # type: ignore[arg-type]
+        second = _live_relay_budget_key(_StubRequest("token-two"), auth)  # type: ignore[arg-type]
+        other_grant = _live_relay_budget_key(
+            _StubRequest("token-one"),  # type: ignore[arg-type]
+            ServerAuth(email="", exp=1, grant_id="h" * 32),
+        )
+        assert first == second
+        assert first != other_grant
+
+    def test_an_unbound_session_spends_its_own_token_budget_and_never_keeps_the_token(
+        self,
+    ) -> None:
+        auth = ServerAuth(email="", exp=1)
+        first = _live_relay_budget_key(_StubRequest("token-one"), auth)  # type: ignore[arg-type]
+        again = _live_relay_budget_key(_StubRequest("token-one"), auth)  # type: ignore[arg-type]
+        other = _live_relay_budget_key(_StubRequest("token-two"), auth)  # type: ignore[arg-type]
+        assert first == again
+        assert first != other
+        assert "token-one" not in first
 
 
 _FIXED_AUTH = ServerAuth(email="", exp=int(time.time()) + 3600)
@@ -971,6 +1096,100 @@ class TestStreamDrawingLiveFrame:
         assert live_frame["id"] is None
         assert persisted_frame["event"] == "message"
         assert persisted_frame["id"] == 1
+
+    @pytest.mark.asyncio
+    async def test_a_frame_pushed_during_the_database_read_is_not_stranded_for_the_timeout(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Audit F2: a live POST that lands while the loop is inside its awaited database
+        read must wake the wait that follows. The wake-up events are swapped on every push,
+        so they have to be captured BEFORE the read; captured after it, the loop waited on the
+        fresh unset event and the frame (or a stroke's final batch, or its cancel) sat in the
+        queue for the whole 2 s re-check."""
+        store = LiveChatStore(tmp_path / "server.db")
+        notifier = LiveChatNotifier()
+        queue = LiveDrawingQueue()
+        reading = threading.Event()
+        release = threading.Event()
+        real_events_after = store.events_after
+
+        def slow_events_after(cursor: int) -> list[EventRow]:
+            reading.set()
+            assert release.wait(5.0)
+            return real_events_after(cursor)
+
+        monkeypatch.setattr(store, "events_after", slow_events_after)
+        gen = _stream_events(store, notifier, _SECRET, _FIXED_AUTH, after=0, live_queue=queue)
+        received: list[dict[str, Any]] = []
+
+        async def consume() -> None:
+            # Well under the loop's 2 s re-check: only a prompt wake-up can pass this.
+            received.append(await _next_frame(gen, timeout_s=1.0))
+
+        try:
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(consume)
+                await anyio.to_thread.run_sync(reading.wait, 5.0)
+                # The loop drained an empty queue and is now awaiting the read: exactly where a
+                # live POST's `publish` runs in production (on the event loop).
+                queue.push(
+                    {"drawingClientId": "draw-x", "anchorSeq": 1, "batch": 0, "points": [[1, 2]]}
+                )
+                release.set()
+        finally:
+            release.set()
+            await gen.aclose()
+        assert [frame["event"] for frame in received] == ["drawing_live"]
+
+    @pytest.mark.asyncio
+    async def test_a_publish_during_the_database_read_still_wakes_the_notifier_wait(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The same window for the persisted lane: a message committed by THIS process while
+        the loop is inside its read (so the read missed it) is delivered on the next tick, not
+        after the 2 s cross-process re-check."""
+        store = LiveChatStore(tmp_path / "server.db")
+        notifier = LiveChatNotifier()
+        reading = threading.Event()
+        release = threading.Event()
+        real_events_after = store.events_after
+
+        def slow_events_after(cursor: int) -> list[EventRow]:
+            reading.set()
+            assert release.wait(5.0)
+            return []
+
+        monkeypatch.setattr(store, "events_after", slow_events_after)
+        gen = _stream_events(
+            store, notifier, _SECRET, _FIXED_AUTH, after=0, live_queue=LiveDrawingQueue()
+        )
+        received: list[dict[str, Any]] = []
+
+        async def consume() -> None:
+            received.append(await _next_frame(gen, timeout_s=1.0))
+
+        try:
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(consume)
+                await anyio.to_thread.run_sync(reading.wait, 5.0)
+                # Committed after this read's snapshot: the read returns nothing, and only the
+                # publish can tell the loop to look again.
+                store.create_message(
+                    client_id="c-during-read",
+                    sender="Josh",
+                    device_id="d" * 8,
+                    by_email=None,
+                    text="landed during the read",
+                    attachment_ids=(),
+                    now=1000.0,
+                )
+                notifier.publish()
+                monkeypatch.setattr(store, "events_after", real_events_after)
+                release.set()
+        finally:
+            release.set()
+            await gen.aclose()
+        assert [frame["event"] for frame in received] == ["message"]
 
     @pytest.mark.asyncio
     async def test_two_registered_connections_each_get_their_own_frames(

@@ -1313,8 +1313,16 @@ own Ramer-Douglas-Peucker simplification, never re-simplified server-side. Full 
 
 ### The live relay: a separate, deliberately lossy channel (F3, Inv 53)
 `POST /drawings/live` batches a stroke's in-progress points (~every 50ms client-side, at
-most 200 points/batch and 30 batches/second per `drawingClientId` — `SlidingWindowRateLimiter`,
-429 `rate_limited` + `Retry-After` past the cap) and relays them through a NEW in-memory
+most 200 points/batch and 30 batches/second per DEVICE — `SlidingWindowRateLimiter`,
+429 `rate_limited` + `Retry-After` past the cap; the budget is the authenticated identity
+(`_live_relay_budget_key`: the device grant when the token is grant-bound, else a hash of the
+token), never a body field, because a token holder chooses every body field and a budget keyed
+by `drawingClientId` is reset by inventing a new id per request; two people drawing at once are
+two tokens, so neither throttles the other; the limiter drops idle keys once a window, so its
+table stays bounded by the keys active within one window). Every id and counter in the body is
+bounded like its create/append twin (`drawingClientId`/`strokeId` 8-64 characters, `anchorSeq`
+1..2^53-1, `batch` 0..10,000,000, else 422), because a frame is copied verbatim into up to 64
+queued frames per open stream. The relay is a NEW in-memory
 `DrawingBroker` (`livechat/drawing_broker.py`) — deliberately NOT the `LiveChatNotifier`,
 which carries no payload and only means "re-read the database". Each open `/stream`
 connection registers its own `LiveDrawingQueue` (a `deque(maxlen=64)`, oldest dropped past
@@ -1323,7 +1331,11 @@ capacity — the "bounded queue of 64 items, overflow drops the oldest" the spec
 poll, so a live frame's latency is never held up by a coalescing pass over unrelated
 messages), and unregisters on disconnect. `LiveDrawingQueue.event` is raced against
 `LiveChatNotifier.current_event` through a shared `wait_on_any` helper (`notifier.py`), so
-the stream loop wakes on either wire without needing two poll loops. The relay is sent to
+the stream loop wakes on either wire without needing two poll loops. Both events are
+captured at the TOP of each loop iteration, before the queue is drained and before any
+awaited read: a `push`/`publish` swaps in a fresh event and sets the old one, so an event read
+only at the wait (after the grant check and `events_after` have yielded) is already the fresh
+unset one, and a frame pushed in that gap would sit for the whole 2 s re-check. The relay is sent to
 EVERY other open connection, including the drawer's own other devices — the client, not the
 server, ignores a frame for a drawing it is itself drawing, matched by `drawingClientId`.
 A final `{...,"cancel":true}` withdraws a stroke; `cancel:true` skips colour/width/points

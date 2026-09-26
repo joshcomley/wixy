@@ -353,6 +353,34 @@ class TestLimits:
         now[0] = 60.5
         assert limiter.hit("a@example.com") is None
 
+    def test_idle_keys_are_swept_so_the_table_cannot_grow_without_bound(self) -> None:
+        """A key whose newest event has left the window is indistinguishable from one never
+        seen, so the table only needs the keys active within ONE window (audit F1: a caller
+        that invents a key per request used to leave one entry each, forever)."""
+        now = [0.0]
+        limiter = SlidingWindowRateLimiter(max_events=2, window_s=10.0, clock=lambda: now[0])
+        for n in range(1000):
+            assert limiter.hit(f"invented-{n}") is None
+        assert limiter.tracked_key_count == 1000
+        now[0] = 10.5
+        assert limiter.hit("fresh") is None
+        assert limiter.tracked_key_count == 1
+        # A swept key starts over exactly as a never-seen one does.
+        assert limiter.hit("invented-0") is None
+        assert limiter.hit("invented-0") is None
+        assert limiter.hit("invented-0") is not None
+
+    def test_a_sweep_never_forgets_a_key_still_inside_its_window(self) -> None:
+        now = [0.0]
+        limiter = SlidingWindowRateLimiter(max_events=1, window_s=10.0, clock=lambda: now[0])
+        assert limiter.hit("old") is None
+        now[0] = 6.0
+        assert limiter.hit("live") is None
+        now[0] = 10.5  # the sweep runs here: "old" (t=0) is idle, "live" (t=6) is not
+        retry_after = limiter.hit("live")
+        assert retry_after is not None and 0 < retry_after <= 5.5
+        assert limiter.hit("old") is None
+
     def test_a_refused_hit_is_not_recorded(self) -> None:
         now = [0.0]
         limiter = SlidingWindowRateLimiter(max_events=1, window_s=10.0, clock=lambda: now[0])

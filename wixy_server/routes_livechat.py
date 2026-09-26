@@ -12,6 +12,7 @@ PIN attempts against the owner.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -32,6 +33,8 @@ from wixy_server.livechat import janitor as livechat_janitor
 from wixy_server.livechat.drawing_broker import DrawingBroker, LiveDrawingQueue
 from wixy_server.livechat.drawings import (
     MAX_COLUMN_WIDTH,
+    MAX_LIVE_ANCHOR_SEQ,
+    MAX_LIVE_BATCH_INDEX,
     MAX_LIVE_BATCHES_PER_SECOND,
     MAX_LIVE_POINTS_PER_BATCH,
     MAX_POINT_X_PAD,
@@ -85,6 +88,7 @@ from wixy_server.livechat.store import (
 )
 from wixy_server.livechat.textcheck import has_unpaired_surrogate
 from wixy_server.livechat.tokens import (
+    SERVER_TOKEN_HEADER,
     MediaSigner,
     ServerAuth,
     mint_unlock_token,
@@ -1103,6 +1107,22 @@ _drawing_live_limiter = SlidingWindowRateLimiter(
 )
 
 
+def _live_relay_budget_key(request: Request, auth: ServerAuth) -> str:
+    """Whose 30-batches-a-second budget a live POST spends (spec 07 §4: "per device").
+
+    It is the AUTHENTICATED identity, never anything in the body: a token holder chooses every
+    body field, so a budget keyed by `drawingClientId` is reset by inventing a new id per
+    request, and its table then grows by one key per request (audit F1). A device-bound token
+    spends its grant's budget (re-unlocking with the grant cannot reset it); a PIN-unlocked token
+    spends its own, and a fresh one costs a PIN entry. Two people drawing at once are two
+    tokens, so neither throttles the other. The token is hashed so the table never keeps a
+    usable credential."""
+    if auth.grant_id is not None:
+        return f"grant:{auth.grant_id}"
+    token = request.headers.get(SERVER_TOKEN_HEADER, "")
+    return "token:" + hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 @router.post("/drawings/live", response_model=None)
 async def post_drawing_live(body: LiveDrawingIn, request: Request) -> JSONResponse:
     """Relays an in-progress stroke's latest points to every OTHER open stream, without
@@ -1110,12 +1130,12 @@ async def post_drawing_live(body: LiveDrawingIn, request: Request) -> JSONRespon
     content, so Inv 40/46 apply). `POST /drawings/live` requires the token like every
     other route, and revocation/lock behaviour is unchanged: the relay rides the same
     stream connections those already gate."""
-    await require_server_token(request)
+    auth = await require_server_token(request)
 
     limiter: SlidingWindowRateLimiter = getattr(
         request.app.state, "livechat_drawing_live_limiter", _drawing_live_limiter
     )
-    retry_after = limiter.hit(body.drawingClientId)
+    retry_after = limiter.hit(_live_relay_budget_key(request, auth))
     if retry_after is not None:
         seconds = max(1, math.ceil(retry_after))
         return JSONResponse(
@@ -1124,6 +1144,17 @@ async def post_drawing_live(body: LiveDrawingIn, request: Request) -> JSONRespon
             headers={"Retry-After": str(seconds)},
         )
 
+    # Every field below is copied verbatim into up to 64 queued frames per open stream, so each
+    # one is bounded like its create/append twin (audit F3): ids 8-64 characters, anchorSeq a
+    # real message seq, batch a sane counter.
+    if not (8 <= len(body.drawingClientId) <= 64):
+        return _invalid("drawingClientId must be 8-64 characters")
+    if not (8 <= len(body.strokeId) <= 64):
+        return _invalid("strokeId must be 8-64 characters")
+    if not (1 <= body.anchorSeq <= MAX_LIVE_ANCHOR_SEQ):
+        return _invalid("anchorSeq must be a message seq")
+    if not (0 <= body.batch <= MAX_LIVE_BATCH_INDEX):
+        return _invalid(f"batch must be 0-{MAX_LIVE_BATCH_INDEX}")
     if not (MIN_COLUMN_WIDTH <= body.columnWidth <= MAX_COLUMN_WIDTH):
         return _invalid(f"columnWidth must be {MIN_COLUMN_WIDTH:.0f}-{MAX_COLUMN_WIDTH:.0f}")
     if not body.cancel:
@@ -1196,6 +1227,14 @@ async def _stream_events(
     queue = live_queue if live_queue is not None else LiveDrawingQueue()
 
     while True:
+        # Capture BOTH wake-up events before draining the queue and before any awaited read below
+        # (audit F2). `queue.push` and `notifier.publish` each swap in a fresh event and set the
+        # old one, so an event read only at the wait, after the grant check and `events_after`
+        # have yielded to the loop, is already the fresh unset one: a frame pushed in that gap
+        # would sit in the queue for the whole 2 s timeout. Captured here, the old event is the
+        # one that gets set, and the wait below returns at once.
+        wake_events = (notifier.current_event, queue.event)
+
         for frame in queue.drain():
             yield _format_sse("drawing_live", frame)
 
@@ -1234,7 +1273,7 @@ async def _stream_events(
             # `live_queue`'s own event alongside it (spec 07 §4: "The stream loop waits
             # on the notifier OR its queue") means a live drawing frame is drained on
             # the very next tick rather than waiting out the rest of this timeout.
-            await wait_on_any([notifier.current_event, queue.event], timeout_s=_NOTIFIER_WAIT_S)
+            await wait_on_any(wake_events, timeout_s=_NOTIFIER_WAIT_S)
             continue
 
         # Forward progress first, regardless of what's emitted below — an event

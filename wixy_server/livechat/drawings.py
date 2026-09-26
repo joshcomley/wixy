@@ -39,6 +39,12 @@ MAX_STROKES_PER_DRAWING = 200
 MAX_DRAWINGS_PER_ANCHOR = 20
 MAX_LIVE_POINTS_PER_BATCH = 200
 MAX_LIVE_BATCHES_PER_SECOND = 30
+MAX_LIVE_BATCH_INDEX = 10_000_000
+"""A live frame's `batch` counts up from 0 within ONE stroke (~20 a second), so even a ten-hour
+stroke stays two orders of magnitude below this. It only exists so a frame relayed to every
+stream never carries an unbounded integer."""
+MAX_LIVE_ANCHOR_SEQ = 2**53 - 1
+"""A message `seq` is a SQLite rowid; this is the largest integer a JSON client can hold exactly."""
 
 _COLOR_SET = frozenset(DRAWING_COLORS)
 _WIDTH_SET = frozenset(DRAWING_WIDTHS)
