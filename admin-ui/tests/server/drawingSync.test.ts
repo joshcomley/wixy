@@ -382,11 +382,182 @@ describe("drawingSync: deleting", () => {
     h.sync.storeStroke(drawing, addStroke(drawing, "s2"));
     await flush();
     h.model.remove(drawing.key);
-    await expect(h.sync.deleteDrawing(drawing)).resolves.toBe("ok");
+    const outcome = h.sync.deleteDrawing(drawing);
     h.creates[0]!.reply.resolve({ kind: "ok", id: 41, rev: 1 });
     await flush();
     expect(h.deletes.map((d) => d.id)).toEqual([41]);
+    // A summary or fetch listing the new id meanwhile must not bring it back on this screen.
+    expect(h.model.isTombstoned(41)).toBe(true);
+    h.deletes[0]!.reply.resolve({ kind: "ok" });
+    await expect(outcome).resolves.toBe("ok");
     expect(h.appends).toHaveLength(0);
+  });
+
+  it("deleting a drawing whose create got no answer: only the create's own verdict can say whether it exists, so it is re-sent (same client id) until it answers, then deleted by that id", async () => {
+    const h = harness();
+    const drawing = own(h);
+    h.sync.storeStroke(drawing, addStroke(drawing, "s1"));
+    h.sync.storeStroke(drawing, addStroke(drawing, "s2"));
+    await flush();
+    // No verdict: the drawing may or may not exist on the server now.
+    h.creates[0]!.reply.resolve({ kind: "retry" });
+    await flush();
+    h.model.remove(drawing.key);
+    let settled: string | null = null;
+    const outcome = h.sync.deleteDrawing(drawing).then((value) => {
+      settled = value;
+      return value;
+    });
+    await flush();
+    expect(settled).toBeNull();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(h.creates).toHaveLength(2);
+    expect(h.creates[1]!.input.clientId).toBe("client-1");
+    expect(h.creates[1]!.input.stroke.strokeId).toBe("s1");
+    // Still no verdict: it keeps going, on the ordinary backoff.
+    h.creates[1]!.reply.reject(new TypeError("Failed to fetch"));
+    await flush();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(h.creates).toHaveLength(3);
+    h.creates[2]!.reply.resolve({ kind: "ok", id: 41, rev: 1 });
+    await flush();
+    expect(h.deletes.map((d) => d.id)).toEqual([41]);
+    expect(settled).toBeNull();
+    h.deletes[0]!.reply.resolve({ kind: "ok" });
+    await expect(outcome).resolves.toBe("ok");
+    expect(h.appends).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.creates).toHaveLength(3);
+  });
+
+  it("the same when the create that was out when the delete came answers with no verdict", async () => {
+    const h = harness();
+    const drawing = own(h);
+    h.sync.storeStroke(drawing, addStroke(drawing, "s1"));
+    await flush();
+    h.model.remove(drawing.key);
+    const outcome = h.sync.deleteDrawing(drawing);
+    h.creates[0]!.reply.resolve({ kind: "retry" });
+    await flush();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(h.creates).toHaveLength(2);
+    h.creates[1]!.reply.resolve({ kind: "ok", id: 41, rev: 1 });
+    await flush();
+    expect(h.deletes.map((d) => d.id)).toEqual([41]);
+    h.deletes[0]!.reply.resolve({ kind: "ok" });
+    await expect(outcome).resolves.toBe("ok");
+  });
+
+  it.each([
+    ["not_found", { kind: "not_found" }],
+    ["full", { kind: "full" }],
+    ["invalid", { kind: "invalid", status: 422 }],
+  ] as const)("a create carried on for a delete that answers %s made nothing: the delete is done, with nothing to send", async (_name, verdict) => {
+    const h = harness();
+    const drawing = own(h);
+    h.sync.storeStroke(drawing, addStroke(drawing, "s1"));
+    await flush();
+    h.model.remove(drawing.key);
+    const outcome = h.sync.deleteDrawing(drawing);
+    h.creates[0]!.reply.resolve(verdict);
+    await expect(outcome).resolves.toBe("ok");
+    expect(h.deletes).toHaveLength(0);
+    // Nothing is reported as lost: the owner asked for it to go.
+    expect(h.deps.onLost).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.creates).toHaveLength(1);
+  });
+
+  it("a create carried on for a delete waits through a lock and finishes with the next unlock's token", async () => {
+    const h = harness();
+    const drawing = own(h);
+    h.sync.storeStroke(drawing, addStroke(drawing, "s1"));
+    await flush();
+    h.creates[0]!.reply.resolve({ kind: "retry" });
+    await flush();
+    h.model.remove(drawing.key);
+    const outcome = h.sync.deleteDrawing(drawing);
+    h.sync.pause();
+    h.session = null;
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(h.creates).toHaveLength(1);
+    h.session = RENEWED;
+    h.sync.resume();
+    await flush();
+    expect(h.creates).toHaveLength(2);
+    expect(h.creates[1]!.session).toBe(RENEWED);
+    h.creates[1]!.reply.resolve({ kind: "ok", id: 41, rev: 1 });
+    await flush();
+    h.deletes[0]!.reply.resolve({ kind: "ok" });
+    await expect(outcome).resolves.toBe("ok");
+  });
+
+  it("a delete that fails after its create answered leaves the drawing with its id, ready to be put back", async () => {
+    const h = harness();
+    const drawing = own(h);
+    h.sync.storeStroke(drawing, addStroke(drawing, "s1"));
+    h.sync.storeStroke(drawing, addStroke(drawing, "s2"));
+    await flush();
+    h.model.remove(drawing.key);
+    const outcome = h.sync.deleteDrawing(drawing);
+    h.creates[0]!.reply.resolve({ kind: "ok", id: 41, rev: 1 });
+    await flush();
+    h.deletes[0]!.reply.resolve({ kind: "failed", status: 400 });
+    await expect(outcome).resolves.toBe("failed");
+    expect(drawing.id).toBe(41);
+    expect(drawing.strokes.map((s) => s.state)).toEqual(["stored", "pending"]);
+    // Put back (as the layer does), the id is live again and its held-back stroke is stored.
+    h.model.restore(drawing);
+    expect(h.model.isTombstoned(41)).toBe(false);
+    expect(h.model.byId(41)).toBe(drawing);
+    h.sync.storeStroke(drawing, drawing.strokes[1]!);
+    await flush();
+    expect(h.appends.map((a) => [a.id, a.stroke.strokeId])).toEqual([[41, "s2"]]);
+  });
+
+  it("a delete still waiting on its create is settled by a wipe, and by its message going; another message going leaves it alone", async () => {
+    const h = harness();
+    const onSeven = own(h, "client-7", 7);
+    const onEight = own(h, "client-8", 8);
+    h.sync.storeStroke(onSeven, addStroke(onSeven, "s7"));
+    h.sync.storeStroke(onEight, addStroke(onEight, "s8"));
+    await flush();
+    h.model.remove(onSeven.key);
+    h.model.remove(onEight.key);
+    const seven = h.sync.deleteDrawing(onSeven);
+    const eight = h.sync.deleteDrawing(onEight);
+    h.sync.forgetAnchor(8);
+    await expect(eight).resolves.toBe("ok");
+    h.creates[0]!.reply.resolve({ kind: "retry" });
+    await flush();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(h.creates.map((c) => c.input.clientId)).toEqual(["client-7", "client-8", "client-7"]);
+    h.sync.clear();
+    await expect(seven).resolves.toBe("ok");
+  });
+
+  it("deleting an own drawing with an id holds back its unsent strokes; an append still out is harmless", async () => {
+    const h = harness();
+    const drawing = own(h);
+    h.sync.storeStroke(drawing, addStroke(drawing, "s1"));
+    await flush();
+    h.creates[0]!.reply.resolve({ kind: "ok", id: 41, rev: 1 });
+    await flush();
+    h.sync.storeStroke(drawing, addStroke(drawing, "s2"));
+    h.sync.storeStroke(drawing, addStroke(drawing, "s3"));
+    await flush();
+    expect(h.appends.map((a) => a.stroke.strokeId)).toEqual(["s2"]);
+    h.model.remove(drawing.key);
+    h.model.tombstone(41);
+    const outcome = h.sync.deleteDrawing(drawing);
+    await flush();
+    expect(h.deletes.map((d) => d.id)).toEqual([41]);
+    h.appends[0]!.reply.resolve({ kind: "not_found" });
+    h.deletes[0]!.reply.resolve({ kind: "ok" });
+    await expect(outcome).resolves.toBe("ok");
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.appends.map((a) => a.stroke.strokeId)).toEqual(["s2"]);
+    expect(h.deps.onLost).not.toHaveBeenCalled();
   });
 
   it("deleting a drawing nothing was ever sent for just drops its queue", async () => {

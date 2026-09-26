@@ -12,8 +12,8 @@
 // layer sits inside `.wx-srv-thread-content` (the wrapper around the message list), so the whole
 // layer moves with the list and only the list's own layout can move a drawing relative to it.
 // Drawings are `pointer-events: none` at all times: Select mode hit-tests them geometrically from
-// a click on the thread instead (§5's 12 px rule), so a drawing can never block scrolling, a tap
-// on a message, the ⋯ menu, or any of the lock gestures.
+// a tap on the thread instead (Pointer Events, §5's 12 px rule), so a drawing can never block
+// scrolling, a tap on a message, the ⋯ menu, or any of the lock gestures.
 //
 // Lifecycle: a lock (`detach`) turns the pen off — cancelling a stroke in progress with a live
 // `cancel` sent at once, before the token is let go — removes the Draw surface, drops every live
@@ -1172,9 +1172,11 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
     removeDrawingView(key);
     const outcome = await sync.deleteDrawing(drawing);
     if (outcome === "ok" || torndown) return;
-    // Not confirmed: it is still there for everyone, so it comes back here too — from the
-    // server's own answer, which also covers strokes stored meanwhile.
+    // Not confirmed: it is still there for everyone, so it comes back here too, whole — the
+    // strokes the delete held back are stored after all — and the server's own answer covers
+    // anything stored meanwhile.
     model.restore(drawing);
+    for (const stroke of drawing.strokes) if (stroke.state === "pending") sync.storeStroke(drawing, stroke);
     renderDrawing(key);
     sync.refetch(drawing.anchorSeq);
     if (outcome === "failed") setStatus("Couldn't delete the drawing. Try again.");

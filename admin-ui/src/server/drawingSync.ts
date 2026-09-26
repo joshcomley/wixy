@@ -11,6 +11,14 @@
 // the server refused the payload). A lock pauses the queue — timers cleared, nothing new sent
 // with a token the client has let go of — and the next unlock resumes it with the fresh one.
 //
+// Deleting: a drawing with an id is deleted by it, and its unsent strokes are never sent (an
+// append already out is harmless: it lands before the delete, which takes it too, or after it,
+// and is refused). A drawing deleted before its create has answered is the hard case: that
+// create may or may not exist on the server, and only its own verdict can say. So the create
+// alone is carried on — re-sent with the same `clientId` on the ordinary backoff, through locks
+// — until it answers; then the drawing is deleted by the id it gives. A create refused outright
+// made nothing, and there is nothing left to delete.
+//
 // Fetching: a summary that says something new schedules one `GET /messages/{seq}/drawings`
 // after a short pause (`FETCH_DEBOUNCE_MS`), re-checked when it fires — usually this client's
 // own create answer has arrived by then and there is nothing left to fetch. At most one fetch
@@ -75,8 +83,11 @@ export interface DrawingSync {
   observe(seq: number, summaries: readonly DrawingSummary[]): void;
   /** Fetch `seq`'s drawings even if the summary looks settled (after a failed delete). */
   refetch(seq: number): void;
-  /** Delete a drawing for everyone (the caller has already taken it off the screen). Drops the
-   * drawing's unsent strokes; a create still in flight is deleted as soon as it answers. */
+  /** Delete a drawing for everyone (the caller has already taken it out of the model and off the
+   * screen). Its unsent strokes are not sent. Settles once the server has answered for good: for
+   * a drawing whose create has not answered yet, only after that create does (see the header).
+   * On "failed" or "locked" the drawing still exists: the caller puts it back and re-queues its
+   * strokes that are not stored. */
   deleteDrawing(drawing: ModelDrawing): Promise<DeleteOutcome>;
   /** Stop storing and fetching anything for `drawing` (its message went away). */
   forgetDrawing(key: string): void;
@@ -96,13 +107,19 @@ const DELETE_RETRY_DELAYS_MS = [1_000, 2_000, 4_000] as const;
 export const FETCH_DEBOUNCE_MS = 60;
 const MAX_CONCURRENT_FETCHES = 4;
 
+/** A delete waiting for its drawing's create to answer (see the header). The drawing is no longer
+ * in the model, so the queue holds it. */
+interface PendingDelete {
+  readonly drawing: ModelDrawing;
+  readonly settle: (outcome: DeleteOutcome) => void;
+}
+
 interface StoreQueue {
   readonly strokeIds: string[];
   running: boolean;
   attempts: number;
   timer: number | null;
-  /** The drawing was deleted while its create was in flight: delete it once that answers. */
-  deleteAfterCreate: boolean;
+  deleting: PendingDelete | null;
 }
 
 interface FetchState {
@@ -136,7 +153,7 @@ export function createDrawingSync(deps: DrawingSyncDeps): DrawingSync {
   function queueFor(key: string): StoreQueue {
     let queue = queues.get(key);
     if (queue === undefined) {
-      queue = { strokeIds: [], running: false, attempts: 0, timer: null, deleteAfterCreate: false };
+      queue = { strokeIds: [], running: false, attempts: 0, timer: null, deleting: null };
       queues.set(key, queue);
     }
     return queue;
@@ -170,7 +187,7 @@ export function createDrawingSync(deps: DrawingSyncDeps): DrawingSync {
   }
 
   async function runHead(key: string, queue: StoreQueue): Promise<void> {
-    const drawing = model.get(key);
+    const drawing = queue.deleting?.drawing ?? model.get(key);
     const strokeId = queue.strokeIds[0];
     const session = deps.session();
     if (drawing === undefined || strokeId === undefined) {
@@ -228,10 +245,20 @@ export function createDrawingSync(deps: DrawingSyncDeps): DrawingSync {
     queue.running = false;
     if (startGeneration !== generation) return;
 
-    if (queue.deleteAfterCreate) {
-      // Deleted while this write was out: whatever it made (or added to) must go too.
+    const pendingDelete = queue.deleting;
+    if (pendingDelete !== null) {
+      // The create was carried on only to learn whether the drawing exists (see the header).
+      if (kind === "retry") {
+        scheduleRetry(key, queue);
+        return;
+      }
       dropQueue(key);
-      if (writtenId !== null) void deleteWithRetries(session, writtenId);
+      if (writtenId === null) {
+        // Refused outright: nothing was made, so nothing is left to delete.
+        pendingDelete.settle("ok");
+        return;
+      }
+      void deleteCreated(pendingDelete, writtenId, rev, strokeId);
       return;
     }
 
@@ -326,24 +353,65 @@ export function createDrawingSync(deps: DrawingSyncDeps): DrawingSync {
     }
   }
 
-  async function deleteDrawing(drawing: ModelDrawing): Promise<DeleteOutcome> {
-    const queue = queues.get(drawing.key);
-    if (queue !== undefined) {
-      if (queue.running) {
-        // A write for it is out right now; whatever it creates or appends is deleted when it
-        // answers (`runHead`). Unsent strokes are simply never sent.
-        queue.deleteAfterCreate = true;
-        queue.strokeIds.splice(1);
-      } else {
-        dropQueue(drawing.key);
-      }
-    }
-    if (drawing.id === null) return "ok";
+  async function deleteById(drawingId: number): Promise<DeleteOutcome> {
     const session = deps.session();
-    if (session === null) return "failed";
-    const outcome = await deleteWithRetries(session, drawing.id);
+    if (session === null) return "locked";
+    const outcome = await deleteWithRetries(session, drawingId);
     if (outcome === "locked") deps.onLocked();
     return outcome;
+  }
+
+  /** The create a pending delete was waiting on answered with `id`: the drawing exists, so it is
+   * deleted by that id. The drawing learns the id first, so a failed delete can put it back whole. */
+  async function deleteCreated(pending: PendingDelete, id: number, rev: number, strokeId: string): Promise<void> {
+    const { drawing } = pending;
+    drawing.id = id;
+    drawing.rev = Math.max(drawing.rev, rev);
+    drawing.knownAtEpoch = model.nextEpoch();
+    const stroke = drawing.strokes.find((candidate) => candidate.strokeId === strokeId);
+    if (stroke !== undefined) stroke.state = "stored";
+    // A summary or a fetch listing the new id must not show it again here; one that already did
+    // (a fetch answered before this create did) is taken back down.
+    model.tombstone(id);
+    const shown = model.byId(id);
+    if (shown !== undefined) {
+      model.remove(shown.key);
+      deps.onApplied({ changed: [], removed: [shown], storedStrokeIds: [] });
+    }
+    pending.settle(await deleteById(id));
+  }
+
+  function deleteDrawing(drawing: ModelDrawing): Promise<DeleteOutcome> {
+    const queue = queues.get(drawing.key);
+    if (drawing.id === null) {
+      const head = queue?.strokeIds[0];
+      const createSent = queue !== undefined
+        && (queue.running || drawing.strokes.some((stroke) => stroke.strokeId === head && stroke.sent));
+      if (queue === undefined || !createSent) {
+        // Nothing for it ever left this client: it exists nowhere else.
+        dropQueue(drawing.key);
+        return Promise.resolve("ok");
+      }
+      // Its create may exist on the server: carry that create on (alone) until it answers.
+      queue.strokeIds.splice(1);
+      return new Promise<DeleteOutcome>((settle) => {
+        queue.deleting = { drawing, settle };
+        kick(drawing.key);
+      });
+    }
+    dropQueue(drawing.key);
+    return deleteById(drawing.id);
+  }
+
+  /** Settles every delete still waiting on a create that will now never be carried on: the wipe
+   * or the message's own deletion took the drawing with it. */
+  function settlePendingDeletes(which: (pending: PendingDelete) => boolean): void {
+    for (const [key, queue] of Array.from(queues)) {
+      const pending = queue.deleting;
+      if (pending === null || !which(pending)) continue;
+      dropQueue(key);
+      pending.settle("ok");
+    }
   }
 
   // -- Fetching ----------------------------------------------------------------------------
@@ -459,7 +527,10 @@ export function createDrawingSync(deps: DrawingSyncDeps): DrawingSync {
       latestSummaries.delete(seq);
       const index = waitingFetches.indexOf(seq);
       if (index !== -1) waitingFetches.splice(index, 1);
-      for (const [key] of queues) {
+      // The message's deletion took its drawings with it, including one still being deleted.
+      settlePendingDeletes((pending) => pending.drawing.anchorSeq === seq);
+      for (const [key, queue] of Array.from(queues)) {
+        if (queue.deleting !== null) continue;
         const drawing = model.get(key);
         if (drawing === undefined || drawing.anchorSeq === seq) dropQueue(key);
       }
@@ -479,6 +550,7 @@ export function createDrawingSync(deps: DrawingSyncDeps): DrawingSync {
     },
     clear(): void {
       generation += 1;
+      settlePendingDeletes(() => true);
       for (const key of Array.from(queues.keys())) dropQueue(key);
       clearFetchTimers();
       fetches.clear();
@@ -488,6 +560,7 @@ export function createDrawingSync(deps: DrawingSyncDeps): DrawingSync {
     teardown(): void {
       paused = true;
       generation += 1;
+      settlePendingDeletes(() => true);
       for (const key of Array.from(queues.keys())) dropQueue(key);
       clearFetchTimers();
       fetches.clear();

@@ -943,6 +943,50 @@ describe("drawingLayer: Select mode (§5)", () => {
     s.layer.detach();
   });
 
+  it("a failed delete of my own drawing brings it back whole: the stroke the delete held back is stored after all", async () => {
+    const s = setup();
+    s.addBubble(2, 300);
+    s.layer.attach(SESSION);
+    s.layer.penButton.click();
+    drawMouseStroke(s, [[40, 320], [60, 330]]);
+    await flush();
+    expect(s.api.createDrawing).toHaveBeenCalledTimes(1); // stored as drawing 41
+    // The second stroke's append hangs, so the third waits behind it, never sent.
+    let answerSecond!: (result: AppendStrokeResult) => void;
+    s.api.appendStroke.mockImplementationOnce(() => new Promise<AppendStrokeResult>((resolve) => {
+      answerSecond = resolve;
+    }));
+    drawMouseStroke(s, [[40, 340], [60, 350]], 2);
+    await flush();
+    drawMouseStroke(s, [[40, 360], [60, 370]], 3);
+    await flush();
+    expect(s.api.appendStroke).toHaveBeenCalledTimes(1);
+    const strokeIdOf = (call: unknown[]): string => (call[2] as { strokeId: string }).strokeId;
+    const [second, third] = Array.from(s.svgs()[0]!.querySelectorAll("path")).slice(1).map((path) => path.dataset["strokeId"]!);
+
+    s.toolbarButton('.wx-srv-pen-mode[data-mode="select"]').click();
+    tap(s.deps.anchorElement(2)!, 60, 330);
+    s.api.deleteDrawing.mockResolvedValueOnce({ kind: "failed", status: 400 });
+    s.toolbarButton(".wx-srv-pen-delete").click();
+    s.toolbarButton(".wx-srv-pen-confirm-delete").click();
+    expect(s.svgs()).toHaveLength(0);
+    await flush();
+    expect(s.api.deleteDrawing).toHaveBeenCalledWith(SESSION, 41);
+
+    // Back, with all three strokes, and the held-back third is stored after the second.
+    expect(s.svgs()).toHaveLength(1);
+    expect(s.svgs()[0]!.querySelectorAll("path")).toHaveLength(3);
+    expect(s.layer.toolbar.querySelector(".wx-srv-pen-status")?.textContent).toMatch(/couldn't delete/i);
+    answerSecond({ kind: "ok", rev: 2 });
+    await flush();
+    await vi.advanceTimersByTimeAsync(100);
+    await flush();
+    const appended = s.api.appendStroke.mock.calls.map(strokeIdOf);
+    expect(appended).toContain(third);
+    expect(appended.indexOf(second!)).toBeLessThan(appended.lastIndexOf(third!));
+    s.layer.detach();
+  });
+
   it("'Next drawing' selects drawings from the keyboard, top to bottom, wrapping", async () => {
     const s = await withStoredDrawing();
     s.toolbarButton(".wx-srv-pen-next").click();
