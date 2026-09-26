@@ -1155,19 +1155,52 @@ Consequences:
 - **Backstop janitor:** Supervised loop running at least every 30 s erases claimed view-once messages older than 600 s.
 
 ### Client: sending
-- The view-once control is NOT a separate composer button — it appears as a small "①" badge in
-  the corner of an already-staged photo/video chip (`thread.ts`'s `renderChipPreview`), opening a
-  picker (2 s / 5 s / 30 s / no limit, plus a Spotlight switch for photos). Tapping it lights the
-  badge and shows the chosen duration on it (e.g. "① 5s").
-- A persistent caption (`.wx-srv-view-once-hint`, "Tap ① on a photo or video below to send it as
-  disappearing") appears the moment any staged file is a photo or video and disappears once none
-  remain — added after an operator report that the bare glyph was undiscoverable with no prior
-  cue. It is driven by `ChatComposerOptions.onChipsRendered`, a generic hook (fires on every chip
-  re-render, including the last chip's removal) any composer caller can use without reaching into
-  the shared component's internal DOM.
-- Only ONE chip may be flagged view-once at a time (flagging a second clears the first); a hard
-  guard in `sendViewOnceDraft` refuses to send if a flagged chip would otherwise go out as an
-  ordinary, fully visible attachment.
+- **Redesigned twice on operator report (round 2), then ratified with conditions.** Attempt 1 was
+  a small "①" badge in the corner of a staged photo/video chip, with its picker appended INSIDE
+  that 56px chip — a box with `overflow: hidden` — so the picker rendered completely invisible on
+  every tap, on every device (not merely small: genuinely clipped to zero visible area). Attempt 2
+  (a composer-bar button + `position: fixed` sheet) fixed the clipping but always retargeted to
+  the most-recently-staged file, clearing the previous flag automatically. The Architect's
+  ratification (`spec/server-chat/06-view-once-media.md` §3.1, amended; decisions/00169) kept
+  attempt 2's button/sheet but REVERSED its targeting rule to sticky, and added the conditions
+  below.
+- **Current design:** a full-size, clearly labelled button (`.wx-srv-view-once-toggle-button`,
+  "⏱ View once") in the composer's button row, next to 🎤/📎. It is ALWAYS rendered (never
+  `hidden`, so its position never jumps) and `disabled` whenever nothing staged is a photo or
+  video. It carries `data-srv-gesture-boundary` (it opens a new surface, the sheet, under the
+  finger).
+- **Sticky target (ratification condition #3):** once a file is flagged, that flag STAYS on that
+  exact file. Staging a further file never moves it. Only removing the specifically-flagged file
+  clears it — the button then falls back to the most recently staged eligible file, unflagged.
+  Before anything is flagged, the button targets the most recently staged eligible file by
+  default (so it always has SOME target to open the sheet against).
+- **The sheet shows the one file it targets** (condition #1): a thumbnail (reusing the same
+  preview URL the chip itself renders from) and the file name, so there is no doubt which staged
+  attachment it applies to when several are staged. Duration choices (2 s / 5 s / 30 s / no
+  limit) plus a Spotlight switch for photos; a separate "Send normally" button clears the flag
+  (condition #4, only shown once something is flagged).
+- **The chip carries its own status marker** (condition #4): a small, non-interactive "⏱ 5s"-style
+  label drawn INSIDE the 56px chip's own box (a status badge, not a popup — no clipping concern
+  for something that fits within the box it lives in).
+- **Escape stays the panic lock** (condition #6): the sheet has no Escape handler of its own, so
+  the keypress bubbles to the document-level panic-lock listener unimpeded; the sheet's own close
+  affordances are its ✕, "Send normally"/a duration pick, or a tap on its backdrop.
+- Driven by `ChatComposerOptions.onChipsRendered`, a generic hook (fires on every chip re-render,
+  including the last chip's removal, with the FULL currently-staged file list) any composer
+  caller can use without reaching into the shared component's internal DOM. A transition to a
+  FULLY EMPTY staged list always disables the button (nothing to apply it to) but must NOT touch
+  the sticky flag itself — `takeServerDraft()` (the send path) clears the live composer as an
+  implementation detail of lifting the draft, which re-renders chips with none staged, and
+  `sendViewOnceDraft` is about to read that exact File's flag moments later. Only a file
+  specifically absent from an otherwise NON-EMPTY staged list is treated as a real removal.
+- A hard guard in `sendViewOnceDraft` additionally refuses to send if more than one staged file
+  is flagged — defense in depth (the sticky, single-target UI design already makes this
+  unreachable through normal use, but `fileViewOnceSettings` is exposed to callers/tests).
+- **Real-click e2e coverage** (condition #7): `e2e/tests/server-view-once.spec.ts` clicks the
+  actual button and sheet at desktop, 360px and 390px viewports, asserting both a genuine
+  bounding box AND that `document.elementFromPoint` at its centre resolves to the control itself
+  — the stronger check a plain `toBeVisible()` cannot give (an invisible overlay stacked above a
+  control at a higher z-index still passes `toBeVisible()` while silently eating the click).
 
 ### Client: viewer and spotlight reveal
 - Fullscreen overlay (`viewOnceViewer.ts`):

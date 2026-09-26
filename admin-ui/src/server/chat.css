@@ -774,6 +774,36 @@ button.wx-srv-quote:focus-visible {
   text-align: center;
 }
 
+/* The wrapper `renderChipPreview` returns for every staged chip (thread.ts), so a small
+   view-once status marker can be drawn INSIDE the 56px chip's own box (decisions/00169,
+   Architect ratification condition #4) alongside the thumb/label it already held. */
+.wx-srv-attachment-chip-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.wx-srv-view-once-chip-marker {
+  position: absolute;
+  left: 2px;
+  bottom: 2px;
+  max-width: calc(100% - 4px);
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 0.625rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+.wx-srv-view-once-chip-marker[hidden] {
+  display: none;
+}
+
 .wx-srv-video {
   max-width: 260px;
   border-radius: var(--wx-radius);
@@ -1222,81 +1252,169 @@ button.wx-srv-quote:focus-visible {
   cursor: default;
 }
 
-/* -- View Once (spec/server-chat/06-view-once-media.md) -------------------- */
+/* -- View Once (spec/server-chat/06-view-once-media.md) --------------------
+   Operator report (round 2): the original control was a ~20px badge in the corner of a 56px
+   thumbnail, whose picker was clipped invisible by that thumbnail's own `overflow: hidden` — it
+   silently did nothing on every tap, on every device. Replaced with a full-size composer-bar
+   button and a bottom sheet fixed to the viewport (never clippable by any ancestor). */
 
-.wx-srv-chip-content {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.wx-srv-view-once-chip-btn {
-  position: absolute;
-  bottom: 2px;
-  right: 2px;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 4px;
-  border-radius: 10px;
+.wx-srv-view-once-toggle-button {
+  flex: none;
+  box-sizing: border-box;
+  min-height: var(--wx-srv-control-h);
+  padding: 0 14px;
   border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
   background: var(--wx-surface);
   color: var(--wx-ink);
-  font: 600 0.6875rem/1 system-ui, sans-serif;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  font: 600 0.8125rem/1 system-ui, sans-serif;
+  white-space: nowrap;
   cursor: pointer;
-  z-index: 2;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
-.wx-srv-view-once-chip-btn.wx-srv-view-once-chip-active {
+.wx-srv-view-once-toggle-button.wx-srv-view-once-toggle-active {
   background: var(--wx-brand-blue);
   color: #fff;
   border-color: var(--wx-brand-blue);
 }
 
-.wx-srv-view-once-picker {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 0;
-  z-index: 10;
+.wx-srv-view-once-toggle-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Narrow phones (360px is tested): the input row already holds attach, mic, the text box and
+   Send, and a third control there steals ~40px from the text box (it fell under the 120px floor
+   `server-media.spec.ts` protects) and was squeezed until its label clipped. So on a phone the
+   button takes its own full-width line above the row while a photo/video is staged, and is not
+   rendered at all while disabled (nothing to apply it to, and no spare room to show it greyed).
+   Wider screens keep it in the row, always visible, greyed out when nothing is staged. */
+@media (max-width: 480px) {
+  .wx-srv-thread-view .wx-chatc-input-row {
+    flex-wrap: wrap;
+  }
+
+  .wx-srv-view-once-toggle-button {
+    order: -1;
+    flex: 1 0 100%;
+  }
+
+  .wx-srv-view-once-toggle-button:disabled {
+    display: none;
+  }
+}
+
+.wx-srv-view-once-sheet-thumb {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--wx-radius);
+  overflow: hidden;
+  background: var(--wx-canvas);
+}
+
+.wx-srv-view-once-sheet-thumb img,
+.wx-srv-view-once-sheet-thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.wx-srv-view-once-sheet-titlewrap {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wx-srv-view-once-sheet-filename {
+  font-size: 0.75rem;
+  color: var(--wx-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wx-srv-view-once-send-normally {
+  min-height: 44px;
+  padding: 8px 10px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-canvas);
+  color: var(--wx-ink);
+  font: 600 0.875rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.wx-srv-view-once-send-normally[hidden] {
+  display: none;
+}
+
+.wx-srv-view-once-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.wx-srv-view-once-sheet {
+  width: 100%;
+  max-width: 480px;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: var(--wx-radius);
+  gap: 14px;
+  padding: 20px 20px calc(20px + env(safe-area-inset-bottom, 0px));
+  border-radius: var(--wx-radius) var(--wx-radius) 0 0;
   background: var(--wx-surface);
-  border: 1px solid var(--wx-border);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-  font: 0.8125rem/1.3 system-ui, sans-serif;
   color: var(--wx-ink);
-  width: 220px;
+  font: 0.875rem/1.3 system-ui, sans-serif;
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.2);
+}
+
+.wx-srv-view-once-sheet-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wx-srv-view-once-sheet-close {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: var(--wx-canvas);
+  color: var(--wx-ink);
+  font-size: 1rem;
+  cursor: pointer;
 }
 
 .wx-srv-view-once-picker-title {
-  font-weight: 600;
-  font-size: 0.8125rem;
+  font-weight: 700;
+  font-size: 1.0625rem;
 }
 
 .wx-srv-view-once-durations {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 8px;
 }
 
 .wx-srv-view-once-dur-btn {
-  flex: 1 1 calc(50% - 4px);
-  min-height: 28px;
-  padding: 4px 6px;
-  border-radius: calc(var(--wx-radius) / 2);
+  flex: 1 1 calc(50% - 8px);
+  min-height: 48px;
+  padding: 8px 10px;
+  border-radius: var(--wx-radius);
   border: 1px solid var(--wx-border);
   background: var(--wx-canvas);
   color: var(--wx-ink);
-  font: 0.75rem/1 system-ui, sans-serif;
+  font: 600 0.9375rem/1 system-ui, sans-serif;
   cursor: pointer;
 }
 
@@ -1304,33 +1422,27 @@ button.wx-srv-quote:focus-visible {
   background: var(--wx-brand-blue-tint);
   border-color: var(--wx-brand-blue);
   color: var(--wx-brand-blue-text);
-  font-weight: 600;
 }
 
 .wx-srv-view-once-spotlight-label {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   cursor: pointer;
   user-select: none;
-  font-size: 0.8125rem;
+  font-size: 0.9375rem;
+  min-height: 44px;
+}
+
+.wx-srv-view-once-spotlight-label input {
+  width: 20px;
+  height: 20px;
 }
 
 .wx-srv-view-once-note {
-  font-size: 0.6875rem;
+  font-size: 0.8125rem;
   line-height: 1.3;
   color: var(--wx-muted);
-}
-
-.wx-srv-view-once-hint {
-  margin: 4px 0 0;
-  font-size: 0.75rem;
-  line-height: 1.3;
-  color: var(--wx-muted);
-}
-
-.wx-srv-view-once-hint[hidden] {
-  display: none;
 }
 
 .wx-srv-view-once-sender-card {
