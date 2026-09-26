@@ -7,6 +7,26 @@
 
 const SERVER_PATH = "/admin/server";
 
+// Inv 45: the text stays generic (never real message content — the whole point of the disguise)
+// but is no longer a single fixed string. Live round-2 testing found Chrome's on-device spam/
+// low-quality-notification detector flags a site that repeatedly sends byte-identical
+// notifications, degrading the display to a generic "Notification from <site>" placeholder — the
+// exact same risk Inv 45's "Chrome can throttle/revoke this origin's notification permission over
+// time" already warns about, now confirmed to also apply to ordinary sustained use, not just
+// testing. Rotating among a handful of equally uninformative phrases avoids the exact-repeat
+// pattern without revealing anything a single fixed phrase didn't already reveal.
+export const NOTIFICATION_BODIES: readonly string[] = [
+  "New activity",
+  "New activity on the site",
+  "There's new activity",
+  "You have new activity",
+  "New site activity",
+];
+
+function pickNotificationBody(): string {
+  return NOTIFICATION_BODIES[Math.floor(Math.random() * NOTIFICATION_BODIES.length)]!;
+}
+
 function isFocusedServerClient(client: Client): client is WindowClient {
   if (client.type !== "window") return false;
   const windowClient = client as WindowClient;
@@ -33,7 +53,7 @@ export async function handlePush(target: ServiceWorkerGlobalScope): Promise<void
   }
   const isFocused = clients.some(isFocusedServerClient);
   const options: NotificationOptions & { renotify: boolean; silent?: boolean } = {
-    body: "New activity",
+    body: pickNotificationBody(),
     tag: "wixy-server",
     renotify: !isFocused,
     ...(isFocused ? { silent: true } : {}),
