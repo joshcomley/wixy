@@ -19,19 +19,39 @@ function targetWith(clients: unknown[]): FakeTarget {
 }
 
 describe("Server service worker", () => {
-  it("shows only the fixed generic notification when the chat is not focused", async () => {
+  it("shows one of a small set of generic notification bodies when the chat is not focused", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
     const target = targetWith([
       { type: "window", url: "https://example.test/admin/pages", focused: true, visibilityState: "visible" },
     ]);
-    const { handlePush } = await import("../src/sw/serverSw");
+    const { handlePush, NOTIFICATION_BODIES } = await import("../src/sw/serverSw");
 
     await handlePush(target as unknown as ServiceWorkerGlobalScope);
 
     expect(target.registration.showNotification).toHaveBeenCalledWith("Server", {
-      body: "New activity",
+      body: NOTIFICATION_BODIES[0],
       tag: "wixy-server",
       renotify: true,
     });
+    vi.restoreAllMocks();
+  });
+
+  it("varies the notification body across calls, so repeated identical pushes (real or test) don't trip Chrome's low-quality/spam-notification detector (operator report, round 2)", async () => {
+    const { handlePush, NOTIFICATION_BODIES } = await import("../src/sw/serverSw");
+    const seenBodies = new Set<string>();
+
+    for (let i = 0; i < 50; i++) {
+      const target = targetWith([]);
+      // eslint-disable-next-line no-await-in-loop
+      await handlePush(target as unknown as ServiceWorkerGlobalScope);
+      const call = target.registration.showNotification.mock.calls[0]?.[1] as { body: string } | undefined;
+      if (call) seenBodies.add(call.body);
+    }
+
+    expect(seenBodies.size).toBeGreaterThan(1);
+    for (const body of seenBodies) {
+      expect(NOTIFICATION_BODIES).toContain(body);
+    }
   });
 
   it("broadcasts push-shown to clients and BroadcastChannel after showNotification resolves", async () => {
@@ -58,36 +78,40 @@ describe("Server service worker", () => {
   });
 
   it("notifies silently while a visible focused Server page is open to satisfy userVisibleOnly", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
     const target = targetWith([
       { type: "window", url: "https://example.test/admin/server/thread", focused: true, visibilityState: "visible" },
     ]);
-    const { handlePush } = await import("../src/sw/serverSw");
+    const { handlePush, NOTIFICATION_BODIES } = await import("../src/sw/serverSw");
 
     await handlePush(target as unknown as ServiceWorkerGlobalScope);
 
     expect(target.registration.showNotification).toHaveBeenCalledWith("Server", {
-      body: "New activity",
+      body: NOTIFICATION_BODIES[0],
       tag: "wixy-server",
       renotify: false,
       silent: true,
     });
+    vi.restoreAllMocks();
   });
 
   it("still shows the generic notification when clients.matchAll fails (Inv 45's userVisibleOnly guarantee must hold even on an unexpected error)", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
     const showNotification = vi.fn(async () => undefined);
     const target = {
       clients: { matchAll: vi.fn(async () => { throw new Error("boom"); }), openWindow: vi.fn(async () => null) },
       registration: { showNotification },
     };
-    const { handlePush } = await import("../src/sw/serverSw");
+    const { handlePush, NOTIFICATION_BODIES } = await import("../src/sw/serverSw");
 
     await handlePush(target as unknown as ServiceWorkerGlobalScope);
 
     expect(showNotification).toHaveBeenCalledWith("Server", {
-      body: "New activity",
+      body: NOTIFICATION_BODIES[0],
       tag: "wixy-server",
       renotify: true,
     });
+    vi.restoreAllMocks();
   });
 
   it("focuses an existing admin window and navigates it to Server", async () => {

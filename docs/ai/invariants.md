@@ -715,7 +715,13 @@ the `sizeBytes` bound).
 
 ### Inv 45 — Server-chat service worker cannot intercept fetches
 The worker has no `fetch` handler and policy permits registration only after explicit Android
-push opt-in. Pushes are payloadless and the notification text is fixed and generic.
+push opt-in. Pushes are payloadless and the notification text is always one of a small, fixed
+set of generic phrases (`serverSw.ts`'s `NOTIFICATION_BODIES`) — never real message content.
+Live round-2 testing found that a single unchanging phrase, repeated for every push, triggers
+Chrome's on-device spam/low-quality-notification detector: it degrades the display to a generic
+"Notification from `<site>`" placeholder, hiding even the payload-free "Server" title. Rotating
+among several equally uninformative phrases avoids the exact-repeat pattern without revealing
+anything a single fixed phrase didn't already reveal.
 
 The opt-in is reachable: each time the settings sheet opens, `settingsSheet.ts` mounts the
 `pushToggle.ts` control into its push slot, but only on an Android-capable browser (Android

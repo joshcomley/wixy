@@ -378,7 +378,9 @@ four. A 201 records success; 404/410 deletes the subscription; other failures ar
 counted and the subscription is deleted after ten consecutive failures.
 
 The service worker is served at `/admin/server-sw.js` before the admin SPA catch-all.
-It emits only the generic `Server` / `New activity` notification, issues it silently for
+It emits only the generic `Server` title, with a body chosen at random from a small fixed set of
+equally generic phrases (`NOTIFICATION_BODIES` — Inv 45; rotating avoids Chrome flagging a
+site that repeats byte-identical notifications as spam, degrading the display), issues it silently for
 a visible focused Server page to satisfy the browser's `userVisibleOnly` push contract
 without disrupting the user, and routes notification clicks to `/admin/server`. It has
 no fetch handler. Upon showing the notification, `handlePush` notifies active clients via
