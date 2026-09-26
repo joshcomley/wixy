@@ -2,9 +2,11 @@
 // Verifies two identities, desktop and mobile viewports, automatic disappearance after display,
 // recipient vs sender cards, 409 already-opened race, and spotlight slider interaction.
 
-import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
+import { fileURLToPath } from "node:url";
 
 const MULTI_TAP_INTERVAL_MS = 400;
+const PHOTO = fileURLToPath(new URL("../fixtures/livechat-photo-gps.jpg", import.meta.url));
 
 async function unlockServer(page: Page, name: string): Promise<void> {
   const configResponse = await page.request.post("/test/server/config");
@@ -297,5 +299,128 @@ test.describe("server-view-once.spec.ts (spec/06-view-once-media)", () => {
 
     await contextAlice.close();
     await contextBobMobile.close();
+  });
+
+  // Architect ratification condition #7 (decisions/00169): jsdom cannot see CSS clipping, so a
+  // real-click e2e must assert both a genuine bounding box AND that `elementFromPoint` at that
+  // box's centre resolves to the control itself — the stronger check `toBeVisible()` alone can
+  // miss (a fully see-through overlay stacked above it with a higher z-index would still pass
+  // `toBeVisible()` while silently eating the real click).
+  async function assertRealClickTarget(
+    page: Page,
+    locator: Locator,
+    matchSelector: string,
+    viewportWidth: number,
+    viewportHeight: number,
+  ): Promise<void> {
+    await expect(locator).toBeVisible();
+    const box = await locator.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeGreaterThan(0);
+    expect(box!.height).toBeGreaterThan(0);
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.y).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(viewportWidth);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(viewportHeight);
+
+    const centerX = box!.x + box!.width / 2;
+    const centerY = box!.y + box!.height / 2;
+    const hitsControl = await page.evaluate(
+      ({ x, y, selector }) => {
+        const el = document.elementFromPoint(x, y);
+        return el !== null && el.closest(selector) !== null;
+      },
+      { x: centerX, y: centerY, selector: matchSelector },
+    );
+    expect(hitsControl).toBe(true);
+  }
+
+  for (const viewport of [
+    { name: "desktop", width: 1280, height: 800, isMobile: false, hasTouch: false },
+    { name: "360px phone", width: 360, height: 780, isMobile: true, hasTouch: true },
+    { name: "390px phone", width: 390, height: 844, isMobile: true, hasTouch: true },
+  ]) {
+    test(`sending through the real composer button at ${viewport.name}: the button and sheet are genuinely visible and hit-testable, not merely present in the DOM (operator report, round 2: the original per-chip badge's picker was clipped invisible by its own thumbnail)`, async ({
+      browser,
+    }) => {
+      const contextAlice = await browser.newContext({
+        viewport: { width: viewport.width, height: viewport.height },
+        isMobile: viewport.isMobile,
+        hasTouch: viewport.hasTouch,
+        extraHTTPHeaders: { "CF-Access-Authenticated-User-Email": "alice@example.com" },
+      });
+      const contextBob = await browser.newContext({
+        extraHTTPHeaders: { "CF-Access-Authenticated-User-Email": "bob@example.com" },
+      });
+
+      const pageAlice = await contextAlice.newPage();
+      const pageBob = await contextBob.newPage();
+
+      await unlockServer(pageAlice, "Alice");
+      await unlockServer(pageBob, "Bob");
+
+      await pageAlice.locator('input[type="file"]').setInputFiles(PHOTO);
+
+      const viewOnceButton = pageAlice.locator(".wx-srv-view-once-toggle-button");
+      await expect(viewOnceButton).toHaveText("⏱ View once");
+      await assertRealClickTarget(
+        pageAlice,
+        viewOnceButton,
+        ".wx-srv-view-once-toggle-button",
+        viewport.width,
+        viewport.height,
+      );
+
+      await viewOnceButton.click();
+      const sheet = pageAlice.locator(".wx-srv-view-once-sheet");
+      // The real regression: the old picker existed in the DOM but was clipped to zero visible
+      // area by its thumbnail's `overflow: hidden`. A bounding box plus `elementFromPoint` is
+      // exactly what a DOM-presence check in a unit test cannot see.
+      await assertRealClickTarget(pageAlice, sheet, ".wx-srv-view-once-sheet", viewport.width, viewport.height);
+      // Condition #1: the sheet shows the targeted file's own thumbnail.
+      await expect(sheet.locator(".wx-srv-view-once-sheet-thumb img")).toBeVisible();
+      await expect(sheet.locator(".wx-srv-view-once-sheet-filename")).toHaveText(/\.jpg$/);
+
+      await sheet.locator(".wx-srv-view-once-durations button", { hasText: "2 s" }).click();
+      await expect(sheet).toBeHidden();
+      await expect(viewOnceButton).toHaveText(/2s/);
+      await expect(viewOnceButton).toHaveClass(/wx-srv-view-once-toggle-active/);
+      // Condition #4: the chip itself carries a small marker, inside its own box.
+      await expect(pageAlice.locator(".wx-srv-view-once-chip-marker")).toHaveText(/2s/);
+
+      await pageAlice.locator(".wx-chat-send-button").click();
+
+      const bobBubble = pageBob.locator(".wx-srv-bubble").filter({ has: pageBob.locator(".wx-srv-view-once-tap-btn") });
+      await expect(bobBubble).toBeVisible({ timeout: 5000 });
+      await expect(bobBubble.locator(".wx-srv-view-once-card-sub")).toContainText("2 s");
+
+      await contextAlice.close();
+      await contextBob.close();
+    });
+  }
+
+  test("the view-once sheet's Escape key is not swallowed: it still triggers the panic lock rather than merely closing the sheet (condition #6)", async ({
+    browser,
+  }) => {
+    const contextAlice = await browser.newContext({
+      extraHTTPHeaders: { "CF-Access-Authenticated-User-Email": "alice@example.com" },
+    });
+    const pageAlice = await contextAlice.newPage();
+    await unlockServer(pageAlice, "Alice");
+
+    await pageAlice.locator('input[type="file"]').setInputFiles(PHOTO);
+    const viewOnceButton = pageAlice.locator(".wx-srv-view-once-toggle-button");
+    await expect(viewOnceButton).toBeEnabled();
+    await viewOnceButton.click();
+
+    const sheet = pageAlice.locator(".wx-srv-view-once-sheet");
+    await expect(sheet).toBeVisible();
+
+    await pageAlice.keyboard.press("Escape");
+
+    // The panic lock fires (the real thread is torn down), not merely the sheet closing.
+    await expect(pageAlice.locator(".wx-srv-thread")).toHaveCount(0);
+
+    await contextAlice.close();
   });
 });
