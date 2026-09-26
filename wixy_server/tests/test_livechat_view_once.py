@@ -1060,21 +1060,47 @@ class TestContentRoute:
             )
             assert open_res.status_code == 200
 
-            # Missing or invalid claim header -> 403
+            # Missing claim header -> 403 forbidden
+            res_missing_header = recip_client.get(
+                f"/api/admin/server/messages/{seq}/view-once/content",
+                headers=recip_headers,
+            )
+            assert res_missing_header.status_code == 403
+            assert res_missing_header.json() == {"error": "forbidden"}
+
+            # Invalid claim header -> 403 forbidden
             res_bad_header = recip_client.get(
                 f"/api/admin/server/messages/{seq}/view-once/content",
                 headers={**recip_headers, "X-Wixy-View-Claim": "short"},
             )
             assert res_bad_header.status_code == 403
+            assert res_bad_header.json() == {"error": "forbidden"}
 
-            # Wrong claim header -> 403
+            # Wrong claim header -> 403 forbidden
             res_wrong_claim = recip_client.get(
                 f"/api/admin/server/messages/{seq}/view-once/content",
                 headers={**recip_headers, "X-Wixy-View-Claim": "f" * 32},
             )
             assert res_wrong_claim.status_code == 403
+            assert res_wrong_claim.json() == {"error": "forbidden"}
 
-            # Wrong user email -> 403
+            # Missing / unknown message seq -> 404 not_found
+            res_missing_msg = recip_client.get(
+                "/api/admin/server/messages/999999/view-once/content",
+                headers={**recip_headers, "X-Wixy-View-Claim": claim_id},
+            )
+            assert res_missing_msg.status_code == 404
+            assert res_missing_msg.json() == {"error": "not_found"}
+
+            # Invalid message seq <= 0 -> 404 not_found
+            res_invalid_seq = recip_client.get(
+                "/api/admin/server/messages/0/view-once/content",
+                headers={**recip_headers, "X-Wixy-View-Claim": claim_id},
+            )
+            assert res_invalid_seq.status_code == 404
+            assert res_invalid_seq.json() == {"error": "not_found"}
+
+            # Wrong user email -> 403 forbidden
             other_client, other_headers = _unlocked_client(
                 storage_root, wixy_repo_root, pin_verifier, email="other@example.com"
             )
@@ -1084,6 +1110,7 @@ class TestContentRoute:
                     headers={**other_headers, "X-Wixy-View-Claim": claim_id},
                 )
                 assert res_wrong_email.status_code == 403
+                assert res_wrong_email.json() == {"error": "forbidden"}
             finally:
                 other_client.__exit__(None, None, None)
 

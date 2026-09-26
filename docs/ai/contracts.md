@@ -254,8 +254,10 @@ never stored on the reply itself. `text` is the target's text cut to 300 Unicode
 thumbUrl:str\|null, viewOnce?:bool}` — `null` for a text-only target; `kind` is the quoted attachments' shared
 kind or `"mixed"`; `durationS` is the single voice note's or video's duration only when
 `count===1`; `thumbUrl` is a freshly signed URL for the FIRST attachment's `thumb` (photo) or
-`poster` (video) rendition, only when that attachment is `ready` and not view-once (`null` for view-once);
-`viewOnce: true` is set when quoting a view-once target. One level only: `<ReplyTo>` never nests another `<ReplyTo>`.
+`poster` (video) rendition, only when that attachment is `ready` and not view-once (`null` for view-once) —
+never `full`/`play`, and never present for a voice note; `viewOnce: true` is set when quoting a view-once target.
+One level only: `<ReplyTo>` never nests another `<ReplyTo>`. `GET media/*`'s signature/expiry rules apply to
+`thumbUrl` exactly as to any other signed media URL.
 
 ### Preview / versions / shell / public
 

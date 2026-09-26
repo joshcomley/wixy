@@ -698,10 +698,10 @@ async def open_view_once(seq: int, body: OpenViewOnceIn, request: Request) -> JS
 async def get_view_once_content(seq: int, request: Request) -> Response:
     auth = await require_server_token(request)
     if not (0 < seq <= _SQLITE_MAX_INTEGER):
-        raise HTTPException(status_code=404)
+        raise HTTPException(status_code=404, detail={"error": "not_found"})
     claim_id = request.headers.get("X-Wixy-View-Claim")
     if not claim_id or not _CLAIM_ID_RE.match(claim_id):
-        raise HTTPException(status_code=403)
+        raise HTTPException(status_code=403, detail={"error": "forbidden"})
 
     store: LiveChatStore = request.app.state.livechat_store
     paths: ProjectPaths = request.app.state.paths
@@ -712,19 +712,19 @@ async def get_view_once_content(seq: int, request: Request) -> Response:
         )
     )
     if outcome == "not_found":
-        raise HTTPException(status_code=404)
+        raise HTTPException(status_code=404, detail={"error": "not_found"})
     if outcome == "forbidden":
-        raise HTTPException(status_code=403)
+        raise HTTPException(status_code=403, detail={"error": "forbidden"})
     if outcome == "expired":
         return JSONResponse(status_code=410, content={"error": "expired"})
 
     assert att is not None
     rendition = "full" if att.kind == "photo" else "play"
     if att.view_once_renditions is None or rendition not in att.view_once_renditions:
-        raise HTTPException(status_code=404)
+        raise HTTPException(status_code=404, detail={"error": "not_found"})
     path = await anyio.to_thread.run_sync(lambda: _resolve_rendition_path(paths, att.id, rendition))
     if path is None or not path.is_file():
-        raise HTTPException(status_code=404)
+        raise HTTPException(status_code=404, detail={"error": "not_found"})
 
     media_type = _MEDIA_TYPE_BY_SUFFIX.get(path.suffix, "application/octet-stream")
     notifier: LiveChatNotifier = request.app.state.livechat_notifier

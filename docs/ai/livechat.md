@@ -563,7 +563,7 @@ every hour: it removes stale uploads and unclaimed orphan attachments after 24 h
 raw upload sources for ready attachments, retries archiving failed originals, expires an
 unarchived failed original after seven days, and prunes completed cleanup rows after seven days.
 It never ages out pending work. The view-once backstop (`livechat-view-once-backstop`, spec 06) runs
-once at startup and then every 60 seconds: it sweeps claimed view-once messages older than 600
+once at startup and then every 30 seconds: it sweeps claimed view-once messages older than 600
 seconds where the claimant disconnected or abandoned the download, permanently deleting their
 database rows and storage.
 
