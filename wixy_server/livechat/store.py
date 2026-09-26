@@ -273,8 +273,7 @@ def _row_to_transcript(row: sqlite3.Row) -> TranscriptRow | None:
 
 def _row_to_attachment(row: sqlite3.Row) -> AttachmentRow:
     peaks_raw = row["peaks"]
-    keys = row.keys()
-    vo_raw = row["view_once_renditions"] if "view_once_renditions" in keys else None
+    vo_raw = row["view_once_renditions"]
     view_once_renditions = tuple(json.loads(vo_raw)) if vo_raw is not None else None
     return AttachmentRow(
         id=row["id"],
@@ -306,7 +305,6 @@ def _row_to_message(
     *,
     reply_to: MessageRow | None = None,
 ) -> MessageRow:
-    keys = row.keys()
     return MessageRow(
         seq=row["seq"],
         client_id=row["client_id"],
@@ -317,13 +315,13 @@ def _row_to_message(
         created_at=row["created_at"],
         attachments=attachments,
         reactions=reactions,
-        reply_to_seq=row["reply_to_seq"] if "reply_to_seq" in keys else None,
+        reply_to_seq=row["reply_to_seq"],
         reply_to=reply_to,
-        view_once_s=row["view_once_s"] if "view_once_s" in keys else None,
-        view_spotlight=row["view_spotlight"] if "view_spotlight" in keys else 0,
-        view_claim_id=row["view_claim_id"] if "view_claim_id" in keys else None,
-        view_claimed_at=row["view_claimed_at"] if "view_claimed_at" in keys else None,
-        view_claim_email=row["view_claim_email"] if "view_claim_email" in keys else None,
+        view_once_s=row["view_once_s"],
+        view_spotlight=row["view_spotlight"],
+        view_claim_id=row["view_claim_id"],
+        view_claimed_at=row["view_claimed_at"],
+        view_claim_email=row["view_claim_email"],
     )
 
 
@@ -797,6 +795,7 @@ class LiveChatStore:
                 or candidate["message_seq"] is not None
                 or candidate["kind"] not in ("photo", "video")
                 or (spotlight and candidate["kind"] != "photo")
+                or candidate["status"] not in ("processing", "ready")
             ):
                 raise UnusableAttachmentError(attachment_id)
             if candidate["status"] != "ready":
@@ -875,7 +874,7 @@ class LiveChatStore:
             if email and msg_email:
                 is_own = email == msg_email
             else:
-                is_own = sender.strip().casefold() == msg_sender.strip().casefold()
+                is_own = reactor_key(sender) == reactor_key(msg_sender)
             if is_own:
                 return "own_message", _load_message(conn, seq), None
 

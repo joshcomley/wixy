@@ -314,7 +314,6 @@ def cleanup_expired_view_once_messages(
     *,
     store: LiveChatStore,
     paths: ProjectPaths,
-    notifier: LiveChatNotifier | None = None,
     now: float | None = None,
 ) -> list[int]:
     """Erases view-once messages whose claims are older than 600 s via the ordinary delete path."""
@@ -333,8 +332,6 @@ def cleanup_expired_view_once_messages(
         erased.append(seq)
     if erased:
         scrub_once(store=store)
-        if notifier is not None:
-            notifier.publish()
     return erased
 
 
@@ -348,14 +345,15 @@ async def run_view_once_backstop_forever(
     """Inv 47: contained loop running once at startup and at least every 30 s."""
     while True:
         started_at = time.monotonic()
-        await anyio.to_thread.run_sync(
+        erased = await anyio.to_thread.run_sync(
             partial(
                 cleanup_expired_view_once_messages,
                 store=store,
                 paths=paths,
-                notifier=notifier,
                 now=None,
             )
         )
+        if erased:
+            notifier.publish()
         elapsed = time.monotonic() - started_at
         await anyio.sleep(max(0.0, interval_s - elapsed))

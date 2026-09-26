@@ -226,7 +226,7 @@ def _reply_quote_media_json(
     first = attachments[0]
     duration_s = first.duration_s if count == 1 else None
     thumb_url: str | None = None
-    if first.status == "ready":
+    if not view_once and first.status == "ready":
         rendition: str | None = None
         if first.kind == "photo":
             rendition = "thumb"

@@ -570,7 +570,7 @@ class SendViewOnceMessageIn(BaseModel):
     attachmentId: str
     durationS: int | None = None
     spotlight: StrictBool = False
-    replyToSeq: int | None = None
+    replyToSeq: Any = None
 
 
 class OpenViewOnceIn(BaseModel):
@@ -720,6 +720,8 @@ async def get_view_once_content(seq: int, request: Request) -> Response:
 
     assert att is not None
     rendition = "full" if att.kind == "photo" else "play"
+    if att.view_once_renditions is None or rendition not in att.view_once_renditions:
+        raise HTTPException(status_code=404)
     path = await anyio.to_thread.run_sync(lambda: _resolve_rendition_path(paths, att.id, rendition))
     if path is None or not path.is_file():
         raise HTTPException(status_code=404)

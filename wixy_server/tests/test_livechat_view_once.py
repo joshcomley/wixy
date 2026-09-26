@@ -19,6 +19,7 @@ import concurrent.futures
 import io
 import json
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Any, cast
@@ -31,7 +32,10 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from wixy_server.app import create_app
-from wixy_server.livechat.janitor import cleanup_expired_view_once_messages
+from wixy_server.livechat.janitor import (
+    cleanup_expired_view_once_messages,
+    run_view_once_backstop_forever,
+)
 from wixy_server.livechat.models import (
     message_json,
     reply_to_json,
@@ -54,6 +58,12 @@ def _git(cmd: list[str], cwd: Path) -> None:
     import subprocess
 
     subprocess.run(["git", *cmd], cwd=cwd, check=True, capture_output=True)
+
+
+def _raw_db(store: LiveChatStore) -> bytes:
+    db = store._db_path
+    wal = Path(f"{db}-wal")
+    return db.read_bytes() + (wal.read_bytes() if wal.exists() else b"")
 
 
 @pytest.fixture
@@ -216,7 +226,7 @@ class TestSchemaMigration:
         store.list_messages(before=None, limit=1)
         conn = sqlite3.connect(str(db_path))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 11
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == _LATEST_SCHEMA_VERSION
             assert _LATEST_SCHEMA_VERSION >= 11
 
             msg_cols = {row[1] for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
@@ -470,6 +480,222 @@ class TestSendRoute:
             )
             assert res.status_code == 422
             assert res.json()["error"] == "invalid"
+
+            # Bad deviceId (<8 chars)
+            res = client.post(
+                "/api/admin/server/messages/view-once",
+                json={
+                    "clientId": "client-12345",
+                    "sender": "Josh",
+                    "deviceId": "short",
+                    "attachmentId": att_id,
+                    "durationS": 5,
+                    "spotlight": False,
+                },
+                headers=headers,
+            )
+            assert res.status_code == 422
+            assert res.json()["error"] == "invalid"
+
+            # Bad deviceId (>64 chars)
+            res = client.post(
+                "/api/admin/server/messages/view-once",
+                json={
+                    "clientId": "client-12345",
+                    "sender": "Josh",
+                    "deviceId": "d" * 65,
+                    "attachmentId": att_id,
+                    "durationS": 5,
+                    "spotlight": False,
+                },
+                headers=headers,
+            )
+            assert res.status_code == 422
+            assert res.json()["error"] == "invalid"
+
+            # Spotlight on a video attachment
+            now = time.time()
+            store: LiveChatStore = client.app.state.livechat_store  # type: ignore[attr-defined]
+            with store._write_txn() as conn:
+                conn.execute(
+                    "INSERT INTO attachments "
+                    "(id, kind, status, mime, renditions, created_at, updated_at) "
+                    "VALUES ('att-video-val-001', 'video', 'ready', 'video/mp4', "
+                    "'[\"play\"]', ?, ?)",
+                    (now, now),
+                )
+                conn.execute(
+                    "INSERT INTO attachments "
+                    "(id, kind, status, mime, renditions, created_at, updated_at) "
+                    "VALUES ('att-voice-val-001', 'voice', 'ready', 'audio/mp4', "
+                    "'[\"play\"]', ?, ?)",
+                    (now, now),
+                )
+
+            res = client.post(
+                "/api/admin/server/messages/view-once",
+                json={
+                    "clientId": "client-spotlight-video",
+                    "sender": "Josh",
+                    "deviceId": "device-1234",
+                    "attachmentId": "att-video-val-001",
+                    "durationS": 5,
+                    "spotlight": True,
+                },
+                headers=headers,
+            )
+            assert res.status_code == 422
+            assert res.json()["error"] == "invalid"
+
+            # Voice-kind attachment
+            res = client.post(
+                "/api/admin/server/messages/view-once",
+                json={
+                    "clientId": "client-voice-vo",
+                    "sender": "Josh",
+                    "deviceId": "device-1234",
+                    "attachmentId": "att-voice-val-001",
+                    "durationS": 5,
+                    "spotlight": False,
+                },
+                headers=headers,
+            )
+            assert res.status_code == 422
+            assert res.json()["error"] == "invalid"
+
+            # Unknown attachment ID
+            res = client.post(
+                "/api/admin/server/messages/view-once",
+                json={
+                    "clientId": "client-unknown-att",
+                    "sender": "Josh",
+                    "deviceId": "device-1234",
+                    "attachmentId": "9" * 32,
+                    "durationS": 5,
+                    "spotlight": False,
+                },
+                headers=headers,
+            )
+            assert res.status_code == 422
+            assert res.json()["error"] == "invalid"
+
+            # Already-used attachment
+            res_used_first = client.post(
+                "/api/admin/server/messages/view-once",
+                json={
+                    "clientId": "client-used-first",
+                    "sender": "Josh",
+                    "deviceId": "device-1234",
+                    "attachmentId": att_id,
+                    "durationS": 5,
+                    "spotlight": False,
+                },
+                headers=headers,
+            )
+            assert res_used_first.status_code == 201
+
+            res_used_second = client.post(
+                "/api/admin/server/messages/view-once",
+                json={
+                    "clientId": "client-used-second",
+                    "sender": "Josh",
+                    "deviceId": "device-1234",
+                    "attachmentId": att_id,
+                    "durationS": 5,
+                    "spotlight": False,
+                },
+                headers=headers,
+            )
+            assert res_used_second.status_code == 422
+            assert res_used_second.json()["error"] == "invalid"
+        finally:
+            client.__exit__(None, None, None)
+
+    @pytest.mark.parametrize("invalid_val", [True, False, "7", 1.0, 0, -1, 2**63])
+    def test_reply_to_seq_invalid_values(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        invalid_val: Any,
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            att_id, _ = _create_ready_photo(client, headers)
+            res = client.post(
+                "/api/admin/server/messages/view-once",
+                json={
+                    "clientId": "client-replyto-1",
+                    "sender": "Josh",
+                    "deviceId": "device-1234",
+                    "attachmentId": att_id,
+                    "durationS": 5,
+                    "spotlight": False,
+                    "replyToSeq": invalid_val,
+                },
+                headers=headers,
+            )
+            assert res.status_code == 422
+            assert res.json()["error"] == "invalid"
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_reply_to_seq_valid_existing_and_missing(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            ord_res = client.post(
+                "/api/admin/server/messages",
+                json={
+                    "clientId": "client-ord-1",
+                    "sender": "Alice",
+                    "deviceId": "device-1234",
+                    "text": "Hello world",
+                },
+                headers=headers,
+            )
+            assert ord_res.status_code == 201
+            target_seq = ord_res.json()["message"]["seq"]
+
+            att_id1, _ = _create_ready_photo(client, headers)
+            vo_res1 = client.post(
+                "/api/admin/server/messages/view-once",
+                json={
+                    "clientId": "client-vo-reply-1",
+                    "sender": "Josh",
+                    "deviceId": "device-1234",
+                    "attachmentId": att_id1,
+                    "durationS": 5,
+                    "spotlight": False,
+                    "replyToSeq": target_seq,
+                },
+                headers=headers,
+            )
+            assert vo_res1.status_code == 201
+            body1 = vo_res1.json()["message"]
+            assert body1["replyTo"] is not None
+            assert body1["replyTo"]["seq"] == target_seq
+            assert body1["replyTo"]["sender"] == "Alice"
+            assert body1["replyTo"]["text"] == "Hello world"
+
+            att_id2, _ = _create_ready_photo(client, headers)
+            vo_res2 = client.post(
+                "/api/admin/server/messages/view-once",
+                json={
+                    "clientId": "client-vo-reply-2",
+                    "sender": "Josh",
+                    "deviceId": "device-1234",
+                    "attachmentId": att_id2,
+                    "durationS": 5,
+                    "spotlight": False,
+                    "replyToSeq": 999999,
+                },
+                headers=headers,
+            )
+            assert vo_res2.status_code == 201
+            body2 = vo_res2.json()["message"]
+            assert body2["replyTo"] is None
         finally:
             client.__exit__(None, None, None)
 
@@ -502,6 +728,38 @@ class TestSendRoute:
             )
             assert res.status_code == 422
             assert res.json() == {"error": "not_ready"}
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_failed_attachment_returns_422_invalid(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            store: LiveChatStore = client.app.state.livechat_store  # type: ignore[attr-defined]
+            now = time.time()
+            att_id = "f" * 32
+            with store._write_txn() as conn:
+                conn.execute(
+                    "INSERT INTO attachments "
+                    "(id, kind, status, mime, created_at, updated_at) "
+                    "VALUES (?, 'photo', 'failed', 'image/jpeg', ?, ?)",
+                    (att_id, now, now),
+                )
+            res = client.post(
+                "/api/admin/server/messages/view-once",
+                json={
+                    "clientId": "client-failed-1",
+                    "sender": "Josh",
+                    "deviceId": "device-1234",
+                    "attachmentId": att_id,
+                    "durationS": 5,
+                    "spotlight": False,
+                },
+                headers=headers,
+            )
+            assert res.status_code == 422
+            assert res.json()["error"] == "invalid"
         finally:
             client.__exit__(None, None, None)
 
@@ -618,6 +876,51 @@ class TestClaimRoute:
                 client_no_email.__exit__(None, None, None)
         finally:
             client.__exit__(None, None, None)
+
+    def test_claim_403_for_sender_nfd_vs_nfc_name(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        """Item 13: own-message check folds like reactor_key (NFC-normalise, trim, casefold)."""
+        import unicodedata
+
+        nfc_name = unicodedata.normalize("NFC", "Zoë")
+        nfd_name = unicodedata.normalize("NFD", "Zoë")
+        assert nfc_name != nfd_name
+
+        sender_client, sender_headers = _unlocked_client(
+            storage_root, wixy_repo_root, pin_verifier, email=""
+        )
+        recip_client, recip_headers = _unlocked_client(
+            storage_root, wixy_repo_root, pin_verifier, email=""
+        )
+        try:
+            att_id, _ = _create_ready_photo(sender_client, sender_headers)
+            send_res = sender_client.post(
+                "/api/admin/server/messages/view-once",
+                json={
+                    "clientId": "client-nfc-1",
+                    "sender": nfc_name,
+                    "deviceId": "device-1234",
+                    "attachmentId": att_id,
+                    "durationS": 2,
+                    "spotlight": False,
+                },
+                headers=sender_headers,
+            )
+            assert send_res.status_code == 201
+            seq = send_res.json()["message"]["seq"]
+
+            # Claim from another device with NFD version of same name -> 403 own_message
+            claim_res = recip_client.post(
+                f"/api/admin/server/messages/{seq}/view-once/open",
+                json={"claimId": "c" * 32, "sender": f"  {nfd_name}  "},
+                headers=recip_headers,
+            )
+            assert claim_res.status_code == 403
+            assert claim_res.json() == {"error": "own_message"}
+        finally:
+            sender_client.__exit__(None, None, None)
+            recip_client.__exit__(None, None, None)
 
     def test_claim_200_for_recipient_idempotent_retry_and_409_conflict(
         self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
@@ -919,6 +1222,10 @@ class TestContentRoute:
         )
         try:
             att_id, _ = _create_ready_photo(sender_client, sender_headers)
+            paths: ProjectPaths = sender_client.app.state.paths  # type: ignore[attr-defined]
+            full_file = paths.server_attachment_media_dir(att_id) / "full.jpg"
+            expected_bytes = full_file.read_bytes()
+
             send_res = sender_client.post(
                 "/api/admin/server/messages/view-once",
                 json={
@@ -947,6 +1254,7 @@ class TestContentRoute:
             assert res.status_code == 200
             assert res.headers["cache-control"] == "no-store"
             assert res.headers["x-content-type-options"] == "nosniff"
+            assert res.content == expected_bytes
 
             store: LiveChatStore = recip_client.app.state.livechat_store  # type: ignore[attr-defined]
             deadline = time.monotonic() + 5.0
@@ -957,6 +1265,14 @@ class TestContentRoute:
                     break
                 time.sleep(0.05)
             assert erased
+
+            from wixy_server.livechat import janitor as livechat_janitor
+
+            livechat_janitor.cleanup_deleted_storage_once(store=store, paths=paths)
+            livechat_janitor.scrub_once(store=store, deadline_s=30.0)
+
+            assert not paths.server_attachment_media_dir(att_id).exists()
+            assert claim_id.encode("utf-8") not in _raw_db(store)
 
             # Second open attempt -> 404
             open_res_after = recip_client.post(
@@ -979,6 +1295,57 @@ class TestContentRoute:
                 e for e in events if e.type == "message_deleted" and e.message_seq == seq
             ]
             assert len(deleted_events) == 1
+        finally:
+            sender_client.__exit__(None, None, None)
+            recip_client.__exit__(None, None, None)
+
+    def test_content_route_404_if_rendition_not_in_view_once_renditions(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        sender_client, sender_headers = _unlocked_client(
+            storage_root, wixy_repo_root, pin_verifier, email="sender@example.com"
+        )
+        recip_client, recip_headers = _unlocked_client(
+            storage_root, wixy_repo_root, pin_verifier, email="recip@example.com"
+        )
+        try:
+            store: LiveChatStore = sender_client.app.state.livechat_store  # type: ignore[attr-defined]
+            att_id, _ = _create_ready_photo(sender_client, sender_headers)
+            send_res = sender_client.post(
+                "/api/admin/server/messages/view-once",
+                json={
+                    "clientId": "client-vo-no-rendition",
+                    "sender": "Sender",
+                    "deviceId": "dev-1234",
+                    "attachmentId": att_id,
+                    "durationS": 5,
+                    "spotlight": False,
+                },
+                headers=sender_headers,
+            )
+            assert send_res.status_code == 201
+            seq = send_res.json()["message"]["seq"]
+            claim_id = "f" * 32
+            open_res = recip_client.post(
+                f"/api/admin/server/messages/{seq}/view-once/open",
+                json={"claimId": claim_id, "sender": "Recip"},
+                headers=recip_headers,
+            )
+            assert open_res.status_code == 200
+
+            # Tamper view_once_renditions in DB so "full" is missing
+            with store._write_txn() as conn:
+                conn.execute(
+                    "UPDATE attachments SET view_once_renditions = '[\"thumb\"]' WHERE id = ?",
+                    (att_id,),
+                )
+
+            content_res = recip_client.get(
+                f"/api/admin/server/messages/{seq}/view-once/content",
+                headers={**recip_headers, "X-Wixy-View-Claim": claim_id},
+            )
+            assert content_res.status_code == 404
+            assert _message_exists(store, seq)
         finally:
             sender_client.__exit__(None, None, None)
             recip_client.__exit__(None, None, None)
@@ -1029,3 +1396,139 @@ class TestBackstop:
         # Verify event was recorded
         events = store.events_after(0, limit=100)
         assert any(e.type == "message_deleted" and e.message_seq == msg.seq for e in events)
+
+    @pytest.mark.anyio
+    async def test_backstop_calls_notifier_on_event_loop_thread(
+        self, tmp_path: Path, store: LiveChatStore
+    ) -> None:
+        loop_thread_id = threading.get_ident()
+        published_thread_ids: list[int] = []
+
+        class RecordingNotifier:
+            def publish(self) -> None:
+                published_thread_ids.append(threading.get_ident())
+
+        paths = ProjectPaths(slug="test", root=tmp_path)
+        paths.server_media.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+
+        # 1. No expired claims -> publish NOT called
+        notifier = RecordingNotifier()
+        with anyio.move_on_after(0.05):
+            await run_view_once_backstop_forever(
+                store=store, paths=paths, notifier=cast(Any, notifier), interval_s=100.0
+            )
+        assert published_thread_ids == []
+
+        # 2. Add an expired claim (>600s)
+        with store._write_txn() as conn:
+            conn.execute(
+                "INSERT INTO attachments "
+                "(id, kind, status, mime, renditions, created_at, updated_at) "
+                "VALUES ('att-backstop-async', 'photo', 'ready', 'image/jpeg', '[\"full\"]', ?, ?)",
+                (now, now),
+            )
+        msg, _ = store.create_view_once_message(
+            client_id="client-backstop-async",
+            sender="Josh",
+            device_id="dev1",
+            by_email="josh@example.com",
+            attachment_id="att-backstop-async",
+            duration_s=5,
+            spotlight=False,
+            now=now,
+        )
+        store.claim_view_once(
+            seq=msg.seq,
+            claim_id="8" * 32,
+            email="bob@example.com",
+            sender="Bob",
+            now=now - 605.0,
+        )
+
+        with anyio.move_on_after(0.05):
+            await run_view_once_backstop_forever(
+                store=store, paths=paths, notifier=cast(Any, notifier), interval_s=100.0
+            )
+
+        assert len(published_thread_ids) == 1
+        assert published_thread_ids[0] == loop_thread_id
+
+    @pytest.mark.anyio
+    async def test_run_view_once_backstop_forever_startup_pass(
+        self, tmp_path: Path, store: LiveChatStore
+    ) -> None:
+        """Startup pass runs immediately, erases claims older than 600s,
+        and preserves fresh claims."""
+        published_count = 0
+
+        class RecordingNotifier:
+            def publish(self) -> None:
+                nonlocal published_count
+                published_count += 1
+
+        paths = ProjectPaths(slug="test", root=tmp_path)
+        paths.server_media.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+
+        with store._write_txn() as conn:
+            conn.execute(
+                "INSERT INTO attachments "
+                "(id, kind, status, mime, renditions, created_at, updated_at) "
+                "VALUES ('att-backstop-exp', 'photo', 'ready', 'image/jpeg', '[\"full\"]', ?, ?)",
+                (now, now),
+            )
+            conn.execute(
+                "INSERT INTO attachments "
+                "(id, kind, status, mime, renditions, created_at, updated_at) "
+                "VALUES ('att-backstop-fresh', 'photo', 'ready', 'image/jpeg', '[\"full\"]', ?, ?)",
+                (now, now),
+            )
+
+        msg_expired, _ = store.create_view_once_message(
+            client_id="client-backstop-exp",
+            sender="Josh",
+            device_id="dev1",
+            by_email="josh@example.com",
+            attachment_id="att-backstop-exp",
+            duration_s=5,
+            spotlight=False,
+            now=now,
+        )
+        msg_fresh, _ = store.create_view_once_message(
+            client_id="client-backstop-fresh",
+            sender="Josh",
+            device_id="dev1",
+            by_email="josh@example.com",
+            attachment_id="att-backstop-fresh",
+            duration_s=5,
+            spotlight=False,
+            now=now,
+        )
+
+        # Claim expired (>600s ago)
+        store.claim_view_once(
+            seq=msg_expired.seq,
+            claim_id="e" * 32,
+            email="alice@example.com",
+            sender="Alice",
+            now=now - 605.0,
+        )
+        # Claim fresh (10s ago)
+        store.claim_view_once(
+            seq=msg_fresh.seq,
+            claim_id="f" * 32,
+            email="bob@example.com",
+            sender="Bob",
+            now=now - 10.0,
+        )
+
+        notifier = RecordingNotifier()
+        with anyio.move_on_after(0.1):
+            await run_view_once_backstop_forever(
+                store=store, paths=paths, notifier=cast(Any, notifier), interval_s=0.05
+            )
+
+        assert not _message_exists(store, msg_expired.seq)
+        assert _message_exists(store, msg_fresh.seq)
+        assert published_count >= 1
