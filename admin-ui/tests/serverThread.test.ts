@@ -13,16 +13,20 @@ const { createVoiceRecorder, deleteMessage, getHistory, getUsage, sendMessage, s
     onStop?: (recording: { blob: Blob; durationMs: number; mimeType: string }) => void;
     onCancel?: () => void;
   }) => {
-    let state: "idle" | "recording" = "idle";
+    let state: "idle" | "starting" | "recording" | "paused" | "stopping" = "idle";
     return {
       get state() { return state; },
       elapsedMs: 2000,
+      supportsPause: true,
       start: vi.fn(async () => { state = "recording"; }),
+      pause: vi.fn(() => { state = "paused"; }),
+      resume: vi.fn(() => { state = "recording"; }),
       stop: vi.fn(() => {
         state = "idle";
         options.onStop?.({ blob: new Blob(["voice"]), durationMs: 2000, mimeType: "audio/webm;codecs=opus" });
       }),
       cancel: vi.fn(() => { state = "idle"; options.onCancel?.(); }),
+      toggle: vi.fn(async () => { state = "idle"; }),
       detach: vi.fn(),
     };
   }),
@@ -824,6 +828,105 @@ describe("mountServerThread", () => {
       discard(view)?.click();
       await flush();
       expect(mic(view)?.disabled).toBe(false);
+      view.teardown();
+    });
+  });
+
+  describe("dedicated voice note recording row and pause/resume", () => {
+    it("hides textarea and send button during recording and pause, restores on stop", async () => {
+      uploadServerAttachment.mockResolvedValue({
+        id: "voice-1", kind: "voice", status: "ready", width: null, height: null, durationS: 2, peaks: null, urls: {},
+      });
+      sendMessage.mockResolvedValue({
+        ok: true,
+        message: fakeMessage({ seq: 7, clientId: "voice-client-id", text: null }),
+      });
+      getHistory.mockResolvedValue(emptyHistory());
+      const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+
+      const textarea = view.element.querySelector<HTMLTextAreaElement>(".wx-chat-composer-input")!;
+      const sendButton = view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")!;
+      const attachButton = view.element.querySelector<HTMLButtonElement>(".wx-chat-attach-button")!;
+      const recordButton = view.element.querySelector<HTMLButtonElement>(".wx-srv-record-button")!;
+      const pauseButton = view.element.querySelector<HTMLButtonElement>(".wx-srv-record-pause")!;
+      const cancelButton = view.element.querySelector<HTMLButtonElement>(".wx-srv-record-cancel")!;
+      const status = view.element.querySelector<HTMLElement>(".wx-srv-record-status")!;
+      const inputRow = view.element.querySelector<HTMLElement>(".wx-chatc-input-row")!;
+
+      expect(textarea.hidden).toBe(false);
+      expect(sendButton.hidden).toBe(false);
+      expect(pauseButton.hidden).toBe(true);
+      expect(inputRow.classList.contains("wx-srv-recording-row")).toBe(false);
+
+      recordButton.click();
+      await flush();
+
+      expect(textarea.hidden).toBe(true);
+      expect(sendButton.hidden).toBe(true);
+      expect(attachButton.hidden).toBe(true);
+      expect(cancelButton.hidden).toBe(false);
+      expect(pauseButton.hidden).toBe(false);
+      expect(pauseButton.textContent).toBe("Pause");
+      expect(pauseButton.getAttribute("aria-label")).toBe("Pause recording");
+      expect(status.textContent).toContain("Recording");
+      expect(inputRow.classList.contains("wx-srv-recording-row")).toBe(true);
+
+      pauseButton.click();
+      await flush();
+
+      expect(textarea.hidden).toBe(true);
+      expect(sendButton.hidden).toBe(true);
+      expect(pauseButton.hidden).toBe(false);
+      expect(pauseButton.textContent).toBe("Resume");
+      expect(pauseButton.getAttribute("aria-label")).toBe("Resume recording");
+      expect(status.textContent).toContain("Paused");
+      expect(inputRow.classList.contains("wx-srv-recording-row")).toBe(true);
+
+      pauseButton.click();
+      await flush();
+
+      expect(pauseButton.textContent).toBe("Pause");
+      expect(status.textContent).toContain("Recording");
+
+      recordButton.click();
+      await flush();
+      await flush();
+
+      expect(textarea.hidden).toBe(false);
+      expect(sendButton.hidden).toBe(false);
+      expect(pauseButton.hidden).toBe(true);
+      expect(inputRow.classList.contains("wx-srv-recording-row")).toBe(false);
+      view.teardown();
+    });
+
+    it("restores textarea and send button when recording is cancelled while paused", async () => {
+      getHistory.mockResolvedValue(emptyHistory());
+      const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+
+      const textarea = view.element.querySelector<HTMLTextAreaElement>(".wx-chat-composer-input")!;
+      const sendButton = view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")!;
+      const recordButton = view.element.querySelector<HTMLButtonElement>(".wx-srv-record-button")!;
+      const pauseButton = view.element.querySelector<HTMLButtonElement>(".wx-srv-record-pause")!;
+      const cancelButton = view.element.querySelector<HTMLButtonElement>(".wx-srv-record-cancel")!;
+      const inputRow = view.element.querySelector<HTMLElement>(".wx-chatc-input-row")!;
+
+      recordButton.click();
+      await flush();
+      pauseButton.click();
+      await flush();
+
+      expect(textarea.hidden).toBe(true);
+      expect(sendButton.hidden).toBe(true);
+
+      cancelButton.click();
+      await flush();
+
+      expect(textarea.hidden).toBe(false);
+      expect(sendButton.hidden).toBe(false);
+      expect(pauseButton.hidden).toBe(true);
+      expect(inputRow.classList.contains("wx-srv-recording-row")).toBe(false);
       view.teardown();
     });
   });

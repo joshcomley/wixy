@@ -28,6 +28,12 @@ class FakeRecorder {
   start = vi.fn(() => {
     this.state = "recording";
   });
+  pause = vi.fn(() => {
+    this.state = "paused";
+  });
+  resume = vi.fn(() => {
+    this.state = "recording";
+  });
   stop = vi.fn(() => {
     this.state = "inactive";
     this.ondataavailable?.({ data: new Blob(["voice"], { type: this.mimeType }) } as BlobEvent);
@@ -136,5 +142,115 @@ describe("server voice recorder", () => {
     expect(release).toHaveBeenCalledOnce();
     expect(onError).toHaveBeenCalledOnce();
     expect(recorder.state).toBe("idle");
+  });
+
+  it("pauses and resumes recording, freezing the timer and excluding paused time from duration", async () => {
+    vi.useFakeTimers();
+    let mockTime = 1000;
+    const timerTicks: number[] = [];
+    const onStop = vi.fn();
+    const { stream, hooks } = setup();
+    const recorder = createVoiceRecorder({
+      hooks,
+      mediaDevices: { getUserMedia: vi.fn(async () => stream as unknown as MediaStream) },
+      mediaRecorder: FakeRecorder,
+      now: () => mockTime,
+      onTimer: (ms) => timerTicks.push(ms),
+      onStop,
+    });
+
+    await recorder.start();
+    expect(recorder.state).toBe("recording");
+    expect(recorder.supportsPause).toBe(true);
+
+    mockTime += 2000;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(recorder.elapsedMs).toBe(2000);
+
+    recorder.pause();
+    expect(recorder.state).toBe("paused");
+    expect(recorder.elapsedMs).toBe(2000);
+
+    mockTime += 5000;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(recorder.state).toBe("paused");
+    expect(recorder.elapsedMs).toBe(2000);
+
+    recorder.resume();
+    expect(recorder.state).toBe("recording");
+    expect(recorder.elapsedMs).toBe(2000);
+
+    mockTime += 3000;
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(recorder.elapsedMs).toBe(5000);
+
+    recorder.stop();
+    expect(recorder.state).toBe("idle");
+    expect(onStop).toHaveBeenCalledWith(expect.objectContaining({ durationMs: 5000 }));
+  });
+
+  it("allows stopping directly from paused state", async () => {
+    vi.useFakeTimers();
+    let mockTime = 1000;
+    const onStop = vi.fn();
+    const { stream, hooks } = setup();
+    const recorder = createVoiceRecorder({
+      hooks,
+      mediaDevices: { getUserMedia: vi.fn(async () => stream as unknown as MediaStream) },
+      mediaRecorder: FakeRecorder,
+      now: () => mockTime,
+      onStop,
+    });
+
+    await recorder.start();
+    mockTime += 3000;
+    await vi.advanceTimersByTimeAsync(3000);
+    recorder.pause();
+    expect(recorder.state).toBe("paused");
+    expect(recorder.elapsedMs).toBe(3000);
+
+    mockTime += 2000;
+    recorder.stop();
+    expect(recorder.state).toBe("idle");
+    expect(onStop).toHaveBeenCalledWith(expect.objectContaining({ durationMs: 3000 }));
+  });
+
+  it("allows cancelling from paused state", async () => {
+    vi.useFakeTimers();
+    let mockTime = 1000;
+    const onCancel = vi.fn();
+    const onStop = vi.fn();
+    const { stream, hooks } = setup();
+    const recorder = createVoiceRecorder({
+      hooks,
+      mediaDevices: { getUserMedia: vi.fn(async () => stream as unknown as MediaStream) },
+      mediaRecorder: FakeRecorder,
+      now: () => mockTime,
+      onCancel,
+      onStop,
+    });
+
+    await recorder.start();
+    mockTime += 3000;
+    recorder.pause();
+    recorder.cancel();
+
+    expect(recorder.state).toBe("idle");
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(onStop).not.toHaveBeenCalled();
+    expect(stream.track.stopped).toBe(true);
+  });
+
+  it("detects when MediaRecorder lacks pause support", async () => {
+    class NoPauseRecorder extends FakeRecorder {
+      override pause = undefined as unknown as typeof FakeRecorder.prototype.pause;
+    }
+    const { stream, hooks } = setup();
+    const recorder = createVoiceRecorder({
+      hooks,
+      mediaDevices: { getUserMedia: vi.fn(async () => stream as unknown as MediaStream) },
+      mediaRecorder: NoPauseRecorder as unknown as typeof FakeRecorder,
+    });
+    expect(recorder.supportsPause).toBe(false);
   });
 });

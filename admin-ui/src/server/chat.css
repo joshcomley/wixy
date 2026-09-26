@@ -120,6 +120,25 @@
   font: 0.75rem/1 system-ui, sans-serif;
 }
 
+.wx-srv-record-pause {
+  flex: none;
+  min-height: var(--wx-srv-control-h);
+  padding: 6px 12px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font: 0.75rem/1 system-ui, sans-serif;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wx-srv-record-pause[hidden] {
+  display: none;
+}
+
 /* A failed voice note's Retry / Discard: their own row under the composer's error
    line (thread.ts), never in the input row, so a 360px phone keeps its text field.
    `[hidden]` ties the display rule below on specificity, so it needs its own line. */
@@ -195,6 +214,47 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.wx-srv-thread-view .wx-chat-send-button[hidden] {
+  display: none;
+}
+
+.wx-srv-thread-view .wx-chat-composer-input[hidden] {
+  display: none;
+}
+
+.wx-srv-thread-view .wx-srv-view-once-toggle-button[hidden] {
+  display: none;
+}
+
+/* Dedicated recording row: replaces the text input and Send button while recording
+   or paused, displaying the elapsed timer, Pause/Resume, Cancel, and Stop & Send. */
+.wx-srv-thread-view .wx-chatc-input-row.wx-srv-recording-row {
+  align-items: center;
+  min-height: var(--wx-srv-control-h);
+  flex-wrap: nowrap;
+}
+
+.wx-srv-thread-view .wx-chatc-input-row.wx-srv-recording-row .wx-srv-record-status {
+  order: 1;
+  flex: 1;
+  min-width: 0;
+  color: var(--wx-ink);
+  font: 500 0.875rem/1.2 system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+.wx-srv-thread-view .wx-chatc-input-row.wx-srv-recording-row .wx-srv-record-pause {
+  order: 2;
+}
+
+.wx-srv-thread-view .wx-chatc-input-row.wx-srv-recording-row .wx-srv-record-cancel {
+  order: 3;
+}
+
+.wx-srv-thread-view .wx-chatc-input-row.wx-srv-recording-row .wx-srv-record-button {
+  order: 4;
 }
 
 /* chatComposer.ts's auto-grow floors the input at 36px and the empty state

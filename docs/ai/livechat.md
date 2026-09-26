@@ -726,8 +726,10 @@ finished. Its progress element reflects uploaded bytes. A picker opening calls
 or `cancel` event. P4 also has a five-minute safety release for browsers that fail to emit
 either event.
 
-The 🎤 control uses `server/recorder.ts`. It requests microphone permission, shows a recording
-timer, supports stop and cancel, and passes the resulting `File` into the same staged-upload
+The 🎤 control uses `server/recorder.ts`. It requests microphone permission, hides the composer
+text input and Send button in favour of a dedicated recording row, provides a Pause/Resume button
+that freezes the elapsed recording timer and excludes paused intervals from the delivered audio
+duration, supports stop and cancel, and passes the resulting `File` into the same staged-upload
 flow. Locking calls the recorder's `detach()` to discard an unfinished recording and release
 the microphone. A new recorder is created on the next attach because a detached recorder is
 terminal. Recordings shorter than one second are discarded with a “Too short” hint and never

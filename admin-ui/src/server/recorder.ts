@@ -7,7 +7,7 @@ export const VOICE_MIME_PREFERENCES = [
   "audio/ogg;codecs=opus",
 ] as const;
 
-export type RecorderState = "idle" | "starting" | "recording" | "stopping";
+export type RecorderState = "idle" | "starting" | "recording" | "paused" | "stopping";
 export type SuspendReason = "recording" | "micPermission" | "filePicker" | "mediaPlaying";
 
 export interface LockHooks {
@@ -22,6 +22,8 @@ interface MediaRecorderLike {
   onerror: ((event: Event) => void) | null;
   start(): void;
   stop(): void;
+  pause?(): void;
+  resume?(): void;
 }
 
 interface MediaRecorderConstructor {
@@ -53,7 +55,10 @@ export interface VoiceRecorderOptions {
 export interface VoiceRecorder {
   readonly state: RecorderState;
   readonly elapsedMs: number;
+  readonly supportsPause: boolean;
   start(): Promise<void>;
+  pause(): void;
+  resume(): void;
   stop(): void;
   cancel(): void;
   toggle(): Promise<void>;
@@ -76,12 +81,13 @@ export function createVoiceRecorder(options: VoiceRecorderOptions): VoiceRecorde
 
   let state: RecorderState = "idle";
   let elapsed = 0;
+  let accumulatedMs = 0;
+  let segmentStartedAt = 0;
   let recorder: MediaRecorderLike | null = null;
   let stream: MediaStream | null = null;
   let releaseRecording: (() => void) | null = null;
   let timerId: ReturnType<typeof setInterval> | null = null;
   let maxDurationId: ReturnType<typeof setTimeout> | null = null;
-  let startedAt = 0;
   let chunks: Blob[] = [];
   let cancelled = false;
   let detached = false;
@@ -94,12 +100,18 @@ export function createVoiceRecorder(options: VoiceRecorderOptions): VoiceRecorde
     get elapsedMs() {
       return elapsed;
     },
+    get supportsPause() {
+      const ctorProto = (MediaRecorderCtor as unknown as { prototype?: { pause?: unknown } })?.prototype;
+      return (recorder !== null && typeof recorder.pause === "function") || typeof ctorProto?.pause === "function";
+    },
     start,
+    pause,
+    resume,
     stop,
     cancel,
     toggle: async () => {
       if (state === "idle") await start();
-      else if (state === "recording") stop();
+      else if (state === "recording" || state === "paused") stop();
     },
     detach,
   };
@@ -111,6 +123,7 @@ export function createVoiceRecorder(options: VoiceRecorderOptions): VoiceRecorde
     cancelNotified = false;
     chunks = [];
     elapsed = 0;
+    accumulatedMs = 0;
     options.onTimer?.(0);
 
     const releasePermission = options.hooks.suspend("micPermission");
@@ -159,19 +172,61 @@ export function createVoiceRecorder(options: VoiceRecorderOptions): VoiceRecorde
     }
 
     state = "recording";
-    startedAt = now();
+    segmentStartedAt = now();
     timerId = setIntervalFn(() => {
-      elapsed = Math.min(now() - startedAt, VOICE_MAX_DURATION_MS);
+      elapsed = Math.min(accumulatedMs + Math.max(0, now() - segmentStartedAt), VOICE_MAX_DURATION_MS);
       options.onTimer?.(elapsed);
     }, 1000);
     maxDurationId = setTimeoutFn(() => stop(), VOICE_MAX_DURATION_MS);
   }
 
+  function pause(): void {
+    if (state !== "recording") return;
+    state = "paused";
+    accumulatedMs = Math.min(accumulatedMs + Math.max(0, now() - segmentStartedAt), VOICE_MAX_DURATION_MS);
+    elapsed = accumulatedMs;
+    if (timerId !== null) clearIntervalFn(timerId);
+    if (maxDurationId !== null) clearTimeoutFn(maxDurationId);
+    timerId = null;
+    maxDurationId = null;
+    try {
+      recorder?.pause?.();
+    } catch (error) {
+      options.onError?.(error);
+    }
+    options.onTimer?.(elapsed);
+  }
+
+  function resume(): void {
+    if (state !== "paused") return;
+    state = "recording";
+    segmentStartedAt = now();
+    const remaining = Math.max(0, VOICE_MAX_DURATION_MS - accumulatedMs);
+    if (remaining <= 0) {
+      stop();
+      return;
+    }
+    timerId = setIntervalFn(() => {
+      elapsed = Math.min(accumulatedMs + Math.max(0, now() - segmentStartedAt), VOICE_MAX_DURATION_MS);
+      options.onTimer?.(elapsed);
+    }, 1000);
+    maxDurationId = setTimeoutFn(() => stop(), remaining);
+    try {
+      recorder?.resume?.();
+    } catch (error) {
+      options.onError?.(error);
+    }
+    options.onTimer?.(elapsed);
+  }
+
   function stop(): void {
-    if (state !== "recording" && state !== "starting") return;
+    if (state !== "recording" && state !== "starting" && state !== "paused") return;
     if (state === "starting") {
       cancelled = true;
       return;
+    }
+    if (state === "recording") {
+      accumulatedMs = Math.min(accumulatedMs + Math.max(0, now() - segmentStartedAt), VOICE_MAX_DURATION_MS);
     }
     state = "stopping";
     try {
@@ -210,7 +265,7 @@ export function createVoiceRecorder(options: VoiceRecorderOptions): VoiceRecorde
 
   function finish(): void {
     if (state === "idle") return;
-    elapsed = Math.min(Math.max(now() - startedAt, elapsed), VOICE_MAX_DURATION_MS);
+    elapsed = Math.min(accumulatedMs, VOICE_MAX_DURATION_MS);
     options.onTimer?.(elapsed);
     const currentRecorder = recorder;
     const result = !cancelled && !detached
@@ -236,6 +291,8 @@ export function createVoiceRecorder(options: VoiceRecorderOptions): VoiceRecorde
     stream = null;
     recorder = null;
     chunks = [];
+    accumulatedMs = 0;
+    segmentStartedAt = 0;
   }
 
   return controller;

@@ -290,6 +290,13 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   cancelRecordingButton.className = "wx-srv-record-cancel";
   cancelRecordingButton.textContent = "Cancel";
   cancelRecordingButton.hidden = true;
+  const pauseRecordingButton = documentRef.createElement("button");
+  pauseRecordingButton.type = "button";
+  pauseRecordingButton.className = "wx-srv-record-pause";
+  pauseRecordingButton.textContent = "Pause";
+  pauseRecordingButton.title = "Pause recording";
+  pauseRecordingButton.setAttribute("aria-label", "Pause recording");
+  pauseRecordingButton.hidden = true;
   const recordingStatus = documentRef.createElement("span");
   recordingStatus.className = "wx-srv-record-status";
   recordingStatus.hidden = true;
@@ -600,34 +607,67 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
 
   function updateRecorderUi(elapsedMs = voiceRecorder?.elapsedMs ?? 0): void {
     const state = voiceRecorder?.state ?? "idle";
+    const isRecordingOrPaused = state === "recording" || state === "paused";
     const active = state !== "idle";
     cancelRecordingButton.hidden = !active;
     recordButton.disabled = voiceSendBusy || pendingVoiceNote !== null
       || state === "starting" || state === "stopping";
+
+    const textarea = composer?.element?.querySelector<HTMLTextAreaElement>(".wx-chat-composer-input");
+    const sendButton = composer?.element?.querySelector<HTMLButtonElement>(".wx-chat-send-button");
+    const attachButton = composer?.element?.querySelector<HTMLButtonElement>(".wx-chat-attach-button");
+    const inputRow = composer?.element?.querySelector<HTMLElement>(".wx-chatc-input-row");
+
+    if (textarea !== null && textarea !== undefined) textarea.hidden = isRecordingOrPaused;
+    if (sendButton !== null && sendButton !== undefined) sendButton.hidden = isRecordingOrPaused;
+    if (attachButton !== null && attachButton !== undefined) attachButton.hidden = isRecordingOrPaused;
+    viewOnceButton.hidden = isRecordingOrPaused;
+
+    inputRow?.classList.toggle("wx-srv-recording-row", isRecordingOrPaused);
+    composer?.element?.classList.toggle("wx-srv-recording-row", isRecordingOrPaused);
+
     if (state === "recording") {
       recordButton.textContent = "■";
       recordButton.title = "Stop recording";
       recordButton.setAttribute("aria-label", "Stop recording");
       recordingStatus.hidden = false;
       recordingStatus.textContent = `Recording ${formatRecordingTime(elapsedMs)}`;
+      pauseRecordingButton.hidden = !(voiceRecorder?.supportsPause ?? true);
+      pauseRecordingButton.textContent = "Pause";
+      pauseRecordingButton.title = "Pause recording";
+      pauseRecordingButton.setAttribute("aria-label", "Pause recording");
+    } else if (state === "paused") {
+      recordButton.textContent = "■";
+      recordButton.title = "Stop recording";
+      recordButton.setAttribute("aria-label", "Stop recording");
+      recordingStatus.hidden = false;
+      recordingStatus.textContent = `Paused ${formatRecordingTime(elapsedMs)}`;
+      pauseRecordingButton.hidden = !(voiceRecorder?.supportsPause ?? true);
+      pauseRecordingButton.textContent = "Resume";
+      pauseRecordingButton.title = "Resume recording";
+      pauseRecordingButton.setAttribute("aria-label", "Resume recording");
     } else if (state === "starting") {
       recordButton.textContent = "🎤";
       recordButton.title = "Waiting for microphone";
       recordButton.setAttribute("aria-label", "Waiting for microphone");
       recordingStatus.hidden = false;
       recordingStatus.textContent = "Waiting for microphone…";
+      pauseRecordingButton.hidden = true;
     } else if (state === "stopping") {
       recordingStatus.hidden = false;
       recordingStatus.textContent = "Saving voice note…";
+      pauseRecordingButton.hidden = true;
     } else if (voiceSendBusy) {
       recordingStatus.hidden = false;
       recordingStatus.textContent = "Sending voice note…";
+      pauseRecordingButton.hidden = true;
     } else {
       recordButton.textContent = "🎤";
       recordButton.title = "Record a voice note";
       recordButton.setAttribute("aria-label", "Record a voice note");
       recordingStatus.hidden = true;
       recordingStatus.textContent = "";
+      pauseRecordingButton.hidden = true;
     }
   }
 
@@ -683,8 +723,18 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       const started = recorder.start();
       updateRecorderUi();
       void started.finally(() => updateRecorderUi());
-    } else if (recorder.state === "recording") {
+    } else if (recorder.state === "recording" || recorder.state === "paused") {
       recorder.stop();
+      updateRecorderUi();
+    }
+  });
+  pauseRecordingButton.addEventListener("click", () => {
+    const recorder = activeRecorder();
+    if (recorder.state === "recording") {
+      recorder.pause();
+      updateRecorderUi();
+    } else if (recorder.state === "paused") {
+      recorder.resume();
       updateRecorderUi();
     }
   });
@@ -705,7 +755,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     // Sending never disables, blurs or resizes the input (operator report, round 2): the box is
     // cleared at once by `takeDraft()` and the draft comes back on a failed send.
     keepInputLive: true,
-    extraButtons: [recordButton, cancelRecordingButton, recordingStatus, viewOnceButton],
+    extraButtons: [recordButton, cancelRecordingButton, pauseRecordingButton, recordingStatus, viewOnceButton],
     renderChipPreview: (file, previewUrl) => {
       filePreviewUrls.set(file, previewUrl);
       const wrapper = documentRef.createElement("div");

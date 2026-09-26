@@ -31,6 +31,7 @@ const HIDDEN_TOGGLED_CLASSES = [
   "wx-srv-reply-bar",
   "wx-srv-view-once-controls",
   "wx-srv-tease-preview",
+  "wx-srv-record-pause",
   // The pen (drawingLayer.ts, spec/server-chat/07-live-drawing.md).
   "wx-srv-pen-toolbar",
   "wx-srv-pen-colors",
