@@ -41,6 +41,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from wixy_server.livechat.drawings import MAX_DRAWINGS_PER_ANCHOR, MAX_STROKES_PER_DRAWING
 from wixy_server.livechat.models import (
     AttachmentKind,
     AttachmentResult,
@@ -55,7 +56,6 @@ from wixy_server.livechat.models import (
     TranscriptRow,
     UploadRow,
 )
-from wixy_server.livechat.drawings import MAX_DRAWINGS_PER_ANCHOR, MAX_STROKES_PER_DRAWING
 from wixy_server.livechat.reactions import reaction_order, reactor_key
 
 _SCHEMA_V1 = """
@@ -1284,9 +1284,15 @@ class LiveChatStore:
                     (client_id, anchor_seq, sender, device_id, by_email, column_width, now, now),
                 )
             except sqlite3.IntegrityError as exc:
-                # The anchor was checked above under this write lock, so this is only a
-                # backstop: one that vanished mid-transaction is "not found", never a 500
-                # (same shape as set_reaction's own IntegrityError backstop).
+                # The anchor was checked above under this write lock, so a FOREIGN KEY
+                # failure here is only a backstop: one that vanished mid-transaction is
+                # "not found", never a 500 (same shape as set_reaction's own IntegrityError
+                # backstop). A CHECK failure (column_width out of range) is a different,
+                # genuine caller bug — the route layer already validates this before
+                # calling in, so this only fires for a caller that skipped that gate, and
+                # must never be misreported as "anchor not found".
+                if "FOREIGN KEY" not in str(exc):
+                    raise
                 raise DrawingAnchorNotFoundError(anchor_seq) from exc
             drawing_id = cursor.lastrowid
             assert drawing_id is not None

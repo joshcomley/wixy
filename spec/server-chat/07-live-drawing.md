@@ -51,6 +51,11 @@ round 2. The Builder may add detail but must not contradict it.
 
 ## 3. Schema (question 6: the number is assigned at merge, v12 today)
 
+> **Amendment (build time):** the schema number below is **13**, not 12. The
+> Spotlight→Tease rename (decisions/00172) landed first and took v12, so this
+> feature's migration was renumbered past it. Zero behavior change from the text
+> below beyond the literal number — read every `12` in this section as `13`.
+
 ```sql
 CREATE TABLE IF NOT EXISTS drawings(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -253,7 +258,8 @@ rebuild of the `events` table.**
   section after the view-once one. Also update `docs/ai/contracts.md` (routes plus the
   `drawing_live` SSE frame), `docs/ai/invariants.md` and the CLAUDE.md store-schema row, in
   the same PR.
-- **New invariant** (the next free number at merge, 53 today): "A drawing is chat content:
+- **New invariant** (the next free number at merge, 53 today — confirmed at build time,
+  see the §3 amendment above for why the schema number is 13 rather than 12): "A drawing is chat content:
   its strokes live only in `server.db`, are erased with the drawing, its anchor message or a
   wipe, and a live stroke in progress is never persisted or logged."
 - **An opus audit is required before merge,** with this file as the acceptance criteria. It
