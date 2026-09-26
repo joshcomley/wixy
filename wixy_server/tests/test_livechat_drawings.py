@@ -94,17 +94,15 @@ class TestAllowlists:
 class TestClientListMatchesServerList:
     """`admin-ui/src/server/drawings.ts` is the browser's copy of both allowlists — the
     reaction-emoji drift guard's own pattern (spec §3: "shared by TS and Python with a
-    drift guard"). The client builder (branch cmd/workspace-00035-live-drawing-client)
-    is writing this file in parallel on a separate branch; until that branch merges,
-    this class is expected to fail here with a clear "file not found" message, not
-    silently pass — see the PR description for the cross-branch landing note."""
+    drift guard"). Both halves ship in one PR, so this passes; if that file ever goes
+    missing it fails loudly with a "file not found" message rather than passing silently.
+    `admin-ui/tests/server/drawings.test.ts` guards the other direction (numeric limits)."""
 
     @staticmethod
     def _source() -> str:
         assert _TS_CONSTANTS.exists(), (
-            f"{_TS_CONSTANTS} does not exist yet — it lives on the live-drawing CLIENT "
-            "builder's branch (cmd/workspace-00035-live-drawing-client) and this drift "
-            "guard can only pass once both branches share it on main."
+            f"{_TS_CONSTANTS} does not exist — the browser's copy of the drawing allowlists "
+            "must ship with the server's (spec 07 §3 drift guard)."
         )
         return _TS_CONSTANTS.read_text(encoding="utf-8")
 
@@ -675,6 +673,25 @@ class TestCascadeErasure:
         assert b"1234" not in _raw_bytes(store)
         assert b"5678" not in _raw_bytes(store)
         assert b"6789" not in _raw_bytes(store)
+
+    def test_delete_for_scrub_records_that_a_scrub_is_owed(self, store: LiveChatStore) -> None:
+        """Audit F4: the delete and the "a WAL scrub is owed" marker commit together, so a
+        crash between the commit and the scrub is finished by the background scrubber."""
+        seq = _seed_message(store, client_id="client-erasure-marker")
+        drawing_id = self._seed_drawing(store, seq)
+        assert store.scrub_pending() is False
+        existed, token = store.delete_drawing_for_scrub(drawing_id=drawing_id, now=200.0)
+        assert existed is True
+        assert token is not None
+        assert store.scrub_pending() is True
+        assert store.scrub(deadline_s=30.0) is True
+        assert store.clear_scrub_pending(expected_token=token) is True
+        assert store.scrub_pending() is False
+
+    def test_deleting_an_already_gone_drawing_owes_no_scrub(self, store: LiveChatStore) -> None:
+        existed, token = store.delete_drawing_for_scrub(drawing_id=424242, now=200.0)
+        assert (existed, token) == (False, None)
+        assert store.scrub_pending() is False
 
     def test_deleting_the_anchor_message_cascades_and_removes_the_raw_bytes(
         self, store: LiveChatStore

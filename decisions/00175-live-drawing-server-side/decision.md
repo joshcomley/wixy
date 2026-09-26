@@ -128,6 +128,34 @@ The audit found three defects in the live relay, each red/green proven in
   They are now bounded like the create/append routes (ids 8-64 characters, `anchorSeq` 1..2^53-1,
   `batch` 0..10,000,000, else 422 before anything is relayed).
 
+### Audit round 2 (Opus rung of the same audit)
+
+- **F4 (high): `DELETE /drawings/{id}` never scrubbed the WAL.** It called the plain store delete
+  and answered 204, so a deleted drawing's stroke points stayed in `server.db-wal`, and no
+  `pending_scrub` marker existed for the background scrubber either. The raw-bytes test hid it by
+  calling `store.scrub()` itself, which no production path does. Now the route uses
+  `delete_drawing_for_scrub` (delete + marker in one transaction, only when a drawing was actually
+  removed) and `_finish_committed_erasure` (scrub, then 204, or 202 `erasurePending`), like
+  `DELETE /messages/{seq}`. `TestErasureThroughTheRoutes` deletes a drawing, its anchor and the whole
+  chat through the real routes and asserts the sentinel is gone from the db and WAL with no manual scrub.
+- **F5 (medium):** the required "no log line contains a live batch's points" test did not exist;
+  `TestNoLiveBatchPointsInLogs` covers the success, cancel, 422 and 429 paths and the stream emit.
+- **F6 (low):** queued live frames were emitted before the loop's expiry/grant checks; they now come
+  after, so a locked stream is never handed a frame.
+- **F7 (low, reverses note 2 above):** the append route cannot know the drawing's width, but the
+  store already reads the drawing row in the append transaction, so `append_stroke` now bounds x by
+  the drawing's OWN `column_width`+50 (`DrawingPointsOutOfBoundsError` -> 422). No wire change.
+- **F8 (low):** ids beyond SQLite's largest integer raised OverflowError (500) on the drawing routes and
+  on `DELETE /messages/{seq}`; they now answer their documented shapes (204 / 404 / `[]`).
+- **F9 (low):** docs said the relay goes to every OTHER stream (it goes to every stream; the client
+  filters its own) and that the drift guard is expected to fail (it passes; both halves ship together).
+- **A test-suite race found while verifying:** `test_routes_livechat_transcription.py` seeds attachment
+  rows straight into the store (create, then claim as "seed"), and with ffmpeg present the app's own
+  media worker can claim the unleased row between those two calls, find no upload file, and fail it, so
+  the seed's send raised UnusableAttachmentError (seen under the hub's 100% CPU load: the worker's
+  FileNotFoundError named the same attachment id). That module never processes real media, so the
+  worker is parked for it by an autouse fixture.
+
 ## What to watch for
 
 - **Two live-drawing branches must never both hold `cmd/workspace-00029-live-drawing`

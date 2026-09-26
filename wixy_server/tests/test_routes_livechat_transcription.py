@@ -18,11 +18,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import anyio
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from wixy_server.app import create_app
+from wixy_server.livechat import media_queue as livechat_media_queue
 from wixy_server.livechat.models import AttachmentResult
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import CmdPinVerifier
@@ -93,6 +95,21 @@ def storage_root(tmp_path: Path) -> Path:
 @pytest.fixture(autouse=True)
 def _dev_no_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("WIXY_DEV_NO_AUTH", "1")
+
+
+@pytest.fixture(autouse=True)
+def _no_live_media_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests seed attachment rows straight into the store (`_seed_voice`: create, claim
+    as "seed", finish) and never process real media. With ffmpeg on the machine the app starts
+    its media worker, which claims any unleased `processing` row in the gap between the seed's
+    create and its own claim, finds no upload file, marks it `failed`, and the seed's send then
+    fails with UnusableAttachmentError. Unlikely on an idle box, routine on a busy one, so the
+    worker is parked for this module."""
+
+    async def _idle(**_: Any) -> None:
+        await anyio.sleep_forever()
+
+    monkeypatch.setattr(livechat_media_queue, "run_forever", _idle)
 
 
 @pytest.fixture

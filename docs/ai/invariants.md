@@ -1002,7 +1002,7 @@ pointerup, in two tables (`drawings`, `drawing_strokes`, schema v13) keyed by th
 message it sticks to. A drawing's strokes are erased the moment any of the following
 happens, and never survive it: the drawing itself is deleted (`DELETE server/drawings/{id}`,
 Inv 46's "Delete for everyone" pattern — no ownership check, either person may delete any
-drawing); its anchor message is deleted (`drawings.anchor_message_seq REFERENCES
+drawing, and `DELETE server/drawings/{id}` commits a `pending_scrub` marker in the same transaction and scrubs the WAL before it answers 204, exactly like `DELETE /messages/{seq}`, so a route that deleted without scrubbing would leave the points in `server.db-wal`; the erasure tests go through the ROUTES and never call `store.scrub()` themselves); its anchor message is deleted (`drawings.anchor_message_seq REFERENCES
 messages(seq) ON DELETE CASCADE`, index-covered by `idx_drawings_anchor` — an OLDER
 blue/green-overlap process that has never heard of the drawing tables still cascades them
 away, exactly as Inv 49's reactions cascade does, because the removal lives in the schema's

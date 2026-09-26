@@ -41,7 +41,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from wixy_server.livechat.drawings import MAX_DRAWINGS_PER_ANCHOR, MAX_STROKES_PER_DRAWING
+from wixy_server.livechat.drawings import (
+    MAX_DRAWINGS_PER_ANCHOR,
+    MAX_POINT_X_PAD,
+    MAX_STROKES_PER_DRAWING,
+)
 from wixy_server.livechat.models import (
     AttachmentKind,
     AttachmentResult,
@@ -299,6 +303,13 @@ class DrawingNotFoundError(LiveChatStoreError):
 class DrawingLimitExceededError(LiveChatStoreError):
     """spec 07 §3: "at most 200 strokes per drawing and 20 drawings per anchor message,
     else 409 full." `routes_livechat.py` maps this to 409 {"error": "full"}."""
+
+
+class DrawingPointsOutOfBoundsError(LiveChatStoreError):
+    """An appended stroke has a point whose x lies beyond THIS drawing's own stored
+    `column_width` (+ the 50 px pad) — spec 07 §3's bound, which only the store can apply on
+    append, because that route's body carries no columnWidth. `routes_livechat.py` maps this
+    to 422 `invalid`. Carries no point value: it is chat content (Inv 53)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -1325,7 +1336,8 @@ class LiveChatStore:
         appends the event" rule."""
         with self._write_txn() as conn:
             drawing_row = conn.execute(
-                "SELECT anchor_message_seq, rev FROM drawings WHERE id = ?", (drawing_id,)
+                "SELECT anchor_message_seq, rev, column_width FROM drawings WHERE id = ?",
+                (drawing_id,),
             ).fetchone()
             if drawing_row is None:
                 raise DrawingNotFoundError(drawing_id)
@@ -1338,6 +1350,15 @@ class LiveChatStore:
                 is not None
             ):
                 return _load_drawing(conn, drawing_id)
+
+            # spec 07 §3: x is bounded by the drawing's OWN column width (audit F7). The
+            # route can only apply the global maximum; the stored width is available here,
+            # inside the same transaction, with no wire change.
+            x_upper_bound = float(drawing_row["column_width"]) + MAX_POINT_X_PAD
+            if any(x > x_upper_bound for x, _y in points):
+                raise DrawingPointsOutOfBoundsError(
+                    f"a point's x is beyond drawing {drawing_id}'s column width"
+                )
 
             stroke_count = conn.execute(
                 "SELECT COUNT(*) AS n FROM drawing_strokes WHERE drawing_id = ?", (drawing_id,)
@@ -1382,13 +1403,29 @@ class LiveChatStore:
     def delete_drawing(self, *, drawing_id: int, now: float) -> bool:
         """Either person may delete any drawing (Inv 46's "Delete for everyone" pattern,
         spec §4). Idempotent: deleting an already-gone drawing is a no-op that returns
-        `False` and appends no event."""
+        `False` and appends no event. Store-level only: the route uses
+        `delete_drawing_for_scrub`, because a delete that is not followed by a WAL scrub
+        leaves the strokes' bytes on disk (spec §6, Inv 53)."""
+        existed, _ = self._delete_drawing(drawing_id=drawing_id, now=now, mark_scrub_pending=False)
+        return existed
+
+    def delete_drawing_for_scrub(self, *, drawing_id: int, now: float) -> tuple[bool, str | None]:
+        """`delete_drawing` that, in the SAME transaction as the delete, records that a
+        WAL scrub is owed (`delete_message_for_scrub`'s pattern), so a crash between the
+        commit and the scrub is finished by the background scrubber instead of leaving a
+        deleted drawing's points in `server.db-wal`. Returns `(existed, pending_token)`;
+        nothing was erased, so nothing is owed, when the drawing was already gone."""
+        return self._delete_drawing(drawing_id=drawing_id, now=now, mark_scrub_pending=True)
+
+    def _delete_drawing(
+        self, *, drawing_id: int, now: float, mark_scrub_pending: bool
+    ) -> tuple[bool, str | None]:
         with self._write_txn() as conn:
             row = conn.execute(
                 "SELECT anchor_message_seq FROM drawings WHERE id = ?", (drawing_id,)
             ).fetchone()
             if row is None:
-                return False
+                return False, None
             anchor_seq = row["anchor_message_seq"]
             conn.execute("DELETE FROM drawing_strokes WHERE drawing_id = ?", (drawing_id,))
             conn.execute("DELETE FROM drawings WHERE id = ?", (drawing_id,))
@@ -1397,7 +1434,8 @@ class LiveChatStore:
                 "VALUES ('message_updated', ?, ?)",
                 (anchor_seq, now),
             )
-            return True
+            pending_token = self._upsert_pending_scrub(conn) if mark_scrub_pending else None
+            return True, pending_token
 
     def get_drawings_for_message(self, *, seq: int) -> list[DrawingRow]:
         with self._read_txn() as conn:

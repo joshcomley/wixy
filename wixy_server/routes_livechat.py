@@ -82,6 +82,7 @@ from wixy_server.livechat.store import (
     DrawingAnchorNotFoundError,
     DrawingLimitExceededError,
     DrawingNotFoundError,
+    DrawingPointsOutOfBoundsError,
     LiveChatStore,
     MessageNotFoundError,
     UnusableAttachmentError,
@@ -851,6 +852,8 @@ async def set_reaction(seq: int, body: SetReactionIn, request: Request) -> JSONR
 @router.delete("/messages/{seq}", response_model=None)
 async def delete_message(seq: int, request: Request) -> Response:
     await require_server_token(request)
+    if not (0 < seq <= _SQLITE_MAX_INTEGER):
+        return Response(status_code=204)  # no such message can exist; the delete is idempotent
     store: LiveChatStore = request.app.state.livechat_store
     paths: ProjectPaths = request.app.state.paths
     notifier: LiveChatNotifier = request.app.state.livechat_notifier
@@ -1035,6 +1038,8 @@ async def append_drawing_stroke(
     drawing_id: int, body: AppendDrawingStrokeIn, request: Request
 ) -> JSONResponse:
     await require_server_token(request)
+    if not (0 < drawing_id <= _SQLITE_MAX_INTEGER):
+        return JSONResponse(status_code=404, content={"error": "not_found"})
 
     if not (8 <= len(body.strokeId) <= 64):
         return _invalid("strokeId must be 8-64 characters")
@@ -1042,9 +1047,9 @@ async def append_drawing_stroke(
         return _invalid("color is not one of the allowed drawing colours")
     if not is_allowed_drawing_width(body.width):
         return _invalid("width is not one of the allowed drawing widths")
-    # No per-drawing columnWidth on the wire here (spec §4's body shape has none) — a
-    # conservative bound covers every possible drawing regardless of its own column
-    # width; the drawing's OWN stored value is what actually places the stroke visually.
+    # This route's body carries no columnWidth (spec §4), so the cheap pre-check here can
+    # only apply the global maximum; the drawing's OWN stored width is applied inside
+    # `store.append_stroke`, in the transaction that already reads the drawing (audit F7).
     points_error = _validate_drawing_points(
         body.points,
         x_upper_bound=MAX_COLUMN_WIDTH + MAX_POINT_X_PAD,
@@ -1074,6 +1079,8 @@ async def append_drawing_stroke(
         return JSONResponse(status_code=404, content={"error": "not_found"})
     except DrawingLimitExceededError:
         return JSONResponse(status_code=409, content={"error": "full"})
+    except DrawingPointsOutOfBoundsError:
+        return _invalid("a point's x is out of bounds for this drawing's column width")
 
     notifier.publish()
     return JSONResponse(status_code=200, content={"rev": drawing.rev})
@@ -1081,22 +1088,39 @@ async def append_drawing_stroke(
 
 @router.delete("/drawings/{drawing_id}", response_model=None)
 async def delete_drawing(drawing_id: int, request: Request) -> Response:
-    """Either person may delete any drawing (Inv 46's "Delete for everyone" pattern)."""
+    """Either person may delete any drawing (Inv 46's "Delete for everyone" pattern).
+
+    Erasure, like `DELETE /messages/{seq}` (spec 07 §6, Inv 53): the delete and the "a WAL scrub
+    is owed" marker commit together, then the scrub runs before the answer, so `204` means the
+    strokes' bytes are gone from `server.db` and its WAL. `202 {"erasurePending": true}` means the
+    delete committed and the background scrubber owes the rest (audit F4)."""
     await require_server_token(request)
+    if not (0 < drawing_id <= _SQLITE_MAX_INTEGER):
+        return Response(status_code=204)  # no such drawing can exist; deleting it is idempotent
     store: LiveChatStore = request.app.state.livechat_store
+    paths: ProjectPaths = request.app.state.paths
     notifier: LiveChatNotifier = request.app.state.livechat_notifier
 
-    existed = await anyio.to_thread.run_sync(
-        lambda: store.delete_drawing(drawing_id=drawing_id, now=time.time())
+    await anyio.to_thread.run_sync(
+        lambda: store.delete_drawing_for_scrub(drawing_id=drawing_id, now=time.time())
     )
-    if existed:
-        notifier.publish()
-    return Response(status_code=204)
+    commit_returned_at = time.monotonic()
+    return await _finish_committed_erasure(
+        store=store,
+        paths=paths,
+        notifier=notifier,
+        attachment_ids=[],
+        upload_ids=[],
+        wipe_token=None,
+        deadline_at=commit_returned_at + _DELETE_SCRUB_DEADLINE_S,
+    )
 
 
 @router.get("/messages/{seq}/drawings", response_model=None)
 async def get_message_drawings(seq: int, request: Request) -> JsonObject:
     await require_server_token(request)
+    if not (0 < seq <= _SQLITE_MAX_INTEGER):
+        return {"drawings": []}
     store: LiveChatStore = request.app.state.livechat_store
     drawings = await anyio.to_thread.run_sync(lambda: store.get_drawings_for_message(seq=seq))
     return {"drawings": [drawing_json(d) for d in drawings]}
@@ -1125,7 +1149,8 @@ def _live_relay_budget_key(request: Request, auth: ServerAuth) -> str:
 
 @router.post("/drawings/live", response_model=None)
 async def post_drawing_live(body: LiveDrawingIn, request: Request) -> JSONResponse:
-    """Relays an in-progress stroke's latest points to every OTHER open stream, without
+    """Relays an in-progress stroke's latest points to EVERY open stream (the drawer's own
+    other tabs included; the client ignores frames for a drawing it is drawing), without
     ever touching the database, a file, or a log line (spec §4 — live points are chat
     content, so Inv 40/46 apply). `POST /drawings/live` requires the token like every
     other route, and revocation/lock behaviour is unchanged: the relay rides the same
@@ -1227,16 +1252,13 @@ async def _stream_events(
     queue = live_queue if live_queue is not None else LiveDrawingQueue()
 
     while True:
-        # Capture BOTH wake-up events before draining the queue and before any awaited read below
-        # (audit F2). `queue.push` and `notifier.publish` each swap in a fresh event and set the
-        # old one, so an event read only at the wait, after the grant check and `events_after`
+        # Capture BOTH wake-up events before the checks, the queue drain and every awaited read
+        # below (audit F2). `queue.push` and `notifier.publish` each swap in a fresh event and set
+        # the old one, so an event read only at the wait, after the grant check and `events_after`
         # have yielded to the loop, is already the fresh unset one: a frame pushed in that gap
         # would sit in the queue for the whole 2 s timeout. Captured here, the old event is the
         # one that gets set, and the wait below returns at once.
         wake_events = (notifier.current_event, queue.event)
-
-        for frame in queue.drain():
-            yield _format_sse("drawing_live", frame)
 
         if auth.exp <= time.time():
             # §6 R6: reaching the token's expiresAt locks. §5.4: "the token
@@ -1259,6 +1281,12 @@ async def _stream_events(
             if not live:
                 yield _format_sse("locked", {})
                 return
+
+        # Live frames go out only AFTER the expiry and grant checks above (audit F6): spec 07 §4
+        # says the grant check, token expiry and `locked` apply unchanged to the relay, and the
+        # persisted path below also checks before it emits.
+        for frame in queue.drain():
+            yield _format_sse("drawing_live", frame)
 
         if anyio.current_time() - last_ping >= _PING_INTERVAL_S:
             last_ping = anyio.current_time()

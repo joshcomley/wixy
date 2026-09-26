@@ -1336,8 +1336,10 @@ captured at the TOP of each loop iteration, before the queue is drained and befo
 awaited read: a `push`/`publish` swaps in a fresh event and sets the old one, so an event read
 only at the wait (after the grant check and `events_after` have yielded) is already the fresh
 unset one, and a frame pushed in that gap would sit for the whole 2 s re-check. The relay is sent to
-EVERY other open connection, including the drawer's own other devices — the client, not the
+EVERY open connection, including the posting tab's own — the client, not the
 server, ignores a frame for a drawing it is itself drawing, matched by `drawingClientId`.
+The loop checks token expiry and grant liveness BEFORE it drains the queue, so a locked stream is
+never handed a queued frame.
 A final `{...,"cancel":true}` withdraws a stroke; `cancel:true` skips colour/width/points
 validation entirely (a withdrawal carries no real stroke to validate).
 **Nothing about a live batch ever reaches `server.db`, a file, or a log line** — the broker

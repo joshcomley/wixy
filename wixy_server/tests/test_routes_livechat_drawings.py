@@ -7,6 +7,7 @@ shape, per-connection broker isolation, and cascade erasure through the DELETE r
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 import threading
 import time
@@ -1228,3 +1229,311 @@ class TestStreamDrawingLiveFrame:
         broker.publish({"batch": 0})
         assert queue.drain() == []
         assert broker.connection_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Round 2 of the Opus audit: erasure through the ROUTES, log hygiene, stream ordering,
+# the drawing's own width bound, out-of-range ids.
+# ---------------------------------------------------------------------------
+
+_SENTINEL_POINTS: list[Any] = [[1234, 5678], [2345, 6789], [3456, 7890]]
+_SENTINEL_NEEDLES = (b"1234, 5678", b"2345, 6789", b"3456, 7890")
+
+
+def _raw_db_bytes(client: TestClient) -> bytes:
+    store: LiveChatStore = client.app.state.livechat_store  # type: ignore[attr-defined]
+    db_path = Path(store._db_path)
+    wal_path = Path(f"{db_path}-wal")
+    return db_path.read_bytes() + (wal_path.read_bytes() if wal_path.exists() else b"")
+
+
+def _assert_sentinel_present(client: TestClient) -> None:
+    raw = _raw_db_bytes(client)
+    assert all(needle in raw for needle in _SENTINEL_NEEDLES), "precondition: stored on disk"
+
+
+def _assert_sentinel_gone(client: TestClient) -> None:
+    raw = _raw_db_bytes(client)
+    leaked = [needle for needle in _SENTINEL_NEEDLES if needle in raw]
+    assert leaked == []
+
+
+def _create_sentinel_drawing(client: TestClient, headers: dict[str, str], *, seq: int) -> int:
+    created = client.post(
+        "/api/admin/server/drawings",
+        json=_create_body(
+            anchor_seq=seq,
+            client_id="draw-sentinel-x",
+            column_width=4000.0,  # the spec's sentinel x-values (up to 3456) need the widest column
+            points=_SENTINEL_POINTS,
+        ),
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    return int(created.json()["id"])
+
+
+class TestErasureThroughTheRoutes:
+    """Audit F4: spec 07 §6 / Inv 53. The store-level erasure tests call `store.scrub()`
+    by hand, which no production path does, so they cannot see a route that forgets it.
+    These go through the real routes and NEVER scrub themselves."""
+
+    def test_deleting_a_drawing_scrubs_the_wal_before_it_answers(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-route-erase-drawing")
+            drawing_id = _create_sentinel_drawing(client, headers, seq=seq)
+            _assert_sentinel_present(client)
+            response = client.delete(f"/api/admin/server/drawings/{drawing_id}", headers=headers)
+            assert response.status_code == 204, response.text
+            store: LiveChatStore = client.app.state.livechat_store  # type: ignore[attr-defined]
+            assert store.scrub_pending() is False
+            _assert_sentinel_gone(client)
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_deleting_the_anchor_message_leaves_no_stroke_bytes(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-route-erase-anchor")
+            _create_sentinel_drawing(client, headers, seq=seq)
+            _assert_sentinel_present(client)
+            response = client.delete(f"/api/admin/server/messages/{seq}", headers=headers)
+            assert response.status_code == 204, response.text
+            _assert_sentinel_gone(client)
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_a_wipe_leaves_no_stroke_bytes(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-route-erase-wipe")
+            _create_sentinel_drawing(client, headers, seq=seq)
+            _assert_sentinel_present(client)
+            response = client.post(
+                "/api/admin/server/wipe", headers=headers, json={"confirm": "WIPE"}
+            )
+            assert response.status_code == 204, response.text
+            _assert_sentinel_gone(client)
+        finally:
+            client.__exit__(None, None, None)
+
+
+class TestNoLiveBatchPointsInLogs:
+    """Audit F5: spec 07 §6/§7 and Inv 53 — a live stroke in progress is never logged, on
+    the success path or on any refusal path (a 422 or 429 handler that echoed its body would
+    leak handwriting)."""
+
+    @staticmethod
+    def _assert_no_points_in(caplog: pytest.LogCaptureFixture) -> None:
+        lines = [record.getMessage() for record in caplog.records]
+        for record in caplog.records:
+            if record.exc_info is not None:
+                lines.append(str(record.exc_info[1]))
+        text = "\n".join(lines)
+        for needle in ("1234, 5678", "1234,5678", "2345, 6789", "3456, 7890"):
+            assert needle not in text
+
+    def test_the_relay_logs_nothing_from_a_batch_on_any_path(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        caplog.set_level(logging.DEBUG)
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-live-log-hygiene")
+            client.app.state.livechat_drawing_live_limiter = SlidingWindowRateLimiter(  # type: ignore[attr-defined]
+                max_events=3, window_s=60.0
+            )
+            url = "/api/admin/server/drawings/live"
+            ok = client.post(
+                url,
+                json=_live_body(anchor_seq=seq, column_width=4000.0, points=_SENTINEL_POINTS),
+                headers=headers,
+            )
+            cancelled = client.post(
+                url,
+                json=_live_body(
+                    anchor_seq=seq, column_width=4000.0, points=_SENTINEL_POINTS, cancel=True
+                ),
+                headers=headers,
+            )
+            refused = client.post(
+                url,
+                json=_live_body(
+                    anchor_seq=seq, column_width=4000.0, points=[[99999, 5678], [2345, 6789]]
+                ),
+                headers=headers,
+            )
+            limited = client.post(
+                url,
+                json=_live_body(anchor_seq=seq, column_width=4000.0, points=_SENTINEL_POINTS),
+                headers=headers,
+            )
+            assert [r.status_code for r in (ok, cancelled, refused, limited)] == [
+                200,
+                200,
+                422,
+                429,
+            ]
+        finally:
+            client.__exit__(None, None, None)
+        self._assert_no_points_in(caplog)
+
+    @pytest.mark.asyncio
+    async def test_the_stream_logs_nothing_when_it_emits_a_live_frame(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.DEBUG)
+        store = LiveChatStore(tmp_path / "server.db")
+        queue = LiveDrawingQueue()
+        queue.push(
+            {"drawingClientId": "draw-x", "anchorSeq": 1, "batch": 0, "points": _SENTINEL_POINTS}
+        )
+        gen = _stream_events(
+            store, LiveChatNotifier(), _SECRET, _FIXED_AUTH, after=0, live_queue=queue
+        )
+        try:
+            frame = await _next_frame(gen)
+        finally:
+            await gen.aclose()
+        assert frame["event"] == "drawing_live"
+        self._assert_no_points_in(caplog)
+
+
+class TestStreamChecksBeforeRelayingLiveFrames:
+    """Audit F6: spec 07 §4 — the grant check, token expiry and `locked` apply unchanged to
+    the relay, so a queued frame must never be emitted to a stream that is already locked."""
+
+    @pytest.mark.asyncio
+    async def test_an_expired_token_is_locked_not_handed_a_queued_frame(
+        self, tmp_path: Path
+    ) -> None:
+        store = LiveChatStore(tmp_path / "server.db")
+        queue = LiveDrawingQueue()
+        queue.push({"drawingClientId": "draw-x", "anchorSeq": 1, "batch": 0, "points": [[1, 2]]})
+        expired = ServerAuth(email="", exp=int(time.time()) - 5)
+        gen = _stream_events(store, LiveChatNotifier(), _SECRET, expired, after=0, live_queue=queue)
+        try:
+            frame = await _next_frame(gen)
+        finally:
+            await gen.aclose()
+        assert frame["event"] == "locked"
+
+    @pytest.mark.asyncio
+    async def test_a_revoked_grant_is_locked_not_handed_a_queued_frame(
+        self, tmp_path: Path
+    ) -> None:
+        store = LiveChatStore(tmp_path / "server.db")
+        queue = LiveDrawingQueue()
+        queue.push({"drawingClientId": "draw-x", "anchorSeq": 1, "batch": 0, "points": [[1, 2]]})
+        # A grant the store has never heard of is exactly what a revoked one looks like.
+        revoked = ServerAuth(email="", exp=int(time.time()) + 3600, grant_id="g" * 32)
+        gen = _stream_events(store, LiveChatNotifier(), _SECRET, revoked, after=0, live_queue=queue)
+        try:
+            frame = await _next_frame(gen)
+        finally:
+            await gen.aclose()
+        assert frame["event"] == "locked"
+
+
+class TestAppendUsesTheDrawingsOwnColumnWidth:
+    """Audit F7: spec 07 §3 bounds a point's x by THAT drawing's column width (+50 px). The
+    append body carries no columnWidth, so the store applies the stored one."""
+
+    def test_x_past_the_drawings_own_width_is_refused_and_not_stored(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-append-width")
+            created = client.post(
+                "/api/admin/server/drawings",
+                json=_create_body(anchor_seq=seq, client_id="draw-append-width", column_width=390),
+                headers=headers,
+            )
+            drawing_id = created.json()["id"]
+            url = f"/api/admin/server/drawings/{drawing_id}/strokes"
+
+            edge = client.post(
+                url,
+                json={
+                    "strokeId": "stroke-at-the-edge",
+                    "color": DRAWING_COLORS[0],
+                    "width": DRAWING_WIDTHS[0],
+                    "points": [[440, 0], [10, 10]],  # 390 + 50: the last legal x
+                },
+                headers=headers,
+            )
+            past = client.post(
+                url,
+                json={
+                    "strokeId": "stroke-past-the-edge",
+                    "color": DRAWING_COLORS[0],
+                    "width": DRAWING_WIDTHS[0],
+                    "points": [[441, 0], [10, 10]],
+                },
+                headers=headers,
+            )
+            assert edge.status_code == 200, edge.text
+            assert past.status_code == 422, past.text
+            assert past.json()["error"] == "invalid"
+            stored = client.get(f"/api/admin/server/messages/{seq}/drawings", headers=headers)
+            strokes = stored.json()["drawings"][0]["strokes"]
+            assert [s["strokeId"] for s in strokes] == ["stroke-route-aaaa", "stroke-at-the-edge"]
+        finally:
+            client.__exit__(None, None, None)
+
+
+_BEYOND_SQLITE = 2**63
+
+
+class TestOutOfRangeIds:
+    """Audit F8: an id beyond SQLite's largest integer used to raise OverflowError -> 500."""
+
+    def test_the_drawing_routes_answer_their_documented_shapes(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            deleted = client.delete(f"/api/admin/server/drawings/{_BEYOND_SQLITE}", headers=headers)
+            appended = client.post(
+                f"/api/admin/server/drawings/{_BEYOND_SQLITE}/strokes",
+                json={
+                    "strokeId": "stroke-out-of-range",
+                    "color": DRAWING_COLORS[0],
+                    "width": DRAWING_WIDTHS[0],
+                    "points": [[1, 2], [3, 4]],
+                },
+                headers=headers,
+            )
+            listed = client.get(
+                f"/api/admin/server/messages/{_BEYOND_SQLITE}/drawings", headers=headers
+            )
+            assert deleted.status_code == 204
+            assert appended.status_code == 404
+            assert listed.status_code == 200
+            assert listed.json() == {"drawings": []}
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_deleting_a_message_with_an_out_of_range_seq_is_the_same_idempotent_204(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            response = client.delete(
+                f"/api/admin/server/messages/{_BEYOND_SQLITE}", headers=headers
+            )
+            assert response.status_code == 204
+        finally:
+            client.__exit__(None, None, None)
