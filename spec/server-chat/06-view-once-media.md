@@ -139,6 +139,19 @@ photo (the old body model ignores unknown fields). This fails closed.
     file it means when several are staged.
   - **Enabled only for a photo or video:** the button is disabled, with a plain label saying
     why, when nothing is staged or the latest staged file is not a photo or video.
+    - **Phones (viewport ≤ 480 px), confirmed 2026-09-26 (decisions/00169):**
+      - With nothing staged, the button is not rendered at all.
+      - While a photo or video is staged, it takes its own full-width line above the input
+        row.
+      - Measured reason: an always-visible third control in that row cut the text box to
+        115 px at 360 px on CI fonts. That breaks the existing 120 px floor (server-media F17),
+        and it clipped the button's label to 30 px.
+      - Nothing is lost by hiding it: only photos and videos are ever staged (a voice note
+        sends on its own), so a hidden-when-empty button only omits a control that could do
+        nothing.
+      - The line must not disable, blur or resize the input (the send no-flicker rule), and the
+        real-click visibility test covers it at 360 and 390 px.
+      - Wider screens keep the always-visible, greyed-out button.
   - **Stable:** the choice stays on the file it was made for. Staging another file afterwards
     never moves it, and removing that file clears it.
   - **Visible and reversible:** the chosen chip shows a "View once · 5 s" marker drawn inside
