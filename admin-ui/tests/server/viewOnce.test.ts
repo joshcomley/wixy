@@ -9,6 +9,7 @@ import {
   TEASE_DRAG_RESUME_DELAY_MS,
   TEASE_EASE_DURATION_MS,
 } from "../../src/server/viewOnceViewer";
+import { teaseGeometry } from "../../src/server/teasePaint";
 import type { LockHooks, ServerSession } from "../../src/server/types";
 import type { ServerIdentity } from "../../src/server/identity";
 import { mountServerThread } from "../../src/server/thread";
@@ -979,6 +980,162 @@ describe("Server Chat View-Once & Tease", () => {
       window.dispatchEvent(new PointerEvent("pointerup"));
 
       HTMLCanvasElement.prototype.getContext = origGetContext;
+      viewer.close();
+    });
+
+    it("has a Speed slider (0.5x-3x, default 1x) and a speed change never makes the cut-out jump", async () => {
+      const arcs: Array<{ x: number; y: number; radius: number }> = [];
+      const stubCtx = {
+        fillRect: vi.fn(),
+        drawImage: vi.fn(),
+        save: vi.fn(),
+        restore: vi.fn(),
+        beginPath: vi.fn(),
+        rect: vi.fn(),
+        arc: vi.fn((x: number, y: number, radius: number) => {
+          arcs.push({ x, y, radius });
+        }),
+        closePath: vi.fn(),
+        fill: vi.fn(),
+        createRadialGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+      };
+      vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(stubCtx as never);
+      // Hand-cranked clock, started away from 0 (the viewer treats 0 as "not painted yet").
+      let now = 1000;
+      vi.spyOn(window.performance, "now").mockImplementation(() => now);
+
+      const { hooks } = createMockHooks();
+      const viewer = mountViewOnceViewer({
+        session: () => SESSION,
+        seq: 117,
+        hooks,
+        identity: fakeIdentity(),
+        win: window,
+        openClaim: async () => ({
+          ok: true,
+          data: { durationS: null, tease: true, kind: "photo", mime: "image/jpeg" },
+        }),
+        fetchContent: async () => ({
+          ok: true,
+          blob: new Blob(["photo"], { type: "image/jpeg" }),
+        }),
+      });
+      document.body.appendChild(viewer.element);
+      await flush();
+
+      const sizeSlider = viewer.element.querySelector<HTMLInputElement>(".wx-srv-view-once-slider")!;
+      const speedSlider = viewer.element.querySelector<HTMLInputElement>(".wx-srv-view-once-speed-slider");
+      const readout = viewer.element.querySelector(".wx-srv-view-once-speed-value");
+      const sizeReadout = viewer.element.querySelector(".wx-srv-view-once-size-value");
+      expect(sizeReadout?.textContent).toBe("12%");
+      expect(speedSlider).toBeTruthy();
+      expect(speedSlider?.min).toBe("0.5");
+      expect(speedSlider?.max).toBe("3");
+      expect(speedSlider?.step).toBe("0.25");
+      expect(speedSlider?.value).toBe("1");
+      expect(speedSlider?.getAttribute("aria-label")).toBe("Tease speed");
+      expect(readout?.textContent).toBe("1×");
+      // The size slider stays the only `.wx-srv-view-once-slider` (its e2e locator is strict).
+      expect(viewer.element.querySelectorAll(".wx-srv-view-once-slider")).toHaveLength(1);
+      const names = [...viewer.element.querySelectorAll(".wx-srv-view-once-control-name")].map(
+        (el) => el.textContent,
+      );
+      expect(names).toEqual(["Size", "Speed"]);
+
+      // 400x300 photo on the 1024x768 jsdom canvas at the default 12% size.
+      const geo = teaseGeometry(1024, 768, 400, 300);
+      const radius = computeTeaseRadius(12, geo.minSide);
+      const spotAt = (elapsedMs: number): { x: number; y: number } =>
+        computeTeaseCoords({
+          cx: geo.cx,
+          cy: geo.cy,
+          Ax: Math.max(0, geo.drawW / 2 - radius),
+          Ay: Math.max(0, geo.drawH / 2 - radius),
+          drawX: geo.drawX,
+          drawY: geo.drawY,
+          drawW: geo.drawW,
+          drawH: geo.drawH,
+          radius,
+          elapsedMs,
+          prefersReducedMotion: false,
+          isDragging: false,
+        });
+      // A size-slider input event repaints one frame at the current (hand-cranked) time.
+      const paint = (): { x: number; y: number } => {
+        sizeSlider.dispatchEvent(new Event("input"));
+        const arc = arcs[arcs.length - 1]!;
+        return { x: arc.x, y: arc.y };
+      };
+
+      now = 3000; // 2 s after first paint, still at 1x
+      const before = paint();
+      const at2s = spotAt(2000);
+      expect(before.x).toBeCloseTo(at2s.x, 6);
+      expect(before.y).toBeCloseTo(at2s.y, 6);
+
+      speedSlider!.value = "3";
+      speedSlider!.dispatchEvent(new Event("input"));
+      expect(readout?.textContent).toBe("3×");
+      const after = paint(); // same instant, new speed: must be the same spot
+      expect(after.x).toBeCloseTo(before.x, 6);
+      expect(after.y).toBeCloseTo(before.y, 6);
+
+      now = 4000; // one more second, now at 3x: three seconds further along the path
+      const later = paint();
+      const expected = spotAt(5000);
+      expect(later.x).toBeCloseTo(expected.x, 6);
+      expect(later.y).toBeCloseTo(expected.y, 6);
+      // ...which is NOT where 1x would have put it (the speed really applied).
+      const wouldBe = spotAt(3000);
+      expect(Math.hypot(later.x - wouldBe.x, later.y - wouldBe.y)).toBeGreaterThan(20);
+
+      viewer.close();
+    });
+
+    it("omits the Speed slider under reduced motion (the cut-out is still, so there is nothing to speed up)", async () => {
+      vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+        fillRect: vi.fn(),
+        drawImage: vi.fn(),
+        save: vi.fn(),
+        restore: vi.fn(),
+        beginPath: vi.fn(),
+        rect: vi.fn(),
+        arc: vi.fn(),
+        closePath: vi.fn(),
+        fill: vi.fn(),
+        createRadialGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+      } as never);
+      const realMatchMedia = window.matchMedia;
+      window.matchMedia = ((q: string) => ({
+        matches: q.includes("prefers-reduced-motion"),
+        media: q,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })) as unknown as typeof window.matchMedia;
+
+      const { hooks } = createMockHooks();
+      const viewer = mountViewOnceViewer({
+        session: () => SESSION,
+        seq: 118,
+        hooks,
+        identity: fakeIdentity(),
+        win: window,
+        openClaim: async () => ({
+          ok: true,
+          data: { durationS: null, tease: true, kind: "photo", mime: "image/jpeg" },
+        }),
+        fetchContent: async () => ({
+          ok: true,
+          blob: new Blob(["photo"], { type: "image/jpeg" }),
+        }),
+      });
+      document.body.appendChild(viewer.element);
+      await flush();
+
+      expect(viewer.element.querySelector(".wx-srv-view-once-slider")).toBeTruthy();
+      expect(viewer.element.querySelector(".wx-srv-view-once-speed-slider")).toBeNull();
+
+      window.matchMedia = realMatchMedia;
       viewer.close();
     });
 

@@ -1213,9 +1213,12 @@ Consequences:
 - Tease reveal (photos only):
   - Automatic Lissajous path: `x = cx + Ax·sin(3θ + π/2)`, `y = cy + Ay·sin(2θ)`, 16 s cycle, clamped to drawn image.
   - Opaque black mask with circular cut-out, outer 15% feathered via radial gradient.
-  - Slider (6% to 35% radius of shorter side, default 12%).
+  - Size slider (6% to 35% radius of shorter side, default 12%) and Speed slider (0.5x to 3x in 0.25 steps, default 1x, `.wx-srv-view-once-speed-slider`), each a labelled row ("Size", "Speed") so both fit a 360px phone. Both are the recipient's own controls, never sent or stored. The size slider stays the only `.wx-srv-view-once-slider` (the e2e locator is strict).
+  - **Speed is a clock, not a divisor.** The path is a function of an animation clock that advances each frame by `frame gap x speed` (`advanceTeasePhase`, `teasePaint.ts`) and is never rewritten, so moving the slider never makes the cut-out jump; `(wall time x speed) mod cycle` would. At 1x the clock equals wall time since first paint. The drag-resume timings stay real time.
   - Dragging moves cut-out under pointer; releasing pauses for 1.5 s, then resumes toward Lissajous path easing smoothly over 600 ms without jump.
-  - `prefers-reduced-motion`: static centered cut-out, automatic movement disabled.
+  - `prefers-reduced-motion`: static centered cut-out, automatic movement disabled, and no Speed slider (nothing to speed up).
+  - The maths and painting live in `teasePaint.ts` (`computeTeaseCoords`, `advanceTeasePhase`, `teaseGeometry`, `paintPhoto`, `paintTeaseMask`); `viewOnceViewer.ts` re-exports the older names.
+- Compose-time Tease preview (`teasePreview.ts`, mounted by `thread.ts`'s View-once sheet): ticking Tease shows the sender's own staged photo with the real moving cut-out at the default size and speed, drawn by the same `teasePaint.ts` code as the viewer. It reuses the staged file's existing preview URL, stops on untick, sheet close, or when its element leaves the page (a lock tears the chat down), shows nothing if the image fails to decode, and paints once under reduced motion. The sheet scrolls (`max-height: 100%`) so a short phone never loses its top or close button.
 
 ### Honest limits
 - A screenshot, screen recording, or external camera cannot be prevented by a web application.
