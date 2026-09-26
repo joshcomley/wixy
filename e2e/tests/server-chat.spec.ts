@@ -430,9 +430,13 @@ test.describe("server-chat.spec.ts (P5b)", () => {
     expect(oldMediaPath).not.toBeNull();
 
     await pageA.request.post("/test/server/delete-response-delay", { data: { seconds: 12 } });
+    // Key presses, never mouse moves: this timer runs while A hovers the photo bubble and clicks
+    // its ⋯ trigger, which takes pointer events only while the bubble is hovered. A move landing
+    // between the hover and the click would drag the pointer off the bubble for good. Shift is R7
+    // activity (a real keydown) and does nothing else in the chat.
     const keepAliveTimer = setInterval(() => {
-      void pageA.mouse.move(42, 42);
-      void pageB.mouse.move(46, 46);
+      void pageA.keyboard.press("Shift");
+      void pageB.keyboard.press("Shift");
     }, 2_000);
     let deleteResponseReceived = false;
     const onResponse = (response: { url(): string; request(): { method(): string } }): void => {
