@@ -14,7 +14,7 @@ import sqlite3
 import subprocess
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -41,6 +41,7 @@ from wixy_server.livechat.models import (
     UploadRow,
 )
 from wixy_server.livechat.notifier import LiveChatNotifier
+from wixy_server.livechat.notifier import wait_on_any as _notifier_wait_on_any
 from wixy_server.livechat.pinclient import CmdPinVerifier
 from wixy_server.livechat.reactions import REACTION_EMOJIS
 from wixy_server.livechat.store import LiveChatStore
@@ -2037,13 +2038,17 @@ class TestDeleteWipeRoutes:
 
         monkeypatch.setattr(livechat_janitor, "cleanup_deleted_storage_once", slow_cleanup)
         stream_waiting = anyio.Event()
-        original_wait = notifier.wait
 
-        async def observe_wait(*, timeout_s: float) -> None:
+        async def observe_wait_on_any(events: Sequence[anyio.Event], *, timeout_s: float) -> None:
+            # The stream loop now races the notifier's event against a per-connection
+            # live-drawing queue's own event (spec/server-chat/07-live-drawing.md §4)
+            # through `wait_on_any`, rather than calling `notifier.wait` directly — this
+            # observer moved to match, so it still fires exactly when the loop reaches
+            # its wait point.
             stream_waiting.set()
-            await original_wait(timeout_s=timeout_s)
+            await _notifier_wait_on_any(events, timeout_s=timeout_s)
 
-        monkeypatch.setattr(notifier, "wait", observe_wait)
+        monkeypatch.setattr(routes_livechat_module, "wait_on_any", observe_wait_on_any)
         stream = _stream_events(store, notifier, app.state.livechat_secret, _FIXED_AUTH, cursor)
         frames: list[dict[str, Any]] = []
         frame_ready = anyio.Event()

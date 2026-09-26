@@ -1,0 +1,1 @@
+`test_delete_requires_token_and_removes_message_files_without_push` occasionally fails full-suite-only, from a transient Windows file lock the production retry logic already tolerates but the test doesn't — pre-existing, out of scope, recorded not fixed

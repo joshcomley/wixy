@@ -7,7 +7,8 @@ storage, routes, and second auth gate, entirely separate from `chats.py`/`cmdcha
 This manual describes the current implementation; where intent and code differ, follow the
 code and record the difference in `decisions/`.
 Numbered guarantees: [invariants.md](invariants.md) 40–47, 48 (permanent unlock), 49 (reactions),
-50 (transcription, §15), 51 (reply to a message, §12) and 52 (view-once media, §17).
+50 (transcription, §15), 51 (reply to a message, §12), 52 (view-once media, §17) and
+53 (live drawing, §18).
 
 ## 1. The disguise (why it looks like nothing is here)
 
@@ -146,9 +147,10 @@ call in `anyio.to_thread.run_sync`.
 
 Tables: `messages`, `attachments`, `events`, `uploads`, `push_subscriptions`, `reactions`,
 `deleted_storage`, `pending_wipe_cleanup`, `pending_scrub`, `attachment_transcripts` (a voice
-note's opt-in transcript, `ON DELETE CASCADE` from its attachment — §15), and `device_grants`
-(schema v9, §16 — auth credentials, not chat content, so delete/wipe leave them alone). Schema
-migrations are serialized under the SQLite writer lock.
+note's opt-in transcript, `ON DELETE CASCADE` from its attachment — §15), `device_grants`
+(schema v9, §16 — auth credentials, not chat content, so delete/wipe leave them alone), and
+`drawings`/`drawing_strokes` (schema v13, Inv 53, §18 — cascade on the anchor message, exactly
+like reactions). Schema migrations are serialized under the SQLite writer lock.
 `deleted_storage` retains internal attachment/upload tombstones and retry status; it is not a
 message/event tombstone and is never returned to chat clients. `pending_wipe_cleanup` records a
 wipe's filesystem sweep token so a crash cannot lose cleanup of orphaned paths. Schema v4 adds the
@@ -170,6 +172,9 @@ this child column once per deleted row for the `SET NULL` action, and unindexed 
 17.6s vs 0.2s at 20,000 messages (one in three a reply). A reply persists only the target's seq;
 its quote (sender, a 300-code-point text snippet, and a media summary) is resolved at read time
 from the target's live row by `list_messages`/`get_messages`, one level only, and is never stored.
+Schema v13 adds `drawings`/`drawing_strokes` (Inv 53, live drawing — the pen tool), described in
+§18; the number is 13, not 11 or 12, because those were already spent by view-once media and the
+Spotlight→Tease rename (decisions/00172) by the time this feature landed.
 Two transaction shapes:
 - `BEGIN IMMEDIATE` for writes needing a race-safe conditional check (an attachment's lease
   claim, `create_message`'s idempotent client-id insert) — serializes concurrent claimants
@@ -1224,6 +1229,143 @@ Consequences:
 - A screenshot, screen recording, or external camera cannot be prevented by a web application.
 - While displayed, bytes reside in recipient browser memory. View-once guarantees the server retains nothing and the ordinary client never shows it twice.
 - OS app-switcher snapshots may be captured when hiding. The viewer closes on hide, but the operating system's snapshot mechanism is outside browser control.
+
+## 18. Live drawing: the server (spec/server-chat/07-live-drawing.md, Architect ruling
+2026-09-26, Inv 53)
+
+The pen tool: either person draws freehand on top of the thread, live, and the drawing
+sticks to the message it was drawn near and scrolls with the chat. This section is the
+SERVER half (schema, routes, the live relay); the client half (the drawing surface,
+gestures, rendering) is §19.
+
+### Anchoring and coordinates (the client's job, stored verbatim)
+A drawing anchors to one message (`anchor_message_seq`) and stores its geometry in *draw
+space*, the drawer's own thread-column width in CSS px (`column_width`, `CHECK BETWEEN
+200 AND 4000`): `x` from the column's left edge, `y` from the anchor bubble's top edge,
+both integers. The server never computes or re-derives a position — it stores exactly what
+the client measured and validated, and a viewer rescales by `viewer column width /
+column_width` entirely client-side (spec §1).
+
+### A drawing is a session; each stroke is its own row (F2)
+A **drawing** (`drawings` table) is every stroke made from turning the pen on to turning it
+off (or the session ending). It carries `client_id` (the create idempotency key, exactly
+`create_message`'s own `clientId` pattern), the anchor, `sender`/`device_id`/`by_email`
+(audit only, never on the wire), `column_width`, and a `rev` that increments on every
+stroke appended. Each **stroke** (`drawing_strokes`, primary key `(drawing_id,
+stroke_id)`) is stored the moment it ends (pointerup) — colour and width are per-stroke,
+because the operator can change the pen mid-drawing — never batched until the session ends,
+so a closed tab loses at most the stroke under the finger. `stroke_id` is the append
+idempotency key: a repeat is a no-op that changes nothing and appends no event, the exact
+shape as `set_reaction`'s "only a real change appends the event" rule.
+
+### Schema v13 (`_SCHEMA_V13_DRAWINGS`, `wixy_server/livechat/store.py`)
+```sql
+CREATE TABLE drawings(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, client_id TEXT NOT NULL UNIQUE,
+  anchor_message_seq INTEGER NOT NULL REFERENCES messages(seq) ON DELETE CASCADE,
+  sender TEXT NOT NULL, device_id TEXT NOT NULL, by_email TEXT,
+  column_width REAL NOT NULL CHECK(column_width BETWEEN 200 AND 4000),
+  rev INTEGER NOT NULL DEFAULT 1, created_at REAL NOT NULL, updated_at REAL NOT NULL);
+CREATE INDEX idx_drawings_anchor ON drawings(anchor_message_seq);
+CREATE TABLE drawing_strokes(
+  drawing_id INTEGER NOT NULL REFERENCES drawings(id) ON DELETE CASCADE,
+  stroke_id TEXT NOT NULL, ord INTEGER NOT NULL,
+  color TEXT NOT NULL, width INTEGER NOT NULL, points TEXT NOT NULL,
+  created_at REAL NOT NULL, PRIMARY KEY(drawing_id, stroke_id));
+```
+The number is **13**, not the spec's original placeholder of 12 — the Spotlight→Tease
+rename (decisions/00172) landed first and took v12, so this feature's migration was
+renumbered past it at build time; the spec text is amended in place to say 13, marked as an
+amendment, rather than left wrong. Both foreign keys are index-covered — `idx_drawings_anchor`
+for `drawings.anchor_message_seq`, and `drawing_strokes`'s own primary key (which leads with
+`drawing_id`) for its FK to `drawings.id` — the same lesson reply-to's schema v10 measured
+(17.6s vs 0.2s at 20,000 rows). `ON DELETE CASCADE` on both is load-bearing for the same
+reason as reactions' (decisions/00164): an older blue/green-overlap process that has never
+heard of these tables can still hard-delete a message, and the cascade — not that older
+process — removes the drawing and its strokes with it (Inv 46/49/53).
+
+### Persistence rides the existing event machinery (F3, no new event type)
+A create, an appended stroke, or a delete each appends exactly one EXISTING
+`message_updated` event for the anchor — identical in shape to a reaction changing. The
+`Message` wire shape carries only a summary, `drawings:[{id,rev}]` (`DrawingSummary`,
+`models.py`), never the strokes: a history page of 50 messages must not carry megabytes of
+points. A client that sees a summary entry it lacks, or a newer `rev` than it has, fetches
+the body with `GET /messages/{seq}/drawings` — `{"drawings":[{id,rev,sender,columnWidth,
+strokes:[{strokeId,color,width,points}]}]}`. The `events` table itself is untouched: no
+rebuild, no new `EventType`, so replay/coalescing/reconnect/blue-green behaviour are
+unchanged for every OTHER consumer of that table.
+
+### Routes (`routes_livechat.py`, token required on every one)
+`POST /drawings` (create + first stroke, idempotent on `clientId`, 404 on an unknown/deleted
+`anchorSeq`, 409 `full` past 20 drawings on one anchor); `POST /drawings/{id}/strokes`
+(append, idempotent on `strokeId`, 404 on an unknown/deleted drawing, 409 `full` past 200
+strokes); `DELETE /drawings/{id}` (204, always, idempotent — either person may delete any
+drawing, Inv 46's pattern, no ownership check); `GET /messages/{seq}/drawings` (every
+drawing for that anchor, with strokes; `[]` rather than 404 for an unknown `seq`, since the
+summary already told the client whether to bother asking). Validation (422 `invalid`):
+colour is one of the 8 hex values in `livechat/drawings.py` (`DRAWING_COLORS`), width is one
+of `{2,4,8,14}` (`DRAWING_WIDTHS`) — both shared with the browser's own copy
+(`admin-ui/src/server/drawings.ts`) through the reaction-emoji drift guard's own pattern,
+enforced by `test_livechat_drawings.py`; points are 2-1000 integer pairs with `x` in
+`[-50, columnWidth+50]` and `y` in `[-20000, 20000]`, checked as the RESULT of the client's
+own Ramer-Douglas-Peucker simplification, never re-simplified server-side. Full contract:
+[contracts.md](contracts.md) §2/§4.
+
+### The live relay: a separate, deliberately lossy channel (F3, Inv 53)
+`POST /drawings/live` batches a stroke's in-progress points (~every 50ms client-side, at
+most 200 points/batch and 30 batches/second per `drawingClientId` — `SlidingWindowRateLimiter`,
+429 `rate_limited` + `Retry-After` past the cap) and relays them through a NEW in-memory
+`DrawingBroker` (`livechat/drawing_broker.py`) — deliberately NOT the `LiveChatNotifier`,
+which carries no payload and only means "re-read the database". Each open `/stream`
+connection registers its own `LiveDrawingQueue` (a `deque(maxlen=64)`, oldest dropped past
+capacity — the "bounded queue of 64 items, overflow drops the oldest" the spec asks for) via
+`broker.register()`, drains it every stream-loop tick (before the ordinary persisted-event
+poll, so a live frame's latency is never held up by a coalescing pass over unrelated
+messages), and unregisters on disconnect. `LiveDrawingQueue.event` is raced against
+`LiveChatNotifier.current_event` through a shared `wait_on_any` helper (`notifier.py`), so
+the stream loop wakes on either wire without needing two poll loops. The relay is sent to
+EVERY other open connection, including the drawer's own other devices — the client, not the
+server, ignores a frame for a drawing it is itself drawing, matched by `drawingClientId`.
+A final `{...,"cancel":true}` withdraws a stroke; `cancel:true` skips colour/width/points
+validation entirely (a withdrawal carries no real stroke to validate).
+**Nothing about a live batch ever reaches `server.db`, a file, or a log line** — the broker
+holds a frame only as long as it takes to hand it to each queue; live points are chat
+content exactly like a stored stroke, so Inv 40/46/53 apply to them too. The SSE frame
+itself carries **no `id:` line**, so it can never advance anyone's replay cursor (wire shape:
+[contracts.md](contracts.md) §4). Revocation, token expiry, and the `locked` event apply
+unchanged, because the relay rides the same stream connections those already gate — `POST
+/drawings/live` requires the token like every other route.
+**Honest limit:** during a blue/green overlap, a live frame reaches only streams on the SAME
+process, because the broker is in-process — a deploy overlap lasts minutes, and stored
+strokes still reach everyone within 2s through the existing cross-process database re-check
+(§6 above). No push notification for drawings, exactly like reactions.
+
+### Erasure (F4, Inv 53)
+Deleting the anchor message cascades to its drawings and strokes (the schema's own FK, not
+application code — proven directly by deleting the anchor through a raw `DELETE FROM
+messages` connection that has never imported the drawing store methods at all). Deleting a
+drawing removes its row and, by cascade, its strokes. A wipe explicitly clears both tables
+in the same transaction as every other one, even though the cascade already covers it, so
+the wipe's intent is never implicit. There are no drawing files (rendering is client-side
+SVG), so nothing is queued in `deleted_storage`.
+
+### Privacy (Inv 40)
+Drawings live only in the private Server-chat `server.db`, under
+`Storage/projects/<slug>/server/` — nothing about them (not even a hint of their existence)
+reaches the site repo, a build, a publish, a `reports.py` diagnostic bundle, or a backup
+snapshot; `wixy_server/tests/test_reports.py` pins a drawing-specific sentinel absent from
+the report bundle alongside the existing whole-`server_dir` exclusion.
+
+### Tests
+`wixy_server/tests/test_livechat_drawings.py` (palette allowlist, the TS/Python drift
+guard, migration v12→v13 on a database frozen at v12 and on a fresh database, store
+create/append/delete idempotency and limits, `CHECK` constraint enforcement, ordering, a
+concurrency test with two `LiveChatStore` connections appending to the same drawing at
+once, and the cascade-erasure raw-bytes proofs) and
+`wixy_server/tests/test_routes_livechat_drawings.py` (auth on every route, the full
+validation matrix, every error code, the live relay's rate limit and per-connection
+isolation, the bounded queue's drop-oldest policy, and the `drawing_live` SSE frame never
+disturbing the replay cursor).
 
 ## 19. Live drawing: the client (the pen) (round 2, `spec/server-chat/07-live-drawing.md`)
 

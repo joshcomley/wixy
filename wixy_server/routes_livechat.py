@@ -1090,7 +1090,7 @@ async def delete_drawing(drawing_id: int, request: Request) -> Response:
     return Response(status_code=204)
 
 
-@router.get("/messages/{seq}/drawings")
+@router.get("/messages/{seq}/drawings", response_model=None)
 async def get_message_drawings(seq: int, request: Request) -> JsonObject:
     await require_server_token(request)
     store: LiveChatStore = request.app.state.livechat_store

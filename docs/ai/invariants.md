@@ -995,3 +995,35 @@ atomic single-winner claim race, streaming download, post-delivery erasure, brok
 backstop cleanup, and fail-closed linklessness), `admin-ui/tests/server/viewOnce.test.ts` (lifecycle triggers,
 resource release, `viewOnce` idle suspension, and tease math/clamping/easing), and `admin-ui/tests/serverThread.test.ts`
 (bubble cards, tap to view, non-closure on `message_deleted`, wipe, and detach).
+
+### Inv 53 — A drawing is chat content: erased with its drawing, its anchor, or a wipe; never persisted mid-stroke
+Live drawing (the pen tool, spec/server-chat/07-live-drawing.md) stores each STROKE at
+pointerup, in two tables (`drawings`, `drawing_strokes`, schema v13) keyed by the anchor
+message it sticks to. A drawing's strokes are erased the moment any of the following
+happens, and never survive it: the drawing itself is deleted (`DELETE server/drawings/{id}`,
+Inv 46's "Delete for everyone" pattern — no ownership check, either person may delete any
+drawing); its anchor message is deleted (`drawings.anchor_message_seq REFERENCES
+messages(seq) ON DELETE CASCADE`, index-covered by `idx_drawings_anchor` — an OLDER
+blue/green-overlap process that has never heard of the drawing tables still cascades them
+away, exactly as Inv 49's reactions cascade does, because the removal lives in the schema's
+own foreign key, not in application code); or a wipe (`DELETE FROM drawing_strokes;
+DELETE FROM drawings` in the same transaction as every other table, explicit even though the
+FK cascade already covers it — spec §6, so the wipe's intent is never left implicit). Every
+create/append/delete is announced only through the EXISTING `message_updated` event carrying
+a `{id, rev}` summary (never the strokes) — no new persisted event type, no rebuild of the
+`events` table.
+**An in-progress stroke is never persisted, logged, or written to any file, regardless of
+how the drawing session ends.** While a stroke is being drawn, its points travel only
+through the in-memory `DrawingBroker` (`livechat/drawing_broker.py`) as an id-less
+`drawing_live` SSE frame (contracts.md §4) — the broker holds nothing after handing a batch
+to each open connection's bounded 64-frame queue (oldest dropped past capacity), and nothing
+about it ever reaches `server.db`, its WAL, or a log line. A cancelled stroke (the drawer
+lifts a second finger, the pen turns off, the chat locks) simply stops relaying; there was
+never anything stored to undo.
+*Enforced by:* `wixy_server/tests/test_livechat_drawings.py` (the `TestCascadeErasure` class:
+raw-bytes-absent proofs for direct drawing delete, anchor-message delete, wipe, and an
+"older process" that deletes the anchor with a bare `DELETE FROM messages` and no knowledge
+of the drawing tables at all) and `wixy_server/tests/test_routes_livechat_drawings.py`
+(`TestStreamDrawingLiveFrame`: a live frame carries no `id:` line and never advances the
+replay cursor; `TestLiveDrawingRoute::test_a_valid_batch_is_relayed_and_never_persisted`:
+the table row count and the events table are unchanged by a live post).
