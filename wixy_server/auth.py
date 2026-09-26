@@ -156,6 +156,9 @@ def build_admin_auth_middleware(
         if not is_admin_path(request.url.path):
             return await call_next(request)
         if dev_no_auth:
+            dev_email = request.headers.get("cf-access-authenticated-user-email")
+            if dev_email:
+                request.state.access_email = dev_email
             return await call_next(request)
 
         token = request.headers.get(CF_ACCESS_JWT_HEADER)

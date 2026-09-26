@@ -296,6 +296,10 @@ async def get_media(
         # rendition yet; the durable cleanup worker will retry the file removal.
         raise HTTPException(status_code=404)
 
+    is_vo = await anyio.to_thread.run_sync(lambda: store.is_attachment_view_once(att_id))
+    if is_vo:
+        raise HTTPException(status_code=404)
+
     def _resolve() -> Path | None:
         return _resolve_rendition_path(paths, att_id, rendition)
 

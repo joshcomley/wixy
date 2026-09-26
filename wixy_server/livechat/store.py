@@ -181,13 +181,37 @@ CREATE INDEX IF NOT EXISTS idx_messages_reply_to
   ON messages(reply_to_seq) WHERE reply_to_seq IS NOT NULL;
 """
 
-_LATEST_SCHEMA_VERSION = 10
+_SCHEMA_V11_VIEW_ONCE_MESSAGES = [
+    "ALTER TABLE messages ADD COLUMN view_once_s INTEGER "
+    "CHECK(view_once_s IS NULL OR view_once_s IN (0, 2, 5, 30))",
+    "ALTER TABLE messages ADD COLUMN view_spotlight INTEGER NOT NULL DEFAULT 0 "
+    "CHECK(view_spotlight IN (0, 1))",
+    "ALTER TABLE messages ADD COLUMN view_claim_id TEXT",
+    "ALTER TABLE messages ADD COLUMN view_claimed_at REAL",
+    "ALTER TABLE messages ADD COLUMN view_claim_email TEXT",
+]
+_SCHEMA_V11_VIEW_ONCE_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_messages_view_claimed
+  ON messages(view_claimed_at) WHERE view_claimed_at IS NOT NULL;
+"""
+_SCHEMA_V11_VIEW_ONCE_ATTACHMENTS = "ALTER TABLE attachments ADD COLUMN view_once_renditions TEXT"
+
+_LATEST_SCHEMA_VERSION = 11
 _UNKNOWN_GRANT_HASH = "0" * 64
 _LOGGER = logging.getLogger(__name__)
 
 
 class LiveChatStoreError(Exception):
     """Base for store-level validation failures the route layer maps to a 4xx."""
+
+
+class AttachmentNotReadyError(LiveChatStoreError):
+    """An attachment is valid and usable, but still processing. `routes_livechat.py`
+    maps this to 422 {"error": "not_ready"}."""
+
+    def __init__(self, attachment_id: str) -> None:
+        super().__init__(f"attachment {attachment_id!r} is not ready yet")
+        self.attachment_id = attachment_id
 
 
 class UnusableAttachmentError(LiveChatStoreError):
@@ -249,6 +273,9 @@ def _row_to_transcript(row: sqlite3.Row) -> TranscriptRow | None:
 
 def _row_to_attachment(row: sqlite3.Row) -> AttachmentRow:
     peaks_raw = row["peaks"]
+    keys = row.keys()
+    vo_raw = row["view_once_renditions"] if "view_once_renditions" in keys else None
+    view_once_renditions = tuple(json.loads(vo_raw)) if vo_raw is not None else None
     return AttachmentRow(
         id=row["id"],
         kind=row["kind"],
@@ -268,6 +295,7 @@ def _row_to_attachment(row: sqlite3.Row) -> AttachmentRow:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         transcript=_row_to_transcript(row),
+        view_once_renditions=view_once_renditions,
     )
 
 
@@ -278,6 +306,7 @@ def _row_to_message(
     *,
     reply_to: MessageRow | None = None,
 ) -> MessageRow:
+    keys = row.keys()
     return MessageRow(
         seq=row["seq"],
         client_id=row["client_id"],
@@ -288,8 +317,13 @@ def _row_to_message(
         created_at=row["created_at"],
         attachments=attachments,
         reactions=reactions,
-        reply_to_seq=row["reply_to_seq"],
+        reply_to_seq=row["reply_to_seq"] if "reply_to_seq" in keys else None,
         reply_to=reply_to,
+        view_once_s=row["view_once_s"] if "view_once_s" in keys else None,
+        view_spotlight=row["view_spotlight"] if "view_spotlight" in keys else 0,
+        view_claim_id=row["view_claim_id"] if "view_claim_id" in keys else None,
+        view_claimed_at=row["view_claimed_at"] if "view_claimed_at" in keys else None,
+        view_claim_email=row["view_claim_email"] if "view_claim_email" in keys else None,
     )
 
 
@@ -540,6 +574,31 @@ class LiveChatStore:
                     if statement.strip():
                         conn.execute(statement)
                 conn.execute("PRAGMA user_version = 10")
+                current = 10
+
+            if current < 11:
+                existing_msg_cols = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
+                col_defs = [
+                    ("view_once_s", _SCHEMA_V11_VIEW_ONCE_MESSAGES[0]),
+                    ("view_spotlight", _SCHEMA_V11_VIEW_ONCE_MESSAGES[1]),
+                    ("view_claim_id", _SCHEMA_V11_VIEW_ONCE_MESSAGES[2]),
+                    ("view_claimed_at", _SCHEMA_V11_VIEW_ONCE_MESSAGES[3]),
+                    ("view_claim_email", _SCHEMA_V11_VIEW_ONCE_MESSAGES[4]),
+                ]
+                for col_name, stmt in col_defs:
+                    if col_name not in existing_msg_cols:
+                        conn.execute(stmt)
+                for statement in _SCHEMA_V11_VIEW_ONCE_INDEX.split(";"):
+                    if statement.strip():
+                        conn.execute(statement)
+
+                existing_att_cols = {
+                    row[1] for row in conn.execute("PRAGMA table_info(attachments)")
+                }
+                if "view_once_renditions" not in existing_att_cols:
+                    conn.execute(_SCHEMA_V11_VIEW_ONCE_ATTACHMENTS)
+                conn.execute("PRAGMA user_version = 11")
+                current = 11
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
@@ -693,6 +752,216 @@ class LiveChatStore:
                 (seq, now),
             )
             return _load_message(conn, seq), True
+
+    def create_view_once_message(
+        self,
+        *,
+        client_id: str,
+        sender: str,
+        device_id: str,
+        by_email: str | None,
+        attachment_id: str,
+        duration_s: int | None,
+        spotlight: bool,
+        reply_to_seq: int | None = None,
+        now: float,
+    ) -> tuple[MessageRow, bool]:
+        """Creates a view-once message holding exactly one attachment and no text.
+
+        Enforces Inv 52: copies the attachment's renditions list into
+        view_once_renditions and clears renditions to '[]' in the SAME transaction.
+        """
+        with self._write_txn() as conn:
+            existing = conn.execute(
+                "SELECT seq FROM messages WHERE client_id = ?", (client_id,)
+            ).fetchone()
+            if existing is not None:
+                return _load_message(conn, existing["seq"]), False
+
+            stored_reply_to_seq: int | None = None
+            if reply_to_seq is not None:
+                target_exists = (
+                    conn.execute("SELECT 1 FROM messages WHERE seq = ?", (reply_to_seq,)).fetchone()
+                    is not None
+                )
+                if target_exists:
+                    stored_reply_to_seq = reply_to_seq
+
+            candidate = conn.execute(
+                "SELECT id, message_seq, status, kind, renditions FROM attachments WHERE id = ?",
+                (attachment_id,),
+            ).fetchone()
+            if (
+                candidate is None
+                or candidate["message_seq"] is not None
+                or candidate["kind"] not in ("photo", "video")
+                or (spotlight and candidate["kind"] != "photo")
+            ):
+                raise UnusableAttachmentError(attachment_id)
+            if candidate["status"] != "ready":
+                raise AttachmentNotReadyError(attachment_id)
+
+            # In the same transaction that creates the message:
+            # 1. copies the attachment's renditions list into view_once_renditions;
+            # 2. sets renditions = '[]'.
+            renditions_raw = candidate["renditions"]
+            conn.execute(
+                "UPDATE attachments SET renditions = '[]', view_once_renditions = ? WHERE id = ?",
+                (renditions_raw, attachment_id),
+            )
+
+            # In DB: view_once_s: NULL = ordinary; 0 = no limit; 2, 5, 30.
+            stored_duration_s = 0 if duration_s is None else duration_s
+            view_spotlight = 1 if spotlight else 0
+
+            cursor = conn.execute(
+                "INSERT INTO messages "
+                "(client_id, sender, device_id, by_email, text, created_at, "
+                "reply_to_seq, view_once_s, view_spotlight) "
+                "VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)",
+                (
+                    client_id,
+                    sender,
+                    device_id,
+                    by_email,
+                    now,
+                    stored_reply_to_seq,
+                    stored_duration_s,
+                    view_spotlight,
+                ),
+            )
+            seq = cursor.lastrowid
+            assert seq is not None
+            conn.execute(
+                "UPDATE attachments SET message_seq = ?, ordinal = 0 WHERE id = ?",
+                (seq, attachment_id),
+            )
+            conn.execute(
+                "INSERT INTO events (type, message_seq, created_at) VALUES ('message', ?, ?)",
+                (seq, now),
+            )
+            return _load_message(conn, seq), True
+
+    def claim_view_once(
+        self,
+        *,
+        seq: int,
+        claim_id: str,
+        email: str,
+        sender: str,
+        now: float,
+    ) -> tuple[
+        Literal["ok", "own_message", "already_opened", "not_found"],
+        MessageRow | None,
+        AttachmentRow | None,
+    ]:
+        """Claims a view-once message atomically inside BEGIN IMMEDIATE.
+
+        Returns:
+        - ('not_found', None, None) if message does not exist or is not view-once.
+        - ('own_message', msg, None) if requester is the sender.
+        - ('ok', msg, att) if claim succeeded or is an idempotent retry with same claim_id & email.
+        - ('already_opened', msg, None) if a different claim already holds it.
+        """
+        with self._write_txn() as conn:
+            row = conn.execute("SELECT * FROM messages WHERE seq = ?", (seq,)).fetchone()
+            if row is None or row["view_once_s"] is None:
+                return "not_found", None, None
+
+            # Own message check: same email when non-empty, else same sender name (R8)
+            msg_email = row["by_email"] or ""
+            msg_sender = row["sender"] or ""
+            if email and msg_email:
+                is_own = email == msg_email
+            else:
+                is_own = sender.strip().casefold() == msg_sender.strip().casefold()
+            if is_own:
+                return "own_message", _load_message(conn, seq), None
+
+            existing_claim = row["view_claim_id"]
+            if existing_claim is not None:
+                if (
+                    hmac.compare_digest(existing_claim, claim_id)
+                    and (row["view_claim_email"] or "") == email
+                ):
+                    msg = _load_message(conn, seq)
+                    att = msg.attachments[0] if msg.attachments else None
+                    return "ok", msg, att
+                return "already_opened", _load_message(conn, seq), None
+
+            cursor = conn.execute(
+                "UPDATE messages SET view_claim_id = ?, view_claimed_at = ?, view_claim_email = ? "
+                "WHERE seq = ? AND view_once_s IS NOT NULL AND view_claim_id IS NULL",
+                (claim_id, now, email, seq),
+            )
+            if cursor.rowcount == 1:
+                msg = _load_message(conn, seq)
+                att = msg.attachments[0] if msg.attachments else None
+                return "ok", msg, att
+
+            # Another connection won the race
+            refreshed = conn.execute("SELECT * FROM messages WHERE seq = ?", (seq,)).fetchone()
+            if refreshed is not None and refreshed["view_claim_id"] is not None:
+                if (
+                    hmac.compare_digest(refreshed["view_claim_id"], claim_id)
+                    and (refreshed["view_claim_email"] or "") == email
+                ):
+                    msg = _load_message(conn, seq)
+                    att = msg.attachments[0] if msg.attachments else None
+                    return "ok", msg, att
+            return "already_opened", _load_message(conn, seq), None
+
+    def get_view_once_content_info(
+        self,
+        *,
+        seq: int,
+        claim_id: str,
+        email: str,
+        now: float,
+    ) -> tuple[
+        Literal["ok", "not_found", "forbidden", "expired"],
+        MessageRow | None,
+        AttachmentRow | None,
+    ]:
+        with self._read_txn() as conn:
+            row = conn.execute("SELECT * FROM messages WHERE seq = ?", (seq,)).fetchone()
+            if row is None or row["view_once_s"] is None or row["view_claim_id"] is None:
+                return "not_found", None, None
+            if not hmac.compare_digest(row["view_claim_id"], claim_id):
+                return "forbidden", None, None
+            if (row["view_claim_email"] or "") != email:
+                return "forbidden", None, None
+            claimed_at = row["view_claimed_at"]
+            if claimed_at is None or now >= claimed_at + 600.0:
+                return "expired", None, None
+            msg = _load_message(conn, seq)
+            att = msg.attachments[0] if msg.attachments else None
+            return "ok", msg, att
+
+    def is_attachment_view_once(self, att_id: str) -> bool:
+        with self._read_txn() as conn:
+            row = conn.execute(
+                "SELECT a.view_once_renditions, m.view_once_s "
+                "FROM attachments a LEFT JOIN messages m ON a.message_seq = m.seq "
+                "WHERE a.id = ?",
+                (att_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            if row["view_once_renditions"] is not None:
+                return True
+            if row["view_once_s"] is not None:
+                return True
+            return False
+
+    def expired_claimed_view_once_seqs(self, *, older_than: float) -> list[int]:
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT seq FROM messages "
+                "WHERE view_claimed_at IS NOT NULL AND view_claimed_at < ?",
+                (older_than,),
+            ).fetchall()
+            return [int(row["seq"]) for row in rows]
 
     def list_messages(
         self, *, before: int | None, limit: int
