@@ -4,7 +4,8 @@
 // (`admin-ui/tests/server/gestures.test.ts` covers the detector logic itself against synthetic
 // events; this file proves it end to end on a real mobile browser).
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "../fixtures";
+import type { Page } from "@playwright/test";
 
 test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 

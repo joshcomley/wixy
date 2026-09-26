@@ -13,7 +13,7 @@
 // mechanism is for an upstream commit arriving with no other signal, and this
 // fixture endpoint has a much stronger one (it just pushed the commit itself).
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "../fixtures";
 import { gotoEditAndWaitReady, publishAndWait, trackConsoleErrors } from "./helpers";
 
 test.describe("E2E 6: AI lane (faked)", () => {

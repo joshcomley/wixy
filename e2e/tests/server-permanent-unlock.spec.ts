@@ -12,7 +12,8 @@
 // init script installs a stand-in with the same surface (`screenState`, `change`, a permission
 // that starts at "prompt" and is granted by `requestPermission`). `fireScreenLock` drives it.
 
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { expect, test } from "../fixtures";
+import type { Browser, Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
 
 const TEST_PIN = "246813";

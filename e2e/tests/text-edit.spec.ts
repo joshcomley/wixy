@@ -8,7 +8,7 @@
 // the fixture's site-origin was a non-bare working-tree repo that would have refused
 // the pipeline's `git push` the moment any flow tried to actually publish.
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "../fixtures";
 import {
   editTextField,
   gotoEditAndWaitReady,

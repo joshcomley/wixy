@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "../fixtures";
+import type { Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 
 const MULTI_TAP_INTERVAL_MS = 400;

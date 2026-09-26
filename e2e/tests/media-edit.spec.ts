@@ -1,7 +1,7 @@
 // E2E: media editing (decisions/00080) — the media panel's detail sheet
 // stages an in-place replacement (grid previews staged bytes immediately)
 // and publishes it (the repo file is overwritten, references untouched).
-import { expect, test } from "@playwright/test";
+import { expect, test } from "../fixtures";
 import { publishAndWait, trackConsoleErrors } from "./helpers";
 
 test.describe("media editing", () => {

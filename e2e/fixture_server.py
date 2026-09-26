@@ -14,11 +14,9 @@ hit the real network" rule). Publishes ONE initial build before starting so the
 preview route's own asset URLs resolve instead of 503ing (decisions/00018 — a fresh
 install with no live.json yet is correct-but-noisy for what E2E flows actually test).
 Then runs `wixy_server.app.create_app` via uvicorn on the port
-`playwright.config.ts`'s `webServer.url` health-checks — 8799 by default,
-overridable via `WIXY_E2E_PORT` so two agent sessions on the same box can run
-the suite in parallel instead of colliding on the one fixed port (found live
-2026-08-02: a second session's run kept failing with "already used" while a
-first was mid-suite).
+`fixtures.ts` passes in `WIXY_E2E_PORT` (a free port it picked; 8799 only when run by
+hand). Playwright starts ONE of these per worker, each with its own private temp
+repo/storage, so workers and concurrent sessions never share state or a port.
 
 Usage: python fixture_server.py
 """
@@ -363,7 +361,7 @@ def main() -> None:
     # `Thread` can only ever be started once, so that stop has no clean
     # restart). This spec file is now a second consumer, so sharing the same
     # instance would leave PIN verification permanently broken for every
-    # later spec file in the same `workers:1` run once chat-ux's test has
+    # later spec file on the same worker once chat-ux's test has
     # run (found live: 12/20 server-lock.spec.ts tests failing with a
     # consistent 503 "pin_service_unavailable" whenever run after
     # chat-ux.spec.ts). Same underlying `FakeCmdState` (so
@@ -471,7 +469,7 @@ def main() -> None:
         time to land on more than one calendar day, exercising the day
         separator. `label` (default "Seeded message") lets each test tag its
         own batch distinctly — this fixture server runs ONE project for the
-        WHOLE spec file (playwright.config.ts's own `workers: 1`, no reset
+        WHOLE spec file (it serves one worker, and there is no reset
         between tests), so two tests seeding the generic default label would
         make each other's leftover rows indistinguishable from their own."""
         count = payload["count"]
@@ -846,7 +844,7 @@ def main() -> None:
     async def _post_stop_fake_cmd() -> dict[str, bool]:
         """E2E 7's offline-banner leg (spec/06 §3) — the LAST thing any chat
         E2E test does (no other spec file touches chat/cmd, so a one-way stop
-        is safe for the shared, workers:1 fixture server)."""
+        is safe: it only ever affects that one worker's own server)."""
         await anyio.to_thread.run_sync(fake_cmd_server.stop)
         return {"ok": True}
 

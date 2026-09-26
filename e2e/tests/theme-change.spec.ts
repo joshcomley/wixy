@@ -19,7 +19,7 @@
 // actually renders (which would require real internet access this suite must not
 // depend on).
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "../fixtures";
 import { publishAndWait, trackConsoleErrors, waitForNextDraftPatchAccepted } from "./helpers";
 
 test.describe("E2E 3: theme change", () => {

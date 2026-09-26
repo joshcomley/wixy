@@ -6,7 +6,8 @@
 // the operator's phone width (CSS 402px). Tolerances are 1px (sub-pixel
 // rounding); the fixes bring every figure below to an exact match.
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "../fixtures";
+import type { Page } from "@playwright/test";
 
 /** Mirrors `MULTI_TAP_INTERVAL_MS` in admin-ui/src/server/constants.ts. */
 const MULTI_TAP_INTERVAL_MS = 400;

@@ -20,7 +20,8 @@
 // unique to its own test rather than asserting an absolute thread-wide
 // count, which a sibling test's leftover rows would silently corrupt.
 
-import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { expect, test } from "../fixtures";
+import type { BrowserContext, Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
 
 /** Mirrors `MULTI_TAP_INTERVAL_MS` in admin-ui/src/server/constants.ts. */

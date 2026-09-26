@@ -5,7 +5,8 @@
 // One fixture server for the whole run (`workers: 1`, no per-test reset), so every message here
 // carries a label unique to its own test rather than asserting a thread-wide count.
 
-import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
+import { expect, test } from "../fixtures";
+import type { BrowserContext, Locator, Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
 
 test.use({

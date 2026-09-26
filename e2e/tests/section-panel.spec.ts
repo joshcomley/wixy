@@ -21,7 +21,8 @@
 // the staged-save UX itself (unsaved -> Save -> ready to publish -> Publish;
 // Undo/Discard at both stages).
 
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test } from "../fixtures";
+import type { Locator, Page } from "@playwright/test";
 import { publishAndWait, trackConsoleErrors, waitForNextDraftPatchAccepted } from "./helpers";
 
 /** Finds the `.wx-section-card` whose title input's current VALUE is `title`.

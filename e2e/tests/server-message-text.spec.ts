@@ -5,7 +5,8 @@
 // `textContent`) reflects the rendered line breaks, so it is the observable the
 // operator actually saw.
 
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test } from "../fixtures";
+import type { Locator, Page } from "@playwright/test";
 
 const VIEWPORTS = [
   { label: "desktop", width: 1280, height: 900 },

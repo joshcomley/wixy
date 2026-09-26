@@ -14,7 +14,8 @@
 // A desktop-mouse variant re-hovers the moment the scroll settles (the pointer
 // lands on new content), which re-creates the chrome and poisons the compare.
 
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { expect, test } from "../fixtures";
+import type { Browser, Page } from "@playwright/test";
 import { gotoEditAndWaitReady, trackConsoleErrors } from "./helpers";
 
 const FRAME = ".wx-preview-iframe";

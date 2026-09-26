@@ -20,7 +20,8 @@
 //    scroll" (operator 2026-07-21, second report). Root is overflow-hidden now
 //    and the shell tracks the DYNAMIC viewport (100dvh).
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "../fixtures";
+import type { Page } from "@playwright/test";
 import { gotoEditAndWaitReady, trackConsoleErrors } from "./helpers";
 
 test.describe("device auto-detect (decisions/00084)", () => {

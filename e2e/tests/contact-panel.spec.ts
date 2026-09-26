@@ -6,7 +6,8 @@
 // the real admin, persisted server-side, then actually live on the PUBLISHED
 // public page — not just reflected in this one panel.
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "../fixtures";
+import type { Page } from "@playwright/test";
 import { publishAndWait, trackConsoleErrors, waitForNextDraftPatchAccepted } from "./helpers";
 
 /** OSM tile images are irrelevant to every assertion here (click-to-pin math

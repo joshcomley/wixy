@@ -10,7 +10,8 @@
 // from just before the send until the confirmed message is in the thread, with the server's
 // response held open so the in-flight frames exist and are observable.
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "../fixtures";
+import type { Page } from "@playwright/test";
 
 const VIEWPORTS = [
   { label: "desktop", width: 1280, height: 900, hasTouch: false },

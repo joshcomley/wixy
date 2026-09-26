@@ -4,7 +4,7 @@
 // price control edits a price text as label/amount rows; the qa control edits
 // the whole Q&A array as question/answer cards in a FULL-SCREEN surface
 // (decisions/00090). All three publish live.
-import { expect, test } from "@playwright/test";
+import { expect, test } from "../fixtures";
 import { gotoEditAndWaitReady, publishAndWait, trackConsoleErrors } from "./helpers";
 
 test.describe("structured controls", () => {

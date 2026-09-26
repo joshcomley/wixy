@@ -5,7 +5,7 @@
 // 0px + padding) that only grew after the first keystroke. jsdom can never catch
 // that (its scrollHeight is always 0 too) — this needs a real browser.
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "../fixtures";
 import {
   gotoEditAndWaitReady,
   trackConsoleErrors,

@@ -4,7 +4,8 @@
 // spec file, no per-test reset — every assertion below filters by a tag
 // unique to its own test).
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "../fixtures";
+import type { Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
 
 const MULTI_TAP_INTERVAL_MS = 400;

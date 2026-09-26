@@ -4,7 +4,7 @@
 // links canonicalize (old bookmarks/chat links must never break); panel
 // navigation pushStates so back/forward walk real history entries.
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "../fixtures";
 import { gotoEditAndWaitReady, trackConsoleErrors } from "./helpers";
 
 test.describe("proper path links (decisions/00087)", () => {
