@@ -365,7 +365,7 @@ describe("Server push toggle", () => {
       vi.useRealTimers();
     });
 
-    it("shows timeout message with troubleshooting hints when confirmation does not arrive within 10s", async () => {
+    it("shows timeout message with troubleshooting hints when confirmation does not arrive within 60s (extended from 10s after a live investigation could not tell late from never)", async () => {
       vi.useFakeTimers();
       const { testButton, testStatus, toggle } = await mountHealthyOn();
 
@@ -373,10 +373,13 @@ describe("Server push toggle", () => {
       await vi.advanceTimersByTimeAsync(10_000);
       expect(testStatus.textContent).toContain("Google accepted it. Waiting for phone confirmation");
 
-      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(59_000);
+      expect(testStatus.textContent).toContain("Google accepted it. Waiting for phone confirmation");
+
+      await vi.advanceTimersByTimeAsync(1_000);
 
       expect(testStatus.textContent).toContain(
-        "Google accepted it but your phone did not confirm within ~10 seconds."
+        "Google accepted it but your phone did not confirm within ~60 seconds."
       );
       expect(testStatus.textContent).toContain("Android Settings -> Apps -> Chrome -> Notifications is On");
       expect(testStatus.textContent).toContain("battery saver");

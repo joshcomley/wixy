@@ -7,6 +7,11 @@ const SERVICE_WORKER_PATH = "/admin/server-sw.js";
 // genuine backgrounded delivery meant racing to switch away from Chrome before it arrived. A
 // visible pre-send delay gives real time to leave the app first.
 const TEST_SEND_DELAY_S = 10;
+// A too-short confirmation wait cannot tell "never arrives" apart from "arrives late" -- exactly
+// the ambiguity a live investigation (round 2) hit on a freshly re-subscribed device. Generous
+// enough to rule out ordinary delivery latency (cold FCM routing after a fresh subscribe, brief
+// network delay) before concluding the phone genuinely never got it.
+const TEST_CONFIRM_TIMEOUT_S = 60;
 
 type PushState = "off" | "on" | "needs_re-enabling" | "blocked" | "error";
 
@@ -344,7 +349,7 @@ export function mountPushToggle(host: HTMLElement, deps: PushToggleDeps): PushTo
       hint.textContent = "If you did not see it appear, check: Android Settings -> Apps -> Chrome -> Notifications is On; Chrome -> Settings -> Site settings -> Notifications must allow this site; battery saver / \"restrict background\" can delay or drop them.";
       testStatus.appendChild(hint);
     } else if (kind === "timeout") {
-      msg.textContent = "Google accepted it but your phone did not confirm within ~10 seconds.";
+      msg.textContent = `Google accepted it but your phone did not confirm within ~${TEST_CONFIRM_TIMEOUT_S} seconds.`;
       testStatus.appendChild(msg);
 
       const hint = document.createElement("p");
@@ -498,7 +503,7 @@ export function mountPushToggle(host: HTMLElement, deps: PushToggleDeps): PushTo
         testButton.disabled = false;
         testButton.textContent = "Send me a test notification";
         renderTestResult("timeout");
-      }, 10_000);
+      }, TEST_CONFIRM_TIMEOUT_S * 1_000);
     } catch {
       cleanupTest();
       testBusy = false;
