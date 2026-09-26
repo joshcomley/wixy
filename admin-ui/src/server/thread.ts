@@ -387,6 +387,15 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     updateRecorderUi();
   });
 
+  // Operator report (round 2): the view-once control was undiscoverable — the only affordance is
+  // a small "①" badge in the corner of an already-staged photo/video chip, with no hint it exists
+  // until you happen to notice it. This caption fills in for that: it appears the moment an
+  // eligible chip is staged and disappears once nothing eligible remains.
+  const viewOnceHint = documentRef.createElement("p");
+  viewOnceHint.className = "wx-srv-view-once-hint";
+  viewOnceHint.textContent = "Tap ① on a photo or video below to send it as disappearing.";
+  viewOnceHint.hidden = true;
+
   composer = mountChatComposer({
     mode: "composer",
     placeholder: "Message…",
@@ -395,6 +404,11 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     accept: "image/*,video/*",
     acceptFile: (file) => file.type.startsWith("image/") || file.type.startsWith("video/"),
     onFilePickerOpen: () => hooks.suspend("filePicker"),
+    onChipsRendered: (stagedFiles) => {
+      viewOnceHint.hidden = !stagedFiles.some(
+        (file) => file.type.startsWith("image/") || file.type.startsWith("video/"),
+      );
+    },
     // Sending never disables, blurs or resizes the input (operator report, round 2): the box is
     // cleared at once by `takeDraft()` and the draft comes back on a failed send.
     keepInputLive: true,
@@ -562,6 +576,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     onSubmit: () => send(),
   });
   composer.setAttachmentsSupported(true);
+  composer.element.querySelector(".wx-chat-attachment-row")?.insertAdjacentElement("afterend", viewOnceHint);
   const attachButton = composer.element.querySelector<HTMLButtonElement>(".wx-chat-attach-button");
   if (attachButton !== null) {
     attachButton.title = "Attach a photo or video";

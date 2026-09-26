@@ -73,6 +73,23 @@ describe("Server service worker", () => {
     });
   });
 
+  it("still shows the generic notification when clients.matchAll fails (Inv 45's userVisibleOnly guarantee must hold even on an unexpected error)", async () => {
+    const showNotification = vi.fn(async () => undefined);
+    const target = {
+      clients: { matchAll: vi.fn(async () => { throw new Error("boom"); }), openWindow: vi.fn(async () => null) },
+      registration: { showNotification },
+    };
+    const { handlePush } = await import("../src/sw/serverSw");
+
+    await handlePush(target as unknown as ServiceWorkerGlobalScope);
+
+    expect(showNotification).toHaveBeenCalledWith("Server", {
+      body: "New activity",
+      tag: "wixy-server",
+      renotify: true,
+    });
+  });
+
   it("focuses an existing admin window and navigates it to Server", async () => {
     const adminClient = {
       type: "window",

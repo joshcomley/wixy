@@ -3,6 +3,10 @@
 const CONFIG_PATH = "/api/admin/server/push/config";
 const SUBSCRIPTION_PATH = "/api/admin/server/push/subscriptions";
 const SERVICE_WORKER_PATH = "/admin/server-sw.js";
+// Operator report (round 2): the test push used to dispatch immediately on tap, so testing
+// genuine backgrounded delivery meant racing to switch away from Chrome before it arrived. A
+// visible pre-send delay gives real time to leave the app first.
+const TEST_SEND_DELAY_S = 10;
 
 type PushState = "off" | "on" | "needs_re-enabling" | "blocked" | "error";
 
@@ -102,6 +106,7 @@ export function mountPushToggle(host: HTMLElement, deps: PushToggleDeps): PushTo
   let destroyed = false;
 
   let testTimeoutId: number | null = null;
+  let testCountdownId: number | null = null;
   let testChannel: BroadcastChannel | null = null;
   let testSwListener: ((event: MessageEvent) => void) | null = null;
 
@@ -117,6 +122,10 @@ export function mountPushToggle(host: HTMLElement, deps: PushToggleDeps): PushTo
     if (testTimeoutId !== null) {
       browserWindow.clearTimeout(testTimeoutId);
       testTimeoutId = null;
+    }
+    if (testCountdownId !== null) {
+      browserWindow.clearInterval(testCountdownId);
+      testCountdownId = null;
     }
     if (testChannel !== null) {
       try {
@@ -357,19 +366,42 @@ export function mountPushToggle(host: HTMLElement, deps: PushToggleDeps): PushTo
     }
   }
 
-  async function sendTestNotification(): Promise<void> {
+  function sendTestNotification(): void {
     if (testBusy || busy || state !== "on") return;
     testBusy = true;
     testButton.disabled = true;
-    testButton.textContent = "Sending test…";
     testStatus.hidden = false;
     testStatus.textContent = "";
     const progressText = document.createElement("p");
     progressText.className = "wx-srv-push-test-message";
-    progressText.textContent = "Sending test notification…";
     testStatus.appendChild(progressText);
 
     cleanupTest();
+
+    let remainingS = TEST_SEND_DELAY_S;
+    const renderCountdown = (): void => {
+      testButton.textContent = `Sending in ${remainingS}s…`;
+      progressText.textContent = `Sending in ${remainingS}s — you can switch away from Chrome now.`;
+    };
+    renderCountdown();
+    testCountdownId = browserWindow.setInterval(() => {
+      remainingS -= 1;
+      if (remainingS > 0) renderCountdown();
+    }, 1_000);
+
+    testTimeoutId = browserWindow.setTimeout(() => {
+      testTimeoutId = null;
+      if (testCountdownId !== null) {
+        browserWindow.clearInterval(testCountdownId);
+        testCountdownId = null;
+      }
+      void dispatchTest(progressText);
+    }, TEST_SEND_DELAY_S * 1_000);
+  }
+
+  async function dispatchTest(progressText: HTMLElement): Promise<void> {
+    testButton.textContent = "Sending test…";
+    progressText.textContent = "Sending test notification…";
 
     let confirmed = false;
 

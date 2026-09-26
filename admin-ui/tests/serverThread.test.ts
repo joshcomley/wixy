@@ -3313,6 +3313,37 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     view.teardown();
   });
 
+  it("shows a discoverability hint for the view-once control while a photo/video is staged, hides it once nothing is staged (operator report, round 2)", async () => {
+    getHistory.mockResolvedValue(emptyHistory());
+    uploadServerAttachment.mockResolvedValueOnce({
+      id: "att-1", kind: "photo", status: "ready", width: 800, height: 600, durationS: null, peaks: null, urls: {},
+    } satisfies UploadAttachment);
+
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: window, onSettings: vi.fn() });
+    await view.attach(SESSION);
+
+    expect((view.element.querySelector(".wx-srv-view-once-hint") as HTMLElement).hidden).toBe(true);
+
+    const input = view.element.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const photo = new File(["photo"], "photo.jpg", { type: "image/jpeg" });
+    Object.defineProperty(input, "files", { value: [photo], configurable: true });
+    input.dispatchEvent(new Event("change"));
+    await flush();
+
+    const hint = view.element.querySelector(".wx-srv-view-once-hint");
+    expect(hint).not.toBeNull();
+    expect(hint!.textContent).toMatch(/①/);
+    expect((hint as HTMLElement).hidden).toBe(false);
+
+    const removeButton = view.element.querySelector<HTMLButtonElement>(".wx-chat-attachment-remove")!;
+    removeButton.click();
+    await flush();
+
+    expect((view.element.querySelector(".wx-srv-view-once-hint") as HTMLElement).hidden).toBe(true);
+
+    view.teardown();
+  });
+
   it("hard guard: aborts send and sends nothing if multiple chips are flagged view-once (bypass UI) (Item 2)", async () => {
     getHistory.mockResolvedValue(emptyHistory());
     uploadServerAttachment

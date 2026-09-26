@@ -96,6 +96,12 @@ export interface ChatComposerOptions {
    * release is called on either `change` or `cancel`; server chat uses this
    * to pause its idle lock while the picker is open. */
   onFilePickerOpen?: (() => () => void) | undefined;
+  /** Called at the end of every chip re-render, with the currently staged files (possibly
+   * empty). A caller that needs to react to the staged set changing as a whole — not per chip,
+   * the way `renderChipPreview` does — uses this instead of reaching into the composer's
+   * internal DOM; it fires even when the last chip is removed, which a `renderChipPreview`-based
+   * hook cannot see (that callback simply stops being called at zero chips). */
+  onChipsRendered?: ((stagedFiles: readonly File[]) => void) | undefined;
   /** Sending never touches the input. `setBusy` then only arms the submit guard (it does not
    * disable the textarea or the Send button), and pressing Send does not take focus from the
    * input, so the caret - and on a phone the soft keyboard - never leaves. The caller pairs it
@@ -343,6 +349,7 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
       attachmentRow.appendChild(chip);
     }
     refreshSubmitState();
+    options.onChipsRendered?.(staged.map((attachment) => attachment.file));
   }
 
   function removeAttachment(localId: string): void {
