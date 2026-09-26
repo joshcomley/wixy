@@ -25,6 +25,7 @@ interface FixtureCase {
     readonly sender: string;
     readonly text: string | null;
     readonly attachments: readonly FixtureAttachment[];
+    readonly viewOnce?: boolean;
   };
   readonly expected: {
     readonly sender: string;
@@ -35,6 +36,7 @@ interface FixtureCase {
       readonly count: number;
       readonly durationS: number | null;
       readonly thumbUrlPresent: boolean;
+      readonly viewOnce?: boolean;
     } | null;
   };
 }
@@ -81,6 +83,7 @@ function messageFromFixtureTarget(target: FixtureCase["target"]): Message {
     reactions: [],
     createdAt: 0,
     replyTo: null,
+    viewOnce: target.viewOnce ? { durationS: 5, spotlight: false } : null,
   };
 }
 
@@ -103,6 +106,9 @@ describe("replyToFromMessage — shared drift-guard fixture", () => {
       expect(result.media?.count).toBe(testCase.expected.media.count);
       expect(result.media?.durationS).toBe(testCase.expected.media.durationS);
       expect(result.media?.thumbUrl !== null).toBe(testCase.expected.media.thumbUrlPresent);
+      if (testCase.expected.media.viewOnce !== undefined) {
+        expect(result.media?.viewOnce).toBe(testCase.expected.media.viewOnce);
+      }
     });
   }
 
@@ -117,6 +123,7 @@ describe("replyToFromMessage — shared drift-guard fixture", () => {
       "mixed",
       "processing",
       "voice-note-duration",
+      "view-once",
     ];
     for (const substring of requiredSubstrings) {
       expect([...names].some((n) => n.includes(substring)), `missing a ${substring} case`).toBe(true);
@@ -161,6 +168,8 @@ describe("formatReplyQuoteMediaLabel", () => {
     [{ kind: "video", count: 2, durationS: null, thumbUrl: null }, "2 videos"],
     [{ kind: "voice", count: 2, durationS: null, thumbUrl: null }, "2 voice notes"],
     [{ kind: "mixed", count: 4, durationS: null, thumbUrl: null }, "4 attachments"],
+    [{ kind: "photo", count: 1, durationS: null, thumbUrl: null, viewOnce: true }, "View-once photo"],
+    [{ kind: "video", count: 1, durationS: null, thumbUrl: null, viewOnce: true }, "View-once video"],
   ] as const)("formats %o as %s", (media, expected) => {
     expect(formatReplyQuoteMediaLabel(media)).toBe(expected);
   });

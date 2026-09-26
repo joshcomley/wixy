@@ -1383,6 +1383,12 @@ button.wx-srv-quote:focus-visible {
   filter: brightness(1.1);
 }
 
+.wx-srv-view-once-card-warning {
+  margin-top: 6px;
+  font-size: 0.75rem;
+  color: var(--wx-text-muted);
+}
+
 /* Fullscreen Viewer Overlay */
 .wx-srv-view-once-overlay {
   position: fixed;
@@ -1472,6 +1478,13 @@ button.wx-srv-quote:focus-visible {
 .wx-srv-view-once-status {
   color: #fff;
   font-size: 1rem;
+  text-align: center;
+}
+
+.wx-srv-view-once-status-notice {
+  margin-top: 8px;
+  font-size: 0.8125rem;
+  opacity: 0.75;
 }
 
 .wx-srv-view-once-canvas {
@@ -1483,18 +1496,20 @@ button.wx-srv-quote:focus-visible {
 .wx-srv-view-once-video {
   max-width: 100%;
   max-height: 100%;
+  pointer-events: none;
 }
 
 .wx-srv-view-once-controls {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  flex-shrink: 0;
   padding: 20px;
   display: flex;
   justify-content: center;
   align-items: center;
   z-index: 10;
+}
+
+.wx-srv-view-once-controls[hidden] {
+  display: none;
 }
 
 .wx-srv-view-once-slider {

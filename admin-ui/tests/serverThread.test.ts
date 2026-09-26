@@ -8,7 +8,7 @@ import { UploadError, type UploadAttachment } from "../src/server/upload";
 import type { ServerStreamEvent } from "../src/server/stream";
 import type { LockHooks, ServerSession } from "../src/server/types";
 
-const { createVoiceRecorder, deleteMessage, getHistory, getUsage, sendMessage, setReaction, transcribeAttachment, wipeChat, uploadServerAttachment } = vi.hoisted(() => ({
+const { createVoiceRecorder, deleteMessage, getHistory, getUsage, sendMessage, sendViewOnceMessage, setReaction, transcribeAttachment, wipeChat, uploadServerAttachment } = vi.hoisted(() => ({
   createVoiceRecorder: vi.fn((options: {
     onStop?: (recording: { blob: Blob; durationMs: number; mimeType: string }) => void;
     onCancel?: () => void;
@@ -30,6 +30,7 @@ const { createVoiceRecorder, deleteMessage, getHistory, getUsage, sendMessage, s
   getHistory: vi.fn(),
   getUsage: vi.fn(),
   sendMessage: vi.fn(),
+  sendViewOnceMessage: vi.fn(),
   setReaction: vi.fn(),
   transcribeAttachment: vi.fn(),
   wipeChat: vi.fn(),
@@ -41,6 +42,7 @@ vi.mock("../src/server/api/messages", async (importOriginal) => ({
   getHistory,
   getUsage,
   sendMessage,
+  sendViewOnceMessage,
   setReaction,
   transcribeAttachment,
   deleteMessage,
@@ -3136,6 +3138,10 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     expect(tapBtn?.hasAttribute("data-srv-gesture-boundary")).toBe(true);
     expect(tapBtn?.textContent).toContain("Tap to view");
 
+    const warning = card?.querySelector(".wx-srv-view-once-card-warning");
+    expect(warning).toBeTruthy();
+    expect(warning?.textContent).toContain("Opening it uses it up.");
+
     view.teardown();
   });
 
@@ -3249,5 +3255,308 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     expect(document.body.querySelector(".wx-srv-view-once-overlay")).toBeNull();
     view.teardown();
   });
+
+  it("allows only ONE chip to be flagged view-once (clears previous chip on flag) (Item 2)", async () => {
+    getHistory.mockResolvedValue(emptyHistory());
+    uploadServerAttachment
+      .mockResolvedValueOnce({
+        id: "att-1", kind: "photo", status: "ready", width: 800, height: 600, durationS: null, peaks: null, urls: {},
+      } satisfies UploadAttachment)
+      .mockResolvedValueOnce({
+        id: "att-2", kind: "photo", status: "ready", width: 800, height: 600, durationS: null, peaks: null, urls: {},
+      } satisfies UploadAttachment);
+
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: window, onSettings: vi.fn() });
+    await view.attach(SESSION);
+
+    const input = view.element.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const photoA = new File(["photoA"], "photoA.jpg", { type: "image/jpeg" });
+    const photoB = new File(["photoB"], "photoB.jpg", { type: "image/jpeg" });
+    Object.defineProperty(input, "files", { value: [photoA, photoB], configurable: true });
+    input.dispatchEvent(new Event("change"));
+    await flush();
+
+    const chips = view.element.querySelectorAll(".wx-chat-attachment-chip");
+    expect(chips).toHaveLength(2);
+
+    const voBtnA = chips[0]!.querySelector<HTMLButtonElement>(".wx-srv-view-once-chip-btn")!;
+    const voBtnB = chips[1]!.querySelector<HTMLButtonElement>(".wx-srv-view-once-chip-btn")!;
+    expect(voBtnA).toBeTruthy();
+    expect(voBtnB).toBeTruthy();
+
+    // Flag chip A as view-once
+    voBtnA.click();
+    await flush();
+    const dur2sBtnA = chips[0]!.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!;
+    dur2sBtnA.click();
+    await flush();
+
+    expect(voBtnA.classList.contains("wx-srv-view-once-chip-active")).toBe(true);
+    expect(voBtnA.textContent).toContain("2s");
+
+    // Now flag chip B as view-once
+    voBtnB.click();
+    await flush();
+    const dur5sBtnB = chips[1]!.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(3)")!;
+    dur5sBtnB.click();
+    await flush();
+
+    expect(voBtnB.classList.contains("wx-srv-view-once-chip-active")).toBe(true);
+    expect(voBtnB.textContent).toContain("5s");
+
+    // Chip A must be cleared!
+    expect(voBtnA.classList.contains("wx-srv-view-once-chip-active")).toBe(false);
+    expect(voBtnA.textContent).toBe("①");
+
+    view.teardown();
+  });
+
+  it("hard guard: aborts send and sends nothing if multiple chips are flagged view-once (bypass UI) (Item 2)", async () => {
+    getHistory.mockResolvedValue(emptyHistory());
+    uploadServerAttachment
+      .mockResolvedValueOnce({
+        id: "att-1", kind: "photo", status: "ready", width: 800, height: 600, durationS: null, peaks: null, urls: {},
+      } satisfies UploadAttachment)
+      .mockResolvedValueOnce({
+        id: "att-2", kind: "photo", status: "ready", width: 800, height: 600, durationS: null, peaks: null, urls: {},
+      } satisfies UploadAttachment);
+
+    const injectedVoSettings = new WeakMap<File, any>();
+    const view = mountServerThread({
+      identity: fakeIdentity("Josh"),
+      hooks: fakeHooks(),
+      win: window,
+      onSettings: vi.fn(),
+      fileViewOnceSettings: injectedVoSettings,
+    });
+    await view.attach(SESSION);
+
+    const input = view.element.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const photoA = new File(["photoA"], "photoA.jpg", { type: "image/jpeg" });
+    const photoB = new File(["photoB"], "photoB.jpg", { type: "image/jpeg" });
+    Object.defineProperty(input, "files", { value: [photoA, photoB], configurable: true });
+    input.dispatchEvent(new Event("change"));
+    await flush();
+
+    // Bypass UI: force both chips to have view-once enabled
+    injectedVoSettings.set(photoA, { enabled: true, durationS: 5, spotlight: false });
+    injectedVoSettings.set(photoB, { enabled: true, durationS: 5, spotlight: false });
+
+    // Reset mocks to monitor what gets sent
+    sendMessage.mockClear();
+    sendViewOnceMessage.mockClear();
+
+    // Tap Send
+    const sendBtn = view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")!;
+    sendBtn.click();
+    await flush();
+
+    // Nothing must be sent!
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(sendViewOnceMessage).not.toHaveBeenCalled();
+
+    // Error shown and draft restored
+    const errEl = view.element.querySelector(".wx-chat-composer-error");
+    expect(errEl?.textContent).toBeTruthy();
+    expect(view.element.querySelectorAll(".wx-chat-attachment-chip")).toHaveLength(2);
+
+    view.teardown();
+  });
+
+  it("bounds preparing retry loop to 60s cap and restores draft (Item 5)", async () => {
+    vi.useFakeTimers();
+    getHistory.mockResolvedValue(emptyHistory());
+    uploadServerAttachment.mockResolvedValueOnce({
+      id: "att-prep-1", kind: "photo", status: "processing", width: 800, height: 600, durationS: null, peaks: null, urls: {},
+    } satisfies UploadAttachment);
+    sendViewOnceMessage.mockResolvedValue({ ok: false, kind: "not_ready" });
+
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: window, onSettings: vi.fn() });
+    await view.attach(SESSION);
+
+    const input = view.element.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const photo = new File(["photo"], "photo.jpg", { type: "image/jpeg" });
+    Object.defineProperty(input, "files", { value: [photo], configurable: true });
+    input.dispatchEvent(new Event("change"));
+    await flush();
+
+    const chip = view.element.querySelector(".wx-chat-attachment-chip")!;
+    chip.querySelector<HTMLButtonElement>(".wx-srv-view-once-chip-btn")!.click();
+    await flush();
+    chip.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!.click();
+    await flush();
+
+    const sendBtn = view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")!;
+    sendBtn.click();
+    await flush();
+
+    // While preparing, button text changes to Preparing… AND button is disabled (Item 18)
+    expect(sendBtn.textContent).toBe("Preparing…");
+    expect(sendBtn.disabled).toBe(true);
+
+    // Advance past 60s
+    await vi.advanceTimersByTimeAsync(61_000);
+    await flush();
+
+    expect(sendBtn.disabled).toBe(false);
+    const errEl = view.element.querySelector(".wx-chat-composer-error");
+    expect(errEl?.textContent).toContain("Still preparing");
+    expect(view.element.querySelectorAll(".wx-chat-attachment-chip")).toHaveLength(1);
+
+    view.teardown();
+    vi.useRealTimers();
+  });
+
+  it("stops preparing retry loop immediately on lock mid-wait (Item 5)", async () => {
+    vi.useFakeTimers();
+    getHistory.mockResolvedValue(emptyHistory());
+    uploadServerAttachment.mockResolvedValueOnce({
+      id: "att-prep-2", kind: "photo", status: "processing", width: 800, height: 600, durationS: null, peaks: null, urls: {},
+    } satisfies UploadAttachment);
+    sendViewOnceMessage.mockResolvedValue({ ok: false, kind: "not_ready" });
+
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: window, onSettings: vi.fn() });
+    await view.attach(SESSION);
+
+    const input = view.element.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const photo = new File(["photo"], "photo.jpg", { type: "image/jpeg" });
+    Object.defineProperty(input, "files", { value: [photo], configurable: true });
+    input.dispatchEvent(new Event("change"));
+    await flush();
+
+    const chip = view.element.querySelector(".wx-chat-attachment-chip")!;
+    chip.querySelector<HTMLButtonElement>(".wx-srv-view-once-chip-btn")!.click();
+    await flush();
+    chip.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!.click();
+    await flush();
+
+    const sendBtn = view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")!;
+    sendBtn.click();
+    await flush();
+
+    await vi.advanceTimersByTimeAsync(600);
+    const countBeforeLock = sendViewOnceMessage.mock.calls.length;
+    expect(countBeforeLock).toBeGreaterThan(0);
+
+    // Lock occurs mid-wait
+    view.detach();
+    await flush();
+
+    // Advance time further
+    await vi.advanceTimersByTimeAsync(5000);
+    await flush();
+
+    // Must not continue polling after lock
+    expect(sendViewOnceMessage.mock.calls.length).toBe(countBeforeLock);
+
+    view.teardown();
+    vi.useRealTimers();
+  });
+
+  it("partial failure (a): ordinary companion fails -> does NOT send view-once and restores whole draft (Item 6)", async () => {
+    getHistory.mockResolvedValue(emptyHistory());
+    uploadServerAttachment
+      .mockResolvedValueOnce({
+        id: "att-ord-1", kind: "photo", status: "ready", width: 800, height: 600, durationS: null, peaks: null, urls: {},
+      } satisfies UploadAttachment)
+      .mockResolvedValueOnce({
+        id: "att-vo-1", kind: "photo", status: "ready", width: 800, height: 600, durationS: null, peaks: null, urls: {},
+      } satisfies UploadAttachment);
+
+    sendMessage.mockResolvedValueOnce({ ok: false, kind: "network" });
+    sendViewOnceMessage.mockClear();
+
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: window, onSettings: vi.fn() });
+    await view.attach(SESSION);
+
+    const textarea = view.element.querySelector<HTMLTextAreaElement>("textarea")!;
+    textarea.value = "Companion text";
+    const input = view.element.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const photoA = new File(["photoA"], "photoA.jpg", { type: "image/jpeg" });
+    const photoB = new File(["photoB"], "photoB.jpg", { type: "image/jpeg" });
+    Object.defineProperty(input, "files", { value: [photoA, photoB], configurable: true });
+    input.dispatchEvent(new Event("change"));
+    await flush();
+
+    // Flag chip B as view-once
+    const chips = view.element.querySelectorAll(".wx-chat-attachment-chip");
+    expect(chips).toHaveLength(2);
+    chips[1]!.querySelector<HTMLButtonElement>(".wx-srv-view-once-chip-btn")!.click();
+    await flush();
+    chips[1]!.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!.click();
+    await flush();
+
+    const sendBtn = view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")!;
+    sendBtn.click();
+    await flush();
+
+    // Ordinary message was attempted
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    // CRITICAL: view-once MUST NOT have been sent!
+    expect(sendViewOnceMessage).not.toHaveBeenCalled();
+
+    // Whole draft restored (both text and both chips)
+    expect(textarea.value).toBe("Companion text");
+    expect(view.element.querySelectorAll(".wx-chat-attachment-chip")).toHaveLength(2);
+    expect(view.element.querySelector(".wx-chat-composer-error")?.textContent).toBeTruthy();
+
+    view.teardown();
+  });
+
+  it("partial failure (b): ordinary succeeds, view-once fails -> restores ONLY view-once chip (Item 6)", async () => {
+    getHistory.mockResolvedValue(emptyHistory());
+    uploadServerAttachment
+      .mockResolvedValueOnce({
+        id: "att-ord-2", kind: "photo", status: "ready", width: 800, height: 600, durationS: null, peaks: null, urls: {},
+      } satisfies UploadAttachment)
+      .mockResolvedValueOnce({
+        id: "att-vo-2", kind: "photo", status: "ready", width: 800, height: 600, durationS: null, peaks: null, urls: {},
+      } satisfies UploadAttachment);
+
+    sendMessage.mockResolvedValueOnce({
+      ok: true,
+      message: fakeMessage({ text: "Companion text", attachments: [] }),
+    });
+    sendViewOnceMessage.mockResolvedValueOnce({ ok: false, kind: "invalid", detail: "Bad VO" });
+
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: window, onSettings: vi.fn() });
+    await view.attach(SESSION);
+
+    const textarea = view.element.querySelector<HTMLTextAreaElement>("textarea")!;
+    textarea.value = "Companion text";
+    const input = view.element.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const photoA = new File(["photoA"], "photoA.jpg", { type: "image/jpeg" });
+    const photoB = new File(["photoB"], "photoB.jpg", { type: "image/jpeg" });
+    Object.defineProperty(input, "files", { value: [photoA, photoB], configurable: true });
+    input.dispatchEvent(new Event("change"));
+    await flush();
+
+    // Flag chip B as view-once
+    const chips = view.element.querySelectorAll(".wx-chat-attachment-chip");
+    expect(chips).toHaveLength(2);
+    chips[1]!.querySelector<HTMLButtonElement>(".wx-srv-view-once-chip-btn")!.click();
+    await flush();
+    chips[1]!.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!.click();
+    await flush();
+
+    const sendBtn = view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")!;
+    sendBtn.click();
+    await flush();
+
+    // Ordinary message succeeded
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    // View-once message was attempted and failed
+    expect(sendViewOnceMessage).toHaveBeenCalledTimes(1);
+
+    // CRITICAL: Draft restored must contain ONLY the view-once chip!
+    expect(textarea.value).toBe("");
+    const restoredChips = view.element.querySelectorAll(".wx-chat-attachment-chip");
+    expect(restoredChips).toHaveLength(1);
+    const restoredVoBtn = restoredChips[0]!.querySelector(".wx-srv-view-once-chip-btn");
+    expect(restoredVoBtn?.classList.contains("wx-srv-view-once-chip-active")).toBe(true);
+
+    view.teardown();
+  });
 });
+
 

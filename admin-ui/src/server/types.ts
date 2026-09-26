@@ -12,7 +12,7 @@ export interface ServerSession {
   readonly expiresAt: number;
 }
 
-/** R7 — the four reasons the idle timer pauses instead of counting down.
+/** R7 — the five reasons the idle timer pauses instead of counting down.
  * `suspend()` (see `LockHooks` below) is idempotent per reason and returns a
  * release function; the idle timer restarts fresh (a full idle period — see
  * `idleTimeoutMs`) the moment the LAST active suspension for a given reason

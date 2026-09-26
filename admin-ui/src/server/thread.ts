@@ -72,12 +72,19 @@ const SCROLL_TO_ORIGINAL_HIGHLIGHT_MS = 1_500;
  * resolve, so `historyLoading` never clears and the loop spins forever. */
 const SCROLL_TO_ORIGINAL_RETRY_MS = 50;
 
+export interface ViewOnceDraftSettings {
+  enabled: boolean;
+  durationS: 2 | 5 | 30 | null;
+  spotlight: boolean;
+}
+
 export interface ServerThreadDeps {
   identity: ServerIdentity;
   hooks: LockHooks;
   win: Window;
   onSettings: () => void;
   document?: Document;
+  fileViewOnceSettings?: WeakMap<File, ViewOnceDraftSettings>;
 }
 
 export interface ServerThreadView {
@@ -231,12 +238,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   let voiceRecorder: VoiceRecorder | null = null;
   let composer: ChatComposer;
   const voiceDurations = new WeakMap<File, number>();
-  interface ViewOnceDraftSettings {
-    enabled: boolean;
-    durationS: 2 | 5 | 30 | null;
-    spotlight: boolean;
-  }
-  const fileViewOnceSettings = new WeakMap<File, ViewOnceDraftSettings>();
+  const fileViewOnceSettings = deps.fileViewOnceSettings ?? new WeakMap<File, ViewOnceDraftSettings>();
+  const fileChipUpdaters = new Map<File, () => void>();
   let activeViewOnceViewer: ViewOnceViewerHandle | null = null;
   let pendingVoiceNote:
     | {
@@ -425,12 +428,18 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         const voBtn = documentRef.createElement("button");
         voBtn.type = "button";
         voBtn.className = "wx-srv-view-once-chip-btn";
-        if (settings.enabled) {
-          voBtn.classList.add("wx-srv-view-once-chip-active");
-          voBtn.textContent = settings.durationS !== null ? `① ${settings.durationS}s` : "① ∞";
-        } else {
-          voBtn.textContent = "①";
-        }
+
+        const updateVoBtn = (): void => {
+          if (settings!.enabled) {
+            voBtn.classList.add("wx-srv-view-once-chip-active");
+            voBtn.textContent = settings!.durationS !== null ? `① ${settings!.durationS}s` : "① ∞";
+          } else {
+            voBtn.classList.remove("wx-srv-view-once-chip-active");
+            voBtn.textContent = "①";
+          }
+        };
+        fileChipUpdaters.set(file, updateVoBtn);
+        updateVoBtn();
         voBtn.setAttribute("aria-label", "View once settings");
         voBtn.title = "View once";
 
@@ -487,15 +496,18 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
               settings!.enabled = d.enabled;
               if (d.enabled) {
                 settings!.durationS = d.val;
+                for (const [otherFile, updater] of fileChipUpdaters.entries()) {
+                  if (otherFile !== file) {
+                    const otherSettings = fileViewOnceSettings.get(otherFile);
+                    if (otherSettings && otherSettings.enabled) {
+                      otherSettings.enabled = false;
+                      updater();
+                    }
+                  }
+                }
               }
               fileViewOnceSettings.set(file, settings!);
-              if (settings!.enabled) {
-                voBtn.classList.add("wx-srv-view-once-chip-active");
-                voBtn.textContent = settings!.durationS !== null ? `① ${settings!.durationS}s` : "① ∞";
-              } else {
-                voBtn.classList.remove("wx-srv-view-once-chip-active");
-                voBtn.textContent = "①";
-              }
+              updateVoBtn();
               closePicker();
             });
             durationsWrap.appendChild(btn);
@@ -1109,7 +1121,11 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           documentRef.body.appendChild(activeViewOnceViewer.element);
         });
 
-        card.append(header, tapButton);
+        const warning = documentRef.createElement("div");
+        warning.className = "wx-srv-view-once-card-warning";
+        warning.textContent = "Opening it uses it up.";
+
+        card.append(header, tapButton, warning);
         bubble.appendChild(card);
       }
     } else {
@@ -1728,11 +1744,23 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     }
 
     const otherStaged = draft.base.staged.filter((_, idx) => idx !== voIndex);
+    if (otherStaged.some((s) => fileViewOnceSettings.get(s.file)?.enabled)) {
+      restoreServerDraft(draft);
+      composer.setError("Cannot send multiple view-once items at once.");
+      return;
+    }
     const hasOther = text !== "" || otherStaged.length > 0;
 
     composer.setBusy(true);
     const submitBtn = composer.element.querySelector<HTMLButtonElement>(".wx-chat-send-button");
     const originalSubmitText = submitBtn?.textContent ?? "Send";
+
+    function resetSubmitBtn(): void {
+      if (submitBtn) {
+        submitBtn.textContent = originalSubmitText;
+        submitBtn.disabled = false;
+      }
+    }
 
     void (async () => {
       if (hasOther) {
@@ -1765,22 +1793,64 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           } else {
             pendingEchoes = pendingEchoes.filter((e) => e.clientId !== ordClientId);
             renderThreadList();
+            resetSubmitBtn();
+            composer.setBusy(false);
+            restoreServerDraft(draft);
+            composer.setError(ordResult.kind === "invalid" ? ordResult.detail : "Couldn't send — retry.");
+            return;
           }
         } catch (error) {
+          pendingEchoes = pendingEchoes.filter((e) => e.clientId !== ordClientId);
+          renderThreadList();
+          resetSubmitBtn();
+          composer.setBusy(false);
+          restoreServerDraft(draft);
           if (error instanceof ServerLockedError) {
             hooks.lockNow("unauthorized");
             return;
           }
-          pendingEchoes = pendingEchoes.filter((e) => e.clientId !== ordClientId);
-          renderThreadList();
+          composer.setError(error instanceof Error ? error.message : "Couldn't send — retry.");
+          return;
         }
       }
 
-      if (submitBtn) submitBtn.textContent = "Preparing…";
+      const failedDraftToRestore: ServerComposerDraft = hasOther
+        ? {
+            base: {
+              text: "",
+              attachmentIds: voAttachmentId ? [voAttachmentId] : [],
+              staged: [voStaged],
+            },
+            replyTo: null,
+          }
+        : draft;
+
+      if (submitBtn) {
+        submitBtn.textContent = "Preparing…";
+        submitBtn.disabled = true;
+      }
       const voClientId = cryptoRandomId(win);
       const voReplyToSeq = !hasOther && draft.replyTo !== null ? draft.replyTo.seq : undefined;
 
+      const maxWaitMs = 60_000;
+      const pollStart = now();
+
       while (true) {
+        if (requestGeneration !== contentGeneration || currentSession === null) {
+          resetSubmitBtn();
+          composer.setBusy(false);
+          restoreServerDraft(failedDraftToRestore);
+          return;
+        }
+
+        if (now() - pollStart > maxWaitMs) {
+          resetSubmitBtn();
+          composer.setBusy(false);
+          restoreServerDraft(failedDraftToRestore);
+          composer.setError("Still preparing — try again in a moment.");
+          return;
+        }
+
         let voResult: SendViewOnceResult;
         try {
           voResult = await sendViewOnceMessage(session, {
@@ -1794,14 +1864,22 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           });
         } catch (error) {
           if (error instanceof ServerLockedError) {
+            resetSubmitBtn();
             hooks.lockNow("unauthorized");
             return;
           }
           voResult = { ok: false, kind: "unavailable" };
         }
 
+        if (requestGeneration !== contentGeneration || currentSession === null) {
+          resetSubmitBtn();
+          composer.setBusy(false);
+          restoreServerDraft(failedDraftToRestore);
+          return;
+        }
+
         if (voResult.ok) {
-          if (submitBtn) submitBtn.textContent = originalSubmitText;
+          resetSubmitBtn();
           composer.setBusy(false);
           addConfirmed(voResult.message);
           renderThreadList();
@@ -1811,14 +1889,17 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         }
 
         if (voResult.kind === "not_ready") {
-          if (submitBtn) submitBtn.textContent = "Preparing…";
+          if (submitBtn) {
+            submitBtn.textContent = "Preparing…";
+            submitBtn.disabled = true;
+          }
           await new Promise((r) => win.setTimeout?.(r, 300) ?? setTimeout(r, 300));
           continue;
         }
 
-        if (submitBtn) submitBtn.textContent = originalSubmitText;
+        resetSubmitBtn();
         composer.setBusy(false);
-        restoreServerDraft(draft);
+        restoreServerDraft(failedDraftToRestore);
         if (voResult.kind === "unsupported") {
           composer.setError("Couldn't send as view-once. Try again in a moment.");
         } else if (voResult.kind === "invalid") {

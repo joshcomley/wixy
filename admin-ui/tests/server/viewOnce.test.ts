@@ -62,6 +62,11 @@ function fakeIdentity(name = "Josh"): ServerIdentity {
 describe("Server Chat View-Once & Spotlight", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    window.createImageBitmap = vi.fn(async () => ({
+      width: 400,
+      height: 300,
+      close: vi.fn(),
+    } as unknown as ImageBitmap));
   });
 
   afterEach(() => {
@@ -73,6 +78,10 @@ describe("Server Chat View-Once & Spotlight", () => {
     it("generates a 32-character lowercase hex string", () => {
       const claimId = generateClaimId(window);
       expect(claimId).toMatch(/^[0-9a-f]{32}$/);
+    });
+
+    it("generateClaimId throws when crypto.getRandomValues is missing", () => {
+      expect(() => generateClaimId({ crypto: {} } as unknown as Window)).toThrow();
     });
   });
 
@@ -764,10 +773,58 @@ describe("Server Chat View-Once & Spotlight", () => {
       expect(statusEl?.hidden).toBe(true);
       viewer.close();
     });
+
+    it("displays 'Couldn't show this photo.' when image decoding fails", async () => {
+      const { hooks } = createMockHooks();
+      window.createImageBitmap = vi.fn(async () => {
+        throw new Error("corrupt image");
+      });
+      const viewer = mountViewOnceViewer({
+        session: () => SESSION,
+        seq: 116,
+        hooks,
+        identity: fakeIdentity(),
+        win: window,
+        openClaim: async () => ({
+          ok: true,
+          data: { durationS: 5, spotlight: false, kind: "photo", mime: "image/jpeg" },
+        }),
+        fetchContent: async () => ({
+          ok: true,
+          blob: new Blob(["corrupt-data"], { type: "image/jpeg" }),
+        }),
+      });
+
+      document.body.appendChild(viewer.element);
+      await flush();
+
+      const statusEl = viewer.element.querySelector(".wx-srv-view-once-status");
+      expect(statusEl?.textContent).toBe("Couldn't show this photo.");
+      viewer.close();
+    });
   });
 
   describe("Spotlight UI component interactions", () => {
     it("renders slider and canvas, responding to range input and pointer events", async () => {
+      const arcCalls: Array<{ x: number; y: number; radius: number }> = [];
+      const stubCtx = {
+        fillRect: vi.fn(),
+        drawImage: vi.fn(),
+        save: vi.fn(),
+        restore: vi.fn(),
+        beginPath: vi.fn(),
+        rect: vi.fn(),
+        arc: vi.fn((x: number, y: number, radius: number) => {
+          arcCalls.push({ x, y, radius });
+        }),
+        closePath: vi.fn(),
+        fill: vi.fn(),
+        createRadialGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+        clearRect: vi.fn(),
+      };
+      const origGetContext = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = vi.fn(() => stubCtx) as any;
+
       const { hooks } = createMockHooks();
       const viewer = mountViewOnceViewer({
         session: () => SESSION,
@@ -790,6 +847,7 @@ describe("Server Chat View-Once & Spotlight", () => {
 
       const canvas = viewer.element.querySelector<HTMLCanvasElement>("canvas");
       expect(canvas).toBeTruthy();
+      canvas!.getBoundingClientRect = () => ({ left: 0, top: 0, width: 800, height: 600 } as DOMRect);
 
       const slider = viewer.element.querySelector<HTMLInputElement>(".wx-srv-view-once-slider");
       expect(slider).toBeTruthy();
@@ -798,19 +856,33 @@ describe("Server Chat View-Once & Spotlight", () => {
       expect(slider?.value).toBe("12");
       expect(slider?.getAttribute("aria-label")).toBe("Spotlight size");
 
+      expect(arcCalls.length).toBeGreaterThan(0);
+      const initialRadius = arcCalls[0]!.radius;
+
       // User moves slider
       slider!.value = "25";
       slider!.dispatchEvent(new Event("input"));
+      expect(slider?.value).toBe("25");
+
+      const afterSliderRadius = arcCalls[arcCalls.length - 1]!.radius;
+      expect(afterSliderRadius).toBeGreaterThan(initialRadius);
 
       // Pointer interactions on canvas
-      canvas!.dispatchEvent(new PointerEvent("pointerdown", { clientX: 100, clientY: 100 }));
-      window.dispatchEvent(new PointerEvent("pointermove", { clientX: 120, clientY: 130 }));
+      canvas!.dispatchEvent(new PointerEvent("pointerdown", { clientX: 400, clientY: 300 }));
+      window.dispatchEvent(new PointerEvent("pointermove", { clientX: 420, clientY: 320 }));
+      const afterMove = arcCalls[arcCalls.length - 1]!;
+      expect(afterMove.x).toBe(420);
+      expect(afterMove.y).toBe(320);
       window.dispatchEvent(new PointerEvent("pointerup"));
 
+      HTMLCanvasElement.prototype.getContext = origGetContext;
       viewer.close();
     });
 
     it("renders Play button when video.play() promise rejects", async () => {
+      const playSpy = vi
+        .spyOn(HTMLMediaElement.prototype, "play")
+        .mockRejectedValue(new Error("NotAllowedError"));
       const { hooks } = createMockHooks();
       const viewer = mountViewOnceViewer({
         session: () => SESSION,
@@ -834,14 +906,399 @@ describe("Server Chat View-Once & Spotlight", () => {
       const video = viewer.element.querySelector("video");
       expect(video).toBeTruthy();
 
-      // In JSDOM HTMLMediaElement.play returns undefined or rejects, triggering the play button
       const playBtn = viewer.element.querySelector<HTMLButtonElement>(".wx-srv-view-once-play-btn");
-      if (playBtn) {
-        expect(playBtn.textContent).toContain("Play");
-        playBtn.click();
+      expect(playBtn).toBeTruthy();
+      expect(playBtn!.textContent).toContain("Play");
+      playBtn!.click();
+
+      playSpy.mockRestore();
+      viewer.close();
+    });
+  });
+
+  describe("Network failure during content download (Item 1)", () => {
+    it("retries with the same claimId when blob() rejects once then succeeds", async () => {
+      const { hooks } = createMockHooks();
+      const openClaimSpy = vi.fn(async () => ({
+        ok: true as const,
+        data: { durationS: 5 as const, spotlight: false, kind: "photo" as const, mime: "image/jpeg" },
+      }));
+
+      let fetchCount = 0;
+      const seenClaimIds: string[] = [];
+      const origFetch = window.fetch;
+      window.fetch = vi.fn(async (_url, init) => {
+        const claimHeader = ((init?.headers as Record<string, string>)?.[
+          "X-Wixy-View-Claim"
+        ] ?? (init?.headers as Headers)?.get?.("X-Wixy-View-Claim")) as string;
+        seenClaimIds.push(claimHeader);
+        fetchCount++;
+        if (fetchCount === 1) {
+          return {
+            status: 200,
+            blob: async () => {
+              throw new Error("mid-body stream disconnect");
+            },
+          } as unknown as Response;
+        }
+        return {
+          status: 200,
+          blob: async () => new Blob(["photo-data"], { type: "image/jpeg" }),
+        } as unknown as Response;
+      });
+
+      const viewer = mountViewOnceViewer({
+        session: () => SESSION,
+        seq: 201,
+        hooks,
+        identity: fakeIdentity(),
+        win: window,
+        openClaim: openClaimSpy,
+      });
+
+      document.body.appendChild(viewer.element);
+      await flush();
+      await vi.advanceTimersByTimeAsync(1000);
+      await flush();
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(fetchCount).toBe(2);
+      expect(seenClaimIds[0]).toBeDefined();
+      expect(seenClaimIds[1]).toBe(seenClaimIds[0]);
+
+      window.fetch = origFetch;
+      viewer.close();
+    });
+
+    it("shows error state when blob() always rejects without unhandled rejection", async () => {
+      const { hooks } = createMockHooks();
+      const origFetch = window.fetch;
+      window.fetch = vi.fn(async () => {
+        return {
+          status: 200,
+          blob: async () => {
+            throw new Error("permanent disconnect");
+          },
+        } as unknown as Response;
+      });
+
+      const viewer = mountViewOnceViewer({
+        session: () => SESSION,
+        seq: 202,
+        hooks,
+        identity: fakeIdentity(),
+        win: window,
+        openClaim: async () => ({
+          ok: true as const,
+          data: { durationS: 5, spotlight: false, kind: "photo" as const, mime: "image/jpeg" },
+        }),
+      });
+
+      document.body.appendChild(viewer.element);
+      await flush();
+      for (let i = 0; i < 35; i++) {
+        await vi.advanceTimersByTimeAsync(1000);
+        await flush();
       }
+
+      const statusEl = viewer.element.querySelector(".wx-srv-view-once-status");
+      expect(statusEl?.textContent).toBe("Couldn't open this message.");
+      const closeBtn = viewer.element.querySelector<HTMLButtonElement>(".wx-srv-view-once-close");
+      expect(closeBtn).toBeTruthy();
+
+      window.fetch = origFetch;
+      viewer.close();
+    });
+  });
+
+  describe("Claim retry on network failure (Item 7)", () => {
+    it("retries claim with the same claimId when first call returns unavailable or rejects, then succeeds and fetches content", async () => {
+      const { hooks } = createMockHooks();
+      let claimAttempts = 0;
+      const seenClaimIds: string[] = [];
+      const fetchContentSpy = vi.fn(async () => ({
+        ok: true as const,
+        blob: new Blob(["photo-data"], { type: "image/jpeg" }),
+      }));
+
+      const openClaimSpy = vi.fn(async (_s: unknown, _seq: number, input: { claimId: string; sender: string }) => {
+        seenClaimIds.push(input.claimId);
+        claimAttempts++;
+        if (claimAttempts === 1) {
+          return { ok: false as const, kind: "unavailable" as const };
+        }
+        return {
+          ok: true as const,
+          data: { durationS: 5 as const, spotlight: false, kind: "photo" as const, mime: "image/jpeg" },
+        };
+      });
+
+      const viewer = mountViewOnceViewer({
+        session: () => SESSION,
+        seq: 301,
+        hooks,
+        identity: fakeIdentity(),
+        win: window,
+        openClaim: openClaimSpy,
+        fetchContent: fetchContentSpy,
+      });
+
+      document.body.appendChild(viewer.element);
+      await flush();
+      expect(claimAttempts).toBe(1);
+      // Advance by retry delay
+      await vi.advanceTimersByTimeAsync(1000);
+      await flush();
+
+      expect(claimAttempts).toBe(2);
+      expect(seenClaimIds[0]).toBeDefined();
+      expect(seenClaimIds[1]).toBe(seenClaimIds[0]);
+      expect(fetchContentSpy).toHaveBeenCalledTimes(1);
+
+      viewer.close();
+    });
+  });
+
+  describe("Opening it uses it up notice (Item 8)", () => {
+    it("keeps 'Opening it uses it up.' visible in the viewer's Loading state", async () => {
+      const { hooks } = createMockHooks();
+      const viewer = mountViewOnceViewer({
+        session: () => SESSION,
+        seq: 401,
+        hooks,
+        identity: fakeIdentity(),
+        win: window,
+        openClaim: () => new Promise(() => {}),
+      });
+
+      document.body.appendChild(viewer.element);
+      const statusEl = viewer.element.querySelector(".wx-srv-view-once-status");
+      expect(statusEl?.textContent).toContain("Opening it uses it up.");
+      viewer.close();
+    });
+  });
+
+  describe("Spotlight integrated viewer tests (Item 9)", () => {
+    let origGetContext: typeof HTMLCanvasElement.prototype.getContext;
+    let stubCtx: any;
+    let arcCalls: Array<{ x: number; y: number; radius: number }>;
+
+    beforeEach(() => {
+      arcCalls = [];
+      stubCtx = {
+        fillRect: vi.fn(),
+        drawImage: vi.fn(),
+        save: vi.fn(),
+        restore: vi.fn(),
+        beginPath: vi.fn(),
+        rect: vi.fn(),
+        arc: vi.fn((x: number, y: number, radius: number) => {
+          arcCalls.push({ x, y, radius });
+        }),
+        closePath: vi.fn(),
+        fill: vi.fn(),
+        createRadialGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+        clearRect: vi.fn(),
+      };
+      origGetContext = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = vi.fn(() => stubCtx) as any;
+    });
+
+    afterEach(() => {
+      HTMLCanvasElement.prototype.getContext = origGetContext;
+    });
+
+    it("(a) release far outside the image keeps the clamped position instead of jumping off-screen", async () => {
+      const { hooks } = createMockHooks();
+      const viewer = mountViewOnceViewer({
+        session: () => SESSION,
+        seq: 501,
+        hooks,
+        identity: fakeIdentity(),
+        win: window,
+        openClaim: async () => ({
+          ok: true,
+          data: { durationS: null, spotlight: true, kind: "photo", mime: "image/jpeg" },
+        }),
+        fetchContent: async () => ({
+          ok: true,
+          blob: new Blob(["photo"], { type: "image/jpeg" }),
+        }),
+      });
+
+      document.body.appendChild(viewer.element);
+      await flush();
+
+      const canvas = viewer.element.querySelector<HTMLCanvasElement>("canvas")!;
+      canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 800, height: 600 } as DOMRect);
+
+      // Drag to far outside
+      canvas.dispatchEvent(new PointerEvent("pointerdown", { clientX: 5000, clientY: 5000 }));
+      window.dispatchEvent(new PointerEvent("pointerup", { clientX: 5000, clientY: 5000 }));
+
+      const lastArc = arcCalls[arcCalls.length - 1];
+      expect(lastArc).toBeDefined();
+      expect(lastArc!.x).toBeLessThanOrEqual(canvas.width);
+      expect(lastArc!.y).toBeLessThanOrEqual(canvas.height);
+      expect(lastArc!.x).toBeLessThan(1000);
+      expect(lastArc!.y).toBeLessThan(1000);
+
+      viewer.close();
+    });
+
+    it("(b) first painted frame is at phase 0 deterministically", async () => {
+      const { hooks } = createMockHooks();
+      await vi.advanceTimersByTimeAsync(50_000);
+
+      const viewer = mountViewOnceViewer({
+        session: () => SESSION,
+        seq: 502,
+        hooks,
+        identity: fakeIdentity(),
+        win: window,
+        openClaim: async () => ({
+          ok: true,
+          data: { durationS: 5, spotlight: true, kind: "photo", mime: "image/jpeg" },
+        }),
+        fetchContent: async () => ({
+          ok: true,
+          blob: new Blob(["photo"], { type: "image/jpeg" }),
+        }),
+      });
+
+      document.body.appendChild(viewer.element);
+      await flush();
+
+      const canvas = viewer.element.querySelector<HTMLCanvasElement>("canvas")!;
+      expect(arcCalls.length).toBeGreaterThan(0);
+      const firstArc = arcCalls[0]!;
+      const expectedCy = canvas.height / 2;
+      const minSide = Math.min(canvas.width, canvas.height);
+      const expectedRadius = computeSpotlightRadius(12, minSide);
+      const expectedCx = canvas.width / 2;
+      const expectedAx = expectedCx - expectedRadius;
+      const expectedX = expectedCx + expectedAx;
+
+      expect(firstArc.y).toBeCloseTo(expectedCy);
+      expect(firstArc.x).toBeCloseTo(expectedX);
+
+      viewer.close();
+    });
+
+    it("(c) in reduced motion, dragging then releasing stays put (does not snap to center)", async () => {
+      const { hooks } = createMockHooks();
+      const origMatchMedia = window.matchMedia;
+      window.matchMedia = vi.fn((query: string) => ({
+        matches: query.includes("prefers-reduced-motion"),
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })) as any;
+
+      const viewer = mountViewOnceViewer({
+        session: () => SESSION,
+        seq: 503,
+        hooks,
+        identity: fakeIdentity(),
+        win: window,
+        openClaim: async () => ({
+          ok: true,
+          data: { durationS: 5, spotlight: true, kind: "photo", mime: "image/jpeg" },
+        }),
+        fetchContent: async () => ({
+          ok: true,
+          blob: new Blob(["photo"], { type: "image/jpeg" }),
+        }),
+      });
+
+      document.body.appendChild(viewer.element);
+      await flush();
+
+      const canvas = viewer.element.querySelector<HTMLCanvasElement>("canvas")!;
+      canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 800, height: 600 } as DOMRect);
+
+      canvas.dispatchEvent(new PointerEvent("pointerdown", { clientX: 250, clientY: 220 }));
+      window.dispatchEvent(new PointerEvent("pointerup"));
+
+      const lastArc = arcCalls[arcCalls.length - 1]!;
+      expect(lastArc.x).toBe(250);
+      expect(lastArc.y).toBe(220);
+
+      window.matchMedia = origMatchMedia;
+      viewer.close();
+    });
+
+    it("(d) window pointer listeners are removed on viewer.close()", async () => {
+      const { hooks } = createMockHooks();
+      const addSpy = vi.spyOn(window, "addEventListener");
+      const removeSpy = vi.spyOn(window, "removeEventListener");
+
+      const viewer = mountViewOnceViewer({
+        session: () => SESSION,
+        seq: 504,
+        hooks,
+        identity: fakeIdentity(),
+        win: window,
+        openClaim: async () => ({
+          ok: true,
+          data: { durationS: 5, spotlight: true, kind: "photo", mime: "image/jpeg" },
+        }),
+        fetchContent: async () => ({
+          ok: true,
+          blob: new Blob(["photo"], { type: "image/jpeg" }),
+        }),
+      });
+
+      document.body.appendChild(viewer.element);
+      await flush();
+
+      expect(addSpy).toHaveBeenCalledWith("pointermove", expect.any(Function));
+      expect(addSpy).toHaveBeenCalledWith("pointerup", expect.any(Function));
+      expect(addSpy).toHaveBeenCalledWith("pointercancel", expect.any(Function));
+
+      viewer.close();
+
+      expect(removeSpy).toHaveBeenCalledWith("pointermove", expect.any(Function));
+      expect(removeSpy).toHaveBeenCalledWith("pointerup", expect.any(Function));
+      expect(removeSpy).toHaveBeenCalledWith("pointercancel", expect.any(Function));
+
+      addSpy.mockRestore();
+      removeSpy.mockRestore();
+    });
+  });
+
+  describe("Double-tap panic lock on playing video (Item 10)", () => {
+    it("viewer video element has pointer-events: none so overlay receives taps and does not exclude gesture", async () => {
+      const { hooks } = createMockHooks();
+      const viewer = mountViewOnceViewer({
+        session: () => SESSION,
+        seq: 601,
+        hooks,
+        identity: fakeIdentity(),
+        win: window,
+        openClaim: async () => ({
+          ok: true,
+          data: { durationS: 5, spotlight: false, kind: "video", mime: "video/mp4" },
+        }),
+        fetchContent: async () => ({
+          ok: true,
+          blob: new Blob(["video"], { type: "video/mp4" }),
+        }),
+      });
+
+      document.body.appendChild(viewer.element);
+      await flush();
+
+      const video = viewer.element.querySelector("video")!;
+      expect(video).toBeTruthy();
+      expect(video.style.pointerEvents).toBe("none");
 
       viewer.close();
     });
   });
 });
+

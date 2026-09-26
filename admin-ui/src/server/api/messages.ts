@@ -464,13 +464,13 @@ export async function fetchViewOnceContent(
       session,
       120_000,
     );
+    if (response.status === 200) {
+      const blob = await response.blob();
+      return { ok: true, blob };
+    }
   } catch (error) {
     if (error instanceof ServerLockedError) throw error;
     return { ok: false, kind: "unavailable" };
-  }
-  if (response.status === 200) {
-    const blob = await response.blob();
-    return { ok: true, blob };
   }
   if (response.status === 404) return { ok: false, kind: "not_found" };
   if (response.status === 403) return { ok: false, kind: "forbidden" };

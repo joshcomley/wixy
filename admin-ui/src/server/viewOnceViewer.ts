@@ -8,6 +8,7 @@ import {
   openViewOnceClaim,
   type FetchViewOnceContentResult,
   type OpenViewOnceResult,
+  type OpenViewOnceSuccess,
 } from "./api/messages";
 import type { ServerIdentity } from "./identity";
 import type { LockHooks, ServerSession } from "./types";
@@ -40,12 +41,11 @@ export interface ViewOnceViewerHandle {
 }
 
 export function generateClaimId(win: Window): string {
-  const bytes = new Uint8Array(16);
-  if (typeof win.crypto?.getRandomValues === "function") {
-    win.crypto.getRandomValues(bytes);
-  } else {
-    for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+  if (typeof win.crypto?.getRandomValues !== "function") {
+    throw new Error("crypto.getRandomValues is not available");
   }
+  const bytes = new Uint8Array(16);
+  win.crypto.getRandomValues(bytes);
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
@@ -108,7 +108,9 @@ export function computeSpotlightCoords(params: SpotlightCoordsParams): { x: numb
       const spotY = Math.max(drawY + radius, Math.min(drawY + drawH - radius, dragY));
       return { x: spotX, y: spotY };
     }
-    return { x: cx, y: cy };
+    const spotX = Math.max(drawX + radius, Math.min(drawX + drawW - radius, dragReleaseX));
+    const spotY = Math.max(drawY + radius, Math.min(drawY + drawH - radius, dragReleaseY));
+    return { x: spotX, y: spotY };
   }
 
   const theta = (2 * Math.PI * (elapsedMs % SPOTLIGHT_CYCLE_MS)) / SPOTLIGHT_CYCLE_MS;
@@ -157,6 +159,7 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
   let videoObjectUrl: string | null = null;
   let rafId: number | null = null;
   let timerIntervalId: number | null = null;
+  let cleanupPhotoEvents: (() => void) | null = null;
 
   const abortController = new AbortController();
 
@@ -211,7 +214,16 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
 
   const statusEl = doc.createElement("div");
   statusEl.className = "wx-srv-view-once-status";
-  statusEl.textContent = "Loading…";
+
+  const statusText = doc.createElement("div");
+  statusText.className = "wx-srv-view-once-status-text";
+  statusText.textContent = "Loading…";
+
+  const statusNotice = doc.createElement("div");
+  statusNotice.className = "wx-srv-view-once-status-notice";
+  statusNotice.textContent = "Opening it uses it up.";
+
+  statusEl.append(statusText, statusNotice);
   body.appendChild(statusEl);
 
   // Controls container (slider for spotlight, or play button for video)
@@ -300,6 +312,11 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
       }
     }
 
+    if (cleanupPhotoEvents !== null) {
+      cleanupPhotoEvents();
+      cleanupPhotoEvents = null;
+    }
+
     activeBlob = null;
     win.removeEventListener("keydown", onKeyDown);
     doc.removeEventListener("visibilitychange", onVisibilityChange);
@@ -316,7 +333,9 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
   function startTimer(durationS: number | null): void {
     if (firstPainted || closed) return;
     firstPainted = true;
-    paintedAt = (win.performance?.now?.() ?? Date.now());
+    if (paintedAt === 0) {
+      paintedAt = (win.performance?.now?.() ?? Date.now());
+    }
     durationSeconds = durationS;
 
     if (durationS !== null) {
@@ -362,6 +381,7 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
   function setupVideo(durationS: number | null, blob: Blob): void {
     const video = doc.createElement("video");
     video.className = "wx-srv-view-once-video";
+    video.style.pointerEvents = "none";
     video.playsInline = true;
     video.controls = false;
     video.setAttribute("playsinline", "true");
@@ -428,10 +448,16 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
       try {
         bitmap = await win.createImageBitmap(blob);
       } catch {
-        bitmap = { width: 400, height: 300, close: () => {} } as ImageBitmap;
+        statusEl.textContent = "Couldn't show this photo.";
+        statusEl.hidden = false;
+        canvas.remove();
+        return;
       }
     } else {
-      bitmap = { width: 400, height: 300, close: () => {} } as ImageBitmap;
+      statusEl.textContent = "Couldn't show this photo.";
+      statusEl.hidden = false;
+      canvas.remove();
+      return;
     }
     if (closed) {
       bitmap.close?.();
@@ -498,8 +524,6 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
       if (!isSpotlight || !isDragging) return;
       isDragging = false;
       dragReleaseTime = (win.performance?.now?.() ?? Date.now());
-      dragReleaseX = dragX;
-      dragReleaseY = dragY;
       renderFrame();
     }
 
@@ -508,8 +532,18 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
     win.addEventListener("pointerup", onPointerUp);
     win.addEventListener("pointercancel", onPointerUp);
 
+    cleanupPhotoEvents = () => {
+      canvas.removeEventListener("pointerdown", onPointerDown);
+      win.removeEventListener("pointermove", onPointerMove);
+      win.removeEventListener("pointerup", onPointerUp);
+      win.removeEventListener("pointercancel", onPointerUp);
+    };
+
     function renderFrame(): void {
       if (closed || !activeBitmap) return;
+      if (!firstPainted && paintedAt === 0) {
+        paintedAt = (win.performance?.now?.() ?? Date.now());
+      }
       const ctx = canvas.getContext("2d");
       if (!ctx) {
         if (!firstPainted) {
@@ -649,64 +683,95 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
 
   // Start claim and fetch lifecycle
   async function init(): Promise<void> {
-    const session = deps.session();
-    if (session === null) {
-      statusEl.textContent = "Unlock Server to view this item.";
-      return;
-    }
-
-    const claimId = generateClaimId(win);
-    const openClaimFn = deps.openClaim ?? openViewOnceClaim;
-    const fetchContentFn = deps.fetchContent ?? fetchViewOnceContent;
-
-    const claimResult = await openClaimFn(session, deps.seq, {
-      claimId,
-      sender: deps.identity.getName() ?? "Someone",
-    });
-
-    if (closed) return;
-
-    if (!claimResult.ok) {
-      if (claimResult.kind === "already_opened") {
-        statusEl.textContent = "Already opened";
-      } else if (claimResult.kind === "not_found") {
-        statusEl.textContent = "No longer available";
-      } else if (claimResult.kind === "own_message") {
-        statusEl.textContent = "Cannot open your own view-once message";
-      } else {
-        statusEl.textContent = "Couldn't open this message. Try again later.";
-      }
-      return;
-    }
-
-    const claimData = claimResult.data;
-
-    // Retry loop for content download on network failure
-    let contentResult: FetchViewOnceContentResult | null = null;
-    while (!closed) {
-      contentResult = await fetchContentFn(
-        session,
-        deps.seq,
-        claimId,
-        abortController.signal,
-      );
-      if (closed) return;
-      if (contentResult.ok) break;
-      if (
-        contentResult.kind === "not_found" ||
-        contentResult.kind === "expired" ||
-        contentResult.kind === "forbidden"
-      ) {
-        statusEl.textContent = "No longer available";
+    try {
+      const session = deps.session();
+      if (session === null) {
+        statusEl.textContent = "Unlock Server to view this item.";
         return;
       }
-      // On unavailable / transient error, retry after 1s
-      statusEl.textContent = "Connection issue, retrying…";
-      await new Promise((r) => win.setTimeout?.(r, 1000) ?? setTimeout(r, 1000));
-    }
 
-    if (contentResult && contentResult.ok) {
-      await setupContent(claimData, contentResult.blob);
+      const claimId = generateClaimId(win);
+      const openClaimFn = deps.openClaim ?? openViewOnceClaim;
+      const fetchContentFn = deps.fetchContent ?? fetchViewOnceContent;
+
+      let claimData: OpenViewOnceSuccess | null = null;
+      let claimAttempts = 0;
+      while (!closed) {
+        let claimResult: OpenViewOnceResult;
+        try {
+          claimResult = await openClaimFn(session, deps.seq, {
+            claimId,
+            sender: deps.identity.getName() ?? "Someone",
+          });
+        } catch {
+          claimResult = { ok: false, kind: "unavailable" };
+        }
+
+        if (closed) return;
+
+        if (claimResult.ok) {
+          claimData = claimResult.data;
+          break;
+        }
+
+        if (claimResult.kind === "already_opened") {
+          statusEl.textContent = "Already opened";
+          return;
+        } else if (claimResult.kind === "not_found") {
+          statusEl.textContent = "No longer available";
+          return;
+        } else if (claimResult.kind === "own_message") {
+          statusEl.textContent = "Cannot open your own view-once message";
+          return;
+        }
+
+        claimAttempts++;
+        if (claimAttempts >= 30) {
+          statusEl.textContent = "Couldn't open this message. Try again later.";
+          return;
+        }
+        statusEl.textContent = "Connection issue, retrying…";
+        await new Promise((r) => win.setTimeout?.(r, 1000) ?? setTimeout(r, 1000));
+      }
+
+      if (!claimData || closed) return;
+
+      // Retry loop for content download on network failure
+      let contentResult: FetchViewOnceContentResult | null = null;
+      let attempts = 0;
+      while (!closed) {
+        contentResult = await fetchContentFn(
+          session,
+          deps.seq,
+          claimId,
+          abortController.signal,
+        );
+        if (closed) return;
+        if (contentResult.ok) break;
+        if (
+          contentResult.kind === "not_found" ||
+          contentResult.kind === "expired" ||
+          contentResult.kind === "forbidden"
+        ) {
+          statusEl.textContent = "No longer available";
+          return;
+        }
+        attempts++;
+        if (attempts >= 30) {
+          statusEl.textContent = "Couldn't open this message.";
+          return;
+        }
+        // On unavailable / transient error, retry after 1s
+        statusEl.textContent = "Connection issue, retrying…";
+        await new Promise((r) => win.setTimeout?.(r, 1000) ?? setTimeout(r, 1000));
+      }
+
+      if (contentResult && contentResult.ok) {
+        await setupContent(claimData, contentResult.blob);
+      }
+    } catch {
+      if (closed) return;
+      statusEl.textContent = "Couldn't open this message.";
     }
   }
 
