@@ -34,6 +34,29 @@ describe("Server service worker", () => {
     });
   });
 
+  it("broadcasts push-shown to clients and BroadcastChannel after showNotification resolves", async () => {
+    const postMessage = vi.fn();
+    const target = targetWith([
+      { type: "window", url: "https://example.test/admin/server", focused: false, visibilityState: "hidden", postMessage },
+    ]);
+    const broadcastPostMessage = vi.fn();
+    const broadcastClose = vi.fn();
+    class MockBroadcastChannel {
+      constructor(public name: string) {}
+      postMessage = broadcastPostMessage;
+      close = broadcastClose;
+    }
+    vi.stubGlobal("BroadcastChannel", MockBroadcastChannel);
+
+    const { handlePush } = await import("../src/sw/serverSw");
+    await handlePush(target as unknown as ServiceWorkerGlobalScope);
+
+    expect(postMessage).toHaveBeenCalledWith({ type: "push-shown" });
+    expect(broadcastPostMessage).toHaveBeenCalledWith({ type: "push-shown" });
+    expect(broadcastClose).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
+  });
+
   it("notifies silently while a visible focused Server page is open to satisfy userVisibleOnly", async () => {
     const target = targetWith([
       { type: "window", url: "https://example.test/admin/server/thread", focused: true, visibilityState: "visible" },
