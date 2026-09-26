@@ -973,7 +973,6 @@ _push_test_limiter = SlidingWindowRateLimiter(max_events=1, window_s=_PUSH_TEST_
 
 
 @router.post("/push/subscriptions/{device_id}/test", response_model=None)
-@router.post("/push/test/{device_id}", response_model=None)
 async def post_push_test(device_id: str, request: Request) -> JSONResponse:
     await require_server_token(request)
     limiter: SlidingWindowRateLimiter = getattr(

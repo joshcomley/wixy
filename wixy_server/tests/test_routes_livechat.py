@@ -3448,8 +3448,9 @@ class TestPushRoutes:
                 transport=httpx.MockTransport(handler)
             )
 
-            # Test using the alias path as well
-            response = client.post(f"/api/admin/server/push/test/{device_target}", headers=headers)
+            response = client.post(
+                f"/api/admin/server/push/subscriptions/{device_target}/test", headers=headers
+            )
             assert response.status_code == 200
             assert response.json() == {"ok": True, "statusCode": 201}
 

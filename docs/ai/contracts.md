@@ -233,7 +233,7 @@ header.
 | GET | `server/push/subscriptions/{deviceId}` | `get_push_subscription` | — (token) | 200 `{"subscribed":bool,"endpoint":str\|null}`; 401 locked |
 | PUT | `server/push/subscriptions/{deviceId}` | `put_push_subscription` | `{"endpoint":str,"keys":{"p256dh":str,"auth":str}}` (token) | 204; 401 locked; 422 (invalid endpoint host / malformed JSON) |
 | DELETE | `server/push/subscriptions/{deviceId}` | `delete_push_subscription` | — (token) | 204 (idempotent); 401 locked |
-| POST | `server/push/subscriptions/{deviceId}/test` | `test_push_subscription` | — (token) | 200 `{"ok":bool,"statusCode":int}`; 401 locked; 404 (device not subscribed); 422 (unsafe endpoint); 429 `{"error":"rate_limited"}` + `Retry-After: 5` (1 request per 5s per device) |
+| POST | `server/push/subscriptions/{deviceId}/test` | `post_push_test` | — (token) | 200 `{"ok":bool,"statusCode":int}`; 401 locked; 404 (device not subscribed); 422 (unsafe endpoint); 429 `{"error":"rate_limited"}` + `Retry-After: 5` (1 request per 5s per device) |
 
 
 `<Message>` = `{seq:int, clientId:str, sender:str, text:str\|null, attachments:[<Attachment>],
