@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from pathlib import Path
 from typing import NoReturn
 
@@ -112,3 +113,55 @@ class TestWriteTranscript:
 
         conv_dir = transcript_path(tmp_path, "anthropic-1").parent
         assert [p for p in conv_dir.iterdir() if p.suffix == ".tmp"] == []
+
+    def test_a_delayed_earlier_writer_never_leaves_a_stale_transcript(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Each turn's `finally` writes the transcript from a worker thread, and a turn can end
+        while the previous turn's write is still queued or stalled (a loaded box, a scanner
+        holding the file). Writer A snapshots two messages, then stalls just before its replace;
+        two more messages arrive and writer B runs. B must never finish FIRST and then be
+        overwritten by A's older two-line snapshot: the file must end up with all four. (Seen for
+        real as `test_second_turn_rewrites_the_transcript_with_both_turns` failing on CI with the
+        file stuck at two lines, and reproduced at ~10% under CPU load.)"""
+        messages = [_message(0, "first message"), _message(1, "first reply")]
+        real_replace = os.replace
+        a_is_stalled = threading.Event()
+        release_a = threading.Event()
+        calls: list[int] = []
+
+        def stall_the_first_replace(
+            src: str | os.PathLike[str], dst: str | os.PathLike[str]
+        ) -> None:
+            calls.append(1)
+            if len(calls) == 1:
+                a_is_stalled.set()
+                assert release_a.wait(10), "test never released the stalled writer"
+            real_replace(src, dst)
+
+        monkeypatch.setattr(os, "replace", stall_the_first_replace)
+        writer_a = threading.Thread(
+            target=write_transcript, args=(tmp_path, "anthropic-1", messages)
+        )
+        writer_a.start()
+        assert a_is_stalled.wait(10)
+
+        messages.extend([_message(2, "second message"), _message(3, "second reply")])
+        writer_b = threading.Thread(
+            target=write_transcript, args=(tmp_path, "anthropic-1", messages)
+        )
+        writer_b.start()
+        writer_b.join(0.3)  # without per-conversation ordering, B finishes here, before A
+
+        release_a.set()
+        writer_a.join(10)
+        writer_b.join(10)
+        assert not writer_a.is_alive() and not writer_b.is_alive()
+
+        lines = transcript_path(tmp_path, "anthropic-1").read_text(encoding="utf-8").splitlines()
+        assert [json.loads(line)["text"] for line in lines] == [
+            "first message",
+            "first reply",
+            "second message",
+            "second reply",
+        ]
