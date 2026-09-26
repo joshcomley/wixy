@@ -30,6 +30,21 @@ export async function handlePush(target: ServiceWorkerGlobalScope): Promise<void
     ...(isFocused ? { silent: true } : {}),
   };
   await target.registration.showNotification("Server", options);
+  const message = { type: "push-shown" };
+  for (const client of clients) {
+    if (typeof client.postMessage === "function") {
+      client.postMessage(message);
+    }
+  }
+  if (typeof BroadcastChannel !== "undefined") {
+    try {
+      const channel = new BroadcastChannel("wx-server-push");
+      channel.postMessage(message);
+      channel.close();
+    } catch {
+      // Ignore broadcast errors
+    }
+  }
 }
 
 worker.addEventListener("push", (event: PushEvent) => {

@@ -48,7 +48,10 @@ from wixy_server.livechat.store import LiveChatStore
 from wixy_server.livechat.sw import server_sw_response
 from wixy_server.livechat.tokens import load_or_create_secret
 from wixy_server.livechat.transcribe import CmdTranscriber, Transcriber
-from wixy_server.livechat.transcription import TranscriptionRuntime
+from wixy_server.livechat.transcription import (
+    SlidingWindowRateLimiter,
+    TranscriptionRuntime,
+)
 from wixy_server.publisher import PublishJob
 from wixy_server.redirects import load_redirects
 from wixy_server.registry import load_registry
@@ -208,6 +211,7 @@ def create_app(
     livechat_secret = load_or_create_secret(paths.server_secret)
     livechat_vapid_keys = load_or_create_vapid_keys(paths.server_vapid)
     livechat_push_client = httpx.AsyncClient(timeout=10.0)
+    livechat_push_test_limiter = SlidingWindowRateLimiter(max_events=1, window_s=5.0)
     livechat_notifier = LiveChatNotifier()
     livechat_message_hooks: list[MessageHook] = []
 
@@ -372,6 +376,8 @@ def create_app(
     app.state.livechat_store = livechat_store
     app.state.livechat_secret = livechat_secret
     app.state.livechat_vapid_keys = livechat_vapid_keys
+    app.state.livechat_push_client = livechat_push_client
+    app.state.livechat_push_test_limiter = livechat_push_test_limiter
     app.state.livechat_notifier = livechat_notifier
     app.state.livechat_message_hooks = livechat_message_hooks
     app.state.livechat_media_available = livechat_media_available

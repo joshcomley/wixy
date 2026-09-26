@@ -3224,7 +3224,10 @@ class TestPushRoutes:
 
             device_id = "device-123456"
             status_url = f"/api/admin/server/push/subscriptions/{device_id}"
-            assert client.get(status_url, headers=headers).json() == {"subscribed": False}
+            assert client.get(status_url, headers=headers).json() == {
+                "subscribed": False,
+                "endpoint": None,
+            }
             subscribed = client.put(
                 status_url,
                 headers=headers,
@@ -3237,7 +3240,10 @@ class TestPushRoutes:
                 },
             )
             assert subscribed.status_code == 204
-            assert client.get(status_url, headers=headers).json() == {"subscribed": True}
+            assert client.get(status_url, headers=headers).json() == {
+                "subscribed": True,
+                "endpoint": "https://fcm.googleapis.com/fcm/send/token",
+            }
 
             bad_endpoint = client.put(
                 status_url,
@@ -3252,7 +3258,10 @@ class TestPushRoutes:
             )
             assert bad_endpoint.status_code == 422
             assert client.delete(status_url, headers=headers).status_code == 204
-            assert client.get(status_url, headers=headers).json() == {"subscribed": False}
+            assert client.get(status_url, headers=headers).json() == {
+                "subscribed": False,
+                "endpoint": None,
+            }
 
             worker = client.get("/admin/server-sw.js")
             assert worker.status_code == 200
@@ -3298,6 +3307,198 @@ class TestPushRoutes:
             assert client.get("/api/admin/server/push/config").json() == {"error": "locked"}
             response = client.get("/api/admin/server/push/subscriptions/device-123456")
             assert response.status_code == 401
+            test_resp = client.post("/api/admin/server/push/subscriptions/device-123456/test")
+            assert test_resp.status_code == 401
+            assert test_resp.json() == {"error": "locked"}
+
+    def test_push_test_unsubscribed_device_returns_404(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        with TestClient(app) as client:
+            token = _unlock(client).json()["token"]
+            headers = {"X-Wixy-Server-Token": token}
+            response = client.post(
+                "/api/admin/server/push/subscriptions/nonexistent-device/test",
+                headers=headers,
+            )
+            assert response.status_code == 404
+            assert response.json() == {"error": "not_found"}
+
+    def test_push_test_rate_limited(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        with TestClient(app) as client:
+            token = _unlock(client).json()["token"]
+            headers = {"X-Wixy-Server-Token": token}
+            device_id = "device-rl"
+            store: LiveChatStore = app.state.livechat_store
+            store.upsert_push_subscription(
+                PushSubscriptionRow(
+                    device_id=device_id,
+                    sender="Alice",
+                    endpoint="https://fcm.googleapis.com/fcm/send/token",
+                    p256dh="pub",
+                    auth="sec",
+                    created_at=time.time(),
+                    last_ok_at=None,
+                    consecutive_failures=0,
+                )
+            )
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                return httpx.Response(201, request=request)
+
+            app.state.livechat_push_client = httpx.AsyncClient(
+                transport=httpx.MockTransport(handler)
+            )
+
+            first = client.post(
+                f"/api/admin/server/push/subscriptions/{device_id}/test", headers=headers
+            )
+            assert first.status_code == 200
+            assert first.json() == {"ok": True, "statusCode": 201}
+
+            second = client.post(
+                f"/api/admin/server/push/subscriptions/{device_id}/test", headers=headers
+            )
+            assert second.status_code == 429
+            assert second.json()["error"] == "rate_limited"
+            assert "Retry-After" in second.headers
+
+    def test_push_test_revalidates_endpoint(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        with TestClient(app) as client:
+            token = _unlock(client).json()["token"]
+            headers = {"X-Wixy-Server-Token": token}
+            device_id = "device-bad-endpoint"
+            store: LiveChatStore = app.state.livechat_store
+            # Direct store insert bypassing route validation:
+            store.upsert_push_subscription(
+                PushSubscriptionRow(
+                    device_id=device_id,
+                    sender="Alice",
+                    endpoint="http://unsafe.example.test/push",
+                    p256dh="pub",
+                    auth="sec",
+                    created_at=time.time(),
+                    last_ok_at=None,
+                    consecutive_failures=0,
+                )
+            )
+            response = client.post(
+                f"/api/admin/server/push/subscriptions/{device_id}/test", headers=headers
+            )
+            assert response.status_code == 422
+            assert response.json()["error"] == "invalid"
+
+    def test_push_test_success_own_device_only(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        with TestClient(app) as client:
+            token = _unlock(client).json()["token"]
+            headers = {"X-Wixy-Server-Token": token}
+            device_target = "device-target"
+            device_other = "device-other"
+            store: LiveChatStore = app.state.livechat_store
+            store.upsert_push_subscription(
+                PushSubscriptionRow(
+                    device_id=device_target,
+                    sender="Alice",
+                    endpoint="https://fcm.googleapis.com/fcm/send/target-token",
+                    p256dh="pub1",
+                    auth="sec1",
+                    created_at=time.time(),
+                    last_ok_at=None,
+                    consecutive_failures=0,
+                )
+            )
+            store.upsert_push_subscription(
+                PushSubscriptionRow(
+                    device_id=device_other,
+                    sender="Bob",
+                    endpoint="https://fcm.googleapis.com/fcm/send/other-token",
+                    p256dh="pub2",
+                    auth="sec2",
+                    created_at=time.time(),
+                    last_ok_at=None,
+                    consecutive_failures=0,
+                )
+            )
+
+            seen: list[str] = []
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                seen.append(str(request.url))
+                return httpx.Response(201, request=request)
+
+            app.state.livechat_push_client = httpx.AsyncClient(
+                transport=httpx.MockTransport(handler)
+            )
+
+            response = client.post(
+                f"/api/admin/server/push/subscriptions/{device_target}/test", headers=headers
+            )
+            assert response.status_code == 200
+            assert response.json() == {"ok": True, "statusCode": 201}
+
+            assert seen == ["https://fcm.googleapis.com/fcm/send/target-token"]
+            target_sub = store.get_push_subscription(device_target)
+            assert target_sub is not None
+            assert target_sub.last_ok_at is not None
+            other_sub = store.get_push_subscription(device_other)
+            assert other_sub is not None
+            assert other_sub.last_ok_at is None
+
+    def test_push_test_rejected_deletes_gone_subscription(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        with TestClient(app) as client:
+            token = _unlock(client).json()["token"]
+            headers = {"X-Wixy-Server-Token": token}
+            device_gone = "device-gone"
+            store: LiveChatStore = app.state.livechat_store
+            store.upsert_push_subscription(
+                PushSubscriptionRow(
+                    device_id=device_gone,
+                    sender="Alice",
+                    endpoint="https://fcm.googleapis.com/fcm/send/gone-token",
+                    p256dh="pub",
+                    auth="sec",
+                    created_at=time.time(),
+                    last_ok_at=None,
+                    consecutive_failures=0,
+                )
+            )
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                return httpx.Response(410, request=request)
+
+            app.state.livechat_push_client = httpx.AsyncClient(
+                transport=httpx.MockTransport(handler)
+            )
+
+            response = client.post(
+                f"/api/admin/server/push/subscriptions/{device_gone}/test", headers=headers
+            )
+            assert response.status_code == 200
+            assert response.json() == {"ok": False, "statusCode": 410}
+            assert store.get_push_subscription(device_gone) is None
 
 
 class TestLiveAppSeedTimestampGuard:

@@ -381,9 +381,16 @@ The service worker is served at `/admin/server-sw.js` before the admin SPA catch
 It emits only the generic `Server` / `New activity` notification, issues it silently for
 a visible focused Server page to satisfy the browser's `userVisibleOnly` push contract
 without disrupting the user, and routes notification clicks to `/admin/server`. It has
-no fetch handler. `server/pushToggle.ts` keeps enablement in the settings sheet's
-caller: permission, worker registration, subscription, and protected PUT all happen
-from the enable click; disable unsubscribes, deletes the server row, and unregisters.
+no fetch handler. Upon showing the notification, `handlePush` notifies active clients via
+both `postMessage({ type: "push-shown" })` and a `BroadcastChannel("wx-server-push")` event
+to confirm display.
+
+`server/pushToggle.ts` derives an **honest state** rather than trusting the server's record alone:
+1. `Notification.permission === "denied"` immediately yields a `blocked` state with guidance to allow notifications in site settings.
+2. If the server says subscribed, the browser verifies that a service worker registration exists at scope `/admin/` and that `pushManager.getSubscription()` returns an active subscription whose endpoint equals the server's stored endpoint.
+3. If the server says subscribed but the browser lacks permission, lacks a registration, or has a mismatched/missing subscription, the toggle enters a `needs_re-enabling` state with a single-tap repair button ("Re-enable notifications") that re-subscribes and updates the server.
+4. When enabled, a "Send me a test notification" button allows verification. Tapping it calls `POST /api/admin/server/push/subscriptions/{deviceId}/test` (token-gated, rate-limited to 1 request per 5 seconds per device). This route sends one payloadless push to the calling device's own subscription only (bypassing sender exclusion) after re-validating the endpoint.
+5. Round-trip evidence: If the service worker confirms display within ~10 seconds via BroadcastChannel or client postMessage, the UI reports "Your phone received the test and showed it." If the push service accepts the request (201) but the phone does not confirm within 10 seconds, it reports "Google accepted it but your phone did not confirm within ~10 seconds" alongside plain-English troubleshooting hints (check Android Settings -> Apps -> Chrome -> Notifications is On; Chrome -> Settings -> Site settings -> Notifications must allow this site; battery saver / "restrict background" can delay or drop them). If the push service rejects the request, it reports "The push service rejected it (status N)".
 
 ## 8. Media processing, chunked uploads and the queue (P2a/P2b)
 
