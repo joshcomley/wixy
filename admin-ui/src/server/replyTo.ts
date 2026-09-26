@@ -37,11 +37,14 @@ export function replyToFromMessage(message: Message): ReplyTo {
     sender: message.sender,
     text: snippet,
     truncated,
-    media: replyToMediaFromAttachments(message.attachments),
+    media: replyToMediaFromAttachments(message.attachments, message.viewOnce != null),
   };
 }
 
-function replyToMediaFromAttachments(attachments: readonly Attachment[]): ReplyToMedia | null {
+function replyToMediaFromAttachments(
+  attachments: readonly Attachment[],
+  viewOnce: boolean = false,
+): ReplyToMedia | null {
   const first = attachments[0];
   if (first === undefined) return null;
   const kinds = new Set(attachments.map((a) => a.kind));
@@ -49,15 +52,27 @@ function replyToMediaFromAttachments(attachments: readonly Attachment[]): ReplyT
   const count = attachments.length;
   const durationS = count === 1 ? first.durationS : null;
   const thumbUrl =
-    first.kind === "photo" ? (first.urls.thumb ?? null)
+    viewOnce ? null
+    : first.kind === "photo" ? (first.urls.thumb ?? null)
     : first.kind === "video" ? (first.urls.poster ?? null)
     : null;
-  return { kind, count, durationS, thumbUrl };
+  return {
+    kind,
+    count,
+    durationS,
+    thumbUrl,
+    ...(viewOnce ? { viewOnce: true } : {}),
+  };
 }
 
 /** §(4)'s exact label set: "Photo", "Video", "Voice note · 0:42", "3
- * photos", "2 videos", "2 voice notes" or "4 attachments". */
+ * photos", "2 videos", "2 voice notes" or "4 attachments". View-once quotes:
+ * "View-once photo" or "View-once video" (spec/server-chat/06-view-once-media.md §3.2). */
 export function formatReplyQuoteMediaLabel(media: ReplyToMedia): string {
+  if (media.viewOnce) {
+    if (media.kind === "photo") return "View-once photo";
+    if (media.kind === "video") return "View-once video";
+  }
   if (media.count === 1) {
     if (media.kind === "photo") return "Photo";
     if (media.kind === "video") return "Video";

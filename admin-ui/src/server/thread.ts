@@ -22,6 +22,8 @@ import {
   getHistory,
   getUsage,
   sendMessage,
+  sendViewOnceMessage,
+  type SendViewOnceResult,
   setReaction,
   transcribeAttachment,
   wipeChat,
@@ -29,6 +31,7 @@ import {
   type ReplyTo,
   type TranscribeAnswer,
 } from "./api/messages";
+import { mountViewOnceViewer, type ViewOnceViewerHandle } from "./viewOnceViewer";
 import { uploadServerAttachment } from "./api/uploads";
 import type { ServerIdentity } from "./identity";
 import { linkifyInto } from "./linkify";
@@ -228,6 +231,13 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   let voiceRecorder: VoiceRecorder | null = null;
   let composer: ChatComposer;
   const voiceDurations = new WeakMap<File, number>();
+  interface ViewOnceDraftSettings {
+    enabled: boolean;
+    durationS: 2 | 5 | 30 | null;
+    spotlight: boolean;
+  }
+  const fileViewOnceSettings = new WeakMap<File, ViewOnceDraftSettings>();
+  let activeViewOnceViewer: ViewOnceViewerHandle | null = null;
   let pendingVoiceNote:
     | {
         readonly file: File;
@@ -387,17 +397,138 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     keepInputLive: true,
     extraButtons: [recordButton, cancelRecordingButton, recordingStatus],
     renderChipPreview: (file, previewUrl) => {
-      if (file.type.startsWith("image/")) {
+      const isImage = file.type.startsWith("image/");
+      const isVideo = file.type.startsWith("video/");
+      const container = documentRef.createElement("div");
+      container.className = "wx-srv-chip-content";
+
+      if (isImage) {
         const thumb = documentRef.createElement("img");
         thumb.className = "wx-chat-attachment-thumb";
         thumb.src = previewUrl;
         thumb.alt = "";
-        return thumb;
+        container.appendChild(thumb);
+      } else {
+        const label = documentRef.createElement("span");
+        label.className = "wx-srv-attachment-chip-label";
+        label.textContent = file.type.startsWith("audio/") ? "🎤 Voice note" : "🎞 Video";
+        container.appendChild(label);
       }
-      const label = documentRef.createElement("span");
-      label.className = "wx-srv-attachment-chip-label";
-      label.textContent = file.type.startsWith("audio/") ? "🎤 Voice note" : "🎞 Video";
-      return label;
+
+      if (isImage || isVideo) {
+        let settings = fileViewOnceSettings.get(file);
+        if (!settings) {
+          settings = { enabled: false, durationS: 5, spotlight: false };
+          fileViewOnceSettings.set(file, settings);
+        }
+
+        const voBtn = documentRef.createElement("button");
+        voBtn.type = "button";
+        voBtn.className = "wx-srv-view-once-chip-btn";
+        if (settings.enabled) {
+          voBtn.classList.add("wx-srv-view-once-chip-active");
+          voBtn.textContent = settings.durationS !== null ? `① ${settings.durationS}s` : "① ∞";
+        } else {
+          voBtn.textContent = "①";
+        }
+        voBtn.setAttribute("aria-label", "View once settings");
+        voBtn.title = "View once";
+
+        let pickerEl: HTMLElement | null = null;
+
+        const onWinClick = (evt: MouseEvent): void => {
+          if (pickerEl && !pickerEl.contains(evt.target as Node) && evt.target !== voBtn) {
+            closePicker();
+          }
+        };
+
+        function closePicker(): void {
+          pickerEl?.remove();
+          pickerEl = null;
+          win.removeEventListener("click", onWinClick);
+        }
+
+        voBtn.addEventListener("click", (evt) => {
+          evt.stopPropagation();
+          if (pickerEl !== null) {
+            closePicker();
+            return;
+          }
+
+          pickerEl = documentRef.createElement("div");
+          pickerEl.className = "wx-srv-view-once-picker";
+
+          const title = documentRef.createElement("div");
+          title.className = "wx-srv-view-once-picker-title";
+          title.textContent = "View once";
+          pickerEl.appendChild(title);
+
+          const durationsWrap = documentRef.createElement("div");
+          durationsWrap.className = "wx-srv-view-once-durations";
+
+          const durations: Array<{ label: string; enabled: boolean; val: 2 | 5 | 30 | null }> = [
+            { label: "Off", enabled: false, val: 5 },
+            { label: "2 s", enabled: true, val: 2 },
+            { label: "5 s", enabled: true, val: 5 },
+            { label: "30 s", enabled: true, val: 30 },
+            { label: "No limit", enabled: true, val: null },
+          ];
+
+          for (const d of durations) {
+            const btn = documentRef.createElement("button");
+            btn.type = "button";
+            btn.className = "wx-srv-view-once-dur-btn";
+            btn.textContent = d.label;
+            const isCurrent = settings!.enabled === d.enabled && (!d.enabled || settings!.durationS === d.val);
+            if (isCurrent) btn.classList.add("active");
+
+            btn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              settings!.enabled = d.enabled;
+              if (d.enabled) {
+                settings!.durationS = d.val;
+              }
+              fileViewOnceSettings.set(file, settings!);
+              if (settings!.enabled) {
+                voBtn.classList.add("wx-srv-view-once-chip-active");
+                voBtn.textContent = settings!.durationS !== null ? `① ${settings!.durationS}s` : "① ∞";
+              } else {
+                voBtn.classList.remove("wx-srv-view-once-chip-active");
+                voBtn.textContent = "①";
+              }
+              closePicker();
+            });
+            durationsWrap.appendChild(btn);
+          }
+          pickerEl.appendChild(durationsWrap);
+
+          if (isImage) {
+            const spotlightLabel = documentRef.createElement("label");
+            spotlightLabel.className = "wx-srv-view-once-spotlight-label";
+            const checkbox = documentRef.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.checked = settings!.spotlight;
+            checkbox.addEventListener("change", () => {
+              settings!.spotlight = checkbox.checked;
+              fileViewOnceSettings.set(file, settings!);
+            });
+            spotlightLabel.append(checkbox, documentRef.createTextNode("Spotlight"));
+            pickerEl.appendChild(spotlightLabel);
+          }
+
+          const note = documentRef.createElement("div");
+          note.className = "wx-srv-view-once-note";
+          note.textContent = "It disappears once they open it. They could still take a screenshot.";
+          pickerEl.appendChild(note);
+
+          container.appendChild(pickerEl);
+          win.setTimeout?.(() => win.addEventListener("click", onWinClick), 0);
+        });
+
+        container.appendChild(voBtn);
+      }
+
+      return container;
     },
     upload: async (file, context) => {
       const session = currentSession;
@@ -916,14 +1047,81 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       sender.textContent = message.sender;
       bubble.appendChild(sender);
     }
-    if (message.text !== null && message.text !== "") {
-      const textEl = documentRef.createElement("div");
-      textEl.className = "wx-srv-bubble-text";
-      linkifyInto(textEl, message.text, documentRef);
-      bubble.appendChild(textEl);
+    if (message.viewOnce) {
+      const isVideo = message.attachments[0]?.kind === "video";
+      const kindLabel = isVideo ? "video" : "photo";
+      const durationS = message.viewOnce.durationS;
+      const durationPart = durationS !== null ? ` · ${durationS} s` : "";
+
+      if (mine) {
+        const card = documentRef.createElement("div");
+        card.className = "wx-srv-view-once-sender-card";
+        card.textContent = `View-once ${kindLabel}${durationPart} · Not opened yet`;
+        bubble.appendChild(card);
+      } else {
+        const card = documentRef.createElement("div");
+        card.className = "wx-srv-view-once-recipient-card";
+
+        const header = documentRef.createElement("div");
+        header.className = "wx-srv-view-once-card-header";
+
+        const icon = documentRef.createElement("span");
+        icon.className = "wx-srv-view-once-card-icon";
+        icon.textContent = isVideo ? "🎞" : "📷";
+
+        const title = documentRef.createElement("span");
+        title.className = "wx-srv-view-once-card-title";
+        title.textContent = isVideo ? "Video" : "Photo";
+
+        const sub = documentRef.createElement("span");
+        sub.className = "wx-srv-view-once-card-sub";
+        sub.textContent = durationS !== null ? `View once · ${durationS} s` : "View once";
+
+        header.append(icon, title, sub);
+
+        if (message.viewOnce.spotlight) {
+          const badge = documentRef.createElement("span");
+          badge.className = "wx-srv-view-once-spotlight-badge";
+          badge.textContent = "Spotlight";
+          header.appendChild(badge);
+        }
+
+        const tapButton = documentRef.createElement("button");
+        tapButton.type = "button";
+        tapButton.className = "wx-srv-view-once-tap-btn";
+        tapButton.setAttribute("data-srv-gesture-boundary", "");
+        tapButton.textContent = "Tap to view";
+        tapButton.addEventListener("click", () => {
+          if (activeViewOnceViewer !== null) {
+            activeViewOnceViewer.close();
+          }
+          activeViewOnceViewer = mountViewOnceViewer({
+            session: () => currentSession,
+            seq: message.seq,
+            hooks,
+            identity,
+            win,
+            document: documentRef,
+            onClose: () => {
+              activeViewOnceViewer = null;
+            },
+          });
+          documentRef.body.appendChild(activeViewOnceViewer.element);
+        });
+
+        card.append(header, tapButton);
+        bubble.appendChild(card);
+      }
+    } else {
+      if (message.text !== null && message.text !== "") {
+        const textEl = documentRef.createElement("div");
+        textEl.className = "wx-srv-bubble-text";
+        linkifyInto(textEl, message.text, documentRef);
+        bubble.appendChild(textEl);
+      }
+      const attachmentsEl = renderAttachmentsFor(message);
+      if (attachmentsEl !== null) bubble.appendChild(attachmentsEl);
     }
-    const attachmentsEl = renderAttachmentsFor(message);
-    if (attachmentsEl !== null) bubble.appendChild(attachmentsEl);
     const reactionsEl = documentRef.createElement("div");
     reactionsEl.className = "wx-srv-reactions";
     fillReactions(reactionsEl, message);
@@ -1157,6 +1355,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   }
 
   function clearAfterWipe(): void {
+    if (activeViewOnceViewer !== null) {
+      activeViewOnceViewer.close();
+      activeViewOnceViewer = null;
+    }
     contentGeneration += 1;
     contentRevision += 1;
     scrollToOriginalGeneration += 1; // §(4): a wipe aborts any in-flight scroll-to-original
@@ -1510,6 +1712,125 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     composer.discardDraft(draft.base);
   }
 
+  function sendViewOnceDraft(
+    session: ServerSession,
+    draft: ServerComposerDraft,
+    voIndex: number,
+    requestGeneration: number,
+  ): void {
+    const text = draft.base.text;
+    const voStaged = draft.base.staged[voIndex]!;
+    const voSettings = fileViewOnceSettings.get(voStaged.file)!;
+    const voAttachmentId = voStaged.attachmentId;
+    if (!voAttachmentId) {
+      restoreServerDraft(draft);
+      return;
+    }
+
+    const otherStaged = draft.base.staged.filter((_, idx) => idx !== voIndex);
+    const hasOther = text !== "" || otherStaged.length > 0;
+
+    composer.setBusy(true);
+    const submitBtn = composer.element.querySelector<HTMLButtonElement>(".wx-chat-send-button");
+    const originalSubmitText = submitBtn?.textContent ?? "Send";
+
+    void (async () => {
+      if (hasOther) {
+        const ordClientId = cryptoRandomId(win);
+        const ordReplyTo = draft.replyTo;
+        const echo: PendingEcho = {
+          clientId: ordClientId,
+          text: text === "" ? null : text,
+          sentAt: now(),
+          replyTo: ordReplyTo?.quote ?? null,
+        };
+        pendingEchoes.push(echo);
+        contentRevision += 1;
+        threadScroll.scrollToBottom();
+        renderThreadList();
+
+        try {
+          const ordResult = await sendMessage(session, {
+            clientId: ordClientId,
+            sender: identity.getName() ?? "",
+            deviceId: identity.getDeviceId(),
+            text: text === "" ? null : text,
+            attachmentIds: otherStaged.map((s) => s.attachmentId!).filter(Boolean),
+            ...(ordReplyTo !== null ? { replyToSeq: ordReplyTo.seq } : {}),
+          });
+          if (ordResult.ok) {
+            addConfirmed(ordResult.message);
+            pendingEchoes = pendingEchoes.filter((e) => e.clientId !== ordClientId);
+            renderThreadList();
+          } else {
+            pendingEchoes = pendingEchoes.filter((e) => e.clientId !== ordClientId);
+            renderThreadList();
+          }
+        } catch (error) {
+          if (error instanceof ServerLockedError) {
+            hooks.lockNow("unauthorized");
+            return;
+          }
+          pendingEchoes = pendingEchoes.filter((e) => e.clientId !== ordClientId);
+          renderThreadList();
+        }
+      }
+
+      if (submitBtn) submitBtn.textContent = "Preparing…";
+      const voClientId = cryptoRandomId(win);
+      const voReplyToSeq = !hasOther && draft.replyTo !== null ? draft.replyTo.seq : undefined;
+
+      while (true) {
+        let voResult: SendViewOnceResult;
+        try {
+          voResult = await sendViewOnceMessage(session, {
+            clientId: voClientId,
+            sender: identity.getName() ?? "",
+            deviceId: identity.getDeviceId(),
+            attachmentId: voAttachmentId,
+            durationS: voSettings.durationS,
+            spotlight: voSettings.spotlight,
+            ...(voReplyToSeq !== undefined ? { replyToSeq: voReplyToSeq } : {}),
+          });
+        } catch (error) {
+          if (error instanceof ServerLockedError) {
+            hooks.lockNow("unauthorized");
+            return;
+          }
+          voResult = { ok: false, kind: "unavailable" };
+        }
+
+        if (voResult.ok) {
+          if (submitBtn) submitBtn.textContent = originalSubmitText;
+          composer.setBusy(false);
+          addConfirmed(voResult.message);
+          renderThreadList();
+          discardServerDraft(draft);
+          fileViewOnceSettings.delete(voStaged.file);
+          break;
+        }
+
+        if (voResult.kind === "not_ready") {
+          if (submitBtn) submitBtn.textContent = "Preparing…";
+          await new Promise((r) => win.setTimeout?.(r, 300) ?? setTimeout(r, 300));
+          continue;
+        }
+
+        if (submitBtn) submitBtn.textContent = originalSubmitText;
+        composer.setBusy(false);
+        restoreServerDraft(draft);
+        if (voResult.kind === "unsupported") {
+          composer.setError("Couldn't send as view-once. Try again in a moment.");
+        } else if (voResult.kind === "invalid") {
+          composer.setError(voResult.detail);
+        } else {
+          composer.setError("Couldn't send — retry.");
+        }
+        break;
+      }
+    })();
+  }
+
   function send(): void {
     if (currentSession === null) return;
     const session = currentSession;
@@ -1521,6 +1842,13 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     // its draft back via `restoreDraft`.
     const draft = takeServerDraft();
     const text = draft.base.text;
+
+    const voIndex = draft.base.staged.findIndex((s) => fileViewOnceSettings.get(s.file)?.enabled);
+    if (voIndex !== -1) {
+      sendViewOnceDraft(session, draft, voIndex, requestGeneration);
+      return;
+    }
+
     composer.setBusy(true);
     // §5.3: clientId is 8-64 chars — a single UUID (36 chars) both stays in
     // range and is already globally unique on its own; concatenating the
@@ -1684,6 +2012,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       updateRecorderUi();
       disposeAttachmentMedia(messageList);
       lightbox.teardown();
+      if (activeViewOnceViewer !== null) {
+        activeViewOnceViewer.close();
+        activeViewOnceViewer = null;
+      }
       // ServerChatView.detach()'s contract: pause media, release any
       // mediaPlaying suspension, and exit fullscreen — a lock mid-playback
       // must never leave audio/video running once the subtree is detached.
@@ -1750,6 +2082,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       disposeAttachmentMedia(messageList);
       observer?.disconnect();
       lightbox.teardown();
+      if (activeViewOnceViewer !== null) {
+        activeViewOnceViewer.close();
+        activeViewOnceViewer = null;
+      }
       threadScroll.teardown();
       composer.teardown();
     },

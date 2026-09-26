@@ -13,7 +13,7 @@ from typing import Any, cast
 import pytest
 
 from wixy_server.livechat.models import AttachmentResult, message_json
-from wixy_server.livechat.store import LiveChatStore
+from wixy_server.livechat.store import _LATEST_SCHEMA_VERSION, LiveChatStore
 
 # A scrub the test expects to SUCCEED gets a generous deadline: success returns as soon as the WAL
 # is truncated, so the number is only ever spent by a machine stall (decision 00159).
@@ -42,7 +42,7 @@ class TestSchemaMigration:
         store.list_messages(before=None, limit=1)
         conn = sqlite3.connect(str(db_path))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 10
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == _LATEST_SCHEMA_VERSION
             index_row = conn.execute(
                 "SELECT sql FROM sqlite_master WHERE type = 'index' "
                 "AND name = 'idx_messages_reply_to'"

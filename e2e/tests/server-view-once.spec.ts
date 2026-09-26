@@ -1,0 +1,228 @@
+// E2E for view-once photos/videos and the spotlight reveal (spec/server-chat/06-view-once-media.md).
+// Verifies two identities, desktop and mobile viewports, automatic disappearance after display,
+// recipient vs sender cards, 409 already-opened race, and spotlight slider interaction.
+
+import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+
+const MULTI_TAP_INTERVAL_MS = 400;
+
+async function unlockServer(page: Page, name: string): Promise<void> {
+  const configResponse = await page.request.post("/test/server/config");
+  const { pin } = (await configResponse.json()) as { pin: string };
+
+  await page.goto("/admin/server");
+  await expect(page.locator(".wx-srv-decoy")).toBeVisible();
+  await expect(page.locator(".wx-srv-affordance")).toBeHidden();
+
+  await page.locator(".wx-srv-panel").click();
+  await expect(page.locator(".wx-srv-affordance")).toBeVisible();
+  await page.waitForTimeout(500);
+  await page.locator(".wx-srv-affordance").click();
+  await expect(page.locator(".wx-srv-pinpad")).toBeVisible();
+
+  for (const digit of pin) {
+    await page.locator(`.wx-srv-pinpad-key-digit:text-is("${digit}")`).click();
+  }
+  await page.locator(".wx-srv-pinpad-key-submit").click();
+
+  const namePrompt = page.locator(".wx-srv-name-prompt");
+  await expect(page.locator(".wx-srv-name-prompt:visible, .wx-srv-thread:visible")).toBeVisible({
+    timeout: 5000,
+  });
+  if (await namePrompt.isVisible()) {
+    await expect(page.locator(".wx-srv-thread-view")).toBeHidden();
+    await page.locator(".wx-srv-name-prompt-input").fill(name);
+    await page.locator(".wx-srv-name-prompt-button").click();
+  }
+  await expect(page.locator(".wx-srv-thread")).toBeVisible();
+  await expect(page.locator(".wx-srv-name-prompt")).toBeHidden();
+  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+}
+
+test.describe("server-view-once.spec.ts (spec/06-view-once-media)", () => {
+  test("desktop: 2s view-once photo opens, closes by itself, vanishes on both sides, sender has no Tap to view", async ({
+    browser,
+  }) => {
+    const contextAlice = await browser.newContext({
+      extraHTTPHeaders: { "CF-Access-Authenticated-User-Email": "alice@example.com" },
+    });
+    const contextBob = await browser.newContext({
+      extraHTTPHeaders: { "CF-Access-Authenticated-User-Email": "bob@example.com" },
+    });
+
+    const pageAlice = await contextAlice.newPage();
+    const pageBob = await contextBob.newPage();
+
+    await unlockServer(pageAlice, "Alice");
+    await unlockServer(pageBob, "Bob");
+
+    // Seed a 2s view-once photo sent by Alice
+    const seedRes = await pageAlice.request.post("/test/server/seed-photo", {
+      data: {
+        sender: "Alice",
+        by_email: "alice@example.com",
+        view_once_s: 2,
+        spotlight: false,
+      },
+    });
+    const { seq } = (await seedRes.json()) as { seq: number };
+
+    // Alice sees sender card with "Not opened yet" and NO "Tap to view" button
+    const aliceBubble = pageAlice.locator(`[data-message-seq="${seq}"]`);
+    await expect(aliceBubble).toBeVisible({ timeout: 5000 });
+    await expect(aliceBubble.locator(".wx-srv-view-once-sender-card")).toBeVisible();
+    await expect(aliceBubble.locator(".wx-srv-view-once-sender-card")).toContainText("Not opened yet");
+    await expect(aliceBubble.locator(".wx-srv-view-once-tap-btn")).toHaveCount(0);
+
+    // Bob sees recipient card with "Tap to view" button
+    const bobBubble = pageBob.locator(`[data-message-seq="${seq}"]`);
+    await expect(bobBubble).toBeVisible({ timeout: 5000 });
+    const tapBtn = bobBubble.locator(".wx-srv-view-once-tap-btn");
+    await expect(tapBtn).toBeVisible();
+    await expect(tapBtn).toContainText("Tap to view");
+
+    // Bob opens the view-once photo
+    await tapBtn.click();
+
+    // Bob sees full-screen overlay with canvas
+    const overlay = pageBob.locator(".wx-srv-view-once-overlay");
+    await expect(overlay).toBeVisible();
+    await expect(overlay.locator("canvas")).toBeVisible();
+    await expect(overlay.locator(".wx-srv-view-once-ring-wrap")).toBeVisible();
+
+    // After 2s, the overlay closes by itself
+    await expect(overlay).toBeHidden({ timeout: 6000 });
+
+    // The message is deleted and vanishes from both sides
+    await expect(bobBubble).toBeHidden({ timeout: 5000 });
+    await expect(aliceBubble).toBeHidden({ timeout: 5000 });
+
+    await contextAlice.close();
+    await contextBob.close();
+  });
+
+  test("a second tab of the recipient gets 'Already opened' (409)", async ({ browser }) => {
+    const contextAlice = await browser.newContext({
+      extraHTTPHeaders: { "CF-Access-Authenticated-User-Email": "alice@example.com" },
+    });
+    const contextBob = await browser.newContext({
+      extraHTTPHeaders: { "CF-Access-Authenticated-User-Email": "bob@example.com" },
+    });
+
+    const pageAlice = await contextAlice.newPage();
+    const pageBob1 = await contextBob.newPage();
+
+    await unlockServer(pageAlice, "Alice");
+    await unlockServer(pageBob1, "Bob");
+
+    // Seed a 30s view-once photo
+    const seedRes = await pageAlice.request.post("/test/server/seed-photo", {
+      data: {
+        sender: "Alice",
+        by_email: "alice@example.com",
+        view_once_s: 30,
+        spotlight: false,
+      },
+    });
+    const { seq } = (await seedRes.json()) as { seq: number };
+
+    // Bob's tab 2 unlocks server
+    const pageBob2 = await contextBob.newPage();
+    await unlockServer(pageBob2, "Bob");
+
+    // Hold tab 1's content download so it stays claimed while tab 2 attempts to claim
+    let releaseContent!: () => void;
+    const contentGate = new Promise<void>((r) => {
+      releaseContent = r;
+    });
+    await pageBob1.route(/\/view-once\/content/, async (route) => {
+      await contentGate;
+      await route.continue();
+    });
+
+    // Bob tab 1 taps to view (claims the item)
+    const tapBtn1 = pageBob1.locator(`[data-message-seq="${seq}"] .wx-srv-view-once-tap-btn`);
+    await expect(tapBtn1).toBeVisible({ timeout: 5000 });
+    await tapBtn1.click();
+    await expect(pageBob1.locator(".wx-srv-view-once-overlay")).toBeVisible();
+
+    // Bob tab 2 also taps to view on the same message
+    const tapBtn2 = pageBob2.locator(`[data-message-seq="${seq}"] .wx-srv-view-once-tap-btn`);
+    await expect(tapBtn2).toBeVisible({ timeout: 5000 });
+    await tapBtn2.click();
+
+    // Bob tab 2 gets "Already opened" status message
+    const overlay2 = pageBob2.locator(".wx-srv-view-once-overlay");
+    await expect(overlay2).toBeVisible();
+    await expect(overlay2.locator(".wx-srv-view-once-status")).toContainText("Already opened");
+
+    // Release content gate so tab 1 finishes or closes cleanly
+    releaseContent();
+
+    // Close overlays
+    await pageBob1.locator(".wx-srv-view-once-close").click();
+    await pageBob2.locator(".wx-srv-view-once-close").click();
+
+    await contextAlice.close();
+    await contextBob.close();
+  });
+
+  test("mobile: spotlight photo renders cut-out and slider changes it", async ({ browser }) => {
+    const contextAlice = await browser.newContext({
+      extraHTTPHeaders: { "CF-Access-Authenticated-User-Email": "alice@example.com" },
+    });
+    const contextBobMobile = await browser.newContext({
+      viewport: { width: 375, height: 667 },
+      isMobile: true,
+      hasTouch: true,
+      extraHTTPHeaders: { "CF-Access-Authenticated-User-Email": "bob@example.com" },
+    });
+
+    const pageAlice = await contextAlice.newPage();
+    const pageBob = await contextBobMobile.newPage();
+
+    await unlockServer(pageAlice, "Alice");
+    await unlockServer(pageBob, "Bob");
+
+    // Seed a 30s spotlight photo
+    const seedRes = await pageAlice.request.post("/test/server/seed-photo", {
+      data: {
+        sender: "Alice",
+        by_email: "alice@example.com",
+        view_once_s: 30,
+        spotlight: true,
+      },
+    });
+    const { seq } = (await seedRes.json()) as { seq: number };
+
+    // Bob sees recipient bubble with Spotlight badge
+    const bobBubble = pageBob.locator(`[data-message-seq="${seq}"]`);
+    await expect(bobBubble).toBeVisible({ timeout: 5000 });
+    await expect(bobBubble.locator(".wx-srv-view-once-spotlight-badge")).toContainText("Spotlight");
+
+    // Bob taps to view
+    await bobBubble.locator(".wx-srv-view-once-tap-btn").click();
+
+    // Spotlight overlay renders canvas and slider
+    const overlay = pageBob.locator(".wx-srv-view-once-overlay");
+    await expect(overlay).toBeVisible();
+    await expect(overlay.locator("canvas")).toBeVisible();
+
+    const slider = overlay.locator(".wx-srv-view-once-slider");
+    await expect(slider).toBeVisible();
+    await expect(slider).toHaveAttribute("min", "6");
+    await expect(slider).toHaveAttribute("max", "35");
+    await expect(slider).toHaveValue("12");
+
+    // Change slider value
+    await slider.fill("28");
+    await expect(slider).toHaveValue("28");
+
+    // Close viewer via close button
+    await overlay.locator(".wx-srv-view-once-close").click();
+    await expect(overlay).toBeHidden();
+
+    await contextAlice.close();
+    await contextBobMobile.close();
+  });
+});

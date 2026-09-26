@@ -17,7 +17,7 @@ export interface ServerSession {
  * release function; the idle timer restarts fresh (a full idle period — see
  * `idleTimeoutMs`) the moment the LAST active suspension for a given reason
  * ends. */
-export type SuspendReason = "recording" | "micPermission" | "filePicker" | "mediaPlaying";
+export type SuspendReason = "recording" | "micPermission" | "filePicker" | "mediaPlaying" | "viewOnce";
 
 /** R6 — every distinct trigger that can force an instant lock (all eight of
  * R6's bullets except "a page reload", which needs no cause: unlock state is

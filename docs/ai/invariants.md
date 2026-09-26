@@ -685,7 +685,9 @@ last real activity, and can lock at once if that deadline has already passed. On
 unlocked chat's idle period is affected; the decoy's re-hide and the PIN pad's idle close
 stay 10 seconds. With a device grant active there is no idle timer for the open chat at all; a
 return from the background compares the wall clock with the last activity (a suspended phone
-may not advance `performance.now()`), except while a suspension holds the timer paused.
+may not advance `performance.now()`), except while a suspension holds the timer paused (R7:
+`recording`, `micPermission`, `filePicker`, `mediaPlaying`, and `viewOnce` — holding only for
+timed views, released on close).
 
 ### Inv 44 — Server-chat media is sniffed, bounded, and private
 Inspect magic bytes before any media subprocess. Every ffmpeg/ffprobe input uses the sniffed
@@ -702,7 +704,9 @@ normalized into private renditions and successful raw uploads are removed. Faile
 diagnostic-only and expire after seven days. Enforce quota and the free-space floor at upload
 initialization; a declared `sizeBytes` below 1 is rejected. Missing ffmpeg, ffprobe or
 `pillow-heif` makes media uploads, the media queue and the `mediaProcessing` status
-unavailable without disabling text chat.
+unavailable without disabling text chat. View-once attachments are delivered once through
+`GET /messages/{seq}/view-once/content` (gated by a one-time claim, Inv 52), never through
+`GET /media` (which returns 404), and their `renditions` column is cleared to `'[]'` upon send.
 *Enforced by:* `wixy_server/tests/test_livechat_processing.py` (pixel-level checks per source
 mode, colour profile and output format, including the palette, 16-bit greyscale and Display-P3
 cases), `test_livechat_uploads.py`, `test_livechat_media_queue.py`, and
@@ -764,9 +768,12 @@ connection is held open, so a WAL that was not truncated would fail them),
 `test_livechat_media_queue.py` (delete/processing race), `admin-ui/tests/server/erasureRequests.test.ts`
 and `admin-ui/tests/serverThread.test.ts` (the client's timeout, retry and reconciliation rules),
 `e2e/tests/server-chat.spec.ts` (cross-client deletion, a 12-second-delayed delete, old-media
-404, wipe replay, and mobile gesture behavior), and — for a reply's quote specifically (Inv 51) —
+404, wipe replay, and mobile gesture behavior), — for a reply's quote specifically (Inv 51) —
 `test_livechat_reply_to.py`'s `TestReplyErasure` (the same raw-byte proof extended to a target
-with replies, plus a bare `DELETE FROM messages` from a simulated older-process connection).
+with replies, plus a bare `DELETE FROM messages` from a simulated older-process connection), and —
+for view-once delivery erasure specifically (Inv 52) — `test_livechat_view_once.py` (fail-closed
+linklessness, post-download erasure via the ordinary delete path, broken stream retry safety, and
+backstop cleanup).
 *Known limits:* filesystem overwrite is not a reliable shred guarantee on NTFS/SSD. A 202
 response means chat content is already deleted and broadcast while database-byte or media-file
 cleanup continues durably in the background.
@@ -962,3 +969,23 @@ resurrect a deleted target's words" suites (mechanisms 2 and 3 above, and the th
 — a stale history page, a failed send restore, a failed delete restore — that could otherwise
 reintroduce a deleted target's words).
 Decisions: [00168](../../decisions/00168-reply-to-a-message-schema-and-erasure/decision.md).
+
+### Inv 52 — A view-once attachment is never linkable
+A view-once photo or video (spec/server-chat/06-view-once-media.md) is never linkable: in the same
+write transaction that creates the message, the store copies the attachment's `renditions` list into
+`view_once_renditions` and sets `renditions = '[]'`. Consequences:
+1. `attachment_json` mints no URLs for a view-once attachment, and nor does any reply quote's `thumbUrl`.
+   This fail-closed rule holds in every code path, including older slot processes during blue/green overlap.
+2. `GET /media/{attId}/{rendition}` returns 404 for any attachment whose message is view-once.
+3. The attachment must be `ready` before sending (`POST /messages/view-once`, 422 `not_ready`), so
+   media processing never runs after send and cannot restore renditions.
+4. Its bytes leave the server once, through a claim-bound route (`POST /messages/{seq}/view-once/open`
+   then `GET /messages/{seq}/view-once/content`), and the message is then immediately erased through the
+   ordinary hard-delete path (Inv 46: `delete_message_for_scrub` + `_finish_committed_erasure`).
+5. A backstop janitor loop running at least every 30s erases any view-once message whose claim is older
+   than 600s, covering incomplete downloads.
+*Enforced by:* `wixy_server/tests/test_livechat_view_once.py` (schema migration v11, validation matrix,
+atomic single-winner claim race, streaming download, post-delivery erasure, broken download retry safety,
+backstop cleanup, and fail-closed linklessness), `admin-ui/tests/server/viewOnce.test.ts` (lifecycle triggers,
+resource release, `viewOnce` idle suspension, and spotlight math/clamping/easing), and `admin-ui/tests/serverThread.test.ts`
+(bubble cards, tap to view, non-closure on `message_deleted`, wipe, and detach).

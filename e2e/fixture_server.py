@@ -521,15 +521,29 @@ def main() -> None:
                 )
             finally:
                 conn.close()
-            message, _created = store.create_message(
-                client_id=f"seed-photo-{uuid.uuid4().hex}",
-                sender=sender,
-                device_id=f"seed-device-{uuid.uuid4().hex[:16]}",
-                by_email=None,
-                text=text,
-                attachment_ids=(attachment_id,),
-                now=now,
-            )
+            if "view_once_s" in payload:
+                vo_s = payload.get("view_once_s")
+                duration_s = int(vo_s) if vo_s is not None and int(vo_s) != 0 else None
+                message, _created = store.create_view_once_message(
+                    client_id=f"seed-viewonce-{uuid.uuid4().hex}",
+                    sender=sender,
+                    device_id=f"seed-device-{uuid.uuid4().hex[:16]}",
+                    by_email=str(payload.get("by_email")) if payload.get("by_email") else None,
+                    attachment_id=attachment_id,
+                    duration_s=duration_s,
+                    spotlight=bool(payload.get("spotlight", False)),
+                    now=now,
+                )
+            else:
+                message, _created = store.create_message(
+                    client_id=f"seed-photo-{uuid.uuid4().hex}",
+                    sender=sender,
+                    device_id=f"seed-device-{uuid.uuid4().hex[:16]}",
+                    by_email=None,
+                    text=text,
+                    attachment_ids=(attachment_id,),
+                    now=now,
+                )
             image = (E2E_DIR / "fixtures" / "tiny-second-image.jpg").read_bytes()
             media_dir = paths.server_attachment_media_dir(attachment_id)
             media_dir.mkdir(parents=True, exist_ok=True)

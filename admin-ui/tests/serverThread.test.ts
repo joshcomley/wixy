@@ -3104,5 +3104,150 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     expect(sent.replyToSeq).toBe(1);
     view.teardown();
   });
+
+  it("renders view-once recipient placeholder card with 'Tap to view' button carrying gesture boundary", async () => {
+    const voMsg = fakeMessage({
+      seq: 201,
+      sender: "Purdy",
+      text: null,
+      attachments: [{
+        id: "att-vo-1",
+        kind: "photo",
+        status: "ready",
+        width: 800,
+        height: 600,
+        durationS: null,
+        peaks: null,
+        urls: {},
+      }],
+      viewOnce: { durationS: 5, spotlight: true },
+    });
+    getHistory.mockResolvedValue(emptyHistory({ messages: [voMsg], cursor: 201 }));
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: window, onSettings: vi.fn() });
+    await view.attach(SESSION);
+
+    const card = view.element.querySelector(".wx-srv-view-once-recipient-card");
+    expect(card).toBeTruthy();
+    expect(card?.textContent).toContain("View once · 5 s");
+    expect(card?.textContent).toContain("Spotlight");
+
+    const tapBtn = card?.querySelector<HTMLButtonElement>(".wx-srv-view-once-tap-btn");
+    expect(tapBtn).toBeTruthy();
+    expect(tapBtn?.hasAttribute("data-srv-gesture-boundary")).toBe(true);
+    expect(tapBtn?.textContent).toContain("Tap to view");
+
+    view.teardown();
+  });
+
+  it("renders view-once sender placeholder card without 'Tap to view' button", async () => {
+    const voMsg = fakeMessage({
+      seq: 202,
+      sender: "Josh",
+      text: null,
+      attachments: [{
+        id: "att-vo-2",
+        kind: "photo",
+        status: "ready",
+        width: 800,
+        height: 600,
+        durationS: null,
+        peaks: null,
+        urls: {},
+      }],
+      viewOnce: { durationS: 30, spotlight: false },
+    });
+    getHistory.mockResolvedValue(emptyHistory({ messages: [voMsg], cursor: 202 }));
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: window, onSettings: vi.fn() });
+    await view.attach(SESSION);
+
+    const card = view.element.querySelector(".wx-srv-view-once-sender-card");
+    expect(card).toBeTruthy();
+    expect(card?.textContent).toContain("View-once photo · 30 s · Not opened yet");
+    const tapBtn = card?.querySelector(".wx-srv-view-once-tap-btn");
+    expect(tapBtn).toBeNull();
+
+    view.teardown();
+  });
+
+  it("tapping 'Tap to view' opens the viewer; message_deleted removes bubble but leaves viewer OPEN", async () => {
+    const voMsg = fakeMessage({
+      seq: 203,
+      sender: "Purdy",
+      text: null,
+      attachments: [{
+        id: "att-vo-3",
+        kind: "photo",
+        status: "ready",
+        width: 800,
+        height: 600,
+        durationS: null,
+        peaks: null,
+        urls: {},
+      }],
+      viewOnce: { durationS: 5, spotlight: false },
+    });
+    getHistory.mockResolvedValue(emptyHistory({ messages: [voMsg], cursor: 203 }));
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: window, onSettings: vi.fn() });
+    await view.attach(SESSION);
+
+    const tapBtn = view.element.querySelector<HTMLButtonElement>(".wx-srv-view-once-tap-btn");
+    expect(tapBtn).toBeTruthy();
+
+    tapBtn?.click();
+    await flush();
+
+    const overlay = document.body.querySelector(".wx-srv-view-once-overlay");
+    expect(overlay).toBeTruthy();
+
+    // Now emit message_deleted event for this message seq
+    view.handleStreamEvent({ type: "message_deleted", seq: 203 } as ServerStreamEvent);
+    await flush();
+
+    // The bubble in the message list must be removed
+    expect(view.element.querySelector(".wx-srv-view-once-recipient-card")).toBeNull();
+
+    // CRITICAL REQUIREMENT: The viewer MUST NOT close on message_deleted!
+    expect(document.body.querySelector(".wx-srv-view-once-overlay")).toBeTruthy();
+
+    // Calling detach (lock) closes the active viewer
+    view.detach();
+    expect(document.body.querySelector(".wx-srv-view-once-overlay")).toBeNull();
+
+    view.teardown();
+  });
+
+  it("chat wipe closes the active viewOnce viewer", async () => {
+    const voMsg = fakeMessage({
+      seq: 204,
+      sender: "Purdy",
+      text: null,
+      attachments: [{
+        id: "att-vo-4",
+        kind: "photo",
+        status: "ready",
+        width: 800,
+        height: 600,
+        durationS: null,
+        peaks: null,
+        urls: {},
+      }],
+      viewOnce: { durationS: 5, spotlight: false },
+    });
+    getHistory.mockResolvedValue(emptyHistory({ messages: [voMsg], cursor: 204 }));
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: window, onSettings: vi.fn() });
+    await view.attach(SESSION);
+
+    view.element.querySelector<HTMLButtonElement>(".wx-srv-view-once-tap-btn")?.click();
+    await flush();
+
+    expect(document.body.querySelector(".wx-srv-view-once-overlay")).toBeTruthy();
+
+    // Wipe chat event arrives
+    view.handleStreamEvent({ type: "wiped" } as ServerStreamEvent);
+    await flush();
+
+    expect(document.body.querySelector(".wx-srv-view-once-overlay")).toBeNull();
+    view.teardown();
+  });
 });
 

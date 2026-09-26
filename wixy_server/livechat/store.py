@@ -578,24 +578,25 @@ class LiveChatStore:
 
             if current < 11:
                 existing_msg_cols = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
-                col_defs = [
-                    ("view_once_s", _SCHEMA_V11_VIEW_ONCE_MESSAGES[0]),
-                    ("view_spotlight", _SCHEMA_V11_VIEW_ONCE_MESSAGES[1]),
-                    ("view_claim_id", _SCHEMA_V11_VIEW_ONCE_MESSAGES[2]),
-                    ("view_claimed_at", _SCHEMA_V11_VIEW_ONCE_MESSAGES[3]),
-                    ("view_claim_email", _SCHEMA_V11_VIEW_ONCE_MESSAGES[4]),
-                ]
-                for col_name, stmt in col_defs:
-                    if col_name not in existing_msg_cols:
-                        conn.execute(stmt)
-                for statement in _SCHEMA_V11_VIEW_ONCE_INDEX.split(";"):
-                    if statement.strip():
-                        conn.execute(statement)
+                if existing_msg_cols:
+                    col_defs = [
+                        ("view_once_s", _SCHEMA_V11_VIEW_ONCE_MESSAGES[0]),
+                        ("view_spotlight", _SCHEMA_V11_VIEW_ONCE_MESSAGES[1]),
+                        ("view_claim_id", _SCHEMA_V11_VIEW_ONCE_MESSAGES[2]),
+                        ("view_claimed_at", _SCHEMA_V11_VIEW_ONCE_MESSAGES[3]),
+                        ("view_claim_email", _SCHEMA_V11_VIEW_ONCE_MESSAGES[4]),
+                    ]
+                    for col_name, stmt in col_defs:
+                        if col_name not in existing_msg_cols:
+                            conn.execute(stmt)
+                    for statement in _SCHEMA_V11_VIEW_ONCE_INDEX.split(";"):
+                        if statement.strip():
+                            conn.execute(statement)
 
                 existing_att_cols = {
                     row[1] for row in conn.execute("PRAGMA table_info(attachments)")
                 }
-                if "view_once_renditions" not in existing_att_cols:
+                if existing_att_cols and "view_once_renditions" not in existing_att_cols:
                     conn.execute(_SCHEMA_V11_VIEW_ONCE_ATTACHMENTS)
                 conn.execute("PRAGMA user_version = 11")
                 current = 11

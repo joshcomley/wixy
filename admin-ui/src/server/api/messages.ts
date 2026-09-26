@@ -47,6 +47,7 @@ export interface ReplyToMedia {
   readonly count: number;
   readonly durationS: number | null;
   readonly thumbUrl: string | null;
+  readonly viewOnce?: boolean;
 }
 
 /** Round 2 ruling item 10 §(3): the `replyTo` member of the `Message` wire
@@ -61,6 +62,11 @@ export interface ReplyTo {
   readonly media: ReplyToMedia | null;
 }
 
+export interface ViewOnceInfo {
+  readonly durationS: 2 | 5 | 30 | null;
+  readonly spotlight: boolean;
+}
+
 export interface Message {
   readonly seq: number;
   readonly clientId: string;
@@ -70,6 +76,7 @@ export interface Message {
   readonly reactions: readonly Reaction[];
   readonly createdAt: number;
   readonly replyTo: ReplyTo | null;
+  readonly viewOnce?: ViewOnceInfo | null;
 }
 
 export interface HistoryPage {
@@ -330,3 +337,144 @@ export async function transcribeAttachment(
   }
   return { kind: "failed" };
 }
+
+export interface SendViewOnceInput {
+  readonly clientId: string;
+  readonly sender: string;
+  readonly deviceId: string;
+  readonly attachmentId: string;
+  readonly durationS: 2 | 5 | 30 | null;
+  readonly spotlight: boolean;
+  readonly replyToSeq?: number;
+}
+
+export type SendViewOnceResult =
+  | { readonly ok: true; readonly message: Message }
+  | { readonly ok: false; readonly kind: "not_ready" }
+  | { readonly ok: false; readonly kind: "unsupported" }
+  | { readonly ok: false; readonly kind: "invalid"; readonly detail: string }
+  | { readonly ok: false; readonly kind: "rejected"; readonly status: number }
+  | { readonly ok: false; readonly kind: "unavailable" };
+
+export async function sendViewOnceMessage(
+  session: ServerSession,
+  input: SendViewOnceInput,
+): Promise<SendViewOnceResult> {
+  let response: Response;
+  try {
+    response = await serverFetch(
+      "/messages/view-once",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      },
+      session,
+    );
+  } catch (error) {
+    if (error instanceof ServerLockedError) throw error;
+    return { ok: false, kind: "unavailable" };
+  }
+  if (response.status === 201 || response.status === 200) {
+    const body = (await response.json()) as { message: Message };
+    return { ok: true, message: body.message };
+  }
+  if (response.status === 404 || response.status === 405) {
+    return { ok: false, kind: "unsupported" };
+  }
+  if (response.status === 422) {
+    const body = (await response.json().catch(() => null)) as { error?: string; detail?: string } | null;
+    if (body?.error === "not_ready") {
+      return { ok: false, kind: "not_ready" };
+    }
+    return { ok: false, kind: "invalid", detail: body?.detail ?? "Couldn't send that message." };
+  }
+  if (isDefinitiveSendRejectionStatus(response.status)) {
+    return { ok: false, kind: "rejected", status: response.status };
+  }
+  return { ok: false, kind: "unavailable" };
+}
+
+export interface OpenViewOnceSuccess {
+  readonly durationS: 2 | 5 | 30 | null;
+  readonly spotlight: boolean;
+  readonly kind: "photo" | "video";
+  readonly mime: string;
+}
+
+export type OpenViewOnceResult =
+  | { readonly ok: true; readonly data: OpenViewOnceSuccess }
+  | { readonly ok: false; readonly kind: "not_found" }
+  | { readonly ok: false; readonly kind: "own_message" }
+  | { readonly ok: false; readonly kind: "already_opened" }
+  | { readonly ok: false; readonly kind: "unavailable" };
+
+export async function openViewOnceClaim(
+  session: ServerSession,
+  seq: number,
+  input: { claimId: string; sender: string },
+): Promise<OpenViewOnceResult> {
+  let response: Response;
+  try {
+    response = await serverFetch(
+      `/messages/${encodeURIComponent(String(seq))}/view-once/open`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      },
+      session,
+    );
+  } catch (error) {
+    if (error instanceof ServerLockedError) throw error;
+    return { ok: false, kind: "unavailable" };
+  }
+  if (response.status === 200) {
+    const data = (await response.json()) as OpenViewOnceSuccess;
+    return { ok: true, data };
+  }
+  if (response.status === 404) return { ok: false, kind: "not_found" };
+  if (response.status === 403) return { ok: false, kind: "own_message" };
+  if (response.status === 409) return { ok: false, kind: "already_opened" };
+  return { ok: false, kind: "unavailable" };
+}
+
+export type FetchViewOnceContentResult =
+  | { readonly ok: true; readonly blob: Blob }
+  | { readonly ok: false; readonly kind: "not_found" }
+  | { readonly ok: false; readonly kind: "forbidden" }
+  | { readonly ok: false; readonly kind: "expired" }
+  | { readonly ok: false; readonly kind: "unavailable" };
+
+export async function fetchViewOnceContent(
+  session: ServerSession,
+  seq: number,
+  claimId: string,
+  signal?: AbortSignal,
+): Promise<FetchViewOnceContentResult> {
+  let response: Response;
+  try {
+    response = await serverFetch(
+      `/messages/${encodeURIComponent(String(seq))}/view-once/content`,
+      {
+        method: "GET",
+        headers: { "X-Wixy-View-Claim": claimId },
+        ...(signal !== undefined ? { signal } : {}),
+      },
+      session,
+      120_000,
+    );
+  } catch (error) {
+    if (error instanceof ServerLockedError) throw error;
+    return { ok: false, kind: "unavailable" };
+  }
+  if (response.status === 200) {
+    const blob = await response.blob();
+    return { ok: true, blob };
+  }
+  if (response.status === 404) return { ok: false, kind: "not_found" };
+  if (response.status === 403) return { ok: false, kind: "forbidden" };
+  if (response.status === 410) return { ok: false, kind: "expired" };
+  return { ok: false, kind: "unavailable" };
+}
+
