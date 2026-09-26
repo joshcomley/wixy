@@ -234,7 +234,8 @@ lightbox, so there is nothing for a tease to hide. Hiding ordinary photos would 
 different feature.
 
 It is the **sender's** choice. The recipient cannot switch it off; they control only the
-cut-out's size and position.
+cut-out's size, speed and position. (Speed added 2026-09-26, operator-approved: viewer-side only,
+like the size. Nothing about it is stored or sent, so there is no schema or wire change.)
 - **Renderer:** one canvas with the image letterboxed to fit.
   - Over it goes an opaque black layer with a circular hole, whose outer 15 % of radius is
     feathered with a radial gradient.
@@ -252,8 +253,30 @@ cut-out's size and position.
 - **Slider:** `<input type="range">` below the image (aria-label "Tease size").
   - The radius runs from **6 % to 35 %** of the drawn image's shorter side, default 12 %.
   - The maximum can never uncover the whole picture; that is the point of a tease.
+- **Speed slider** (added 2026-09-26): a second `<input type="range">` under the size slider
+  (aria-label "Tease speed"), each on its own labelled row ("Size", "Speed") so both fit a 360 px
+  phone, with a fixed-width readout ("1×").
+  - A multiplier from **0.5× to 3×** in steps of 0.25, default **1×**, which is exactly the
+    16 s cycle above. It is the recipient's own control and is never sent or stored.
+  - **No jump when it moves.** The path is a function of an *animation clock*, not of wall time.
+    The clock advances each frame by `frame gap × speed` and is never rewritten, so changing the
+    speed only changes how fast it advances from then on. (`(wall time × speed) mod cycle` would
+    teleport the cut-out the instant the slider moves; the same trap the drag-resume easing avoids.)
+    At 1× the clock equals the wall time since the first painted frame, as before.
+  - Dragging still pauses the path and the resume eases from where the cut-out is; those timings
+    are real time and are not scaled by the speed.
+  - Under reduced motion there is no automatic movement, so the speed slider is not shown.
+- **Compose-time preview** (added 2026-09-26): in the sender's View-once sheet, ticking Tease
+  shows the sender's own staged photo with the real moving cut-out (default size and speed) under
+  the checkbox, captioned "This is how they will see it. They can change the size and speed."
+  - It is drawn by the same code as the recipient's viewer (`teasePaint.ts`), not a look-alike.
+  - It uses the staged file's existing preview URL (no second copy), stops when Tease is
+    unticked, the sheet closes, or the chat is torn down, and shows nothing if the photo cannot
+    be decoded. Under reduced motion it paints once, centred.
+  - It sits inside the sheet, which scrolls rather than letting a short phone push the top and
+    the close button off-screen.
 - **Reduced motion** (`prefers-reduced-motion`): no automatic movement. The cut-out starts
-  centred, and dragging and the slider still work.
+  centred, and dragging and the size slider still work.
 - The timer runs as for any view-once.
 
 ## 5. Taps and the double-tap lock (R3 v1.5.2 / v1.7)
@@ -299,14 +322,22 @@ cut-out's size and position.
 - every resource is released;
 - the `viewOnce` suspension is held only for timed views and released on close;
 - tease: the path is deterministic under fake time and clamped; reduced motion gives a
-  static cut-out; the slider's bounds; drag pauses and resumes without a jump.
+  static cut-out; the slider's bounds; drag pauses and resumes without a jump;
+- tease speed: the slider's bounds and readout, no jump when the speed changes (asserted against
+  exact expected positions, and shown to FAIL with the naive wall-time-times-speed clock), the
+  speed applying afterwards, and no speed slider under reduced motion;
+- tease preview: paints only after the photo loads, is the live effect (moves between frames),
+  paints once under reduced motion, and stops on destroy or when its element is removed.
 
 **e2e** (two identities, desktop and mobile viewports):
 - send a 2 s view-once photo; the recipient opens it, sees the canvas, and it closes by
   itself; the message vanishes on both sides;
 - the sender has no "Tap to view";
 - a second tab of the recipient gets "Already opened";
-- a tease photo renders its cut-out, and the slider changes it.
+- a tease photo renders its cut-out, and the slider changes it; the Speed slider sits under Size,
+  both inside a 375 px phone;
+- ticking Tease in the sender's sheet shows a moving, non-blank preview inside the viewport at
+  desktop, 360 px and 390 px, unticking removes it, and the Tease still reaches the recipient.
 
 ## 8. Process
 - **Opus audit required before merge,** with this file as the acceptance criteria. It adds a

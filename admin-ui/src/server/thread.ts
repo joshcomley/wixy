@@ -31,6 +31,7 @@ import {
   type ReplyTo,
   type TranscribeAnswer,
 } from "./api/messages";
+import { mountTeasePreview, type TeasePreviewHandle } from "./teasePreview";
 import { mountViewOnceViewer, type ViewOnceViewerHandle } from "./viewOnceViewer";
 import { uploadServerAttachment } from "./api/uploads";
 import type { ServerIdentity } from "./identity";
@@ -309,6 +310,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   let viewOnceEnabledFile: File | null = null;
   let viewOnceTargetFile: File | null = null;
   let viewOncePickerEl: HTMLElement | null = null;
+  /** The sheet's live Tease preview while Tease is ticked (one at most; the sheet is modal). */
+  let teasePreviewHandle: TeasePreviewHandle | null = null;
   /** Populated by `renderChipPreview` on every chip render; read back to show "the one file it
    * targets" (condition #1) in the sheet without minting a second object URL per file. */
   const filePreviewUrls = new WeakMap<File, string>();
@@ -347,6 +350,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   }
 
   function closeViewOncePicker(): void {
+    teasePreviewHandle?.destroy();
+    teasePreviewHandle = null;
     viewOncePickerEl?.remove();
     viewOncePickerEl = null;
   }
@@ -497,12 +502,28 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       const checkbox = documentRef.createElement("input");
       checkbox.type = "checkbox";
       checkbox.checked = settings.tease;
+      teaseLabel.append(checkbox, documentRef.createTextNode("Tease"));
+      sheet.appendChild(teaseLabel);
+
+      // The sender sees the real moving cut-out on their own photo while Tease is ticked, so it
+      // is not a surprise. The preview draws with the recipient viewer's own renderer.
+      const previewSlot = documentRef.createElement("div");
+      previewSlot.className = "wx-srv-tease-preview-slot";
+      sheet.appendChild(previewSlot);
+      const syncTeasePreview = (): void => {
+        teasePreviewHandle?.destroy();
+        teasePreviewHandle = null;
+        if (checkbox.checked && previewUrl !== undefined) {
+          teasePreviewHandle = mountTeasePreview({ doc: documentRef, win, imageUrl: previewUrl });
+          previewSlot.appendChild(teasePreviewHandle.element);
+        }
+      };
       checkbox.addEventListener("change", () => {
         settings!.tease = checkbox.checked;
         fileViewOnceSettings.set(file, settings!);
+        syncTeasePreview();
       });
-      teaseLabel.append(checkbox, documentRef.createTextNode("Tease"));
-      sheet.appendChild(teaseLabel);
+      syncTeasePreview();
     }
 
     // Condition #4: "the sheet offers 'Send normally' to clear the choice" — only shown once
