@@ -89,6 +89,7 @@
 }
 
 .wx-srv-record-button,
+.wx-srv-record-pause,
 .wx-srv-record-cancel {
   flex: none;
   min-height: var(--wx-srv-control-h);
@@ -107,10 +108,27 @@
   align-items: center;
   justify-content: center;
   padding: 0;
-  font-size: 1rem;
 }
 
-.wx-srv-record-button:disabled {
+.wx-srv-record-pause {
+  box-sizing: border-box;
+  width: var(--wx-srv-control-h);
+  height: var(--wx-srv-control-h);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.wx-srv-record-button svg,
+.wx-srv-record-pause svg {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+
+.wx-srv-record-button:disabled,
+.wx-srv-record-pause:disabled {
   opacity: 0.6;
   cursor: default;
 }
@@ -118,21 +136,6 @@
 .wx-srv-record-cancel {
   padding: 6px 10px;
   font: 0.75rem/1 system-ui, sans-serif;
-}
-
-.wx-srv-record-pause {
-  flex: none;
-  min-height: var(--wx-srv-control-h);
-  padding: 6px 12px;
-  border: 1px solid var(--wx-border);
-  border-radius: var(--wx-radius);
-  background: var(--wx-surface);
-  color: var(--wx-ink);
-  font: 0.75rem/1 system-ui, sans-serif;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .wx-srv-record-pause[hidden] {

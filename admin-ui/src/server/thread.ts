@@ -279,10 +279,19 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     | null = null;
   let voiceSendBusy = false;
 
+  const MIC_LINE_ICON =
+    '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
+  const STOP_LINE_ICON =
+    '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2" ry="2"/></svg>';
+  const PAUSE_LINE_ICON =
+    '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>';
+  const RESUME_LINE_ICON =
+    '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
+
   const recordButton = documentRef.createElement("button");
   recordButton.type = "button";
   recordButton.className = "wx-srv-record-button";
-  recordButton.textContent = "🎤";
+  recordButton.innerHTML = MIC_LINE_ICON;
   recordButton.title = "Record a voice note";
   recordButton.setAttribute("aria-label", "Record a voice note");
   const cancelRecordingButton = documentRef.createElement("button");
@@ -293,7 +302,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   const pauseRecordingButton = documentRef.createElement("button");
   pauseRecordingButton.type = "button";
   pauseRecordingButton.className = "wx-srv-record-pause";
-  pauseRecordingButton.textContent = "Pause";
+  pauseRecordingButton.innerHTML = PAUSE_LINE_ICON;
   pauseRecordingButton.title = "Pause recording";
   pauseRecordingButton.setAttribute("aria-label", "Pause recording");
   pauseRecordingButton.hidden = true;
@@ -627,42 +636,44 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     composer?.element?.classList.toggle("wx-srv-recording-row", isRecordingOrPaused);
 
     if (state === "recording") {
-      recordButton.textContent = "■";
+      recordButton.innerHTML = STOP_LINE_ICON;
       recordButton.title = "Stop recording";
       recordButton.setAttribute("aria-label", "Stop recording");
       recordingStatus.hidden = false;
       recordingStatus.textContent = `Recording ${formatRecordingTime(elapsedMs)}`;
       pauseRecordingButton.hidden = !(voiceRecorder?.supportsPause ?? true);
-      pauseRecordingButton.textContent = "Pause";
+      pauseRecordingButton.innerHTML = PAUSE_LINE_ICON;
       pauseRecordingButton.title = "Pause recording";
       pauseRecordingButton.setAttribute("aria-label", "Pause recording");
     } else if (state === "paused") {
-      recordButton.textContent = "■";
+      recordButton.innerHTML = STOP_LINE_ICON;
       recordButton.title = "Stop recording";
       recordButton.setAttribute("aria-label", "Stop recording");
       recordingStatus.hidden = false;
       recordingStatus.textContent = `Paused ${formatRecordingTime(elapsedMs)}`;
       pauseRecordingButton.hidden = !(voiceRecorder?.supportsPause ?? true);
-      pauseRecordingButton.textContent = "Resume";
+      pauseRecordingButton.innerHTML = RESUME_LINE_ICON;
       pauseRecordingButton.title = "Resume recording";
       pauseRecordingButton.setAttribute("aria-label", "Resume recording");
     } else if (state === "starting") {
-      recordButton.textContent = "🎤";
+      recordButton.innerHTML = MIC_LINE_ICON;
       recordButton.title = "Waiting for microphone";
       recordButton.setAttribute("aria-label", "Waiting for microphone");
       recordingStatus.hidden = false;
       recordingStatus.textContent = "Waiting for microphone…";
       pauseRecordingButton.hidden = true;
     } else if (state === "stopping") {
+      recordButton.innerHTML = MIC_LINE_ICON;
       recordingStatus.hidden = false;
       recordingStatus.textContent = "Saving voice note…";
       pauseRecordingButton.hidden = true;
     } else if (voiceSendBusy) {
+      recordButton.innerHTML = MIC_LINE_ICON;
       recordingStatus.hidden = false;
       recordingStatus.textContent = "Sending voice note…";
       pauseRecordingButton.hidden = true;
     } else {
-      recordButton.textContent = "🎤";
+      recordButton.innerHTML = MIC_LINE_ICON;
       recordButton.title = "Record a voice note";
       recordButton.setAttribute("aria-label", "Record a voice note");
       recordingStatus.hidden = true;

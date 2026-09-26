@@ -867,7 +867,8 @@ describe("mountServerThread", () => {
       expect(attachButton.hidden).toBe(true);
       expect(cancelButton.hidden).toBe(false);
       expect(pauseButton.hidden).toBe(false);
-      expect(pauseButton.textContent).toBe("Pause");
+      expect(pauseButton.querySelector("svg")).not.toBeNull();
+      expect(recordButton.querySelector("svg")).not.toBeNull();
       expect(pauseButton.getAttribute("aria-label")).toBe("Pause recording");
       expect(status.textContent).toContain("Recording");
       expect(inputRow.classList.contains("wx-srv-recording-row")).toBe(true);
@@ -878,7 +879,7 @@ describe("mountServerThread", () => {
       expect(textarea.hidden).toBe(true);
       expect(sendButton.hidden).toBe(true);
       expect(pauseButton.hidden).toBe(false);
-      expect(pauseButton.textContent).toBe("Resume");
+      expect(pauseButton.querySelector("svg")).not.toBeNull();
       expect(pauseButton.getAttribute("aria-label")).toBe("Resume recording");
       expect(status.textContent).toContain("Paused");
       expect(inputRow.classList.contains("wx-srv-recording-row")).toBe(true);
@@ -886,7 +887,7 @@ describe("mountServerThread", () => {
       pauseButton.click();
       await flush();
 
-      expect(pauseButton.textContent).toBe("Pause");
+      expect(pauseButton.getAttribute("aria-label")).toBe("Pause recording");
       expect(status.textContent).toContain("Recording");
 
       recordButton.click();
@@ -927,6 +928,28 @@ describe("mountServerThread", () => {
       expect(sendButton.hidden).toBe(false);
       expect(pauseButton.hidden).toBe(true);
       expect(inputRow.classList.contains("wx-srv-recording-row")).toBe(false);
+      view.teardown();
+    });
+
+    it("uses a line SVG icon for the microphone button across all states", async () => {
+      getHistory.mockResolvedValue(emptyHistory());
+      const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+
+      const recordButton = view.element.querySelector<HTMLButtonElement>(".wx-srv-record-button")!;
+      expect(recordButton.textContent).not.toContain("🎤");
+      expect(recordButton.querySelector("svg")).not.toBeNull();
+      expect(recordButton.querySelector("path")).not.toBeNull();
+
+      recordButton.click();
+      await flush();
+      expect(recordButton.querySelector("svg")).not.toBeNull();
+      expect(recordButton.querySelector("rect")).not.toBeNull();
+
+      recordButton.click();
+      await flush();
+      await flush();
+      expect(recordButton.querySelector("path")).not.toBeNull();
       view.teardown();
     });
   });
