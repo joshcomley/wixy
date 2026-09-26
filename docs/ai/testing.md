@@ -31,6 +31,16 @@ E2E (`e2e/`, Playwright, headless, against a local full stack):
 npm ci && npx playwright install --with-deps chromium && npx playwright test
 ```
 
+Each Playwright worker boots its **own** isolated fixture server (`e2e/fixtures.ts`, a
+worker-scoped fixture: free port, private temp git origin and storage, ~5–9 s cold start) and
+supplies `baseURL`, so the suite runs on several workers instead of one shared server. Specs import
+`test`/`expect` from `../fixtures`, never straight from `@playwright/test` (types still come from
+there). Whole spec files go to whichever worker is free; tests within a file stay serial.
+`WIXY_E2E_WORKERS` sets the cap (default 3/4 of the cores, at most 4: 3 on a 4-vCPU CI runner,
+never "auto"; `1` reproduces the old fully serial run for debugging) and `WIXY_E2E_PYTHON` names the interpreter for `fixture_server.py` (default
+`python3`; on Windows use the real interpreter, bare `python` is the Store stub). Do not add a
+shared `webServer` or a fixed port back: that is what forced `workers: 1`.
+
 The one `@pytest.mark.live_cmd` test (a real cmd round-trip) is excluded by default; run it
 during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/`.
 

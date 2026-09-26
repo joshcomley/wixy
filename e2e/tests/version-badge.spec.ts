@@ -3,7 +3,7 @@
 // the themed confirm that gates the reload (never automatic, never a changelog
 // — this surface is the site owner's).
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "../fixtures";
 import { trackConsoleErrors } from "./helpers";
 
 test.describe("version badge (decisions/00109)", () => {

@@ -6,7 +6,8 @@
 // still arrives when the drawer is closed mid-publish (the shell's watch, not
 // the drawer, owns completion).
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "../fixtures";
+import type { Page } from "@playwright/test";
 import { editTextField, gotoEditAndWaitReady, trackConsoleErrors, waitForNextDraftPatchAccepted } from "./helpers";
 
 /** Stages one text edit and lets the shell's post-accept background state

@@ -7,7 +7,7 @@
 // before the server starts (`fixture_server.py`'s `_publish_initial_build`), so this
 // flow's own two publishes land at whatever versions actually follow that.
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "../fixtures";
 import {
   editTextField,
   gotoEditAndWaitReady,

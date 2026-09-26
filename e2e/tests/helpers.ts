@@ -3,7 +3,7 @@
 // and wait for it to actually be ready" logic (previously duplicated in
 // concurrent-editing.spec.ts alone).
 
-import type { Page } from "@playwright/test";
+import type { Page, Response } from "@playwright/test";
 
 export async function gotoEditAndWaitReady(page: Page, slug: string): Promise<void> {
   const contentFetch = page.waitForResponse(
@@ -69,18 +69,28 @@ export function trackConsoleErrors(page: Page): string[] {
  * observe the first PATCH attempt landing a 409 before the queue's own retry
  * lands the real 200. Skip those transparently rather than failing on them —
  * this is expected queue behavior, not a bug the test should catch. */
-export async function waitForNextDraftPatchAccepted(page: Page): Promise<number> {
-  for (;;) {
-    const res = await page.waitForResponse(
-      (r) => r.url().endsWith("/api/admin/draft") && r.request().method() === "PATCH",
-    );
-    if (res.status() === 409) continue;
-    if (res.status() !== 200) {
-      throw new Error(`expected PATCH /api/admin/draft to 200, got ${res.status()}`);
-    }
-    const body = (await res.json()) as { rev: number };
-    return body.rev;
-  }
+export function waitForNextDraftPatchAccepted(page: Page): Promise<number> {
+  // ONE listener for the whole wait. Looping on `page.waitForResponse` re-registered a fresh
+  // listener only AFTER each 409 arrived, and the queue's immediate replay can land its 200 in
+  // that gap: the 200 was then never seen and the wait hung until the test timeout (measured on
+  // a loaded 4-worker run). The listener is attached synchronously, so a caller that creates the
+  // promise before clicking still cannot miss the response.
+  return new Promise<number>((resolve, reject) => {
+    const onResponse = (res: Response): void => {
+      if (!res.url().endsWith("/api/admin/draft") || res.request().method() !== "PATCH") return;
+      if (res.status() === 409) return;
+      page.off("response", onResponse);
+      if (res.status() !== 200) {
+        reject(new Error(`expected PATCH /api/admin/draft to 200, got ${res.status()}`));
+        return;
+      }
+      res.json().then(
+        (body: { rev: number }) => resolve(body.rev),
+        (error: unknown) => reject(error),
+      );
+    };
+    page.on("response", onResponse);
+  });
 }
 
 const PUBLISH_CONFLICT_RETRY_LIMIT = 5;

@@ -1,40 +1,26 @@
 import { defineConfig } from "@playwright/test";
+import { availableParallelism } from "node:os";
 
-// 8799 by default; override with WIXY_E2E_PORT when another session on the
-// same box is running this suite at the same time (two runs collide on the
-// one fixed port — found live 2026-08-02). fixture_server.py reads the same
-// variable, so the spawned server and the tests always agree.
-const PORT = Number(process.env.WIXY_E2E_PORT ?? "8799");
-
-// The interpreter to launch fixture_server.py with. Defaults to "python3" (correct
-// on CI's ubuntu-latest runner after actions/setup-python — verified there is no
-// bare "python"/"python3" alias trap on Linux the way Windows's Microsoft Store stub
-// is). Override locally via WIXY_E2E_PYTHON when the right interpreter isn't on
-// PATH under that name (this repo's own convention: pythoncore-3.14, a specific
-// non-PATH install location — see the project CLAUDE.md).
-const PYTHON = process.env.WIXY_E2E_PYTHON ?? "python3";
+// Each worker boots its OWN isolated fixture server (fixtures.ts) on a free port and gives the
+// specs their `baseURL`, so there is no shared port, server or draft overlay to collide on and
+// two sessions on one box can run the suite side by side. Set WIXY_E2E_PYTHON to the
+// interpreter to launch fixture_server.py with (default "python3", right on CI's ubuntu-latest;
+// locally this repo's convention is a specific pythoncore-3.14 install, see the project
+// CLAUDE.md).
+//
+// Workers are capped, never "auto": each one is a Chromium plus a Python server (plus ffmpeg and
+// image work in some specs), so they must leave real headroom. Default = 3/4 of the cores,
+// capped at 4: 3 on a 4-vCPU CI runner, 4 on a big box. At 4 workers on 4 vCPUs the server-side
+// photo bake behind section-panel's "align a photo pair" save ran past its 5 s wait (measured on
+// CI). WIXY_E2E_WORKERS overrides; `1` reproduces the old fully serial run for debugging.
+const DEFAULT_WORKERS = Math.min(4, Math.max(1, Math.floor(availableParallelism() * 0.75)));
+const WORKERS = Number(process.env["WIXY_E2E_WORKERS"] ?? DEFAULT_WORKERS);
 
 export default defineConfig({
   testDir: "./tests",
-  // One shared fixture server + ONE draft overlay for every spec file — `fullyParallel:
-  // false` alone only serializes tests WITHIN a single file; different .spec.ts files
-  // still land on separate workers by default and race each other's PATCH /api/admin/
-  // draft calls against the same overlay rev (a real 409 found the moment a SECOND spec
-  // file existed alongside concurrent-editing.spec.ts — invisible before that with only
-  // one file to run). `workers: 1` is what actually guarantees global seriality; revisit
-  // if the suite ever grows enough to need per-file isolated fixture servers instead.
+  // Tests WITHIN a spec file stay serial (they share that file's server state and several depend
+  // on each other's ordering); whole files are what get handed to a free worker.
   fullyParallel: false,
-  workers: 1,
+  workers: WORKERS,
   reporter: "list",
-  use: {
-    baseURL: `http://127.0.0.1:${PORT}`,
-  },
-  webServer: {
-    command: `${PYTHON} fixture_server.py`,
-    url: `http://127.0.0.1:${PORT}/healthz`,
-    reuseExistingServer: false,
-    // The fixture builds and publishes its temporary site before binding the
-    // health endpoint; a local cold start can exceed 30s on this Windows host.
-    timeout: 60_000,
-  },
 });

@@ -6,7 +6,8 @@
 // then lossless, and reopening the same binding offers Restore / Discard.
 // Both flows are side-effect-free (cancel/discard leave no draft and no op).
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "../fixtures";
+import type { Page } from "@playwright/test";
 import { gotoEditAndWaitReady, trackConsoleErrors } from "./helpers";
 
 const FRAME = ".wx-preview-iframe";

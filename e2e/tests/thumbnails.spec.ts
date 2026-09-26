@@ -1,6 +1,6 @@
 // E2E: page thumbnails (decisions/00078) — the Pages panel backfills missing
 // thumbnails client-side (404 → placeholder → capture → PUT → real img).
-import { expect, test } from "@playwright/test";
+import { expect, test } from "../fixtures";
 import { trackConsoleErrors } from "./helpers";
 
 test.describe("page thumbnails", () => {

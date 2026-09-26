@@ -21,7 +21,8 @@
 // needs a real reset (`POST /test/server/reset-pin-lockout`), not just
 // fast-forwarding the page.
 
-import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
+import { expect, test } from "../fixtures";
+import type { Browser, Locator, Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
 
 // Matches e2e/fixture_server.py's TEST_SERVER_PIN / TEST_SERVER_PIN_APP_KEY.

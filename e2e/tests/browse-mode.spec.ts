@@ -8,7 +8,7 @@
 // isolation (unit-covered in editor/tests/overlay.test.ts and
 // admin-ui/tests/editView.test.ts already).
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "../fixtures";
 import { gotoEditAndWaitReady, trackConsoleErrors, waitForNextDraftPatchAccepted } from "./helpers";
 
 test.describe("browse mode (decisions/00091)", () => {

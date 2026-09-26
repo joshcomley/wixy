@@ -5,7 +5,8 @@
 // Real focus only - jsdom does not blur an element when it is disabled, so a unit test cannot
 // reproduce the bug; `toBeFocused()` reads the real `document.activeElement`.
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "../fixtures";
+import type { Page } from "@playwright/test";
 
 const VIEWPORTS = [
   { label: "desktop", width: 1280, height: 900 },

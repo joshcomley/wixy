@@ -11,7 +11,7 @@
 // because no other spec file touches chat/cmd — see fixture_server.py's own
 // note).
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "../fixtures";
 import { trackConsoleErrors } from "./helpers";
 
 interface FakeMessage {

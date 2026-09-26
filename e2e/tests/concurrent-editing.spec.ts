@@ -4,7 +4,7 @@
 // decision 4) — E2E 1 and 4 need a real publish step to fully pass and aren't built
 // as Playwright tests yet.
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "../fixtures";
 import { editTextField, gotoEditAndWaitReady, trackConsoleErrors } from "./helpers";
 
 test.describe("E2E 8: concurrent editing sanity", () => {

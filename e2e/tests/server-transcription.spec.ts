@@ -1,4 +1,5 @@
-import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { expect, test } from "../fixtures";
+import type { Browser, BrowserContext, Page } from "@playwright/test";
 
 // spec/server-chat/05-voice-transcription.md: opt-in voice-note transcription, against the
 // fixture's fake cmd (which implements cmd's private mode + capability probe). Every gesture

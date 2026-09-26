@@ -9,7 +9,7 @@
 // CA-specific name rather than inventing CA-shaped fixture data this generic suite
 // was never meant to carry.
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "../fixtures";
 import {
   gotoEditAndWaitReady,
   publishAndWait,
