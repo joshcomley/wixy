@@ -13,6 +13,23 @@ import {
 import { ServerLockedError } from "./api/http";
 import type { ServerIdentity } from "./identity";
 import type { LockHooks, ServerSession } from "./types";
+import {
+  TEASE_DRAG_RESUME_DELAY_MS,
+  TEASE_EASE_DURATION_MS,
+  TEASE_SIZE_DEFAULT,
+  TEASE_SIZE_MAX,
+  TEASE_SIZE_MIN,
+  TEASE_SPEED_DEFAULT,
+  TEASE_SPEED_MAX,
+  TEASE_SPEED_MIN,
+  TEASE_SPEED_STEP,
+  advanceTeasePhase,
+  computeTeaseCoords,
+  computeTeaseRadius,
+  paintPhoto,
+  paintTeaseMask,
+  teaseGeometry,
+} from "./teasePaint";
 
 export interface ViewOnceViewerDeps {
   readonly session: () => ServerSession | null;
@@ -50,95 +67,19 @@ export function generateClaimId(win: Window): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export const TEASE_CYCLE_MS = 16_000;
-export const TEASE_DRAG_RESUME_DELAY_MS = 1_500;
-export const TEASE_EASE_DURATION_MS = 600;
 export const RING_RADIUS = 15;
 export const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
-export function computeTeaseRadius(sliderValue: number, minSide: number): number {
-  return (sliderValue / 100) * minSide;
-}
-
-export interface TeaseCoordsParams {
-  cx: number;
-  cy: number;
-  Ax: number;
-  Ay: number;
-  drawX: number;
-  drawY: number;
-  drawW: number;
-  drawH: number;
-  radius: number;
-  elapsedMs: number;
-  prefersReducedMotion: boolean;
-  isDragging: boolean;
-  dragX?: number;
-  dragY?: number;
-  dragReleaseTime?: number;
-  dragReleaseX?: number | undefined;
-  dragReleaseY?: number | undefined;
-  now?: number;
-}
-
-export function computeTeaseCoords(params: TeaseCoordsParams): { x: number; y: number } {
-  const {
-    cx,
-    cy,
-    Ax,
-    Ay,
-    drawX,
-    drawY,
-    drawW,
-    drawH,
-    radius,
-    elapsedMs,
-    prefersReducedMotion,
-    isDragging,
-    dragX = cx,
-    dragY = cy,
-    dragReleaseTime = 0,
-    dragReleaseX = cx,
-    dragReleaseY = cy,
-    now = 0,
-  } = params;
-
-  if (prefersReducedMotion) {
-    if (isDragging) {
-      const spotX = Math.max(drawX + radius, Math.min(drawX + drawW - radius, dragX));
-      const spotY = Math.max(drawY + radius, Math.min(drawY + drawH - radius, dragY));
-      return { x: spotX, y: spotY };
-    }
-    const spotX = Math.max(drawX + radius, Math.min(drawX + drawW - radius, dragReleaseX));
-    const spotY = Math.max(drawY + radius, Math.min(drawY + drawH - radius, dragReleaseY));
-    return { x: spotX, y: spotY };
-  }
-
-  const theta = (2 * Math.PI * (elapsedMs % TEASE_CYCLE_MS)) / TEASE_CYCLE_MS;
-  const autoX = cx + Ax * Math.sin(3 * theta + Math.PI / 2);
-  const autoY = cy + Ay * Math.sin(2 * theta);
-
-  if (isDragging) {
-    const spotX = Math.max(drawX + radius, Math.min(drawX + drawW - radius, dragX));
-    const spotY = Math.max(drawY + radius, Math.min(drawY + drawH - radius, dragY));
-    return { x: spotX, y: spotY };
-  }
-
-  if (dragReleaseTime > 0) {
-    const timeSinceRelease = now - dragReleaseTime;
-    if (timeSinceRelease < TEASE_DRAG_RESUME_DELAY_MS) {
-      return { x: dragReleaseX, y: dragReleaseY };
-    }
-    const easeElapsed = timeSinceRelease - TEASE_DRAG_RESUME_DELAY_MS;
-    const progress = Math.min(1, easeElapsed / TEASE_EASE_DURATION_MS);
-    const ease = 0.5 - 0.5 * Math.cos(Math.PI * progress);
-    const spotX = (1 - ease) * dragReleaseX + ease * autoX;
-    const spotY = (1 - ease) * dragReleaseY + ease * autoY;
-    return { x: spotX, y: spotY };
-  }
-
-  return { x: autoX, y: autoY };
-}
+// The Tease maths and painting live in teasePaint.ts (shared with the sender's compose-time
+// preview); re-exported so existing importers keep working.
+export {
+  TEASE_CYCLE_MS,
+  TEASE_DRAG_RESUME_DELAY_MS,
+  TEASE_EASE_DURATION_MS,
+  computeTeaseCoords,
+  computeTeaseRadius,
+  type TeaseCoordsParams,
+} from "./teasePaint";
 
 export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHandle {
   const win = deps.win;
@@ -512,27 +453,81 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
     }
     activeBitmap = bitmap;
 
-    let sliderValue = 12; // 6 to 35, default 12%
-    if (isTease) {
-      controlsEl.hidden = false;
-      const slider = doc.createElement("input");
-      slider.type = "range";
-      slider.className = "wx-srv-view-once-slider";
-      slider.min = "6";
-      slider.max = "35";
-      slider.value = "12";
-      slider.step = "1";
-      slider.setAttribute("aria-label", "Tease size");
-      slider.addEventListener("input", () => {
-        sliderValue = Number(slider.value);
-        renderFrame();
-      });
-      controlsEl.appendChild(slider);
-    }
-
     const prefersReducedMotion =
       typeof win.matchMedia === "function" &&
       win.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    let sliderValue = TEASE_SIZE_DEFAULT; // 6 to 35, default 12%
+    // The animation clock and the recipient's speed multiplier (advanceTeasePhase, teasePaint.ts):
+    // the cut-out's position follows this clock, so a speed change never makes it jump.
+    let teaseSpeed = TEASE_SPEED_DEFAULT;
+    let teasePhaseMs = 0;
+    let lastFrameAt: number | null = null;
+    if (isTease) {
+      controlsEl.hidden = false;
+      const panel = doc.createElement("div");
+      panel.className = "wx-srv-view-once-tease-controls";
+      const addRow = (label: string, input: HTMLInputElement, readout?: HTMLElement): void => {
+        const row = doc.createElement("label");
+        row.className = "wx-srv-view-once-control";
+        const name = doc.createElement("span");
+        name.className = "wx-srv-view-once-control-name";
+        name.textContent = label;
+        row.append(name, input);
+        if (readout !== undefined) row.appendChild(readout);
+        panel.appendChild(row);
+      };
+
+      const slider = doc.createElement("input");
+      slider.type = "range";
+      slider.className = "wx-srv-view-once-slider";
+      slider.min = String(TEASE_SIZE_MIN);
+      slider.max = String(TEASE_SIZE_MAX);
+      slider.value = String(TEASE_SIZE_DEFAULT);
+      slider.step = "1";
+      slider.setAttribute("aria-label", "Tease size");
+      // A readout on each row keeps the two sliders the same length.
+      const sizeReadout = doc.createElement("span");
+      sizeReadout.className = "wx-srv-view-once-control-value wx-srv-view-once-size-value";
+      const showSize = (): void => {
+        sizeReadout.textContent = `${sliderValue}%`;
+      };
+      slider.addEventListener("input", () => {
+        sliderValue = Number(slider.value);
+        showSize();
+        renderFrame();
+      });
+      showSize();
+      addRow("Size", slider, sizeReadout);
+
+      // With reduced motion the cut-out is still (only the drag moves it), so there is no
+      // speed to control and the slider is left out rather than shown doing nothing.
+      if (!prefersReducedMotion) {
+        const speedSlider = doc.createElement("input");
+        speedSlider.type = "range";
+        speedSlider.className = "wx-srv-view-once-speed-slider";
+        speedSlider.min = String(TEASE_SPEED_MIN);
+        speedSlider.max = String(TEASE_SPEED_MAX);
+        speedSlider.step = String(TEASE_SPEED_STEP);
+        speedSlider.value = String(TEASE_SPEED_DEFAULT);
+        speedSlider.setAttribute("aria-label", "Tease speed");
+        const speedReadout = doc.createElement("span");
+        speedReadout.className = "wx-srv-view-once-control-value wx-srv-view-once-speed-value";
+        const showSpeed = (): void => {
+          speedReadout.textContent = `${teaseSpeed}×`;
+        };
+        speedSlider.addEventListener("input", () => {
+          const v = Number(speedSlider.value);
+          if (Number.isFinite(v)) {
+            teaseSpeed = Math.min(TEASE_SPEED_MAX, Math.max(TEASE_SPEED_MIN, v));
+          }
+          showSpeed();
+        });
+        showSpeed();
+        addRow("Speed", speedSlider, speedReadout);
+      }
+      controlsEl.appendChild(panel);
+    }
 
     let isDragging = false;
     let dragX = 0;
@@ -608,28 +603,11 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
         canvas.height = height;
       }
 
-      // Compute letterbox geometry
-      const imgW = activeBitmap.width;
-      const imgH = activeBitmap.height;
-      const scale = Math.min(width / imgW, height / imgH);
-      const drawW = imgW * scale;
-      const drawH = imgH * scale;
-      const drawX = (width - drawW) / 2;
-      const drawY = (height - drawH) / 2;
-      const cx = drawX + drawW / 2;
-      const cy = drawY + drawH / 2;
-      const minSide = Math.min(drawW, drawH);
-
-      // Clear & black background
-      ctx.fillStyle = "#000000";
-      ctx.fillRect(0, 0, width, height);
-
-      // Draw photo
-      try {
-        ctx.drawImage(activeBitmap, drawX, drawY, drawW, drawH);
-      } catch {
-        // Fallback for jsdom without canvas implementation
-      }
+      // Letterbox geometry, black background, then the photo (teasePaint.ts, shared with the
+      // sender's compose-time preview).
+      const geo = teaseGeometry(width, height, activeBitmap.width, activeBitmap.height);
+      const { drawX, drawY, drawW, drawH, cx, cy, minSide } = geo;
+      paintPhoto(ctx, activeBitmap, geo);
 
       if (isTease) {
         const radius = computeTeaseRadius(sliderValue, minSide);
@@ -637,7 +615,10 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
         const Ay = Math.max(0, drawH / 2 - radius);
 
         const now = (win.performance?.now?.() ?? Date.now());
-        const elapsed = now - paintedAt;
+        // The clock starts at first paint and only ever advances by (frame gap x speed), so at
+        // speed 1 it equals the wall time since first paint and a speed change never jumps.
+        teasePhaseMs = advanceTeasePhase(teasePhaseMs, now - (lastFrameAt ?? paintedAt), teaseSpeed);
+        lastFrameAt = now;
 
         const coords = computeTeaseCoords({
           cx,
@@ -649,7 +630,7 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
           drawW,
           drawH,
           radius,
-          elapsedMs: elapsed,
+          elapsedMs: teasePhaseMs,
           prefersReducedMotion,
           isDragging,
           dragX,
@@ -673,39 +654,8 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
         const spotX = coords.x;
         const spotY = coords.y;
 
-        // Apply tease mask:
-        // Opaque black layer with circular hole; outer 15% feathered with radial gradient.
-        try {
-          ctx.save();
-          // Draw mask: everything outside the hole is solid black
-          ctx.beginPath();
-          ctx.rect(0, 0, width, height);
-          ctx.arc(spotX, spotY, radius, 0, Math.PI * 2, true);
-          ctx.closePath();
-          ctx.fillStyle = "#000000";
-          ctx.fill();
-
-          // Feathered outer 15%
-          if (typeof ctx.createRadialGradient === "function") {
-            const grad = ctx.createRadialGradient(
-              spotX,
-              spotY,
-              radius * 0.85,
-              spotX,
-              spotY,
-              radius,
-            );
-            grad.addColorStop(0, "rgba(0,0,0,0)");
-            grad.addColorStop(1, "rgba(0,0,0,1)");
-            ctx.fillStyle = grad;
-            ctx.beginPath();
-            ctx.arc(spotX, spotY, radius, 0, Math.PI * 2);
-            ctx.fill();
-          }
-          ctx.restore();
-        } catch {
-          // Ignored if canvas 2D context is stubbed
-        }
+        // Opaque black layer with a circular hole, outer 15% feathered (teasePaint.ts).
+        paintTeaseMask(ctx, geo, spotX, spotY, radius);
       }
 
       if (!firstPainted) {

@@ -244,6 +244,30 @@ test.describe("server-view-once.spec.ts (spec/06-view-once-media)", () => {
     await expect(slider).toHaveAttribute("max", "35");
     await expect(slider).toHaveValue("12");
 
+    // Speed control: 0.5x-3x, default 1x, on its own row under Size, both fully inside the phone's
+    // width (side by side they would not fit at 375px). Viewer-side only, like the size.
+    const speed = overlay.locator(".wx-srv-view-once-speed-slider");
+    const speedReadout = overlay.locator(".wx-srv-view-once-speed-value");
+    await expect(overlay.locator(".wx-srv-view-once-size-value")).toHaveText("12%");
+    await expect(speed).toBeVisible();
+    await expect(speed).toHaveAttribute("min", "0.5");
+    await expect(speed).toHaveAttribute("max", "3");
+    await expect(speed).toHaveAttribute("step", "0.25");
+    await expect(speed).toHaveValue("1");
+    await expect(speedReadout).toHaveText("1×");
+    const sizeBox = (await slider.boundingBox())!;
+    const speedBox = (await speed.boundingBox())!;
+    for (const box of [sizeBox, speedBox]) {
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(375);
+      expect(box.width).toBeGreaterThan(100);
+    }
+    expect(speedBox.y).toBeGreaterThanOrEqual(sizeBox.y + sizeBox.height - 1);
+    await speed.fill("2");
+    await expect(speedReadout).toHaveText("2×");
+    await speed.fill("1");
+    await expect(speedReadout).toHaveText("1×");
+
     // Pin tease to center (187, 333) with pointerdown on canvas
     const canvas = overlay.locator("canvas");
     await canvas.dispatchEvent("pointerdown", { clientX: 187, clientY: 333 });
@@ -411,6 +435,40 @@ test.describe("server-view-once.spec.ts (spec/06-view-once-media)", () => {
       await expect(sheet.locator(".wx-srv-view-once-sheet-thumb img")).toBeVisible();
       await expect(sheet.locator(".wx-srv-view-once-sheet-filename")).toHaveText(/\.jpg$/);
 
+      // Tease preview: ticking Tease shows the sender's own photo with the real moving cut-out,
+      // fully inside the viewport (the sheet scrolls rather than pushing it off a short phone),
+      // and unticking removes it. jsdom cannot see any of this: it needs a real canvas.
+      const teaseBox = sheet.locator(".wx-srv-view-once-tease-label input");
+      const preview = sheet.locator(".wx-srv-tease-preview-canvas");
+      await expect(preview).toHaveCount(0);
+      await teaseBox.check();
+      await expect(preview).toBeVisible();
+      await preview.scrollIntoViewIfNeeded();
+      const previewBox = (await preview.boundingBox())!;
+      expect(previewBox.width).toBeGreaterThan(100);
+      expect(previewBox.height).toBeGreaterThan(80);
+      expect(previewBox.x).toBeGreaterThanOrEqual(0);
+      expect(previewBox.x + previewBox.width).toBeLessThanOrEqual(viewport.width);
+      expect(previewBox.y + previewBox.height).toBeLessThanOrEqual(viewport.height);
+      await expect(sheet.locator(".wx-srv-tease-preview-caption")).toContainText("They can change the size and speed");
+      // It is the live effect, not a still: the cut-out moves, so the canvas pixels change.
+      const snapshot = (): Promise<string> =>
+        preview.evaluate((el) => (el as HTMLCanvasElement).toDataURL());
+      await expect.poll(snapshot, { timeout: 8000, intervals: [400] }).not.toBe(await snapshot());
+      // ...and it is not blank: the photo shows through the hole (some pixel is not black).
+      const hasPhotoPixels = await preview.evaluate((el) => {
+        const cv = el as HTMLCanvasElement;
+        const d = cv.getContext("2d")!.getImageData(0, 0, cv.width, cv.height).data;
+        for (let i = 0; i < d.length; i += 4) if (d[i]! + d[i + 1]! + d[i + 2]! > 30) return true;
+        return false;
+      });
+      expect(hasPhotoPixels).toBe(true);
+      await assertRealClickTarget(pageAlice, sheet, ".wx-srv-view-once-sheet", viewport.width, viewport.height);
+      await teaseBox.uncheck();
+      await expect(preview).toHaveCount(0);
+      await teaseBox.check();
+      await expect(preview).toBeVisible();
+
       await sheet.locator(".wx-srv-view-once-durations button", { hasText: "2 s" }).click();
       await expect(sheet).toBeHidden();
       await expect(viewOnceButton).toHaveText(/2s/);
@@ -436,6 +494,9 @@ test.describe("server-view-once.spec.ts (spec/06-view-once-media)", () => {
       const bobBubble = pageBob.locator(`[data-message-seq="${sentMessage.seq}"]`);
       await expect(bobBubble.locator(".wx-srv-view-once-tap-btn")).toBeVisible({ timeout: 5000 });
       await expect(bobBubble.locator(".wx-srv-view-once-card-sub")).toContainText("2 s");
+      // Tease was ticked in the sheet, so it reaches Bob as a Tease (the wire alias and the
+      // renamed field both carry it end to end).
+      await expect(bobBubble.locator(".wx-srv-view-once-tease-badge")).toContainText("Tease");
 
       await contextAlice.close();
       await contextBob.close();
