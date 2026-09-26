@@ -131,6 +131,11 @@ test.describe("server-reply.spec.ts (round 2 ruling item 10)", () => {
     await page.locator(".wx-srv-thread-view .wx-chat-send-button").click();
     const originalBubble = page.locator(".wx-srv-bubble").filter({ hasText: originalText });
     await expect(originalBubble).toBeVisible();
+    // The bubble first shows as the optimistic "sending" echo, which the confirmed message then
+    // REPLACES (a new element). Pressing the echo starts a 500ms long-press on an element that is
+    // discarded mid-press on a slower runner (failed 2 of 3 CI runs), so wait for the confirmed
+    // bubble, the only one carrying `data-message-seq`.
+    await expect(originalBubble).toHaveAttribute("data-message-seq", /^\d+$/);
 
     const pointer = { pointerType: "touch", pointerId: 1, clientX: 40, clientY: 200, button: 0 };
     await originalBubble.dispatchEvent("pointerdown", pointer);
