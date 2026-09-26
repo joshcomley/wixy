@@ -269,6 +269,24 @@ def _run_or_raise(args: list[str], *, cwd: Path, timeout: float, label: str) -> 
         raise BuildStepError(f"{label} failed: {(result.stdout + result.stderr)[-800:]!r}")
 
 
+def _cleanup_old_venvs(slot: Path) -> None:
+    """Delete every `.venv.old.<pid>.<timestamp>` directory `_atomic_swap_dir` has
+    ever left behind in this slot. Safe unconditionally: this function only ever
+    runs as the first step of rebuilding `slot`'s venv, and a slot is only ever
+    rebuilt while it is the INACTIVE one (Slots' executor always targets the
+    inactive slot for a build) — so no process can have any of this slot's venvs,
+    old or current, open at this point; the live traffic is being served entirely
+    out of the OTHER slot. Found via the 2026-09-26 disk-space incident: with no
+    cleanup, every single deploy permanently leaked one ~200MB `.venv.old.*`
+    (`_atomic_swap_dir` deliberately renames rather than deletes in place, to
+    avoid deleting the currently-running interpreter's own binary — see that
+    function's docstring) — 228 of them had accumulated across both slots (~46GB)
+    by the time the drive hit single-digit GB free."""
+    for stale in slot.glob(".venv.old.*"):
+        if stale.is_dir():
+            shutil.rmtree(stale, ignore_errors=True)
+
+
 def _pip_install_venv(slot: Path) -> None:
     """Rebuilds ``<slot>/.venv`` FRESH (never reused across deploys — a rollback to
     the OTHER slot keeps ITS OWN independently-built venv completely untouched, and
@@ -299,6 +317,7 @@ def _pip_install_venv(slot: Path) -> None:
     if venv_new.exists():
         shutil.rmtree(venv_new)  # leftover from a prior failed attempt; nothing
         # ever runs FROM .venv.new, so deleting it here is always safe.
+    _cleanup_old_venvs(slot)  # see _cleanup_old_venvs docstring for the safety argument
     print(f"[wixy] creating venv at {venv_new}", flush=True)
     _run_or_raise(
         [_CANONICAL_PYTHON, "-m", "venv", str(venv_new)],
