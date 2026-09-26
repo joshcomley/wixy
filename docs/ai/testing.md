@@ -122,7 +122,11 @@ during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/
   two identities: a stroke seen live before the drawer lifts and then stored in the same place,
   scrolling with its message, Select-mode delete for both, the anchor's deletion taking it,
   rapid dots never locking while Escape does, and 390/360 px phones with touch where every
-  control is hit-tested and two fingers scroll without drawing; the fixture runs one chat per
+  control is hit-tested and two fingers scroll without drawing; the toolbar's layout contract —
+  two lines in every mode, the Draw | Select switch never moving — is checked in the device's own
+  font AND in a forced wide one (`useWideFont`: Verdana, else DejaVu Sans), because the first
+  layout passed every local run in Segoe UI and failed only on CI's Ubuntu font (decisions/00176
+  #13); the fixture runs one chat per
   worker, so it scopes every assertion to its own anchor via
   `svg.wx-srv-drawing[data-anchor-seq="N"]` and acts at a human pace between separate
   controls, or R3's boundary rule locks). The transcription fixture drives the

@@ -162,6 +162,41 @@ async function assertRealClickTarget(page: Page, locator: Locator, viewportWidth
   expect(fit.scroll, `${name} label fits (${fit.scroll} <= ${fit.client})`).toBeLessThanOrEqual(fit.client + 1);
 }
 
+/** Draws the Server chat in a font much WIDER than Segoe UI, as some devices do: Verdana (one of
+ * the widest common UI fonts, on Windows and macOS) or else DejaVu Sans (Ubuntu's `system-ui`, the
+ * font CI's runner draws the chat with). The pen toolbar's first layout fitted two lines in Segoe
+ * UI but needed three in both of these, on both phones — caught only by CI (decisions/00176 #13). */
+async function useWideFont(page: Page): Promise<void> {
+  await page.addStyleTag({
+    content: '.wx-srv-panel, .wx-srv-panel * { font-family: Verdana, "DejaVu Sans", sans-serif !important; }',
+  });
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
+}
+
+/** The phone toolbar's layout contract (decisions/00176 #13), for the mode on screen now: exactly
+ * two lines, nothing wider than the screen, every control a real, unclipped 44px target — and the
+ * Draw | Select switch exactly where it was in the other modes (`switchAt`, from the first call),
+ * so a mode change never moves it from under the finger. Returns where the switch is. */
+async function assertPhoneToolbar(
+  page: Page,
+  viewport: { readonly width: number; readonly height: number },
+  switchAt?: { readonly x: number; readonly y: number },
+): Promise<{ x: number; y: number }> {
+  const toolbar = (await page.locator(".wx-srv-pen-toolbar").boundingBox())!;
+  expect(toolbar.height, "the toolbar is two lines").toBeGreaterThan(80);
+  expect(toolbar.height, "the toolbar is two lines").toBeLessThan(110);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  for (const control of await page.locator(".wx-srv-pen-toolbar button:visible").all()) {
+    await assertRealClickTarget(page, control, viewport.width, viewport.height);
+  }
+  const draw = (await page.locator('.wx-srv-pen-mode[data-mode="draw"]').boundingBox())!;
+  if (switchAt !== undefined) {
+    expect(Math.abs(draw.x - switchAt.x), "Draw | Select never moves when the mode changes").toBeLessThan(1);
+    expect(Math.abs(draw.y - switchAt.y), "Draw | Select never moves when the mode changes").toBeLessThan(1);
+  }
+  return { x: draw.x, y: draw.y };
+}
+
 // -- Touch, through the real browser input pipeline (CDP), so pointer events are genuine ------
 
 interface TouchPoint {
@@ -421,7 +456,19 @@ test.describe("server-drawing.spec.ts", () => {
     for (const control of await page.locator(".wx-srv-pen-toolbar button:visible").all()) {
       await assertRealClickTarget(page, control, viewport.width, viewport.height);
     }
+    expect((await page.locator(".wx-srv-pen-toolbar").boundingBox())!.height).toBeLessThan(60);
     await page.screenshot({ path: test.info().outputPath("desktop-select.png") });
+
+    // A much wider font changes nothing at desktop width: still one line, every label whole.
+    await useWideFont(page);
+    for (const mode of ["select", "draw"] as const) {
+      await humanPause(page);
+      await page.locator(`.wx-srv-pen-mode[data-mode="${mode}"]`).click();
+      for (const control of await page.locator(".wx-srv-pen-toolbar button:visible").all()) {
+        await assertRealClickTarget(page, control, viewport.width, viewport.height);
+      }
+      expect((await page.locator(".wx-srv-pen-toolbar").boundingBox())!.height).toBeLessThan(60);
+    }
     await context.close();
   });
 
@@ -438,14 +485,9 @@ test.describe("server-drawing.spec.ts", () => {
       await assertRealClickTarget(page, page.locator(".wx-srv-pen-button"), viewport.width, viewport.height);
       await turnPenOn(page);
 
-      // §5: on a phone it wraps onto two lines rather than overflowing.
-      const toolbar = (await page.locator(".wx-srv-pen-toolbar").boundingBox())!;
-      expect(toolbar.height).toBeGreaterThan(80);
-      expect(toolbar.height).toBeLessThan(110);
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-      for (const control of await page.locator(".wx-srv-pen-toolbar button:visible").all()) {
-        await assertRealClickTarget(page, control, viewport.width, viewport.height);
-      }
+      // §5: on a phone it wraps onto two lines rather than overflowing — the same two lines in
+      // every mode, with Draw | Select in the same place.
+      const switchAt = await assertPhoneToolbar(page, viewport);
 
       const cdp = await context.newCDPSession(page);
       const created: number[] = [];
@@ -472,16 +514,12 @@ test.describe("server-drawing.spec.ts", () => {
       await humanPause(page);
       await page.touchscreen.tap(x0 + 2, y);
       await expect(page.locator(".wx-srv-drawing-selection")).toBeVisible();
-      for (const control of await page.locator(".wx-srv-pen-toolbar button:visible").all()) {
-        await assertRealClickTarget(page, control, viewport.width, viewport.height);
-      }
+      await assertPhoneToolbar(page, viewport, switchAt);
       await page.screenshot({ path: test.info().outputPath(`phone-${viewport.width}-select.png`) });
       await humanPause(page);
       await page.locator(".wx-srv-pen-delete").click();
       await expect(page.locator(".wx-srv-pen-confirm-question")).toBeVisible();
-      for (const control of await page.locator(".wx-srv-pen-toolbar button:visible").all()) {
-        await assertRealClickTarget(page, control, viewport.width, viewport.height);
-      }
+      await assertPhoneToolbar(page, viewport, switchAt);
       await page.screenshot({ path: test.info().outputPath(`phone-${viewport.width}-confirm.png`) });
       await page.locator(".wx-srv-pen-confirm-cancel").click();
       await expect(stored).toHaveCount(1);
@@ -510,6 +548,25 @@ test.describe("server-drawing.spec.ts", () => {
       expect(created).toEqual([201]);
       await expect(page.locator(".wx-srv-thread")).toBeVisible();
       await page.screenshot({ path: test.info().outputPath(`phone-${viewport.width}-panned.png`) });
+
+      // The same contract in a much wider font, in every mode (decisions/00176 #13).
+      await useWideFont(page);
+      const wideSwitchAt = await assertPhoneToolbar(page, viewport);
+      await page.screenshot({ path: test.info().outputPath(`phone-${viewport.width}-wide-draw.png`) });
+      await humanPause(page);
+      await page.locator('.wx-srv-pen-mode[data-mode="select"]').click();
+      await humanPause(page);
+      await page.locator(".wx-srv-pen-next").click();
+      await expect(page.locator(".wx-srv-drawing-selection")).toBeVisible();
+      await assertPhoneToolbar(page, viewport, wideSwitchAt);
+      await page.screenshot({ path: test.info().outputPath(`phone-${viewport.width}-wide-select.png`) });
+      await humanPause(page);
+      await page.locator(".wx-srv-pen-delete").click();
+      await expect(page.locator(".wx-srv-pen-confirm-question")).toBeVisible();
+      await assertPhoneToolbar(page, viewport, wideSwitchAt);
+      await page.screenshot({ path: test.info().outputPath(`phone-${viewport.width}-wide-confirm.png`) });
+      await page.locator(".wx-srv-pen-confirm-cancel").click();
+      await expect(stored).toHaveCount(1);
       expect(errors).toEqual([]);
       await context.close();
     });

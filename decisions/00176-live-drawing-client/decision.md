@@ -99,10 +99,51 @@ wording. The operator manual is `docs/ai/livechat.md` §19.
       this screen's own confirmations.
     - `chatThreadScroll.ts` (shared with the AI chat) gained `hold()`, which the pen uses for the
       length of one stroke.
-13. **Toolbar sizes** (measured in real Chromium): desktop is one line, 54 px. At 390 and 360 px
-    it is exactly two lines, 100 px, in every mode. At 380 px and below the thickness buttons are
-    40 px wide (still 44 px tall), because 44 px ones need 363 px where 336 px exist. The hint and
-    the question sit beside their buttons and wrap, so a mode switch never changes the height.
+13. **The phone toolbar is two fixed lines whatever the font** (amended 2026-09-26 after a CI
+    failure; measured in real Chromium). Desktop is one line, 54 px.
+    - **Symptom:** remote CI (Ubuntu) failed the 360 and 390 px phone tests with the toolbar at
+      146 px, three lines. The first layout gave line 2 fixed-width thicknesses (40 px at 380 px
+      and below) and let everything wrap by its natural width. It fitted two lines in Windows'
+      Segoe UI, the font every local run used, so 227/227 passed locally.
+    - **Root cause, reproduced on Windows rather than assumed:** a probe test loaded Ubuntu's
+      own `DejaVuSans.ttf`/`DejaVuSans-Bold.ttf` (fontconfig resolves `system-ui` and weight 600
+      to them on Ubuntu 24.04, as WSL confirmed) into the real page. It measured 146 px, exactly
+      CI's number, at both widths.
+      - In Draw mode the switch and Done labels grew about 20 px in the wider font, and Done
+        wrapped.
+      - In Select mode the hint, "Next drawing" and "Delete drawing" shared line 1, and "Delete
+        drawing" wrapped (148 px).
+      - Arial (the same widths as Linux's Liberation Sans) fitted; Verdana failed like DejaVu.
+      - The probe also showed a defect nobody had reported: the Draw | Select switch sat after
+        the thicknesses in Draw mode but at the line's start in Select mode, so it jumped
+        166–182 px from under the finger on every mode change.
+    - **Decision:** on a phone (≤ 480 px):
+      - Line 1 is what the mode acts on (the colours, the selection's two buttons, or the delete
+        question).
+      - Line 2 is always Draw | Select, then the mode's slot (the thicknesses, or the hint, now
+        a direct toolbar child), then Done.
+      - Only the slot gives. The thicknesses start at 28 px wide (always 44 px tall) and grow
+        towards 44 px into the room the labels leave. The hint wraps inside the slot, with at
+        most three 1.2-line-height lines in the 44 px line.
+      - The line breaks are decided by those fixed bases, not by the labels' widths, so a wider
+        font narrows the slot instead of adding a line. Only a font far larger than any default
+        would wrap line 2, and it would still never overflow.
+      - The DOM order stays the desktop line's (and the keyboard's); CSS `order` arranges the
+        phone's two lines.
+    - **Rejected:**
+      - Loosening the height assertion (the problem is real on real devices).
+      - Pinning an explicit font-family (it depends on which fonts a device has, which is the
+        fragility itself).
+      - Icon-only Draw/Select/Done (the spec names the labels; text is clearer to the owner).
+    - **Measured after:** 100 px, two lines, in every mode at 390 and 360 px, in Segoe UI,
+      DejaVu Sans, Arial and Verdana, with nothing clipped or overflowing. The switch is at the
+      same spot in every mode. The thicknesses are 35–44 px wide depending on the font.
+    - **Tests:** `server-drawing.spec.ts`'s `assertPhoneToolbar` checks every mode: two lines,
+      no overflow, every control a real unclipped 44 px target, and the switch not moving. It
+      then does it all again under `useWideFont` (Verdana, else DejaVu Sans), and desktop gets
+      the wide-font pass too. Red on the old layout: the switch-position check failed at 182 and
+      166 px; with that check switched off, the wide-font pass failed at 146 px, CI's number.
+      Green on the new one.
 14. **The R3 boundary-close hazard: KEEP AS SPEC** (driver ruling). A tap on a drawing followed
     by "Delete drawing" within 400 ms locks the chat, because the button is a boundary and the
     select tap is an ordinary tap. The same pattern exists for a bubble tap followed by ⚙. The e2e
@@ -116,7 +157,8 @@ wording. The operator manual is `docs/ai/livechat.md` §19.
 
 - Every choice above either follows the spec's decided behaviour or fixes a defect measured in
   a real browser: the header space, the click-less touch tap, the toolbar pushing messages under
-  the composer, and the stale keepalive.
+  the composer, the stale keepalive, and the toolbar's font-dependent third line and moving
+  switch.
 - The storing and reconciliation rules exist because the stream and this client's own POST
   answers travel on different connections and arrive in either order. A summary therefore can
   never be allowed to delete anything by itself. Only a fetch that knows what the client knew
@@ -129,13 +171,18 @@ wording. The operator manual is `docs/ai/livechat.md` §19.
 - Never put anything inside `.wx-srv-message-list` that `renderThreadList` does not own. The
   layer lives beside it in `.wx-srv-thread-content`.
 - Anything that changes the toolbar's height must go through `keepThreadInPlace`.
+- Never size a phone toolbar line by its labels' natural widths: layout checked only in the
+  developer's own font is how #13's three-line toolbar got past 227 green local tests. Give
+  every text-bearing line a part that gives (a flexible slot), and test it with `useWideFont`
+  as well as the default.
 - A new write outcome must be classified as a verdict or "retry" in `api/drawings.ts`. A 2xx the
   client cannot read is "retry", never "ok": the idempotent retry will read it.
 - Honest limits (listed in livechat.md §19):
   - text re-wraps on other widths;
   - live frames reach only same-process streams in a blue/green overlap;
   - a reconnect mid-stroke misses that preview;
-  - the thickness buttons are 40 px wide at 360 px;
+  - on a narrow phone with a wide font the thickness buttons narrow (35–36 px at 360 px in
+    DejaVu Sans or Verdana, never below 28 px, always 44 px tall);
   - the boundary-close hazard;
   - a lost create answer can re-create a drawing the other person just deleted
     (tombstone-free, as for messages).

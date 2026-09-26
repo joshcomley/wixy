@@ -1412,11 +1412,31 @@ side (schema, routes, the live relay and erasure) is §18. This section covers t
   (`data-srv-gesture-boundary`, since it opens the confirmation). "Delete this drawing for
   everyone?" then replaces them with Delete / Cancel. Notices use the status line
   (`role="status"`, cleared after 5 s).
-- **Measured sizes (real Chromium):** on desktop it is one line, 54 px. At 390 and 360 px it
-  is exactly two lines, 100 px, in every mode. At 380 px and below the thickness buttons are
-  40 px wide (still 44 px tall), because 44 px ones need 363 px where a 360 px phone has
-  336 px. The hint and the question sit beside their buttons and wrap, so switching modes
-  never changes the height.
+- **On a phone (≤ 480 px) it is two fixed lines in every mode, whatever the device's font**
+  (`chat.css`, the `max-width: 480px` block):
+  - Line 1 is what the mode acts on: the colours, the selection's two buttons, or the delete
+    question with Delete / Cancel.
+  - Line 2 is always **Draw | Select, then the mode's slot** (the thicknesses in Draw mode, the
+    hint in Select mode, nothing during the question), **then Done**. The switch comes first,
+    so it never moves under the finger when the mode changes.
+  - The slot is the only part that gives. The thicknesses start at 28 px wide each (always
+    44 px tall) and grow back towards 44 px into the room the labels leave, and the hint wraps
+    inside it (at most three lines fit the 44 px line).
+  - DOM order is the desktop line's (and so the keyboard's). CSS `order` arranges the phone's
+    two lines, and the hint is a direct child of the toolbar, not of the select group.
+- **Why it is built this way (measured, decisions/00176 #13):** the first layout gave line 2
+  fixed-width thicknesses. It fitted two lines in Windows' Segoe UI but needed THREE (146 px)
+  in Ubuntu's DejaVu Sans, which is what CI's runner draws `system-ui` with, and in Verdana,
+  on both a 360 and a 390 px phone. Its Select mode also pushed "Delete drawing" onto a line of
+  its own, and the switch jumped from after the thicknesses to the line's start on every mode
+  change.
+- **Measured now (real Chromium):** 100 px, two lines, in every mode at 390 and 360 px, in
+  Segoe UI, DejaVu Sans, Arial (the same letter widths as Linux's Liberation Sans) and Verdana,
+  with nothing clipped or overflowing. The thicknesses measure 40–44 px wide in Segoe UI or
+  Arial and 35–42 px in DejaVu Sans or Verdana. On desktop the toolbar is one line, 54 px.
+  `server-drawing.spec.ts` checks all of this in every mode, with the device's own font and
+  again with a forced wide one (`useWideFont`: Verdana, or else DejaVu Sans). Only a font far
+  larger than any default would wrap line 2, and it would still never overflow.
 - **The thread stays where it is** (`keepThreadInPlace`): any change in the toolbar's height
   (pen on or off, a mode switch, a notice, the question) adds that change to
   `thread.scrollTop`. Without this, the newest messages slid under the composer when the pen
@@ -1584,7 +1604,8 @@ side (schema, routes, the live relay and erasure) is §18. This section covers t
   strokes still reach everyone through the database re-check.
 - **A reconnect mid-stroke** misses that stroke's live preview. The stored stroke arrives
   with the next `message_updated`.
-- **At 360 px the thickness buttons are 40 px wide**, still 44 px tall.
+- **On a narrow phone with a wide font the thickness buttons get narrower**: 35–36 px wide at
+  360 px in DejaVu Sans or Verdana, never below 28 px, and always 44 px tall.
 - **The select-then-delete boundary hazard** described above.
 - **A lost create answer can re-create a drawing the other person has just deleted.**
   Deletes keep no record of client ids (the same tombstone-free design as messages, Inv 46).

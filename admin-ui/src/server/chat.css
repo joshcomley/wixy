@@ -1954,7 +1954,7 @@ button.wx-srv-quote:focus-visible {
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 8px;
-  flex: 1 1 auto;
+  flex: none;
   min-width: 0;
 }
 
@@ -1975,14 +1975,18 @@ button.wx-srv-quote:focus-visible {
   display: none;
 }
 
-/* The hint and the delete question sit BESIDE their buttons and wrap within their own space, so
-   every mode of the toolbar keeps the same two lines on a phone (a mode switch never moves the
+/* The hint and the delete question wrap within their own space rather than pushing a button onto
+   another line, so every mode of the toolbar keeps the same height (a mode switch never moves the
    thread). */
 .wx-srv-pen-hint {
   flex: 1 1 8em;
   min-width: 0;
   font: 0.75rem/1.3 system-ui, sans-serif;
   color: var(--wx-muted);
+}
+
+.wx-srv-pen-hint[hidden] {
+  display: none;
 }
 
 .wx-srv-pen-confirm-question {
@@ -2071,15 +2075,60 @@ button.wx-srv-quote:focus-visible {
 }
 
 @media (max-width: 480px) {
-  /* Phone: the colours take the whole first line; thicknesses, Draw | Select and Done share the
-     second (measured at 390px: 8 x 44px colours, then 176 + 109 + 54px). */
-  .wx-srv-pen-colors {
+  /* Phone: two fixed lines in every mode, whatever font the device has.
+     - Line 1 is what the mode acts on: the colours, the selection's two buttons, or the delete
+       question with its buttons.
+     - Line 2 is always Draw | Select, then the mode's slot (the thicknesses, or the hint), then
+       Done. The switch is first, so it never moves under the finger when the mode changes.
+     The slot is the only part that gives: the thicknesses start from 28px wide each (still 44px
+     tall) and grow back to 44px into whatever the labels leave, and the hint wraps inside it. So
+     a wider font takes width from the slot instead of pushing Done onto a third line — measured:
+     with Ubuntu's DejaVu Sans (and with Verdana) the old fixed-width line needed three lines on
+     both a 360px and a 390px phone. Only a font far larger than any default would wrap, and it
+     would still never overflow. */
+  .wx-srv-pen-toolbar {
+    gap: 2px 6px;
+  }
+
+  .wx-srv-pen-colors,
+  .wx-srv-pen-select,
+  .wx-srv-pen-confirm {
+    order: 0;
     flex: 1 1 100%;
     max-width: none;
   }
 
-  .wx-srv-pen-toolbar {
-    gap: 2px 6px;
+  .wx-srv-pen-modes {
+    order: 1;
+  }
+
+  .wx-srv-pen-widths,
+  .wx-srv-pen-hint {
+    order: 2;
+  }
+
+  .wx-srv-pen-done {
+    order: 3;
+  }
+
+  .wx-srv-pen-status {
+    order: 4;
+  }
+
+  .wx-srv-pen-widths {
+    flex: 1 1 calc(4 * 28px);
+    max-width: calc(4 * 44px);
+  }
+
+  .wx-srv-pen-width {
+    min-width: 28px;
+    width: auto;
+  }
+
+  /* At most three lines of it fit the 44px line (3 x 14.4px). */
+  .wx-srv-pen-hint {
+    flex: 1 1 calc(4 * 28px);
+    line-height: 1.2;
   }
 
   .wx-srv-pen-mode,
@@ -2093,16 +2142,6 @@ button.wx-srv-quote:focus-visible {
 }
 
 @media (max-width: 380px) {
-  /* A 360px phone has 336px: 44px-wide thicknesses plus Draw | Select and Done need 363px and
-     pushed Done onto a third line (measured). Thicknesses go 40px wide there — still 44px tall —
-     and the switch loses a little padding, which keeps two lines with room to spare. */
-  .wx-srv-pen-width {
-    flex: 0 0 40px;
-    width: 40px;
-    min-width: 40px;
-    max-width: 40px;
-  }
-
   .wx-srv-pen-mode {
     padding: 0 9px;
   }

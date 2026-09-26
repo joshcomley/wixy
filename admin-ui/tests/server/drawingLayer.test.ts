@@ -987,6 +987,26 @@ describe("drawingLayer: Select mode (§5)", () => {
     s.layer.detach();
   });
 
+  it("each mode shows only its own groups; Draw | Select and Done stay in every mode", async () => {
+    const s = await withStoredDrawing();
+    const shown = (): string[] =>
+      Array.from(s.layer.toolbar.children)
+        .filter((el) => !(el as HTMLElement).hidden && !el.classList.contains("wx-srv-pen-status"))
+        .map((el) => el.className);
+    // The hint is the toolbar's own child (a phone puts it in the thicknesses' place), so the
+    // select group holds only its two buttons.
+    expect(s.layer.toolbar.querySelector(".wx-srv-pen-select .wx-srv-pen-hint")).toBeNull();
+    expect(shown()).toEqual(["wx-srv-pen-hint", "wx-srv-pen-select", "wx-srv-pen-modes", "wx-srv-pen-done"]);
+    tap(s.deps.anchorElement(2)!, 25, 315);
+    s.toolbarButton(".wx-srv-pen-delete").click();
+    expect(shown()).toEqual(["wx-srv-pen-confirm", "wx-srv-pen-modes", "wx-srv-pen-done"]);
+    s.toolbarButton(".wx-srv-pen-confirm-cancel").click();
+    expect(shown()).toEqual(["wx-srv-pen-hint", "wx-srv-pen-select", "wx-srv-pen-modes", "wx-srv-pen-done"]);
+    s.toolbarButton('.wx-srv-pen-mode[data-mode="draw"]').click();
+    expect(shown()).toEqual(["wx-srv-pen-colors", "wx-srv-pen-widths", "wx-srv-pen-modes", "wx-srv-pen-done"]);
+    s.layer.detach();
+  });
+
   it("'Next drawing' selects drawings from the keyboard, top to bottom, wrapping", async () => {
     const s = await withStoredDrawing();
     s.toolbarButton(".wx-srv-pen-next").click();

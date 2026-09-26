@@ -271,12 +271,16 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
     widthGroup.appendChild(button);
   }
 
-  const selectGroup = documentRef.createElement("div");
-  selectGroup.className = "wx-srv-pen-select";
-  selectGroup.hidden = true;
+  // Select mode's hint is the toolbar's own child, not the select group's: on a phone it takes
+  // the thicknesses' place on the second line (chat.css), so the first line holds only the two
+  // buttons and neither line depends on how wide the device's font is.
   const selectHint = documentRef.createElement("span");
   selectHint.className = "wx-srv-pen-hint";
   selectHint.textContent = "Tap a drawing to select it.";
+  selectHint.hidden = true;
+  const selectGroup = documentRef.createElement("div");
+  selectGroup.className = "wx-srv-pen-select";
+  selectGroup.hidden = true;
   const nextButton = documentRef.createElement("button");
   nextButton.type = "button";
   nextButton.className = "wx-srv-pen-next";
@@ -290,7 +294,7 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
   // §5: it opens a confirmation under the finger, as "Delete for everyone" does.
   deleteButton.setAttribute("data-srv-gesture-boundary", "");
   deleteButton.addEventListener("click", () => openDeleteConfirm());
-  selectGroup.append(selectHint, nextButton, deleteButton);
+  selectGroup.append(nextButton, deleteButton);
 
   const confirmGroup = documentRef.createElement("div");
   confirmGroup.className = "wx-srv-pen-confirm";
@@ -343,7 +347,9 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
   statusLine.setAttribute("aria-live", "polite");
   statusLine.hidden = true;
 
-  toolbar.append(colorGroup, widthGroup, selectGroup, confirmGroup, modeGroup, doneButton, statusLine);
+  // DOM order is the desktop line's order (and so the keyboard's); on a phone chat.css arranges
+  // the same controls into two fixed lines.
+  toolbar.append(colorGroup, widthGroup, selectHint, selectGroup, confirmGroup, modeGroup, doneButton, statusLine);
 
   const layer = documentRef.createElement("div");
   layer.className = "wx-srv-drawing-layer";
@@ -1141,8 +1147,7 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
     if (selectedKey === null) return;
     keepThreadInPlace(() => {
       confirmingDelete = true;
-      selectGroup.hidden = true;
-      confirmGroup.hidden = false;
+      syncGroups();
     });
     confirmDeleteButton.focus();
   }
@@ -1151,8 +1156,7 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
     if (!confirmingDelete) return;
     keepThreadInPlace(() => {
       confirmingDelete = false;
-      confirmGroup.hidden = true;
-      selectGroup.hidden = !(penOn && mode === "select");
+      syncGroups();
     });
     if (refocus && !deleteButton.disabled) deleteButton.focus();
   }
@@ -1192,12 +1196,21 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
     }
     drawModeButton.setAttribute("aria-pressed", String(mode === "draw"));
     selectModeButton.setAttribute("aria-pressed", String(mode === "select"));
+    syncGroups();
+    toolbar.classList.toggle("wx-srv-pen-toolbar-select", mode !== "draw");
+  }
+
+  /** The groups this mode shows. On a phone the first line holds what the mode acts on (the
+   * colours, the selection's buttons, or the delete question) and the second line is always
+   * Draw | Select, then this mode's slot (the thicknesses, or the hint; nothing while the
+   * question is up), then Done — so the switch never moves when the mode changes. */
+  function syncGroups(): void {
     const drawing = mode === "draw";
     colorGroup.hidden = !drawing;
     widthGroup.hidden = !drawing;
+    selectHint.hidden = drawing || confirmingDelete;
     selectGroup.hidden = drawing || confirmingDelete;
     confirmGroup.hidden = !confirmingDelete;
-    toolbar.classList.toggle("wx-srv-pen-toolbar-select", !drawing);
   }
 
   function setColor(value: DrawingColor): void {
