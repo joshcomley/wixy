@@ -31,10 +31,13 @@ delete it; pen colour and thickness; the other person can draw too.
 - 2026-09-26: DRAFT PR #286 opened (typecheck clean; vitest 89 files / 2338 passed; builds
   no drift; full e2e 227/227 with the local GET fix). Driver notified.
 
+- 2026-09-26: driver's ruling: #286 is the single merge target for the whole feature. Merged
+  server PR #287's final head f4b7b93 (e19c619; only conflict livechat.md §18/§19, kept both;
+  merged .py identical to #287). On the merged branch: both builds no drift; typecheck (admin
+  + editor) clean; vitest 2338 (admin) + 249 (editor); full e2e 227/227; full pytest 2385
+  passed. #287 is superseded (not merged separately).
+
 ## Remaining
-1. When `origin/cmd/workspace-00029-live-drawing` gains the server's `response_model=None`
-   fix: confirm `git diff wixy_server/routes_livechat.py` is only that line, restore the local
-   copy, merge their branch, then `origin/main`; LF check; rebuild both bundles (no drift);
-   typecheck; vitest; full e2e; push.
-2. When the server PR merges to `main`: merge `main`, re-verify, mark #286 ready for review.
-3. Answer the driver's review and the Opus 5.5 audit findings. Never merge from here.
+1. #286 is ready for review: the driver does the joint review and the Opus 5.5 audit, then
+   merges. Answer their findings here. Never merge from here.
+2. If `main` moves before then: merge it, re-verify the same way, push.
