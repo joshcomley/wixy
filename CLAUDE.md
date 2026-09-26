@@ -91,7 +91,10 @@ npx playwright test
   inference goes through cmd (`spec/06-ai-chat.md`).
 - Frontend bundles are committed; CI fails on drift (`git diff --exit-code` after a
   rebuild) — always run `npm run build` after touching `admin-ui/src` or `editor/src`
-  and commit the output alongside the source change.
+  and commit the output alongside the source change. On Windows, first make sure the
+  working files are LF: a tool that writes CRLF (`git ls-files --eol | grep w/crlf`)
+  puts Windows line endings into the `.map` files' embedded source text, and CI's Linux
+  rebuild then differs (seen on the Tease rename, PR #284). Convert to LF, rebuild, commit.
 - Tests parallelize via pytest-xdist with the fixed `-n 4` cap in `pyproject.toml`'s
   `addopts` — never pass `-n auto`.
 - **Every commit message carries a `Release-note:` trailer** (decisions/00112): ONE
