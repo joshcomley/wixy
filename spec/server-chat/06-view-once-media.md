@@ -128,8 +128,31 @@ photo (the old body model ignores unknown fields). This fails closed.
 ## 3. Client
 
 ### 3.1 Sending
-- The attachment chip for a photo or video in the composer gets a **"View once"** control. It
-  opens a small picker:
+- ~~The attachment chip for a photo or video in the composer gets a **"View once"** control. It
+  opens a small picker:~~ **Amended 2026-09-26 (operator-directed, decisions/00169):** the
+  per-chip picker shipped invisible (it was a child of the 56 px chip, whose `overflow: hidden`
+  clipped it to nothing on every device). The control is now a **"View once" button in the
+  composer bar**, opening a `position: fixed` bottom sheet, which no ancestor's overflow can
+  clip. Architect ratification, with these conditions:
+  - **One target, shown:** the sheet applies to the most recently staged attachment at the
+    moment the button is pressed. It shows that file's thumbnail, so there is no doubt which
+    file it means when several are staged.
+  - **Enabled only for a photo or video:** the button is disabled, with a plain label saying
+    why, when nothing is staged or the latest staged file is not a photo or video.
+  - **Stable:** the choice stays on the file it was made for. Staging another file afterwards
+    never moves it, and removing that file clears it.
+  - **Visible and reversible:** the chosen chip shows a "View once · 5 s" marker drawn inside
+    the chip's own box (never a child that overflows it). The sheet offers "Send normally" to
+    clear the choice.
+  - **Taps:** the composer-bar button carries `data-srv-gesture-boundary`, because it opens a
+    surface. Escape stays the panic lock (R3) and never merely closes the sheet; the sheet
+    closes with its own Cancel/Done or a tap on its backdrop.
+  - **Tested for real visibility:** jsdom cannot see CSS clipping. An e2e test with real
+    clicks, at desktop and 360/390 px phone widths, must assert that the button, the sheet and
+    the chip marker are visible and hit-testable (bounding box inside the viewport, and
+    `elementFromPoint` returns the control). The general lesson: a popover or sheet is
+    `position: fixed` or attached to the body, never nested inside a clipped container.
+- The sheet holds:
   - the choices 2 s / 5 s / 30 s / No time limit;
   - for a photo only, a **"Spotlight"** switch;
   - the plain note: "It disappears once they open it. They could still take a screenshot."
