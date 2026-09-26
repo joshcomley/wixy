@@ -220,9 +220,9 @@ header.
 | POST | `server/messages` | `send_message` | `{"clientId":str(8-64),"sender":str(1-32,trimmed),"deviceId":str(8-64),"text":str\|null(≤4000),"attachmentIds":[hex32](0-10),"replyToSeq":int(≥1)?}` — `replyToSeq` optional, omitted for an ordinary message; a target that no longer exists (or never did) is silently dropped, sending as a plain message, never a 500 | 201 `{"message":<Message>}` (200 + the SAME message on a replayed `clientId` — idempotent); 422 `{"error":"invalid","detail":str}` (empty text with no attachments, too long, bad sender, an unknown/already-used/failed attachment id, or `replyToSeq` present and not an integer ≥1 — booleans rejected) |
 | PUT | `server/messages/{seq}/reactions` | `set_reaction` | `{"emoji":str,"sender":str(1-32,trimmed,no control chars),"reacted":bool}` — no other keys; `emoji` must be one of the six in `livechat/reactions.py`, compared as exact code points (the heart is U+2764 U+FE0F); `reacted` is the DESIRED state, not a toggle | 200 `{"message":<Message>}` — the message as the server now holds it; a request that changes nothing is still 200 but writes **no** `message_updated` event; 404 `{"error":"not_found"}` (unknown, deleted, or too-large `seq`; never a 500); 422 `{"error":"invalid","detail":str}` (emoji off the list, bad sender) or FastAPI's validation shape (unknown key, non-boolean `reacted`); 401 `{"error":"locked"}` |
 | DELETE | `server/messages/{seq}` | `delete_message` | — | 204 when DB scrub and media cleanup are complete; otherwise 202 `{"erasurePending":true}`; idempotent even when the message is already gone |
-| POST | `server/messages/view-once` | `send_view_once` | `{"clientId":str(8-64),"sender":str(1-32,trimmed),"deviceId":str(8-64),"attachmentId":hex32,"durationS":2\|5\|30\|null,"spotlight":bool,"replyToSeq":int(≥1)?}` — exactly one attachment (photo or video), no text; `spotlight` permitted only for photos; 422 `not_ready` if attachment is not ready | 201 `{"message":<Message>}` (200 on replayed `clientId`); 422 `{"error":"invalid"\|"not_ready","detail":str}` |
-| POST | `server/messages/{seq}/view-once/open` | `open_view_once` | `{"claimId":hex32,"sender":str(1-32,trimmed)}` — claims the single view; sender cannot claim own message (403 `own_message`) | 200 `{"durationS":int\|null,"spotlight":bool,"kind":"photo"\|"video","mime":str}`; 403 `{"error":"own_message"}`; 404 `{"error":"not_found"}`; 409 `{"error":"already_opened"}` |
-| GET | `server/messages/{seq}/view-once/content` | `get_view_once_content` | — (`X-Wixy-View-Claim: <claimId>` header required; verified against claim and claimant identity; expires after 600s) | 200 raw stream (`Cache-Control: no-store`, `X-Content-Type-Options: nosniff`); erased via Inv 46 upon complete delivery; 404 `{"error":"not_found"}`; 410 `{"error":"expired"}` |
+| POST | `server/messages/view-once` | `send_view_once_message` | `{"clientId":str(8-64),"sender":str(1-32,trimmed),"deviceId":str(8-64),"attachmentId":hex32,"durationS":2\|5\|30\|null,"spotlight":bool,"replyToSeq":int(≥1)?}` — exactly one attachment (photo or video), no text; `spotlight` permitted only for photos; 422 `not_ready` if attachment is not ready | 201 `{"message":<Message>}` (200 on replayed `clientId`); 422 `{"error":"invalid","detail":str}` or `{"error":"not_ready"}` |
+| POST | `server/messages/{seq}/view-once/open` | `open_view_once` | `{"claimId":hex32,"sender":str(1-32,trimmed)}` — claims the single view; sender cannot claim own message (403 `own_message`) | 200 `{"durationS":int\|null,"spotlight":bool,"kind":"photo"\|"video","mime":str}`; 403 `{"error":"own_message"}`; 404 `{"error":"not_found"}`; 409 `{"error":"already_opened"}`; 422 `{"error":"invalid","detail":str}` |
+| GET | `server/messages/{seq}/view-once/content` | `get_view_once_content` | — (`X-Wixy-View-Claim: <claimId>` header required; verified against claim and claimant identity; expires after 600s) | 200 raw stream (`Cache-Control: no-store`, `X-Content-Type-Options: nosniff`); erased via Inv 46 upon complete delivery; 403 `{"error":"forbidden"}` (missing/malformed/wrong claim header or wrong email); 404 `{"error":"not_found"}`; 410 `{"error":"expired"}` |
 | POST | `server/wipe` | `wipe_chat` | exactly `{"confirm":"WIPE"}` | 204 when DB scrub and media cleanup are complete; otherwise 202 `{"erasurePending":true}`; every other body, including extra keys, is 422 |
 | GET | `server/stream?after=` | `stream` | query `after?:int` (event cursor) | **SSE**, see §4 |
 | GET | `server/usage` | `usage` | — | `{"usedBytes":int,"quotaBytes":int,"freeBytes":int,"mediaAvailable":bool,"erasurePending":bool,"transcriptionAvailable":bool}` — the last is true only while cmd's capability probe answers `{"private":true}` (cached 60 s; always false on the standalone edition); it is what shows the Transcribe control |
@@ -231,10 +231,11 @@ header.
 | POST | `server/uploads/{id}/complete` | `complete_upload` | — | 202 `{"attachment":<Attachment>}` (status `processing`; idempotent on retry); 409 `{"error":"incomplete","missing":[int]}`; 422 `{"error":"size_mismatch"}`; 404 (unknown upload) |
 | DELETE | `server/uploads/{id}` | `delete_upload` | — | 204 (always — a no-op once already promoted to an attachment) |
 | POST | `server/attachments/{id}/transcribe` | `transcribe_attachment` | — (opt-in, one voice note; **asynchronous** — Cloudflare cuts a proxied response at 100 s) | 202 `{"transcript":{"status":"pending"}}` (a job was started, or one already owns it; the finished transcript arrives as a `message_updated` stream event); 200 `{"transcript":{"status":"done","text":str}}` (already stored — no cmd call); 404 `{"error":"not_found"}` (malformed/unknown id, not a voice attachment, or not yet sent in a message); 409 `{"error":"not_ready"}` (still processing / failed processing); 429 `{"error":"rate_limited","retryAfterS":int}` + `Retry-After` (more than 6 new jobs a minute for this identity); 503 `{"error":"not_configured"}` (cmd cannot promise its private mode, or standalone — nothing is sent anywhere). A `failed` transcript is retried by calling this again. Inv 50 |
-| GET | `server/media/{attId}/{rendition}?exp=&sig=[&g=]` | `get_media` | `rendition ∈ full\|thumb\|poster\|play`; query `exp:int`, `sig:b64url`, `g?:hex32` — present only on a URL minted from a BOUND session (§9/audit F4), and part of the signed message (`media\|{attId}\|{rendition}\|{exp}\|{email}\|{g}`), so a caller can neither add nor strip it | 200/206 (Range-aware `FileResponse`, `Cache-Control: private, no-cache`, `X-Content-Type-Options: nosniff`, `Content-Disposition: inline`); 403 (bad/expired signature, email mismatch, malformed `g`, or — when `g` is present — the grant it names is no longer live); 404 (malformed id, unknown rendition, deleted/unknown attachment, or missing file) |
+| GET | `server/media/{attId}/{rendition}?exp=&sig=[&g=]` | `get_media` | `rendition ∈ full\|thumb\|poster\|play`; query `exp:int`, `sig:b64url`, `g?:hex32` — present only on a URL minted from a BOUND session (§9/audit F4), and part of the signed message (`media\|{attId}\|{rendition}\|{exp}\|{email}\|{g}`), so a caller can neither add nor strip it | 200/206 (Range-aware `FileResponse`, `Cache-Control: private, no-cache`, `X-Content-Type-Options: nosniff`, `Content-Disposition: inline`); 403 (bad/expired signature, email mismatch, malformed `g`, or — when `g` is present — the grant it names is no longer live); 404 (malformed id, unknown rendition, deleted/unknown attachment, view-once attachment, or missing file) |
 
 `<Message>` = `{seq:int, clientId:str, sender:str, text:str\|null, attachments:[<Attachment>],
-reactions:[<Reaction>], createdAt:float, replyTo:<ReplyTo>\|null}`. `<Reaction>` =
+reactions:[<Reaction>], createdAt:float, replyTo:<ReplyTo>\|null,
+viewOnce:{durationS:int\|null, spotlight:bool}\|null}`. `<Reaction>` =
 `{emoji:str, count:int, senders:[str]}` — only emoji with at least one reactor, in the
 allowlist's order, `senders` oldest first; the reactor's `by_email` audit value is never
 returned. `<Attachment>` = `{id:str, kind:"photo"\|"video"\|"voice",
@@ -242,7 +243,7 @@ status:"processing"\|"ready"\|"failed", width:int\|null, height:int\|null,
 durationS:float\|null, peaks:[float]\|null, urls:{full?,thumb?,poster?,play?},
 transcript:null\|{status:"pending"}\|{status:"failed"}\|{status:"done",text:str}}` — `urls`
 carries only READY renditions, each a freshly per-response HMAC-signed path (never
-precomputed/stored). `transcript` is `null` until someone asks for one (voice notes only); the
+precomputed/stored); view-once attachments carry `urls: {}` (fail closed, Inv 52). `transcript` is `null` until someone asks for one (voice notes only); the
 machine `failure` reason is never on the wire.
 
 `<ReplyTo>` = `{seq:int, sender:str, text:str\|null, truncated:bool, media:<ReplyToMedia>\|null}`
@@ -250,13 +251,11 @@ machine `failure` reason is never on the wire.
 never stored on the reply itself. `text` is the target's text cut to 300 Unicode code points
 (`truncated` is true exactly when it was cut); `null` for an attachment-only target.
 `<ReplyToMedia>` = `{kind:"photo"\|"video"\|"voice"\|"mixed", count:int, durationS:float\|null,
-thumbUrl:str\|null}` — `null` for a text-only target; `kind` is the quoted attachments' shared
+thumbUrl:str\|null, viewOnce?:bool}` — `null` for a text-only target; `kind` is the quoted attachments' shared
 kind or `"mixed"`; `durationS` is the single voice note's or video's duration only when
 `count===1`; `thumbUrl` is a freshly signed URL for the FIRST attachment's `thumb` (photo) or
-`poster` (video) rendition, only when that attachment is `ready` — never `full`/`play`, and
-never present for a voice note. One level only: `<ReplyTo>` never nests another `<ReplyTo>`.
-`GET media/*`'s signature/expiry rules apply to `thumbUrl` exactly as to any other signed media
-URL.
+`poster` (video) rendition, only when that attachment is `ready` and not view-once (`null` for view-once);
+`viewOnce: true` is set when quoting a view-once target. One level only: `<ReplyTo>` never nests another `<ReplyTo>`.
 
 ### Preview / versions / shell / public
 

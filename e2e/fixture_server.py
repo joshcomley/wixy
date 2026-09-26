@@ -562,6 +562,44 @@ def main() -> None:
 
         return await anyio.to_thread.run_sync(_seed)
 
+    @app.post("/test/server/upload-photo", include_in_schema=False)
+    async def _post_upload_server_photo() -> dict[str, object]:
+        """Seeds a ready photo attachment through the server media paths
+        for real message send tests."""
+        store: LiveChatStore = app.state.livechat_store
+        paths: ProjectPaths = app.state.paths
+
+        def _upload() -> dict[str, object]:
+            now = time.time()
+            attachment_id = uuid.uuid4().hex
+            conn = store._connect()
+            try:
+                conn.execute(
+                    "INSERT INTO attachments "
+                    "(id, kind, status, mime, width, height, renditions, bytes_on_disk, "
+                    "created_at, updated_at) "
+                    "VALUES (?, 'photo', 'ready', 'image/jpeg', 16, 12, ?, ?, ?, ?)",
+                    (attachment_id, '["full","thumb"]', 0, now, now),
+                )
+            finally:
+                conn.close()
+            image = (E2E_DIR / "fixtures" / "tiny-second-image.jpg").read_bytes()
+            media_dir = paths.server_attachment_media_dir(attachment_id)
+            media_dir.mkdir(parents=True, exist_ok=True)
+            (media_dir / "full.jpg").write_bytes(image)
+            (media_dir / "thumb.jpg").write_bytes(image)
+            conn = store._connect()
+            try:
+                conn.execute(
+                    "UPDATE attachments SET bytes_on_disk = ? WHERE id = ?",
+                    (len(image) * 2, attachment_id),
+                )
+            finally:
+                conn.close()
+            return {"attachmentId": attachment_id}
+
+        return await anyio.to_thread.run_sync(_upload)
+
     def _transcribe_stats() -> dict[str, object]:
         last = (
             fake_cmd_state.transcribe_requests[-1] if fake_cmd_state.transcribe_requests else None

@@ -56,16 +56,37 @@ test.describe("server-view-once.spec.ts (spec/06-view-once-media)", () => {
     await unlockServer(pageAlice, "Alice");
     await unlockServer(pageBob, "Bob");
 
-    // Seed a 2s view-once photo sent by Alice
-    const seedRes = await pageAlice.request.post("/test/server/seed-photo", {
+    // Alice uploads photo via fixture helper (simulating normal upload route)
+    const uploadRes = await pageAlice.request.post("/test/server/upload-photo");
+    const { attachmentId } = (await uploadRes.json()) as { attachmentId: string };
+
+    // Get Alice's unlock token to send through the real POST /api/admin/server/messages/view-once route
+    const configRes = await pageAlice.request.post("/test/server/config");
+    const { pin } = (await configRes.json()) as { pin: string };
+    const unlockRes = await pageAlice.request.post("/api/admin/server/unlock", {
+      headers: { "X-Wixy-Server-Unlock": "1", "Content-Type": "application/json" },
+      data: { pin },
+    });
+    const { token: aliceToken } = (await unlockRes.json()) as { token: string };
+
+    const sendRes = await pageAlice.request.post("/api/admin/server/messages/view-once", {
+      headers: {
+        "X-Wixy-Server-Unlock": "1",
+        "X-Wixy-Server-Token": aliceToken,
+        "Content-Type": "application/json",
+      },
       data: {
+        clientId: `client-e2e-${Date.now()}`,
         sender: "Alice",
-        by_email: "alice@example.com",
-        view_once_s: 2,
+        deviceId: "device-alice-e2e",
+        attachmentId,
+        durationS: 2,
         spotlight: false,
       },
     });
-    const { seq } = (await seedRes.json()) as { seq: number };
+    expect(sendRes.status()).toBe(201);
+    const { message } = (await sendRes.json()) as { message: { seq: number } };
+    const seq = message.seq;
 
     // Alice sees sender card with "Not opened yet" and NO "Tap to view" button
     const aliceBubble = pageAlice.locator(`[data-message-seq="${seq}"]`);
@@ -132,10 +153,15 @@ test.describe("server-view-once.spec.ts (spec/06-view-once-media)", () => {
 
     // Hold tab 1's content download so it stays claimed while tab 2 attempts to claim
     let releaseContent!: () => void;
+    let contentReached!: () => void;
+    const contentReachedPromise = new Promise<void>((r) => {
+      contentReached = r;
+    });
     const contentGate = new Promise<void>((r) => {
       releaseContent = r;
     });
     await pageBob1.route(/\/view-once\/content/, async (route) => {
+      contentReached();
       await contentGate;
       await route.continue();
     });
@@ -144,6 +170,7 @@ test.describe("server-view-once.spec.ts (spec/06-view-once-media)", () => {
     const tapBtn1 = pageBob1.locator(`[data-message-seq="${seq}"] .wx-srv-view-once-tap-btn`);
     await expect(tapBtn1).toBeVisible({ timeout: 5000 });
     await tapBtn1.click();
+    await contentReachedPromise;
     await expect(pageBob1.locator(".wx-srv-view-once-overlay")).toBeVisible();
 
     // Bob tab 2 also taps to view on the same message
@@ -214,9 +241,55 @@ test.describe("server-view-once.spec.ts (spec/06-view-once-media)", () => {
     await expect(slider).toHaveAttribute("max", "35");
     await expect(slider).toHaveValue("12");
 
-    // Change slider value
+    // Pin spotlight to center (187, 333) with pointerdown on canvas
+    const canvas = overlay.locator("canvas");
+    await canvas.dispatchEvent("pointerdown", { clientX: 187, clientY: 333 });
+
+    // Sample pixels at slider = 12:
+    // (a) Corner (10, 10) is solid black mask (outside hole)
+    // (b) Center (187, 333) has image color (inside hole, blue: B > 100)
+    // (c) Intermediate point at distance ~75px from center (262, 333):
+    //     At slider = 12 (radius ~45px), it is outside hole (black mask)
+    const initialSample = await pageBob.evaluate(() => {
+      const cv = document.querySelector<HTMLCanvasElement>(".wx-srv-view-once-overlay canvas");
+      if (!cv) return null;
+      const ctx = cv.getContext("2d");
+      if (!ctx) return null;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const corner = ctx.getImageData(Math.round(10 * dpr), Math.round(10 * dpr), 1, 1).data;
+      const center = ctx.getImageData(Math.round(187 * dpr), Math.round(333 * dpr), 1, 1).data;
+      const mid = ctx.getImageData(Math.round(262 * dpr), Math.round(333 * dpr), 1, 1).data;
+      return {
+        corner: [corner[0], corner[1], corner[2]],
+        center: [center[0], center[1], center[2]],
+        mid: [mid[0], mid[1], mid[2]],
+      };
+    });
+    expect(initialSample).not.toBeNull();
+    expect(initialSample!.corner).toEqual([0, 0, 0]);
+    expect(initialSample!.center[2]).toBeGreaterThan(100);
+    expect(initialSample!.mid).toEqual([0, 0, 0]);
+
+    // Change slider value to 28 (expands radius to ~105px)
     await slider.fill("28");
     await expect(slider).toHaveValue("28");
+    await slider.dispatchEvent("input");
+
+    // Sample mid pixel again: now within expanded hole (radius 105px > 75px)
+    const expandedSample = await pageBob.evaluate(() => {
+      const cv = document.querySelector<HTMLCanvasElement>(".wx-srv-view-once-overlay canvas");
+      if (!cv) return null;
+      const ctx = cv.getContext("2d");
+      if (!ctx) return null;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const mid = ctx.getImageData(Math.round(262 * dpr), Math.round(333 * dpr), 1, 1).data;
+      return {
+        mid: [mid[0], mid[1], mid[2]],
+      };
+    });
+    expect(expandedSample).not.toBeNull();
+    // Mid point is now inside the expanded spotlight hole (shows image color!)
+    expect(expandedSample!.mid[2]).toBeGreaterThan(100);
 
     // Close viewer via close button
     await overlay.locator(".wx-srv-view-once-close").click();

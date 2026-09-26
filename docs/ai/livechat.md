@@ -551,7 +551,7 @@ directory. Plus three per-item helpers (P2b): `server_upload_dir(uploadId)` →
 ## 10. Background containment and recovery
 
 `wixy_server/background.py` wraps app-lifetime work in `ContainedTaskGroup`. Long-running loops
-(`livechat-media` and `livechat-erasure`, among others) use `supervise`: exceptions are logged,
+(`livechat-media`, `livechat-erasure`, and `livechat-view-once-backstop`, among others) use `supervise`: exceptions are logged,
 health is recorded, and loops restart with exponential backoff capped at 60 seconds. One-shot
 work uses `spawn`, which logs and contains an exception. No worker exception can cancel the
 lifespan task group; media-queue items and push recipients are also isolated from sibling items.
@@ -562,7 +562,10 @@ startup and while `pending_wipe_cleanup` exists. The hourly janitor runs once at
 every hour: it removes stale uploads and unclaimed orphan attachments after 24 hours, removes
 raw upload sources for ready attachments, retries archiving failed originals, expires an
 unarchived failed original after seven days, and prunes completed cleanup rows after seven days.
-It never ages out pending work.
+It never ages out pending work. The view-once backstop (`livechat-view-once-backstop`, spec 06) runs
+once at startup and then every 60 seconds: it sweeps claimed view-once messages older than 600
+seconds where the claimant disconnected or abandoned the download, permanently deleting their
+database rows and storage.
 
 If `/api/admin/server/usage` reports `erasurePending: true`, delete/wipe has committed and the
 worker still owes WAL or file cleanup. Check server logs for filesystem errors, restore access,
