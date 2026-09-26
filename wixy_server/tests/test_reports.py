@@ -153,6 +153,54 @@ class TestBuildReportBundle:
         ):
             assert secret not in serialized
 
+    def test_report_bundle_excludes_a_real_drawings_stroke(
+        self,
+        project: ProjectConfig,
+        paths: ProjectPaths,
+        engine_root: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Inv 40/53: a live-drawing stroke's points are chat content, exactly like a
+        message. The whole-`server_dir`-tree exclusion above already covers `server.db`
+        wholesale, but this pins the drawing feature specifically with its own
+        sentinel, rather than resting only on that generic guarantee."""
+        from wixy_server.livechat.store import LiveChatStore
+
+        settings = _settings(tmp_path, monkeypatch)
+        paths.server_dir.mkdir(parents=True)
+        store = LiveChatStore(paths.server_db)
+        message, _ = store.create_message(
+            client_id="client-report-drawing-anchor",
+            sender="Josh",
+            device_id="device-report-drawing",
+            by_email=None,
+            text="anchor for a private drawing",
+            attachment_ids=(),
+            now=1.0,
+        )
+        store.create_drawing(
+            client_id="draw-report-sentinel",
+            anchor_seq=message.seq,
+            column_width=390.0,
+            sender="Josh",
+            device_id="device-report-drawing",
+            by_email=None,
+            stroke_id="stroke-report-sentinel",
+            color="#1c1c1e",
+            width=2,
+            points=[(4242, 4343), (4444, 4545)],
+            now=2.0,
+        )
+
+        bundle = build_report_bundle(
+            project, paths, engine_root, settings, None, context="ctx", note=None, now=_TS
+        )
+
+        serialized = json.dumps(bundle)
+        for secret in ("4242", "4343", "4444", "4545", "anchor for a private drawing"):
+            assert secret not in serialized
+
     def test_shape_with_no_checkout_yet(
         self,
         project: ProjectConfig,

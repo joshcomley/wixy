@@ -34,6 +34,7 @@ import {
 import { mountTeasePreview, type TeasePreviewHandle } from "./teasePreview";
 import { mountViewOnceViewer, type ViewOnceViewerHandle } from "./viewOnceViewer";
 import { uploadServerAttachment } from "./api/uploads";
+import { mountDrawingLayer, type DrawingLayer } from "./drawingLayer";
 import type { ServerIdentity } from "./identity";
 import { linkifyInto } from "./linkify";
 import { mountMessageActions, type MessageActionsController } from "./messageActions";
@@ -224,7 +225,13 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   historyErrorRow.append(historyErrorText, retryButton);
   const messageList = documentRef.createElement("div");
   messageList.className = "wx-srv-message-list";
-  thread.append(sentinel, historyErrorRow, messageList);
+  // The message list's own positioned wrapper: the pen's drawing layer lives in here beside the
+  // list (never inside it — `renderThreadList` owns every child of the list), so drawings move
+  // with the list and are positioned relative to it (spec/server-chat/07-live-drawing.md §1).
+  const threadContent = documentRef.createElement("div");
+  threadContent.className = "wx-srv-thread-content";
+  threadContent.appendChild(messageList);
+  thread.append(sentinel, historyErrorRow, threadContent);
   const jumpPill = documentRef.createElement("button");
   jumpPill.type = "button";
   jumpPill.className = "wx-srv-jump-pill";
@@ -234,6 +241,27 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   element.appendChild(threadWrap);
 
   const threadScroll: ChatThreadScroll = mountChatThreadScroll(thread, jumpPill);
+
+  // -- The pen (spec/server-chat/07-live-drawing.md) ---------------------------------------
+  // Declared before the message state below exists, so its callbacks read that state lazily.
+  const drawingLayer: DrawingLayer = mountDrawingLayer({
+    document: documentRef,
+    win,
+    hooks,
+    identity,
+    thread,
+    threadWrap,
+    content: threadContent,
+    column: messageList,
+    anchors: () => drawingAnchors(),
+    anchorElement: (seq) => drawingAnchorElement(seq),
+    holdScroll: () => threadScroll.hold(),
+    onRemoteContent: () => threadScroll.afterContentChange(false),
+  });
+  // §5: the Pen button lives in the chat HEADER (a third composer control pushed the text box
+  // under its 120px floor on a 360px phone, decisions/00169); its toolbar sits under the header.
+  header.insertBefore(drawingLayer.penButton, settingsButton);
+  element.insertBefore(drawingLayer.toolbar, threadWrap);
   const lightbox: Lightbox = mountLightbox();
   let currentSession: ServerSession | null = null;
   let voiceRecorder: VoiceRecorder | null = null;
@@ -774,6 +802,23 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   const reactionErrors = new Map<number, string>();
   const reactionErrorTimers = new Map<number, number>();
   const renderedMessages = new Map<number, { readonly message: Message; readonly element: HTMLElement }>();
+
+  /** The bubbles a drawing may anchor to (§1): confirmed messages on screen, oldest first — never
+   * an optimistic echo (it has no seq yet) and never a bubble fading out after a delete. */
+  function drawingAnchors(): Array<{ readonly seq: number; readonly element: HTMLElement }> {
+    const anchors: Array<{ readonly seq: number; readonly element: HTMLElement }> = [];
+    for (const [seq, rendered] of renderedMessages) {
+      if (confirmedBySeq.has(seq) && rendered.element.isConnected) anchors.push({ seq, element: rendered.element });
+    }
+    return anchors.sort((a, b) => a.seq - b.seq);
+  }
+
+  function drawingAnchorElement(seq: number): HTMLElement | null {
+    const rendered = renderedMessages.get(seq);
+    return rendered !== undefined && confirmedBySeq.has(seq) && rendered.element.isConnected
+      ? rendered.element
+      : null;
+  }
 
   // -- Opt-in voice-note transcription (spec/server-chat/05-voice-transcription.md) ------
   // `transcriptionAvailable` mirrors `GET /usage`'s flag (cmd's private mode is live); the
@@ -1476,6 +1521,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       messageList.removeChild(current);
       current = next;
     }
+    // Drawings follow their anchors (positions re-read from the new layout before the scroll
+    // decision below, which must see a drawing that extends past the last bubble), fetch
+    // what a message's `drawings` summary says is new, and drop those of vanished messages.
+    drawingLayer.syncMessages(messages);
     threadScroll.afterContentChange(revealPillIfNotStuck);
   }
 
@@ -1487,6 +1536,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     deletedSeqs.add(message.seq);
     inFlightDeletes.add(message.seq);
     confirmedBySeq.delete(message.seq);
+    // spec 07 §6: its drawings go with it at once, in place (a failed delete restores the
+    // message, and its summary brings them back).
+    drawingLayer.messageDeleted(message.seq);
     const bubble = messageList.querySelector<HTMLElement>(
       `[data-message-seq="${message.seq}"]`,
     );
@@ -1539,6 +1591,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       activeViewOnceViewer.close();
       activeViewOnceViewer = null;
     }
+    // spec 07 §5/§6: a wipe ends any drawing session and takes every drawing with it.
+    drawingLayer.wiped();
     contentGeneration += 1;
     contentRevision += 1;
     scrollToOriginalGeneration += 1; // §(4): a wipe aborts any in-flight scroll-to-original
@@ -2172,6 +2226,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
 
   async function attach(session: ServerSession): Promise<number | null> {
     currentSession = session;
+    // Strokes a lock left waiting to be stored resume with this unlock's token.
+    drawingLayer.attach(session);
     if (voiceRecorder === null) voiceRecorder = createRecorder();
     const requestGeneration = contentGeneration;
     const oldestSeqAtAttach = historyLoaded ? oldestLoadedSeq() : null;
@@ -2258,6 +2314,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     element,
     attach,
     detach(): void {
+      // First, while this unlock's token is still in hand: the pen turns off, a stroke in
+      // progress is withdrawn with a live cancel, and the surface, live previews and every
+      // drawing timer go (spec 07 §5).
+      drawingLayer.detach();
       currentSession = null;
       endWipeReconcile("abandoned");
       // §(4): a lock aborts an in-flight scroll-to-original, but the pending
@@ -2298,6 +2358,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           deletedSeqs.add(event.seq);
           contentRevision += 1;
           confirmedBySeq.delete(event.seq);
+          // spec 07 §6: the cascade took its drawings; remove them in place, no tombstone.
+          drawingLayer.messageDeleted(event.seq);
           // §(2)'s client mechanism: this seq's quote vanishes everywhere it
           // was shown, patched in place — the server does NOT fan out a
           // message_updated for replies on delete.
@@ -2315,6 +2377,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           // reconciled, this settles it as committed (F16).
           endWipeReconcile("committed");
           return;
+        case "drawing_live":
+          // spec 07 §4: another screen's stroke while it is being drawn — lossy, never stored.
+          drawingLayer.handleLive(event.frame);
+          return;
         case "locked":
           // The stream's own `locked` event is handled by the caller
           // (chatView.ts), which owns the `ServerStreamHandle` — nothing to
@@ -2325,6 +2391,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     wipe,
     refreshNameChip,
     teardown(): void {
+      drawingLayer.teardown();
       currentSession = null;
       endWipeReconcile("abandoned");
       for (const controller of messageActionControllers.values()) controller.teardown();

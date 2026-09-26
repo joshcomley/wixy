@@ -4,6 +4,7 @@
 // module hand-parses `text/event-stream` frames off a plain `fetch()` body
 // reader instead.
 
+import { parseLiveFrame, type LiveFrame } from "./api/drawings";
 import { SERVER_API_BASE } from "./api/http";
 import type { Message } from "./api/messages";
 import type { ServerSession } from "./types";
@@ -11,6 +12,10 @@ import type { ServerSession } from "./types";
 export type ServerStreamEvent =
   | { readonly type: "message"; readonly message: Message }
   | { readonly type: "message_updated"; readonly message: Message }
+  /** spec/server-chat/07-live-drawing.md §4: another screen's stroke while it is being drawn.
+   * Sent with NO `id:` line, so it never moves the replay cursor (see `connect` below), and
+   * validated here before anything can render it (a malformed frame is simply skipped). */
+  | { readonly type: "drawing_live"; readonly frame: LiveFrame }
   /** §17.2's A1 amendment — P1 already emits the schema/stream headroom for
    * this; nothing produces it for real until P8. Handled here defensively so
    * this parser never chokes on it once P8 lands. */
@@ -92,6 +97,10 @@ export function mapSseEvent(frame: SseFrame): ServerStreamEvent | null {
       }
       case "wiped":
         return { type: "wiped" };
+      case "drawing_live": {
+        const parsed = parseLiveFrame(JSON.parse(frame.data));
+        return parsed === null ? null : { type: "drawing_live", frame: parsed };
+      }
       case "locked":
         return { type: "locked" };
       default:

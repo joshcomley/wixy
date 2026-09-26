@@ -76,9 +76,32 @@ class SlidingWindowRateLimiter:
         self._window_s = window_s
         self._clock = clock
         self._events: dict[str, deque[float]] = {}
+        self._last_sweep = clock()
+
+    @property
+    def tracked_key_count(self) -> int:
+        """How many keys the table holds right now (a size probe: it must stay bounded by the
+        keys active within one window)."""
+        return len(self._events)
+
+    def _sweep_idle_keys(self, now: float) -> None:
+        """Drops every key whose newest event has left the window: such a key is
+        indistinguishable from one never seen, so this cannot change any answer, and the table
+        stays bounded by the keys active within one window rather than every key ever hit.
+        Run at most once per window, so the O(keys) walk is amortised over the hits."""
+        self._last_sweep = now
+        idle = [
+            key
+            for key, events in self._events.items()
+            if not events or now - events[-1] >= self._window_s
+        ]
+        for key in idle:
+            del self._events[key]
 
     def hit(self, key: str) -> float | None:
         now = self._clock()
+        if now - self._last_sweep >= self._window_s:
+            self._sweep_idle_keys(now)
         events = self._events.setdefault(key, deque())
         while events and now - events[0] >= self._window_s:
             events.popleft()

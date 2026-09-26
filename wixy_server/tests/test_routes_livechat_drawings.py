@@ -1,0 +1,1539 @@
+"""`/api/admin/server/drawings*` and `GET /messages/{seq}/drawings`
+(spec/server-chat/07-live-drawing.md) through a real app: auth, the full validation
+matrix, idempotency, limits, the live relay's rate limit and SSE `drawing_live` frame
+shape, per-connection broker isolation, and cascade erasure through the DELETE routes.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import subprocess
+import threading
+import time
+from pathlib import Path
+from typing import Any
+
+import anyio
+import httpx
+import pytest
+from fastapi.testclient import TestClient
+
+from wixy_server.app import create_app
+from wixy_server.livechat.drawing_broker import DrawingBroker, LiveDrawingQueue
+from wixy_server.livechat.drawings import (
+    DRAWING_COLORS,
+    DRAWING_WIDTHS,
+    MAX_DRAWINGS_PER_ANCHOR,
+    MAX_STROKES_PER_DRAWING,
+)
+from wixy_server.livechat.models import EventRow
+from wixy_server.livechat.notifier import LiveChatNotifier
+from wixy_server.livechat.pinclient import CmdPinVerifier
+from wixy_server.livechat.store import LiveChatStore
+from wixy_server.livechat.tokens import UNLOCK_GUARD_HEADER, UNLOCK_GUARD_VALUE, ServerAuth
+from wixy_server.livechat.transcription import SlidingWindowRateLimiter
+from wixy_server.routes_livechat import _live_relay_budget_key, _stream_events
+from wixy_server.tests.fake_cmd import FakeCmdState, create_fake_cmd_app
+
+TEST_APP_KEY = "wixy-livechat"
+TEST_PIN = "482913"
+
+
+def _git(args: list[str], cwd: Path) -> None:
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
+
+
+@pytest.fixture
+def origin_repo(tmp_path: Path) -> Path:
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    _git(["init", "--initial-branch=main"], origin)
+    _git(["config", "user.email", "test@example.com"], origin)
+    _git(["config", "user.name", "Test"], origin)
+    (origin / "README.md").write_text("hi\n", encoding="utf-8")
+    _git(["add", "."], origin)
+    _git(["commit", "-m", "initial"], origin)
+    return origin
+
+
+@pytest.fixture
+def wixy_repo_root(tmp_path: Path, origin_repo: Path) -> Path:
+    root = tmp_path / "wixy-repo"
+    (root / "projects").mkdir(parents=True)
+    (root / "projects" / "test.json").write_text(
+        json.dumps(
+            {
+                "slug": "test",
+                "name": "test",
+                "repo": str(origin_repo),
+                "defaultBranch": "main",
+                "cmdProject": "test",
+                "domain": "test.example.invalid",
+                "locale": "en-GB",
+                "indexable": False,
+                "media": {"maxLongSidePx": 2000, "jpegQuality": 85},
+            }
+        ),
+        encoding="utf-8",
+    )
+    _git(["init", "--initial-branch=main"], root)
+    _git(["config", "user.email", "test@example.com"], root)
+    _git(["config", "user.name", "Test"], root)
+    _git(["add", "."], root)
+    _git(["commit", "-m", "engine commit"], root)
+    return root
+
+
+@pytest.fixture
+def storage_root(tmp_path: Path) -> Path:
+    return tmp_path / "storage"
+
+
+@pytest.fixture(autouse=True)
+def _dev_no_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WIXY_DEV_NO_AUTH", "1")
+
+
+@pytest.fixture
+def fake_cmd_state() -> FakeCmdState:
+    state = FakeCmdState()
+    state.register_pin_app(TEST_APP_KEY, TEST_PIN, lockout_after=5, lockout_seconds=60.0)
+    return state
+
+
+@pytest.fixture
+def pin_verifier(fake_cmd_state: FakeCmdState) -> CmdPinVerifier:
+    fake_app = create_fake_cmd_app(fake_cmd_state)
+    return CmdPinVerifier(app_key=TEST_APP_KEY, transport=httpx.ASGITransport(app=fake_app))
+
+
+def _unlock(client: TestClient, *, pin: str = TEST_PIN) -> Any:
+    return client.post(
+        "/api/admin/server/unlock",
+        json={"pin": pin},
+        headers={UNLOCK_GUARD_HEADER: UNLOCK_GUARD_VALUE},
+    )
+
+
+def _unlocked_client(
+    storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+) -> tuple[TestClient, dict[str, str]]:
+    app = create_app(
+        storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+    )
+    client = TestClient(app)
+    client.__enter__()
+    token = _unlock(client).json()["token"]
+    return client, {"X-Wixy-Server-Token": token}
+
+
+def _send_anchor(client: TestClient, headers: dict[str, str], *, client_id: str) -> int:
+    response = client.post(
+        "/api/admin/server/messages",
+        json={
+            "clientId": client_id,
+            "sender": "Josh",
+            "deviceId": "device-anchor-seed",
+            "text": "anchor message",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    return int(response.json()["message"]["seq"])
+
+
+def _create_body(
+    *,
+    client_id: str = "draw-route-client",
+    anchor_seq: int,
+    column_width: float = 390.0,
+    sender: str = "Josh",
+    device_id: str = "device-route-aaaa",
+    stroke_id: str = "stroke-route-aaaa",
+    color: str = DRAWING_COLORS[0],
+    width: int = DRAWING_WIDTHS[0],
+    points: list[list[int]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "clientId": client_id,
+        "anchorSeq": anchor_seq,
+        "columnWidth": column_width,
+        "sender": sender,
+        "deviceId": device_id,
+        "stroke": {
+            "strokeId": stroke_id,
+            "color": color,
+            "width": width,
+            "points": points if points is not None else [[1, 2], [3, 4]],
+        },
+    }
+
+
+class TestAuthIsRequiredOnEveryRoute:
+    def test_create_without_a_token_is_401_locked(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-auth-anchor")
+            response = client.post("/api/admin/server/drawings", json=_create_body(anchor_seq=seq))
+            assert response.status_code == 401
+            assert response.json() == {"error": "locked"}
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_append_stroke_without_a_token_is_401_locked(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-auth-anchor-2")
+            created = client.post(
+                "/api/admin/server/drawings", json=_create_body(anchor_seq=seq), headers=headers
+            )
+            drawing_id = created.json()["id"]
+            response = client.post(
+                f"/api/admin/server/drawings/{drawing_id}/strokes",
+                json={
+                    "strokeId": "stroke-noauth",
+                    "color": DRAWING_COLORS[0],
+                    "width": DRAWING_WIDTHS[0],
+                    "points": [[1, 2], [3, 4]],
+                },
+            )
+            assert response.status_code == 401
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_delete_without_a_token_is_401_locked(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-auth-anchor-3")
+            created = client.post(
+                "/api/admin/server/drawings", json=_create_body(anchor_seq=seq), headers=headers
+            )
+            drawing_id = created.json()["id"]
+            response = client.delete(f"/api/admin/server/drawings/{drawing_id}")
+            assert response.status_code == 401
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_get_drawings_without_a_token_is_401_locked(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-auth-anchor-4")
+            response = client.get(f"/api/admin/server/messages/{seq}/drawings")
+            assert response.status_code == 401
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_live_without_a_token_is_401_locked(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-auth-anchor-5")
+            response = client.post(
+                "/api/admin/server/drawings/live",
+                json={
+                    "drawingClientId": "draw-client-live-noauth",
+                    "anchorSeq": seq,
+                    "columnWidth": 390.0,
+                    "strokeId": "stroke-live-noauth",
+                    "batch": 0,
+                    "color": DRAWING_COLORS[0],
+                    "width": DRAWING_WIDTHS[0],
+                    "points": [[1, 2]],
+                },
+            )
+            assert response.status_code == 401
+        finally:
+            client.__exit__(None, None, None)
+
+
+class TestCreateDrawingRoute:
+    def test_creates_and_returns_201_with_id_and_rev(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-create-1")
+            response = client.post(
+                "/api/admin/server/drawings", json=_create_body(anchor_seq=seq), headers=headers
+            )
+            assert response.status_code == 201, response.text
+            body = response.json()
+            assert body["rev"] == 1
+            assert isinstance(body["id"], int)
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_a_repeated_client_id_is_200_with_the_same_drawing(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-create-2")
+            body = _create_body(anchor_seq=seq, client_id="draw-client-repeat-route")
+            first = client.post("/api/admin/server/drawings", json=body, headers=headers)
+            second = client.post("/api/admin/server/drawings", json=body, headers=headers)
+            assert first.status_code == 201
+            assert second.status_code == 200
+            assert first.json() == second.json()
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_an_unknown_anchor_seq_is_404(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            response = client.post(
+                "/api/admin/server/drawings",
+                json=_create_body(anchor_seq=999999),
+                headers=headers,
+            )
+            assert response.status_code == 404
+            assert response.json() == {"error": "not_found"}
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_a_deleted_anchor_seq_is_404(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-create-deleted")
+            deleted = client.delete(f"/api/admin/server/messages/{seq}", headers=headers)
+            assert deleted.status_code == 204
+            response = client.post(
+                "/api/admin/server/drawings", json=_create_body(anchor_seq=seq), headers=headers
+            )
+            assert response.status_code == 404
+        finally:
+            client.__exit__(None, None, None)
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("clientId", "short"),
+            ("clientId", "x" * 65),
+            ("deviceId", "short"),
+            ("deviceId", "x" * 65),
+            ("sender", ""),
+            ("sender", "   "),
+            ("sender", "x" * 33),
+            ("columnWidth", 199.0),
+            ("columnWidth", 4001.0),
+        ],
+    )
+    def test_top_level_field_validation_is_422(
+        self,
+        field: str,
+        value: object,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-create-validation")
+            body = _create_body(anchor_seq=seq)
+            body[field] = value
+            response = client.post("/api/admin/server/drawings", json=body, headers=headers)
+            assert response.status_code == 422, response.text
+            assert response.json()["error"] == "invalid"
+        finally:
+            client.__exit__(None, None, None)
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("strokeId", "short"),
+            ("strokeId", "x" * 65),
+            ("color", "#000000"),
+            ("color", ""),
+            ("width", 1),
+            ("width", 3),
+        ],
+    )
+    def test_stroke_field_validation_is_422(
+        self,
+        field: str,
+        value: object,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-create-stroke-validation")
+            body = _create_body(anchor_seq=seq)
+            body["stroke"][field] = value
+            response = client.post("/api/admin/server/drawings", json=body, headers=headers)
+            assert response.status_code == 422, response.text
+            assert response.json()["error"] == "invalid"
+        finally:
+            client.__exit__(None, None, None)
+
+    @pytest.mark.parametrize(
+        "points",
+        [
+            [[1, 2]],  # only one point
+            [[1, 2]] * 1001,  # over the 1000-pair cap
+            [[-51, 2], [3, 4]],  # x below -50
+            [[1, 2, 3], [4, 5]],  # not a pair
+            [[1, -20001], [2, 3]],  # y below -20000
+            [[1, 20001], [2, 3]],  # y above 20000
+        ],
+    )
+    def test_stroke_points_validation_is_422(
+        self,
+        points: list[list[int]],
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-create-points-validation")
+            body = _create_body(anchor_seq=seq, points=points)
+            response = client.post("/api/admin/server/drawings", json=body, headers=headers)
+            assert response.status_code == 422, response.text
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_a_non_integer_point_is_422_not_500(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        """Path data must be built only from validated numbers (spec §3) — a float
+        smuggled past `StrictInt` must 422, never coerce or crash."""
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-create-float-point")
+            body = _create_body(anchor_seq=seq, points=[[1.5, 2], [3, 4]])  # type: ignore[list-item]
+            response = client.post("/api/admin/server/drawings", json=body, headers=headers)
+            assert response.status_code == 422, response.text
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_the_twenty_first_drawing_on_one_anchor_is_409_full(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-create-limit")
+            store: LiveChatStore = client.app.state.livechat_store  # type: ignore[attr-defined]
+            for i in range(MAX_DRAWINGS_PER_ANCHOR):
+                store.create_drawing(
+                    client_id=f"draw-limit-seed-{i}",
+                    anchor_seq=seq,
+                    column_width=390.0,
+                    sender="Josh",
+                    device_id="device-1",
+                    by_email=None,
+                    stroke_id="s0",
+                    color=DRAWING_COLORS[0],
+                    width=DRAWING_WIDTHS[0],
+                    points=[(1, 2)] * 2,
+                    now=100.0 + i,
+                )
+            response = client.post(
+                "/api/admin/server/drawings",
+                json=_create_body(anchor_seq=seq, client_id="draw-limit-overflow"),
+                headers=headers,
+            )
+            assert response.status_code == 409
+            assert response.json() == {"error": "full"}
+        finally:
+            client.__exit__(None, None, None)
+
+
+class TestAppendStrokeRoute:
+    def _seed_drawing(
+        self, client: TestClient, headers: dict[str, str], *, anchor_client_id: str
+    ) -> int:
+        seq = _send_anchor(client, headers, client_id=anchor_client_id)
+        created = client.post(
+            "/api/admin/server/drawings",
+            json=_create_body(anchor_seq=seq, client_id=f"draw-{anchor_client_id}"),
+            headers=headers,
+        )
+        return int(created.json()["id"])
+
+    def test_appends_and_returns_the_new_rev(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            drawing_id = self._seed_drawing(client, headers, anchor_client_id="client-append-1")
+            response = client.post(
+                f"/api/admin/server/drawings/{drawing_id}/strokes",
+                json={
+                    "strokeId": "stroke-append-aaaa",
+                    "color": DRAWING_COLORS[1],
+                    "width": DRAWING_WIDTHS[1],
+                    "points": [[5, 6], [7, 8]],
+                },
+                headers=headers,
+            )
+            assert response.status_code == 200, response.text
+            assert response.json() == {"rev": 2}
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_a_repeated_stroke_id_is_200_and_a_no_op(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            drawing_id = self._seed_drawing(client, headers, anchor_client_id="client-append-2")
+            body = {
+                "strokeId": "stroke-repeat-aaaa",
+                "color": DRAWING_COLORS[1],
+                "width": DRAWING_WIDTHS[1],
+                "points": [[5, 6], [7, 8]],
+            }
+            first = client.post(
+                f"/api/admin/server/drawings/{drawing_id}/strokes", json=body, headers=headers
+            )
+            second = client.post(
+                f"/api/admin/server/drawings/{drawing_id}/strokes", json=body, headers=headers
+            )
+            assert first.status_code == second.status_code == 200
+            assert first.json() == second.json() == {"rev": 2}
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_an_unknown_drawing_id_is_404(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            response = client.post(
+                "/api/admin/server/drawings/999999/strokes",
+                json={
+                    "strokeId": "stroke-unknown-aaaa",
+                    "color": DRAWING_COLORS[0],
+                    "width": DRAWING_WIDTHS[0],
+                    "points": [[1, 2], [3, 4]],
+                },
+                headers=headers,
+            )
+            assert response.status_code == 404
+            assert response.json() == {"error": "not_found"}
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_a_deleted_drawing_id_is_404(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            drawing_id = self._seed_drawing(client, headers, anchor_client_id="client-append-del")
+            client.delete(f"/api/admin/server/drawings/{drawing_id}", headers=headers)
+            response = client.post(
+                f"/api/admin/server/drawings/{drawing_id}/strokes",
+                json={
+                    "strokeId": "stroke-after-delete-aaaa",
+                    "color": DRAWING_COLORS[0],
+                    "width": DRAWING_WIDTHS[0],
+                    "points": [[1, 2], [3, 4]],
+                },
+                headers=headers,
+            )
+            assert response.status_code == 404
+        finally:
+            client.__exit__(None, None, None)
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("strokeId", "short"),
+            ("color", "#not-a-color"),
+            ("width", 100),
+            ("points", [[1, 2]]),
+        ],
+    )
+    def test_field_validation_is_422(
+        self,
+        field: str,
+        value: object,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            drawing_id = self._seed_drawing(client, headers, anchor_client_id="client-append-val")
+            body: dict[str, Any] = {
+                "strokeId": "stroke-valid-base-aaaa",
+                "color": DRAWING_COLORS[0],
+                "width": DRAWING_WIDTHS[0],
+                "points": [[1, 2], [3, 4]],
+            }
+            body[field] = value
+            response = client.post(
+                f"/api/admin/server/drawings/{drawing_id}/strokes", json=body, headers=headers
+            )
+            assert response.status_code == 422, response.text
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_the_two_hundredth_stroke_succeeds_and_the_next_is_409_full(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            drawing_id = self._seed_drawing(client, headers, anchor_client_id="client-append-cap")
+            store: LiveChatStore = client.app.state.livechat_store  # type: ignore[attr-defined]
+            for i in range(1, MAX_STROKES_PER_DRAWING):
+                store.append_stroke(
+                    drawing_id=drawing_id,
+                    stroke_id=f"stroke-cap-seed-{i}",
+                    color=DRAWING_COLORS[0],
+                    width=DRAWING_WIDTHS[0],
+                    points=[(1, 2)] * 2,
+                    now=100.0 + i,
+                )
+            response = client.post(
+                f"/api/admin/server/drawings/{drawing_id}/strokes",
+                json={
+                    "strokeId": "stroke-cap-overflow",
+                    "color": DRAWING_COLORS[0],
+                    "width": DRAWING_WIDTHS[0],
+                    "points": [[1, 2], [3, 4]],
+                },
+                headers=headers,
+            )
+            assert response.status_code == 409
+            assert response.json() == {"error": "full"}
+        finally:
+            client.__exit__(None, None, None)
+
+
+class TestDeleteDrawingRoute:
+    def test_deletes_and_returns_204(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-del-1")
+            created = client.post(
+                "/api/admin/server/drawings",
+                json=_create_body(anchor_seq=seq, client_id="draw-del-1"),
+                headers=headers,
+            )
+            drawing_id = created.json()["id"]
+            response = client.delete(f"/api/admin/server/drawings/{drawing_id}", headers=headers)
+            assert response.status_code == 204
+            after = client.get(f"/api/admin/server/messages/{seq}/drawings", headers=headers)
+            assert after.json()["drawings"] == []
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_a_second_delete_is_still_204_idempotent(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-del-2")
+            created = client.post(
+                "/api/admin/server/drawings",
+                json=_create_body(anchor_seq=seq, client_id="draw-del-2"),
+                headers=headers,
+            )
+            drawing_id = created.json()["id"]
+            first = client.delete(f"/api/admin/server/drawings/{drawing_id}", headers=headers)
+            second = client.delete(f"/api/admin/server/drawings/{drawing_id}", headers=headers)
+            assert first.status_code == second.status_code == 204
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_an_unknown_drawing_id_is_still_204(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            response = client.delete("/api/admin/server/drawings/999999", headers=headers)
+            assert response.status_code == 204
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_either_person_may_delete_any_drawing(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        """Inv 46's "Delete for everyone" pattern: the deleting client's own headers
+        carry no notion of "sender" at all — there is no ownership check."""
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-del-other")
+            created = client.post(
+                "/api/admin/server/drawings",
+                json=_create_body(
+                    anchor_seq=seq,
+                    client_id="draw-del-other",
+                    sender="Purdy",
+                    device_id="device-purdy-aaaa",
+                ),
+                headers=headers,
+            )
+            drawing_id = created.json()["id"]
+            response = client.delete(f"/api/admin/server/drawings/{drawing_id}", headers=headers)
+            assert response.status_code == 204
+        finally:
+            client.__exit__(None, None, None)
+
+
+class TestGetDrawingsRoute:
+    def test_returns_every_drawing_with_its_strokes(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        """Regression test for the client builder's real-browser finding: this route
+        500'd on EVERY call (`response_model=None` was missing, so FastAPI tried to
+        infer a Pydantic model from `-> JsonObject` and raised `PydanticUserError`)."""
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-get-1")
+            created = client.post(
+                "/api/admin/server/drawings",
+                json=_create_body(anchor_seq=seq, client_id="draw-get-1"),
+                headers=headers,
+            )
+            drawing_id = created.json()["id"]
+            client.post(
+                f"/api/admin/server/drawings/{drawing_id}/strokes",
+                json={
+                    "strokeId": "stroke-get-second",
+                    "color": DRAWING_COLORS[1],
+                    "width": DRAWING_WIDTHS[1],
+                    "points": [[5, 6], [7, 8]],
+                },
+                headers=headers,
+            )
+            response = client.get(f"/api/admin/server/messages/{seq}/drawings", headers=headers)
+            assert response.status_code == 200, response.text
+            body = response.json()
+            assert len(body["drawings"]) == 1
+            drawing = body["drawings"][0]
+            assert drawing["id"] == drawing_id
+            assert drawing["rev"] == 2
+            assert drawing["sender"] == "Josh"
+            assert drawing["columnWidth"] == 390.0
+            assert [s["strokeId"] for s in drawing["strokes"]] == [
+                "stroke-route-aaaa",
+                "stroke-get-second",
+            ]
+            assert drawing["strokes"][0]["points"] == [[1, 2], [3, 4]]
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_a_message_with_no_drawings_returns_an_empty_list(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-get-empty")
+            response = client.get(f"/api/admin/server/messages/{seq}/drawings", headers=headers)
+            assert response.status_code == 200
+            assert response.json() == {"drawings": []}
+        finally:
+            client.__exit__(None, None, None)
+
+
+def _live_body(
+    *,
+    drawing_client_id: str = "draw-client-live-aaaa",
+    anchor_seq: int,
+    column_width: float = 390.0,
+    stroke_id: str = "stroke-live-aaaa",
+    batch: int = 0,
+    color: str = DRAWING_COLORS[0],
+    width: int = DRAWING_WIDTHS[0],
+    points: list[list[int]] | None = None,
+    cancel: bool = False,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "drawingClientId": drawing_client_id,
+        "anchorSeq": anchor_seq,
+        "columnWidth": column_width,
+        "strokeId": stroke_id,
+        "batch": batch,
+        "color": color,
+        "width": width,
+        "points": points if points is not None else [[1, 2]],
+        "cancel": cancel,
+    }
+    return body
+
+
+class TestLiveDrawingRoute:
+    def test_a_valid_batch_is_relayed_and_never_persisted(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-live-1")
+            store: LiveChatStore = client.app.state.livechat_store  # type: ignore[attr-defined]
+            broker: DrawingBroker = client.app.state.livechat_drawing_broker  # type: ignore[attr-defined]
+            conn_id, queue = broker.register()
+            try:
+                response = client.post(
+                    "/api/admin/server/drawings/live",
+                    json=_live_body(anchor_seq=seq),
+                    headers=headers,
+                )
+                assert response.status_code == 200, response.text
+                assert response.json() == {"ok": True}
+                frames = queue.drain()
+                assert len(frames) == 1
+                assert frames[0]["anchorSeq"] == seq
+                assert frames[0]["points"] == [[1, 2]]
+            finally:
+                broker.unregister(conn_id)
+            # Nothing about the live batch reached the database.
+            assert store.get_drawings_for_message(seq=seq) == []
+            assert store.events_after(0) == [
+                e for e in store.events_after(0) if e.type == "message"
+            ]
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_cancel_true_skips_stroke_validation(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-live-cancel")
+            response = client.post(
+                "/api/admin/server/drawings/live",
+                json=_live_body(
+                    anchor_seq=seq, cancel=True, color="not-a-real-colour", width=999, points=[]
+                ),
+                headers=headers,
+            )
+            assert response.status_code == 200, response.text
+        finally:
+            client.__exit__(None, None, None)
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("columnWidth", 199.0),
+            ("color", "#not-a-colour"),
+            ("width", 999),
+        ],
+    )
+    def test_field_validation_is_422_when_not_cancelling(
+        self,
+        field: str,
+        value: object,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-live-validation")
+            body = _live_body(anchor_seq=seq)
+            body[field] = value
+            response = client.post("/api/admin/server/drawings/live", json=body, headers=headers)
+            assert response.status_code == 422, response.text
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_too_many_points_in_one_batch_is_422(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-live-too-many-points")
+            response = client.post(
+                "/api/admin/server/drawings/live",
+                json=_live_body(anchor_seq=seq, points=[[1, 2]] * 201),
+                headers=headers,
+            )
+            assert response.status_code == 422, response.text
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_rate_limit_returns_429_with_retry_after(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-live-rate-limit")
+            client.app.state.livechat_drawing_live_limiter = SlidingWindowRateLimiter(  # type: ignore[attr-defined]
+                max_events=2, window_s=60.0
+            )
+            body = _live_body(anchor_seq=seq, drawing_client_id="draw-client-rate-limited")
+            first = client.post("/api/admin/server/drawings/live", json=body, headers=headers)
+            second = client.post("/api/admin/server/drawings/live", json=body, headers=headers)
+            third = client.post("/api/admin/server/drawings/live", json=body, headers=headers)
+            assert first.status_code == second.status_code == 200
+            assert third.status_code == 429
+            assert third.json()["error"] == "rate_limited"
+            assert int(third.headers["Retry-After"]) >= 1
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_rotating_the_drawing_client_id_does_not_reset_the_budget(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        """Audit F1: the budget is the AUTHENTICATED device's, not the body's. A token holder
+        picks every body field, so a budget keyed by `drawingClientId` was reset by inventing
+        a new id per request (and its table grew by one key each time)."""
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-live-rotate")
+            client.app.state.livechat_drawing_live_limiter = SlidingWindowRateLimiter(  # type: ignore[attr-defined]
+                max_events=2, window_s=60.0
+            )
+            statuses = [
+                client.post(
+                    "/api/admin/server/drawings/live",
+                    json=_live_body(anchor_seq=seq, drawing_client_id=f"draw-client-rot-{n:04d}"),
+                    headers=headers,
+                ).status_code
+                for n in range(4)
+            ]
+            assert statuses == [200, 200, 429, 429]
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_each_unlocked_session_has_its_own_budget(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        """spec §4: 30 batches/second is a per-DEVICE budget: two people drawing at once are
+        two unlocked sessions, and one must not throttle the other."""
+        client, first_headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            second_headers = {"X-Wixy-Server-Token": _unlock(client).json()["token"]}
+            assert second_headers != first_headers
+            seq = _send_anchor(client, first_headers, client_id="client-live-two-sessions")
+            client.app.state.livechat_drawing_live_limiter = SlidingWindowRateLimiter(  # type: ignore[attr-defined]
+                max_events=1, window_s=60.0
+            )
+            body = _live_body(anchor_seq=seq)
+            first = client.post("/api/admin/server/drawings/live", json=body, headers=first_headers)
+            second = client.post(
+                "/api/admin/server/drawings/live", json=body, headers=second_headers
+            )
+            again = client.post("/api/admin/server/drawings/live", json=body, headers=first_headers)
+            assert (first.status_code, second.status_code, again.status_code) == (200, 200, 429)
+        finally:
+            client.__exit__(None, None, None)
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            pytest.param("drawingClientId", "short", id="drawing-id-too-short"),
+            pytest.param("drawingClientId", "d" * 65, id="drawing-id-65"),
+            pytest.param("drawingClientId", "d" * 100_000, id="drawing-id-100k"),
+            pytest.param("strokeId", "short", id="stroke-id-too-short"),
+            pytest.param("strokeId", "s" * 65, id="stroke-id-65"),
+            pytest.param("strokeId", "s" * 100_000, id="stroke-id-100k"),
+            pytest.param("anchorSeq", 0, id="anchor-0"),
+            pytest.param("anchorSeq", -1, id="anchor-negative"),
+            pytest.param("anchorSeq", 2**53, id="anchor-2-53"),
+            pytest.param("batch", -1, id="batch-negative"),
+            pytest.param("batch", 10_000_001, id="batch-over-cap"),
+        ],
+    )
+    def test_unbounded_ids_and_counters_are_refused_before_relaying(
+        self,
+        field: str,
+        value: object,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        """Audit F3: every field is copied verbatim into up to 64 queued frames per open
+        stream, so each is bounded like its create/append twin, and a refused frame is never
+        relayed."""
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-live-bounds")
+            broker: DrawingBroker = client.app.state.livechat_drawing_broker  # type: ignore[attr-defined]
+            conn_id, queue = broker.register()
+            try:
+                body = _live_body(anchor_seq=seq)
+                body[field] = value
+                response = client.post(
+                    "/api/admin/server/drawings/live", json=body, headers=headers
+                )
+                assert response.status_code == 422, response.text
+                assert response.json()["error"] == "invalid"
+                assert queue.drain() == []
+            finally:
+                broker.unregister(conn_id)
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_the_largest_legal_ids_and_counters_are_relayed(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-live-max-legal")
+            broker: DrawingBroker = client.app.state.livechat_drawing_broker  # type: ignore[attr-defined]
+            conn_id, queue = broker.register()
+            try:
+                body = _live_body(
+                    anchor_seq=seq,
+                    drawing_client_id="d" * 64,
+                    stroke_id="s" * 8,
+                    batch=10_000_000,
+                )
+                response = client.post(
+                    "/api/admin/server/drawings/live", json=body, headers=headers
+                )
+                assert response.status_code == 200, response.text
+                assert len(queue.drain()) == 1
+            finally:
+                broker.unregister(conn_id)
+        finally:
+            client.__exit__(None, None, None)
+
+
+class _StubRequest:
+    """Just the `headers` a budget key reads."""
+
+    def __init__(self, token: str) -> None:
+        self.headers = {"X-Wixy-Server-Token": token}
+
+
+class TestLiveRelayBudgetKey:
+    def test_a_grant_bound_session_spends_its_grants_budget_whatever_token_it_holds(self) -> None:
+        auth = ServerAuth(email="", exp=1, grant_id="g" * 32)
+        first = _live_relay_budget_key(_StubRequest("token-one"), auth)  # type: ignore[arg-type]
+        second = _live_relay_budget_key(_StubRequest("token-two"), auth)  # type: ignore[arg-type]
+        other_grant = _live_relay_budget_key(
+            _StubRequest("token-one"),  # type: ignore[arg-type]
+            ServerAuth(email="", exp=1, grant_id="h" * 32),
+        )
+        assert first == second
+        assert first != other_grant
+
+    def test_an_unbound_session_spends_its_own_token_budget_and_never_keeps_the_token(
+        self,
+    ) -> None:
+        auth = ServerAuth(email="", exp=1)
+        first = _live_relay_budget_key(_StubRequest("token-one"), auth)  # type: ignore[arg-type]
+        again = _live_relay_budget_key(_StubRequest("token-one"), auth)  # type: ignore[arg-type]
+        other = _live_relay_budget_key(_StubRequest("token-two"), auth)  # type: ignore[arg-type]
+        assert first == again
+        assert first != other
+        assert "token-one" not in first
+
+
+_FIXED_AUTH = ServerAuth(email="", exp=int(time.time()) + 3600)
+_SECRET = b"x" * 32
+
+
+async def _next_frame(generator: Any, *, timeout_s: float = 2.0) -> dict[str, Any]:
+    with anyio.fail_after(timeout_s):
+        raw = await generator.__anext__()
+    frame: dict[str, Any] = {"id": None, "event": None, "data": None}
+    for line in raw.rstrip("\n").split("\n"):
+        if line.startswith("id: "):
+            frame["id"] = int(line[len("id: ") :])
+        elif line.startswith("event: "):
+            frame["event"] = line[len("event: ") :]
+        elif line.startswith("data: "):
+            frame["data"] = json.loads(line[len("data: ") :])
+    return frame
+
+
+class TestStreamDrawingLiveFrame:
+    """spec §4: live frames ride the SSE stream as id-less `drawing_live` events —
+    never advancing the replay cursor — interleaved with the ordinary persisted
+    events on the SAME connection."""
+
+    @pytest.mark.asyncio
+    async def test_a_pushed_frame_is_emitted_with_no_id_line(self, tmp_path: Path) -> None:
+        store = LiveChatStore(tmp_path / "server.db")
+        notifier = LiveChatNotifier()
+        queue = LiveDrawingQueue()
+        queue.push({"drawingClientId": "draw-x", "anchorSeq": 1, "batch": 0, "points": [[1, 2]]})
+        gen = _stream_events(store, notifier, _SECRET, _FIXED_AUTH, after=0, live_queue=queue)
+        try:
+            frame = await _next_frame(gen)
+        finally:
+            await gen.aclose()
+        assert frame["event"] == "drawing_live"
+        assert frame["id"] is None
+        assert frame["data"]["anchorSeq"] == 1
+
+    @pytest.mark.asyncio
+    async def test_a_live_frame_never_disturbs_the_persisted_event_cursor(
+        self, tmp_path: Path
+    ) -> None:
+        store = LiveChatStore(tmp_path / "server.db")
+        store.create_message(
+            client_id="c1",
+            sender="Josh",
+            device_id="d" * 8,
+            by_email=None,
+            text="one",
+            attachment_ids=(),
+            now=1000.0,
+        )
+        notifier = LiveChatNotifier()
+        queue = LiveDrawingQueue()
+        queue.push({"drawingClientId": "draw-x", "anchorSeq": 1, "batch": 0, "points": [[1, 2]]})
+        gen = _stream_events(store, notifier, _SECRET, _FIXED_AUTH, after=0, live_queue=queue)
+        try:
+            live_frame = await _next_frame(gen)
+            persisted_frame = await _next_frame(gen)
+        finally:
+            await gen.aclose()
+        assert live_frame["event"] == "drawing_live"
+        assert live_frame["id"] is None
+        assert persisted_frame["event"] == "message"
+        assert persisted_frame["id"] == 1
+
+    @pytest.mark.asyncio
+    async def test_a_frame_pushed_during_the_database_read_is_not_stranded_for_the_timeout(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Audit F2: a live POST that lands while the loop is inside its awaited database
+        read must wake the wait that follows. The wake-up events are swapped on every push,
+        so they have to be captured BEFORE the read; captured after it, the loop waited on the
+        fresh unset event and the frame (or a stroke's final batch, or its cancel) sat in the
+        queue for the whole 2 s re-check."""
+        store = LiveChatStore(tmp_path / "server.db")
+        notifier = LiveChatNotifier()
+        queue = LiveDrawingQueue()
+        reading = threading.Event()
+        release = threading.Event()
+        real_events_after = store.events_after
+
+        def slow_events_after(cursor: int) -> list[EventRow]:
+            reading.set()
+            assert release.wait(5.0)
+            return real_events_after(cursor)
+
+        monkeypatch.setattr(store, "events_after", slow_events_after)
+        gen = _stream_events(store, notifier, _SECRET, _FIXED_AUTH, after=0, live_queue=queue)
+        received: list[dict[str, Any]] = []
+
+        async def consume() -> None:
+            # Well under the loop's 2 s re-check: only a prompt wake-up can pass this.
+            received.append(await _next_frame(gen, timeout_s=1.0))
+
+        try:
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(consume)
+                await anyio.to_thread.run_sync(reading.wait, 5.0)
+                # The loop drained an empty queue and is now awaiting the read: exactly where a
+                # live POST's `publish` runs in production (on the event loop).
+                queue.push(
+                    {"drawingClientId": "draw-x", "anchorSeq": 1, "batch": 0, "points": [[1, 2]]}
+                )
+                release.set()
+        finally:
+            release.set()
+            await gen.aclose()
+        assert [frame["event"] for frame in received] == ["drawing_live"]
+
+    @pytest.mark.asyncio
+    async def test_a_publish_during_the_database_read_still_wakes_the_notifier_wait(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The same window for the persisted lane: a message committed by THIS process while
+        the loop is inside its read (so the read missed it) is delivered on the next tick, not
+        after the 2 s cross-process re-check."""
+        store = LiveChatStore(tmp_path / "server.db")
+        notifier = LiveChatNotifier()
+        reading = threading.Event()
+        release = threading.Event()
+        real_events_after = store.events_after
+
+        def slow_events_after(cursor: int) -> list[EventRow]:
+            reading.set()
+            assert release.wait(5.0)
+            return []
+
+        monkeypatch.setattr(store, "events_after", slow_events_after)
+        gen = _stream_events(
+            store, notifier, _SECRET, _FIXED_AUTH, after=0, live_queue=LiveDrawingQueue()
+        )
+        received: list[dict[str, Any]] = []
+
+        async def consume() -> None:
+            received.append(await _next_frame(gen, timeout_s=1.0))
+
+        try:
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(consume)
+                await anyio.to_thread.run_sync(reading.wait, 5.0)
+                # Committed after this read's snapshot: the read returns nothing, and only the
+                # publish can tell the loop to look again.
+                store.create_message(
+                    client_id="c-during-read",
+                    sender="Josh",
+                    device_id="d" * 8,
+                    by_email=None,
+                    text="landed during the read",
+                    attachment_ids=(),
+                    now=1000.0,
+                )
+                notifier.publish()
+                monkeypatch.setattr(store, "events_after", real_events_after)
+                release.set()
+        finally:
+            release.set()
+            await gen.aclose()
+        assert [frame["event"] for frame in received] == ["message"]
+
+    @pytest.mark.asyncio
+    async def test_two_registered_connections_each_get_their_own_frames(
+        self, tmp_path: Path
+    ) -> None:
+        """Per-connection isolation: `DrawingBroker.publish` fans out to every
+        registered queue, but each connection drains only its OWN queue — one
+        connection's drain never empties another's."""
+        broker = DrawingBroker()
+        _id_a, queue_a = broker.register()
+        _id_b, queue_b = broker.register()
+        broker.publish({"drawingClientId": "draw-x", "anchorSeq": 1, "batch": 0, "points": []})
+        frames_a = queue_a.drain()
+        assert len(frames_a) == 1
+        # queue_b still holds its own copy — draining `a` didn't touch it.
+        frames_b = queue_b.drain()
+        assert len(frames_b) == 1
+        assert queue_a.drain() == []
+        assert queue_b.drain() == []
+
+    def test_the_queue_drops_the_oldest_frame_past_capacity(self) -> None:
+        queue = LiveDrawingQueue()
+        from wixy_server.livechat.drawing_broker import QUEUE_MAX_FRAMES
+
+        for i in range(QUEUE_MAX_FRAMES + 5):
+            queue.push({"batch": i})
+        frames = queue.drain()
+        assert len(frames) == QUEUE_MAX_FRAMES
+        assert frames[0]["batch"] == 5  # the first 5 were dropped, oldest first
+        assert frames[-1]["batch"] == QUEUE_MAX_FRAMES + 4
+
+    def test_unregistering_stops_further_delivery(self) -> None:
+        broker = DrawingBroker()
+        conn_id, queue = broker.register()
+        broker.unregister(conn_id)
+        broker.publish({"batch": 0})
+        assert queue.drain() == []
+        assert broker.connection_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Round 2 of the Opus audit: erasure through the ROUTES, log hygiene, stream ordering,
+# the drawing's own width bound, out-of-range ids.
+# ---------------------------------------------------------------------------
+
+_SENTINEL_POINTS: list[Any] = [[1234, 5678], [2345, 6789], [3456, 7890]]
+_SENTINEL_NEEDLES = (b"1234, 5678", b"2345, 6789", b"3456, 7890")
+
+
+def _raw_db_bytes(client: TestClient) -> bytes:
+    store: LiveChatStore = client.app.state.livechat_store  # type: ignore[attr-defined]
+    db_path = Path(store._db_path)
+    wal_path = Path(f"{db_path}-wal")
+    return db_path.read_bytes() + (wal_path.read_bytes() if wal_path.exists() else b"")
+
+
+def _assert_sentinel_present(client: TestClient) -> None:
+    raw = _raw_db_bytes(client)
+    assert all(needle in raw for needle in _SENTINEL_NEEDLES), "precondition: stored on disk"
+
+
+def _assert_sentinel_gone(client: TestClient) -> None:
+    raw = _raw_db_bytes(client)
+    leaked = [needle for needle in _SENTINEL_NEEDLES if needle in raw]
+    assert leaked == []
+
+
+def _create_sentinel_drawing(client: TestClient, headers: dict[str, str], *, seq: int) -> int:
+    created = client.post(
+        "/api/admin/server/drawings",
+        json=_create_body(
+            anchor_seq=seq,
+            client_id="draw-sentinel-x",
+            column_width=4000.0,  # the spec's sentinel x-values (up to 3456) need the widest column
+            points=_SENTINEL_POINTS,
+        ),
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    return int(created.json()["id"])
+
+
+class TestErasureThroughTheRoutes:
+    """Audit F4: spec 07 §6 / Inv 53. The store-level erasure tests call `store.scrub()`
+    by hand, which no production path does, so they cannot see a route that forgets it.
+    These go through the real routes and NEVER scrub themselves."""
+
+    def test_deleting_a_drawing_scrubs_the_wal_before_it_answers(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-route-erase-drawing")
+            drawing_id = _create_sentinel_drawing(client, headers, seq=seq)
+            _assert_sentinel_present(client)
+            response = client.delete(f"/api/admin/server/drawings/{drawing_id}", headers=headers)
+            assert response.status_code == 204, response.text
+            store: LiveChatStore = client.app.state.livechat_store  # type: ignore[attr-defined]
+            assert store.scrub_pending() is False
+            _assert_sentinel_gone(client)
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_deleting_the_anchor_message_leaves_no_stroke_bytes(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-route-erase-anchor")
+            _create_sentinel_drawing(client, headers, seq=seq)
+            _assert_sentinel_present(client)
+            response = client.delete(f"/api/admin/server/messages/{seq}", headers=headers)
+            assert response.status_code == 204, response.text
+            _assert_sentinel_gone(client)
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_a_wipe_leaves_no_stroke_bytes(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-route-erase-wipe")
+            _create_sentinel_drawing(client, headers, seq=seq)
+            _assert_sentinel_present(client)
+            response = client.post(
+                "/api/admin/server/wipe", headers=headers, json={"confirm": "WIPE"}
+            )
+            assert response.status_code == 204, response.text
+            _assert_sentinel_gone(client)
+        finally:
+            client.__exit__(None, None, None)
+
+
+class TestNoLiveBatchPointsInLogs:
+    """Audit F5: spec 07 §6/§7 and Inv 53 — a live stroke in progress is never logged, on
+    the success path or on any refusal path (a 422 or 429 handler that echoed its body would
+    leak handwriting)."""
+
+    @staticmethod
+    def _assert_no_points_in(caplog: pytest.LogCaptureFixture) -> None:
+        lines = [record.getMessage() for record in caplog.records]
+        for record in caplog.records:
+            if record.exc_info is not None:
+                lines.append(str(record.exc_info[1]))
+        text = "\n".join(lines)
+        for needle in ("1234, 5678", "1234,5678", "2345, 6789", "3456, 7890"):
+            assert needle not in text
+
+    def test_the_relay_logs_nothing_from_a_batch_on_any_path(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        caplog.set_level(logging.DEBUG)
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-live-log-hygiene")
+            client.app.state.livechat_drawing_live_limiter = SlidingWindowRateLimiter(  # type: ignore[attr-defined]
+                max_events=3, window_s=60.0
+            )
+            url = "/api/admin/server/drawings/live"
+            ok = client.post(
+                url,
+                json=_live_body(anchor_seq=seq, column_width=4000.0, points=_SENTINEL_POINTS),
+                headers=headers,
+            )
+            cancelled = client.post(
+                url,
+                json=_live_body(
+                    anchor_seq=seq, column_width=4000.0, points=_SENTINEL_POINTS, cancel=True
+                ),
+                headers=headers,
+            )
+            refused = client.post(
+                url,
+                json=_live_body(
+                    anchor_seq=seq, column_width=4000.0, points=[[99999, 5678], [2345, 6789]]
+                ),
+                headers=headers,
+            )
+            limited = client.post(
+                url,
+                json=_live_body(anchor_seq=seq, column_width=4000.0, points=_SENTINEL_POINTS),
+                headers=headers,
+            )
+            assert [r.status_code for r in (ok, cancelled, refused, limited)] == [
+                200,
+                200,
+                422,
+                429,
+            ]
+        finally:
+            client.__exit__(None, None, None)
+        self._assert_no_points_in(caplog)
+
+    @pytest.mark.asyncio
+    async def test_the_stream_logs_nothing_when_it_emits_a_live_frame(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.DEBUG)
+        store = LiveChatStore(tmp_path / "server.db")
+        queue = LiveDrawingQueue()
+        queue.push(
+            {"drawingClientId": "draw-x", "anchorSeq": 1, "batch": 0, "points": _SENTINEL_POINTS}
+        )
+        gen = _stream_events(
+            store, LiveChatNotifier(), _SECRET, _FIXED_AUTH, after=0, live_queue=queue
+        )
+        try:
+            frame = await _next_frame(gen)
+        finally:
+            await gen.aclose()
+        assert frame["event"] == "drawing_live"
+        self._assert_no_points_in(caplog)
+
+
+class TestStreamChecksBeforeRelayingLiveFrames:
+    """Audit F6: spec 07 §4 — the grant check, token expiry and `locked` apply unchanged to
+    the relay, so a queued frame must never be emitted to a stream that is already locked."""
+
+    @pytest.mark.asyncio
+    async def test_an_expired_token_is_locked_not_handed_a_queued_frame(
+        self, tmp_path: Path
+    ) -> None:
+        store = LiveChatStore(tmp_path / "server.db")
+        queue = LiveDrawingQueue()
+        queue.push({"drawingClientId": "draw-x", "anchorSeq": 1, "batch": 0, "points": [[1, 2]]})
+        expired = ServerAuth(email="", exp=int(time.time()) - 5)
+        gen = _stream_events(store, LiveChatNotifier(), _SECRET, expired, after=0, live_queue=queue)
+        try:
+            frame = await _next_frame(gen)
+        finally:
+            await gen.aclose()
+        assert frame["event"] == "locked"
+
+    @pytest.mark.asyncio
+    async def test_a_revoked_grant_is_locked_not_handed_a_queued_frame(
+        self, tmp_path: Path
+    ) -> None:
+        store = LiveChatStore(tmp_path / "server.db")
+        queue = LiveDrawingQueue()
+        queue.push({"drawingClientId": "draw-x", "anchorSeq": 1, "batch": 0, "points": [[1, 2]]})
+        # A grant the store has never heard of is exactly what a revoked one looks like.
+        revoked = ServerAuth(email="", exp=int(time.time()) + 3600, grant_id="g" * 32)
+        gen = _stream_events(store, LiveChatNotifier(), _SECRET, revoked, after=0, live_queue=queue)
+        try:
+            frame = await _next_frame(gen)
+        finally:
+            await gen.aclose()
+        assert frame["event"] == "locked"
+
+
+class TestAppendUsesTheDrawingsOwnColumnWidth:
+    """Audit F7: spec 07 §3 bounds a point's x by THAT drawing's column width (+50 px). The
+    append body carries no columnWidth, so the store applies the stored one."""
+
+    def test_x_past_the_drawings_own_width_is_refused_and_not_stored(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            seq = _send_anchor(client, headers, client_id="client-append-width")
+            created = client.post(
+                "/api/admin/server/drawings",
+                json=_create_body(anchor_seq=seq, client_id="draw-append-width", column_width=390),
+                headers=headers,
+            )
+            drawing_id = created.json()["id"]
+            url = f"/api/admin/server/drawings/{drawing_id}/strokes"
+
+            edge = client.post(
+                url,
+                json={
+                    "strokeId": "stroke-at-the-edge",
+                    "color": DRAWING_COLORS[0],
+                    "width": DRAWING_WIDTHS[0],
+                    "points": [[440, 0], [10, 10]],  # 390 + 50: the last legal x
+                },
+                headers=headers,
+            )
+            past = client.post(
+                url,
+                json={
+                    "strokeId": "stroke-past-the-edge",
+                    "color": DRAWING_COLORS[0],
+                    "width": DRAWING_WIDTHS[0],
+                    "points": [[441, 0], [10, 10]],
+                },
+                headers=headers,
+            )
+            assert edge.status_code == 200, edge.text
+            assert past.status_code == 422, past.text
+            assert past.json()["error"] == "invalid"
+            stored = client.get(f"/api/admin/server/messages/{seq}/drawings", headers=headers)
+            strokes = stored.json()["drawings"][0]["strokes"]
+            assert [s["strokeId"] for s in strokes] == ["stroke-route-aaaa", "stroke-at-the-edge"]
+        finally:
+            client.__exit__(None, None, None)
+
+
+_BEYOND_SQLITE = 2**63
+
+
+class TestOutOfRangeIds:
+    """Audit F8: an id beyond SQLite's largest integer used to raise OverflowError -> 500."""
+
+    def test_the_drawing_routes_answer_their_documented_shapes(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            deleted = client.delete(f"/api/admin/server/drawings/{_BEYOND_SQLITE}", headers=headers)
+            appended = client.post(
+                f"/api/admin/server/drawings/{_BEYOND_SQLITE}/strokes",
+                json={
+                    "strokeId": "stroke-out-of-range",
+                    "color": DRAWING_COLORS[0],
+                    "width": DRAWING_WIDTHS[0],
+                    "points": [[1, 2], [3, 4]],
+                },
+                headers=headers,
+            )
+            listed = client.get(
+                f"/api/admin/server/messages/{_BEYOND_SQLITE}/drawings", headers=headers
+            )
+            assert deleted.status_code == 204
+            assert appended.status_code == 404
+            assert listed.status_code == 200
+            assert listed.json() == {"drawings": []}
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_deleting_a_message_with_an_out_of_range_seq_is_the_same_idempotent_204(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            response = client.delete(
+                f"/api/admin/server/messages/{_BEYOND_SQLITE}", headers=headers
+            )
+            assert response.status_code == 204
+        finally:
+            client.__exit__(None, None, None)
