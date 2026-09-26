@@ -13,6 +13,7 @@ import type { LockHooks, ServerSession } from "../../src/server/types";
 import type { ServerIdentity } from "../../src/server/identity";
 import { mountServerThread } from "../../src/server/thread";
 import type { Message } from "../../src/server/api/messages";
+import { ServerLockedError } from "../../src/server/api/http";
 
 const SESSION: ServerSession = { token: "tok-test", expiresAt: 9_999_999_999 };
 
@@ -372,6 +373,7 @@ describe("Server Chat View-Once & Spotlight", () => {
 
       const video = viewer.element.querySelector("video")!;
       video.dispatchEvent(new Event("play"));
+      video.dispatchEvent(new Event("playing"));
 
       expect(suspended.has("viewOnce")).toBe(true);
       expect(suspended.has("mediaPlaying")).toBe(true);
@@ -381,6 +383,48 @@ describe("Server Chat View-Once & Spotlight", () => {
       expect(suspended.has("mediaPlaying")).toBe(false);
       expect(releases["viewOnce"]).toBe(1);
       expect(releases["mediaPlaying"]).toBe(1);
+    });
+
+    it("video timer does not start merely because play() was called, but on first frame callback or playing event", async () => {
+      const { hooks, suspended } = createMockHooks();
+      const viewer = mountViewOnceViewer({
+        session: () => SESSION,
+        seq: 110,
+        hooks,
+        identity: fakeIdentity(),
+        win: window,
+        openClaim: async () => ({
+          ok: true,
+          data: { durationS: 5, spotlight: false, kind: "video", mime: "video/mp4" },
+        }),
+        fetchContent: async () => ({
+          ok: true,
+          blob: new Blob(["video"], { type: "video/mp4" }),
+        }),
+      });
+
+      document.body.appendChild(viewer.element);
+      await flush();
+      await vi.advanceTimersByTimeAsync(10);
+
+      const video = viewer.element.querySelector("video")!;
+      const countdown = viewer.element.querySelector(".wx-srv-view-once-countdown")!;
+
+      // Dispatch 'play' (playback requested)
+      video.dispatchEvent(new Event("play"));
+
+      // mediaPlaying is suspended, but timer has NOT started yet
+      expect(suspended.has("mediaPlaying")).toBe(true);
+      expect(suspended.has("viewOnce")).toBe(false);
+      expect(countdown.textContent).toBe("");
+
+      // Dispatch 'playing' (playback actually started / first frame rendered)
+      video.dispatchEvent(new Event("playing"));
+
+      expect(suspended.has("viewOnce")).toBe(true);
+      expect(countdown.textContent).toBe("5");
+
+      viewer.close();
     });
   });
 
@@ -1232,6 +1276,51 @@ describe("Server Chat View-Once & Spotlight", () => {
       viewer.close();
     });
 
+    it("in reduced motion, first drawn arc is centred at (cx, cy) before any drag", async () => {
+      const { hooks } = createMockHooks();
+      const origMatchMedia = window.matchMedia;
+      window.matchMedia = vi.fn((query: string) => ({
+        matches: query.includes("prefers-reduced-motion"),
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })) as any;
+
+      const viewer = mountViewOnceViewer({
+        session: () => SESSION,
+        seq: 505,
+        hooks,
+        identity: fakeIdentity(),
+        win: window,
+        openClaim: async () => ({
+          ok: true,
+          data: { durationS: 5, spotlight: true, kind: "photo", mime: "image/jpeg" },
+        }),
+        fetchContent: async () => ({
+          ok: true,
+          blob: new Blob(["photo"], { type: "image/jpeg" }),
+        }),
+      });
+
+      document.body.appendChild(viewer.element);
+      await flush();
+
+      const canvas = viewer.element.querySelector<HTMLCanvasElement>("canvas")!;
+      expect(arcCalls.length).toBeGreaterThan(0);
+      const firstArc = arcCalls[0]!;
+      const expectedCx = canvas.width / 2;
+      const expectedCy = canvas.height / 2;
+      expect(firstArc.x).toBeCloseTo(expectedCx);
+      expect(firstArc.y).toBeCloseTo(expectedCy);
+
+      window.matchMedia = origMatchMedia;
+      viewer.close();
+    });
+
     it("(d) window pointer listeners are removed on viewer.close()", async () => {
       const { hooks } = createMockHooks();
       const addSpy = vi.spyOn(window, "addEventListener");
@@ -1298,6 +1387,52 @@ describe("Server Chat View-Once & Spotlight", () => {
       expect(video.style.pointerEvents).toBe("none");
 
       viewer.close();
+    });
+  });
+
+  describe("Viewer 401 handling (F8)", () => {
+    it("401 / ServerLockedError on openClaim closes viewer and calls lockNow('unauthorized')", async () => {
+      const { hooks, lockCauses } = createMockHooks();
+      const viewer = mountViewOnceViewer({
+        session: () => SESSION,
+        seq: 701,
+        hooks,
+        identity: fakeIdentity(),
+        win: window,
+        openClaim: async () => {
+          throw new ServerLockedError();
+        },
+      });
+
+      document.body.appendChild(viewer.element);
+      await flush();
+
+      expect(lockCauses).toContain("unauthorized");
+      expect(document.body.contains(viewer.element)).toBe(false);
+    });
+
+    it("401 / ServerLockedError on fetchContent closes viewer and calls lockNow('unauthorized')", async () => {
+      const { hooks, lockCauses } = createMockHooks();
+      const viewer = mountViewOnceViewer({
+        session: () => SESSION,
+        seq: 702,
+        hooks,
+        identity: fakeIdentity(),
+        win: window,
+        openClaim: async () => ({
+          ok: true,
+          data: { durationS: 5, spotlight: false, kind: "photo", mime: "image/jpeg" },
+        }),
+        fetchContent: async () => {
+          throw new ServerLockedError();
+        },
+      });
+
+      document.body.appendChild(viewer.element);
+      await flush();
+
+      expect(lockCauses).toContain("unauthorized");
+      expect(document.body.contains(viewer.element)).toBe(false);
     });
   });
 });

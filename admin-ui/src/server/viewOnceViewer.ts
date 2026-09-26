@@ -10,6 +10,7 @@ import {
   type OpenViewOnceResult,
   type OpenViewOnceSuccess,
 } from "./api/messages";
+import { ServerLockedError } from "./api/http";
 import type { ServerIdentity } from "./identity";
 import type { LockHooks, ServerSession } from "./types";
 
@@ -75,8 +76,8 @@ export interface SpotlightCoordsParams {
   dragX?: number;
   dragY?: number;
   dragReleaseTime?: number;
-  dragReleaseX?: number;
-  dragReleaseY?: number;
+  dragReleaseX?: number | undefined;
+  dragReleaseY?: number | undefined;
   now?: number;
 }
 
@@ -160,6 +161,7 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
   let rafId: number | null = null;
   let timerIntervalId: number | null = null;
   let cleanupPhotoEvents: (() => void) | null = null;
+  let cancelVideoFrame: (() => void) | null = null;
 
   const abortController = new AbortController();
 
@@ -261,6 +263,10 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
     if (timerIntervalId !== null) {
       win.clearInterval?.(timerIntervalId);
       timerIntervalId = null;
+    }
+    if (cancelVideoFrame !== null) {
+      cancelVideoFrame();
+      cancelVideoFrame = null;
     }
 
     if (releaseViewOnceSuspend !== null) {
@@ -405,8 +411,34 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
       if (!releaseMediaPlayingSuspend) {
         releaseMediaPlayingSuspend = deps.hooks.suspend("mediaPlaying");
       }
-      startTimer(durationS);
     });
+
+    let videoTimerStarted = false;
+    function onFirstFrame(): void {
+      if (closed || videoTimerStarted) return;
+      videoTimerStarted = true;
+      startTimer(durationS);
+    }
+
+    const videoWithRfc = video as HTMLVideoElement & {
+      requestVideoFrameCallback?: (cb: (now: DOMHighResTimeStamp, metadata: unknown) => void) => number;
+      cancelVideoFrameCallback?: (id: number) => void;
+    };
+
+    if (typeof videoWithRfc.requestVideoFrameCallback === "function") {
+      const id = videoWithRfc.requestVideoFrameCallback(() => {
+        onFirstFrame();
+      });
+      cancelVideoFrame = () => {
+        try {
+          videoWithRfc.cancelVideoFrameCallback?.(id);
+        } catch {
+          // Ignored
+        }
+      };
+    } else {
+      video.addEventListener("playing", onFirstFrame, { once: true });
+    }
 
     video.addEventListener("ended", () => {
       close();
@@ -491,8 +523,8 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
     let dragX = 0;
     let dragY = 0;
     let dragReleaseTime = 0;
-    let dragReleaseX = 0;
-    let dragReleaseY = 0;
+    let dragReleaseX: number | undefined = undefined;
+    let dragReleaseY: number | undefined = undefined;
 
     function getPointerPos(evt: PointerEvent | MouseEvent | Touch): { x: number; y: number } {
       const rect = canvas.getBoundingClientRect();
@@ -703,7 +735,12 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
             claimId,
             sender: deps.identity.getName() ?? "Someone",
           });
-        } catch {
+        } catch (error) {
+          if (error instanceof ServerLockedError) {
+            close();
+            deps.hooks.lockNow("unauthorized");
+            return;
+          }
           claimResult = { ok: false, kind: "unavailable" };
         }
 
@@ -740,12 +777,21 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
       let contentResult: FetchViewOnceContentResult | null = null;
       let attempts = 0;
       while (!closed) {
-        contentResult = await fetchContentFn(
-          session,
-          deps.seq,
-          claimId,
-          abortController.signal,
-        );
+        try {
+          contentResult = await fetchContentFn(
+            session,
+            deps.seq,
+            claimId,
+            abortController.signal,
+          );
+        } catch (error) {
+          if (error instanceof ServerLockedError) {
+            close();
+            deps.hooks.lockNow("unauthorized");
+            return;
+          }
+          contentResult = { ok: false, kind: "unavailable" };
+        }
         if (closed) return;
         if (contentResult.ok) break;
         if (
@@ -769,7 +815,12 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
       if (contentResult && contentResult.ok) {
         await setupContent(claimData, contentResult.blob);
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof ServerLockedError) {
+        close();
+        deps.hooks.lockNow("unauthorized");
+        return;
+      }
       if (closed) return;
       statusEl.textContent = "Couldn't open this message.";
     }

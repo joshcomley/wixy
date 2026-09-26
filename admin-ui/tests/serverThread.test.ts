@@ -148,6 +148,7 @@ describe("mountServerThread", () => {
     deleteMessage.mockReset();
     wipeChat.mockReset();
     uploadServerAttachment.mockReset();
+    sendViewOnceMessage.mockReset();
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -2488,6 +2489,7 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     deleteMessage.mockReset();
     wipeChat.mockReset();
     uploadServerAttachment.mockReset();
+    sendViewOnceMessage.mockReset();
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -3554,6 +3556,100 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     expect(restoredChips).toHaveLength(1);
     const restoredVoBtn = restoredChips[0]!.querySelector(".wx-srv-view-once-chip-btn");
     expect(restoredVoBtn?.classList.contains("wx-srv-view-once-chip-active")).toBe(true);
+
+    view.teardown();
+  });
+
+  it("F3: lock during view-once send clears composer busy and restores draft", async () => {
+    getHistory.mockResolvedValue(emptyHistory());
+    uploadServerAttachment.mockResolvedValueOnce({
+      id: "att-vo-lock", kind: "photo", status: "ready", width: 800, height: 600, durationS: null, peaks: null, urls: {},
+    } satisfies UploadAttachment);
+
+    sendViewOnceMessage.mockRejectedValueOnce(new ServerLockedError());
+
+    const hooks = fakeHooks();
+    const lockNowSpy = vi.spyOn(hooks, "lockNow");
+
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks, win: window, onSettings: vi.fn() });
+    await view.attach(SESSION);
+
+    const input = view.element.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const photo = new File(["photo"], "photo.jpg", { type: "image/jpeg" });
+    Object.defineProperty(input, "files", { value: [photo], configurable: true });
+    input.dispatchEvent(new Event("change"));
+    await flush();
+
+    const chip = view.element.querySelector(".wx-chat-attachment-chip")!;
+    chip.querySelector<HTMLButtonElement>(".wx-srv-view-once-chip-btn")!.click();
+    await flush();
+    chip.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!.click();
+    await flush();
+
+    const sendBtn = view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")!;
+    sendBtn.click();
+    await flush();
+
+    expect(lockNowSpy).toHaveBeenCalledWith("unauthorized");
+
+    // The draft must be restored!
+    const restoredChips = view.element.querySelectorAll(".wx-chat-attachment-chip");
+    expect(restoredChips).toHaveLength(1);
+
+    // Composer must not be stuck busy (send button not disabled by busy flag)
+    expect(sendBtn.disabled).toBe(false);
+
+    view.teardown();
+  });
+
+  it("F4: view-once send reuses the same clientId across retries of the same attempt", async () => {
+    getHistory.mockResolvedValue(emptyHistory());
+    uploadServerAttachment.mockResolvedValueOnce({
+      id: "att-vo-retry", kind: "photo", status: "ready", width: 800, height: 600, durationS: null, peaks: null, urls: {},
+    } satisfies UploadAttachment);
+
+    // First attempt fails (dropped response / network timeout)
+    sendViewOnceMessage.mockRejectedValueOnce(new Error("network timeout"));
+    // Retry succeeds
+    sendViewOnceMessage.mockResolvedValueOnce({
+      ok: true,
+      message: fakeMessage({ text: null, attachments: [] }),
+    });
+
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: window, onSettings: vi.fn() });
+    await view.attach(SESSION);
+
+    const input = view.element.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const photo = new File(["photo"], "photo.jpg", { type: "image/jpeg" });
+    Object.defineProperty(input, "files", { value: [photo], configurable: true });
+    input.dispatchEvent(new Event("change"));
+    await flush();
+
+    const chip = view.element.querySelector(".wx-chat-attachment-chip")!;
+    chip.querySelector<HTMLButtonElement>(".wx-srv-view-once-chip-btn")!.click();
+    await flush();
+    chip.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!.click();
+    await flush();
+
+    const sendBtn = view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")!;
+
+    // First send attempt
+    sendBtn.click();
+    await flush();
+
+    expect(sendViewOnceMessage).toHaveBeenCalledTimes(1);
+    const firstClientId = (sendViewOnceMessage.mock.calls[0] as any)[1].clientId;
+    expect(typeof firstClientId).toBe("string");
+
+    // Retry send
+    sendBtn.click();
+    await flush();
+
+    expect(sendViewOnceMessage).toHaveBeenCalledTimes(2);
+    const secondClientId = (sendViewOnceMessage.mock.calls[1] as any)[1].clientId;
+
+    // Must reuse the exact same clientId for idempotency!
+    expect(secondClientId).toBe(firstClientId);
 
     view.teardown();
   });

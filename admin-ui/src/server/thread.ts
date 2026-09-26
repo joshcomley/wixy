@@ -662,6 +662,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   let pendingEchoes: PendingEcho[] = [];
   let echoCounter = 0;
   let pendingClientId: string | null = null;
+  let pendingVoCompanionClientId: string | null = null;
+  let pendingVoMessageClientId: string | null = null;
   let contentGeneration = 0;
   let contentRevision = 0;
   let latestKnownMessageSeq = 0;
@@ -1388,6 +1390,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     confirmedClientIds.clear();
     pendingEchoes = [];
     pendingClientId = null;
+    pendingVoCompanionClientId = null;
+    pendingVoMessageClientId = null;
     hasMoreHistory = false;
     // §(4): a wipe cancels the pending reply, same as ✕, a send, or the
     // target's own deletion.
@@ -1764,7 +1768,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
 
     void (async () => {
       if (hasOther) {
-        const ordClientId = cryptoRandomId(win);
+        pendingVoCompanionClientId ??= cryptoRandomId(win);
+        const ordClientId = pendingVoCompanionClientId;
         const ordReplyTo = draft.replyTo;
         const echo: PendingEcho = {
           clientId: ordClientId,
@@ -1790,6 +1795,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
             addConfirmed(ordResult.message);
             pendingEchoes = pendingEchoes.filter((e) => e.clientId !== ordClientId);
             renderThreadList();
+            pendingVoCompanionClientId = null;
           } else {
             pendingEchoes = pendingEchoes.filter((e) => e.clientId !== ordClientId);
             renderThreadList();
@@ -1829,7 +1835,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         submitBtn.textContent = "Preparing…";
         submitBtn.disabled = true;
       }
-      const voClientId = cryptoRandomId(win);
+      pendingVoMessageClientId ??= cryptoRandomId(win);
+      const voClientId = pendingVoMessageClientId;
       const voReplyToSeq = !hasOther && draft.replyTo !== null ? draft.replyTo.seq : undefined;
 
       const maxWaitMs = 60_000;
@@ -1840,6 +1847,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           resetSubmitBtn();
           composer.setBusy(false);
           restoreServerDraft(failedDraftToRestore);
+          pendingVoCompanionClientId = null;
+          pendingVoMessageClientId = null;
           return;
         }
 
@@ -1865,6 +1874,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         } catch (error) {
           if (error instanceof ServerLockedError) {
             resetSubmitBtn();
+            composer.setBusy(false);
+            restoreServerDraft(failedDraftToRestore);
             hooks.lockNow("unauthorized");
             return;
           }
@@ -1875,6 +1886,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           resetSubmitBtn();
           composer.setBusy(false);
           restoreServerDraft(failedDraftToRestore);
+          pendingVoCompanionClientId = null;
+          pendingVoMessageClientId = null;
           return;
         }
 
@@ -1885,6 +1898,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           renderThreadList();
           discardServerDraft(draft);
           fileViewOnceSettings.delete(voStaged.file);
+          pendingVoCompanionClientId = null;
+          pendingVoMessageClientId = null;
           break;
         }
 
