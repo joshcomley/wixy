@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -44,6 +45,21 @@ _REPLACE_RETRY_BASE_S = 0.05
 
 def transcript_path(transcripts_root: Path, conv_id: str) -> Path:
     return transcripts_root / conv_id / _TRANSCRIPT_FILENAME
+
+
+# One lock per transcript file. Each turn's `finally` writes from a worker thread, and a turn can
+# end while the previous turn's write is still queued or stalled, so two writers for one
+# conversation can overlap. Without ordering, a delayed EARLIER writer replaces the file after a
+# newer one and leaves it permanently missing the latest turn. The entries are tiny and per
+# conversation, so the registry is never pruned (pruning could hand two writers different locks
+# for the same file).
+_WRITE_LOCKS: dict[str, threading.Lock] = {}
+_WRITE_LOCKS_GUARD = threading.Lock()
+
+
+def _write_lock_for(path: Path) -> threading.Lock:
+    with _WRITE_LOCKS_GUARD:
+        return _WRITE_LOCKS.setdefault(str(path), threading.Lock())
 
 
 def _replace_riding_out_scanners(tmp_path: Path, path: Path) -> None:
@@ -82,12 +98,15 @@ def write_transcript(transcripts_root: Path, conv_id: str, messages: list[Worker
     """
     path = transcript_path(transcripts_root, conv_id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    text = "".join(json.dumps(message.to_json()) + "\n" for message in messages)
-    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    os.close(fd)
-    tmp_path = Path(tmp_name)
-    try:
-        tmp_path.write_text(text, encoding="utf-8")
-        _replace_riding_out_scanners(tmp_path, path)
-    finally:
-        tmp_path.unlink(missing_ok=True)
+    # The snapshot is taken INSIDE the lock, at the moment this write actually happens, so whichever
+    # writer goes last always writes the latest messages, however the writers were scheduled.
+    with _write_lock_for(path):
+        text = "".join(json.dumps(message.to_json()) + "\n" for message in messages)
+        fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+        os.close(fd)
+        tmp_path = Path(tmp_name)
+        try:
+            tmp_path.write_text(text, encoding="utf-8")
+            _replace_riding_out_scanners(tmp_path, path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
