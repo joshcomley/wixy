@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -362,7 +363,8 @@ class TestQuoteFreshnessThroughTheStore:
         client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
         try:
             store: LiveChatStore = client.app.state.livechat_store  # type: ignore[attr-defined]
-            attachment = store.create_attachment(att_id="c" * 32, kind="photo", now=1.0)
+            now_base = time.time()
+            attachment = store.create_attachment(att_id="c" * 32, kind="photo", now=now_base)
             target, _ = store.create_message(
                 client_id="client-store-target",
                 sender="Josh",
@@ -370,7 +372,7 @@ class TestQuoteFreshnessThroughTheStore:
                 by_email=None,
                 text=None,
                 attachment_ids=(attachment.id,),
-                now=2.0,
+                now=now_base + 1.0,
             )
             reply, _ = store.create_message(
                 client_id="client-store-reply",
@@ -380,10 +382,10 @@ class TestQuoteFreshnessThroughTheStore:
                 text="quoting the photo",
                 attachment_ids=(),
                 reply_to_seq=target.seq,
-                now=3.0,
+                now=now_base + 2.0,
             )
             cursor_before = max(e.event_seq for e in store.events_after(0))
-            store.claim_processing(owner="w1", now=4.0, lease_s=60.0)
+            store.claim_processing(owner="w1", now=now_base + 3.0, lease_s=60.0)
             store.finish_attachment(
                 att_id=attachment.id,
                 owner="w1",
@@ -398,7 +400,7 @@ class TestQuoteFreshnessThroughTheStore:
                     bytes_on_disk=100,
                     failure=None,
                 ),
-                now=5.0,
+                now=now_base + 4.0,
             )
             updated = {
                 e.message_seq

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ReactionRequestError, type Attachment, type HistoryPage, type Message, type SendMessageResult } from "../src/server/api/messages";
+import { ReactionRequestError, type Attachment, type HistoryPage, type Message, type SendMessageResult, type SendViewOnceResult } from "../src/server/api/messages";
 import { ServerErasureOutcomeUnknownError, ServerLockedError } from "../src/server/api/http";
 import type { ServerIdentity } from "../src/server/identity";
 import { mountServerSettingsSheet } from "../src/server/settingsSheet";
@@ -3649,6 +3649,116 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     const secondClientId = (sendViewOnceMessage.mock.calls[1] as any)[1].clientId;
 
     // Must reuse the exact same clientId for idempotency!
+    expect(secondClientId).toBe(firstClientId);
+
+    view.teardown();
+  });
+
+  it("F9: lock mid-request discards draft on success and clears clientIds", async () => {
+    getHistory.mockResolvedValue(emptyHistory());
+    uploadServerAttachment.mockResolvedValueOnce({
+      id: "att-vo-f9-succ", kind: "photo", status: "ready", width: 800, height: 600, durationS: null, peaks: null, urls: {},
+    } satisfies UploadAttachment);
+
+    let resolveSend!: (res: SendViewOnceResult) => void;
+    sendViewOnceMessage.mockReturnValueOnce(new Promise((resolve) => {
+      resolveSend = resolve;
+    }));
+
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: window, onSettings: vi.fn() });
+    await view.attach(SESSION);
+
+    const input = view.element.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const photo = new File(["photo"], "photo.jpg", { type: "image/jpeg" });
+    Object.defineProperty(input, "files", { value: [photo], configurable: true });
+    input.dispatchEvent(new Event("change"));
+    await flush();
+
+    const chip = view.element.querySelector(".wx-chat-attachment-chip")!;
+    chip.querySelector<HTMLButtonElement>(".wx-srv-view-once-chip-btn")!.click();
+    await flush();
+    chip.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!.click();
+    await flush();
+
+    const sendBtn = view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")!;
+    sendBtn.click();
+    await flush();
+
+    // Lock lands while send is in flight:
+    view.detach();
+
+    // Server responds with success
+    resolveSend({
+      ok: true,
+      message: fakeMessage({ text: null, attachments: [] }),
+    });
+    await flush();
+
+    // Draft must NOT be restored (it succeeded!)
+    const restoredChips = view.element.querySelectorAll(".wx-chat-attachment-chip");
+    expect(restoredChips).toHaveLength(0);
+
+    view.teardown();
+  });
+
+  it("F9: lock mid-request preserves clientId on failure so retry reuses it", async () => {
+    getHistory.mockResolvedValue(emptyHistory());
+    uploadServerAttachment.mockResolvedValueOnce({
+      id: "att-vo-f9-fail", kind: "photo", status: "ready", width: 800, height: 600, durationS: null, peaks: null, urls: {},
+    } satisfies UploadAttachment);
+
+    let resolveSend!: (res: SendViewOnceResult) => void;
+    sendViewOnceMessage.mockReturnValueOnce(new Promise((resolve) => {
+      resolveSend = resolve;
+    }));
+    sendViewOnceMessage.mockResolvedValueOnce({
+      ok: true,
+      message: fakeMessage({ text: null, attachments: [] }),
+    });
+
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: window, onSettings: vi.fn() });
+    await view.attach(SESSION);
+
+    const input = view.element.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const photo = new File(["photo"], "photo.jpg", { type: "image/jpeg" });
+    Object.defineProperty(input, "files", { value: [photo], configurable: true });
+    input.dispatchEvent(new Event("change"));
+    await flush();
+
+    const chip = view.element.querySelector(".wx-chat-attachment-chip")!;
+    chip.querySelector<HTMLButtonElement>(".wx-srv-view-once-chip-btn")!.click();
+    await flush();
+    chip.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!.click();
+    await flush();
+
+    const sendBtn = view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")!;
+    sendBtn.click();
+    await flush();
+
+    expect(sendViewOnceMessage).toHaveBeenCalledTimes(1);
+    const firstClientId = (sendViewOnceMessage.mock.calls[0] as any)[1].clientId;
+
+    // Lock lands while send is in flight:
+    view.detach();
+
+    // Server responds with failure (network error / unavailable)
+    resolveSend({ ok: false, kind: "unavailable" });
+    await flush();
+
+    // Reattach (simulate unlock)
+    await view.attach(SESSION);
+    await flush();
+
+    // Draft was restored:
+    const restoredChips = view.element.querySelectorAll(".wx-chat-attachment-chip");
+    expect(restoredChips).toHaveLength(1);
+
+    // Retry send
+    sendBtn.click();
+    await flush();
+
+    expect(sendViewOnceMessage).toHaveBeenCalledTimes(2);
+    const secondClientId = (sendViewOnceMessage.mock.calls[1] as any)[1].clientId;
     expect(secondClientId).toBe(firstClientId);
 
     view.teardown();

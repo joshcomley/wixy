@@ -417,6 +417,10 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
     function onFirstFrame(): void {
       if (closed || videoTimerStarted) return;
       videoTimerStarted = true;
+      if (cancelVideoFrame !== null) {
+        cancelVideoFrame();
+        cancelVideoFrame = null;
+      }
       startTimer(durationS);
     }
 
@@ -426,16 +430,27 @@ export function mountViewOnceViewer(deps: ViewOnceViewerDeps): ViewOnceViewerHan
     };
 
     if (typeof videoWithRfc.requestVideoFrameCallback === "function") {
-      const id = videoWithRfc.requestVideoFrameCallback(() => {
+      let rfcId: number | null = null;
+      const onFrame = (): void => {
+        if (closed || videoTimerStarted) return;
+        if (video.paused) {
+          rfcId = videoWithRfc.requestVideoFrameCallback!(onFrame);
+          return;
+        }
         onFirstFrame();
-      });
+      };
+      rfcId = videoWithRfc.requestVideoFrameCallback(onFrame);
       cancelVideoFrame = () => {
-        try {
-          videoWithRfc.cancelVideoFrameCallback?.(id);
-        } catch {
-          // Ignored
+        if (rfcId !== null) {
+          try {
+            videoWithRfc.cancelVideoFrameCallback?.(rfcId);
+          } catch {
+            // Ignored
+          }
+          rfcId = null;
         }
       };
+      video.addEventListener("playing", onFirstFrame, { once: true });
     } else {
       video.addEventListener("playing", onFirstFrame, { once: true });
     }

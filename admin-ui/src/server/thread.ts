@@ -1730,6 +1730,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
 
   function discardServerDraft(draft: ServerComposerDraft): void {
     composer.discardDraft(draft.base);
+    pendingVoCompanionClientId = null;
+    pendingVoMessageClientId = null;
   }
 
   function sendViewOnceDraft(
@@ -1847,8 +1849,6 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           resetSubmitBtn();
           composer.setBusy(false);
           restoreServerDraft(failedDraftToRestore);
-          pendingVoCompanionClientId = null;
-          pendingVoMessageClientId = null;
           return;
         }
 
@@ -1882,25 +1882,25 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           voResult = { ok: false, kind: "unavailable" };
         }
 
-        if (requestGeneration !== contentGeneration || currentSession === null) {
-          resetSubmitBtn();
-          composer.setBusy(false);
-          restoreServerDraft(failedDraftToRestore);
-          pendingVoCompanionClientId = null;
-          pendingVoMessageClientId = null;
-          return;
-        }
-
         if (voResult.ok) {
           resetSubmitBtn();
           composer.setBusy(false);
-          addConfirmed(voResult.message);
-          renderThreadList();
           discardServerDraft(draft);
           fileViewOnceSettings.delete(voStaged.file);
           pendingVoCompanionClientId = null;
           pendingVoMessageClientId = null;
+          if (requestGeneration === contentGeneration && currentSession !== null) {
+            addConfirmed(voResult.message);
+            renderThreadList();
+          }
           break;
+        }
+
+        if (requestGeneration !== contentGeneration || currentSession === null) {
+          resetSubmitBtn();
+          composer.setBusy(false);
+          restoreServerDraft(failedDraftToRestore);
+          return;
         }
 
         if (voResult.kind === "not_ready") {

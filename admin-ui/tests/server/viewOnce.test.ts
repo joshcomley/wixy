@@ -426,6 +426,65 @@ describe("Server Chat View-Once & Spotlight", () => {
 
       viewer.close();
     });
+
+    it("F10: video timer does not start when requestVideoFrameCallback fires while video is paused (preroll)", async () => {
+      const { hooks, suspended } = createMockHooks();
+      let rfcCallback: ((now: number, metadata: unknown) => void) | null = null;
+      const originalRfc = (HTMLVideoElement.prototype as any).requestVideoFrameCallback;
+      const originalCancel = (HTMLVideoElement.prototype as any).cancelVideoFrameCallback;
+      (HTMLVideoElement.prototype as any).requestVideoFrameCallback = vi.fn((cb) => {
+        rfcCallback = cb;
+        return 123;
+      });
+      (HTMLVideoElement.prototype as any).cancelVideoFrameCallback = vi.fn();
+
+      try {
+        const viewer = mountViewOnceViewer({
+          session: () => SESSION,
+          seq: 111,
+          hooks,
+          identity: fakeIdentity(),
+          win: window,
+          openClaim: async () => ({
+            ok: true,
+            data: { durationS: 5, spotlight: false, kind: "video", mime: "video/mp4" },
+          }),
+          fetchContent: async () => ({
+            ok: true,
+            blob: new Blob(["video"], { type: "video/mp4" }),
+          }),
+        });
+
+        document.body.appendChild(viewer.element);
+        await flush();
+        await vi.advanceTimersByTimeAsync(10);
+
+        const video = viewer.element.querySelector("video")!;
+        const countdown = viewer.element.querySelector(".wx-srv-view-once-countdown")!;
+
+        expect(rfcCallback).not.toBeNull();
+        // Simulate preroll frame while video is paused
+        Object.defineProperty(video, "paused", { value: true, configurable: true });
+        rfcCallback!(100, {});
+
+        // Timer and viewOnce suspension must NOT have started!
+        expect(suspended.has("viewOnce")).toBe(false);
+        expect(countdown.textContent).toBe("");
+
+        // Now simulate video starting to play
+        Object.defineProperty(video, "paused", { value: false, configurable: true });
+        video.dispatchEvent(new Event("playing"));
+
+        // Timer and viewOnce suspension should now start
+        expect(suspended.has("viewOnce")).toBe(true);
+        expect(countdown.textContent).toBe("5");
+
+        viewer.close();
+      } finally {
+        (HTMLVideoElement.prototype as any).requestVideoFrameCallback = originalRfc;
+        (HTMLVideoElement.prototype as any).cancelVideoFrameCallback = originalCancel;
+      }
+    });
   });
 
   describe("Spotlight calculations & interaction guarantees", () => {
