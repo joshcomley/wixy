@@ -3,7 +3,7 @@ import { ReactionRequestError, type Attachment, type HistoryPage, type Message, 
 import { ServerErasureOutcomeUnknownError, ServerLockedError } from "../src/server/api/http";
 import type { ServerIdentity } from "../src/server/identity";
 import { mountServerSettingsSheet } from "../src/server/settingsSheet";
-import { mountServerThread } from "../src/server/thread";
+import { mountServerThread, type ViewOnceDraftSettings } from "../src/server/thread";
 import { UploadError, type UploadAttachment } from "../src/server/upload";
 import type { ServerStreamEvent } from "../src/server/stream";
 import type { LockHooks, ServerSession } from "../src/server/types";
@@ -3258,7 +3258,7 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     view.teardown();
   });
 
-  it("allows only ONE chip to be flagged view-once (clears previous chip on flag) (Item 2)", async () => {
+  it("a full-size composer button (not a per-chip badge) targets the most recently staged photo/video and retargeting clears the previous flag (Item 2, redesigned after operator report: the badge's picker was clipped invisible)", async () => {
     getHistory.mockResolvedValue(emptyHistory());
     uploadServerAttachment
       .mockResolvedValueOnce({
@@ -3268,52 +3268,63 @@ describe("reply to a message (round 2 ruling item 10)", () => {
         id: "att-2", kind: "photo", status: "ready", width: 800, height: 600, durationS: null, peaks: null, urls: {},
       } satisfies UploadAttachment);
 
-    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: window, onSettings: vi.fn() });
+    const injectedVoSettings = new WeakMap<File, ViewOnceDraftSettings>();
+    const view = mountServerThread({
+      identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: window, onSettings: vi.fn(),
+      fileViewOnceSettings: injectedVoSettings,
+    });
     await view.attach(SESSION);
+
+    const viewOnceButton = view.element.querySelector<HTMLButtonElement>(".wx-srv-view-once-toggle-button")!;
+    expect(viewOnceButton.hidden).toBe(true);
 
     const input = view.element.querySelector<HTMLInputElement>('input[type="file"]')!;
     const photoA = new File(["photoA"], "photoA.jpg", { type: "image/jpeg" });
-    const photoB = new File(["photoB"], "photoB.jpg", { type: "image/jpeg" });
-    Object.defineProperty(input, "files", { value: [photoA, photoB], configurable: true });
+    Object.defineProperty(input, "files", { value: [photoA], configurable: true });
     input.dispatchEvent(new Event("change"));
     await flush();
 
-    const chips = view.element.querySelectorAll(".wx-chat-attachment-chip");
-    expect(chips).toHaveLength(2);
+    expect(viewOnceButton.hidden).toBe(false);
+    expect(viewOnceButton.textContent).toBe("⏱ View once");
 
-    const voBtnA = chips[0]!.querySelector<HTMLButtonElement>(".wx-srv-view-once-chip-btn")!;
-    const voBtnB = chips[1]!.querySelector<HTMLButtonElement>(".wx-srv-view-once-chip-btn")!;
-    expect(voBtnA).toBeTruthy();
-    expect(voBtnB).toBeTruthy();
-
-    // Flag chip A as view-once
-    voBtnA.click();
+    // Open the sheet (a real DOM element, appended to document.body — never clipped by a chip)
+    // and set A to 2s.
+    viewOnceButton.click();
     await flush();
-    const dur2sBtnA = chips[0]!.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!;
-    dur2sBtnA.click();
+    const sheetA = document.body.querySelector(".wx-srv-view-once-sheet")!;
+    expect(sheetA).toBeTruthy();
+    sheetA.querySelector<HTMLButtonElement>(".wx-srv-view-once-dur-btn:nth-child(2)")!.click();
     await flush();
 
-    expect(voBtnA.classList.contains("wx-srv-view-once-chip-active")).toBe(true);
-    expect(voBtnA.textContent).toContain("2s");
+    expect(viewOnceButton.classList.contains("wx-srv-view-once-toggle-active")).toBe(true);
+    expect(viewOnceButton.textContent).toContain("2s");
+    expect(injectedVoSettings.get(photoA)?.enabled).toBe(true);
+    expect(document.body.querySelector(".wx-srv-view-once-sheet")).toBeNull(); // closes on pick
 
-    // Now flag chip B as view-once
-    voBtnB.click();
+    // Attaching a second photo retargets the button to it and clears A's flag automatically —
+    // there is now only ONE control, so there is nothing left for the user to forget to clear.
+    const photoB = new File(["photoB"], "photoB.jpg", { type: "image/jpeg" });
+    const inputAgain = view.element.querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(inputAgain, "files", { value: [photoB], configurable: true });
+    inputAgain.dispatchEvent(new Event("change"));
     await flush();
-    const dur5sBtnB = chips[1]!.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(3)")!;
-    dur5sBtnB.click();
+
+    expect(viewOnceButton.classList.contains("wx-srv-view-once-toggle-active")).toBe(false);
+    expect(viewOnceButton.textContent).toBe("⏱ View once");
+    expect(injectedVoSettings.get(photoA)?.enabled).toBe(false);
+
+    viewOnceButton.click();
+    await flush();
+    document.body.querySelector<HTMLButtonElement>(".wx-srv-view-once-dur-btn:nth-child(3)")!.click();
     await flush();
 
-    expect(voBtnB.classList.contains("wx-srv-view-once-chip-active")).toBe(true);
-    expect(voBtnB.textContent).toContain("5s");
-
-    // Chip A must be cleared!
-    expect(voBtnA.classList.contains("wx-srv-view-once-chip-active")).toBe(false);
-    expect(voBtnA.textContent).toBe("①");
+    expect(injectedVoSettings.get(photoB)?.enabled).toBe(true);
+    expect(viewOnceButton.textContent).toContain("5s");
 
     view.teardown();
   });
 
-  it("shows a discoverability hint for the view-once control while a photo/video is staged, hides it once nothing is staged (operator report, round 2)", async () => {
+  it("hides the view-once button once nothing eligible remains staged, and reopening its sheet is a real, unclipped body-level element (operator report, round 2)", async () => {
     getHistory.mockResolvedValue(emptyHistory());
     uploadServerAttachment.mockResolvedValueOnce({
       id: "att-1", kind: "photo", status: "ready", width: 800, height: 600, durationS: null, peaks: null, urls: {},
@@ -3322,7 +3333,8 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: window, onSettings: vi.fn() });
     await view.attach(SESSION);
 
-    expect((view.element.querySelector(".wx-srv-view-once-hint") as HTMLElement).hidden).toBe(true);
+    const viewOnceButton = view.element.querySelector<HTMLButtonElement>(".wx-srv-view-once-toggle-button")!;
+    expect(viewOnceButton.hidden).toBe(true);
 
     const input = view.element.querySelector<HTMLInputElement>('input[type="file"]')!;
     const photo = new File(["photo"], "photo.jpg", { type: "image/jpeg" });
@@ -3330,16 +3342,24 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     input.dispatchEvent(new Event("change"));
     await flush();
 
-    const hint = view.element.querySelector(".wx-srv-view-once-hint");
-    expect(hint).not.toBeNull();
-    expect(hint!.textContent).toMatch(/①/);
-    expect((hint as HTMLElement).hidden).toBe(false);
+    expect(viewOnceButton.hidden).toBe(false);
+
+    viewOnceButton.click();
+    await flush();
+    const sheet = document.body.querySelector(".wx-srv-view-once-sheet");
+    expect(sheet).not.toBeNull();
+    // Genuinely reachable in real layout, not merely present in the DOM (the exact class of bug
+    // that shipped: the old picker existed in the DOM but was clipped to zero visible area by an
+    // ancestor's `overflow: hidden`).
+    expect(sheet!.closest(".wx-chat-attachment-chip")).toBeNull();
+    expect(document.body.contains(sheet)).toBe(true);
 
     const removeButton = view.element.querySelector<HTMLButtonElement>(".wx-chat-attachment-remove")!;
     removeButton.click();
     await flush();
 
-    expect((view.element.querySelector(".wx-srv-view-once-hint") as HTMLElement).hidden).toBe(true);
+    expect(viewOnceButton.hidden).toBe(true);
+    expect(document.body.querySelector(".wx-srv-view-once-sheet")).toBeNull();
 
     view.teardown();
   });
@@ -3414,9 +3434,9 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     await flush();
 
     const chip = view.element.querySelector(".wx-chat-attachment-chip")!;
-    chip.querySelector<HTMLButtonElement>(".wx-srv-view-once-chip-btn")!.click();
+    view.element.querySelector<HTMLButtonElement>(".wx-srv-view-once-toggle-button")!.click();
     await flush();
-    chip.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!.click();
+    document.body.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!.click();
     await flush();
 
     const sendBtn = view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")!;
@@ -3458,9 +3478,9 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     await flush();
 
     const chip = view.element.querySelector(".wx-chat-attachment-chip")!;
-    chip.querySelector<HTMLButtonElement>(".wx-srv-view-once-chip-btn")!.click();
+    view.element.querySelector<HTMLButtonElement>(".wx-srv-view-once-toggle-button")!.click();
     await flush();
-    chip.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!.click();
+    document.body.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!.click();
     await flush();
 
     const sendBtn = view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")!;
@@ -3514,9 +3534,9 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     // Flag chip B as view-once
     const chips = view.element.querySelectorAll(".wx-chat-attachment-chip");
     expect(chips).toHaveLength(2);
-    chips[1]!.querySelector<HTMLButtonElement>(".wx-srv-view-once-chip-btn")!.click();
+    view.element.querySelector<HTMLButtonElement>(".wx-srv-view-once-toggle-button")!.click();
     await flush();
-    chips[1]!.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!.click();
+    document.body.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!.click();
     await flush();
 
     const sendBtn = view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")!;
@@ -3567,9 +3587,9 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     // Flag chip B as view-once
     const chips = view.element.querySelectorAll(".wx-chat-attachment-chip");
     expect(chips).toHaveLength(2);
-    chips[1]!.querySelector<HTMLButtonElement>(".wx-srv-view-once-chip-btn")!.click();
+    view.element.querySelector<HTMLButtonElement>(".wx-srv-view-once-toggle-button")!.click();
     await flush();
-    chips[1]!.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!.click();
+    document.body.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!.click();
     await flush();
 
     const sendBtn = view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")!;
@@ -3585,8 +3605,9 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     expect(textarea.value).toBe("");
     const restoredChips = view.element.querySelectorAll(".wx-chat-attachment-chip");
     expect(restoredChips).toHaveLength(1);
-    const restoredVoBtn = restoredChips[0]!.querySelector(".wx-srv-view-once-chip-btn");
-    expect(restoredVoBtn?.classList.contains("wx-srv-view-once-chip-active")).toBe(true);
+    const viewOnceButton = view.element.querySelector<HTMLButtonElement>(".wx-srv-view-once-toggle-button")!;
+    expect(viewOnceButton.hidden).toBe(false);
+    expect(viewOnceButton.classList.contains("wx-srv-view-once-toggle-active")).toBe(true);
 
     view.teardown();
   });
@@ -3612,9 +3633,9 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     await flush();
 
     const chip = view.element.querySelector(".wx-chat-attachment-chip")!;
-    chip.querySelector<HTMLButtonElement>(".wx-srv-view-once-chip-btn")!.click();
+    view.element.querySelector<HTMLButtonElement>(".wx-srv-view-once-toggle-button")!.click();
     await flush();
-    chip.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!.click();
+    document.body.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!.click();
     await flush();
 
     const sendBtn = view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")!;
@@ -3657,9 +3678,9 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     await flush();
 
     const chip = view.element.querySelector(".wx-chat-attachment-chip")!;
-    chip.querySelector<HTMLButtonElement>(".wx-srv-view-once-chip-btn")!.click();
+    view.element.querySelector<HTMLButtonElement>(".wx-srv-view-once-toggle-button")!.click();
     await flush();
-    chip.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!.click();
+    document.body.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!.click();
     await flush();
 
     const sendBtn = view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")!;
@@ -3706,9 +3727,9 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     await flush();
 
     const chip = view.element.querySelector(".wx-chat-attachment-chip")!;
-    chip.querySelector<HTMLButtonElement>(".wx-srv-view-once-chip-btn")!.click();
+    view.element.querySelector<HTMLButtonElement>(".wx-srv-view-once-toggle-button")!.click();
     await flush();
-    chip.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!.click();
+    document.body.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!.click();
     await flush();
 
     const sendBtn = view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")!;
@@ -3757,9 +3778,9 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     await flush();
 
     const chip = view.element.querySelector(".wx-chat-attachment-chip")!;
-    chip.querySelector<HTMLButtonElement>(".wx-srv-view-once-chip-btn")!.click();
+    view.element.querySelector<HTMLButtonElement>(".wx-srv-view-once-toggle-button")!.click();
     await flush();
-    chip.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!.click();
+    document.body.querySelector<HTMLButtonElement>(".wx-srv-view-once-durations button:nth-child(2)")!.click();
     await flush();
 
     const sendBtn = view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")!;

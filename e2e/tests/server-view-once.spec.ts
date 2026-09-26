@@ -3,8 +3,10 @@
 // recipient vs sender cards, 409 already-opened race, and spotlight slider interaction.
 
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { fileURLToPath } from "node:url";
 
 const MULTI_TAP_INTERVAL_MS = 400;
+const PHOTO = fileURLToPath(new URL("../fixtures/livechat-photo-gps.jpg", import.meta.url));
 
 async function unlockServer(page: Page, name: string): Promise<void> {
   const configResponse = await page.request.post("/test/server/config");
@@ -297,5 +299,59 @@ test.describe("server-view-once.spec.ts (spec/06-view-once-media)", () => {
 
     await contextAlice.close();
     await contextBobMobile.close();
+  });
+
+  test("sending through the real composer button: the sheet is genuinely visible (not merely present in the DOM) and reachable on a real touch viewport (operator report, round 2: the original per-chip badge's picker was clipped invisible by its own thumbnail)", async ({
+    browser,
+  }) => {
+    const contextAlice = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      isMobile: true,
+      hasTouch: true,
+      extraHTTPHeaders: { "CF-Access-Authenticated-User-Email": "alice@example.com" },
+    });
+    const contextBob = await browser.newContext({
+      extraHTTPHeaders: { "CF-Access-Authenticated-User-Email": "bob@example.com" },
+    });
+
+    const pageAlice = await contextAlice.newPage();
+    const pageBob = await contextBob.newPage();
+
+    await unlockServer(pageAlice, "Alice");
+    await unlockServer(pageBob, "Bob");
+
+    await pageAlice.locator('input[type="file"]').setInputFiles(PHOTO);
+
+    const viewOnceButton = pageAlice.locator(".wx-srv-view-once-toggle-button");
+    await expect(viewOnceButton).toBeVisible();
+    await expect(viewOnceButton).toHaveText("⏱ View once");
+
+    await viewOnceButton.click();
+    const sheet = pageAlice.locator(".wx-srv-view-once-sheet");
+    // The real regression: the old picker existed in the DOM but was clipped to zero visible
+    // area by its thumbnail's `overflow: hidden`. `toBeVisible()` checks actual rendered layout
+    // (non-zero size, not `display:none`/`visibility:hidden`, not clipped to nothing) — exactly
+    // what a DOM-presence check in a unit test cannot catch.
+    await expect(sheet).toBeVisible();
+    // Genuinely reachable within the viewport, not merely "visible" while positioned off-screen.
+    const box = await sheet.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeGreaterThan(200);
+    expect(box!.y).toBeGreaterThanOrEqual(0);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(844);
+
+    await sheet.locator(".wx-srv-view-once-durations button", { hasText: "2 s" }).click();
+    await expect(sheet).toBeHidden();
+    await expect(viewOnceButton).toHaveText(/2s/);
+    await expect(viewOnceButton).toHaveClass(/wx-srv-view-once-toggle-active/);
+
+    await pageAlice.locator(".wx-chat-send-button").click();
+
+    const bobBubble = pageBob.locator(".wx-srv-bubble").filter({ has: pageBob.locator(".wx-srv-view-once-tap-btn") });
+    await expect(bobBubble).toBeVisible({ timeout: 5000 });
+    await expect(bobBubble.locator(".wx-srv-view-once-card-sub")).toContainText("2 s");
+
+    await contextAlice.close();
+    await contextBob.close();
   });
 });

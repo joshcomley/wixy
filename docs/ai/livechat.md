@@ -1155,19 +1155,30 @@ Consequences:
 - **Backstop janitor:** Supervised loop running at least every 30 s erases claimed view-once messages older than 600 s.
 
 ### Client: sending
-- The view-once control is NOT a separate composer button — it appears as a small "①" badge in
-  the corner of an already-staged photo/video chip (`thread.ts`'s `renderChipPreview`), opening a
-  picker (2 s / 5 s / 30 s / no limit, plus a Spotlight switch for photos). Tapping it lights the
-  badge and shows the chosen duration on it (e.g. "① 5s").
-- A persistent caption (`.wx-srv-view-once-hint`, "Tap ① on a photo or video below to send it as
-  disappearing") appears the moment any staged file is a photo or video and disappears once none
-  remain — added after an operator report that the bare glyph was undiscoverable with no prior
-  cue. It is driven by `ChatComposerOptions.onChipsRendered`, a generic hook (fires on every chip
-  re-render, including the last chip's removal) any composer caller can use without reaching into
-  the shared component's internal DOM.
-- Only ONE chip may be flagged view-once at a time (flagging a second clears the first); a hard
-  guard in `sendViewOnceDraft` refuses to send if a flagged chip would otherwise go out as an
-  ordinary, fully visible attachment.
+- **Redesigned twice on operator report (round 2).** Attempt 1 was a small "①" badge in the
+  corner of a staged photo/video chip, with its picker appended INSIDE that 56px chip — a box
+  with `overflow: hidden` — so the picker rendered completely invisible on every tap, on every
+  device (not merely small: genuinely clipped to zero visible area). A caption pointing at the
+  badge (attempt 1's discoverability fix) could not fix that; the control itself did nothing.
+- **Current design:** a full-size, clearly labelled button (`.wx-srv-view-once-toggle-button`,
+  "⏱ View once") in the composer's button row, next to 🎤/📎, visible whenever any staged file is
+  a photo or video. It always targets the MOST RECENTLY staged eligible file (the common case is
+  exactly one at a time, WhatsApp-style); attaching a different file retargets it and clears the
+  previous file's flag automatically, so there is nothing for the user to remember to undo.
+  Tapping it opens a bottom sheet (`.wx-srv-view-once-sheet`, duration 2 s / 5 s / 30 s / no
+  limit plus a Spotlight switch for photos) `position: fixed` to the viewport and appended to
+  `document.body` — never clippable by any ancestor, unlike attempt 1.
+- Driven by `ChatComposerOptions.onChipsRendered`, a generic hook (fires on every chip re-render,
+  including the last chip's removal, with the FULL currently-staged file list) any composer
+  caller can use without reaching into the shared component's internal DOM. It must NOT clear a
+  flagged file's setting when the staged list transitions to EMPTY — `takeServerDraft()` (the
+  send path) clears the live composer as an implementation detail of lifting the draft, which
+  re-renders chips with none staged; clearing there would erase the very flag `send()` is about
+  to read a moment later. Only a transition between two DIFFERENT non-empty targets clears the
+  outgoing one.
+- A hard guard in `sendViewOnceDraft` additionally refuses to send if a flagged file would
+  otherwise go out as an ordinary, fully visible attachment — defense in depth, since the
+  single-target design above already makes that path unreachable through the UI.
 
 ### Client: viewer and spotlight reveal
 - Fullscreen overlay (`viewOnceViewer.ts`):

@@ -239,7 +239,6 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   let composer: ChatComposer;
   const voiceDurations = new WeakMap<File, number>();
   const fileViewOnceSettings = deps.fileViewOnceSettings ?? new WeakMap<File, ViewOnceDraftSettings>();
-  const fileChipUpdaters = new Map<File, () => void>();
   let activeViewOnceViewer: ViewOnceViewerHandle | null = null;
   let pendingVoiceNote:
     | {
@@ -286,6 +285,140 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   voiceFailureRow.className = "wx-srv-voice-failure-row";
   voiceFailureRow.hidden = true;
   voiceFailureRow.append(retryVoiceButton, discardVoiceButton);
+
+  // Operator report (round 2): the original entry point was a ~20px "①" badge in the corner of
+  // a 56px thumbnail chip, and its picker was appended INSIDE that chip — a box with
+  // `overflow: hidden` — so the picker rendered completely invisible every time (clipped out of
+  // existence, not merely small). A proper full-size composer-bar button, and a sheet positioned
+  // `fixed` to the viewport (never clipped by any ancestor), replace both problems at once.
+  const viewOnceButton = documentRef.createElement("button");
+  viewOnceButton.type = "button";
+  viewOnceButton.className = "wx-srv-view-once-toggle-button";
+  viewOnceButton.hidden = true;
+  viewOnceButton.setAttribute("aria-label", "View once settings");
+  viewOnceButton.title = "Send this photo or video so it disappears after one view";
+
+  let viewOnceTargetFile: File | null = null;
+  let viewOncePickerEl: HTMLElement | null = null;
+
+  function updateViewOnceButtonLabel(): void {
+    const settings = viewOnceTargetFile !== null ? fileViewOnceSettings.get(viewOnceTargetFile) : undefined;
+    if (settings?.enabled) {
+      viewOnceButton.classList.add("wx-srv-view-once-toggle-active");
+      viewOnceButton.textContent = settings.durationS !== null
+        ? `⏱ View once · ${settings.durationS}s`
+        : "⏱ View once · ∞";
+    } else {
+      viewOnceButton.classList.remove("wx-srv-view-once-toggle-active");
+      viewOnceButton.textContent = "⏱ View once";
+    }
+  }
+
+  function closeViewOncePicker(): void {
+    viewOncePickerEl?.remove();
+    viewOncePickerEl = null;
+  }
+
+  function openViewOncePicker(): void {
+    const file = viewOnceTargetFile;
+    if (file === null) return;
+    if (viewOncePickerEl !== null) {
+      closeViewOncePicker();
+      return;
+    }
+
+    let settings = fileViewOnceSettings.get(file);
+    if (!settings) {
+      settings = { enabled: false, durationS: 5, spotlight: false };
+      fileViewOnceSettings.set(file, settings);
+    }
+    const isImage = file.type.startsWith("image/");
+
+    const sheet = documentRef.createElement("div");
+    sheet.className = "wx-srv-view-once-sheet";
+
+    const header = documentRef.createElement("div");
+    header.className = "wx-srv-view-once-sheet-header";
+    const title = documentRef.createElement("div");
+    title.className = "wx-srv-view-once-picker-title";
+    title.textContent = "View once";
+    const closeBtn = documentRef.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "wx-srv-view-once-sheet-close";
+    closeBtn.textContent = "✕";
+    closeBtn.setAttribute("aria-label", "Close");
+    closeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeViewOncePicker();
+    });
+    header.append(title, closeBtn);
+    sheet.appendChild(header);
+
+    const durationsWrap = documentRef.createElement("div");
+    durationsWrap.className = "wx-srv-view-once-durations";
+
+    const durations: Array<{ label: string; enabled: boolean; val: 2 | 5 | 30 | null }> = [
+      { label: "Off", enabled: false, val: 5 },
+      { label: "2 s", enabled: true, val: 2 },
+      { label: "5 s", enabled: true, val: 5 },
+      { label: "30 s", enabled: true, val: 30 },
+      { label: "No limit", enabled: true, val: null },
+    ];
+
+    for (const d of durations) {
+      const btn = documentRef.createElement("button");
+      btn.type = "button";
+      btn.className = "wx-srv-view-once-dur-btn";
+      btn.textContent = d.label;
+      const isCurrent = settings.enabled === d.enabled && (!d.enabled || settings.durationS === d.val);
+      if (isCurrent) btn.classList.add("active");
+
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        settings!.enabled = d.enabled;
+        if (d.enabled) settings!.durationS = d.val;
+        fileViewOnceSettings.set(file, settings!);
+        updateViewOnceButtonLabel();
+        closeViewOncePicker();
+      });
+      durationsWrap.appendChild(btn);
+    }
+    sheet.appendChild(durationsWrap);
+
+    if (isImage) {
+      const spotlightLabel = documentRef.createElement("label");
+      spotlightLabel.className = "wx-srv-view-once-spotlight-label";
+      const checkbox = documentRef.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = settings.spotlight;
+      checkbox.addEventListener("change", () => {
+        settings!.spotlight = checkbox.checked;
+        fileViewOnceSettings.set(file, settings!);
+      });
+      spotlightLabel.append(checkbox, documentRef.createTextNode("Spotlight"));
+      sheet.appendChild(spotlightLabel);
+    }
+
+    const note = documentRef.createElement("div");
+    note.className = "wx-srv-view-once-note";
+    note.textContent = "It disappears once they open it. They could still take a screenshot.";
+    sheet.appendChild(note);
+
+    sheet.addEventListener("click", (e) => e.stopPropagation());
+
+    const backdrop = documentRef.createElement("div");
+    backdrop.className = "wx-srv-view-once-sheet-backdrop";
+    backdrop.addEventListener("click", () => closeViewOncePicker());
+    backdrop.appendChild(sheet);
+
+    documentRef.body.appendChild(backdrop);
+    viewOncePickerEl = backdrop;
+  }
+
+  viewOnceButton.addEventListener("click", (evt) => {
+    evt.stopPropagation();
+    openViewOncePicker();
+  });
 
   function formatRecordingTime(milliseconds: number): string {
     const seconds = Math.floor(Math.max(0, milliseconds) / 1000);
@@ -387,15 +520,6 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     updateRecorderUi();
   });
 
-  // Operator report (round 2): the view-once control was undiscoverable — the only affordance is
-  // a small "①" badge in the corner of an already-staged photo/video chip, with no hint it exists
-  // until you happen to notice it. This caption fills in for that: it appears the moment an
-  // eligible chip is staged and disappears once nothing eligible remains.
-  const viewOnceHint = documentRef.createElement("p");
-  viewOnceHint.className = "wx-srv-view-once-hint";
-  viewOnceHint.textContent = "Tap ① on a photo or video below to send it as disappearing.";
-  viewOnceHint.hidden = true;
-
   composer = mountChatComposer({
     mode: "composer",
     placeholder: "Message…",
@@ -405,156 +529,45 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     acceptFile: (file) => file.type.startsWith("image/") || file.type.startsWith("video/"),
     onFilePickerOpen: () => hooks.suspend("filePicker"),
     onChipsRendered: (stagedFiles) => {
-      viewOnceHint.hidden = !stagedFiles.some(
+      const eligible = stagedFiles.filter(
         (file) => file.type.startsWith("image/") || file.type.startsWith("video/"),
       );
+      // The button always targets the most recently staged eligible file — the common case is
+      // exactly one photo/video at a time (WhatsApp-style). Attaching a DIFFERENT file while one
+      // was flagged clears the old flag rather than leaving a stale, invisible enabled file behind
+      // (it would otherwise silently win the "which chip is the view-once one" check at send
+      // time). Transitioning to NO eligible file (target === null) must NOT clear anything: that
+      // also happens as an implementation detail of sending — `takeServerDraft()` empties the
+      // live composer immediately, which re-renders chips with none staged — and clearing here
+      // would erase the very flag `send()` is about to read, moments before it reads it.
+      const target = eligible.length > 0 ? eligible[eligible.length - 1]! : null;
+      if (target !== viewOnceTargetFile) {
+        closeViewOncePicker();
+        if (viewOnceTargetFile !== null && target !== null) {
+          const previous = fileViewOnceSettings.get(viewOnceTargetFile);
+          if (previous?.enabled) fileViewOnceSettings.set(viewOnceTargetFile, { ...previous, enabled: false });
+        }
+        viewOnceTargetFile = target;
+      }
+      viewOnceButton.hidden = target === null;
+      updateViewOnceButtonLabel();
     },
     // Sending never disables, blurs or resizes the input (operator report, round 2): the box is
     // cleared at once by `takeDraft()` and the draft comes back on a failed send.
     keepInputLive: true,
-    extraButtons: [recordButton, cancelRecordingButton, recordingStatus],
+    extraButtons: [recordButton, cancelRecordingButton, recordingStatus, viewOnceButton],
     renderChipPreview: (file, previewUrl) => {
-      const isImage = file.type.startsWith("image/");
-      const isVideo = file.type.startsWith("video/");
-      const container = documentRef.createElement("div");
-      container.className = "wx-srv-chip-content";
-
-      if (isImage) {
+      if (file.type.startsWith("image/")) {
         const thumb = documentRef.createElement("img");
         thumb.className = "wx-chat-attachment-thumb";
         thumb.src = previewUrl;
         thumb.alt = "";
-        container.appendChild(thumb);
-      } else {
-        const label = documentRef.createElement("span");
-        label.className = "wx-srv-attachment-chip-label";
-        label.textContent = file.type.startsWith("audio/") ? "🎤 Voice note" : "🎞 Video";
-        container.appendChild(label);
+        return thumb;
       }
-
-      if (isImage || isVideo) {
-        let settings = fileViewOnceSettings.get(file);
-        if (!settings) {
-          settings = { enabled: false, durationS: 5, spotlight: false };
-          fileViewOnceSettings.set(file, settings);
-        }
-
-        const voBtn = documentRef.createElement("button");
-        voBtn.type = "button";
-        voBtn.className = "wx-srv-view-once-chip-btn";
-
-        const updateVoBtn = (): void => {
-          if (settings!.enabled) {
-            voBtn.classList.add("wx-srv-view-once-chip-active");
-            voBtn.textContent = settings!.durationS !== null ? `① ${settings!.durationS}s` : "① ∞";
-          } else {
-            voBtn.classList.remove("wx-srv-view-once-chip-active");
-            voBtn.textContent = "①";
-          }
-        };
-        fileChipUpdaters.set(file, updateVoBtn);
-        updateVoBtn();
-        voBtn.setAttribute("aria-label", "View once settings");
-        voBtn.title = "View once";
-
-        let pickerEl: HTMLElement | null = null;
-
-        const onWinClick = (evt: MouseEvent): void => {
-          if (pickerEl && !pickerEl.contains(evt.target as Node) && evt.target !== voBtn) {
-            closePicker();
-          }
-        };
-
-        function closePicker(): void {
-          pickerEl?.remove();
-          pickerEl = null;
-          win.removeEventListener("click", onWinClick);
-        }
-
-        voBtn.addEventListener("click", (evt) => {
-          evt.stopPropagation();
-          if (pickerEl !== null) {
-            closePicker();
-            return;
-          }
-
-          pickerEl = documentRef.createElement("div");
-          pickerEl.className = "wx-srv-view-once-picker";
-
-          const title = documentRef.createElement("div");
-          title.className = "wx-srv-view-once-picker-title";
-          title.textContent = "View once";
-          pickerEl.appendChild(title);
-
-          const durationsWrap = documentRef.createElement("div");
-          durationsWrap.className = "wx-srv-view-once-durations";
-
-          const durations: Array<{ label: string; enabled: boolean; val: 2 | 5 | 30 | null }> = [
-            { label: "Off", enabled: false, val: 5 },
-            { label: "2 s", enabled: true, val: 2 },
-            { label: "5 s", enabled: true, val: 5 },
-            { label: "30 s", enabled: true, val: 30 },
-            { label: "No limit", enabled: true, val: null },
-          ];
-
-          for (const d of durations) {
-            const btn = documentRef.createElement("button");
-            btn.type = "button";
-            btn.className = "wx-srv-view-once-dur-btn";
-            btn.textContent = d.label;
-            const isCurrent = settings!.enabled === d.enabled && (!d.enabled || settings!.durationS === d.val);
-            if (isCurrent) btn.classList.add("active");
-
-            btn.addEventListener("click", (e) => {
-              e.stopPropagation();
-              settings!.enabled = d.enabled;
-              if (d.enabled) {
-                settings!.durationS = d.val;
-                for (const [otherFile, updater] of fileChipUpdaters.entries()) {
-                  if (otherFile !== file) {
-                    const otherSettings = fileViewOnceSettings.get(otherFile);
-                    if (otherSettings && otherSettings.enabled) {
-                      otherSettings.enabled = false;
-                      updater();
-                    }
-                  }
-                }
-              }
-              fileViewOnceSettings.set(file, settings!);
-              updateVoBtn();
-              closePicker();
-            });
-            durationsWrap.appendChild(btn);
-          }
-          pickerEl.appendChild(durationsWrap);
-
-          if (isImage) {
-            const spotlightLabel = documentRef.createElement("label");
-            spotlightLabel.className = "wx-srv-view-once-spotlight-label";
-            const checkbox = documentRef.createElement("input");
-            checkbox.type = "checkbox";
-            checkbox.checked = settings!.spotlight;
-            checkbox.addEventListener("change", () => {
-              settings!.spotlight = checkbox.checked;
-              fileViewOnceSettings.set(file, settings!);
-            });
-            spotlightLabel.append(checkbox, documentRef.createTextNode("Spotlight"));
-            pickerEl.appendChild(spotlightLabel);
-          }
-
-          const note = documentRef.createElement("div");
-          note.className = "wx-srv-view-once-note";
-          note.textContent = "It disappears once they open it. They could still take a screenshot.";
-          pickerEl.appendChild(note);
-
-          container.appendChild(pickerEl);
-          win.setTimeout?.(() => win.addEventListener("click", onWinClick), 0);
-        });
-
-        container.appendChild(voBtn);
-      }
-
-      return container;
+      const label = documentRef.createElement("span");
+      label.className = "wx-srv-attachment-chip-label";
+      label.textContent = file.type.startsWith("audio/") ? "🎤 Voice note" : "🎞 Video";
+      return label;
     },
     upload: async (file, context) => {
       const session = currentSession;
@@ -576,7 +589,6 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     onSubmit: () => send(),
   });
   composer.setAttachmentsSupported(true);
-  composer.element.querySelector(".wx-chat-attachment-row")?.insertAdjacentElement("afterend", viewOnceHint);
   const attachButton = composer.element.querySelector<HTMLButtonElement>(".wx-chat-attach-button");
   if (attachButton !== null) {
     attachButton.title = "Attach a photo or video";
@@ -2197,6 +2209,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         activeViewOnceViewer.close();
         activeViewOnceViewer = null;
       }
+      closeViewOncePicker();
       threadScroll.teardown();
       composer.teardown();
     },
