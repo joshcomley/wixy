@@ -12,6 +12,8 @@ confirm delivery without ever calling this notifier's `publish()`).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import anyio
 
 
@@ -37,3 +39,29 @@ class LiveChatNotifier:
         event = self._event
         with anyio.move_on_after(timeout_s):
             await event.wait()
+
+    @property
+    def current_event(self) -> anyio.Event:
+        """The event a caller should capture BEFORE checking any condition it exists to
+        guard, so nothing can `publish()` in the gap between the check and the wait
+        (spec/server-chat/07-live-drawing.md §4: the stream loop races this against a
+        `LiveDrawingQueue`'s own event, so both wake sources need the same guarantee)."""
+        return self._event
+
+
+async def wait_on_any(events: Sequence[anyio.Event], *, timeout_s: float) -> None:
+    """Returns as soon as ANY of `events` is set, or after `timeout_s` elapses — used by
+    the Server-chat stream loop to wait on the notifier's event and a per-connection
+    `LiveDrawingQueue`'s event together (spec/server-chat/07-live-drawing.md §4: "The
+    stream loop waits on the notifier OR its queue"). Cancelling the outer scope as soon
+    as one waiter's event fires unwinds the task group cleanly — the other waiters are
+    simply cancelled, never awaited to completion."""
+    with anyio.move_on_after(timeout_s) as scope:
+        async with anyio.create_task_group() as tg:
+
+            async def _wait_one(event: anyio.Event) -> None:
+                await event.wait()
+                scope.cancel()
+
+            for event in events:
+                tg.start_soon(_wait_one, event)
