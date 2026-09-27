@@ -142,11 +142,29 @@ function setup(): Setup {
   const bubbles = new Map<number, HTMLElement>();
   let uuid = 0;
   const clock = { t: 1_000 };
+  const listeners = new Map<string, Set<EventListener>>();
   const win = {
     crypto: { randomUUID: () => `uuid-${(uuid += 1).toString().padStart(4, "0")}` },
     setTimeout: globalThis.setTimeout.bind(globalThis),
     clearTimeout: globalThis.clearTimeout.bind(globalThis),
     matchMedia: () => ({ matches: false }),
+    addEventListener: (type: string, listener: EventListener) => {
+      let set = listeners.get(type);
+      if (!set) {
+        set = new Set();
+        listeners.set(type, set);
+      }
+      set.add(listener);
+    },
+    removeEventListener: (type: string, listener: EventListener) => {
+      listeners.get(type)?.delete(listener);
+    },
+    dispatchEvent: (event: Event) => {
+      for (const listener of listeners.get(event.type) ?? []) {
+        listener(event);
+      }
+      return true;
+    },
   } as unknown as Window;
   const api = {
     createDrawing: vi.fn(async (): Promise<CreateDrawingResult> => ({ kind: "ok", id: 41, rev: 1 })),
@@ -1096,3 +1114,198 @@ describe("drawingLayer: Select mode (§5)", () => {
     s.layer.detach();
   });
 });
+
+describe("drawingLayer: undo, redo, and abandon", () => {
+  it("undo and redo buttons are gesture boundaries, hidden when pen is off, disabled initially", () => {
+    const s = setup();
+    s.layer.attach(SESSION);
+    expect(s.layer.undoButton.getAttribute("aria-label")).toBe("Undo");
+    expect(s.layer.redoButton.getAttribute("aria-label")).toBe("Redo");
+    expect(s.layer.undoButton.hasAttribute("data-srv-gesture-boundary")).toBe(true);
+    expect(s.layer.redoButton.hasAttribute("data-srv-gesture-boundary")).toBe(true);
+    expect(s.layer.undoButton.hidden).toBe(true);
+    expect(s.layer.redoButton.hidden).toBe(true);
+    expect(s.layer.undoButton.disabled).toBe(true);
+    expect(s.layer.redoButton.disabled).toBe(true);
+
+    s.layer.penButton.click();
+    expect(s.layer.undoButton.hidden).toBe(false);
+    expect(s.layer.redoButton.hidden).toBe(false);
+    expect(s.layer.undoButton.disabled).toBe(true);
+    expect(s.layer.redoButton.disabled).toBe(true);
+    s.layer.detach();
+  });
+
+  it("drawing a stroke enables Undo, leaves Redo disabled; undo drops it locally, calls live cancel and delete", async () => {
+    const s = setup();
+    s.layer.attach(SESSION);
+    s.addBubble(1, 300);
+    s.layer.penButton.click();
+
+    drawMouseStroke(s, [[40, 310], [50, 312], [60, 310]]);
+    await flush();
+
+    expect(s.layer.undoButton.disabled).toBe(false);
+    expect(s.layer.redoButton.disabled).toBe(true);
+    expect(s.svgs()).toHaveLength(1);
+
+    // Clicking Undo
+    s.layer.undoButton.click();
+    await flush();
+
+    expect(s.svgs()).toHaveLength(0);
+    expect(s.layer.undoButton.disabled).toBe(true);
+    expect(s.layer.redoButton.disabled).toBe(false);
+    expect(s.api.deleteDrawing).toHaveBeenCalledTimes(1);
+    expect(s.api.postLiveBatch).toHaveBeenCalledWith(
+      SESSION,
+      expect.objectContaining({ cancel: true }),
+    );
+
+    // Clicking Redo restores it
+    s.layer.redoButton.click();
+    await flush();
+
+    expect(s.svgs()).toHaveLength(1);
+    expect(s.layer.undoButton.disabled).toBe(false);
+    expect(s.layer.redoButton.disabled).toBe(true);
+
+    s.layer.detach();
+  });
+
+  it("keyboard shortcuts Ctrl+Z undos and Ctrl+Y / Ctrl+Shift+Z redoes while pen is on", async () => {
+    const s = setup();
+    s.layer.attach(SESSION);
+    s.addBubble(1, 300);
+    s.layer.penButton.click();
+
+    drawMouseStroke(s, [[40, 310], [50, 312], [60, 310]]);
+    await flush();
+    expect(s.svgs()).toHaveLength(1);
+
+    // Ctrl+Z
+    s.deps.win.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true }));
+    await flush();
+    expect(s.svgs()).toHaveLength(0);
+    expect(s.layer.redoButton.disabled).toBe(false);
+
+    // Ctrl+Shift+Z
+    s.deps.win.dispatchEvent(new KeyboardEvent("keydown", { key: "Z", ctrlKey: true, shiftKey: true, bubbles: true }));
+    await flush();
+    expect(s.svgs()).toHaveLength(1);
+    expect(s.layer.undoButton.disabled).toBe(false);
+
+    // Ctrl+Z again
+    s.deps.win.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true }));
+    await flush();
+    expect(s.svgs()).toHaveLength(0);
+
+    // Ctrl+Y
+    s.deps.win.dispatchEvent(new KeyboardEvent("keydown", { key: "y", ctrlKey: true, bubbles: true }));
+    await flush();
+    expect(s.svgs()).toHaveLength(1);
+
+    s.layer.detach();
+  });
+
+  it("drawing a new stroke after undo clears the redo stack", async () => {
+    const s = setup();
+    s.layer.attach(SESSION);
+    s.addBubble(1, 300);
+    s.layer.penButton.click();
+
+    drawMouseStroke(s, [[40, 310], [50, 312], [60, 310]]);
+    await flush();
+    s.layer.undo();
+    await flush();
+    expect(s.layer.redoButton.disabled).toBe(false);
+
+    // Draw a new stroke
+    drawMouseStroke(s, [[45, 315], [55, 317], [65, 315]]);
+    await flush();
+    expect(s.layer.undoButton.disabled).toBe(false);
+    expect(s.layer.redoButton.disabled).toBe(true);
+
+    s.layer.detach();
+  });
+
+  it("multi-stroke drawing: undoing the second stroke deletes the old drawing and re-stores the first stroke", async () => {
+    const s = setup();
+    s.layer.attach(SESSION);
+    s.addBubble(1, 300);
+    s.layer.penButton.click();
+
+    // First stroke
+    drawMouseStroke(s, [[40, 310], [50, 312], [60, 310]]);
+    await flush();
+    // Second stroke in same drawing
+    drawMouseStroke(s, [[45, 320], [55, 322], [65, 320]]);
+    await flush();
+
+    expect(s.svgs()).toHaveLength(1);
+    expect(s.svgs()[0]!.querySelectorAll("path")).toHaveLength(2);
+
+    // Undo second stroke
+    s.layer.undo();
+    await flush();
+
+    expect(s.svgs()).toHaveLength(1);
+    expect(s.svgs()[0]!.querySelectorAll("path")).toHaveLength(1);
+    expect(s.api.deleteDrawing).toHaveBeenCalledTimes(1);
+
+    // Redo second stroke
+    s.layer.redo();
+    await flush();
+
+    expect(s.svgs()).toHaveLength(1);
+    expect(s.svgs()[0]!.querySelectorAll("path")).toHaveLength(2);
+
+    s.layer.detach();
+  });
+
+  it("abandon immediately exits draw mode and deletes all drawings made in this session", async () => {
+    const s = setup();
+    s.layer.attach(SESSION);
+    s.addBubble(1, 300);
+    s.layer.penButton.click();
+
+    drawMouseStroke(s, [[40, 310], [50, 312], [60, 310]]);
+    await flush();
+    expect(s.svgs()).toHaveLength(1);
+
+    s.layer.abandon();
+    await flush();
+
+    expect(s.svgs()).toHaveLength(0);
+    expect(s.layer.isPenOn()).toBe(false);
+    expect(s.layer.undoButton.hidden).toBe(true);
+    expect(s.layer.redoButton.hidden).toBe(true);
+    expect(s.api.deleteDrawing).toHaveBeenCalledTimes(1);
+
+    s.layer.detach();
+  });
+
+  it("ending the session with Done clears the undo and redo stacks", async () => {
+    const s = setup();
+    s.layer.attach(SESSION);
+    s.addBubble(1, 300);
+    s.layer.penButton.click();
+
+    drawMouseStroke(s, [[40, 310], [50, 312], [60, 310]]);
+    await flush();
+    expect(s.layer.undoButton.disabled).toBe(false);
+
+    // Click Done to end session
+    s.toolbarButton(".wx-srv-pen-done").click();
+    expect(s.layer.isPenOn()).toBe(false);
+
+    // Turn pen back on: fresh session with empty undo/redo stacks
+    s.layer.penButton.click();
+    expect(s.layer.isPenOn()).toBe(true);
+    expect(s.layer.undoButton.disabled).toBe(true);
+    expect(s.layer.redoButton.disabled).toBe(true);
+
+    s.layer.detach();
+  });
+});
+

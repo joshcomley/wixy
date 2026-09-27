@@ -66,6 +66,8 @@ export interface LiveSender {
   /** The current stroke was withdrawn (§5: a second finger, a lock, the page hiding): anything
    * not yet sent is dropped, and a `cancel` frame follows if any batch already went out. */
   cancel(): void;
+  /** An already-finished stroke was undone: sends a live cancel frame so receivers drop it immediately. */
+  cancelStroke(meta: LiveStrokeMeta): void;
   /** Lock or teardown: posts any owed `cancel` at once (bypassing the pacing, because nothing
    * will run afterwards), then forgets everything and clears every timer. */
   shutdown(): void;
@@ -243,6 +245,15 @@ export function createLiveSender(deps: LiveSenderDeps): LiveSender {
       active.buffer = [];
       active = null;
       schedule();
+    },
+    cancelStroke(meta: LiveStrokeMeta): void {
+      const frame: OutgoingLiveFrame = {
+        ...meta,
+        batch: 999_999,
+        points: [],
+        cancel: true,
+      };
+      void deps.post(frame).catch(() => {});
     },
     shutdown(): void {
       if (active !== null) {

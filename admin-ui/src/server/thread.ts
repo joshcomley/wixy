@@ -193,12 +193,19 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   settingsButton.setAttribute("aria-label", "Settings");
   settingsButton.setAttribute("data-srv-gesture-boundary", "");
   settingsButton.addEventListener("click", () => deps.onSettings());
+  let drawingLayer: DrawingLayer;
   const panicButton = documentRef.createElement("button");
   panicButton.type = "button";
   panicButton.className = "wx-srv-panic-button";
   panicButton.textContent = "✕";
   panicButton.setAttribute("aria-label", "Close");
-  panicButton.addEventListener("click", () => hooks.lockNow("panic"));
+  panicButton.addEventListener("click", () => {
+    if (drawingLayer?.isPenOn()) {
+      drawingLayer.abandon();
+    } else {
+      hooks.lockNow("panic");
+    }
+  });
   header.append(title, nameChip, settingsButton, panicButton);
   element.appendChild(header);
 
@@ -244,7 +251,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
 
   // -- The pen (spec/server-chat/07-live-drawing.md) ---------------------------------------
   // Declared before the message state below exists, so its callbacks read that state lazily.
-  const drawingLayer: DrawingLayer = mountDrawingLayer({
+  drawingLayer = mountDrawingLayer({
     document: documentRef,
     win,
     hooks,
@@ -257,10 +264,15 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     anchorElement: (seq) => drawingAnchorElement(seq),
     holdScroll: () => threadScroll.hold(),
     onRemoteContent: () => threadScroll.afterContentChange(false),
+    onPenChange: (penOn) => {
+      settingsButton.hidden = penOn;
+    },
   });
   // §5: the Pen button lives in the chat HEADER (a third composer control pushed the text box
   // under its 120px floor on a 360px phone, decisions/00169); its toolbar sits under the header.
   header.insertBefore(drawingLayer.penButton, settingsButton);
+  header.insertBefore(drawingLayer.undoButton, settingsButton);
+  header.insertBefore(drawingLayer.redoButton, settingsButton);
   element.insertBefore(drawingLayer.toolbar, threadWrap);
   const lightbox: Lightbox = mountLightbox();
   let currentSession: ServerSession | null = null;

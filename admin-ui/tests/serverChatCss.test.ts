@@ -33,6 +33,9 @@ const HIDDEN_TOGGLED_CLASSES = [
   "wx-srv-tease-preview",
   "wx-srv-record-pause",
   "wx-srv-voice-confirm",
+  "wx-srv-settings-button",
+  "wx-srv-pen-undo",
+  "wx-srv-pen-redo",
   // The pen (drawingLayer.ts, spec/server-chat/07-live-drawing.md).
   "wx-srv-pen-toolbar",
   "wx-srv-pen-colors",

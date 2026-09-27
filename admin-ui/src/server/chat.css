@@ -73,19 +73,60 @@
 }
 
 .wx-srv-settings-button,
-.wx-srv-panic-button {
+.wx-srv-panic-button,
+.wx-srv-pen-undo,
+.wx-srv-pen-redo {
   flex: none;
   width: 36px;
   height: 36px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-border);
   background: var(--wx-surface);
   color: var(--wx-ink);
   font-size: 1rem;
   cursor: pointer;
+}
+
+.wx-srv-settings-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wx-srv-panic-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wx-srv-pen-undo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wx-srv-pen-redo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wx-srv-pen-undo:disabled,
+.wx-srv-pen-redo:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.wx-srv-settings-button[hidden] {
+  display: none;
+}
+
+.wx-srv-pen-undo[hidden] {
+  display: none;
+}
+
+.wx-srv-pen-redo[hidden] {
+  display: none;
 }
 
 .wx-srv-record-button,
