@@ -536,6 +536,25 @@
       D: "#e11d48",
     };
 
+    // --- GUY SPRITES ---
+    const GUY_STAND_1 = [
+      "....HHHH....",
+      "...HHHHHH...",
+      "...SSFFSS...",
+      "...SFFFFS...",
+      "....SSSS....",
+      "...PPPPPP...",
+      "..PPWWWWPP..",
+      "..PPPTTPPP..",
+      "..PPPPPPPP..",
+      "...PPPPPP...",
+      "...PPPPPP...",
+      "...PP..PP...",
+      "...PP..PP...",
+      "...PP..PP...",
+      "...SS..SS...",
+    ];
+
     const GUY_WALK_1 = [
       "....HHHH....",
       "...HHHHHH...",
@@ -555,53 +574,129 @@
     ];
 
     const GUY_WALK_2 = [
+      "...HHHHH....",
+      "..HHHHHHH...",
+      "..EEFFEE....",
+      "..EFFFFE....",
+      "...FFFF.....",
+      "..LLPPLL....",
+      "..PPWPPPD...",
+      "..PPTPPD....",
+      "..PPPPPD....",
+      "..DPPPPD....",
+      "..PPPPPP....",
+      "....PP.PP...",
+      "....PP.PP...",
+      "....PP.SS...",
+      "....SS......",
+    ];
+
+    const GUY_WALK_3 = [
       "....HHHH....",
       "...HHHHHH...",
       "...EEFFEE...",
       "...EFFFFE...",
       "....FFFF....",
       "...LLPPLL...",
-      "..LPPWPPPD..",
-      "..PPPTPPD...",
-      "...PPPPPD...",
+      "..DPPWPPPL..",
+      "...DPTPPP...",
+      "...DPPPPP...",
       "...DPPPPD...",
       "...PPPPPP...",
-      "....PPPP....",
-      "....PPPP....",
-      "....PPPP....",
-      "....SSSS....",
+      "...PP..PP...",
+      "..PP....PP..",
+      "..PP....PP..",
+      ".SS......SS.",
+    ];
+
+    const GUY_WALK_4 = [
+      "....HHHHH...",
+      "...HHHHHHH..",
+      "....EEFFEE..",
+      "....EFFFFE..",
+      ".....FFFF...",
+      "....LLPPLL..",
+      "...DPPWPPP..",
+      "....DPTPPP..",
+      "....DPPPPP..",
+      "....DPPPPD..",
+      "....PPPPPP..",
+      "...PP.PP....",
+      "...PP.PP....",
+      "...SS.PP....",
+      "......SS....",
     ];
 
     const GUY_CLIMB_1 = [
-      "..FFHHHH....",
-      ".FFFHHHHHH..",
-      ".F..EEFFEE..",
+      "FF..........",
+      "FFF.HHHH....",
+      ".LLHHHHHH...",
+      "..L.EEFFEE..",
       "....FFFF....",
-      "..LLPPLLFF..",
-      "..LPPWPPPP..",
+      "..LLPPLL....",
+      ".FLLPWPPPD..",
+      ".FF.PPPTPPD.",
+      "...PPPPPD...",
+      "..DPPPPD....",
+      ".SSPPPPPP...",
+      "..PP..PP....",
+      "......PP....",
+      "......PP....",
+      "......SS....",
+    ];
+
+    const GUY_CLIMB_2 = [
+      "....HHHH....",
+      "...HHHHHH...",
+      "...EEFFEE...",
+      "....FFFF....",
+      ".FFLLPPLLFF.",
+      ".FFPPWPPPFF.",
       "...PPPTPPD..",
       "...PPPPPD...",
       "..DPPPPD....",
       "..PPPPPP....",
-      "...PP..PP...",
-      "..PP....PP..",
-      "..SS.....SS.",
+      "..SS..PP....",
+      "......PP....",
+      ".....SS.....",
+      "............",
+      "............",
     ];
 
-    const GUY_CLIMB_2 = [
-      "....HHHHFF..",
-      "..HHHHHHFFF.",
-      "..EEFFEE..F.",
+    const GUY_CLIMB_3 = [
+      "...FF.......",
+      "...FFFHHHH..",
+      "..LLHHHHHH..",
+      "...LEFFEE...",
       "....FFFF....",
-      "..FFLLPPLL..",
-      "..PPPWWPPD..",
+      ".FFLLPPLL...",
+      ".FPPPWPPPD..",
+      "..PPPTPPD...",
+      "...PPPPPD...",
+      "..DPPPPD....",
+      "..SSPPPP....",
+      "..PP..PP....",
+      "......PP....",
+      "......PP....",
+      "......SS....",
+    ];
+
+    const GUY_CLIMB_4 = [
+      "...HHHH.....",
+      "..HHHHHH....",
+      "..EEFFEE....",
+      "...FFFF.....",
+      "..FFLLPPLLF.",
+      "..FFPPWPPPF.",
       "...PPPTPPD..",
       "...PPPPPD...",
-      "....DPPPPD..",
-      "....PPPPPP..",
-      "...PP..PP...",
-      "..PP....PP..",
-      ".SS......SS.",
+      "..DPPPPD....",
+      "..PPPPPP....",
+      "....PP..SS..",
+      "....PP......",
+      "....SS......",
+      "............",
+      "............",
     ];
 
     const GUY_HANG_1 = [
@@ -623,6 +718,24 @@
     ];
 
     const GUY_HANG_2 = [
+      "...FF...FF..",
+      "...FF...FF..",
+      "...LL...LL..",
+      "...LLPPLL...",
+      "...HHHHHH...",
+      "...EEFFEE...",
+      "....FFFF....",
+      "..LPPWPPPD..",
+      "...PPPTPPD..",
+      "...PPPPPD...",
+      "...DPPPPD...",
+      "....PPPP....",
+      "....PPPP....",
+      "....PP.PP...",
+      "....SS.SS...",
+    ];
+
+    const GUY_HANG_3 = [
       "..FF....FF..",
       "..FF....FF..",
       "..LL....LL..",
@@ -640,6 +753,96 @@
       "......SSSS..",
     ];
 
+    const GUY_HANG_4 = [
+      "..FF...FF...",
+      "..FF...FF...",
+      "..LL...LL...",
+      "...LLPPLL...",
+      "...HHHHHH...",
+      "...EEFFEE...",
+      "....FFFF....",
+      "..LPPWPPPD..",
+      "...PPPTPPD..",
+      "...PPPPPD...",
+      "...DPPPPD...",
+      "....PPPP....",
+      "....PPPP....",
+      "...PP.PP....",
+      "...SS.SS....",
+    ];
+
+    const GUY_CRAWL_1 = [
+      "................",
+      "................",
+      "................",
+      "................",
+      "................",
+      "...........HHHH.",
+      "..........HHEFFH",
+      "..........HFFFFF",
+      "....LL...LLPPWWP",
+      "..LLPP..LPPPPPPP",
+      ".SS.PP..PPPPPP.F",
+      ".PP.PPPPPP..PPFF",
+      ".SS..SS.SS......",
+      "................",
+      "................",
+    ];
+
+    const GUY_CRAWL_2 = [
+      "................",
+      "................",
+      "................",
+      "................",
+      "................",
+      "............HHHH",
+      "...........HHEFF",
+      "...........HFFFF",
+      ".....LL..LLPPWWP",
+      "...LLPP.LPPPPPPP",
+      "..SS.PPPPPP.PP..",
+      "...PP.PPPP..PPFF",
+      "...SS.SS....SS..",
+      "................",
+      "................",
+    ];
+
+    const GUY_CRAWL_3 = [
+      "................",
+      "................",
+      "................",
+      "................",
+      "................",
+      "...........HHHH.",
+      "..........HHEFFH",
+      "..........HFFFFF",
+      "....LL...LLPPWWP",
+      "..LLPP..LPPPPPPP",
+      ".SS.PP..PPPPPPFF",
+      ".PP.PPPPPP..PP.F",
+      ".SS..SS.SS......",
+      "................",
+      "................",
+    ];
+
+    const GUY_CRAWL_4 = [
+      "................",
+      "................",
+      "................",
+      "................",
+      "................",
+      "............HHHH",
+      "...........HHEFF",
+      "...........HFFFF",
+      ".....LL..LLPPWWP",
+      "...LLPP.LPPPPPPP",
+      "..SS.PPPPPP.PPFF",
+      "...PP.PPPP..PP..",
+      "...SS.SS....SS..",
+      "................",
+      "................",
+    ];
+
     const GUY_JUMP = [
       "..FF....FF..",
       "...HHHHHH...",
@@ -654,6 +857,8 @@
       "...PP..PP...",
       "..PP....PP..",
       ".SS......SS.",
+      "............",
+      "............",
     ];
 
     const GUY_STUMBLE_1 = [
@@ -670,6 +875,8 @@
       "...PP..PP...",
       "..PP....PP..",
       "..SS.....SS.",
+      "............",
+      "............",
     ];
 
     const GUY_STUMBLE_2 = [
@@ -686,42 +893,27 @@
       "....PPPP....",
       "...PP..PP...",
       "...SS..SS...",
+      "............",
+      "............",
     ];
 
-    const GUY_CRAWL_1 = [
-      "................",
-      "................",
-      "................",
-      "................",
-      "................",
-      "................",
-      "................",
-      ".....HHHH.......",
-      "....HHEFFH......",
-      "....HFFFF.......",
-      "..LLPPWWPPD.....",
-      ".LPPPPPPPPPDD...",
-      ".F..PPPP..PP....",
-      "....SS....SS....",
-      "................",
-    ];
-
-    const GUY_CRAWL_2 = [
-      "................",
-      "................",
-      "................",
-      "................",
-      "................",
-      "................",
-      "................",
-      ".....HHHH.......",
-      "....HHEFFH......",
-      "....HFFFF.......",
-      "..LLPPWWPPD.....",
-      "..LPPPPPPPPPD...",
-      "...F..PP..PP.SS.",
-      "......SS..F.....",
-      "................",
+    // --- WOMAN SPRITES ---
+    const WOMAN_STAND_1 = [
+      "....HHHH....",
+      "...HHHHHH...",
+      "..HHFFFEHH..",
+      "...FFFFF....",
+      "....FFFF....",
+      "...LLCCLL...",
+      "..LCCCCCLD..",
+      "..LCCCCCLD..",
+      ".LLCCCCCLDD.",
+      ".LCCCCCCLDD.",
+      "LLCCCCCCLLDD",
+      "CCCCCCCCCCCC",
+      "CCCCCCCCCCCC",
+      "....FF.FF...",
+      "....SS.SS...",
     ];
 
     const WOMAN_WALK_1 = [
@@ -743,53 +935,129 @@
     ];
 
     const WOMAN_WALK_2 = [
+      "...HHHHH....",
+      "..HHHHHHH...",
+      ".HHFFFEHH...",
+      "..FFFFF.....",
+      "...FFFF.....",
+      "..LLCCLL....",
+      ".LCCCCCLD...",
+      ".LCCCCCLD...",
+      "LLCCCCCLDD..",
+      "LLCCCCCCLDD.",
+      "CCCCCCCCCCDD",
+      "CCCCCCCCCCCC",
+      "CCCCCCCCCCCC",
+      "....FF.SS...",
+      "....SS......",
+    ];
+
+    const WOMAN_WALK_3 = [
       "....HHHH....",
       "...HHHHHH...",
       "..HHFFFEHH..",
       "...FFFFF....",
       "....FFFF....",
       "...LLCCLL...",
-      "..LCCCCCLD..",
-      "..LCCCCCLD..",
-      ".LLCCCCCLDD.",
-      ".LCCCCCCLDD.",
-      "LLCCCCCCLLDD",
+      "..DLCCCCCL..",
+      "..DLCCCCCL..",
+      ".DDLCCCCCL..",
+      ".DDLCCCCCCL.",
+      "DDLLCCCCCCLL",
       "CCCCCCCCCCCC",
       "CCCCCCCCCCCC",
-      "....FFFF....",
-      "....SSSS....",
-    ];
-
-    const WOMAN_CLIMB_1 = [
-      "..FFHHHH....",
-      ".FFFHHHHHH..",
-      ".FHHFFFEHH..",
-      "...FFFFF....",
-      "..LLCCLLFF..",
-      "..LCCCCCLD..",
-      ".LLCCCCCLDD.",
-      "LLCCCCCCLLDD",
-      "CCCCCCCCCCCC",
-      "CCCCCCCCCCCC",
-      "....FF.FF...",
       "...FF...FF..",
       "..SS.....SS.",
     ];
 
-    const WOMAN_CLIMB_2 = [
-      "....HHHHFF..",
-      "..HHHHHHFFF.",
-      "..HHFFFEH.F.",
+    const WOMAN_WALK_4 = [
+      "....HHHHH...",
+      "...HHHHHHH..",
+      "..HHFFFEHH..",
       "...FFFFF....",
-      "..FFLLCCLL..",
-      "..LCCCCCLD..",
+      "....FFFF....",
+      "....LLCCLL..",
+      "...DLCCCCCL.",
+      "...DLCCCCCL.",
+      "..DDLCCCCCL.",
+      ".DDLCCCCCCL.",
+      "DDCCCCCCCCCC",
+      "CCCCCCCCCCCC",
+      "CCCCCCCCCCCC",
+      "...SS.FF....",
+      "......SS....",
+    ];
+
+    const WOMAN_CLIMB_1 = [
+      "FF..........",
+      "FFF.HHHH....",
+      ".FFHHHHHH...",
+      "..HHFFFEHH..",
+      "...FFFFF....",
+      "..LLCCLL....",
+      ".FLLCCCCLD..",
+      ".FFCCCCCLDD.",
+      "LLCCCCCCLLDD",
+      "CCCCCCCCCCCC",
+      ".SSCCCCCCCCC",
+      "..FF...FF...",
+      "......FF....",
+      "......FF....",
+      "......SS....",
+    ];
+
+    const WOMAN_CLIMB_2 = [
+      "....HHHH....",
+      "...HHHHHH...",
+      "..HHFFFEHH..",
+      "...FFFFF....",
+      ".FFLLCCLLFF.",
+      ".FFLCCCCLDFF",
       ".LLCCCCCLDD.",
       "LLCCCCCCLLDD",
       "CCCCCCCCCCCC",
       "CCCCCCCCCCCC",
-      "....FF.FF...",
-      "..FF.....FF.",
-      ".SS.......SS",
+      "..SS..FF....",
+      "......FF....",
+      ".....SS.....",
+      "............",
+      "............",
+    ];
+
+    const WOMAN_CLIMB_3 = [
+      "...FF.......",
+      "...FFFHHHH..",
+      "..FFHHHHHH..",
+      "..HHFFFEH...",
+      "...FFFFF....",
+      ".FFLLCCLL...",
+      ".FLCCCCCLD..",
+      "..LCCCCCLDD.",
+      "LLCCCCCCLLDD",
+      "CCCCCCCCCCCC",
+      "..SSCCCCCCCC",
+      "..FF...FF...",
+      "......FF....",
+      "......FF....",
+      "......SS....",
+    ];
+
+    const WOMAN_CLIMB_4 = [
+      "...HHHH.....",
+      "..HHHHHH....",
+      "..HHFFFEH...",
+      "...FFFFF....",
+      "..FFLLCCLLF.",
+      "..FFLCCCCLDF",
+      ".LLCCCCCLDD.",
+      "LLCCCCCCLLDD",
+      "CCCCCCCCCCCC",
+      "CCCCCCCCCCCC",
+      "....FF..SS..",
+      "....FF......",
+      "....SS......",
+      "............",
+      "............",
     ];
 
     const WOMAN_HANG_1 = [
@@ -811,6 +1079,24 @@
     ];
 
     const WOMAN_HANG_2 = [
+      "...FF...FF..",
+      "...FF...FF..",
+      "...FF...FF..",
+      "...LLCCLL...",
+      "...HHHHHH...",
+      "..HHFFFEHH..",
+      "....FFFF....",
+      "..LCCCCCLD..",
+      ".LLCCCCCLDD.",
+      "LLCCCCCCLLDD",
+      "CCCCCCCCCCCC",
+      "CCCCCCCCCCCC",
+      "....FF.FF...",
+      "....FF.FF...",
+      "....SS.SS...",
+    ];
+
+    const WOMAN_HANG_3 = [
       "..FF....FF..",
       "..FF....FF..",
       "..FF....FF..",
@@ -828,6 +1114,96 @@
       "......SSSS..",
     ];
 
+    const WOMAN_HANG_4 = [
+      "..FF...FF...",
+      "..FF...FF...",
+      "..FF...FF...",
+      "...LLCCLL...",
+      "...HHHHHH...",
+      "..HHFFFEHH..",
+      "....FFFF....",
+      "..LCCCCCLD..",
+      ".LLCCCCCLDD.",
+      "LLCCCCCCLLDD",
+      "CCCCCCCCCCCC",
+      "CCCCCCCCCCCC",
+      "....FFFF....",
+      "...FF.FF....",
+      "...SSSS.....",
+    ];
+
+    const WOMAN_CRAWL_1 = [
+      "................",
+      "................",
+      "................",
+      "................",
+      "................",
+      "...........HHHH.",
+      "..........HHEFFH",
+      "..........HFFFFF",
+      "....LL...LLCCCCD",
+      "..LLCC..LCCCCCCC",
+      ".SS.FF..CCCCCC.F",
+      ".FF.CCCCCC..CCFF",
+      ".SS..SS.SS......",
+      "................",
+      "................",
+    ];
+
+    const WOMAN_CRAWL_2 = [
+      "................",
+      "................",
+      "................",
+      "................",
+      "................",
+      "............HHHH",
+      "...........HHEFF",
+      "...........HFFFF",
+      ".....LL..LLCCCCD",
+      "...LLCC.LCCCCCCC",
+      "..SS.CCCCCC.CC..",
+      "...FF.CCCC..CCFF",
+      "...SS.SS....SS..",
+      "................",
+      "................",
+    ];
+
+    const WOMAN_CRAWL_3 = [
+      "................",
+      "................",
+      "................",
+      "................",
+      "................",
+      "...........HHHH.",
+      "..........HHEFFH",
+      "..........HFFFFF",
+      "....LL...LLCCCCD",
+      "..LLCC..LCCCCCCC",
+      ".SS.FF..CCCCCCFF",
+      ".FF.CCCCCC..CC.F",
+      ".SS..SS.SS......",
+      "................",
+      "................",
+    ];
+
+    const WOMAN_CRAWL_4 = [
+      "................",
+      "................",
+      "................",
+      "................",
+      "................",
+      "............HHHH",
+      "...........HHEFF",
+      "...........HFFFF",
+      ".....LL..LLCCCCD",
+      "...LLCC.LCCCCCCC",
+      "..SS.CCCCCC.CCFF",
+      "...FF.CCCC..CC..",
+      "...SS.SS....SS..",
+      "................",
+      "................",
+    ];
+
     const WOMAN_JUMP = [
       "..FF....FF..",
       "...HHHHHH...",
@@ -841,6 +1217,9 @@
       "....FFFF....",
       "...FF...FF..",
       "..SS.....SS.",
+      "............",
+      "............",
+      "............",
     ];
 
     const WOMAN_STUMBLE_1 = [
@@ -857,6 +1236,8 @@
       "...FF..FF...",
       "..FF....FF..",
       "..SS.....SS.",
+      "............",
+      "............",
     ];
 
     const WOMAN_STUMBLE_2 = [
@@ -873,42 +1254,8 @@
       "....FF.FF...",
       "...FF...FF..",
       "...SS...SS..",
-    ];
-
-    const WOMAN_CRAWL_1 = [
-      "................",
-      "................",
-      "................",
-      "................",
-      "................",
-      "................",
-      "................",
-      ".....HHHH.......",
-      "....HHEFFH......",
-      "....HFFFF.......",
-      "..LLCCCCCCD.....",
-      ".LCCCCCCCCCDD...",
-      ".F..CCCC..FF....",
-      "....SS....SS....",
-      "................",
-    ];
-
-    const WOMAN_CRAWL_2 = [
-      "................",
-      "................",
-      "................",
-      "................",
-      "................",
-      "................",
-      "................",
-      ".....HHHH.......",
-      "....HHEFFH......",
-      "....HFFFF.......",
-      "..LLCCCCCCD.....",
-      "..LCCCCCCCCCD...",
-      "...F..CC..FF.SS.",
-      "......SS..F.....",
-      "................",
+      "............",
+      "............",
     ];
 
     const COUPLE_EMBRACE = [
@@ -1037,46 +1384,46 @@
       ctx.globalAlpha = prevAlpha;
     }
 
-    // Static Sprite Showcase Drawings
-    function renderGallery() {
-      const gWalk = document.getElementById("spGuyWalk").getContext("2d");
-      drawPixelMatrix(gWalk, GUY_WALK_1, GUY_PALETTE, 6, 6, 2);
+    // Animated Sprite Showcase Drawings
+    function renderGallery(frame = 0) {
+      const f4 = Math.abs(Math.floor(frame)) % 4;
 
-      const gClimb = document.getElementById("spGuyClimb").getContext("2d");
-      drawPixelMatrix(gClimb, GUY_CLIMB_1, GUY_PALETTE, 6, 6, 2);
+      function drawTo(id, matrix, palette, x, y, scale = 2) {
+        const c = document.getElementById(id);
+        if (!c) return;
+        const ctx = c.getContext("2d");
+        ctx.clearRect(0, 0, c.width, c.height);
+        drawPixelMatrix(ctx, matrix, palette, x, y, scale);
+      }
 
-      const gHang = document.getElementById("spGuyHang").getContext("2d");
-      drawPixelMatrix(gHang, GUY_HANG_1, GUY_PALETTE, 6, 6, 2);
+      drawTo("spGuyWalk", [GUY_WALK_1, GUY_WALK_2, GUY_WALK_3, GUY_WALK_4][f4], GUY_PALETTE, 6, 6, 2);
+      drawTo("spGuyClimb", [GUY_CLIMB_1, GUY_CLIMB_2, GUY_CLIMB_3, GUY_CLIMB_4][f4], GUY_PALETTE, 6, 6, 2);
+      drawTo("spGuyHang", [GUY_HANG_1, GUY_HANG_2, GUY_HANG_3, GUY_HANG_4][f4], GUY_PALETTE, 6, 6, 2);
+      drawTo("spGuyCrawl", [GUY_CRAWL_1, GUY_CRAWL_2, GUY_CRAWL_3, GUY_CRAWL_4][f4], GUY_PALETTE, 2, 8, 2);
+      drawTo("spGuyJump", GUY_JUMP, GUY_PALETTE, 6, 6, 2);
 
-      const gCrawl = document.getElementById("spGuyCrawl")?.getContext("2d");
-      if (gCrawl) drawPixelMatrix(gCrawl, GUY_CRAWL_1, GUY_PALETTE, 2, 8, 2);
+      drawTo("spWomanWalk", [WOMAN_WALK_1, WOMAN_WALK_2, WOMAN_WALK_3, WOMAN_WALK_4][f4], WOMAN_PALETTE, 6, 6, 2);
+      drawTo("spWomanClimb", [WOMAN_CLIMB_1, WOMAN_CLIMB_2, WOMAN_CLIMB_3, WOMAN_CLIMB_4][f4], WOMAN_PALETTE, 6, 6, 2);
+      drawTo("spWomanHang", [WOMAN_HANG_1, WOMAN_HANG_2, WOMAN_HANG_3, WOMAN_HANG_4][f4], WOMAN_PALETTE, 6, 6, 2);
+      drawTo("spWomanCrawl", [WOMAN_CRAWL_1, WOMAN_CRAWL_2, WOMAN_CRAWL_3, WOMAN_CRAWL_4][f4], WOMAN_PALETTE, 2, 8, 2);
+      drawTo("spWomanJump", WOMAN_JUMP, WOMAN_PALETTE, 6, 6, 2);
 
-      const gJump = document.getElementById("spGuyJump").getContext("2d");
-      drawPixelMatrix(gJump, GUY_JUMP, GUY_PALETTE, 6, 6, 2);
+      drawTo("spEmbrace", COUPLE_EMBRACE, { ...GUY_PALETTE, ...WOMAN_PALETTE }, 6, 6, 2);
 
-      const wWalk = document.getElementById("spWomanWalk").getContext("2d");
-      drawPixelMatrix(wWalk, WOMAN_WALK_1, WOMAN_PALETTE, 6, 6, 2);
-
-      const wClimb = document.getElementById("spWomanClimb").getContext("2d");
-      drawPixelMatrix(wClimb, WOMAN_CLIMB_1, WOMAN_PALETTE, 6, 6, 2);
-
-      const wHang = document.getElementById("spWomanHang").getContext("2d");
-      drawPixelMatrix(wHang, WOMAN_HANG_1, WOMAN_PALETTE, 6, 6, 2);
-
-      const wCrawl = document.getElementById("spWomanCrawl")?.getContext("2d");
-      if (wCrawl) drawPixelMatrix(wCrawl, WOMAN_CRAWL_1, WOMAN_PALETTE, 2, 8, 2);
-
-      const wJump = document.getElementById("spWomanJump").getContext("2d");
-      drawPixelMatrix(wJump, WOMAN_JUMP, WOMAN_PALETTE, 6, 6, 2);
-
-      const emb = document.getElementById("spEmbrace").getContext("2d");
-      drawPixelMatrix(emb, COUPLE_EMBRACE, { ...GUY_PALETTE, ...WOMAN_PALETTE }, 6, 6, 2);
-
-      const cud = document.getElementById("spCuddle").getContext("2d");
-      drawPixelMatrix(cud, COUPLE_CUDDLE, { ...GUY_PALETTE, ...WOMAN_PALETTE, P: GUY_PALETTE.P, C: WOMAN_PALETTE.C }, 6, 6, 2);
-      drawPixelMatrix(cud, PIXEL_HEART, HEART_PALETTE, 30, 2, 1.5);
+      const cud = document.getElementById("spCuddle");
+      if (cud) {
+        const ctxCud = cud.getContext("2d");
+        ctxCud.clearRect(0, 0, cud.width, cud.height);
+        drawPixelMatrix(ctxCud, COUPLE_CUDDLE, { ...GUY_PALETTE, ...WOMAN_PALETTE, P: GUY_PALETTE.P, C: WOMAN_PALETTE.C }, 6, 6, 2);
+        drawPixelMatrix(ctxCud, PIXEL_HEART, HEART_PALETTE, 30, 2, 1.5);
+      }
     }
-    renderGallery();
+    renderGallery(0);
+    let galleryFrame = 0;
+    setInterval(() => {
+      galleryFrame = (galleryFrame + 1) % 4;
+      renderGallery(galleryFrame);
+    }, 160);
 
     // Presets
     const presets = {
@@ -1671,20 +2018,24 @@
         } else {
           // Individual sprites
           let gMat = GUY_WALK_1;
-          if (this.guyMotion.state === "climb_up") gMat = (this.guyMotion.frame % 2 === 0) ? GUY_CLIMB_1 : GUY_CLIMB_2;
-          else if (this.guyMotion.state === "hang_traverse") gMat = (this.guyMotion.frame % 2 === 0) ? GUY_HANG_1 : GUY_HANG_2;
-          else if (this.guyMotion.state === "crawl") gMat = (this.guyMotion.frame % 2 === 0) ? GUY_CRAWL_1 : GUY_CRAWL_2;
+          const gF4 = Math.abs(Math.floor(this.guyMotion.frame)) % 4;
+          const gF2 = Math.abs(Math.floor(this.guyMotion.frame)) % 2;
+          if (this.guyMotion.state === "climb_up" || this.guyMotion.state === "climb_down") gMat = [GUY_CLIMB_1, GUY_CLIMB_2, GUY_CLIMB_3, GUY_CLIMB_4][gF4];
+          else if (this.guyMotion.state === "hang_traverse") gMat = [GUY_HANG_1, GUY_HANG_2, GUY_HANG_3, GUY_HANG_4][gF4];
+          else if (this.guyMotion.state === "crawl") gMat = [GUY_CRAWL_1, GUY_CRAWL_2, GUY_CRAWL_3, GUY_CRAWL_4][gF4];
           else if (this.guyMotion.state === "jump") gMat = GUY_JUMP;
-          else if (this.guyMotion.state === "stumble") gMat = (this.guyMotion.frame % 2 === 0) ? GUY_STUMBLE_1 : GUY_STUMBLE_2;
-          else if (this.guyMotion.state === "walk_top" || this.guyMotion.state === "appear") gMat = (this.guyMotion.frame % 2 === 0) ? GUY_WALK_1 : GUY_WALK_2;
+          else if (this.guyMotion.state === "stumble") gMat = [GUY_STUMBLE_1, GUY_STUMBLE_2][gF2];
+          else if (this.guyMotion.state === "walk_top" || this.guyMotion.state === "appear") gMat = [GUY_WALK_1, GUY_WALK_2, GUY_WALK_3, GUY_WALK_4][gF4];
 
           let wMat = WOMAN_WALK_1;
-          if (this.womanMotion.state === "climb_down") wMat = (this.womanMotion.frame % 2 === 0) ? WOMAN_CLIMB_1 : WOMAN_CLIMB_2;
-          else if (this.womanMotion.state === "hang_traverse") wMat = (this.womanMotion.frame % 2 === 0) ? WOMAN_HANG_1 : WOMAN_HANG_2;
-          else if (this.womanMotion.state === "crawl") wMat = (this.womanMotion.frame % 2 === 0) ? WOMAN_CRAWL_1 : WOMAN_CRAWL_2;
+          const wF4 = Math.abs(Math.floor(this.womanMotion.frame)) % 4;
+          const wF2 = Math.abs(Math.floor(this.womanMotion.frame)) % 2;
+          if (this.womanMotion.state === "climb_down" || this.womanMotion.state === "climb_up") wMat = [WOMAN_CLIMB_1, WOMAN_CLIMB_2, WOMAN_CLIMB_3, WOMAN_CLIMB_4][wF4];
+          else if (this.womanMotion.state === "hang_traverse") wMat = [WOMAN_HANG_1, WOMAN_HANG_2, WOMAN_HANG_3, WOMAN_HANG_4][wF4];
+          else if (this.womanMotion.state === "crawl") wMat = [WOMAN_CRAWL_1, WOMAN_CRAWL_2, WOMAN_CRAWL_3, WOMAN_CRAWL_4][wF4];
           else if (this.womanMotion.state === "jump") wMat = WOMAN_JUMP;
-          else if (this.womanMotion.state === "stumble") wMat = (this.womanMotion.frame % 2 === 0) ? WOMAN_STUMBLE_1 : WOMAN_STUMBLE_2;
-          else if (this.womanMotion.state === "walk_top" || this.womanMotion.state === "appear") wMat = (this.womanMotion.frame % 2 === 0) ? WOMAN_WALK_1 : WOMAN_WALK_2;
+          else if (this.womanMotion.state === "stumble") wMat = [WOMAN_STUMBLE_1, WOMAN_STUMBLE_2][wF2];
+          else if (this.womanMotion.state === "walk_top" || this.womanMotion.state === "appear") wMat = [WOMAN_WALK_1, WOMAN_WALK_2, WOMAN_WALK_3, WOMAN_WALK_4][wF4];
 
           drawPixelMatrix(this.ctx, gMat, GUY_PALETTE, Math.round(this.guyMotion.x - 12), Math.round(this.guyMotion.y - 24), PIXEL_SCALE, this.guyMotion.facing === "right", this.guyMotion.alpha);
           drawPixelMatrix(this.ctx, wMat, WOMAN_PALETTE, Math.round(this.womanMotion.x - 12), Math.round(this.womanMotion.y - 24), PIXEL_SCALE, this.womanMotion.facing === "right", this.womanMotion.alpha);

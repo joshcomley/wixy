@@ -16,7 +16,7 @@ import {
 import type { SceneController } from "../src/pixelChat/scene";
 
 describe("Pixel Art Sprites", () => {
-  it("returns distinct sprite matrices for all guy animation states", () => {
+  it("returns distinct sprite matrices for all guy animation states and cycles 4 frames for locomotion", () => {
     const states = ["walk_top", "climb_up", "hang_traverse", "crawl", "jump", "embrace", "cuddle", "scamper"] as const;
     for (const state of states) {
       const frame0 = getSpriteMatrix("guy", state, 0);
@@ -24,15 +24,47 @@ describe("Pixel Art Sprites", () => {
       expect(frame0.length).toBeGreaterThan(0);
       expect(frame1.length).toBeGreaterThan(0);
     }
+
+    // 4-frame locomotion cycles
+    const locomotion = ["walk_top", "climb_up", "hang_traverse", "crawl"] as const;
+    for (const state of locomotion) {
+      const f0 = getSpriteMatrix("guy", state, 0);
+      const f1 = getSpriteMatrix("guy", state, 1);
+      const f2 = getSpriteMatrix("guy", state, 2);
+      const f3 = getSpriteMatrix("guy", state, 3);
+      expect(f0.length).toBe(15);
+      expect(f1.length).toBe(15);
+      expect(f2.length).toBe(15);
+      expect(f3.length).toBe(15);
+      // Verify f0 and f2 (opposite strides/holds) are distinct
+      expect(f0).not.toEqual(f2);
+      // Verify f1 and f3 (passing poses) are distinct
+      expect(f1).not.toEqual(f3);
+    }
   });
 
-  it("returns distinct sprite matrices for all woman animation states", () => {
+  it("returns distinct sprite matrices for all woman animation states and cycles 4 frames for locomotion", () => {
     const states = ["walk_top", "climb_down", "hang_traverse", "crawl", "jump", "embrace", "cuddle", "scamper"] as const;
     for (const state of states) {
       const frame0 = getSpriteMatrix("woman", state, 0);
       const frame1 = getSpriteMatrix("woman", state, 1);
       expect(frame0.length).toBeGreaterThan(0);
       expect(frame1.length).toBeGreaterThan(0);
+    }
+
+    // 4-frame locomotion cycles
+    const locomotion = ["walk_top", "climb_down", "hang_traverse", "crawl"] as const;
+    for (const state of locomotion) {
+      const f0 = getSpriteMatrix("woman", state, 0);
+      const f1 = getSpriteMatrix("woman", state, 1);
+      const f2 = getSpriteMatrix("woman", state, 2);
+      const f3 = getSpriteMatrix("woman", state, 3);
+      expect(f0.length).toBe(15);
+      expect(f1.length).toBe(15);
+      expect(f2.length).toBe(15);
+      expect(f3.length).toBe(15);
+      expect(f0).not.toEqual(f2);
+      expect(f1).not.toEqual(f3);
     }
   });
 

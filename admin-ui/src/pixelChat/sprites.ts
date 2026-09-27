@@ -49,10 +49,11 @@ export const HEART_PALETTE: Record<string, string> = {
   D: "#e11d48", // Dark red
 };
 
-// 12 wide x 18 high pixel matrix templates
+// ==========================================
+// GUY SPRITES (12 wide x 15 high, Crawl: 16x15)
+// ==========================================
 
-// --- GUY POSES ---
-const GUY_STAND_1 = [
+export const GUY_STAND_1 = [
   "....HHHH....",
   "...HHHHHH...",
   "...SSFFSS...",
@@ -70,7 +71,8 @@ const GUY_STAND_1 = [
   "...SS..SS...",
 ];
 
-const GUY_WALK_1 = [
+// --- 4-Frame Walk Cycle (Contact -> Passing Rise -> Contact Opp -> Passing Rise) ---
+export const GUY_WALK_1 = [
   "....HHHH....",
   "...HHHHHH...",
   "...EEFFEE...",
@@ -88,81 +90,136 @@ const GUY_WALK_1 = [
   ".SS......SS.",
 ];
 
-const GUY_WALK_2 = [
+export const GUY_WALK_2 = [
+  "...HHHHH....",
+  "..HHHHHHH...",
+  "..EEFFEE....",
+  "..EFFFFE....",
+  "...FFFF.....",
+  "..LLPPLL....",
+  "..PPWPPPD...",
+  "..PPTPPD....",
+  "..PPPPPD....",
+  "..DPPPPD....",
+  "..PPPPPP....",
+  "....PP.PP...",
+  "....PP.PP...",
+  "....PP.SS...",
+  "....SS......",
+];
+
+export const GUY_WALK_3 = [
   "....HHHH....",
   "...HHHHHH...",
   "...EEFFEE...",
   "...EFFFFE...",
   "....FFFF....",
   "...LLPPLL...",
-  "..LPPWPPPD..",
-  "..PPPTPPD...",
-  "...PPPPPD...",
+  "..DPPWPPPL..",
+  "...DPTPPP...",
+  "...DPPPPP...",
   "...DPPPPD...",
   "...PPPPPP...",
-  "....PPPP....",
-  "....PPPP....",
-  "....PPPP....",
-  "....SSSS....",
+  "...PP..PP...",
+  "..PP....PP..",
+  "..PP....PP..",
+  ".SS......SS.",
 ];
 
-const GUY_CLIMB_1 = [
-  "..FFHHHH....",
-  ".FFFHHHHHH..",
-  ".F..EEFFEE..",
+export const GUY_WALK_4 = [
+  "....HHHHH...",
+  "...HHHHHHH..",
+  "....EEFFEE..",
+  "....EFFFFE..",
+  ".....FFFF...",
+  "....LLPPLL..",
+  "...DPPWPPP..",
+  "....DPTPPP..",
+  "....DPPPPP..",
+  "....DPPPPD..",
+  "....PPPPPP..",
+  "...PP.PP....",
+  "...PP.PP....",
+  "...SS.PP....",
+  "......SS....",
+];
+
+// --- 4-Frame Climbing Cycle (Hand-over-hand, wall foot-plant, hip surge) ---
+export const GUY_CLIMB_1 = [
+  "FF..........",
+  "FFF.HHHH....",
+  ".LLHHHHHH...",
+  "..L.EEFFEE..",
   "....FFFF....",
-  "..LLPPLLFF..",
-  "..LPPWPPPP..",
+  "..LLPPLL....",
+  ".FLLPWPPPD..",
+  ".FF.PPPTPPD.",
+  "...PPPPPD...",
+  "..DPPPPD....",
+  ".SSPPPPPP...",
+  "..PP..PP....",
+  "......PP....",
+  "......PP....",
+  "......SS....",
+];
+
+export const GUY_CLIMB_2 = [
+  "....HHHH....",
+  "...HHHHHH...",
+  "...EEFFEE...",
+  "....FFFF....",
+  ".FFLLPPLLFF.",
+  ".FFPPWPPPFF.",
   "...PPPTPPD..",
   "...PPPPPD...",
   "..DPPPPD....",
   "..PPPPPP....",
-  "...PP..PP...",
-  "..PP....PP..",
-  "..SS.....SS.",
+  "..SS..PP....",
+  "......PP....",
+  ".....SS.....",
   "............",
   "............",
 ];
 
-const GUY_CLIMB_2 = [
-  "....HHHHFF..",
-  "..HHHHHHFFF.",
-  "..EEFFEE..F.",
+export const GUY_CLIMB_3 = [
+  "...FF.......",
+  "...FFFHHHH..",
+  "..LLHHHHHH..",
+  "...LEFFEE...",
   "....FFFF....",
-  "..FFLLPPLL..",
-  "..PPPWWPPD..",
+  ".FFLLPPLL...",
+  ".FPPPWPPPD..",
+  "..PPPTPPD...",
+  "...PPPPPD...",
+  "..DPPPPD....",
+  "..SSPPPP....",
+  "..PP..PP....",
+  "......PP....",
+  "......PP....",
+  "......SS....",
+];
+
+export const GUY_CLIMB_4 = [
+  "...HHHH.....",
+  "..HHHHHH....",
+  "..EEFFEE....",
+  "...FFFF.....",
+  "..FFLLPPLLF.",
+  "..FFPPWPPPF.",
   "...PPPTPPD..",
   "...PPPPPD...",
-  "....DPPPPD..",
-  "....PPPPPP..",
-  "...PP..PP...",
-  "..PP....PP..",
-  ".SS......SS.",
+  "..DPPPPD....",
+  "..PPPPPP....",
+  "....PP..SS..",
+  "....PP......",
+  "....SS......",
   "............",
   "............",
 ];
 
-// The iconic monkey-bar traversal: arms stretched UP, hands gripping ledge, legs dangling!
-const GUY_HANG_1 = [
-  "..FF....FF..", // Hands stretched straight up grabbing the ledge
+// --- 4-Frame Monkey-bar Traversal (Arms gripping ledge, legs dangling & swinging) ---
+export const GUY_HANG_1 = [
   "..FF....FF..",
-  "..LL....LL..", // Pink suit sleeves
-  "...LLPPLL...",
-  "...HHHHHH...", // Head looking up / forward
-  "...EEFFEE...",
-  "....FFFF....",
-  "..LPPWPPPD..",
-  "...PPPTPPD..",
-  "...PPPPPD...",
-  "...DPPPPD...",
-  "....PPPP....", // Body dangling down
-  "....PPPP....",
-  "...PP..PP...", // Legs dangling & swinging left
-  "..SS....SS..",
-];
-
-const GUY_HANG_2 = [
-  "..FF....FF..", // Hands stretched up
   "..FF....FF..",
   "..LL....LL..",
   "...LLPPLL...",
@@ -175,11 +232,138 @@ const GUY_HANG_2 = [
   "...DPPPPD...",
   "....PPPP....",
   "....PPPP....",
-  ".....PPPP...", // Legs swinging right
+  "...PP..PP...",
+  "..SS....SS..",
+];
+
+export const GUY_HANG_2 = [
+  "...FF...FF..",
+  "...FF...FF..",
+  "...LL...LL..",
+  "...LLPPLL...",
+  "...HHHHHH...",
+  "...EEFFEE...",
+  "....FFFF....",
+  "..LPPWPPPD..",
+  "...PPPTPPD..",
+  "...PPPPPD...",
+  "...DPPPPD...",
+  "....PPPP....",
+  "....PPPP....",
+  "....PP.PP...",
+  "....SS.SS...",
+];
+
+export const GUY_HANG_3 = [
+  "..FF....FF..",
+  "..FF....FF..",
+  "..LL....LL..",
+  "...LLPPLL...",
+  "...HHHHHH...",
+  "...EEFFEE...",
+  "....FFFF....",
+  "..LPPWPPPD..",
+  "...PPPTPPD..",
+  "...PPPPPD...",
+  "...DPPPPD...",
+  "....PPPP....",
+  "....PPPP....",
+  ".....PPPP...",
   "......SSSS..",
 ];
 
-const GUY_JUMP = [
+export const GUY_HANG_4 = [
+  "..FF...FF...",
+  "..FF...FF...",
+  "..LL...LL...",
+  "...LLPPLL...",
+  "...HHHHHH...",
+  "...EEFFEE...",
+  "....FFFF....",
+  "..LPPWPPPD..",
+  "...PPPTPPD..",
+  "...PPPPPD...",
+  "...DPPPPD...",
+  "....PPPP....",
+  "....PPPP....",
+  "...PP.PP....",
+  "...SS.SS....",
+];
+
+// --- 4-Frame Crawling Cycle (Hands and knees, weight transfer, knee drive) ---
+export const GUY_CRAWL_1 = [
+  "................",
+  "................",
+  "................",
+  "................",
+  "................",
+  "...........HHHH.",
+  "..........HHEFFH",
+  "..........HFFFFF",
+  "....LL...LLPPWWP",
+  "..LLPP..LPPPPPPP",
+  ".SS.PP..PPPPPP.F",
+  ".PP.PPPPPP..PPFF",
+  ".SS..SS.SS......",
+  "................",
+  "................",
+];
+
+export const GUY_CRAWL_2 = [
+  "................",
+  "................",
+  "................",
+  "................",
+  "................",
+  "............HHHH",
+  "...........HHEFF",
+  "...........HFFFF",
+  ".....LL..LLPPWWP",
+  "...LLPP.LPPPPPPP",
+  "..SS.PPPPPP.PP..",
+  "...PP.PPPP..PPFF",
+  "...SS.SS....SS..",
+  "................",
+  "................",
+];
+
+export const GUY_CRAWL_3 = [
+  "................",
+  "................",
+  "................",
+  "................",
+  "................",
+  "...........HHHH.",
+  "..........HHEFFH",
+  "..........HFFFFF",
+  "....LL...LLPPWWP",
+  "..LLPP..LPPPPPPP",
+  ".SS.PP..PPPPPPFF",
+  ".PP.PPPPPP..PP.F",
+  ".SS..SS.SS......",
+  "................",
+  "................",
+];
+
+export const GUY_CRAWL_4 = [
+  "................",
+  "................",
+  "................",
+  "................",
+  "................",
+  "............HHHH",
+  "...........HHEFF",
+  "...........HFFFF",
+  ".....LL..LLPPWWP",
+  "...LLPP.LPPPPPPP",
+  "..SS.PPPPPP.PPFF",
+  "...PP.PPPP..PP..",
+  "...SS.SS....SS..",
+  "................",
+  "................",
+];
+
+export const GUY_JUMP = [
   "..FF....FF..",
   "...HHHHHH...",
   "...EEFFEE...",
@@ -197,7 +381,7 @@ const GUY_JUMP = [
   "............",
 ];
 
-const GUY_STUMBLE_1 = [
+export const GUY_STUMBLE_1 = [
   "..FF....FF..",
   ".FFF....FFF.",
   "...HHHHHH...",
@@ -215,7 +399,7 @@ const GUY_STUMBLE_1 = [
   "............",
 ];
 
-const GUY_STUMBLE_2 = [
+export const GUY_STUMBLE_2 = [
   "FF........FF",
   ".FFF....FFF.",
   "...HHHHHH...",
@@ -233,44 +417,11 @@ const GUY_STUMBLE_2 = [
   "............",
 ];
 
-const GUY_CRAWL_1 = [
-  "................",
-  "................",
-  "................",
-  "................",
-  "................",
-  "................",
-  "................",
-  ".....HHHH.......",
-  "....HHEFFH......",
-  "....HFFFF.......",
-  "..LLPPWWPPD.....",
-  ".LPPPPPPPPPDD...",
-  ".F..PPPP..PP....",
-  "....SS....SS....",
-  "................",
-];
+// ==========================================
+// WOMAN SPRITES (12 wide x 15 high, Crawl: 16x15)
+// ==========================================
 
-const GUY_CRAWL_2 = [
-  "................",
-  "................",
-  "................",
-  "................",
-  "................",
-  "................",
-  "................",
-  ".....HHHH.......",
-  "....HHEFFH......",
-  "....HFFFF.......",
-  "..LLPPWWPPD.....",
-  "..LPPPPPPPPPD...",
-  "...F..PP..PP.SS.",
-  "......SS..F.....",
-  "................",
-];
-
-// --- WOMAN POSES ---
-const WOMAN_STAND_1 = [
+export const WOMAN_STAND_1 = [
   "....HHHH....",
   "...HHHHHH...",
   "..HHFFFEHH..",
@@ -288,7 +439,8 @@ const WOMAN_STAND_1 = [
   "....SS.SS...",
 ];
 
-const WOMAN_WALK_1 = [
+// --- 4-Frame Walk Cycle (Dress swaying, foot passing, head bob) ---
+export const WOMAN_WALK_1 = [
   "....HHHH....",
   "...HHHHHH...",
   "..HHFFFEHH..",
@@ -306,64 +458,138 @@ const WOMAN_WALK_1 = [
   "..SS.....SS.",
 ];
 
-const WOMAN_WALK_2 = [
+export const WOMAN_WALK_2 = [
+  "...HHHHH....",
+  "..HHHHHHH...",
+  ".HHFFFEHH...",
+  "..FFFFF.....",
+  "...FFFF.....",
+  "..LLCCLL....",
+  ".LCCCCCLD...",
+  ".LCCCCCLD...",
+  "LLCCCCCLDD..",
+  "LLCCCCCCLDD.",
+  "CCCCCCCCCCDD",
+  "CCCCCCCCCCCC",
+  "CCCCCCCCCCCC",
+  "....FF.SS...",
+  "....SS......",
+];
+
+export const WOMAN_WALK_3 = [
   "....HHHH....",
   "...HHHHHH...",
   "..HHFFFEHH..",
   "...FFFFF....",
   "....FFFF....",
   "...LLCCLL...",
-  "..LCCCCCLD..",
-  "..LCCCCCLD..",
-  ".LLCCCCCLDD.",
-  ".LCCCCCCLDD.",
-  "LLCCCCCCLLDD",
+  "..DLCCCCCL..",
+  "..DLCCCCCL..",
+  ".DDLCCCCCL..",
+  ".DDLCCCCCCL.",
+  "DDLLCCCCCCLL",
   "CCCCCCCCCCCC",
   "CCCCCCCCCCCC",
-  "....FFFF....",
-  "....SSSS....",
-];
-
-const WOMAN_CLIMB_1 = [
-  "..FFHHHH....",
-  ".FFFHHHHHH..",
-  ".FHHFFFEHH..",
-  "...FFFFF....",
-  "..LLCCLLFF..",
-  "..LCCCCCLD..",
-  ".LLCCCCCLDD.",
-  "LLCCCCCCLLDD",
-  "CCCCCCCCCCCC",
-  "CCCCCCCCCCCC",
-  "....FF.FF...",
   "...FF...FF..",
   "..SS.....SS.",
-  "............",
-  "............",
 ];
 
-const WOMAN_CLIMB_2 = [
-  "....HHHHFF..",
-  "..HHHHHHFFF.",
-  "..HHFFFEH.F.",
+export const WOMAN_WALK_4 = [
+  "....HHHHH...",
+  "...HHHHHHH..",
+  "..HHFFFEHH..",
   "...FFFFF....",
-  "..FFLLCCLL..",
-  "..LCCCCCLD..",
+  "....FFFF....",
+  "....LLCCLL..",
+  "...DLCCCCCL.",
+  "...DLCCCCCL.",
+  "..DDLCCCCCL.",
+  ".DDLCCCCCCL.",
+  "DDCCCCCCCCCC",
+  "CCCCCCCCCCCC",
+  "CCCCCCCCCCCC",
+  "...SS.FF....",
+  "......SS....",
+];
+
+// --- 4-Frame Climbing Cycle (Hand-over-hand, wall foot-plant, dress gathering) ---
+export const WOMAN_CLIMB_1 = [
+  "FF..........",
+  "FFF.HHHH....",
+  ".FFHHHHHH...",
+  "..HHFFFEHH..",
+  "...FFFFF....",
+  "..LLCCLL....",
+  ".FLLCCCCLD..",
+  ".FFCCCCCLDD.",
+  "LLCCCCCCLLDD",
+  "CCCCCCCCCCCC",
+  ".SSCCCCCCCCC",
+  "..FF...FF...",
+  "......FF....",
+  "......FF....",
+  "......SS....",
+];
+
+export const WOMAN_CLIMB_2 = [
+  "....HHHH....",
+  "...HHHHHH...",
+  "..HHFFFEHH..",
+  "...FFFFF....",
+  ".FFLLCCLLFF.",
+  ".FFLCCCCLDFF",
   ".LLCCCCCLDD.",
   "LLCCCCCCLLDD",
   "CCCCCCCCCCCC",
   "CCCCCCCCCCCC",
-  "....FF.FF...",
-  "..FF.....FF.",
-  ".SS.......SS",
+  "..SS..FF....",
+  "......FF....",
+  ".....SS.....",
   "............",
   "............",
 ];
 
-const WOMAN_HANG_1 = [
-  "..FF....FF..", // Hands stretched straight up grabbing the ledge
+export const WOMAN_CLIMB_3 = [
+  "...FF.......",
+  "...FFFHHHH..",
+  "..FFHHHHHH..",
+  "..HHFFFEH...",
+  "...FFFFF....",
+  ".FFLLCCLL...",
+  ".FLCCCCCLD..",
+  "..LCCCCCLDD.",
+  "LLCCCCCCLLDD",
+  "CCCCCCCCCCCC",
+  "..SSCCCCCCCC",
+  "..FF...FF...",
+  "......FF....",
+  "......FF....",
+  "......SS....",
+];
+
+export const WOMAN_CLIMB_4 = [
+  "...HHHH.....",
+  "..HHHHHH....",
+  "..HHFFFEH...",
+  "...FFFFF....",
+  "..FFLLCCLLF.",
+  "..FFLCCCCLDF",
+  ".LLCCCCCLDD.",
+  "LLCCCCCCLLDD",
+  "CCCCCCCCCCCC",
+  "CCCCCCCCCCCC",
+  "....FF..SS..",
+  "....FF......",
+  "....SS......",
+  "............",
+  "............",
+];
+
+// --- 4-Frame Monkey-bar Traversal ---
+export const WOMAN_HANG_1 = [
   "..FF....FF..",
-  "..FF....FF..", // Bare arms
+  "..FF....FF..",
+  "..FF....FF..",
   "...LLCCLL...",
   "...HHHHHH...",
   "..HHFFFEHH..",
@@ -378,7 +604,25 @@ const WOMAN_HANG_1 = [
   "..SS.....SS.",
 ];
 
-const WOMAN_HANG_2 = [
+export const WOMAN_HANG_2 = [
+  "...FF...FF..",
+  "...FF...FF..",
+  "...FF...FF..",
+  "...LLCCLL...",
+  "...HHHHHH...",
+  "..HHFFFEHH..",
+  "....FFFF....",
+  "..LCCCCCLD..",
+  ".LLCCCCCLDD.",
+  "LLCCCCCCLLDD",
+  "CCCCCCCCCCCC",
+  "CCCCCCCCCCCC",
+  "....FF.FF...",
+  "....FF.FF...",
+  "....SS.SS...",
+];
+
+export const WOMAN_HANG_3 = [
   "..FF....FF..",
   "..FF....FF..",
   "..FF....FF..",
@@ -396,7 +640,98 @@ const WOMAN_HANG_2 = [
   "......SSSS..",
 ];
 
-const WOMAN_JUMP = [
+export const WOMAN_HANG_4 = [
+  "..FF...FF...",
+  "..FF...FF...",
+  "..FF...FF...",
+  "...LLCCLL...",
+  "...HHHHHH...",
+  "..HHFFFEHH..",
+  "....FFFF....",
+  "..LCCCCCLD..",
+  ".LLCCCCCLDD.",
+  "LLCCCCCCLLDD",
+  "CCCCCCCCCCCC",
+  "CCCCCCCCCCCC",
+  "....FFFF....",
+  "...FF.FF....",
+  "...SSSS.....",
+];
+
+// --- 4-Frame Crawling Cycle ---
+export const WOMAN_CRAWL_1 = [
+  "................",
+  "................",
+  "................",
+  "................",
+  "................",
+  "...........HHHH.",
+  "..........HHEFFH",
+  "..........HFFFFF",
+  "....LL...LLCCCCD",
+  "..LLCC..LCCCCCCC",
+  ".SS.FF..CCCCCC.F",
+  ".FF.CCCCCC..CCFF",
+  ".SS..SS.SS......",
+  "................",
+  "................",
+];
+
+export const WOMAN_CRAWL_2 = [
+  "................",
+  "................",
+  "................",
+  "................",
+  "................",
+  "............HHHH",
+  "...........HHEFF",
+  "...........HFFFF",
+  ".....LL..LLCCCCD",
+  "...LLCC.LCCCCCCC",
+  "..SS.CCCCCC.CC..",
+  "...FF.CCCC..CCFF",
+  "...SS.SS....SS..",
+  "................",
+  "................",
+];
+
+export const WOMAN_CRAWL_3 = [
+  "................",
+  "................",
+  "................",
+  "................",
+  "................",
+  "...........HHHH.",
+  "..........HHEFFH",
+  "..........HFFFFF",
+  "....LL...LLCCCCD",
+  "..LLCC..LCCCCCCC",
+  ".SS.FF..CCCCCCFF",
+  ".FF.CCCCCC..CC.F",
+  ".SS..SS.SS......",
+  "................",
+  "................",
+];
+
+export const WOMAN_CRAWL_4 = [
+  "................",
+  "................",
+  "................",
+  "................",
+  "................",
+  "............HHHH",
+  "...........HHEFF",
+  "...........HFFFF",
+  ".....LL..LLCCCCD",
+  "...LLCC.LCCCCCCC",
+  "..SS.CCCCCC.CCFF",
+  "...FF.CCCC..CC..",
+  "...SS.SS....SS..",
+  "................",
+  "................",
+];
+
+export const WOMAN_JUMP = [
   "..FF....FF..",
   "...HHHHHH...",
   "..HHFFFEHH..",
@@ -414,7 +749,7 @@ const WOMAN_JUMP = [
   "............",
 ];
 
-const WOMAN_STUMBLE_1 = [
+export const WOMAN_STUMBLE_1 = [
   "..FF....FF..",
   ".FFF....FFF.",
   "...HHHHHH...",
@@ -432,7 +767,7 @@ const WOMAN_STUMBLE_1 = [
   "............",
 ];
 
-const WOMAN_STUMBLE_2 = [
+export const WOMAN_STUMBLE_2 = [
   "FF........FF",
   ".FFF....FFF.",
   "...HHHHHH...",
@@ -450,44 +785,11 @@ const WOMAN_STUMBLE_2 = [
   "............",
 ];
 
-const WOMAN_CRAWL_1 = [
-  "................",
-  "................",
-  "................",
-  "................",
-  "................",
-  "................",
-  "................",
-  ".....HHHH.......",
-  "....HHEFFH......",
-  "....HFFFF.......",
-  "..LLCCCCCCD.....",
-  ".LCCCCCCCCCDD...",
-  ".F..CCCC..FF....",
-  "....SS....SS....",
-  "................",
-];
+// ==========================================
+// COUPLE EMBRACE, CUDDLE & SLIDE FALL
+// ==========================================
 
-const WOMAN_CRAWL_2 = [
-  "................",
-  "................",
-  "................",
-  "................",
-  "................",
-  "................",
-  "................",
-  ".....HHHH.......",
-  "....HHEFFH......",
-  "....HFFFF.......",
-  "..LLCCCCCCD.....",
-  "..LCCCCCCCCCD...",
-  "...F..CC..FF.SS.",
-  "......SS..F.....",
-  "................",
-];
-
-// --- COUPLE EMBRACE & CUDDLE ---
-const COUPLE_EMBRACE = [
+export const COUPLE_EMBRACE = [
   "..HHHH..HHHH..",
   ".HHHHHHHHHHHH.",
   ".HFFEHH..HFEH.",
@@ -503,8 +805,7 @@ const COUPLE_EMBRACE = [
   "..SS.SS.SS.SS.",
 ];
 
-// Lying down horizontally cuddling on the platform
-const COUPLE_CUDDLE = [
+export const COUPLE_CUDDLE = [
   "........................",
   "....HHHHH......HHHH.....",
   "..HHHHHHHHH..HHHHHHHH...",
@@ -517,8 +818,7 @@ const COUPLE_CUDDLE = [
   "....SSSS.......SSSS.....",
 ];
 
-// Couple sliding down the collapsing platform and falling together
-const COUPLE_SLIDE_FALL = [
+export const COUPLE_SLIDE_FALL = [
   "......HHHH...HHHH...",
   "....HHHHHHHHHHHHHHHH",
   "...HHEFFEH...HEFFEH.",
@@ -535,7 +835,6 @@ const COUPLE_SLIDE_FALL = [
   "....................",
 ];
 
-// Floating heart sprite (7x6)
 export const PIXEL_HEART = [
   ".RR.RR.",
   "RHHIRHR",
@@ -550,29 +849,30 @@ export function getSpriteMatrix(
   state: AnimationState,
   frame: number,
 ): string[] {
+  const f4 = Math.abs(Math.floor(frame)) % 4;
+  const f2 = Math.abs(Math.floor(frame)) % 2;
+
   if (kind === "guy") {
     switch (state) {
       case "appear":
       case "walk_top":
-        return frame % 2 === 0 ? GUY_WALK_1 : GUY_WALK_2;
+      case "scamper":
+        return [GUY_WALK_1, GUY_WALK_2, GUY_WALK_3, GUY_WALK_4][f4]!;
       case "climb_up":
       case "climb_down":
-        return frame % 2 === 0 ? GUY_CLIMB_1 : GUY_CLIMB_2;
+        return [GUY_CLIMB_1, GUY_CLIMB_2, GUY_CLIMB_3, GUY_CLIMB_4][f4]!;
       case "hang_traverse":
-        return frame % 2 === 0 ? GUY_HANG_1 : GUY_HANG_2;
+        return [GUY_HANG_1, GUY_HANG_2, GUY_HANG_3, GUY_HANG_4][f4]!;
       case "crawl":
-        return frame % 2 === 0 ? GUY_CRAWL_1 : GUY_CRAWL_2;
+        return [GUY_CRAWL_1, GUY_CRAWL_2, GUY_CRAWL_3, GUY_CRAWL_4][f4]!;
       case "jump":
         return GUY_JUMP;
       case "embrace":
-        return GUY_STAND_1;
       case "cuddle":
         return GUY_STAND_1;
-      case "scamper":
-        return frame % 2 === 0 ? GUY_WALK_1 : GUY_WALK_2;
       case "stumble":
       case "slide_fall":
-        return frame % 2 === 0 ? GUY_STUMBLE_1 : GUY_STUMBLE_2;
+        return [GUY_STUMBLE_1, GUY_STUMBLE_2][f2]!;
       default:
         return GUY_STAND_1;
     }
@@ -580,25 +880,23 @@ export function getSpriteMatrix(
     switch (state) {
       case "appear":
       case "walk_top":
-        return frame % 2 === 0 ? WOMAN_WALK_1 : WOMAN_WALK_2;
+      case "scamper":
+        return [WOMAN_WALK_1, WOMAN_WALK_2, WOMAN_WALK_3, WOMAN_WALK_4][f4]!;
       case "climb_up":
       case "climb_down":
-        return frame % 2 === 0 ? WOMAN_CLIMB_1 : WOMAN_CLIMB_2;
+        return [WOMAN_CLIMB_1, WOMAN_CLIMB_2, WOMAN_CLIMB_3, WOMAN_CLIMB_4][f4]!;
       case "hang_traverse":
-        return frame % 2 === 0 ? WOMAN_HANG_1 : WOMAN_HANG_2;
+        return [WOMAN_HANG_1, WOMAN_HANG_2, WOMAN_HANG_3, WOMAN_HANG_4][f4]!;
       case "crawl":
-        return frame % 2 === 0 ? WOMAN_CRAWL_1 : WOMAN_CRAWL_2;
+        return [WOMAN_CRAWL_1, WOMAN_CRAWL_2, WOMAN_CRAWL_3, WOMAN_CRAWL_4][f4]!;
       case "jump":
         return WOMAN_JUMP;
       case "embrace":
-        return WOMAN_STAND_1;
       case "cuddle":
         return WOMAN_STAND_1;
-      case "scamper":
-        return frame % 2 === 0 ? WOMAN_WALK_1 : WOMAN_WALK_2;
       case "stumble":
       case "slide_fall":
-        return frame % 2 === 0 ? WOMAN_STUMBLE_1 : WOMAN_STUMBLE_2;
+        return [WOMAN_STUMBLE_1, WOMAN_STUMBLE_2][f2]!;
       default:
         return WOMAN_STAND_1;
     }
@@ -655,20 +953,16 @@ export function drawCoupleCuddle(
   scale = PIXEL_SCALE,
   alpha = 1.0,
 ): void {
-  const compositePalette: Record<string, string> = {
+  const mergedPalette: Record<string, string> = {
     ...GUY_PALETTE,
     ...WOMAN_PALETTE,
-    // Disambiguate overlap
-    P: GUY_PALETTE["P"] ?? "#ec4899",
-    W: GUY_PALETTE["W"] ?? "#ffffff",
-    T: GUY_PALETTE["T"] ?? "#0f172a",
-    C: WOMAN_PALETTE["C"] ?? "#0284c7",
-    B: "#f43f5e",
+    P: GUY_PALETTE.P!,
+    C: WOMAN_PALETTE.C!,
   };
-  drawPixelMatrix(ctx, COUPLE_CUDDLE, compositePalette, x, y, scale, false, alpha);
+  drawPixelMatrix(ctx, COUPLE_CUDDLE, mergedPalette, x, y, scale, false, alpha);
 }
 
-/** Draw the pair in mutual embrace */
+/** Draw the couple embracing at the edge before leaping */
 export function drawCoupleEmbrace(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -676,17 +970,14 @@ export function drawCoupleEmbrace(
   scale = PIXEL_SCALE,
   alpha = 1.0,
 ): void {
-  const compositePalette: Record<string, string> = {
+  const mergedPalette: Record<string, string> = {
     ...GUY_PALETTE,
     ...WOMAN_PALETTE,
-    P: GUY_PALETTE["P"] ?? "#ec4899",
-    C: WOMAN_PALETTE["C"] ?? "#0284c7",
-    B: "#f43f5e",
   };
-  drawPixelMatrix(ctx, COUPLE_EMBRACE, compositePalette, x, y, scale, false, alpha);
+  drawPixelMatrix(ctx, COUPLE_EMBRACE, mergedPalette, x, y, scale, false, alpha);
 }
 
-/** Draw the pair clinging and sliding down when the platform collapses */
+/** Draw couple sliding together down collapsing platform */
 export function drawCoupleSlideFall(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -694,18 +985,17 @@ export function drawCoupleSlideFall(
   scale = PIXEL_SCALE,
   alpha = 1.0,
 ): void {
-  const compositePalette: Record<string, string> = {
+  const mergedPalette: Record<string, string> = {
     ...GUY_PALETTE,
     ...WOMAN_PALETTE,
-    P: GUY_PALETTE["P"] ?? "#ec4899",
-    W: GUY_PALETTE["W"] ?? "#ffffff",
-    C: WOMAN_PALETTE["C"] ?? "#0284c7",
+    P: GUY_PALETTE.P!,
+    C: WOMAN_PALETTE.C!,
     B: "#f43f5e",
   };
-  drawPixelMatrix(ctx, COUPLE_SLIDE_FALL, compositePalette, x, y, scale, false, alpha);
+  drawPixelMatrix(ctx, COUPLE_SLIDE_FALL, mergedPalette, x, y, scale, false, alpha);
 }
 
-/** Draw the retro pixel-art platform as it scrolls out */
+/** Draw the retro wooden platform scrolling out from the wall */
 export function drawPixelPlatform(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -715,40 +1005,42 @@ export function drawPixelPlatform(
   scale = PIXEL_SCALE,
   alpha = 1.0,
 ): void {
-  if (width <= 0 || alpha <= 0) return;
+  if (width <= 0) return;
   const prevAlpha = ctx.globalAlpha;
   ctx.globalAlpha = prevAlpha * alpha;
 
   ctx.save();
-  // Draw main plank
-  ctx.fillStyle = PLATFORM_PALETTE["W"] ?? "#d97706";
-  ctx.fillRect(x, y, width, height);
 
-  // Top highlight line
-  ctx.fillStyle = "#fde68a";
-  ctx.fillRect(x, y, width, scale);
+  // Top wood edge (light highlight)
+  ctx.fillStyle = PLATFORM_PALETTE.W!;
+  ctx.fillRect(x, y, width, scale * 2);
+
+  // Middle wood grain (medium tone)
+  ctx.fillStyle = PLATFORM_PALETTE.M!;
+  ctx.fillRect(x, y + scale * 2, width, height - scale * 4);
 
   // Bottom wood shadow
-  ctx.fillStyle = PLATFORM_PALETTE["D"] ?? "#78350f";
-  ctx.fillRect(x, y + height - scale, width, scale);
+  ctx.fillStyle = PLATFORM_PALETTE.D!;
+  ctx.fillRect(x, y + height - scale * 2, width, scale * 2);
 
-  // Wood plank lines every 16px
-  ctx.fillStyle = PLATFORM_PALETTE["M"] ?? "#b45309";
-  for (let px = x + 16 * scale; px < x + width; px += 16 * scale) {
+  // Vertical wood plank separation lines every 24px
+  ctx.fillStyle = PLATFORM_PALETTE.D!;
+  for (let px = x + 24; px < x + width; px += 24) {
     ctx.fillRect(px, y, scale, height);
   }
 
-  // Supporting wall brackets
-  const bracketSize = Math.min(height * 1.5, 18 * scale);
-  ctx.fillStyle = PLATFORM_PALETTE["K"] ?? "#334155";
-  ctx.fillRect(x, y + height, scale * 3, bracketSize);
-  ctx.fillStyle = PLATFORM_PALETTE["I"] ?? "#64748b";
-  ctx.fillRect(x + scale, y + height, scale, bracketSize);
+  // Bracket at anchor point (wall end)
+  ctx.fillStyle = PLATFORM_PALETTE.K!;
+  ctx.fillRect(x + width - scale * 3, y, scale * 3, height);
+  ctx.fillStyle = PLATFORM_PALETTE.I!;
+  ctx.fillRect(x + width - scale * 2, y + scale * 2, scale, scale * 2);
+  ctx.fillRect(x + width - scale * 2, y + height - scale * 4, scale, scale * 2);
 
-  // Diagonal strut
-  for (let i = 0; i < bracketSize; i += scale) {
-    ctx.fillStyle = PLATFORM_PALETTE["K"] ?? "#334155";
-    ctx.fillRect(x + i, y + height + bracketSize - i, scale, scale);
+  // Diagonal support strut underneath the wall hinge
+  const bSize = Math.min(18, Math.floor(width * 0.4));
+  ctx.fillStyle = PLATFORM_PALETTE.D!;
+  for (let i = 0; i < bSize; i += scale) {
+    ctx.fillRect(x + width - bSize + i, y + height + i, scale * 2, scale);
   }
 
   ctx.restore();
