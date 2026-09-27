@@ -1,7 +1,8 @@
 # Section panel refresh race
 
 **ID**: 50jblw
-**Status**: in progress (PR #289 open; the driver reviews and merges)
+**Status**: done — PR #289 merged to main as e6a2937 (2026-09-27, by the driver), CI all green
+at head 9d62e1a.
 **Workspace**: 00035
 **Branch**: `cmd/workspace-00035-section-refresh-race`
 
