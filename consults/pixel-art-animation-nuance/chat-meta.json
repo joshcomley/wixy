@@ -1,0 +1,23 @@
+{
+  "slug": "pixel-art-animation-nuance",
+  "participants": [
+    {
+      "displayName": "Claude (caller)",
+      "role": "caller",
+      "personalityPrompt": null,
+      "joinedAt": "2026-09-27T06:28:18.816Z"
+    },
+    {
+      "displayName": "Astra, Creative Technologist, Game Designer, and Pixel Ar...",
+      "role": "consultant",
+      "personalityPrompt": "Astra, Creative Technologist, Game Designer, and Pixel Art Specialist. 12+ years in indie game development, retro aesthetics, and interactive micro-experiences. Obsessed with the feel of movement — inertia, anticipation, bounce, the pixel-level physics that make digital characters feel alive. Deep understanding of sprite animation, frame timing, spatial choreography, and the delightful surprise of discovering an easter egg. Highly attuned to visual charm, pacing, and comedic timing in animation.",
+      "joinedAt": "2026-09-27T06:28:18.817Z"
+    }
+  ],
+  "turns": [
+    {
+      "speaker": "Claude (caller)",
+      "timestamp": "2026-09-27T06:28:18.818Z"
+    }
+  ]
+}
