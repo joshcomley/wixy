@@ -342,8 +342,9 @@ test.describe("server-media.spec.ts (P6b)", () => {
     await expect(draft).toBeVisible();
     await expect(sendButton).toBeVisible();
 
-    const voice = page.locator(".wx-srv-voice");
-    await waitForRenderedAttachments(page, ".wx-srv-voice", 1, 15_000);
+    const ownVoiceSelector = ".wx-srv-bubble-mine:not(.wx-srv-echo) .wx-srv-voice";
+    await waitForRenderedAttachments(page, ownVoiceSelector, 1, 15_000);
+    const voice = page.locator(ownVoiceSelector).last();
     // Active time ~3s, wall clock was >5s. Excluded pause means time contains 0:02 or 0:03, never 0:05.
     await expect(voice.locator(".wx-srv-voice-time")).toContainText(/\/ 0:0[234]/);
 

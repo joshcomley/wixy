@@ -57,16 +57,17 @@ for (const viewport of VIEWPORTS) {
   test.describe(`composer focus after Send (${viewport.label})`, () => {
     test.use({ viewport: { width: viewport.width, height: viewport.height } });
 
-    test("pressing Enter keeps the caret in the input", async ({ page }) => {
+    test("pressing Enter inserts a newline without sending", async ({ page }) => {
       await unlockServer(page, "Focus");
       const marker = `enter-${viewport.label}-${Date.now()}`;
       const input = page.locator(COMPOSER_TEXTAREA);
       await input.click();
       await input.fill(marker);
       await input.press("Enter");
-      await expect(confirmedBubble(page, marker)).toHaveCount(1);
-      await expect(input).toHaveValue("");
+      await expect(input).toHaveValue(`${marker}\n`);
       await expect(input).toBeFocused();
+      await expect(page.locator(".wx-chatc-input-row")).toHaveClass(/wx-chatc-multiline/);
+      await expect(confirmedBubble(page, marker)).toHaveCount(0);
     });
 
     test("clicking Send keeps the caret in the input", async ({ page }) => {
@@ -94,7 +95,7 @@ for (const viewport of VIEWPORTS) {
       const input = page.locator(COMPOSER_TEXTAREA);
       await input.click();
       await input.fill(marker);
-      await input.press("Enter");
+      await page.locator(SEND_BUTTON).click();
       await expect(page.locator(".wx-srv-thread-view .wx-chat-composer-error")).toBeVisible();
       await expect(input).toHaveValue(marker);
       await expect(input).toBeFocused();
@@ -117,7 +118,7 @@ for (const viewport of VIEWPORTS) {
       const input = page.locator(COMPOSER_TEXTAREA);
       await input.click();
       await input.fill(marker);
-      await input.press("Enter");
+      await page.locator(SEND_BUTTON).click();
       // The send never disables the input (that was the flicker bug); the optimistic echo
       // bubble is what proves the send is genuinely still in flight.
       await expect(page.locator(".wx-srv-bubble-mine.wx-srv-echo", { hasText: marker })).toHaveCount(1);
