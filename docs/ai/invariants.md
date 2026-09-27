@@ -666,11 +666,17 @@ not when the shield later resolves to a lock — a page reloaded, closed, or dis
 500 ms window elapses is still found paused on the next mount. An idle period that ran out while
 the page was away locks the returning chat INSTANTLY (cause `idleAway`), before any touch gets a
 chance to be mistaken for activity that should have prevented it.
+*Exception (draw mode, decisions/00176, round 2):* while draw mode (pen) is active, clicking the
+header Close button (`.wx-srv-panic-button`, ✕) immediately abandons the in-progress drawing (discards
+active and stored session strokes from the model, DOM, and server) and exits draw mode without a confirmation
+dialog and without locking the chat. Outside draw mode, the Close button locks the chat as panic. (Escape
+continues to lock immediately even mid-stroke).
 *Enforced by:* `admin-ui/tests/serverChatView.test.ts` (no stream after a panic, idle or hidden
 lock while attach is pending; a late `locked` event or unauthorized attach failure from the
 previous unlock is ignored), `admin-ui/tests/server/panel.test.ts`,
 `admin-ui/tests/server/panelGrant.test.ts` and `lockModelGrant.test.ts` (the grant,
-shield and checkbox behaviour), and `e2e/tests/server-lock.spec.ts` +
+shield and checkbox behaviour), `admin-ui/tests/server/threadDrawing.test.ts`,
+`e2e/tests/server-drawing.spec.ts`, and `e2e/tests/server-lock.spec.ts` +
 `server-permanent-unlock.spec.ts`.
 
 ### Inv 43 — Server-chat idle time is reset only by user input

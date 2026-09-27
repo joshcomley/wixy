@@ -948,7 +948,8 @@ note's seconds**, and records `done`/`failed`, which appends `message_updated`; 
 **Frontend (`admin-ui/src/server/transcript.ts`).** Per voice note, one `.wx-srv-transcript` block:
 Transcribe (only while `transcriptionAvailable`, read once per attach) → "Transcribing…" spinner →
 text + per-device Hide/Show (a `Set` in `thread.ts`, memory only) + Re-transcribe (re-POSTs with
-`?retranscribe=1`, replacing finished text in place) → or an error + Retry. A
+`?retranscribe=1`, replacing finished text in place; if the re-transcribe attempt fails, the prior
+successful transcript text is preserved rather than wiped) → or an error + Retry. A
 transcript-only `message_updated` is patched into the live bubble (`differOnlyInTranscripts` →
 `patchTranscriptBlocks`) so a playing `<audio>` is never disposed; anything else still rebuilds the
 bubble. A `202` reply cannot overwrite a newer stream update (a quick job's update can beat the
@@ -1426,10 +1427,24 @@ side (schema, routes, the live relay and erasure) is §18. This section covers t
   It carries `data-srv-gesture-boundary`, `aria-pressed` (pen on/off), and `aria-expanded` (toolbar open/collapsed).
   It does nothing while locked. While the pen is on, tapping the Pen button toggles the toolbar open or collapsed
   without turning the pen off.
+- **Header Settings cog swap & Undo/Redo:** While the pen is on, the header settings cog
+  (`.wx-srv-settings-button`) is hidden, and **Undo** (`.wx-srv-pen-undo`) and **Redo**
+  (`.wx-srv-pen-redo`) buttons take its place for strokes made during the current drawing session.
+  Undo pops the latest stroke; if it was the drawing's sole stroke, the drawing is deleted locally
+  and via `sync.deleteDrawing` (and a live cancel frame is emitted), while for multi-stroke drawings
+  remaining strokes are re-stored under a new key. Redo restores undone strokes and stores them
+  on the anchor message. Both buttons carry `data-srv-gesture-boundary`.
+- **Keyboard parity:** `Ctrl+Z` / `Cmd+Z` (undo) and `Ctrl+Y` / `Ctrl+Shift+Z` / `Cmd+Shift+Z`
+  (redo) operate undo/redo globally while draw mode is active.
+- **Header Close button abandons:** In draw mode, clicking the header Close button
+  (`.wx-srv-panic-button`, ✕) immediately abandons in-progress session drawings (discards active
+  and stored strokes from model, view, and server, resets undo/redo stacks) and exits draw mode
+  without a confirmation dialog and without locking the chat (Inv 42 exception). Outside draw mode,
+  ✕ locks the chat as panic. (Escape continues to lock immediately even mid-stroke).
 - **The toolbar** (`.wx-srv-pen-toolbar`, `role="toolbar"`) sits between the header and the
   thread. It holds the 8 colour swatches and the 4 thicknesses (in Draw mode), a **Draw |
   Select** switch, **Collapse** (in Draw mode, `.wx-srv-pen-collapse`, which tucks the toolbar away so the full thread
-  area is drawable while strokes stay live), and **Done** (which exits pen mode). In Select mode it shows the hint,
+  area is drawable while strokes stay live), and **Done** (which exits pen mode and clears undo/redo session history). In Select mode it shows the hint,
   **Next drawing** (the keyboard route to a drawing) and **Delete drawing**
   (`data-srv-gesture-boundary`, since it opens the confirmation). "Delete this drawing for
   everyone?" then replaces them with Delete / Cancel. Notices use the status line
@@ -1495,7 +1510,8 @@ side (schema, routes, the live relay and erasure) is §18. This section covers t
 - In Draw mode, `div.wx-srv-draw-surface` lies over the thread inside `.wx-srv-thread-wrap`:
   `z-index: 1` (below the jump pill's 2), `touch-action: none`, pointer capture, and a right
   inset that leaves a desktop scrollbar draggable. It carries `data-srv-gesture-exempt`, so
-  the multi-tap lock ignores it and rapid dots never lock. Escape and ✕ still lock at once.
+  the multi-tap lock ignores it and rapid dots never lock. Escape still locks at once; ✕ abandons
+  the drawing session and exits draw mode without locking (Inv 42 exception).
 - **One finger, pen or mouse draws.** A second TOUCH finger that lands within 150 ms of the
   first and before the first has moved 12 px cancels the stroke (a live `cancel`, nothing
   stored) and starts a two-finger pan that scrolls by the centroid's movement. Any other extra
