@@ -1371,6 +1371,11 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       sender.textContent = message.sender;
       bubble.appendChild(sender);
     }
+    const time = documentRef.createElement("span");
+    time.className = "wx-srv-bubble-time";
+    time.textContent = formatTime(message.createdAt);
+
+    let hasTranscribableVoice = false;
     if (message.viewOnce) {
       const isVideo = message.attachments[0]?.kind === "video";
       const kindLabel = isVideo ? "video" : "photo";
@@ -1447,23 +1452,19 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         linkifyInto(textEl, message.text, documentRef);
         bubble.appendChild(textEl);
       }
-      
-      const time = documentRef.createElement("span");
-      time.className = "wx-srv-bubble-time";
-      time.textContent = formatTime(message.createdAt);
-      
-      const hasTranscribableVoice = transcription !== undefined && message.attachments.some((a) => a.kind === "voice" && a.status === "ready");
+
+      hasTranscribableVoice = transcription !== undefined && message.attachments.some((a) => a.kind === "voice" && a.status === "ready");
       const attachmentsEl = renderAttachmentsFor(message, hasTranscribableVoice ? time : undefined);
       if (attachmentsEl !== null) bubble.appendChild(attachmentsEl);
-      
-      const reactionsEl = documentRef.createElement("div");
-      reactionsEl.className = "wx-srv-reactions";
-      fillReactions(reactionsEl, message);
-      bubble.appendChild(reactionsEl);
-      
-      if (!hasTranscribableVoice) {
-        bubble.appendChild(time);
-      }
+    }
+
+    const reactionsEl = documentRef.createElement("div");
+    reactionsEl.className = "wx-srv-reactions";
+    fillReactions(reactionsEl, message);
+    bubble.appendChild(reactionsEl);
+
+    if (!hasTranscribableVoice) {
+      bubble.appendChild(time);
     }
     messageActionControllers.set(
       message.seq,

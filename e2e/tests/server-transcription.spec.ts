@@ -122,7 +122,7 @@ for (const [label, viewport] of [
 
       const button = note(page, seq).getByRole("button", { name: "Transcribe this voice note" });
       await expect(button).toBeVisible();
-      
+
       const actionRow = button.locator("xpath=ancestor::*[contains(@class, 'wx-srv-transcript-action-row')]").first();
       await expect(actionRow.locator(".wx-srv-bubble-time")).toBeVisible();
 
