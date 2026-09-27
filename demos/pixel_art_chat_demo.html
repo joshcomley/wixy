@@ -323,12 +323,82 @@
       font-size: 0.7rem;
       color: var(--text-muted);
     }
+
+    /* Kinematic Inspector Styles */
+    .inspector-card {
+      max-width: 960px;
+      width: 100%;
+      margin-top: 24px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    .inspector-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px;
+      margin-top: 12px;
+    }
+    .inspector-anim-col {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      padding-right: 16px;
+      border-right: 1px solid var(--border);
+      min-width: 110px;
+    }
+    .inspector-anim-col canvas {
+      display: block;
+      image-rendering: pixelated;
+    }
+    .inspector-frames-col {
+      display: flex;
+      flex: 1;
+      justify-content: space-around;
+      gap: 10px;
+    }
+    .inspector-frame-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      background: #1e293b;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 6px;
+      padding: 10px 8px;
+      flex: 1;
+    }
+    .inspector-frame-card canvas {
+      display: block;
+      margin-bottom: 6px;
+      image-rendering: pixelated;
+    }
+    .inspector-frame-title {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #38bdf8;
+      margin-bottom: 2px;
+    }
+    .inspector-frame-desc {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      line-height: 1.25;
+    }
   </style>
 </head>
 <body>
 
   <header>
     <h1>Wixy Chat — Pixel Art Idle Interaction</h1>
+    <div style="display: inline-block; margin-top: 6px; margin-bottom: 8px; padding: 4px 14px; background: rgba(56, 189, 248, 0.15); border: 1px solid #0284c7; border-radius: 9999px; font-size: 0.8rem; color: #38bdf8; font-weight: 600;">
+      Version 2.2 • Nuanced Side-Profile Wall-Climb & Crawl Engine • 2026-09-27
+    </div>
     <p class="subtitle">
       When Wixie chat sits idle for 30s: a guy in a pink suit climbs from the bottom, a woman in a blue dress climbs from the top, they scale and monkey-bar across chat blocks, meet at a scrolling platform, jump across, and cuddle together.
     </p>
@@ -383,7 +453,8 @@
       <div class="control-group">
         <span class="control-label">Speed</span>
         <div class="btn-group">
-          <button class="btn btn-secondary" onclick="setSpeed(0.5, this)">0.5x (Slow)</button>
+          <button class="btn btn-secondary" onclick="setSpeed(0.25, this)">0.25x (Slow-Mo)</button>
+          <button class="btn btn-secondary" onclick="setSpeed(0.5, this)">0.5x</button>
           <button class="btn btn-secondary active" onclick="setSpeed(1.0, this)">1.0x (Normal)</button>
           <button class="btn btn-secondary" onclick="setSpeed(2.0, this)">2.0x (Fast)</button>
         </div>
@@ -489,6 +560,28 @@
 
   </div>
 
+  <!-- Kinematic Frame-by-Frame Inspector (Enlarged 4x) -->
+  <div class="inspector-card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+      <div>
+        <h2 style="font-size: 1.15rem; font-weight: 700; color: #f1f5f9; margin-bottom: 4px;">Kinematic Locomotion Inspector (4x Zoom)</h2>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin: 0;">
+          Inspect every single frame side-by-side: hand-over-hand wall scaling, 90° knee plants, vertical pull-up surges, and quadrupedal crawls.
+        </p>
+      </div>
+      <div class="btn-group" id="inspectorTabs">
+        <button class="btn btn-secondary active" onclick="selectInspectorTab('climb', this)">Wall Climb</button>
+        <button class="btn btn-secondary" onclick="selectInspectorTab('crawl', this)">Underhang Crawl</button>
+        <button class="btn btn-secondary" onclick="selectInspectorTab('walk', this)">Walk Stride</button>
+        <button class="btn btn-secondary" onclick="selectInspectorTab('hang', this)">Monkey-Bar</button>
+      </div>
+    </div>
+
+    <div id="inspectorDisplay">
+      <!-- Injected by renderInspector() -->
+    </div>
+  </div>
+
   <script>
     // Embedded Pixel Art Engine
     const PIXEL_SCALE = 2;
@@ -556,145 +649,145 @@
     ];
 
     const GUY_WALK_1 = [
-      "....HHHH....",
-      "...HHHHHH...",
-      "...EEFFEE...",
-      "...EFFFFE...",
-      "....FFFF....",
-      "...LLPPLL...",
-      "..LPPWPPPD..",
-      "..PPPTPPD...",
-      "...PPPPPD...",
-      "...DPPPPD...",
-      "...PPPPPP...",
+      "...HHHHH....",
+      "..HHHHHHH...",
+      ".HFEFFHHH...",
+      ".FFFFFFPP...",
+      "..LLPPWWP...",
+      ".FLLPPPTPPD.",
+      "..LPPPPPDD..",
+      "...PPPPPDD..",
       "...PP..PP...",
       "..PP....PP..",
       "..PP....PP..",
-      ".SS......SS.",
+      ".PP......PP.",
+      ".PP......PP.",
+      "SS........SS",
+      "............",
     ];
 
     const GUY_WALK_2 = [
       "...HHHHH....",
       "..HHHHHHH...",
-      "..EEFFEE....",
-      "..EFFFFE....",
-      "...FFFF.....",
-      "..LLPPLL....",
-      "..PPWPPPD...",
-      "..PPTPPD....",
-      "..PPPPPD....",
-      "..DPPPPD....",
-      "..PPPPPP....",
+      ".HFEFFHHH...",
+      ".FFFFFFPP...",
+      "..LLPPWWPD..",
+      "..LPPPTPPD..",
+      "..DPPPPPDD..",
+      "...PPPPPD...",
+      "....PPPP....",
+      "....PPPP....",
       "....PP.PP...",
-      "....PP.PP...",
-      "....PP.SS...",
+      "....PP..PP..",
+      "....SS...SS.",
       "....SS......",
+      "............",
     ];
 
     const GUY_WALK_3 = [
-      "....HHHH....",
-      "...HHHHHH...",
-      "...EEFFEE...",
-      "...EFFFFE...",
-      "....FFFF....",
-      "...LLPPLL...",
-      "..DPPWPPPL..",
-      "...DPTPPP...",
-      "...DPPPPP...",
-      "...DPPPPD...",
-      "...PPPPPP...",
+      "...HHHHH....",
+      "..HHHHHHH...",
+      ".HFEFFHHH...",
+      ".FFFFFFPP...",
+      "..LLPPWWP...",
+      "..LPPPTPPLLF",
+      "..LPPPPPDD..",
+      ".F.PPPPPDD..",
       "...PP..PP...",
       "..PP....PP..",
       "..PP....PP..",
-      ".SS......SS.",
+      ".PP......PP.",
+      ".PP......PP.",
+      "SS........SS",
+      "............",
     ];
 
     const GUY_WALK_4 = [
-      "....HHHHH...",
-      "...HHHHHHH..",
-      "....EEFFEE..",
-      "....EFFFFE..",
-      ".....FFFF...",
-      "....LLPPLL..",
-      "...DPPWPPP..",
-      "....DPTPPP..",
-      "....DPPPPP..",
-      "....DPPPPD..",
-      "....PPPPPP..",
+      "...HHHHH....",
+      "..HHHHHHH...",
+      ".HFEFFHHH...",
+      ".FFFFFFPP...",
+      "..LLPPWWPD..",
+      "..LPPPTPPD..",
+      "..DPPPPPDD..",
+      "...PPPPPD...",
+      "....PPPP....",
+      "....PPPP....",
       "...PP.PP....",
-      "...PP.PP....",
-      "...SS.PP....",
+      "..PP..PP....",
+      ".SS...SS....",
       "......SS....",
+      "............",
     ];
 
     const GUY_CLIMB_1 = [
       "FF..........",
-      "FFF.HHHH....",
-      ".LLHHHHHH...",
-      "..L.EEFFEE..",
-      "....FFFF....",
-      "..LLPPLL....",
-      ".FLLPWPPPD..",
-      ".FF.PPPTPPD.",
-      "...PPPPPD...",
-      "..DPPPPD....",
-      ".SSPPPPPP...",
-      "..PP..PP....",
-      "......PP....",
-      "......PP....",
-      "......SS....",
+      "FF..HHHH....",
+      "..FHHHHHH...",
+      ".FEFFHHHH...",
+      ".FFFFPPPP...",
+      ".LLPPWWPP...",
+      "FFPPPTPPD...",
+      "..PPPPPDD...",
+      "SSPPPPPD....",
+      "SSPP..PP....",
+      "....PPPP....",
+      "....PP......",
+      "....PP......",
+      "....SS......",
+      "............",
     ];
 
     const GUY_CLIMB_2 = [
       "....HHHH....",
       "...HHHHHH...",
-      "...EEFFEE...",
-      "....FFFF....",
-      ".FFLLPPLLFF.",
-      ".FFPPWPPPFF.",
-      "...PPPTPPD..",
-      "...PPPPPD...",
-      "..DPPPPD....",
-      "..PPPPPP....",
-      "..SS..PP....",
-      "......PP....",
-      ".....SS.....",
+      "..FEFFHHH...",
+      "FFFFFFPPPP..",
+      ".LLPPWWPPD..",
+      "FFPPPTPPDD..",
+      "..PPPPPDD...",
+      "..PPPPPD....",
+      "SSPPPP......",
+      "SS..PP......",
+      "...PPP......",
+      "...SS.......",
+      "............",
       "............",
       "............",
     ];
 
     const GUY_CLIMB_3 = [
-      "...FF.......",
-      "...FFFHHHH..",
-      "..LLHHHHHH..",
-      "...LEFFEE...",
-      "....FFFF....",
-      ".FFLLPPLL...",
-      ".FPPPWPPPD..",
-      "..PPPTPPD...",
-      "...PPPPPD...",
-      "..DPPPPD....",
-      "..SSPPPP....",
-      "..PP..PP....",
-      "......PP....",
-      "......PP....",
-      "......SS....",
+      "FF..........",
+      "FFF.HHHH....",
+      "..FHHHHHH...",
+      "..FEFFHHH...",
+      "..FFFFLLPP..",
+      "..LLPPWWPD..",
+      "FFPPPTPPDD..",
+      "..PPPPPDD...",
+      "..PPPPPD....",
+      "SSPPPP......",
+      "SS..PP......",
+      "....PP......",
+      "....PP......",
+      "....SS......",
+      "............",
     ];
 
     const GUY_CLIMB_4 = [
       "...HHHH.....",
       "..HHHHHH....",
-      "..EEFFEE....",
-      "...FFFF.....",
-      "..FFLLPPLLF.",
-      "..FFPPWPPPF.",
-      "...PPPTPPD..",
-      "...PPPPPD...",
-      "..DPPPPD....",
-      "..PPPPPP....",
-      "....PP..SS..",
+      ".FEFFHHH....",
+      "FFFFFFPPPP..",
+      ".LLPPWWPPD..",
+      ".FPPPTPPDD..",
+      "..PPPPPDD...",
+      "SSPPPPPD....",
+      "SS..PPPP....",
+      "....PP......",
       "....PP......",
       "....SS......",
+      "............",
       "............",
       "............",
     ];
@@ -705,32 +798,32 @@
       "..LL....LL..",
       "...LLPPLL...",
       "...HHHHHH...",
-      "...EEFFEE...",
-      "....FFFF....",
-      "..LPPWPPPD..",
-      "...PPPTPPD..",
+      "..HFEFFHHH..",
+      "..FFFFFFPP..",
+      "..LLPPWWPD..",
+      "..LPPPTPPD..",
+      "..DPPPPPDD..",
       "...PPPPPD...",
-      "...DPPPPD...",
-      "....PPPP....",
-      "....PPPP....",
-      "...PP..PP...",
-      "..SS....SS..",
+      "....PP..PP..",
+      ".....PP..PP.",
+      "......PP..PP",
+      "......SS..SS",
     ];
 
     const GUY_HANG_2 = [
-      "...FF...FF..",
-      "...FF...FF..",
-      "...LL...LL..",
+      "..FF....FF..",
+      "..FF....FF..",
+      "..LL....LL..",
       "...LLPPLL...",
       "...HHHHHH...",
-      "...EEFFEE...",
-      "....FFFF....",
-      "..LPPWPPPD..",
-      "...PPPTPPD..",
+      "..HFEFFHHH..",
+      "..FFFFFFPP..",
+      "..LLPPWWPD..",
+      "..LPPPTPPD..",
+      "..DPPPPPDD..",
       "...PPPPPD...",
-      "...DPPPPD...",
       "....PPPP....",
-      "....PPPP....",
+      "....PP.PP...",
       "....PP.PP...",
       "....SS.SS...",
     ];
@@ -741,34 +834,34 @@
       "..LL....LL..",
       "...LLPPLL...",
       "...HHHHHH...",
-      "...EEFFEE...",
-      "....FFFF....",
-      "..LPPWPPPD..",
-      "...PPPTPPD..",
+      "..HFEFFHHH..",
+      "..FFFFFFPP..",
+      "..LLPPWWPD..",
+      "..LPPPTPPD..",
+      "..DPPPPPDD..",
       "...PPPPPD...",
-      "...DPPPPD...",
-      "....PPPP....",
-      "....PPPP....",
-      ".....PPPP...",
-      "......SSSS..",
+      "..PP..PP....",
+      ".PP..PP.....",
+      "PP..PP......",
+      "SS..SS......",
     ];
 
     const GUY_HANG_4 = [
-      "..FF...FF...",
-      "..FF...FF...",
-      "..LL...LL...",
+      "..FF....FF..",
+      "..FF....FF..",
+      "..LL....LL..",
       "...LLPPLL...",
       "...HHHHHH...",
-      "...EEFFEE...",
-      "....FFFF....",
-      "..LPPWPPPD..",
-      "...PPPTPPD..",
+      "..HFEFFHHH..",
+      "..FFFFFFPP..",
+      "..LLPPWWPD..",
+      "..LPPPTPPD..",
+      "..DPPPPPDD..",
       "...PPPPPD...",
-      "...DPPPPD...",
       "....PPPP....",
-      "....PPPP....",
-      "...PP.PP....",
-      "...SS.SS....",
+      "...PP..PP...",
+      "...PP..PP...",
+      "...SS..SS...",
     ];
 
     const GUY_CRAWL_1 = [
@@ -777,14 +870,14 @@
       "................",
       "................",
       "................",
-      "...........HHHH.",
-      "..........HHEFFH",
-      "..........HFFFFF",
-      "....LL...LLPPWWP",
-      "..LLPP..LPPPPPPP",
-      ".SS.PP..PPPPPP.F",
-      ".PP.PPPPPP..PPFF",
-      ".SS..SS.SS......",
+      "................",
+      "....HHHHHH......",
+      "...HFEFFHHHH....",
+      "...FFFFFLLPP....",
+      "FF.LLPPWWPPPDD..",
+      "FF.FPPPTPPPPPPD.",
+      "...LLPP.PP...PPD",
+      "..SS....SS..SSSS",
       "................",
       "................",
     ];
@@ -795,14 +888,14 @@
       "................",
       "................",
       "................",
-      "............HHHH",
-      "...........HHEFF",
-      "...........HFFFF",
-      ".....LL..LLPPWWP",
-      "...LLPP.LPPPPPPP",
-      "..SS.PPPPPP.PP..",
-      "...PP.PPPP..PPFF",
-      "...SS.SS....SS..",
+      "................",
+      "....HHHHHH......",
+      "...HFEFFHHHH....",
+      "...FFFFFLLPP....",
+      "..LLPPWWPPPDD...",
+      ".FFPPPTPPPPPPD..",
+      ".FFLLPP.PP..PPPD",
+      "...SS...PP..SSSS",
       "................",
       "................",
     ];
@@ -813,14 +906,14 @@
       "................",
       "................",
       "................",
-      "...........HHHH.",
-      "..........HHEFFH",
-      "..........HFFFFF",
-      "....LL...LLPPWWP",
-      "..LLPP..LPPPPPPP",
-      ".SS.PP..PPPPPPFF",
-      ".PP.PPPPPP..PP.F",
-      ".SS..SS.SS......",
+      "................",
+      "....HHHHHH......",
+      "...HFEFFHHHH....",
+      "...FFFFFLLPP....",
+      "FF.LLPPWWPPPDD..",
+      "FF.LLPPTPPPPPPD.",
+      "...FPPP.PPPP..PD",
+      "..SS......SSSSSS",
       "................",
       "................",
     ];
@@ -831,30 +924,30 @@
       "................",
       "................",
       "................",
-      "............HHHH",
-      "...........HHEFF",
-      "...........HFFFF",
-      ".....LL..LLPPWWP",
-      "...LLPP.LPPPPPPP",
-      "..SS.PPPPPP.PPFF",
-      "...PP.PPPP..PP..",
-      "...SS.SS....SS..",
+      "................",
+      "....HHHHHH......",
+      "...HFEFFHHHH....",
+      "...FFFFFLLPP....",
+      "..LLPPWWPPPDD...",
+      ".FFLLPPTPPPPPD..",
+      ".FF.PPP.PPPPPPPD",
+      "...SS...SSSS....",
       "................",
       "................",
     ];
 
     const GUY_JUMP = [
-      "..FF....FF..",
-      "...HHHHHH...",
-      "...EEFFEE...",
-      "....FFFF....",
-      "..LLPPLLDD..",
-      ".LPPPWPPPDD.",
-      ".LPPPPTPPDD.",
-      "..PPPPPPPP..",
-      "...PPPPPP...",
+      "FF..........",
+      ".FF.HHHH....",
+      "..FHHHHHH...",
+      "..FEFFHHH...",
+      "..FFFFLLPP..",
+      "..LLPPWWPD..",
+      "..LPPPTPPDD.",
+      "...DPPPPPD..",
       "....PPPP....",
       "...PP..PP...",
+      "..PP....PP..",
       "..PP....PP..",
       ".SS......SS.",
       "............",
@@ -917,145 +1010,145 @@
     ];
 
     const WOMAN_WALK_1 = [
-      "....HHHH....",
-      "...HHHHHH...",
-      "..HHFFFEHH..",
-      "...FFFFF....",
-      "....FFFF....",
-      "...LLCCLL...",
-      "..LCCCCCLD..",
-      "..LCCCCCLD..",
-      ".LLCCCCCLDD.",
-      ".LCCCCCCLDD.",
-      "LLCCCCCCLLDD",
-      "CCCCCCCCCCCC",
-      "CCCCCCCCCCCC",
-      "...FF...FF..",
-      "..SS.....SS.",
+      "...HHHHH....",
+      "..HHHHHHH...",
+      ".HFEFFHHH...",
+      ".FFFFFFCC...",
+      "..LLCCWWCD..",
+      ".FLLCCCCCDD.",
+      "..LCCCCCDD..",
+      ".DDCCCCCCDD.",
+      "DDCCCCCCCCDD",
+      ".CCCCCCCCCC.",
+      "..FF....FF..",
+      "..FF....FF..",
+      "..FF....FF..",
+      ".SS......SS.",
+      "............",
     ];
 
     const WOMAN_WALK_2 = [
       "...HHHHH....",
       "..HHHHHHH...",
-      ".HHFFFEHH...",
-      "..FFFFF.....",
-      "...FFFF.....",
-      "..LLCCLL....",
-      ".LCCCCCLD...",
-      ".LCCCCCLD...",
-      "LLCCCCCLDD..",
-      "LLCCCCCCLDD.",
-      "CCCCCCCCCCDD",
-      "CCCCCCCCCCCC",
-      "CCCCCCCCCCCC",
-      "....FF.SS...",
+      ".HFEFFHHH...",
+      ".FFFFFFCC...",
+      "..LLCCWWCD..",
+      "..LCCCCCDD..",
+      "..DCCCCCDD..",
+      "...CCCCCD...",
+      "...CCCCCC...",
+      "...CCCCCC...",
+      "....FF.FF...",
+      "....FF..FF..",
+      "....SS...SS.",
       "....SS......",
+      "............",
     ];
 
     const WOMAN_WALK_3 = [
-      "....HHHH....",
-      "...HHHHHH...",
-      "..HHFFFEHH..",
-      "...FFFFF....",
-      "....FFFF....",
-      "...LLCCLL...",
-      "..DLCCCCCL..",
-      "..DLCCCCCL..",
-      ".DDLCCCCCL..",
-      ".DDLCCCCCCL.",
-      "DDLLCCCCCCLL",
-      "CCCCCCCCCCCC",
-      "CCCCCCCCCCCC",
-      "...FF...FF..",
-      "..SS.....SS.",
+      "...HHHHH....",
+      "..HHHHHHH...",
+      ".HFEFFHHH...",
+      ".FFFFFFCC...",
+      "..LLCCWWCD..",
+      "..LCCCCCCLLF",
+      "..LCCCCCDD..",
+      ".DDCCCCCCDD.",
+      "DDCCCCCCCCDD",
+      ".CCCCCCCCCC.",
+      "..FF....FF..",
+      "..FF....FF..",
+      "..FF....FF..",
+      ".SS......SS.",
+      "............",
     ];
 
     const WOMAN_WALK_4 = [
-      "....HHHHH...",
-      "...HHHHHHH..",
-      "..HHFFFEHH..",
-      "...FFFFF....",
-      "....FFFF....",
-      "....LLCCLL..",
-      "...DLCCCCCL.",
-      "...DLCCCCCL.",
-      "..DDLCCCCCL.",
-      ".DDLCCCCCCL.",
-      "DDCCCCCCCCCC",
-      "CCCCCCCCCCCC",
-      "CCCCCCCCCCCC",
-      "...SS.FF....",
+      "...HHHHH....",
+      "..HHHHHHH...",
+      ".HFEFFHHH...",
+      ".FFFFFFCC...",
+      "..LLCCWWCD..",
+      "..LCCCCCDD..",
+      "..DCCCCCDD..",
+      "...CCCCCD...",
+      "...CCCCCC...",
+      "...CCCCCC...",
+      "...FF.FF....",
+      "..FF..FF....",
+      ".SS...SS....",
       "......SS....",
+      "............",
     ];
 
     const WOMAN_CLIMB_1 = [
       "FF..........",
-      "FFF.HHHH....",
-      ".FFHHHHHH...",
-      "..HHFFFEHH..",
-      "...FFFFF....",
-      "..LLCCLL....",
-      ".FLLCCCCLD..",
-      ".FFCCCCCLDD.",
-      "LLCCCCCCLLDD",
-      "CCCCCCCCCCCC",
-      ".SSCCCCCCCCC",
-      "..FF...FF...",
-      "......FF....",
-      "......FF....",
-      "......SS....",
+      "FF..HHHH....",
+      "..FHHHHHH...",
+      ".FEFFHHHH...",
+      ".FFFFCCCC...",
+      ".LLCCWWCC...",
+      "FFCCCWCCDD..",
+      "..CCCCCCDD..",
+      "SSCCCCCCD...",
+      "SSCCCCDD....",
+      "..CCCCCC....",
+      "....FF......",
+      "....FF......",
+      "....SS......",
+      "............",
     ];
 
     const WOMAN_CLIMB_2 = [
       "....HHHH....",
       "...HHHHHH...",
-      "..HHFFFEHH..",
-      "...FFFFF....",
-      ".FFLLCCLLFF.",
-      ".FFLCCCCLDFF",
-      ".LLCCCCCLDD.",
-      "LLCCCCCCLLDD",
-      "CCCCCCCCCCCC",
-      "CCCCCCCCCCCC",
-      "..SS..FF....",
-      "......FF....",
-      ".....SS.....",
+      "..FEFFHHH...",
+      "FFFFFFCCCC..",
+      ".LLCCWWCCD..",
+      "FFCCCCWCDD..",
+      "..CCCCCCDD..",
+      "..CCCCCCD...",
+      "SSCCCCCC....",
+      "SS..CCCC....",
+      "...FF.FF....",
+      "...SS.SS....",
+      "............",
       "............",
       "............",
     ];
 
     const WOMAN_CLIMB_3 = [
-      "...FF.......",
-      "...FFFHHHH..",
-      "..FFHHHHHH..",
-      "..HHFFFEH...",
-      "...FFFFF....",
-      ".FFLLCCLL...",
-      ".FLCCCCCLD..",
-      "..LCCCCCLDD.",
-      "LLCCCCCCLLDD",
-      "CCCCCCCCCCCC",
-      "..SSCCCCCCCC",
-      "..FF...FF...",
-      "......FF....",
-      "......FF....",
-      "......SS....",
+      "FF..........",
+      "FFF.HHHH....",
+      "..FHHHHHH...",
+      "..FEFFHHH...",
+      "..FFFFLLCC..",
+      "..LLCCWWCD..",
+      "FFCCCWCCDD..",
+      "..CCCCCCDD..",
+      "..CCCCCCD...",
+      "SSCCCCCC....",
+      "SS..CCCC....",
+      "....FF......",
+      "....FF......",
+      "....SS......",
+      "............",
     ];
 
     const WOMAN_CLIMB_4 = [
       "...HHHH.....",
       "..HHHHHH....",
-      "..HHFFFEH...",
-      "...FFFFF....",
-      "..FFLLCCLLF.",
-      "..FFLCCCCLDF",
-      ".LLCCCCCLDD.",
-      "LLCCCCCCLLDD",
-      "CCCCCCCCCCCC",
-      "CCCCCCCCCCCC",
-      "....FF..SS..",
+      ".FEFFHHH....",
+      "FFFFFFCCCC..",
+      ".LLCCWWCCD..",
+      ".FCCCWCCDD..",
+      "..CCCCCCDD..",
+      "SSCCCCCCD...",
+      "SS..CCCC....",
+      "....FF......",
       "....FF......",
       "....SS......",
+      "............",
       "............",
       "............",
     ];
@@ -1063,34 +1156,34 @@
     const WOMAN_HANG_1 = [
       "..FF....FF..",
       "..FF....FF..",
-      "..FF....FF..",
+      "..LL....LL..",
       "...LLCCLL...",
       "...HHHHHH...",
-      "..HHFFFEHH..",
-      "....FFFF....",
-      "..LCCCCCLD..",
-      ".LLCCCCCLDD.",
-      "LLCCCCCCLLDD",
-      "CCCCCCCCCCCC",
-      "CCCCCCCCCCCC",
-      "....FF.FF...",
-      "...FF...FF..",
-      "..SS.....SS.",
+      "..HFEFFHHH..",
+      "..FFFFFFCC..",
+      "..LLCCWWCD..",
+      "..LCCCCCDD..",
+      "..DCCCCCDD..",
+      "...CCCCCD...",
+      "....CC..CC..",
+      ".....FF..FF.",
+      "......FF..FF",
+      "......SS..SS",
     ];
 
     const WOMAN_HANG_2 = [
-      "...FF...FF..",
-      "...FF...FF..",
-      "...FF...FF..",
+      "..FF....FF..",
+      "..FF....FF..",
+      "..LL....LL..",
       "...LLCCLL...",
       "...HHHHHH...",
-      "..HHFFFEHH..",
-      "....FFFF....",
-      "..LCCCCCLD..",
-      ".LLCCCCCLDD.",
-      "LLCCCCCCLLDD",
-      "CCCCCCCCCCCC",
-      "CCCCCCCCCCCC",
+      "..HFEFFHHH..",
+      "..FFFFFFCC..",
+      "..LLCCWWCD..",
+      "..LCCCCCDD..",
+      "..DCCCCCDD..",
+      "...CCCCCD...",
+      "....CCCC....",
       "....FF.FF...",
       "....FF.FF...",
       "....SS.SS...",
@@ -1099,37 +1192,37 @@
     const WOMAN_HANG_3 = [
       "..FF....FF..",
       "..FF....FF..",
-      "..FF....FF..",
+      "..LL....LL..",
       "...LLCCLL...",
       "...HHHHHH...",
-      "..HHFFFEHH..",
-      "....FFFF....",
-      "..LCCCCCLD..",
-      ".LLCCCCCLDD.",
-      "LLCCCCCCLLDD",
-      "CCCCCCCCCCCC",
-      "CCCCCCCCCCCC",
-      "....FFFF....",
-      ".....FF.FF..",
-      "......SSSS..",
+      "..HFEFFHHH..",
+      "..FFFFFFCC..",
+      "..LLCCWWCD..",
+      "..LCCCCCDD..",
+      "..DCCCCCDD..",
+      "...CCCCCD...",
+      "..CC..CC....",
+      ".FF..FF.....",
+      "FF..FF......",
+      "SS..SS......",
     ];
 
     const WOMAN_HANG_4 = [
-      "..FF...FF...",
-      "..FF...FF...",
-      "..FF...FF...",
+      "..FF....FF..",
+      "..FF....FF..",
+      "..LL....LL..",
       "...LLCCLL...",
       "...HHHHHH...",
-      "..HHFFFEHH..",
-      "....FFFF....",
-      "..LCCCCCLD..",
-      ".LLCCCCCLDD.",
-      "LLCCCCCCLLDD",
-      "CCCCCCCCCCCC",
-      "CCCCCCCCCCCC",
-      "....FFFF....",
-      "...FF.FF....",
-      "...SSSS.....",
+      "..HFEFFHHH..",
+      "..FFFFFFCC..",
+      "..LLCCWWCD..",
+      "..LCCCCCDD..",
+      "..DCCCCCDD..",
+      "...CCCCCD...",
+      "....CCCC....",
+      "...FF..FF...",
+      "...FF..FF...",
+      "...SS..SS...",
     ];
 
     const WOMAN_CRAWL_1 = [
@@ -1138,15 +1231,15 @@
       "................",
       "................",
       "................",
-      "...........HHHH.",
-      "..........HHEFFH",
-      "..........HFFFFF",
-      "....LL...LLCCCCD",
-      "..LLCC..LCCCCCCC",
-      ".SS.FF..CCCCCC.F",
-      ".FF.CCCCCC..CCFF",
-      ".SS..SS.SS......",
       "................",
+      "....HHHHHHHH....",
+      "...HFEFFHHHHH...",
+      "...FFFFFLLCC....",
+      "FF.LLCCWWCCCDD..",
+      "FF.FCCCWCCCCCCD.",
+      "...LLCC.CC...CCD",
+      "..SS....FF..SSSS",
+      "........SS......",
       "................",
     ];
 
@@ -1156,15 +1249,15 @@
       "................",
       "................",
       "................",
-      "............HHHH",
-      "...........HHEFF",
-      "...........HFFFF",
-      ".....LL..LLCCCCD",
-      "...LLCC.LCCCCCCC",
-      "..SS.CCCCCC.CC..",
-      "...FF.CCCC..CCFF",
-      "...SS.SS....SS..",
       "................",
+      "....HHHHHHHH....",
+      "...HFEFFHHHHH...",
+      "...FFFFFLLCC....",
+      "..LLCCWWCCCDD...",
+      ".FFCCCWCCCCCCD..",
+      ".FFLLCC.CC..CCCD",
+      "...SS...FF..SSSS",
+      "........SS......",
       "................",
     ];
 
@@ -1174,15 +1267,15 @@
       "................",
       "................",
       "................",
-      "...........HHHH.",
-      "..........HHEFFH",
-      "..........HFFFFF",
-      "....LL...LLCCCCD",
-      "..LLCC..LCCCCCCC",
-      ".SS.FF..CCCCCCFF",
-      ".FF.CCCCCC..CC.F",
-      ".SS..SS.SS......",
       "................",
+      "....HHHHHHHH....",
+      "...HFEFFHHHHH...",
+      "...FFFFFLLCC....",
+      "FF.LLCCWWCCCDD..",
+      "FF.LLCCWCCCCCCD.",
+      "...FCCC.CCCC..CD",
+      "..SS......SSSSSS",
+      "........SS......",
       "................",
     ];
 
@@ -1192,32 +1285,32 @@
       "................",
       "................",
       "................",
-      "............HHHH",
-      "...........HHEFF",
-      "...........HFFFF",
-      ".....LL..LLCCCCD",
-      "...LLCC.LCCCCCCC",
-      "..SS.CCCCCC.CCFF",
-      "...FF.CCCC..CC..",
-      "...SS.SS....SS..",
       "................",
+      "....HHHHHHHH....",
+      "...HFEFFHHHHH...",
+      "...FFFFFLLCC....",
+      "..LLCCWWCCCDD...",
+      ".FFLLCCWCCCCCCD.",
+      ".FF.CCC.CCCCCCCD",
+      "...SS...SSSS....",
+      "........SS......",
       "................",
     ];
 
     const WOMAN_JUMP = [
+      "FF..........",
+      ".FF.HHHH....",
+      "..FHHHHHH...",
+      "..FEFFHHH...",
+      "..FFFFLLCC..",
+      "..LLCCWWCD..",
+      "..LCCCCCDD..",
+      "...DCCCCCCD.",
+      "....DDCCDD..",
+      "...FF..FF...",
       "..FF....FF..",
-      "...HHHHHH...",
-      "..HHFFFEHH..",
-      "....FFFF....",
-      "..LLCCLLDD..",
-      ".LCCCCCLDDD.",
-      "LLCCCCCCLLDD",
-      "CCCCCCCCCCCC",
-      "CCCCCCCCCCCC",
-      "....FFFF....",
-      "...FF...FF..",
-      "..SS.....SS.",
-      "............",
+      "..FF....FF..",
+      ".SS......SS.",
       "............",
       "............",
     ];
@@ -1423,7 +1516,180 @@
     setInterval(() => {
       galleryFrame = (galleryFrame + 1) % 4;
       renderGallery(galleryFrame);
+      updateInspectorLive(galleryFrame);
     }, 160);
+
+    // Kinematic Frame-by-Frame Inspector Engine
+    let currentInspectorTab = "climb";
+
+    const INSPECTOR_DATA = {
+      climb: {
+        title: "Wall Climb Mechanics (Facing Wall)",
+        guyFrames: [GUY_CLIMB_1, GUY_CLIMB_2, GUY_CLIMB_3, GUY_CLIMB_4],
+        guyPalette: GUY_PALETTE,
+        womanFrames: [WOMAN_CLIMB_1, WOMAN_CLIMB_2, WOMAN_CLIMB_3, WOMAN_CLIMB_4],
+        womanPalette: WOMAN_PALETTE,
+        frameLabels: [
+          { name: "Frame 1", desc: "High reach with wall hand, foot planted firmly on wall face" },
+          { name: "Frame 2", desc: "Pull-up surge: both arms pull down, hips rise 2px off ground" },
+          { name: "Frame 3", desc: "Hand-over-hand alternate reach, opposite foot plants higher" },
+          { name: "Frame 4", desc: "Lock-off compression & knee drive pulling body upward" },
+        ],
+        canvasW: 64,
+        canvasH: 70,
+        scale: 4,
+        offsetX: 8,
+        offsetY: 4
+      },
+      crawl: {
+        title: "Quadrupedal Crawl Under Overhangs",
+        guyFrames: [GUY_CRAWL_1, GUY_CRAWL_2, GUY_CRAWL_3, GUY_CRAWL_4],
+        guyPalette: GUY_PALETTE,
+        womanFrames: [WOMAN_CRAWL_1, WOMAN_CRAWL_2, WOMAN_CRAWL_3, WOMAN_CRAWL_4],
+        womanPalette: WOMAN_PALETTE,
+        frameLabels: [
+          { name: "Frame 1", desc: "Left hand reaches forward, right knee on ground bearing weight" },
+          { name: "Frame 2", desc: "Weight transfer forward, left knee drives under belly" },
+          { name: "Frame 3", desc: "Right hand reaches forward, left knee on ground bearing weight" },
+          { name: "Frame 4", desc: "Weight transfer forward, right knee drives under belly" },
+        ],
+        canvasW: 76,
+        canvasH: 70,
+        scale: 4,
+        offsetX: 6,
+        offsetY: 4
+      },
+      walk: {
+        title: "Walk Stride & Passing Bob",
+        guyFrames: [GUY_WALK_1, GUY_WALK_2, GUY_WALK_3, GUY_WALK_4],
+        guyPalette: GUY_PALETTE,
+        womanFrames: [WOMAN_WALK_1, WOMAN_WALK_2, WOMAN_WALK_3, WOMAN_WALK_4],
+        womanPalette: WOMAN_PALETTE,
+        frameLabels: [
+          { name: "Frame 1", desc: "Left foot contact stride with heel strike & counter arm swing" },
+          { name: "Frame 2", desc: "Passing pose: body bobs +1px higher, leg swings forward past knee" },
+          { name: "Frame 3", desc: "Right foot contact stride with heel strike & opposite arm swing" },
+          { name: "Frame 4", desc: "Passing pose: body bobs +1px higher, opposite leg swings forward" },
+        ],
+        canvasW: 64,
+        canvasH: 70,
+        scale: 4,
+        offsetX: 8,
+        offsetY: 4
+      },
+      hang: {
+        title: "Monkey-Bar / Ceiling Traversal",
+        guyFrames: [GUY_HANG_1, GUY_HANG_2, GUY_HANG_3, GUY_HANG_4],
+        guyPalette: GUY_PALETTE,
+        womanFrames: [WOMAN_HANG_1, WOMAN_HANG_2, WOMAN_HANG_3, WOMAN_HANG_4],
+        womanPalette: WOMAN_PALETTE,
+        frameLabels: [
+          { name: "Frame 1", desc: "Hands gripping ceiling, legs swung backward like a pendulum" },
+          { name: "Frame 2", desc: "Hands gripping ceiling, body pulled up 1px, legs centered" },
+          { name: "Frame 3", desc: "Hands gripping ceiling, legs swung forward in direction of travel" },
+          { name: "Frame 4", desc: "Hands gripping ceiling, legs passing center swinging backward" },
+        ],
+        canvasW: 64,
+        canvasH: 70,
+        scale: 4,
+        offsetX: 8,
+        offsetY: 4
+      }
+    };
+
+    function selectInspectorTab(tab, btn) {
+      currentInspectorTab = tab;
+      if (btn) {
+        document.querySelectorAll("#inspectorTabs button").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+      }
+      renderInspector();
+    }
+
+    function renderInspector() {
+      const container = document.getElementById("inspectorDisplay");
+      if (!container) return;
+      const data = INSPECTOR_DATA[currentInspectorTab] || INSPECTOR_DATA.climb;
+
+      container.innerHTML = `
+        <div style="font-size: 0.85rem; font-weight: 700; color: #ec4899; margin-bottom: 8px;">
+          ${data.title}
+        </div>
+
+        <!-- Guy Row -->
+        <div class="inspector-row">
+          <div class="inspector-anim-col">
+            <canvas id="inspLiveGuy" width="${data.canvasW}" height="${data.canvasH}"></canvas>
+            <span style="font-size: 0.72rem; color: #f472b6; font-weight: 600;">Guy (Live 4x)</span>
+          </div>
+          <div class="inspector-frames-col">
+            ${data.guyFrames.map((_, i) => `
+              <div class="inspector-frame-card">
+                <canvas id="inspGuyF${i}" width="${data.canvasW}" height="${data.canvasH}"></canvas>
+                <div class="inspector-frame-title">${data.frameLabels[i].name}</div>
+                <div class="inspector-frame-desc">${data.frameLabels[i].desc}</div>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+
+        <!-- Woman Row -->
+        <div class="inspector-row">
+          <div class="inspector-anim-col">
+            <canvas id="inspLiveWoman" width="${data.canvasW}" height="${data.canvasH}"></canvas>
+            <span style="font-size: 0.72rem; color: #38bdf8; font-weight: 600;">Woman (Live 4x)</span>
+          </div>
+          <div class="inspector-frames-col">
+            ${data.womanFrames.map((_, i) => `
+              <div class="inspector-frame-card">
+                <canvas id="inspWomanF${i}" width="${data.canvasW}" height="${data.canvasH}"></canvas>
+                <div class="inspector-frame-title">${data.frameLabels[i].name}</div>
+                <div class="inspector-frame-desc">${data.frameLabels[i].desc}</div>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      `;
+
+      // Draw static frames
+      data.guyFrames.forEach((mat, i) => {
+        const c = document.getElementById(`inspGuyF${i}`);
+        if (!c) return;
+        const ctx = c.getContext("2d");
+        ctx.clearRect(0, 0, c.width, c.height);
+        drawPixelMatrix(ctx, mat, data.guyPalette, data.offsetX, data.offsetY, data.scale);
+      });
+
+      data.womanFrames.forEach((mat, i) => {
+        const c = document.getElementById(`inspWomanF${i}`);
+        if (!c) return;
+        const ctx = c.getContext("2d");
+        ctx.clearRect(0, 0, c.width, c.height);
+        drawPixelMatrix(ctx, mat, data.womanPalette, data.offsetX, data.offsetY, data.scale);
+      });
+
+      updateInspectorLive(galleryFrame);
+    }
+
+    function updateInspectorLive(frame) {
+      const data = INSPECTOR_DATA[currentInspectorTab] || INSPECTOR_DATA.climb;
+      const f4 = Math.abs(Math.floor(frame)) % 4;
+
+      const cGuy = document.getElementById("inspLiveGuy");
+      if (cGuy) {
+        const ctx = cGuy.getContext("2d");
+        ctx.clearRect(0, 0, cGuy.width, cGuy.height);
+        drawPixelMatrix(ctx, data.guyFrames[f4], data.guyPalette, data.offsetX, data.offsetY, data.scale);
+      }
+
+      const cWoman = document.getElementById("inspLiveWoman");
+      if (cWoman) {
+        const ctx = cWoman.getContext("2d");
+        ctx.clearRect(0, 0, cWoman.width, cWoman.height);
+        drawPixelMatrix(ctx, data.womanFrames[f4], data.womanPalette, data.offsetX, data.offsetY, data.scale);
+      }
+    }
+    renderInspector();
 
     // Presets
     const presets = {
@@ -1539,17 +1805,17 @@
       const lowest = blocks[n - 1];
       const lowestInnerX = getInnerEdgeX(lowest);
 
-      guyWaypoints.push({ x: lowestInnerX, y: containerEl.clientHeight + 40, state: "appear", facing: isRight(lowest) ? "left" : "right" });
-      guyWaypoints.push({ x: lowestInnerX, y: lowest.y + lowest.height, state: "climb_up", facing: isRight(lowest) ? "left" : "right" });
+      guyWaypoints.push({ x: lowestInnerX, y: containerEl.clientHeight + 40, state: "appear", facing: isRight(lowest) ? "right" : "left" });
+      guyWaypoints.push({ x: lowestInnerX, y: lowest.y + lowest.height, state: "climb_up", facing: isRight(lowest) ? "right" : "left" });
 
       for (let i = n - 1; i >= meetingIdx; i--) {
         const cur = blocks[i];
         const curInnerX = getInnerEdgeX(cur);
-        const facingSide = isRight(cur) ? "left" : "right";
+        const facingSide = isRight(cur) ? "right" : "left";
 
         if (i === meetingIdx) {
           // Reached meeting block! Stop at meetingPoint.y and do NOT climb past
-          guyWaypoints.push({ x: meetingPoint.x, y: meetingPoint.y, state: "climb_up", facing: "left" });
+          guyWaypoints.push({ x: meetingPoint.x, y: meetingPoint.y, state: "climb_up", facing: isRight(cur) ? "right" : "left" });
           break;
         }
 
@@ -1599,17 +1865,17 @@
       const highest = blocks[0];
       const highestInnerX = getInnerEdgeX(highest);
 
-      womanWaypoints.push({ x: highestInnerX, y: Math.max(-40, highest.y - 40), state: "appear", facing: isRight(highest) ? "left" : "right" });
-      womanWaypoints.push({ x: highestInnerX, y: highest.y, state: "climb_down", facing: isRight(highest) ? "left" : "right" });
+      womanWaypoints.push({ x: highestInnerX, y: Math.max(-40, highest.y - 40), state: "appear", facing: isRight(highest) ? "right" : "left" });
+      womanWaypoints.push({ x: highestInnerX, y: highest.y, state: "climb_down", facing: isRight(highest) ? "right" : "left" });
 
       for (let i = 0; i <= meetingIdx; i++) {
         const cur = blocks[i];
         const curInnerX = getInnerEdgeX(cur);
-        const facingSide = isRight(cur) ? "left" : "right";
+        const facingSide = isRight(cur) ? "right" : "left";
 
         if (i === meetingIdx) {
           // Reached meeting block! Stop at meetingPoint.y
-          womanWaypoints.push({ x: meetingPoint.x, y: meetingPoint.y, state: "climb_down", facing: "left" });
+          womanWaypoints.push({ x: meetingPoint.x, y: meetingPoint.y, state: "climb_down", facing: isRight(cur) ? "right" : "left" });
           break;
         }
 

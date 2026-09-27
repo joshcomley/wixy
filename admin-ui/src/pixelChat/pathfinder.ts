@@ -154,7 +154,7 @@ export function buildTrajectoryPlan(
     x: startGuyX,
     y: startGuyY,
     state: "appear",
-    facing: isRight(lowestBlock) ? "left" : "right",
+    facing: isRight(lowestBlock) ? "right" : "left",
   });
 
   // Climb up to bottom edge of lowest block
@@ -162,14 +162,14 @@ export function buildTrajectoryPlan(
     x: lowestInnerX,
     y: lowestBlock.y + lowestBlock.height,
     state: "climb_up",
-    facing: isRight(lowestBlock) ? "left" : "right",
+    facing: isRight(lowestBlock) ? "right" : "left",
   });
 
   // Navigate up from lowest block (n-1) to meetingIdx
   for (let i = n - 1; i >= meetingIdx; i--) {
     const cur = blocks[i]!;
     const curInnerX = getInnerEdgeX(cur);
-    const facingSide: FacingDirection = isRight(cur) ? "left" : "right";
+    const facingSide: FacingDirection = isRight(cur) ? "right" : "left";
 
     if (i === meetingIdx) {
       // Reached meeting block! Climb up to meetingPoint.y and STOP
@@ -178,7 +178,7 @@ export function buildTrajectoryPlan(
         x: meetingPoint.x,
         y: meetingPoint.y,
         state: "climb_up",
-        facing: "left",
+        facing: isRight(cur) ? "right" : "left",
       });
       break;
     }
@@ -325,7 +325,7 @@ export function buildTrajectoryPlan(
     x: startWomanX,
     y: startWomanY,
     state: "appear",
-    facing: isRight(highestBlock) ? "left" : "right",
+    facing: isRight(highestBlock) ? "right" : "left",
   });
 
   // Climb down to top edge of highest block
@@ -333,14 +333,14 @@ export function buildTrajectoryPlan(
     x: highestInnerX,
     y: highestBlock.y,
     state: "climb_down",
-    facing: isRight(highestBlock) ? "left" : "right",
+    facing: isRight(highestBlock) ? "right" : "left",
   });
 
   // Navigate down from top block (0) to meetingIdx
   for (let i = 0; i <= meetingIdx; i++) {
     const cur = blocks[i]!;
     const curInnerX = getInnerEdgeX(cur);
-    const facingSide: FacingDirection = isRight(cur) ? "left" : "right";
+    const facingSide: FacingDirection = isRight(cur) ? "right" : "left";
 
     if (i === meetingIdx) {
       // Reached meeting block! Climb down to meetingPoint.y and STOP
@@ -348,7 +348,7 @@ export function buildTrajectoryPlan(
         x: meetingPoint.x,
         y: meetingPoint.y,
         state: "climb_down",
-        facing: "left",
+        facing: isRight(cur) ? "right" : "left",
       });
       break;
     }
