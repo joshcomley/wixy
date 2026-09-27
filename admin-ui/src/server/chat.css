@@ -841,16 +841,31 @@ button.wx-srv-quote:focus-visible {
   background: var(--wx-canvas);
 }
 
-/* The emoji row at the top of the menu: round 36px buttons that wrap inside the menu's own
-   width, so on a narrow phone the six still fit without overflowing the card. */
+/* The emoji picker at the top of the menu: static row + recents row underneath, round 36px buttons. */
 .wx-srv-message-reactions-picker {
   display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
+  flex-direction: column;
+  gap: 4px;
   max-width: 15rem;
 }
 
-.wx-srv-message-actions button.wx-srv-message-react {
+.wx-srv-message-reactions-static {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.wx-srv-message-reactions-recents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding-top: 4px;
+  border-top: 1px solid var(--wx-border-subtle, rgba(255, 255, 255, 0.1));
+}
+
+.wx-srv-message-actions button.wx-srv-message-react,
+.wx-srv-message-actions button.wx-srv-message-react-more {
+  position: relative;
   width: 2.25rem;
   height: 2.25rem;
   padding: 0;
@@ -858,12 +873,157 @@ button.wx-srv-quote:focus-visible {
   text-align: center;
   font-size: 1.25rem;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Up arrow next to / on emojis with variants */
+.wx-srv-message-actions button.wx-srv-message-react[data-has-variants="true"]::after {
+  content: "▲";
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  font-size: 6px;
+  line-height: 1;
+  pointer-events: none;
+  opacity: 0.65;
+  color: var(--wx-text-muted, #888);
 }
 
 .wx-srv-message-actions button.wx-srv-message-react-on {
   background: var(--wx-brand-blue-tint);
   box-shadow: inset 0 0 0 1px var(--wx-brand-blue-text);
 }
+
+/* Floating variant popup */
+.wx-srv-reaction-variants-bar {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  display: flex;
+  gap: 2px;
+  padding: 4px 6px;
+  background: var(--wx-surface, #222);
+  border: 1px solid var(--wx-border, #444);
+  border-radius: 9999px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  white-space: nowrap;
+  max-width: 85vw;
+  overflow-x: auto;
+}
+
+.wx-srv-reaction-variant-item {
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.wx-srv-reaction-variant-item:hover,
+.wx-srv-reaction-variant-item:focus-visible {
+  transform: scale(1.2);
+  background: var(--wx-surface-hover, rgba(255, 255, 255, 0.1));
+}
+
+/* Full emoji picker view */
+.wx-srv-emoji-picker {
+  display: flex;
+  flex-direction: column;
+  width: 15rem;
+  max-height: 18rem;
+  padding: 4px;
+}
+
+.wx-srv-emoji-picker-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.wx-srv-emoji-picker-back {
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1rem;
+}
+
+.wx-srv-emoji-search {
+  flex: 1;
+  height: 1.75rem;
+  padding: 0 6px;
+  font-size: 0.75rem;
+  border: 1px solid var(--wx-border, #444);
+  border-radius: 4px;
+  background: var(--wx-canvas, #111);
+  color: var(--wx-text, #eee);
+}
+
+.wx-srv-emoji-categories {
+  display: flex;
+  gap: 2px;
+  padding: 2px 0 4px;
+  border-bottom: 1px solid var(--wx-border-subtle, rgba(255, 255, 255, 0.1));
+}
+
+.wx-srv-emoji-category-tab {
+  flex: 1;
+  height: 1.75rem;
+  padding: 0;
+  font-size: 1rem;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.wx-srv-emoji-category-tab:hover,
+.wx-srv-emoji-category-tab:focus-visible {
+  background: var(--wx-surface-hover, rgba(255, 255, 255, 0.1));
+}
+
+.wx-srv-emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 2px;
+  padding: 4px 0;
+  overflow-y: auto;
+  max-height: 12rem;
+}
+
+.wx-srv-emoji-item {
+  width: 2.25rem;
+  height: 2.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.wx-srv-emoji-item:hover,
+.wx-srv-emoji-item:focus-visible {
+  background: var(--wx-surface-hover, rgba(255, 255, 255, 0.1));
+  transform: scale(1.15);
+}
+
 
 .wx-srv-message-delete-confirm p,
 .wx-srv-message-action-error,

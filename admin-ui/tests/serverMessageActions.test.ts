@@ -192,4 +192,111 @@ describe("Server message action menu: the reaction row", () => {
     expect(bubble.querySelector<HTMLElement>(".wx-srv-message-actions-list")?.hidden).toBe(true);
     controller.teardown();
   });
+
+  it("marks variantable emojis with data-has-variants affordance", () => {
+    const { bubble, controller } = mount("hello");
+    bubble.querySelector<HTMLButtonElement>(".wx-srv-message-actions-trigger")?.click();
+
+    const buttons = [...bubble.querySelectorAll<HTMLButtonElement>(".wx-srv-message-react")];
+    const thumbsUp = buttons.find((b) => b.dataset["reaction"] === "👍");
+    const heart = buttons.find((b) => b.dataset["reaction"] === "❤️");
+    const pray = buttons.find((b) => b.dataset["reaction"] === "🙏");
+    const joy = buttons.find((b) => b.dataset["reaction"] === "😂");
+    const care = buttons.find((b) => b.dataset["reaction"] === "🥰");
+    const celebrate = buttons.find((b) => b.dataset["reaction"] === "🎉");
+
+    expect(thumbsUp?.dataset["hasVariants"]).toBe("true");
+    expect(heart?.dataset["hasVariants"]).toBe("true");
+    expect(pray?.dataset["hasVariants"]).toBe("true");
+    expect(joy?.dataset["hasVariants"]).toBeUndefined();
+    expect(care?.dataset["hasVariants"]).toBeUndefined();
+    expect(celebrate?.dataset["hasVariants"]).toBeUndefined();
+
+    controller.teardown();
+  });
+
+  it("opens variants bar on contextmenu/long-press, selecting heart variant updates default and calls onReact", () => {
+    localStorage.clear();
+    const { bubble, controller, onReact } = mount("hello");
+    bubble.querySelector<HTMLButtonElement>(".wx-srv-message-actions-trigger")?.click();
+
+    const heart = [...bubble.querySelectorAll<HTMLButtonElement>(".wx-srv-message-react")].find(
+      (b) => b.dataset["reaction"] === "❤️",
+    );
+    expect(heart).not.toBeNull();
+    heart?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+
+    const bar = bubble.querySelector<HTMLElement>(".wx-srv-reaction-variants-bar");
+    expect(bar).not.toBeNull();
+    const blueHeart = [...bubble.querySelectorAll<HTMLButtonElement>(".wx-srv-reaction-variant-item")].find(
+      (b) => b.dataset["reaction"] === "💙",
+    );
+    expect(blueHeart).not.toBeUndefined();
+    blueHeart?.click();
+
+    expect(onReact).toHaveBeenCalledWith(expect.objectContaining({ seq: 1 }), "💙");
+    expect(localStorage.getItem("wx_srv_default_heart")).toBe("💙");
+    controller.teardown();
+
+    // Opening again uses the persisted default heart
+    const next = mount("hello");
+    next.bubble.querySelector<HTMLButtonElement>(".wx-srv-message-actions-trigger")?.click();
+    const newHeartBtn = [...next.bubble.querySelectorAll<HTMLButtonElement>(".wx-srv-message-react")].find(
+      (b) => b.dataset["reaction"] === "💙",
+    );
+    expect(newHeartBtn?.textContent).toBe("💙");
+    expect(newHeartBtn?.getAttribute("aria-label")).toBe("Blue heart");
+    next.controller.teardown();
+  });
+
+  it("ellipsis button opens full emoji selection picker and selecting emoji reacts and adds to recents", () => {
+    localStorage.clear();
+    const { bubble, controller, onReact } = mount("hello");
+    bubble.querySelector<HTMLButtonElement>(".wx-srv-message-actions-trigger")?.click();
+
+    const moreBtn = bubble.querySelector<HTMLButtonElement>(".wx-srv-message-react-more");
+    expect(moreBtn).not.toBeNull();
+    moreBtn?.click();
+
+    const fullPicker = bubble.querySelector<HTMLElement>(".wx-srv-emoji-picker");
+    expect(fullPicker?.hidden).toBe(false);
+    expect(bubble.querySelector<HTMLElement>(".wx-srv-message-actions-list")?.hidden).toBe(true);
+
+    const searchInput = bubble.querySelector<HTMLInputElement>(".wx-srv-emoji-search");
+    expect(searchInput).not.toBeNull();
+    searchInput!.value = "rocket";
+    searchInput!.dispatchEvent(new Event("input", { bubbles: true }));
+
+    const rocket = [...bubble.querySelectorAll<HTMLButtonElement>(".wx-srv-emoji-item")].find(
+      (b) => b.dataset["reaction"] === "🚀",
+    );
+    expect(rocket).not.toBeUndefined();
+    rocket?.click();
+
+    expect(onReact).toHaveBeenCalledWith(expect.objectContaining({ seq: 1 }), "🚀");
+    expect(bubble.querySelector<HTMLElement>(".wx-srv-message-actions")?.hidden).toBe(true);
+    controller.teardown();
+  });
+
+
+  it("displays recent emojis outside the main list underneath the static list", () => {
+    localStorage.clear();
+    localStorage.setItem("wx_srv_recent_reactions", JSON.stringify(["🚀", "🍕"]));
+
+    const { bubble, controller, onReact } = mount("hello");
+    bubble.querySelector<HTMLButtonElement>(".wx-srv-message-actions-trigger")?.click();
+
+    const recentsRow = bubble.querySelector<HTMLElement>(".wx-srv-message-reactions-recents");
+    expect(recentsRow?.hidden).toBe(false);
+
+    const recentButtons = recentsRow?.querySelectorAll<HTMLButtonElement>(".wx-srv-message-react-recent");
+    expect(recentButtons?.length).toBe(2);
+    expect(recentButtons?.[0]?.textContent).toBe("🚀");
+    expect(recentButtons?.[1]?.textContent).toBe("🍕");
+
+    recentButtons?.[0]?.click();
+    expect(onReact).toHaveBeenCalledWith(expect.objectContaining({ seq: 1 }), "🚀");
+    controller.teardown();
+  });
 });
+

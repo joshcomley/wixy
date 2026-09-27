@@ -19,7 +19,7 @@ _TS_CONSTANTS = _REPO_ROOT / "admin-ui" / "src" / "server" / "reactions.ts"
 
 
 class TestAllowlist:
-    def test_is_exactly_the_six_quick_reactions_as_code_point_sequences(self) -> None:
+    def test_is_the_eight_static_reactions_as_code_point_sequences(self) -> None:
         assert REACTION_EMOJIS == (
             "\U0001f44d",  # thumbs up: U+1F44D
             "❤️",  # red heart: U+2764 U+FE0F
@@ -27,6 +27,8 @@ class TestAllowlist:
             "\U0001f62e",  # face with open mouth: U+1F62E
             "\U0001f622",  # crying face: U+1F622
             "\U0001f64f",  # folded hands: U+1F64F
+            "\U0001f970",  # care (smiling face with hearts): U+1F970
+            "\U0001f389",  # celebrate (party popper): U+1F389
         )
 
     def test_the_heart_carries_its_variation_selector(self) -> None:
@@ -40,22 +42,38 @@ class TestAllowlist:
         assert is_allowed_reaction(emoji)
 
     @pytest.mark.parametrize(
+        "emoji",
+        [
+            "\U0001f44d\U0001f3fd",  # thumbs up with skin tone modifier
+            "\U0001f64f\U0001f3fb",  # folded hands with light skin tone
+            "💙",  # blue heart
+            "🧡",  # orange heart
+            "💔",  # broken heart
+            "🚀",  # rocket
+            "🍕",  # pizza
+            "🎉",  # celebrate
+            "🥰",  # care
+        ],
+    )
+    def test_variants_and_custom_emojis_are_allowed(self, emoji: str) -> None:
+        assert is_allowed_reaction(emoji)
+
+    @pytest.mark.parametrize(
         "value",
         [
             "",
             " ",
-            "❤",  # the heart without its variation selector
-            "❤️️",
-            "\U0001f44d️",
-            "\U0001f44d\U0001f3fd",  # thumbs up with a skin-tone modifier
-            "\U0001f44e",
-            "\U0001f44d\U0001f44d",
-            "\U0001f44d ",
             "thumbs_up",
-            "１",  # a full-width digit, which NFKC would fold to "1"
+            "1",
+            "hello",
+            "<script>",
+            "\U0001f44d ",
+            " \U0001f44d",
+            "👍\n",
+            "a" * 33,
         ],
     )
-    def test_anything_else_is_refused_with_no_normalisation(self, value: str) -> None:
+    def test_invalid_reactions_are_refused(self, value: str) -> None:
         assert not is_allowed_reaction(value)
 
     def test_order_follows_the_list_and_unknowns_sort_last(self) -> None:

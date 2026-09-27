@@ -161,6 +161,51 @@ test.describe("server-reactions.spec.ts", () => {
     await closeAll(contextA, contextB);
   });
 
+  test("extended reaction picker: care, celebrate, full emoji picker, and recents row", async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const errors = trackConsoleErrors(page);
+    const label = `react-extended-${Date.now()}`;
+
+    await seed(page, { label, sender: "Purdy" });
+    await unlockServer(page, "Josh");
+    const bubble = bubbleWith(page, `${label} #1`);
+    await waitVisible(bubble, page);
+
+    await bubble.hover();
+    await bubble.locator(".wx-srv-message-actions-trigger").click();
+    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+
+    // Verify care and celebrate exist in the menu
+    await expect(bubble.getByRole("menuitemcheckbox", { name: "Care" })).toBeVisible();
+    await expect(bubble.getByRole("menuitemcheckbox", { name: "Celebrate" })).toBeVisible();
+
+    // Click more button (⋯)
+    await bubble.locator(".wx-srv-message-react-more").click();
+    const fullPicker = bubble.locator(".wx-srv-emoji-picker");
+    await expect(fullPicker).toBeVisible();
+    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+
+    // Click grinning face from the grid
+    const grinningBtn = fullPicker.locator(".wx-srv-emoji-item").filter({ hasText: "😀" });
+    await expect(grinningBtn).toBeVisible();
+    await grinningBtn.click();
+
+    // Chip should appear
+    await expect(chip(bubble, "😀")).toBeVisible({ timeout: 3000 });
+
+    // Open reaction menu again; recents row should be visible with grinning face
+    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+    await bubble.hover();
+    await bubble.locator(".wx-srv-message-actions-trigger").click();
+    const recentsRow = bubble.locator(".wx-srv-message-reactions-recents");
+    await expect(recentsRow).toBeVisible();
+    await expect(recentsRow.locator(".wx-srv-message-react-recent").filter({ hasText: "😀" })).toBeVisible();
+
+    expect(errors, `console errors: ${errors.join("; ")}`).toEqual([]);
+    await context.close();
+  });
+
   test("deleting the message takes its reactions with it, for everyone", async ({ browser }) => {
     const contextA = await browser.newContext();
     const contextB = await browser.newContext();
