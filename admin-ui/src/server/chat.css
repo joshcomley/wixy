@@ -875,6 +875,7 @@ button.wx-srv-quote:focus-visible {
 
 .wx-srv-voice {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
@@ -911,6 +912,49 @@ button.wx-srv-quote:focus-visible {
   flex: none;
   font-size: 0.6875rem;
   color: var(--wx-muted);
+}
+
+.wx-srv-voice-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 10px;
+  box-sizing: border-box;
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+  border: 1px solid var(--wx-border);
+  font: 0.8125rem/1.3 system-ui, sans-serif;
+  color: var(--wx-ink);
+}
+
+.wx-srv-voice-confirm[hidden] {
+  display: none;
+}
+
+.wx-srv-voice-confirm-prompt {
+  flex: 1 1 auto;
+  font-weight: 500;
+}
+
+.wx-srv-voice-confirm-play,
+.wx-srv-voice-confirm-cancel {
+  flex: none;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font: 600 0.8125rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.wx-srv-voice-confirm-play {
+  background: var(--wx-brand-blue-tint);
+  border-color: var(--wx-brand-blue-text);
+  color: var(--wx-brand-blue-text);
 }
 
 /* -- Voice-note transcript (spec/server-chat/05-voice-transcription.md) ------

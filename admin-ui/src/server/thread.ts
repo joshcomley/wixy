@@ -1107,6 +1107,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       openLightbox: (src, alt) => lightbox.open(src, alt),
       transcription,
       document: documentRef,
+      win,
     });
   }
 

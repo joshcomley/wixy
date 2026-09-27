@@ -396,4 +396,67 @@ test.describe("server-media.spec.ts (P6b)", () => {
     await expect(page.locator(".wx-chat-attachment-chip")).toHaveCount(0);
     expect(uploadRequests).toEqual([]);
   });
+
+  test("confirm before playing audio messages preference gates voice playback on a phone", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await unlockServer(page, `AudioConfirm ${Date.now()}`);
+
+    // Record and send a voice note
+    const record = page.getByRole("button", { name: "Record a voice note" });
+    await record.click();
+    await expect(page.getByRole("button", { name: "Stop recording" })).toBeVisible();
+    await page.waitForTimeout(1_300);
+    const sentVoice = page.waitForResponse((response) =>
+      response.url().endsWith("/api/admin/server/messages") && response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: "Stop recording" }).click();
+    expect((await sentVoice).status()).toBe(201);
+
+    // Wait for the voice note to render in the user's bubble
+    const userBubble = page.locator(".wx-srv-bubble-mine").last();
+    await expect(userBubble.locator(".wx-srv-voice")).toBeVisible({ timeout: 15_000 });
+    const voiceNote = userBubble.locator(".wx-srv-voice");
+    const playBtn = voiceNote.getByRole("button", { name: "Play voice note" });
+    const confirmBox = voiceNote.locator(".wx-srv-voice-confirm");
+
+    // By default (preference OFF), tapping play does NOT show confirmation
+    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+    await expect(confirmBox).toBeHidden();
+    await playBtn.click();
+    await expect(confirmBox).toBeHidden();
+    // Pause it
+    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+    await playBtn.click();
+
+    // Now open settings and enable "Ask before playing audio messages"
+    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+    await page.locator(".wx-srv-settings-button").click();
+    await expect(page.locator(".wx-srv-sheet")).toBeVisible();
+    const confirmPrefCheckbox = page.getByLabel("Ask before playing audio messages");
+    await expect(confirmPrefCheckbox).not.toBeChecked();
+    await confirmPrefCheckbox.check();
+    await expect(confirmPrefCheckbox).toBeChecked();
+    await page.locator(".wx-srv-sheet-close").click();
+    await expect(page.locator(".wx-srv-sheet")).toBeHidden();
+
+    // With preference ON: tapping play shows confirm prompt
+    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+    await playBtn.click();
+    await expect(confirmBox).toBeVisible();
+    await expect(confirmBox.locator(".wx-srv-voice-confirm-prompt")).toHaveText("Play audio message?");
+
+    // Cancel hides prompt and does not play
+    await confirmBox.locator(".wx-srv-voice-confirm-cancel").click();
+    await expect(confirmBox).toBeHidden();
+    const audioEl = voiceNote.locator("audio");
+    expect(await audioEl.evaluate((a: HTMLAudioElement) => a.paused)).toBe(true);
+
+    // Tapping play again and confirming plays the audio
+    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+    await playBtn.click();
+    await expect(confirmBox).toBeVisible();
+    await confirmBox.locator(".wx-srv-voice-confirm-play").click();
+    await expect(confirmBox).toBeHidden();
+    await expect.poll(() => audioEl.evaluate((a) => (a as HTMLAudioElement).currentTime)).toBeGreaterThan(0);
+  });
 });

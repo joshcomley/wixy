@@ -5,6 +5,7 @@ import {
   renderAttachments,
   type Attachment,
 } from "../src/server/mediaRender";
+import { AUDIO_CONFIRM_KEY } from "../src/server/audioConfirmPreference";
 
 const base: Attachment = {
   id: "a1",
@@ -71,6 +72,65 @@ describe("server attachment rendering", () => {
     expect(ctx.hooks.suspend).toHaveBeenCalledWith("mediaPlaying");
     audio?.dispatchEvent(new Event("pause"));
     expect(ctx.hooks.suspend).toHaveBeenCalledTimes(1);
+  });
+
+  it("plays voice audio immediately without confirmation by default (preference OFF)", () => {
+    const ctx = context();
+    const root = renderAttachment({
+      ...base,
+      kind: "voice",
+      durationS: 5,
+      peaks: [0.5],
+      urls: { play: "/voice" },
+    }, { ...ctx, win: window });
+    const audio = root.querySelector("audio")!;
+    const playSpy = vi.spyOn(audio, "play").mockImplementation(() => Promise.resolve());
+    const playBtn = root.querySelector<HTMLButtonElement>("button.wx-srv-voice-play")!;
+    const confirmBox = root.querySelector<HTMLElement>(".wx-srv-voice-confirm")!;
+
+    expect(confirmBox.hidden).toBe(true);
+    playBtn.click();
+    expect(confirmBox.hidden).toBe(true);
+    expect(playSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows confirmation prompt when preference is ON, and cancels without playing", () => {
+    window.localStorage.setItem(AUDIO_CONFIRM_KEY, "1");
+    try {
+      const ctx = context();
+      const root = renderAttachment({
+        ...base,
+        kind: "voice",
+        durationS: 5,
+        peaks: [0.5],
+        urls: { play: "/voice" },
+      }, { ...ctx, win: window });
+      const audio = root.querySelector("audio")!;
+      const playSpy = vi.spyOn(audio, "play").mockImplementation(() => Promise.resolve());
+      const playBtn = root.querySelector<HTMLButtonElement>("button.wx-srv-voice-play")!;
+      const confirmBox = root.querySelector<HTMLElement>(".wx-srv-voice-confirm")!;
+      const cancelBtn = root.querySelector<HTMLButtonElement>(".wx-srv-voice-confirm-cancel")!;
+      const confirmPlayBtn = root.querySelector<HTMLButtonElement>(".wx-srv-voice-confirm-play")!;
+
+      expect(confirmBox.hidden).toBe(true);
+      playBtn.click();
+      expect(confirmBox.hidden).toBe(false);
+      expect(playSpy).not.toHaveBeenCalled();
+
+      // Cancel hides prompt and does not play
+      cancelBtn.click();
+      expect(confirmBox.hidden).toBe(true);
+      expect(playSpy).not.toHaveBeenCalled();
+
+      // Click play again, then confirm plays
+      playBtn.click();
+      expect(confirmBox.hidden).toBe(false);
+      confirmPlayBtn.click();
+      expect(confirmBox.hidden).toBe(true);
+      expect(playSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      window.localStorage.removeItem(AUDIO_CONFIRM_KEY);
+    }
   });
 
   it("pauses and synchronously releases active video and voice before redraw", () => {
