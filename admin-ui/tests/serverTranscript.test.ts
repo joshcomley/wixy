@@ -59,8 +59,8 @@ function harness(answer: TranscribeAnswer | Promise<TranscribeAnswer> = { kind: 
   };
 }
 
-function block(h: Harness, attachment: Attachment = voice): HTMLElement {
-  return renderTranscriptBlock(attachment, h.ctx, document);
+function block(h: Harness, attachment: Attachment = voice, timeElement?: HTMLElement): HTMLElement {
+  return renderTranscriptBlock(attachment, h.ctx, document, timeElement);
 }
 
 const settle = async (): Promise<void> => {
@@ -345,6 +345,32 @@ describe("transcript block", () => {
     expect(retryBtn).not.toBeNull();
     retryBtn!.click();
     expect(h.request).toHaveBeenCalledWith(voice.id, { retranscribe: true });
+  });
+
+  it("absorbs timeElement into an action row for idle state", () => {
+    const time = document.createElement("span");
+    const el = block(harness(), voice, time);
+    const row = el.querySelector(".wx-srv-transcript-action-row");
+    expect(row).not.toBeNull();
+    expect(row!.querySelector(".wx-srv-transcript-action-group")?.textContent).toContain("Transcribe");
+    expect(row!.lastElementChild).toBe(time);
+  });
+
+  it("absorbs timeElement into an action row for failed state with retry button", () => {
+    const time = document.createElement("span");
+    const el = block(harness(), { ...voice, transcript: { status: "failed" } }, time);
+    const row = el.querySelector(".wx-srv-transcript-action-row");
+    expect(row).not.toBeNull();
+    expect(row!.querySelector(".wx-srv-transcript-action-group")?.textContent).toContain("Retry");
+    expect(row!.lastElementChild).toBe(time);
+  });
+
+  it("appends timeElement but does not absorb it into action row when last element is text", () => {
+    const time = document.createElement("span");
+    const el = block(harness(), { ...voice, transcript: { status: "done", text: "" } }, time);
+    const row = el.querySelector(".wx-srv-transcript-action-row");
+    expect(row).toBeNull();
+    expect(el.lastElementChild).toBe(time);
   });
 });
 

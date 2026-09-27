@@ -50,11 +50,13 @@ const releasePlaybackByElement = new WeakMap<HTMLMediaElement, () => void>();
 export function renderAttachments(
   attachments: readonly Attachment[],
   context: MediaRenderContext,
+  timeElement?: HTMLElement
 ): HTMLElement {
   const documentRef = context.document ?? document;
   const container = documentRef.createElement("div");
   container.className = "wx-srv-attachments";
   let photoGrid: HTMLElement | null = null;
+  const lastTranscribable = timeElement ? [...attachments].reverse().find(a => a.kind === "voice" && a.status === "ready" && context.transcription) : undefined;
   for (const attachment of attachments) {
     if (attachment.kind === "photo" && attachment.status === "ready") {
       if (!photoGrid) {
@@ -66,7 +68,7 @@ export function renderAttachments(
     } else {
       container.appendChild(renderAttachment(attachment, context, documentRef));
       if (attachment.kind === "voice" && attachment.status === "ready" && context.transcription) {
-        container.appendChild(renderTranscriptBlock(attachment, context.transcription, documentRef));
+        container.appendChild(renderTranscriptBlock(attachment, context.transcription, documentRef, attachment === lastTranscribable ? timeElement : undefined));
       }
     }
   }

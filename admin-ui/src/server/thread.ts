@@ -1117,7 +1117,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     messageActionControllers.delete(seq);
   }
 
-  function renderAttachmentsFor(message: Message): HTMLElement | null {
+  function renderAttachmentsFor(message: Message, timeElement?: HTMLElement): HTMLElement | null {
     if (message.attachments.length === 0) return null;
     return renderAttachments(message.attachments, {
       hooks,
@@ -1125,7 +1125,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       transcription,
       document: documentRef,
       win,
-    });
+    }, timeElement);
   }
 
   // -- Reactions ---------------------------------------------------------
@@ -1423,17 +1423,24 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         linkifyInto(textEl, message.text, documentRef);
         bubble.appendChild(textEl);
       }
-      const attachmentsEl = renderAttachmentsFor(message);
+      
+      const time = documentRef.createElement("span");
+      time.className = "wx-srv-bubble-time";
+      time.textContent = formatTime(message.createdAt);
+      
+      const hasTranscribableVoice = transcription !== undefined && message.attachments.some((a) => a.kind === "voice" && a.status === "ready");
+      const attachmentsEl = renderAttachmentsFor(message, hasTranscribableVoice ? time : undefined);
       if (attachmentsEl !== null) bubble.appendChild(attachmentsEl);
+      
+      const reactionsEl = documentRef.createElement("div");
+      reactionsEl.className = "wx-srv-reactions";
+      fillReactions(reactionsEl, message);
+      bubble.appendChild(reactionsEl);
+      
+      if (!hasTranscribableVoice) {
+        bubble.appendChild(time);
+      }
     }
-    const reactionsEl = documentRef.createElement("div");
-    reactionsEl.className = "wx-srv-reactions";
-    fillReactions(reactionsEl, message);
-    bubble.appendChild(reactionsEl);
-    const time = documentRef.createElement("span");
-    time.className = "wx-srv-bubble-time";
-    time.textContent = formatTime(message.createdAt);
-    bubble.appendChild(time);
     messageActionControllers.set(
       message.seq,
       mountMessageActions({
