@@ -252,6 +252,19 @@
   align-items: flex-end;
 }
 
+/* Server chat keeps Enter for line breaks. When text explicitly or visually wraps, give it a
+   dedicated full-width line above the buttons; retain that layout until the draft is cleared. */
+.wx-srv-thread-view .wx-chatc-input-row.wx-chatc-multiline {
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+.wx-srv-thread-view .wx-chatc-input-row.wx-chatc-multiline .wx-chat-composer-input {
+  order: -2;
+  flex: 1 0 100%;
+  width: 100%;
+}
+
 .wx-srv-thread-view .wx-chat-attach-button {
   box-sizing: border-box;
   width: var(--wx-srv-control-h);
@@ -317,6 +330,38 @@
 
 .wx-srv-thread-view .wx-chatc-input-row.wx-srv-recording-row .wx-srv-record-button {
   order: 4;
+}
+
+.wx-srv-thread-view .wx-chatc-input-row.wx-srv-sending
+  :is(.wx-srv-record-cancel, .wx-srv-record-pause, .wx-srv-record-button):disabled {
+  opacity: 0.45;
+  cursor: wait;
+}
+
+.wx-srv-thread-view .wx-chatc-input-row.wx-srv-sending .wx-srv-record-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wx-srv-voice-send-spinner {
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: wx-srv-voice-spin 0.8s linear infinite;
+}
+
+@keyframes wx-srv-voice-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wx-srv-voice-send-spinner {
+    animation: none;
+  }
 }
 
 /* chatComposer.ts's auto-grow floors the input at 36px and the empty state
@@ -1483,6 +1528,12 @@ button.wx-srv-quote:focus-visible {
   .wx-srv-view-once-toggle-button {
     order: -1;
     flex: 1 0 100%;
+  }
+
+  /* The full-width text line leaves room for view-once beside the other controls. */
+  .wx-srv-thread-view .wx-chatc-input-row.wx-chatc-multiline .wx-srv-view-once-toggle-button {
+    order: 0;
+    flex: 0 0 var(--wx-srv-control-h);
   }
 
   .wx-srv-view-once-toggle-button:disabled {

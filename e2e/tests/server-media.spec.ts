@@ -187,6 +187,90 @@ test.describe("server-media.spec.ts (P6b)", () => {
     await audioNode!.dispose();
   });
 
+  test("Server chat uses Enter for a full-width multiline message and promotes soft-wrapped text", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await unlockServer(page, `Multiline ${Date.now()}`);
+    const draft = page.locator(".wx-chat-composer-input");
+    const inputRow = page.locator(".wx-chatc-input-row");
+    const send = page.locator(".wx-chat-send-button");
+
+    await draft.fill("first line");
+    await draft.press("Enter");
+    await draft.type("second line");
+    await expect(draft).toHaveValue("first line\nsecond line");
+    await expect(inputRow).toHaveClass(/wx-chatc-multiline/);
+
+    const [rowBox, draftBox, sendBox] = await Promise.all([
+      inputRow.boundingBox(),
+      draft.boundingBox(),
+      send.boundingBox(),
+    ]);
+    expect(rowBox).not.toBeNull();
+    expect(draftBox).not.toBeNull();
+    expect(sendBox).not.toBeNull();
+    if (rowBox !== null && draftBox !== null && sendBox !== null) {
+      expect(draftBox.x).toBeCloseTo(rowBox.x, 0);
+      expect(draftBox.width).toBeGreaterThanOrEqual(rowBox.width - 2);
+      expect(draftBox.y + draftBox.height).toBeLessThanOrEqual(sendBox.y);
+    }
+
+    const posted = page.waitForRequest((request) =>
+      request.url().endsWith("/api/admin/server/messages") && request.method() === "POST",
+    );
+    await send.click();
+    const postedRequest = await posted;
+    expect(postedRequest.postDataJSON().text).toBe("first line\nsecond line");
+    await expect(draft).toHaveValue("");
+    await expect(inputRow).not.toHaveClass(/wx-chatc-multiline/);
+
+    // No explicit newline: a visual wrap in the narrow inline field should promote it too.
+    await draft.fill("This longer message wraps automatically in the narrow phone composer");
+    await expect(inputRow).toHaveClass(/wx-chatc-multiline/);
+  });
+
+  test("voice note keeps its disabled recording row and throbber while sending", async ({ page }) => {
+    await unlockServer(page, `VoiceSending ${Date.now()}`);
+    let releaseSend!: () => void;
+    let markSendStarted!: () => void;
+    const sendGate = new Promise<void>((resolve) => { releaseSend = resolve; });
+    const sendStarted = new Promise<void>((resolve) => { markSendStarted = resolve; });
+    await page.route("**/api/admin/server/messages", async (route) => {
+      if (route.request().method() === "POST") {
+        markSendStarted();
+        await sendGate;
+      }
+      await route.fallback();
+    });
+
+    const textarea = page.locator(".wx-chat-composer-input");
+    const sendButton = page.locator(".wx-chat-send-button");
+    const inputRow = page.locator(".wx-chatc-input-row");
+    const status = page.locator(".wx-srv-record-status");
+    const record = page.getByRole("button", { name: "Record a voice note" });
+    await record.click();
+    await expect(page.getByRole("button", { name: "Stop and send recording" })).toBeVisible();
+    await page.waitForTimeout(1_300);
+    const sentVoice = page.waitForResponse((response) =>
+      response.url().endsWith("/api/admin/server/messages") && response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: "Stop and send recording" }).click();
+    await sendStarted;
+
+    await expect(inputRow).toHaveClass(/wx-srv-recording-row/);
+    await expect(inputRow).toHaveClass(/wx-srv-sending/);
+    await expect(textarea).toBeHidden();
+    await expect(sendButton).toBeHidden();
+    await expect(status.locator(".wx-srv-voice-send-spinner")).toBeVisible();
+    await expect(status).toHaveAttribute("aria-label", "Sending voice note");
+    await expect(page.getByRole("button", { name: "Pause recording" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Sending voice note" })).toBeDisabled();
+
+    releaseSend();
+    expect((await sentVoice).status()).toBe(201);
+    await expect(inputRow).not.toHaveClass(/wx-srv-sending/);
+    await expect(textarea).toBeVisible();
+  });
+
   test("voice recorder pause and resume excludes paused interval and dedicated row hides inputs on desktop and mobile", async ({ page }) => {
     // 1. Desktop test
     await unlockServer(page, `PauseDesktop ${Date.now()}`);
