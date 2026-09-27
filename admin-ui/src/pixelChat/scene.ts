@@ -5,6 +5,7 @@ import { buildTrajectoryPlan, extractBubbleRects, type TrajectoryPlan } from "./
 import {
   drawCoupleCuddle,
   drawCoupleEmbrace,
+  drawCoupleSlideFall,
   drawPixelMatrix,
   drawPixelPlatform,
   getSpriteMatrix,
@@ -20,6 +21,7 @@ export interface SceneController {
   start(): void;
   stop(): void;
   dismiss(onComplete?: () => void): void;
+  interrupt(reason?: "message" | "activity", onComplete?: () => void): void;
   reset(): void;
   isRunning(): boolean;
   setSpeed(multiplier: number): void;
@@ -88,7 +90,14 @@ export function createPixelChatScene(
     scrollProgress: 0,
   };
 
-  type Phase = "traversing" | "platform_deploy" | "embrace" | "jump" | "cuddle";
+  type Phase =
+    | "traversing"
+    | "platform_deploy"
+    | "embrace"
+    | "jump"
+    | "cuddle"
+    | "stumble_fall"
+    | "platform_collapse";
   let currentPhase: Phase = "traversing";
   let phaseTimerMs = 0;
 
@@ -96,6 +105,20 @@ export function createPixelChatScene(
   let jumpStart = { x: 0, y: 0 };
   let jumpTarget = { x: 0, y: 0 };
   let jumpProgress = 0; // 0 to 1
+
+  // Stumble & fall physics (while climbing/traversing)
+  let guyVx = 0;
+  let guyVy = 0;
+  let womanVx = 0;
+  let womanVy = 0;
+
+  // Platform collapse physics (while cuddling)
+  let platformAngle = 0;
+  let coupleSlideDist = 0;
+  let coupleVx = 0;
+  let coupleVy = 0;
+  let coupleInAir = false;
+  let couplePos = { x: 0, y: 0 };
 
   const hearts: HeartParticle[] = [];
   let lastTime = 0;
@@ -365,6 +388,63 @@ export function createPixelChatScene(
         }
         break;
       }
+
+      case "stumble_fall": {
+        const GRAVITY = 750;
+        guyVy += GRAVITY * dt;
+        womanVy += GRAVITY * dt;
+
+        guyMotion.x += guyVx * dt;
+        guyMotion.y += guyVy * dt;
+        womanMotion.x += womanVx * dt;
+        womanMotion.y += womanVy * dt;
+
+        guyMotion.state = "stumble";
+        womanMotion.state = "stumble";
+
+        const canvasH = canvas ? canvas.height / (win.devicePixelRatio || 1) : 600;
+        if (guyMotion.y > canvasH + 40 && womanMotion.y > canvasH + 40) {
+          stop();
+          onDismissComplete?.();
+          onDismissComplete = null;
+        }
+        break;
+      }
+
+      case "platform_collapse": {
+        const MAX_PLATFORM_ANGLE = Math.PI * 0.35;
+        platformAngle = Math.min(MAX_PLATFORM_ANGLE, platformAngle + dt * 2.8);
+
+        const anchorX = plan.meetingPoint.x;
+        const anchorY = platform.y;
+        const plankLen = platform.targetWidth;
+
+        if (!coupleInAir) {
+          coupleSlideDist += dt * 280;
+          const distFromAnchor = Math.min(plankLen, plankLen * 0.45 + coupleSlideDist);
+          couplePos.x = anchorX - Math.cos(platformAngle) * distFromAnchor;
+          couplePos.y = anchorY + Math.sin(platformAngle) * distFromAnchor - 12;
+
+          if (coupleSlideDist >= plankLen * 0.55) {
+            coupleInAir = true;
+            coupleVx = -Math.cos(platformAngle) * 200;
+            coupleVy = Math.sin(platformAngle) * 200;
+          }
+        } else {
+          const GRAVITY = 800;
+          coupleVy += GRAVITY * dt;
+          couplePos.x += coupleVx * dt;
+          couplePos.y += coupleVy * dt;
+        }
+
+        const canvasH = canvas ? canvas.height / (win.devicePixelRatio || 1) : 600;
+        if (couplePos.y > canvasH + 50) {
+          stop();
+          onDismissComplete?.();
+          onDismissComplete = null;
+        }
+        break;
+      }
     }
 
     // Update heart particles
@@ -393,16 +473,27 @@ export function createPixelChatScene(
 
     // 1. Draw platform if deployed
     if (platform.visible && platform.currentWidth > 0) {
-      // Platform scrolls out from wall (right to left):
-      // right anchor is at plan.meetingPoint.x
-      const drawX = plan.meetingPoint.x - platform.currentWidth;
-      drawPixelPlatform(ctx, drawX, platform.y, platform.currentWidth, platform.height, PIXEL_SCALE);
+      if (currentPhase === "platform_collapse") {
+        ctx.save();
+        ctx.translate(plan.meetingPoint.x, platform.y);
+        ctx.rotate(platformAngle);
+        ctx.translate(-plan.meetingPoint.x, -platform.y);
+        const drawX = plan.meetingPoint.x - platform.currentWidth;
+        drawPixelPlatform(ctx, drawX, platform.y, platform.currentWidth, platform.height, PIXEL_SCALE);
+        ctx.restore();
+      } else {
+        const drawX = plan.meetingPoint.x - platform.currentWidth;
+        drawPixelPlatform(ctx, drawX, platform.y, platform.currentWidth, platform.height, PIXEL_SCALE);
+      }
     }
 
     // 2. Draw characters
     if (currentPhase === "cuddle") {
       // Draw pair cuddling together
       drawCoupleCuddle(ctx, guyMotion.x, guyMotion.y, PIXEL_SCALE, guyMotion.alpha);
+    } else if (currentPhase === "platform_collapse") {
+      // Draw pair clinging and sliding down as platform collapses
+      drawCoupleSlideFall(ctx, couplePos.x, couplePos.y, PIXEL_SCALE, 1.0);
     } else if (currentPhase === "embrace") {
       drawCoupleEmbrace(ctx, plan.meetingPoint.x - 14, plan.meetingPoint.y - 20, PIXEL_SCALE, guyMotion.alpha);
     } else {
@@ -472,6 +563,13 @@ export function createPixelChatScene(
     platform.visible = false;
     platform.currentWidth = 0;
     platform.scrollProgress = 0;
+    platformAngle = 0;
+    coupleSlideDist = 0;
+    coupleInAir = false;
+    guyVx = 0;
+    guyVy = 0;
+    womanVx = 0;
+    womanVy = 0;
     hearts.length = 0;
 
     setPhase("traversing");
@@ -492,16 +590,45 @@ export function createPixelChatScene(
     }
   }
 
-  function dismiss(onComplete?: () => void): void {
-    if (!running || dismissing) {
+  function interrupt(reason?: "message" | "activity", onComplete?: () => void): void {
+    if (!running) {
       onComplete?.();
       return;
     }
-    dismissing = true;
-    dismissProgress = 0;
+    if (currentPhase === "stumble_fall" || currentPhase === "platform_collapse") {
+      return;
+    }
+
     onDismissComplete = onComplete ?? null;
-    guyMotion.state = "scamper";
-    womanMotion.state = "scamper";
+
+    if (currentPhase === "cuddle") {
+      setPhase("platform_collapse");
+      platformAngle = 0;
+      coupleSlideDist = 0;
+      coupleInAir = false;
+      couplePos = { x: guyMotion.x, y: guyMotion.y };
+      coupleVx = -70;
+      coupleVy = 0;
+      // Scatter heart particles
+      for (const h of hearts) {
+        h.vx = (Math.random() - 0.5) * 160;
+        h.vy = -80 - Math.random() * 80;
+        h.maxLife = 600;
+        h.life = 0;
+      }
+    } else {
+      setPhase("stumble_fall");
+      guyMotion.state = "stumble";
+      womanMotion.state = "stumble";
+      guyVx = (guyMotion.facing === "right" ? -45 : 45) + (Math.random() - 0.5) * 20;
+      guyVy = -80;
+      womanVx = (womanMotion.facing === "right" ? -45 : 45) + (Math.random() - 0.5) * 20;
+      womanVy = -80;
+    }
+  }
+
+  function dismiss(onComplete?: () => void): void {
+    interrupt("activity", onComplete);
   }
 
   function reset(): void {
@@ -513,6 +640,7 @@ export function createPixelChatScene(
     start,
     stop,
     dismiss,
+    interrupt,
     reset,
     isRunning(): boolean {
       return running;

@@ -720,6 +720,7 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
   function handleStreamEvent(event: ConversationStreamEvent): void {
     if (cancelled) return;
     if (event.type === "message") {
+      pixelChat.onIncomingMessage();
       offlineBanner.hidden = true;
       messagesByIndex.set(event.message.index, event.message);
       if (event.message.role === "user") {
@@ -785,7 +786,7 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
     pendingEchoes.push(echo);
     threadScroll.scrollToBottom();
     renderThread();
-    pixelChat.reset();
+    pixelChat.interrupt("activity");
     api
       .sendMessage(convId, text, idempotencyKey, attachmentIds)
       .then(() => {

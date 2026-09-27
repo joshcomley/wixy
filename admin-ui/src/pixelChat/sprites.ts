@@ -197,6 +197,42 @@ const GUY_JUMP = [
   "............",
 ];
 
+const GUY_STUMBLE_1 = [
+  "..FF....FF..",
+  ".FFF....FFF.",
+  "...HHHHHH...",
+  "..HHEFFEEH..",
+  "...FFFFF....",
+  "..LLPPWWLL..",
+  ".LLPPPPPPLL.",
+  "LL..PPPP..LL",
+  "....PPPP....",
+  "....DPPD....",
+  "...PP..PP...",
+  "..PP....PP..",
+  "..SS.....SS.",
+  "............",
+  "............",
+];
+
+const GUY_STUMBLE_2 = [
+  "FF........FF",
+  ".FFF....FFF.",
+  "...HHHHHH...",
+  "..HHEFFEEH..",
+  "...FFFFFF...",
+  "...LPPWWPL..",
+  "..LLPPPPLL..",
+  "..L.PPPP.L..",
+  "....PPPP....",
+  "....DPPD....",
+  "....PPPP....",
+  "...PP..PP...",
+  "...SS..SS...",
+  "............",
+  "............",
+];
+
 // --- WOMAN POSES ---
 const WOMAN_STAND_1 = [
   "....HHHH....",
@@ -342,6 +378,42 @@ const WOMAN_JUMP = [
   "............",
 ];
 
+const WOMAN_STUMBLE_1 = [
+  "..FF....FF..",
+  ".FFF....FFF.",
+  "...HHHHHH...",
+  "..HHEFFEEH..",
+  "...FFFFF....",
+  "..LLCCLL....",
+  ".LCCCCCLD...",
+  "LLCCCCCLDD..",
+  "CCCCCCCCCCCC",
+  "CCCCCCCCCCCC",
+  "...FF..FF...",
+  "..FF....FF..",
+  "..SS.....SS.",
+  "............",
+  "............",
+];
+
+const WOMAN_STUMBLE_2 = [
+  "FF........FF",
+  ".FFF....FFF.",
+  "...HHHHHH...",
+  "..HHEFFEEH..",
+  "...FFFFF....",
+  "...LLCCLL...",
+  "..LCCCCCLD..",
+  ".LLCCCCCLDD.",
+  "CCCCCCCCCCCC",
+  "CCCCCCCCCCCC",
+  "....FF.FF...",
+  "...FF...FF..",
+  "...SS...SS..",
+  "............",
+  "............",
+];
+
 // --- COUPLE EMBRACE & CUDDLE ---
 const COUPLE_EMBRACE = [
   "..HHHH..HHHH..",
@@ -371,6 +443,24 @@ const COUPLE_CUDDLE = [
   ".PPPPPPPPBBBBCCCCCCCCD..",
   "..PPPPPPPP...CCCCCCCCD..",
   "....SSSS.......SSSS.....",
+];
+
+// Couple sliding down the collapsing platform and falling together
+const COUPLE_SLIDE_FALL = [
+  "......HHHH...HHHH...",
+  "....HHHHHHHHHHHHHHHH",
+  "...HHEFFEH...HEFFEH.",
+  "....FFFFF.BB.FFFFF..",
+  "...LLPPWWBBBBCCLL...",
+  "..LLPPPPPPBBCCCCLL..",
+  ".LLPPPPPPPBBCCCCCLLD",
+  ".DPPPPPPPPCCCCCCCCD.",
+  "..DPPPPPP.CCCCCCCC..",
+  "...PP..PP..CC..CC...",
+  "..PP....PP..CC..CC..",
+  "..SS....SS..SS..SS..",
+  "....................",
+  "....................",
 ];
 
 // Floating heart sprite (7x6)
@@ -406,6 +496,9 @@ export function getSpriteMatrix(
         return GUY_STAND_1;
       case "scamper":
         return frame % 2 === 0 ? GUY_WALK_1 : GUY_WALK_2;
+      case "stumble":
+      case "slide_fall":
+        return frame % 2 === 0 ? GUY_STUMBLE_1 : GUY_STUMBLE_2;
       default:
         return GUY_STAND_1;
     }
@@ -427,6 +520,9 @@ export function getSpriteMatrix(
         return WOMAN_STAND_1;
       case "scamper":
         return frame % 2 === 0 ? WOMAN_WALK_1 : WOMAN_WALK_2;
+      case "stumble":
+      case "slide_fall":
+        return frame % 2 === 0 ? WOMAN_STUMBLE_1 : WOMAN_STUMBLE_2;
       default:
         return WOMAN_STAND_1;
     }
@@ -512,6 +608,25 @@ export function drawCoupleEmbrace(
     B: "#f43f5e",
   };
   drawPixelMatrix(ctx, COUPLE_EMBRACE, compositePalette, x, y, scale, false, alpha);
+}
+
+/** Draw the pair clinging and sliding down when the platform collapses */
+export function drawCoupleSlideFall(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  scale = PIXEL_SCALE,
+  alpha = 1.0,
+): void {
+  const compositePalette: Record<string, string> = {
+    ...GUY_PALETTE,
+    ...WOMAN_PALETTE,
+    P: GUY_PALETTE["P"] ?? "#ec4899",
+    W: GUY_PALETTE["W"] ?? "#ffffff",
+    C: WOMAN_PALETTE["C"] ?? "#0284c7",
+    B: "#f43f5e",
+  };
+  drawPixelMatrix(ctx, COUPLE_SLIDE_FALL, compositePalette, x, y, scale, false, alpha);
 }
 
 /** Draw the retro pixel-art platform as it scrolls out */

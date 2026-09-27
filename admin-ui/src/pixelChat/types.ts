@@ -13,7 +13,9 @@ export type AnimationState =
   | "embrace"
   | "jump"
   | "cuddle"
-  | "scamper";
+  | "scamper"
+  | "stumble"
+  | "slide_fall";
 
 export type FacingDirection = "left" | "right";
 
@@ -64,7 +66,16 @@ export interface HeartParticle {
 }
 
 export interface SceneStage {
-  phase: "traversing" | "platform_deploy" | "embrace" | "jump" | "cuddle" | "dismissing" | "idle_waiting";
+  phase:
+    | "traversing"
+    | "platform_deploy"
+    | "embrace"
+    | "jump"
+    | "cuddle"
+    | "stumble_fall"
+    | "platform_collapse"
+    | "dismissing"
+    | "idle_waiting";
   progress: number;
 }
 
@@ -74,6 +85,8 @@ export interface PixelChatController {
   teardown(): void;
   isAnimating(): boolean;
   getTimeUntilIdleMs(): number;
+  interrupt(reason?: "message" | "activity"): void;
+  onIncomingMessage(): void;
 }
 
 export interface PixelChatOptions {

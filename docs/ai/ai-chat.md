@@ -352,5 +352,6 @@ When the conversation view sits idle for 30 seconds (`mountIdleWatchdog` with `D
 - Under overhangs (where the block above sticks out further horizontally), the character stretches their arms up, grasps the underside of the overhead block, and monkey-bar traverses horizontally with dangling legs (`hang_traverse`).
 - On step-ins (where the current block extends further than the one above), the character climbs onto the block top and walks horizontally (`walk_top`).
 - When they meet at the middle block, a retro wooden platform scrolls smoothly out from the block edge; they embrace at the wall edge, leap together across to the platform in a parabolic arc, and lie down cuddling side-by-side while pixel heart particles drift upward.
-- The interaction is completely unobtrusive: any user interaction (mousemove, mousedown, keydown, touchstart, wheel/scroll, or message sending) instantly triggers a graceful ~300ms scamper/fade-out, clearing the canvas and resetting the 30s watchdog.
+- Interruption & reaction: if a message arrives or user activity breaks stillness whilst they are climbing, both characters stumble (flailing arms, startled expressions) and tumble down off the bottom of the screen under gravity. If a message arrives or activity occurs whilst cuddling, the wooden platform collapses downward, and the couple clutches each other, slides down the sloping plank, and falls off the bottom together. Staying still allows the full sequence to play out. Once they fall off-screen, the canvas is cleared and the 30s idle watchdog resets.
+
 

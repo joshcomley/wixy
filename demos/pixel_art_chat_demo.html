@@ -360,10 +360,23 @@
       <div class="control-group">
         <span class="control-label">Live Animation Control</span>
         <button id="btnPlayNow" class="btn btn-primary">
-          ▶ Trigger Animation Now
+          ▶ Trigger Animation (Climb from bottom/top)
         </button>
         <button id="btnReset" class="btn btn-secondary">
           ◼ Reset / Clear
+        </button>
+      </div>
+
+      <div class="control-group">
+        <span class="control-label">Message Interrupt Simulations</span>
+        <button id="btnSimClimbInterrupt" class="btn btn-secondary" style="border-left: 3px solid #f59e0b; justify-content: flex-start; text-align: left;">
+          💥 Message while Climbing → Stumble & Fall
+        </button>
+        <button id="btnJumpToCuddle" class="btn btn-secondary" style="border-left: 3px solid #ec4899; justify-content: flex-start; text-align: left;">
+          💖 Jump to Cuddling Phase
+        </button>
+        <button id="btnSimCuddleInterrupt" class="btn btn-secondary" style="border-left: 3px solid #ef4444; justify-content: flex-start; text-align: left;">
+          💥 Message while Cuddling → Platform Collapse
         </button>
       </div>
 
@@ -629,6 +642,38 @@
       ".SS......SS.",
     ];
 
+    const GUY_STUMBLE_1 = [
+      "..FF....FF..",
+      ".FFF....FFF.",
+      "...HHHHHH...",
+      "..HHEFFEEH..",
+      "...FFFFF....",
+      "..LLPPWWLL..",
+      ".LLPPPPPPLL.",
+      "LL..PPPP..LL",
+      "....PPPP....",
+      "....DPPD....",
+      "...PP..PP...",
+      "..PP....PP..",
+      "..SS.....SS.",
+    ];
+
+    const GUY_STUMBLE_2 = [
+      "FF........FF",
+      ".FFF....FFF.",
+      "...HHHHHH...",
+      "..HHEFFEEH..",
+      "...FFFFFF...",
+      "...LPPWWPL..",
+      "..LLPPPPLL..",
+      "..L.PPPP.L..",
+      "....PPPP....",
+      "....DPPD....",
+      "....PPPP....",
+      "...PP..PP...",
+      "...SS..SS...",
+    ];
+
     const WOMAN_WALK_1 = [
       "....HHHH....",
       "...HHHHHH...",
@@ -748,6 +793,38 @@
       "..SS.....SS.",
     ];
 
+    const WOMAN_STUMBLE_1 = [
+      "..FF....FF..",
+      ".FFF....FFF.",
+      "...HHHHHH...",
+      "..HHEFFEEH..",
+      "...FFFFF....",
+      "..LLCCLL....",
+      ".LCCCCCLD...",
+      "LLCCCCCLDD..",
+      "CCCCCCCCCCCC",
+      "CCCCCCCCCCCC",
+      "...FF..FF...",
+      "..FF....FF..",
+      "..SS.....SS.",
+    ];
+
+    const WOMAN_STUMBLE_2 = [
+      "FF........FF",
+      ".FFF....FFF.",
+      "...HHHHHH...",
+      "..HHEFFEEH..",
+      "...FFFFF....",
+      "...LLCCLL...",
+      "..LCCCCCLD..",
+      ".LLCCCCCLDD.",
+      "CCCCCCCCCCCC",
+      "CCCCCCCCCCCC",
+      "....FF.FF...",
+      "...FF...FF..",
+      "...SS...SS..",
+    ];
+
     const COUPLE_EMBRACE = [
       "..HHHH..HHHH..",
       ".HHHHHHHHHHHH.",
@@ -775,6 +852,23 @@
       ".PPPPPPPPBBBBCCCCCCCCD..",
       "..PPPPPPPP...CCCCCCCCD..",
       "....SSSS.......SSSS.....",
+    ];
+
+    const COUPLE_SLIDE_FALL = [
+      "......HHHH...HHHH...",
+      "....HHHHHHHHHHHHHHHH",
+      "...HHEFFEH...HEFFEH.",
+      "....FFFFF.BB.FFFFF..",
+      "...LLPPWWBBBBCCLL...",
+      "..LLPPPPPPBBCCCCLL..",
+      ".LLPPPPPPPBBCCCCCLLD",
+      ".DPPPPPPPPCCCCCCCCD.",
+      "..DPPPPPP.CCCCCCCC..",
+      "...PP..PP..CC..CC...",
+      "..PP....PP..CC..CC..",
+      "..SS....SS..SS..SS..",
+      "....................",
+      "....................",
     ];
 
     const PIXEL_HEART = [
@@ -1118,22 +1212,63 @@
         this.stop();
       }
 
-      dismiss() {
+      interrupt(reason = "message") {
         if (!this.running) return;
-        this.guyMotion.state = "scamper";
-        this.womanMotion.state = "scamper";
-        let dismissT = 0;
-        const fade = () => {
-          dismissT += 0.08;
-          this.guyMotion.alpha = Math.max(0, 1 - dismissT);
-          this.womanMotion.alpha = Math.max(0, 1 - dismissT);
-          if (dismissT >= 1) {
-            this.stop();
-          } else {
-            requestAnimationFrame(fade);
+        if (this.phase === "stumble_fall" || this.phase === "platform_collapse") return;
+
+        if (this.phase === "cuddle") {
+          this.phase = "platform_collapse";
+          this.platformAngle = 0;
+          this.coupleSlideDist = 0;
+          this.coupleInAir = false;
+          this.couplePos = { x: this.guyMotion.x, y: this.guyMotion.y };
+          this.coupleVx = -70;
+          this.coupleVy = 0;
+          for (const h of this.hearts) {
+            h.vx = (Math.random() - 0.5) * 160;
+            h.vy = -80 - Math.random() * 80;
+            h.maxLife = 600;
+            h.life = 0;
           }
+          document.getElementById("phaseVal").textContent = "platform_collapse";
+          document.getElementById("platformVal").textContent = "Collapsing!";
+        } else {
+          this.phase = "stumble_fall";
+          this.guyMotion.state = "stumble";
+          this.womanMotion.state = "stumble";
+          this.guyVx = (this.guyMotion.facing === "right" ? -45 : 45) + (Math.random() - 0.5) * 20;
+          this.guyVy = -80;
+          this.womanVx = (this.womanMotion.facing === "right" ? -45 : 45) + (Math.random() - 0.5) * 20;
+          this.womanVy = -80;
+          document.getElementById("phaseVal").textContent = "stumble_fall";
+        }
+      }
+
+      dismiss() {
+        this.interrupt("activity");
+      }
+
+      jumpToCuddle() {
+        if (!this.running) {
+          this.start();
+        }
+        this.platform.visible = true;
+        this.platform.currentWidth = this.platform.targetWidth;
+        this.platform.scrollProgress = 1;
+        this.phase = "cuddle";
+        this.phaseTimer = 0;
+        this.jumpTarget = {
+          x: this.plan.meetingPoint.x - this.platform.targetWidth * 0.5,
+          y: this.plan.platformRect.y - 4
         };
-        fade();
+        this.guyMotion.x = this.jumpTarget.x - 8;
+        this.guyMotion.y = this.jumpTarget.y - 12;
+        this.guyMotion.state = "cuddle";
+        this.womanMotion.x = this.jumpTarget.x - 8;
+        this.womanMotion.y = this.jumpTarget.y - 12;
+        this.womanMotion.state = "cuddle";
+        document.getElementById("phaseVal").textContent = "cuddle";
+        document.getElementById("platformVal").textContent = "Deployed";
       }
 
       loop(timestamp) {
@@ -1247,6 +1382,54 @@
             }
             break;
           }
+
+          case "stumble_fall": {
+            const GRAVITY = 750;
+            this.guyVy = (this.guyVy || 0) + GRAVITY * dt;
+            this.womanVy = (this.womanVy || 0) + GRAVITY * dt;
+
+            this.guyMotion.x += (this.guyVx || 0) * dt;
+            this.guyMotion.y += this.guyVy * dt;
+            this.womanMotion.x += (this.womanVx || 0) * dt;
+            this.womanMotion.y += this.womanVy * dt;
+
+            if (this.guyMotion.y > this.canvas.height + 40 && this.womanMotion.y > this.canvas.height + 40) {
+              this.stop();
+            }
+            break;
+          }
+
+          case "platform_collapse": {
+            const MAX_ANGLE = Math.PI * 0.35;
+            this.platformAngle = Math.min(MAX_ANGLE, (this.platformAngle || 0) + dt * 2.8);
+
+            const anchorX = this.plan.meetingPoint.x;
+            const anchorY = this.plan.platformRect.y;
+            const plankLen = this.platform.targetWidth;
+
+            if (!this.coupleInAir) {
+              this.coupleSlideDist = (this.coupleSlideDist || 0) + dt * 280;
+              const distFromAnchor = Math.min(plankLen, plankLen * 0.45 + this.coupleSlideDist);
+              this.couplePos.x = anchorX - Math.cos(this.platformAngle) * distFromAnchor;
+              this.couplePos.y = anchorY + Math.sin(this.platformAngle) * distFromAnchor - 12;
+
+              if (this.coupleSlideDist >= plankLen * 0.55) {
+                this.coupleInAir = true;
+                this.coupleVx = -Math.cos(this.platformAngle) * 200;
+                this.coupleVy = Math.sin(this.platformAngle) * 200;
+              }
+            } else {
+              const GRAVITY = 800;
+              this.coupleVy = (this.coupleVy || 0) + GRAVITY * dt;
+              this.couplePos.x += (this.coupleVx || 0) * dt;
+              this.couplePos.y += this.coupleVy * dt;
+            }
+
+            if (this.couplePos.y > this.canvas.height + 50) {
+              this.stop();
+            }
+            break;
+          }
         }
 
         // Particles
@@ -1316,13 +1499,25 @@
 
         // Platform
         if (this.platform.visible && this.platform.currentWidth > 0) {
-          const drawX = this.plan.meetingPoint.x - this.platform.currentWidth;
-          drawPlatform(this.ctx, drawX, this.plan.platformRect.y, this.platform.currentWidth, this.plan.platformRect.height, PIXEL_SCALE);
+          if (this.phase === "platform_collapse") {
+            this.ctx.save();
+            this.ctx.translate(this.plan.meetingPoint.x, this.plan.platformRect.y);
+            this.ctx.rotate(this.platformAngle || 0);
+            this.ctx.translate(-this.plan.meetingPoint.x, -this.plan.platformRect.y);
+            const drawX = this.plan.meetingPoint.x - this.platform.currentWidth;
+            drawPlatform(this.ctx, drawX, this.plan.platformRect.y, this.platform.currentWidth, this.plan.platformRect.height, PIXEL_SCALE);
+            this.ctx.restore();
+          } else {
+            const drawX = this.plan.meetingPoint.x - this.platform.currentWidth;
+            drawPlatform(this.ctx, drawX, this.plan.platformRect.y, this.platform.currentWidth, this.plan.platformRect.height, PIXEL_SCALE);
+          }
         }
 
         // Characters
         if (this.phase === "cuddle") {
           drawPixelMatrix(this.ctx, COUPLE_CUDDLE, { ...GUY_PALETTE, ...WOMAN_PALETTE, P: GUY_PALETTE.P, C: WOMAN_PALETTE.C }, this.guyMotion.x, this.guyMotion.y, PIXEL_SCALE, false, this.guyMotion.alpha);
+        } else if (this.phase === "platform_collapse") {
+          drawPixelMatrix(this.ctx, COUPLE_SLIDE_FALL, { ...GUY_PALETTE, ...WOMAN_PALETTE, P: GUY_PALETTE.P, C: WOMAN_PALETTE.C, B: "#f43f5e" }, this.couplePos.x, this.couplePos.y, PIXEL_SCALE, false, 1.0);
         } else if (this.phase === "embrace") {
           drawPixelMatrix(this.ctx, COUPLE_EMBRACE, { ...GUY_PALETTE, ...WOMAN_PALETTE }, this.plan.meetingPoint.x - 14, this.plan.meetingPoint.y - 20, PIXEL_SCALE, false, this.guyMotion.alpha);
         } else {
@@ -1331,12 +1526,14 @@
           if (this.guyMotion.state === "climb_up") gMat = (this.guyMotion.frame % 2 === 0) ? GUY_CLIMB_1 : GUY_CLIMB_2;
           else if (this.guyMotion.state === "hang_traverse") gMat = (this.guyMotion.frame % 2 === 0) ? GUY_HANG_1 : GUY_HANG_2;
           else if (this.guyMotion.state === "jump") gMat = GUY_JUMP;
+          else if (this.guyMotion.state === "stumble") gMat = (this.guyMotion.frame % 2 === 0) ? GUY_STUMBLE_1 : GUY_STUMBLE_2;
           else if (this.guyMotion.state === "walk_top" || this.guyMotion.state === "appear") gMat = (this.guyMotion.frame % 2 === 0) ? GUY_WALK_1 : GUY_WALK_2;
 
           let wMat = WOMAN_WALK_1;
           if (this.womanMotion.state === "climb_down") wMat = (this.womanMotion.frame % 2 === 0) ? WOMAN_CLIMB_1 : WOMAN_CLIMB_2;
           else if (this.womanMotion.state === "hang_traverse") wMat = (this.womanMotion.frame % 2 === 0) ? WOMAN_HANG_1 : WOMAN_HANG_2;
           else if (this.womanMotion.state === "jump") wMat = WOMAN_JUMP;
+          else if (this.womanMotion.state === "stumble") wMat = (this.womanMotion.frame % 2 === 0) ? WOMAN_STUMBLE_1 : WOMAN_STUMBLE_2;
           else if (this.womanMotion.state === "walk_top" || this.womanMotion.state === "appear") wMat = (this.womanMotion.frame % 2 === 0) ? WOMAN_WALK_1 : WOMAN_WALK_2;
 
           drawPixelMatrix(this.ctx, gMat, GUY_PALETTE, Math.round(this.guyMotion.x - 12), Math.round(this.guyMotion.y - 24), PIXEL_SCALE, this.guyMotion.facing === "right", this.guyMotion.alpha);
@@ -1388,6 +1585,26 @@
     document.getElementById("btnReset").addEventListener("click", () => {
       activeScene.reset();
       resetActivity();
+    });
+
+    document.getElementById("btnSimClimbInterrupt").addEventListener("click", () => {
+      if (!activeScene.running || activeScene.phase === "idle_waiting") {
+        activeScene.start();
+      }
+      activeScene.interrupt("message");
+    });
+
+    document.getElementById("btnJumpToCuddle").addEventListener("click", () => {
+      activeScene.jumpToCuddle();
+    });
+
+    document.getElementById("btnSimCuddleInterrupt").addEventListener("click", () => {
+      if (!activeScene.running || activeScene.phase !== "cuddle") {
+        activeScene.jumpToCuddle();
+        setTimeout(() => activeScene.interrupt("message"), 350);
+      } else {
+        activeScene.interrupt("message");
+      }
     });
   </script>
 </body>

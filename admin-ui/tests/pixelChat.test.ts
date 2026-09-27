@@ -137,6 +137,7 @@ describe("Idle Watchdog", () => {
       start: () => { started = true; },
       stop: () => { stopped = true; },
       dismiss: (cb) => { dismissed = true; cb?.(); },
+      interrupt: () => {},
       reset: () => {},
       isRunning: () => started && !stopped,
       setSpeed: () => {},
@@ -172,6 +173,7 @@ describe("Idle Watchdog", () => {
       start: () => { isRunning = true; },
       stop: () => { isRunning = false; },
       dismiss: (cb) => { dismissed = true; isRunning = false; cb?.(); },
+      interrupt: () => { dismissed = true; isRunning = false; },
       reset: () => { isRunning = false; },
       isRunning: () => isRunning,
       setSpeed: () => {},
@@ -195,6 +197,29 @@ describe("Idle Watchdog", () => {
     vi.useRealTimers();
   });
 
+  it("calls interrupt when onIncomingMessage is received", () => {
+    let interruptedReason: string | undefined = undefined;
+    let running = true;
+
+    const fakeScene: SceneController = {
+      start: () => { running = true; },
+      stop: () => { running = false; },
+      dismiss: () => {},
+      interrupt: (reason) => { interruptedReason = reason; },
+      reset: () => {},
+      isRunning: () => running,
+      setSpeed: () => {},
+    };
+
+    const container = document.createElement("div");
+    const controller = mountIdleWatchdog(container, fakeScene);
+
+    controller.onIncomingMessage();
+    expect(interruptedReason).toBe("message");
+
+    controller.teardown();
+  });
+
   it("triggerNow starts scene immediately", () => {
     const container = document.createElement("div");
     let started = false;
@@ -203,6 +228,7 @@ describe("Idle Watchdog", () => {
       start: () => { started = true; },
       stop: () => {},
       dismiss: () => {},
+      interrupt: () => {},
       reset: () => {},
       isRunning: () => false,
       setSpeed: () => {},
@@ -221,8 +247,21 @@ describe("Idle Watchdog", () => {
 
     expect(controller).toBeDefined();
     expect(typeof controller.triggerNow).toBe("function");
+    expect(typeof controller.interrupt).toBe("function");
+    expect(typeof controller.onIncomingMessage).toBe("function");
     expect(typeof controller.teardown).toBe("function");
 
     controller.teardown();
+  });
+
+  it("provides stumble and slide_fall sprite matrices for characters", () => {
+    const guyStumble = getSpriteMatrix("guy", "stumble", 0);
+    expect(guyStumble.length).toBeGreaterThan(10);
+
+    const womanStumble = getSpriteMatrix("woman", "stumble", 0);
+    expect(womanStumble.length).toBeGreaterThan(10);
+
+    const guySlide = getSpriteMatrix("guy", "slide_fall", 0);
+    expect(guySlide.length).toBeGreaterThan(10);
   });
 });

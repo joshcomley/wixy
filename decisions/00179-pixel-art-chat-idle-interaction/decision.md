@@ -13,9 +13,10 @@ When the Wixy chat interface is left open and inactive for ~30 seconds, the oper
   - The characters embrace at the wall edge.
   - They push off the wall and leap across together onto the platform.
   - They lie down side-by-side on the platform and cuddle, with floating pixel heart particles rising softly.
-- Interactivity:
-  - The animation is non-intrusive and completely unobtrusive to normal chat usage.
-  - Any user interaction (moving the mouse, typing, clicking, scrolling) immediately startles/scampers/fades out the characters within ~300ms, clearing the canvas and resetting the 30-second countdown.
+- Interactivity & Interruption:
+  - If a message comes in (or activity occurs) whilst they are climbing/traversing, they both stumble (flailing arms, startled expressions, hop backwards off the ledge) and tumble/fall off the bottom of the screen under gravity.
+  - If a message comes in (or activity occurs) whilst they are lying down cuddling on the platform, the platform collapses downward (pivoting at the wall anchor), and the couple clutches each other, slides down the incline, and falls off the bottom together.
+  - Any movement or incoming message interrupts them; staying still allows the full romantic sequence to unfold.
   - Canvas uses `pointer-events: none` and does not block text selection, link clicks, or message interaction.
 
 ## Architecture

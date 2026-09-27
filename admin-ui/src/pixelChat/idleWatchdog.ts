@@ -73,6 +73,22 @@ export function mountIdleWatchdog(
       scene.reset();
       onActivity();
     },
+    interrupt(reason?: "message" | "activity"): void {
+      if (teardownCalled) return;
+      lastActivityAt = Date.now();
+      if (scene.isRunning()) {
+        scene.interrupt(reason);
+      }
+      armTimer();
+    },
+    onIncomingMessage(): void {
+      if (teardownCalled) return;
+      lastActivityAt = Date.now();
+      if (scene.isRunning()) {
+        scene.interrupt("message");
+      }
+      armTimer();
+    },
     isAnimating(): boolean {
       return scene.isRunning();
     },
