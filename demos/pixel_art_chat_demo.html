@@ -417,6 +417,12 @@
             <span>Interactivity:</span>
             <span class="status-val" style="color: #10b981;">Mouse/Keys dismiss</span>
           </div>
+          <div class="status-row" style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border);">
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 0.78rem; cursor: pointer; color: var(--text-muted); width: 100%;">
+              <input type="checkbox" id="chkDismissOnHover" checked>
+              <span>Dismiss on activity in chat thread</span>
+            </label>
+          </div>
         </div>
       </div>
 
@@ -1008,6 +1014,8 @@
       ]
     };
 
+    let activeScene = null;
+
     function loadPreset(name, btn) {
       if (btn) {
         document.querySelectorAll(".btn-group button").forEach(b => {
@@ -1026,8 +1034,6 @@
       });
       if (activeScene) activeScene.reset();
     }
-
-    loadPreset("playground");
 
     // Live Scene Controller
     let speedMult = 1.0;
@@ -1150,8 +1156,9 @@
 
     // Engine loop
     class PixelChatScene {
-      constructor(container) {
+      constructor(container, onStop) {
         this.container = container;
+        this.onStop = onStop;
         this.canvas = document.createElement("canvas");
         this.canvas.className = "wx-pixel-chat-canvas";
         this.container.appendChild(this.canvas);
@@ -1206,6 +1213,7 @@
         this.phase = "idle_waiting";
         document.getElementById("phaseVal").textContent = "idle_waiting";
         document.getElementById("platformVal").textContent = "Hidden";
+        if (this.onStop) this.onStop();
       }
 
       reset() {
@@ -1547,16 +1555,20 @@
       }
     }
 
-    const threadWrap = document.getElementById("threadWrap");
-    const activeScene = new PixelChatScene(threadWrap);
-
     // Watchdog simulation
     let lastActivity = Date.now();
     const IDLE_TIME = 30000;
 
+    const threadWrap = document.getElementById("threadWrap");
+    activeScene = new PixelChatScene(threadWrap, () => {
+      lastActivity = Date.now();
+    });
+    loadPreset("playground");
+
     function resetActivity() {
       lastActivity = Date.now();
-      if (activeScene.running) {
+      const dismissEnabled = document.getElementById("chkDismissOnHover")?.checked ?? true;
+      if (dismissEnabled && activeScene && activeScene.running) {
         activeScene.dismiss();
       }
     }
@@ -1571,20 +1583,21 @@
       document.getElementById("countdownVal").textContent = `${secs}s`;
       document.getElementById("idleTimerDisplay").textContent = remaining === 0 ? "Idle (Active)" : `Idle in ${secs}s`;
 
-      if (remaining === 0 && !activeScene.running && activeScene.phase === "idle_waiting") {
+      if (remaining === 0 && activeScene && !activeScene.running && activeScene.phase === "idle_waiting") {
         activeScene.start();
       }
     }, 100);
 
     // Buttons
     document.getElementById("btnPlayNow").addEventListener("click", () => {
+      lastActivity = Date.now() - IDLE_TIME;
       activeScene.reset();
       activeScene.start();
     });
 
     document.getElementById("btnReset").addEventListener("click", () => {
       activeScene.reset();
-      resetActivity();
+      lastActivity = Date.now();
     });
 
     document.getElementById("btnSimClimbInterrupt").addEventListener("click", () => {
@@ -1595,6 +1608,7 @@
     });
 
     document.getElementById("btnJumpToCuddle").addEventListener("click", () => {
+      lastActivity = Date.now() - IDLE_TIME;
       activeScene.jumpToCuddle();
     });
 
