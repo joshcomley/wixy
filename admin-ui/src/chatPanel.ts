@@ -55,6 +55,7 @@ import { mountChatComposer } from "./chatComposer";
 import { mountChatThreadScroll } from "./chatThreadScroll";
 import { mountLightbox } from "./lightbox";
 import { renderMarkdown } from "./markdown";
+import { mountPixelChat, type PixelChatController } from "./pixelChat";
 import { navigateTo, routeToPath, type Route } from "./router";
 
 export interface ChatPanelDeps {
@@ -436,6 +437,7 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
   // (spec/server-chat/00-brief.md §6/§10 P5b).
   const threadScroll = mountChatThreadScroll(thread, jumpPill);
   const lightbox = mountLightbox();
+  const pixelChat = mountPixelChat(threadWrap, { win });
 
   const composer = mountChatComposer({
     mode: "composer",
@@ -783,6 +785,7 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
     pendingEchoes.push(echo);
     threadScroll.scrollToBottom();
     renderThread();
+    pixelChat.reset();
     api
       .sendMessage(convId, text, idempotencyKey, attachmentIds)
       .then(() => {
@@ -871,6 +874,7 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
       composer.teardown();
       lightbox.teardown();
       threadScroll.teardown();
+      pixelChat.teardown();
     },
   };
 }

@@ -1,0 +1,1394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wixy Pixel Art Chat Idle Interaction Demo</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --panel-bg: #090d16;
+      --border: #334155;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --brand-blue: #0284c7;
+      --brand-blue-tint: rgba(2, 132, 199, 0.15);
+      --pink: #ec4899;
+      --radius: 8px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px;
+    }
+
+    header {
+      max-width: 960px;
+      width: 100%;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+
+    h1 {
+      font-size: 1.8rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+      background: linear-gradient(135deg, #ec4899, #38bdf8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    p.subtitle {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      line-height: 1.5;
+    }
+
+    .demo-container {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 24px;
+      max-width: 1060px;
+      width: 100%;
+    }
+
+    @media (max-width: 860px) {
+      .demo-container {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Simulated Wixy Chat View */
+    .chat-window {
+      background: var(--panel-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      display: flex;
+      flex-direction: column;
+      height: 640px;
+      overflow: hidden;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    }
+
+    .chat-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      background: #131c2e;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .chat-title {
+      font-weight: 600;
+      font-size: 0.95rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .chat-title::before {
+      content: "";
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #10b981;
+    }
+
+    .idle-badge {
+      font-size: 0.75rem;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(236, 72, 153, 0.2);
+      color: var(--pink);
+      border: 1px solid rgba(236, 72, 153, 0.4);
+    }
+
+    .chat-thread-wrap {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .chat-thread {
+      height: 100%;
+      overflow-y: auto;
+      padding: 20px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      position: relative;
+    }
+
+    .wx-chat-bubble {
+      max-width: 75%;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      line-height: 1.45;
+      position: relative;
+      border: 1px solid var(--border);
+    }
+
+    .wx-chat-bubble-user {
+      align-self: flex-end;
+      background: var(--brand-blue-tint);
+      color: #bae6fd;
+      border-color: rgba(2, 132, 199, 0.3);
+    }
+
+    .wx-chat-bubble-assistant {
+      align-self: flex-start;
+      background: #1e293b;
+      color: #e2e8f0;
+    }
+
+    .chat-composer-fake {
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      background: #131c2e;
+      display: flex;
+      gap: 8px;
+    }
+
+    .composer-input-fake {
+      flex: 1;
+      padding: 8px 12px;
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+
+    .composer-btn-fake {
+      padding: 8px 16px;
+      background: var(--brand-blue);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 500;
+    }
+
+    /* Canvas overlay */
+    canvas.wx-pixel-chat-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 10;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+
+    /* Controls Sidebar */
+    .controls-panel {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      height: 640px;
+      overflow-y: auto;
+    }
+
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .control-label {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .btn {
+      padding: 10px 14px;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.875rem;
+      transition: all 0.15s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #ec4899, #d946ef);
+      color: white;
+      box-shadow: 0 4px 12px rgba(236, 72, 153, 0.35);
+    }
+    .btn-primary:hover {
+      filter: brightness(1.1);
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: #334155;
+      color: #f1f5f9;
+    }
+    .btn-secondary:hover {
+      background: #475569;
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 6px;
+    }
+    .btn-group .btn {
+      flex: 1;
+      padding: 6px 8px;
+      font-size: 0.8rem;
+    }
+    .btn.active {
+      background: var(--brand-blue);
+      color: white;
+    }
+
+    .status-box {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      font-size: 0.85rem;
+    }
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+    .status-row:last-child {
+      margin-bottom: 0;
+    }
+    .status-val {
+      font-weight: 600;
+      color: #38bdf8;
+    }
+
+    /* Sprite showcase gallery */
+    .sprite-gallery {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .sprite-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      padding: 8px 0;
+      border-bottom: 1px dashed #334155;
+    }
+    .sprite-row:last-child {
+      border-bottom: none;
+    }
+    .sprite-item {
+      text-align: center;
+    }
+    .sprite-item canvas {
+      display: block;
+      margin: 0 auto 4px auto;
+      image-rendering: pixelated;
+    }
+    .sprite-item span {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>Wixy Chat — Pixel Art Idle Interaction</h1>
+    <p class="subtitle">
+      When Wixie chat sits idle for 30s: a guy in a pink suit climbs from the bottom, a woman in a blue dress climbs from the top, they scale and monkey-bar across chat blocks, meet at a scrolling platform, jump across, and cuddle together.
+    </p>
+  </header>
+
+  <div class="demo-container">
+
+    <!-- Left: Simulated Wixy Chat -->
+    <div class="chat-window">
+      <div class="chat-header">
+        <div class="chat-title">Wixy Assistant (Conversation #42)</div>
+        <div id="idleTimerDisplay" class="idle-badge">Waiting for idle (30s)</div>
+      </div>
+
+      <div id="threadWrap" class="chat-thread-wrap">
+        <div id="chatThread" class="chat-thread">
+          <!-- Chat bubbles populated by preset -->
+        </div>
+      </div>
+
+      <div class="chat-composer-fake">
+        <input class="composer-input-fake" placeholder="Type a message or move mouse to interrupt..." readonly>
+        <button class="composer-btn-fake">Send</button>
+      </div>
+    </div>
+
+    <!-- Right: Controls & Inspector -->
+    <div class="controls-panel">
+      <div class="control-group">
+        <span class="control-label">Live Animation Control</span>
+        <button id="btnPlayNow" class="btn btn-primary">
+          ▶ Trigger Animation Now
+        </button>
+        <button id="btnReset" class="btn btn-secondary">
+          ◼ Reset / Clear
+        </button>
+      </div>
+
+      <div class="control-group">
+        <span class="control-label">Speed</span>
+        <div class="btn-group">
+          <button class="btn btn-secondary" onclick="setSpeed(0.5, this)">0.5x (Slow)</button>
+          <button class="btn btn-secondary active" onclick="setSpeed(1.0, this)">1.0x (Normal)</button>
+          <button class="btn btn-secondary" onclick="setSpeed(2.0, this)">2.0x (Fast)</button>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <span class="control-label">Bubble Layout Presets</span>
+        <div class="btn-group">
+          <button class="btn btn-secondary active" onclick="loadPreset('playground', this)">Overhangs</button>
+          <button class="btn btn-secondary" onclick="loadPreset('real', this)">Realistic</button>
+          <button class="btn btn-secondary" onclick="loadPreset('empty', this)">Empty/Few</button>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <span class="control-label">Live State Inspector</span>
+        <div class="status-box">
+          <div class="status-row">
+            <span>Current Phase:</span>
+            <span id="phaseVal" class="status-val">idle_waiting</span>
+          </div>
+          <div class="status-row">
+            <span>Idle Countdown:</span>
+            <span id="countdownVal" class="status-val">30.0s</span>
+          </div>
+          <div class="status-row">
+            <span>Platform Status:</span>
+            <span id="platformVal" class="status-val">Hidden</span>
+          </div>
+          <div class="status-row">
+            <span>Interactivity:</span>
+            <span class="status-val" style="color: #10b981;">Mouse/Keys dismiss</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <span class="control-label">Pixel Sprite Showcase</span>
+        <div class="sprite-gallery">
+          <div class="sprite-row">
+            <div class="sprite-item">
+              <canvas id="spGuyWalk" width="36" height="46"></canvas>
+              <span>Walk</span>
+            </div>
+            <div class="sprite-item">
+              <canvas id="spGuyClimb" width="36" height="46"></canvas>
+              <span>Climb</span>
+            </div>
+            <div class="sprite-item">
+              <canvas id="spGuyHang" width="36" height="46"></canvas>
+              <span>Monkey-bar</span>
+            </div>
+            <div class="sprite-item">
+              <canvas id="spGuyJump" width="36" height="46"></canvas>
+              <span>Leap</span>
+            </div>
+          </div>
+          <div class="sprite-row">
+            <div class="sprite-item">
+              <canvas id="spWomanWalk" width="36" height="46"></canvas>
+              <span>Walk</span>
+            </div>
+            <div class="sprite-item">
+              <canvas id="spWomanClimb" width="36" height="46"></canvas>
+              <span>Climb</span>
+            </div>
+            <div class="sprite-item">
+              <canvas id="spWomanHang" width="36" height="46"></canvas>
+              <span>Monkey-bar</span>
+            </div>
+            <div class="sprite-item">
+              <canvas id="spWomanJump" width="36" height="46"></canvas>
+              <span>Leap</span>
+            </div>
+          </div>
+          <div class="sprite-row">
+            <div class="sprite-item">
+              <canvas id="spEmbrace" width="48" height="46"></canvas>
+              <span>Embrace</span>
+            </div>
+            <div class="sprite-item">
+              <canvas id="spCuddle" width="76" height="36"></canvas>
+              <span>Cuddle & Hearts</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // Embedded Pixel Art Engine
+    const PIXEL_SCALE = 2;
+
+    const GUY_PALETTE = {
+      ".": "transparent",
+      H: "#1e293b",
+      F: "#fed7aa",
+      E: "#0f172a",
+      P: "#ec4899",
+      L: "#f472b6",
+      D: "#be185d",
+      W: "#ffffff",
+      T: "#0f172a",
+      S: "#334155",
+      B: "#f43f5e",
+    };
+
+    const WOMAN_PALETTE = {
+      ".": "transparent",
+      H: "#b45309",
+      F: "#fed7aa",
+      E: "#0f172a",
+      C: "#0284c7",
+      L: "#38bdf8",
+      D: "#0369a1",
+      W: "#e0f2fe",
+      S: "#1e293b",
+      B: "#f43f5e",
+    };
+
+    const PLATFORM_PALETTE = {
+      ".": "transparent",
+      W: "#d97706",
+      M: "#b45309",
+      D: "#78350f",
+      I: "#64748b",
+      K: "#334155",
+    };
+
+    const HEART_PALETTE = {
+      ".": "transparent",
+      R: "#f43f5e",
+      H: "#fb7185",
+      D: "#e11d48",
+    };
+
+    const GUY_WALK_1 = [
+      "....HHHH....",
+      "...HHHHHH...",
+      "...EEFFEE...",
+      "...EFFFFE...",
+      "....FFFF....",
+      "...LLPPLL...",
+      "..LPPWPPPD..",
+      "..PPPTPPD...",
+      "...PPPPPD...",
+      "...DPPPPD...",
+      "...PPPPPP...",
+      "...PP..PP...",
+      "..PP....PP..",
+      "..PP....PP..",
+      ".SS......SS.",
+    ];
+
+    const GUY_WALK_2 = [
+      "....HHHH....",
+      "...HHHHHH...",
+      "...EEFFEE...",
+      "...EFFFFE...",
+      "....FFFF....",
+      "...LLPPLL...",
+      "..LPPWPPPD..",
+      "..PPPTPPD...",
+      "...PPPPPD...",
+      "...DPPPPD...",
+      "...PPPPPP...",
+      "....PPPP....",
+      "....PPPP....",
+      "....PPPP....",
+      "....SSSS....",
+    ];
+
+    const GUY_CLIMB_1 = [
+      "..FFHHHH....",
+      ".FFFHHHHHH..",
+      ".F..EEFFEE..",
+      "....FFFF....",
+      "..LLPPLLFF..",
+      "..LPPWPPPP..",
+      "...PPPTPPD..",
+      "...PPPPPD...",
+      "..DPPPPD....",
+      "..PPPPPP....",
+      "...PP..PP...",
+      "..PP....PP..",
+      "..SS.....SS.",
+    ];
+
+    const GUY_CLIMB_2 = [
+      "....HHHHFF..",
+      "..HHHHHHFFF.",
+      "..EEFFEE..F.",
+      "....FFFF....",
+      "..FFLLPPLL..",
+      "..PPPWWPPD..",
+      "...PPPTPPD..",
+      "...PPPPPD...",
+      "....DPPPPD..",
+      "....PPPPPP..",
+      "...PP..PP...",
+      "..PP....PP..",
+      ".SS......SS.",
+    ];
+
+    const GUY_HANG_1 = [
+      "..FF....FF..",
+      "..FF....FF..",
+      "..LL....LL..",
+      "...LLPPLL...",
+      "...HHHHHH...",
+      "...EEFFEE...",
+      "....FFFF....",
+      "..LPPWPPPD..",
+      "...PPPTPPD..",
+      "...PPPPPD...",
+      "...DPPPPD...",
+      "....PPPP....",
+      "....PPPP....",
+      "...PP..PP...",
+      "..SS....SS..",
+    ];
+
+    const GUY_HANG_2 = [
+      "..FF....FF..",
+      "..FF....FF..",
+      "..LL....LL..",
+      "...LLPPLL...",
+      "...HHHHHH...",
+      "...EEFFEE...",
+      "....FFFF....",
+      "..LPPWPPPD..",
+      "...PPPTPPD..",
+      "...PPPPPD...",
+      "...DPPPPD...",
+      "....PPPP....",
+      "....PPPP....",
+      ".....PPPP...",
+      "......SSSS..",
+    ];
+
+    const GUY_JUMP = [
+      "..FF....FF..",
+      "...HHHHHH...",
+      "...EEFFEE...",
+      "....FFFF....",
+      "..LLPPLLDD..",
+      ".LPPPWPPPDD.",
+      ".LPPPPTPPDD.",
+      "..PPPPPPPP..",
+      "...PPPPPP...",
+      "....PPPP....",
+      "...PP..PP...",
+      "..PP....PP..",
+      ".SS......SS.",
+    ];
+
+    const WOMAN_WALK_1 = [
+      "....HHHH....",
+      "...HHHHHH...",
+      "..HHFFFEHH..",
+      "...FFFFF....",
+      "....FFFF....",
+      "...LLCCLL...",
+      "..LCCCCCLD..",
+      "..LCCCCCLD..",
+      ".LLCCCCCLDD.",
+      ".LCCCCCCLDD.",
+      "LLCCCCCCLLDD",
+      "CCCCCCCCCCCC",
+      "CCCCCCCCCCCC",
+      "...FF...FF..",
+      "..SS.....SS.",
+    ];
+
+    const WOMAN_WALK_2 = [
+      "....HHHH....",
+      "...HHHHHH...",
+      "..HHFFFEHH..",
+      "...FFFFF....",
+      "....FFFF....",
+      "...LLCCLL...",
+      "..LCCCCCLD..",
+      "..LCCCCCLD..",
+      ".LLCCCCCLDD.",
+      ".LCCCCCCLDD.",
+      "LLCCCCCCLLDD",
+      "CCCCCCCCCCCC",
+      "CCCCCCCCCCCC",
+      "....FFFF....",
+      "....SSSS....",
+    ];
+
+    const WOMAN_CLIMB_1 = [
+      "..FFHHHH....",
+      ".FFFHHHHHH..",
+      ".FHHFFFEHH..",
+      "...FFFFF....",
+      "..LLCCLLFF..",
+      "..LCCCCCLD..",
+      ".LLCCCCCLDD.",
+      "LLCCCCCCLLDD",
+      "CCCCCCCCCCCC",
+      "CCCCCCCCCCCC",
+      "....FF.FF...",
+      "...FF...FF..",
+      "..SS.....SS.",
+    ];
+
+    const WOMAN_CLIMB_2 = [
+      "....HHHHFF..",
+      "..HHHHHHFFF.",
+      "..HHFFFEH.F.",
+      "...FFFFF....",
+      "..FFLLCCLL..",
+      "..LCCCCCLD..",
+      ".LLCCCCCLDD.",
+      "LLCCCCCCLLDD",
+      "CCCCCCCCCCCC",
+      "CCCCCCCCCCCC",
+      "....FF.FF...",
+      "..FF.....FF.",
+      ".SS.......SS",
+    ];
+
+    const WOMAN_HANG_1 = [
+      "..FF....FF..",
+      "..FF....FF..",
+      "..FF....FF..",
+      "...LLCCLL...",
+      "...HHHHHH...",
+      "..HHFFFEHH..",
+      "....FFFF....",
+      "..LCCCCCLD..",
+      ".LLCCCCCLDD.",
+      "LLCCCCCCLLDD",
+      "CCCCCCCCCCCC",
+      "CCCCCCCCCCCC",
+      "....FF.FF...",
+      "...FF...FF..",
+      "..SS.....SS.",
+    ];
+
+    const WOMAN_HANG_2 = [
+      "..FF....FF..",
+      "..FF....FF..",
+      "..FF....FF..",
+      "...LLCCLL...",
+      "...HHHHHH...",
+      "..HHFFFEHH..",
+      "....FFFF....",
+      "..LCCCCCLD..",
+      ".LLCCCCCLDD.",
+      "LLCCCCCCLLDD",
+      "CCCCCCCCCCCC",
+      "CCCCCCCCCCCC",
+      "....FFFF....",
+      ".....FF.FF..",
+      "......SSSS..",
+    ];
+
+    const WOMAN_JUMP = [
+      "..FF....FF..",
+      "...HHHHHH...",
+      "..HHFFFEHH..",
+      "....FFFF....",
+      "..LLCCLLDD..",
+      ".LCCCCCLDDD.",
+      "LLCCCCCCLLDD",
+      "CCCCCCCCCCCC",
+      "CCCCCCCCCCCC",
+      "....FFFF....",
+      "...FF...FF..",
+      "..SS.....SS.",
+    ];
+
+    const COUPLE_EMBRACE = [
+      "..HHHH..HHHH..",
+      ".HHHHHHHHHHHH.",
+      ".HFFEHH..HFEH.",
+      "..FFFF.B.FFFF.",
+      "..PPPPBBCCCC..",
+      ".PPWWPBBCCCCD.",
+      ".PPTTPBBCCCCD.",
+      ".PPPPPBBCCCCD.",
+      "..PPPP..CCCC..",
+      "..PPPP..CCCC..",
+      "..PP.PP.CC.CC.",
+      "..PP.PP.CC.CC.",
+      "..SS.SS.SS.SS.",
+    ];
+
+    const COUPLE_CUDDLE = [
+      "........................",
+      "....HHHHH......HHHH.....",
+      "..HHHHHHHHH..HHHHHHHH...",
+      ".HHFFFEHHHH.HHFFFEEHHH..",
+      ".HFFFFFBBHH.HFFFFFBBHH..",
+      "..PPWWPPBBBB..CCCCCC....",
+      ".PPPPPPTPBBBB.CCCCCCC...",
+      ".PPPPPPPPBBBBCCCCCCCCD..",
+      "..PPPPPPPP...CCCCCCCCD..",
+      "....SSSS.......SSSS.....",
+    ];
+
+    const PIXEL_HEART = [
+      ".RR.RR.",
+      "RHHIRHR",
+      "RRRRRRR",
+      ".RRRRR.",
+      "..RRR..",
+      "...R...",
+    ];
+
+    function drawPixelMatrix(ctx, matrix, palette, x, y, scale = PIXEL_SCALE, flipH = false, alpha = 1.0) {
+      if (alpha <= 0) return;
+      const prevAlpha = ctx.globalAlpha;
+      ctx.globalAlpha = prevAlpha * alpha;
+      const rows = matrix.length;
+      const cols = matrix[0]?.length || 0;
+
+      ctx.save();
+      if (flipH) {
+        ctx.translate(x + cols * scale, y);
+        ctx.scale(-1, 1);
+      } else {
+        ctx.translate(x, y);
+      }
+
+      for (let r = 0; r < rows; r++) {
+        const row = matrix[r] || "";
+        for (let c = 0; c < cols; c++) {
+          const char = row[c] || ".";
+          if (char === ".") continue;
+          const color = palette[char];
+          if (color && color !== "transparent") {
+            ctx.fillStyle = color;
+            ctx.fillRect(c * scale, r * scale, scale, scale);
+          }
+        }
+      }
+      ctx.restore();
+      ctx.globalAlpha = prevAlpha;
+    }
+
+    function drawPlatform(ctx, x, y, width, height, scale = PIXEL_SCALE, alpha = 1.0) {
+      if (width <= 0 || alpha <= 0) return;
+      const prevAlpha = ctx.globalAlpha;
+      ctx.globalAlpha = prevAlpha * alpha;
+
+      ctx.save();
+      // Main wood plank
+      ctx.fillStyle = PLATFORM_PALETTE.W;
+      ctx.fillRect(x, y, width, height);
+
+      // Highlight
+      ctx.fillStyle = "#fde68a";
+      ctx.fillRect(x, y, width, scale);
+
+      // Shadow
+      ctx.fillStyle = PLATFORM_PALETTE.D;
+      ctx.fillRect(x, y + height - scale, width, scale);
+
+      // Plank seams
+      ctx.fillStyle = PLATFORM_PALETTE.M;
+      for (let px = x + 16 * scale; px < x + width; px += 16 * scale) {
+        ctx.fillRect(px, y, scale, height);
+      }
+
+      // Brackets
+      const bSize = Math.min(height * 1.5, 18 * scale);
+      ctx.fillStyle = PLATFORM_PALETTE.K;
+      ctx.fillRect(x, y + height, scale * 3, bSize);
+      ctx.fillStyle = PLATFORM_PALETTE.I;
+      ctx.fillRect(x + scale, y + height, scale, bSize);
+
+      for (let i = 0; i < bSize; i += scale) {
+        ctx.fillStyle = PLATFORM_PALETTE.K;
+        ctx.fillRect(x + i, y + height + bSize - i, scale, scale);
+      }
+
+      ctx.restore();
+      ctx.globalAlpha = prevAlpha;
+    }
+
+    // Static Sprite Showcase Drawings
+    function renderGallery() {
+      const gWalk = document.getElementById("spGuyWalk").getContext("2d");
+      drawPixelMatrix(gWalk, GUY_WALK_1, GUY_PALETTE, 6, 6, 2);
+
+      const gClimb = document.getElementById("spGuyClimb").getContext("2d");
+      drawPixelMatrix(gClimb, GUY_CLIMB_1, GUY_PALETTE, 6, 6, 2);
+
+      const gHang = document.getElementById("spGuyHang").getContext("2d");
+      drawPixelMatrix(gHang, GUY_HANG_1, GUY_PALETTE, 6, 6, 2);
+
+      const gJump = document.getElementById("spGuyJump").getContext("2d");
+      drawPixelMatrix(gJump, GUY_JUMP, GUY_PALETTE, 6, 6, 2);
+
+      const wWalk = document.getElementById("spWomanWalk").getContext("2d");
+      drawPixelMatrix(wWalk, WOMAN_WALK_1, WOMAN_PALETTE, 6, 6, 2);
+
+      const wClimb = document.getElementById("spWomanClimb").getContext("2d");
+      drawPixelMatrix(wClimb, WOMAN_CLIMB_1, WOMAN_PALETTE, 6, 6, 2);
+
+      const wHang = document.getElementById("spWomanHang").getContext("2d");
+      drawPixelMatrix(wHang, WOMAN_HANG_1, WOMAN_PALETTE, 6, 6, 2);
+
+      const wJump = document.getElementById("spWomanJump").getContext("2d");
+      drawPixelMatrix(wJump, WOMAN_JUMP, WOMAN_PALETTE, 6, 6, 2);
+
+      const emb = document.getElementById("spEmbrace").getContext("2d");
+      drawPixelMatrix(emb, COUPLE_EMBRACE, { ...GUY_PALETTE, ...WOMAN_PALETTE }, 6, 6, 2);
+
+      const cud = document.getElementById("spCuddle").getContext("2d");
+      drawPixelMatrix(cud, COUPLE_CUDDLE, { ...GUY_PALETTE, ...WOMAN_PALETTE, P: GUY_PALETTE.P, C: WOMAN_PALETTE.C }, 6, 6, 2);
+      drawPixelMatrix(cud, PIXEL_HEART, HEART_PALETTE, 30, 2, 1.5);
+    }
+    renderGallery();
+
+    // Presets
+    const presets = {
+      playground: [
+        { role: "assistant", text: "Hello Purdy! Ready to work on the treatment page updates today?" },
+        { role: "user", text: "Yes! Can we update the pricing for the classic hydrafacial?" }, // short
+        { role: "assistant", text: "Certainly. I've drafted the update with the new £85 consultation fee included." },
+        { role: "user", text: "Also please make sure the before and after slider on the gallery is showing the dermal filler results prominently with the fresh captions we discussed." }, // long (huge overhang!)
+        { role: "assistant", text: "Updated! Take a look in your draft preview." },
+        { role: "user", text: "Looks great, let's review!" } // short (step-in)
+      ],
+      real: [
+        { role: "assistant", text: "Good morning! The new Autumn banner is now deployed on the home page." },
+        { role: "user", text: "Purdi pressed publish and got this note about 6 changed files." },
+        { role: "assistant", text: "That includes the 4 clinic service pages and the new testimonial cards." },
+        { role: "user", text: "Can we add the client disclaimer badge right below the booking button?" },
+        { role: "assistant", text: "Done! Review changes in Edit when you're ready." }
+      ],
+      empty: [
+        { role: "assistant", text: "No messages yet — say hello below." }
+      ]
+    };
+
+    function loadPreset(name, btn) {
+      if (btn) {
+        document.querySelectorAll(".btn-group button").forEach(b => {
+          if (b.parentElement === btn.parentElement) b.classList.remove("active");
+        });
+        btn.classList.add("active");
+      }
+      const thread = document.getElementById("chatThread");
+      thread.innerHTML = "";
+      const msgs = presets[name] || presets.playground;
+      msgs.forEach(m => {
+        const bubble = document.createElement("div");
+        bubble.className = `wx-chat-bubble wx-chat-bubble-${m.role}`;
+        bubble.textContent = m.text;
+        thread.appendChild(bubble);
+      });
+      if (activeScene) activeScene.reset();
+    }
+
+    loadPreset("playground");
+
+    // Live Scene Controller
+    let speedMult = 1.0;
+    function setSpeed(s, btn) {
+      speedMult = s;
+      if (btn) {
+        document.querySelectorAll(".btn-group button").forEach(b => {
+          if (b.parentElement === btn.parentElement) b.classList.remove("active");
+        });
+        btn.classList.add("active");
+      }
+      if (activeScene) activeScene.setSpeed(s);
+    }
+
+    // Pathfinder Implementation
+    function planPath(containerEl) {
+      const threadRect = containerEl.getBoundingClientRect();
+      const bubbles = Array.from(containerEl.querySelectorAll(".wx-chat-bubble"));
+      let blocks = [];
+
+      bubbles.forEach(b => {
+        const r = b.getBoundingClientRect();
+        blocks.push({
+          x: Math.round(r.left - threadRect.left),
+          y: Math.round(r.top - threadRect.top),
+          width: Math.round(r.width),
+          height: Math.round(r.height),
+          role: b.classList.contains("wx-chat-bubble-user") ? "user" : "assistant"
+        });
+      });
+
+      // Filter to right-aligned user bubbles if possible
+      const userBlocks = blocks.filter(b => b.role === "user");
+      if (userBlocks.length >= 2) {
+        blocks = userBlocks;
+      }
+
+      if (blocks.length < 3) {
+        // Fallback synthetic blocks
+        const w = containerEl.clientWidth || 500;
+        blocks = [
+          { x: w - 240, y: 70, width: 220, height: 50 },
+          { x: w - 340, y: 160, width: 320, height: 55 }, // overhang
+          { x: w - 210, y: 250, width: 190, height: 45 }, // step-in
+          { x: w - 300, y: 340, width: 280, height: 50 }  // overhang
+        ];
+      }
+
+      blocks.sort((a, b) => a.y - b.y);
+      const n = blocks.length;
+      const meetingIdx = Math.floor(n / 2);
+      const meetingBlock = blocks[meetingIdx];
+
+      const platformWidth = 120;
+      const platformHeight = 14;
+      const platformX = Math.max(16, meetingBlock.x - platformWidth - 20);
+      const platformY = meetingBlock.y + Math.floor(meetingBlock.height / 2);
+
+      const meetingPoint = { x: meetingBlock.x, y: platformY };
+
+      // Guy: climbing up from bottom
+      const guyWaypoints = [];
+      const lowest = blocks[n - 1];
+      guyWaypoints.push({ x: lowest.x, y: containerEl.clientHeight + 40, state: "appear", facing: "left" });
+      guyWaypoints.push({ x: lowest.x, y: lowest.y + lowest.height, state: "climb_up", facing: "left" });
+
+      for (let i = n - 1; i >= meetingIdx; i--) {
+        const cur = blocks[i];
+        guyWaypoints.push({ x: cur.x, y: cur.y, state: "climb_up", facing: "left" });
+
+        if (i > meetingIdx) {
+          const nextUp = blocks[i - 1];
+          if (nextUp.x < cur.x) {
+            // Overhang! Monkey bar traverse
+            const underY = nextUp.y + nextUp.height;
+            guyWaypoints.push({ x: cur.x, y: underY, state: "hang_traverse", facing: "left" });
+            guyWaypoints.push({ x: nextUp.x, y: underY, state: "hang_traverse", facing: "left" });
+          } else {
+            // Step in! Walk top of current
+            guyWaypoints.push({ x: nextUp.x, y: cur.y, state: "walk_top", facing: "right" });
+            guyWaypoints.push({ x: nextUp.x, y: nextUp.y + nextUp.height, state: "climb_up", facing: "left" });
+          }
+        }
+      }
+      guyWaypoints.push({ x: meetingPoint.x, y: meetingPoint.y, state: "climb_up", facing: "left" });
+
+      // Woman: climbing down from top
+      const womanWaypoints = [];
+      const highest = blocks[0];
+      womanWaypoints.push({ x: highest.x, y: -40, state: "appear", facing: "left" });
+      womanWaypoints.push({ x: highest.x, y: highest.y, state: "climb_down", facing: "left" });
+
+      for (let i = 0; i <= meetingIdx; i++) {
+        const cur = blocks[i];
+        if (i < meetingIdx) {
+          const nextDown = blocks[i + 1];
+          womanWaypoints.push({ x: cur.x, y: cur.y + cur.height, state: "climb_down", facing: "left" });
+          if (nextDown.x < cur.x) {
+            // Next is wider
+            womanWaypoints.push({ x: cur.x, y: nextDown.y, state: "walk_top", facing: "left" });
+            womanWaypoints.push({ x: nextDown.x, y: nextDown.y, state: "walk_top", facing: "left" });
+          } else {
+            // Cur is overhang
+            womanWaypoints.push({ x: nextDown.x, y: cur.y + cur.height, state: "hang_traverse", facing: "right" });
+            womanWaypoints.push({ x: nextDown.x, y: nextDown.y, state: "climb_down", facing: "left" });
+          }
+        } else {
+          womanWaypoints.push({ x: cur.x, y: meetingPoint.y, state: "climb_down", facing: "left" });
+        }
+      }
+
+      return {
+        blocks,
+        meetingPoint,
+        platformRect: { x: platformX, y: platformY, width: platformWidth, height: platformHeight },
+        guyWaypoints,
+        womanWaypoints
+      };
+    }
+
+    // Engine loop
+    class PixelChatScene {
+      constructor(container) {
+        this.container = container;
+        this.canvas = document.createElement("canvas");
+        this.canvas.className = "wx-pixel-chat-canvas";
+        this.container.appendChild(this.canvas);
+        this.ctx = this.canvas.getContext("2d");
+        this.running = false;
+        this.speed = 1.0;
+        this.animId = null;
+        this.phase = "idle_waiting";
+        this.hearts = [];
+        this.platform = { visible: false, currentWidth: 0, targetWidth: 120, scrollProgress: 0 };
+        this.resize();
+        window.addEventListener("resize", () => this.resize());
+      }
+
+      resize() {
+        const r = this.container.getBoundingClientRect();
+        this.canvas.width = r.width;
+        this.canvas.height = r.height;
+      }
+
+      setSpeed(s) {
+        this.speed = s;
+      }
+
+      start() {
+        if (this.running) return;
+        this.resize();
+        this.plan = planPath(this.container);
+        this.running = true;
+        this.phase = "traversing";
+        this.phaseTimer = 0;
+        this.guyIdx = 0;
+        this.guyProg = 0;
+        this.womanIdx = 0;
+        this.womanProg = 0;
+        this.guyMotion = { x: 0, y: 0, state: "appear", facing: "left", frame: 0, alpha: 1.0 };
+        this.womanMotion = { x: 0, y: 0, state: "appear", facing: "left", frame: 0, alpha: 1.0 };
+        this.platform = { visible: false, currentWidth: 0, targetWidth: 120, scrollProgress: 0 };
+        this.hearts = [];
+        this.lastTime = 0;
+        this.frameTimer = 0;
+        this.heartTimer = 0;
+        document.getElementById("phaseVal").textContent = "traversing";
+        document.getElementById("platformVal").textContent = "Waiting for meeting";
+        this.loop(0);
+      }
+
+      stop() {
+        this.running = false;
+        if (this.animId) cancelAnimationFrame(this.animId);
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.phase = "idle_waiting";
+        document.getElementById("phaseVal").textContent = "idle_waiting";
+        document.getElementById("platformVal").textContent = "Hidden";
+      }
+
+      reset() {
+        this.stop();
+      }
+
+      dismiss() {
+        if (!this.running) return;
+        this.guyMotion.state = "scamper";
+        this.womanMotion.state = "scamper";
+        let dismissT = 0;
+        const fade = () => {
+          dismissT += 0.08;
+          this.guyMotion.alpha = Math.max(0, 1 - dismissT);
+          this.womanMotion.alpha = Math.max(0, 1 - dismissT);
+          if (dismissT >= 1) {
+            this.stop();
+          } else {
+            requestAnimationFrame(fade);
+          }
+        };
+        fade();
+      }
+
+      loop(timestamp) {
+        if (!this.running) return;
+        if (!this.lastTime) this.lastTime = timestamp;
+        const dt = Math.min((timestamp - this.lastTime) / 1000, 0.1) * this.speed;
+        this.lastTime = timestamp;
+
+        this.frameTimer += dt;
+        if (this.frameTimer >= 0.14) {
+          this.guyMotion.frame = (this.guyMotion.frame + 1) % 4;
+          this.womanMotion.frame = (this.womanMotion.frame + 1) % 4;
+          this.frameTimer = 0;
+        }
+
+        this.update(dt);
+        this.render();
+
+        this.animId = requestAnimationFrame(t => this.loop(t));
+      }
+
+      update(dt) {
+        const BASE_SPEED = 75;
+        this.phaseTimer += dt;
+
+        switch (this.phase) {
+          case "traversing": {
+            const gRes = this.updateMotion(this.plan.guyWaypoints, this.guyIdx, this.guyProg, this.guyMotion, dt, BASE_SPEED);
+            this.guyIdx = gRes.idx;
+            this.guyProg = gRes.prog;
+
+            const wRes = this.updateMotion(this.plan.womanWaypoints, this.womanIdx, this.womanProg, this.womanMotion, dt, BASE_SPEED);
+            this.womanIdx = wRes.idx;
+            this.womanProg = wRes.prog;
+
+            if (gRes.reached && wRes.reached) {
+              this.phase = "platform_deploy";
+              this.phaseTimer = 0;
+              this.platform.visible = true;
+              this.platform.scrollProgress = 0;
+              document.getElementById("phaseVal").textContent = "platform_deploy";
+              document.getElementById("platformVal").textContent = "Scrolling out...";
+            }
+            break;
+          }
+
+          case "platform_deploy": {
+            this.platform.scrollProgress = Math.min(1, this.platform.scrollProgress + dt * 1.3);
+            const ease = 1 - Math.pow(1 - this.platform.scrollProgress, 3);
+            this.platform.currentWidth = this.platform.targetWidth * ease;
+
+            if (this.platform.scrollProgress >= 1) {
+              this.phase = "embrace";
+              this.phaseTimer = 0;
+              document.getElementById("phaseVal").textContent = "embrace";
+              document.getElementById("platformVal").textContent = "Deployed";
+            }
+            break;
+          }
+
+          case "embrace": {
+            this.guyMotion.state = "embrace";
+            this.womanMotion.state = "embrace";
+            if (this.phaseTimer >= 1.0) {
+              this.phase = "jump";
+              this.jumpProg = 0;
+              this.jumpStart = { x: this.plan.meetingPoint.x, y: this.plan.meetingPoint.y };
+              this.jumpTarget = {
+                x: this.plan.meetingPoint.x - this.platform.targetWidth * 0.5,
+                y: this.plan.platformRect.y - 4
+              };
+              document.getElementById("phaseVal").textContent = "jump";
+            }
+            break;
+          }
+
+          case "jump": {
+            this.jumpProg = Math.min(1, this.jumpProg + dt * 1.6);
+            const jp = this.jumpProg;
+            const curX = this.jumpStart.x + (this.jumpTarget.x - this.jumpStart.x) * jp;
+            const arc = -4 * 35 * jp * (jp - 1);
+            const curY = this.jumpStart.y + (this.jumpTarget.y - this.jumpStart.y) * jp - arc;
+
+            this.guyMotion.x = curX;
+            this.guyMotion.y = curY;
+            this.guyMotion.state = "jump";
+            this.womanMotion.x = curX + 6;
+            this.womanMotion.y = curY;
+            this.womanMotion.state = "jump";
+
+            if (this.jumpProg >= 1) {
+              this.phase = "cuddle";
+              this.phaseTimer = 0;
+              document.getElementById("phaseVal").textContent = "cuddle";
+            }
+            break;
+          }
+
+          case "cuddle": {
+            this.guyMotion.x = this.jumpTarget.x - 8;
+            this.guyMotion.y = this.jumpTarget.y - 12;
+            this.guyMotion.state = "cuddle";
+            this.womanMotion.x = this.jumpTarget.x - 8;
+            this.womanMotion.y = this.jumpTarget.y - 12;
+            this.womanMotion.state = "cuddle";
+
+            this.heartTimer += dt;
+            if (this.heartTimer >= 0.45) {
+              this.heartTimer = 0;
+              this.spawnHeart(this.guyMotion.x + 20, this.guyMotion.y);
+            }
+            break;
+          }
+        }
+
+        // Particles
+        for (let i = this.hearts.length - 1; i >= 0; i--) {
+          const h = this.hearts[i];
+          h.life += dt * 1000;
+          h.x += h.vx * dt;
+          h.y += h.vy * dt;
+          h.alpha = Math.max(0, 1 - h.life / h.maxLife);
+          if (h.life >= h.maxLife) this.hearts.splice(i, 1);
+        }
+      }
+
+      spawnHeart(x, y) {
+        this.hearts.push({
+          x: x + (Math.random() * 20 - 10),
+          y: y + (Math.random() * 10 - 5),
+          vx: (Math.random() - 0.5) * 20,
+          vy: -(25 + Math.random() * 25),
+          alpha: 1.0,
+          size: 1.5,
+          life: 0,
+          maxLife: 1600
+        });
+      }
+
+      updateMotion(waypoints, idx, prog, motion, dt, speed) {
+        if (idx >= waypoints.length - 1) {
+          const last = waypoints[waypoints.length - 1];
+          motion.x = last.x;
+          motion.y = last.y;
+          motion.state = last.state;
+          motion.facing = last.facing;
+          return { idx, prog: 1, reached: true };
+        }
+
+        const p0 = waypoints[idx];
+        const p1 = waypoints[idx + 1];
+        const dx = p1.x - p0.x;
+        const dy = p1.y - p0.y;
+        const dist = Math.hypot(dx, dy);
+
+        if (dist <= 0.001) return { idx: idx + 1, prog: 0, reached: false };
+
+        const step = (speed * dt) / dist;
+        let nextProg = prog + step;
+        let nextIdx = idx;
+
+        if (nextProg >= 1) {
+          nextIdx++;
+          nextProg = 0;
+        }
+
+        const curP0 = waypoints[nextIdx] || p0;
+        const curP1 = waypoints[nextIdx + 1] || p1;
+        motion.x = curP0.x + (curP1.x - curP0.x) * nextProg;
+        motion.y = curP0.y + (curP1.y - curP0.y) * nextProg;
+        motion.state = curP0.state;
+        motion.facing = curP0.facing;
+
+        return { idx: nextIdx, prog: nextProg, reached: nextIdx >= waypoints.length - 1 };
+      }
+
+      render() {
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.ctx.imageSmoothingEnabled = false;
+
+        // Platform
+        if (this.platform.visible && this.platform.currentWidth > 0) {
+          const drawX = this.plan.meetingPoint.x - this.platform.currentWidth;
+          drawPlatform(this.ctx, drawX, this.plan.platformRect.y, this.platform.currentWidth, this.plan.platformRect.height, PIXEL_SCALE);
+        }
+
+        // Characters
+        if (this.phase === "cuddle") {
+          drawPixelMatrix(this.ctx, COUPLE_CUDDLE, { ...GUY_PALETTE, ...WOMAN_PALETTE, P: GUY_PALETTE.P, C: WOMAN_PALETTE.C }, this.guyMotion.x, this.guyMotion.y, PIXEL_SCALE, false, this.guyMotion.alpha);
+        } else if (this.phase === "embrace") {
+          drawPixelMatrix(this.ctx, COUPLE_EMBRACE, { ...GUY_PALETTE, ...WOMAN_PALETTE }, this.plan.meetingPoint.x - 14, this.plan.meetingPoint.y - 20, PIXEL_SCALE, false, this.guyMotion.alpha);
+        } else {
+          // Individual sprites
+          let gMat = GUY_WALK_1;
+          if (this.guyMotion.state === "climb_up") gMat = (this.guyMotion.frame % 2 === 0) ? GUY_CLIMB_1 : GUY_CLIMB_2;
+          else if (this.guyMotion.state === "hang_traverse") gMat = (this.guyMotion.frame % 2 === 0) ? GUY_HANG_1 : GUY_HANG_2;
+          else if (this.guyMotion.state === "jump") gMat = GUY_JUMP;
+          else if (this.guyMotion.state === "walk_top" || this.guyMotion.state === "appear") gMat = (this.guyMotion.frame % 2 === 0) ? GUY_WALK_1 : GUY_WALK_2;
+
+          let wMat = WOMAN_WALK_1;
+          if (this.womanMotion.state === "climb_down") wMat = (this.womanMotion.frame % 2 === 0) ? WOMAN_CLIMB_1 : WOMAN_CLIMB_2;
+          else if (this.womanMotion.state === "hang_traverse") wMat = (this.womanMotion.frame % 2 === 0) ? WOMAN_HANG_1 : WOMAN_HANG_2;
+          else if (this.womanMotion.state === "jump") wMat = WOMAN_JUMP;
+          else if (this.womanMotion.state === "walk_top" || this.womanMotion.state === "appear") wMat = (this.womanMotion.frame % 2 === 0) ? WOMAN_WALK_1 : WOMAN_WALK_2;
+
+          drawPixelMatrix(this.ctx, gMat, GUY_PALETTE, Math.round(this.guyMotion.x - 12), Math.round(this.guyMotion.y - 24), PIXEL_SCALE, this.guyMotion.facing === "right", this.guyMotion.alpha);
+          drawPixelMatrix(this.ctx, wMat, WOMAN_PALETTE, Math.round(this.womanMotion.x - 12), Math.round(this.womanMotion.y - 24), PIXEL_SCALE, this.womanMotion.facing === "right", this.womanMotion.alpha);
+        }
+
+        // Hearts
+        for (const h of this.hearts) {
+          drawPixelMatrix(this.ctx, PIXEL_HEART, HEART_PALETTE, Math.round(h.x), Math.round(h.y), h.size, false, h.alpha * this.guyMotion.alpha);
+        }
+      }
+    }
+
+    const threadWrap = document.getElementById("threadWrap");
+    const activeScene = new PixelChatScene(threadWrap);
+
+    // Watchdog simulation
+    let lastActivity = Date.now();
+    const IDLE_TIME = 30000;
+
+    function resetActivity() {
+      lastActivity = Date.now();
+      if (activeScene.running) {
+        activeScene.dismiss();
+      }
+    }
+
+    ["mousemove", "keydown", "mousedown", "wheel", "touchstart"].forEach(evt => {
+      threadWrap.addEventListener(evt, resetActivity);
+    });
+
+    setInterval(() => {
+      const remaining = Math.max(0, IDLE_TIME - (Date.now() - lastActivity));
+      const secs = (remaining / 1000).toFixed(1);
+      document.getElementById("countdownVal").textContent = `${secs}s`;
+      document.getElementById("idleTimerDisplay").textContent = remaining === 0 ? "Idle (Active)" : `Idle in ${secs}s`;
+
+      if (remaining === 0 && !activeScene.running && activeScene.phase === "idle_waiting") {
+        activeScene.start();
+      }
+    }, 100);
+
+    // Buttons
+    document.getElementById("btnPlayNow").addEventListener("click", () => {
+      activeScene.reset();
+      activeScene.start();
+    });
+
+    document.getElementById("btnReset").addEventListener("click", () => {
+      activeScene.reset();
+      resetActivity();
+    });
+  </script>
+</body>
+</html>
