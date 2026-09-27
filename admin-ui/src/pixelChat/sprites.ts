@@ -152,7 +152,7 @@ export const GUY_CLIMB_1 = [
   ".FEFFHHHH...",
   ".FFFFPPPP...",
   ".LLPPWWPP...",
-  "FFPPPTPPD...",
+  "FFPPPTPPDD..",
   "..PPPPPDD...",
   "SSPPPPPD....",
   "SSPP..PP....",
@@ -168,13 +168,13 @@ export const GUY_CLIMB_2 = [
   "...HHHHHH...",
   "..FEFFHHH...",
   "FFFFFFPPPP..",
-  ".LLPPWWPPD..",
-  "FFPPPTPPDD..",
+  "FFLLPWWPPD..",
+  ".PPPPTPPDD..",
   "..PPPPPDD...",
-  "..PPPPPD....",
+  "SSPPPPPD....",
   "SSPPPP......",
-  "SS..PP......",
-  "...PPP......",
+  "..DDDD......",
+  "...DD.......",
   "...SS.......",
   "............",
   "............",
@@ -183,16 +183,16 @@ export const GUY_CLIMB_2 = [
 
 export const GUY_CLIMB_3 = [
   "FF..........",
-  "FFF.HHHH....",
-  "..FHHHHHH...",
-  "..FEFFHHH...",
-  "..FFFFLLPP..",
-  "..LLPPWWPD..",
-  "FFPPPTPPDD..",
+  "DD..HHHH....",
+  ".DFHHHHHH...",
+  ".FEFFHHHH...",
+  ".FFFFPPPP...",
+  ".LLPPWWPP...",
+  "FFPPPTPPD...",
   "..PPPPPDD...",
-  "..PPPPPD....",
-  "SSPPPP......",
-  "SS..PP......",
+  "SSDDDDDD....",
+  "SSDD..PP....",
+  "....PPPP....",
   "....PP......",
   "....PP......",
   "....SS......",
@@ -204,14 +204,14 @@ export const GUY_CLIMB_4 = [
   "..HHHHHH....",
   ".FEFFHHH....",
   "FFFFFFPPPP..",
-  ".LLPPWWPPD..",
+  "DDLLPWWPPD..",
   ".FPPPTPPDD..",
   "..PPPPPDD...",
-  "SSPPPPPD....",
+  "SSDDDDDD....",
   "SS..PPPP....",
-  "....PP......",
-  "....PP......",
+  "....PPPP....",
   "....SS......",
+  "............",
   "............",
   "............",
   "............",
@@ -363,24 +363,82 @@ export const GUY_CRAWL_4 = [
   "................",
 ];
 
-export const GUY_JUMP = [
+// --- 4-Frame Jump / Leap Cycle (Crouch -> Leap Surge -> Apex Tuck -> Landing Catch) ---
+export const GUY_JUMP_1 = [
+  "............",
+  "............",
+  "....HHHH....",
+  "...HHHHHH...",
+  "..FEFFHHH...",
+  "..FFFFPPPP..",
+  "..LLPPWWPPD.",
+  "...LPPPTPPDD",
+  "...PPPPPDD..",
+  "..PPPPPPPP..",
+  "..PP....PP..",
+  "..SS....SS..",
+  "............",
+  "............",
+  "............",
+];
+
+export const GUY_JUMP_2 = [
   "FF..........",
   ".FF.HHHH....",
   "..FHHHHHH...",
   "..FEFFHHH...",
   "..FFFFLLPP..",
-  "..LLPPWWPD..",
-  "..LPPPTPPDD.",
-  "...DPPPPPD..",
-  "....PPPP....",
-  "...PP..PP...",
-  "..PP....PP..",
-  "..PP....PP..",
-  ".SS......SS.",
+  "...LLPPWWPD.",
+  "...LPPPTPPDD",
+  "....PPPPPDD.",
+  ".....PPPPPD.",
+  "......PP..PP",
+  ".......PP.PP",
+  "........SSSS",
+  "............",
   "............",
   "............",
 ];
 
+export const GUY_JUMP_3 = [
+  "..FF........",
+  ".FFFF.HHHH..",
+  "...FFHHHHHH.",
+  "...FEFFHHH..",
+  "...FFFFLLPP.",
+  "...LLPPWWPDD",
+  "...LPPPTPPDD",
+  "....PPPPPDD.",
+  "....PPPPPP..",
+  "....PPPP....",
+  ".....SSSS...",
+  "............",
+  "............",
+  "............",
+  "............",
+];
+
+export const GUY_JUMP_4 = [
+  "....HHHH....",
+  "...HHHHHH...",
+  "..FEFFHHH...",
+  "..FFFFPPPP..",
+  "FFLLPPWWPPD.",
+  "FFLPPPTPPDD.",
+  "..PPPPPDD...",
+  "..PPPPPDD...",
+  "...PP..PP...",
+  "...PP..PP...",
+  "...PP..PP...",
+  "..SS....SS..",
+  "............",
+  "............",
+  "............",
+];
+
+export const GUY_JUMP = GUY_JUMP_2;
+
+// --- 4-Frame Stumble & Panic Flail Cycle (Slip -> Tumble -> Freefall -> Windmill) ---
 export const GUY_STUMBLE_1 = [
   "..FF....FF..",
   ".FFF....FFF.",
@@ -413,6 +471,42 @@ export const GUY_STUMBLE_2 = [
   "....PPPP....",
   "...PP..PP...",
   "...SS..SS...",
+  "............",
+  "............",
+];
+
+export const GUY_STUMBLE_3 = [
+  "FF........FF",
+  ".FF......FF.",
+  "..F.HHHH.F..",
+  "...HHHHHH...",
+  "...FEFFEE...",
+  "...FFFFFF...",
+  "..LLPPWWPD..",
+  ".LLPPPPPPPD.",
+  "LL..DPPD..DD",
+  "...PP..PP...",
+  "..PP....PP..",
+  ".PP......PP.",
+  ".SS......SS.",
+  "............",
+  "............",
+];
+
+export const GUY_STUMBLE_4 = [
+  "......FF....",
+  ".....FFF....",
+  "....HHHH....",
+  "...HHHHHH...",
+  "...FEFFEE...",
+  "...FFFFFF...",
+  "..LLPPWWPD..",
+  ".LLPPPPPPPD.",
+  "....DPPD..DD",
+  "...PP..PP.FF",
+  "..PP....PPFF",
+  ".SS......SS.",
+  "............",
   "............",
   "............",
 ];
@@ -536,14 +630,14 @@ export const WOMAN_CLIMB_2 = [
   "...HHHHHH...",
   "..FEFFHHH...",
   "FFFFFFCCCC..",
-  ".LLCCWWCCD..",
-  "FFCCCCWCDD..",
+  "FFLLCWWCCD..",
+  ".CCCCWCCDD..",
   "..CCCCCCDD..",
-  "..CCCCCCD...",
+  "SSCCCCCCD...",
   "SSCCCCCC....",
-  "SS..CCCC....",
-  "...FF.FF....",
-  "...SS.SS....",
+  "..DDDD......",
+  "...FF.......",
+  "...SS.......",
   "............",
   "............",
   "............",
@@ -551,16 +645,16 @@ export const WOMAN_CLIMB_2 = [
 
 export const WOMAN_CLIMB_3 = [
   "FF..........",
-  "FFF.HHHH....",
-  "..FHHHHHH...",
-  "..FEFFHHH...",
-  "..FFFFLLCC..",
-  "..LLCCWWCD..",
+  "DD..HHHH....",
+  ".DFHHHHHH...",
+  ".FEFFHHHH...",
+  ".FFFFCCCC...",
+  ".LLCCWWCC...",
   "FFCCCWCCDD..",
   "..CCCCCCDD..",
-  "..CCCCCCD...",
-  "SSCCCCCC....",
-  "SS..CCCC....",
+  "SSDDDDDD....",
+  "SSDD..CC....",
+  "..CCCCCC....",
   "....FF......",
   "....FF......",
   "....SS......",
@@ -572,14 +666,14 @@ export const WOMAN_CLIMB_4 = [
   "..HHHHHH....",
   ".FEFFHHH....",
   "FFFFFFCCCC..",
-  ".LLCCWWCCD..",
+  "DDLLCWWCCD..",
   ".FCCCWCCDD..",
   "..CCCCCCDD..",
-  "SSCCCCCCD...",
+  "SSDDDDDD....",
   "SS..CCCC....",
-  "....FF......",
-  "....FF......",
+  "....CCCC....",
   "....SS......",
+  "............",
   "............",
   "............",
   "............",
@@ -731,24 +825,82 @@ export const WOMAN_CRAWL_4 = [
   "................",
 ];
 
-export const WOMAN_JUMP = [
+// --- 4-Frame Jump / Leap Cycle (Crouch -> Leap Surge -> Apex Tuck -> Landing Catch) ---
+export const WOMAN_JUMP_1 = [
+  "............",
+  "............",
+  "....HHHH....",
+  "...HHHHHH...",
+  "..FEFFHHH...",
+  "..FFFFCCCC..",
+  "..LLCCWWCCD.",
+  "...LCCCWCCDD",
+  "...CCCCCCDD.",
+  "..CCCCCCCC..",
+  "..CC....CC..",
+  "..SS....SS..",
+  "............",
+  "............",
+  "............",
+];
+
+export const WOMAN_JUMP_2 = [
   "FF..........",
   ".FF.HHHH....",
   "..FHHHHHH...",
   "..FEFFHHH...",
   "..FFFFLLCC..",
-  "..LLCCWWCD..",
-  "..LCCCCCDD..",
-  "...DCCCCCCD.",
-  "....DDCCDD..",
-  "...FF..FF...",
-  "..FF....FF..",
-  "..FF....FF..",
-  ".SS......SS.",
+  "...LLCCWWCD.",
+  "...LCCCWCCDD",
+  "....CCCCCCD.",
+  ".....CCCCCD.",
+  "......FF..FF",
+  ".......FF.FF",
+  "........SSSS",
+  "............",
   "............",
   "............",
 ];
 
+export const WOMAN_JUMP_3 = [
+  "..FF........",
+  ".FFFF.HHHH..",
+  "...FFHHHHHH.",
+  "...FEFFHHH..",
+  "...FFFFLLCC.",
+  "...LLCCWWCDD",
+  "...LCCCWCCDD",
+  "....CCCCCCD.",
+  "....CCCCCC..",
+  "....CCCC....",
+  ".....SSSS...",
+  "............",
+  "............",
+  "............",
+  "............",
+];
+
+export const WOMAN_JUMP_4 = [
+  "....HHHH....",
+  "...HHHHHH...",
+  "..FEFFHHH...",
+  "..FFFFCCCC..",
+  "FFLLCCWWCCD.",
+  "FFLCCCWCCDD.",
+  "..CCCCCCDD..",
+  "..CCCCCCDD..",
+  "...CC..CC...",
+  "...FF..FF...",
+  "...FF..FF...",
+  "..SS....SS..",
+  "............",
+  "............",
+  "............",
+];
+
+export const WOMAN_JUMP = WOMAN_JUMP_2;
+
+// --- 4-Frame Stumble & Panic Flail Cycle (Slip -> Tumble -> Freefall -> Windmill) ---
 export const WOMAN_STUMBLE_1 = [
   "..FF....FF..",
   ".FFF....FFF.",
@@ -772,15 +924,51 @@ export const WOMAN_STUMBLE_2 = [
   ".FFF....FFF.",
   "...HHHHHH...",
   "..HHEFFEEH..",
-  "...FFFFF....",
-  "...LLCCLL...",
-  "..LCCCCCLD..",
-  ".LLCCCCCLDD.",
-  "CCCCCCCCCCCC",
-  "CCCCCCCCCCCC",
-  "....FF.FF...",
-  "...FF...FF..",
-  "...SS...SS..",
+  "...FFFFFF...",
+  "...LCCWWCL..",
+  "..LLCCCCLL..",
+  "..L.CCCC.L..",
+  "....CCCC....",
+  "....DDCD....",
+  "....CCCC....",
+  "...FF..FF...",
+  "...SS..SS...",
+  "............",
+  "............",
+];
+
+export const WOMAN_STUMBLE_3 = [
+  "FF........FF",
+  ".FF......FF.",
+  "..F.HHHH.F..",
+  "...HHHHHH...",
+  "...FEFFEE...",
+  "...FFFFFF...",
+  "..LLCCWWCD..",
+  ".LLCCCCCCCD.",
+  "LL..DCCD..DD",
+  "...CC..CC...",
+  "..FF....FF..",
+  ".FF......FF.",
+  ".SS......SS.",
+  "............",
+  "............",
+];
+
+export const WOMAN_STUMBLE_4 = [
+  "......FF....",
+  ".....FFF....",
+  "....HHHH....",
+  "...HHHHHH...",
+  "...FEFFEE...",
+  "...FFFFFF...",
+  "..LLCCWWCD..",
+  ".LLCCCCCCCD.",
+  "....DCCD..DD",
+  "...CC..CC.FF",
+  "..FF....FFFF",
+  ".SS......SS.",
+  "............",
   "............",
   "............",
 ];
@@ -866,13 +1054,13 @@ export function getSpriteMatrix(
       case "crawl":
         return [GUY_CRAWL_1, GUY_CRAWL_2, GUY_CRAWL_3, GUY_CRAWL_4][f4]!;
       case "jump":
-        return GUY_JUMP;
+        return [GUY_JUMP_1, GUY_JUMP_2, GUY_JUMP_3, GUY_JUMP_4][f4]!;
       case "embrace":
       case "cuddle":
         return GUY_STAND_1;
       case "stumble":
       case "slide_fall":
-        return [GUY_STUMBLE_1, GUY_STUMBLE_2][f2]!;
+        return [GUY_STUMBLE_1, GUY_STUMBLE_2, GUY_STUMBLE_3, GUY_STUMBLE_4][f4]!;
       default:
         return GUY_STAND_1;
     }
@@ -890,13 +1078,13 @@ export function getSpriteMatrix(
       case "crawl":
         return [WOMAN_CRAWL_1, WOMAN_CRAWL_2, WOMAN_CRAWL_3, WOMAN_CRAWL_4][f4]!;
       case "jump":
-        return WOMAN_JUMP;
+        return [WOMAN_JUMP_1, WOMAN_JUMP_2, WOMAN_JUMP_3, WOMAN_JUMP_4][f4]!;
       case "embrace":
       case "cuddle":
         return WOMAN_STAND_1;
       case "stumble":
       case "slide_fall":
-        return [WOMAN_STUMBLE_1, WOMAN_STUMBLE_2][f2]!;
+        return [WOMAN_STUMBLE_1, WOMAN_STUMBLE_2, WOMAN_STUMBLE_3, WOMAN_STUMBLE_4][f4]!;
       default:
         return WOMAN_STAND_1;
     }

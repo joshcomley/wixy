@@ -25,8 +25,8 @@ describe("Pixel Art Sprites", () => {
       expect(frame1.length).toBeGreaterThan(0);
     }
 
-    // 4-frame locomotion cycles
-    const locomotion = ["walk_top", "climb_up", "hang_traverse", "crawl"] as const;
+    // 4-frame cycles (walk, climb, hang, crawl, jump, stumble)
+    const locomotion = ["walk_top", "climb_up", "hang_traverse", "crawl", "jump", "stumble"] as const;
     for (const state of locomotion) {
       const f0 = getSpriteMatrix("guy", state, 0);
       const f1 = getSpriteMatrix("guy", state, 1);
@@ -36,9 +36,9 @@ describe("Pixel Art Sprites", () => {
       expect(f1.length).toBe(15);
       expect(f2.length).toBe(15);
       expect(f3.length).toBe(15);
-      // Verify f0 and f2 (opposite strides/holds) are distinct
+      // Verify f0 and f2 are distinct
       expect(f0).not.toEqual(f2);
-      // Verify f1 and f3 (passing poses) are distinct
+      // Verify f1 and f3 are distinct
       expect(f1).not.toEqual(f3);
     }
   });
@@ -52,8 +52,8 @@ describe("Pixel Art Sprites", () => {
       expect(frame1.length).toBeGreaterThan(0);
     }
 
-    // 4-frame locomotion cycles
-    const locomotion = ["walk_top", "climb_down", "hang_traverse", "crawl"] as const;
+    // 4-frame cycles (walk, climb, hang, crawl, jump, stumble)
+    const locomotion = ["walk_top", "climb_down", "hang_traverse", "crawl", "jump", "stumble"] as const;
     for (const state of locomotion) {
       const f0 = getSpriteMatrix("woman", state, 0);
       const f1 = getSpriteMatrix("woman", state, 1);

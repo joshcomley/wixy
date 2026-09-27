@@ -397,7 +397,7 @@
   <header>
     <h1>Wixy Chat — Pixel Art Idle Interaction</h1>
     <div style="display: inline-block; margin-top: 6px; margin-bottom: 8px; padding: 4px 14px; background: rgba(56, 189, 248, 0.15); border: 1px solid #0284c7; border-radius: 9999px; font-size: 0.8rem; color: #38bdf8; font-weight: 600;">
-      Version 2.2 • Nuanced Side-Profile Wall-Climb & Crawl Engine • 2026-09-27
+      Version 2.3 • 4-Frame Hand-Over-Hand Wall Scale & Dynamic Leap Engine • 2026-09-27
     </div>
     <p class="subtitle">
       When Wixie chat sits idle for 30s: a guy in a pink suit climbs from the bottom, a woman in a blue dress climbs from the top, they scale and monkey-bar across chat blocks, meet at a scrolling platform, jump across, and cuddle together.
@@ -574,6 +574,8 @@
         <button class="btn btn-secondary" onclick="selectInspectorTab('crawl', this)">Underhang Crawl</button>
         <button class="btn btn-secondary" onclick="selectInspectorTab('walk', this)">Walk Stride</button>
         <button class="btn btn-secondary" onclick="selectInspectorTab('hang', this)">Monkey-Bar</button>
+        <button class="btn btn-secondary" onclick="selectInspectorTab('jump', this)">Jump Leap</button>
+        <button class="btn btn-secondary" onclick="selectInspectorTab('stumble', this)">Stumble & Fall</button>
       </div>
     </div>
 
@@ -727,7 +729,7 @@
       ".FEFFHHHH...",
       ".FFFFPPPP...",
       ".LLPPWWPP...",
-      "FFPPPTPPD...",
+      "FFPPPTPPDD..",
       "..PPPPPDD...",
       "SSPPPPPD....",
       "SSPP..PP....",
@@ -743,13 +745,13 @@
       "...HHHHHH...",
       "..FEFFHHH...",
       "FFFFFFPPPP..",
-      ".LLPPWWPPD..",
-      "FFPPPTPPDD..",
+      "FFLLPWWPPD..",
+      ".PPPPTPPDD..",
       "..PPPPPDD...",
-      "..PPPPPD....",
+      "SSPPPPPD....",
       "SSPPPP......",
-      "SS..PP......",
-      "...PPP......",
+      "..DDDD......",
+      "...DD.......",
       "...SS.......",
       "............",
       "............",
@@ -758,16 +760,16 @@
 
     const GUY_CLIMB_3 = [
       "FF..........",
-      "FFF.HHHH....",
-      "..FHHHHHH...",
-      "..FEFFHHH...",
-      "..FFFFLLPP..",
-      "..LLPPWWPD..",
-      "FFPPPTPPDD..",
+      "DD..HHHH....",
+      ".DFHHHHHH...",
+      ".FEFFHHHH...",
+      ".FFFFPPPP...",
+      ".LLPPWWPP...",
+      "FFPPPTPPD...",
       "..PPPPPDD...",
-      "..PPPPPD....",
-      "SSPPPP......",
-      "SS..PP......",
+      "SSDDDDDD....",
+      "SSDD..PP....",
+      "....PPPP....",
       "....PP......",
       "....PP......",
       "....SS......",
@@ -779,14 +781,14 @@
       "..HHHHHH....",
       ".FEFFHHH....",
       "FFFFFFPPPP..",
-      ".LLPPWWPPD..",
+      "DDLLPWWPPD..",
       ".FPPPTPPDD..",
       "..PPPPPDD...",
-      "SSPPPPPD....",
+      "SSDDDDDD....",
       "SS..PPPP....",
-      "....PP......",
-      "....PP......",
+      "....PPPP....",
       "....SS......",
+      "............",
       "............",
       "............",
       "............",
@@ -936,23 +938,79 @@
       "................",
     ];
 
-    const GUY_JUMP = [
+    const GUY_JUMP_1 = [
+      "............",
+      "............",
+      "....HHHH....",
+      "...HHHHHH...",
+      "..FEFFHHH...",
+      "..FFFFPPPP..",
+      "..LLPPWWPPD.",
+      "...LPPPTPPDD",
+      "...PPPPPDD..",
+      "..PPPPPPPP..",
+      "..PP....PP..",
+      "..SS....SS..",
+      "............",
+      "............",
+      "............",
+    ];
+
+    const GUY_JUMP_2 = [
       "FF..........",
       ".FF.HHHH....",
       "..FHHHHHH...",
       "..FEFFHHH...",
       "..FFFFLLPP..",
-      "..LLPPWWPD..",
-      "..LPPPTPPDD.",
-      "...DPPPPPD..",
-      "....PPPP....",
-      "...PP..PP...",
-      "..PP....PP..",
-      "..PP....PP..",
-      ".SS......SS.",
+      "...LLPPWWPD.",
+      "...LPPPTPPDD",
+      "....PPPPPDD.",
+      ".....PPPPPD.",
+      "......PP..PP",
+      ".......PP.PP",
+      "........SSSS",
+      "............",
       "............",
       "............",
     ];
+
+    const GUY_JUMP_3 = [
+      "..FF........",
+      ".FFFF.HHHH..",
+      "...FFHHHHHH.",
+      "...FEFFHHH..",
+      "...FFFFLLPP.",
+      "...LLPPWWPDD",
+      "...LPPPTPPDD",
+      "....PPPPPDD.",
+      "....PPPPPP..",
+      "....PPPP....",
+      ".....SSSS...",
+      "............",
+      "............",
+      "............",
+      "............",
+    ];
+
+    const GUY_JUMP_4 = [
+      "....HHHH....",
+      "...HHHHHH...",
+      "..FEFFHHH...",
+      "..FFFFPPPP..",
+      "FFLLPPWWPPD.",
+      "FFLPPPTPPDD.",
+      "..PPPPPDD...",
+      "..PPPPPDD...",
+      "...PP..PP...",
+      "...PP..PP...",
+      "...PP..PP...",
+      "..SS....SS..",
+      "............",
+      "............",
+      "............",
+    ];
+
+    const GUY_JUMP = GUY_JUMP_2;
 
     const GUY_STUMBLE_1 = [
       "..FF....FF..",
@@ -986,6 +1044,42 @@
       "....PPPP....",
       "...PP..PP...",
       "...SS..SS...",
+      "............",
+      "............",
+    ];
+
+    const GUY_STUMBLE_3 = [
+      "FF........FF",
+      ".FF......FF.",
+      "..F.HHHH.F..",
+      "...HHHHHH...",
+      "...FEFFEE...",
+      "...FFFFFF...",
+      "..LLCCWWPD..",
+      ".LLPPPPPPPD.",
+      "LL..DPPD..DD",
+      "...PP..PP...",
+      "..PP....PP..",
+      ".PP......PP.",
+      ".SS......SS.",
+      "............",
+      "............",
+    ];
+
+    const GUY_STUMBLE_4 = [
+      "......FF....",
+      ".....FFF....",
+      "....HHHH....",
+      "...HHHHHH...",
+      "...FEFFEE...",
+      "...FFFFFF...",
+      "..LLCCWWPD..",
+      ".LLPPPPPPPD.",
+      "....DPPD..DD",
+      "...PP..PP.FF",
+      "..PP....PPFF",
+      ".SS......SS.",
+      "............",
       "............",
       "............",
     ];
@@ -1104,14 +1198,14 @@
       "...HHHHHH...",
       "..FEFFHHH...",
       "FFFFFFCCCC..",
-      ".LLCCWWCCD..",
-      "FFCCCCWCDD..",
+      "FFLLCWWCCD..",
+      ".CCCCWCCDD..",
       "..CCCCCCDD..",
-      "..CCCCCCD...",
+      "SSCCCCCCD...",
       "SSCCCCCC....",
-      "SS..CCCC....",
-      "...FF.FF....",
-      "...SS.SS....",
+      "..DDDD......",
+      "...FF.......",
+      "...SS.......",
       "............",
       "............",
       "............",
@@ -1119,16 +1213,16 @@
 
     const WOMAN_CLIMB_3 = [
       "FF..........",
-      "FFF.HHHH....",
-      "..FHHHHHH...",
-      "..FEFFHHH...",
-      "..FFFFLLCC..",
-      "..LLCCWWCD..",
+      "DD..HHHH....",
+      ".DFHHHHHH...",
+      ".FEFFHHHH...",
+      ".FFFFCCCC...",
+      ".LLCCWWCC...",
       "FFCCCWCCDD..",
       "..CCCCCCDD..",
-      "..CCCCCCD...",
-      "SSCCCCCC....",
-      "SS..CCCC....",
+      "SSDDDDDD....",
+      "SSDD..CC....",
+      "..CCCCCC....",
       "....FF......",
       "....FF......",
       "....SS......",
@@ -1140,14 +1234,14 @@
       "..HHHHHH....",
       ".FEFFHHH....",
       "FFFFFFCCCC..",
-      ".LLCCWWCCD..",
+      "DDLLCWWCCD..",
       ".FCCCWCCDD..",
       "..CCCCCCDD..",
-      "SSCCCCCCD...",
+      "SSDDDDDD....",
       "SS..CCCC....",
-      "....FF......",
-      "....FF......",
+      "....CCCC....",
       "....SS......",
+      "............",
       "............",
       "............",
       "............",
@@ -1297,23 +1391,79 @@
       "................",
     ];
 
-    const WOMAN_JUMP = [
+    const WOMAN_JUMP_1 = [
+      "............",
+      "............",
+      "....HHHH....",
+      "...HHHHHH...",
+      "..FEFFHHH...",
+      "..FFFFCCCC..",
+      "..LLCCWWCCD.",
+      "...LCCCWCCDD",
+      "...CCCCCCDD.",
+      "..CCCCCCCC..",
+      "..CC....CC..",
+      "..SS....SS..",
+      "............",
+      "............",
+      "............",
+    ];
+
+    const WOMAN_JUMP_2 = [
       "FF..........",
       ".FF.HHHH....",
       "..FHHHHHH...",
       "..FEFFHHH...",
       "..FFFFLLCC..",
-      "..LLCCWWCD..",
-      "..LCCCCCDD..",
-      "...DCCCCCCD.",
-      "....DDCCDD..",
-      "...FF..FF...",
-      "..FF....FF..",
-      "..FF....FF..",
-      ".SS......SS.",
+      "...LLCCWWCD.",
+      "...LCCCWCCDD",
+      "....CCCCCCD.",
+      ".....CCCCCD.",
+      "......FF..FF",
+      ".......FF.FF",
+      "........SSSS",
+      "............",
       "............",
       "............",
     ];
+
+    const WOMAN_JUMP_3 = [
+      "..FF........",
+      ".FFFF.HHHH..",
+      "...FFHHHHHH.",
+      "...FEFFHHH..",
+      "...FFFFLLCC.",
+      "...LLCCWWCDD",
+      "...LCCCWCCDD",
+      "....CCCCCCD.",
+      "....CCCCCC..",
+      "....CCCC....",
+      ".....SSSS...",
+      "............",
+      "............",
+      "............",
+      "............",
+    ];
+
+    const WOMAN_JUMP_4 = [
+      "....HHHH....",
+      "...HHHHHH...",
+      "..FEFFHHH...",
+      "..FFFFCCCC..",
+      "FFLLCCWWCCD.",
+      "FFLCCCWCCDD.",
+      "..CCCCCCDD..",
+      "..CCCCCCDD..",
+      "...CC..CC...",
+      "...FF..FF...",
+      "...FF..FF...",
+      "..SS....SS..",
+      "............",
+      "............",
+      "............",
+    ];
+
+    const WOMAN_JUMP = WOMAN_JUMP_2;
 
     const WOMAN_STUMBLE_1 = [
       "..FF....FF..",
@@ -1338,15 +1488,51 @@
       ".FFF....FFF.",
       "...HHHHHH...",
       "..HHEFFEEH..",
-      "...FFFFF....",
-      "...LLCCLL...",
-      "..LCCCCCLD..",
-      ".LLCCCCCLDD.",
-      "CCCCCCCCCCCC",
-      "CCCCCCCCCCCC",
-      "....FF.FF...",
-      "...FF...FF..",
-      "...SS...SS..",
+      "...FFFFFF...",
+      "...LCCWWCL..",
+      "..LLCCCCLL..",
+      "..L.CCCC.L..",
+      "....CCCC....",
+      "....DDCD....",
+      "....CCCC....",
+      "...FF..FF...",
+      "...SS..SS...",
+      "............",
+      "............",
+    ];
+
+    const WOMAN_STUMBLE_3 = [
+      "FF........FF",
+      ".FF......FF.",
+      "..F.HHHH.F..",
+      "...HHHHHH...",
+      "...FEFFEE...",
+      "...FFFFFF...",
+      "..LLCCWWCD..",
+      ".LLCCCCCCCD.",
+      "LL..DCCD..DD",
+      "...CC..CC...",
+      "..FF....FF..",
+      ".FF......FF.",
+      ".SS......SS.",
+      "............",
+      "............",
+    ];
+
+    const WOMAN_STUMBLE_4 = [
+      "......FF....",
+      ".....FFF....",
+      "....HHHH....",
+      "...HHHHHH...",
+      "...FEFFEE...",
+      "...FFFFFF...",
+      "..LLCCWWCD..",
+      ".LLCCCCCCCD.",
+      "....DCCD..DD",
+      "...CC..CC.FF",
+      "..FF....FFFF",
+      ".SS......SS.",
+      "............",
       "............",
       "............",
     ];
@@ -1524,16 +1710,16 @@
 
     const INSPECTOR_DATA = {
       climb: {
-        title: "Wall Climb Mechanics (Facing Wall)",
+        title: "Wall Climb Mechanics (Alternating Hand-over-Hand & Foot-over-Foot with +2px Body Surge)",
         guyFrames: [GUY_CLIMB_1, GUY_CLIMB_2, GUY_CLIMB_3, GUY_CLIMB_4],
         guyPalette: GUY_PALETTE,
         womanFrames: [WOMAN_CLIMB_1, WOMAN_CLIMB_2, WOMAN_CLIMB_3, WOMAN_CLIMB_4],
         womanPalette: WOMAN_PALETTE,
         frameLabels: [
-          { name: "Frame 1", desc: "High reach with wall hand, foot planted firmly on wall face" },
-          { name: "Frame 2", desc: "Pull-up surge: both arms pull down, hips rise 2px off ground" },
-          { name: "Frame 3", desc: "Hand-over-hand alternate reach, opposite foot plants higher" },
-          { name: "Frame 4", desc: "Lock-off compression & knee drive pulling body upward" },
+          { name: "Frame 1", desc: "Left hand reaches HIGH, right hand braced low, left foot planted firmly at 90° on wall face" },
+          { name: "Frame 2", desc: "Pull-up surge: both arms pull down hoisting body +2px up, right knee drives up under chest" },
+          { name: "Frame 3", desc: "Hand-over-hand: right hand reaches OVER to grip HIGH, left hand now low anchor, right foot plants on wall" },
+          { name: "Frame 4", desc: "Pull-up surge: both arms pull down hoisting body +2px up, left knee drives up under chest" },
         ],
         canvasW: 64,
         canvasH: 70,
@@ -1588,6 +1774,42 @@
           { name: "Frame 2", desc: "Hands gripping ceiling, body pulled up 1px, legs centered" },
           { name: "Frame 3", desc: "Hands gripping ceiling, legs swung forward in direction of travel" },
           { name: "Frame 4", desc: "Hands gripping ceiling, legs passing center swinging backward" },
+        ],
+        canvasW: 64,
+        canvasH: 70,
+        scale: 4,
+        offsetX: 8,
+        offsetY: 4
+      },
+      jump: {
+        title: "Jump & Leap Trajectory (4 Dynamic Flight Phases)",
+        guyFrames: [GUY_JUMP_1, GUY_JUMP_2, GUY_JUMP_3, GUY_JUMP_4],
+        guyPalette: GUY_PALETTE,
+        womanFrames: [WOMAN_JUMP_1, WOMAN_JUMP_2, WOMAN_JUMP_3, WOMAN_JUMP_4],
+        womanPalette: WOMAN_PALETTE,
+        frameLabels: [
+          { name: "Frame 1", desc: "Crouch & coil windup: knees bent deep, arms swept back behind torso to spring" },
+          { name: "Frame 2", desc: "Ascent surge: body angled 45° forward, lead arm reaching for target, thrust from back leg" },
+          { name: "Frame 3", desc: "Apex glide: horizontal flight through air, both arms outstretched, knees tucked to chest" },
+          { name: "Frame 4", desc: "Catch & impact prep: hands angled down to grab edge, feet swung under hips for contact" },
+        ],
+        canvasW: 64,
+        canvasH: 70,
+        scale: 4,
+        offsetX: 8,
+        offsetY: 4
+      },
+      stumble: {
+        title: "Stumble & Freefall Panic (4 Dynamic Slip & Tumble Phases)",
+        guyFrames: [GUY_STUMBLE_1, GUY_STUMBLE_2, GUY_STUMBLE_3, GUY_STUMBLE_4],
+        guyPalette: GUY_PALETTE,
+        womanFrames: [WOMAN_STUMBLE_1, WOMAN_STUMBLE_2, WOMAN_STUMBLE_3, WOMAN_STUMBLE_4],
+        womanPalette: WOMAN_PALETTE,
+        frameLabels: [
+          { name: "Frame 1", desc: "Slip & lost grip: feet slip off wall edge, shock expression, hands flail upward" },
+          { name: "Frame 2", desc: "Backward tumble: torso tilts back 45°, arms windmill backwards, legs kicking up" },
+          { name: "Frame 3", desc: "Spread-eagle freefall: body splayed out catching air as gravity accelerates fall" },
+          { name: "Frame 4", desc: "Windmill flail: arms and legs alternate cross-flail in panic" },
         ],
         canvasW: 64,
         canvasH: 70,
@@ -1805,7 +2027,7 @@
       const lowest = blocks[n - 1];
       const lowestInnerX = getInnerEdgeX(lowest);
 
-      guyWaypoints.push({ x: lowestInnerX, y: containerEl.clientHeight + 40, state: "appear", facing: isRight(lowest) ? "right" : "left" });
+      guyWaypoints.push({ x: lowestInnerX, y: containerEl.clientHeight + 40, state: "climb_up", facing: isRight(lowest) ? "right" : "left" });
       guyWaypoints.push({ x: lowestInnerX, y: lowest.y + lowest.height, state: "climb_up", facing: isRight(lowest) ? "right" : "left" });
 
       for (let i = n - 1; i >= meetingIdx; i--) {
@@ -1829,33 +2051,31 @@
           if (nextUp.x < cur.x) {
             // Overhang above! Crawl underneath nextUp
             guyWaypoints.push({ x: cur.x, y: undersideY, state: "crawl", facing: "left" });
-            guyWaypoints.push({ x: nextUp.x, y: undersideY, state: "crawl", facing: "left" });
-            guyWaypoints.push({ x: nextUp.x, y: undersideY - 6, state: "jump", facing: "left" });
+            guyWaypoints.push({ x: nextUp.x, y: undersideY, state: "climb_up", facing: "left" });
           } else {
             // Step-in: walk top
             guyWaypoints.push({ x: nextUp.x, y: cur.y, state: "walk_top", facing: "right" });
-            guyWaypoints.push({ x: nextUp.x, y: undersideY, state: "climb_up", facing: "left" });
+            guyWaypoints.push({ x: nextUp.x, y: cur.y, state: "climb_up", facing: "left" });
           }
         } else if (!isRight(cur) && !isRight(nextUp)) {
           const curRight = cur.x + cur.width;
           const nextRight = nextUp.x + nextUp.width;
           if (nextRight > curRight) {
             guyWaypoints.push({ x: curRight, y: undersideY, state: "crawl", facing: "right" });
-            guyWaypoints.push({ x: nextRight, y: undersideY, state: "crawl", facing: "right" });
-            guyWaypoints.push({ x: nextRight, y: undersideY - 6, state: "jump", facing: "right" });
+            guyWaypoints.push({ x: nextRight, y: undersideY, state: "climb_up", facing: "right" });
           } else {
             guyWaypoints.push({ x: nextRight, y: cur.y, state: "walk_top", facing: "left" });
-            guyWaypoints.push({ x: nextRight, y: undersideY, state: "climb_up", facing: "right" });
+            guyWaypoints.push({ x: nextRight, y: cur.y, state: "climb_up", facing: "right" });
           }
         } else {
           // Opposite side block: crawl underneath if it overlaps, or jump across gap
           const overlaps = isRight(cur) ? (nextUp.x + nextUp.width >= cur.x - 20) : (cur.x + cur.width >= nextUp.x - 20);
           if (overlaps) {
             guyWaypoints.push({ x: curInnerX, y: undersideY, state: "crawl", facing: nextInnerX < curInnerX ? "left" : "right" });
-            guyWaypoints.push({ x: nextInnerX, y: undersideY, state: "crawl", facing: nextInnerX < curInnerX ? "left" : "right" });
-            guyWaypoints.push({ x: nextInnerX, y: undersideY - 6, state: "jump", facing: isRight(nextUp) ? "left" : "right" });
+            guyWaypoints.push({ x: nextInnerX, y: undersideY, state: "climb_up", facing: isRight(nextUp) ? "right" : "left" });
           } else {
-            guyWaypoints.push({ x: nextInnerX, y: undersideY, state: "jump", facing: nextInnerX < curInnerX ? "left" : "right" });
+            guyWaypoints.push({ x: curInnerX, y: cur.y, state: "jump", facing: nextInnerX < curInnerX ? "left" : "right" });
+            guyWaypoints.push({ x: nextInnerX, y: undersideY, state: "climb_up", facing: isRight(nextUp) ? "right" : "left" });
           }
         }
       }
@@ -1865,7 +2085,7 @@
       const highest = blocks[0];
       const highestInnerX = getInnerEdgeX(highest);
 
-      womanWaypoints.push({ x: highestInnerX, y: Math.max(-40, highest.y - 40), state: "appear", facing: isRight(highest) ? "right" : "left" });
+      womanWaypoints.push({ x: highestInnerX, y: Math.max(-40, highest.y - 40), state: "climb_down", facing: isRight(highest) ? "right" : "left" });
       womanWaypoints.push({ x: highestInnerX, y: highest.y, state: "climb_down", facing: isRight(highest) ? "right" : "left" });
 
       for (let i = 0; i <= meetingIdx; i++) {
@@ -1887,13 +2107,14 @@
         if (isRight(cur) && isRight(nextDown)) {
           if (nextDown.x < cur.x) {
             womanWaypoints.push({ x: cur.x, y: nextDown.y, state: "walk_top", facing: "left" });
-            womanWaypoints.push({ x: nextDown.x, y: nextDown.y, state: "walk_top", facing: "left" });
+            womanWaypoints.push({ x: nextDown.x, y: nextDown.y, state: "climb_down", facing: "left" });
           } else {
             womanWaypoints.push({ x: nextDown.x, y: cur.y + cur.height, state: "crawl", facing: "right" });
-            womanWaypoints.push({ x: nextDown.x, y: nextDown.y, state: "jump", facing: "left" });
+            womanWaypoints.push({ x: nextDown.x, y: nextDown.y, state: "climb_down", facing: "left" });
           }
         } else {
-          womanWaypoints.push({ x: nextInnerX, y: nextDown.y, state: "jump", facing: nextInnerX < curInnerX ? "left" : "right" });
+          womanWaypoints.push({ x: curInnerX, y: cur.y + cur.height, state: "jump", facing: nextInnerX < curInnerX ? "left" : "right" });
+          womanWaypoints.push({ x: nextInnerX, y: nextDown.y, state: "climb_down", facing: isRight(nextDown) ? "right" : "left" });
         }
       }
 
@@ -2285,22 +2506,20 @@
           // Individual sprites
           let gMat = GUY_WALK_1;
           const gF4 = Math.abs(Math.floor(this.guyMotion.frame)) % 4;
-          const gF2 = Math.abs(Math.floor(this.guyMotion.frame)) % 2;
           if (this.guyMotion.state === "climb_up" || this.guyMotion.state === "climb_down") gMat = [GUY_CLIMB_1, GUY_CLIMB_2, GUY_CLIMB_3, GUY_CLIMB_4][gF4];
           else if (this.guyMotion.state === "hang_traverse") gMat = [GUY_HANG_1, GUY_HANG_2, GUY_HANG_3, GUY_HANG_4][gF4];
           else if (this.guyMotion.state === "crawl") gMat = [GUY_CRAWL_1, GUY_CRAWL_2, GUY_CRAWL_3, GUY_CRAWL_4][gF4];
-          else if (this.guyMotion.state === "jump") gMat = GUY_JUMP;
-          else if (this.guyMotion.state === "stumble") gMat = [GUY_STUMBLE_1, GUY_STUMBLE_2][gF2];
+          else if (this.guyMotion.state === "jump") gMat = [GUY_JUMP_1, GUY_JUMP_2, GUY_JUMP_3, GUY_JUMP_4][gF4];
+          else if (this.guyMotion.state === "stumble") gMat = [GUY_STUMBLE_1, GUY_STUMBLE_2, GUY_STUMBLE_3, GUY_STUMBLE_4][gF4];
           else if (this.guyMotion.state === "walk_top" || this.guyMotion.state === "appear") gMat = [GUY_WALK_1, GUY_WALK_2, GUY_WALK_3, GUY_WALK_4][gF4];
 
           let wMat = WOMAN_WALK_1;
           const wF4 = Math.abs(Math.floor(this.womanMotion.frame)) % 4;
-          const wF2 = Math.abs(Math.floor(this.womanMotion.frame)) % 2;
           if (this.womanMotion.state === "climb_down" || this.womanMotion.state === "climb_up") wMat = [WOMAN_CLIMB_1, WOMAN_CLIMB_2, WOMAN_CLIMB_3, WOMAN_CLIMB_4][wF4];
           else if (this.womanMotion.state === "hang_traverse") wMat = [WOMAN_HANG_1, WOMAN_HANG_2, WOMAN_HANG_3, WOMAN_HANG_4][wF4];
           else if (this.womanMotion.state === "crawl") wMat = [WOMAN_CRAWL_1, WOMAN_CRAWL_2, WOMAN_CRAWL_3, WOMAN_CRAWL_4][wF4];
-          else if (this.womanMotion.state === "jump") wMat = WOMAN_JUMP;
-          else if (this.womanMotion.state === "stumble") wMat = [WOMAN_STUMBLE_1, WOMAN_STUMBLE_2][wF2];
+          else if (this.womanMotion.state === "jump") wMat = [WOMAN_JUMP_1, WOMAN_JUMP_2, WOMAN_JUMP_3, WOMAN_JUMP_4][wF4];
+          else if (this.womanMotion.state === "stumble") wMat = [WOMAN_STUMBLE_1, WOMAN_STUMBLE_2, WOMAN_STUMBLE_3, WOMAN_STUMBLE_4][wF4];
           else if (this.womanMotion.state === "walk_top" || this.womanMotion.state === "appear") wMat = [WOMAN_WALK_1, WOMAN_WALK_2, WOMAN_WALK_3, WOMAN_WALK_4][wF4];
 
           drawPixelMatrix(this.ctx, gMat, GUY_PALETTE, Math.round(this.guyMotion.x - 12), Math.round(this.guyMotion.y - 24), PIXEL_SCALE, this.guyMotion.facing === "right", this.guyMotion.alpha);

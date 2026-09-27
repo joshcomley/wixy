@@ -146,14 +146,14 @@ export function buildTrajectoryPlan(
   const lowestBlock = blocks[n - 1]!;
   const lowestInnerX = getInnerEdgeX(lowestBlock);
 
-  // 1. Appear from bottom
+  // 1. Appear from bottom - Guy climbs UP from below
   const startGuyX = lowestInnerX;
   const startGuyY = Math.min(containerHeight + 40, lowestBlock.y + lowestBlock.height + 40);
 
   guyWaypoints.push({
     x: startGuyX,
     y: startGuyY,
-    state: "appear",
+    state: "climb_up",
     facing: isRight(lowestBlock) ? "right" : "left",
   });
 
@@ -205,17 +205,11 @@ export function buildTrajectoryPlan(
           state: "crawl",
           facing: "left",
         });
+        // Wrap around corner and climb up nextUp
         guyWaypoints.push({
           x: nextUp.x,
           y: undersideY,
-          state: "crawl",
-          facing: "left",
-        });
-        // Jump onto the side of that block
-        guyWaypoints.push({
-          x: nextUp.x,
-          y: undersideY - 6,
-          state: "jump",
+          state: "climb_up",
           facing: "left",
         });
       } else {
@@ -228,7 +222,7 @@ export function buildTrajectoryPlan(
         });
         guyWaypoints.push({
           x: nextUp.x,
-          y: undersideY,
+          y: cur.y,
           state: "climb_up",
           facing: "left",
         });
@@ -247,13 +241,7 @@ export function buildTrajectoryPlan(
         guyWaypoints.push({
           x: nextRight,
           y: undersideY,
-          state: "crawl",
-          facing: "right",
-        });
-        guyWaypoints.push({
-          x: nextRight,
-          y: undersideY - 6,
-          state: "jump",
+          state: "climb_up",
           facing: "right",
         });
       } else {
@@ -266,14 +254,13 @@ export function buildTrajectoryPlan(
         });
         guyWaypoints.push({
           x: nextRight,
-          y: undersideY,
+          y: cur.y,
           state: "climb_up",
           facing: "right",
         });
       }
     } else {
       // Opposite sides (crossing between user and assistant blocks)
-      // When block above extends across, crawl underneath
       const overlapsHorizontally =
         isRight(cur)
           ? nextUp.x + nextUp.width >= cur.x - 20
@@ -290,23 +277,22 @@ export function buildTrajectoryPlan(
         guyWaypoints.push({
           x: nextInnerX,
           y: undersideY,
-          state: "crawl",
-          facing: nextInnerX < curInnerX ? "left" : "right",
-        });
-        // Jump onto the side of that block
-        guyWaypoints.push({
-          x: nextInnerX,
-          y: undersideY - 6,
-          state: "jump",
-          facing: isRight(nextUp) ? "left" : "right",
+          state: "climb_up",
+          facing: isRight(nextUp) ? "right" : "left",
         });
       } else {
-        // Gap between blocks: leap across to next block
+        // Gap between blocks: leap across to next block underside
+        guyWaypoints.push({
+          x: curInnerX,
+          y: cur.y,
+          state: "jump",
+          facing: nextInnerX < curInnerX ? "left" : "right",
+        });
         guyWaypoints.push({
           x: nextInnerX,
           y: undersideY,
-          state: "jump",
-          facing: nextInnerX < curInnerX ? "left" : "right",
+          state: "climb_up",
+          facing: isRight(nextUp) ? "right" : "left",
         });
       }
     }
@@ -317,14 +303,14 @@ export function buildTrajectoryPlan(
   const highestBlock = blocks[0]!;
   const highestInnerX = getInnerEdgeX(highestBlock);
 
-  // 1. Appear from top
+  // 1. Appear from top - Woman climbs DOWN from above
   const startWomanX = highestInnerX;
   const startWomanY = Math.max(-40, highestBlock.y - 40);
 
   womanWaypoints.push({
     x: startWomanX,
     y: startWomanY,
-    state: "appear",
+    state: "climb_down",
     facing: isRight(highestBlock) ? "right" : "left",
   });
 
@@ -376,7 +362,7 @@ export function buildTrajectoryPlan(
         womanWaypoints.push({
           x: nextDown.x,
           y: nextDown.y,
-          state: "walk_top",
+          state: "climb_down",
           facing: "left",
         });
       } else {
@@ -390,17 +376,23 @@ export function buildTrajectoryPlan(
         womanWaypoints.push({
           x: nextDown.x,
           y: nextDown.y,
-          state: "jump",
+          state: "climb_down",
           facing: "left",
         });
       }
     } else {
-      // Across opposite blocks: walk/crawl across and jump
+      // Across opposite blocks: leap across gap to next block top
+      womanWaypoints.push({
+        x: curInnerX,
+        y: cur.y + cur.height,
+        state: "jump",
+        facing: nextInnerX < curInnerX ? "left" : "right",
+      });
       womanWaypoints.push({
         x: nextInnerX,
         y: nextDown.y,
-        state: "jump",
-        facing: nextInnerX < curInnerX ? "left" : "right",
+        state: "climb_down",
+        facing: isRight(nextDown) ? "right" : "left",
       });
     }
   }
