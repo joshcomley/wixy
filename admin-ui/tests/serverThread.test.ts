@@ -833,6 +833,58 @@ describe("mountServerThread", () => {
   });
 
   describe("dedicated voice note recording row and pause/resume", () => {
+    it("keeps the disabled recording row and a throbber visible while the voice note sends", async () => {
+      let resolveUpload!: (attachment: UploadAttachment) => void;
+      uploadServerAttachment.mockImplementation(() => new Promise((resolve) => {
+        resolveUpload = resolve;
+      }));
+      sendMessage.mockResolvedValue({
+        ok: true,
+        message: fakeMessage({ seq: 7, clientId: "voice-client-id", text: null }),
+      });
+      getHistory.mockResolvedValue(emptyHistory());
+      const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+
+      const textarea = view.element.querySelector<HTMLTextAreaElement>(".wx-chat-composer-input")!;
+      const sendButton = view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")!;
+      const attachButton = view.element.querySelector<HTMLButtonElement>(".wx-chat-attach-button")!;
+      const recordButton = view.element.querySelector<HTMLButtonElement>(".wx-srv-record-button")!;
+      const pauseButton = view.element.querySelector<HTMLButtonElement>(".wx-srv-record-pause")!;
+      const cancelButton = view.element.querySelector<HTMLButtonElement>(".wx-srv-record-cancel")!;
+      const status = view.element.querySelector<HTMLElement>(".wx-srv-record-status")!;
+      const inputRow = view.element.querySelector<HTMLElement>(".wx-chatc-input-row")!;
+
+      recordButton.click();
+      await flush();
+      recordButton.click();
+
+      expect(inputRow.classList.contains("wx-srv-recording-row")).toBe(true);
+      expect(inputRow.classList.contains("wx-srv-sending")).toBe(true);
+      expect(textarea.hidden).toBe(true);
+      expect(sendButton.hidden).toBe(true);
+      expect(attachButton.hidden).toBe(true);
+      expect(cancelButton.hidden).toBe(false);
+      expect(cancelButton.disabled).toBe(true);
+      expect(pauseButton.hidden).toBe(false);
+      expect(pauseButton.disabled).toBe(true);
+      expect(recordButton.disabled).toBe(true);
+      expect(status.querySelector(".wx-srv-voice-send-spinner")).not.toBeNull();
+      expect(status.getAttribute("aria-label")).toBe("Sending voice note");
+
+      resolveUpload({
+        id: "voice-1", kind: "voice", status: "ready", width: null, height: null, durationS: 2, peaks: null, urls: {},
+      });
+      await flush();
+      await flush();
+
+      expect(inputRow.classList.contains("wx-srv-recording-row")).toBe(false);
+      expect(inputRow.classList.contains("wx-srv-sending")).toBe(false);
+      expect(textarea.hidden).toBe(false);
+      expect(sendButton.hidden).toBe(false);
+      view.teardown();
+    });
+
     it("hides textarea and send button during recording and pause, restores on stop", async () => {
       uploadServerAttachment.mockResolvedValue({
         id: "voice-1", kind: "voice", status: "ready", width: null, height: null, durationS: 2, peaks: null, urls: {},
