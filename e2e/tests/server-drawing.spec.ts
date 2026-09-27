@@ -571,4 +571,168 @@ test.describe("server-drawing.spec.ts", () => {
       await context.close();
     });
   }
+
+  test("collapsible pen toolbar: collapses while drawing stays active, tap Pen re-opens, Done exits (desktop and phone)", async ({ browser }) => {
+    for (const viewport of [{ width: 1280, height: 800, isMobile: false }, { width: 360, height: 740, isMobile: true }]) {
+      const context = await browser.newContext({
+        viewport: { width: viewport.width, height: viewport.height },
+        isMobile: viewport.isMobile,
+        hasTouch: viewport.isMobile,
+      });
+      const page = await context.newPage();
+      const label = `draw-col-${viewport.width}-${Date.now()}`;
+      await seed(page, label, 3);
+      await unlockServer(page, "Alice");
+      const target = bubbleWith(page, `${label} #2`);
+      await expect(target).toBeVisible();
+
+      const penButton = page.locator(".wx-srv-pen-button");
+      const toolbar = page.locator(".wx-srv-pen-toolbar");
+      const surface = page.locator(".wx-srv-draw-surface");
+      const collapseButton = page.locator(".wx-srv-pen-collapse");
+      const doneButton = page.locator(".wx-srv-pen-done");
+
+      // 1. Pen on -> toolbar visible, real click targets
+      await penButton.click();
+      await expect(toolbar).toBeVisible();
+      await expect(surface).toBeVisible();
+      await expect(penButton).toHaveAttribute("aria-pressed", "true");
+      await expect(penButton).toHaveAttribute("aria-expanded", "true");
+      await assertRealClickTarget(page, collapseButton, viewport.width, viewport.height);
+      await assertRealClickTarget(page, doneButton, viewport.width, viewport.height);
+
+      // 2. Collapse toolbar -> toolbar hidden, surface remains live
+      await collapseButton.click();
+      await expect(toolbar).toBeHidden();
+      await expect(penButton).toHaveAttribute("aria-pressed", "true");
+      await expect(penButton).toHaveAttribute("aria-expanded", "false");
+      await expect(surface).toBeVisible();
+
+      // 3. Draw a stroke while collapsed -> works and area is unobstructed
+      await mouseStroke(page, target, true);
+      const stored = await storedOn(page, target);
+      await eventually([page], async () => (await stored.count()) === 1, "drawing stored while collapsed");
+
+      // 4. Tap Pen button while collapsed -> re-opens toolbar
+      await humanPause(page);
+      await penButton.click();
+      await expect(toolbar).toBeVisible();
+      await expect(penButton).toHaveAttribute("aria-pressed", "true");
+      await expect(penButton).toHaveAttribute("aria-expanded", "true");
+
+      // 5. Tap Pen button while open -> collapses toolbar
+      await humanPause(page);
+      await penButton.click();
+      await expect(toolbar).toBeHidden();
+      await expect(penButton).toHaveAttribute("aria-pressed", "true");
+      await expect(penButton).toHaveAttribute("aria-expanded", "false");
+
+      // 6. Tap Pen button again -> re-opens toolbar
+      await humanPause(page);
+      await penButton.click();
+      await expect(toolbar).toBeVisible();
+
+      // 7. Done exits draw mode
+      await humanPause(page);
+      await doneButton.click();
+      await expect(toolbar).toBeHidden();
+      await expect(surface).toHaveCount(0);
+      await expect(penButton).toHaveAttribute("aria-pressed", "false");
+      await expect(penButton).toHaveAttribute("aria-expanded", "false");
+
+      await context.close();
+    }
+  });
+
+  test("drawing header undo/redo, cog swap, and close-abandons: undo removes locally and on B, redo restores, close discards and exits without locking", async ({ browser }) => {
+    const contextA = await browser.newContext();
+    const contextB = await browser.newContext();
+    const pageA = await contextA.newPage();
+    const pageB = await contextB.newPage();
+    const errorsA = trackConsoleErrors(pageA);
+    const errorsB = trackConsoleErrors(pageB);
+    const label = `draw-undo-${Date.now()}`;
+    await seed(pageA, label, 3);
+    await unlockServer(pageA, "Alice");
+    await unlockServer(pageB, "Bob");
+    const targetA = bubbleWith(pageA, `${label} #2`);
+    const targetB = bubbleWith(pageB, `${label} #2`);
+    await expect(targetA).toBeVisible();
+    await expect(targetB).toBeVisible();
+
+    const cogA = pageA.locator(".wx-srv-settings-button");
+    const undoA = pageA.locator(".wx-srv-pen-undo");
+    const redoA = pageA.locator(".wx-srv-pen-redo");
+    const closeA = pageA.locator(".wx-srv-panic-button");
+    const penButtonA = pageA.locator(".wx-srv-pen-button");
+    const toolbarA = pageA.locator(".wx-srv-pen-toolbar");
+    const surfaceA = pageA.locator(".wx-srv-draw-surface");
+
+    // Initial state: pen off -> cog visible, undo/redo hidden
+    await expect(cogA).toBeVisible();
+    await expect(undoA).toBeHidden();
+    await expect(redoA).toBeHidden();
+
+    // Turn pen on -> cog hidden, undo/redo visible (both disabled initially)
+    await turnPenOn(pageA);
+    await expect(cogA).toBeHidden();
+    await expect(undoA).toBeVisible();
+    await expect(redoA).toBeVisible();
+    await expect(undoA).toBeDisabled();
+    await expect(redoA).toBeDisabled();
+
+    // Draw a stroke on targetA
+    await mouseStroke(pageA, targetA, true);
+    const storedA = await storedOn(pageA, targetA);
+    const storedB = await storedOn(pageB, targetB);
+    await eventually([pageA, pageB], async () => (await storedB.count()) === 1, "B's stored stroke");
+    await expect(storedA).toHaveCount(1);
+
+    // Undo is now enabled, redo disabled
+    await expect(undoA).toBeEnabled();
+    await expect(redoA).toBeDisabled();
+
+    // Click Undo -> stroke vanishes on A and B
+    await humanPause(pageA);
+    await undoA.click();
+    await eventually([pageA, pageB], async () => (await storedA.count()) === 0, "A's stroke removed on undo");
+    await eventually([pageA, pageB], async () => (await storedB.count()) === 0, "B's stroke removed on undo");
+    await expect(undoA).toBeDisabled();
+    await expect(redoA).toBeEnabled();
+
+    // Click Redo -> stroke restored on A and B
+    await humanPause(pageA);
+    await redoA.click();
+    await eventually([pageA, pageB], async () => (await storedA.count()) === 1, "A's stroke restored on redo");
+    await eventually([pageA, pageB], async () => (await storedB.count()) === 1, "B's stroke restored on redo");
+    await expect(undoA).toBeEnabled();
+    await expect(redoA).toBeDisabled();
+
+    // Close button (✕) while drawing: exits draw mode, discards session drawing, does not lock
+    await humanPause(pageA);
+    await closeA.click();
+
+    // Draw mode exited immediately
+    await expect(surfaceA).toHaveCount(0);
+    await expect(toolbarA).toBeHidden();
+    await expect(penButtonA).toHaveAttribute("aria-pressed", "false");
+
+    // Cog restored, undo/redo hidden
+    await expect(cogA).toBeVisible();
+    await expect(undoA).toBeHidden();
+    await expect(redoA).toBeHidden();
+
+    // Session drawing discarded on A and B
+    await eventually([pageA, pageB], async () => (await storedA.count()) === 0, "A's session drawing discarded on abandon");
+    await eventually([pageA, pageB], async () => (await storedB.count()) === 0, "B's session drawing discarded on abandon");
+
+    // Chat remains unlocked (thread remains present and visible, not detached)
+    await expect(pageA.locator(".wx-srv-thread")).toHaveCount(1);
+    await expect(pageA.locator(".wx-srv-thread")).toBeVisible();
+
+    expect(errorsA).toEqual([]);
+    expect(errorsB).toEqual([]);
+    await closeAll(contextA, contextB);
+  });
 });
+

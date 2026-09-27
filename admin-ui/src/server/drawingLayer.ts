@@ -120,13 +120,21 @@ export interface DrawingLayerDeps {
   readonly api?: DrawingSyncApi & DrawingLiveApi;
   /** Injectable clock for tests; `performance.now()` by default. */
   readonly now?: () => number;
+  /** Called whenever pen mode turns on or off (e.g. for header cog swap). */
+  readonly onPenChange?: (penOn: boolean) => void;
 }
 
 export interface DrawingLayer {
   /** The header's Pen button (§5). */
   readonly penButton: HTMLButtonElement;
+  /** The header's Undo button. */
+  readonly undoButton: HTMLButtonElement;
+  /** The header's Redo button. */
+  readonly redoButton: HTMLButtonElement;
   /** The pen toolbar, placed between the header and the thread. */
   readonly toolbar: HTMLElement;
+  /** The collapse affordance on the toolbar. */
+  readonly collapseButton: HTMLButtonElement;
   attach(session: ServerSession): void;
   detach(): void;
   teardown(): void;
@@ -139,6 +147,14 @@ export interface DrawingLayer {
   isStrokeActive(): boolean;
   /** Re-reads every drawing's position from the live DOM (also runs on its own on resize). */
   relayout(): void;
+  /** True while pen is on (in draw or select mode). */
+  isPenOn(): boolean;
+  /** Undoes the most recent stroke drawn in this session. */
+  undo(): void;
+  /** Redoes the most recent undone stroke. */
+  redo(): void;
+  /** Immediately exits draw mode and abandons this session's drawings. */
+  abandon(): void;
 }
 
 interface Frame {
@@ -218,8 +234,57 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
   penButton.title = "Draw on the chat";
   penButton.setAttribute("aria-label", "Pen");
   penButton.setAttribute("aria-pressed", "false");
+  penButton.setAttribute("aria-expanded", "false");
   // §5: turning the pen on opens a new mode and toolbar under the finger.
   penButton.setAttribute("data-srv-gesture-boundary", "");
+
+  const UNDO_ICON =
+    '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>' +
+    '</svg>';
+
+  const REDO_ICON =
+    '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13"/>' +
+    '</svg>';
+
+  const undoButton = documentRef.createElement("button");
+  undoButton.type = "button";
+  undoButton.className = "wx-srv-pen-undo";
+  undoButton.setAttribute("aria-label", "Undo");
+  undoButton.title = "Undo";
+  undoButton.setAttribute("data-srv-gesture-boundary", "");
+  undoButton.innerHTML = UNDO_ICON;
+  undoButton.disabled = true;
+  undoButton.hidden = true;
+  undoButton.addEventListener("click", () => undo());
+
+  const redoButton = documentRef.createElement("button");
+  redoButton.type = "button";
+  redoButton.className = "wx-srv-pen-redo";
+  redoButton.setAttribute("aria-label", "Redo");
+  redoButton.title = "Redo";
+  redoButton.setAttribute("data-srv-gesture-boundary", "");
+  redoButton.innerHTML = REDO_ICON;
+  redoButton.disabled = true;
+  redoButton.hidden = true;
+  redoButton.addEventListener("click", () => redo());
+
+  interface UndoRecord {
+    drawingKey: string;
+    readonly anchorSeq: number;
+    readonly columnWidth: number;
+    readonly stroke: ModelStroke;
+  }
+
+  const undoStack: UndoRecord[] = [];
+  const redoStack: UndoRecord[] = [];
+  const sessionDrawingKeys = new Set<string>();
+
+  function updateUndoRedo(): void {
+    undoButton.disabled = undoStack.length === 0;
+    redoButton.disabled = redoStack.length === 0;
+  }
 
   const toolbar = documentRef.createElement("div");
   toolbar.className = "wx-srv-pen-toolbar";
@@ -332,6 +397,21 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
   selectModeButton.addEventListener("click", () => setMode("select"));
   modeGroup.append(drawModeButton, selectModeButton);
 
+  const collapseButton = documentRef.createElement("button");
+  collapseButton.type = "button";
+  collapseButton.className = "wx-srv-pen-collapse";
+  collapseButton.innerHTML =
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<polyline points="18 15 12 9 6 15"/>' +
+    '</svg>' +
+    '<span class="wx-srv-pen-collapse-label">Collapse</span>';
+  collapseButton.title = "Collapse toolbar";
+  collapseButton.setAttribute("aria-label", "Collapse toolbar");
+  collapseButton.addEventListener("click", () => {
+    setToolbarCollapsed(true);
+    penButton.focus();
+  });
+
   const doneButton = documentRef.createElement("button");
   doneButton.type = "button";
   doneButton.className = "wx-srv-pen-done";
@@ -349,7 +429,7 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
 
   // DOM order is the desktop line's order (and so the keyboard's); on a phone chat.css arranges
   // the same controls into two fixed lines.
-  toolbar.append(colorGroup, widthGroup, selectHint, selectGroup, confirmGroup, modeGroup, doneButton, statusLine);
+  toolbar.append(colorGroup, widthGroup, selectHint, selectGroup, confirmGroup, modeGroup, collapseButton, doneButton, statusLine);
 
   const layer = documentRef.createElement("div");
   layer.className = "wx-srv-drawing-layer";
@@ -361,8 +441,15 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
   content.appendChild(layer);
 
   let surface: HTMLElement | null = null;
+  let toolbarCollapsed = false;
 
-  penButton.addEventListener("click", () => setPen(!penOn));
+  penButton.addEventListener("click", () => {
+    if (!penOn) {
+      setPen(true);
+    } else {
+      setToolbarCollapsed(!toolbarCollapsed);
+    }
+  });
 
   // -- Timers and observers ------------------------------------------------------------------
 
@@ -716,6 +803,7 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
     },
     onSplit(from: ModelDrawing, to: ModelDrawing): void {
       if (sessionDrawingKey === from.key) sessionDrawingKey = to.key;
+      if (sessionDrawingKeys.has(from.key)) sessionDrawingKeys.add(to.key);
     },
     onLocked: () => hooks.lockNow("unauthorized"),
     setTimeout: (callback, ms) => win.setTimeout(callback, ms),
@@ -796,6 +884,7 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
       sender: identity.getName() ?? "",
     });
     sessionDrawingKey = drawing.key;
+    sessionDrawingKeys.add(drawing.key);
     return drawing;
   }
 
@@ -871,6 +960,152 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
     stroke.state = "pending";
     renderDrawing(drawing.key);
     sync.storeStroke(drawing, stroke);
+
+    undoStack.push({
+      drawingKey: drawing.key,
+      anchorSeq: drawing.anchorSeq,
+      columnWidth: drawing.columnWidth,
+      stroke: {
+        strokeId: stroke.strokeId,
+        color: stroke.color,
+        width: stroke.width,
+        points: stroke.points.slice(),
+        state: "pending",
+        sent: false,
+      },
+    });
+    redoStack.length = 0;
+    updateUndoRedo();
+  }
+
+  function undo(): void {
+    if (undoStack.length === 0) return;
+    const entry = undoStack.pop()!;
+    redoStack.push(entry);
+    updateUndoRedo();
+
+    if (activeStroke !== null) cancelActiveStroke();
+
+    const drawing = model.get(entry.drawingKey);
+    if (drawing === undefined) return;
+
+    liveSender.cancelStroke({
+      drawingClientId: drawing.clientId ?? "",
+      anchorSeq: entry.anchorSeq,
+      columnWidth: entry.columnWidth,
+      strokeId: entry.stroke.strokeId,
+      color: entry.stroke.color,
+      width: entry.stroke.width,
+    });
+
+    if (drawing.strokes.length <= 1) {
+      model.remove(drawing.key);
+      if (drawing.id !== null) model.tombstone(drawing.id);
+      removeDrawingView(drawing.key);
+      if (sessionDrawingKey === drawing.key) sessionDrawingKey = null;
+      sessionDrawingKeys.delete(drawing.key);
+      void sync.deleteDrawing(drawing);
+    } else {
+      const remainingStrokes = drawing.strokes.filter((s) => s.strokeId !== entry.stroke.strokeId);
+      model.remove(drawing.key);
+      if (drawing.id !== null) model.tombstone(drawing.id);
+      removeDrawingView(drawing.key);
+      sessionDrawingKeys.delete(drawing.key);
+      void sync.deleteDrawing(drawing);
+
+      const clientId = newId(win);
+      ownClientIds.add(clientId);
+      const newDrawing = model.addOwn({
+        clientId,
+        anchorSeq: entry.anchorSeq,
+        columnWidth: entry.columnWidth,
+        sender: identity.getName() ?? "",
+      });
+      sessionDrawingKeys.add(newDrawing.key);
+      sessionDrawingKey = newDrawing.key;
+
+      for (const item of undoStack) {
+        if (item.drawingKey === entry.drawingKey) {
+          item.drawingKey = newDrawing.key;
+        }
+      }
+      for (const item of redoStack) {
+        if (item.drawingKey === entry.drawingKey) {
+          item.drawingKey = newDrawing.key;
+        }
+      }
+      entry.drawingKey = newDrawing.key;
+
+      for (const s of remainingStrokes) {
+        const restored: ModelStroke = {
+          strokeId: s.strokeId,
+          color: s.color,
+          width: s.width,
+          points: s.points.slice(),
+          state: "pending",
+          sent: false,
+        };
+        newDrawing.strokes.push(restored);
+        sync.storeStroke(newDrawing, restored);
+      }
+      renderDrawing(newDrawing.key);
+    }
+  }
+
+  function redo(): void {
+    if (redoStack.length === 0) return;
+    const entry = redoStack.pop()!;
+    undoStack.push(entry);
+    updateUndoRedo();
+
+    let drawing = sessionDrawingKey !== null ? model.get(sessionDrawingKey) : undefined;
+    if (drawing === undefined || drawing.anchorSeq !== entry.anchorSeq) {
+      drawing = model.get(entry.drawingKey);
+    }
+    if (drawing === undefined || drawing.anchorSeq !== entry.anchorSeq) {
+      const clientId = newId(win);
+      ownClientIds.add(clientId);
+      drawing = model.addOwn({
+        clientId,
+        anchorSeq: entry.anchorSeq,
+        columnWidth: entry.columnWidth,
+        sender: identity.getName() ?? "",
+      });
+      sessionDrawingKeys.add(drawing.key);
+      sessionDrawingKey = drawing.key;
+    }
+    entry.drawingKey = drawing.key;
+
+    const strokeToRestore: ModelStroke = {
+      strokeId: entry.stroke.strokeId,
+      color: entry.stroke.color,
+      width: entry.stroke.width,
+      points: entry.stroke.points.slice(),
+      state: "pending",
+      sent: false,
+    };
+    drawing.strokes.push(strokeToRestore);
+    renderDrawing(drawing.key);
+    sync.storeStroke(drawing, strokeToRestore);
+  }
+
+  function abandon(): void {
+    if (!penOn) return;
+    if (activeStroke !== null) cancelActiveStroke();
+    for (const key of Array.from(sessionDrawingKeys)) {
+      const drawing = model.get(key);
+      if (drawing !== undefined) {
+        model.remove(key);
+        if (drawing.id !== null) model.tombstone(drawing.id);
+        removeDrawingView(key);
+        void sync.deleteDrawing(drawing);
+      }
+    }
+    sessionDrawingKeys.clear();
+    undoStack.length = 0;
+    redoStack.length = 0;
+    updateUndoRedo();
+    setPen(false);
   }
 
   function removeStroke(drawing: ModelDrawing, strokeId: string): void {
@@ -1208,6 +1443,7 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
     const drawing = mode === "draw";
     colorGroup.hidden = !drawing;
     widthGroup.hidden = !drawing;
+    collapseButton.hidden = !drawing;
     selectHint.hidden = drawing || confirmingDelete;
     selectGroup.hidden = drawing || confirmingDelete;
     confirmGroup.hidden = !confirmingDelete;
@@ -1242,16 +1478,36 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
     keepThreadInPlace(syncToolbar);
   }
 
+  function setToolbarCollapsed(collapsed: boolean): void {
+    if (!penOn) return;
+    if (toolbarCollapsed === collapsed) return;
+    toolbarCollapsed = collapsed;
+    penButton.setAttribute("aria-expanded", String(!collapsed));
+    keepThreadInPlace(() => {
+      toolbar.hidden = collapsed;
+    });
+    relayout();
+  }
+
   function setPen(on: boolean): void {
     if (on === penOn) return;
     if (on && session === null) return;
     penOn = on;
+    toolbarCollapsed = false;
     penButton.setAttribute("aria-pressed", String(on));
+    penButton.setAttribute("aria-expanded", String(on));
     penButton.classList.toggle("wx-srv-pen-button-on", on);
+    undoButton.hidden = !on;
+    redoButton.hidden = !on;
+    deps.onPenChange?.(on);
     keepThreadInPlace(() => {
       if (on) {
         mode = "draw";
         sessionDrawingKey = null;
+        sessionDrawingKeys.clear();
+        undoStack.length = 0;
+        redoStack.length = 0;
+        updateUndoRedo();
         toolbar.hidden = false;
         mountSurface();
       } else {
@@ -1262,6 +1518,10 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
         listenForSelectTaps(false);
         setStatus(null);
         toolbar.hidden = true;
+        sessionDrawingKeys.clear();
+        undoStack.length = 0;
+        redoStack.length = 0;
+        updateUndoRedo();
       }
       syncToolbar();
     });
@@ -1278,8 +1538,32 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
     for (const strokeId of liveReceiver.removeForAnchor(seq)) removeLiveView(strokeId);
   }
 
+  let keyboardListening = false;
+
+  function onKeyDown(event: KeyboardEvent): void {
+    if (!penOn) return;
+    const isMac = typeof win.navigator?.platform === "string" && /Mac|iPod|iPhone|iPad/.test(win.navigator.platform);
+    const modKey = isMac ? event.metaKey : event.ctrlKey;
+    if (!modKey) return;
+    if (event.key === "z" || event.key === "Z") {
+      event.preventDefault();
+      if (event.shiftKey) {
+        redo();
+      } else {
+        undo();
+      }
+    } else if (event.key === "y" || event.key === "Y") {
+      event.preventDefault();
+      redo();
+    }
+  }
+
   function detach(): void {
     if (penOn) setPen(false);
+    if (keyboardListening) {
+      win.removeEventListener?.("keydown", onKeyDown as EventListener);
+      keyboardListening = false;
+    }
     // Owed live cancels go out now, while this unlock's token is still in hand.
     liveSender.shutdown();
     session = null;
@@ -1297,7 +1581,10 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
 
   return {
     penButton,
+    undoButton,
+    redoButton,
     toolbar,
+    collapseButton,
     attach(next: ServerSession): void {
       if (torndown) return;
       session = next;
@@ -1305,6 +1592,10 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
       if (!visibilityListening) {
         documentRef.addEventListener("visibilitychange", onVisibilityChange);
         visibilityListening = true;
+      }
+      if (!keyboardListening) {
+        win.addEventListener?.("keydown", onKeyDown as EventListener);
+        keyboardListening = true;
       }
       sync.resume();
     },
@@ -1317,7 +1608,12 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
       model.clear();
       for (const key of Array.from(drawingViews.keys())) removeDrawingView(key);
       layer.remove();
+      undoButton.remove();
+      redoButton.remove();
       ownClientIds.clear();
+      sessionDrawingKeys.clear();
+      undoStack.length = 0;
+      redoStack.length = 0;
     },
     syncMessages(messages: readonly Message[]): void {
       if (torndown) return;
@@ -1350,9 +1646,17 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
       model.clear();
       clearLive();
       for (const key of Array.from(drawingViews.keys())) removeDrawingView(key);
+      sessionDrawingKeys.clear();
+      undoStack.length = 0;
+      redoStack.length = 0;
+      updateUndoRedo();
     },
     isStrokeActive: () => activeStroke !== null,
     relayout,
+    isPenOn: () => penOn,
+    undo,
+    redo,
+    abandon,
   };
 }
 

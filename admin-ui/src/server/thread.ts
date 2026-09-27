@@ -193,12 +193,19 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   settingsButton.setAttribute("aria-label", "Settings");
   settingsButton.setAttribute("data-srv-gesture-boundary", "");
   settingsButton.addEventListener("click", () => deps.onSettings());
+  let drawingLayer: DrawingLayer;
   const panicButton = documentRef.createElement("button");
   panicButton.type = "button";
   panicButton.className = "wx-srv-panic-button";
   panicButton.textContent = "✕";
   panicButton.setAttribute("aria-label", "Close");
-  panicButton.addEventListener("click", () => hooks.lockNow("panic"));
+  panicButton.addEventListener("click", () => {
+    if (drawingLayer?.isPenOn()) {
+      drawingLayer.abandon();
+    } else {
+      hooks.lockNow("panic");
+    }
+  });
   header.append(title, nameChip, settingsButton, panicButton);
   element.appendChild(header);
 
@@ -244,7 +251,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
 
   // -- The pen (spec/server-chat/07-live-drawing.md) ---------------------------------------
   // Declared before the message state below exists, so its callbacks read that state lazily.
-  const drawingLayer: DrawingLayer = mountDrawingLayer({
+  drawingLayer = mountDrawingLayer({
     document: documentRef,
     win,
     hooks,
@@ -257,10 +264,15 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     anchorElement: (seq) => drawingAnchorElement(seq),
     holdScroll: () => threadScroll.hold(),
     onRemoteContent: () => threadScroll.afterContentChange(false),
+    onPenChange: (penOn) => {
+      settingsButton.hidden = penOn;
+    },
   });
   // §5: the Pen button lives in the chat HEADER (a third composer control pushed the text box
   // under its 120px floor on a 360px phone, decisions/00169); its toolbar sits under the header.
   header.insertBefore(drawingLayer.penButton, settingsButton);
+  header.insertBefore(drawingLayer.undoButton, settingsButton);
+  header.insertBefore(drawingLayer.redoButton, settingsButton);
   element.insertBefore(drawingLayer.toolbar, threadWrap);
   const lightbox: Lightbox = mountLightbox();
   let currentSession: ServerSession | null = null;
@@ -279,10 +291,19 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     | null = null;
   let voiceSendBusy = false;
 
+  const MIC_LINE_ICON =
+    '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
+  const STOP_LINE_ICON =
+    '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2" ry="2"/></svg>';
+  const PAUSE_LINE_ICON =
+    '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>';
+  const RESUME_LINE_ICON =
+    '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
+
   const recordButton = documentRef.createElement("button");
   recordButton.type = "button";
   recordButton.className = "wx-srv-record-button";
-  recordButton.textContent = "🎤";
+  recordButton.innerHTML = MIC_LINE_ICON;
   recordButton.title = "Record a voice note";
   recordButton.setAttribute("aria-label", "Record a voice note");
   const cancelRecordingButton = documentRef.createElement("button");
@@ -290,6 +311,13 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   cancelRecordingButton.className = "wx-srv-record-cancel";
   cancelRecordingButton.textContent = "Cancel";
   cancelRecordingButton.hidden = true;
+  const pauseRecordingButton = documentRef.createElement("button");
+  pauseRecordingButton.type = "button";
+  pauseRecordingButton.className = "wx-srv-record-pause";
+  pauseRecordingButton.innerHTML = PAUSE_LINE_ICON;
+  pauseRecordingButton.title = "Pause recording";
+  pauseRecordingButton.setAttribute("aria-label", "Pause recording");
+  pauseRecordingButton.hidden = true;
   const recordingStatus = documentRef.createElement("span");
   recordingStatus.className = "wx-srv-record-status";
   recordingStatus.hidden = true;
@@ -600,34 +628,69 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
 
   function updateRecorderUi(elapsedMs = voiceRecorder?.elapsedMs ?? 0): void {
     const state = voiceRecorder?.state ?? "idle";
+    const isRecordingOrPaused = state === "recording" || state === "paused";
     const active = state !== "idle";
     cancelRecordingButton.hidden = !active;
     recordButton.disabled = voiceSendBusy || pendingVoiceNote !== null
       || state === "starting" || state === "stopping";
+
+    const textarea = composer?.element?.querySelector<HTMLTextAreaElement>(".wx-chat-composer-input");
+    const sendButton = composer?.element?.querySelector<HTMLButtonElement>(".wx-chat-send-button");
+    const attachButton = composer?.element?.querySelector<HTMLButtonElement>(".wx-chat-attach-button");
+    const inputRow = composer?.element?.querySelector<HTMLElement>(".wx-chatc-input-row");
+
+    if (textarea !== null && textarea !== undefined) textarea.hidden = isRecordingOrPaused;
+    if (sendButton !== null && sendButton !== undefined) sendButton.hidden = isRecordingOrPaused;
+    if (attachButton !== null && attachButton !== undefined) attachButton.hidden = isRecordingOrPaused;
+    viewOnceButton.hidden = isRecordingOrPaused;
+
+    inputRow?.classList.toggle("wx-srv-recording-row", isRecordingOrPaused);
+    composer?.element?.classList.toggle("wx-srv-recording-row", isRecordingOrPaused);
+
     if (state === "recording") {
-      recordButton.textContent = "■";
+      recordButton.innerHTML = STOP_LINE_ICON;
       recordButton.title = "Stop recording";
       recordButton.setAttribute("aria-label", "Stop recording");
       recordingStatus.hidden = false;
       recordingStatus.textContent = `Recording ${formatRecordingTime(elapsedMs)}`;
+      pauseRecordingButton.hidden = !(voiceRecorder?.supportsPause ?? true);
+      pauseRecordingButton.innerHTML = PAUSE_LINE_ICON;
+      pauseRecordingButton.title = "Pause recording";
+      pauseRecordingButton.setAttribute("aria-label", "Pause recording");
+    } else if (state === "paused") {
+      recordButton.innerHTML = STOP_LINE_ICON;
+      recordButton.title = "Stop recording";
+      recordButton.setAttribute("aria-label", "Stop recording");
+      recordingStatus.hidden = false;
+      recordingStatus.textContent = `Paused ${formatRecordingTime(elapsedMs)}`;
+      pauseRecordingButton.hidden = !(voiceRecorder?.supportsPause ?? true);
+      pauseRecordingButton.innerHTML = RESUME_LINE_ICON;
+      pauseRecordingButton.title = "Resume recording";
+      pauseRecordingButton.setAttribute("aria-label", "Resume recording");
     } else if (state === "starting") {
-      recordButton.textContent = "🎤";
+      recordButton.innerHTML = MIC_LINE_ICON;
       recordButton.title = "Waiting for microphone";
       recordButton.setAttribute("aria-label", "Waiting for microphone");
       recordingStatus.hidden = false;
       recordingStatus.textContent = "Waiting for microphone…";
+      pauseRecordingButton.hidden = true;
     } else if (state === "stopping") {
+      recordButton.innerHTML = MIC_LINE_ICON;
       recordingStatus.hidden = false;
       recordingStatus.textContent = "Saving voice note…";
+      pauseRecordingButton.hidden = true;
     } else if (voiceSendBusy) {
+      recordButton.innerHTML = MIC_LINE_ICON;
       recordingStatus.hidden = false;
       recordingStatus.textContent = "Sending voice note…";
+      pauseRecordingButton.hidden = true;
     } else {
-      recordButton.textContent = "🎤";
+      recordButton.innerHTML = MIC_LINE_ICON;
       recordButton.title = "Record a voice note";
       recordButton.setAttribute("aria-label", "Record a voice note");
       recordingStatus.hidden = true;
       recordingStatus.textContent = "";
+      pauseRecordingButton.hidden = true;
     }
   }
 
@@ -683,8 +746,18 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       const started = recorder.start();
       updateRecorderUi();
       void started.finally(() => updateRecorderUi());
-    } else if (recorder.state === "recording") {
+    } else if (recorder.state === "recording" || recorder.state === "paused") {
       recorder.stop();
+      updateRecorderUi();
+    }
+  });
+  pauseRecordingButton.addEventListener("click", () => {
+    const recorder = activeRecorder();
+    if (recorder.state === "recording") {
+      recorder.pause();
+      updateRecorderUi();
+    } else if (recorder.state === "paused") {
+      recorder.resume();
       updateRecorderUi();
     }
   });
@@ -705,7 +778,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     // Sending never disables, blurs or resizes the input (operator report, round 2): the box is
     // cleared at once by `takeDraft()` and the draft comes back on a failed send.
     keepInputLive: true,
-    extraButtons: [recordButton, cancelRecordingButton, recordingStatus, viewOnceButton],
+    extraButtons: [recordButton, cancelRecordingButton, pauseRecordingButton, recordingStatus, viewOnceButton],
     renderChipPreview: (file, previewUrl) => {
       filePreviewUrls.set(file, previewUrl);
       const wrapper = documentRef.createElement("div");
@@ -840,11 +913,16 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     },
   };
 
-  async function requestTranscription(attachmentId: string): Promise<TranscribeAnswer> {
+  async function requestTranscription(
+    attachmentId: string,
+    options?: { retranscribe?: boolean },
+  ): Promise<TranscribeAnswer> {
     const session = currentSession;
     if (session === null) return { kind: "failed" };
     try {
-      return await transcribeAttachment(session, attachmentId);
+      return options !== undefined
+        ? await transcribeAttachment(session, attachmentId, options)
+        : await transcribeAttachment(session, attachmentId);
     } catch (error) {
       if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
       return { kind: "failed" };
@@ -1046,6 +1124,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       openLightbox: (src, alt) => lightbox.open(src, alt),
       transcription,
       document: documentRef,
+      win,
     });
   }
 

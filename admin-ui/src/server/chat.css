@@ -73,13 +73,12 @@
 }
 
 .wx-srv-settings-button,
-.wx-srv-panic-button {
+.wx-srv-panic-button,
+.wx-srv-pen-undo,
+.wx-srv-pen-redo {
   flex: none;
   width: 36px;
   height: 36px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-border);
   background: var(--wx-surface);
@@ -88,7 +87,50 @@
   cursor: pointer;
 }
 
+.wx-srv-settings-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wx-srv-panic-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wx-srv-pen-undo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wx-srv-pen-redo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wx-srv-pen-undo:disabled,
+.wx-srv-pen-redo:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.wx-srv-settings-button[hidden] {
+  display: none;
+}
+
+.wx-srv-pen-undo[hidden] {
+  display: none;
+}
+
+.wx-srv-pen-redo[hidden] {
+  display: none;
+}
+
 .wx-srv-record-button,
+.wx-srv-record-pause,
 .wx-srv-record-cancel {
   flex: none;
   min-height: var(--wx-srv-control-h);
@@ -107,10 +149,27 @@
   align-items: center;
   justify-content: center;
   padding: 0;
-  font-size: 1rem;
 }
 
-.wx-srv-record-button:disabled {
+.wx-srv-record-pause {
+  box-sizing: border-box;
+  width: var(--wx-srv-control-h);
+  height: var(--wx-srv-control-h);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.wx-srv-record-button svg,
+.wx-srv-record-pause svg {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+
+.wx-srv-record-button:disabled,
+.wx-srv-record-pause:disabled {
   opacity: 0.6;
   cursor: default;
 }
@@ -118,6 +177,10 @@
 .wx-srv-record-cancel {
   padding: 6px 10px;
   font: 0.75rem/1 system-ui, sans-serif;
+}
+
+.wx-srv-record-pause[hidden] {
+  display: none;
 }
 
 /* A failed voice note's Retry / Discard: their own row under the composer's error
@@ -195,6 +258,47 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.wx-srv-thread-view .wx-chat-send-button[hidden] {
+  display: none;
+}
+
+.wx-srv-thread-view .wx-chat-composer-input[hidden] {
+  display: none;
+}
+
+.wx-srv-thread-view .wx-srv-view-once-toggle-button[hidden] {
+  display: none;
+}
+
+/* Dedicated recording row: replaces the text input and Send button while recording
+   or paused, displaying the elapsed timer, Pause/Resume, Cancel, and Stop & Send. */
+.wx-srv-thread-view .wx-chatc-input-row.wx-srv-recording-row {
+  align-items: center;
+  min-height: var(--wx-srv-control-h);
+  flex-wrap: nowrap;
+}
+
+.wx-srv-thread-view .wx-chatc-input-row.wx-srv-recording-row .wx-srv-record-status {
+  order: 1;
+  flex: 1;
+  min-width: 0;
+  color: var(--wx-ink);
+  font: 500 0.875rem/1.2 system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+.wx-srv-thread-view .wx-chatc-input-row.wx-srv-recording-row .wx-srv-record-pause {
+  order: 2;
+}
+
+.wx-srv-thread-view .wx-chatc-input-row.wx-srv-recording-row .wx-srv-record-cancel {
+  order: 3;
+}
+
+.wx-srv-thread-view .wx-chatc-input-row.wx-srv-recording-row .wx-srv-record-button {
+  order: 4;
 }
 
 /* chatComposer.ts's auto-grow floors the input at 36px and the empty state
@@ -812,6 +916,7 @@ button.wx-srv-quote:focus-visible {
 
 .wx-srv-voice {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
@@ -848,6 +953,49 @@ button.wx-srv-quote:focus-visible {
   flex: none;
   font-size: 0.6875rem;
   color: var(--wx-muted);
+}
+
+.wx-srv-voice-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 10px;
+  box-sizing: border-box;
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+  border: 1px solid var(--wx-border);
+  font: 0.8125rem/1.3 system-ui, sans-serif;
+  color: var(--wx-ink);
+}
+
+.wx-srv-voice-confirm[hidden] {
+  display: none;
+}
+
+.wx-srv-voice-confirm-prompt {
+  flex: 1 1 auto;
+  font-weight: 500;
+}
+
+.wx-srv-voice-confirm-play,
+.wx-srv-voice-confirm-cancel {
+  flex: none;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font: 600 0.8125rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.wx-srv-voice-confirm-play {
+  background: var(--wx-brand-blue-tint);
+  border-color: var(--wx-brand-blue-text);
+  color: var(--wx-brand-blue-text);
 }
 
 /* -- Voice-note transcript (spec/server-chat/05-voice-transcription.md) ------
@@ -931,6 +1079,11 @@ button.wx-srv-quote:focus-visible {
   font: inherit;
   font-size: 0.75rem;
   cursor: pointer;
+}
+
+.wx-srv-transcript-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .wx-srv-transcript-toggle {
@@ -2007,6 +2160,7 @@ button.wx-srv-quote:focus-visible {
 
 .wx-srv-pen-mode,
 .wx-srv-pen-done,
+.wx-srv-pen-collapse,
 .wx-srv-pen-next,
 .wx-srv-pen-delete,
 .wx-srv-pen-confirm-delete,
@@ -2035,6 +2189,7 @@ button.wx-srv-quote:focus-visible {
 }
 
 .wx-srv-pen-done,
+.wx-srv-pen-collapse,
 .wx-srv-pen-next,
 .wx-srv-pen-delete,
 .wx-srv-pen-confirm-delete,
@@ -2044,8 +2199,20 @@ button.wx-srv-quote:focus-visible {
   border-radius: var(--wx-radius);
 }
 
-.wx-srv-pen-done {
+.wx-srv-pen-collapse {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.wx-srv-pen-collapse[hidden] {
+  display: none;
+}
+
+.wx-srv-pen-collapse svg {
+  flex: none;
 }
 
 .wx-srv-pen-delete,
@@ -2079,8 +2246,8 @@ button.wx-srv-quote:focus-visible {
      - Line 1 is what the mode acts on: the colours, the selection's two buttons, or the delete
        question with its buttons.
      - Line 2 is always Draw | Select, then the mode's slot (the thicknesses, or the hint), then
-       Done. The switch is first, so it never moves under the finger when the mode changes.
-     The slot is the only part that gives: the thicknesses start from 28px wide each (still 44px
+       Collapse, then Done. The switch is first, so it never moves under the finger when the mode changes.
+     The slot is the only part that gives: the thicknesses start from 24px wide each (still 44px
      tall) and grow back to 44px into whatever the labels leave, and the hint wraps inside it. So
      a wider font takes width from the slot instead of pushing Done onto a third line — measured:
      with Ubuntu's DejaVu Sans (and with Verdana) the old fixed-width line needed three lines on
@@ -2107,22 +2274,32 @@ button.wx-srv-quote:focus-visible {
     order: 2;
   }
 
-  .wx-srv-pen-done {
+  .wx-srv-pen-collapse {
     order: 3;
+    margin-left: 0;
+    padding: 0 10px;
   }
 
-  .wx-srv-pen-status {
+  .wx-srv-pen-done {
     order: 4;
   }
 
+  .wx-srv-pen-status {
+    order: 5;
+  }
+
   .wx-srv-pen-widths {
-    flex: 1 1 calc(4 * 28px);
+    flex: 1 1 calc(4 * 24px);
     max-width: calc(4 * 44px);
   }
 
   .wx-srv-pen-width {
-    min-width: 28px;
+    min-width: 24px;
     width: auto;
+  }
+
+  .wx-srv-pen-collapse-label {
+    display: none;
   }
 
   /* At most three lines of it fit the 44px line (3 x 14.4px). */
@@ -2133,6 +2310,7 @@ button.wx-srv-quote:focus-visible {
 
   .wx-srv-pen-mode,
   .wx-srv-pen-done,
+  .wx-srv-pen-collapse,
   .wx-srv-pen-next,
   .wx-srv-pen-delete,
   .wx-srv-pen-confirm-delete,

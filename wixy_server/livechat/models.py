@@ -217,13 +217,17 @@ class AttachmentResult:
 
 def transcript_json(row: TranscriptRow | None) -> JsonObject | None:
     """The `Attachment.transcript` wire shape: `null` (never asked) or `{status}` with
-    `text` only once `done`. A failed row carries no reason on the wire — the machine-readable
+    `text` when `done` or when a previous transcript is preserved across a failed
+    re-transcribe. A failed row carries no reason on the wire — the machine-readable
     `failure` code stays server-side."""
     if row is None:
         return None
-    if row.status == "done":
-        return {"status": "done", "text": row.text if row.text is not None else ""}
-    return {"status": row.status}
+    data: JsonObject = {"status": row.status}
+    if row.text is not None:
+        data["text"] = row.text
+    elif row.status == "done":
+        data["text"] = ""
+    return data
 
 
 def attachment_json(row: AttachmentRow, signer: MediaUrlSigner) -> JsonObject:

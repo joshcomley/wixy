@@ -104,12 +104,62 @@ describe("thread + pen", () => {
     const view = mountServerThread({ identity: identity(), hooks: hooks(), win: win(), onSettings: vi.fn() });
     const header = view.element.querySelector(".wx-srv-thread-header")!;
     const buttons = Array.from(header.querySelectorAll("button"), (b) => b.className);
-    expect(buttons).toEqual(["wx-srv-pen-button", "wx-srv-settings-button", "wx-srv-panic-button"]);
+    expect(buttons).toEqual([
+      "wx-srv-pen-button",
+      "wx-srv-pen-undo",
+      "wx-srv-pen-redo",
+      "wx-srv-settings-button",
+      "wx-srv-panic-button",
+    ]);
+    const undoButton = header.querySelector<HTMLButtonElement>(".wx-srv-pen-undo")!;
+    const redoButton = header.querySelector<HTMLButtonElement>(".wx-srv-pen-redo")!;
+    const settingsButton = header.querySelector<HTMLButtonElement>(".wx-srv-settings-button")!;
+    expect(undoButton.hidden).toBe(true);
+    expect(redoButton.hidden).toBe(true);
+    expect(settingsButton.hidden).toBe(false);
+
     // Not in the composer (decisions/00169: a third composer control squeezed the text box).
     expect(view.element.querySelector(".wx-chat-composer .wx-srv-pen-button, .wx-chatc-input-row .wx-srv-pen-button")).toBeNull();
     const children = Array.from(view.element.children, (child) => child.className);
     expect(children.indexOf("wx-srv-pen-toolbar")).toBe(children.indexOf("wx-srv-thread-header") + 1);
     expect(children.indexOf("wx-srv-thread-wrap")).toBe(children.indexOf("wx-srv-pen-toolbar") + 1);
+    view.teardown();
+  });
+
+  it("swaps settings cog for undo/redo when pen is turned on, and close button abandons without locking", async () => {
+    const lockHooks = hooks();
+    const view = mountServerThread({ identity: identity(), hooks: lockHooks, win: win(), onSettings: vi.fn() });
+    document.body.appendChild(view.element);
+    await view.attach(SESSION);
+
+    const header = view.element.querySelector(".wx-srv-thread-header")!;
+    const penButton = header.querySelector<HTMLButtonElement>(".wx-srv-pen-button")!;
+    const undoButton = header.querySelector<HTMLButtonElement>(".wx-srv-pen-undo")!;
+    const redoButton = header.querySelector<HTMLButtonElement>(".wx-srv-pen-redo")!;
+    const settingsButton = header.querySelector<HTMLButtonElement>(".wx-srv-settings-button")!;
+    const panicButton = header.querySelector<HTMLButtonElement>(".wx-srv-panic-button")!;
+
+    expect(undoButton.hidden).toBe(true);
+    expect(redoButton.hidden).toBe(true);
+    expect(settingsButton.hidden).toBe(false);
+
+    // Turn pen on: settings cog hidden, undo/redo visible
+    penButton.click();
+    expect(undoButton.hidden).toBe(false);
+    expect(redoButton.hidden).toBe(false);
+    expect(settingsButton.hidden).toBe(true);
+
+    // Panic button while in draw mode abandons and restores cog without panic-locking
+    panicButton.click();
+    expect(undoButton.hidden).toBe(true);
+    expect(redoButton.hidden).toBe(true);
+    expect(settingsButton.hidden).toBe(false);
+    expect(lockHooks.lockNow).not.toHaveBeenCalled();
+
+    // Panic button outside draw mode locks normally
+    panicButton.click();
+    expect(lockHooks.lockNow).toHaveBeenCalledWith("panic");
+
     view.teardown();
   });
 

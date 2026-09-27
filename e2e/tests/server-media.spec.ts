@@ -187,6 +187,91 @@ test.describe("server-media.spec.ts (P6b)", () => {
     await audioNode!.dispose();
   });
 
+  test("voice recorder pause and resume excludes paused interval and dedicated row hides inputs on desktop and mobile", async ({ page }) => {
+    // 1. Desktop test
+    await unlockServer(page, `PauseDesktop ${Date.now()}`);
+    const draft = page.locator(".wx-chat-composer textarea");
+    const sendButton = page.locator(".wx-chat-send-button");
+    const record = page.getByRole("button", { name: "Record a voice note" });
+    const status = page.locator(".wx-srv-record-status");
+
+    await expect(draft).toBeVisible();
+    await expect(sendButton).toBeVisible();
+
+    await record.click();
+    await expect(page.getByRole("button", { name: "Stop recording" })).toBeVisible();
+    await expect(draft).toBeHidden();
+    await expect(sendButton).toBeHidden();
+    await expect(status).toContainText("Recording");
+
+    const pauseButton = page.getByRole("button", { name: "Pause recording" });
+    await expect(pauseButton).toBeVisible();
+
+    // Record for ~1.5s
+    await page.waitForTimeout(1_500);
+
+    // Pause
+    await pauseButton.click();
+    await expect(status).toContainText("Paused");
+    const resumeButton = page.getByRole("button", { name: "Resume recording" });
+    await expect(resumeButton).toBeVisible();
+    await expect(draft).toBeHidden();
+    await expect(sendButton).toBeHidden();
+
+    // Paused for 2.2s (this time must NOT be included in duration)
+    await page.waitForTimeout(2_200);
+
+    // Resume
+    await resumeButton.click();
+    await expect(status).toContainText("Recording");
+    await expect(pauseButton).toBeVisible();
+
+    // Record for ~1.5s more (total active time ~3s, wall clock ~5.2s)
+    await page.waitForTimeout(1_500);
+
+    const sentVoice = page.waitForResponse((response) =>
+      response.url().endsWith("/api/admin/server/messages") && response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: "Stop recording" }).click();
+    expect((await sentVoice).status()).toBe(201);
+
+    await expect(draft).toBeVisible();
+    await expect(sendButton).toBeVisible();
+
+    const voice = page.locator(".wx-srv-voice");
+    await waitForRenderedAttachments(page, ".wx-srv-voice", 1, 15_000);
+    // Active time ~3s, wall clock was >5s. Excluded pause means time contains 0:02 or 0:03, never 0:05.
+    await expect(voice.locator(".wx-srv-voice-time")).toContainText(/\/ 0:0[234]/);
+
+    // 2. Mobile 360px test: verify dedicated row fits without overflow
+    await page.setViewportSize({ width: 360, height: 740 });
+    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+    await record.click();
+    await expect(page.getByRole("button", { name: "Stop recording" })).toBeVisible();
+    await expect(draft).toBeHidden();
+    await expect(sendButton).toBeHidden();
+    await expect(page.getByRole("button", { name: "Pause recording" })).toBeVisible();
+
+    // All controls in the dedicated row fit within 360px viewport with no horizontal overflow
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+    const pauseBox = await page.getByRole("button", { name: "Pause recording" }).boundingBox();
+    const stopBox = await page.getByRole("button", { name: "Stop recording" }).boundingBox();
+    const cancelBox = await page.getByRole("button", { name: "Cancel" }).boundingBox();
+
+    expect(pauseBox).not.toBeNull();
+    expect(stopBox).not.toBeNull();
+    expect(cancelBox).not.toBeNull();
+    expect(pauseBox!.x + pauseBox!.width).toBeLessThanOrEqual(360);
+    expect(stopBox!.x + stopBox!.width).toBeLessThanOrEqual(360);
+    expect(cancelBox!.x + cancelBox!.width).toBeLessThanOrEqual(360);
+
+    // Cancel to clean up
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(draft).toBeVisible();
+    await expect(sendButton).toBeVisible();
+  });
+
   test("a voice note the server cannot accept never strands the mic, on a 360px phone (F17)", async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 740 });
     let sends = 0;
@@ -310,5 +395,68 @@ test.describe("server-media.spec.ts (P6b)", () => {
     await expect(page.locator(".wx-chat-composer-error")).toContainText("Too short");
     await expect(page.locator(".wx-chat-attachment-chip")).toHaveCount(0);
     expect(uploadRequests).toEqual([]);
+  });
+
+  test("confirm before playing audio messages preference gates voice playback on a phone", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await unlockServer(page, `AudioConfirm ${Date.now()}`);
+
+    // Record and send a voice note
+    const record = page.getByRole("button", { name: "Record a voice note" });
+    await record.click();
+    await expect(page.getByRole("button", { name: "Stop recording" })).toBeVisible();
+    await page.waitForTimeout(1_300);
+    const sentVoice = page.waitForResponse((response) =>
+      response.url().endsWith("/api/admin/server/messages") && response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: "Stop recording" }).click();
+    expect((await sentVoice).status()).toBe(201);
+
+    // Wait for the voice note to render in the user's bubble
+    const userBubble = page.locator(".wx-srv-bubble-mine").last();
+    await expect(userBubble.locator(".wx-srv-voice")).toBeVisible({ timeout: 15_000 });
+    const voiceNote = userBubble.locator(".wx-srv-voice");
+    const playBtn = voiceNote.getByRole("button", { name: "Play voice note" });
+    const confirmBox = voiceNote.locator(".wx-srv-voice-confirm");
+
+    // By default (preference OFF), tapping play does NOT show confirmation
+    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+    await expect(confirmBox).toBeHidden();
+    await playBtn.click();
+    await expect(confirmBox).toBeHidden();
+    // Pause it
+    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+    await playBtn.click();
+
+    // Now open settings and enable "Ask before playing audio messages"
+    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+    await page.locator(".wx-srv-settings-button").click();
+    await expect(page.locator(".wx-srv-sheet")).toBeVisible();
+    const confirmPrefCheckbox = page.getByLabel("Ask before playing audio messages");
+    await expect(confirmPrefCheckbox).not.toBeChecked();
+    await confirmPrefCheckbox.check();
+    await expect(confirmPrefCheckbox).toBeChecked();
+    await page.locator(".wx-srv-sheet-close").click();
+    await expect(page.locator(".wx-srv-sheet")).toBeHidden();
+
+    // With preference ON: tapping play shows confirm prompt
+    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+    await playBtn.click();
+    await expect(confirmBox).toBeVisible();
+    await expect(confirmBox.locator(".wx-srv-voice-confirm-prompt")).toHaveText("Play audio message?");
+
+    // Cancel hides prompt and does not play
+    await confirmBox.locator(".wx-srv-voice-confirm-cancel").click();
+    await expect(confirmBox).toBeHidden();
+    const audioEl = voiceNote.locator("audio");
+    expect(await audioEl.evaluate((a: HTMLAudioElement) => a.paused)).toBe(true);
+
+    // Tapping play again and confirming plays the audio
+    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+    await playBtn.click();
+    await expect(confirmBox).toBeVisible();
+    await confirmBox.locator(".wx-srv-voice-confirm-play").click();
+    await expect(confirmBox).toBeHidden();
+    await expect.poll(() => audioEl.evaluate((a) => (a as HTMLAudioElement).currentTime)).toBeGreaterThan(0);
   });
 });

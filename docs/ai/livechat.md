@@ -726,8 +726,10 @@ finished. Its progress element reflects uploaded bytes. A picker opening calls
 or `cancel` event. P4 also has a five-minute safety release for browsers that fail to emit
 either event.
 
-The 🎤 control uses `server/recorder.ts`. It requests microphone permission, shows a recording
-timer, supports stop and cancel, and passes the resulting `File` into the same staged-upload
+The 🎤 control uses `server/recorder.ts`. It requests microphone permission, hides the composer
+text input and Send button in favour of a dedicated recording row, provides a Pause/Resume button
+that freezes the elapsed recording timer and excludes paused intervals from the delivered audio
+duration, supports stop and cancel, and passes the resulting `File` into the same staged-upload
 flow. Locking calls the recorder's `detach()` to discard an unfinished recording and release
 the microphone. A new recorder is created on the next attach because a detached recorder is
 terminal. Recordings shorter than one second are discarded with a “Too short” hint and never
@@ -931,11 +933,13 @@ deploy the startup sweep, not this handler, is what clears such a row.) The `fai
 
 **The route and job (`routes_livechat.py`, `livechat/transcription.py`).**
 `POST /attachments/{id}/transcribe` answers at once: 404 (not a sent voice note), 409 (not ready),
-200 (already `done`), 202 (this process already has a job for it — `TranscriptionRuntime.inflight`
-is the single-flight authority), 503 `not_configured`, 429 (6 new jobs a minute per identity), else
-the note is claimed in process before the first `await`, a `pending` row is written and a job runs on
-the contained group → 202. A `pending` row with no job behind it (its outcome could not be recorded)
-is restarted by the next request (`begin_transcript(restart_pending=True)`). The job
+200 (already `done` when not re-transcribing), 202 (fresh job, or re-transcribing an existing `done`
+row via `?retranscribe=1` / `?force=1` which replaces it in place via
+`begin_transcript(restart_done=True)`, or this process already has a job for it —
+`TranscriptionRuntime.inflight` is the single-flight authority), 503 `not_configured`, 429 (6 new jobs
+a minute per identity), else the note is claimed in process before the first `await`, a `pending` row is
+written and a job runs on the contained group → 202. A `pending` row with no job behind it (its outcome
+could not be recorded) is restarted by the next request (`begin_transcript(restart_pending=True)`). The job
 (`TranscriptionRuntime.run_job`) waits for the global one-at-a-time slot, reads
 `media/<id[:2]>/<id>/play.m4a`, asks cmd afresh whether it still promises private mode, sends it with a budget of **60 s + 0.5 × the
 note's seconds**, and records `done`/`failed`, which appends `message_updated`; the stream delivers
@@ -943,7 +947,9 @@ note's seconds**, and records `done`/`failed`, which appends `message_updated`; 
 
 **Frontend (`admin-ui/src/server/transcript.ts`).** Per voice note, one `.wx-srv-transcript` block:
 Transcribe (only while `transcriptionAvailable`, read once per attach) → "Transcribing…" spinner →
-text + per-device Hide/Show (a `Set` in `thread.ts`, memory only) → or an error + Retry. A
+text + per-device Hide/Show (a `Set` in `thread.ts`, memory only) + Re-transcribe (re-POSTs with
+`?retranscribe=1`, replacing finished text in place; if the re-transcribe attempt fails, the prior
+successful transcript text is preserved rather than wiped) → or an error + Retry. A
 transcript-only `message_updated` is patched into the live bubble (`differOnlyInTranscripts` →
 `patchTranscriptBlocks`) so a playing `<audio>` is never disposed; anything else still rebuilds the
 bubble. A `202` reply cannot overwrite a newer stream update (a quick job's update can beat the
@@ -1418,10 +1424,27 @@ side (schema, routes, the live relay and erasure) is §18. This section covers t
   composer: a third composer control pushed the text box under its 120 px floor on a 360 px
   phone (decisions/00169). It is a 44×44 px button whose visible 36 px face
   (`.wx-srv-pen-face`) matches ⚙ and ✕. A `-4px` margin keeps the header row's 36 px layout.
-  It carries `data-srv-gesture-boundary` and `aria-pressed`. It does nothing while locked.
+  It carries `data-srv-gesture-boundary`, `aria-pressed` (pen on/off), and `aria-expanded` (toolbar open/collapsed).
+  It does nothing while locked. While the pen is on, tapping the Pen button toggles the toolbar open or collapsed
+  without turning the pen off.
+- **Header Settings cog swap & Undo/Redo:** While the pen is on, the header settings cog
+  (`.wx-srv-settings-button`) is hidden, and **Undo** (`.wx-srv-pen-undo`) and **Redo**
+  (`.wx-srv-pen-redo`) buttons take its place for strokes made during the current drawing session.
+  Undo pops the latest stroke; if it was the drawing's sole stroke, the drawing is deleted locally
+  and via `sync.deleteDrawing` (and a live cancel frame is emitted), while for multi-stroke drawings
+  remaining strokes are re-stored under a new key. Redo restores undone strokes and stores them
+  on the anchor message. Both buttons carry `data-srv-gesture-boundary`.
+- **Keyboard parity:** `Ctrl+Z` / `Cmd+Z` (undo) and `Ctrl+Y` / `Ctrl+Shift+Z` / `Cmd+Shift+Z`
+  (redo) operate undo/redo globally while draw mode is active.
+- **Header Close button abandons:** In draw mode, clicking the header Close button
+  (`.wx-srv-panic-button`, ✕) immediately abandons in-progress session drawings (discards active
+  and stored strokes from model, view, and server, resets undo/redo stacks) and exits draw mode
+  without a confirmation dialog and without locking the chat (Inv 42 exception). Outside draw mode,
+  ✕ locks the chat as panic. (Escape continues to lock immediately even mid-stroke).
 - **The toolbar** (`.wx-srv-pen-toolbar`, `role="toolbar"`) sits between the header and the
   thread. It holds the 8 colour swatches and the 4 thicknesses (in Draw mode), a **Draw |
-  Select** switch, and **Done** (which turns the pen off). In Select mode it shows the hint,
+  Select** switch, **Collapse** (in Draw mode, `.wx-srv-pen-collapse`, which tucks the toolbar away so the full thread
+  area is drawable while strokes stay live), and **Done** (which exits pen mode and clears undo/redo session history). In Select mode it shows the hint,
   **Next drawing** (the keyboard route to a drawing) and **Delete drawing**
   (`data-srv-gesture-boundary`, since it opens the confirmation). "Delete this drawing for
   everyone?" then replaces them with Delete / Cancel. Notices use the status line
@@ -1431,11 +1454,11 @@ side (schema, routes, the live relay and erasure) is §18. This section covers t
   - Line 1 is what the mode acts on: the colours, the selection's two buttons, or the delete
     question with Delete / Cancel.
   - Line 2 is always **Draw | Select, then the mode's slot** (the thicknesses in Draw mode, the
-    hint in Select mode, nothing during the question), **then Done**. The switch comes first,
-    so it never moves under the finger when the mode changes.
-  - The slot is the only part that gives. The thicknesses start at 28 px wide each (always
+    hint in Select mode, nothing during the question), **then Collapse (in Draw mode), then Done**.
+    The switch comes first, so it never moves under the finger when the mode changes.
+  - The slot is the only part that gives. The thicknesses start at 24 px wide each (always
     44 px tall) and grow back towards 44 px into the room the labels leave, and the hint wraps
-    inside it (at most three lines fit the 44 px line).
+    inside it (at most three lines fit the 44 px line). Collapse displays an icon without its label on phone widths.
   - DOM order is the desktop line's (and so the keyboard's). CSS `order` arranges the phone's
     two lines, and the hint is a direct child of the toolbar, not of the select group.
 - **Why it is built this way (measured, decisions/00176 #13):** the first layout gave line 2
@@ -1487,7 +1510,8 @@ side (schema, routes, the live relay and erasure) is §18. This section covers t
 - In Draw mode, `div.wx-srv-draw-surface` lies over the thread inside `.wx-srv-thread-wrap`:
   `z-index: 1` (below the jump pill's 2), `touch-action: none`, pointer capture, and a right
   inset that leaves a desktop scrollbar draggable. It carries `data-srv-gesture-exempt`, so
-  the multi-tap lock ignores it and rapid dots never lock. Escape and ✕ still lock at once.
+  the multi-tap lock ignores it and rapid dots never lock. Escape still locks at once; ✕ abandons
+  the drawing session and exits draw mode without locking (Inv 42 exception).
 - **One finger, pen or mouse draws.** A second TOUCH finger that lands within 150 ms of the
   first and before the first has moved 12 px cancels the stroke (a live `cancel`, nothing
   stored) and starts a two-finger pan that scrolls by the centroid's movement. Any other extra

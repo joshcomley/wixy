@@ -1759,6 +1759,43 @@ class TestTranscripts:
         assert again.state == "done"
         assert again.transcript is not None and again.transcript.text == "keep me"
 
+    def test_restart_done_replaces_a_finished_transcript_in_place(
+        self, store: LiveChatStore
+    ) -> None:
+        _seq, att_id = _ready_voice_message(store)
+        store.begin_transcript(att_id=att_id, now=2000.0)
+        store.finish_transcript(
+            att_id=att_id,
+            status="done",
+            text="first attempt",
+            failure=None,
+            engine=None,
+            now=2001.0,
+        )
+        restarted = store.begin_transcript(
+            att_id=att_id, now=2002.0, restart_pending=True, restart_done=True
+        )
+        assert restarted.state == "started"
+        assert restarted.transcript is not None
+        assert restarted.transcript.status == "pending"
+        assert restarted.transcript.text == "first attempt"
+        assert restarted.transcript.updated_at == 2002.0
+
+        # A failed re-transcribe leaves the pre-retry transcript intact
+        store.finish_transcript(
+            att_id=att_id,
+            status="failed",
+            text=None,
+            failure="cmd_502",
+            engine="hub_whisper",
+            now=2003.0,
+        )
+        failed_row = store.get_transcript(att_id)
+        assert failed_row is not None
+        assert failed_row.status == "failed"
+        assert failed_row.text == "first attempt"
+        assert failed_row.failure == "cmd_502"
+
     def test_an_interrupted_record_only_ever_turns_pending_into_failed(
         self, store: LiveChatStore
     ) -> None:

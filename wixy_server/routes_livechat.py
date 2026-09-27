@@ -1422,12 +1422,18 @@ async def usage(request: Request) -> JsonObject:
 
 
 @router.post("/attachments/{att_id}/transcribe", response_model=None)
-async def transcribe_attachment(att_id: str, request: Request) -> JSONResponse:
+async def transcribe_attachment(
+    att_id: str,
+    request: Request,
+    retranscribe: bool = False,
+) -> JSONResponse:
     auth = await require_server_token(request)
     store: LiveChatStore = request.app.state.livechat_store
     runtime: TranscriptionRuntime = request.app.state.livechat_transcription
     notifier: LiveChatNotifier = request.app.state.livechat_notifier
     background: ContainedTaskGroup = request.app.state.background_tasks
+
+    retranscribe = retranscribe or request.query_params.get("force") in ("1", "true")
 
     def _not_found() -> JSONResponse:
         return JSONResponse(status_code=404, content={"error": "not_found"})
@@ -1449,7 +1455,7 @@ async def transcribe_attachment(att_id: str, request: Request) -> JSONResponse:
         return JSONResponse(status_code=202, content={"transcript": {"status": "pending"}})
 
     existing = attachment.transcript
-    if existing is not None and existing.status == "done":
+    if existing is not None and existing.status == "done" and not retranscribe:
         return _stored(existing, status_code=200)  # reading a stored transcript needs no cmd
     if att_id in runtime.inflight:
         return _pending()  # single-flight: this process already has a job for the note
@@ -1474,7 +1480,12 @@ async def transcribe_attachment(att_id: str, request: Request) -> JSONResponse:
     runtime.inflight.add(att_id)
     try:
         begin = await anyio.to_thread.run_sync(
-            lambda: store.begin_transcript(att_id=att_id, now=time.time(), restart_pending=True)
+            lambda: store.begin_transcript(
+                att_id=att_id,
+                now=time.time(),
+                restart_pending=True,
+                restart_done=retranscribe,
+            )
         )
         if begin.state == "started":
             notifier.publish()  # the other device's spinner

@@ -12,6 +12,7 @@ import {
   ServerWipeAbandonedError,
 } from "./api/http";
 import { clearDeviceGrant, deviceLabel, onGrantStateChanged, readDeviceGrant, storeDeviceGrant } from "./deviceGrant";
+import { isAudioConfirmEnabled, onAudioConfirmPreferenceChanged, setAudioConfirmEnabled } from "./audioConfirmPreference";
 import type { ServerIdentity } from "./identity";
 import { isIdleLockExtended, onIdleLockPreferenceChanged, setIdleLockExtended } from "./idlePreference";
 import { effectiveLockSettings, type PinError } from "./lockModel";
@@ -129,6 +130,19 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   idleNote.hidden = true;
   idleNote.textContent = "Off — nothing to extend while this device is kept unlocked.";
   idleInput.setAttribute("aria-describedby", idleNote.id);
+
+  // "Ask before playing audio messages" — a per-DEVICE preference (localStorage).
+  const audioConfirmLabel = documentRef.createElement("label");
+  audioConfirmLabel.className = "wx-srv-sheet-idle wx-srv-sheet-audio-confirm-row";
+  const audioConfirmInput = documentRef.createElement("input");
+  audioConfirmInput.type = "checkbox";
+  audioConfirmInput.className = "wx-srv-sheet-idle-input wx-srv-sheet-audio-confirm-input";
+  audioConfirmInput.id = `wx-srv-audio-confirm-${++idleCheckboxSequence}`;
+  audioConfirmLabel.htmlFor = audioConfirmInput.id;
+  const audioConfirmText = documentRef.createElement("span");
+  audioConfirmText.className = "wx-srv-sheet-idle-text";
+  audioConfirmText.textContent = "Ask before playing audio messages";
+  audioConfirmLabel.append(audioConfirmInput, audioConfirmText);
 
   // -- "Keep this device unlocked" (03-permanent-unlock.md §4) -------------------------------
 
@@ -353,6 +367,7 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     pushSlot,
     idleLabel,
     idleNote,
+    audioConfirmLabel,
     keepGroup,
     lockGroup,
     wipeButton,
@@ -628,6 +643,12 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
   const detachIdlePreferenceListener = onIdleLockPreferenceChanged(win, () => {
     idleInput.checked = isIdleLockExtended(win);
   });
+  audioConfirmInput.addEventListener("change", () =>
+    setAudioConfirmEnabled(win, audioConfirmInput.checked),
+  );
+  const detachAudioConfirmListener = onAudioConfirmPreferenceChanged(win, () => {
+    audioConfirmInput.checked = isAudioConfirmEnabled(win);
+  });
   nameInput.addEventListener("keydown", (evt) => {
     if (evt.key === "Enter") saveName();
   });
@@ -709,6 +730,7 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
       wipeStatus.hidden = !wipeOutcomeUnknown;
       nameInput.value = identity.getName() ?? "";
       idleInput.checked = isIdleLockExtended(win);
+      audioConfirmInput.checked = isAudioConfirmEnabled(win);
       signOutStatus.hidden = true;
       syncKeepRow();
       syncLockRows();
@@ -739,6 +761,7 @@ export function mountServerSettingsSheet(deps: ServerSettingsSheetDeps): ServerS
     close,
     teardown(): void {
       detachIdlePreferenceListener();
+      detachAudioConfirmListener();
       detachGrantStateListener();
       detachLockSettingsListener();
       keepPad.teardown();

@@ -1957,7 +1957,12 @@ class LiveChatStore:
         return attachment.transcript if attachment is not None else None
 
     def begin_transcript(
-        self, *, att_id: str, now: float, restart_pending: bool = False
+        self,
+        *,
+        att_id: str,
+        now: float,
+        restart_pending: bool = False,
+        restart_done: bool = False,
     ) -> TranscriptBegin:
         """Atomically decide whether a transcription job should start for `att_id`.
 
@@ -1965,6 +1970,9 @@ class LiveChatStore:
         over: the route passes it only when THIS process has no job in flight for the note, so
         the row belongs to a job that is gone (its outcome could not be recorded, or it was
         started by a process that died) — never to a live one.
+
+        `restart_done=True` allows re-transcribing a completed transcript row, resetting it to
+        `pending` in place.
 
         Everything is checked under one write lock, so two racing requests can never both
         get `started`: the loser sees the winner's `pending` row. A missing row and a
@@ -1985,7 +1993,7 @@ class LiveChatStore:
             ):
                 return TranscriptBegin("gone")
             existing = _load_attachment(conn, att_id).transcript
-            if existing is not None and existing.status == "done":
+            if existing is not None and existing.status == "done" and not restart_done:
                 return TranscriptBegin("done", existing)
             if existing is not None and existing.status == "pending" and not restart_pending:
                 return TranscriptBegin("pending", existing)
@@ -1997,7 +2005,7 @@ class LiveChatStore:
                 )
             else:
                 conn.execute(
-                    "UPDATE attachment_transcripts SET status = 'pending', text = NULL, "
+                    "UPDATE attachment_transcripts SET status = 'pending', "
                     "failure = NULL, engine = NULL, updated_at = ? WHERE attachment_id = ?",
                     (now, att_id),
                 )
@@ -2025,12 +2033,21 @@ class LiveChatStore:
         still-`pending` row into `failed`, never overwrite a `done` transcript or a newer
         attempt's outcome."""
         with self._write_txn() as conn:
-            cursor = conn.execute(
-                "UPDATE attachment_transcripts SET status = ?, text = ?, failure = ?, "
-                "engine = ?, updated_at = ? WHERE attachment_id = ?"
-                + (" AND status = 'pending'" if only_if_pending else ""),
-                (status, text if status == "done" else None, failure, engine, now, att_id),
-            )
+            if status == "done":
+                cursor = conn.execute(
+                    "UPDATE attachment_transcripts SET status = ?, text = ?, failure = ?, "
+                    "engine = ?, updated_at = ? WHERE attachment_id = ?"
+                    + (" AND status = 'pending'" if only_if_pending else ""),
+                    (status, text, failure, engine, now, att_id),
+                )
+            else:
+                # Failure: preserve existing transcript text (if any) rather than wiping it to NULL
+                cursor = conn.execute(
+                    "UPDATE attachment_transcripts SET status = ?, failure = ?, "
+                    "engine = ?, updated_at = ? WHERE attachment_id = ?"
+                    + (" AND status = 'pending'" if only_if_pending else ""),
+                    (status, failure, engine, now, att_id),
+                )
             if cursor.rowcount != 1:
                 return False
             self._append_message_updated(conn, att_id, now)

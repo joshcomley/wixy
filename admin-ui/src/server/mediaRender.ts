@@ -1,5 +1,6 @@
 /** DOM renderers for server-chat photo, video and voice attachments. */
 
+import { isAudioConfirmEnabled } from "./audioConfirmPreference";
 import { renderTranscriptBlock, type TranscriptionContext } from "./transcript";
 
 export type AttachmentKind = "photo" | "video" | "voice";
@@ -9,8 +10,8 @@ export type SuspendReason = "recording" | "micPermission" | "filePicker" | "medi
 /** A voice note's opt-in transcript (spec/server-chat/05-voice-transcription.md): absent/`null`
  * until someone asks; `text` only once `done`. */
 export type AttachmentTranscript =
-  | { readonly status: "pending" }
-  | { readonly status: "failed" }
+  | { readonly status: "pending"; readonly text?: string | null }
+  | { readonly status: "failed"; readonly text?: string | null }
   | { readonly status: "done"; readonly text: string };
 
 export interface Attachment {
@@ -41,6 +42,7 @@ export interface MediaRenderContext {
   /** When present, every ready voice note gets the opt-in Transcribe control beneath it. */
   readonly transcription?: TranscriptionContext;
   readonly document?: Document;
+  readonly win?: Window;
 }
 
 const releasePlaybackByElement = new WeakMap<HTMLMediaElement, () => void>();
@@ -210,15 +212,52 @@ function renderVoice(
       Number.isFinite(audio.duration) ? audio.duration : attachment.durationS ?? 0,
     )}`;
   });
+  const confirmBox = documentRef.createElement("div");
+  confirmBox.className = "wx-srv-voice-confirm";
+  confirmBox.hidden = true;
+  const confirmText = documentRef.createElement("span");
+  confirmText.className = "wx-srv-voice-confirm-prompt";
+  confirmText.textContent = "Play audio message?";
+  const confirmPlay = documentRef.createElement("button");
+  confirmPlay.type = "button";
+  confirmPlay.className = "wx-srv-voice-confirm-play";
+  confirmPlay.textContent = "Play";
+  const confirmCancel = documentRef.createElement("button");
+  confirmCancel.type = "button";
+  confirmCancel.className = "wx-srv-voice-confirm-cancel";
+  confirmCancel.textContent = "Cancel";
+  confirmBox.append(confirmText, confirmPlay, confirmCancel);
+
+  const startPlayback = () => {
+    const playResult = audio.play();
+    void playResult?.catch(() => stopped());
+  };
+
+  confirmPlay.addEventListener("click", () => {
+    confirmBox.hidden = true;
+    startPlayback();
+  });
+
+  confirmCancel.addEventListener("click", () => {
+    confirmBox.hidden = true;
+  });
+
   playButton.addEventListener("click", () => {
     if (audio.paused) {
-      const playResult = audio.play();
-      void playResult?.catch(() => stopped());
+      const askConfirm = context.win ? isAudioConfirmEnabled(context.win) : false;
+      if (askConfirm) {
+        confirmBox.hidden = false;
+        confirmPlay.focus();
+      } else {
+        confirmBox.hidden = true;
+        startPlayback();
+      }
     } else {
+      confirmBox.hidden = true;
       audio.pause();
     }
   });
-  root.append(playButton, waveform, elapsed, audio);
+  root.append(playButton, waveform, elapsed, audio, confirmBox);
   return root;
 }
 
