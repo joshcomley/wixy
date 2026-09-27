@@ -3384,8 +3384,56 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     const card = view.element.querySelector(".wx-srv-view-once-sender-card");
     expect(card).toBeTruthy();
     expect(card?.textContent).toContain("View-once photo · 30 s · Not opened yet");
-    const tapBtn = card?.querySelector(".wx-srv-view-once-tap-btn");
-    expect(tapBtn).toBeNull();
+    const bubble = view.element.querySelector(".wx-srv-bubble");
+    expect(bubble?.querySelector(".wx-srv-bubble-time")).toBeTruthy();
+    expect(bubble?.querySelector(".wx-srv-reactions")).toBeTruthy();
+
+    view.teardown();
+  });
+
+  it("renders timestamp and reactions on view-once bubbles and updates reactions dynamically", async () => {
+    const voMsg = fakeMessage({
+      seq: 2021,
+      sender: "Purdy",
+      text: null,
+      createdAt: 1727395200,
+      reactions: [{ emoji: "❤️", count: 1, senders: ["Purdy"] }],
+      attachments: [{
+        id: "att-vo-reactions",
+        kind: "photo",
+        status: "ready",
+        width: 800,
+        height: 600,
+        durationS: null,
+        peaks: null,
+        urls: {},
+      }],
+      viewOnce: { durationS: 5, tease: false },
+    });
+    getHistory.mockResolvedValue(emptyHistory({ messages: [voMsg], cursor: 2021 }));
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: window, onSettings: vi.fn() });
+    await view.attach(SESSION);
+
+    const bubble = view.element.querySelector(".wx-srv-bubble");
+    expect(bubble).toBeTruthy();
+    const time = bubble?.querySelector(".wx-srv-bubble-time");
+    expect(time).toBeTruthy();
+    expect(time?.textContent).toBeTruthy();
+    const reactions = bubble?.querySelector<HTMLElement>(".wx-srv-reactions");
+    expect(reactions).toBeTruthy();
+    expect(reactions?.hidden).toBe(false);
+    expect(reactions?.textContent).toContain("❤️");
+
+    const updated = {
+      ...voMsg,
+      reactions: [
+        { emoji: "❤️", count: 1, senders: ["Purdy"] },
+        { emoji: "👍", count: 1, senders: ["Josh"] },
+      ],
+    };
+    view.handleStreamEvent({ type: "message_updated", message: updated });
+    expect(reactions?.textContent).toContain("❤️");
+    expect(reactions?.textContent).toContain("👍");
 
     view.teardown();
   });

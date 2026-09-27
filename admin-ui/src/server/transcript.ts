@@ -235,7 +235,7 @@ export function renderTranscriptBlock(
         children.push(message);
       }
     }
-    
+
     const hasVisibleText = children.some(el => el.classList.contains("wx-srv-transcript-text"));
     if (children.length > 0) {
       const trailingActions: HTMLElement[] = [];
