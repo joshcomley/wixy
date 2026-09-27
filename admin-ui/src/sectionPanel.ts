@@ -1431,8 +1431,19 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
     if (activeTab !== null) activateTab(activeTab);
   }
 
-  async function load(): Promise<void> {
+  /** Reads the page's collections and renders them. A `refresh` re-read applies its answer only
+   * if that is STILL safe when the answer arrives: the safety check in `requestRefresh()` ran
+   * before the read went out, and she may have started typing or made an edit while it was in
+   * flight — applying an answer that predates the edit would silently throw it away (measured:
+   * a switch flipped just after a publish snapped back and the Save bar vanished). Such a
+   * refresh is deferred again, exactly as if it had been requested then — never dropped. */
+  async function load(options: { readonly refresh?: boolean } = {}): Promise<void> {
     const [content] = await Promise.all([api.getContent(section.page), refreshDraftState()]);
+    if (destroyed) return;
+    if (options.refresh === true && (isEditingInPanel() || isDirty())) {
+      refreshPending = true;
+      return;
+    }
     for (const collection of section.collections) {
       const items = itemsAt(content.content, collection.path);
       collectionState.set(collection.path, items);
@@ -1465,7 +1476,7 @@ export function mountSectionPanel(section: AdminSection, deps: SectionPanelDeps)
   async function refreshFromServer(): Promise<void> {
     await opQueue.flushNow();
     if (destroyed) return;
-    await load();
+    await load({ refresh: true });
   }
 
   function requestRefresh(): void {

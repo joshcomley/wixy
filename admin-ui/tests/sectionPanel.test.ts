@@ -1118,6 +1118,50 @@ describe("mountSectionPanel — the before/after aligner (decisions/00111)", () 
       expect(opQueue.flushes).toBe(1);
     });
 
+    it("keeps an edit made while the re-read is in flight, and re-reads again once it is safe", async () => {
+      // Measured in e2e (section-panel.spec.ts "PR 2", about 1 run in 10 on a loaded box): the
+      // refresh a publish triggers found the panel clean and started its re-read, she flipped a
+      // switch while that read was still out, and its answer then overwrote the switch and hid
+      // the Save bar — the edit silently gone.
+      let answerRefresh!: (response: ContentResponse) => void;
+      const serverContent: ContentResponse = {
+        content: { gallery: { sliders: [SLIDER_ITEM] } },
+        bindings: { page: "gallery", fields: [] },
+      };
+      const getContent = vi.fn(async (): Promise<ContentResponse> => serverContent);
+      const api = fakeApi({ getContent });
+      const opQueue = fakeQueue();
+      const panel = mountSectionPanel(SLIDER_SECTION, { api, opQueue });
+      await flush();
+
+      getContent.mockImplementationOnce(() => new Promise<ContentResponse>((resolve) => {
+        answerRefresh = resolve;
+      }));
+      panel.refresh();
+      await flush();
+      expect(getContent).toHaveBeenCalledTimes(2); // the re-read is out
+
+      const titleInput = panel.element.querySelector<HTMLInputElement>(".wx-section-field-input")!;
+      titleInput.value = "Retitled";
+      titleInput.dispatchEvent(new Event("blur"));
+      const saveBar = panel.element.querySelector<HTMLElement>(".wx-section-save-bar")!;
+      expect(saveBar.hidden).toBe(false);
+
+      answerRefresh(serverContent); // the answer predates her edit
+      await flush();
+
+      expect(panel.element.querySelector<HTMLInputElement>(".wx-section-field-input")!.value).toBe("Retitled");
+      expect(saveBar.hidden).toBe(false);
+      clickSave(panel);
+      await flush();
+      expect(opQueue.enqueued).toEqual([
+        { file: "gallery", path: "gallery.sliders", value: [{ ...SLIDER_ITEM, title: "Retitled" }] },
+      ]);
+      // The refresh was only deferred, never dropped: it runs once the panel is clean again.
+      await flush();
+      expect(getContent).toHaveBeenCalledTimes(3);
+    });
+
     it("defers the re-read while a field has focus, so it never eats what she is typing", async () => {
       const api = apiWithStagedThenPublished();
       const opQueue = fakeQueue();

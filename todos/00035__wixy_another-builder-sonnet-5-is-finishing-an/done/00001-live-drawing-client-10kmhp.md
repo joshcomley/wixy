@@ -1,7 +1,9 @@
 # Live drawing client (the pen)
 
 **ID**: 10kmhp
-**Status**: in progress
+**Status**: done — PR #286 merged to main as e0eed7c (2026-09-26), after a clean Opus 5.5 audit
+(4 rounds, 9 findings fixed). The phone toolbar's font-dependent third line, caught by CI on
+Ubuntu, was fixed at the root before the audit (decisions/00176 #13).
 **Workspace**: 00035
 **Branch**: `cmd/workspace-00035-live-drawing-client`
 

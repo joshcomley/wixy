@@ -506,18 +506,33 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
 
     // A publish success re-reads the mounted panel's collection in the
     // background (`SectionPanel.refresh()`, decisions/00115) — its OWN `GET
-    // /api/admin/content/gallery` fetch. Wait for that specific request to
-    // land before the next edit: `toBeChecked()` alone doesn't prove
-    // anything here (this item is already checked either side of the
-    // refresh), and a still-in-flight refresh, if it resolves AFTER the next
-    // edit's optimistic render, clobbers the DOM back to what it fetched
-    // before that edit ever happened.
-    const refreshFetched = page.waitForResponse(
-      (res) =>
-        res.url().includes("/api/admin/content/gallery") && res.request().method() === "GET",
-    );
+    // /api/admin/content/gallery` fetch. That re-read is HELD here until after
+    // the next edit, to force the race decisions/00178 fixed: the panel was
+    // clean when the re-read went out, the switch was flipped while it was in
+    // flight, and its answer (which predates the flip) used to overwrite the
+    // flip — the switch snapped back on and the Save bar vanished, so the Save
+    // below timed out (about 1 run in 10 on a loaded box while this test only
+    // waited for the response and hoped the render had landed too).
+    const contentRoute = "**/api/admin/content/gallery";
+    let releaseRefresh!: () => void;
+    const refreshHeld = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    let noteRefresh!: () => void;
+    const refreshRequested = new Promise<void>((resolve) => {
+      noteRefresh = resolve;
+    });
+    await page.route(contentRoute, async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      noteRefresh();
+      await refreshHeld;
+      await route.continue();
+    });
     await publishAndWait(page);
-    await refreshFetched;
+    await refreshRequested;
     liveHtml = await (await page.request.get("/gallery.html")).text();
     expect(liveHtml).toContain("Hidden Pair");
 
@@ -528,9 +543,23 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     // status bar's Publish button.
     await page.click(".wx-drawer-close");
 
-    // -- switch back OFF, Save, publish, and it's gone again -----------------
+    // -- switch back OFF while that re-read is still out, then let it answer --
     await toggle.uncheck();
     await expect(hiddenCard).toHaveClass(/wx-section-card-hidden/);
+    const refreshAnswered = page.waitForResponse(
+      (res) => res.url().includes("/api/admin/content/gallery") && res.request().method() === "GET",
+    );
+    releaseRefresh();
+    await refreshAnswered;
+    await page.unroute(contentRoute);
+    // Give the page a few turns of its own event loop to act on that answer
+    // (it needs no further network), then the flip must still be there, unsaved.
+    await page.evaluate(async () => {
+      for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    await expect(hiddenCard).toHaveClass(/wx-section-card-hidden/);
+    await expect(toggle).not.toBeChecked();
+    await expect(page.locator(".wx-section-save-bar")).toBeVisible();
     await saveSectionPanel(page);
 
     await publishAndWait(page);
