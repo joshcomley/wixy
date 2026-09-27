@@ -199,7 +199,8 @@ export function createPixelChatScene(
       return { nextIndex: currentIndex + 1, nextProgress: 0, reachedEnd: false };
     }
 
-    const step = (moveSpeedPxPerSec * dtSeconds) / dist;
+    const effectiveSpeed = p0.state === "jump" ? 75 : moveSpeedPxPerSec;
+    const step = (effectiveSpeed * dtSeconds) / dist;
     let nextProgress = progress + step;
     let nextIndex = currentIndex;
 
@@ -263,7 +264,7 @@ export function createPixelChatScene(
     if (!plan) return;
     phaseTimerMs += dt * 1000;
 
-    const BASE_MOVE_SPEED = 75; // pixels per second
+    const BASE_MOVE_SPEED = 32; // relaxed retro climbing speed (pixels per second)
 
     switch (currentPhase) {
       case "traversing": {
@@ -412,26 +413,26 @@ export function createPixelChatScene(
       }
 
       case "platform_collapse": {
-        const MAX_PLATFORM_ANGLE = Math.PI * 0.35;
-        platformAngle = Math.min(MAX_PLATFORM_ANGLE, platformAngle + dt * 2.8);
+        const MAX_PLATFORM_ANGLE = Math.PI * 0.42;
+        platformAngle = Math.min(MAX_PLATFORM_ANGLE, platformAngle + dt * 2.6);
 
         const anchorX = plan.meetingPoint.x;
         const anchorY = platform.y;
         const plankLen = platform.targetWidth;
 
         if (!coupleInAir) {
-          coupleSlideDist += dt * 280;
-          const distFromAnchor = Math.min(plankLen, plankLen * 0.45 + coupleSlideDist);
-          couplePos.x = anchorX - Math.cos(platformAngle) * distFromAnchor;
+          coupleSlideDist += dt * (200 + 260 * Math.sin(platformAngle));
+          const distFromAnchor = Math.min(plankLen, plankLen * 0.42 + coupleSlideDist);
+          couplePos.x = anchorX - Math.cos(platformAngle) * distFromAnchor - 10;
           couplePos.y = anchorY + Math.sin(platformAngle) * distFromAnchor - 12;
 
-          if (coupleSlideDist >= plankLen * 0.55) {
+          if (coupleSlideDist >= plankLen * 0.58) {
             coupleInAir = true;
-            coupleVx = -Math.cos(platformAngle) * 200;
-            coupleVy = Math.sin(platformAngle) * 200;
+            coupleVx = -Math.cos(platformAngle) * 220;
+            coupleVy = Math.sin(platformAngle) * 220;
           }
         } else {
-          const GRAVITY = 800;
+          const GRAVITY = 850;
           coupleVy += GRAVITY * dt;
           couplePos.x += coupleVx * dt;
           couplePos.y += coupleVy * dt;
@@ -476,7 +477,7 @@ export function createPixelChatScene(
       if (currentPhase === "platform_collapse") {
         ctx.save();
         ctx.translate(plan.meetingPoint.x, platform.y);
-        ctx.rotate(platformAngle);
+        ctx.rotate(-platformAngle);
         ctx.translate(-plan.meetingPoint.x, -platform.y);
         const drawX = plan.meetingPoint.x - platform.currentWidth;
         drawPixelPlatform(ctx, drawX, platform.y, platform.currentWidth, platform.height, PIXEL_SCALE);

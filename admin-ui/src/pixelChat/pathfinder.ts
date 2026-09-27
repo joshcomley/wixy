@@ -1,6 +1,6 @@
 // Pathfinder and trajectory generator for the pixel art characters
-// Computes movement waypoints along chat blocks with overhangs (monkey-bar traversal)
-// and step-ins (top-of-block walking).
+// Computes movement waypoints along chat blocks with overhangs (crawling/monkey-bar traversal),
+// walking tops of blocks, crawling through gaps, and meeting smoothly at the middle block.
 
 import type { FacingDirection, PixelRect, Waypoint } from "./types";
 
@@ -41,41 +41,51 @@ export function extractBubbleRects(threadEl: HTMLElement): PixelRect[] {
   return rects;
 }
 
-/** Create fallback synthetic blocks to ensure a rich climbing scene even in empty or small chats */
+/** Create fallback synthetic blocks to ensure a rich climbing scene across both sides */
 export function createSyntheticBlocks(containerWidth: number, containerHeight: number): PixelRect[] {
   const w = Math.max(containerWidth, 400);
   const h = Math.max(containerHeight, 500);
 
-  const blockHeight = 60;
+  const blockHeight = 52;
   const gap = 30;
   const count = 4;
   const totalH = count * blockHeight + (count - 1) * gap;
-  const startY = Math.max(20, (h - totalH) / 2);
+  const startY = Math.max(24, Math.floor((h - totalH) / 2));
 
-  // Varying widths to guarantee both overhangs and step-ins:
-  // Bottom block (0): width 240
-  // Next block up (1): width 340 (OVERHANG! Next extends further out left)
-  // Next block up (2): width 200 (STEP-IN! Current extends further out left than next)
-  // Top block (3): width 280 (OVERHANG!)
-  const widths = [240, 340, 200, 280];
+  // Alternating blocks that cross the middle so characters crawl across and underneath:
+  // Block 0 (top): Assistant (left)
+  // Block 1: User (right, extends far across to the left)
+  // Block 2: Assistant (left, extends far across to the right)
+  // Block 3 (bottom): User (right)
+  const b0: PixelRect = { x: 24, y: startY, width: 280, height: blockHeight };
+  const b1: PixelRect = {
+    x: Math.max(80, w - 360),
+    y: startY + blockHeight + gap,
+    width: 336,
+    height: blockHeight,
+  };
+  const b2: PixelRect = {
+    x: 24,
+    y: startY + (blockHeight + gap) * 2,
+    width: 320,
+    height: blockHeight,
+  };
+  const b3: PixelRect = {
+    x: Math.max(120, w - 280),
+    y: startY + (blockHeight + gap) * 3,
+    width: 256,
+    height: blockHeight,
+  };
 
-  const blocks: PixelRect[] = [];
-  for (let i = 0; i < count; i++) {
-    const bw = widths[i] ?? 240;
-    const by = startY + (count - 1 - i) * (blockHeight + gap);
-    const bx = w - 24 - bw;
-    blocks.push({ x: bx, y: by, width: bw, height: blockHeight });
-  }
-  // Sort top-to-bottom by y ascending
-  blocks.sort((a, b) => a.y - b.y);
-  return blocks;
+  return [b0, b1, b2, b3];
 }
 
 /**
  * Generate complete trajectory plan for both characters.
  * Guy climbs UP from bottom.
  * Woman climbs DOWN from top.
- * They meet at the middle block, where the platform scrolls out.
+ * They traverse both user and assistant blocks, crawl under overhangs, walk tops,
+ * and meet cleanly at the middle block without either overshooting.
  */
 export function buildTrajectoryPlan(
   containerWidth: number,
@@ -84,113 +94,219 @@ export function buildTrajectoryPlan(
 ): TrajectoryPlan {
   let blocks: PixelRect[] = [];
 
-  // Filter or augment blocks
-  if (extractedBlocks.length >= 3) {
-    // Check if right-aligned or left-aligned
-    const rightSide = extractedBlocks.filter((b) => b.x + b.width > containerWidth * 0.5);
-    if (rightSide.length >= 2) {
-      blocks = [...rightSide].sort((a, b) => a.y - b.y);
-    } else {
-      blocks = [...extractedBlocks].sort((a, b) => a.y - b.y);
-    }
+  if (extractedBlocks.length >= 2) {
+    // Preserve all blocks (both user and assistant) sorted by vertical position
+    blocks = [...extractedBlocks].sort((a, b) => a.y - b.y);
   }
 
-  // If fewer than 3 blocks or lack of width variation, use synthetic blocks
+  // Fallback to rich synthetic blocks if sparse
   if (blocks.length < 3) {
     blocks = createSyntheticBlocks(containerWidth, containerHeight);
   }
 
-  const side: "right" | "left" = "right"; // Right-aligned bubbles (user messages)
   const n = blocks.length;
   const meetingIdx = Math.floor(n / 2);
   const meetingBlock = blocks[meetingIdx] ?? blocks[0]!;
 
-  // Platform details
+  // Platform details:
+  // Wooden platform scrolls out to the left from the meeting block
   const platformWidth = 120;
   const platformHeight = 14;
-  // Platform scrolls out to the left of the meeting block
-  const platformX = Math.max(16, meetingBlock.x - platformWidth - 20);
+
+  // The meeting block's inner/left edge provides the anchor wall
+  const isRightSide = meetingBlock.x + meetingBlock.width * 0.5 > containerWidth * 0.4;
+  const anchorX = isRightSide ? meetingBlock.x : Math.min(containerWidth - 24, meetingBlock.x + meetingBlock.width);
   const platformY = meetingBlock.y + Math.floor(meetingBlock.height / 2);
 
   const meetingPoint = {
-    x: meetingBlock.x,
+    x: anchorX,
     y: platformY,
   };
+
+  const platformRect = {
+    x: anchorX - platformWidth,
+    y: platformY,
+    width: platformWidth,
+    height: platformHeight,
+  };
+
+  const side: "right" | "left" = isRightSide ? "right" : "left";
+
+  // Helper to determine if a block is anchored on the right side
+  function isRight(b: PixelRect): boolean {
+    return b.x + b.width * 0.5 > containerWidth * 0.45;
+  }
+
+  function getInnerEdgeX(b: PixelRect): number {
+    return isRight(b) ? b.x : b.x + b.width;
+  }
 
   // --- GUY TRAJECTORY (Climbing UP from bottom to meetingIdx) ---
   const guyWaypoints: Waypoint[] = [];
   const lowestBlock = blocks[n - 1]!;
+  const lowestInnerX = getInnerEdgeX(lowestBlock);
 
   // 1. Appear from bottom
-  const startGuyX = lowestBlock.x;
+  const startGuyX = lowestInnerX;
   const startGuyY = Math.min(containerHeight + 40, lowestBlock.y + lowestBlock.height + 40);
 
   guyWaypoints.push({
     x: startGuyX,
     y: startGuyY,
     state: "appear",
-    facing: "left",
+    facing: isRight(lowestBlock) ? "left" : "right",
   });
 
   // Climb up to bottom edge of lowest block
   guyWaypoints.push({
-    x: lowestBlock.x,
+    x: lowestInnerX,
     y: lowestBlock.y + lowestBlock.height,
     state: "climb_up",
-    facing: "left",
+    facing: isRight(lowestBlock) ? "left" : "right",
   });
 
   // Navigate up from lowest block (n-1) to meetingIdx
   for (let i = n - 1; i >= meetingIdx; i--) {
-    const current = blocks[i]!;
+    const cur = blocks[i]!;
+    const curInnerX = getInnerEdgeX(cur);
+    const facingSide: FacingDirection = isRight(cur) ? "left" : "right";
 
-    // Climb up the vertical side of current block
+    if (i === meetingIdx) {
+      // Reached meeting block! Climb up to meetingPoint.y and STOP
+      // (Never overshoot the girl!)
+      guyWaypoints.push({
+        x: meetingPoint.x,
+        y: meetingPoint.y,
+        state: "climb_up",
+        facing: "left",
+      });
+      break;
+    }
+
+    // Climb up vertical edge of current block to its top edge
     guyWaypoints.push({
-      x: current.x,
-      y: current.y, // At top-left corner
+      x: curInnerX,
+      y: cur.y,
       state: "climb_up",
-      facing: "left",
+      facing: facingSide,
     });
 
-    if (i > meetingIdx) {
-      const nextUp = blocks[i - 1]!;
-      // Compare horizontal extent of current vs nextUp
-      // Note: for right-aligned bubbles, smaller x means sticking out FURTHER left
-      if (nextUp.x < current.x) {
-        // OVERHANG! Next block extends further left than current block
-        // Guy stretches arms up, grabs underside of next block, and monkey-bar shimmies left!
-        // 1. Reach up to underside of nextUp
-        const undersideY = nextUp.y + nextUp.height;
+    const nextUp = blocks[i - 1]!;
+    const nextInnerX = getInnerEdgeX(nextUp);
+    const undersideY = nextUp.y + nextUp.height;
+
+    // Check relationship with block above
+    if (isRight(cur) && isRight(nextUp)) {
+      if (nextUp.x < cur.x) {
+        // Overhang above! Crawl underneath nextUp
         guyWaypoints.push({
-          x: current.x,
+          x: cur.x,
           y: undersideY,
-          state: "hang_traverse",
+          state: "crawl",
           facing: "left",
         });
-        // 2. Monkey-bar shimmy across underside to outer edge of nextUp
         guyWaypoints.push({
           x: nextUp.x,
           y: undersideY,
-          state: "hang_traverse",
+          state: "crawl",
           facing: "left",
         });
-        // 3. Now positioned at bottom-left corner of nextUp, ready to climb up its side
+        // Jump onto the side of that block
+        guyWaypoints.push({
+          x: nextUp.x,
+          y: undersideY - 6,
+          state: "jump",
+          facing: "left",
+        });
       } else {
-        // STEP-IN! Current block extends further left than nextUp
-        // Guy climbs onto top surface of current, walks right across top surface to nextUp!
-        // 1. Walk across top of current to x of nextUp
+        // Step-in: walk across top of cur to nextUp base
         guyWaypoints.push({
           x: nextUp.x,
-          y: current.y,
+          y: cur.y,
           state: "walk_top",
           facing: "right",
         });
-        // 2. Step to base of nextUp
         guyWaypoints.push({
           x: nextUp.x,
-          y: nextUp.y + nextUp.height,
+          y: undersideY,
           state: "climb_up",
           facing: "left",
+        });
+      }
+    } else if (!isRight(cur) && !isRight(nextUp)) {
+      const curRight = cur.x + cur.width;
+      const nextRight = nextUp.x + nextUp.width;
+      if (nextRight > curRight) {
+        // Overhang to the right
+        guyWaypoints.push({
+          x: curRight,
+          y: undersideY,
+          state: "crawl",
+          facing: "right",
+        });
+        guyWaypoints.push({
+          x: nextRight,
+          y: undersideY,
+          state: "crawl",
+          facing: "right",
+        });
+        guyWaypoints.push({
+          x: nextRight,
+          y: undersideY - 6,
+          state: "jump",
+          facing: "right",
+        });
+      } else {
+        // Step-in to the left
+        guyWaypoints.push({
+          x: nextRight,
+          y: cur.y,
+          state: "walk_top",
+          facing: "left",
+        });
+        guyWaypoints.push({
+          x: nextRight,
+          y: undersideY,
+          state: "climb_up",
+          facing: "right",
+        });
+      }
+    } else {
+      // Opposite sides (crossing between user and assistant blocks)
+      // When block above extends across, crawl underneath
+      const overlapsHorizontally =
+        isRight(cur)
+          ? nextUp.x + nextUp.width >= cur.x - 20
+          : cur.x + cur.width >= nextUp.x - 20;
+
+      if (overlapsHorizontally) {
+        // Crawl underneath the block that spans across
+        guyWaypoints.push({
+          x: curInnerX,
+          y: undersideY,
+          state: "crawl",
+          facing: nextInnerX < curInnerX ? "left" : "right",
+        });
+        guyWaypoints.push({
+          x: nextInnerX,
+          y: undersideY,
+          state: "crawl",
+          facing: nextInnerX < curInnerX ? "left" : "right",
+        });
+        // Jump onto the side of that block
+        guyWaypoints.push({
+          x: nextInnerX,
+          y: undersideY - 6,
+          state: "jump",
+          facing: isRight(nextUp) ? "left" : "right",
+        });
+      } else {
+        // Gap between blocks: leap across to next block
+        guyWaypoints.push({
+          x: nextInnerX,
+          y: undersideY,
+          state: "jump",
+          facing: nextInnerX < curInnerX ? "left" : "right",
         });
       }
     }
@@ -199,47 +315,60 @@ export function buildTrajectoryPlan(
   // --- WOMAN TRAJECTORY (Climbing DOWN from top to meetingIdx) ---
   const womanWaypoints: Waypoint[] = [];
   const highestBlock = blocks[0]!;
+  const highestInnerX = getInnerEdgeX(highestBlock);
 
   // 1. Appear from top
-  const startWomanX = highestBlock.x;
+  const startWomanX = highestInnerX;
   const startWomanY = Math.max(-40, highestBlock.y - 40);
 
   womanWaypoints.push({
     x: startWomanX,
     y: startWomanY,
     state: "appear",
-    facing: "left",
+    facing: isRight(highestBlock) ? "left" : "right",
   });
 
   // Climb down to top edge of highest block
   womanWaypoints.push({
-    x: highestBlock.x,
+    x: highestInnerX,
     y: highestBlock.y,
     state: "climb_down",
-    facing: "left",
+    facing: isRight(highestBlock) ? "left" : "right",
   });
 
   // Navigate down from top block (0) to meetingIdx
   for (let i = 0; i <= meetingIdx; i++) {
-    const current = blocks[i]!;
+    const cur = blocks[i]!;
+    const curInnerX = getInnerEdgeX(cur);
+    const facingSide: FacingDirection = isRight(cur) ? "left" : "right";
 
-    if (i < meetingIdx) {
-      const nextDown = blocks[i + 1]!;
-
-      // Climb down vertical side of current block to its bottom corner
+    if (i === meetingIdx) {
+      // Reached meeting block! Climb down to meetingPoint.y and STOP
       womanWaypoints.push({
-        x: current.x,
-        y: current.y + current.height,
+        x: meetingPoint.x,
+        y: meetingPoint.y,
         state: "climb_down",
         facing: "left",
       });
+      break;
+    }
 
-      // Compare horizontal extent of current vs nextDown
-      if (nextDown.x < current.x) {
-        // Next block down extends further left (sticks out more)
-        // Woman drops/climbs down to top surface of nextDown, then walks across top surface
+    // Climb down vertical side to bottom corner
+    womanWaypoints.push({
+      x: curInnerX,
+      y: cur.y + cur.height,
+      state: "climb_down",
+      facing: facingSide,
+    });
+
+    const nextDown = blocks[i + 1]!;
+    const nextInnerX = getInnerEdgeX(nextDown);
+
+    if (isRight(cur) && isRight(nextDown)) {
+      if (nextDown.x < cur.x) {
+        // Next block down extends further out: drop down and walk across
         womanWaypoints.push({
-          x: current.x,
+          x: cur.x,
           y: nextDown.y,
           state: "walk_top",
           facing: "left",
@@ -251,51 +380,37 @@ export function buildTrajectoryPlan(
           facing: "left",
         });
       } else {
-        // Current block extends further left than nextDown (current is an overhang)
-        // Woman hangs from bottom edge of current, shimmies across, then drops to nextDown
+        // Current block overhangs: crawl along bottom edge
         womanWaypoints.push({
           x: nextDown.x,
-          y: current.y + current.height,
-          state: "hang_traverse",
+          y: cur.y + cur.height,
+          state: "crawl",
           facing: "right",
         });
         womanWaypoints.push({
           x: nextDown.x,
           y: nextDown.y,
-          state: "climb_down",
+          state: "jump",
           facing: "left",
         });
       }
     } else {
-      // Reached meeting block
+      // Across opposite blocks: walk/crawl across and jump
       womanWaypoints.push({
-        x: current.x,
-        y: meetingPoint.y,
-        state: "climb_down",
-        facing: "left",
+        x: nextInnerX,
+        y: nextDown.y,
+        state: "jump",
+        facing: nextInnerX < curInnerX ? "left" : "right",
       });
     }
   }
-
-  // Adjust guy's final arrival at meetingPoint
-  guyWaypoints.push({
-    x: meetingPoint.x,
-    y: meetingPoint.y,
-    state: "climb_up",
-    facing: "left",
-  });
 
   return {
     side,
     blocks,
     meetingBlockIndex: meetingIdx,
     meetingPoint,
-    platformRect: {
-      x: platformX,
-      y: platformY,
-      width: platformWidth,
-      height: platformHeight,
-    },
+    platformRect,
     guyWaypoints,
     womanWaypoints,
   };

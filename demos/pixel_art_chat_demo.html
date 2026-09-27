@@ -443,6 +443,10 @@
               <span>Monkey-bar</span>
             </div>
             <div class="sprite-item">
+              <canvas id="spGuyCrawl" width="36" height="46"></canvas>
+              <span>Crawl</span>
+            </div>
+            <div class="sprite-item">
               <canvas id="spGuyJump" width="36" height="46"></canvas>
               <span>Leap</span>
             </div>
@@ -459,6 +463,10 @@
             <div class="sprite-item">
               <canvas id="spWomanHang" width="36" height="46"></canvas>
               <span>Monkey-bar</span>
+            </div>
+            <div class="sprite-item">
+              <canvas id="spWomanCrawl" width="36" height="46"></canvas>
+              <span>Crawl</span>
             </div>
             <div class="sprite-item">
               <canvas id="spWomanJump" width="36" height="46"></canvas>
@@ -680,6 +688,42 @@
       "...SS..SS...",
     ];
 
+    const GUY_CRAWL_1 = [
+      "................",
+      "................",
+      "................",
+      "................",
+      "................",
+      "................",
+      "................",
+      ".....HHHH.......",
+      "....HHEFFH......",
+      "....HFFFF.......",
+      "..LLPPWWPPD.....",
+      ".LPPPPPPPPPDD...",
+      ".F..PPPP..PP....",
+      "....SS....SS....",
+      "................",
+    ];
+
+    const GUY_CRAWL_2 = [
+      "................",
+      "................",
+      "................",
+      "................",
+      "................",
+      "................",
+      "................",
+      ".....HHHH.......",
+      "....HHEFFH......",
+      "....HFFFF.......",
+      "..LLPPWWPPD.....",
+      "..LPPPPPPPPPD...",
+      "...F..PP..PP.SS.",
+      "......SS..F.....",
+      "................",
+    ];
+
     const WOMAN_WALK_1 = [
       "....HHHH....",
       "...HHHHHH...",
@@ -831,6 +875,42 @@
       "...SS...SS..",
     ];
 
+    const WOMAN_CRAWL_1 = [
+      "................",
+      "................",
+      "................",
+      "................",
+      "................",
+      "................",
+      "................",
+      ".....HHHH.......",
+      "....HHEFFH......",
+      "....HFFFF.......",
+      "..LLCCCCCCD.....",
+      ".LCCCCCCCCCDD...",
+      ".F..CCCC..FF....",
+      "....SS....SS....",
+      "................",
+    ];
+
+    const WOMAN_CRAWL_2 = [
+      "................",
+      "................",
+      "................",
+      "................",
+      "................",
+      "................",
+      "................",
+      ".....HHHH.......",
+      "....HHEFFH......",
+      "....HFFFF.......",
+      "..LLCCCCCCD.....",
+      "..LCCCCCCCCCD...",
+      "...F..CC..FF.SS.",
+      "......SS..F.....",
+      "................",
+    ];
+
     const COUPLE_EMBRACE = [
       "..HHHH..HHHH..",
       ".HHHHHHHHHHHH.",
@@ -968,6 +1048,9 @@
       const gHang = document.getElementById("spGuyHang").getContext("2d");
       drawPixelMatrix(gHang, GUY_HANG_1, GUY_PALETTE, 6, 6, 2);
 
+      const gCrawl = document.getElementById("spGuyCrawl")?.getContext("2d");
+      if (gCrawl) drawPixelMatrix(gCrawl, GUY_CRAWL_1, GUY_PALETTE, 2, 8, 2);
+
       const gJump = document.getElementById("spGuyJump").getContext("2d");
       drawPixelMatrix(gJump, GUY_JUMP, GUY_PALETTE, 6, 6, 2);
 
@@ -979,6 +1062,9 @@
 
       const wHang = document.getElementById("spWomanHang").getContext("2d");
       drawPixelMatrix(wHang, WOMAN_HANG_1, WOMAN_PALETTE, 6, 6, 2);
+
+      const wCrawl = document.getElementById("spWomanCrawl")?.getContext("2d");
+      if (wCrawl) drawPixelMatrix(wCrawl, WOMAN_CRAWL_1, WOMAN_PALETTE, 2, 8, 2);
 
       const wJump = document.getElementById("spWomanJump").getContext("2d");
       drawPixelMatrix(wJump, WOMAN_JUMP, WOMAN_PALETTE, 6, 6, 2);
@@ -1065,20 +1151,18 @@
         });
       });
 
-      // Filter to right-aligned user bubbles if possible
-      const userBlocks = blocks.filter(b => b.role === "user");
-      if (userBlocks.length >= 2) {
-        blocks = userBlocks;
+      if (blocks.length >= 2) {
+        blocks.sort((a, b) => a.y - b.y);
       }
 
       if (blocks.length < 3) {
-        // Fallback synthetic blocks
+        // Fallback synthetic blocks alternating across both sides
         const w = containerEl.clientWidth || 500;
         blocks = [
-          { x: w - 240, y: 70, width: 220, height: 50 },
-          { x: w - 340, y: 160, width: 320, height: 55 }, // overhang
-          { x: w - 210, y: 250, width: 190, height: 45 }, // step-in
-          { x: w - 300, y: 340, width: 280, height: 50 }  // overhang
+          { x: 24, y: 70, width: 280, height: 50 },
+          { x: Math.max(80, w - 360), y: 160, width: 336, height: 55 },
+          { x: 24, y: 250, width: 320, height: 48 },
+          { x: Math.max(120, w - 280), y: 340, width: 256, height: 50 }
         ];
       }
 
@@ -1089,66 +1173,121 @@
 
       const platformWidth = 120;
       const platformHeight = 14;
-      const platformX = Math.max(16, meetingBlock.x - platformWidth - 20);
+      const isRightSide = (meetingBlock.x + meetingBlock.width * 0.5) > (containerEl.clientWidth || 500) * 0.4;
+      const anchorX = isRightSide ? meetingBlock.x : Math.min((containerEl.clientWidth || 500) - 24, meetingBlock.x + meetingBlock.width);
       const platformY = meetingBlock.y + Math.floor(meetingBlock.height / 2);
 
-      const meetingPoint = { x: meetingBlock.x, y: platformY };
+      const meetingPoint = { x: anchorX, y: platformY };
+      const platformRect = { x: anchorX - platformWidth, y: platformY, width: platformWidth, height: platformHeight };
+
+      function isRight(b) {
+        return (b.x + b.width * 0.5) > (containerEl.clientWidth || 500) * 0.45;
+      }
+      function getInnerEdgeX(b) {
+        return isRight(b) ? b.x : b.x + b.width;
+      }
 
       // Guy: climbing up from bottom
       const guyWaypoints = [];
       const lowest = blocks[n - 1];
-      guyWaypoints.push({ x: lowest.x, y: containerEl.clientHeight + 40, state: "appear", facing: "left" });
-      guyWaypoints.push({ x: lowest.x, y: lowest.y + lowest.height, state: "climb_up", facing: "left" });
+      const lowestInnerX = getInnerEdgeX(lowest);
+
+      guyWaypoints.push({ x: lowestInnerX, y: containerEl.clientHeight + 40, state: "appear", facing: isRight(lowest) ? "left" : "right" });
+      guyWaypoints.push({ x: lowestInnerX, y: lowest.y + lowest.height, state: "climb_up", facing: isRight(lowest) ? "left" : "right" });
 
       for (let i = n - 1; i >= meetingIdx; i--) {
         const cur = blocks[i];
-        guyWaypoints.push({ x: cur.x, y: cur.y, state: "climb_up", facing: "left" });
+        const curInnerX = getInnerEdgeX(cur);
+        const facingSide = isRight(cur) ? "left" : "right";
 
-        if (i > meetingIdx) {
-          const nextUp = blocks[i - 1];
+        if (i === meetingIdx) {
+          // Reached meeting block! Stop at meetingPoint.y and do NOT climb past
+          guyWaypoints.push({ x: meetingPoint.x, y: meetingPoint.y, state: "climb_up", facing: "left" });
+          break;
+        }
+
+        guyWaypoints.push({ x: curInnerX, y: cur.y, state: "climb_up", facing: facingSide });
+
+        const nextUp = blocks[i - 1];
+        const nextInnerX = getInnerEdgeX(nextUp);
+        const undersideY = nextUp.y + nextUp.height;
+
+        if (isRight(cur) && isRight(nextUp)) {
           if (nextUp.x < cur.x) {
-            // Overhang! Monkey bar traverse
-            const underY = nextUp.y + nextUp.height;
-            guyWaypoints.push({ x: cur.x, y: underY, state: "hang_traverse", facing: "left" });
-            guyWaypoints.push({ x: nextUp.x, y: underY, state: "hang_traverse", facing: "left" });
+            // Overhang above! Crawl underneath nextUp
+            guyWaypoints.push({ x: cur.x, y: undersideY, state: "crawl", facing: "left" });
+            guyWaypoints.push({ x: nextUp.x, y: undersideY, state: "crawl", facing: "left" });
+            guyWaypoints.push({ x: nextUp.x, y: undersideY - 6, state: "jump", facing: "left" });
           } else {
-            // Step in! Walk top of current
+            // Step-in: walk top
             guyWaypoints.push({ x: nextUp.x, y: cur.y, state: "walk_top", facing: "right" });
-            guyWaypoints.push({ x: nextUp.x, y: nextUp.y + nextUp.height, state: "climb_up", facing: "left" });
+            guyWaypoints.push({ x: nextUp.x, y: undersideY, state: "climb_up", facing: "left" });
+          }
+        } else if (!isRight(cur) && !isRight(nextUp)) {
+          const curRight = cur.x + cur.width;
+          const nextRight = nextUp.x + nextUp.width;
+          if (nextRight > curRight) {
+            guyWaypoints.push({ x: curRight, y: undersideY, state: "crawl", facing: "right" });
+            guyWaypoints.push({ x: nextRight, y: undersideY, state: "crawl", facing: "right" });
+            guyWaypoints.push({ x: nextRight, y: undersideY - 6, state: "jump", facing: "right" });
+          } else {
+            guyWaypoints.push({ x: nextRight, y: cur.y, state: "walk_top", facing: "left" });
+            guyWaypoints.push({ x: nextRight, y: undersideY, state: "climb_up", facing: "right" });
+          }
+        } else {
+          // Opposite side block: crawl underneath if it overlaps, or jump across gap
+          const overlaps = isRight(cur) ? (nextUp.x + nextUp.width >= cur.x - 20) : (cur.x + cur.width >= nextUp.x - 20);
+          if (overlaps) {
+            guyWaypoints.push({ x: curInnerX, y: undersideY, state: "crawl", facing: nextInnerX < curInnerX ? "left" : "right" });
+            guyWaypoints.push({ x: nextInnerX, y: undersideY, state: "crawl", facing: nextInnerX < curInnerX ? "left" : "right" });
+            guyWaypoints.push({ x: nextInnerX, y: undersideY - 6, state: "jump", facing: isRight(nextUp) ? "left" : "right" });
+          } else {
+            guyWaypoints.push({ x: nextInnerX, y: undersideY, state: "jump", facing: nextInnerX < curInnerX ? "left" : "right" });
           }
         }
       }
-      guyWaypoints.push({ x: meetingPoint.x, y: meetingPoint.y, state: "climb_up", facing: "left" });
 
       // Woman: climbing down from top
       const womanWaypoints = [];
       const highest = blocks[0];
-      womanWaypoints.push({ x: highest.x, y: -40, state: "appear", facing: "left" });
-      womanWaypoints.push({ x: highest.x, y: highest.y, state: "climb_down", facing: "left" });
+      const highestInnerX = getInnerEdgeX(highest);
+
+      womanWaypoints.push({ x: highestInnerX, y: Math.max(-40, highest.y - 40), state: "appear", facing: isRight(highest) ? "left" : "right" });
+      womanWaypoints.push({ x: highestInnerX, y: highest.y, state: "climb_down", facing: isRight(highest) ? "left" : "right" });
 
       for (let i = 0; i <= meetingIdx; i++) {
         const cur = blocks[i];
-        if (i < meetingIdx) {
-          const nextDown = blocks[i + 1];
-          womanWaypoints.push({ x: cur.x, y: cur.y + cur.height, state: "climb_down", facing: "left" });
+        const curInnerX = getInnerEdgeX(cur);
+        const facingSide = isRight(cur) ? "left" : "right";
+
+        if (i === meetingIdx) {
+          // Reached meeting block! Stop at meetingPoint.y
+          womanWaypoints.push({ x: meetingPoint.x, y: meetingPoint.y, state: "climb_down", facing: "left" });
+          break;
+        }
+
+        womanWaypoints.push({ x: curInnerX, y: cur.y + cur.height, state: "climb_down", facing: facingSide });
+
+        const nextDown = blocks[i + 1];
+        const nextInnerX = getInnerEdgeX(nextDown);
+
+        if (isRight(cur) && isRight(nextDown)) {
           if (nextDown.x < cur.x) {
-            // Next is wider
             womanWaypoints.push({ x: cur.x, y: nextDown.y, state: "walk_top", facing: "left" });
             womanWaypoints.push({ x: nextDown.x, y: nextDown.y, state: "walk_top", facing: "left" });
           } else {
-            // Cur is overhang
-            womanWaypoints.push({ x: nextDown.x, y: cur.y + cur.height, state: "hang_traverse", facing: "right" });
-            womanWaypoints.push({ x: nextDown.x, y: nextDown.y, state: "climb_down", facing: "left" });
+            womanWaypoints.push({ x: nextDown.x, y: cur.y + cur.height, state: "crawl", facing: "right" });
+            womanWaypoints.push({ x: nextDown.x, y: nextDown.y, state: "jump", facing: "left" });
           }
         } else {
-          womanWaypoints.push({ x: cur.x, y: meetingPoint.y, state: "climb_down", facing: "left" });
+          womanWaypoints.push({ x: nextInnerX, y: nextDown.y, state: "jump", facing: nextInnerX < curInnerX ? "left" : "right" });
         }
       }
 
       return {
         blocks,
         meetingPoint,
-        platformRect: { x: platformX, y: platformY, width: platformWidth, height: platformHeight },
+        platformRect,
         guyWaypoints,
         womanWaypoints
       };
@@ -1299,7 +1438,7 @@
       }
 
       update(dt) {
-        const BASE_SPEED = 75;
+        const BASE_SPEED = 32;
         this.phaseTimer += dt;
 
         switch (this.phase) {
@@ -1408,26 +1547,26 @@
           }
 
           case "platform_collapse": {
-            const MAX_ANGLE = Math.PI * 0.35;
-            this.platformAngle = Math.min(MAX_ANGLE, (this.platformAngle || 0) + dt * 2.8);
+            const MAX_ANGLE = Math.PI * 0.42;
+            this.platformAngle = Math.min(MAX_ANGLE, (this.platformAngle || 0) + dt * 2.6);
 
             const anchorX = this.plan.meetingPoint.x;
             const anchorY = this.plan.platformRect.y;
             const plankLen = this.platform.targetWidth;
 
             if (!this.coupleInAir) {
-              this.coupleSlideDist = (this.coupleSlideDist || 0) + dt * 280;
-              const distFromAnchor = Math.min(plankLen, plankLen * 0.45 + this.coupleSlideDist);
-              this.couplePos.x = anchorX - Math.cos(this.platformAngle) * distFromAnchor;
+              this.coupleSlideDist = (this.coupleSlideDist || 0) + dt * (200 + 260 * Math.sin(this.platformAngle));
+              const distFromAnchor = Math.min(plankLen, plankLen * 0.42 + this.coupleSlideDist);
+              this.couplePos.x = anchorX - Math.cos(this.platformAngle) * distFromAnchor - 10;
               this.couplePos.y = anchorY + Math.sin(this.platformAngle) * distFromAnchor - 12;
 
-              if (this.coupleSlideDist >= plankLen * 0.55) {
+              if (this.coupleSlideDist >= plankLen * 0.58) {
                 this.coupleInAir = true;
-                this.coupleVx = -Math.cos(this.platformAngle) * 200;
-                this.coupleVy = Math.sin(this.platformAngle) * 200;
+                this.coupleVx = -Math.cos(this.platformAngle) * 220;
+                this.coupleVy = Math.sin(this.platformAngle) * 220;
               }
             } else {
-              const GRAVITY = 800;
+              const GRAVITY = 850;
               this.coupleVy = (this.coupleVy || 0) + GRAVITY * dt;
               this.couplePos.x += (this.coupleVx || 0) * dt;
               this.couplePos.y += this.coupleVy * dt;
@@ -1482,7 +1621,8 @@
 
         if (dist <= 0.001) return { idx: idx + 1, prog: 0, reached: false };
 
-        const step = (speed * dt) / dist;
+        const effectiveSpeed = p0.state === "jump" ? 75 : speed;
+        const step = (effectiveSpeed * dt) / dist;
         let nextProg = prog + step;
         let nextIdx = idx;
 
@@ -1510,7 +1650,7 @@
           if (this.phase === "platform_collapse") {
             this.ctx.save();
             this.ctx.translate(this.plan.meetingPoint.x, this.plan.platformRect.y);
-            this.ctx.rotate(this.platformAngle || 0);
+            this.ctx.rotate(-this.platformAngle || 0);
             this.ctx.translate(-this.plan.meetingPoint.x, -this.plan.platformRect.y);
             const drawX = this.plan.meetingPoint.x - this.platform.currentWidth;
             drawPlatform(this.ctx, drawX, this.plan.platformRect.y, this.platform.currentWidth, this.plan.platformRect.height, PIXEL_SCALE);
@@ -1533,6 +1673,7 @@
           let gMat = GUY_WALK_1;
           if (this.guyMotion.state === "climb_up") gMat = (this.guyMotion.frame % 2 === 0) ? GUY_CLIMB_1 : GUY_CLIMB_2;
           else if (this.guyMotion.state === "hang_traverse") gMat = (this.guyMotion.frame % 2 === 0) ? GUY_HANG_1 : GUY_HANG_2;
+          else if (this.guyMotion.state === "crawl") gMat = (this.guyMotion.frame % 2 === 0) ? GUY_CRAWL_1 : GUY_CRAWL_2;
           else if (this.guyMotion.state === "jump") gMat = GUY_JUMP;
           else if (this.guyMotion.state === "stumble") gMat = (this.guyMotion.frame % 2 === 0) ? GUY_STUMBLE_1 : GUY_STUMBLE_2;
           else if (this.guyMotion.state === "walk_top" || this.guyMotion.state === "appear") gMat = (this.guyMotion.frame % 2 === 0) ? GUY_WALK_1 : GUY_WALK_2;
@@ -1540,6 +1681,7 @@
           let wMat = WOMAN_WALK_1;
           if (this.womanMotion.state === "climb_down") wMat = (this.womanMotion.frame % 2 === 0) ? WOMAN_CLIMB_1 : WOMAN_CLIMB_2;
           else if (this.womanMotion.state === "hang_traverse") wMat = (this.womanMotion.frame % 2 === 0) ? WOMAN_HANG_1 : WOMAN_HANG_2;
+          else if (this.womanMotion.state === "crawl") wMat = (this.womanMotion.frame % 2 === 0) ? WOMAN_CRAWL_1 : WOMAN_CRAWL_2;
           else if (this.womanMotion.state === "jump") wMat = WOMAN_JUMP;
           else if (this.womanMotion.state === "stumble") wMat = (this.womanMotion.frame % 2 === 0) ? WOMAN_STUMBLE_1 : WOMAN_STUMBLE_2;
           else if (this.womanMotion.state === "walk_top" || this.womanMotion.state === "appear") wMat = (this.womanMotion.frame % 2 === 0) ? WOMAN_WALK_1 : WOMAN_WALK_2;

@@ -233,6 +233,42 @@ const GUY_STUMBLE_2 = [
   "............",
 ];
 
+const GUY_CRAWL_1 = [
+  "................",
+  "................",
+  "................",
+  "................",
+  "................",
+  "................",
+  "................",
+  ".....HHHH.......",
+  "....HHEFFH......",
+  "....HFFFF.......",
+  "..LLPPWWPPD.....",
+  ".LPPPPPPPPPDD...",
+  ".F..PPPP..PP....",
+  "....SS....SS....",
+  "................",
+];
+
+const GUY_CRAWL_2 = [
+  "................",
+  "................",
+  "................",
+  "................",
+  "................",
+  "................",
+  "................",
+  ".....HHHH.......",
+  "....HHEFFH......",
+  "....HFFFF.......",
+  "..LLPPWWPPD.....",
+  "..LPPPPPPPPPD...",
+  "...F..PP..PP.SS.",
+  "......SS..F.....",
+  "................",
+];
+
 // --- WOMAN POSES ---
 const WOMAN_STAND_1 = [
   "....HHHH....",
@@ -414,6 +450,42 @@ const WOMAN_STUMBLE_2 = [
   "............",
 ];
 
+const WOMAN_CRAWL_1 = [
+  "................",
+  "................",
+  "................",
+  "................",
+  "................",
+  "................",
+  "................",
+  ".....HHHH.......",
+  "....HHEFFH......",
+  "....HFFFF.......",
+  "..LLCCCCCCD.....",
+  ".LCCCCCCCCCDD...",
+  ".F..CCCC..FF....",
+  "....SS....SS....",
+  "................",
+];
+
+const WOMAN_CRAWL_2 = [
+  "................",
+  "................",
+  "................",
+  "................",
+  "................",
+  "................",
+  "................",
+  ".....HHHH.......",
+  "....HHEFFH......",
+  "....HFFFF.......",
+  "..LLCCCCCCD.....",
+  "..LCCCCCCCCCD...",
+  "...F..CC..FF.SS.",
+  "......SS..F.....",
+  "................",
+];
+
 // --- COUPLE EMBRACE & CUDDLE ---
 const COUPLE_EMBRACE = [
   "..HHHH..HHHH..",
@@ -488,6 +560,8 @@ export function getSpriteMatrix(
         return frame % 2 === 0 ? GUY_CLIMB_1 : GUY_CLIMB_2;
       case "hang_traverse":
         return frame % 2 === 0 ? GUY_HANG_1 : GUY_HANG_2;
+      case "crawl":
+        return frame % 2 === 0 ? GUY_CRAWL_1 : GUY_CRAWL_2;
       case "jump":
         return GUY_JUMP;
       case "embrace":
@@ -512,6 +586,8 @@ export function getSpriteMatrix(
         return frame % 2 === 0 ? WOMAN_CLIMB_1 : WOMAN_CLIMB_2;
       case "hang_traverse":
         return frame % 2 === 0 ? WOMAN_HANG_1 : WOMAN_HANG_2;
+      case "crawl":
+        return frame % 2 === 0 ? WOMAN_CRAWL_1 : WOMAN_CRAWL_2;
       case "jump":
         return WOMAN_JUMP;
       case "embrace":

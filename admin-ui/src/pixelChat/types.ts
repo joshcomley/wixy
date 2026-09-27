@@ -10,6 +10,7 @@ export type AnimationState =
   | "climb_down"
   | "walk_top"
   | "hang_traverse" // Monkey-bar ledge traverse with dangling legs
+  | "crawl" // Hands and knees crawling under overhangs and through gaps
   | "embrace"
   | "jump"
   | "cuddle"

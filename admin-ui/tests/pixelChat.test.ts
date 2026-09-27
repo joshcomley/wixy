@@ -17,7 +17,7 @@ import type { SceneController } from "../src/pixelChat/scene";
 
 describe("Pixel Art Sprites", () => {
   it("returns distinct sprite matrices for all guy animation states", () => {
-    const states = ["walk_top", "climb_up", "hang_traverse", "jump", "embrace", "cuddle", "scamper"] as const;
+    const states = ["walk_top", "climb_up", "hang_traverse", "crawl", "jump", "embrace", "cuddle", "scamper"] as const;
     for (const state of states) {
       const frame0 = getSpriteMatrix("guy", state, 0);
       const frame1 = getSpriteMatrix("guy", state, 1);
@@ -27,7 +27,7 @@ describe("Pixel Art Sprites", () => {
   });
 
   it("returns distinct sprite matrices for all woman animation states", () => {
-    const states = ["walk_top", "climb_down", "hang_traverse", "jump", "embrace", "cuddle", "scamper"] as const;
+    const states = ["walk_top", "climb_down", "hang_traverse", "crawl", "jump", "embrace", "cuddle", "scamper"] as const;
     for (const state of states) {
       const frame0 = getSpriteMatrix("woman", state, 0);
       const frame1 = getSpriteMatrix("woman", state, 1);
@@ -83,7 +83,7 @@ describe("Pathfinder & Trajectory Planner", () => {
     expect(blocks[1]!.y).toBeLessThan(blocks[2]!.y);
   });
 
-  it("builds trajectory plan identifying overhangs for monkey-bar traversal", () => {
+  it("builds trajectory plan identifying overhangs for crawl traversal", () => {
     const synthetic = [
       { x: 260, y: 50, width: 240, height: 50 },  // 0 (top)
       { x: 160, y: 150, width: 340, height: 50 }, // 1 (overhang for woman descending)
@@ -98,15 +98,15 @@ describe("Pathfinder & Trajectory Planner", () => {
     expect(plan.womanWaypoints.length).toBeGreaterThan(4);
     expect(plan.platformRect.width).toBeGreaterThan(0);
 
-    // Guy path must contain hang_traverse (monkey-bar) state
-    const guyHasHang = plan.guyWaypoints.some((w) => w.state === "hang_traverse");
-    expect(guyHasHang).toBe(true);
+    // Guy path must contain crawl state when navigating under overhangs
+    const guyHasCrawl = plan.guyWaypoints.some((w) => w.state === "crawl");
+    expect(guyHasCrawl).toBe(true);
 
     // Guy path must contain climb_up state
     const guyHasClimb = plan.guyWaypoints.some((w) => w.state === "climb_up");
     expect(guyHasClimb).toBe(true);
 
-    // Woman path must contain hang_traverse or climb_down state
+    // Woman path must contain crawl or climb_down state
     const womanHasClimb = plan.womanWaypoints.some((w) => w.state === "climb_down");
     expect(womanHasClimb).toBe(true);
   });
