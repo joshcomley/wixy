@@ -279,13 +279,13 @@ test.describe("server-reactions.spec.ts", () => {
     try {
       // A records an ~8 second note (long enough that it is still playing when B reacts).
       await pageA.getByRole("button", { name: "Record a voice note" }).click();
-      await expect(pageA.getByRole("button", { name: "Stop recording" })).toBeVisible();
+      await expect(pageA.getByRole("button", { name: "Stop and send recording" })).toBeVisible();
       await pageA.waitForTimeout(8_000);
       const sent = pageA.waitForResponse(
         (response) =>
           response.url().endsWith("/api/admin/server/messages") && response.request().method() === "POST",
       );
-      await pageA.getByRole("button", { name: "Stop recording" }).click();
+      await pageA.getByRole("button", { name: "Stop and send recording" }).click();
       expect((await sent).status()).toBe(201);
 
       const voiceBubbleA = pageA.locator(".wx-srv-bubble-mine").filter({ has: pageA.locator(".wx-srv-voice") }).last();
