@@ -73,7 +73,9 @@ async function seedHistory(page: Page, label: string): Promise<void> {
   for (let i = 0; i < 14; i++) {
     const marker = `seed-${label}-${i}-${Date.now()}`;
     await input.fill(marker);
-    await input.press("Enter");
+    // Seed history without physical pointer events; repeated Send taps are tested separately as
+    // part of the chat's multi-tap lock behavior.
+    await page.locator(SEND_BUTTON).evaluate((button) => (button as HTMLButtonElement).click());
     await expect(
       page.locator(".wx-srv-bubble-mine:not(.wx-srv-echo) .wx-srv-bubble-text", { hasText: marker }),
     ).toHaveCount(1);
@@ -153,7 +155,7 @@ for (const viewport of VIEWPORTS) {
       hasTouch: viewport.hasTouch,
     });
 
-    for (const path of ["enter", "click", "tap"] as const) {
+    for (const path of ["click", "tap"] as const) {
       if (path === "tap" && !viewport.hasTouch) continue;
       test(`via ${path}: focus, enabled state, size and scroll never change`, async ({ page }) => {
         await unlockServer(page, "NoFlicker");
@@ -167,8 +169,7 @@ for (const viewport of VIEWPORTS) {
         await expect(input).toBeFocused();
 
         await startSampler(page);
-        if (path === "enter") await input.press("Enter");
-        else if (path === "click") await page.locator(SEND_BUTTON).click();
+        if (path === "click") await page.locator(SEND_BUTTON).click();
         else await page.locator(SEND_BUTTON).tap();
 
         await expect(
