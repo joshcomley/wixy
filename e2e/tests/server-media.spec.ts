@@ -153,13 +153,13 @@ test.describe("server-media.spec.ts (P6b)", () => {
     await draft.fill("Keep this draft for a separate message");
     const record = page.getByRole("button", { name: "Record a voice note" });
     await record.click();
-    await expect(page.getByRole("button", { name: "Stop recording" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Stop and send recording" })).toBeVisible();
     await expect(page.locator(".wx-srv-record-status")).toContainText("Recording");
     await page.waitForTimeout(2_100);
     const sentVoice = page.waitForResponse((response) =>
       response.url().endsWith("/api/admin/server/messages") && response.request().method() === "POST",
     );
-    await page.getByRole("button", { name: "Stop recording" }).click();
+    await page.getByRole("button", { name: "Stop and send recording" }).click();
     expect((await sentVoice).status()).toBe(201);
 
     const voice = page.locator(".wx-srv-voice");
@@ -199,13 +199,31 @@ test.describe("server-media.spec.ts (P6b)", () => {
     await expect(sendButton).toBeVisible();
 
     await record.click();
-    await expect(page.getByRole("button", { name: "Stop recording" })).toBeVisible();
+    const stopAndSend = page.getByRole("button", { name: "Stop and send recording" });
+    const cancelRecording = page.getByRole("button", { name: "Cancel recording" });
+    await expect(stopAndSend).toBeVisible();
+    await expect(stopAndSend).toHaveAttribute("title", "Stop and send recording");
+    await expect(cancelRecording).toHaveAttribute("title", "Cancel recording");
+    await expect(cancelRecording.locator("svg line")).toHaveCount(2);
     await expect(draft).toBeHidden();
     await expect(sendButton).toBeHidden();
     await expect(status).toContainText("Recording");
 
     const pauseButton = page.getByRole("button", { name: "Pause recording" });
     await expect(pauseButton).toBeVisible();
+    const desktopCancelBox = await cancelRecording.boundingBox();
+    const desktopPauseBox = await pauseButton.boundingBox();
+    const desktopStopBox = await stopAndSend.boundingBox();
+    const desktopRowBox = await page.locator(".wx-srv-recording-row.wx-chatc-input-row").boundingBox();
+    expect(desktopCancelBox).not.toBeNull();
+    expect(desktopPauseBox).not.toBeNull();
+    expect(desktopStopBox).not.toBeNull();
+    expect(desktopRowBox).not.toBeNull();
+    expect(desktopCancelBox!.x).toBeCloseTo(desktopRowBox!.x, 0);
+    expect(desktopCancelBox!.x + desktopCancelBox!.width).toBeLessThan(desktopPauseBox!.x);
+    expect(desktopPauseBox!.x).toBeLessThan(desktopStopBox!.x);
+    const sendBlue = await sendButton.evaluate((element) => getComputedStyle(element).backgroundColor);
+    expect(await stopAndSend.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(sendBlue);
 
     // Record for ~1.5s
     await page.waitForTimeout(1_500);
@@ -215,6 +233,8 @@ test.describe("server-media.spec.ts (P6b)", () => {
     await expect(status).toContainText("Paused");
     const resumeButton = page.getByRole("button", { name: "Resume recording" });
     await expect(resumeButton).toBeVisible();
+    await expect(stopAndSend).toBeVisible();
+    expect(await stopAndSend.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(sendBlue);
     await expect(draft).toBeHidden();
     await expect(sendButton).toBeHidden();
 
@@ -232,7 +252,7 @@ test.describe("server-media.spec.ts (P6b)", () => {
     const sentVoice = page.waitForResponse((response) =>
       response.url().endsWith("/api/admin/server/messages") && response.request().method() === "POST",
     );
-    await page.getByRole("button", { name: "Stop recording" }).click();
+    await page.getByRole("button", { name: "Stop and send recording" }).click();
     expect((await sentVoice).status()).toBe(201);
 
     await expect(draft).toBeVisible();
@@ -247,27 +267,39 @@ test.describe("server-media.spec.ts (P6b)", () => {
     await page.setViewportSize({ width: 360, height: 740 });
     await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
     await record.click();
-    await expect(page.getByRole("button", { name: "Stop recording" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Stop and send recording" })).toBeVisible();
     await expect(draft).toBeHidden();
     await expect(sendButton).toBeHidden();
     await expect(page.getByRole("button", { name: "Pause recording" })).toBeVisible();
+    await expect(stopAndSend).toHaveAttribute("title", "Stop and send recording");
+    await expect(cancelRecording).toHaveAttribute("title", "Cancel recording");
+    expect(await stopAndSend.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(sendBlue);
 
     // All controls in the dedicated row fit within 360px viewport with no horizontal overflow
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
     const pauseBox = await page.getByRole("button", { name: "Pause recording" }).boundingBox();
-    const stopBox = await page.getByRole("button", { name: "Stop recording" }).boundingBox();
-    const cancelBox = await page.getByRole("button", { name: "Cancel" }).boundingBox();
+    const stopBox = await stopAndSend.boundingBox();
+    const cancelBox = await cancelRecording.boundingBox();
+    const rowBox = await page.locator(".wx-srv-recording-row.wx-chatc-input-row").boundingBox();
 
     expect(pauseBox).not.toBeNull();
     expect(stopBox).not.toBeNull();
     expect(cancelBox).not.toBeNull();
+    expect(rowBox).not.toBeNull();
+    expect(cancelBox!.x).toBeCloseTo(rowBox!.x, 0);
     expect(pauseBox!.x + pauseBox!.width).toBeLessThanOrEqual(360);
     expect(stopBox!.x + stopBox!.width).toBeLessThanOrEqual(360);
     expect(cancelBox!.x + cancelBox!.width).toBeLessThanOrEqual(360);
 
+    // Cancel sits alone at the left edge, with the status text between it and
+    // Pause/Stop — never sandwiched between them (a too-easy mis-tap). Pause and
+    // Stop stay adjacent on the right, Pause before Stop.
+    expect(cancelBox!.x + cancelBox!.width).toBeLessThan(pauseBox!.x);
+    expect(pauseBox!.x).toBeLessThan(stopBox!.x);
+
     // Cancel to clean up
-    await page.getByRole("button", { name: "Cancel" }).click();
+    await page.getByRole("button", { name: "Cancel recording" }).click();
     await expect(draft).toBeVisible();
     await expect(sendButton).toBeVisible();
   });
@@ -307,9 +339,9 @@ test.describe("server-media.spec.ts (P6b)", () => {
     const draft = page.locator(".wx-chat-composer textarea");
 
     await record.click();
-    await expect(page.getByRole("button", { name: "Stop recording" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Stop and send recording" })).toBeVisible();
     await page.waitForTimeout(1_300);
-    await page.getByRole("button", { name: "Stop recording" }).click();
+    await page.getByRole("button", { name: "Stop and send recording" }).click();
     await expect(retry).toBeVisible();
     await expect(discard).toBeVisible();
 
@@ -336,12 +368,12 @@ test.describe("server-media.spec.ts (P6b)", () => {
     // A new note can be recorded and now goes through.
     await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
     await record.click();
-    await expect(page.getByRole("button", { name: "Stop recording" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Stop and send recording" })).toBeVisible();
     await page.waitForTimeout(1_300);
     const sentVoice = page.waitForResponse((response) =>
       response.url().endsWith("/api/admin/server/messages") && response.request().method() === "POST",
     );
-    await page.getByRole("button", { name: "Stop recording" }).click();
+    await page.getByRole("button", { name: "Stop and send recording" }).click();
     expect((await sentVoice).status()).toBe(201);
     // The new note is sent and shown as this user's own message. Whether ffmpeg has
     // finished it is not F17's concern (the two intercepted attempts above left orphan
@@ -365,9 +397,9 @@ test.describe("server-media.spec.ts (P6b)", () => {
     await unlockServer(page, "Discard tester");
     const record = page.getByRole("button", { name: "Record a voice note" });
     await record.click();
-    await expect(page.getByRole("button", { name: "Stop recording" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Stop and send recording" })).toBeVisible();
     await page.waitForTimeout(1_300);
-    await page.getByRole("button", { name: "Stop recording" }).click();
+    await page.getByRole("button", { name: "Stop and send recording" }).click();
 
     const discard = page.getByRole("button", { name: "Discard voice note" });
     await expect(discard).toBeVisible();
@@ -388,9 +420,9 @@ test.describe("server-media.spec.ts (P6b)", () => {
     });
     await unlockServer(page, "Quick tester");
     await page.getByRole("button", { name: "Record a voice note" }).click();
-    await expect(page.getByRole("button", { name: "Stop recording" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Stop and send recording" })).toBeVisible();
     await page.waitForTimeout(650); // >400 ms tap window, but below the 1s minimum.
-    await page.getByRole("button", { name: "Stop recording" }).click();
+    await page.getByRole("button", { name: "Stop and send recording" }).click();
 
     await expect(page.locator(".wx-chat-composer-error")).toContainText("Too short");
     await expect(page.locator(".wx-chat-attachment-chip")).toHaveCount(0);
@@ -404,12 +436,12 @@ test.describe("server-media.spec.ts (P6b)", () => {
     // Record and send a voice note
     const record = page.getByRole("button", { name: "Record a voice note" });
     await record.click();
-    await expect(page.getByRole("button", { name: "Stop recording" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Stop and send recording" })).toBeVisible();
     await page.waitForTimeout(1_300);
     const sentVoice = page.waitForResponse((response) =>
       response.url().endsWith("/api/admin/server/messages") && response.request().method() === "POST",
     );
-    await page.getByRole("button", { name: "Stop recording" }).click();
+    await page.getByRole("button", { name: "Stop and send recording" }).click();
     expect((await sentVoice).status()).toBe(201);
 
     // Wait for the voice note to render in the user's bubble

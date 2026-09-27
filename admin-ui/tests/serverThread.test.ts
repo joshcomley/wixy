@@ -881,6 +881,9 @@ describe("mountServerThread", () => {
       expect(pauseButton.hidden).toBe(false);
       expect(pauseButton.querySelector("svg")).not.toBeNull();
       expect(pauseButton.getAttribute("aria-label")).toBe("Resume recording");
+      expect(recordButton.classList.contains("wx-srv-record-button--send")).toBe(true);
+      expect(recordButton.getAttribute("aria-label")).toBe("Stop and send recording");
+      expect(recordButton.getAttribute("title")).toBe("Stop and send recording");
       expect(status.textContent).toContain("Paused");
       expect(inputRow.classList.contains("wx-srv-recording-row")).toBe(true);
 
@@ -931,7 +934,7 @@ describe("mountServerThread", () => {
       view.teardown();
     });
 
-    it("uses a line SVG icon for the microphone button across all states", async () => {
+    it("uses a line SVG icon for the microphone button across all states, swapping to a send glyph while recording/paused", async () => {
       getHistory.mockResolvedValue(emptyHistory());
       const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
       await view.attach(SESSION);
@@ -940,16 +943,43 @@ describe("mountServerThread", () => {
       expect(recordButton.textContent).not.toContain("🎤");
       expect(recordButton.querySelector("svg")).not.toBeNull();
       expect(recordButton.querySelector("path")).not.toBeNull();
+      expect(recordButton.classList.contains("wx-srv-record-button--send")).toBe(false);
 
       recordButton.click();
       await flush();
+      // Recording: a send-style glyph (polygon), not the old neutral stop-square, and
+      // the filled "send" button treatment — it already finishes AND sends the note.
       expect(recordButton.querySelector("svg")).not.toBeNull();
-      expect(recordButton.querySelector("rect")).not.toBeNull();
+      expect(recordButton.querySelector("polygon")).not.toBeNull();
+      expect(recordButton.querySelector("rect")).toBeNull();
+      expect(recordButton.classList.contains("wx-srv-record-button--send")).toBe(true);
+      expect(recordButton.getAttribute("aria-label")).toBe("Stop and send recording");
 
       recordButton.click();
       await flush();
       await flush();
       expect(recordButton.querySelector("path")).not.toBeNull();
+      expect(recordButton.classList.contains("wx-srv-record-button--send")).toBe(false);
+      expect(recordButton.getAttribute("aria-label")).toBe("Record a voice note");
+      view.teardown();
+    });
+
+    it("shows Cancel as an icon-only cross with an accessible name, never bare 'Cancel' text", async () => {
+      getHistory.mockResolvedValue(emptyHistory());
+      const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+
+      const recordButton = view.element.querySelector<HTMLButtonElement>(".wx-srv-record-button")!;
+      const cancelButton = view.element.querySelector<HTMLButtonElement>(".wx-srv-record-cancel")!;
+
+      recordButton.click();
+      await flush();
+
+      expect(cancelButton.hidden).toBe(false);
+      expect(cancelButton.textContent?.trim()).toBe("");
+      expect(cancelButton.querySelector("svg")).not.toBeNull();
+      expect(cancelButton.getAttribute("aria-label")).toBe("Cancel recording");
+      expect(cancelButton.getAttribute("title")).toBe("Cancel recording");
       view.teardown();
     });
   });
@@ -4038,5 +4068,4 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     view.teardown();
   });
 });
-
 

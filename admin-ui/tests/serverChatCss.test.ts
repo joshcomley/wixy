@@ -32,6 +32,7 @@ const HIDDEN_TOGGLED_CLASSES = [
   "wx-srv-view-once-controls",
   "wx-srv-tease-preview",
   "wx-srv-record-pause",
+  "wx-srv-record-cancel",
   "wx-srv-voice-confirm",
   "wx-srv-settings-button",
   "wx-srv-pen-undo",
@@ -68,6 +69,34 @@ describe("server/chat.css: hidden elements must actually hide", () => {
       }
     });
   }
+});
+
+// Cancel used to sit between Pause and Stop (order 2/3/4 with status at order 1),
+// which made it too easy to mis-tap — the operator's own report, 2026-09-27.
+describe("server/chat.css: the recording row keeps Cancel away from Pause/Stop", () => {
+  function orderOf(cls: string): number | null {
+    const selector = `.wx-srv-thread-view .wx-chatc-input-row.wx-srv-recording-row .${cls}`;
+    const pattern = new RegExp(`${escapeRegExp(selector)}\\s*\\{([^}]*)\\}`);
+    const body = pattern.exec(chatCss)?.[1] ?? null;
+    if (body === null) return null;
+    const match = /order\s*:\s*(\d+)/.exec(body);
+    return match !== null ? Number(match[1]) : null;
+  }
+
+  it("puts Cancel at the left edge, separated from Pause and Stop by the status text", () => {
+    const cancelOrder = orderOf("wx-srv-record-cancel");
+    const statusOrder = orderOf("wx-srv-record-status");
+    const pauseOrder = orderOf("wx-srv-record-pause");
+    const stopOrder = orderOf("wx-srv-record-button");
+    expect(cancelOrder, "no order rule for .wx-srv-record-cancel").not.toBeNull();
+    expect(statusOrder, "no order rule for .wx-srv-record-status").not.toBeNull();
+    expect(pauseOrder, "no order rule for .wx-srv-record-pause").not.toBeNull();
+    expect(stopOrder, "no order rule for .wx-srv-record-button").not.toBeNull();
+
+    expect(cancelOrder!).toBeLessThan(statusOrder!);
+    expect(statusOrder!).toBeLessThan(pauseOrder!);
+    expect(pauseOrder!).toBeLessThan(stopOrder!);
+  });
 });
 
 describe("server/chat.css: the 'Extend auto-lock to 1 minute' row", () => {
