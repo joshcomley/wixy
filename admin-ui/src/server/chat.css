@@ -162,7 +162,8 @@
 }
 
 .wx-srv-record-button svg,
-.wx-srv-record-pause svg {
+.wx-srv-record-pause svg,
+.wx-srv-record-cancel svg {
   width: 20px;
   height: 20px;
   display: block;
@@ -174,12 +175,29 @@
   cursor: default;
 }
 
+/* Match Send while recording or paused, when this button stops and sends. */
+.wx-srv-record-button--send {
+  border-color: var(--wx-brand-blue);
+  background: var(--wx-brand-blue);
+  color: #fff;
+}
+
+/* Match the other recorder icon buttons' tap target. */
 .wx-srv-record-cancel {
-  padding: 6px 10px;
-  font: 0.75rem/1 system-ui, sans-serif;
+  box-sizing: border-box;
+  width: var(--wx-srv-control-h);
+  height: var(--wx-srv-control-h);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
 }
 
 .wx-srv-record-pause[hidden] {
+  display: none;
+}
+
+.wx-srv-record-cancel[hidden] {
   display: none;
 }
 
@@ -272,16 +290,20 @@
   display: none;
 }
 
-/* Dedicated recording row: replaces the text input and Send button while recording
-   or paused, displaying the elapsed timer, Pause/Resume, Cancel, and Stop & Send. */
+/* The status fills the space between Cancel on the left and the two actions on
+   the right, reducing accidental taps on Cancel. */
 .wx-srv-thread-view .wx-chatc-input-row.wx-srv-recording-row {
   align-items: center;
   min-height: var(--wx-srv-control-h);
   flex-wrap: nowrap;
 }
 
-.wx-srv-thread-view .wx-chatc-input-row.wx-srv-recording-row .wx-srv-record-status {
+.wx-srv-thread-view .wx-chatc-input-row.wx-srv-recording-row .wx-srv-record-cancel {
   order: 1;
+}
+
+.wx-srv-thread-view .wx-chatc-input-row.wx-srv-recording-row .wx-srv-record-status {
+  order: 2;
   flex: 1;
   min-width: 0;
   color: var(--wx-ink);
@@ -290,10 +312,6 @@
 }
 
 .wx-srv-thread-view .wx-chatc-input-row.wx-srv-recording-row .wx-srv-record-pause {
-  order: 2;
-}
-
-.wx-srv-thread-view .wx-chatc-input-row.wx-srv-recording-row .wx-srv-record-cancel {
   order: 3;
 }
 
