@@ -18,7 +18,7 @@ export interface TranscriptionContext {
   /** Whether a new transcription may be requested (cmd's private mode is live). */
   available(): boolean;
   /** Asks the server to transcribe; resolves with its immediate answer. */
-  request(attachmentId: string): Promise<TranscribeAnswer>;
+  request(attachmentId: string, options?: { retranscribe?: boolean }): Promise<TranscribeAnswer>;
   /** The server refused with "not available": hide every Transcribe control. */
   markUnavailable(): void;
   /** Per-device Hide/Show choice for a finished transcript (memory only, never persisted). */
@@ -73,13 +73,16 @@ export function renderTranscriptBlock(
   // an older state ("pending") and must never overwrite the newer one.
   let streamUpdates = 0;
 
-  function start(): void {
+  function start(options?: { retranscribe?: boolean }): void {
     if (requesting) return;
     requesting = true;
     notice = null;
     const updatesAtStart = streamUpdates;
     paint();
-    void context.request(attachment.id).then((answer) => {
+    const req = options !== undefined
+      ? context.request(attachment.id, options)
+      : context.request(attachment.id);
+    void req.then((answer) => {
       requesting = false;
       switch (answer.kind) {
         case "started":
@@ -153,6 +156,24 @@ export function renderTranscriptBlock(
         });
         children.push(toggle);
       }
+      if (notice !== null) {
+        const message = documentRef.createElement("p");
+        message.className = "wx-srv-transcript-error";
+        message.setAttribute("role", "status");
+        message.textContent = notice;
+        children.push(message);
+      }
+      if (context.available() && !hidden && text !== "") {
+        const retranscribe = action(
+          documentRef,
+          "wx-srv-transcript-retranscribe",
+          "Re-transcribe",
+          "Re-transcribe this voice note",
+        );
+        retranscribe.disabled = requesting;
+        retranscribe.addEventListener("click", () => start({ retranscribe: true }));
+        children.push(retranscribe);
+      }
     } else if (server?.status === "failed") {
       state = "failed";
       const message = documentRef.createElement("p");
@@ -162,7 +183,7 @@ export function renderTranscriptBlock(
       children.push(message);
       if (context.available()) {
         const retry = action(documentRef, "wx-srv-transcript-retry", "Retry", "Retry transcribing this voice note");
-        retry.addEventListener("click", start);
+        retry.addEventListener("click", () => start());
         children.push(retry);
       }
     } else if (context.available()) {
@@ -175,7 +196,7 @@ export function renderTranscriptBlock(
         children.push(message);
       }
       const button = action(documentRef, "wx-srv-transcript-start", "Transcribe", "Transcribe this voice note");
-      button.addEventListener("click", start);
+      button.addEventListener("click", () => start());
       children.push(button);
     } else {
       state = notice === null ? "none" : "error";

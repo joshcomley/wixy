@@ -187,6 +187,32 @@ for (const [label, viewport] of [
       await expect(bubble.locator(".wx-srv-transcript-text")).toHaveText(TRANSCRIPT);
       expect((await stats(page)).requests).toBe(2);
     });
+
+    test("a finished transcript can be re-transcribed", async ({ page }) => {
+      await configure(page, { private: true, text: TRANSCRIPT });
+      const seq = await seedVoice(page, `Retranscribe ${label}`);
+      await unlock(page, "Retranscriber");
+      const bubble = note(page, seq);
+
+      await bubble.getByRole("button", { name: "Transcribe this voice note" }).click();
+      await expect(bubble.locator(".wx-srv-transcript-text")).toHaveText(TRANSCRIPT);
+
+      const retranscribeBtn = bubble.getByRole("button", { name: "Re-transcribe this voice note" });
+      await expect(retranscribeBtn).toBeVisible();
+
+      const SECOND_TRANSCRIPT = "second attempt from the fake transcriber";
+      await configure(page, { hold: true, text: SECOND_TRANSCRIPT });
+      await page.waitForTimeout(TAP_GAP_MS);
+
+      await retranscribeBtn.click();
+      await expect(bubble.locator(".wx-srv-transcript-pending")).toBeVisible();
+      await expect(bubble.locator(".wx-srv-transcript-text")).toHaveCount(0);
+
+      await configure(page, { hold: false });
+      await expect(bubble.locator(".wx-srv-transcript-text")).toHaveText(SECOND_TRANSCRIPT);
+      await expect(bubble.getByRole("button", { name: "Re-transcribe this voice note" })).toBeVisible();
+      expect((await stats(page)).requests).toBe(2);
+    });
   });
 }
 

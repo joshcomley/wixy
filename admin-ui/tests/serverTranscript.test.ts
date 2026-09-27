@@ -22,7 +22,7 @@ const voice: Attachment = {
 
 interface Harness {
   readonly ctx: TranscriptionContext;
-  readonly request: ReturnType<typeof vi.fn<(id: string) => Promise<TranscribeAnswer>>>;
+  readonly request: ReturnType<typeof vi.fn<(id: string, options?: { retranscribe?: boolean }) => Promise<TranscribeAnswer>>>;
   readonly markUnavailable: ReturnType<typeof vi.fn>;
   readonly hidden: Set<string>;
   available: boolean;
@@ -31,7 +31,7 @@ interface Harness {
 function harness(answer: TranscribeAnswer | Promise<TranscribeAnswer> = { kind: "started", transcript: { status: "pending" } }): Harness {
   const hidden = new Set<string>();
   const state = { available: true };
-  const request = vi.fn<(id: string) => Promise<TranscribeAnswer>>(() => Promise.resolve(answer));
+  const request = vi.fn<(id: string, options?: { retranscribe?: boolean }) => Promise<TranscribeAnswer>>(() => Promise.resolve(answer));
   const markUnavailable = vi.fn(() => {
     state.available = false;
   });
@@ -287,6 +287,52 @@ describe("transcript block", () => {
     patchTranscriptBlocks(host, [{ ...voice, id: "c".repeat(32), transcript: { status: "done", text: "c note" } }]);
     expect(other.dataset["state"]).toBe("done");
     expect(host.querySelector<HTMLElement>(`[data-attachment-id="${voice.id}"]`)?.dataset["state"]).toBe("idle");
+  });
+
+  it("renders a Re-transcribe button when transcript is done and transcription is available", () => {
+    const el = block(harness(), { ...voice, transcript: { status: "done", text: "words to transcribe again" } });
+    const btn = el.querySelector<HTMLButtonElement>(".wx-srv-transcript-retranscribe");
+    expect(btn).not.toBeNull();
+    expect(btn?.textContent).toBe("Re-transcribe");
+    expect(btn?.getAttribute("aria-label")).toBe("Re-transcribe this voice note");
+  });
+
+  it("clicking Re-transcribe calls request with retranscribe: true and enters pending state", async () => {
+    const h = harness();
+    const el = block(h, { ...voice, transcript: { status: "done", text: "old words" } });
+    const btn = el.querySelector<HTMLButtonElement>(".wx-srv-transcript-retranscribe")!;
+    btn.click();
+    expect(h.request).toHaveBeenCalledExactlyOnceWith(voice.id, { retranscribe: true });
+    expect(el.dataset["state"]).toBe("pending");
+    expect(el.querySelector(".wx-srv-transcript-spinner")).not.toBeNull();
+    await settle();
+    expect(el.dataset["state"]).toBe("pending");
+  });
+
+  it("omits Re-transcribe button when transcription is unavailable or transcript is hidden", () => {
+    const h = harness();
+    h.available = false;
+    const elUnavailable = block(h, { ...voice, transcript: { status: "done", text: "visible text" } });
+    expect(elUnavailable.querySelector(".wx-srv-transcript-retranscribe")).toBeNull();
+
+    const h2 = harness();
+    const elHidden = block(h2, { ...voice, transcript: { status: "done", text: "secret text" } });
+    elHidden.querySelector<HTMLButtonElement>(".wx-srv-transcript-toggle")!.click();
+    expect(elHidden.querySelector(".wx-srv-transcript-retranscribe")).toBeNull();
+  });
+
+  it("shows an error notice if Re-transcribe fails or is rate-limited, keeping the text and Re-transcribe button", async () => {
+    const h = harness({ kind: "rate_limited", retryAfterS: 15 });
+    const el = block(h, { ...voice, transcript: { status: "done", text: "persisting text" } });
+    const btn = el.querySelector<HTMLButtonElement>(".wx-srv-transcript-retranscribe")!;
+    btn.click();
+    await settle();
+    expect(el.dataset["state"]).toBe("done");
+    expect(el.querySelector(".wx-srv-transcript-text")?.textContent).toBe("persisting text");
+    expect(el.querySelector(".wx-srv-transcript-error")?.textContent).toBe(
+      "That's a lot of transcripts — try again in 15 seconds.",
+    );
+    expect(el.querySelector(".wx-srv-transcript-retranscribe")).not.toBeNull();
   });
 });
 

@@ -1957,7 +1957,12 @@ class LiveChatStore:
         return attachment.transcript if attachment is not None else None
 
     def begin_transcript(
-        self, *, att_id: str, now: float, restart_pending: bool = False
+        self,
+        *,
+        att_id: str,
+        now: float,
+        restart_pending: bool = False,
+        restart_done: bool = False,
     ) -> TranscriptBegin:
         """Atomically decide whether a transcription job should start for `att_id`.
 
@@ -1965,6 +1970,9 @@ class LiveChatStore:
         over: the route passes it only when THIS process has no job in flight for the note, so
         the row belongs to a job that is gone (its outcome could not be recorded, or it was
         started by a process that died) — never to a live one.
+
+        `restart_done=True` allows re-transcribing a completed transcript row, resetting it to
+        `pending` in place.
 
         Everything is checked under one write lock, so two racing requests can never both
         get `started`: the loser sees the winner's `pending` row. A missing row and a
@@ -1985,7 +1993,7 @@ class LiveChatStore:
             ):
                 return TranscriptBegin("gone")
             existing = _load_attachment(conn, att_id).transcript
-            if existing is not None and existing.status == "done":
+            if existing is not None and existing.status == "done" and not restart_done:
                 return TranscriptBegin("done", existing)
             if existing is not None and existing.status == "pending" and not restart_pending:
                 return TranscriptBegin("pending", existing)

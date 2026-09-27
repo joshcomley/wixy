@@ -933,11 +933,13 @@ deploy the startup sweep, not this handler, is what clears such a row.) The `fai
 
 **The route and job (`routes_livechat.py`, `livechat/transcription.py`).**
 `POST /attachments/{id}/transcribe` answers at once: 404 (not a sent voice note), 409 (not ready),
-200 (already `done`), 202 (this process already has a job for it — `TranscriptionRuntime.inflight`
-is the single-flight authority), 503 `not_configured`, 429 (6 new jobs a minute per identity), else
-the note is claimed in process before the first `await`, a `pending` row is written and a job runs on
-the contained group → 202. A `pending` row with no job behind it (its outcome could not be recorded)
-is restarted by the next request (`begin_transcript(restart_pending=True)`). The job
+200 (already `done` when not re-transcribing), 202 (fresh job, or re-transcribing an existing `done`
+row via `?retranscribe=1` / `?force=1` which replaces it in place via
+`begin_transcript(restart_done=True)`, or this process already has a job for it —
+`TranscriptionRuntime.inflight` is the single-flight authority), 503 `not_configured`, 429 (6 new jobs
+a minute per identity), else the note is claimed in process before the first `await`, a `pending` row is
+written and a job runs on the contained group → 202. A `pending` row with no job behind it (its outcome
+could not be recorded) is restarted by the next request (`begin_transcript(restart_pending=True)`). The job
 (`TranscriptionRuntime.run_job`) waits for the global one-at-a-time slot, reads
 `media/<id[:2]>/<id>/play.m4a`, asks cmd afresh whether it still promises private mode, sends it with a budget of **60 s + 0.5 × the
 note's seconds**, and records `done`/`failed`, which appends `message_updated`; the stream delivers
@@ -945,7 +947,8 @@ note's seconds**, and records `done`/`failed`, which appends `message_updated`; 
 
 **Frontend (`admin-ui/src/server/transcript.ts`).** Per voice note, one `.wx-srv-transcript` block:
 Transcribe (only while `transcriptionAvailable`, read once per attach) → "Transcribing…" spinner →
-text + per-device Hide/Show (a `Set` in `thread.ts`, memory only) → or an error + Retry. A
+text + per-device Hide/Show (a `Set` in `thread.ts`, memory only) + Re-transcribe (re-POSTs with
+`?retranscribe=1`, replacing finished text in place) → or an error + Retry. A
 transcript-only `message_updated` is patched into the live bubble (`differOnlyInTranscripts` →
 `patchTranscriptBlocks`) so a playing `<audio>` is never disposed; anything else still rebuilds the
 bubble. A `202` reply cannot overwrite a newer stream update (a quick job's update can beat the

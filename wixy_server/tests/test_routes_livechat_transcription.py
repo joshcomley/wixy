@@ -284,6 +284,56 @@ class TestTranscribeFlow:
         row = env.store.get_transcript(voice.att_id)
         assert row is not None and row.engine == "parakeet"
 
+    def test_retranscribe_replaces_a_finished_transcript_in_place_and_stays_single_flight(
+        self, make_env: Callable[..., Env]
+    ) -> None:
+        env = make_env()
+        voice = _seed_voice(env)
+        with TestClient(env.app) as client:
+            headers = _unlock(client)
+            # 1. Initial transcribe
+            first = client.post(TRANSCRIBE.format(voice.att_id), headers=headers)
+            assert first.status_code == 202
+            _wait_for(_finished(env, voice.att_id))
+            assert _message_attachment(client, headers, voice.att_id)["transcript"] == {
+                "status": "done",
+                "text": SENTINEL,
+            }
+
+            # 2. Reading without retranscribe serves the stored transcript back (200)
+            again = client.post(TRANSCRIBE.format(voice.att_id), headers=headers)
+            assert again.status_code == 200
+            assert again.json() == {"transcript": {"status": "done", "text": SENTINEL}}
+
+            # 3. Re-transcribe with ?retranscribe=1 replaces the finished row and returns 202
+            env.state.transcribe_text = "updated-sentence-8a21f"
+            retranscribe = client.post(
+                TRANSCRIBE.format(voice.att_id) + "?retranscribe=1", headers=headers
+            )
+            assert retranscribe.status_code == 202
+            assert retranscribe.json() == {"transcript": {"status": "pending"}}
+
+            # 4. Racing re-transcribe request while inflight returns 202 (single-flight)
+            racing = client.post(
+                TRANSCRIBE.format(voice.att_id) + "?retranscribe=1", headers=headers
+            )
+            assert racing.status_code == 202
+
+            # 5. Wait for second transcription to complete
+            _wait_for(_finished(env, voice.att_id))
+            updated_attachment = _message_attachment(client, headers, voice.att_id)
+            assert updated_attachment["transcript"] == {
+                "status": "done",
+                "text": "updated-sentence-8a21f",
+            }
+
+            # 6. Re-transcribing a deleted/gone message 404s
+            assert voice.seq is not None
+            client.delete(f"/api/admin/server/messages/{voice.seq}", headers=headers)
+            gone = client.post(TRANSCRIBE.format(voice.att_id) + "?retranscribe=1", headers=headers)
+            assert gone.status_code == 404
+            assert gone.json() == {"error": "not_found"}
+
     def test_both_devices_are_told_pending_then_done_through_events(
         self, make_env: Callable[..., Env]
     ) -> None:

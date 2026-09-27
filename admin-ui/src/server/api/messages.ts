@@ -314,11 +314,13 @@ function parseTranscript(value: unknown): AttachmentTranscript | null {
 export async function transcribeAttachment(
   session: ServerSession,
   attachmentId: string,
+  options?: { retranscribe?: boolean },
 ): Promise<TranscribeAnswer> {
   let response: Response;
+  const query = options?.retranscribe ? "?retranscribe=1" : "";
   try {
     response = await serverFetch(
-      `/attachments/${encodeURIComponent(attachmentId)}/transcribe`,
+      `/attachments/${encodeURIComponent(attachmentId)}/transcribe${query}`,
       { method: "POST" },
       session,
     );

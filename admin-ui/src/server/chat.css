@@ -1040,6 +1040,11 @@ button.wx-srv-quote:focus-visible {
   cursor: pointer;
 }
 
+.wx-srv-transcript-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .wx-srv-transcript-toggle {
   padding: 0 4px;
   border-color: transparent;

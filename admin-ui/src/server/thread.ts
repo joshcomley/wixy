@@ -901,11 +901,16 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     },
   };
 
-  async function requestTranscription(attachmentId: string): Promise<TranscribeAnswer> {
+  async function requestTranscription(
+    attachmentId: string,
+    options?: { retranscribe?: boolean },
+  ): Promise<TranscribeAnswer> {
     const session = currentSession;
     if (session === null) return { kind: "failed" };
     try {
-      return await transcribeAttachment(session, attachmentId);
+      return options !== undefined
+        ? await transcribeAttachment(session, attachmentId, options)
+        : await transcribeAttachment(session, attachmentId);
     } catch (error) {
       if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
       return { kind: "failed" };
