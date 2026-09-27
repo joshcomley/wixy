@@ -148,6 +148,26 @@ export function mountMessageActions(deps: MessageActionsDeps): MessageActionsCon
 
     anchorButton.appendChild(bar);
     activeVariantsBar = bar;
+
+    try {
+      const rect = bar.getBoundingClientRect();
+      const viewportWidth = win.innerWidth || documentRef.documentElement?.clientWidth || 360;
+      let shiftX = 0;
+      if (rect.left < 8) {
+        shiftX = 8 - rect.left;
+      } else if (rect.right > viewportWidth - 8) {
+        shiftX = (viewportWidth - 8) - rect.right;
+      }
+      if (shiftX !== 0) {
+        bar.style.transform = `translateX(calc(-50% + ${shiftX}px))`;
+      }
+      if (rect.top < 8) {
+        bar.style.bottom = "auto";
+        bar.style.top = "calc(100% + 4px)";
+      }
+    } catch {
+      // In non-DOM / test environments
+    }
   }
 
   for (const emoji of REACTION_EMOJIS) {
@@ -278,10 +298,18 @@ export function mountMessageActions(deps: MessageActionsDeps): MessageActionsCon
   syncPicker();
   refreshRecents();
 
-  // Full emoji picker view
+  // Full emoji picker backdrop and view (centered popup on the chat view)
+  const backdrop = documentRef.createElement("div");
+  backdrop.className = "wx-srv-emoji-picker-backdrop";
+  backdrop.hidden = true;
+  backdrop.dataset["srvGestureBoundary"] = "";
+
   const fullPicker = documentRef.createElement("div");
   fullPicker.className = "wx-srv-emoji-picker";
+  fullPicker.setAttribute("role", "dialog");
+  fullPicker.setAttribute("aria-label", "Emoji picker");
   fullPicker.hidden = true;
+  fullPicker.dataset["srvGestureBoundary"] = "";
 
   const pickerHeader = documentRef.createElement("div");
   pickerHeader.className = "wx-srv-emoji-picker-header";
@@ -293,8 +321,7 @@ export function mountMessageActions(deps: MessageActionsDeps): MessageActionsCon
   backBtn.setAttribute("aria-label", "Back to actions");
   backBtn.dataset["srvGestureBoundary"] = "";
   backBtn.addEventListener("click", () => {
-    fullPicker.hidden = true;
-    actions.hidden = false;
+    closeFullPicker();
   });
 
   const searchInput = documentRef.createElement("input");
@@ -302,8 +329,23 @@ export function mountMessageActions(deps: MessageActionsDeps): MessageActionsCon
   searchInput.className = "wx-srv-emoji-search";
   searchInput.placeholder = "Search emojis…";
   searchInput.setAttribute("aria-label", "Search emojis");
+  searchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      close();
+    }
+  });
 
-  pickerHeader.append(backBtn, searchInput);
+  const closeBtn = documentRef.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "wx-srv-emoji-picker-close";
+  closeBtn.textContent = "✕";
+  closeBtn.setAttribute("aria-label", "Close emoji picker");
+  closeBtn.setAttribute("title", "Close");
+  closeBtn.dataset["srvGestureBoundary"] = "";
+  closeBtn.addEventListener("click", close);
+
+  pickerHeader.append(backBtn, searchInput, closeBtn);
 
   const categoryTabs = documentRef.createElement("div");
   categoryTabs.className = "wx-srv-emoji-categories";
@@ -363,24 +405,44 @@ export function mountMessageActions(deps: MessageActionsDeps): MessageActionsCon
     }
   });
 
+  backdrop.addEventListener("pointerdown", (e) => {
+    if (e.target === backdrop) close();
+  });
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop) close();
+  });
+
   fullPicker.append(pickerHeader, categoryTabs, emojiGrid);
-  menu.appendChild(fullPicker);
+  backdrop.appendChild(fullPicker);
+  menu.appendChild(backdrop);
 
   function openFullPicker(): void {
+    menu.classList.add("wx-srv-message-actions-picker-open");
     actions.hidden = true;
+    backdrop.hidden = false;
     fullPicker.hidden = false;
     searchInput.value = "";
     activeCatId = EMOJI_CATEGORIES[0]?.id ?? "";
     renderGrid(EMOJI_CATEGORIES[0]?.emojis ?? []);
-    searchInput.focus();
+    win.setTimeout(() => searchInput.focus(), 50);
+  }
+
+  function closeFullPicker(): void {
+    menu.classList.remove("wx-srv-message-actions-picker-open");
+    fullPicker.hidden = true;
+    backdrop.hidden = true;
+    actions.hidden = false;
   }
 
   function close(): void {
+    menu.classList.remove("wx-srv-message-actions-picker-open");
     menu.hidden = true;
     confirmation.hidden = true;
     actions.hidden = false;
     fullPicker.hidden = true;
+    backdrop.hidden = true;
     closeVariantsBar();
+    detachOutsideListener();
     trigger.setAttribute("aria-expanded", "false");
     bubble.classList.remove("wx-srv-message-actions-open");
   }
@@ -391,6 +453,7 @@ export function mountMessageActions(deps: MessageActionsDeps): MessageActionsCon
     menu.hidden = false;
     trigger.setAttribute("aria-expanded", "true");
     bubble.classList.add("wx-srv-message-actions-open");
+    attachOutsideListener();
   }
 
   // Round 2 ruling item 10 §(4): Reply is the FIRST item in the menu.
@@ -477,6 +540,56 @@ export function mountMessageActions(deps: MessageActionsDeps): MessageActionsCon
     else close();
   });
 
+  let outsideListenerActive = false;
+  let justOpenedTime = 0;
+
+  function onOutsideEvent(event: Event): void {
+    if (menu.hidden && fullPicker.hidden && backdrop.hidden) return;
+    if (Date.now() - justOpenedTime < 200) return;
+
+    const target = event.target;
+    if (!(target instanceof Node)) return;
+
+    if (!backdrop.hidden && !fullPicker.hidden) {
+      if (fullPicker.contains(target)) {
+        return;
+      }
+      close();
+      return;
+    }
+
+    if (activeVariantsBar !== null) {
+      if (activeVariantsBar.contains(target)) {
+        return;
+      }
+      closeVariantsBar();
+      if (menu.contains(target) || trigger.contains(target)) {
+        return;
+      }
+    }
+
+    if (menu.contains(target) || trigger.contains(target)) {
+      return;
+    }
+
+    close();
+  }
+
+  function attachOutsideListener(): void {
+    if (outsideListenerActive) return;
+    outsideListenerActive = true;
+    justOpenedTime = Date.now();
+    documentRef.addEventListener("pointerdown", onOutsideEvent, true);
+    documentRef.addEventListener("click", onOutsideEvent, true);
+  }
+
+  function detachOutsideListener(): void {
+    if (!outsideListenerActive) return;
+    outsideListenerActive = false;
+    documentRef.removeEventListener("pointerdown", onOutsideEvent, true);
+    documentRef.removeEventListener("click", onOutsideEvent, true);
+  }
+
   const onContextMenu = (event: Event): void => {
     event.preventDefault();
     open();
@@ -485,6 +598,8 @@ export function mountMessageActions(deps: MessageActionsDeps): MessageActionsCon
 
   let pressTimer: number | null = null;
   let pressStart: { readonly x: number; readonly y: number } | null = null;
+  let bubbleLongPressed = false;
+
   function clearPress(): void {
     if (pressTimer !== null) win.clearTimeout(pressTimer);
     pressTimer = null;
@@ -499,6 +614,7 @@ export function mountMessageActions(deps: MessageActionsDeps): MessageActionsCon
     pressTimer = win.setTimeout(() => {
       pressTimer = null;
       pressStart = null;
+      bubbleLongPressed = true;
       open();
     }, LONG_PRESS_MS);
   };
@@ -508,10 +624,31 @@ export function mountMessageActions(deps: MessageActionsDeps): MessageActionsCon
       clearPress();
     }
   };
+  const onPointerUp = (): void => {
+    clearPress();
+    if (bubbleLongPressed) {
+      win.setTimeout(() => {
+        bubbleLongPressed = false;
+      }, 100);
+    }
+  };
+
   bubble.addEventListener("pointerdown", onPointerDown);
   bubble.addEventListener("pointermove", onPointerMove);
-  bubble.addEventListener("pointerup", clearPress);
+  bubble.addEventListener("pointerup", onPointerUp);
   bubble.addEventListener("pointercancel", clearPress);
+
+  const onBubbleClick = (event: MouseEvent): void => {
+    if (bubbleLongPressed) {
+      bubbleLongPressed = false;
+      if (event.target instanceof Element && event.target.closest(".wx-srv-message-actions")) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  };
+  bubble.addEventListener("click", onBubbleClick, true);
 
   trigger.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
@@ -520,8 +657,7 @@ export function mountMessageActions(deps: MessageActionsDeps): MessageActionsCon
         return;
       }
       if (!fullPicker.hidden) {
-        fullPicker.hidden = true;
-        actions.hidden = false;
+        closeFullPicker();
         return;
       }
       close();
@@ -538,12 +674,14 @@ export function mountMessageActions(deps: MessageActionsDeps): MessageActionsCon
     teardown(): void {
       close();
       clearPress();
+      detachOutsideListener();
       closeVariantsBar();
       bubble.removeEventListener("contextmenu", onContextMenu);
       bubble.removeEventListener("pointerdown", onPointerDown);
       bubble.removeEventListener("pointermove", onPointerMove);
-      bubble.removeEventListener("pointerup", clearPress);
+      bubble.removeEventListener("pointerup", onPointerUp);
       bubble.removeEventListener("pointercancel", clearPress);
+      bubble.removeEventListener("click", onBubbleClick, true);
     },
   };
 }

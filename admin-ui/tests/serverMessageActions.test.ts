@@ -298,5 +298,102 @@ describe("Server message action menu: the reaction row", () => {
     expect(onReact).toHaveBeenCalledWith(expect.objectContaining({ seq: 1 }), "🚀");
     controller.teardown();
   });
+
+  it("clicking outside of the action popup closes it", async () => {
+    const { bubble, controller } = mount("hello");
+    bubble.querySelector<HTMLButtonElement>(".wx-srv-message-actions-trigger")?.click();
+
+    const menu = bubble.querySelector<HTMLElement>(".wx-srv-message-actions");
+    expect(menu?.hidden).toBe(false);
+
+    // Wait past the debounce window for the opening touch
+    await new Promise((r) => setTimeout(r, 220));
+
+    // Click outside on the document body
+    document.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+    expect(menu?.hidden).toBe(true);
+
+    controller.teardown();
+  });
+
+  it("clicking the backdrop or outside of the emoji search popup closes it", async () => {
+    const { bubble, controller } = mount("hello");
+    bubble.querySelector<HTMLButtonElement>(".wx-srv-message-actions-trigger")?.click();
+
+    const moreBtn = bubble.querySelector<HTMLButtonElement>(".wx-srv-message-react-more");
+    moreBtn?.click();
+
+    const fullPicker = bubble.querySelector<HTMLElement>(".wx-srv-emoji-picker");
+    const backdrop = bubble.querySelector<HTMLElement>(".wx-srv-emoji-picker-backdrop");
+    expect(fullPicker?.hidden).toBe(false);
+    expect(backdrop?.hidden).toBe(false);
+
+    await new Promise((r) => setTimeout(r, 220));
+
+    // Clicking the backdrop closes the popup
+    backdrop?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(bubble.querySelector<HTMLElement>(".wx-srv-message-actions")?.hidden).toBe(true);
+    expect(backdrop?.hidden).toBe(true);
+
+    controller.teardown();
+  });
+
+  it("back button in emoji search popup returns to actions list", () => {
+    const { bubble, controller } = mount("hello");
+    bubble.querySelector<HTMLButtonElement>(".wx-srv-message-actions-trigger")?.click();
+
+    const moreBtn = bubble.querySelector<HTMLButtonElement>(".wx-srv-message-react-more");
+    moreBtn?.click();
+
+    const fullPicker = bubble.querySelector<HTMLElement>(".wx-srv-emoji-picker");
+    const backdrop = bubble.querySelector<HTMLElement>(".wx-srv-emoji-picker-backdrop");
+    const actionsList = bubble.querySelector<HTMLElement>(".wx-srv-message-actions-list");
+
+    expect(fullPicker?.hidden).toBe(false);
+    expect(backdrop?.hidden).toBe(false);
+    expect(actionsList?.hidden).toBe(true);
+
+    // Click back button
+    const backBtn = bubble.querySelector<HTMLButtonElement>(".wx-srv-emoji-picker-back");
+    backBtn?.click();
+
+    expect(fullPicker?.hidden).toBe(true);
+    expect(backdrop?.hidden).toBe(true);
+    expect(actionsList?.hidden).toBe(false);
+
+    controller.teardown();
+  });
+
+  it("variant bar shifts when anchored near left edge so it stays bounded", () => {
+    const { bubble, controller } = mount("hello");
+    bubble.querySelector<HTMLButtonElement>(".wx-srv-message-actions-trigger")?.click();
+
+    const heartBtn = [...bubble.querySelectorAll<HTMLButtonElement>(".wx-srv-message-react")].find(
+      (b) => b.dataset["reaction"] === "❤️",
+    );
+    expect(heartBtn).not.toBeUndefined();
+
+    // Mock getBoundingClientRect on elements to simulate heart button near screen left
+    const origGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+    try {
+      Element.prototype.getBoundingClientRect = function () {
+        if (this.classList.contains("wx-srv-reaction-variants-bar")) {
+          // Simulate bar extending off left at -50px
+          return { left: -50, right: 170, top: 100, bottom: 150, width: 220, height: 50, x: -50, y: 100, toJSON: () => {} };
+        }
+        return { left: 10, right: 46, top: 150, bottom: 186, width: 36, height: 36, x: 10, y: 150, toJSON: () => {} };
+      };
+
+      heartBtn?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      const bar = bubble.querySelector<HTMLElement>(".wx-srv-reaction-variants-bar");
+      expect(bar).not.toBeNull();
+      // Should have shifted right: shiftX = 8 - (-50) = 58px
+      expect(bar?.style.transform).toBe("translateX(calc(-50% + 58px))");
+    } finally {
+      Element.prototype.getBoundingClientRect = origGetBoundingClientRect;
+    }
+
+    controller.teardown();
+  });
 });
 
