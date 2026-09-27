@@ -1917,7 +1917,12 @@ describe("mountServerThread", () => {
       await view.attach(SESSION);
       await flush();
       expect(view.element.querySelector(".wx-srv-transcript-start")).toBeNull();
-      expect(view.element.querySelector<HTMLElement>(".wx-srv-transcript")?.hidden).toBe(true);
+      // The transcript container remains visible because it now houses the timestamp.
+      const transcript = view.element.querySelector<HTMLElement>(".wx-srv-transcript");
+      expect(transcript?.hidden).toBe(false);
+      // It should only contain the timestamp element.
+      expect(transcript?.children.length).toBe(1);
+      expect(transcript?.firstElementChild?.className).toBe("wx-srv-bubble-time");
       view.teardown();
     });
 

@@ -60,6 +60,7 @@ export function renderTranscriptBlock(
   attachment: Attachment,
   context: TranscriptionContext,
   documentRef: Document,
+  timeElement?: HTMLElement
 ): HTMLElement {
   const root = documentRef.createElement("div");
   root.className = "wx-srv-transcript";
@@ -234,6 +235,38 @@ export function renderTranscriptBlock(
         children.push(message);
       }
     }
+    
+    const hasVisibleText = children.some(el => el.classList.contains("wx-srv-transcript-text"));
+    if (children.length > 0) {
+      const trailingActions: HTMLElement[] = [];
+      while (children.length > 0 && children[children.length - 1]!.classList.contains("wx-srv-transcript-action")) {
+        trailingActions.unshift(children.pop()!);
+      }
+      if (trailingActions.length > 0) {
+        if (!hasVisibleText) {
+          const row = documentRef.createElement("div");
+          row.className = "wx-srv-transcript-action-row";
+          const btnGroup = documentRef.createElement("div");
+          btnGroup.className = "wx-srv-transcript-action-group";
+          btnGroup.append(...trailingActions);
+          row.appendChild(btnGroup);
+          if (timeElement) {
+            row.appendChild(timeElement);
+          }
+          children.push(row);
+        } else {
+          children.push(...trailingActions);
+          if (timeElement) {
+            children.push(timeElement);
+          }
+        }
+      } else if (timeElement) {
+        children.push(timeElement);
+      }
+    } else if (timeElement) {
+      children.push(timeElement);
+    }
+
     root.dataset["state"] = state;
     root.hidden = children.length === 0;
     root.replaceChildren(...children);

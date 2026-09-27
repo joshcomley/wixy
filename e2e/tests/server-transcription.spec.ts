@@ -122,12 +122,18 @@ for (const [label, viewport] of [
 
       const button = note(page, seq).getByRole("button", { name: "Transcribe this voice note" });
       await expect(button).toBeVisible();
+      
+      const actionRow = button.locator("xpath=ancestor::*[contains(@class, 'wx-srv-transcript-action-row')]").first();
+      await expect(actionRow.locator(".wx-srv-bubble-time")).toBeVisible();
+
       await page.waitForTimeout(1_500); // an idle voice note is never transcribed by itself
       expect((await stats(page)).requests).toBe(0);
 
       await button.click();
       await expect(note(page, seq).locator(".wx-srv-transcript-text")).toHaveText(TRANSCRIPT);
       await expect(note(page, seq).getByRole("button", { name: "Hide transcript" })).toBeVisible();
+      await expect(note(page, seq).locator(".wx-srv-transcript-action-row .wx-srv-bubble-time")).toHaveCount(0);
+      await expect(note(page, seq).locator(".wx-srv-bubble-time")).toBeVisible();
 
       const after = await stats(page);
       expect(after.requests).toBe(1);

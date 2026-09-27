@@ -1086,6 +1086,21 @@ button.wx-srv-quote:focus-visible {
   cursor: not-allowed;
 }
 
+.wx-srv-transcript-action-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 8px;
+}
+
+.wx-srv-transcript-action-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 .wx-srv-transcript-toggle {
   padding: 0 4px;
   border-color: transparent;
