@@ -329,6 +329,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   recordingStatus.hidden = true;
   recordingStatus.setAttribute("role", "status");
   recordingStatus.setAttribute("aria-live", "polite");
+  const voiceSendSpinner = documentRef.createElement("span");
+  voiceSendSpinner.className = "wx-srv-voice-send-spinner";
+  voiceSendSpinner.setAttribute("aria-hidden", "true");
   const retryVoiceButton = documentRef.createElement("button");
   retryVoiceButton.type = "button";
   retryVoiceButton.className = "wx-srv-retry-voice-button";
@@ -636,7 +639,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     const state = voiceRecorder?.state ?? "idle";
     const isRecordingOrPaused = state === "recording" || state === "paused";
     const active = state !== "idle";
-    cancelRecordingButton.hidden = !active;
+    const recordingRowActive = active || voiceSendBusy;
+    cancelRecordingButton.hidden = !recordingRowActive;
+    cancelRecordingButton.disabled = voiceSendBusy;
+    pauseRecordingButton.disabled = voiceSendBusy;
     recordButton.disabled = voiceSendBusy || pendingVoiceNote !== null
       || state === "starting" || state === "stopping";
 
@@ -645,13 +651,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     const attachButton = composer?.element?.querySelector<HTMLButtonElement>(".wx-chat-attach-button");
     const inputRow = composer?.element?.querySelector<HTMLElement>(".wx-chatc-input-row");
 
-    if (textarea !== null && textarea !== undefined) textarea.hidden = isRecordingOrPaused;
-    if (sendButton !== null && sendButton !== undefined) sendButton.hidden = isRecordingOrPaused;
-    if (attachButton !== null && attachButton !== undefined) attachButton.hidden = isRecordingOrPaused;
-    viewOnceButton.hidden = isRecordingOrPaused;
+    if (textarea !== null && textarea !== undefined) textarea.hidden = recordingRowActive;
+    if (sendButton !== null && sendButton !== undefined) sendButton.hidden = recordingRowActive;
+    if (attachButton !== null && attachButton !== undefined) attachButton.hidden = recordingRowActive;
+    viewOnceButton.hidden = recordingRowActive;
 
-    inputRow?.classList.toggle("wx-srv-recording-row", isRecordingOrPaused);
-    composer?.element?.classList.toggle("wx-srv-recording-row", isRecordingOrPaused);
+    inputRow?.classList.toggle("wx-srv-recording-row", recordingRowActive);
+    inputRow?.classList.toggle("wx-srv-sending", voiceSendBusy);
+    composer?.element?.classList.toggle("wx-srv-recording-row", recordingRowActive);
     // Blue indicates the button's stop-and-send action in these two states.
     recordButton.classList.toggle("wx-srv-record-button--send", isRecordingOrPaused);
 
@@ -690,17 +697,22 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       recordingStatus.textContent = "Saving voice note…";
       pauseRecordingButton.hidden = true;
     } else if (voiceSendBusy) {
-      recordButton.innerHTML = MIC_LINE_ICON;
+      recordButton.innerHTML = SEND_LINE_ICON;
       recordButton.title = "Sending voice note";
       recordButton.setAttribute("aria-label", "Sending voice note");
       recordingStatus.hidden = false;
-      recordingStatus.textContent = "Sending voice note…";
-      pauseRecordingButton.hidden = true;
+      recordingStatus.replaceChildren(voiceSendSpinner);
+      recordingStatus.setAttribute("aria-label", "Sending voice note");
+      pauseRecordingButton.hidden = !(voiceRecorder?.supportsPause ?? true);
+      pauseRecordingButton.innerHTML = PAUSE_LINE_ICON;
+      pauseRecordingButton.title = "Pause recording";
+      pauseRecordingButton.setAttribute("aria-label", "Pause recording");
     } else {
       recordButton.innerHTML = MIC_LINE_ICON;
       recordButton.title = "Record a voice note";
       recordButton.setAttribute("aria-label", "Record a voice note");
       recordingStatus.hidden = true;
+      recordingStatus.removeAttribute("aria-label");
       recordingStatus.textContent = "";
       pauseRecordingButton.hidden = true;
     }
@@ -790,6 +802,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     // Sending never disables, blurs or resizes the input (operator report, round 2): the box is
     // cleared at once by `takeDraft()` and the draft comes back on a failed send.
     keepInputLive: true,
+    enterToSend: false,
+    promoteToFullWidthOnMultiline: true,
     extraButtons: [recordButton, cancelRecordingButton, pauseRecordingButton, recordingStatus, viewOnceButton],
     renderChipPreview: (file, previewUrl) => {
       filePreviewUrls.set(file, previewUrl);
@@ -1046,8 +1060,6 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     const focusWasInRow = voiceFailureRow.contains(documentRef.activeElement);
     retryVoiceButton.disabled = true;
     setVoiceRetryOffered(false);
-    recordingStatus.hidden = false;
-    recordingStatus.textContent = "Sending voice note…";
     composer.setError(null);
     updateRecorderUi();
     try {
@@ -1359,6 +1371,11 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       sender.textContent = message.sender;
       bubble.appendChild(sender);
     }
+    const time = documentRef.createElement("span");
+    time.className = "wx-srv-bubble-time";
+    time.textContent = formatTime(message.createdAt);
+
+    let hasTranscribableVoice = false;
     if (message.viewOnce) {
       const isVideo = message.attachments[0]?.kind === "video";
       const kindLabel = isVideo ? "video" : "photo";
@@ -1435,23 +1452,19 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         linkifyInto(textEl, message.text, documentRef);
         bubble.appendChild(textEl);
       }
-      
-      const time = documentRef.createElement("span");
-      time.className = "wx-srv-bubble-time";
-      time.textContent = formatTime(message.createdAt);
-      
-      const hasTranscribableVoice = transcription !== undefined && message.attachments.some((a) => a.kind === "voice" && a.status === "ready");
+
+      hasTranscribableVoice = transcription !== undefined && message.attachments.some((a) => a.kind === "voice" && a.status === "ready");
       const attachmentsEl = renderAttachmentsFor(message, hasTranscribableVoice ? time : undefined);
       if (attachmentsEl !== null) bubble.appendChild(attachmentsEl);
-      
-      const reactionsEl = documentRef.createElement("div");
-      reactionsEl.className = "wx-srv-reactions";
-      fillReactions(reactionsEl, message);
-      bubble.appendChild(reactionsEl);
-      
-      if (!hasTranscribableVoice) {
-        bubble.appendChild(time);
-      }
+    }
+
+    const reactionsEl = documentRef.createElement("div");
+    reactionsEl.className = "wx-srv-reactions";
+    fillReactions(reactionsEl, message);
+    bubble.appendChild(reactionsEl);
+
+    if (!hasTranscribableVoice) {
+      bubble.appendChild(time);
     }
     messageActionControllers.set(
       message.seq,

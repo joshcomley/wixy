@@ -833,6 +833,58 @@ describe("mountServerThread", () => {
   });
 
   describe("dedicated voice note recording row and pause/resume", () => {
+    it("keeps the disabled recording row and a throbber visible while the voice note sends", async () => {
+      let resolveUpload!: (attachment: UploadAttachment) => void;
+      uploadServerAttachment.mockImplementation(() => new Promise((resolve) => {
+        resolveUpload = resolve;
+      }));
+      sendMessage.mockResolvedValue({
+        ok: true,
+        message: fakeMessage({ seq: 7, clientId: "voice-client-id", text: null }),
+      });
+      getHistory.mockResolvedValue(emptyHistory());
+      const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
+      await view.attach(SESSION);
+
+      const textarea = view.element.querySelector<HTMLTextAreaElement>(".wx-chat-composer-input")!;
+      const sendButton = view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")!;
+      const attachButton = view.element.querySelector<HTMLButtonElement>(".wx-chat-attach-button")!;
+      const recordButton = view.element.querySelector<HTMLButtonElement>(".wx-srv-record-button")!;
+      const pauseButton = view.element.querySelector<HTMLButtonElement>(".wx-srv-record-pause")!;
+      const cancelButton = view.element.querySelector<HTMLButtonElement>(".wx-srv-record-cancel")!;
+      const status = view.element.querySelector<HTMLElement>(".wx-srv-record-status")!;
+      const inputRow = view.element.querySelector<HTMLElement>(".wx-chatc-input-row")!;
+
+      recordButton.click();
+      await flush();
+      recordButton.click();
+
+      expect(inputRow.classList.contains("wx-srv-recording-row")).toBe(true);
+      expect(inputRow.classList.contains("wx-srv-sending")).toBe(true);
+      expect(textarea.hidden).toBe(true);
+      expect(sendButton.hidden).toBe(true);
+      expect(attachButton.hidden).toBe(true);
+      expect(cancelButton.hidden).toBe(false);
+      expect(cancelButton.disabled).toBe(true);
+      expect(pauseButton.hidden).toBe(false);
+      expect(pauseButton.disabled).toBe(true);
+      expect(recordButton.disabled).toBe(true);
+      expect(status.querySelector(".wx-srv-voice-send-spinner")).not.toBeNull();
+      expect(status.getAttribute("aria-label")).toBe("Sending voice note");
+
+      resolveUpload({
+        id: "voice-1", kind: "voice", status: "ready", width: null, height: null, durationS: 2, peaks: null, urls: {},
+      });
+      await flush();
+      await flush();
+
+      expect(inputRow.classList.contains("wx-srv-recording-row")).toBe(false);
+      expect(inputRow.classList.contains("wx-srv-sending")).toBe(false);
+      expect(textarea.hidden).toBe(false);
+      expect(sendButton.hidden).toBe(false);
+      view.teardown();
+    });
+
     it("hides textarea and send button during recording and pause, restores on stop", async () => {
       uploadServerAttachment.mockResolvedValue({
         id: "voice-1", kind: "voice", status: "ready", width: null, height: null, durationS: 2, peaks: null, urls: {},
@@ -3332,8 +3384,56 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     const card = view.element.querySelector(".wx-srv-view-once-sender-card");
     expect(card).toBeTruthy();
     expect(card?.textContent).toContain("View-once photo · 30 s · Not opened yet");
-    const tapBtn = card?.querySelector(".wx-srv-view-once-tap-btn");
-    expect(tapBtn).toBeNull();
+    const bubble = view.element.querySelector(".wx-srv-bubble");
+    expect(bubble?.querySelector(".wx-srv-bubble-time")).toBeTruthy();
+    expect(bubble?.querySelector(".wx-srv-reactions")).toBeTruthy();
+
+    view.teardown();
+  });
+
+  it("renders timestamp and reactions on view-once bubbles and updates reactions dynamically", async () => {
+    const voMsg = fakeMessage({
+      seq: 2021,
+      sender: "Purdy",
+      text: null,
+      createdAt: 1727395200,
+      reactions: [{ emoji: "❤️", count: 1, senders: ["Purdy"] }],
+      attachments: [{
+        id: "att-vo-reactions",
+        kind: "photo",
+        status: "ready",
+        width: 800,
+        height: 600,
+        durationS: null,
+        peaks: null,
+        urls: {},
+      }],
+      viewOnce: { durationS: 5, tease: false },
+    });
+    getHistory.mockResolvedValue(emptyHistory({ messages: [voMsg], cursor: 2021 }));
+    const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: window, onSettings: vi.fn() });
+    await view.attach(SESSION);
+
+    const bubble = view.element.querySelector(".wx-srv-bubble");
+    expect(bubble).toBeTruthy();
+    const time = bubble?.querySelector(".wx-srv-bubble-time");
+    expect(time).toBeTruthy();
+    expect(time?.textContent).toBeTruthy();
+    const reactions = bubble?.querySelector<HTMLElement>(".wx-srv-reactions");
+    expect(reactions).toBeTruthy();
+    expect(reactions?.hidden).toBe(false);
+    expect(reactions?.textContent).toContain("❤️");
+
+    const updated = {
+      ...voMsg,
+      reactions: [
+        { emoji: "❤️", count: 1, senders: ["Purdy"] },
+        { emoji: "👍", count: 1, senders: ["Josh"] },
+      ],
+    };
+    view.handleStreamEvent({ type: "message_updated", message: updated });
+    expect(reactions?.textContent).toContain("❤️");
+    expect(reactions?.textContent).toContain("👍");
 
     view.teardown();
   });

@@ -60,6 +60,57 @@ describe("mountChatComposer", () => {
     composer.teardown();
   });
 
+  it("lets Server chat keep Enter for newlines and promotes a multiline draft until it clears", () => {
+    const onSubmit = vi.fn();
+    const composer = mountChatComposer(makeOptions({
+      onSubmit,
+      enterToSend: false,
+      promoteToFullWidthOnMultiline: true,
+    }));
+    const textarea = composer.element.querySelector<HTMLTextAreaElement>("textarea")!;
+    const inputRow = composer.element.querySelector<HTMLElement>(".wx-chatc-input-row")!;
+
+    const enter = new KeyboardEvent("keydown", {
+      key: "Enter", shiftKey: false, bubbles: true, cancelable: true,
+    });
+    textarea.dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(false);
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    textarea.value = "first line\nsecond line";
+    textarea.dispatchEvent(new Event("input"));
+    expect(inputRow.classList.contains("wx-chatc-multiline")).toBe(true);
+
+    // Once expanded, the row stays full-width while the same draft is edited back to one line.
+    textarea.value = "one line again";
+    textarea.dispatchEvent(new Event("input"));
+    expect(inputRow.classList.contains("wx-chatc-multiline")).toBe(true);
+
+    composer.reset();
+    expect(inputRow.classList.contains("wx-chatc-multiline")).toBe(false);
+    composer.teardown();
+  });
+
+  it("promotes the Server chat input when a long line soft-wraps", () => {
+    const composer = mountChatComposer(makeOptions({
+      enterToSend: false,
+      promoteToFullWidthOnMultiline: true,
+    }));
+    const textarea = composer.element.querySelector<HTMLTextAreaElement>("textarea")!;
+    const inputRow = composer.element.querySelector<HTMLElement>(".wx-chatc-input-row")!;
+    document.body.appendChild(composer.element);
+    textarea.style.minHeight = "36px";
+    Object.defineProperty(textarea, "clientWidth", { configurable: true, value: 100 });
+    Object.defineProperty(textarea, "scrollHeight", { configurable: true, get: () => 72 });
+
+    textarea.value = "a long line that wraps";
+    textarea.dispatchEvent(new Event("input"));
+
+    expect(inputRow.classList.contains("wx-chatc-multiline")).toBe(true);
+    document.body.removeChild(composer.element);
+    composer.teardown();
+  });
+
   it("an empty submit is a no-op by default but allowed with allowEmptySubmit", () => {
     const gated = mountChatComposer(makeOptions({ onSubmit: vi.fn() }));
     gated.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")?.click();

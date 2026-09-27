@@ -13,7 +13,7 @@
 //   uploads BEFORE submit, with a spinner per chip and a ✕ to remove;
 // - submit disabled while any upload is in flight (a failed upload drops its
 //   chip with a real error — never silently sends without the image);
-// - Enter submits, Shift+Enter newline.
+// - Enter submits by default; callers can opt into Enter inserting newlines.
 //
 // Legacy class hooks are kept deliberately: the e2e suite and the unit tests
 // select `.wx-chat-compose-box`, `.wx-chat-compose-input`,
@@ -61,10 +61,9 @@ export interface ChatComposerOptions {
    * that remains valid (JS/TS both allow a callback to declare fewer
    * parameters than the type it's assigned to expects). */
   upload: (file: File, ctx: ChatComposerUploadContext) => Promise<ChatAttachment>;
-  /** Fired by Enter or the submit button, only when submittable (non-empty
-   * or attachments staged, no upload in flight). The caller performs the
-   * actual send, then calls `reset()` on success or `setError()` +
-   * `setBusy(false)` on failure. */
+  /** Fired by Enter when `enterToSend` is enabled, or the submit button, only when
+   * submittable (non-empty or attachments staged, no upload in flight). The caller performs
+   * the actual send, then calls `reset()` on success or `setError()` + `setBusy(false)` on failure. */
   onSubmit: () => void;
   /** Compose mode submits empty ("start with nothing" creates a preamble-
    * only conversation — spec/06 §1's no-opening-message case); the
@@ -108,6 +107,12 @@ export interface ChatComposerOptions {
    * with `takeDraft()` (clear the box at once) and `restoreDraft()` (put the draft back if the
    * send fails). The AI chat omits this and keeps its disabled-while-busy input. */
   keepInputLive?: boolean | undefined;
+  /** Defaults to true (Enter submits, Shift+Enter inserts a newline). Server chat sets false
+   * so Enter always creates a newline and sending remains an explicit button action. */
+  enterToSend?: boolean | undefined;
+  /** Promote a server-chat textarea above its controls once it contains an explicit newline or
+   * soft-wraps in the narrow inline row. The promoted state lasts until the draft is cleared. */
+  promoteToFullWidthOnMultiline?: boolean | undefined;
 }
 
 /** What `takeDraft()` lifted out of the composer: the caller owns it until it calls either
@@ -218,6 +223,7 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
   // feedback). Grows to 2 rows the moment there's content, and to the 180px
   // cap beyond that.
   textarea.rows = EMPTY_TEXTAREA_ROWS;
+  let multilinePromoted = false;
 
   const submitButton = document.createElement("button");
   submitButton.type = "button";
@@ -283,11 +289,29 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
       // measure (scrollHeight 0 would collapse it to nothing).
       textarea.style.height = "";
       textarea.style.overflowY = "";
+      multilinePromoted = false;
+      inputRow.classList.remove("wx-chatc-multiline");
       return;
     }
     textarea.style.height = "0px";
+    const naturalHeight = textarea.scrollHeight;
+    if (options.promoteToFullWidthOnMultiline === true && !multilinePromoted) {
+      const style = textarea.ownerDocument.defaultView?.getComputedStyle(textarea);
+      const parsedMinHeight = Number.parseFloat(style?.minHeight ?? "");
+      const singleLineHeight = Number.isFinite(parsedMinHeight) && parsedMinHeight > 0
+        ? parsedMinHeight
+        : MIN_TEXTAREA_HEIGHT_PX;
+      const wraps = textarea.isConnected
+        && textarea.clientWidth > 0
+        && naturalHeight > singleLineHeight + 2;
+      if (textarea.value.includes("\n") || wraps) {
+        multilinePromoted = true;
+        inputRow.classList.add("wx-chatc-multiline");
+      }
+    }
+    const contentHeight = multilinePromoted ? textarea.scrollHeight : naturalHeight;
     const next = Math.min(
-      Math.max(textarea.scrollHeight, MIN_TEXTAREA_HEIGHT_PX),
+      Math.max(contentHeight, MIN_TEXTAREA_HEIGHT_PX),
       MAX_TEXTAREA_HEIGHT_PX,
     );
     textarea.style.height = `${next}px`;
@@ -443,7 +467,7 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
     submitButton.addEventListener("mousedown", (evt) => evt.preventDefault());
   }
   textarea.addEventListener("keydown", (evt) => {
-    if (evt.key === "Enter" && !evt.shiftKey) {
+    if (options.enterToSend !== false && evt.key === "Enter" && !evt.shiftKey) {
       evt.preventDefault();
       trySubmit();
     }

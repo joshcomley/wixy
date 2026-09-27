@@ -97,10 +97,12 @@ test.describe("server-view-once.spec.ts (spec/06-view-once-media)", () => {
     await expect(aliceBubble.locator(".wx-srv-view-once-sender-card")).toBeVisible();
     await expect(aliceBubble.locator(".wx-srv-view-once-sender-card")).toContainText("Not opened yet");
     await expect(aliceBubble.locator(".wx-srv-view-once-tap-btn")).toHaveCount(0);
+    await expect(aliceBubble.locator(".wx-srv-bubble-time")).toBeVisible();
 
     // Bob sees recipient card with "Tap to view" button
     const bobBubble = pageBob.locator(`[data-message-seq="${seq}"]`);
     await expect(bobBubble).toBeVisible({ timeout: 5000 });
+    await expect(bobBubble.locator(".wx-srv-bubble-time")).toBeVisible();
     const tapBtn = bobBubble.locator(".wx-srv-view-once-tap-btn");
     await expect(tapBtn).toBeVisible();
     await expect(tapBtn).toContainText("Tap to view");
