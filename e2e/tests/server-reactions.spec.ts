@@ -182,6 +182,8 @@ test.describe("server-reactions.spec.ts", () => {
 
     // Click more button (⋯)
     await bubble.locator(".wx-srv-message-react-more").click();
+    const backdrop = bubble.locator(".wx-srv-emoji-picker-backdrop");
+    await expect(backdrop).toBeVisible();
     const fullPicker = bubble.locator(".wx-srv-emoji-picker");
     await expect(fullPicker).toBeVisible();
     await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
@@ -201,6 +203,11 @@ test.describe("server-reactions.spec.ts", () => {
     const recentsRow = bubble.locator(".wx-srv-message-reactions-recents");
     await expect(recentsRow).toBeVisible();
     await expect(recentsRow.locator(".wx-srv-message-react-recent").filter({ hasText: "😀" })).toBeVisible();
+
+    // Clicking outside the popup box closes it
+    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+    await page.locator(".wx-srv-chat").click({ position: { x: 10, y: 10 } });
+    await expect(bubble.locator(".wx-srv-message-actions")).toBeHidden();
 
     expect(errors, `console errors: ${errors.join("; ")}`).toEqual([]);
     await context.close();
