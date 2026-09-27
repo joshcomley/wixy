@@ -305,13 +305,13 @@ class TestTranscribeFlow:
             assert again.status_code == 200
             assert again.json() == {"transcript": {"status": "done", "text": SENTINEL}}
 
-            # 3. Re-transcribe with ?retranscribe=1 replaces the finished row and returns 202
+            # 3. Re-transcribe with ?retranscribe=1 returns 202 and preserves prior text
             env.state.transcribe_text = "updated-sentence-8a21f"
             retranscribe = client.post(
                 TRANSCRIBE.format(voice.att_id) + "?retranscribe=1", headers=headers
             )
             assert retranscribe.status_code == 202
-            assert retranscribe.json() == {"transcript": {"status": "pending"}}
+            assert retranscribe.json() == {"transcript": {"status": "pending", "text": SENTINEL}}
 
             # 4. Racing re-transcribe request while inflight returns 202 (single-flight)
             racing = client.post(
@@ -333,6 +333,39 @@ class TestTranscribeFlow:
             gone = client.post(TRANSCRIBE.format(voice.att_id) + "?retranscribe=1", headers=headers)
             assert gone.status_code == 404
             assert gone.json() == {"error": "not_found"}
+
+    def test_failed_retranscribe_leaves_prior_transcript_intact_and_served(
+        self, make_env: Callable[..., Env], cmd_state: FakeCmdState
+    ) -> None:
+        env = make_env()
+        voice = _seed_voice(env)
+        with TestClient(env.app) as client:
+            headers = _unlock(client)
+            # 1. Initial successful transcription
+            client.post(TRANSCRIBE.format(voice.att_id), headers=headers)
+            _wait_for(_finished(env, voice.att_id))
+            assert _message_attachment(client, headers, voice.att_id)["transcript"] == {
+                "status": "done",
+                "text": SENTINEL,
+            }
+
+            # 2. Re-transcribe attempt fails on backend
+            cmd_state.transcribe_status_code = 502
+            retranscribe = client.post(
+                TRANSCRIBE.format(voice.att_id) + "?retranscribe=1", headers=headers
+            )
+            assert retranscribe.status_code == 202
+            assert retranscribe.json() == {"transcript": {"status": "pending", "text": SENTINEL}}
+            _wait_for(_finished(env, voice.att_id))
+
+            # 3. Old transcript text is still served and shown with status failed
+            failed_attachment = _message_attachment(client, headers, voice.att_id)
+            assert failed_attachment["transcript"] == {
+                "status": "failed",
+                "text": SENTINEL,
+            }
+            row = env.store.get_transcript(voice.att_id)
+            assert row is not None and row.status == "failed" and row.text == SENTINEL
 
     def test_both_devices_are_told_pending_then_done_through_events(
         self, make_env: Callable[..., Env]

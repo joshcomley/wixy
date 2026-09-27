@@ -176,14 +176,40 @@ export function renderTranscriptBlock(
       }
     } else if (server?.status === "failed") {
       state = "failed";
+      const hasPriorText = typeof server.text === "string" && server.text !== "";
+      if (hasPriorText) {
+        const hidden = context.isHidden(attachment.id);
+        if (!hidden) {
+          const body = documentRef.createElement("p");
+          body.className = "wx-srv-transcript-text";
+          body.textContent = server.text!;
+          children.push(body);
+        }
+        const toggle = action(
+          documentRef,
+          "wx-srv-transcript-toggle",
+          hidden ? "Show transcript" : "Hide transcript",
+          hidden ? "Show transcript" : "Hide transcript",
+        );
+        toggle.addEventListener("click", () => {
+          context.setHidden(attachment.id, !hidden);
+          paint();
+        });
+        children.push(toggle);
+      }
       const message = documentRef.createElement("p");
       message.className = "wx-srv-transcript-error";
       message.setAttribute("role", "status");
-      message.textContent = notice ?? MESSAGES.failed;
+      message.textContent = notice ?? (hasPriorText ? "Couldn't update transcript." : MESSAGES.failed);
       children.push(message);
       if (context.available()) {
-        const retry = action(documentRef, "wx-srv-transcript-retry", "Retry", "Retry transcribing this voice note");
-        retry.addEventListener("click", () => start());
+        const retry = action(
+          documentRef,
+          "wx-srv-transcript-retry",
+          "Retry",
+          hasPriorText ? "Retry updating this transcript" : "Retry transcribing this voice note",
+        );
+        retry.addEventListener("click", () => start(hasPriorText ? { retranscribe: true } : undefined));
         children.push(retry);
       }
     } else if (context.available()) {

@@ -1778,8 +1778,23 @@ class TestTranscripts:
         assert restarted.state == "started"
         assert restarted.transcript is not None
         assert restarted.transcript.status == "pending"
-        assert restarted.transcript.text is None
+        assert restarted.transcript.text == "first attempt"
         assert restarted.transcript.updated_at == 2002.0
+
+        # A failed re-transcribe leaves the pre-retry transcript intact
+        store.finish_transcript(
+            att_id=att_id,
+            status="failed",
+            text=None,
+            failure="cmd_502",
+            engine="hub_whisper",
+            now=2003.0,
+        )
+        failed_row = store.get_transcript(att_id)
+        assert failed_row is not None
+        assert failed_row.status == "failed"
+        assert failed_row.text == "first attempt"
+        assert failed_row.failure == "cmd_502"
 
     def test_an_interrupted_record_only_ever_turns_pending_into_failed(
         self, store: LiveChatStore

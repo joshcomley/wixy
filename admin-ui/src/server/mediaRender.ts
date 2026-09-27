@@ -10,8 +10,8 @@ export type SuspendReason = "recording" | "micPermission" | "filePicker" | "medi
 /** A voice note's opt-in transcript (spec/server-chat/05-voice-transcription.md): absent/`null`
  * until someone asks; `text` only once `done`. */
 export type AttachmentTranscript =
-  | { readonly status: "pending" }
-  | { readonly status: "failed" }
+  | { readonly status: "pending"; readonly text?: string | null }
+  | { readonly status: "failed"; readonly text?: string | null }
   | { readonly status: "done"; readonly text: string };
 
 export interface Attachment {

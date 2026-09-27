@@ -2005,7 +2005,7 @@ class LiveChatStore:
                 )
             else:
                 conn.execute(
-                    "UPDATE attachment_transcripts SET status = 'pending', text = NULL, "
+                    "UPDATE attachment_transcripts SET status = 'pending', "
                     "failure = NULL, engine = NULL, updated_at = ? WHERE attachment_id = ?",
                     (now, att_id),
                 )
@@ -2033,12 +2033,21 @@ class LiveChatStore:
         still-`pending` row into `failed`, never overwrite a `done` transcript or a newer
         attempt's outcome."""
         with self._write_txn() as conn:
-            cursor = conn.execute(
-                "UPDATE attachment_transcripts SET status = ?, text = ?, failure = ?, "
-                "engine = ?, updated_at = ? WHERE attachment_id = ?"
-                + (" AND status = 'pending'" if only_if_pending else ""),
-                (status, text if status == "done" else None, failure, engine, now, att_id),
-            )
+            if status == "done":
+                cursor = conn.execute(
+                    "UPDATE attachment_transcripts SET status = ?, text = ?, failure = ?, "
+                    "engine = ?, updated_at = ? WHERE attachment_id = ?"
+                    + (" AND status = 'pending'" if only_if_pending else ""),
+                    (status, text, failure, engine, now, att_id),
+                )
+            else:
+                # Failure: preserve existing transcript text (if any) rather than wiping it to NULL
+                cursor = conn.execute(
+                    "UPDATE attachment_transcripts SET status = ?, failure = ?, "
+                    "engine = ?, updated_at = ? WHERE attachment_id = ?"
+                    + (" AND status = 'pending'" if only_if_pending else ""),
+                    (status, failure, engine, now, att_id),
+                )
             if cursor.rowcount != 1:
                 return False
             self._append_message_updated(conn, att_id, now)

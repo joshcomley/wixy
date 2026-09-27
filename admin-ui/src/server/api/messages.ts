@@ -302,7 +302,10 @@ export type TranscribeAnswer =
 function parseTranscript(value: unknown): AttachmentTranscript | null {
   if (typeof value !== "object" || value === null) return null;
   const record = value as { status?: unknown; text?: unknown };
-  if (record.status === "pending" || record.status === "failed") return { status: record.status };
+  if (record.status === "pending" || record.status === "failed") {
+    const text = typeof record.text === "string" ? record.text : undefined;
+    return text !== undefined ? { status: record.status, text } : { status: record.status };
+  }
   if (record.status === "done" && typeof record.text === "string") {
     return { status: "done", text: record.text };
   }

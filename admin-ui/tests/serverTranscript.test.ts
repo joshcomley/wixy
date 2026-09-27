@@ -334,6 +334,18 @@ describe("transcript block", () => {
     );
     expect(el.querySelector(".wx-srv-transcript-retranscribe")).not.toBeNull();
   });
+
+  it("failed transcript with prior text leaves the pre-retry transcript intact and visible with hint", () => {
+    const h = harness();
+    const el = block(h, { ...voice, transcript: { status: "failed", text: "pre-retry words" } });
+    expect(el.dataset["state"]).toBe("failed");
+    expect(el.querySelector(".wx-srv-transcript-text")?.textContent).toBe("pre-retry words");
+    expect(el.querySelector(".wx-srv-transcript-error")?.textContent).toBe("Couldn't update transcript.");
+    const retryBtn = el.querySelector<HTMLButtonElement>(".wx-srv-transcript-retry");
+    expect(retryBtn).not.toBeNull();
+    retryBtn!.click();
+    expect(h.request).toHaveBeenCalledWith(voice.id, { retranscribe: true });
+  });
 });
 
 describe("differOnlyInTranscripts", () => {
