@@ -1616,15 +1616,15 @@ class TestReactionRoutes:
         "emoji",
         [
             "",
-            "\U0001f44e",  # thumbs down: not on the list
-            "❤",  # the heart WITHOUT its variation selector: exact code points only
-            THUMBS_UP + THUMBS_UP,
-            THUMBS_UP + "️",
             "thumbs_up",
             " " + THUMBS_UP,
+            THUMBS_UP + " ",
+            "<script>",
+            "1",
+            "a" * 33,
         ],
     )
-    def test_an_emoji_off_the_allowlist_is_422_and_changes_nothing(
+    def test_an_invalid_emoji_is_422_and_changes_nothing(
         self,
         emoji: str,
         storage_root: Path,
@@ -1637,6 +1637,30 @@ class TestReactionRoutes:
             assert response.status_code == 422
             assert response.json()["error"] == "invalid"
             assert self._event_types(client) == ["message"]
+        finally:
+            client.__exit__(None, None, None)
+
+    @pytest.mark.parametrize(
+        "emoji",
+        [
+            "\U0001f44e",  # thumbs down from full selection
+            "💙",  # blue heart variant
+            "\U0001f44d\U0001f3fd",  # skin-tone variant
+            "🎉",  # celebrate
+            "🥰",  # care
+        ],
+    )
+    def test_variants_and_custom_emojis_return_200(
+        self,
+        emoji: str,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+    ) -> None:
+        client, headers, seq = self._unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+        try:
+            response = self._put(client, headers, seq, emoji=emoji)
+            assert response.status_code == 200
         finally:
             client.__exit__(None, None, None)
 

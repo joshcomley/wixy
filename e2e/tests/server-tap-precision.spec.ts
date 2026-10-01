@@ -111,7 +111,8 @@ test("a rapid two-finger-flick scroll of the thread never locks", async ({ page 
   for (let i = 0; i < 10; i++) {
     const input = page.locator(".wx-srv-thread-view textarea");
     await input.fill(`scroll-history-${i}-${Date.now()}`);
-    await input.press("Enter");
+    await page.locator(".wx-srv-thread-view .wx-chat-send-button")
+      .evaluate((button) => (button as HTMLButtonElement).click());
     await page.waitForTimeout(20);
   }
   await expect(page.locator(".wx-srv-thread")).toBeVisible();
@@ -139,7 +140,8 @@ test("a genuine same-spot double-tap on a message bubble still locks", async ({ 
   const marker = `bubble-doubletap-${Date.now()}`;
   const input = page.locator(".wx-srv-thread-view textarea");
   await input.fill(marker);
-  await input.press("Enter");
+  await page.locator(".wx-srv-thread-view .wx-chat-send-button")
+    .evaluate((button) => (button as HTMLButtonElement).click());
   const bubble = page.locator(".wx-srv-bubble-mine:not(.wx-srv-echo) .wx-srv-bubble-text", { hasText: marker });
   await expect(bubble).toBeVisible();
   const box = await stableBox(page, bubble);

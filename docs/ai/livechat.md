@@ -735,6 +735,13 @@ the microphone. A new recorder is created on the next attach because a detached 
 terminal. Recordings shorter than one second are discarded with a “Too short” hint and never
 uploaded.
 
+The Server-chat composer inserts a newline on Enter (sending is the Send button). When the draft
+contains a newline or soft-wraps in the inline row, the textarea moves above the controls at full
+width and keeps that layout until the draft clears; it grows to 180px, then scrolls internally.
+The shared AI chat composer keeps its Enter-to-send default. While a voice note uploads/sends, the
+recording row stays in place with disabled controls and a centered throbber; the in-flight state
+has an accessible status label.
+
 A voice note that fails to send stays pending in `thread.ts` (`pendingVoiceNote`) with **Retry**
 and **Discard** buttons side by side, so the owner is never stuck behind a note that cannot be
 sent. Retry reuses the same `clientId` and, once the upload finished, the same attachment, so it

@@ -252,6 +252,19 @@
   align-items: flex-end;
 }
 
+/* Server chat keeps Enter for line breaks. When text explicitly or visually wraps, give it a
+   dedicated full-width line above the buttons; retain that layout until the draft is cleared. */
+.wx-srv-thread-view .wx-chatc-input-row.wx-chatc-multiline {
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+.wx-srv-thread-view .wx-chatc-input-row.wx-chatc-multiline .wx-chat-composer-input {
+  order: -2;
+  flex: 1 0 100%;
+  width: 100%;
+}
+
 .wx-srv-thread-view .wx-chat-attach-button {
   box-sizing: border-box;
   width: var(--wx-srv-control-h);
@@ -317,6 +330,38 @@
 
 .wx-srv-thread-view .wx-chatc-input-row.wx-srv-recording-row .wx-srv-record-button {
   order: 4;
+}
+
+.wx-srv-thread-view .wx-chatc-input-row.wx-srv-sending
+  :is(.wx-srv-record-cancel, .wx-srv-record-pause, .wx-srv-record-button):disabled {
+  opacity: 0.45;
+  cursor: wait;
+}
+
+.wx-srv-thread-view .wx-chatc-input-row.wx-srv-sending .wx-srv-record-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wx-srv-voice-send-spinner {
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: wx-srv-voice-spin 0.8s linear infinite;
+}
+
+@keyframes wx-srv-voice-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wx-srv-voice-send-spinner {
+    animation: none;
+  }
 }
 
 /* chatComposer.ts's auto-grow floors the input at 36px and the empty state
@@ -768,9 +813,17 @@ button.wx-srv-quote:focus-visible {
 }
 
 .wx-srv-message-actions[hidden],
+.wx-srv-message-actions-list[hidden],
 .wx-srv-message-delete-confirm[hidden],
 .wx-srv-message-action-error[hidden] {
   display: none;
+}
+
+.wx-srv-message-actions.wx-srv-message-actions-picker-open {
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
 }
 
 .wx-srv-message-actions-list,
@@ -796,16 +849,31 @@ button.wx-srv-quote:focus-visible {
   background: var(--wx-canvas);
 }
 
-/* The emoji row at the top of the menu: round 36px buttons that wrap inside the menu's own
-   width, so on a narrow phone the six still fit without overflowing the card. */
+/* The emoji picker at the top of the menu: static row + recents row underneath, round 36px buttons. */
 .wx-srv-message-reactions-picker {
   display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
+  flex-direction: column;
+  gap: 4px;
   max-width: 15rem;
 }
 
-.wx-srv-message-actions button.wx-srv-message-react {
+.wx-srv-message-reactions-static {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.wx-srv-message-reactions-recents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding-top: 4px;
+  border-top: 1px solid var(--wx-border-subtle, rgba(255, 255, 255, 0.1));
+}
+
+.wx-srv-message-actions button.wx-srv-message-react,
+.wx-srv-message-actions button.wx-srv-message-react-more {
+  position: relative;
   width: 2.25rem;
   height: 2.25rem;
   padding: 0;
@@ -813,12 +881,202 @@ button.wx-srv-quote:focus-visible {
   text-align: center;
   font-size: 1.25rem;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Up arrow next to / on emojis with variants */
+.wx-srv-message-actions button.wx-srv-message-react[data-has-variants="true"]::after {
+  content: "▲";
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  font-size: 6px;
+  line-height: 1;
+  pointer-events: none;
+  opacity: 0.65;
+  color: var(--wx-text-muted, #888);
 }
 
 .wx-srv-message-actions button.wx-srv-message-react-on {
   background: var(--wx-brand-blue-tint);
   box-shadow: inset 0 0 0 1px var(--wx-brand-blue-text);
 }
+
+/* Floating variant popup */
+.wx-srv-reaction-variants-bar {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  display: flex;
+  flex-wrap: wrap;
+  width: max-content;
+  max-width: min(220px, calc(100vw - 24px));
+  gap: 2px;
+  padding: 4px 6px;
+  background: var(--wx-surface, #222);
+  border: 1px solid var(--wx-border, #444);
+  border-radius: var(--wx-radius, 12px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  box-sizing: border-box;
+}
+
+.wx-srv-reaction-variant-item {
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.wx-srv-reaction-variant-item:hover,
+.wx-srv-reaction-variant-item:focus-visible {
+  transform: scale(1.2);
+  background: var(--wx-surface-hover, rgba(255, 255, 255, 0.1));
+}
+
+/* Full emoji picker modal backdrop */
+.wx-srv-emoji-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.wx-srv-emoji-picker-backdrop[hidden] {
+  display: none;
+}
+
+/* Full emoji picker view */
+.wx-srv-emoji-picker {
+  display: flex;
+  flex-direction: column;
+  width: min(20rem, 100%);
+  max-height: min(24rem, 80vh);
+  padding: 10px;
+  background: var(--wx-surface, #222);
+  border: 1px solid var(--wx-border, #444);
+  border-radius: var(--wx-radius, 12px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  box-sizing: border-box;
+}
+
+.wx-srv-emoji-picker[hidden] {
+  display: none;
+}
+
+.wx-srv-emoji-picker-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.wx-srv-emoji-picker-back,
+.wx-srv-emoji-picker-close {
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border-radius: calc(var(--wx-radius, 8px) / 2);
+  border: 1px solid var(--wx-border, #444);
+  background: var(--wx-surface, #222);
+  color: var(--wx-ink, #eee);
+  font-size: 1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: none;
+}
+
+.wx-srv-emoji-picker-back:hover,
+.wx-srv-emoji-picker-close:hover {
+  background: var(--wx-surface-hover, rgba(255, 255, 255, 0.1));
+}
+
+.wx-srv-emoji-search {
+  flex: 1;
+  min-width: 0;
+  height: 2rem;
+  padding: 0 8px;
+  font-size: 0.8125rem;
+  border: 1px solid var(--wx-border, #444);
+  border-radius: calc(var(--wx-radius, 8px) / 2);
+  background: var(--wx-canvas, #111);
+  color: var(--wx-ink, #eee);
+  box-sizing: border-box;
+}
+
+.wx-srv-emoji-categories {
+  display: flex;
+  gap: 2px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--wx-border-subtle, rgba(255, 255, 255, 0.1));
+  overflow-x: auto;
+}
+
+.wx-srv-emoji-category-tab {
+  flex: 1;
+  min-width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  font-size: 1rem;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wx-srv-emoji-category-tab:hover,
+.wx-srv-emoji-category-tab:focus-visible {
+  background: var(--wx-surface-hover, rgba(255, 255, 255, 0.1));
+}
+
+.wx-srv-emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 2px;
+  padding: 6px 0;
+  overflow-y: auto;
+  max-height: 16rem;
+}
+
+.wx-srv-emoji-item {
+  width: 2.25rem;
+  height: 2.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.wx-srv-emoji-item:hover,
+.wx-srv-emoji-item:focus-visible {
+  background: var(--wx-surface-hover, rgba(255, 255, 255, 0.1));
+  transform: scale(1.15);
+}
+
 
 .wx-srv-message-delete-confirm p,
 .wx-srv-message-action-error,
@@ -1483,6 +1741,12 @@ button.wx-srv-quote:focus-visible {
   .wx-srv-view-once-toggle-button {
     order: -1;
     flex: 1 0 100%;
+  }
+
+  /* The full-width text line leaves room for view-once beside the other controls. */
+  .wx-srv-thread-view .wx-chatc-input-row.wx-chatc-multiline .wx-srv-view-once-toggle-button {
+    order: 0;
+    flex: 0 0 var(--wx-srv-control-h);
   }
 
   .wx-srv-view-once-toggle-button:disabled {
