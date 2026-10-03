@@ -550,7 +550,7 @@ playback in the browser. Served via Starlette `FileResponse` (200/206, Range-awa
 |---|---|---|---|
 | `WIXY_SERVER_PIN_APP_KEY` | `server_pin_app_key` | `"wixy-livechat"` | an identifier, never a secret — **no PIN setting exists** |
 | `WIXY_SERVER_MEDIA_QUOTA_MB` | `server_media_quota_bytes` | 20480 MiB (20 GiB) | R10 — enforced at upload init (P2b); MB values multiply by 1024² |
-| `WIXY_SERVER_MIN_FREE_MB` | `server_min_free_bytes` | 10240 MiB (10 GiB) | R10 — the disk free-space floor, enforced alongside the quota |
+| `WIXY_SERVER_MIN_FREE_MB` | `server_min_free_bytes` | 1024 MiB (1 GiB) | R10 — the disk free-space floor, enforced alongside the quota |
 | `WIXY_SERVER_UPLOAD_CHUNK_BYTES` | `server_upload_chunk_bytes` | 8 MiB | clamped to 64 KiB–16 MiB |
 | `WIXY_FFMPEG` / `WIXY_FFPROBE` | `ffmpeg_path` / `ffprobe_path` | `""` (resolve via `PATH`) | overrides must point to existing files; either binary missing — or `pillow-heif` not importable — makes media uploads return 503 while text chat works |
 

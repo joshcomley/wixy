@@ -128,7 +128,7 @@ Server-chat settings are read by `wixy_server/settings.py`:
 |---|---|---|
 | `WIXY_SERVER_PIN_APP_KEY` | `server_pin_app_key` | `wixy-livechat`; cmd PIN-service app-key identifier, not a secret or PIN. Register the PIN in cmd. |
 | `WIXY_SERVER_MEDIA_QUOTA_MB` | `server_media_quota_bytes` | 20,480 MiB (20 GiB); per-project chat-media quota. |
-| `WIXY_SERVER_MIN_FREE_MB` | `server_min_free_bytes` | 10,240 MiB (10 GiB); minimum free-space floor. |
+| `WIXY_SERVER_MIN_FREE_MB` | `server_min_free_bytes` | 1,024 MiB (1 GiB); minimum free-space floor. |
 | `WIXY_SERVER_UPLOAD_CHUNK_BYTES` | `server_upload_chunk_bytes` | 8 MiB; clamped to 64 KiB–16 MiB. |
 | `WIXY_FFMPEG` | `ffmpeg_path` | Empty means resolve `ffmpeg` from `PATH`; otherwise must name an existing file. |
 | `WIXY_FFPROBE` | `ffprobe_path` | Empty means resolve `ffprobe` from `PATH`; otherwise must name an existing file. |

@@ -173,7 +173,7 @@ class TestServerChatSettings:
         settings = load_settings(tmp_path)
         assert settings.server_pin_app_key == "wixy-livechat"
         assert settings.server_media_quota_bytes == 20480 * 1024 * 1024
-        assert settings.server_min_free_bytes == 10240 * 1024 * 1024
+        assert settings.server_min_free_bytes == 1024 * 1024 * 1024
         assert settings.server_upload_chunk_bytes == 8 * 1024 * 1024
         assert settings.ffmpeg_path == ""
         assert settings.ffprobe_path == ""
