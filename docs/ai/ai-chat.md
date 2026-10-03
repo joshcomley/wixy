@@ -342,3 +342,16 @@ fake-cmd port. `wixy_server/tests/fake_cmd.py` implements both surfaces as one F
 for the websocket), making the chat suite hermetic. One `@pytest.mark.live_cmd` smoke test
 does a real "reply with the word pong" round-trip against local cmd (excluded from CI by the
 default `addopts`).
+
+## Pixel art chat idle interaction (`pixelChat/`, decisions/00179)
+
+When the conversation view sits idle for 30 seconds (`mountIdleWatchdog` with `DEFAULT_IDLE_TIMEOUT_MS = 30_000`), a retro pixel-art animation plays on a transparent canvas overlay (`.wx-pixel-chat-canvas` with `pointer-events: none`):
+- A guy in a pink suit climbs onto the screen at the bottom.
+- A woman in a blue dress climbs onto the screen at the top.
+- They scale message bubbles (`.wx-chat-bubble`) along vertical walls.
+- Under overhangs (where the block above sticks out further horizontally), the character stretches their arms up, grasps the underside of the overhead block, and monkey-bar traverses horizontally with dangling legs (`hang_traverse`).
+- On step-ins (where the current block extends further than the one above), the character climbs onto the block top and walks horizontally (`walk_top`).
+- When they meet at the middle block, a retro wooden platform scrolls smoothly out from the block edge; they embrace at the wall edge, leap together across to the platform in a parabolic arc, and lie down cuddling side-by-side while pixel heart particles drift upward.
+- Interruption & reaction: if a message arrives or user activity breaks stillness whilst they are climbing, both characters stumble (flailing arms, startled expressions) and tumble down off the bottom of the screen under gravity. If a message arrives or activity occurs whilst cuddling, the wooden platform collapses downward, and the couple clutches each other, slides down the sloping plank, and falls off the bottom together. Staying still allows the full sequence to play out. Once they fall off-screen, the canvas is cleared and the 30s idle watchdog resets.
+
+
