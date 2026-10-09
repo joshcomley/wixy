@@ -1419,7 +1419,9 @@ button.wx-srv-quote:focus-visible {
 .wx-srv-voice-seek-tab {
   position: absolute;
   bottom: 0;
-  left: clamp(18px, calc(var(--wx-srv-seek) * 100%), calc(100% - 18px));
+  /* Centred exactly under the playhead line, even at 0:00 and at the end, where it hangs a few
+     pixels over the bubble's padding rather than sitting off the line. */
+  left: calc(var(--wx-srv-seek) * 100%);
   width: 36px;
   height: 24px;
   margin-left: -18px;
