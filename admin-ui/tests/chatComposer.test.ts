@@ -111,7 +111,7 @@ describe("mountChatComposer", () => {
     composer.teardown();
   });
 
-  it("takes the full-width line the moment the Server chat input is focused, and gives it back on blur only while empty", () => {
+  it("takes the full-width line the moment the Server chat input is focused and keeps it", () => {
     const composer = mountChatComposer(makeOptions({
       enterToSend: false,
       promoteToFullWidthOnMultiline: true,
@@ -124,17 +124,15 @@ describe("mountChatComposer", () => {
     textarea.dispatchEvent(new Event("focus"));
     expect(promoted()).toBe(true); // nothing typed yet
 
+    // Blurring (a tap anywhere else) must never move the controls under the next tap.
     textarea.dispatchEvent(new Event("blur"));
-    expect(promoted()).toBe(false); // still empty: back to one line
+    expect(promoted()).toBe(true);
 
-    textarea.dispatchEvent(new Event("focus"));
     textarea.value = "hi";
     textarea.dispatchEvent(new Event("input"));
-    textarea.dispatchEvent(new Event("blur"));
-    expect(promoted()).toBe(true); // a draft keeps its line until it is cleared
-
+    expect(promoted()).toBe(true);
     composer.reset();
-    expect(promoted()).toBe(false);
+    expect(promoted()).toBe(true);
     composer.teardown();
   });
 

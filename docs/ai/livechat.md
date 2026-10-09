@@ -48,9 +48,11 @@ button. A note finished while the view is open stays until the view closes; tran
 in place. `detach()`/`teardown()` close it.
 
 **Composer focus + the header ... menu.** With `promoteToFullWidthOnMultiline` (Server chat only) the
-text box takes its own full-width line the instant it is focused (`chatComposer.ts`
-`textareaFocused`), not only once the text wraps; on blur it gives the line back only while the draft
-is empty (a draft keeps it until cleared). Attach/mic stay at the left and Send keeps its place at
+text box takes its own full-width line the first time it is focused (`chatComposer.ts`
+`promotedByFocus`), not only once the text wraps, and KEEPS it for the life of the composer — a
+send or a blur never collapses it, because collapsing moved every control (and the thread above)
+at the instant of a tap elsewhere, so a double-tap on a message or a tap on a button missed
+(measured by `server-tap-precision`/`server-reply`/`server-view-once` e2e). Attach/mic stay at the left and Send keeps its place at
 the right edge (`margin-left: auto` in the promoted row), so no button moves when the box jumps up.
 The header's `⋯` button (`.wx-srv-more-button`, first of the right-hand buttons) opens
 `.wx-srv-more-menu`; its first item, **Canvas**, calls `POST /messages/canvas` and scrolls to the new
