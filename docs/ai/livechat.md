@@ -675,6 +675,13 @@ FRESH `ServerSession` on each unlock, never a stale one.
 successful unlock. It retains that view through later lock/unlock cycles and disposes it only
 when routing away from `/admin/server`.
 
+**Recording keeps the screen awake.** While a voice note records (including paused),
+`recorder.ts` holds a Screen Wake Lock (`navigator.wakeLock.request("screen")`, injectable as
+`wakeLock`), so the phone's own display timeout cannot background the page — a `hidden` lock
+(which `recording` deliberately does not excuse) would otherwise detach the chat and discard the
+note. Released in `cleanup()`; a late-resolving request releases itself; unsupported or refused
+is silent. Idle-lock suspension and the fresh full idle period on stop were already R7 behaviour.
+
 **Extend auto-lock to 1 minute** is a per-device checkbox in the chat's settings sheet
 (`settingsSheet.ts`: a real `<label for>` row, at least 44px tall, default off). It stores `"1"`
 under the localStorage key `wx-srv-idle-extended` (`server/idlePreference.ts`; absent, an
