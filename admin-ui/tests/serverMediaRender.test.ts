@@ -180,8 +180,9 @@ describe("server attachment rendering", () => {
       audio.currentTime = 50;
       const back = root.querySelector<HTMLButtonElement>(".wx-srv-voice-skip-back")!;
       const fwd = root.querySelector<HTMLButtonElement>(".wx-srv-voice-skip-forward")!;
-      const bar = root.querySelector<HTMLInputElement>(".wx-srv-voice-seek")!;
-      return { audio, back, fwd, bar };
+      const bar = root.querySelector<HTMLElement>(".wx-srv-voice-seek-tab")!;
+      const scrub = root.querySelector<HTMLElement>(".wx-srv-voice-scrub")!;
+      return { audio, back, fwd, bar, scrub };
     }
     const press = (el: HTMLElement) => el.dispatchEvent(new Event("pointerdown", { bubbles: true }));
     const lift = (el: HTMLElement) => el.dispatchEvent(new Event("pointerup", { bubbles: true }));
@@ -215,13 +216,22 @@ describe("server attachment rendering", () => {
       vi.useRealTimers();
     });
 
-    it("the bar follows playback and seeks when dragged", () => {
-      const { audio, bar } = setup();
+    it("the line follows playback and dragging the tab seeks", () => {
+      const { audio, bar, scrub } = setup();
       audio.dispatchEvent(new Event("timeupdate"));
-      expect(Number(bar.value)).toBe(50);
-      bar.value = "90";
-      bar.dispatchEvent(new Event("input"));
-      expect(audio.currentTime).toBe(90);
+      expect(bar.getAttribute("aria-valuenow")).toBe("50");
+      expect(Number(scrub.style.getPropertyValue("--wx-srv-seek"))).toBeCloseTo(50 / 120);
+      scrub.getBoundingClientRect = () => ({ left: 0, width: 200 }) as DOMRect;
+      bar.dispatchEvent(new Event("pointerdown", { bubbles: true, cancelable: true }));
+      const move = new Event("pointermove", { bubbles: true });
+      Object.defineProperty(move, "clientX", { value: 100 });
+      bar.dispatchEvent(move);
+      expect(audio.currentTime).toBe(60);
+      bar.dispatchEvent(new Event("pointerup", { bubbles: true }));
+      const later = new Event("pointermove", { bubbles: true });
+      Object.defineProperty(later, "clientX", { value: 200 });
+      bar.dispatchEvent(later);
+      expect(audio.currentTime).toBe(60);
       vi.useRealTimers();
     });
   });

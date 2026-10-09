@@ -682,6 +682,665 @@ when routing away from `/admin/server`.
 note. Released in `cleanup()`; a late-resolving request releases itself; unsupported or refused
 is silent. Idle-lock suspension and the fresh full idle period on stop were already R7 behaviour.
 
+**Voice-note playback controls** (`mediaRender.ts` `renderVoice`): a full-width waveform with a
+playhead line (`--wx-srv-seek` 0..1 on `.wx-srv-voice-scrub`, driven by `timeupdate`) and, below it,
+a draggable tab (`.wx-srv-voice-seek-tab`, `role=slider`, pointer-captured drag, arrow keys ±5s) so a
+finger never covers the line. Under that one row: back, play/pause and forward icon buttons (44px)
+and the elapsed time. A tap on back/forward jumps 10s (`VOICE_SKIP_S`); holding past
+`VOICE_HOLD_DELAY_MS` (350ms) scrubs continuously at `VOICE_HOLD_SEEK_RATE` = 2.5x net of normal
+playback (100ms ticks, real elapsed time) until release. Keyboard activation (click with `detail` 0)
+also skips 10s. Seeking never touches the `mediaPlaying` suspension; pointer events count as R7 activity.
+
+**Extend auto-lock to 1 minute** in the chat's settings sheet
+  (§11); a panic button, a multi-tap inside the chat, `Escape`, tab-hidden, or routing away
+  all lock instantly. A reload never restores the unlocked state (Inv 42).
+- Locking **detaches the chat subtree from the document** — nothing chat-shaped remains
+  readable in the DOM once locked.
+
+This is the frontend's job (P4/P5/P6); P1 (this doc's main subject) is the backend those
+panels talk to.
+
+## 2. Auth: two independent gates, stacked
+
+1. **CF Access** (Inv 12, unchanged) — the same JWT gate every `/admin*`/`/api/admin*` route
+   already has. Nothing server-chat-specific here.
+2. **The unlock token** — a second, in-app gate layered ON TOP of CF Access, never a
+   replacement for it (Inv 12 amendment). See §3.
+
+**wixy holds zero PIN state** (Inv 41) — not in code, not in `Storage/.env`, not in its own
+DB. There is no PIN field anywhere in `Settings` (`wixy_server/tests/test_routes_livechat.py
+::TestSettingsHaveNoPinField` asserts this directly — a grep-style guard against ever adding
+one). The PIN is verified entirely by cmd; see §4.
+
+A device the owner has told to **keep itself unlocked** has a second way to obtain the unlock
+token: a device grant (§16), created only with the PIN, which mints the same token through
+`POST /unlock-with-grant`. It replaces typing the PIN — never the token, never CF Access.
+
+## 3. Unlock tokens and signed media URLs (`livechat/tokens.py`)
+
+- `POST /api/admin/server/unlock` (§5.1 of the brief) mints an **unlock token** on a
+  correct PIN: `b64url(json{v,e,iat,exp,n}) + "." + b64url(HMAC-SHA256(secret,
+  b"unlock|" + payload_b64))`, `secret` = 32 random bytes at `Storage/projects/<slug>/
+  server/secret.key` (created race-safely across blue/green slot processes,
+  `tokens.load_or_create_secret`). TTL 12h absolute.
+- The token is bound to the CF Access email (`e`) that requested it — `require_server_token`
+  (the route-level gate every other route calls first) rejects a token presented under a
+  *different* email, so it can't outlive a change of admin on the shared device.
+- Held **only in JS memory** on the client — never localStorage/sessionStorage/cookies/URLs.
+  Sent as the `X-Wixy-Server-Token` header; a token in a query string is rejected outright
+  (the header is the only place `require_server_token` ever looks). A header value that is not
+  pure ASCII fails verification like any other malformed token and gets the same
+  `401 {"error":"locked"}` — never a server error (`tokens.verify_unlock_token` rejects it
+  before any HMAC work; `TestTokenRequired::test_non_ascii_unlock_token_is_401_locked`).
+- **Signed media URLs** (§5.6, for P2b's `GET media/*` — `<img>`/`<video>`/`<audio>` can't
+  send custom headers): `MediaSigner` mints `?exp=<token's own exp>&sig=<HMAC(secret,
+  "media|{attId}|{rendition}|{exp}|{email}")>` per attachment, per response — never
+  precomputed or stored, always freshly signed against the CURRENT requester's (email, exp).
+
+## 4. The PIN itself: `livechat/pinclient.py` (the zero-PIN-state hop)
+
+`POST /unlock` forwards the submitted PIN + the CF email (as `subject`) to cmd's
+app-key-scoped, loopback-only PIN-verify service — `CmdPinVerifier`, the only place a PIN
+value ever exists in this process, and only for the duration of one outbound HTTP call.
+Settings: `WIXY_SERVER_PIN_APP_KEY` → `server_pin_app_key` (default `"wixy-livechat"` — an
+**identifier**, not a secret). cmd owns the registered PIN, the comparison, and the
+failed-attempt lockout (per-subject **and** app-wide ladders); wixy never sees or stores
+either.
+
+**Real contract** (cmd workspace #875 PR #3068 — supersedes the brief's original
+strawman shape; see brief §5.1's own "v1.4" note for the full mapping table):
+
+```
+POST http://127.0.0.1:9320/api/pins/<app_key>/verify     # app key in the PATH, plural "pins"
+Content-Type: application/json                            # required (CSRF guard), else 415
+body: {"pin": "<4-16 digits>", "subject": "<CF email, omitted if empty>"}
+```
+
+wixy validates **4–16 ASCII digits locally** and never calls cmd for anything else — cmd
+charges an attempt **before** checking it, so a stray keypress must never burn one. The
+`unlock` route (`routes_livechat.py`) reads the raw JSON body itself instead of binding a
+Pydantic model, and rejects every malformed shape (invalid or non-UTF-8 JSON, a non-object
+body, a missing or misspelled `pin` key, a non-string or nested `pin`, or a `pin` that is not
+4–16 ASCII digits) with one redacted `422 {"error":"invalid_pin"}` **before**
+`verifier.verify()` is ever reached; the submitted value appears in no response or log line
+(Inv 41).
+
+**Retry policy** (`CmdPinVerifier._post_with_narrow_retry`) — the one place in this whole
+feature where getting retries wrong double-counts a wrong PIN toward the owner's real
+lockout: **at most one retry, and only on a connection error that provably never reached
+cmd** — `httpx.ConnectError` (refused/DNS) or `httpx.ConnectTimeout` (timed out
+*establishing* the connection). Both mean nothing was ever written to the socket. Every
+other transport failure (`ReadTimeout`, a dropped connection mid-response) gets exactly one
+attempt, because the request MAY already have reached cmd.
+
+**Mapping cmd → wixy's own `/unlock` response** (`pinclient._map_response`, verbatim from
+the brief's table): cmd's 200 is trusted only if the body genuinely says `ok: true` (a
+malformed/garbage 200 is treated as `unavailable`, never as success — the one outcome that
+mints a token must never come from trusting a status code alone); a 401 with `locked: true`
+normalizes to the SAME outcome a genuine 429 produces (the owner sees one consistent
+"try again in Ns", never two different UI paths for what is functionally the same lockout);
+404 (`unknown_app`) → `not_configured`; 409 (`pin_changed` — cmd's PIN rotated mid-check,
+nothing spent) → wixy's own 409; 400 `invalid_app_key` (misconfiguration) → `not_configured`;
+400 `invalid_request`, 403, 413, 415 are all wixy-side bugs or a misrouted deployment
+(logged as `ERROR`) — but **not the same wixy-side outcome**: 400 `invalid_request` maps to
+**422** (the frozen contract's own distinction: "wixy validates first, so this is a wixy
+bug" gets a 422 like a locally-invalid PIN does — as `{"error":"invalid","detail":...}`, not
+`invalid_pin` — and is provably unreachable in practice, since the route's manual 4–16
+ASCII-digit check already rejects anything that could trigger it), while 403/413/415 map to
+the closed-fail `unavailable` → 503 — see `pinclient.py`'s own docstrings for the exhaustive
+table.
+
+**Tests use a fake cmd** (`wixy_server/tests/fake_cmd.py`'s `/api/pins/{app_key}/verify`
+double — `FakeCmdState.register_pin_app(app_key, pin)`) — the real PIN value never appears
+anywhere in this repo (it's public on GitHub); see
+[`spec/server-chat/00-brief.md`](../../spec/server-chat/00-brief.md)'s own banner about that.
+
+## 5. Store (`livechat/store.py`) — `LiveChatStore`, SQLite (WAL)
+
+One `server.db` per project at `Storage/projects/<slug>/server/server.db`. A fresh
+`sqlite3.Connection` per call (never held across calls — safe under `anyio.to_thread.
+run_sync` handing different calls to different worker threads, and correct across a
+blue/green slot-swap overlap, since WAL + `busy_timeout=5000` handle cross-process
+contention at the file level). Every method is **synchronous**; route handlers wrap each
+call in `anyio.to_thread.run_sync`.
+
+Tables: `messages`, `attachments`, `events`, `uploads`, `push_subscriptions`, `reactions`,
+`deleted_storage`, `pending_wipe_cleanup`, `pending_scrub`, `attachment_transcripts` (a voice
+note's opt-in transcript, `ON DELETE CASCADE` from its attachment — §15), `device_grants`
+(schema v9, §16 — auth credentials, not chat content, so delete/wipe leave them alone), and
+`drawings`/`drawing_strokes` (schema v13, Inv 53, §18 — cascade on the anchor message, exactly
+like reactions). Schema migrations are serialized under the SQLite writer lock.
+`deleted_storage` retains internal attachment/upload tombstones and retry status; it is not a
+message/event tombstone and is never returned to chat clients. `pending_wipe_cleanup` records a
+wipe's filesystem sweep token so a crash cannot lose cleanup of orphaned paths. Schema v4 adds the
+partial `idx_deleted_storage_pending` index containing only incomplete cleanup rows. Schema v5
+adds a per-tombstone generation so a late requeue cannot be cleared by an older cleanup pass, plus
+an age index for completed rows. The hourly janitor prunes completed tombstones after seven days;
+pending tombstones are never pruned. Schema v6 adds singleton `pending_scrub`, written in the same
+transaction as delete/wipe. Startup imports a legacy `scrub.pending` file into this row before
+trying to remove it; an access failure retains durable scrub work and the file for retry. Schema v7
+adds `reactions` (decisions/00164), described under "Reactions" in §6. Schema v8 adds
+`attachment_transcripts` (decisions/00166/00167), described in §15; a database that reaches v8
+through a migration path older than this table's own step still gets it via
+`_ensure_attachment_transcripts_table`'s idempotent `sqlite_master` check on every connect.
+Schema v9 adds `device_grants` (Inv 48), described in §16. Schema v10 adds
+`messages.reply_to_seq` (nullable, self-referencing, `REFERENCES messages(seq) ON DELETE
+SET NULL`) for reply-to-a-message (round 2 ruling item 10, Inv 51), plus the partial index
+`idx_messages_reply_to` — required, not tuning: `wipe()`'s bulk `DELETE FROM messages` searches
+this child column once per deleted row for the `SET NULL` action, and unindexed that measured
+17.6s vs 0.2s at 20,000 messages (one in three a reply). A reply persists only the target's seq;
+its quote (sender, a 300-code-point text snippet, and a media summary) is resolved at read time
+from the target's live row by `list_messages`/`get_messages`, one level only, and is never stored.
+Schema v13 adds `drawings`/`drawing_strokes` (Inv 53, live drawing — the pen tool), described in
+§18; the number is 13, not 11 or 12, because those were already spent by view-once media and the
+Spotlight→Tease rename (decisions/00172) by the time this feature landed.
+Two transaction shapes:
+- `BEGIN IMMEDIATE` for writes needing a race-safe conditional check (an attachment's lease
+  claim, `create_message`'s idempotent client-id insert) — serializes concurrent claimants
+  across threads AND processes.
+- `BEGIN` (deferred) for a multi-SELECT read needing one consistent snapshot —
+  `list_messages`'s cursor is the events high-water mark from the SAME transaction as the
+  messages it returns.
+
+**Attachment leases** (`claim_processing`/`renew_lease`/`finish_attachment`, consumed by
+P2's media queue): `lease_owner`/`lease_expires_at` columns; a lease past its expiry is
+reclaimable by a different owner (crash-resume); `finish_attachment` is a silent no-op if
+the caller no longer holds the lease (stolen) **or the row no longer exists at all**
+(§17.1 — a future delete/wipe race).
+
+**A cold-start concurrency fix (P2b, 2026-09-14):** `_connect()`'s migration check-then-act
+(read `user_version`, `CREATE TABLE` if not yet migrated) is not itself atomic across
+connections, and `PRAGMA journal_mode = WAL`'s one-time conversion does **not** respect
+`busy_timeout` the way ordinary reads/writes do — it fails immediately with `OperationalError:
+database is locked` rather than retrying. Both surfaced the moment P2b's media queue started
+polling `claim_processing` concurrently with the very first request against a brand-new DB
+file (measured: 100% failure across 160 concurrent cold-start connections without the fixes
+below, 0% with them). Fixed with: every `CREATE TABLE` in the schema now says `IF NOT EXISTS`
+(a racing duplicate migration attempt becomes a harmless no-op), and the `journal_mode = WAL`
+switch retries with a short backoff (up to ~1s) instead of raising on the first
+`OperationalError` — see `LiveChatStore._connect`'s own comments for the measured detail.
+This applies to every SQLite database opened by more than one connection near true first-ever
+startup (blue/green included), not just the media queue's own polling.
+
+## 6. The SSE stream (`GET /stream?after=<cursor>`)
+
+Full wire shape: [contracts.md](contracts.md) §4. Per-connection loop
+(`routes_livechat._stream_events`):
+
+1. Check token expiry — past it, emit `event: locked` and close.
+2. Fetch `events_after(cursor)`. None → wait up to 2s on `LiveChatNotifier` (in-process
+   `anyio.Event` swap), then re-poll.
+3. Some → advance `cursor` to the batch's max `event_seq` (forward progress guaranteed
+   regardless of what's emitted), group by `message_seq`, fetch each group's CURRENT
+   message content, and emit one **coalesced** frame per message (a `message` + a
+   `message_updated` for the same message in one batch collapse into a single `message`
+   frame).
+4. Every 15s, a bare `: ping` comment line, independent of the poll cadence.
+
+**Why the 2s re-check matters more than the notifier**: `LiveChatNotifier` only wakes SSE
+loops in the SAME process. A blue/green slot-swap runs two processes against one SQLite
+file for a window — a message a sibling process writes is picked up by THIS loop's next 2s
+re-check even though that write never touched this process's notifier at all. Proven
+directly in `test_routes_livechat.py::TestStreamEvents
+::test_cross_process_write_is_picked_up_by_the_2s_recheck` (two `LiveChatStore` instances,
+one db file, the writing instance's own notifier never called).
+
+**§17.2 migration v2** rebuilds the content-free `events` table on upgrade, accepts
+`message_deleted`/`wiped`, makes `message_seq` nullable for `wiped`, and preserves
+`sqlite_sequence`'s high-water mark. Every store connection enables `PRAGMA secure_delete=ON`.
+The stream emits `message_deleted` as `data: {"seq":int}`, emits `wiped` as `data: {}`, and
+skips a stale `message`/`message_updated` event if its message row has already vanished.
+
+### Delete and wipe (P8)
+
+Any unlocked chat user may hard-delete any message for everyone. Deletion removes its message
+and attachment rows, media/upload/failed directories, and prior `message`/`message_updated`
+events, then appends one `message_deleted` event. Repeating a delete adds no second event and
+returns 204 or 202 according to the scrub result. The client removes the bubble optimistically
+and removes remote bubbles from the same `message_deleted` event; the stream is the source of
+truth.
+
+**Client timeouts, retries and reconciliation.** Delete and wipe requests use a dedicated
+30-second timeout (`serverFetch` in `admin-ui/src/server/api/http.ts`; ordinary chat requests
+keep 10 seconds and upload chunks 120), so a slow but successful erasure is not abandoned by
+the client. A timeout or network failure of either request is an *unknown outcome*
+(`ServerErasureOutcomeUnknownError`), distinct from a definite HTTP failure. For the wipe the
+class is broader: `wipeChat` (`api/messages.ts`, `isUnknownOutcomeStatus`) also treats a 408 or
+any 5xx as unknown, because Cloudflare answers for the origin and a gateway status says nothing
+about whether wixy's commit landed. `deleteMessage` still treats any non-OK status as a definite
+failure:
+
+- **Delete** is idempotent, so `deleteMessage` (`api/messages.ts`) retries an unknown outcome up
+  to three times, after 1, 2 and 4 seconds (at most four requests). If it still cannot be
+  confirmed, the bubble is restored with "Couldn't confirm the delete — try again". A definite
+  HTTP failure other than 401 is not retried and restores the bubble with "Couldn't delete
+  message. Try again."; a 401 locks the chat. If the delete did commit, its `message_deleted`
+  event removes the bubble anyway, even after a restore.
+- **Wipe** is never retried, because a repeat would delete anything sent since. A definite
+  failure (a 4xx) keeps the two-step confirmation open with "Couldn't delete everything — try
+  again". On an unknown outcome the settings sheet shows "Couldn't confirm — checking…"
+  immediately, before any history request. `thread.ts` (`reconcileUnknownWipe`) then pages the
+  whole history and compares server message sequence numbers against the newest sequence the
+  client knew when it sent the wipe; browser and server clocks are never compared. That
+  boundary is only trustworthy if the history had loaded when the wipe was sent (`boundaryKnown`
+  in `thread.ts`). If it had, any message at or before the boundary means the wipe did not
+  commit; if it had not, the boundary is 0 and "nothing at or before it" would be vacuously
+  true, so the only proof of a commit is an **empty** history. When the wipe did not commit the
+  history is restored and the retry message is shown. Otherwise the wipe counts as done,
+  messages newer than the boundary are kept, and the `/usage` erasure poll starts. If the
+  history request itself fails, the thread keeps retrying that request — never the wipe — after
+  1, 2, 4 and 8 seconds and then every 15 seconds, until it gets a definite answer, sees a
+  `wiped` event on the stream, or the chat locks. A lock or teardown abandons the check
+  (`ServerWipeAbandonedError`) and the sheet resets its control quietly. The sheet's own
+  `/usage` poll and its "Status unclear. Check the messages to confirm." ending
+  (`settingsSheet.ts`) apply only if `onWipe` itself rejects with an unknown outcome and no
+  reconciler exists, which the real thread never does. A `wiped` event from the stream settles
+  any of these cases.
+
+Covered by `admin-ui/tests/server/erasureRequests.test.ts`,
+`admin-ui/tests/serverThread.test.ts` and `admin-ui/tests/serverSettingsSheet.test.ts`, and by
+`e2e/tests/server-chat.spec.ts` (a delete whose response is delayed 12 seconds still ends
+removed on both clients).
+
+The settings sheet's two-step **Delete all messages** action requires exactly
+`{"confirm":"WIPE"}`. Wipe clears messages, attachments, pending uploads, all events, and the
+contents of `media/`, `uploads/`, and `failed/`, then appends one `wiped` event. The client
+clears loaded history and pending echoes; the stream remains connected. Message/event sequence
+numbers, push subscriptions, `secret.key`, `vapid.json`, and localStorage identity values stay
+intact. Delete and wipe never dispatch push notifications.
+
+Both operations enable secure delete and use `PRAGMA wal_checkpoint(TRUNCATE)`. A 204 means the
+WAL is empty, deleted text is absent from both database files, and media-file cleanup completed.
+The route gives the scrub up to 10 seconds; if a reader still blocks it, the route retains the
+database-backed `pending_scrub` row. Delete and wipe transactions record deleted storage IDs and
+the scrub marker before commit.
+Both routes publish the deletion event immediately after commit and before file cleanup. Every
+post-commit cleanup exception is logged and returns 202; committed deletion is never turned into
+an error response. Each WAL checkpoint attempt waits no more than 250 ms for SQLite's busy lock;
+the route's ten-second deadline includes waiting for `LiveChatStore.scrub_guard()`, and lock
+timeout returns pending. A WAL `stat()` error other than `FileNotFoundError` is treated as an
+incomplete scrub and retried, not raised from the worker.
+If an unlink fails (for example, Windows reports a file-sharing violation), the durable cleanup
+record remains pending and the two-second worker retries at startup and while the app runs. It
+removes files before retrying the database scrub. `/usage` exposes one `erasurePending` flag;
+202 returns `{"erasurePending":true}`, and the settings sheet polls until it clears. `GET /media`
+checks that the attachment row still exists
+before opening a signed rendition, so an old URL returns 404 even while a locked file awaits
+cleanup. Wipe cleanup sweeps only paths without live attachment/upload rows, preserving uploads
+created after the wipe transaction. **NTFS/SSD byte-level shredding is not claimed**, since
+overwrite-in-place is not reliable on SSDs. If the media worker finishes after deletion removed
+its row, its post-finish check re-queues cleanup for any paths it recreated. The worker scans
+unreferenced `media/`, `uploads/`, and `failed/` entries once at startup, then repeats that sweep
+only while a wipe-sweep token remains pending. It enumerates paths before consulting a batched
+snapshot of live attachment/upload rows and acts only on paths without a live row. A failed
+startup sweep creates a durable retry token. Chunk writes shield the write-and-row-check sequence
+from cancellation. If a late write finds its upload deleted, it
+re-marks that upload for durable cleanup, even when an earlier cleanup already completed.
+Route-owned and background WAL scrubs serialize under `LiveChatStore.scrub_guard()` and read the
+current marker after acquiring the guard; a route skips its scrub if the worker already cleared it.
+Media cleanup clears a pending row only if its generation is unchanged; a late requeue increments
+the generation so an older cleanup pass cannot lose it.
+
+### Reactions
+
+Full design: [`spec/server-chat/04-reactions.md`](../../spec/server-chat/04-reactions.md);
+decisions [00164](../../decisions/00164-server-chat-reactions/decision.md) (server) and
+[00165](../../decisions/00165-reactions-patch-in-place-stream-is-truth/decision.md) (client);
+guarantees: Inv 49. Not part of the AI chat (`chats.py`/`cmdchat.py`) — decisions/00110's split stands.
+
+A reaction is one row of `reactions(message_seq, sender_key, sender, emoji, by_email, created_at)`,
+primary key `(message_seq, sender_key, emoji)`. The reactor is `sender_key`, the trimmed, case-folded
+sender name (`livechat/reactions.py::reactor_key`) — the same identity as "mine" and push
+self-exclusion, not the device, so one person on two devices is one reactor. `sender` keeps the
+spelling first typed; `by_email` is audit only and never returned. The `message_seq` foreign key is
+`ON DELETE CASCADE`: with `foreign_keys=ON` on every connection, an OLDER slot process that has never
+heard of the table can still hard-delete a message during a blue/green overlap, and the cascade
+carries the reactions away (and `secure_delete` zeroes them), so delete and wipe stay erasing
+(Inv 46). `_delete_message`/`_wipe` deliberately do not mention the table.
+
+`LiveChatStore.set_reaction(seq, sender, by_email, emoji, reacted, now)` runs in one `BEGIN
+IMMEDIATE` transaction: it checks the message exists (else `MessageNotFoundError`, and an
+`IntegrityError` from the write maps to the same error), then `INSERT OR IGNORE` / `DELETE`, and
+appends a `message_updated` event **only when a row actually changed**. It returns the current message
+and whether anything changed. `list_messages`, `get_messages` and `_load_message` all load reactions
+through `_load_reactions_for` (allowlist order across emoji, oldest reactor first within one), so
+history, the send response and the stream all carry `reactions` via `message_json`.
+
+The six allowed emoji are `REACTION_EMOJIS`, each an exact code-point sequence (the heart is U+2764
+U+FE0F) compared with no normalisation. `admin-ui/src/server/reactions.ts` is the browser's copy and
+`test_livechat_reactions.py` parses it and fails on any difference.
+
+`PUT /api/admin/server/messages/{seq}/reactions` (`routes_livechat.py::set_reaction`, contract in
+[contracts.md](contracts.md)) takes `{emoji, sender, reacted}` — the DESIRED state, so a retry after a
+dropped response cannot flip it back. It validates the token, then the emoji, then the sender (the
+`POST /messages` rules), then the `seq` (0 or beyond SQLite's integer range is a 404, since the
+integer would otherwise raise `OverflowError` and become a 500). On a change it calls
+`notifier.publish()`. It dispatches no push: the message hooks fire only for a created message. The
+stream needs no change: a `message_updated` is re-read and coalesced like any other, and a message
+plus its reaction in one batch collapse into one `message` frame.
+
+## 7. Web Push (`livechat/push.py`, `server/pushToggle.ts`)
+
+Push is an explicit Android-only opt-in. `GET /api/admin/server/push/config` returns
+the project's uncompressed P-256 VAPID public key; subscription status and mutations
+use the protected `/push/subscriptions/{deviceId}` routes. Subscription endpoints are
+validated against the frozen HTTPS push-service allowlist before they are stored. The
+VAPID key pair is persisted race-safely in the private server directory's `vapid.json`.
+
+The opt-in is reachable from the UI. Each time the settings sheet opens, `settingsSheet.ts`
+mounts `pushToggle.ts` into its push slot — only on an Android-capable browser (an Android user
+agent with `PushManager`, `serviceWorker` and `Notification`) and only once the chat has a
+display name; the sheet unmounts it on close. Desktop and other browsers see an
+informative note that notifications are currently supported on Android devices only.
+`e2e/tests/server-push.spec.ts` proves both: a desktop browser shows no toggle control,
+and an Android browser enables and disables the subscription through the sheet.
+
+After a message commits, the registered dispatch hook sends a payloadless Web Push
+request to every subscription except the message's device and case-insensitive sender.
+Requests use a shared HTTPX client with a 10-second timeout and concurrency capped at
+four. A 201 records success; 404/410 deletes the subscription; other failures are
+counted and the subscription is deleted after ten consecutive failures.
+
+The service worker is served at `/admin/server-sw.js` before the admin SPA catch-all.
+It emits only the generic `Server` title, with a body chosen at random from a small fixed set of
+equally generic phrases (`NOTIFICATION_BODIES` — Inv 45; rotating avoids Chrome flagging a
+site that repeats byte-identical notifications as spam, degrading the display), issues it silently for
+a visible focused Server page to satisfy the browser's `userVisibleOnly` push contract
+without disrupting the user, and routes notification clicks to `/admin/server`. It has
+no fetch handler. Upon showing the notification, `handlePush` notifies active clients via
+both `postMessage({ type: "push-shown" })` and a `BroadcastChannel("wx-server-push")` event
+to confirm display.
+
+`server/pushToggle.ts` derives an **honest state** rather than trusting the server's record alone:
+1. `Notification.permission === "denied"` immediately yields a `blocked` state with guidance to allow notifications in site settings.
+2. If the server says subscribed, the browser verifies that a service worker registration exists at scope `/admin/` and that `pushManager.getSubscription()` returns an active subscription whose endpoint equals the server's stored endpoint.
+3. If the server says subscribed but the browser lacks permission, lacks a registration, or has a mismatched/missing subscription, the toggle enters a `needs_re-enabling` state with a single-tap repair button ("Re-enable notifications") that re-subscribes and updates the server.
+4. When enabled, a "Send me a test notification" button allows verification. Tapping it starts a visible 10-second countdown ("Sending in 10s… you can switch away from Chrome now") before the request fires (operator report, round 2: dispatching immediately made it impossible to actually leave the foreground before the push arrived, so a foreground-only failure could never be distinguished from a true backgrounded-delivery failure). After the countdown, it calls `POST /api/admin/server/push/subscriptions/{deviceId}/test` (token-gated, rate-limited to 1 request per 5 seconds per device). This route sends one payloadless push to the calling device's own subscription only (bypassing sender exclusion) after re-validating the endpoint.
+5. Round-trip evidence: If the service worker confirms display within ~60 seconds via BroadcastChannel or client postMessage, the UI reports "Your phone received the test and showed it." If the push service accepts the request (201) but the phone does not confirm within that window, it reports "Google accepted it but your phone did not confirm within ~60 seconds" alongside plain-English troubleshooting hints (check Android Settings -> Apps -> Chrome -> Notifications is On; Chrome -> Settings -> Site settings -> Notifications must allow this site; battery saver / "restrict background" can delay or drop them). The wait was originally 10 seconds; extended after a live investigation (round 2) on a real device could not tell "arrives late" apart from "never arrives" in that window. If the push service rejects the request, it reports "The push service rejected it (status N)".
+
+## 8. Media processing, chunked uploads and the queue (P2a/P2b)
+
+**Processing (`livechat/processing.py`, P2a) — pure, no DB/settings coupling.** Every
+function takes explicit input/output paths and (for voice/video) explicit `ffmpeg`/
+`ffprobe` paths; callers own everything stateful. The pipeline for every attachment:
+
+1. **Sniff magic bytes first** (`sniff`/`sniff_path`) — before ffmpeg/ffprobe ever sees the
+   file. This is the load-bearing hardening: an HLS playlist or ffconcat script renamed to
+   `.mp4` has no recognised magic bytes, so it's rejected here and never reaches a
+   subprocess (§2's ffmpeg SSRF/LFI concern). The sniffed container is checked against the
+   claimed kind (`MediaProcessingError("kind_mismatch")` on a mismatch) before any
+   processing starts.
+2. **Photo** (Pillow + `pillow-heif==1.7.0`, included by the server extra): an 80MP pixel cap
+   is checked immediately after `Image.open()`, before `.load()`/`.convert()`/
+   `exif_transpose()` — a decompression bomb (huge declared dimensions, tiny file) is rejected
+   without ever decoding pixel data. A still image then goes through, in this order:
+   (a) `exif_transpose`; (b) **colour management** — an embedded ICC profile is converted to
+   sRGB with the perceptual intent (a failed conversion logs a `WARNING` and continues with the
+   pixels as they are, never failing the upload; alpha is carried across); (c) **normalization
+   to 8-bit RGB or RGBA** — palette modes (`P`/`PA`) keep their colours, alpha is kept for
+   `RGBA`/`LA`/`PA` and for any image with a `transparency` entry (a PNG tRNS chunk or a GIF
+   transparent index), 16-bit greyscale (`I;16*`/`I`) is scaled 0–65535 → 0–255 through a
+   lookup table (`round(v * 255 / 65535)`, so 32768 becomes 128 — never clipped), and every
+   other mode, CMYK included, goes through Pillow's own `convert()`; (d) the **metadata strip**
+   — the image is rebuilt from those normalized raw pixels (not a round-tripped save), so EXIF,
+   ICC and text chunks are gone, and the profile is not re-attached because the pixels are
+   already sRGB; (e) long edge ≤4096 (full) / ≤480 (thumb). The output format then follows
+   transparency, not the source format — see the photo table below.
+3. **Voice**: AAC-LC mono 64kb/s `m4a`, duration from the **output** (MediaRecorder webm has
+   none in its own header), 64-bucket RMS peaks normalized against the clip's own loudest
+   bucket.
+4. **Video**: remux (`-c copy`) iff h264/yuv420p/long-edge≤1920/fps≤60/audio is aac-or-absent
+   — the display-matrix rotation side data survives untouched (`-map_metadata -1` strips
+   metadata *tags*, not stream side data). Otherwise transcode (libx264 veryfast crf23, same
+   caps), relying on ffmpeg's default autorotate to bake rotation into the pixels. A poster
+   frame at `-ss min(1, dur/2)`, long edge ≤960.
+5. **Subprocess hygiene**: Windows `BELOW_NORMAL_PRIORITY_CLASS|CREATE_NO_WINDOW`, POSIX
+   `nice -n 10`; hard timeouts (30min video / 5min else) with kill-on-timeout; every
+   ffprobe/ffmpeg call pins `-f <demuxer> -protocol_whitelist file`; every rendition write is
+   atomic (temp name, then `os.replace`).
+
+**Photo renditions** (`processing.process_photo`; the first matching row applies):
+
+| Source | `full` | `thumb` |
+|---|---|---|
+| animated GIF | the original bytes, untouched, as `full.gif` — the one documented exception to "metadata stripped" (a GIF carries no EXIF/GPS, and re-encoding an animation buys nothing); its recorded width/height are the original's | the first frame through steps (a)–(d) and the 480px cap: `thumb.png` if that frame has transparency, otherwise `thumb.jpg` |
+| has alpha (any other format) | `full.png` | `thumb.png` |
+| opaque PNG or opaque static GIF | `full.png` (lossless) | `thumb.jpg` (q80) |
+| any other opaque source (JPEG, WebP, HEIC/HEIF) | `full.jpg` (q88) | `thumb.jpg` (q80) |
+
+The signed-media route resolves the `thumb` rendition as `thumb.png` or `thumb.jpg`, whichever
+exists (see the media-route paragraph below).
+
+`process(kind, src, *, output_dir, ffmpeg, ffprobe)` dispatches to the three and never
+returns a partial/failed result — a caller that catches `MediaProcessingError` has nothing to
+clean up beyond `output_dir` itself.
+
+**Uploads (`livechat/uploads.py`, P2b) — §5.5.** `init_upload` checks (cheapest-first): the
+media-pipeline gate (ffmpeg **and** ffprobe **and** `pillow-heif` all available — see
+`resolve_binaries` below), the declared MIME type against a per-kind allowlist, the declared
+size (`sizeBytes` must be at least 1: the route's request model rejects 0 or a negative value
+with a 422, and `init_upload` itself refuses it as defence in depth, so such a size cannot
+bypass the quota arithmetic) against the per-kind cap (photo 30MiB / voice 25MiB / video
+1GiB), then quota
+(`media_bytes_used + pending_upload_bytes + size > quota`) and the free-space floor
+(injectable `disk_usage`, default `shutil.disk_usage`). `write_chunk` is idempotent
+(`.part` then rename); `assemble` verifies every expected chunk is present (`missing` list on
+409), checks the assembled size against the declared size (422 on mismatch), and is itself
+**idempotent on retry** — a `/complete` replay after the first one already promoted the
+upload returns the same attachment rather than re-assembling or erroring (same posture as
+`create_message`'s `clientId` replay).
+
+**The upload id becomes the attachment id.** There is no separate "original file path"
+column on `AttachmentRow` — the convention *is* the pointer: the media queue looks for its
+source at `uploads/<attachmentId>/assembled`. The `uploads` DB row stays alive (for
+`pending_upload_bytes` accounting) until the queue resolves the attachment, success or
+failure, at which point it — and the staged file — are removed (success) or the original is
+archived to `failed/<id>/original.<ext>` (failure, kept 7 days).
+
+**The queue (`livechat/media_queue.py`, P2b) — `run_forever`, one app-lifetime task.**
+Claims via `store.claim_processing` (`owner=f"{pid}-{uuid}"`, 120s lease), spawns one child
+task per claim into an unbounded dispatch group, then feeds `processing.process()` off the
+event loop via `anyio.to_thread.run_sync`. Concurrency: a `video` claim acquires a
+`CapacityLimiter(1)`, everything else acquires a shared `CapacityLimiter(2)` — chosen
+**after** claiming, since `claim_processing`'s frozen signature has no kind filter. The
+per-attachment lease-renewal loop starts the moment a row is claimed, **before** it may have
+to wait behind a full limiter, so a claim queued behind busy workers never goes lease-stale
+and gets double-claimed. **Crash-resume needs no special code**: `claim_processing`'s own
+query (unclaimed OR lease expired) already re-surfaces a row orphaned by a killed process the
+instant its lease lapses — `run_forever`'s ordinary claim loop on the next startup *is* the
+recovery path.
+
+**The delete/processing race:** after `finish_attachment` (itself a silent no-op against a
+concurrently-deleted row, per `store.py`), the queue re-reads `get_attachment`. If the row is
+gone, it journals cleanup for any paths this worker recreated — the journal writes, like every
+other store call here, run in worker threads so the event loop never blocks on SQLite; the
+erasure worker removes them with the same retryable deletion path as request-side cleanup.
+
+**`resolve_binaries`** (called once at `create_app` time): `WIXY_FFMPEG`/`WIXY_FFPROBE`,
+falling back to `shutil.which` — but an **explicit** override must point at a file that
+actually exists (`Path(...).is_file()`), or it's treated as unresolved. This catches an
+operator typo in the env var as a clean 503 at upload time, rather than deferring the failure
+to per-upload processing deep inside the queue. It returns the queue worker's `QueueConfig`, or
+`None` when either binary is unresolved. `app.py` then sets `app.state.livechat_media_available`
+to true only when that config exists **and** `pillow-heif` imported (`processing.
+PILLOW_HEIF_AVAILABLE`), so a missing ffmpeg, ffprobe or HEIF decoder gates media the same way:
+uploads return 503 `media_unavailable`, `GET /usage` reports `mediaAvailable: false`, the
+decoy's "Media processing" row degrades to `unavailable`, the queue task is never started at
+all (nothing valid to run it with), and text chat is unaffected. The janitor still runs (pure
+DB/filesystem housekeeping, no ffmpeg dependency).
+
+**Janitor (`livechat/janitor.py`, P2b/P8) — `run_once`/`run_forever`, hourly.** Ages out
+uploads >24h (`stale_upload_ids`), unreferenced attachments >24h (`orphan_attachment_ids`,
+keyed off `message_seq IS NULL` — never touches anything a message references, regardless of
+its processing status), and `failed/` entries >7 days (by directory `mtime`, since there's no
+DB row backing them). It rechecks orphan/upload eligibility in the delete transaction and queues
+filesystem cleanup only when that conditional delete succeeds. It also prunes completed erasure
+tombstones older than seven days, never pending ones. `run_once` takes an explicit `now`, never
+reads the clock — every age threshold is test-driven, not slept through. `run_forever` sweeps
+once immediately at app start and then hourly, so a test that seeds a live app's store directly
+must use real-clock timestamps: a 1970-dated orphan is reaped mid-test (decisions/00157).
+It also deletes staged raw uploads left behind on ready attachments; those sources have no
+diagnostic-retention window once safe renditions exist.
+
+The same module's `run_scrubber_forever` is a separately supervised app-lifetime task. It resumes
+the database-backed scrub marker at startup and attempts `TRUNCATE` every two seconds until the WAL
+is empty, then compare-and-clears the marker and performs one best-effort checkpoint. Legacy
+`scrub.pending` files are imported once at startup and removed; a denied removal is retried on the
+next startup. A failed-original archive is retried by the hourly janitor and its staged original is
+removed after the seven-day diagnostic retention window.
+
+**Media route (`routes_livechat_media.py`, P2b) — `GET /media/{attId}/{rendition}`, §5.6.**
+The one route besides `POST /unlock` that skips `require_server_token`, since
+`<img>`/`<video>`/`<audio>` can't send a custom header — `verify_media_signature` (§3) gates
+it instead. `attId` is validated as exactly 32 lowercase hex chars *before* the signature
+math runs (cheap defense in depth; a forged id can never pass the HMAC anyway, since it's
+covered by the signature). The stored `renditions` tuple carries rendition **names**
+(`"full"`, `"thumb"`, `"play"`, `"poster"`), never file paths — the actual filename's
+extension (`full.jpg`, `full.png` or `full.gif`; `thumb.png` or `thumb.jpg`) is resolved by
+trying each of P2a's possible outputs for that name in turn, since exactly one of them ever
+exists per attachment and rendition.
+An explicit MIME map (not `FileResponse`'s extension-guessing) sets `Content-Type`, because
+`X-Content-Type-Options: nosniff` plus a wrong/generic content type would silently break
+playback in the browser. Served via Starlette `FileResponse` (200/206, Range-aware).
+
+## 9. Settings (`WIXY_SERVER_*`, `WIXY_FFMPEG`/`WIXY_FFPROBE`)
+
+| Env var | Setting | Default | Notes |
+|---|---|---|---|
+| `WIXY_SERVER_PIN_APP_KEY` | `server_pin_app_key` | `"wixy-livechat"` | an identifier, never a secret — **no PIN setting exists** |
+| `WIXY_SERVER_MEDIA_QUOTA_MB` | `server_media_quota_bytes` | 20480 MiB (20 GiB) | R10 — enforced at upload init (P2b); MB values multiply by 1024² |
+| `WIXY_SERVER_MIN_FREE_MB` | `server_min_free_bytes` | 1024 MiB (1 GiB) | R10 — the disk free-space floor, enforced alongside the quota |
+| `WIXY_SERVER_UPLOAD_CHUNK_BYTES` | `server_upload_chunk_bytes` | 8 MiB | clamped to 64 KiB–16 MiB |
+| `WIXY_FFMPEG` / `WIXY_FFPROBE` | `ffmpeg_path` / `ffprobe_path` | `""` (resolve via `PATH`) | overrides must point to existing files; either binary missing — or `pillow-heif` not importable — makes media uploads return 503 while text chat works |
+
+`ProjectPaths` (`storage.py`) gets `server_dir`/`server_db`/`server_secret`/`server_vapid`/
+`server_media`/`server_uploads`/`server_failed` — created **lazily** (like `reports_dir`),
+not by `ensure_project_dirs`: a project that never unlocks the chat never needs the
+directory. Plus three per-item helpers (P2b): `server_upload_dir(uploadId)` →
+`uploads/<uploadId>/`, `server_attachment_media_dir(attachmentId)` → `media/<id[:2]>/<id>/`
+(the two-level fan-out keeps any one directory from accumulating thousands of entries),
+`server_failed_dir(attachmentId)` → `failed/<id>/`.
+
+## 10. Background containment and recovery
+
+`wixy_server/background.py` wraps app-lifetime work in `ContainedTaskGroup`. Long-running loops
+(`livechat-media`, `livechat-erasure`, and `livechat-view-once-backstop`, among others) use `supervise`: exceptions are logged,
+health is recorded, and loops restart with exponential backoff capped at 60 seconds. One-shot
+work uses `spawn`, which logs and contains an exception. No worker exception can cancel the
+lifespan task group; media-queue items and push recipients are also isolated from sibling items.
+
+The erasure worker starts immediately and retries every two seconds. It removes
+`deleted_storage` paths, resumes `pending_scrub` WAL work, and runs the full wipe/orphan sweep at
+startup and while `pending_wipe_cleanup` exists. The hourly janitor runs once at startup and then
+every hour: it removes stale uploads and unclaimed orphan attachments after 24 hours, removes
+raw upload sources for ready attachments, retries archiving failed originals, expires an
+unarchived failed original after seven days, and prunes completed cleanup rows after seven days.
+It never ages out pending work. The view-once backstop (`livechat-view-once-backstop`, spec 06) runs
+once at startup and then every 30 seconds: it sweeps claimed view-once messages older than 600
+seconds where the claimant disconnected or abandoned the download, permanently deleting their
+database rows and storage.
+
+If `/api/admin/server/usage` reports `erasurePending: true`, delete/wipe has committed and the
+worker still owes WAL or file cleanup. Check server logs for filesystem errors, restore access,
+and allow automatic retry; a restart also retries startup recovery and legacy-marker import.
+Do not manually clear `pending_scrub`, `deleted_storage`, or the wipe-sweep token. Schema v6
+imports legacy `server/scrub.pending` into `pending_scrub`; an unreadable marker is retained and
+a durable row is created so privacy work is not lost.
+
+`/api/admin/system/status` reports `server.mediaProcessing` as `unavailable` when ffmpeg,
+ffprobe or `pillow-heif` is unavailable, `degraded` after at least three consecutive
+media-queue or erasure-worker failures, and `ok` when media is available without that failure
+threshold. The reported failure count resets after five minutes without another failure.
+
+## 11. Frontend: the lock/gesture state machine (P4, `admin-ui/src/server/`)
+
+The router/nav/shell wiring is ordinary (`router.ts` gets a `server` route with no
+parameters; `shell.ts`'s `NAV_ROUTES` gets it last, and an injectable `mountServerPanel` seam
+mirrors the AI chat panel's own `mountChatPanel` pattern — real DOM listeners would otherwise
+leak across shell unit tests that never tear the panel down).
+
+**`lockModel.ts`** is a PURE reducer, `(state, event, now) => {state, effects[]}` — every
+decision about what state comes next lives here, with no DOM/timer/network access, so it has
+100% branch coverage in vitest. States: `decoy`, `revealed`, `pin` (with an optional
+`wrong`/`lockedOut`/`unavailable` error), `verifying`, `chat`, `fading`, plus the two round-2 states
+`granting` and `shielded` (§16). One deliberate
+design choice: R6's eight lock triggers (`idle`, `panic`, `multiTap`, `escape`, `hidden`,
+`routeAway`, `unauthorized`, `expired`) are ALL modelled as one `{type:"lock", cause}` event
+rather than eight bespoke ones — `idle` is the sole exception, going through `fading` first
+only when raised from `chat` (every other state locks straight to `decoy`). There is
+deliberately no "needs a display name" sub-state tracked here: §6's first-unlock name prompt
+is the mounted chat view's own internal concern (R8 — it reads `localStorage["wx-srv-name"]`
+itself), since the frozen `ServerChatView` interface (`types.ts`) has no hook to report one
+back.
+
+**`gestures.ts`** — TWO independent Pointer-Events-only detectors, both excluding
+`textarea`/`input`/`[contenteditable]`/`audio`/`video` targets (so text entry and native
+media seeking never trigger either one) and both using `performance.now()` (so Playwright's
+`page.clock` controls them deterministically in e2e):
+- `createTapDetector`/`attachTapListener` (R2 v1.3) — fires on every single qualifying tap,
+  no counting. `panel.ts` attaches this to the panel's OWN root element (not `document`) —
+  "not nav/topbar" is free that way, since an event outside the root's subtree never reaches
+  a listener attached to it.
+- `createMultiTapDetector`/`attachMultiTapListener` (R3, precision revised to v1.7 by
+  decisions/00163: a scroll flick or two different menu items were registering as a
+  panic lock) — two RECOGNIZED taps (see below) within `MULTI_TAP_INTERVAL_MS` (400ms),
+  `MULTI_TAP_RADIUS_PX` (32px) of each other and resolving to the same tap zone
+  (`tapZoneOf`: the nearest `button`/`a[href]`/`[role="button"]`/`[role="menuitem"]`/
+  `label`/`.wx-srv-bubble` ancestor, or a shared background zone) count as one
+  multi-tap. A gesture-boundary tap closing a run started elsewhere is exempt from the
+  radius/zone gates (v1.5's "may close, never open" is unchanged). Attached to
+  `document` in the CAPTURE phase for the panel's whole mounted lifetime, so a tap
+  inside a `stopPropagation()`'d descendant is still seen; only the reducer's
+  `chat`/`fading` states give the resulting event any meaning.
+
+Both detectors are fed by one shared `attachTapRecognizer`: what counts as a TAP at
+all (R3 v1.7 part 1) is a primary-button `pointerdown` followed by its own `pointerup`
+(same `pointerId`), moved ≤ `TAP_SLOP_PX` (10px) and held ≤ `TAP_MAX_MS` (300ms), never
+interrupted by `pointercancel` — what the browser fires when it takes a touch over for
+scrolling. A flick, a drag or a long-press is therefore never a tap for either
+detector, closing the same false-positive class on R2's decoy reveal too.
+
+Brief v1.5.2's `GESTURE_BOUNDARY_SELECTOR` reads `[data-srv-gesture-boundary]` from the
+pointer target or its ancestors. The boundary tap counts normally first, so it can still
+complete a run started elsewhere; if it doesn't lock, the detector clears the partial run
+afterward. Classify a pair by asking whether tap 1 made control 2 appear under the finger:
+causal flows such as settings → sheet option or photo → lightbox close use a boundary, while
+independent controls such as Send → 📎/🎤 keep normal cadence. The native file picker doesn't
+need a marker, and the mic start/stop toggle deliberately remains non-boundary.
+
+**`panel.ts`** owns everything `lockModel.ts` deliberately doesn't: the idle timer
+(`IDLE_LOCK_MS` = 10s, or `IDLE_LOCK_EXTENDED_MS` = 60s for the unlocked chat only — see
+"Extend auto-lock to 1 minute" below) and fade timer (`FADE_MS` = 800ms), the token-expiry
+timer, R7's suspension bookkeeping (`LockHooks.suspend(reason)` — reference-counted per call,
+the idle timer stays paused while ANY suspension is active and restarts with a FRESH full idle
+period (10s, or the chat's configured 60s) the moment the last one releases; `filePicker`
+alone carries a `PICKER_SUSPEND_MAX_MS` = 5-minute safety auto-release), the R7 activity
+listener set (`pointerdown`/`pointermove`/`touchstart`/
+`touchmove`/`wheel`/`keydown`/`input` — deliberately NOT `scroll`, so a programmatic
+scroll-to-bottom on an incoming message can never keep the chat visible), a dedicated
+`document` `keydown` listener for `Escape`, and a `visibilitychange` listener whose `hidden`
+lock is skipped only while `filePicker` or `micPermission` is suspended (R6's one named
+exception — `recording`/`mediaPlaying` do NOT excuse it).
+
+Locking always runs `ServerChatView.detach()` then removes `element` from the document — the
+view instance itself is created once (on the first successful unlock) and kept alive across
+every subsequent lock/unlock cycle within one page visit, only ever `dispose()`d when the
+panel itself is torn down (routing away from `/admin/server`, which `panel.ts` treats as one
+more R6 lock cause so cleanup runs through the same path). This is the mechanism draft text
+and in-flight uploads survive a lock on (R6) — `attach(session)` is called again with a
+FRESH `ServerSession` on each unlock, never a stale one.
+
+`panel.ts` calls the `createServerChatView` factory in `server/chatView.ts` after the first
+successful unlock. It retains that view through later lock/unlock cycles and disposes it only
+when routing away from `/admin/server`.
+
+**Recording keeps the screen awake.** While a voice note records (including paused),
+`recorder.ts` holds a Screen Wake Lock (`navigator.wakeLock.request("screen")`, injectable as
+`wakeLock`), so the phone's own display timeout cannot background the page — a `hidden` lock
+(which `recording` deliberately does not excuse) would otherwise detach the chat and discard the
+note. Released in `cleanup()`; a late-resolving request releases itself; unsupported or refused
+is silent. Idle-lock suspension and the fresh full idle period on stop were already R7 behaviour.
+
 **Voice-note playback controls** (`mediaRender.ts` `renderVoice`): a position bar (`input[type=range]`,
 `.wx-srv-voice-seek`) follows `timeupdate` and seeks on drag, plus two 44px buttons. A tap on
 `−10`/`+10` jumps 10s (`VOICE_SKIP_S`); holding past `VOICE_HOLD_DELAY_MS` (350ms) scrubs
