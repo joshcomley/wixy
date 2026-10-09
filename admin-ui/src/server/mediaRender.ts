@@ -1,6 +1,7 @@
 /** DOM renderers for server-chat photo, video and voice attachments. */
 
 import { isAudioConfirmEnabled } from "./audioConfirmPreference";
+import { HEARD_THRESHOLD } from "./heardStore";
 import { renderTranscriptBlock, type TranscriptionContext } from "./transcript";
 
 export type AttachmentKind = "photo" | "video" | "voice";
@@ -41,6 +42,9 @@ export interface MediaRenderContext {
   readonly openLightbox?: (source: string, alt: string) => void;
   /** When present, every ready voice note gets the opt-in Transcribe control beneath it. */
   readonly transcription?: TranscriptionContext;
+  /** Called once per voice note when playback reaches `HEARD_THRESHOLD` of its length (or it
+   * ends) — the "listened to" signal behind the unheard-voice-notes list. */
+  readonly onVoiceListened?: (attachmentId: string) => void;
   readonly document?: Document;
   readonly win?: Window;
 }
@@ -226,7 +230,18 @@ function renderVoice(
   audio.addEventListener("pause", stopped);
   audio.addEventListener("ended", stopped);
   audio.addEventListener("emptied", stopped);
+  let reportedListened = false;
+  const reportListened = (force: boolean) => {
+    if (reportedListened || !context.onVoiceListened) return;
+    const total = knownDuration();
+    if (!force && !(total > 0 && audio.currentTime >= total * HEARD_THRESHOLD)) return;
+    reportedListened = true;
+    context.onVoiceListened(attachment.id);
+  };
+  audio.addEventListener("ended", () => reportListened(true));
   audio.addEventListener("timeupdate", () => {
+    // Only natural playback counts: dragging the tab to the end of a note is not listening to it.
+    if (!audio.paused) reportListened(false);
     syncSeekBar();
     elapsed.textContent = `${formatDuration(audio.currentTime)} / ${formatDuration(
       Number.isFinite(audio.duration) ? audio.duration : attachment.durationS ?? 0,

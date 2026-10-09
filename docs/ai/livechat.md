@@ -32,7 +32,22 @@ Numbered guarantees: [invariants.md](invariants.md) 40–47, 48 (permanent unloc
   final-action buttons and toggles are not. The exact classifier is in
   `admin-ui/src/server/gestures.ts` and is covered by `admin-ui/tests/server/gestures.test.ts`.
 - Once unlocked: 10 seconds of no activity fades back to the decoy — or 60 seconds on a
-  device where the owner ticked **Extend auto-lock to 1 minute** in the chat's settings sheet
+  device where the owner ticked **Unheard voice notes** (`heardStore.ts`, `thread.ts`): nothing on the server tracks whether a voice
+note was listened to — this is per-device state in localStorage `wx-srv-voice-heard`
+(`{since, ids[]}`, newest 1000 ids; unreadable storage = nothing remembered; never sent anywhere).
+A received voice note (sender not this device's name, not view-once, `ready`, created at or after
+`since` — the device's first run of the feature, so old history is not suddenly "unheard") is
+unheard until: playback reaches `HEARD_THRESHOLD` (90%) *during natural playback* (dragging a paused
+note to the end does not count; `onVoiceListened` in `MediaRenderContext`), its transcript is
+requested (`requestTranscription`), or it is dismissed. When any unheard note's bubble has scrolled
+above the thread viewport, `.wx-srv-unheard-tab` ("N unread voice notes", bottom-left; the jump pill
+is bottom-right) appears. It opens `.wx-srv-unheard-view`, a full-screen overlay below the header
+(panic ✕ and lock gestures stay reachable) listing the same `renderBubble(…, embedded)` bubbles —
+same player, skip buttons and transcript block, minus the message-action menu — each with a Dismiss
+button. A note finished while the view is open stays until the view closes; transcript updates patch
+in place. `detach()`/`teardown()` close it.
+
+**Extend auto-lock to 1 minute** in the chat's settings sheet
   (§11); a panic button, a multi-tap inside the chat, `Escape`, tab-hidden, or routing away
   all lock instantly. A reload never restores the unlocked state (Inv 42).
 - Locking **detaches the chat subtree from the document** — nothing chat-shaped remains

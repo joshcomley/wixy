@@ -637,6 +637,111 @@ button.wx-srv-quote:focus-visible {
   display: none;
 }
 
+/* -- Unheard voice notes --------------------------------------------------- */
+
+.wx-srv-thread-view {
+  position: relative;
+}
+
+.wx-srv-unheard-tab {
+  position: absolute;
+  bottom: 12px;
+  left: 16px;
+  z-index: 2;
+  max-width: calc(100% - 140px);
+  font: 600 0.75rem/1 system-ui, sans-serif;
+  padding: 10px 14px;
+  min-height: 36px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-brand-blue-text);
+  background: var(--wx-brand-blue-tint);
+  color: var(--wx-brand-blue-text);
+  cursor: pointer;
+  box-shadow: var(--wx-shadow);
+}
+
+.wx-srv-unheard-tab[hidden],
+.wx-srv-unheard-view[hidden],
+.wx-srv-unheard-empty[hidden] {
+  display: none;
+}
+
+.wx-srv-unheard-view {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  background: var(--wx-canvas);
+}
+
+.wx-srv-unheard-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.wx-srv-unheard-title {
+  font-weight: 600;
+  font-size: 0.9375rem;
+}
+
+.wx-srv-unheard-close {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  cursor: pointer;
+}
+
+.wx-srv-unheard-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-bottom: 12px;
+}
+
+.wx-srv-unheard-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.wx-srv-unheard-item .wx-srv-bubble {
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.wx-srv-unheard-dismiss {
+  align-self: flex-end;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-muted);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.wx-srv-unheard-empty {
+  margin: 24px 0;
+  text-align: center;
+  color: var(--wx-muted);
+}
+
 /* -- Bubbles ------------------------------------------------------------- */
 
 .wx-srv-bubble {

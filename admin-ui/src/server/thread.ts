@@ -38,6 +38,7 @@ import { mountDrawingLayer, type DrawingLayer } from "./drawingLayer";
 import type { ServerIdentity } from "./identity";
 import { linkifyInto } from "./linkify";
 import { mountMessageActions, type MessageActionsController } from "./messageActions";
+import { createHeardStore } from "./heardStore";
 import { disposeAttachmentMedia, renderAttachments } from "./mediaRender";
 import { reactionLabel, reactionOrder } from "./reactions";
 import { createVoiceRecorder, type VoiceRecorder } from "./recorder";
@@ -919,6 +920,172 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       : null;
   }
 
+  // -- Unheard voice notes ---------------------------------------------------------------
+  // A voice note someone ELSE sent is "unheard" until this device plays it past 90%, asks for its
+  // transcript, or dismisses it. When one has scrolled off the top, a tab at the bottom of the
+  // thread counts them and opens a full-screen list of exactly the same bubbles (same player,
+  // transcript, skip controls). All of it is per-device (`heardStore.ts`); the server is not told.
+  const heard = createHeardStore(win);
+
+  function messageIsUnheard(message: Message): boolean {
+    if (message.sender === "" || identity.isMine(message.sender) || message.viewOnce) return false;
+    if (message.createdAt < heard.since()) return false;
+    return message.attachments.some(
+      (attachment) => attachment.kind === "voice" && attachment.status === "ready" && !heard.isHeard(attachment.id),
+    );
+  }
+
+  function unheardMessages(): Message[] {
+    return Array.from(confirmedBySeq.values())
+      .filter(messageIsUnheard)
+      .sort((a, b) => a.seq - b.seq);
+  }
+
+  function markHeard(attachmentId: string): void {
+    heard.markHeard(attachmentId);
+    updateUnheard();
+  }
+
+  const unheardTab = documentRef.createElement("button");
+  unheardTab.type = "button";
+  unheardTab.className = "wx-srv-unheard-tab";
+  unheardTab.setAttribute("data-srv-gesture-boundary", "");
+  unheardTab.hidden = true;
+  threadWrap.appendChild(unheardTab);
+
+  const unheardView = documentRef.createElement("div");
+  unheardView.className = "wx-srv-unheard-view";
+  unheardView.hidden = true;
+  unheardView.setAttribute("role", "dialog");
+  unheardView.setAttribute("aria-label", "Unread voice notes");
+  const unheardBar = documentRef.createElement("div");
+  unheardBar.className = "wx-srv-unheard-bar";
+  const unheardTitle = documentRef.createElement("span");
+  unheardTitle.className = "wx-srv-unheard-title";
+  unheardTitle.textContent = "Unread voice notes";
+  const unheardClose = documentRef.createElement("button");
+  unheardClose.type = "button";
+  unheardClose.className = "wx-srv-unheard-close";
+  unheardClose.textContent = "Back to chat";
+  unheardBar.append(unheardTitle, unheardClose);
+  const unheardList = documentRef.createElement("div");
+  unheardList.className = "wx-srv-unheard-list";
+  const unheardEmpty = documentRef.createElement("p");
+  unheardEmpty.className = "wx-srv-unheard-empty";
+  unheardEmpty.textContent = "No unread voice notes.";
+  unheardView.append(unheardBar, unheardList, unheardEmpty);
+  // Under the header, so the panic ✕ and the lock gestures stay reachable.
+  element.appendChild(unheardView);
+
+  /** Notes shown in the open view. A note you finish listening to stays until the view closes
+   * (it must not vanish from under you mid-playback); only Dismiss removes one at once. */
+  const unheardItems = new Map<number, { message: Message; element: HTMLElement }>();
+  let unheardOpen = false;
+
+  function refreshUnheardEmpty(): void {
+    unheardEmpty.hidden = unheardItems.size > 0;
+  }
+
+  function removeUnheardItem(seq: number): void {
+    const item = unheardItems.get(seq);
+    if (item === undefined) return;
+    disposeAttachmentMedia(item.element);
+    item.element.remove();
+    unheardItems.delete(seq);
+    refreshUnheardEmpty();
+  }
+
+  function buildUnheardItem(message: Message): HTMLElement {
+    const item = documentRef.createElement("div");
+    item.className = "wx-srv-unheard-item";
+    item.dataset["messageSeq"] = String(message.seq);
+    const bubble = renderBubble(message, false, true);
+    const dismiss = documentRef.createElement("button");
+    dismiss.type = "button";
+    dismiss.className = "wx-srv-unheard-dismiss";
+    dismiss.textContent = "Dismiss";
+    dismiss.title = "Dismiss — stop counting this voice note as unread";
+    dismiss.addEventListener("click", () => {
+      for (const attachment of message.attachments) {
+        if (attachment.kind === "voice") heard.markHeard(attachment.id);
+      }
+      removeUnheardItem(message.seq);
+      updateUnheard();
+    });
+    item.append(bubble, dismiss);
+    return item;
+  }
+
+  function addUnheardItem(message: Message): void {
+    const element = buildUnheardItem(message);
+    unheardItems.set(message.seq, { message, element });
+    unheardList.appendChild(element);
+    refreshUnheardEmpty();
+  }
+
+  /** Keeps the open view current: new arrivals appended, deleted notes dropped, a transcript
+   * change patched in place (rebuilding would cut off a note that is playing). */
+  function syncUnheardView(unheard: readonly Message[]): void {
+    if (!unheardOpen) return;
+    for (const message of unheard) {
+      if (!unheardItems.has(message.seq)) addUnheardItem(message);
+    }
+    for (const [seq, item] of Array.from(unheardItems)) {
+      const current = confirmedBySeq.get(seq);
+      if (current === undefined) {
+        removeUnheardItem(seq);
+      } else if (current !== item.message) {
+        if (differOnlyInTranscripts(item.message, current)) {
+          patchTranscriptBlocks(item.element, current.attachments);
+          item.message = current;
+        } else {
+          const replacement = buildUnheardItem(current);
+          disposeAttachmentMedia(item.element);
+          item.element.replaceWith(replacement);
+          unheardItems.set(seq, { message: current, element: replacement });
+        }
+      }
+    }
+  }
+
+  function updateUnheard(): void {
+    const unheard = unheardMessages();
+    const topY = thread.getBoundingClientRect().top;
+    const scrolledOff = unheard.some((message) => {
+      const element = renderedMessages.get(message.seq)?.element;
+      return element !== undefined && element.getBoundingClientRect().bottom < topY;
+    });
+    unheardTab.hidden = unheardOpen || !scrolledOff;
+    if (!unheardTab.hidden) {
+      unheardTab.textContent = `${unheard.length} unread voice note${unheard.length === 1 ? "" : "s"}`;
+    }
+    syncUnheardView(unheard);
+  }
+
+  function openUnheardView(): void {
+    if (unheardOpen) return;
+    unheardOpen = true;
+    unheardView.hidden = false;
+    unheardView.style.top = `${header.offsetHeight}px`;
+    for (const message of unheardMessages()) addUnheardItem(message);
+    refreshUnheardEmpty();
+    updateUnheard();
+  }
+
+  function closeUnheardView(): void {
+    if (!unheardOpen) return;
+    unheardOpen = false;
+    disposeAttachmentMedia(unheardList);
+    unheardList.replaceChildren();
+    unheardItems.clear();
+    unheardView.hidden = true;
+    updateUnheard();
+  }
+
+  unheardTab.addEventListener("click", openUnheardView);
+  unheardClose.addEventListener("click", closeUnheardView);
+  thread.addEventListener("scroll", updateUnheard, { passive: true });
+
   // -- Opt-in voice-note transcription (spec/server-chat/05-voice-transcription.md) ------
   // `transcriptionAvailable` mirrors `GET /usage`'s flag (cmd's private mode is live); the
   // Transcribe control is hidden until the server says so. Hide/Show is a per-device choice
@@ -945,6 +1112,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   ): Promise<TranscribeAnswer> {
     const session = currentSession;
     if (session === null) return { kind: "failed" };
+    // Asking for the words is "dealing with" the note: it stops counting as unheard.
+    markHeard(attachmentId);
     try {
       return options !== undefined
         ? await transcribeAttachment(session, attachmentId, options)
@@ -1147,6 +1316,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       hooks,
       openLightbox: (src, alt) => lightbox.open(src, alt),
       transcription,
+      onVoiceListened: (attachmentId) => markHeard(attachmentId),
       document: documentRef,
       win,
     }, timeElement);
@@ -1358,7 +1528,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     return button;
   }
 
-  function renderBubble(message: Message, mine: boolean): HTMLElement {
+  function renderBubble(message: Message, mine: boolean, embedded = false): HTMLElement {
     const bubble = documentRef.createElement("div");
     bubble.className = `wx-srv-bubble ${mine ? "wx-srv-bubble-mine" : "wx-srv-bubble-theirs"}`;
     bubble.dataset["messageSeq"] = String(message.seq);
@@ -1466,6 +1636,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     if (!hasTranscribableVoice) {
       bubble.appendChild(time);
     }
+    // The unheard-notes view shows copies of bubbles; only the thread's own one owns the menu.
+    if (embedded) return bubble;
     messageActionControllers.set(
       message.seq,
       mountMessageActions({
@@ -1637,6 +1809,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     // what a message's `drawings` summary says is new, and drop those of vanished messages.
     drawingLayer.syncMessages(messages);
     threadScroll.afterContentChange(revealPillIfNotStuck);
+    updateUnheard();
   }
 
   async function deleteForEveryone(message: Message): Promise<void> {
@@ -2429,6 +2602,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       // progress is withdrawn with a live cancel, and the surface, live previews and every
       // drawing timer go (spec 07 §5).
       drawingLayer.detach();
+      closeUnheardView();
       currentSession = null;
       endWipeReconcile("abandoned");
       // §(4): a lock aborts an in-flight scroll-to-original, but the pending
@@ -2515,6 +2689,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       pendingReactions.clear();
       voiceRecorder?.detach();
       voiceRecorder = null;
+      closeUnheardView();
       disposeAttachmentMedia(messageList);
       observer?.disconnect();
       lightbox.teardown();
