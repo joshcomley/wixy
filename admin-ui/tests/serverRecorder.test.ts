@@ -83,6 +83,56 @@ describe("server voice recorder", () => {
     expect(FakeRecorder.isTypeSupported).toHaveBeenCalledWith(VOICE_MIME_PREFERENCES[0]);
   });
 
+  it("holds a screen wake lock while recording, through pause, and releases it on stop", async () => {
+    const release = vi.fn(async () => undefined);
+    const wakeLock = { request: vi.fn(async () => ({ release }) as unknown as WakeLockSentinel) };
+    const { hooks, stream } = setup();
+    const recorder = createVoiceRecorder({
+      hooks,
+      mediaDevices: { getUserMedia: vi.fn(async () => stream as unknown as MediaStream) },
+      mediaRecorder: FakeRecorder,
+      wakeLock,
+    });
+    await recorder.start();
+    await Promise.resolve();
+    expect(wakeLock.request).toHaveBeenCalledWith("screen");
+    recorder.pause();
+    expect(release).not.toHaveBeenCalled();
+    recorder.resume();
+    recorder.stop();
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases a wake lock that resolves after the recording ended, and survives a refusal", async () => {
+    const release = vi.fn(async () => undefined);
+    let grant!: (s: WakeLockSentinel) => void;
+    const late = new Promise<WakeLockSentinel>((r) => (grant = r));
+    const { hooks, stream } = setup();
+    const make = (wakeLock: Pick<WakeLock, "request">) =>
+      createVoiceRecorder({
+        hooks,
+        mediaDevices: { getUserMedia: vi.fn(async () => stream as unknown as MediaStream) },
+        mediaRecorder: FakeRecorder,
+        wakeLock,
+      });
+    const slow = make({ request: vi.fn(() => late) });
+    await slow.start();
+    slow.stop();
+    grant({ release } as unknown as WakeLockSentinel);
+    await late;
+    await Promise.resolve();
+    expect(release).toHaveBeenCalledTimes(1);
+
+    const refused = make({
+      request: vi.fn(async () => {
+        throw new Error("NotAllowedError");
+      }),
+    });
+    await refused.start();
+    expect(refused.state).toBe("recording");
+    refused.stop();
+  });
+
   it("delivers a recording on stop and a cancel never delivers a blob", async () => {
     const onStop = vi.fn();
     const onCancel = vi.fn();

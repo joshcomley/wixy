@@ -41,6 +41,10 @@ export interface VoiceRecorderOptions {
   readonly hooks: LockHooks;
   readonly mediaDevices?: Pick<MediaDevices, "getUserMedia">;
   readonly mediaRecorder?: MediaRecorderConstructor;
+  /** Screen Wake Lock, held for the whole recording so the phone's own display timeout cannot
+   * background the page (which locks the chat and discards the note). Defaults to
+   * `navigator.wakeLock`; absent or refused is silently fine. */
+  readonly wakeLock?: Pick<WakeLock, "request">;
   readonly onStop?: (recording: VoiceRecording) => void;
   readonly onCancel?: () => void;
   readonly onTimer?: (elapsedMs: number) => void;
@@ -86,6 +90,10 @@ export function createVoiceRecorder(options: VoiceRecorderOptions): VoiceRecorde
   let recorder: MediaRecorderLike | null = null;
   let stream: MediaStream | null = null;
   let releaseRecording: (() => void) | null = null;
+  let wakeSentinel: WakeLockSentinel | null = null;
+  /** Bumped on every acquire/release so a request that resolves after the recording ended
+   * releases itself instead of holding the screen on. */
+  let wakeEpoch = 0;
   let timerId: ReturnType<typeof setInterval> | null = null;
   let maxDurationId: ReturnType<typeof setTimeout> | null = null;
   let chunks: Blob[] = [];
@@ -173,6 +181,7 @@ export function createVoiceRecorder(options: VoiceRecorderOptions): VoiceRecorde
 
     state = "recording";
     segmentStartedAt = now();
+    holdScreenAwake();
     timerId = setIntervalFn(() => {
       elapsed = Math.min(accumulatedMs + Math.max(0, now() - segmentStartedAt), VOICE_MAX_DURATION_MS);
       options.onTimer?.(elapsed);
@@ -287,12 +296,35 @@ export function createVoiceRecorder(options: VoiceRecorderOptions): VoiceRecorde
     maxDurationId = null;
     releaseRecording?.();
     releaseRecording = null;
+    releaseScreenAwake();
     stopTracks(stream);
     stream = null;
     recorder = null;
     chunks = [];
     accumulatedMs = 0;
     segmentStartedAt = 0;
+  }
+
+  function holdScreenAwake(): void {
+    const wakeLock = options.wakeLock ?? (typeof navigator !== "undefined" ? navigator.wakeLock : undefined);
+    if (!wakeLock) return;
+    const epoch = ++wakeEpoch;
+    void (async () => {
+      try {
+        const sentinel = await wakeLock.request("screen");
+        if (epoch !== wakeEpoch) await sentinel.release();
+        else wakeSentinel = sentinel;
+      } catch {
+        // Unsupported, refused (battery saver) or not allowed here: recording carries on.
+      }
+    })();
+  }
+
+  function releaseScreenAwake(): void {
+    wakeEpoch += 1;
+    const sentinel = wakeSentinel;
+    wakeSentinel = null;
+    if (sentinel) void sentinel.release().catch(() => undefined);
   }
 
   return controller;
