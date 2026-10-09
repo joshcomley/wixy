@@ -163,6 +163,69 @@ describe("server attachment rendering", () => {
     expect(video.hasAttribute("src")).toBe(false);
   });
 
+  describe("voice-note position bar and skip buttons", () => {
+    const voice: Attachment = {
+      ...base,
+      kind: "voice",
+      durationS: 120,
+      peaks: [0.5],
+      urls: { play: "/voice" },
+    };
+    function setup() {
+      vi.useFakeTimers();
+      const root = renderAttachments([voice], context());
+      document.body.appendChild(root);
+      const audio = root.querySelector<HTMLAudioElement>("audio")!;
+      Object.defineProperty(audio, "duration", { value: 120, configurable: true });
+      audio.currentTime = 50;
+      const back = root.querySelector<HTMLButtonElement>(".wx-srv-voice-skip-back")!;
+      const fwd = root.querySelector<HTMLButtonElement>(".wx-srv-voice-skip-forward")!;
+      const bar = root.querySelector<HTMLInputElement>(".wx-srv-voice-seek")!;
+      return { audio, back, fwd, bar };
+    }
+    const press = (el: HTMLElement) => el.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    const lift = (el: HTMLElement) => el.dispatchEvent(new Event("pointerup", { bubbles: true }));
+
+    it("a tap jumps 10 seconds back or forward", () => {
+      const { audio, back, fwd } = setup();
+      press(fwd);
+      lift(fwd);
+      expect(audio.currentTime).toBe(60);
+      press(back);
+      lift(back);
+      press(back);
+      lift(back);
+      expect(audio.currentTime).toBe(40);
+      vi.useRealTimers();
+    });
+
+    it("holding scrubs at 2.5x and does not also jump on release", () => {
+      const { audio, fwd, back } = setup();
+      press(fwd);
+      vi.advanceTimersByTime(350 + 1000);
+      lift(fwd);
+      expect(audio.currentTime).toBeGreaterThan(50 + 2.0);
+      expect(audio.currentTime).toBeLessThan(50 + 3.5);
+      const after = audio.currentTime;
+      press(back);
+      vi.advanceTimersByTime(350 + 1000);
+      lift(back);
+      expect(audio.currentTime).toBeLessThan(after - 2.0);
+      expect(audio.currentTime).toBeGreaterThan(after - 3.5);
+      vi.useRealTimers();
+    });
+
+    it("the bar follows playback and seeks when dragged", () => {
+      const { audio, bar } = setup();
+      audio.dispatchEvent(new Event("timeupdate"));
+      expect(Number(bar.value)).toBe(50);
+      bar.value = "90";
+      bar.dispatchEvent(new Event("input"));
+      expect(audio.currentTime).toBe(90);
+      vi.useRealTimers();
+    });
+  });
+
   describe("voice-note transcription control", () => {
     const transcription = {
       available: () => true,

@@ -1207,6 +1207,32 @@ button.wx-srv-quote:focus-visible {
   cursor: pointer;
 }
 
+.wx-srv-voice-skip {
+  flex: none;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 6px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  font-size: 0.75rem;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.wx-srv-voice-seek {
+  flex: 1 1 100%;
+  width: 100%;
+  min-height: 24px;
+  margin: 0;
+  accent-color: currentColor;
+  cursor: pointer;
+}
+
 .wx-srv-voice-waveform {
   flex: 1;
   min-width: 0;

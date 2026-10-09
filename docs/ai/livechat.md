@@ -682,6 +682,13 @@ when routing away from `/admin/server`.
 note. Released in `cleanup()`; a late-resolving request releases itself; unsupported or refused
 is silent. Idle-lock suspension and the fresh full idle period on stop were already R7 behaviour.
 
+**Voice-note playback controls** (`mediaRender.ts` `renderVoice`): a position bar (`input[type=range]`,
+`.wx-srv-voice-seek`) follows `timeupdate` and seeks on drag, plus two 44px buttons. A tap on
+`−10`/`+10` jumps 10s (`VOICE_SKIP_S`); holding past `VOICE_HOLD_DELAY_MS` (350ms) scrubs
+continuously at `VOICE_HOLD_SEEK_RATE` = 2.5x net of normal playback (ticks every 100ms, using real
+elapsed time) until release. Keyboard activation (click with `detail` 0) also skips 10s. Seeking
+never touches the `mediaPlaying` suspension; the pointer events count as ordinary R7 activity.
+
 **Extend auto-lock to 1 minute** is a per-device checkbox in the chat's settings sheet
 (`settingsSheet.ts`: a real `<label for>` row, at least 44px tall, default off). It stores `"1"`
 under the localStorage key `wx-srv-idle-extended` (`server/idlePreference.ts`; absent, an
