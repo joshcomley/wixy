@@ -111,6 +111,41 @@ describe("mountChatComposer", () => {
     composer.teardown();
   });
 
+  it("takes the full-width line the moment the Server chat input is focused, and gives it back on blur only while empty", () => {
+    const composer = mountChatComposer(makeOptions({
+      enterToSend: false,
+      promoteToFullWidthOnMultiline: true,
+    }));
+    const textarea = composer.element.querySelector<HTMLTextAreaElement>("textarea")!;
+    const inputRow = composer.element.querySelector<HTMLElement>(".wx-chatc-input-row")!;
+    const promoted = () => inputRow.classList.contains("wx-chatc-multiline");
+
+    expect(promoted()).toBe(false);
+    textarea.dispatchEvent(new Event("focus"));
+    expect(promoted()).toBe(true); // nothing typed yet
+
+    textarea.dispatchEvent(new Event("blur"));
+    expect(promoted()).toBe(false); // still empty: back to one line
+
+    textarea.dispatchEvent(new Event("focus"));
+    textarea.value = "hi";
+    textarea.dispatchEvent(new Event("input"));
+    textarea.dispatchEvent(new Event("blur"));
+    expect(promoted()).toBe(true); // a draft keeps its line until it is cleared
+
+    composer.reset();
+    expect(promoted()).toBe(false);
+    composer.teardown();
+  });
+
+  it("never promotes on focus unless the option is on", () => {
+    const composer = mountChatComposer(makeOptions({ enterToSend: false }));
+    const textarea = composer.element.querySelector<HTMLTextAreaElement>("textarea")!;
+    textarea.dispatchEvent(new Event("focus"));
+    expect(composer.element.querySelector(".wx-chatc-multiline")).toBeNull();
+    composer.teardown();
+  });
+
   it("an empty submit is a no-op by default but allowed with allowEmptySubmit", () => {
     const gated = mountChatComposer(makeOptions({ onSubmit: vi.fn() }));
     gated.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")?.click();

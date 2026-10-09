@@ -280,6 +280,10 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
   // impossible with field-sizing active, so we size by hand — one proven
   // path, exactly what older engines get too, no dual-path drift.
   textarea.style.boxSizing = "border-box";
+  /** Whether the box has focus. With `promoteToFullWidthOnMultiline` the full-width line is taken
+   * the moment the box is focused (not only once the text wraps), so the layout never jumps in
+   * the middle of typing. It is given back on blur only while the draft is still empty. */
+  let textareaFocused = false;
   function autogrow(): void {
     const empty = textarea.value === "";
     textarea.classList.toggle("wx-chat-input-empty", empty);
@@ -289,9 +293,13 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
       // measure (scrollHeight 0 would collapse it to nothing).
       textarea.style.height = "";
       textarea.style.overflowY = "";
-      multilinePromoted = false;
-      inputRow.classList.remove("wx-chatc-multiline");
+      multilinePromoted = options.promoteToFullWidthOnMultiline === true && textareaFocused;
+      inputRow.classList.toggle("wx-chatc-multiline", multilinePromoted);
       return;
+    }
+    if (options.promoteToFullWidthOnMultiline === true && textareaFocused && !multilinePromoted) {
+      multilinePromoted = true;
+      inputRow.classList.add("wx-chatc-multiline");
     }
     textarea.style.height = "0px";
     const naturalHeight = textarea.scrollHeight;
@@ -318,6 +326,14 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
     textarea.style.overflowY = textarea.scrollHeight > MAX_TEXTAREA_HEIGHT_PX ? "auto" : "hidden";
   }
   textarea.addEventListener("input", autogrow);
+  textarea.addEventListener("focus", () => {
+    textareaFocused = true;
+    autogrow();
+  });
+  textarea.addEventListener("blur", () => {
+    textareaFocused = false;
+    autogrow();
+  });
   autogrow();
 
   function anyUploading(): boolean {

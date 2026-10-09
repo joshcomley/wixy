@@ -265,6 +265,13 @@
   width: 100%;
 }
 
+/* The buttons must not move when the text box takes its own line (it does so the instant it is
+   focused): attach and mic stay at the left, and Send keeps its place at the right edge, instead
+   of closing up beside the mic. The row is bottom-anchored, so they also keep their height. */
+.wx-srv-thread-view .wx-chatc-input-row.wx-chatc-multiline .wx-chat-send-button {
+  margin-left: auto;
+}
+
 .wx-srv-thread-view .wx-chat-attach-button {
   box-sizing: border-box;
   width: var(--wx-srv-control-h);
@@ -635,6 +642,93 @@ button.wx-srv-quote:focus-visible {
 
 .wx-srv-jump-pill[hidden] {
   display: none;
+}
+
+/* -- Header ... menu and the canvas ------------------------------------------ */
+
+.wx-srv-more-button {
+  flex: none;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 8px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  font-size: 1.125rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.wx-srv-more-menu {
+  position: absolute;
+  right: 0;
+  z-index: 7;
+  min-width: 220px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  box-shadow: var(--wx-shadow);
+}
+
+.wx-srv-more-menu[hidden] {
+  display: none;
+}
+
+.wx-srv-more-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: var(--wx-radius);
+  background: transparent;
+  color: var(--wx-ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.wx-srv-more-item:hover,
+.wx-srv-more-item:focus-visible {
+  background: var(--wx-canvas);
+}
+
+.wx-srv-more-item-title {
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.wx-srv-more-item-hint {
+  font-size: 0.75rem;
+  color: var(--wx-muted);
+}
+
+/* A canvas message is a wide blank surface, not a chat bubble. Its aspect ratio (not a pixel
+   height) keeps a drawing's uniform scale right on every screen width (spec 07 §1). The tint is
+   a muted step off the theme's own surface, never white: it follows light and dark themes. */
+.wx-srv-bubble.wx-srv-bubble-canvas {
+  align-self: stretch;
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px;
+  background: var(--wx-surface);
+  border: 1px solid var(--wx-border);
+}
+
+.wx-srv-canvas-surface {
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  border-radius: calc(var(--wx-radius) - 2px);
+  background: var(--wx-canvas);
+  background-image: radial-gradient(circle, var(--wx-border) 1px, transparent 1.5px);
+  background-size: 24px 24px;
 }
 
 /* -- Unheard voice notes --------------------------------------------------- */

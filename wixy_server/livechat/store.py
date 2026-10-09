@@ -238,7 +238,17 @@ CREATE TABLE IF NOT EXISTS drawing_strokes(
   PRIMARY KEY(drawing_id, stroke_id));
 """
 
-_LATEST_SCHEMA_VERSION = 13
+# A "canvas" message (the header's ... menu): a text-less, attachment-less message that renders as
+# a big blank drawing surface. It exists so the pen (spec 07), whose drawings anchor to a message,
+# has reserved space of its own to draw on instead of over other people's words. A flag only —
+# the surface's shape is a fixed aspect ratio on the client, so a drawing's uniform scale (spec 07
+# §1) stays right at every column width. `DEFAULT 0` keeps every existing row an ordinary message,
+# and an older blue/green-overlap process that never names the column still inserts valid rows.
+_SCHEMA_V14_CANVAS = (
+    "ALTER TABLE messages ADD COLUMN canvas INTEGER NOT NULL DEFAULT 0 CHECK(canvas IN (0, 1))"
+)
+
+_LATEST_SCHEMA_VERSION = 14
 _UNKNOWN_GRANT_HASH = "0" * 64
 _LOGGER = logging.getLogger(__name__)
 
@@ -399,6 +409,7 @@ def _row_to_message(
         view_claim_id=row["view_claim_id"],
         view_claimed_at=row["view_claimed_at"],
         view_claim_email=row["view_claim_email"],
+        canvas=row["canvas"],
     )
 
 
@@ -762,6 +773,13 @@ class LiveChatStore:
                         conn.execute(statement)
                 conn.execute("PRAGMA user_version = 13")
                 current = 13
+
+            if current < 14:
+                existing_msg_cols = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
+                if existing_msg_cols and "canvas" not in existing_msg_cols:
+                    conn.execute(_SCHEMA_V14_CANVAS)
+                conn.execute("PRAGMA user_version = 14")
+                current = 14
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
@@ -1000,6 +1018,37 @@ class LiveChatStore:
                 "UPDATE attachments SET message_seq = ?, ordinal = 0 WHERE id = ?",
                 (seq, attachment_id),
             )
+            conn.execute(
+                "INSERT INTO events (type, message_seq, created_at) VALUES ('message', ?, ?)",
+                (seq, now),
+            )
+            return _load_message(conn, seq), True
+
+    def create_canvas_message(
+        self,
+        *,
+        client_id: str,
+        sender: str,
+        device_id: str,
+        by_email: str | None,
+        now: float,
+    ) -> tuple[MessageRow, bool]:
+        """Creates a canvas message: no text, no attachments, `canvas = 1`. Idempotent on
+        `client_id` like every other send."""
+        with self._write_txn() as conn:
+            existing = conn.execute(
+                "SELECT seq FROM messages WHERE client_id = ?", (client_id,)
+            ).fetchone()
+            if existing is not None:
+                return _load_message(conn, existing["seq"]), False
+            cursor = conn.execute(
+                "INSERT INTO messages "
+                "(client_id, sender, device_id, by_email, text, created_at, canvas) "
+                "VALUES (?, ?, ?, ?, NULL, ?, 1)",
+                (client_id, sender, device_id, by_email, now),
+            )
+            seq = cursor.lastrowid
+            assert seq is not None
             conn.execute(
                 "INSERT INTO events (type, message_seq, created_at) VALUES ('message', ?, ?)",
                 (seq, now),

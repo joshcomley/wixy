@@ -105,6 +105,7 @@ describe("thread + pen", () => {
     const header = view.element.querySelector(".wx-srv-thread-header")!;
     const buttons = Array.from(header.querySelectorAll("button"), (b) => b.className);
     expect(buttons).toEqual([
+      "wx-srv-more-button",
       "wx-srv-pen-button",
       "wx-srv-pen-undo",
       "wx-srv-pen-redo",
