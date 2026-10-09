@@ -111,7 +111,8 @@ describe("mountChatComposer", () => {
     composer.teardown();
   });
 
-  it("takes the full-width line the moment the Server chat input is focused and keeps it", () => {
+  it("takes the full-width line on focus and gives it back after blur once no gesture is in progress, unless the draft grew past one line", () => {
+    vi.useFakeTimers();
     const composer = mountChatComposer(makeOptions({
       enterToSend: false,
       promoteToFullWidthOnMultiline: true,
@@ -124,16 +125,43 @@ describe("mountChatComposer", () => {
     textarea.dispatchEvent(new Event("focus"));
     expect(promoted()).toBe(true); // nothing typed yet
 
-    // Blurring (a tap anywhere else) must never move the controls under the next tap.
+    // Blur must not collapse it mid-gesture: not at once, and not while a pointer is down.
+    document.body.appendChild(composer.element);
     textarea.dispatchEvent(new Event("blur"));
     expect(promoted()).toBe(true);
+    document.dispatchEvent(new Event("pointerdown"));
+    vi.advanceTimersByTime(2000);
+    expect(promoted()).toBe(true);
+    document.dispatchEvent(new Event("pointerup"));
+    vi.advanceTimersByTime(200);
+    expect(promoted()).toBe(false); // empty and unfocused: back in its place
 
-    textarea.value = "hi";
+    // Refocusing before the delay is over cancels the collapse.
+    textarea.dispatchEvent(new Event("focus"));
+    textarea.dispatchEvent(new Event("blur"));
+    vi.advanceTimersByTime(200);
+    textarea.dispatchEvent(new Event("focus"));
+    vi.advanceTimersByTime(2000);
+    expect(promoted()).toBe(true);
+
+    // A draft with a newline has grown past one line and keeps the full line after blur.
+    textarea.value = "first\nsecond";
     textarea.dispatchEvent(new Event("input"));
+    textarea.dispatchEvent(new Event("blur"));
+    vi.advanceTimersByTime(2000);
     expect(promoted()).toBe(true);
+
+    // A single short line goes back.
     composer.reset();
-    expect(promoted()).toBe(true);
+    textarea.dispatchEvent(new Event("focus"));
+    textarea.value = "short";
+    textarea.dispatchEvent(new Event("input"));
+    textarea.dispatchEvent(new Event("blur"));
+    vi.advanceTimersByTime(2000);
+    expect(promoted()).toBe(false);
     composer.teardown();
+    document.body.removeChild(composer.element);
+    vi.useRealTimers();
   });
 
   it("never promotes on focus unless the option is on", () => {

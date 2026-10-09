@@ -280,12 +280,54 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
   // impossible with field-sizing active, so we size by hand — one proven
   // path, exactly what older engines get too, no dual-path drift.
   textarea.style.boxSizing = "border-box";
-  /** With `promoteToFullWidthOnMultiline` the full-width line is taken the moment the box is first
-   * focused (not only once the text wraps), so the layout never jumps in the middle of typing, and
-   * it is then KEPT for the life of the composer. Giving it back on blur would move every control
-   * (and the thread above) at the instant of a tap elsewhere — a double-tap on a message or a tap
-   * on a button landed on whatever had shifted underneath — so it never collapses on its own. */
+  /** With `promoteToFullWidthOnMultiline` the full-width line is taken the moment the box is
+   * focused (not only once the text wraps), so the layout never jumps in the middle of typing.
+   * When focus leaves, it goes back to its place — unless the draft has grown past one line — but
+   * never in the middle of a gesture: collapsing at the instant of a blur moves every control (and
+   * the thread above) while the tap that caused the blur is still in progress, so a double-tap on
+   * a message or a tap on a button lands on whatever shifted underneath. The collapse therefore
+   * waits for `COLLAPSE_AFTER_BLUR_MS` and for no pointer to be down, and a refocus cancels it. */
   let promotedByFocus = false;
+  const COLLAPSE_AFTER_BLUR_MS = 450;
+  const COLLAPSE_RECHECK_MS = 150;
+  const view = textarea.ownerDocument.defaultView;
+  let collapseTimer: number | null = null;
+  let pointerDown = false;
+  const onPointerDown = (): void => {
+    pointerDown = true;
+  };
+  const onPointerUp = (): void => {
+    pointerDown = false;
+  };
+  function cancelCollapse(): void {
+    if (collapseTimer !== null && view !== null) view.clearTimeout(collapseTimer);
+    collapseTimer = null;
+  }
+  function scheduleCollapse(delayMs: number): void {
+    cancelCollapse();
+    if (view === null) return;
+    collapseTimer = view.setTimeout(tryCollapse, delayMs);
+  }
+  function tryCollapse(): void {
+    collapseTimer = null;
+    if (tornDown || textarea.ownerDocument.activeElement === textarea) return;
+    if (pointerDown) {
+      scheduleCollapse(COLLAPSE_RECHECK_MS);
+      return;
+    }
+    // Back to the inline row, then let `autogrow` decide: a draft that still wraps (or holds a
+    // newline) in the narrow inline box has grown past one line and takes the full line again.
+    promotedByFocus = false;
+    multilinePromoted = false;
+    inputRow.classList.remove("wx-chatc-multiline");
+    autogrow();
+  }
+  if (options.promoteToFullWidthOnMultiline === true) {
+    const doc = textarea.ownerDocument;
+    doc.addEventListener("pointerdown", onPointerDown, true);
+    doc.addEventListener("pointerup", onPointerUp, true);
+    doc.addEventListener("pointercancel", onPointerUp, true);
+  }
   function autogrow(): void {
     const empty = textarea.value === "";
     textarea.classList.toggle("wx-chat-input-empty", empty);
@@ -330,8 +372,13 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
   textarea.addEventListener("input", autogrow);
   textarea.addEventListener("focus", () => {
     if (options.promoteToFullWidthOnMultiline !== true) return;
+    cancelCollapse();
     promotedByFocus = true;
     autogrow();
+  });
+  textarea.addEventListener("blur", () => {
+    if (options.promoteToFullWidthOnMultiline !== true || !promotedByFocus) return;
+    scheduleCollapse(COLLAPSE_AFTER_BLUR_MS);
   });
   autogrow();
 
@@ -563,6 +610,10 @@ ${typedSince}`;
     },
     teardown() {
       tornDown = true;
+      cancelCollapse();
+      textarea.ownerDocument.removeEventListener("pointerdown", onPointerDown, true);
+      textarea.ownerDocument.removeEventListener("pointerup", onPointerUp, true);
+      textarea.ownerDocument.removeEventListener("pointercancel", onPointerUp, true);
       finishFilePicker();
       for (const controller of uploadControllers.values()) controller.abort();
       uploadControllers.clear();

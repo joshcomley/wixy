@@ -241,8 +241,23 @@ test.describe("server-media.spec.ts (P6b)", () => {
     const postedRequest = await posted;
     expect(postedRequest.postDataJSON().text).toBe("first line\nsecond line");
     await expect(draft).toHaveValue("");
-    // The full-width line is kept after a send: collapsing it would shift every control.
+    // Still focused after the send: it keeps the full-width line.
     await expect(inputRow).toHaveClass(/wx-chatc-multiline/);
+
+    // Once focus leaves and the draft is not more than one line, it goes back to its place — a
+    // beat after the blur, never in the middle of the tap that caused it.
+    await draft.evaluate((el) => (el as HTMLTextAreaElement).blur());
+    await expect(inputRow).not.toHaveClass(/wx-chatc-multiline/);
+    const back = await Promise.all([attach.boundingBox(), mic.boundingBox(), send.boundingBox()]);
+    for (const [index, box] of before.entries()) {
+      const restored = back[index];
+      expect(box).not.toBeNull();
+      expect(restored).not.toBeNull();
+      if (box !== null && restored !== null) {
+        expect(restored.x).toBeCloseTo(box.x, 0);
+        expect(restored.y + restored.height).toBeCloseTo(box.y + box.height, 0);
+      }
+    }
   });
 
   test("voice note keeps its disabled recording row and throbber while sending", async ({ page }) => {
