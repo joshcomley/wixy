@@ -7,7 +7,10 @@
 # build time. Baking them here would silently reintroduce the standalone/fleet
 # image drift decision 6 exists to prevent.
 
-FROM python:3.14-slim
+# The base image is a build argument so CI can pull the same image from a registry mirror
+# (anonymous Docker Hub pulls from shared CI runners are rate-limited: 429). Default is unchanged.
+ARG PYTHON_IMAGE=python:3.14-slim
+FROM ${PYTHON_IMAGE}
 
 # Build-time provenance (spec/independence/01 §2.6, 03 §1): /api/version prefers
 # these over a git-shell fallback, which a pip-installed image (no .git dir) can't
