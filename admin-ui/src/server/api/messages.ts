@@ -78,6 +78,9 @@ export interface Message {
   readonly createdAt: number;
   readonly replyTo: ReplyTo | null;
   readonly viewOnce?: ViewOnceInfo | null;
+  /** A blank drawing surface (the header's ... menu): no text, no attachments. Absent from a
+   * server that predates canvases — read as "not a canvas". */
+  readonly canvas?: boolean;
   /** spec/server-chat/07-live-drawing.md §4: a summary of the drawings anchored to this message
    * (never their strokes). Absent from a server that predates drawings — read as "unknown",
    * never as "none" (`parseDrawingSummaries`). */
@@ -402,6 +405,40 @@ export async function sendViewOnceMessage(
   if (isDefinitiveSendRejectionStatus(response.status)) {
     return { ok: false, kind: "rejected", status: response.status };
   }
+  return { ok: false, kind: "unavailable" };
+}
+
+export type SendCanvasResult =
+  | { readonly ok: true; readonly message: Message }
+  | { readonly ok: false; readonly kind: "unsupported" | "rejected" | "unavailable" };
+
+/** Adds a blank canvas to the thread. Idempotent on `clientId`, like every send. */
+export async function sendCanvasMessage(
+  session: ServerSession,
+  input: { readonly clientId: string; readonly sender: string; readonly deviceId: string },
+): Promise<SendCanvasResult> {
+  let response: Response;
+  try {
+    response = await serverFetch(
+      "/messages/canvas",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      },
+      session,
+    );
+  } catch (error) {
+    if (error instanceof ServerLockedError) throw error;
+    return { ok: false, kind: "unavailable" };
+  }
+  if (response.status === 201 || response.status === 200) {
+    const body = (await response.json()) as { message: Message };
+    return { ok: true, message: body.message };
+  }
+  // A server that predates canvases has no such route (404/405).
+  if (response.status === 404 || response.status === 405) return { ok: false, kind: "unsupported" };
+  if (isDefinitiveSendRejectionStatus(response.status)) return { ok: false, kind: "rejected" };
   return { ok: false, kind: "unavailable" };
 }
 

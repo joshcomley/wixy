@@ -47,6 +47,22 @@ same player, skip buttons and transcript block, minus the message-action menu �
 button. A note finished while the view is open stays until the view closes; transcript updates patch
 in place. `detach()`/`teardown()` close it.
 
+**Composer focus + the header ... menu.** With `promoteToFullWidthOnMultiline` (Server chat only) the
+text box takes its own full-width line the first time it is focused (`chatComposer.ts`
+`promotedByFocus`), not only once the text wraps, and KEEPS it for the life of the composer — a
+send or a blur never collapses it, because collapsing moved every control (and the thread above)
+at the instant of a tap elsewhere, so a double-tap on a message or a tap on a button missed
+(measured by `server-tap-precision`/`server-reply`/`server-view-once` e2e). Attach/mic stay at the left and Send keeps its place at
+the right edge (`margin-left: auto` in the promoted row), so no button moves when the box jumps up.
+The header's `⋯` button (`.wx-srv-more-button`, first of the right-hand buttons) opens
+`.wx-srv-more-menu`; its first item, **Canvas**, calls `POST /messages/canvas` and scrolls to the new
+message. A **canvas message** (schema v14, `messages.canvas INTEGER NOT NULL DEFAULT 0`; wire
+`canvas: true`; no text, no attachments) renders as a full-width bubble holding
+`.wx-srv-canvas-surface`, a muted theme-coloured surface at a fixed 4:5 aspect ratio (a ratio, not a
+pixel height, so the pen's uniform draw-space scale stays right at every width — spec 07 §1). It
+exists so the pen, whose drawings anchor to a message, has reserved space instead of drawing over
+other text. The pen is still turned on with its own button. Quoting a canvas shows only the sender.
+
 **Extend auto-lock to 1 minute** in the chat's settings sheet
   (§11); a panic button, a multi-tap inside the chat, `Escape`, tab-hidden, or routing away
   all lock instantly. A reload never restores the unlocked state (Inv 42).

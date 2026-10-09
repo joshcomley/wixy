@@ -21,8 +21,10 @@ import {
   deleteMessage,
   getHistory,
   getUsage,
+  sendCanvasMessage,
   sendMessage,
   sendViewOnceMessage,
+  type SendCanvasResult,
   type SendViewOnceResult,
   setReaction,
   transcribeAttachment,
@@ -207,7 +209,57 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       hooks.lockNow("panic");
     }
   });
-  header.append(title, nameChip, settingsButton, panicButton);
+  const moreButton = documentRef.createElement("button");
+  moreButton.type = "button";
+  moreButton.className = "wx-srv-more-button";
+  moreButton.textContent = "\u22EF";
+  moreButton.title = "More";
+  moreButton.setAttribute("aria-label", "More");
+  moreButton.setAttribute("aria-haspopup", "menu");
+  moreButton.setAttribute("aria-expanded", "false");
+  moreButton.setAttribute("data-srv-gesture-boundary", "");
+  const moreMenu = documentRef.createElement("div");
+  moreMenu.className = "wx-srv-more-menu";
+  moreMenu.setAttribute("role", "menu");
+  moreMenu.hidden = true;
+  const canvasItem = documentRef.createElement("button");
+  canvasItem.type = "button";
+  canvasItem.className = "wx-srv-more-item wx-srv-more-canvas";
+  canvasItem.setAttribute("role", "menuitem");
+  canvasItem.setAttribute("data-srv-gesture-boundary", "");
+  const canvasItemTitle = documentRef.createElement("span");
+  canvasItemTitle.className = "wx-srv-more-item-title";
+  canvasItemTitle.textContent = "Canvas";
+  const canvasItemHint = documentRef.createElement("span");
+  canvasItemHint.className = "wx-srv-more-item-hint";
+  canvasItemHint.textContent = "Add a blank space to draw on";
+  canvasItem.append(canvasItemTitle, canvasItemHint);
+  moreMenu.appendChild(canvasItem);
+
+  function closeMoreMenu(): void {
+    if (moreMenu.hidden) return;
+    moreMenu.hidden = true;
+    moreButton.setAttribute("aria-expanded", "false");
+    documentRef.removeEventListener("pointerdown", onPointerOutsideMore, true);
+  }
+  function onPointerOutsideMore(event: Event): void {
+    const target = event.target;
+    if (target instanceof Node && (moreMenu.contains(target) || moreButton.contains(target))) return;
+    closeMoreMenu();
+  }
+  function openMoreMenu(): void {
+    moreMenu.hidden = false;
+    moreMenu.style.top = `${header.offsetHeight}px`;
+    moreButton.setAttribute("aria-expanded", "true");
+    documentRef.addEventListener("pointerdown", onPointerOutsideMore, true);
+  }
+  moreButton.addEventListener("click", () => (moreMenu.hidden ? openMoreMenu() : closeMoreMenu()));
+  canvasItem.addEventListener("click", () => {
+    closeMoreMenu();
+    void addCanvas();
+  });
+
+  header.append(title, nameChip, moreButton, settingsButton, panicButton);
   element.appendChild(header);
 
   function refreshNameChip(): void {
@@ -976,6 +1028,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   unheardView.append(unheardBar, unheardList, unheardEmpty);
   // Under the header, so the panic ✕ and the lock gestures stay reachable.
   element.appendChild(unheardView);
+  element.appendChild(moreMenu);
 
   /** Notes shown in the open view. A note you finish listening to stays until the view closes
    * (it must not vanish from under you mid-playback); only Dismiss removes one at once. */
@@ -1528,6 +1581,37 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     return button;
   }
 
+  /** Adds a canvas message: a big blank surface in the thread, with space of its own so the pen
+   * has somewhere to draw that is not on top of anyone's words. */
+  async function addCanvas(): Promise<void> {
+    const session = currentSession;
+    if (session === null) return;
+    const requestGeneration = contentGeneration;
+    let result: SendCanvasResult;
+    try {
+      result = await sendCanvasMessage(session, {
+        clientId: cryptoRandomId(win),
+        sender: identity.getName() ?? "",
+        deviceId: identity.getDeviceId(),
+      });
+    } catch (error) {
+      if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+      return;
+    }
+    if (requestGeneration !== contentGeneration || currentSession === null) return;
+    if (!result.ok) {
+      composer.setError(
+        result.kind === "unsupported"
+          ? "Canvases aren't available yet \u2014 try again in a moment."
+          : "Couldn't add a canvas \u2014 try again.",
+      );
+      return;
+    }
+    addConfirmed(result.message);
+    renderThreadList();
+    threadScroll.scrollToBottom();
+  }
+
   function renderBubble(message: Message, mine: boolean, embedded = false): HTMLElement {
     const bubble = documentRef.createElement("div");
     bubble.className = `wx-srv-bubble ${mine ? "wx-srv-bubble-mine" : "wx-srv-bubble-theirs"}`;
@@ -1546,7 +1630,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     time.textContent = formatTime(message.createdAt);
 
     let hasTranscribableVoice = false;
-    if (message.viewOnce) {
+    if (message.canvas === true) {
+      bubble.classList.add("wx-srv-bubble-canvas");
+      const surface = documentRef.createElement("div");
+      surface.className = "wx-srv-canvas-surface";
+      surface.setAttribute("role", "img");
+      surface.setAttribute("aria-label", "Blank canvas to draw on");
+      bubble.appendChild(surface);
+    } else if (message.viewOnce) {
       const isVideo = message.attachments[0]?.kind === "video";
       const kindLabel = isVideo ? "video" : "photo";
       const durationS = message.viewOnce.durationS;
@@ -2603,6 +2694,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       // drawing timer go (spec 07 §5).
       drawingLayer.detach();
       closeUnheardView();
+      closeMoreMenu();
       currentSession = null;
       endWipeReconcile("abandoned");
       // §(4): a lock aborts an in-flight scroll-to-original, but the pending
@@ -2690,6 +2782,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       voiceRecorder?.detach();
       voiceRecorder = null;
       closeUnheardView();
+      closeMoreMenu();
       disposeAttachmentMedia(messageList);
       observer?.disconnect();
       lightbox.teardown();

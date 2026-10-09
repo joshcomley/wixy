@@ -187,12 +187,32 @@ test.describe("server-media.spec.ts (P6b)", () => {
     await audioNode!.dispose();
   });
 
-  test("Server chat uses Enter for a full-width multiline message and promotes soft-wrapped text", async ({ page }) => {
+  test("Server chat jumps to a full-width line on focus without moving the buttons, and Enter makes newlines", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await unlockServer(page, `Multiline ${Date.now()}`);
     const draft = page.locator(".wx-chat-composer-input");
     const inputRow = page.locator(".wx-chatc-input-row");
     const send = page.locator(".wx-chat-send-button");
+    const attach = page.locator(".wx-chat-attach-button");
+    const mic = page.locator(".wx-srv-record-button");
+
+    // Before focus: one line, controls inline. The instant the box is focused it takes its own
+    // full-width line (nothing typed yet) and every button stays exactly where it was.
+    await expect(inputRow).not.toHaveClass(/wx-chatc-multiline/);
+    const before = await Promise.all([attach.boundingBox(), mic.boundingBox(), send.boundingBox()]);
+    await draft.focus();
+    await expect(inputRow).toHaveClass(/wx-chatc-multiline/);
+    const after = await Promise.all([attach.boundingBox(), mic.boundingBox(), send.boundingBox()]);
+    for (const [index, box] of before.entries()) {
+      const moved = after[index];
+      expect(box).not.toBeNull();
+      expect(moved).not.toBeNull();
+      if (box !== null && moved !== null) {
+        expect(moved.x).toBeCloseTo(box.x, 0);
+        expect(moved.y + moved.height).toBeCloseTo(box.y + box.height, 0);
+        expect(moved.width).toBeCloseTo(box.width, 0);
+      }
+    }
 
     await draft.fill("first line");
     await draft.press("Enter");
@@ -221,10 +241,7 @@ test.describe("server-media.spec.ts (P6b)", () => {
     const postedRequest = await posted;
     expect(postedRequest.postDataJSON().text).toBe("first line\nsecond line");
     await expect(draft).toHaveValue("");
-    await expect(inputRow).not.toHaveClass(/wx-chatc-multiline/);
-
-    // No explicit newline: a visual wrap in the narrow inline field should promote it too.
-    await draft.fill("This longer message wraps automatically in the narrow phone composer");
+    // The full-width line is kept after a send: collapsing it would shift every control.
     await expect(inputRow).toHaveClass(/wx-chatc-multiline/);
   });
 

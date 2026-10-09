@@ -597,6 +597,61 @@ async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
     )
 
 
+class SendCanvasMessageIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    clientId: str
+    sender: str
+    deviceId: str
+
+
+@router.post("/messages/canvas", response_model=None)
+async def send_canvas_message(body: SendCanvasMessageIn, request: Request) -> JSONResponse:
+    """A blank drawing surface in the thread (the header's ... menu). Same envelope and hooks
+    as an ordinary send; it simply carries no text or attachments."""
+    auth = await require_server_token(request)
+
+    if not (8 <= len(body.clientId) <= 64):
+        return _invalid("clientId must be 8-64 characters")
+    if not (8 <= len(body.deviceId) <= 64):
+        return _invalid("deviceId must be 8-64 characters")
+    sender = body.sender.strip()
+    if not _valid_sender(sender):
+        return _invalid("sender must be 1-32 characters with no control characters")
+
+    store: LiveChatStore = request.app.state.livechat_store
+    notifier: LiveChatNotifier = request.app.state.livechat_notifier
+    hooks: list[MessageHook] = request.app.state.livechat_message_hooks
+    background: ContainedTaskGroup = request.app.state.background_tasks
+    secret: bytes = request.app.state.livechat_secret
+    now = time.time()
+
+    message, created = await anyio.to_thread.run_sync(
+        lambda: store.create_canvas_message(
+            client_id=body.clientId,
+            sender=sender,
+            device_id=body.deviceId,
+            by_email=auth.email or None,
+            now=now,
+        )
+    )
+
+    if created:
+        notifier.publish()
+        for hook in hooks:
+
+            async def _dispatch(h: MessageHook = hook) -> None:
+                await h(message)
+
+            background.spawn("livechat-push-dispatch", _dispatch)
+
+    signer = MediaSigner.for_auth(secret, auth)
+    return JSONResponse(
+        status_code=201 if created else 200,
+        content={"message": message_json(message, signer)},
+    )
+
+
 class SendViewOnceMessageIn(BaseModel):
     clientId: str
     sender: str

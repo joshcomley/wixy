@@ -152,6 +152,8 @@ class MessageRow:
     view_claim_id: str | None = None
     view_claimed_at: float | None = None
     view_claim_email: str | None = None
+    canvas: int = 0
+    """1 for a canvas message (a blank drawing surface, no text/attachments), else 0."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -349,6 +351,7 @@ def message_json(row: MessageRow, signer: MediaUrlSigner) -> JsonObject:
         "createdAt": row.created_at,
         "replyTo": reply_to_json(row.reply_to, signer),
         "viewOnce": view_once,
+        "canvas": bool(row.canvas),
         "drawings": [{"id": d.id, "rev": d.rev} for d in row.drawings],
     }
 

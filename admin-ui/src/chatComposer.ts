@@ -280,6 +280,12 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
   // impossible with field-sizing active, so we size by hand — one proven
   // path, exactly what older engines get too, no dual-path drift.
   textarea.style.boxSizing = "border-box";
+  /** With `promoteToFullWidthOnMultiline` the full-width line is taken the moment the box is first
+   * focused (not only once the text wraps), so the layout never jumps in the middle of typing, and
+   * it is then KEPT for the life of the composer. Giving it back on blur would move every control
+   * (and the thread above) at the instant of a tap elsewhere — a double-tap on a message or a tap
+   * on a button landed on whatever had shifted underneath — so it never collapses on its own. */
+  let promotedByFocus = false;
   function autogrow(): void {
     const empty = textarea.value === "";
     textarea.classList.toggle("wx-chat-input-empty", empty);
@@ -289,9 +295,13 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
       // measure (scrollHeight 0 would collapse it to nothing).
       textarea.style.height = "";
       textarea.style.overflowY = "";
-      multilinePromoted = false;
-      inputRow.classList.remove("wx-chatc-multiline");
+      multilinePromoted = promotedByFocus;
+      inputRow.classList.toggle("wx-chatc-multiline", multilinePromoted);
       return;
+    }
+    if (promotedByFocus && !multilinePromoted) {
+      multilinePromoted = true;
+      inputRow.classList.add("wx-chatc-multiline");
     }
     textarea.style.height = "0px";
     const naturalHeight = textarea.scrollHeight;
@@ -318,6 +328,11 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
     textarea.style.overflowY = textarea.scrollHeight > MAX_TEXTAREA_HEIGHT_PX ? "auto" : "hidden";
   }
   textarea.addEventListener("input", autogrow);
+  textarea.addEventListener("focus", () => {
+    if (options.promoteToFullWidthOnMultiline !== true) return;
+    promotedByFocus = true;
+    autogrow();
+  });
   autogrow();
 
   function anyUploading(): boolean {
