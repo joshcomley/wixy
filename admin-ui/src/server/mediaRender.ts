@@ -178,24 +178,28 @@ function renderVoice(
   playButton.type = "button";
   playButton.className = "wx-srv-voice-play";
   playButton.setAttribute("aria-label", "Play voice note");
-  playButton.textContent = "Play";
+  playButton.innerHTML = PLAY_ICON;
   const waveform = renderWaveform(attachment.peaks ?? [], documentRef);
   const backButton = renderSkipButton(documentRef, "back");
   const forwardButton = renderSkipButton(documentRef, "forward");
-  const seekBar = documentRef.createElement("input");
-  seekBar.type = "range";
-  seekBar.className = "wx-srv-voice-seek";
-  seekBar.min = "0";
-  seekBar.step = "0.1";
-  seekBar.value = "0";
-  seekBar.setAttribute("aria-label", "Voice note position");
+  const scrub = documentRef.createElement("div");
+  scrub.className = "wx-srv-voice-scrub";
+  const playhead = documentRef.createElement("div");
+  playhead.className = "wx-srv-voice-playhead";
+  const seekTab = documentRef.createElement("div");
+  seekTab.className = "wx-srv-voice-seek-tab";
+  seekTab.tabIndex = 0;
+  seekTab.setAttribute("role", "slider");
+  seekTab.setAttribute("aria-label", "Voice note position");
+  seekTab.setAttribute("aria-valuemin", "0");
+  scrub.append(waveform, playhead, seekTab);
   const knownDuration = () =>
     Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : attachment.durationS ?? 0;
   const syncSeekBar = () => {
     const total = knownDuration();
-    seekBar.max = String(total);
-    seekBar.value = String(Math.min(audio.currentTime, total));
-    seekBar.style.setProperty("--wx-srv-seek", total > 0 ? String(Math.min(1, audio.currentTime / total)) : "0");
+    seekTab.setAttribute("aria-valuemax", String(Math.round(total)));
+    seekTab.setAttribute("aria-valuenow", String(Math.round(audio.currentTime)));
+    scrub.style.setProperty("--wx-srv-seek", total > 0 ? String(Math.min(1, audio.currentTime / total)) : "0");
   };
   syncSeekBar();
   const elapsed = documentRef.createElement("span");
@@ -211,12 +215,12 @@ function renderVoice(
   audio.addEventListener("play", () => {
     releaseMedia();
     release = context.hooks.suspend("mediaPlaying");
-    playButton.textContent = "Pause";
+    playButton.innerHTML = PAUSE_ICON;
     playButton.setAttribute("aria-label", "Pause voice note");
   });
   const stopped = () => {
     releaseMedia();
-    playButton.textContent = "Play";
+    playButton.innerHTML = PLAY_ICON;
     playButton.setAttribute("aria-label", "Play voice note");
   };
   audio.addEventListener("pause", stopped);
@@ -284,12 +288,49 @@ function renderVoice(
     audio.currentTime = Math.max(0, total > 0 ? Math.min(seconds, total) : seconds);
     syncSeekBar();
   };
-  seekBar.addEventListener("input", () => seekTo(Number(seekBar.value)));
+  let dragging = false;
+  const seekFromPointer = (clientX: number) => {
+    const rect = scrub.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    seekTo(Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) * knownDuration());
+  };
+  seekTab.addEventListener("pointerdown", (event) => {
+    dragging = true;
+    seekTab.setPointerCapture?.(event.pointerId);
+    seekTab.classList.add("wx-srv-voice-seek-tab-active");
+    event.preventDefault();
+  });
+  seekTab.addEventListener("pointermove", (event) => {
+    if (dragging) seekFromPointer(event.clientX);
+  });
+  const endDrag = () => {
+    dragging = false;
+    seekTab.classList.remove("wx-srv-voice-seek-tab-active");
+  };
+  seekTab.addEventListener("pointerup", endDrag);
+  seekTab.addEventListener("pointercancel", endDrag);
+  seekTab.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    seekTo(audio.currentTime + (event.key === "ArrowRight" ? 5 : -5));
+  });
   wireSkipButton(backButton, -1, audio, seekTo, documentRef);
   wireSkipButton(forwardButton, 1, audio, seekTo, documentRef);
-  root.append(playButton, backButton, forwardButton, waveform, elapsed, seekBar, audio, confirmBox);
+  const controls = documentRef.createElement("div");
+  controls.className = "wx-srv-voice-controls";
+  controls.append(backButton, playButton, forwardButton, elapsed);
+  root.append(scrub, controls, audio, confirmBox);
   return root;
 }
+
+const ICON_OPEN =
+  '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">';
+const PLAY_ICON = `${ICON_OPEN}<polygon points="7 4 20 12 7 20 7 4" fill="currentColor"/></svg>`;
+const PAUSE_ICON = `${ICON_OPEN}<rect x="6" y="4" width="4" height="16" rx="1" fill="currentColor"/><rect x="14" y="4" width="4" height="16" rx="1" fill="currentColor"/></svg>`;
+const SKIP_LABEL =
+  '<text x="12" y="15.4" font-size="8" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none">10</text>';
+const BACK_ICON = `${ICON_OPEN}<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><polyline points="3.5 3.8 3.5 8.8 8.5 8.8"/>${SKIP_LABEL}</svg>`;
+const FORWARD_ICON = `${ICON_OPEN}<path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><polyline points="20.5 3.8 20.5 8.8 15.5 8.8"/>${SKIP_LABEL}</svg>`;
 
 /** A tap skips this far; holding scrubs at HOLD_SEEK_RATE times normal speed. */
 export const VOICE_SKIP_S = 10;
@@ -301,7 +342,7 @@ function renderSkipButton(documentRef: Document, direction: "back" | "forward"):
   const button = documentRef.createElement("button");
   button.type = "button";
   button.className = `wx-srv-voice-skip wx-srv-voice-skip-${direction}`;
-  button.textContent = direction === "back" ? "−10" : "+10";
+  button.innerHTML = direction === "back" ? BACK_ICON : FORWARD_ICON;
   button.setAttribute(
     "aria-label",
     direction === "back" ? "Back 10 seconds (hold to rewind)" : "Forward 10 seconds (hold to fast-forward)",

@@ -1192,31 +1192,89 @@ button.wx-srv-quote:focus-visible {
 
 .wx-srv-voice {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.wx-srv-voice-scrub {
+  --wx-srv-seek: 0;
+  position: relative;
+  width: 100%;
+  /* Room below the waveform for the drag tab, so a finger on it never covers the line. */
+  padding-bottom: 26px;
+}
+
+.wx-srv-voice-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 26px;
+  left: calc(var(--wx-srv-seek) * 100%);
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--wx-ink);
+  pointer-events: none;
+}
+
+.wx-srv-voice-seek-tab {
+  position: absolute;
+  bottom: 0;
+  left: clamp(18px, calc(var(--wx-srv-seek) * 100%), calc(100% - 18px));
+  width: 36px;
+  height: 24px;
+  margin-left: -18px;
+  box-sizing: border-box;
+  border-radius: 12px;
+  background: var(--wx-brand-blue);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.wx-srv-voice-seek-tab::before {
+  /* Little pointer joining the tab to the line above it. */
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  margin-left: -4px;
+  border: 4px solid transparent;
+  border-top: 0;
+  border-bottom-color: var(--wx-brand-blue);
+}
+
+.wx-srv-voice-seek-tab-active {
+  cursor: grabbing;
+  transform: scale(1.12);
+}
+
+.wx-srv-voice-seek-tab:focus-visible {
+  outline: 2px solid var(--wx-ink);
+  outline-offset: 2px;
+}
+
+.wx-srv-voice-controls {
+  display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.wx-srv-voice-play {
-  flex: none;
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--wx-border);
-  background: var(--wx-btn-bg);
-  color: var(--wx-ink);
-  cursor: pointer;
-}
-
+.wx-srv-voice-play,
 .wx-srv-voice-skip {
   flex: none;
-  min-width: 44px;
-  min-height: 44px;
-  padding: 6px 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
   border-radius: 999px;
   border: 1px solid var(--wx-border);
   background: var(--wx-btn-bg);
   color: var(--wx-ink);
-  font-size: 0.75rem;
   cursor: pointer;
   touch-action: manipulation;
   user-select: none;
@@ -1224,22 +1282,12 @@ button.wx-srv-quote:focus-visible {
   -webkit-touch-callout: none;
 }
 
-.wx-srv-voice-seek {
-  flex: 1 1 100%;
-  width: 100%;
-  min-height: 24px;
-  margin: 0;
-  accent-color: currentColor;
-  cursor: pointer;
-}
-
 .wx-srv-voice-waveform {
-  flex: 1;
-  min-width: 0;
   display: flex;
   align-items: flex-end;
   gap: 1px;
-  height: 24px;
+  width: 100%;
+  height: 40px;
 }
 
 .wx-srv-voice-waveform-bar {
@@ -1253,7 +1301,9 @@ button.wx-srv-quote:focus-visible {
 
 .wx-srv-voice-time {
   flex: none;
-  font-size: 0.6875rem;
+  margin-left: auto;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
   color: var(--wx-muted);
 }
 
