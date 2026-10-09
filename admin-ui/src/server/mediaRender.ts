@@ -180,6 +180,24 @@ function renderVoice(
   playButton.setAttribute("aria-label", "Play voice note");
   playButton.textContent = "Play";
   const waveform = renderWaveform(attachment.peaks ?? [], documentRef);
+  const backButton = renderSkipButton(documentRef, "back");
+  const forwardButton = renderSkipButton(documentRef, "forward");
+  const seekBar = documentRef.createElement("input");
+  seekBar.type = "range";
+  seekBar.className = "wx-srv-voice-seek";
+  seekBar.min = "0";
+  seekBar.step = "0.1";
+  seekBar.value = "0";
+  seekBar.setAttribute("aria-label", "Voice note position");
+  const knownDuration = () =>
+    Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : attachment.durationS ?? 0;
+  const syncSeekBar = () => {
+    const total = knownDuration();
+    seekBar.max = String(total);
+    seekBar.value = String(Math.min(audio.currentTime, total));
+    seekBar.style.setProperty("--wx-srv-seek", total > 0 ? String(Math.min(1, audio.currentTime / total)) : "0");
+  };
+  syncSeekBar();
   const elapsed = documentRef.createElement("span");
   elapsed.className = "wx-srv-voice-time";
   elapsed.textContent = `0:00 / ${formatDuration(attachment.durationS ?? 0)}`;
@@ -205,11 +223,13 @@ function renderVoice(
   audio.addEventListener("ended", stopped);
   audio.addEventListener("emptied", stopped);
   audio.addEventListener("timeupdate", () => {
+    syncSeekBar();
     elapsed.textContent = `${formatDuration(audio.currentTime)} / ${formatDuration(
       Number.isFinite(audio.duration) ? audio.duration : attachment.durationS ?? 0,
     )}`;
   });
   audio.addEventListener("loadedmetadata", () => {
+    syncSeekBar();
     elapsed.textContent = `0:00 / ${formatDuration(
       Number.isFinite(audio.duration) ? audio.duration : attachment.durationS ?? 0,
     )}`;
@@ -259,8 +279,95 @@ function renderVoice(
       audio.pause();
     }
   });
-  root.append(playButton, waveform, elapsed, audio, confirmBox);
+  const seekTo = (seconds: number) => {
+    const total = knownDuration();
+    audio.currentTime = Math.max(0, total > 0 ? Math.min(seconds, total) : seconds);
+    syncSeekBar();
+  };
+  seekBar.addEventListener("input", () => seekTo(Number(seekBar.value)));
+  wireSkipButton(backButton, -1, audio, seekTo, documentRef);
+  wireSkipButton(forwardButton, 1, audio, seekTo, documentRef);
+  root.append(playButton, backButton, forwardButton, waveform, elapsed, seekBar, audio, confirmBox);
   return root;
+}
+
+/** A tap skips this far; holding scrubs at HOLD_SEEK_RATE times normal speed. */
+export const VOICE_SKIP_S = 10;
+export const VOICE_HOLD_SEEK_RATE = 2.5;
+export const VOICE_HOLD_DELAY_MS = 350;
+const HOLD_TICK_MS = 100;
+
+function renderSkipButton(documentRef: Document, direction: "back" | "forward"): HTMLButtonElement {
+  const button = documentRef.createElement("button");
+  button.type = "button";
+  button.className = `wx-srv-voice-skip wx-srv-voice-skip-${direction}`;
+  button.textContent = direction === "back" ? "−10" : "+10";
+  button.setAttribute(
+    "aria-label",
+    direction === "back" ? "Back 10 seconds (hold to rewind)" : "Forward 10 seconds (hold to fast-forward)",
+  );
+  return button;
+}
+
+/** Tap = jump 10s. Hold past the delay = continuous rewind / fast-forward at 2.5x (net of normal
+ * playback, so it is 2.5x whether or not the note is playing). Keyboard activation (a click with
+ * detail 0; a pointer click is already handled on release) also skips 10s. */
+function wireSkipButton(
+  button: HTMLButtonElement,
+  direction: 1 | -1,
+  audio: HTMLAudioElement,
+  seekTo: (seconds: number) => void,
+  documentRef: Document,
+): void {
+  const win: Window = documentRef.defaultView ?? window;
+  let holdTimer: number | null = null;
+  let tickTimer: number | null = null;
+  let holding = false;
+  let pointerActive = false;
+
+  const stop = () => {
+    if (holdTimer !== null) win.clearTimeout(holdTimer);
+    if (tickTimer !== null) win.clearInterval(tickTimer);
+    holdTimer = null;
+    tickTimer = null;
+  };
+  const startHold = () => {
+    holdTimer = null;
+    holding = true;
+    let last = win.performance.now();
+    tickTimer = win.setInterval(() => {
+      const now = win.performance.now();
+      const dt = (now - last) / 1000;
+      last = now;
+      const natural = audio.paused ? 0 : 1;
+      const rate = direction === 1 ? VOICE_HOLD_SEEK_RATE - natural : -(VOICE_HOLD_SEEK_RATE + natural);
+      seekTo(audio.currentTime + rate * dt);
+    }, HOLD_TICK_MS);
+  };
+
+  button.addEventListener("pointerdown", () => {
+    pointerActive = true;
+    holding = false;
+    stop();
+    holdTimer = win.setTimeout(startHold, VOICE_HOLD_DELAY_MS);
+  });
+  const release = () => {
+    if (!pointerActive) return;
+    pointerActive = false;
+    const wasHolding = holding;
+    stop();
+    if (!wasHolding) seekTo(audio.currentTime + direction * VOICE_SKIP_S);
+    holding = false;
+  };
+  button.addEventListener("pointerup", release);
+  button.addEventListener("pointercancel", () => {
+    pointerActive = false;
+    stop();
+  });
+  button.addEventListener("contextmenu", (event) => event.preventDefault());
+  button.addEventListener("click", (event) => {
+    if (event.detail === 0) seekTo(audio.currentTime + direction * VOICE_SKIP_S);
+  });
 }
 
 function renderWaveform(peaks: readonly number[], documentRef: Document): HTMLElement {
