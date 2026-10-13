@@ -118,12 +118,14 @@ export async function fetchGifFile(
   if (Number.isFinite(declared) && declared > MAX_GIF_BYTES) {
     throw new GifFetchError("That GIF is too big to attach.");
   }
-  const blob = await response.blob();
-  if (blob.size > MAX_GIF_BYTES) throw new GifFetchError("That GIF is too big to attach.");
-  const head = new Uint8Array(await blob.slice(0, 6).arrayBuffer());
-  const signature = String.fromCharCode(...head);
+  // Raw bytes, not `response.blob()`: a File built from bytes never depends on the Blob and
+  // File coming from the same implementation (under jsdom on some Node versions a foreign
+  // Blob part is stringified to "[object Blob]" — seen in CI on PR #311).
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.byteLength > MAX_GIF_BYTES) throw new GifFetchError("That GIF is too big to attach.");
+  const signature = String.fromCharCode(...bytes.subarray(0, 6));
   if (signature !== "GIF87a" && signature !== "GIF89a") {
     throw new GifFetchError("That link isn't a GIF.");
   }
-  return new File([blob], fileNameFor(url), { type: "image/gif" });
+  return new File([bytes], fileNameFor(url), { type: "image/gif" });
 }
