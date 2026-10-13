@@ -320,7 +320,8 @@ describe("server chat GIF attaching", () => {
 
     view.element.querySelector<HTMLButtonElement>(".wx-srv-more-button")!.click();
     const fry = view.element.querySelector<HTMLButtonElement>(".wx-srv-more-fry")!;
-    expect(fry.textContent).toContain("Fry");
+    expect(fry.querySelector(".wx-srv-more-item-title")?.textContent).toBe("Fry");
+    expect(fry.querySelector(".wx-srv-more-item-hint")?.textContent).toBe("Hmmmmmm");
     fry.click();
     expect(view.element.querySelector<HTMLElement>(".wx-srv-more-menu")!.hidden).toBe(true);
     await settle();
