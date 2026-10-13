@@ -241,6 +241,10 @@ def attachment_json(row: AttachmentRow, signer: MediaUrlSigner) -> JsonObject:
     if row.status == "ready":
         for rendition in row.renditions:
             urls[rendition] = signer.url_for(row.id, rendition)
+    # Only an animated GIF keeps `image/gif` as its stored mime (processing turns a still
+    # GIF into PNG), so this marks a photo whose `full` rendition moves — the bubble shows
+    # `full` instead of the still `thumb` (decisions/00180).
+    animated = row.status == "ready" and row.mime == "image/gif" and "full" in row.renditions
     return {
         "id": row.id,
         "kind": row.kind,
@@ -250,6 +254,7 @@ def attachment_json(row: AttachmentRow, signer: MediaUrlSigner) -> JsonObject:
         "durationS": row.duration_s,
         "peaks": list(row.peaks) if row.peaks is not None else None,
         "urls": urls,
+        "animated": animated,
         "transcript": transcript_json(row.transcript),
     }
 
