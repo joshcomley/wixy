@@ -249,7 +249,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   fryItemTitle.textContent = "Fry";
   const fryItemHint = documentRef.createElement("span");
   fryItemHint.className = "wx-srv-more-item-hint";
-  fryItemHint.textContent = "Attach the squinting Fry GIF";
+  fryItemHint.textContent = "Hmmmmmm";
   fryItem.append(fryItemTitle, fryItemHint);
   moreMenu.appendChild(fryItem);
 

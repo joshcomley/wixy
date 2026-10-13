@@ -259,3 +259,30 @@ for (const width of [320, 402]) {
     }
   });
 }
+
+// The menu opens at the top of its bubble and grows downward INSIDE the scrolling thread. On the
+// newest message of a thread that already fills the screen, the bubble sits against the thread's
+// bottom edge, so without scrolling the menu into view its lower items (Cancel) were below the
+// visible area — first seen on CI once a spec earlier in the same worker left tall GIF bubbles
+// in the shared thread (PR #312).
+test("message actions menu on the newest message of a full thread is fully on-screen", async ({ page }) => {
+  await page.setViewportSize({ width: 402, height: 844 });
+  await unlockServer(page, "Cupcake");
+  const label = "fullthread";
+  await page.request.post("/test/server/seed-messages", {
+    data: { count: 40, label, sender: "Fixture", startAgoS: 120, spreadS: 60 },
+  });
+  const bubble = page.locator(".wx-srv-bubble-theirs", { hasText: `${label} #40` });
+  await expect(bubble).toBeVisible({ timeout: 5000 });
+  await bubble.scrollIntoViewIfNeeded();
+  await bubble.hover();
+  await bubble.locator(".wx-srv-message-actions-trigger").click();
+  const menu = bubble.locator(".wx-srv-message-actions");
+  await expect(menu).toBeVisible();
+  const items = menu.locator('[role="menuitem"]');
+  const itemCount = await items.count();
+  expect(itemCount).toBeGreaterThan(0);
+  for (let i = 0; i < itemCount; i++) {
+    await expect(items.nth(i)).toBeInViewport({ ratio: 1 });
+  }
+});

@@ -454,6 +454,12 @@ export function mountMessageActions(deps: MessageActionsDeps): MessageActionsCon
     trigger.setAttribute("aria-expanded", "true");
     bubble.classList.add("wx-srv-message-actions-open");
     attachOutsideListener();
+    // The menu grows downward from the bubble's top inside the scrolling thread, so on the newest
+    // message of a full thread its lower items sat below the visible area. Scroll just enough to
+    // show the whole menu (`nearest` leaves an already-visible menu exactly where it is).
+    if (typeof menu.scrollIntoView === "function") {
+      menu.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
   }
 
   // Round 2 ruling item 10 §(4): Reply is the FIRST item in the menu.
