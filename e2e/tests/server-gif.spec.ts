@@ -7,10 +7,11 @@ import { fileURLToPath } from "node:url";
 // itself, and the More menu's Fry item attaches the bundled Fry GIF. Both must play in the thread.
 
 const MULTI_TAP_INTERVAL_MS = 400;
-const FRY_GIF = readFileSync(
-  fileURLToPath(new URL("../../wixy_server/static/server-chat/fry-squint.gif", import.meta.url)),
-);
-const KEYBOARD_GIF_LINK = "https://static.klipy.com/ii/d7aec6f6f171607374b2065c836f92f4/9d/7d/2KTnFTI6.gif";
+// A small animated GIF made for these tests (160x120, 4 frames). Every GIF the browser fetches here
+// is answered with it, so the tests never load the real Fry GIF or a real GIF-host link.
+const TEST_GIF = readFileSync(fileURLToPath(new URL("../fixtures/test-animated.gif", import.meta.url)));
+const KEYBOARD_GIF_LINK = "https://static.klipy.com/test/local-test.gif";
+const FRY_GIF_PATH = "**/admin/static/server-chat/fry-squint.gif";
 
 test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 test.describe.configure({ timeout: 60_000 });
@@ -50,7 +51,7 @@ async function expectAnimatedGifBubble(page: Page): Promise<void> {
   await expect(bubbleGif).toBeVisible({ timeout: 20_000 });
   await expect(bubbleGif.locator(".wx-srv-gif-badge")).toHaveText("GIF");
   await expect(bubbleGif.locator("img")).toHaveAttribute("src", /\/full\?/);
-  // The bubble keeps the GIF's own shape (640x468) instead of a square crop, and fits a phone.
+  // The bubble keeps the GIF's own shape (160x120) instead of a square crop, and fits a phone.
   const box = (await bubbleGif.boundingBox())!;
   expect(box.width).toBeLessThanOrEqual(240.5);
   expect(box.width / box.height).toBeGreaterThan(1.2);
@@ -64,7 +65,7 @@ test.describe("server-gif.spec.ts", () => {
         status: 200,
         contentType: "image/gif",
         headers: { "access-control-allow-origin": "*" },
-        body: FRY_GIF,
+        body: TEST_GIF,
       }),
     );
     await unlockServer(page, "Gif tester");
@@ -78,12 +79,18 @@ test.describe("server-gif.spec.ts", () => {
   });
 
   test("the More menu's Fry item attaches the Fry GIF", async ({ page }) => {
+    let fryRequested = false;
+    await page.route(FRY_GIF_PATH, (route) => {
+      fryRequested = true;
+      return route.fulfill({ status: 200, contentType: "image/gif", body: TEST_GIF });
+    });
     await unlockServer(page, "Fry tester");
     await page.locator(".wx-srv-more-button").click();
     await expect(page.locator(".wx-srv-more-fry")).toBeVisible();
     await page.locator(".wx-srv-more-fry").click();
     await expect(page.locator(".wx-srv-more-menu")).toBeHidden();
     await sendStagedGif(page);
+    expect(fryRequested, "the Fry item fetched the bundled Fry GIF's address").toBe(true);
     await expectAnimatedGifBubble(page);
   });
 });

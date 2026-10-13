@@ -32,7 +32,8 @@ vi.mock("../src/server/api/uploads", async (importOriginal) => ({
   uploadServerAttachment,
 }));
 
-const KLIPY = "https://static.klipy.com/ii/d7aec6f6f171607374b2065c836f92f4/9d/7d/2KTnFTI6.gif";
+// A made-up link on a GIF host: only its shape matters, nothing is ever downloaded from it.
+const KLIPY = "https://static.klipy.com/test/local-test.gif";
 const GIF_BYTES = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 1, 2, 3]); // "GIF89a…"
 
 function gifResponse(bytes: Uint8Array = GIF_BYTES, init: ResponseInit = { status: 200 }): Response {
@@ -75,7 +76,7 @@ describe("fetchGifFile", () => {
     const fetchImpl = vi.fn(async () => gifResponse());
     const file = await fetchGifFile(KLIPY, new AbortController().signal, fetchImpl);
     expect(file.type).toBe("image/gif");
-    expect(file.name).toBe("2KTnFTI6.gif");
+    expect(file.name).toBe("local-test.gif");
     expect(file.size).toBe(GIF_BYTES.length);
     const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(init.credentials).toBe("omit");
