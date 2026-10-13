@@ -113,6 +113,10 @@ export interface ChatComposerOptions {
   /** Promote a server-chat textarea above its controls once it contains an explicit newline or
    * soft-wraps in the narrow inline row. The promoted state lasts until the draft is cleared. */
   promoteToFullWidthOnMultiline?: boolean | undefined;
+  /** Called with the text box's current value after every `input` event that is not part of
+   * an open IME composition, and when a composition ends — e.g. the server chat turning a
+   * keyboard-inserted GIF link into an attachment. */
+  onTextInput?: ((text: string) => void) | undefined;
 }
 
 /** What `takeDraft()` lifted out of the composer: the caller owns it until it calls either
@@ -136,6 +140,19 @@ export interface ChatComposer {
   /** Programmatically stage a file from an auxiliary composer control, such
    * as a MediaRecorder result. Picker/paste/drop still use `acceptFile`. */
   addFile(file: File): void;
+  /** Stage a file that first has to be fetched (a GIF behind a link). A placeholder chip
+   * labelled `label` shows at once and holds Send exactly like an upload in flight; its ✕
+   * aborts `load`'s signal. Once `load` resolves, the file is staged through `acceptFile`
+   * and uploaded as usual. If `load` rejects (and was not aborted), the chip goes and
+   * `onFailure` runs; with no `onFailure` the error's message is shown. */
+  stageFromSource(
+    label: string,
+    load: (signal: AbortSignal) => Promise<File>,
+    onFailure?: (error: unknown) => void,
+  ): void;
+  /** Replaces the draft text (re-sizing the box) and, when given, puts the caret at
+   * `caret`. Used to lift a GIF link out of the text once it becomes an attachment. */
+  setText(value: string, caret?: number): void;
   hasUploadsInFlight(): boolean;
   setAttachmentsSupported(supported: boolean): void;
   setBusy(busy: boolean): void;
@@ -261,6 +278,9 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
   root.appendChild(errorEl);
 
   let staged: StagedAttachment[] = [];
+  /** Files still being fetched by `stageFromSource` — shown as placeholder chips after the
+   * staged ones, and counted as uploads in flight so Send waits for them. */
+  let pendingSources: Array<{ readonly localId: string; readonly label: string; readonly controller: AbortController }> = [];
   let busy = false;
   let tornDown = false;
   /** One AbortController per in-flight upload, keyed by `localId` — aborted
@@ -369,7 +389,17 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
     textarea.style.height = `${next}px`;
     textarea.style.overflowY = textarea.scrollHeight > MAX_TEXTAREA_HEIGHT_PX ? "auto" : "hidden";
   }
-  textarea.addEventListener("input", autogrow);
+  // `onTextInput` never sees a half-composed word: changing the value under an open IME
+  // composition (an Android keyboard composes as you type) confuses the keyboard, so a
+  // composing input waits for its `compositionend`.
+  textarea.addEventListener("input", (evt) => {
+    autogrow();
+    if ((evt as InputEvent).isComposing === true) return;
+    options.onTextInput?.(textarea.value);
+  });
+  textarea.addEventListener("compositionend", () => {
+    options.onTextInput?.(textarea.value);
+  });
   textarea.addEventListener("focus", () => {
     if (options.promoteToFullWidthOnMultiline !== true) return;
     cancelCollapse();
@@ -383,7 +413,7 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
   autogrow();
 
   function anyUploading(): boolean {
-    return staged.some((a) => a.uploading);
+    return pendingSources.length > 0 || staged.some((a) => a.uploading);
   }
 
   const keepInputLive = options.keepInputLive === true;
@@ -404,7 +434,7 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
 
   function renderChips(): void {
     attachmentRow.innerHTML = "";
-    attachmentRow.hidden = staged.length === 0;
+    attachmentRow.hidden = staged.length === 0 && pendingSources.length === 0;
     for (const attachment of staged) {
       const chip = document.createElement("div");
       chip.className = "wx-chat-attachment-chip";
@@ -432,6 +462,28 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
       removeButton.setAttribute("aria-label", "Remove this attachment");
       removeButton.addEventListener("click", () => removeAttachment(attachment.localId));
       chip.appendChild(removeButton);
+      attachmentRow.appendChild(chip);
+    }
+    for (const source of pendingSources) {
+      const chip = document.createElement("div");
+      chip.className = "wx-chat-attachment-chip wx-chat-attachment-chip-pending";
+      const label = document.createElement("span");
+      label.className = "wx-chat-attachment-pending-label";
+      label.textContent = source.label;
+      const spinner = document.createElement("span");
+      spinner.className = "wx-spinner wx-chat-attachment-spinner";
+      spinner.setAttribute("aria-hidden", "true");
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.className = "wx-chat-attachment-remove";
+      removeButton.textContent = "✕";
+      removeButton.setAttribute("aria-label", "Remove this attachment");
+      removeButton.addEventListener("click", () => {
+        source.controller.abort();
+        pendingSources = pendingSources.filter((s) => s.localId !== source.localId);
+        renderChips();
+      });
+      chip.append(label, spinner, removeButton);
       attachmentRow.appendChild(chip);
     }
     refreshSubmitState();
@@ -481,6 +533,45 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
         removeAttachment(localId);
         setError(error instanceof Error ? error.message : "Couldn't attach that image — try again.");
       });
+  }
+
+  function stageFromSource(
+    label: string,
+    load: (signal: AbortSignal) => Promise<File>,
+    onFailure?: (error: unknown) => void,
+  ): void {
+    const source = { localId: cryptoRandomId(win), label, controller: new AbortController() };
+    pendingSources = [...pendingSources, source];
+    renderChips();
+    const settle = (): boolean => {
+      const stillPending = pendingSources.some((s) => s.localId === source.localId);
+      pendingSources = pendingSources.filter((s) => s.localId !== source.localId);
+      return stillPending && !tornDown && !source.controller.signal.aborted;
+    };
+    let loaded: Promise<File>;
+    try {
+      loaded = load(source.controller.signal);
+    } catch (error) {
+      loaded = Promise.reject(error);
+    }
+    loaded.then(
+      (file) => {
+        if (!settle()) return;
+        if (acceptFile(file)) {
+          uploadAndAttach(file);
+        } else {
+          renderChips();
+          if (onFailure !== undefined) onFailure(new Error("That file can't be attached here."));
+          else setError("That file can't be attached here.");
+        }
+      },
+      (error: unknown) => {
+        if (!settle()) return;
+        renderChips();
+        if (onFailure !== undefined) onFailure(error);
+        else setError(error instanceof Error ? error.message : "Couldn't attach that — try again.");
+      },
+    );
   }
 
   function handleFileList(files: FileList | null): void {
@@ -558,6 +649,15 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
     addFile(file) {
       uploadAndAttach(file, false);
     },
+    stageFromSource,
+    setText(value, caret) {
+      textarea.value = value;
+      autogrow();
+      if (caret !== undefined) {
+        const at = Math.max(0, Math.min(caret, value.length));
+        textarea.setSelectionRange(at, at);
+      }
+    },
     hasUploadsInFlight() {
       return anyUploading();
     },
@@ -617,6 +717,8 @@ ${typedSince}`;
       finishFilePicker();
       for (const controller of uploadControllers.values()) controller.abort();
       uploadControllers.clear();
+      for (const source of pendingSources) source.controller.abort();
+      pendingSources = [];
       for (const attachment of staged) URL.revokeObjectURL(attachment.previewUrl);
       staged = [];
     },

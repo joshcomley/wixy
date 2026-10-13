@@ -258,10 +258,10 @@ stroke's own creation order. `<Reaction>` =
 allowlist's order, `senders` oldest first; the reactor's `by_email` audit value is never
 returned. `<Attachment>` = `{id:str, kind:"photo"\|"video"\|"voice",
 status:"processing"\|"ready"\|"failed", width:int\|null, height:int\|null,
-durationS:float\|null, peaks:[float]\|null, urls:{full?,thumb?,poster?,play?},
+durationS:float\|null, peaks:[float]\|null, urls:{full?,thumb?,poster?,play?}, animated:bool,
 transcript:null\|{status:"pending"}\|{status:"failed"}\|{status:"done",text:str}}` — `urls`
 carries only READY renditions, each a freshly per-response HMAC-signed path (never
-precomputed/stored); view-once attachments carry `urls: {}` (fail closed, Inv 52). `transcript` is `null` until someone asks for one (voice notes only); the
+precomputed/stored); view-once attachments carry `urls: {}` (fail closed, Inv 52). `animated` is true only for a ready photo whose stored mime is `image/gif` (processing keeps only an ANIMATED GIF as GIF) and whose `full` rendition is on the wire — the bubble then shows `full` instead of the still `thumb`; always false for view-once (its `urls` are empty). `transcript` is `null` until someone asks for one (voice notes only); the
 machine `failure` reason is never on the wire.
 
 `<ReplyTo>` = `{seq:int, sender:str, text:str\|null, truncated:bool, media:<ReplyToMedia>\|null}`

@@ -30,6 +30,9 @@ export interface Attachment {
     readonly play?: string;
   };
   readonly transcript?: AttachmentTranscript | null;
+  /** True for a ready animated GIF: the bubble shows the moving `full` rendition, not the
+   * still `thumb`. Absent on a server that predates the flag. */
+  readonly animated?: boolean;
 }
 
 export interface MediaRenderHooks {
@@ -137,12 +140,24 @@ function renderPhotoButton(
   button.dataset["srvGestureBoundary"] = "";
   button.setAttribute("aria-label", "Open attached photo");
   const image = documentRef.createElement("img");
-  image.src = attachment.urls.thumb ?? attachment.urls.full ?? "";
-  image.alt = "Attached photo";
+  // An animated GIF's still `thumb` is only its first frame, so the bubble shows `full` (the
+  // original GIF bytes) and it plays in the thread like any chat app's GIF.
+  const animated = attachment.animated === true && attachment.urls.full !== undefined;
+  image.src = animated ? attachment.urls.full! : (attachment.urls.thumb ?? attachment.urls.full ?? "");
+  image.alt = animated ? "Attached GIF" : "Attached photo";
   image.loading = "lazy";
   if (attachment.width !== null) image.width = attachment.width;
   if (attachment.height !== null) image.height = attachment.height;
   button.appendChild(image);
+  if (animated) {
+    button.classList.add("wx-srv-photo-animated");
+    button.setAttribute("aria-label", "Open attached GIF");
+    const badge = documentRef.createElement("span");
+    badge.className = "wx-srv-gif-badge";
+    badge.textContent = "GIF";
+    badge.setAttribute("aria-hidden", "true");
+    button.appendChild(badge);
+  }
   if (attachment.urls.full && context.openLightbox) {
     button.addEventListener("click", () => context.openLightbox?.(attachment.urls.full!, image.alt));
   } else {

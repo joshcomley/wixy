@@ -41,6 +41,7 @@ import type { ServerIdentity } from "./identity";
 import { linkifyInto } from "./linkify";
 import { mountMessageActions, type MessageActionsController } from "./messageActions";
 import { createHeardStore } from "./heardStore";
+import { FRY_GIF_URL, GifFetchError, fetchGifFile, findGifLinks, removeGifLinks } from "./gifLink";
 import { disposeAttachmentMedia, renderAttachments } from "./mediaRender";
 import { reactionLabel, reactionOrder } from "./reactions";
 import { createVoiceRecorder, type VoiceRecorder } from "./recorder";
@@ -90,6 +91,8 @@ export interface ServerThreadDeps {
   onSettings: () => void;
   document?: Document;
   fileViewOnceSettings?: WeakMap<File, ViewOnceDraftSettings>;
+  /** Fetches GIFs (keyboard GIF links and the bundled Fry GIF). Defaults to `win.fetch`. */
+  fetch?: typeof fetch;
 }
 
 export interface ServerThreadView {
@@ -173,6 +176,7 @@ function formatTime(epochS: number): string {
 export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   const { identity, hooks, win } = deps;
   const documentRef = deps.document ?? document;
+  const fetchImpl: typeof fetch = deps.fetch ?? ((input, init) => win.fetch(input, init));
   const now = (): number => Date.now();
 
   const element = documentRef.createElement("div");
@@ -235,6 +239,19 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   canvasItemHint.textContent = "Add a blank space to draw on";
   canvasItem.append(canvasItemTitle, canvasItemHint);
   moreMenu.appendChild(canvasItem);
+  const fryItem = documentRef.createElement("button");
+  fryItem.type = "button";
+  fryItem.className = "wx-srv-more-item wx-srv-more-fry";
+  fryItem.setAttribute("role", "menuitem");
+  fryItem.setAttribute("data-srv-gesture-boundary", "");
+  const fryItemTitle = documentRef.createElement("span");
+  fryItemTitle.className = "wx-srv-more-item-title";
+  fryItemTitle.textContent = "Fry";
+  const fryItemHint = documentRef.createElement("span");
+  fryItemHint.className = "wx-srv-more-item-hint";
+  fryItemHint.textContent = "Attach the squinting Fry GIF";
+  fryItem.append(fryItemTitle, fryItemHint);
+  moreMenu.appendChild(fryItem);
 
   function closeMoreMenu(): void {
     if (moreMenu.hidden) return;
@@ -257,6 +274,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   canvasItem.addEventListener("click", () => {
     closeMoreMenu();
     void addCanvas();
+  });
+  fryItem.addEventListener("click", () => {
+    closeMoreMenu();
+    if (currentSession === null) return;
+    composer.setError(null);
+    composer.stageFromSource("GIF", (signal) => fetchGifFile(FRY_GIF_URL, signal, fetchImpl), () => {
+      composer.setError("Couldn't attach the Fry GIF. Try again.");
+    });
   });
 
   header.append(title, nameChip, moreButton, settingsButton, panicButton);
@@ -857,6 +882,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     keepInputLive: true,
     enterToSend: false,
     promoteToFullWidthOnMultiline: true,
+    onTextInput: (text) => takeGifLinks(text),
     extraButtons: [recordButton, cancelRecordingButton, pauseRecordingButton, recordingStatus, viewOnceButton],
     renderChipPreview: (file, previewUrl) => {
       filePreviewUrls.set(file, previewUrl);
@@ -904,6 +930,31 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     onSubmit: () => send(),
   });
   composer.setAttachmentsSupported(true);
+
+  /** GIF links that could not be attached: put back in the text, they are left alone after
+   * that so editing the message never re-tries (and re-fails) them on every keystroke. */
+  const unattachableGifLinks = new Set<string>();
+
+  /** A keyboard's GIF picker inserts a link (decisions/00180): lift each GIF link out of the
+   * text and attach the GIF itself. A link that cannot be fetched goes back into the text. */
+  function takeGifLinks(text: string): void {
+    if (currentSession === null) return;
+    const matches = findGifLinks(text).filter((match) => !unattachableGifLinks.has(match.url));
+    if (matches.length === 0) return;
+    const remaining = removeGifLinks(text, matches);
+    composer.setText(remaining.text, remaining.caret);
+    composer.setError(null);
+    for (const match of matches) {
+      composer.stageFromSource("GIF", (signal) => fetchGifFile(match.url, signal, fetchImpl), (error) => {
+        unattachableGifLinks.add(match.url);
+        const current = composer.text();
+        composer.setText(current === "" ? match.url : `${current} ${match.url}`);
+        const reason = error instanceof GifFetchError ? `${error.message} ` : "";
+        composer.setError(`${reason}The link was left in your message instead.`);
+      });
+    }
+  }
+
   const attachButton = composer.element.querySelector<HTMLButtonElement>(".wx-chat-attach-button");
   if (attachButton !== null) {
     attachButton.title = "Attach a photo or video";

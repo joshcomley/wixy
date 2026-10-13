@@ -28,6 +28,9 @@ export interface Attachment {
   };
   /** Absent on a server that predates transcripts; `null` until someone asks for one. */
   readonly transcript?: AttachmentTranscript | null;
+  /** True for a ready animated GIF: the bubble shows the moving `full` rendition, not the
+   * still `thumb`. Absent on a server that predates the flag. */
+  readonly animated?: boolean;
 }
 
 /** One emoji on one message: who reacted, oldest first (spec/server-chat/04-reactions.md). */

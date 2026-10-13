@@ -1338,6 +1338,48 @@ button.wx-srv-quote:focus-visible {
   display: block;
 }
 
+/* An animated GIF plays in the bubble at its own shape rather than a square crop
+   (decisions/00180); its width/height attributes give the box its aspect ratio before the
+   bytes arrive, so the thread does not jump. */
+.wx-srv-photo-thumb.wx-srv-photo-animated {
+  position: relative;
+  width: min(240px, 100%);
+  height: auto;
+}
+
+.wx-srv-photo-animated img {
+  height: auto;
+  object-fit: contain;
+}
+
+.wx-srv-gif-badge {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 0.6);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+.wx-chat-attachment-chip-pending {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--wx-canvas);
+}
+
+.wx-chat-attachment-pending-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--wx-muted);
+}
+
 .wx-srv-attachment-chip-label {
   box-sizing: border-box;
   width: 100%;
