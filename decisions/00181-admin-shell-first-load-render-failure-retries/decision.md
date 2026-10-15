@@ -9,3 +9,6 @@ Fetch failures and render failures are handled separately. A render failure afte
 
 # Watch for
 The trigger of the 2026-10-15 incident was never established (server healthy since the 21:28 deploy; fixture and real-data copy both loaded). If it recurs, the toast now appears and the browser console has the real error.
+
+# Delivery
+Shipped as pull request 314 (merge b9d4848) and live as version 317 on 2026-10-15.
