@@ -1087,6 +1087,40 @@ describe("mountShell", () => {
     }
   });
 
+  it("a snapshot that arrives but cannot be rendered shows the error toast and retries, never a silent \"Loading…\"", async () => {
+    let calls = 0;
+    const api = fakeApi({
+      getState: vi.fn(async () => {
+        calls += 1;
+        // First answer is a 200 whose shape the top bar chokes on.
+        if (calls === 1) return fakeState({ upstream: undefined as never });
+        return fakeState();
+      }),
+    });
+    const win = fakeWindow();
+    goTo(win, "/admin/contact");
+    const container = document.createElement("div");
+
+    vi.useFakeTimers();
+    try {
+      mountShell(container, { api, win, mountEditView: fakeMountEditView().fn });
+      const getStateMock = api.getState as ReturnType<typeof vi.fn>;
+      await getStateMock.mock.results[0]?.value;
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(container.querySelector(".wx-toast-error")).not.toBeNull();
+
+      await vi.runOnlyPendingTimersAsync(); // fires the scheduled retry
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(container.querySelector(".wx-toast-error")).toBeNull();
+      expect(container.querySelector(".wx-contact-panel")).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("an accepted PATCH batch forwards applyOps to the active edit view", async () => {
     const api = fakeApi({ patchDraft: vi.fn(async () => ({ kind: "ok" as const, rev: 1 })) });
     const win = fakeWindow();

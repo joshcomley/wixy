@@ -1196,9 +1196,16 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
   // -- State loading ----------------------------------------------------------
 
   async function loadState(): Promise<void> {
+    let fresh: StateResponse;
     try {
-      const fresh = await api.getState();
-      const isFirstLoad = state === null;
+      fresh = await api.getState();
+    } catch {
+      showStateError();
+      stateRetryTimer = setTimeout(() => void loadState(), STATE_RETRY_MS) as unknown as number;
+      return;
+    }
+    const isFirstLoad = state === null;
+    try {
       state = fresh;
       hideStateError();
       if (opQueue === null) {
@@ -1232,6 +1239,12 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
       renderTopBar();
       if (isFirstLoad) handleRoute(currentRoute(win));
     } catch {
+      // The snapshot ARRIVED but turning it into a screen threw (a bad field
+      // in real data, a panel that failed to mount). Never leave the shell
+      // parked on its initial "Loading…" with no message and no retry —
+      // that was indistinguishable from the server being down (2026-10-15).
+      // Reset to first-load so the retry re-runs the whole mount.
+      state = null;
       showStateError();
       stateRetryTimer = setTimeout(() => void loadState(), STATE_RETRY_MS) as unknown as number;
     }
