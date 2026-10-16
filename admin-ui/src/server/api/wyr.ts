@@ -9,6 +9,8 @@ import type { Message } from "./messages";
 export type WyrState = "voting" | "answering" | "revealing" | "revealed" | "skipped";
 export type WyrChoice = "a" | "b";
 export type WyrVote = "play" | "skip";
+/** The picture job's state: a card waits for pictures only while `pending`. */
+export type WyrImages = "none" | "pending" | "done" | "failed";
 
 /** What a `Message` carries about its round: enough to notice it moved, never the answers. */
 export interface WyrSummary {
@@ -59,9 +61,7 @@ export interface WyrView {
   readonly state: WyrState;
   readonly rev: number;
   readonly question: WyrQuestionView;
-  /** True when this server paints pictures for rounds (a card waits for them); false means
-   * text-only rounds. */
-  readonly images: boolean;
+  readonly images: WyrImages;
   readonly players: readonly WyrPlayerView[];
   readonly you: WyrYouView | null;
   readonly result: WyrResult | null;
@@ -90,6 +90,10 @@ function asChoice(value: unknown): WyrChoice | null {
 
 function asVote(value: unknown): WyrVote | null {
   return value === "play" || value === "skip" ? value : null;
+}
+
+function asImages(value: unknown): WyrImages {
+  return value === "pending" || value === "done" || value === "failed" ? value : "none";
 }
 
 function asPosInt(value: unknown): number | null {
@@ -196,7 +200,7 @@ export function parseWyrView(value: unknown): WyrView | null {
       a: question["a"],
       b: question["b"],
     },
-    images: record["images"] === true,
+    images: asImages(record["images"]),
     players,
     you: record["you"] === null ? null : parseYou(record["you"]),
     // Defence in depth: a result is only ever honoured for a revealed round.

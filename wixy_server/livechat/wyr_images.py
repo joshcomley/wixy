@@ -11,6 +11,13 @@ benchmark ("use Krea 2 Turbo day to day"); Boogu Image Turbo is the fast/Apache-
 alternative. Both were benchmarked rendering a 1024x1024 photo in ~9-25 s while the
 voice services stay resident.
 
+ComfyUI keeps what it renders: `SaveImage` writes a PNG into ComfyUI's own output directory and
+the prompt graph stays in its `/history`. Both are chat content (Inv 54) that delete/wipe can
+never reach from outside, so every run cleans up after itself — it deletes its own history
+entry, its own output files (`output_dir`, which MUST be the directory ComfyUI writes to; the
+fleet runs ComfyUI with a dedicated `--output-directory`) and, for a run it abandons, cancels
+the queued/running job. `purge_leftovers` sweeps anything a crashed run left behind.
+
 Both option images go in ONE `/prompt` submission as two sampling chains sharing the
 loaded UNET/CLIP/VAE, so the second image never pays a model reload.
 """
@@ -71,25 +78,88 @@ IMAGE_MODELS: dict[str, ImageModelConfig] = {
     ),
 }
 DEFAULT_IMAGE_MODEL = "krea2-turbo-nvfp4"
+FILE_PREFIX = "wyr_"
 
 _SUBMIT_TIMEOUT_S = 30.0
 _DOWNLOAD_TIMEOUT_S = 60.0
 _GENERATION_BUDGET_S = 300.0
 _PROBE_TIMEOUT_S = 5.0
+_STALE_OUTPUT_AFTER_S = 900.0
 
 
 class ComfyImageGenerator:
     """Drives one ComfyUI HTTP API (`/prompt` + `/history` + `/view`). All methods are
     synchronous — route code calls them via `anyio.to_thread.run_sync`."""
 
-    def __init__(self, base_url: str, *, model: str = DEFAULT_IMAGE_MODEL) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        model: str = DEFAULT_IMAGE_MODEL,
+        output_dir: Path | None = None,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._config = IMAGE_MODELS.get(model, IMAGE_MODELS[DEFAULT_IMAGE_MODEL])
+        self._output_dir = output_dir
+        self._transport = transport
+
+    def purge_leftovers(self) -> int:
+        """Delete stale `wyr_*` files in ComfyUI's output directory — what a run that crashed (or
+        was cancelled mid-write) left behind. Files younger than the generation budget may
+        belong to the OLDER process of a blue/green overlap, still working, and are kept.
+        Returns how many were removed."""
+        if self._output_dir is None:
+            return 0
+        removed = 0
+        cutoff = time.time() - _STALE_OUTPUT_AFTER_S
+        try:
+            for path in self._output_dir.glob(f"{FILE_PREFIX}*"):
+                try:
+                    if path.stat().st_mtime >= cutoff:
+                        continue
+                    path.unlink()
+                    removed += 1
+                except OSError:
+                    _LOGGER.warning("wyr: could not remove leftover %s", path)
+        except OSError:
+            _LOGGER.warning("wyr: could not list %s", self._output_dir)
+        return removed
+
+    def _forget_run(
+        self, client: httpx.Client, prompt_id: str | None, prefix: str, *, cancel: bool
+    ) -> None:
+        """Best-effort removal of everything ComfyUI retains about one run: its history
+        entry, its output files, and (for an abandoned run) the queued/running job itself."""
+        if prompt_id is not None:
+            if cancel:
+                for endpoint, body in (
+                    ("/queue", {"delete": [prompt_id]}),
+                    ("/interrupt", {"prompt_id": prompt_id}),
+                ):
+                    try:
+                        client.post(endpoint, json=body, timeout=_PROBE_TIMEOUT_S)
+                    except httpx.HTTPError:
+                        pass
+            try:
+                client.post("/history", json={"delete": [prompt_id]}, timeout=_PROBE_TIMEOUT_S)
+            except httpx.HTTPError:
+                _LOGGER.warning("wyr: could not delete ComfyUI history for a finished run")
+        if self._output_dir is not None:
+            try:
+                for path in self._output_dir.glob(f"{prefix}_*"):
+                    try:
+                        path.unlink()
+                    except OSError:
+                        _LOGGER.warning("wyr: could not remove %s", path)
+            except OSError:
+                _LOGGER.warning("wyr: could not list %s", self._output_dir)
 
     def available(self) -> bool:
         """Cheap liveness probe before any GPU work is queued for a round."""
         try:
-            resp = httpx.get(f"{self._base_url}/system_stats", timeout=_PROBE_TIMEOUT_S)
+            with httpx.Client(transport=self._transport) as client:
+                resp = client.get(f"{self._base_url}/system_stats", timeout=_PROBE_TIMEOUT_S)
         except httpx.HTTPError:
             return False
         return resp.status_code == 200
@@ -107,7 +177,7 @@ class ComfyImageGenerator:
         `out_dir` (which must exist). Raises `ImageGenerationError` on any failure —
         nothing partial is returned."""
         cfg = self._config
-        prefix = f"wyr_{uuid.uuid4().hex[:12]}"
+        prefix = f"{FILE_PREFIX}{uuid.uuid4().hex[:12]}"
         graph: dict[str, dict[str, object]] = {
             "1": {
                 "class_type": "UNETLoader",
@@ -156,68 +226,74 @@ class ComfyImageGenerator:
                 "inputs": {"images": [str(base + 5), 0], "filename_prefix": f"{prefix}_{tag}"},
             }
 
-        with httpx.Client(base_url=self._base_url) as client:
+        with httpx.Client(base_url=self._base_url, transport=self._transport) as client:
+            prompt_id: str | None = None
+            cancel = False
             try:
-                resp = client.post(
-                    "/prompt",
-                    json={"prompt": graph, "client_id": uuid.uuid4().hex},
-                    timeout=_SUBMIT_TIMEOUT_S,
-                )
-            except httpx.HTTPError as exc:
-                raise ImageGenerationError(f"submit unreachable: {exc}") from exc
-            if resp.status_code != 200:
-                raise ImageGenerationError(f"submit refused: HTTP {resp.status_code}")
-            try:
-                prompt_id = resp.json()["prompt_id"]
-            except (ValueError, KeyError) as exc:
-                raise ImageGenerationError(
-                    f"submit returned no prompt_id: {resp.text!r:.200}"
-                ) from exc
-
-            deadline = time.monotonic() + _GENERATION_BUDGET_S
-            images: dict[str, str] = {}
-            while time.monotonic() < deadline:
                 try:
-                    history = client.get(f"/history/{prompt_id}", timeout=_SUBMIT_TIMEOUT_S)
-                except httpx.HTTPError:
-                    time.sleep(0.5)
-                    continue
-                if history.status_code != 200:
-                    time.sleep(0.5)
-                    continue
-                entry = history.json().get(prompt_id)
-                if entry is None:
-                    time.sleep(0.5)
-                    continue
-                status = entry.get("status") or {}
-                if status.get("status_str") != "success":
-                    raise ImageGenerationError(f"generation failed: {str(status)[:200]}")
-                for node_out in entry.get("outputs", {}).values():
-                    for image in node_out.get("images", []):
-                        filename = image.get("filename", "")
-                        if filename.startswith(f"{prefix}_a"):
-                            images["a"] = filename
-                        elif filename.startswith(f"{prefix}_b"):
-                            images["b"] = filename
-                break
-            else:
-                raise ImageGenerationError("generation timed out")
-            if "a" not in images or "b" not in images:
-                raise ImageGenerationError(f"missing outputs: {sorted(images)}")
-
-            paths: dict[str, Path] = {}
-            for tag in ("a", "b"):
-                try:
-                    view = client.get(
-                        "/view",
-                        params={"filename": images[tag], "subfolder": "", "type": "output"},
-                        timeout=_DOWNLOAD_TIMEOUT_S,
+                    resp = client.post(
+                        "/prompt",
+                        json={"prompt": graph, "client_id": uuid.uuid4().hex},
+                        timeout=_SUBMIT_TIMEOUT_S,
                     )
                 except httpx.HTTPError as exc:
-                    raise ImageGenerationError(f"download failed: {exc}") from exc
-                if view.status_code != 200 or not view.content:
-                    raise ImageGenerationError(f"download refused: HTTP {view.status_code}")
-                target = out_dir / f"{prefix}_{tag}.png"
-                target.write_bytes(view.content)
-                paths[tag] = target
-            return paths["a"], paths["b"]
+                    raise ImageGenerationError(f"submit unreachable: {exc}") from exc
+                if resp.status_code != 200:
+                    raise ImageGenerationError(f"submit refused: HTTP {resp.status_code}")
+                try:
+                    prompt_id = resp.json()["prompt_id"]
+                except (ValueError, KeyError) as exc:
+                    raise ImageGenerationError(
+                        f"submit returned no prompt_id: {resp.text!r:.200}"
+                    ) from exc
+
+                deadline = time.monotonic() + _GENERATION_BUDGET_S
+                images: dict[str, str] = {}
+                while time.monotonic() < deadline:
+                    try:
+                        history = client.get(f"/history/{prompt_id}", timeout=_SUBMIT_TIMEOUT_S)
+                    except httpx.HTTPError:
+                        time.sleep(0.5)
+                        continue
+                    if history.status_code != 200:
+                        time.sleep(0.5)
+                        continue
+                    entry = history.json().get(prompt_id)
+                    if entry is None:
+                        time.sleep(0.5)
+                        continue
+                    status = entry.get("status") or {}
+                    if status.get("status_str") != "success":
+                        raise ImageGenerationError(f"generation failed: {str(status)[:200]}")
+                    for node_out in entry.get("outputs", {}).values():
+                        for image in node_out.get("images", []):
+                            filename = image.get("filename", "")
+                            if filename.startswith(f"{prefix}_a"):
+                                images["a"] = filename
+                            elif filename.startswith(f"{prefix}_b"):
+                                images["b"] = filename
+                    break
+                else:
+                    cancel = True
+                    raise ImageGenerationError("generation timed out")
+                if "a" not in images or "b" not in images:
+                    raise ImageGenerationError(f"missing outputs: {sorted(images)}")
+
+                paths: dict[str, Path] = {}
+                for tag in ("a", "b"):
+                    try:
+                        view = client.get(
+                            "/view",
+                            params={"filename": images[tag], "subfolder": "", "type": "output"},
+                            timeout=_DOWNLOAD_TIMEOUT_S,
+                        )
+                    except httpx.HTTPError as exc:
+                        raise ImageGenerationError(f"download failed: {exc}") from exc
+                    if view.status_code != 200 or not view.content:
+                        raise ImageGenerationError(f"download refused: HTTP {view.status_code}")
+                    target = out_dir / f"{prefix}_{tag}.png"
+                    target.write_bytes(view.content)
+                    paths[tag] = target
+                return paths["a"], paths["b"]
+            finally:
+                self._forget_run(client, prompt_id, prefix, cancel=cancel)

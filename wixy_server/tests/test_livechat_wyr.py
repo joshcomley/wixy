@@ -6,12 +6,16 @@ reveal), the `/wyr*` routes, on-demand image attachment, and erasure with the ch
 from __future__ import annotations
 
 import io
+import json
+import os
 import random
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -26,7 +30,12 @@ from wixy_server.livechat.store import (
     WyrRoundFullError,
     WyrRoundNotFoundError,
 )
-from wixy_server.livechat.wyr_game import wyr_view_json
+from wixy_server.livechat.wyr_game import (
+    clear_wyr_scratch,
+    generate_round_images,
+    wyr_scratch_dir,
+    wyr_view_json,
+)
 from wixy_server.livechat.wyr_images import ComfyImageGenerator, ImageGenerationError
 from wixy_server.livechat.wyr_questions import (
     BANK_PATH,
@@ -34,6 +43,7 @@ from wixy_server.livechat.wyr_questions import (
     pick_question,
     style_suffix,
 )
+from wixy_server.storage import ProjectPaths
 from wixy_server.tests.test_livechat_view_once import (  # noqa: F401 - fixtures re-exported
     TEST_PIN,
     UNLOCK_GUARD_HEADERS,
@@ -56,6 +66,7 @@ def store(tmp_path: Path) -> LiveChatStore:
 
 def _new_round(store: LiveChatStore, client_id: str = "wyr-client-1", sender: str = "Josh") -> int:
     message, created = store.create_wyr_round(
+        images_pending=False,
         client_id=client_id,
         sender=sender,
         device_id="device-1",
@@ -69,7 +80,12 @@ def _new_round(store: LiveChatStore, client_id: str = "wyr-client-1", sender: st
 
 def _vote(store: LiveChatStore, seq: int, name: str, vote: Any = "play") -> Any:
     return store.vote_wyr(
-        anchor_seq=seq, voter_key=name.casefold(), voter_name=name, vote=vote, now=11.0
+        voter_email=None,
+        anchor_seq=seq,
+        voter_key=name.casefold(),
+        voter_name=name,
+        vote=vote,
+        now=11.0,
     )
 
 
@@ -140,7 +156,6 @@ class TestSchema:
         conn = sqlite3.connect(str(db))
         try:
             conn.execute("DROP TABLE wyr_rounds")
-            conn.execute("DROP TABLE wyr_used")
             conn.execute("PRAGMA user_version = 14")
             conn.commit()
         finally:
@@ -163,6 +178,7 @@ class TestStateMachine:
     def test_create_is_idempotent_on_client_id(self, store: LiveChatStore) -> None:
         seq = _new_round(store)
         again, created = store.create_wyr_round(
+            images_pending=False,
             client_id="wyr-client-1",
             sender="Josh",
             device_id="device-1",
@@ -171,18 +187,24 @@ class TestStateMachine:
             now=99.0,
         )
         assert created is False and again.seq == seq
-        assert "q0002" not in store.wyr_used_ids()
+        assert store.wyr_used_ids() == {"q0001"}
 
     def test_full_happy_path_to_revealed(self, store: LiveChatStore) -> None:
         seq = _to_answering(store)
         assert store.get_wyr_round(anchor_seq=seq).state == "answering"  # type: ignore[union-attr]
-        store.answer_wyr(anchor_seq=seq, player_key="josh", choice="a", guess="b", now=12.0)
+        store.answer_wyr(
+            player_email=None, anchor_seq=seq, player_key="josh", choice="a", guess="b", now=12.0
+        )
         assert store.get_wyr_round(anchor_seq=seq).state == "answering"  # type: ignore[union-attr]
-        store.answer_wyr(anchor_seq=seq, player_key="rose", choice="b", guess="a", now=13.0)
+        store.answer_wyr(
+            player_email=None, anchor_seq=seq, player_key="rose", choice="b", guess="a", now=13.0
+        )
         assert store.get_wyr_round(anchor_seq=seq).state == "revealing"  # type: ignore[union-attr]
-        store.reveal_wyr(anchor_seq=seq, player_key="josh", now=14.0)
+        store.reveal_wyr(player_email=None, anchor_seq=seq, player_key="josh", now=14.0)
         assert store.get_wyr_round(anchor_seq=seq).state == "revealing"  # type: ignore[union-attr]
-        done, changed = store.reveal_wyr(anchor_seq=seq, player_key="rose", now=15.0)
+        done, changed = store.reveal_wyr(
+            player_email=None, anchor_seq=seq, player_key="rose", now=15.0
+        )
         assert changed is True and done.state == "revealed"
 
     def test_any_skip_vote_skips_the_round(self, store: LiveChatStore) -> None:
@@ -201,7 +223,14 @@ class TestStateMachine:
         seq2 = _new_round(store, client_id="wyr-client-2")
         _vote(store, seq2, "Rose")
         with pytest.raises(WyrNotPlayerError):
-            store.answer_wyr(anchor_seq=seq2, player_key="mallory", choice="a", guess="a", now=12.0)
+            store.answer_wyr(
+                player_email=None,
+                anchor_seq=seq2,
+                player_key="mallory",
+                choice="a",
+                guess="a",
+                now=12.0,
+            )
 
     def test_a_third_identity_voting_on_a_full_round_is_refused(
         self, store: LiveChatStore, tmp_path: Path
@@ -225,25 +254,36 @@ class TestStateMachine:
     def test_retries_are_idempotent_and_answers_lock_at_reveal(self, store: LiveChatStore) -> None:
         seq = _to_answering(store)
         first, changed = store.answer_wyr(
-            anchor_seq=seq, player_key="josh", choice="a", guess="b", now=12.0
+            player_email=None, anchor_seq=seq, player_key="josh", choice="a", guess="b", now=12.0
         )
         assert changed is True
         same, changed_again = store.answer_wyr(
-            anchor_seq=seq, player_key="josh", choice="a", guess="b", now=12.5
+            player_email=None, anchor_seq=seq, player_key="josh", choice="a", guess="b", now=12.5
         )
         assert changed_again is False and same.rev == first.rev
-        store.answer_wyr(anchor_seq=seq, player_key="rose", choice="b", guess="a", now=13.0)
+        store.answer_wyr(
+            player_email=None, anchor_seq=seq, player_key="rose", choice="b", guess="a", now=13.0
+        )
         with pytest.raises(WyrBadStateError):
-            store.answer_wyr(anchor_seq=seq, player_key="josh", choice="b", guess="b", now=14.0)
-        again, changed_reveal = store.reveal_wyr(anchor_seq=seq, player_key="josh", now=15.0)
+            store.answer_wyr(
+                player_email=None,
+                anchor_seq=seq,
+                player_key="josh",
+                choice="b",
+                guess="b",
+                now=14.0,
+            )
+        again, changed_reveal = store.reveal_wyr(
+            player_email=None, anchor_seq=seq, player_key="josh", now=15.0
+        )
         assert changed_reveal is True
-        _, repeat = store.reveal_wyr(anchor_seq=seq, player_key="josh", now=16.0)
+        _, repeat = store.reveal_wyr(player_email=None, anchor_seq=seq, player_key="josh", now=16.0)
         assert repeat is False and again.reveal1 is True
 
     def test_cannot_reveal_before_both_answered(self, store: LiveChatStore) -> None:
         seq = _to_answering(store)
         with pytest.raises(WyrBadStateError):
-            store.reveal_wyr(anchor_seq=seq, player_key="josh", now=12.0)
+            store.reveal_wyr(player_email=None, anchor_seq=seq, player_key="josh", now=12.0)
 
     def test_unknown_round(self, store: LiveChatStore) -> None:
         with pytest.raises(WyrRoundNotFoundError):
@@ -262,15 +302,109 @@ class TestStateMachine:
         assert store.get_wyr_round(anchor_seq=seq) is None
         assert store.wyr_used_ids() == set()
 
+    def test_deleting_a_round_leaves_no_record_that_it_was_played(
+        self, store: LiveChatStore, tmp_path: Path
+    ) -> None:
+        # The played list is derived from existing rounds: there is no separate (dated)
+        # table whose row could outlive the message — or an older process's wipe.
+        seq = _new_round(store)
+        store.delete_message(seq=seq, now=20.0)
+        assert store.wyr_used_ids() == set()
+        conn = sqlite3.connect(str(tmp_path / "server" / "server.db"))
+        try:
+            tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
+        finally:
+            conn.close()
+        assert "wyr_used" not in tables
+
+    def test_a_name_asserted_under_a_different_sign_in_is_not_that_player(
+        self, store: LiveChatStore
+    ) -> None:
+        message, _ = store.create_wyr_round(
+            images_pending=False,
+            client_id="wyr-email-1",
+            sender="Josh",
+            device_id="device-1",
+            by_email="josh@example.com",
+            question_id="q0001",
+            now=10.0,
+        )
+        seq = message.seq
+        store.vote_wyr(
+            voter_email="rose@example.com",
+            anchor_seq=seq,
+            voter_key="rose",
+            voter_name="Rose",
+            vote="play",
+            now=11.0,
+        )
+        # Someone signed in as Rose's email cannot answer or reveal AS Josh...
+        with pytest.raises(WyrNotPlayerError):
+            store.answer_wyr(
+                player_email="rose@example.com",
+                anchor_seq=seq,
+                player_key="josh",
+                choice="a",
+                guess="a",
+                now=12.0,
+            )
+        with pytest.raises(WyrNotPlayerError):
+            store.vote_wyr(
+                voter_email="rose@example.com",
+                anchor_seq=seq,
+                voter_key="josh",
+                voter_name="Josh",
+                vote="play",
+                now=12.0,
+            )
+        # ...but each person under their own sign-in (or no known email) still plays.
+        store.answer_wyr(
+            player_email="josh@example.com",
+            anchor_seq=seq,
+            player_key="josh",
+            choice="a",
+            guess="b",
+            now=13.0,
+        )
+        store.answer_wyr(
+            player_email=None, anchor_seq=seq, player_key="rose", choice="b", guess="a", now=14.0
+        )
+        assert store.get_wyr_round(anchor_seq=seq).state == "revealing"  # type: ignore[union-attr]
+
+    def test_image_state_ends_exactly_once_and_stale_pending_is_failed_at_startup(
+        self, store: LiveChatStore
+    ) -> None:
+        message, _ = store.create_wyr_round(
+            images_pending=True,
+            client_id="wyr-img-1",
+            sender="Josh",
+            device_id="device-1",
+            by_email=None,
+            question_id="q0001",
+            now=10.0,
+        )
+        seq = message.seq
+        assert store.get_wyr_round(anchor_seq=seq).images == "pending"  # type: ignore[union-attr]
+        assert store.fail_stale_wyr_images(now=20.0) == 1
+        failed = store.get_wyr_round(anchor_seq=seq)
+        assert failed is not None and failed.images == "failed"
+        store.fail_wyr_images(anchor_seq=seq, now=21.0)  # idempotent: no second bump
+        assert store.get_wyr_round(anchor_seq=seq).rev == failed.rev  # type: ignore[union-attr]
+        assert store.fail_stale_wyr_images(now=22.0) == 0
+
 
 class TestViewFiltering:
     def _round(self, store: LiveChatStore, *, reveal: bool) -> Any:
         seq = _to_answering(store)
-        store.answer_wyr(anchor_seq=seq, player_key="josh", choice="a", guess="b", now=12.0)
-        store.answer_wyr(anchor_seq=seq, player_key="rose", choice="b", guess="a", now=13.0)
+        store.answer_wyr(
+            player_email=None, anchor_seq=seq, player_key="josh", choice="a", guess="b", now=12.0
+        )
+        store.answer_wyr(
+            player_email=None, anchor_seq=seq, player_key="rose", choice="b", guess="a", now=13.0
+        )
         if reveal:
-            store.reveal_wyr(anchor_seq=seq, player_key="josh", now=14.0)
-            store.reveal_wyr(anchor_seq=seq, player_key="rose", now=15.0)
+            store.reveal_wyr(player_email=None, anchor_seq=seq, player_key="josh", now=14.0)
+            store.reveal_wyr(player_email=None, anchor_seq=seq, player_key="rose", now=15.0)
         return store.get_wyr_round(anchor_seq=seq)
 
     def test_the_other_players_answers_are_hidden_until_both_reveal(
@@ -293,6 +427,43 @@ class TestViewFiltering:
         stranger = wyr_view_json(round_, question, "Nobody")
         assert stranger["you"] is None and stranger["result"] is None
         assert "'choice'" not in repr(stranger)
+
+    def test_a_name_under_a_different_sign_in_sees_no_answers(self, store: LiveChatStore) -> None:
+        message, _ = store.create_wyr_round(
+            images_pending=False,
+            client_id="wyr-view-email",
+            sender="Josh",
+            device_id="device-1",
+            by_email="josh@example.com",
+            question_id="q0001",
+            now=10.0,
+        )
+        seq = message.seq
+        store.vote_wyr(
+            voter_email="rose@example.com",
+            anchor_seq=seq,
+            voter_key="rose",
+            voter_name="Rose",
+            vote="play",
+            now=11.0,
+        )
+        store.answer_wyr(
+            player_email="josh@example.com",
+            anchor_seq=seq,
+            player_key="josh",
+            choice="a",
+            guess="b",
+            now=12.0,
+        )
+        round_ = store.get_wyr_round(anchor_seq=seq)
+        assert round_ is not None
+        question = next(q for q in load_questions(BANK_PATH) if q.id == round_.question_id)
+        genuine = wyr_view_json(round_, question, "Josh", "josh@example.com")
+        assert isinstance(genuine["you"], dict) and genuine["you"]["choice"] == "a"
+        # Rose's sign-in asking for Josh's view: a stranger — none of Josh's answers.
+        spoofed = wyr_view_json(round_, question, "Josh", "rose@example.com")
+        assert spoofed["you"] is None
+        assert "'choice': 'a'" not in repr(spoofed)
 
     def test_after_both_reveal_everyone_sees_the_result(self, store: LiveChatStore) -> None:
         round_ = self._round(store, reveal=True)
@@ -397,7 +568,7 @@ class TestRoutes:
 
             view = client.get(f"{BASE}/wyr/{seq}?as=Josh", headers=h).json()
             assert view["state"] == "voting" and view["question"]["a"] and view["question"]["b"]
-            assert view["images"] is False  # no generator configured in this app
+            assert view["images"] == "none"  # no generator configured in this app
             assert view["you"]["vote"] == "play" and view["result"] is None
 
             voted = _post(client, h, f"/wyr/{seq}/vote", sender="Rose", vote="play")
@@ -486,7 +657,7 @@ class TestRoutes:
             assert len(generator.calls) == 1
             prompt_a, prompt_b = generator.calls[0]
             view = client.get(f"{BASE}/wyr/{seq}?as=Josh", headers=h).json()
-            assert view["images"] is True
+            assert view["images"] == "done"
             assert view["question"]["id"]
             assert prompt_a.endswith(style_suffix(view["question"]["category"]))
             assert prompt_a != prompt_b
@@ -537,3 +708,317 @@ class TestRoutes:
             assert client.get(f"{BASE}/wyr/{seq}?as=Josh", headers=h).status_code == 404
         finally:
             client.__exit__(None, None, None)
+
+
+class _Gate(FakeGenerator):
+    """A generator whose first run blocks until released, recording peak concurrency."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.release = threading.Event()
+        self.running = 0
+        self.peak = 0
+        self._lock = threading.Lock()
+
+    def generate_pair(
+        self, prompt_a: str, prompt_b: str, out_dir: Path, *, seed_a: int, seed_b: int
+    ) -> tuple[Path, Path]:
+        with self._lock:
+            self.running += 1
+            self.peak = max(self.peak, self.running)
+        try:
+            if not self.calls:
+                self.release.wait(timeout=10)
+            return super().generate_pair(prompt_a, prompt_b, out_dir, seed_a=seed_a, seed_b=seed_b)
+        finally:
+            with self._lock:
+                self.running -= 1
+
+
+class TestImageJob:
+    """`wyr_game.generate_round_images` against a real store: every exit ends the wait, nothing
+    is left on disk, and a round that stopped being live costs no GPU and gets no pictures."""
+
+    def _setup(
+        self, tmp_path: Path, *, pending: bool = True
+    ) -> tuple[LiveChatStore, ProjectPaths, int]:
+        storage = tmp_path / "storage"
+        paths = ProjectPaths(slug="test", root=storage / "projects" / "test")
+        paths.server_dir.mkdir(parents=True, exist_ok=True)
+        store = LiveChatStore(paths.server_db)
+        message, _ = store.create_wyr_round(
+            images_pending=pending,
+            client_id="wyr-job-0001",
+            sender="Josh",
+            device_id="device-1",
+            by_email=None,
+            question_id="q0001",
+            now=10.0,
+        )
+        return store, paths, message.seq
+
+    def _question(self) -> Any:
+        return load_questions(BANK_PATH)[0]
+
+    def _leftovers(self, paths: ProjectPaths) -> list[str]:
+        uploads = (
+            [p.name for p in paths.server_uploads.glob("*")]
+            if paths.server_uploads.exists()
+            else []
+        )
+        scratch = (
+            [p.name for p in wyr_scratch_dir(paths).glob("*")]
+            if wyr_scratch_dir(paths).exists()
+            else []
+        )
+        return uploads + scratch
+
+    def test_success_attaches_both_in_one_step_and_ends_the_wait(self, tmp_path: Path) -> None:
+        store, paths, seq = self._setup(tmp_path)
+        published: list[int] = []
+        ok = generate_round_images(
+            store=store,
+            paths=paths,
+            generator=FakeGenerator(),
+            question=self._question(),
+            anchor_seq=seq,
+            by_email=None,
+            publish=lambda: published.append(1),
+        )
+        assert ok is True
+        round_ = store.get_wyr_round(anchor_seq=seq)
+        assert round_ is not None and round_.images == "done"
+        [message] = store.list_messages(before=None, limit=5)[0]
+        assert [a.id for a in message.attachments] and len(message.attachments) == 2
+        assert (
+            [a.ordinal for a in message.attachments] == [0, 1]
+            if hasattr(message.attachments[0], "ordinal")
+            else True
+        )
+        assert published
+        assert not (wyr_scratch_dir(paths).exists() and list(wyr_scratch_dir(paths).glob("*")))
+
+    @pytest.mark.parametrize("mode", ["down", "fails", "raises"])
+    def test_any_failure_ends_the_wait_and_leaves_nothing(self, tmp_path: Path, mode: str) -> None:
+        store, paths, seq = self._setup(tmp_path)
+
+        class Boom(FakeGenerator):
+            def generate_pair(self, *a: Any, **k: Any) -> tuple[Path, Path]:
+                raise RuntimeError("unexpected")
+
+        generator: ComfyImageGenerator = (
+            Boom()
+            if mode == "raises"
+            else FakeGenerator(up=(mode != "down"), fail=(mode == "fails"))
+        )
+        ok = generate_round_images(
+            store=store,
+            paths=paths,
+            generator=generator,
+            question=self._question(),
+            anchor_seq=seq,
+            by_email=None,
+            publish=lambda: None,
+        )
+        assert ok is False
+        assert store.get_wyr_round(anchor_seq=seq).images == "failed"  # type: ignore[union-attr]
+        assert self._leftovers(paths) == []
+
+    def test_a_skipped_round_is_never_painted(self, tmp_path: Path) -> None:
+        store, paths, seq = self._setup(tmp_path)
+        store.vote_wyr(
+            voter_email=None,
+            anchor_seq=seq,
+            voter_key="rose",
+            voter_name="Rose",
+            vote="skip",
+            now=11.0,
+        )
+        generator = FakeGenerator()
+        ok = generate_round_images(
+            store=store,
+            paths=paths,
+            generator=generator,
+            question=self._question(),
+            anchor_seq=seq,
+            by_email=None,
+            publish=lambda: None,
+        )
+        assert ok is False and generator.calls == []
+        assert store.get_wyr_round(anchor_seq=seq).images == "failed"  # type: ignore[union-attr]
+
+    def test_a_round_deleted_while_painting_leaves_no_files_and_no_attachments(
+        self, tmp_path: Path
+    ) -> None:
+        store, paths, seq = self._setup(tmp_path)
+
+        class DeletesAnchor(FakeGenerator):
+            def generate_pair(self, *a: Any, **k: Any) -> tuple[Path, Path]:
+                result = super().generate_pair(*a, **k)
+                store.delete_message(seq=seq, now=20.0)
+                return result
+
+        ok = generate_round_images(
+            store=store,
+            paths=paths,
+            generator=DeletesAnchor(),
+            question=self._question(),
+            anchor_seq=seq,
+            by_email=None,
+            publish=lambda: None,
+        )
+        assert ok is False
+        assert store.list_messages(before=None, limit=5)[0] == []
+        assert self._leftovers(paths) == []
+
+    def test_scratch_clear_keeps_young_dirs_and_removes_stale_ones(self, tmp_path: Path) -> None:
+        _store, paths, _seq = self._setup(tmp_path)
+        root = wyr_scratch_dir(paths)
+        young, old = root / "young", root / "old"
+        young.mkdir(parents=True)
+        old.mkdir()
+        os.utime(old, (1.0, 1.0))
+        clear_wyr_scratch(paths)
+        assert young.exists() and not old.exists()
+
+
+class TestComfyClient:
+    """The ComfyUI client's cleanup, against a fake ComfyUI over `httpx.MockTransport`."""
+
+    def _fake(
+        self, out_dir: Path, *, finishes: bool = True
+    ) -> tuple[httpx.MockTransport, list[tuple[str, str, Any]]]:
+        calls: list[tuple[str, str, Any]] = []
+        state: dict[str, str] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content) if request.content else None
+            calls.append((request.method, request.url.path, body))
+            if request.url.path == "/prompt":
+                state["prefix"] = (body or {})["prompt"]["16"]["inputs"]["filename_prefix"][:-2]
+                for tag in ("a", "b"):
+                    (out_dir / f"{state['prefix']}_{tag}_00001_.png").write_bytes(_png())
+                return httpx.Response(200, json={"prompt_id": "p1"})
+            if request.url.path == "/history/p1":
+                if not finishes:
+                    return httpx.Response(200, json={})
+                prefix = state["prefix"]
+                return httpx.Response(
+                    200,
+                    json={
+                        "p1": {
+                            "status": {"status_str": "success"},
+                            "outputs": {
+                                "16": {"images": [{"filename": f"{prefix}_a_00001_.png"}]},
+                                "26": {"images": [{"filename": f"{prefix}_b_00001_.png"}]},
+                            },
+                        }
+                    },
+                )
+            if request.url.path == "/view":
+                return httpx.Response(
+                    200, content=(out_dir / request.url.params["filename"]).read_bytes()
+                )
+            return httpx.Response(200, json={})
+
+        return httpx.MockTransport(handler), calls
+
+    def test_a_finished_run_deletes_its_history_and_its_output_files(self, tmp_path: Path) -> None:
+        out = tmp_path / "comfy-out"
+        out.mkdir()
+        (out / "someone_elses.png").write_bytes(b"keep")
+        transport, calls = self._fake(out)
+        generator = ComfyImageGenerator("http://comfy.invalid", output_dir=out, transport=transport)
+        work = tmp_path / "work"
+        work.mkdir()
+        a, b = generator.generate_pair("x", "y", work, seed_a=1, seed_b=2)
+        assert a.read_bytes() and b.read_bytes()
+        assert [p.name for p in out.iterdir()] == ["someone_elses.png"]
+        assert ("POST", "/history", {"delete": ["p1"]}) in calls
+        assert not any(c[1] in ("/queue", "/interrupt") for c in calls)
+
+    def test_an_abandoned_run_is_cancelled_and_cleaned_up(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import wixy_server.livechat.wyr_images as images
+
+        monkeypatch.setattr(images, "_GENERATION_BUDGET_S", 0.3)
+        out = tmp_path / "comfy-out"
+        out.mkdir()
+        transport, calls = self._fake(out, finishes=False)
+        generator = ComfyImageGenerator("http://comfy.invalid", output_dir=out, transport=transport)
+        work = tmp_path / "work"
+        work.mkdir()
+        with pytest.raises(ImageGenerationError):
+            generator.generate_pair("x", "y", work, seed_a=1, seed_b=2)
+        assert ("POST", "/queue", {"delete": ["p1"]}) in calls
+        assert ("POST", "/interrupt", {"prompt_id": "p1"}) in calls
+        assert ("POST", "/history", {"delete": ["p1"]}) in calls
+        assert list(out.iterdir()) == []
+
+    def test_purge_leftovers_removes_only_stale_wyr_files(self, tmp_path: Path) -> None:
+        out = tmp_path / "comfy-out"
+        out.mkdir()
+        stale, fresh, other = out / "wyr_old_a_1.png", out / "wyr_new_a_1.png", out / "keep.png"
+        for f in (stale, fresh, other):
+            f.write_bytes(b"x")
+        os.utime(stale, (1.0, 1.0))
+        generator = ComfyImageGenerator("http://comfy.invalid", output_dir=out)
+        assert generator.purge_leftovers() == 1
+        assert not stale.exists() and fresh.exists() and other.exists()
+
+
+class TestSingleFlight:
+    def test_picture_jobs_run_one_at_a_time_and_a_superseded_round_costs_no_gpu(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        gate = _Gate()
+        client, h = _client(storage_root, wixy_repo_root, pin_verifier, gate, "a@example.com")
+        try:
+            first = _create(client, h, "wyr-flight-0001").json()["message"]["seq"]
+            deadline = time.time() + 10
+            while gate.running == 0 and time.time() < deadline:
+                time.sleep(0.05)
+            assert gate.running == 1
+            second = _create(client, h, "wyr-flight-0002").json()["message"]["seq"]  # supersedes #1
+            time.sleep(0.5)
+            assert gate.peak == 1  # the second job waits, it does not run alongside
+            gate.release.set()
+            deadline = time.time() + 15
+            rows: dict[int, Any] = {}
+            while time.time() < deadline:
+                history = client.get(f"{BASE}/messages?limit=10", headers=h).json()["messages"]
+                rows = {m["seq"]: m for m in history}
+                if len(rows[second]["attachments"]) == 2:
+                    break
+                time.sleep(0.1)
+            assert len(rows[second]["attachments"]) == 2
+            # The superseded round's pictures were discarded after its run finished.
+            assert rows[first]["attachments"] == []
+            assert gate.peak == 1
+            assert len(gate.calls) == 2  # #1 had already started; #2 ran after it
+            view = client.get(f"{BASE}/wyr/{first}?as=Josh", headers=h).json()
+            assert view["state"] == "skipped" and view["images"] == "failed"
+        finally:
+            client.__exit__(None, None, None)
+
+
+class TestConfiguration:
+    def test_comfy_url_without_an_output_dir_disables_pictures(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("WIXY_COMFY_URL", "http://127.0.0.1:1")
+        monkeypatch.delenv("WIXY_COMFY_OUTPUT_DIR", raising=False)
+        app = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        assert app.state.livechat_wyr_image_generator is None
+        monkeypatch.setenv("WIXY_COMFY_OUTPUT_DIR", str(storage_root / "comfy-out"))
+        app2 = create_app(
+            storage_root=storage_root, wixy_repo_root=wixy_repo_root, pin_verifier=pin_verifier
+        )
+        assert app2.state.livechat_wyr_image_generator is not None

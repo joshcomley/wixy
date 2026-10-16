@@ -27,10 +27,6 @@ export interface WyrCards {
   render(container: HTMLElement, message: Message): void;
 }
 
-/** How long a young round keeps showing "Painting…" before concluding the pictures are not
- * coming (the server's own generation budget is 300 s). */
-const PAINT_WAIT_MS = 330_000;
-
 const ERROR_TEXT: Record<string, string> = {
   not_found: "That round is gone.",
   full: "This round already has two players.",
@@ -189,11 +185,11 @@ export function createWyrCards(deps: WyrCardDeps): WyrCards {
     const urls: (string | null)[] = photoUrls(message).map((u) => u ?? null);
     const urlA = urls[0] ?? null;
     const urlB = urls[1] ?? null;
-    // Wait for pictures only when this server paints them, the round is still young (a
-    // generation that failed leaves none behind), and the round is not already skipped.
-    const youngMs = Date.now() - message.createdAt * 1000;
+    // Wait for pictures only while the server says they are being painted (every end of
+    // that job — done, failed, skipped, a restart — moves it out of `pending` and bumps the
+    // round, so a card can never be left waiting for pictures that are not coming).
     const waiting: "loading" | "none" =
-      view.images && view.state !== "skipped" && youngMs < PAINT_WAIT_MS ? "loading" : "none";
+      view.images === "pending" && view.state !== "skipped" ? "loading" : "none";
 
     container.appendChild(el("div", "wx-srv-wyr-title", "Would you rather…?"));
 

@@ -44,7 +44,7 @@ function view(overrides: Partial<WyrView> = {}): WyrView {
     state: "voting",
     rev: 1,
     question: { id: "q0001", category: "food-meals", a: "A classic cheeseburger", b: "A spicy pizza" },
-    images: true,
+    images: "pending",
     players: [{ name: "Josh", vote: "play", answered: false, revealed: false }],
     you: { slot: 1, vote: "play", choice: null, guess: null, revealed: false },
     result: null,
@@ -178,6 +178,22 @@ describe("wyr model", () => {
     model.observe([message(7)]);
     await flush();
     expect(fetchRound).toHaveBeenCalledWith(SESSION, 7, "Rose");
+  });
+
+  it("does not refetch in a loop when the held view is newer than the thread's summary", async () => {
+    const { model, fetchRound } = make();
+    model.apply(view({ state: "answering", rev: 3 }));
+    // The thread's summary lags the mutation response that was applied first.
+    model.observe([message(7, "voting", 1)]);
+    model.observe([message(7, "voting", 1)]);
+    await flush();
+    expect(fetchRound).not.toHaveBeenCalled();
+    // A genuinely newer summary does fetch, exactly once.
+    fetchRound.mockResolvedValue({ ok: true, view: view({ state: "revealing", rev: 5 }) });
+    model.observe([message(7, "revealing", 5)]);
+    await flush();
+    expect(fetchRound).toHaveBeenCalledTimes(1);
+    expect(model.view(7)?.rev).toBe(5);
   });
 
   it("forgets a round the server says is gone", async () => {
@@ -348,14 +364,16 @@ describe("wyr card", () => {
     expect(painting.el.textContent).toContain("Painting");
     document.body.replaceChildren();
     // A server that paints no pictures lays the round out as text: no placeholder frames.
-    const textOnly = make(view({ images: false }), message(7));
+    const textOnly = make(view({ images: "none" }), message(7));
     expect(textOnly.el.textContent).not.toContain("Painting");
     expect(textOnly.el.querySelectorAll(".wx-srv-wyr-frame")).toHaveLength(0);
     expect(textOnly.el.textContent).toContain("A classic cheeseburger");
     document.body.replaceChildren();
-    // An old round whose pictures never arrived stops waiting for them.
-    const stale = make(view(), { ...message(7), createdAt: Date.now() / 1000 - 3600 });
-    expect(stale.el.textContent).not.toContain("Painting");
+    document.body.replaceChildren();
+    // The job ended without pictures: the card stops waiting at once.
+    const failed = make(view({ images: "failed" }), message(7));
+    expect(failed.el.textContent).not.toContain("Painting");
+    expect(failed.el.querySelectorAll(".wx-srv-wyr-frame")).toHaveLength(0);
   });
 });
 

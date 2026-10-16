@@ -1249,16 +1249,28 @@ def _wyr_question_for(request: Request, question_id: str) -> WyrQuestion | None:
     return None
 
 
-async def _wyr_view_response(request: Request, seq: int, viewer: str) -> JSONResponse:
+async def _wyr_view_response(
+    request: Request, seq: int, viewer: str, viewer_email: str | None
+) -> JSONResponse:
     store: LiveChatStore = request.app.state.livechat_store
     round_ = await anyio.to_thread.run_sync(lambda: store.get_wyr_round(anchor_seq=seq))
     if round_ is None:
         return JSONResponse(status_code=404, content={"error": "not_found"})
     question = _wyr_question_for(request, round_.question_id)
-    images = request.app.state.livechat_wyr_image_generator is not None
     return JSONResponse(
-        status_code=200, content=wyr_view_json(round_, question, viewer, images=images)
+        status_code=200, content=wyr_view_json(round_, question, viewer, viewer_email)
     )
+
+
+def _wyr_image_limiter(request: Request) -> anyio.CapacityLimiter:
+    """The single-flight gate for picture jobs, created on first use inside the event loop."""
+    limiter: anyio.CapacityLimiter | None = getattr(
+        request.app.state, "livechat_wyr_image_limiter", None
+    )
+    if limiter is None:
+        limiter = anyio.CapacityLimiter(1)
+        request.app.state.livechat_wyr_image_limiter = limiter
+    return limiter
 
 
 @router.post("/wyr", response_model=None)
@@ -1296,6 +1308,7 @@ async def create_wyr_round(body: CreateWyrIn, request: Request) -> JSONResponse:
             device_id=body.deviceId,
             by_email=auth.email or None,
             question_id=question.id,
+            images_pending=generator is not None,
             now=now,
         )
     )
@@ -1311,6 +1324,8 @@ async def create_wyr_round(body: CreateWyrIn, request: Request) -> JSONResponse:
         if generator is not None:
             by_email = auth.email or None
 
+            limiter = _wyr_image_limiter(request)
+
             async def _paint() -> None:
                 def _run() -> bool:
                     return generate_round_images(
@@ -1323,7 +1338,9 @@ async def create_wyr_round(body: CreateWyrIn, request: Request) -> JSONResponse:
                         publish=lambda: anyio.from_thread.run_sync(notifier.publish),
                     )
 
-                await anyio.to_thread.run_sync(_run)
+                # One picture job at a time: ComfyUI renders serially anyway, and a waiting
+                # job is a parked coroutine, not a held thread of the shared worker pool.
+                await anyio.to_thread.run_sync(_run, limiter=limiter)
 
             background.spawn("livechat-wyr-images", _paint)
 
@@ -1338,22 +1355,22 @@ async def create_wyr_round(body: CreateWyrIn, request: Request) -> JSONResponse:
 async def get_wyr_round(seq: int, request: Request) -> JSONResponse:
     """The viewer-filtered round body. `?as=<sender>` names who is looking (the chat's trust
     model: a display name, like every other route here)."""
-    await require_server_token(request)
+    auth = await require_server_token(request)
     viewer = request.query_params.get("as", "").strip()
     if viewer and not _valid_sender(viewer):
         return _invalid("as must be 1-32 characters with no control characters")
     if not (0 < seq <= _SQLITE_MAX_INTEGER):
         return JSONResponse(status_code=404, content={"error": "not_found"})
-    return await _wyr_view_response(request, seq, viewer)
+    return await _wyr_view_response(request, seq, viewer, auth.email or None)
 
 
 async def _wyr_mutation(
     request: Request,
     seq: int,
     sender_raw: str,
-    action: Callable[[LiveChatStore, str, str, float], object],
+    action: Callable[[LiveChatStore, str, str, str | None, float], object],
 ) -> JSONResponse:
-    await require_server_token(request)
+    auth = await require_server_token(request)
     sender = sender_raw.strip()
     if not _valid_sender(sender):
         return _invalid("sender must be 1-32 characters with no control characters")
@@ -1362,9 +1379,10 @@ async def _wyr_mutation(
     store: LiveChatStore = request.app.state.livechat_store
     notifier: LiveChatNotifier = request.app.state.livechat_notifier
     key = reactor_key(sender)
+    email = auth.email or None
     now = time.time()
     try:
-        await anyio.to_thread.run_sync(lambda: action(store, key, sender, now))
+        await anyio.to_thread.run_sync(lambda: action(store, key, sender, email, now))
     except (
         WyrRoundNotFoundError,
         WyrRoundFullError,
@@ -1373,7 +1391,7 @@ async def _wyr_mutation(
     ) as exc:
         return _wyr_error(exc)
     notifier.publish()
-    return await _wyr_view_response(request, seq, sender)
+    return await _wyr_view_response(request, seq, sender, email)
 
 
 @router.post("/wyr/{seq}/vote", response_model=None)
@@ -1382,8 +1400,13 @@ async def vote_wyr_round(seq: int, body: WyrVoteIn, request: Request) -> JSONRes
         request,
         seq,
         body.sender,
-        lambda store, key, name, now: store.vote_wyr(
-            anchor_seq=seq, voter_key=key, voter_name=name, vote=body.vote, now=now
+        lambda store, key, name, email, now: store.vote_wyr(
+            anchor_seq=seq,
+            voter_key=key,
+            voter_name=name,
+            voter_email=email,
+            vote=body.vote,
+            now=now,
         ),
     )
 
@@ -1394,8 +1417,13 @@ async def answer_wyr_round(seq: int, body: WyrAnswerIn, request: Request) -> JSO
         request,
         seq,
         body.sender,
-        lambda store, key, name, now: store.answer_wyr(
-            anchor_seq=seq, player_key=key, choice=body.choice, guess=body.guess, now=now
+        lambda store, key, name, email, now: store.answer_wyr(
+            anchor_seq=seq,
+            player_key=key,
+            player_email=email,
+            choice=body.choice,
+            guess=body.guess,
+            now=now,
         ),
     )
 
@@ -1406,7 +1434,9 @@ async def reveal_wyr_round(seq: int, body: WyrRevealIn, request: Request) -> JSO
         request,
         seq,
         body.sender,
-        lambda store, key, name, now: store.reveal_wyr(anchor_seq=seq, player_key=key, now=now),
+        lambda store, key, name, email, now: store.reveal_wyr(
+            anchor_seq=seq, player_key=key, player_email=email, now=now
+        ),
     )
 
 

@@ -133,6 +133,7 @@ Server-chat settings are read by `wixy_server/settings.py`:
 | `WIXY_FFMPEG` | `ffmpeg_path` | Empty means resolve `ffmpeg` from `PATH`; otherwise must name an existing file. |
 | `WIXY_FFPROBE` | `ffprobe_path` | Empty means resolve `ffprobe` from `PATH`; otherwise must name an existing file. |
 | `WIXY_COMFY_URL` | `comfy_url` | Empty disables the would-you-rather pictures (rounds are text-only). Fleet: `http://127.0.0.1:8199`, the Devfleet `ComfyUi` child. |
+| `WIXY_COMFY_OUTPUT_DIR` | `comfy_output_dir` | The folder ComfyUI writes to (its `--output-directory`); required with `WIXY_COMFY_URL` — wixy deletes its own pictures there after each run; unset means pictures stay disabled. |
 | `WIXY_WYR_IMAGE_MODEL` | `wyr_image_model` | `krea2-turbo-nvfp4` (default) or `boogu-turbo-nvfp4`. |
 
 The `*_MB` values are multiplied by 1,048,576. The quota and free-space floor are enforced

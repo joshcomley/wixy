@@ -152,14 +152,17 @@ class WyrRoundRow:
     anchor_message_seq: int
     question_id: str
     state: WyrState
+    images: Literal["none", "pending", "done", "failed"]
     player1_key: str | None
     player1_name: str | None
+    player1_email: str | None
     vote1: Literal["play", "skip"] | None
     choice1: Literal["a", "b"] | None
     guess1: Literal["a", "b"] | None
     reveal1: bool
     player2_key: str | None
     player2_name: str | None
+    player2_email: str | None
     vote2: Literal["play", "skip"] | None
     choice2: Literal["a", "b"] | None
     guess2: Literal["a", "b"] | None

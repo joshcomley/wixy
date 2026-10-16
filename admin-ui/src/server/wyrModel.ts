@@ -73,7 +73,10 @@ export function createWyrModel(deps: WyrModelDeps): WyrModel {
     const summary = latest.get(seq);
     if (summary === undefined) return false;
     const have = views.get(seq);
-    return have === undefined || have.rev < summary.rev || have.state !== summary.state;
+    // `rev` only moves forward, so a held view at the summary's rev or later is current — even
+    // when the thread's summary lags it (a mutation answered before its stream frame arrived).
+    // Comparing `state` as well would refetch in a tight loop until a newer summary came.
+    return have === undefined || have.rev < summary.rev;
   }
 
   function schedule(seq: number, entry: Pending): void {

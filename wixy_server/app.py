@@ -9,6 +9,7 @@ decisions/00014 for this slice's design choices. Slice 3's preview route
 from __future__ import annotations
 
 import functools
+import logging
 import re
 import time
 from collections.abc import AsyncIterator
@@ -275,9 +276,21 @@ def create_app(
     if image_generator is not None:
         resolved_image_generator: ComfyImageGenerator | None = image_generator
     elif settings.comfy_url and settings.edition != "standalone":
-        resolved_image_generator = ComfyImageGenerator(
-            settings.comfy_url, model=settings.wyr_image_model
-        )
+        if settings.comfy_output_dir:
+            resolved_image_generator = ComfyImageGenerator(
+                settings.comfy_url,
+                model=settings.wyr_image_model,
+                output_dir=Path(settings.comfy_output_dir),
+            )
+        else:
+            # Fail closed: ComfyUI keeps every picture it renders in its own output folder, and
+            # without knowing that folder this server could never delete them (Inv 54).
+            logging.getLogger(__name__).error(
+                "WIXY_COMFY_URL is set but WIXY_COMFY_OUTPUT_DIR is not — would-you-rather "
+                "pictures are DISABLED (rounds are text-only) until the folder ComfyUI writes "
+                "to is configured"
+            )
+            resolved_image_generator = None
     else:
         resolved_image_generator = None
     livechat_transcription = TranscriptionRuntime(
@@ -323,6 +336,11 @@ def create_app(
         # A game image run that died with the previous process leaves its PNGs in the
         # scratch dir; they are chat content, so they must not outlive it (Inv 54).
         await anyio.to_thread.run_sync(lambda: clear_wyr_scratch(paths))
+        await anyio.to_thread.run_sync(
+            lambda: livechat_store.fail_stale_wyr_images(now=time.time())
+        )
+        if resolved_image_generator is not None:
+            await anyio.to_thread.run_sync(resolved_image_generator.purge_leftovers)
         await anyio.to_thread.run_sync(
             lambda: livechat_store.fail_stale_pending_transcripts(now=time.time())
         )

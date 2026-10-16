@@ -1036,20 +1036,34 @@ the table row count and the events table are unchanged by a live post).
 
 
 ### Inv 54 — A would-you-rather round is chat content: the other player's answers never leave the server before both reveal, and the round is erased with its message or a wipe
-The game (`wyr_rounds` + `wyr_used`, schema v15, workspace 00045) is chat content. `wyr_rounds`
-is keyed by its anchor message (`anchor_message_seq REFERENCES messages(seq) ON DELETE CASCADE`,
-the Inv 53 pattern: an older blue/green-overlap process that never heard of the table still
-cascades a round away with its message), and a wipe issues `DELETE FROM wyr_rounds; DELETE FROM
-wyr_used` explicitly in the same transaction as every other table. The two generated pictures are
-ordinary photo attachments, so their erasure is Inv 46's. A generation run's downloaded PNGs sit
-in `server/wyr-tmp/` only while it runs and are cleared at app start.
+The game (`wyr_rounds`, schema v15, workspace 00045) is chat content. `wyr_rounds` is keyed by
+its anchor message (`anchor_message_seq REFERENCES messages(seq) ON DELETE CASCADE`, the Inv 53
+pattern: an older blue/green-overlap process that never heard of the table still cascades a round
+away with its message), and a wipe issues `DELETE FROM wyr_rounds` explicitly in the same
+transaction as every other table. There is NO separate "questions played" table — the repeat guard
+is derived from the rounds that still exist — because a second table would keep a dated record
+that survives a per-message delete and an older process's wipe. The two generated pictures are
+ordinary photo attachments, so their erasure is Inv 46's. **ComfyUI itself retains what it
+renders** (a PNG in its own output folder, the prompt in its `/history`): every run therefore
+deletes its own history entry and its own `wyr_*` output files (`WIXY_COMFY_OUTPUT_DIR` must name
+the folder ComfyUI writes to — without it pictures stay DISABLED, fail-closed), cancels a run it
+abandons, and a startup sweep removes `wyr_*` files older than the generation budget. Those files
+exist for seconds and are unlinked, not scrubbed — the one place game content touches disk outside
+`server/` (a plain unlink, so recoverable by forensics until the OS reuses the blocks); a run's
+downloaded PNGs likewise sit in `server/wyr-tmp/` only while it runs (stale dirs cleared at start).
 **The other player's pick and guess are served only when `state == "revealed"`** (both players
 pressed Reveal): `wyr_view_json` is the one place answers leave the store, `Message.wyr` carries
 only `{state, rev}`, and the client parser ignores a `result` on any unrevealed view. This is a
-game rule, not a secrecy boundary — anyone unlocked can read anything in this chat (Inv 40).
+game rule, not a secrecy boundary — anyone unlocked can read anything in this chat (Inv 40) —
+but it does not rest on a typed name alone: the sign-in (CF Access email) that took a player slot
+is recorded, and a request that names that player under a DIFFERENT verified sign-in is treated as
+a stranger (no `you`, none of that player's answers; mutations answer `not_player`). An unknown
+email on either side (dev/no-auth, device-grant sessions) falls back to the name.
 Every mutation is idempotent and announced only via the existing `message_updated` event.
 *Enforced by:* `wixy_server/tests/test_livechat_wyr.py` (state machine and idempotency,
-`TestViewFiltering` — no other-player answers before reveal, cascade + wipe erasure, the
-route flow and its filtered views, image attachment/failure/delete) and
+`TestViewFiltering` — no other-player answers before reveal or under another sign-in, cascade +
+wipe erasure and no leftover played-list row, the route flow and its filtered views, `TestImageJob`
+— every exit ends the picture wait and leaves no files, `TestComfyClient` — ComfyUI history and
+output files deleted, abandoned runs cancelled, `TestSingleFlight`) and
 `admin-ui/tests/serverWyr.test.ts` (view parsing refuses a result before reveal; the card shows
 no answers until revealed).
