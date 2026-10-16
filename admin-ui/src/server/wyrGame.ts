@@ -194,10 +194,8 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
   const popBubbles = new Map<number, { readonly key: string; readonly element: HTMLElement }>();
   const popEchoes = new Map<string, HTMLElement>();
 
-  function onKeydown(event: KeyboardEvent): void {
-    if (event.key === "Escape" && popupOpen) closePopup();
-  }
-  doc.addEventListener("keydown", onKeydown);
+  // Escape is deliberately NOT a way to close the pop-up: in this chat Escape is the panic key
+  // (it locks everything at once, R6), so the pop-up closes by its ✕ or by tapping the backdrop.
 
   // -- State changes ------------------------------------------------------------------------
 

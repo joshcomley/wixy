@@ -1840,7 +1840,7 @@ the answers filter keeps the game fun but the chat has no per-person secrecy (In
   chat and is the card's chat in the tab and pop-up.
 - **The pop-up** is the same chat larger: the card's whole history (the thread's embedded bubble renderer, updated
   incrementally) with the ONE composer re-parented into it (`mountComposer(host)`), so voice notes, attachments and the
-  draft all work and survive the move. Escape or the backdrop closes it and returns the composer.
+  draft all work and survive the move. Its ✕ or the backdrop closes it and returns the composer (not Escape: Escape is the chat's panic key and locks everything).
 - **The main-chat card** (`wyrCard.ts`) is now a preview: the question, both pictures side by side, one status line and
   a Play/Open button that opens the tab. It has no answer controls.
 - **Files.** `admin-ui/src/server/{wyrGame,wyrControls,wyrCard,wyrModel}.ts`, `api/wyr.ts`; tests

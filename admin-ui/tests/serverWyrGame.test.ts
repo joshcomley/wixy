@@ -448,12 +448,14 @@ describe("wyr game tab", () => {
     expect(h.game.popup.querySelectorAll(".wx-srv-bubble")).toHaveLength(2);
   });
 
-  it("Escape and the backdrop close the pop-up", () => {
+  it("the close button and the backdrop close the pop-up; Escape is left to the panic lock", () => {
     const h = make();
     h.game.open(7);
     h.game.pane.querySelector<HTMLButtonElement>(".wx-srv-game-mini-expand")!.click();
     expect(h.game.isPopupOpen()).toBe(true);
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(h.game.isPopupOpen()).toBe(true); // not ours: the panel's panic key handles Escape
+    h.game.popup.querySelector<HTMLButtonElement>(".wx-srv-gamepop-close")!.click();
     expect(h.game.isPopupOpen()).toBe(false);
     h.game.pane.querySelector<HTMLButtonElement>(".wx-srv-game-mini-expand")!.click();
     h.game.popup.querySelector<HTMLButtonElement>(".wx-srv-gamepop-backdrop")!.click();

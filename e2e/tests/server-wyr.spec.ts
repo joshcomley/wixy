@@ -232,6 +232,79 @@ test.describe("Would you rather", () => {
     await closeAll(contextA, contextB);
   });
 
+  test("the card's chat: mini chat, pop-up with the same composer, also in the main chat (tagged)", async ({ browser }) => {
+    const contextA = await browser.newContext();
+    const contextB = await browser.newContext();
+    const pageA = await contextA.newPage();
+    const pageB = await contextB.newPage();
+    const errors = [trackConsoleErrors(pageA), trackConsoleErrors(pageB)];
+    await unlockServer(pageA, "Alice");
+    await unlockServer(pageB, "Bob");
+
+    async function say(page: Page, text: string): Promise<void> {
+      await page.locator(".wx-chat-composer-input").fill(text);
+      await page.locator(".wx-chat-send-button").click();
+      await humanPause(page);
+    }
+
+    const seq = await startRound(pageA);
+    await eventually([pageA, pageB], async () => await pageB.locator(`.wx-srv-bubble-wyr[data-message-seq="${seq}"]`).isVisible(), "Bob sees the round");
+    await pageB.locator(`.wx-srv-bubble-wyr[data-message-seq="${seq}"]`).getByRole("button", { name: "Play", exact: true }).click();
+    await expect(game(pageB)).toBeVisible();
+
+    // A message sent in the WYR tab lands in the OTHER person's mini chat for this card.
+    await say(pageA, "I love the first one");
+    await eventually([pageA, pageB], async () => (await pageB.locator(".wx-srv-game-mini").innerText()).includes("I love the first one"), "Bob's mini chat");
+    await expect(pageA.locator(".wx-srv-game-mini")).toContainText("I love the first one");
+    await expect(pageB.locator(".wx-srv-game-mini")).toContainText("Alice:");
+
+    // Only the last two messages show in the mini chat.
+    await say(pageA, "second thought");
+    await say(pageA, "third thought");
+    await eventually([pageA, pageB], async () => (await pageB.locator(".wx-srv-game-mini-msg").count()) === 2, "two mini rows");
+    await expect(pageB.locator(".wx-srv-game-mini")).not.toContainText("I love the first one");
+
+    // Tapping a mini-chat message opens the pop-up: the card's whole history, with the composer.
+    await pageB.locator(".wx-srv-game-mini-msg").first().click();
+    await expect(pageB.locator(".wx-srv-gamepop")).toBeVisible();
+    await expect(pageB.locator(".wx-srv-gamepop .wx-srv-bubble")).toHaveCount(3);
+    await expect(pageB.locator(".wx-srv-gamepop")).toContainText("I love the first one");
+    await expect(pageB.locator(".wx-srv-gamepop .wx-chat-composer-input")).toBeVisible();
+    await expect(pageB.locator(".wx-srv-gamepop .wx-srv-bubble-wyrtag").first()).toBeHidden(); // the pop-up is already the game chat
+    await pageB.screenshot({ path: test.info().outputPath("b-popup.png") });
+
+    // A reply typed in the pop-up goes to the same card chat.
+    await say(pageB, "me too, but the second is closer");
+    await expect(pageB.locator(".wx-srv-gamepop .wx-srv-bubble")).toHaveCount(4);
+    await eventually([pageA, pageB], async () => (await pageA.locator(".wx-srv-game-mini").innerText()).includes("me too"), "Alice sees the reply");
+    await pageB.locator(".wx-srv-gamepop-close").click();
+    await expect(pageB.locator(".wx-srv-gamepop")).toBeHidden();
+    // The composer is back in the chat, where it always is.
+    await expect(pageB.locator(".wx-srv-thread-view > .wx-chat-composer, .wx-srv-thread-view .wx-chat-composer-input").first()).toBeVisible();
+
+    // The Chat tab shows the same messages in the main chat, each tagged WYR; ordinary chat is not tagged
+    // and does not appear in the card's mini chat.
+    await pageB.locator(".wx-srv-tab-chat").click();
+    await expect(pageB.locator(".wx-srv-thread-wrap")).toBeVisible();
+    const tagged = pageB.locator(".wx-srv-thread .wx-srv-bubble:has(.wx-srv-bubble-wyrtag)");
+    await expect(tagged).toHaveCount(4);
+    await say(pageB, "just ordinary chat");
+    await expect(pageB.locator(".wx-srv-thread .wx-srv-bubble:has-text('just ordinary chat') .wx-srv-bubble-wyrtag")).toHaveCount(0);
+    await eventually([pageA, pageB], async () => (await pageA.locator(".wx-srv-tab-chat .wx-srv-tab-dot").isVisible()), "Alice's Chat tab gets a dot");
+    await expect(pageA.locator(".wx-srv-game-mini")).not.toContainText("just ordinary chat");
+
+    // It all survives a reload: the card's chat is stored with the card.
+    await pageA.reload();
+    await unlockServer(pageA, "Alice");
+    await eventually([pageA], async () => await pageA.locator(".wx-srv-tabs").isVisible(), "the round's tab is offered again");
+    await pageA.locator(".wx-srv-tab-wyr").click();
+    await expect(pageA.locator(".wx-srv-game-mini")).toContainText("me too");
+    await expect(pageA.locator(".wx-srv-game-mini")).not.toContainText("just ordinary chat");
+
+    for (const e of errors) expect(e.filter((m) => !/favicon/i.test(m))).toEqual([]);
+    await closeAll(contextA, contextB);
+  });
+
   test("the game fits a 360 px phone with real tap targets", async ({ browser }) => {
     const context = await browser.newContext({
       viewport: { width: 360, height: 780 },
