@@ -30,6 +30,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -86,6 +87,9 @@ _DOWNLOAD_TIMEOUT_S = 60.0
 _GENERATION_BUDGET_S = 300.0
 _PROBE_TIMEOUT_S = 5.0
 _STALE_OUTPUT_AFTER_S = 900.0
+_CANCEL_SETTLE_S = 5.0
+_SWEEP_PAGE = 200
+_SWEEP_MAX_PAGES = 50
 
 
 class ComfyImageGenerator:
@@ -132,46 +136,89 @@ class ComfyImageGenerator:
 
     def sweep_leftovers(self) -> int:
         """Remove what no live run can own: stale `wyr_*` output files AND the ComfyUI history
-        entries of `wyr_*` runs whose files are gone or stale. Run at startup and periodically,
-        it is the backstop for a run orphaned by a killed process (ComfyUI finishes and writes
-        after the replacement process already started) and for a cancelled run whose history
-        entry appeared after the delete. Young files and their entries are left alone: they may
-        belong to the older process of a blue/green overlap, still working. Returns the number
-        of files plus history entries removed."""
+        entries of `wyr_*` runs that are finished and old. Run at startup and periodically, it is
+        the backstop for a run orphaned by a killed process (ComfyUI finishes and writes after the
+        replacement process already started) and for a cancelled run whose history entry appeared
+        after the delete — including one interrupted before it saved anything, whose entry has no
+        outputs and is recognised by the prompt graph it carries (`wyr_` filename prefixes). Young
+        files and entries are left alone: they may belong to the older process of a blue/green
+        overlap, still working. All of ComfyUI's history is walked, a page at a time, so a busy
+        shared instance cannot push an orphan out of view. Returns the number of files plus
+        history entries removed."""
         removed = self.purge_leftovers()
         if self._output_dir is None:
             return removed
         cutoff = time.time() - _STALE_OUTPUT_AFTER_S
         try:
             with httpx.Client(base_url=self._base_url, transport=self._transport) as client:
-                resp = client.get("/history", params={"max_items": 200}, timeout=_PROBE_TIMEOUT_S)
-                if resp.status_code != 200:
-                    return removed
                 orphans: list[str] = []
-                for prompt_id, entry in resp.json().items():
-                    names = [
-                        str(image.get("filename", ""))
-                        for node_out in (entry.get("outputs") or {}).values()
-                        for image in node_out.get("images", [])
-                    ]
-                    mine = [n for n in names if n.startswith(FILE_PREFIX)]
-                    if not mine:
-                        continue
-                    alive = False
-                    for name in mine:
-                        try:
-                            if (self._output_dir / name).stat().st_mtime >= cutoff:
-                                alive = True
-                        except OSError:
-                            pass  # file gone: nothing left for the entry to describe
-                    if not alive:
-                        orphans.append(prompt_id)
+                seen: set[str] = set()
+                for page in range(_SWEEP_MAX_PAGES):
+                    resp = client.get(
+                        "/history",
+                        params={"max_items": _SWEEP_PAGE, "offset": page * _SWEEP_PAGE},
+                        timeout=_PROBE_TIMEOUT_S,
+                    )
+                    if resp.status_code != 200:
+                        break
+                    entries = resp.json()
+                    fresh = [pid for pid in entries if pid not in seen]
+                    if not fresh:
+                        break  # an old build ignoring `offset` repeats the same page
+                    for prompt_id in fresh:
+                        seen.add(prompt_id)
+                        if self._is_orphaned_wyr_entry(entries[prompt_id], cutoff):
+                            orphans.append(prompt_id)
+                    if len(entries) < _SWEEP_PAGE:
+                        break
                 if orphans:
                     client.post("/history", json={"delete": orphans}, timeout=_PROBE_TIMEOUT_S)
                     removed += len(orphans)
         except httpx.HTTPError, ValueError, AttributeError:
             _LOGGER.warning("wyr: could not sweep ComfyUI history", exc_info=True)
         return removed
+
+    def _is_orphaned_wyr_entry(self, entry: dict[str, Any], cutoff: float) -> bool:
+        """True for a finished history entry of one of OUR runs with nothing young left behind:
+        none of its output files is recent and (when it has none) it is itself old. Entries of
+        other applications' runs are never ours."""
+        assert self._output_dir is not None
+        graph: Any = None
+        prompt = entry.get("prompt")
+        if isinstance(prompt, list) and len(prompt) > 2:
+            graph = prompt[2]
+        mine = False
+        if isinstance(graph, dict):
+            for node in graph.values():
+                inputs = node.get("inputs") if isinstance(node, dict) else None
+                prefix = inputs.get("filename_prefix") if isinstance(inputs, dict) else None
+                if isinstance(prefix, str) and prefix.startswith(FILE_PREFIX):
+                    mine = True
+                    break
+        names = [
+            str(image.get("filename", ""))
+            for node_out in (entry.get("outputs") or {}).values()
+            for image in node_out.get("images", [])
+        ]
+        wyr_names = [n for n in names if n.startswith(FILE_PREFIX)]
+        if not mine and not wyr_names:
+            return False
+        for name in wyr_names:
+            try:
+                if (self._output_dir / name).stat().st_mtime >= cutoff:
+                    return False  # a run may still own it
+            except OSError:
+                pass  # file gone: nothing left for the entry to describe
+        if wyr_names:
+            return True
+        # No outputs (interrupted/failed before saving): judge by the entry's own timestamps.
+        stamps: list[float] = []
+        for message in (entry.get("status") or {}).get("messages") or []:
+            if isinstance(message, list) and len(message) == 2 and isinstance(message[1], dict):
+                ts = message[1].get("timestamp")
+                if isinstance(ts, int | float):
+                    stamps.append(ts / 1000.0)
+        return not stamps or max(stamps) < cutoff
 
     def _forget_run(
         self, client: httpx.Client, prompt_id: str | None, prefix: str, *, cancel: bool
@@ -188,6 +235,17 @@ class ComfyImageGenerator:
                         client.post(endpoint, json=body, timeout=_PROBE_TIMEOUT_S)
                     except httpx.HTTPError:
                         pass
+                # An interrupted run only writes its history entry when its executor stops, a
+                # moment AFTER the interrupt: wait for it, or the delete below would run first.
+                settle_deadline = time.monotonic() + _CANCEL_SETTLE_S
+                while time.monotonic() < settle_deadline:
+                    try:
+                        seen = client.get(f"/history/{prompt_id}", timeout=_PROBE_TIMEOUT_S)
+                        if seen.status_code == 200 and prompt_id in seen.json():
+                            break
+                    except httpx.HTTPError, ValueError:
+                        pass
+                    time.sleep(0.25)
             try:
                 client.post("/history", json={"delete": [prompt_id]}, timeout=_PROBE_TIMEOUT_S)
             except httpx.HTTPError:

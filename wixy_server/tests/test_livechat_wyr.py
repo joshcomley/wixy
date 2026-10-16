@@ -960,6 +960,7 @@ class TestComfyClient:
         import wixy_server.livechat.wyr_images as images
 
         monkeypatch.setattr(images, "_GENERATION_BUDGET_S", 0.3)
+        monkeypatch.setattr(images, "_CANCEL_SETTLE_S", 0.3)
         out = tmp_path / "comfy-out"
         out.mkdir()
         transport, calls = self._fake(out, finishes=False)
@@ -973,7 +974,12 @@ class TestComfyClient:
         assert ("POST", "/history", {"delete": ["p1"]}) in calls
         assert list(out.iterdir()) == []
 
-    def test_an_unreadable_history_answer_still_cancels_the_run(self, tmp_path: Path) -> None:
+    def test_an_unreadable_history_answer_still_cancels_the_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import wixy_server.livechat.wyr_images as images
+
+        monkeypatch.setattr(images, "_CANCEL_SETTLE_S", 0.3)
         out = tmp_path / "comfy-out"
         out.mkdir()
         transport, calls = self._fake(out, bad_history=True)
@@ -1043,6 +1049,117 @@ class TestComfyClient:
         deletes = [c[2]["delete"] for c in calls if c[:2] == ("POST", "/history")]
         assert deletes == [["dead", "gone"]]
         assert not stale.exists() and young.exists()
+
+    def test_sweep_recognises_an_interrupted_run_with_no_outputs_by_its_graph(
+        self, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "comfy-out"
+        out.mkdir()
+        old_ms, young_ms = 1_000.0, time.time() * 1000.0
+
+        def bare(prefix: str, ts_ms: float) -> dict[str, Any]:
+            return {
+                "prompt": [
+                    1,
+                    "x",
+                    {"16": {"class_type": "SaveImage", "inputs": {"filename_prefix": prefix}}},
+                    {},
+                    [],
+                ],
+                "outputs": {},
+                "status": {
+                    "status_str": "error",
+                    "messages": [["execution_interrupted", {"timestamp": ts_ms}]],
+                },
+            }
+
+        listing = {
+            "old": bare("wyr_abc_a", old_ms),  # ours, interrupted long ago -> orphan
+            "young": bare("wyr_def_a", young_ms),  # ours, a moment ago -> left alone
+            "theirs": bare("someone_else", old_ms),  # not ours
+        }
+        transport, calls = self._fake(out, listing=listing)
+        generator = ComfyImageGenerator("http://comfy.invalid", output_dir=out, transport=transport)
+        assert generator.sweep_leftovers() == 1
+        assert [c[2]["delete"] for c in calls if c[:2] == ("POST", "/history")] == [["old"]]
+
+    def test_sweep_walks_every_history_page(self, tmp_path: Path) -> None:
+        out = tmp_path / "comfy-out"
+        out.mkdir()
+        pages: dict[int, dict[str, Any]] = {}
+
+        def other(i: int) -> dict[str, Any]:
+            return {"prompt": [i, f"o{i}", {}, {}, []], "outputs": {}, "status": {}}
+
+        pages[0] = {f"o{i}": other(i) for i in range(200)}  # a full page of other people's runs
+        pages[200] = {
+            "orphan": {
+                "prompt": [
+                    1,
+                    "orphan",
+                    {"16": {"inputs": {"filename_prefix": "wyr_zzz_a"}}},
+                    {},
+                    [],
+                ],
+                "outputs": {},
+                "status": {},
+            }
+        }
+        calls: list[tuple[str, str, Any]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content) if request.content else None
+            calls.append((request.method, request.url.path, body))
+            if request.method == "GET" and request.url.path == "/history":
+                return httpx.Response(200, json=pages.get(int(request.url.params["offset"]), {}))
+            return httpx.Response(200, json={})
+
+        generator = ComfyImageGenerator(
+            "http://comfy.invalid", output_dir=out, transport=httpx.MockTransport(handler)
+        )
+        assert generator.sweep_leftovers() == 1
+        assert [c[2]["delete"] for c in calls if c[:2] == ("POST", "/history")] == [["orphan"]]
+
+    def test_a_cancelled_run_waits_for_its_late_history_entry_then_deletes_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import wixy_server.livechat.wyr_images as images
+
+        monkeypatch.setattr(images, "_GENERATION_BUDGET_S", 0.3)
+        monkeypatch.setattr(images, "_CANCEL_SETTLE_S", 3.0)
+        out = tmp_path / "comfy-out"
+        out.mkdir()
+        polls = {"n": 0}
+        order: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content) if request.content else None
+            path = request.url.path
+            if path == "/prompt":
+                return httpx.Response(200, json={"prompt_id": "p1"})
+            if path == "/history/p1":
+                polls["n"] += 1
+                # empty while generating; the interrupted run's entry lands only after /interrupt
+                if "interrupt" in order and polls["n"] > 3:
+                    order.append("entry-landed")
+                    return httpx.Response(200, json={"p1": {"status": {"status_str": "error"}}})
+                return httpx.Response(200, json={})
+            if request.method == "POST":
+                order.append(
+                    path.strip("/")
+                    + (":" + ",".join(body.get("delete", [])) if body and "delete" in body else "")
+                )
+            return httpx.Response(200, json={})
+
+        generator = ComfyImageGenerator(
+            "http://comfy.invalid", output_dir=out, transport=httpx.MockTransport(handler)
+        )
+        work = tmp_path / "work"
+        work.mkdir()
+        with pytest.raises(ImageGenerationError):
+            generator.generate_pair("x", "y", work, seed_a=1, seed_b=2)
+        assert "entry-landed" in order
+        assert order.index("history:p1") > order.index("entry-landed")  # deleted AFTER it landed
 
     def test_purge_leftovers_removes_only_stale_wyr_files(self, tmp_path: Path) -> None:
         out = tmp_path / "comfy-out"
