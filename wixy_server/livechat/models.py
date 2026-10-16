@@ -204,6 +204,9 @@ class MessageRow:
     canvas: int = 0
     """1 for a canvas message (a blank drawing surface, no text/attachments), else 0."""
     wyr: WyrSummary | None = None
+    wyr_ref: int | None = None
+    """The anchor seq of the would-you-rather round this message was sent in the game chat of,
+    else None — joined from `wyr_chat` at read time. The message itself stays in the main chat."""
     """The round summary when this message anchors a would-you-rather round, else
     None — joined from `wyr_rounds` at read time, exactly like `drawings`."""
 
@@ -411,6 +414,7 @@ def message_json(row: MessageRow, signer: MediaUrlSigner) -> JsonObject:
         "canvas": bool(row.canvas),
         "drawings": [{"id": d.id, "rev": d.rev} for d in row.drawings],
         "wyr": ({"state": row.wyr.state, "rev": row.wyr.rev} if row.wyr is not None else None),
+        "wyrRef": row.wyr_ref,
     }
 
 

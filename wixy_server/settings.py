@@ -101,6 +101,8 @@ _DEFAULT_SERVER_MIN_FREE_BYTES = 1024 * _MB
 _DEFAULT_SERVER_UPLOAD_CHUNK_BYTES = 8 * _MB
 _MIN_SERVER_UPLOAD_CHUNK_BYTES = 64 * 1024
 _MAX_SERVER_UPLOAD_CHUNK_BYTES = 16 * _MB
+_DEFAULT_WYR_POOL_SIZE = 100
+_MAX_WYR_POOL_SIZE = 1000
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +135,7 @@ class Settings:
     comfy_url: str
     comfy_output_dir: str
     wyr_image_model: str
+    wyr_pool_size: int
 
 
 def load_settings(storage_root: Path) -> Settings:
@@ -189,6 +192,14 @@ def load_settings(storage_root: Path) -> Settings:
         ),
     )
 
+    # Pictures painted ahead for upcoming would-you-rather questions (0 = off). A malformed value
+    # falls back to the default rather than stopping the chat from starting.
+    try:
+        wyr_pool_size = int(_get("WIXY_WYR_POOL_SIZE", str(_DEFAULT_WYR_POOL_SIZE)))
+    except ValueError:
+        wyr_pool_size = _DEFAULT_WYR_POOL_SIZE
+    wyr_pool_size = min(_MAX_WYR_POOL_SIZE, max(0, wyr_pool_size))
+
     return Settings(
         port=int(_get("WIXY_PORT", "8000")),
         env=env,
@@ -230,4 +241,5 @@ def load_settings(storage_root: Path) -> Settings:
         comfy_url=_get("WIXY_COMFY_URL"),
         comfy_output_dir=_get("WIXY_COMFY_OUTPUT_DIR"),
         wyr_image_model=_get("WIXY_WYR_IMAGE_MODEL", "krea2-turbo-nvfp4"),
+        wyr_pool_size=wyr_pool_size,
     )

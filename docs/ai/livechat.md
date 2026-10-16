@@ -555,6 +555,7 @@ playback in the browser. Served via Starlette `FileResponse` (200/206, Range-awa
 | `WIXY_FFMPEG` / `WIXY_FFPROBE` | `ffmpeg_path` / `ffprobe_path` | `""` (resolve via `PATH`) | overrides must point to existing files; either binary missing — or `pillow-heif` not importable — makes media uploads return 503 while text chat works |
 | `WIXY_COMFY_URL` | `comfy_url` | `""` (images off) | would-you-rather pictures (§19): base URL of the local ComfyUI (fleet: `http://127.0.0.1:8199`); empty or `WIXY_EDITION=standalone` means text-only rounds |
 | `WIXY_COMFY_OUTPUT_DIR` | `comfy_output_dir` | `""` | the folder ComfyUI writes its output to (fleet: `E:\ImageGenLab\out-wyr`, its `--output-directory`); **required with `WIXY_COMFY_URL`** — this server deletes its own pictures there after each run (Inv 54), and without it pictures stay disabled |
+| `WIXY_WYR_POOL_SIZE` | `wyr_pool_size` | `100` | pictures for this many upcoming would-you-rather questions are painted ahead of time (§19); `0` = off (and a stale pool is removed at start), clamped to 1000, a malformed value means 100 |
 | `WIXY_WYR_IMAGE_MODEL` | `wyr_image_model` | `krea2-turbo-nvfp4` | which proven model recipe in `wyr_images.IMAGE_MODELS` to drive (`boogu-turbo-nvfp4` is the fast alternative) |
 
 `ProjectPaths` (`storage.py`) gets `server_dir`/`server_db`/`server_secret`/`server_vapid`/
@@ -1766,7 +1767,7 @@ answered, each presses **Reveal**, and only when both have does anyone see the a
   once at `create_app` into `app.state.livechat_wyr_questions`; `wyr_questions.pick_question` draws
   a random unplayed one. Each carries a scene description per option; a per-category style
   suffix is appended before painting.
-- **Pictures**: painted when the round is created, never ahead of time. `wyr_images.ComfyImageGenerator`
+- **Pictures**: attached to the round when it is created — instantly from the picture pool, or painted on demand when the pool has none. `wyr_images.ComfyImageGenerator`
   drives ComfyUI (`/prompt` -> `/history` -> `/view`) with both options in one submission and then
   **cleans up after itself** (deletes its `/history` entry and its `wyr_*` output files, cancels any run that did not
   finish cleanly; `sweep_leftovers` at startup and every 10 min removes stale files/history of
@@ -1780,6 +1781,33 @@ answered, each presses **Reveal**, and only when both have does anyone see the a
   never waits for pictures that are not coming. `create_app(image_generator=...)` is the test
   seam. No generator (unset `WIXY_COMFY_URL`, no `WIXY_COMFY_OUTPUT_DIR`, standalone edition,
   ComfyUI down or failing) means text-only.
+- **The picture pool** (schema-free, `wyr_pool.py` + `wyr_game.py`): `server/wyr-pool/<question_id>/{a,b}.png`
+  holds pictures painted AHEAD of time for upcoming questions (target `WIXY_WYR_POOL_SIZE`, default 100,
+  about 2.7 MB each). A supervised loop (`livechat-wyr-pool`, only with a generator and a non-zero size)
+  runs `pool_step` repeatedly: while the pool is below target it paints one pair for a random question
+  that is neither played nor already pooled, under the SAME single-flight gate (`wyr_image_limiter`) as
+  on-demand rounds. It **yields** to any waiting on-demand job (`WyrDemand` counter), stops when free
+  disk is within 1 GiB of `server_min_free_bytes`, and waits (5 min) for a generator that is down or
+  misconfigured; failures back off 30 s doubling to 5 min (`PoolPacing`); full pool = 60 s idle. A
+  pair appears only by an atomic directory rename out of `<id>.tmp`; a consumer reserves it by
+  renaming it to `<id>.taken-<token>`, so it can be taken once, and `restore`/`discard` finish the
+  reservation. `POST /wyr` calls `pick_round`: it takes a pooled pair for an unplayed question
+  when one exists, MOVES its PNGs into `uploads/<id>/assembled` and attaches both in one transaction
+  (`attach_pooled_images`) BEFORE answering, so the response already carries the two photo
+  attachments; a replayed `clientId` puts its reservation back; any staging failure falls back to the
+  on-demand job. Startup (`WyrPool.cleanup`) removes `*.tmp`/`*.taken-*` older than 15 minutes (younger
+  ones may belong to the older process of a blue/green overlap) and pooled pairs for questions played
+  since — but when the whole bank has been played the repeat guard restarts and nothing is pruned.
+  Pooled pictures are NOT chat content (bank-derived, tied to no conversation), so a wipe does not
+  clear them; a consumed picture is an ordinary attachment and is erased with its message (Inv 54).
+- **The game chat** (schema v16, `wyr_chat`): a message sent from inside a round's game tab is an
+  ordinary message — it stays in the main chat, in order — plus one `wyr_chat(message_seq, anchor_seq)`
+  row. `POST /messages` takes an optional `wyrSeq` (a missing round is 404, nothing created) and the
+  `Message` wire shape carries `wyrRef` (the anchor seq, else `null`). `LiveChatStore.create_message(...,
+  wyr_anchor_seq=)` validates the round and writes the association in the SAME transaction. Both foreign
+  keys cascade: deleting a message removes its row, deleting the round's anchor removes the rows (the
+  messages stay in the main chat), and a wipe deletes `wyr_chat` explicitly. No dates are stored.
+  A per-round history view is future work; the association is what it will read.
 - **Client**: `admin-ui/src/server/api/wyr.ts` (defensive parsers), `wyrModel.ts` (per-round
   viewer-filtered view + unsent picks; the summary only triggers a fetch), `wyrCard.ts` (the
   in-bubble card), wired in `thread.ts` (menu item `.wx-srv-more-wyr`, `.wx-srv-bubble-wyr`).
@@ -1787,7 +1815,7 @@ answered, each presses **Reveal**, and only when both have does anyone see the a
   RTX 5060 Ti by UUID, `--output-directory E:\ImageGenLab\out-wyr`) and `WIXY_COMFY_URL` +
   `WIXY_COMFY_OUTPUT_DIR` (the same folder) in `D:\Servers\Wixy\.env`.
 
-Honest limits: a round's pictures take roughly 25-60 s to appear (the card shows a placeholder);
+Honest limits: with a full pool a round's pictures are there at once; with an empty one (just after a deploy, or a long play session that outruns the ~25-45 s per pair the GPU needs) they take roughly 25-60 s to appear (the card shows a placeholder);
 the answers filter keeps the game fun but the chat has no per-person secrecy (Inv 40).
 
 ## 20. The would-you-rather game tab and the full-screen chat (client; workspace 00045, decisions/00184)

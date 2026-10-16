@@ -1036,7 +1036,7 @@ the table row count and the events table are unchanged by a live post).
 
 
 ### Inv 54 — A would-you-rather round is chat content: the other player's answers never leave the server before both reveal, and the round is erased with its message or a wipe
-The game (`wyr_rounds`, schema v15, workspace 00045) is chat content. `wyr_rounds` is keyed by
+The game (`wyr_rounds` schema v15 and the game-chat association `wyr_chat` schema v16, workspace 00045) is chat content. `wyr_rounds` is keyed by
 its anchor message (`anchor_message_seq REFERENCES messages(seq) ON DELETE CASCADE`, the Inv 53
 pattern: an older blue/green-overlap process that never heard of the table still cascades a round
 away with its message), and a wipe issues `DELETE FROM wyr_rounds` explicitly in the same
@@ -1051,6 +1051,16 @@ abandons, and a sweep (at startup and every 10 minutes) removes `wyr_*` files ol
 exist for seconds and are unlinked, not scrubbed — the one place game content touches disk outside
 `server/` (a plain unlink, so recoverable by forensics until the OS reuses the blocks); a run's
 downloaded PNGs likewise sit in `server/wyr-tmp/` only while it runs (stale dirs cleared at start).
+**The game chat** (`wyr_chat(message_seq, anchor_seq)`, both `ON DELETE CASCADE`): a message sent from inside a round's game
+tab is an ordinary message plus one association row, written in the same transaction as the message. Deleting the
+message removes its row; deleting the round's anchor removes the rows while the messages stay in the main chat (they
+are main-chat messages first); a wipe issues `DELETE FROM wyr_chat` explicitly. Nothing dated is stored beside it.
+**The picture pool** (`server/wyr-pool/`, pictures painted ahead for upcoming questions) is NOT chat content: it is
+derived from the static question bank and tied to no conversation, so a wipe does not clear it. The moment a round
+consumes a pair its PNGs are MOVED into `uploads/<id>/assembled` and become ordinary photo attachments, erased with
+their message (Inv 46); an unconsumed pair for a question that has since been played is removed by the next start.
+The pool's one observable trace — which questions are pooled — is a subset of the static bank and says nothing about
+what was played. Pool generation obeys the same ComfyUI cleanup as on-demand runs (above).
 **The other player's pick and guess are served only when `state == "revealed"`** (both players
 pressed Reveal): `wyr_view_json` is the one place answers leave the store, `Message.wyr` carries
 only `{state, rev}`, and the client parser ignores a `result` on any unrevealed view. This is a
@@ -1064,6 +1074,6 @@ Every mutation is idempotent and announced only via the existing `message_update
 `TestViewFiltering` — no other-player answers before reveal or under another sign-in, cascade +
 wipe erasure and no leftover played-list row, the route flow and its filtered views, `TestImageJob`
 — every exit ends the picture wait and leaves no files, `TestComfyClient` — ComfyUI history and
-output files deleted, abandoned runs cancelled, `TestSingleFlight`) and
+output files deleted, abandoned runs cancelled, `TestSingleFlight`), `test_livechat_wyr_chat.py` (the association: create, replay, unknown round, cascade on message delete, anchor delete keeps the messages, wipe, the v15 -> v16 migration, `wyrSeq`/`wyrRef` over the routes) and `test_livechat_wyr_pool.py` (atomic publish/reserve, overlap-safe cleanup, every filler guard, pacing, the loop, pool-first `POST /wyr`, fallbacks) and
 `admin-ui/tests/serverWyr.test.ts` (view parsing refuses a result before reveal; the card shows
 no answers until revealed).
