@@ -990,6 +990,31 @@ describe("mountShell", () => {
     expect(serverPanel.teardownCount).toBe(1);
   });
 
+  it("the unlocked Server chat hides the shell's bars (full screen); the panel handing the screen back restores them", async () => {
+    const api = fakeApi();
+    const win = fakeWindow();
+    const container = document.createElement("div");
+    let panelDeps: ServerPanelDeps | null = null;
+
+    mountShell(container, {
+      api,
+      win,
+      mountEditView: fakeMountEditView().fn,
+      mountServerPanel: (deps) => {
+        panelDeps = deps;
+        return { element: document.createElement("div"), teardown: () => {} };
+      },
+    });
+    await flushState(api);
+    goTo(win, "/admin/server");
+    expect(container.classList.contains("wx-shell-srv-full")).toBe(false);
+
+    panelDeps!.onFullscreenChange!(true);
+    expect(container.classList.contains("wx-shell-srv-full")).toBe(true);
+    panelDeps!.onFullscreenChange!(false);
+    expect(container.classList.contains("wx-shell-srv-full")).toBe(false);
+  });
+
   it("the History route renders the real history panel, not a stub", async () => {
     const api = fakeApi();
     const win = fakeWindow();

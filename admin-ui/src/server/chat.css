@@ -560,6 +560,10 @@ button.wx-srv-quote:focus-visible {
   margin: 0 0 8px;
 }
 
+.wx-srv-thread-wrap[hidden] {
+  display: none;
+}
+
 .wx-srv-thread {
   flex: 1;
   min-height: 0;
@@ -731,7 +735,7 @@ button.wx-srv-quote:focus-visible {
   background-size: 24px 24px;
 }
 
-/* -- Would-you-rather card --------------------------------------------------- */
+/* -- Would-you-rather: the preview card in the main chat ---------------------- */
 
 .wx-srv-bubble.wx-srv-bubble-wyr {
   align-self: stretch;
@@ -746,7 +750,7 @@ button.wx-srv-quote:focus-visible {
 .wx-srv-wyr-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -755,16 +759,12 @@ button.wx-srv-quote:focus-visible {
   color: var(--wx-ink);
 }
 
+/* The preview is two thumbnails side by side on every width (the playing happens in the game
+   tab); each stays small so a round takes little room when scrolling back through the thread. */
 .wx-srv-wyr-pair {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 10px;
-}
-
-@media (min-width: 480px) {
-  .wx-srv-wyr-pair {
-    grid-template-columns: 1fr 1fr;
-  }
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
 
 .wx-srv-wyr-pair-muted {
@@ -774,9 +774,9 @@ button.wx-srv-quote:focus-visible {
 .wx-srv-wyr-tile {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
-  padding: 6px;
+  padding: 4px;
   border: 2px solid transparent;
   border-radius: var(--wx-radius);
 }
@@ -796,6 +796,7 @@ button.wx-srv-quote:focus-visible {
 
 .wx-srv-wyr-frame {
   width: 100%;
+  max-height: 160px;
   aspect-ratio: 1 / 1;
   border-radius: calc(var(--wx-radius) - 2px);
   background: var(--wx-canvas);
@@ -812,13 +813,9 @@ button.wx-srv-quote:focus-visible {
   display: block;
 }
 
-.wx-srv-wyr-frame-loading {
-  background-image: linear-gradient(
-    110deg,
-    var(--wx-canvas) 30%,
-    var(--wx-border) 50%,
-    var(--wx-canvas) 70%
-  );
+.wx-srv-wyr-frame-loading,
+.wx-srv-game-placeholder-loading {
+  background-image: linear-gradient(110deg, var(--wx-canvas) 30%, var(--wx-border) 50%, var(--wx-canvas) 70%);
   background-size: 200% 100%;
   animation: wx-srv-wyr-shimmer 1.6s linear infinite;
 }
@@ -833,7 +830,8 @@ button.wx-srv-quote:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .wx-srv-wyr-frame-loading {
+  .wx-srv-wyr-frame-loading,
+  .wx-srv-game-placeholder-loading {
     animation: none;
   }
 }
@@ -845,14 +843,9 @@ button.wx-srv-quote:focus-visible {
 
 .wx-srv-wyr-label {
   color: var(--wx-ink);
+  font-size: 0.8125rem;
   overflow-wrap: anywhere;
   text-align: center;
-}
-
-.wx-srv-wyr-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
 }
 
 .wx-srv-wyr-status,
@@ -873,8 +866,10 @@ button.wx-srv-quote:focus-visible {
   gap: 8px;
 }
 
-.wx-srv-wyr-group {
-  flex-direction: column;
+/* Pick / guess: the two options side by side, so each pair of choices costs one row. */
+.wx-srv-wyr-group > .wx-srv-wyr-option {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .wx-srv-wyr-primary,
@@ -889,18 +884,18 @@ button.wx-srv-quote:focus-visible {
   font: inherit;
   cursor: pointer;
   overflow-wrap: anywhere;
-  text-align: left;
+  text-align: center;
 }
 
 .wx-srv-wyr-primary {
   background: var(--wx-brand-blue);
   border-color: var(--wx-brand-blue);
   color: #fff;
-  text-align: center;
 }
 
-.wx-srv-wyr-secondary {
-  text-align: center;
+.wx-srv-wyr-option {
+  padding: 4px 10px;
+  font-size: 0.8125rem;
 }
 
 .wx-srv-wyr-option-on {
@@ -918,7 +913,7 @@ button.wx-srv-quote:focus-visible {
 .wx-srv-wyr-results {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .wx-srv-wyr-result-name {
@@ -949,6 +944,397 @@ button.wx-srv-quote:focus-visible {
   margin: 0;
   color: var(--wx-muted);
   font-size: 0.9rem;
+}
+
+/* A message sent in a round's game chat keeps a small tag in the main chat. */
+.wx-srv-bubble-wyrtag {
+  align-self: flex-start;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--wx-muted);
+  border: 1px solid var(--wx-border);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+
+/* -- Would-you-rather: the tab bar --------------------------------------------- */
+
+.wx-srv-tabs {
+  display: flex;
+  margin: 0 0 4px;
+  border-top: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+}
+
+.wx-srv-tabs[hidden] {
+  display: none;
+}
+
+.wx-srv-tab {
+  position: relative;
+  flex: 1 1 0;
+  min-height: var(--wx-srv-control-h);
+  border: 0;
+  border-top: 3px solid transparent;
+  background: none;
+  color: var(--wx-muted);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.wx-srv-tab-on {
+  color: var(--wx-ink);
+  border-top-color: var(--wx-brand-blue);
+}
+
+.wx-srv-tab-dot {
+  position: absolute;
+  top: 6px;
+  margin-left: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--wx-brand-blue);
+}
+
+.wx-srv-tab-dot[hidden] {
+  display: none;
+}
+
+/* The pen draws on the thread; in the game tab there is no thread to draw on. */
+.wx-srv-in-game .wx-srv-pen-button,
+.wx-srv-in-game .wx-srv-pen-undo,
+.wx-srv-in-game .wx-srv-pen-redo {
+  display: none;
+}
+
+/* -- Would-you-rather: the game tab -------------------------------------------- */
+
+.wx-srv-game {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.wx-srv-game[hidden] {
+  display: none;
+}
+
+.wx-srv-game-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wx-srv-game-title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 700;
+  color: var(--wx-ink);
+}
+
+.wx-srv-game-next,
+.wx-srv-game-close {
+  min-height: var(--wx-srv-control-h);
+  padding: 0 12px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.wx-srv-game-next {
+  background: var(--wx-brand-blue);
+  border-color: var(--wx-brand-blue);
+  color: #fff;
+  font-weight: 700;
+}
+
+.wx-srv-game-next[hidden] {
+  display: none;
+}
+
+/* The picture takes whatever height the rest leaves; tapping it flips between the options. */
+.wx-srv-game-stage {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 140px;
+  padding: 0;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-canvas);
+  overflow: hidden;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.wx-srv-game-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: none;
+}
+
+.wx-srv-game-img.wx-srv-game-img-on {
+  display: block;
+}
+
+.wx-srv-game-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  color: var(--wx-ink);
+  font-size: 1.25rem;
+  font-weight: 700;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-game-placeholder[hidden] {
+  display: none;
+}
+
+.wx-srv-game-chips {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+.wx-srv-game-chip {
+  min-width: 24px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.wx-srv-game-chip-on {
+  background: var(--wx-brand-blue);
+  color: #fff;
+}
+
+.wx-srv-game-caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 24px 12px 10px;
+  background: linear-gradient(to bottom, transparent, rgba(0, 0, 0, 0.72));
+  color: #fff;
+  text-align: left;
+}
+
+.wx-srv-game-caption-text {
+  font-size: 1rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-game-caption-picks {
+  font-size: 0.75rem;
+  opacity: 0.9;
+}
+
+.wx-srv-game-controls {
+  flex: none;
+  max-height: 38%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+}
+
+.wx-srv-game-controls[hidden] {
+  display: none;
+}
+
+/* The mini chat: this card's last two messages — tap one (or its thumbnail) for the pop-up. */
+.wx-srv-game-mini {
+  position: relative;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-right: 40px;
+}
+
+.wx-srv-game-mini-msg {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  max-height: 3.6em;
+  padding: 4px 8px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.wx-srv-game-mini-empty {
+  color: var(--wx-muted);
+  border-style: dashed;
+}
+
+.wx-srv-game-mini-sender {
+  flex: none;
+  font-weight: 700;
+}
+
+.wx-srv-game-mini-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-game-mini-thumb {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.wx-srv-game-mini-icon {
+  flex: none;
+}
+
+.wx-srv-game-mini-expand {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 36px;
+  min-height: 32px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* -- Would-you-rather: the pop-up game chat ------------------------------------- */
+
+.wx-srv-gamepop {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.wx-srv-gamepop[hidden] {
+  display: none;
+}
+
+.wx-srv-gamepop-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+}
+
+.wx-srv-gamepop-sheet {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 55%;
+  max-height: 90%;
+  padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+  border: 1px solid var(--wx-border);
+  border-radius: 16px 16px 0 0;
+  background: var(--wx-canvas);
+}
+
+.wx-srv-gamepop-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wx-srv-gamepop-title {
+  flex: 1;
+  font-weight: 700;
+  color: var(--wx-ink);
+}
+
+.wx-srv-gamepop-close {
+  min-height: var(--wx-srv-control-h);
+  padding: 0 12px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.wx-srv-gamepop-list {
+  flex: 1 1 auto;
+  min-height: 80px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+}
+
+.wx-srv-gamepop-empty {
+  margin: auto;
+  color: var(--wx-muted);
+}
+
+.wx-srv-gamepop-empty[hidden] {
+  display: none;
+}
+
+.wx-srv-gamepop-composer {
+  flex: none;
+}
+
+/* The pop-up is already the game chat: the tag would say the same thing on every message. */
+.wx-srv-gamepop .wx-srv-bubble-wyrtag {
+  display: none;
 }
 
 /* -- Unheard voice notes --------------------------------------------------- */
@@ -3159,4 +3545,8 @@ button.wx-srv-quote:focus-visible {
   .wx-srv-pen-mode {
     padding: 0 9px;
   }
+}
+
+.wx-srv-game-caption-text[hidden] {
+  display: none;
 }

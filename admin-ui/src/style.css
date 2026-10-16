@@ -418,6 +418,17 @@ html, body {
   display: none;
 }
 
+/* The unlocked Server chat uses the whole screen (workspace 00045): the status bar, top bar and
+   navigation all step aside, so `.wx-main` — and the chat inside it — gets the full dynamic
+   viewport height. Locking (or leaving the route) removes the class and the bars return. */
+.wx-shell-srv-full .wx-statusbar,
+.wx-shell-srv-full .wx-topbar,
+.wx-shell-srv-full .wx-navrow,
+.wx-shell-srv-full .wx-edit-bar-host,
+.wx-shell-srv-full .wx-nav {
+  display: none;
+}
+
 .wx-shell-chrome-revealed .wx-topbar {
   max-height: 140px;
   /* The editing rule above set visibility:hidden and NO rule reset it — equal

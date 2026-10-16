@@ -1789,3 +1789,32 @@ answered, each presses **Reveal**, and only when both have does anyone see the a
 
 Honest limits: a round's pictures take roughly 25-60 s to appear (the card shows a placeholder);
 the answers filter keeps the game fun but the chat has no per-person secrecy (Inv 40).
+
+## 20. The would-you-rather game tab and the full-screen chat (client; workspace 00045, decisions/00184)
+
+- **Full screen.** While the chat is unlocked (`panel.ts` state `chat`/`fading`) it reports `onFullscreenChange(true)`;
+  `shell.ts` adds `wx-shell-srv-full` to the shell root and `style.css` hides the status bar, top bar, nav row, side nav
+  and edit-bar host. Locking, or leaving `/admin/server`, removes it. The header's panic ✕ is the exit.
+- **Tabs.** `wyrGame.ts` (`createWyrGame`) owns the tab bar (`.wx-srv-tabs`, under the composer; hidden unless a game is
+  open — one tab means no bar), the game pane (`.wx-srv-game`, in the thread's place while the WYR tab shows) and the
+  pop-up (`.wx-srv-gamepop`). `thread.ts` creates it after the composer and implements its callbacks
+  (`applyGameLayout` hides/restores the thread wrapper, saves its scroll, abandons the pen).
+  `open(seq)` (starter / tapping a card's Play) shows the tab; `offer(seq)` (a round someone else started, or the newest
+  unfinished round at load) adds it with a dot without switching; `close()` removes it and remembers the dismissal.
+- **The game pane**, top to bottom: header (title, Next ▸ once a round is revealed/skipped, ✕), the picture stage (tap
+  flips A/B; both images are preloaded; a text-only round shows the option as large text, a `pending` job shows
+  "Painting…"), the controls (`wyrControls.ts`: Play/Skip, a pick row and a guess row, Reveal, results), the mini chat
+  (this card's last two messages + echoes, attachments as 28 px thumbnails, tap → pop-up) and — below, as always — the
+  one composer, which now sends into the card.
+- **Game chat routing.** Messages are ordinary; `game.chatTarget()` (the open round's seq while the WYR tab or the
+  pop-up is in use) is spread into every `sendMessage` as `wyrSeq` (`wyrSendFields()` in `thread.ts`), and optimistic
+  echoes carry it so the mini chat shows them at once. A message carrying `wyrRef` gets a small "WYR" tag in the main
+  chat and is the card's chat in the tab and pop-up.
+- **The pop-up** is the same chat larger: the card's whole history (the thread's embedded bubble renderer, updated
+  incrementally) with the ONE composer re-parented into it (`mountComposer(host)`), so voice notes, attachments and the
+  draft all work and survive the move. Escape or the backdrop closes it and returns the composer.
+- **The main-chat card** (`wyrCard.ts`) is now a preview: the question, both pictures side by side, one status line and
+  a Play/Open button that opens the tab. It has no answer controls.
+- **Files.** `admin-ui/src/server/{wyrGame,wyrControls,wyrCard,wyrModel}.ts`, `api/wyr.ts`; tests
+  `admin-ui/tests/{serverWyr,serverWyrGame,serverChatCss}.test.ts`, panel/shell tests for full screen, and
+  `e2e/tests/server-wyr.spec.ts` (two people, tabs, picture flip, full screen, 360 px phone).

@@ -39,6 +39,8 @@ import { uploadServerAttachment } from "./api/uploads";
 import { mountDrawingLayer, type DrawingLayer } from "./drawingLayer";
 import { answerWyr, createWyrRound, getWyrRound, revealWyr, voteWyr } from "./api/wyr";
 import { createWyrCards, type WyrCards } from "./wyrCard";
+import { createWyrControls, type WyrControls } from "./wyrControls";
+import { createWyrGame, type WyrGame } from "./wyrGame";
 import { createWyrModel, type WyrModel } from "./wyrModel";
 import type { ServerIdentity } from "./identity";
 import { linkifyInto } from "./linkify";
@@ -122,6 +124,8 @@ interface PendingEcho {
   readonly text: string | null;
   readonly sentAt: number;
   readonly replyTo: ReplyTo | null;
+  /** The game chat this message was sent into (a would-you-rather round's anchor seq). */
+  readonly wyrSeq?: number;
 }
 
 /** The composer's current reply target (round 2 ruling item 10 §(4)) — part
@@ -379,7 +383,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     session: () => currentSession,
     viewer: () => identity.getName(),
     fetchRound: (session, seq, viewer) => getWyrRound(session, seq, viewer),
-    onChange: (seq) => patchWyr(seq),
+    onChange: (seq) => {
+      patchWyr(seq);
+      game.refresh();
+    },
     setTimeout: (fn, ms) => win.setTimeout(fn, ms),
     clearTimeout: (id) => win.clearTimeout(id),
   });
@@ -387,7 +394,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     if (currentSession === null) throw new ServerLockedError();
     return currentSession;
   }
-  const wyrCards: WyrCards = createWyrCards({
+  // The game tab (`wyrGame.ts`) is created once the composer exists (it re-parents it).
+  let game: WyrGame;
+  const wyrControls: WyrControls = createWyrControls({
     model: wyrModel,
     document: documentRef,
     viewer: () => identity.getName(),
@@ -395,8 +404,17 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     answer: (seq, choice, guess) =>
       answerWyr(wyrSession(), seq, { sender: identity.getName() ?? "", choice, guess }),
     reveal: (seq) => revealWyr(wyrSession(), seq, { sender: identity.getName() ?? "" }),
-    openLightbox: (src, alt) => lightbox.open(src, alt),
+    redraw: (seq) => {
+      patchWyr(seq);
+      game.refresh();
+    },
     afterChange: () => threadScroll.afterContentChange(false),
+  });
+  const wyrCards: WyrCards = createWyrCards({
+    model: wyrModel,
+    document: documentRef,
+    openGame: (seq) => game.open(seq),
+    openLightbox: (src, alt) => lightbox.open(src, alt),
   });
   let voiceRecorder: VoiceRecorder | null = null;
   let composer: ChatComposer;
@@ -1028,6 +1046,62 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   element.appendChild(replyBar);
   element.appendChild(composer.element);
 
+  // -- Would-you-rather game tab (workspace 00045) ---------------------------------------------
+  // The tab bar sits under the composer; the game pane takes the thread's place while the WYR tab
+  // shows; the pop-up game chat borrows the ONE composer (voice notes, attachments and all).
+  let savedThreadScrollTop = 0;
+  let threadHiddenForGame = false;
+  function applyGameLayout(): void {
+    const inGame = game.activeTab() === "wyr" && game.gameSeq() !== null;
+    element.classList.toggle("wx-srv-in-game", inGame);
+    if (inGame && !threadHiddenForGame) {
+      if (drawingLayer.isPenOn()) drawingLayer.abandon();
+      savedThreadScrollTop = thread.scrollTop;
+      threadWrap.hidden = true;
+      threadHiddenForGame = true;
+    } else if (!inGame && threadHiddenForGame) {
+      threadWrap.hidden = false;
+      threadHiddenForGame = false;
+      thread.scrollTop = savedThreadScrollTop;
+      threadScroll.afterContentChange(false);
+      drawingLayer.relayout();
+    }
+  }
+  game = createWyrGame({
+    document: documentRef,
+    model: wyrModel,
+    controls: wyrControls,
+    isMine: (sender) => identity.isMine(sender),
+    roundMessage: (seq) => confirmedBySeq.get(seq),
+    gameMessages: (seq) =>
+      Array.from(confirmedBySeq.values())
+        .filter((m) => m.wyrRef === seq)
+        .sort((a, b) => a.seq - b.seq),
+    gameEchoes: (seq) =>
+      pendingEchoes
+        .filter((e) => e.wyrSeq === seq && !confirmedClientIds.has(e.clientId))
+        .map((e) => ({ clientId: e.clientId, text: e.text })),
+    renderBubble: (message) => renderBubble(message, identity.isMine(message.sender), true),
+    disposeBubble: (bubble) => disposeAttachmentMedia(bubble),
+    mountComposer: (host) => {
+      if (host !== null) host.appendChild(composer.element);
+      else element.insertBefore(composer.element, game.tabBar);
+    },
+    startNextRound: () => void addWyrRound(),
+    onLayoutChange: applyGameLayout,
+    afterChange: () => threadScroll.afterContentChange(false),
+    openLightbox: (src, alt) => lightbox.open(src, alt),
+  });
+  threadWrap.after(game.pane);
+  element.appendChild(game.tabBar);
+  element.appendChild(game.popup);
+
+  /** The game chat a message sent now belongs to — `{}` for the main chat. */
+  function wyrSendFields(): { wyrSeq?: number } {
+    const target = game.chatTarget();
+    return target === null ? {} : { wyrSeq: target };
+  }
+
   // -- State ---------------------------------------------------------------
 
   let historyLoaded = false;
@@ -1401,6 +1475,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         // captured when recording stopped, independent of whatever the
         // composer bar shows now.
         ...(pending.replyTo !== null ? { replyToSeq: pending.replyTo.seq } : {}),
+        ...wyrSendFields(),
       });
       if (!result.ok) {
         if (result.kind === "invalid" || result.kind === "rejected") {
@@ -1735,6 +1810,23 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     addConfirmed(result.message);
     renderThreadList();
     threadScroll.scrollToBottom();
+    // The game opens in its own tab (and pops the next round's card into the main chat).
+    game.open(result.message.seq);
+  }
+
+  /** Keeps the game tab in step with the thread: a round someone ELSE started (or the newest
+   * unfinished one at load) offers its tab; a closed or vanished round leaves it. */
+  function syncWyrGame(messages: readonly Message[]): void {
+    let newest: Message | undefined;
+    for (const m of messages) if (m.wyr !== undefined && m.wyr !== null) newest = m;
+    if (newest !== undefined && newest.wyr !== undefined && newest.wyr !== null) {
+      const active = newest.wyr.state !== "revealed" && newest.wyr.state !== "skipped";
+      const current = game.gameSeq();
+      if (newest.seq !== current && (active || (current !== null && newest.seq > current))) {
+        game.offer(newest.seq);
+      }
+    }
+    game.refresh();
   }
 
   /** Redraws one round's card in place (no bubble rebuild). */
@@ -1759,6 +1851,13 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       sender.className = "wx-srv-bubble-sender";
       sender.textContent = message.sender;
       bubble.appendChild(sender);
+    }
+    if (typeof message.wyrRef === "number") {
+      // Sent in a would-you-rather round's game chat: a small tag keeps the context in the thread.
+      const tag = documentRef.createElement("span");
+      tag.className = "wx-srv-bubble-wyrtag";
+      tag.textContent = "WYR";
+      bubble.appendChild(tag);
     }
     const time = documentRef.createElement("span");
     time.className = "wx-srv-bubble-time";
@@ -2039,6 +2138,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     // what a message's `drawings` summary says is new, and drop those of vanished messages.
     drawingLayer.syncMessages(messages);
     wyrModel.observe(messages);
+    syncWyrGame(messages);
     threadScroll.afterContentChange(revealPillIfNotStuck);
     updateUnheard();
   }
@@ -2109,6 +2209,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     // spec 07 §5/§6: a wipe ends any drawing session and takes every drawing with it.
     drawingLayer.wiped();
     wyrModel.reset();
+    game.reset();
     contentGeneration += 1;
     contentRevision += 1;
     scrollToOriginalGeneration += 1; // §(4): a wipe aborts any in-flight scroll-to-original
@@ -2505,11 +2606,13 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         pendingVoCompanionClientId ??= cryptoRandomId(win);
         const ordClientId = pendingVoCompanionClientId;
         const ordReplyTo = draft.replyTo;
+        const ordWyr = wyrSendFields();
         const echo: PendingEcho = {
           clientId: ordClientId,
           text: text === "" ? null : text,
           sentAt: now(),
           replyTo: ordReplyTo?.quote ?? null,
+          ...ordWyr,
         };
         pendingEchoes.push(echo);
         contentRevision += 1;
@@ -2524,6 +2627,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
             text: text === "" ? null : text,
             attachmentIds: otherStaged.map((s) => s.attachmentId!).filter(Boolean),
             ...(ordReplyTo !== null ? { replyToSeq: ordReplyTo.seq } : {}),
+            ...ordWyr,
           });
           if (ordResult.ok) {
             addConfirmed(ordResult.message);
@@ -2684,11 +2788,13 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     // made every real send 422 while the optimistic echo masked it.
     pendingClientId ??= cryptoRandomId(win);
     const clientId = pendingClientId;
+    const wyr = wyrSendFields();
     const echo: PendingEcho = {
       clientId,
       text: text === "" ? null : text,
       sentAt: now(),
       replyTo: draft.replyTo?.quote ?? null,
+      ...wyr,
     };
     pendingEchoes.push(echo);
     contentRevision += 1;
@@ -2702,6 +2808,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       text: text === "" ? null : text,
       attachmentIds: [...draft.base.attachmentIds],
       ...(draft.replyTo !== null ? { replyToSeq: draft.replyTo.seq } : {}),
+      ...wyr,
     })
       .then((result) => {
         composer.setBusy(false);
@@ -2835,6 +2942,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       // drawing timer go (spec 07 §5).
       drawingLayer.detach();
       wyrModel.reset();
+      game.reset();
       closeUnheardView();
       closeMoreMenu();
       currentSession = null;
@@ -2871,6 +2979,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           renderThreadList(
             isArrival && event.message.sender !== "" && !identity.isMine(event.message.sender),
           );
+          if (isArrival && !identity.isMine(event.message.sender) && event.message.wyrRef == null) {
+            game.noteChatActivity();
+          }
           return;
         }
         case "message_deleted":
@@ -2912,6 +3023,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     teardown(): void {
       drawingLayer.teardown();
       wyrModel.reset();
+      game.reset();
       currentSession = null;
       endWipeReconcile("abandoned");
       for (const controller of messageActionControllers.values()) controller.teardown();

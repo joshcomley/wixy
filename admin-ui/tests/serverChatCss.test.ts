@@ -47,6 +47,16 @@ const HIDDEN_TOGGLED_CLASSES = [
   "wx-srv-pen-confirm",
   "wx-srv-pen-status",
   "wx-srv-drawing-selection",
+  // The would-you-rather game tab (wyrGame.ts; thread.ts hides the thread while it shows).
+  "wx-srv-thread-wrap",
+  "wx-srv-tabs",
+  "wx-srv-tab-dot",
+  "wx-srv-game",
+  "wx-srv-game-next",
+  "wx-srv-game-placeholder",
+  "wx-srv-game-controls",
+  "wx-srv-gamepop",
+  "wx-srv-gamepop-empty",
 ] as const;
 
 function escapeRegExp(text: string): string {

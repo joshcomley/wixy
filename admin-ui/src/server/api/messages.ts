@@ -92,6 +92,9 @@ export interface Message {
   /** The would-you-rather round anchored to this message (summary only — never the answers).
    * Absent or null on a server that predates the game, or on an ordinary message. */
   readonly wyr?: WyrSummary | null;
+  /** The would-you-rather round (its anchor message's seq) this message was sent in the game
+   * chat of — null/absent for an ordinary message or on a server that predates the game chat. */
+  readonly wyrRef?: number | null;
 }
 
 export interface HistoryPage {
@@ -123,6 +126,9 @@ export interface SendMessageInput {
   /** Round 2 ruling item 10 §(3): omit the key entirely for an ordinary
    * message — never send it as `undefined` explicitly. */
   readonly replyToSeq?: number;
+  /** Send into a would-you-rather round's game chat (the round's anchor seq); omit for the
+   * main chat. */
+  readonly wyrSeq?: number;
 }
 
 export type SendMessageResult =
