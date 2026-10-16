@@ -553,7 +553,9 @@ class TestRoutes:
         questions = load_questions(BANK_PATH)
         pool = _app_pool(storage_root)
         _fill(pool, questions[3].id)
-        generator = FakeGenerator()
+        # A generator that is down: the pool-first path never needs it, and the background filler
+        # (which would otherwise refill the pair this test just watched being consumed) stays idle.
+        generator = FakeGenerator(up=False)
         client, h = _client(storage_root, wixy_repo_root, pin_verifier, generator, "a@example.com")
         try:
             created = _create(client, h, "wyr-pool-route-1")
@@ -566,6 +568,7 @@ class TestRoutes:
             assert view["question"]["id"] == questions[3].id
             assert view["images"] == "done"
             assert pool.ids() == set()  # consumed
+            assert generator.calls == []  # no picture job ran
         finally:
             client.__exit__(None, None, None)
 
@@ -582,7 +585,7 @@ class TestRoutes:
         _fill(pool, questions[3].id)
         _fill(pool, questions[4].id)
         client, h = _client(
-            storage_root, wixy_repo_root, pin_verifier, FakeGenerator(), "a@example.com"
+            storage_root, wixy_repo_root, pin_verifier, FakeGenerator(up=False), "a@example.com"
         )
         try:
             first = _create(client, h, "wyr-pool-route-2")
