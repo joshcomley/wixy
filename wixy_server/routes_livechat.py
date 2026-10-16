@@ -18,7 +18,7 @@ import logging
 import math
 import re
 import time
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from typing import Any, Literal
 
 import anyio
@@ -76,7 +76,7 @@ from wixy_server.livechat.push import (
     send_payloadless_push,
     validate_push_endpoint,
 )
-from wixy_server.livechat.reactions import is_allowed_reaction
+from wixy_server.livechat.reactions import is_allowed_reaction, reactor_key
 from wixy_server.livechat.store import (
     AttachmentNotReadyError,
     DrawingAnchorNotFoundError,
@@ -86,6 +86,10 @@ from wixy_server.livechat.store import (
     LiveChatStore,
     MessageNotFoundError,
     UnusableAttachmentError,
+    WyrBadStateError,
+    WyrNotPlayerError,
+    WyrRoundFullError,
+    WyrRoundNotFoundError,
 )
 from wixy_server.livechat.textcheck import has_unpaired_surrogate
 from wixy_server.livechat.tokens import (
@@ -100,6 +104,13 @@ from wixy_server.livechat.transcription import (
     SlidingWindowRateLimiter,
     TranscriptionRuntime,
 )
+from wixy_server.livechat.wyr_game import (
+    choose_question,
+    generate_round_images,
+    wyr_view_json,
+)
+from wixy_server.livechat.wyr_images import ComfyImageGenerator
+from wixy_server.livechat.wyr_questions import WyrQuestion
 from wixy_server.routes_livechat_media import _MEDIA_TYPE_BY_SUFFIX, _resolve_rendition_path
 from wixy_server.settings import Settings
 from wixy_server.storage import ProjectPaths
@@ -1179,6 +1190,254 @@ async def get_message_drawings(seq: int, request: Request) -> JsonObject:
     store: LiveChatStore = request.app.state.livechat_store
     drawings = await anyio.to_thread.run_sync(lambda: store.get_drawings_for_message(seq=seq))
     return {"drawings": [drawing_json(d) for d in drawings]}
+
+
+# -- would-you-rather game (workspace 00045) -------------------------------------------------
+#
+# A round is anchored to a message (like a canvas), so it lives in the thread, streams via the
+# ordinary `message_updated` events and erases with the message (Inv 54). Mutations answer with
+# the viewer's filtered view; the other player's pick/guess never leaves the server before both
+# press Reveal (`wyr_game.wyr_view_json`).
+
+
+class CreateWyrIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    clientId: str
+    sender: str
+    deviceId: str
+
+
+class WyrVoteIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sender: str
+    vote: Literal["play", "skip"]
+
+
+class WyrAnswerIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sender: str
+    choice: Literal["a", "b"]
+    guess: Literal["a", "b"]
+
+
+class WyrRevealIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sender: str
+
+
+def _wyr_error(exc: Exception) -> JSONResponse:
+    if isinstance(exc, WyrRoundNotFoundError):
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+    if isinstance(exc, WyrRoundFullError):
+        return JSONResponse(status_code=409, content={"error": "full"})
+    if isinstance(exc, WyrNotPlayerError):
+        return JSONResponse(status_code=409, content={"error": "not_player"})
+    if isinstance(exc, WyrBadStateError):
+        return JSONResponse(status_code=409, content={"error": "bad_state"})
+    raise exc
+
+
+def _wyr_question_for(request: Request, question_id: str) -> WyrQuestion | None:
+    questions: tuple[WyrQuestion, ...] = request.app.state.livechat_wyr_questions
+    for q in questions:
+        if q.id == question_id:
+            return q
+    return None
+
+
+async def _wyr_view_response(
+    request: Request, seq: int, viewer: str, viewer_email: str | None
+) -> JSONResponse:
+    store: LiveChatStore = request.app.state.livechat_store
+    round_ = await anyio.to_thread.run_sync(lambda: store.get_wyr_round(anchor_seq=seq))
+    if round_ is None:
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+    question = _wyr_question_for(request, round_.question_id)
+    return JSONResponse(
+        status_code=200, content=wyr_view_json(round_, question, viewer, viewer_email)
+    )
+
+
+def _wyr_image_limiter(request: Request) -> anyio.CapacityLimiter:
+    """The single-flight gate for picture jobs, created on first use inside the event loop."""
+    limiter: anyio.CapacityLimiter | None = getattr(
+        request.app.state, "livechat_wyr_image_limiter", None
+    )
+    if limiter is None:
+        limiter = anyio.CapacityLimiter(1)
+        request.app.state.livechat_wyr_image_limiter = limiter
+    return limiter
+
+
+@router.post("/wyr", response_model=None)
+async def create_wyr_round(body: CreateWyrIn, request: Request) -> JSONResponse:
+    """Start a round (the header's ... menu): picks a random unplayed question, supersedes any
+    still-open round, and paints the two pictures in the background (never ahead of time)."""
+    auth = await require_server_token(request)
+
+    if not (8 <= len(body.clientId) <= 64):
+        return _invalid("clientId must be 8-64 characters")
+    if not (8 <= len(body.deviceId) <= 64):
+        return _invalid("deviceId must be 8-64 characters")
+    sender = body.sender.strip()
+    if not _valid_sender(sender):
+        return _invalid("sender must be 1-32 characters with no control characters")
+
+    store: LiveChatStore = request.app.state.livechat_store
+    notifier: LiveChatNotifier = request.app.state.livechat_notifier
+    hooks: list[MessageHook] = request.app.state.livechat_message_hooks
+    background: ContainedTaskGroup = request.app.state.background_tasks
+    secret: bytes = request.app.state.livechat_secret
+    paths: ProjectPaths = request.app.state.paths
+    questions: tuple[WyrQuestion, ...] = request.app.state.livechat_wyr_questions
+    generator: ComfyImageGenerator | None = request.app.state.livechat_wyr_image_generator
+
+    question = await anyio.to_thread.run_sync(lambda: choose_question(store, questions))
+    if question is None:
+        return JSONResponse(status_code=503, content={"error": "game_unavailable"})
+    now = time.time()
+
+    message, created = await anyio.to_thread.run_sync(
+        lambda: store.create_wyr_round(
+            client_id=body.clientId,
+            sender=sender,
+            device_id=body.deviceId,
+            by_email=auth.email or None,
+            question_id=question.id,
+            images_pending=generator is not None,
+            now=now,
+        )
+    )
+
+    if created:
+        notifier.publish()
+        for hook in hooks:
+
+            async def _dispatch(h: MessageHook = hook) -> None:
+                await h(message)
+
+            background.spawn("livechat-push-dispatch", _dispatch)
+        if generator is not None:
+            by_email = auth.email or None
+
+            limiter = _wyr_image_limiter(request)
+
+            async def _paint() -> None:
+                def _run() -> bool:
+                    return generate_round_images(
+                        store=store,
+                        paths=paths,
+                        generator=generator,
+                        question=question,
+                        anchor_seq=message.seq,
+                        by_email=by_email,
+                        publish=lambda: anyio.from_thread.run_sync(notifier.publish),
+                    )
+
+                # One picture job at a time: ComfyUI renders serially anyway, and a waiting
+                # job is a parked coroutine, not a held thread of the shared worker pool.
+                await anyio.to_thread.run_sync(_run, limiter=limiter)
+
+            background.spawn("livechat-wyr-images", _paint)
+
+    signer = MediaSigner.for_auth(secret, auth)
+    return JSONResponse(
+        status_code=201 if created else 200,
+        content={"message": message_json(message, signer)},
+    )
+
+
+@router.get("/wyr/{seq}", response_model=None)
+async def get_wyr_round(seq: int, request: Request) -> JSONResponse:
+    """The viewer-filtered round body. `?as=<sender>` names who is looking (the chat's trust
+    model: a display name, like every other route here)."""
+    auth = await require_server_token(request)
+    viewer = request.query_params.get("as", "").strip()
+    if viewer and not _valid_sender(viewer):
+        return _invalid("as must be 1-32 characters with no control characters")
+    if not (0 < seq <= _SQLITE_MAX_INTEGER):
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+    return await _wyr_view_response(request, seq, viewer, auth.email or None)
+
+
+async def _wyr_mutation(
+    request: Request,
+    seq: int,
+    sender_raw: str,
+    action: Callable[[LiveChatStore, str, str, str | None, float], object],
+) -> JSONResponse:
+    auth = await require_server_token(request)
+    sender = sender_raw.strip()
+    if not _valid_sender(sender):
+        return _invalid("sender must be 1-32 characters with no control characters")
+    if not (0 < seq <= _SQLITE_MAX_INTEGER):
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+    store: LiveChatStore = request.app.state.livechat_store
+    notifier: LiveChatNotifier = request.app.state.livechat_notifier
+    key = reactor_key(sender)
+    email = auth.email or None
+    now = time.time()
+    try:
+        await anyio.to_thread.run_sync(lambda: action(store, key, sender, email, now))
+    except (
+        WyrRoundNotFoundError,
+        WyrRoundFullError,
+        WyrNotPlayerError,
+        WyrBadStateError,
+    ) as exc:
+        return _wyr_error(exc)
+    notifier.publish()
+    return await _wyr_view_response(request, seq, sender, email)
+
+
+@router.post("/wyr/{seq}/vote", response_model=None)
+async def vote_wyr_round(seq: int, body: WyrVoteIn, request: Request) -> JSONResponse:
+    return await _wyr_mutation(
+        request,
+        seq,
+        body.sender,
+        lambda store, key, name, email, now: store.vote_wyr(
+            anchor_seq=seq,
+            voter_key=key,
+            voter_name=name,
+            voter_email=email,
+            vote=body.vote,
+            now=now,
+        ),
+    )
+
+
+@router.post("/wyr/{seq}/answer", response_model=None)
+async def answer_wyr_round(seq: int, body: WyrAnswerIn, request: Request) -> JSONResponse:
+    return await _wyr_mutation(
+        request,
+        seq,
+        body.sender,
+        lambda store, key, name, email, now: store.answer_wyr(
+            anchor_seq=seq,
+            player_key=key,
+            player_email=email,
+            choice=body.choice,
+            guess=body.guess,
+            now=now,
+        ),
+    )
+
+
+@router.post("/wyr/{seq}/reveal", response_model=None)
+async def reveal_wyr_round(seq: int, body: WyrRevealIn, request: Request) -> JSONResponse:
+    return await _wyr_mutation(
+        request,
+        seq,
+        body.sender,
+        lambda store, key, name, email, now: store.reveal_wyr(
+            anchor_seq=seq, player_key=key, player_email=email, now=now
+        ),
+    )
 
 
 _drawing_live_limiter = SlidingWindowRateLimiter(

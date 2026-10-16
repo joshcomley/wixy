@@ -9,6 +9,7 @@ decisions/00014 for this slice's design choices. Slice 3's preview route
 from __future__ import annotations
 
 import functools
+import logging
 import re
 import time
 from collections.abc import AsyncIterator
@@ -54,6 +55,9 @@ from wixy_server.livechat.transcription import (
     SlidingWindowRateLimiter,
     TranscriptionRuntime,
 )
+from wixy_server.livechat.wyr_game import clear_wyr_scratch, run_wyr_sweep_forever
+from wixy_server.livechat.wyr_images import ComfyImageGenerator
+from wixy_server.livechat.wyr_questions import load_questions as load_wyr_questions
 from wixy_server.publisher import PublishJob
 from wixy_server.redirects import load_redirects
 from wixy_server.registry import load_registry
@@ -131,6 +135,7 @@ def create_app(
     ai_backend: AIBackend | None = None,
     pin_verifier: PinVerifier | None = None,
     transcriber: Transcriber | None = None,
+    image_generator: ComfyImageGenerator | None = None,
 ) -> FastAPI:
     """Build the Wixy FastAPI app for one project.
 
@@ -173,6 +178,9 @@ def create_app(
     (`CmdTranscriber()` on the fleet, `None` on standalone — the feature is then always
     unavailable). It only ever talks to cmd through cmd's private mode, and only once cmd's
     capability probe says `private: true`.
+    `image_generator` (workspace 00045): the would-you-rather game's on-demand image painter
+    (a `ComfyImageGenerator`). Defaults to one built from `WIXY_COMFY_URL` on the fleet edition
+    and `None` when that is unset or on standalone — rounds are then text-only.
     """
     settings = load_settings(storage_root)
     registry = load_registry(wixy_repo_root)
@@ -260,6 +268,31 @@ def create_app(
         resolved_transcriber = None
     else:
         resolved_transcriber = CmdTranscriber()
+    # Would-you-rather game (workspace 00045): the question bank loads once; the image
+    # generator is the optional local-ComfyUI client (`WIXY_COMFY_URL`; empty / standalone
+    # edition = text-only cards). A test passes its own generator the way it passes a
+    # `transcriber`.
+    wyr_questions = load_wyr_questions()
+    if image_generator is not None:
+        resolved_image_generator: ComfyImageGenerator | None = image_generator
+    elif settings.comfy_url and settings.edition != "standalone":
+        if settings.comfy_output_dir:
+            resolved_image_generator = ComfyImageGenerator(
+                settings.comfy_url,
+                model=settings.wyr_image_model,
+                output_dir=Path(settings.comfy_output_dir),
+            )
+        else:
+            # Fail closed: ComfyUI keeps every picture it renders in its own output folder, and
+            # without knowing that folder this server could never delete them (Inv 54).
+            logging.getLogger(__name__).error(
+                "WIXY_COMFY_URL is set but WIXY_COMFY_OUTPUT_DIR is not — would-you-rather "
+                "pictures are DISABLED (rounds are text-only) until the folder ComfyUI writes "
+                "to is configured"
+            )
+            resolved_image_generator = None
+    else:
+        resolved_image_generator = None
     livechat_transcription = TranscriptionRuntime(
         store=livechat_store,
         paths=paths,
@@ -300,6 +333,12 @@ def create_app(
         # `pending` row belongs to one that died with its process: fail it (the owner can
         # retry) rather than leave a spinner up forever.
         livechat_transcription.reset_loop_state()
+        # A game image run that died with the previous process leaves its PNGs in the
+        # scratch dir; they are chat content, so they must not outlive it (Inv 54).
+        await anyio.to_thread.run_sync(lambda: clear_wyr_scratch(paths))
+        await anyio.to_thread.run_sync(
+            lambda: livechat_store.fail_stale_wyr_images(now=time.time())
+        )
         await anyio.to_thread.run_sync(
             lambda: livechat_store.fail_stale_pending_transcripts(now=time.time())
         )
@@ -324,6 +363,10 @@ def create_app(
         async def _run_scrubber() -> None:
             await livechat_janitor.run_scrubber_forever(store=livechat_store, paths=paths)
 
+        async def _run_wyr_sweep() -> None:
+            assert resolved_image_generator is not None
+            await run_wyr_sweep_forever(resolved_image_generator)
+
         async def _run_view_once_backstop() -> None:
             await livechat_janitor.run_view_once_backstop_forever(
                 store=livechat_store, paths=paths, notifier=livechat_notifier
@@ -346,6 +389,8 @@ def create_app(
                 if livechat_media_available:
                     background.supervise("livechat-media", _run_media_queue)
                 background.supervise("livechat-janitor", _run_janitor)
+                if resolved_image_generator is not None:
+                    background.supervise("livechat-wyr-sweep", _run_wyr_sweep)
                 yield
                 tg.cancel_scope.cancel()
         finally:
@@ -395,6 +440,8 @@ def create_app(
     app.state.livechat_grant_limiter = GrantFailureLimiter()
     app.state.livechat_transcription = livechat_transcription
     app.state.livechat_drawing_broker = livechat_drawing_broker
+    app.state.livechat_wyr_questions = wyr_questions
+    app.state.livechat_wyr_image_generator = resolved_image_generator
     app.state.livechat_drawing_live_limiter = livechat_drawing_live_limiter
 
     @app.exception_handler(FastAPIHTTPException)

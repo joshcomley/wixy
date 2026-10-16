@@ -59,6 +59,8 @@ from wixy_server.livechat.models import (
     ReactionSummary,
     TranscriptRow,
     UploadRow,
+    WyrRoundRow,
+    WyrSummary,
 )
 from wixy_server.livechat.reactions import reaction_order, reactor_key
 
@@ -248,7 +250,37 @@ _SCHEMA_V14_CANVAS = (
     "ALTER TABLE messages ADD COLUMN canvas INTEGER NOT NULL DEFAULT 0 CHECK(canvas IN (0, 1))"
 )
 
-_LATEST_SCHEMA_VERSION = 14
+# The would-you-rather game (workspace 00045). One round per anchor message, exactly two
+# player slots. `ON DELETE CASCADE` is load-bearing for the SAME reason as reactions' and
+# drawings' (decisions/00164): an older blue/green-overlap process that knows nothing about
+# the game can still hard-delete a message, and the cascade — not that older process — is
+# what removes the round with it (Inv 46's erasure guarantee). The PRIMARY KEY itself covers
+# the FK lookup, so no extra index is needed. There is deliberately NO separate "questions
+# played" table: the repeat guard is derived from the rounds that still exist, so deleting a
+# round or wiping leaves no dated residue behind (a separate table would survive an older
+# process's wipe and per-message deletes). `images` is the picture job's state (the card waits
+# only while `pending`); `playerN_email` is the verified sign-in that took the slot.
+_SCHEMA_V15_WYR = """
+CREATE TABLE IF NOT EXISTS wyr_rounds(
+  anchor_message_seq INTEGER PRIMARY KEY REFERENCES messages(seq) ON DELETE CASCADE,
+  question_id TEXT NOT NULL,
+  state TEXT NOT NULL CHECK(state IN ('voting','answering','revealing','revealed','skipped')),
+  images TEXT NOT NULL DEFAULT 'none' CHECK(images IN ('none','pending','done','failed')),
+  player1_key TEXT, player1_name TEXT, player1_email TEXT,
+  vote1 TEXT CHECK(vote1 IN ('play','skip') OR vote1 IS NULL),
+  choice1 TEXT CHECK(choice1 IN ('a','b') OR choice1 IS NULL),
+  guess1 TEXT CHECK(guess1 IN ('a','b') OR guess1 IS NULL),
+  reveal1 INTEGER NOT NULL DEFAULT 0 CHECK(reveal1 IN (0, 1)),
+  player2_key TEXT, player2_name TEXT, player2_email TEXT,
+  vote2 TEXT CHECK(vote2 IN ('play','skip') OR vote2 IS NULL),
+  choice2 TEXT CHECK(choice2 IN ('a','b') OR choice2 IS NULL),
+  guess2 TEXT CHECK(guess2 IN ('a','b') OR guess2 IS NULL),
+  reveal2 INTEGER NOT NULL DEFAULT 0 CHECK(reveal2 IN (0, 1)),
+  rev INTEGER NOT NULL DEFAULT 1,
+  created_at REAL NOT NULL, updated_at REAL NOT NULL);
+"""
+
+_LATEST_SCHEMA_VERSION = 15
 _UNKNOWN_GRANT_HASH = "0" * 64
 _LOGGER = logging.getLogger(__name__)
 
@@ -322,6 +354,32 @@ class DrawingPointsOutOfBoundsError(LiveChatStoreError):
     to 422 `invalid`. Carries no point value: it is chat content (Inv 53)."""
 
 
+class WyrRoundNotFoundError(LiveChatStoreError):
+    """The would-you-rather round a request targets does not exist (never did, or
+    cascaded away with its anchor message). `routes_livechat.py` maps this to 404."""
+
+    def __init__(self, anchor_seq: int) -> None:
+        super().__init__(f"no would-you-rather round on message {anchor_seq}")
+        self.anchor_seq = anchor_seq
+
+
+class WyrRoundFullError(LiveChatStoreError):
+    """A third identity tried to vote on a round whose two player slots are taken.
+    `routes_livechat.py` maps this to 409 {"error": "full"}."""
+
+
+class WyrBadStateError(LiveChatStoreError):
+    """The round is not in the state this mutation needs (e.g. answering while still
+    voting, revealing before both answered, voting on a skipped round).
+    `routes_livechat.py` maps this to 409 {"error": "bad_state"}. Carries the current
+    state only — never answers."""
+
+
+class WyrNotPlayerError(LiveChatStoreError):
+    """An identity with no player slot tried to answer or reveal. `routes_livechat.py`
+    maps this to 409 {"error": "not_player"}."""
+
+
 @dataclass(frozen=True, slots=True)
 class TranscriptBegin:
     """What `begin_transcript` decided: `started` (a fresh `pending` row — the caller must
@@ -390,6 +448,7 @@ def _row_to_message(
     drawings: tuple[DrawingSummary, ...] = (),
     *,
     reply_to: MessageRow | None = None,
+    wyr: WyrSummary | None = None,
 ) -> MessageRow:
     return MessageRow(
         seq=row["seq"],
@@ -410,6 +469,7 @@ def _row_to_message(
         view_claimed_at=row["view_claimed_at"],
         view_claim_email=row["view_claim_email"],
         canvas=row["canvas"],
+        wyr=wyr,
     )
 
 
@@ -551,6 +611,51 @@ def _load_drawing_summaries_for(
     return {seq: tuple(summaries) for seq, summaries in by_message.items()}
 
 
+def _row_to_wyr_round(row: sqlite3.Row) -> WyrRoundRow:
+    return WyrRoundRow(
+        anchor_message_seq=row["anchor_message_seq"],
+        question_id=row["question_id"],
+        state=row["state"],
+        images=row["images"],
+        player1_key=row["player1_key"],
+        player1_name=row["player1_name"],
+        player1_email=row["player1_email"],
+        vote1=row["vote1"],
+        choice1=row["choice1"],
+        guess1=row["guess1"],
+        reveal1=bool(row["reveal1"]),
+        player2_key=row["player2_key"],
+        player2_name=row["player2_name"],
+        player2_email=row["player2_email"],
+        vote2=row["vote2"],
+        choice2=row["choice2"],
+        guess2=row["guess2"],
+        reveal2=bool(row["reveal2"]),
+        rev=row["rev"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _load_wyr_summaries_for(
+    conn: sqlite3.Connection, message_seqs: Sequence[int]
+) -> dict[int, WyrSummary]:
+    """Round summary per anchor message — the `Message` wire shape's `wyr` member
+    (the `_load_drawing_summaries_for` precedent). At most one round per message
+    (`wyr_rounds`'s PRIMARY KEY is the anchor seq)."""
+    if not message_seqs:
+        return {}
+    placeholders = ",".join("?" for _ in message_seqs)
+    rows = conn.execute(
+        "SELECT anchor_message_seq, state, rev FROM wyr_rounds "
+        f"WHERE anchor_message_seq IN ({placeholders})",
+        tuple(message_seqs),
+    ).fetchall()
+    return {
+        row["anchor_message_seq"]: WyrSummary(state=row["state"], rev=row["rev"]) for row in rows
+    }
+
+
 def _load_reply_targets(
     conn: sqlite3.Connection, reply_to_seqs: Sequence[int | None]
 ) -> dict[int, MessageRow]:
@@ -579,10 +684,11 @@ def _load_message(conn: sqlite3.Connection, seq: int) -> MessageRow:
     attachments = _load_attachments_for(conn, [seq])[seq]
     reactions = _load_reactions_for(conn, [seq])[seq]
     drawings = _load_drawing_summaries_for(conn, [seq])[seq]
+    wyr = _load_wyr_summaries_for(conn, [seq]).get(seq)
     reply_to_seq = row["reply_to_seq"]
     reply_targets = _load_reply_targets(conn, [reply_to_seq])
     reply_to = reply_targets.get(reply_to_seq) if reply_to_seq is not None else None
-    return _row_to_message(row, tuple(attachments), reactions, drawings, reply_to=reply_to)
+    return _row_to_message(row, tuple(attachments), reactions, drawings, reply_to=reply_to, wyr=wyr)
 
 
 def _load_drawing(conn: sqlite3.Connection, drawing_id: int) -> DrawingRow:
@@ -780,6 +886,13 @@ class LiveChatStore:
                     conn.execute(_SCHEMA_V14_CANVAS)
                 conn.execute("PRAGMA user_version = 14")
                 current = 14
+
+            if current < 15:
+                for statement in _SCHEMA_V15_WYR.split(";"):
+                    if statement.strip():
+                        conn.execute(statement)
+                conn.execute("PRAGMA user_version = 15")
+                current = 15
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
@@ -1195,6 +1308,7 @@ class LiveChatStore:
             attachments_by_seq = _load_attachments_for(conn, seqs)
             reactions_by_seq = _load_reactions_for(conn, seqs)
             drawings_by_seq = _load_drawing_summaries_for(conn, seqs)
+            wyr_by_seq = _load_wyr_summaries_for(conn, seqs)
             # §(2): targets are resolved by seq, including ones OUTSIDE this
             # page — a reply near the top of a page may quote a message that
             # paged off already.
@@ -1208,6 +1322,7 @@ class LiveChatStore:
                     reactions_by_seq[row["seq"]],
                     drawings_by_seq[row["seq"]],
                     reply_to=reply_targets.get(row["reply_to_seq"]),
+                    wyr=wyr_by_seq.get(row["seq"]),
                 )
                 for row in ascending_rows
             ]
@@ -1227,6 +1342,7 @@ class LiveChatStore:
             attachments_by_seq = _load_attachments_for(conn, list(by_seq.keys()))
             reactions_by_seq = _load_reactions_for(conn, list(by_seq.keys()))
             drawings_by_seq = _load_drawing_summaries_for(conn, list(by_seq.keys()))
+            wyr_by_seq = _load_wyr_summaries_for(conn, list(by_seq.keys()))
             reply_targets = _load_reply_targets(
                 conn, [row["reply_to_seq"] for row in by_seq.values()]
             )
@@ -1242,6 +1358,7 @@ class LiveChatStore:
                         reactions_by_seq[seq],
                         drawings_by_seq[seq],
                         reply_to=reply_targets.get(row["reply_to_seq"]),
+                        wyr=wyr_by_seq.get(seq),
                     )
                 )
             return result
@@ -1494,6 +1611,392 @@ class LiveChatStore:
             strokes_by_drawing = _load_strokes_for(conn, [row["id"] for row in rows])
             return [_row_to_drawing(row, strokes_by_drawing[row["id"]]) for row in rows]
 
+    # -- would-you-rather game (schema v15, workspace 00045) ----------------------
+
+    def create_wyr_round(
+        self,
+        *,
+        client_id: str,
+        sender: str,
+        device_id: str,
+        by_email: str | None,
+        question_id: str,
+        images_pending: bool,
+        now: float,
+    ) -> tuple[MessageRow, bool]:
+        """Create a round: anchor message (no text/attachments) + `wyr_rounds` row in
+        `voting`, with the creator slotted as player 1 already voting `play` (starting
+        the round IS their play vote). Any still-open round is superseded to `skipped`
+        in the same transaction (one live round at a time). Idempotent on `client_id`
+        like every other send. `images_pending` marks a round whose pictures are about
+        to be painted (the card waits for them; `finish_wyr_images` ends the wait)."""
+        key = reactor_key(sender)
+        with self._write_txn() as conn:
+            existing = conn.execute(
+                "SELECT seq FROM messages WHERE client_id = ?", (client_id,)
+            ).fetchone()
+            if existing is not None:
+                return _load_message(conn, existing["seq"]), False
+
+            superseded = conn.execute(
+                "SELECT anchor_message_seq FROM wyr_rounds "
+                "WHERE state IN ('voting','answering','revealing')"
+            ).fetchall()
+            for old in superseded:
+                conn.execute(
+                    "UPDATE wyr_rounds SET state = 'skipped', rev = rev + 1, updated_at = ? "
+                    "WHERE anchor_message_seq = ?",
+                    (now, old["anchor_message_seq"]),
+                )
+                conn.execute(
+                    "INSERT INTO events (type, message_seq, created_at) "
+                    "VALUES ('message_updated', ?, ?)",
+                    (old["anchor_message_seq"], now),
+                )
+
+            cursor = conn.execute(
+                "INSERT INTO messages "
+                "(client_id, sender, device_id, by_email, text, created_at) "
+                "VALUES (?, ?, ?, ?, NULL, ?)",
+                (client_id, sender, device_id, by_email, now),
+            )
+            seq = cursor.lastrowid
+            assert seq is not None
+            conn.execute(
+                "INSERT INTO wyr_rounds "
+                "(anchor_message_seq, question_id, state, images, player1_key, player1_name, "
+                "player1_email, vote1, rev, created_at, updated_at) "
+                "VALUES (?, ?, 'voting', ?, ?, ?, ?, 'play', 1, ?, ?)",
+                (
+                    seq,
+                    question_id,
+                    "pending" if images_pending else "none",
+                    key,
+                    sender,
+                    by_email,
+                    now,
+                    now,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO events (type, message_seq, created_at) VALUES ('message', ?, ?)",
+                (seq, now),
+            )
+            return _load_message(conn, seq), True
+
+    def get_wyr_round(self, *, anchor_seq: int) -> WyrRoundRow | None:
+        with self._read_txn() as conn:
+            row = conn.execute(
+                "SELECT * FROM wyr_rounds WHERE anchor_message_seq = ?", (anchor_seq,)
+            ).fetchone()
+            return _row_to_wyr_round(row) if row is not None else None
+
+    def wyr_used_ids(self) -> set[str]:
+        """Questions this chat has played — derived from the rounds that still exist, so
+        deleting a round (or wiping) leaves no separate record of it behind."""
+        with self._read_txn() as conn:
+            rows = conn.execute("SELECT DISTINCT question_id FROM wyr_rounds").fetchall()
+            return {str(row["question_id"]) for row in rows}
+
+    @staticmethod
+    def _wyr_slot(round_: WyrRoundRow, key: str, email: str | None) -> int | None:
+        """Which player slot `key` is, or None for nobody. A name that IS a slot but arrives
+        under a different authenticated email than the one that took the slot is someone
+        else asserting that name: `WyrNotPlayerError` (the filter keys on a name the caller
+        types, so the verified email is what stops one person reading the other's answers).
+        An unknown email on either side (dev/no-auth, grant sessions) falls back to the name."""
+        slot = 1 if round_.player1_key == key else 2 if round_.player2_key == key else None
+        if slot is None:
+            return None
+        slot_email = round_.player1_email if slot == 1 else round_.player2_email
+        if email is not None and slot_email is not None and email != slot_email:
+            raise WyrNotPlayerError(f"that name belongs to another sign-in on this round ({slot})")
+        return slot
+
+    def vote_wyr(
+        self,
+        *,
+        anchor_seq: int,
+        voter_key: str,
+        voter_name: str,
+        voter_email: str | None,
+        vote: Literal["play", "skip"],
+        now: float,
+    ) -> tuple[WyrRoundRow, bool]:
+        """Record one player's skip/play vote. A new voter takes the next free slot;
+        a third identity gets `WyrRoundFullError`. Any `skip` skips the round; two
+        `play`s move it to `answering`. Re-sending the vote already recorded is an
+        idempotent no-op (a retry after a dropped response cannot flip anything)."""
+        with self._write_txn() as conn:
+            row = conn.execute(
+                "SELECT * FROM wyr_rounds WHERE anchor_message_seq = ?", (anchor_seq,)
+            ).fetchone()
+            if row is None:
+                raise WyrRoundNotFoundError(anchor_seq)
+            round_ = _row_to_wyr_round(row)
+
+            slot = self._wyr_slot(round_, voter_key, voter_email)
+            if round_.state != "voting":
+                already = round_.vote1 if slot == 1 else round_.vote2 if slot == 2 else None
+                if slot is not None and already == vote:
+                    return round_, False
+                raise WyrBadStateError(
+                    f"round on message {anchor_seq} is {round_.state}, not voting"
+                )
+            if slot is None:
+                if round_.player1_key is None:
+                    slot = 1
+                elif round_.player2_key is None:
+                    slot = 2
+                else:
+                    raise WyrRoundFullError(
+                        f"round on message {anchor_seq} already has two players"
+                    )
+
+            current = round_.vote1 if slot == 1 else round_.vote2
+            if current == vote and (round_.player1_name if slot == 1 else round_.player2_name):
+                return round_, False
+
+            conn.execute(
+                f"UPDATE wyr_rounds SET player{slot}_key = ?, player{slot}_name = ?, "
+                f"player{slot}_email = COALESCE(player{slot}_email, ?), "
+                f"vote{slot} = ?, rev = rev + 1, updated_at = ? WHERE anchor_message_seq = ?",
+                (voter_key, voter_name, voter_email, vote, now, anchor_seq),
+            )
+            new_state: str | None = None
+            if vote == "skip":
+                new_state = "skipped"
+            else:
+                other_vote = round_.vote2 if slot == 1 else round_.vote1
+                if other_vote == "play":
+                    new_state = "answering"
+            if new_state is not None:
+                conn.execute(
+                    "UPDATE wyr_rounds SET state = ?, rev = rev + 1, updated_at = ? "
+                    "WHERE anchor_message_seq = ?",
+                    (new_state, now, anchor_seq),
+                )
+            conn.execute(
+                "INSERT INTO events (type, message_seq, created_at) "
+                "VALUES ('message_updated', ?, ?)",
+                (anchor_seq, now),
+            )
+            updated = conn.execute(
+                "SELECT * FROM wyr_rounds WHERE anchor_message_seq = ?", (anchor_seq,)
+            ).fetchone()
+            return _row_to_wyr_round(updated), True
+
+    def answer_wyr(
+        self,
+        *,
+        anchor_seq: int,
+        player_key: str,
+        player_email: str | None,
+        choice: Literal["a", "b"],
+        guess: Literal["a", "b"],
+        now: float,
+    ) -> tuple[WyrRoundRow, bool]:
+        """Record one player's own pick and their guess of the other player's pick.
+        Answers lock the moment both are in (`revealing`) — from then on the same
+        answer re-sent is an idempotent no-op and a different one is `WyrBadStateError`
+        (no re-answering once the reveal is pending)."""
+        with self._write_txn() as conn:
+            row = conn.execute(
+                "SELECT * FROM wyr_rounds WHERE anchor_message_seq = ?", (anchor_seq,)
+            ).fetchone()
+            if row is None:
+                raise WyrRoundNotFoundError(anchor_seq)
+            round_ = _row_to_wyr_round(row)
+            slot = self._wyr_slot(round_, player_key, player_email)
+            if slot is None:
+                raise WyrNotPlayerError(
+                    f"identity has no player slot on message {anchor_seq}'s round"
+                )
+            current_choice = round_.choice1 if slot == 1 else round_.choice2
+            current_guess = round_.guess1 if slot == 1 else round_.guess2
+            if round_.state != "answering":
+                if current_choice == choice and current_guess == guess:
+                    return round_, False
+                raise WyrBadStateError(
+                    f"round on message {anchor_seq} is {round_.state}, not answering"
+                )
+            if current_choice == choice and current_guess == guess:
+                return round_, False
+
+            conn.execute(
+                f"UPDATE wyr_rounds SET choice{slot} = ?, guess{slot} = ?, "
+                f"rev = rev + 1, updated_at = ? WHERE anchor_message_seq = ?",
+                (choice, guess, now, anchor_seq),
+            )
+            other_choice = round_.choice2 if slot == 1 else round_.choice1
+            other_guess = round_.guess2 if slot == 1 else round_.guess1
+            if other_choice is not None and other_guess is not None:
+                conn.execute(
+                    "UPDATE wyr_rounds SET state = 'revealing', rev = rev + 1, "
+                    "updated_at = ? WHERE anchor_message_seq = ?",
+                    (now, anchor_seq),
+                )
+            conn.execute(
+                "INSERT INTO events (type, message_seq, created_at) "
+                "VALUES ('message_updated', ?, ?)",
+                (anchor_seq, now),
+            )
+            updated = conn.execute(
+                "SELECT * FROM wyr_rounds WHERE anchor_message_seq = ?", (anchor_seq,)
+            ).fetchone()
+            return _row_to_wyr_round(updated), True
+
+    def reveal_wyr(
+        self, *, anchor_seq: int, player_key: str, player_email: str | None, now: float
+    ) -> tuple[WyrRoundRow, bool]:
+        """Record one player's Reveal press; when both have pressed, the round becomes
+        `revealed` and the answers become visible to everyone (`wyr_view_json` gates
+        on this state, not on the press). Re-pressing is an idempotent no-op."""
+        with self._write_txn() as conn:
+            row = conn.execute(
+                "SELECT * FROM wyr_rounds WHERE anchor_message_seq = ?", (anchor_seq,)
+            ).fetchone()
+            if row is None:
+                raise WyrRoundNotFoundError(anchor_seq)
+            round_ = _row_to_wyr_round(row)
+            slot = self._wyr_slot(round_, player_key, player_email)
+            if slot is None:
+                raise WyrNotPlayerError(
+                    f"identity has no player slot on message {anchor_seq}'s round"
+                )
+            already = round_.reveal1 if slot == 1 else round_.reveal2
+            if round_.state not in ("revealing", "revealed"):
+                raise WyrBadStateError(
+                    f"round on message {anchor_seq} is {round_.state}, not revealing"
+                )
+            if already:
+                return round_, False
+
+            conn.execute(
+                f"UPDATE wyr_rounds SET reveal{slot} = 1, rev = rev + 1, updated_at = ? "
+                f"WHERE anchor_message_seq = ?",
+                (now, anchor_seq),
+            )
+            other_revealed = round_.reveal2 if slot == 1 else round_.reveal1
+            if other_revealed:
+                conn.execute(
+                    "UPDATE wyr_rounds SET state = 'revealed', rev = rev + 1, "
+                    "updated_at = ? WHERE anchor_message_seq = ?",
+                    (now, anchor_seq),
+                )
+            conn.execute(
+                "INSERT INTO events (type, message_seq, created_at) "
+                "VALUES ('message_updated', ?, ?)",
+                (anchor_seq, now),
+            )
+            updated = conn.execute(
+                "SELECT * FROM wyr_rounds WHERE anchor_message_seq = ?", (anchor_seq,)
+            ).fetchone()
+            return _row_to_wyr_round(updated), True
+
+    def wyr_round_is_paintable(self, *, anchor_seq: int) -> bool:
+        """True while a round still exists and has not been skipped — the image job asks
+        before spending GPU time, so a superseded or deleted round costs none."""
+        with self._read_txn() as conn:
+            row = conn.execute(
+                "SELECT state FROM wyr_rounds WHERE anchor_message_seq = ?", (anchor_seq,)
+            ).fetchone()
+            return row is not None and row["state"] != "skipped"
+
+    def create_wyr_image_attachments(
+        self,
+        *,
+        anchor_seq: int,
+        images: Sequence[tuple[str, int]],
+        by_email: str | None,
+        now: float,
+    ) -> bool:
+        """Attach a round's server-generated pictures (`(attachment id, size)` per option, in
+        option order) in ONE transaction: upload rows + `processing` photo attachments + the
+        links to the anchor message + `images = 'done'`. One transaction means a round never
+        keeps just one of its two pictures, and the media queue can never claim an attachment
+        before it has a home (its source is `uploads/<id>/assembled`, already on disk).
+        Returns False — after journaling the ids for cleanup — when the anchor vanished
+        (deleted mid-generation), so the caller removes the staged files."""
+        ids = [att_id for att_id, _ in images]
+        with self._write_txn() as conn:
+            if any(
+                self._is_deleted_storage(conn, kind=kind, storage_id=att_id)
+                for att_id in ids
+                for kind in ("attachment", "upload")
+            ):
+                return False
+            anchor_exists = (
+                conn.execute(
+                    "SELECT 1 FROM wyr_rounds WHERE anchor_message_seq = ?", (anchor_seq,)
+                ).fetchone()
+                is not None
+            )
+            if not anchor_exists:
+                self._queue_deleted_storage(conn, kind="attachment", ids=ids, now=now)
+                self._queue_deleted_storage(conn, kind="upload", ids=ids, now=now)
+                return False
+            for ordinal, (att_id, size_bytes) in enumerate(images):
+                conn.execute(
+                    "INSERT INTO uploads (id, kind, mime, size_bytes, filename, by_email, "
+                    "created_at) VALUES (?, 'photo', 'image/png', ?, NULL, ?, ?)",
+                    (att_id, size_bytes, by_email, now),
+                )
+                conn.execute(
+                    "INSERT INTO attachments "
+                    "(id, kind, status, message_seq, ordinal, renditions, bytes_on_disk, "
+                    "created_at, updated_at) "
+                    "VALUES (?, 'photo', 'processing', ?, ?, '[]', 0, ?, ?)",
+                    (att_id, anchor_seq, ordinal, now, now),
+                )
+            conn.execute(
+                "UPDATE wyr_rounds SET images = 'done', rev = rev + 1, updated_at = ? "
+                "WHERE anchor_message_seq = ?",
+                (now, anchor_seq),
+            )
+            conn.execute(
+                "INSERT INTO events (type, message_seq, created_at) "
+                "VALUES ('message_updated', ?, ?)",
+                (anchor_seq, now),
+            )
+            return True
+
+    def fail_wyr_images(self, *, anchor_seq: int, now: float) -> None:
+        """The pictures for a round are not coming (generator down/failed/round skipped): the
+        card stops waiting and lays out as text. No-op for a round that is gone or not pending."""
+        with self._write_txn() as conn:
+            cursor = conn.execute(
+                "UPDATE wyr_rounds SET images = 'failed', rev = rev + 1, updated_at = ? "
+                "WHERE anchor_message_seq = ? AND images = 'pending'",
+                (now, anchor_seq),
+            )
+            if cursor.rowcount:
+                conn.execute(
+                    "INSERT INTO events (type, message_seq, created_at) "
+                    "VALUES ('message_updated', ?, ?)",
+                    (anchor_seq, now),
+                )
+
+    def fail_stale_wyr_images(self, *, now: float) -> int:
+        """Startup recovery: a round still `pending` at process start belongs to an image job
+        that died with its process, so its card stops waiting (the transcription precedent)."""
+        with self._write_txn() as conn:
+            rows = conn.execute(
+                "SELECT anchor_message_seq FROM wyr_rounds WHERE images = 'pending'"
+            ).fetchall()
+            for row in rows:
+                conn.execute(
+                    "UPDATE wyr_rounds SET images = 'failed', rev = rev + 1, updated_at = ? "
+                    "WHERE anchor_message_seq = ?",
+                    (now, row["anchor_message_seq"]),
+                )
+                conn.execute(
+                    "INSERT INTO events (type, message_seq, created_at) "
+                    "VALUES ('message_updated', ?, ?)",
+                    (row["anchor_message_seq"], now),
+                )
+            return len(rows)
+
     def events_after(self, cursor: int, limit: int = 200) -> list[EventRow]:
         with self._read_txn() as conn:
             rows = conn.execute(
@@ -1595,6 +2098,10 @@ class LiveChatStore:
             # wipe's intent to clear every drawing is not left implicit in a constraint.
             conn.execute("DELETE FROM drawing_strokes")
             conn.execute("DELETE FROM drawings")
+            # Same doctrine for the game (schema v15): the cascade on
+            # `wyr_rounds.anchor_message_seq` already carries rounds away with their
+            # messages; explicit here so wipe's intent is never left implicit.
+            conn.execute("DELETE FROM wyr_rounds")
             conn.execute("DELETE FROM messages")
             conn.execute("DELETE FROM uploads")
             conn.execute("DELETE FROM events")

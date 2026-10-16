@@ -37,6 +37,9 @@ import { mountTeasePreview, type TeasePreviewHandle } from "./teasePreview";
 import { mountViewOnceViewer, type ViewOnceViewerHandle } from "./viewOnceViewer";
 import { uploadServerAttachment } from "./api/uploads";
 import { mountDrawingLayer, type DrawingLayer } from "./drawingLayer";
+import { answerWyr, createWyrRound, getWyrRound, revealWyr, voteWyr } from "./api/wyr";
+import { createWyrCards, type WyrCards } from "./wyrCard";
+import { createWyrModel, type WyrModel } from "./wyrModel";
 import type { ServerIdentity } from "./identity";
 import { linkifyInto } from "./linkify";
 import { mountMessageActions, type MessageActionsController } from "./messageActions";
@@ -239,6 +242,19 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   canvasItemHint.textContent = "Add a blank space to draw on";
   canvasItem.append(canvasItemTitle, canvasItemHint);
   moreMenu.appendChild(canvasItem);
+  const wyrItem = documentRef.createElement("button");
+  wyrItem.type = "button";
+  wyrItem.className = "wx-srv-more-item wx-srv-more-wyr";
+  wyrItem.setAttribute("role", "menuitem");
+  wyrItem.setAttribute("data-srv-gesture-boundary", "");
+  const wyrItemTitle = documentRef.createElement("span");
+  wyrItemTitle.className = "wx-srv-more-item-title";
+  wyrItemTitle.textContent = "Would you rather?";
+  const wyrItemHint = documentRef.createElement("span");
+  wyrItemHint.className = "wx-srv-more-item-hint";
+  wyrItemHint.textContent = "Pick one, guess theirs, reveal together";
+  wyrItem.append(wyrItemTitle, wyrItemHint);
+  moreMenu.appendChild(wyrItem);
   const fryItem = documentRef.createElement("button");
   fryItem.type = "button";
   fryItem.className = "wx-srv-more-item wx-srv-more-fry";
@@ -274,6 +290,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   canvasItem.addEventListener("click", () => {
     closeMoreMenu();
     void addCanvas();
+  });
+  wyrItem.addEventListener("click", () => {
+    closeMoreMenu();
+    void addWyrRound();
   });
   fryItem.addEventListener("click", () => {
     closeMoreMenu();
@@ -354,6 +374,30 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   element.insertBefore(drawingLayer.toolbar, threadWrap);
   const lightbox: Lightbox = mountLightbox();
   let currentSession: ServerSession | null = null;
+  // Would-you-rather: the model holds each round's viewer-filtered view; the cards draw it.
+  const wyrModel: WyrModel = createWyrModel({
+    session: () => currentSession,
+    viewer: () => identity.getName(),
+    fetchRound: (session, seq, viewer) => getWyrRound(session, seq, viewer),
+    onChange: (seq) => patchWyr(seq),
+    setTimeout: (fn, ms) => win.setTimeout(fn, ms),
+    clearTimeout: (id) => win.clearTimeout(id),
+  });
+  function wyrSession(): ServerSession {
+    if (currentSession === null) throw new ServerLockedError();
+    return currentSession;
+  }
+  const wyrCards: WyrCards = createWyrCards({
+    model: wyrModel,
+    document: documentRef,
+    viewer: () => identity.getName(),
+    vote: (seq, vote) => voteWyr(wyrSession(), seq, { sender: identity.getName() ?? "", vote }),
+    answer: (seq, choice, guess) =>
+      answerWyr(wyrSession(), seq, { sender: identity.getName() ?? "", choice, guess }),
+    reveal: (seq) => revealWyr(wyrSession(), seq, { sender: identity.getName() ?? "" }),
+    openLightbox: (src, alt) => lightbox.open(src, alt),
+    afterChange: () => threadScroll.afterContentChange(false),
+  });
   let voiceRecorder: VoiceRecorder | null = null;
   let composer: ChatComposer;
   const voiceDurations = new WeakMap<File, number>();
@@ -1662,6 +1706,47 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     threadScroll.scrollToBottom();
   }
 
+  /** Starts a would-you-rather round: the server picks the question and paints the two
+   * pictures in the background; the card appears at once and the pictures fill in. */
+  async function addWyrRound(): Promise<void> {
+    const session = currentSession;
+    if (session === null) return;
+    const requestGeneration = contentGeneration;
+    let result: Awaited<ReturnType<typeof createWyrRound>>;
+    try {
+      result = await createWyrRound(session, {
+        clientId: cryptoRandomId(win),
+        sender: identity.getName() ?? "",
+        deviceId: identity.getDeviceId(),
+      });
+    } catch (error) {
+      if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+      return;
+    }
+    if (requestGeneration !== contentGeneration || currentSession === null) return;
+    if (!result.ok) {
+      composer.setError(
+        result.kind === "unsupported"
+          ? "The game isn't available yet — try again in a moment."
+          : "Couldn't start a round — try again.",
+      );
+      return;
+    }
+    addConfirmed(result.message);
+    renderThreadList();
+    threadScroll.scrollToBottom();
+  }
+
+  /** Redraws one round's card in place (no bubble rebuild). */
+  function patchWyr(seq: number): void {
+    const rendered = renderedMessages.get(seq);
+    if (rendered === undefined) return;
+    const container = rendered.element.querySelector<HTMLElement>(".wx-srv-wyr-card");
+    if (container === null) return;
+    wyrCards.render(container, rendered.message);
+    threadScroll.afterContentChange(false);
+  }
+
   function renderBubble(message: Message, mine: boolean, embedded = false): HTMLElement {
     const bubble = documentRef.createElement("div");
     bubble.className = `wx-srv-bubble ${mine ? "wx-srv-bubble-mine" : "wx-srv-bubble-theirs"}`;
@@ -1680,7 +1765,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     time.textContent = formatTime(message.createdAt);
 
     let hasTranscribableVoice = false;
-    if (message.canvas === true) {
+    if (message.wyr !== undefined && message.wyr !== null) {
+      bubble.classList.add("wx-srv-bubble-wyr");
+      bubble.appendChild(wyrCards.create(message));
+    } else if (message.canvas === true) {
       bubble.classList.add("wx-srv-bubble-canvas");
       const surface = documentRef.createElement("div");
       surface.className = "wx-srv-canvas-surface";
@@ -1870,6 +1958,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         messageActionControllers.get(message.seq)?.update(message);
         patchReactions(message.seq);
         patchQuote(message.seq);
+        if (message.wyr !== undefined && message.wyr !== null) patchWyr(message.seq);
       }
       if (rendered !== undefined && rendered.message !== message) {
         teardownMessageActions(message.seq);
@@ -1949,6 +2038,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     // decision below, which must see a drawing that extends past the last bubble), fetch
     // what a message's `drawings` summary says is new, and drop those of vanished messages.
     drawingLayer.syncMessages(messages);
+    wyrModel.observe(messages);
     threadScroll.afterContentChange(revealPillIfNotStuck);
     updateUnheard();
   }
@@ -2018,6 +2108,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     }
     // spec 07 §5/§6: a wipe ends any drawing session and takes every drawing with it.
     drawingLayer.wiped();
+    wyrModel.reset();
     contentGeneration += 1;
     contentRevision += 1;
     scrollToOriginalGeneration += 1; // §(4): a wipe aborts any in-flight scroll-to-original
@@ -2743,6 +2834,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       // progress is withdrawn with a live cancel, and the surface, live previews and every
       // drawing timer go (spec 07 §5).
       drawingLayer.detach();
+      wyrModel.reset();
       closeUnheardView();
       closeMoreMenu();
       currentSession = null;
@@ -2819,6 +2911,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     refreshNameChip,
     teardown(): void {
       drawingLayer.teardown();
+      wyrModel.reset();
       currentSession = null;
       endWipeReconcile("abandoned");
       for (const controller of messageActionControllers.values()) controller.teardown();

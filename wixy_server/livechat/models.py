@@ -20,6 +20,11 @@ EventType = Literal["message", "message_updated", "message_deleted", "wiped"]
 message / wipe the chat) — P1 only widens the schema + stream so v1 never needs a
 breaking rebuild migration later. Nothing in P1 actually EMITS these two yet."""
 
+WyrState = Literal["voting", "answering", "revealing", "revealed", "skipped"]
+"""The would-you-rather round's states: both players vote skip/play (`voting`),
+both answer privately (`answering`), both press Reveal (`revealing`), results
+visible (`revealed`), or the round was skipped/superseded (`skipped`)."""
+
 
 MessageHook = Callable[["MessageRow"], Awaitable[None]]
 """`app.state.livechat_message_hooks`'s element type (§4 "App state"): run on the
@@ -96,6 +101,16 @@ class DrawingSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class WyrSummary:
+    """What a `Message` carries about its would-you-rather round — the `DrawingSummary`
+    precedent: enough for a client to notice the round exists or moved state/rev and
+    fetch the (viewer-filtered) body with `GET /wyr/{seq}`. Never the answers."""
+
+    state: WyrState
+    rev: int
+
+
+@dataclass(frozen=True, slots=True)
 class DrawingStrokeRow:
     stroke_id: str
     ord: int
@@ -127,6 +142,40 @@ class DrawingRow:
 
 
 @dataclass(frozen=True, slots=True)
+class WyrRoundRow:
+    """One would-you-rather round, anchored to its message (`anchor_message_seq`).
+    Player slots fill as votes arrive: the round's creator votes by sending the round
+    (slot 1), the first OTHER voter takes slot 2. `choice`/`guess` are the game's
+    private answers — served per-viewer by `wyr_view_json`, never via `message_json`,
+    and never the other player's until the round is `revealed`."""
+
+    anchor_message_seq: int
+    question_id: str
+    state: WyrState
+    images: Literal["none", "pending", "done", "failed"]
+    player1_key: str | None
+    player1_name: str | None
+    player1_email: str | None
+    vote1: Literal["play", "skip"] | None
+    choice1: Literal["a", "b"] | None
+    guess1: Literal["a", "b"] | None
+    reveal1: bool
+    player2_key: str | None
+    player2_name: str | None
+    player2_email: str | None
+    vote2: Literal["play", "skip"] | None
+    choice2: Literal["a", "b"] | None
+    guess2: Literal["a", "b"] | None
+    reveal2: bool
+    rev: int
+    created_at: float
+    updated_at: float
+
+    def summary(self) -> WyrSummary:
+        return WyrSummary(state=self.state, rev=self.rev)
+
+
+@dataclass(frozen=True, slots=True)
 class MessageRow:
     seq: int
     client_id: str
@@ -154,6 +203,9 @@ class MessageRow:
     view_claim_email: str | None = None
     canvas: int = 0
     """1 for a canvas message (a blank drawing surface, no text/attachments), else 0."""
+    wyr: WyrSummary | None = None
+    """The round summary when this message anchors a would-you-rather round, else
+    None — joined from `wyr_rounds` at read time, exactly like `drawings`."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -358,6 +410,7 @@ def message_json(row: MessageRow, signer: MediaUrlSigner) -> JsonObject:
         "viewOnce": view_once,
         "canvas": bool(row.canvas),
         "drawings": [{"id": d.id, "rev": d.rev} for d in row.drawings],
+        "wyr": ({"state": row.wyr.state, "rev": row.wyr.rev} if row.wyr is not None else None),
     }
 
 

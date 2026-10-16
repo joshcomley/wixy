@@ -130,6 +130,9 @@ class Settings:
     server_upload_chunk_bytes: int
     ffmpeg_path: str
     ffprobe_path: str
+    comfy_url: str
+    comfy_output_dir: str
+    wyr_image_model: str
 
 
 def load_settings(storage_root: Path) -> Settings:
@@ -221,4 +224,10 @@ def load_settings(storage_root: Path) -> Settings:
         server_upload_chunk_bytes=server_upload_chunk_bytes,
         ffmpeg_path=_get("WIXY_FFMPEG"),
         ffprobe_path=_get("WIXY_FFPROBE"),
+        # Would-you-rather game images (workspace 00045): the local ComfyUI base URL
+        # (empty = images disabled, the game still plays with text-only cards) and which
+        # proven model recipe to drive (`wyr_images.IMAGE_MODELS`).
+        comfy_url=_get("WIXY_COMFY_URL"),
+        comfy_output_dir=_get("WIXY_COMFY_OUTPUT_DIR"),
+        wyr_image_model=_get("WIXY_WYR_IMAGE_MODEL", "krea2-turbo-nvfp4"),
     )
