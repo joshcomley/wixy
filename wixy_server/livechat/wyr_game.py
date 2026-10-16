@@ -10,6 +10,7 @@ and is documented as such in decisions/.)
 
 from __future__ import annotations
 
+import enum
 import logging
 import os
 import random
@@ -17,9 +18,10 @@ import shutil
 import tempfile
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import anyio
 
@@ -28,6 +30,7 @@ from wixy_server.livechat.models import WyrRoundRow
 from wixy_server.livechat.reactions import reactor_key
 from wixy_server.livechat.store import LiveChatStore
 from wixy_server.livechat.wyr_images import ComfyImageGenerator
+from wixy_server.livechat.wyr_pool import POOL_FILES, PooledPictures, WyrPool
 from wixy_server.livechat.wyr_questions import WyrQuestion, pick_question, style_suffix
 from wixy_server.storage import ProjectPaths
 
@@ -275,3 +278,224 @@ def generate_round_images(
             publish()
         except Exception:
             _LOGGER.debug("wyr: publish after image job failed", exc_info=True)
+
+
+# -- the picture pool: pictures painted AHEAD of time (workspace 00045 follow-on) ---------------
+
+
+class WyrDemand:
+    """How many on-demand picture jobs are queued or running. The pool filler yields to them (a
+    waiting round beats a speculative picture). Only touched from the event loop thread."""
+
+    def __init__(self) -> None:
+        self.count = 0
+
+
+def wyr_image_limiter(state: Any) -> anyio.CapacityLimiter:
+    """The ONE single-flight gate for every picture job (on-demand rounds and the pool filler),
+    created on first use inside the event loop (an anyio limiter needs a running loop)."""
+    limiter: anyio.CapacityLimiter | None = getattr(state, "livechat_wyr_image_limiter", None)
+    if limiter is None:
+        limiter = anyio.CapacityLimiter(1)
+        state.livechat_wyr_image_limiter = limiter
+    return limiter
+
+
+def pick_round(
+    store: LiveChatStore,
+    questions: tuple[WyrQuestion, ...],
+    pool: WyrPool | None,
+    rng: random.Random,
+) -> tuple[WyrQuestion | None, PooledPictures | None]:
+    """Choose the question for a new round, preferring one whose pictures are already pooled
+    (reserved for the caller). Falls back to a random unplayed question, whose pictures the
+    on-demand job paints. Once the whole bank has been played the repeat guard starts over."""
+    used = store.wyr_used_ids()
+    if pool is not None and questions:
+        by_id = {q.id: q for q in questions}
+        unplayed = {i for i in by_id if i not in used} or set(by_id)
+        pooled = pool.take(unplayed, rng)
+        if pooled is not None:
+            question = by_id.get(pooled.question_id)
+            if question is not None:
+                return question, pooled
+            pool.discard(pooled)  # a retired question's pair
+    return pick_question(questions, used, rng), None
+
+
+def pool_played_ids(store: LiveChatStore, questions: tuple[WyrQuestion, ...]) -> set[str]:
+    """The question ids the pool must not hold: the played ones — unless the whole bank has been
+    played, when the repeat guard restarts and every question is fair game again."""
+    used = store.wyr_used_ids()
+    return set() if all(q.id in used for q in questions) else used
+
+
+def attach_pooled_images(
+    *,
+    store: LiveChatStore,
+    paths: ProjectPaths,
+    pooled: PooledPictures,
+    anchor_seq: int,
+    by_email: str | None,
+) -> bool:
+    """Attach a reserved pooled pair to a freshly created round: the PNGs are MOVED into
+    `uploads/<id>/assembled` and attached in ONE transaction (the on-demand job's own path), so
+    the round has both pictures the instant it exists. False on any failure — staged files and
+    the reserved pair are removed either way and the caller falls back to the on-demand job."""
+    staged: list[Path] = []
+    try:
+        images: list[tuple[str, int]] = []
+        for source in (pooled.a, pooled.b):
+            att_id = uuid.uuid4().hex
+            upload_dir = paths.server_upload_dir(att_id)
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            staged.append(upload_dir)
+            shutil.move(str(source), str(upload_dir / "assembled"))
+            images.append((att_id, (upload_dir / "assembled").stat().st_size))
+        attached = store.create_wyr_image_attachments(
+            anchor_seq=anchor_seq, images=images, by_email=by_email, now=time.time()
+        )
+        if attached:
+            staged = []  # the attachments own these directories now
+        return attached
+    except Exception:
+        _LOGGER.exception("wyr: could not attach pooled pictures to round %d", anchor_seq)
+        return False
+    finally:
+        for upload_dir in staged:
+            shutil.rmtree(upload_dir, ignore_errors=True)
+        WyrPool.discard(pooled)
+
+
+class PoolOutcome(enum.Enum):
+    GENERATED = "generated"
+    FULL = "full"
+    NO_CANDIDATES = "no_candidates"
+    YIELDED = "yielded"
+    NO_DISK = "no_disk"
+    UNAVAILABLE = "unavailable"
+    FAILED = "failed"
+
+
+# Never fill the disk with speculative pictures: stop this far above the chat's own free-space
+# floor (`server_min_free_bytes`), which uploads must still be able to use.
+_POOL_DISK_HEADROOM_BYTES = 1024 * 1024 * 1024
+
+
+def pool_step(
+    *,
+    store: LiveChatStore,
+    paths: ProjectPaths,
+    generator: ComfyImageGenerator,
+    pool: WyrPool,
+    questions: tuple[WyrQuestion, ...],
+    target: int,
+    demand: WyrDemand,
+    min_free_bytes: int,
+    rng: random.Random | None = None,
+    free_bytes: Callable[[], int] | None = None,
+) -> PoolOutcome:
+    """One blocking filler iteration (callers run it in a worker thread under the picture
+    gate): paint ONE pair for a random unplayed, not-yet-pooled question if the pool is below
+    target, nothing is waiting for a round's pictures, the disk has room and the generator is
+    up. Every outcome is reported, never raised — the loop decides how long to wait."""
+    pooled_ids = pool.ids()
+    if len(pooled_ids) >= target:
+        return PoolOutcome.FULL
+    if demand.count > 0:
+        return PoolOutcome.YIELDED
+    free = free_bytes() if free_bytes is not None else shutil.disk_usage(paths.server_dir).free
+    if free < min_free_bytes + _POOL_DISK_HEADROOM_BYTES:
+        return PoolOutcome.NO_DISK
+    if not generator.available():
+        return PoolOutcome.UNAVAILABLE
+    used = pool_played_ids(store, questions)
+    candidates = [q for q in questions if q.id not in used and q.id not in pooled_ids]
+    if not candidates:
+        return PoolOutcome.NO_CANDIDATES
+    chooser = rng or random.SystemRandom()
+    question = chooser.choice(candidates)
+    suffix = style_suffix(question.category)
+    tmp: Path | None = None
+    try:
+        tmp = pool.begin(question.id)
+        png_a, png_b = generator.generate_pair(
+            question.image_a + suffix,
+            question.image_b + suffix,
+            tmp,
+            seed_a=chooser.randrange(2**32),
+            seed_b=chooser.randrange(2**32),
+        )
+        for produced, name in ((png_a, POOL_FILES[0]), (png_b, POOL_FILES[1])):
+            if produced != tmp / name:
+                produced.replace(tmp / name)
+        if question.id in pool_played_ids(store, questions):
+            # An on-demand round used this question while it was painting: do not pool a played one.
+            WyrPool.abort(tmp)
+            return PoolOutcome.GENERATED
+        committed = pool.commit(question.id, tmp)
+        tmp = None
+        return PoolOutcome.GENERATED if committed else PoolOutcome.FAILED
+    except Exception:
+        _LOGGER.exception("wyr pool: could not paint pictures for %s", question.id)
+        return PoolOutcome.FAILED
+    finally:
+        if tmp is not None:
+            WyrPool.abort(tmp)
+
+
+@dataclass(slots=True)
+class PoolPacing:
+    """How long the filler waits after each outcome: briefly after a success (the GPU is otherwise
+    idle), a minute when there is nothing to do, five when the world is not ready (no disk,
+    generator down/misconfigured), and an exponential back-off after failures."""
+
+    failures: int = 0
+
+    def delay_for(self, outcome: PoolOutcome) -> float:
+        if outcome is PoolOutcome.FAILED:
+            self.failures += 1
+            return float(min(300, 30 * 2 ** (self.failures - 1)))
+        self.failures = 0
+        if outcome is PoolOutcome.GENERATED:
+            return 2.0
+        if outcome is PoolOutcome.YIELDED:
+            return 5.0
+        if outcome in (PoolOutcome.NO_DISK, PoolOutcome.UNAVAILABLE):
+            return 300.0
+        return 60.0  # FULL / NO_CANDIDATES
+
+
+async def run_wyr_pool_forever(
+    *,
+    store: LiveChatStore,
+    paths: ProjectPaths,
+    generator: ComfyImageGenerator,
+    pool: WyrPool,
+    questions: tuple[WyrQuestion, ...],
+    target: int,
+    demand: WyrDemand,
+    limiter: Callable[[], anyio.CapacityLimiter],
+    min_free_bytes: int,
+    sleep: Callable[[float], Awaitable[None]] = anyio.sleep,
+) -> None:
+    """Contained loop (`livechat-wyr-pool`): keep `target` pictures-pairs ready. Startup first
+    removes stale scratch and pairs for questions that have been played. Each iteration runs one
+    `pool_step` in a worker thread under the SAME single-flight gate as on-demand rounds."""
+    await anyio.to_thread.run_sync(lambda: pool.cleanup(pool_played_ids(store, questions)))
+    pacing = PoolPacing()
+    while True:
+        outcome = await anyio.to_thread.run_sync(
+            lambda: pool_step(
+                store=store,
+                paths=paths,
+                generator=generator,
+                pool=pool,
+                questions=questions,
+                target=target,
+                demand=demand,
+                min_free_bytes=min_free_bytes,
+            ),
+            limiter=limiter(),
+        )
+        await sleep(pacing.delay_for(outcome))
