@@ -886,20 +886,37 @@ class TestComfyClient:
     """The ComfyUI client's cleanup, against a fake ComfyUI over `httpx.MockTransport`."""
 
     def _fake(
-        self, out_dir: Path, *, finishes: bool = True
+        self,
+        out_dir: Path,
+        *,
+        finishes: bool = True,
+        argv: list[str] | None = None,
+        real_dir: Path | None = None,
+        bad_history: bool = False,
+        listing: dict[str, Any] | None = None,
     ) -> tuple[httpx.MockTransport, list[tuple[str, str, Any]]]:
         calls: list[tuple[str, str, Any]] = []
         state: dict[str, str] = {}
+        write_to = real_dir if real_dir is not None else out_dir
 
         def handler(request: httpx.Request) -> httpx.Response:
             body = json.loads(request.content) if request.content else None
             calls.append((request.method, request.url.path, body))
+            if request.url.path == "/system_stats":
+                system: dict[str, Any] = {}
+                if argv is not None:
+                    system["argv"] = argv
+                return httpx.Response(200, json={"system": system})
+            if request.url.path == "/history" and request.method == "GET":
+                return httpx.Response(200, json=listing or {})
             if request.url.path == "/prompt":
                 state["prefix"] = (body or {})["prompt"]["16"]["inputs"]["filename_prefix"][:-2]
                 for tag in ("a", "b"):
-                    (out_dir / f"{state['prefix']}_{tag}_00001_.png").write_bytes(_png())
+                    (write_to / f"{state['prefix']}_{tag}_00001_.png").write_bytes(_png())
                 return httpx.Response(200, json={"prompt_id": "p1"})
             if request.url.path == "/history/p1":
+                if bad_history:
+                    return httpx.Response(200, content=b"<html>not json</html>")
                 if not finishes:
                     return httpx.Response(200, json={})
                 prefix = state["prefix"]
@@ -917,7 +934,7 @@ class TestComfyClient:
                 )
             if request.url.path == "/view":
                 return httpx.Response(
-                    200, content=(out_dir / request.url.params["filename"]).read_bytes()
+                    200, content=(write_to / request.url.params["filename"]).read_bytes()
                 )
             return httpx.Response(200, json={})
 
@@ -955,6 +972,77 @@ class TestComfyClient:
         assert ("POST", "/interrupt", {"prompt_id": "p1"}) in calls
         assert ("POST", "/history", {"delete": ["p1"]}) in calls
         assert list(out.iterdir()) == []
+
+    def test_an_unreadable_history_answer_still_cancels_the_run(self, tmp_path: Path) -> None:
+        out = tmp_path / "comfy-out"
+        out.mkdir()
+        transport, calls = self._fake(out, bad_history=True)
+        generator = ComfyImageGenerator("http://comfy.invalid", output_dir=out, transport=transport)
+        work = tmp_path / "work"
+        work.mkdir()
+        with pytest.raises(ValueError):
+            generator.generate_pair("x", "y", work, seed_a=1, seed_b=2)
+        assert ("POST", "/queue", {"delete": ["p1"]}) in calls
+        assert ("POST", "/interrupt", {"prompt_id": "p1"}) in calls
+        assert list(out.iterdir()) == []
+
+    def test_availability_checks_comfys_reported_output_directory(self, tmp_path: Path) -> None:
+        out = tmp_path / "comfy-out"
+        out.mkdir()
+
+        def avail(argv: list[str] | None) -> bool:
+            transport, _ = self._fake(out, argv=argv)
+            return ComfyImageGenerator(
+                "http://comfy.invalid", output_dir=out, transport=transport
+            ).available()
+
+        assert avail(["main.py", "--output-directory", str(out)]) is True
+        assert avail(["main.py", f"--output-directory={out}"]) is True
+        assert avail(["main.py", "--output-directory", str(tmp_path / "elsewhere")]) is False
+        assert avail(["main.py", "--port", "8199"]) is False  # flag absent: unknowable, so no
+        assert avail(None) is True  # an older build reports nothing: the post-run check covers it
+
+    def test_pictures_written_outside_the_configured_folder_disable_the_generator(
+        self, tmp_path: Path
+    ) -> None:
+        configured = tmp_path / "configured"
+        real = tmp_path / "real-comfy-output"
+        configured.mkdir()
+        real.mkdir()
+        transport, _calls = self._fake(configured, real_dir=real)
+        generator = ComfyImageGenerator(
+            "http://comfy.invalid", output_dir=configured, transport=transport
+        )
+        work = tmp_path / "work"
+        work.mkdir()
+        with pytest.raises(ImageGenerationError, match="output directory mismatch"):
+            generator.generate_pair("x", "y", work, seed_a=1, seed_b=2)
+        assert generator.available() is False  # sticky: it never renders again
+
+    def test_sweep_removes_orphaned_runs_but_not_young_ones(self, tmp_path: Path) -> None:
+        out = tmp_path / "comfy-out"
+        out.mkdir()
+        stale = out / "wyr_dead_a_00001_.png"
+        young = out / "wyr_live_a_00001_.png"
+        for f in (stale, young):
+            f.write_bytes(b"x")
+        os.utime(stale, (1.0, 1.0))
+
+        def entry(name: str) -> dict[str, Any]:
+            return {"outputs": {"16": {"images": [{"filename": name}]}}}
+
+        listing = {
+            "dead": entry("wyr_dead_a_00001_.png"),  # file stale -> orphan
+            "gone": entry("wyr_gone_a_00001_.png"),  # file already removed -> orphan
+            "live": entry("wyr_live_a_00001_.png"),  # young file -> a run may own it
+            "other": entry("somebody_elses.png"),  # not ours -> untouched
+        }
+        transport, calls = self._fake(out, listing=listing)
+        generator = ComfyImageGenerator("http://comfy.invalid", output_dir=out, transport=transport)
+        assert generator.sweep_leftovers() == 3  # 1 stale file + 2 orphaned history entries
+        deletes = [c[2]["delete"] for c in calls if c[:2] == ("POST", "/history")]
+        assert deletes == [["dead", "gone"]]
+        assert not stale.exists() and young.exists()
 
     def test_purge_leftovers_removes_only_stale_wyr_files(self, tmp_path: Path) -> None:
         out = tmp_path / "comfy-out"

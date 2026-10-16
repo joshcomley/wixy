@@ -1047,7 +1047,7 @@ ordinary photo attachments, so their erasure is Inv 46's. **ComfyUI itself retai
 renders** (a PNG in its own output folder, the prompt in its `/history`): every run therefore
 deletes its own history entry and its own `wyr_*` output files (`WIXY_COMFY_OUTPUT_DIR` must name
 the folder ComfyUI writes to — without it pictures stay DISABLED, fail-closed), cancels a run it
-abandons, and a startup sweep removes `wyr_*` files older than the generation budget. Those files
+abandons, and a sweep (at startup and every 10 minutes) removes `wyr_*` files older than the generation budget and the history entries whose files are gone or stale, covering a run orphaned by a killed process. The folder is verified against ComfyUI's own reported `--output-directory` (mismatch or absent flag disables pictures; a post-run check covers builds that report no arguments). Those files
 exist for seconds and are unlinked, not scrubbed — the one place game content touches disk outside
 `server/` (a plain unlink, so recoverable by forensics until the OS reuses the blocks); a run's
 downloaded PNGs likewise sit in `server/wyr-tmp/` only while it runs (stale dirs cleared at start).

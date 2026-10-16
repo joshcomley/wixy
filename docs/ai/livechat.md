@@ -1768,8 +1768,10 @@ answered, each presses **Reveal**, and only when both have does anyone see the a
   suffix is appended before painting.
 - **Pictures**: painted when the round is created, never ahead of time. `wyr_images.ComfyImageGenerator`
   drives ComfyUI (`/prompt` -> `/history` -> `/view`) with both options in one submission and then
-  **cleans up after itself** (deletes its `/history` entry and its `wyr_*` output files, cancels a
-  run it abandons; `purge_leftovers` at startup). `wyr_game.generate_round_images` stages the PNGs
+  **cleans up after itself** (deletes its `/history` entry and its `wyr_*` output files, cancels any run that did not
+  finish cleanly; `sweep_leftovers` at startup and every 10 min removes stale files/history of
+  orphaned runs; `available()` verifies ComfyUI's reported `--output-directory` against
+  `WIXY_COMFY_OUTPUT_DIR`). `wyr_game.generate_round_images` stages the PNGs
   and attaches them as ordinary photo attachments in ONE transaction (ordinal 0 = option A,
   1 = B). Picture jobs are **single-flight** (`CapacityLimiter(1)`; a waiting job is a parked
   coroutine, not a held worker thread) and re-check that the round is still live (exists, not

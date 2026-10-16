@@ -21,6 +21,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
+import anyio
+
 from builder.jsontypes import JsonObject, JsonValue
 from wixy_server.livechat.models import WyrRoundRow
 from wixy_server.livechat.reactions import reactor_key
@@ -171,12 +173,25 @@ def clear_wyr_scratch(paths: ProjectPaths, *, now: float | None = None) -> None:
             _LOGGER.warning("wyr: could not inspect scratch entry %s", entry)
 
 
+async def run_wyr_sweep_forever(
+    generator: ComfyImageGenerator, *, interval_s: float = 600.0
+) -> None:
+    """Contained loop: sweep ComfyUI's stale `wyr_*` files and history entries at startup and
+    every `interval_s` (the backstop for runs orphaned by a killed process — see
+    `ComfyImageGenerator.sweep_leftovers`)."""
+    while True:
+        started_at = time.monotonic()
+        await anyio.to_thread.run_sync(generator.sweep_leftovers)
+        await anyio.sleep(max(0.0, interval_s - (time.monotonic() - started_at)))
+
+
 def choose_question(
     store: LiveChatStore, questions: tuple[WyrQuestion, ...], rng: random.Random | None = None
 ) -> WyrQuestion | None:
     """A random bank question this chat has not played yet; `None` only for an empty bank.
     Once the whole bank has been played the pool resets to the full bank (the repeat guard
-    simply starts over — `wyr_used` keeps accumulating via INSERT OR IGNORE)."""
+    simply starts over: the played set is derived from the rounds that still exist, so
+    there is nothing to clear and no separate record of what was played)."""
     return pick_question(questions, store.wyr_used_ids(), rng or random.Random())
 
 

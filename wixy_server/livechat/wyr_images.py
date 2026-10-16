@@ -25,6 +25,7 @@ loaded UNET/CLIP/VAE, so the second image never pays a model reload.
 from __future__ import annotations
 
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass
@@ -103,6 +104,9 @@ class ComfyImageGenerator:
         self._config = IMAGE_MODELS.get(model, IMAGE_MODELS[DEFAULT_IMAGE_MODEL])
         self._output_dir = output_dir
         self._transport = transport
+        # Sticky: once ComfyUI is seen writing somewhere other than `output_dir`, this server
+        # can never delete the pictures it renders, so it stops rendering (Inv 54).
+        self._misconfigured = False
 
     def purge_leftovers(self) -> int:
         """Delete stale `wyr_*` files in ComfyUI's output directory — what a run that crashed (or
@@ -124,6 +128,49 @@ class ComfyImageGenerator:
                     _LOGGER.warning("wyr: could not remove leftover %s", path)
         except OSError:
             _LOGGER.warning("wyr: could not list %s", self._output_dir)
+        return removed
+
+    def sweep_leftovers(self) -> int:
+        """Remove what no live run can own: stale `wyr_*` output files AND the ComfyUI history
+        entries of `wyr_*` runs whose files are gone or stale. Run at startup and periodically,
+        it is the backstop for a run orphaned by a killed process (ComfyUI finishes and writes
+        after the replacement process already started) and for a cancelled run whose history
+        entry appeared after the delete. Young files and their entries are left alone: they may
+        belong to the older process of a blue/green overlap, still working. Returns the number
+        of files plus history entries removed."""
+        removed = self.purge_leftovers()
+        if self._output_dir is None:
+            return removed
+        cutoff = time.time() - _STALE_OUTPUT_AFTER_S
+        try:
+            with httpx.Client(base_url=self._base_url, transport=self._transport) as client:
+                resp = client.get("/history", params={"max_items": 200}, timeout=_PROBE_TIMEOUT_S)
+                if resp.status_code != 200:
+                    return removed
+                orphans: list[str] = []
+                for prompt_id, entry in resp.json().items():
+                    names = [
+                        str(image.get("filename", ""))
+                        for node_out in (entry.get("outputs") or {}).values()
+                        for image in node_out.get("images", [])
+                    ]
+                    mine = [n for n in names if n.startswith(FILE_PREFIX)]
+                    if not mine:
+                        continue
+                    alive = False
+                    for name in mine:
+                        try:
+                            if (self._output_dir / name).stat().st_mtime >= cutoff:
+                                alive = True
+                        except OSError:
+                            pass  # file gone: nothing left for the entry to describe
+                    if not alive:
+                        orphans.append(prompt_id)
+                if orphans:
+                    client.post("/history", json={"delete": orphans}, timeout=_PROBE_TIMEOUT_S)
+                    removed += len(orphans)
+        except httpx.HTTPError, ValueError, AttributeError:
+            _LOGGER.warning("wyr: could not sweep ComfyUI history", exc_info=True)
         return removed
 
     def _forget_run(
@@ -157,12 +204,57 @@ class ComfyImageGenerator:
 
     def available(self) -> bool:
         """Cheap liveness probe before any GPU work is queued for a round."""
+        if self._misconfigured:
+            return False
         try:
             with httpx.Client(transport=self._transport) as client:
                 resp = client.get(f"{self._base_url}/system_stats", timeout=_PROBE_TIMEOUT_S)
         except httpx.HTTPError:
             return False
-        return resp.status_code == 200
+        if resp.status_code != 200:
+            return False
+        return self._output_dir_matches(resp)
+
+    def _output_dir_matches(self, resp: httpx.Response) -> bool:
+        """ComfyUI reports its own launch arguments in `/system_stats`. When they are there, the
+        folder it was told to write to MUST be the one this server was told to clean — a typo, or
+        ComfyUI started without `--output-directory`, would silently retain every picture. Older
+        ComfyUI builds that report no arguments are caught by the post-run check instead."""
+        if self._output_dir is None:
+            return True
+        try:
+            argv = resp.json().get("system", {}).get("argv")
+        except ValueError, AttributeError:
+            return True
+        if not isinstance(argv, list):
+            return True
+        reported: str | None = None
+        for i, arg in enumerate(argv):
+            if arg == "--output-directory" and i + 1 < len(argv):
+                reported = str(argv[i + 1])
+            elif isinstance(arg, str) and arg.startswith("--output-directory="):
+                reported = arg.split("=", 1)[1]
+        if reported is None:
+            _LOGGER.error(
+                "wyr: ComfyUI was started without --output-directory, so this server cannot "
+                "know where it keeps pictures; pictures are DISABLED until it is started with "
+                "--output-directory %s",
+                self._output_dir,
+            )
+            self._misconfigured = True
+            return False
+        if os.path.normcase(os.path.normpath(reported)) != os.path.normcase(
+            os.path.normpath(str(self._output_dir))
+        ):
+            _LOGGER.error(
+                "wyr: ComfyUI writes to %s but WIXY_COMFY_OUTPUT_DIR is %s; pictures are "
+                "DISABLED (this server could not delete them)",
+                reported,
+                self._output_dir,
+            )
+            self._misconfigured = True
+            return False
+        return True
 
     def generate_pair(
         self,
@@ -228,7 +320,10 @@ class ComfyImageGenerator:
 
         with httpx.Client(base_url=self._base_url, transport=self._transport) as client:
             prompt_id: str | None = None
-            cancel = False
+            # A run is only left alone once ComfyUI has reported it finished; ANY other exit
+            # (timeout, an unreadable answer, an unexpected error) cancels it so it cannot go
+            # on to write pictures after this server has stopped looking.
+            completed = False
             try:
                 try:
                     resp = client.post(
@@ -262,6 +357,7 @@ class ComfyImageGenerator:
                     if entry is None:
                         time.sleep(0.5)
                         continue
+                    completed = True
                     status = entry.get("status") or {}
                     if status.get("status_str") != "success":
                         raise ImageGenerationError(f"generation failed: {str(status)[:200]}")
@@ -274,10 +370,21 @@ class ComfyImageGenerator:
                                 images["b"] = filename
                     break
                 else:
-                    cancel = True
                     raise ImageGenerationError("generation timed out")
                 if "a" not in images or "b" not in images:
                     raise ImageGenerationError(f"missing outputs: {sorted(images)}")
+                if self._output_dir is not None and not all(
+                    (self._output_dir / name).is_file() for name in images.values()
+                ):
+                    # ComfyUI wrote the pictures somewhere this server does not clean. Stop
+                    # rendering for good rather than keep leaving chat content behind.
+                    self._misconfigured = True
+                    _LOGGER.error(
+                        "wyr: ComfyUI's pictures are not in WIXY_COMFY_OUTPUT_DIR (%s); "
+                        "pictures are DISABLED until it names the folder ComfyUI writes to",
+                        self._output_dir,
+                    )
+                    raise ImageGenerationError("output directory mismatch")
 
                 paths: dict[str, Path] = {}
                 for tag in ("a", "b"):
@@ -296,4 +403,4 @@ class ComfyImageGenerator:
                     paths[tag] = target
                 return paths["a"], paths["b"]
             finally:
-                self._forget_run(client, prompt_id, prefix, cancel=cancel)
+                self._forget_run(client, prompt_id, prefix, cancel=not completed)

@@ -111,7 +111,8 @@ def pick_question(
     questions: tuple[WyrQuestion, ...], used_ids: set[str], rng: random.Random
 ) -> WyrQuestion | None:
     """Pick a random question the couple has not played yet. Once the whole bank has
-    been played, start over with the full bank (the caller clears `wyr_used`)."""
+    been played, start over with the full bank (`used_ids` is derived from the rounds that
+    still exist, so there is nothing to clear)."""
     if not questions:
         return None
     fresh = [q for q in questions if q.id not in used_ids]

@@ -55,7 +55,7 @@ from wixy_server.livechat.transcription import (
     SlidingWindowRateLimiter,
     TranscriptionRuntime,
 )
-from wixy_server.livechat.wyr_game import clear_wyr_scratch
+from wixy_server.livechat.wyr_game import clear_wyr_scratch, run_wyr_sweep_forever
 from wixy_server.livechat.wyr_images import ComfyImageGenerator
 from wixy_server.livechat.wyr_questions import load_questions as load_wyr_questions
 from wixy_server.publisher import PublishJob
@@ -339,8 +339,6 @@ def create_app(
         await anyio.to_thread.run_sync(
             lambda: livechat_store.fail_stale_wyr_images(now=time.time())
         )
-        if resolved_image_generator is not None:
-            await anyio.to_thread.run_sync(resolved_image_generator.purge_leftovers)
         await anyio.to_thread.run_sync(
             lambda: livechat_store.fail_stale_pending_transcripts(now=time.time())
         )
@@ -365,6 +363,10 @@ def create_app(
         async def _run_scrubber() -> None:
             await livechat_janitor.run_scrubber_forever(store=livechat_store, paths=paths)
 
+        async def _run_wyr_sweep() -> None:
+            assert resolved_image_generator is not None
+            await run_wyr_sweep_forever(resolved_image_generator)
+
         async def _run_view_once_backstop() -> None:
             await livechat_janitor.run_view_once_backstop_forever(
                 store=livechat_store, paths=paths, notifier=livechat_notifier
@@ -387,6 +389,8 @@ def create_app(
                 if livechat_media_available:
                     background.supervise("livechat-media", _run_media_queue)
                 background.supervise("livechat-janitor", _run_janitor)
+                if resolved_image_generator is not None:
+                    background.supervise("livechat-wyr-sweep", _run_wyr_sweep)
                 yield
                 tg.cancel_scope.cancel()
         finally:
