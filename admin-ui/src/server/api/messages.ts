@@ -4,6 +4,7 @@
 
 import { ServerErasureOutcomeUnknownError, ServerLockedError, serverFetch } from "./http";
 import type { DrawingSummary } from "./drawings";
+import type { WyrSummary } from "./wyr";
 import type { ServerSession } from "../types";
 
 import type { AttachmentTranscript } from "../mediaRender";
@@ -88,6 +89,9 @@ export interface Message {
    * (never their strokes). Absent from a server that predates drawings — read as "unknown",
    * never as "none" (`parseDrawingSummaries`). */
   readonly drawings?: readonly DrawingSummary[];
+  /** The would-you-rather round anchored to this message (summary only — never the answers).
+   * Absent or null on a server that predates the game, or on an ordinary message. */
+  readonly wyr?: WyrSummary | null;
 }
 
 export interface HistoryPage {

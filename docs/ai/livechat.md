@@ -8,7 +8,7 @@ This manual describes the current implementation; where intent and code differ, 
 code and record the difference in `decisions/`.
 Numbered guarantees: [invariants.md](invariants.md) 40–47, 48 (permanent unlock), 49 (reactions),
 50 (transcription, §15), 51 (reply to a message, §12), 52 (view-once media, §17) and
-53 (live drawing, §18).
+53 (live drawing, §18) and 54 (the would-you-rather game, §19).
 
 ## 1. The disguise (why it looks like nothing is here)
 
@@ -553,6 +553,8 @@ playback in the browser. Served via Starlette `FileResponse` (200/206, Range-awa
 | `WIXY_SERVER_MIN_FREE_MB` | `server_min_free_bytes` | 1024 MiB (1 GiB) | R10 — the disk free-space floor, enforced alongside the quota |
 | `WIXY_SERVER_UPLOAD_CHUNK_BYTES` | `server_upload_chunk_bytes` | 8 MiB | clamped to 64 KiB–16 MiB |
 | `WIXY_FFMPEG` / `WIXY_FFPROBE` | `ffmpeg_path` / `ffprobe_path` | `""` (resolve via `PATH`) | overrides must point to existing files; either binary missing — or `pillow-heif` not importable — makes media uploads return 503 while text chat works |
+| `WIXY_COMFY_URL` | `comfy_url` | `""` (images off) | would-you-rather pictures (§19): base URL of the local ComfyUI (fleet: `http://127.0.0.1:8199`); empty or `WIXY_EDITION=standalone` means text-only rounds |
+| `WIXY_WYR_IMAGE_MODEL` | `wyr_image_model` | `krea2-turbo-nvfp4` | which proven model recipe in `wyr_images.IMAGE_MODELS` to drive (`boogu-turbo-nvfp4` is the fast alternative) |
 
 `ProjectPaths` (`storage.py`) gets `server_dir`/`server_db`/`server_secret`/`server_vapid`/
 `server_media`/`server_uploads`/`server_failed` — created **lazily** (like `reports_dir`),
@@ -1739,3 +1741,38 @@ side (schema, routes, the live relay and erasure) is §18. This section covers t
   arrives, the retry creates it again.
 - **Leaving the panel stops a pending delete:** a delete still waiting on its create (above)
   ends if the panel is torn down before that create answers.
+
+
+## 19. The would-you-rather game (workspace 00045, decisions/00182, Inv 54)
+
+The header's ... menu has a **Would you rather?** item. It starts a round: a card in the thread
+showing a question with two options, each with a picture. Both people vote Play/Skip; if both
+play, each privately answers *which would I rather* and *which will the other pick*; once both
+answered, each presses **Reveal**, and only when both have does anyone see the answers.
+
+- **Storage** (schema v15): `wyr_rounds` (one row per anchor message — state, the two player
+  slots with `vote`/`choice`/`guess`/`reveal`, `rev`) and `wyr_used` (played question ids).
+  Store methods: `create_wyr_round`, `vote_wyr`, `answer_wyr`, `reveal_wyr`, `get_wyr_round`,
+  `wyr_used_ids`, `create_wyr_image_attachment`; errors `WyrRoundNotFoundError`/`WyrRoundFullError`/
+  `WyrBadStateError`/`WyrNotPlayerError`. States: `voting -> answering -> revealing -> revealed`,
+  or `skipped`. Starting a round supersedes any open one.
+- **Wire**: `Message.wyr = {state, rev} | null`; routes `POST /wyr`, `GET /wyr/{seq}?as=`,
+  `POST /wyr/{seq}/vote|answer|reveal` (contracts.md). The viewer-filtered view
+  (`wyr_game.wyr_view_json`) is the only path answers leave the store.
+- **Questions**: `wyr_questions.json` (2,352, ten categories; ids permanent, append-only) loaded
+  once at `create_app` into `app.state.livechat_wyr_questions`; `wyr_questions.pick_question` draws
+  a random unplayed one. Each carries a scene description per option; a per-category style
+  suffix is appended before painting.
+- **Pictures**: painted when the round is created, never ahead of time. `wyr_images.ComfyImageGenerator`
+  drives ComfyUI (`/prompt` -> `/history` -> `/view`) with both options in one submission;
+  `wyr_game.generate_round_images` stages the PNGs and attaches them as ordinary photo
+  attachments (ordinal 0 = option A, 1 = B). `create_app(image_generator=...)` is the test seam.
+  No generator (unset `WIXY_COMFY_URL`, standalone edition, ComfyUI down or failing) means text-only.
+- **Client**: `admin-ui/src/server/api/wyr.ts` (defensive parsers), `wyrModel.ts` (per-round
+  viewer-filtered view + unsent picks; the summary only triggers a fetch), `wyrCard.ts` (the
+  in-bubble card), wired in `thread.ts` (menu item `.wx-srv-more-wyr`, `.wx-srv-bubble-wyr`).
+- **Fleet ops** (not in this repo): the Devfleet child `ComfyUi` (127.0.0.1:8199, pinned to the
+  RTX 5060 Ti by UUID) and `WIXY_COMFY_URL` in `D:\Servers\Wixy\.env`.
+
+Honest limits: a round's pictures take roughly 25-60 s to appear (the card shows a placeholder);
+the answers filter keeps the game fun but the chat has no per-person secrecy (Inv 40).

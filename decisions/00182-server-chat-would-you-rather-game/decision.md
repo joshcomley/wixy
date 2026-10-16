@@ -1,0 +1,21 @@
+# Symptom / ask
+Operator (workspace 00045): a "Would you rather?" game in the chat's ... menu. Each round asks both people what THEY would rather and what they think the OTHER would pick; results show only after BOTH press Reveal. 2,000+ questions across food, travel, date nights, interiors and more, each option with a picture generated on Hub's GPU at the moment the round is shown, never ahead of time.
+
+# Decided
+- **One table per round, anchored to a message** (schema v15 `wyr_rounds`, PK = `anchor_message_seq`, `ON DELETE CASCADE`) — the drawings precedent (decisions/00164): the table is the message-kind marker, no `messages` column, and an older blue/green process that deletes a message still removes the round. `wyr_used` remembers played question ids (random pick of unplayed; when the bank is exhausted the pool resets). Both are explicitly cleared by wipe.
+- **State machine** `voting -> answering -> revealing -> revealed`, or `skipped` from `voting` (any skip vote) or by a newer round superseding it. The creator is player 1 and has already voted `play`; the first other voter is player 2; a third is refused (`full`/`bad_state`). Every mutation is idempotent (a retry after a dropped response never flips anything) and announced via the existing `message_updated` event — no new event type, no `events` rebuild.
+- **The game rule is enforced on the server**: `wyr_view_json` never includes the other player's pick/guess until `state == "revealed"`, and `Message.wyr` carries only `{state, rev}`. The chat's trust model is unchanged (anyone unlocked can read anything; the filter keeps the game fun, it is not a secret-keeping boundary).
+- **Question bank is static repo content** (`wixy_server/livechat/wyr_questions.json`, 2,352 questions after dedupe from 2,400 written by ten Luna writers, 10 categories; ids `qNNNN` permanent, append-only). It reveals nothing about anyone so wipe never touches it. Dedupe: exact normalised option pair (order-insensitive), then token-Jaccard >= 0.72 near-duplicates.
+- **Pictures are ordinary photo attachments** painted on demand: `POST /wyr` commits the round, then a background job (`wyr_game.generate_round_images`) probes ComfyUI, renders both options in ONE submission (two sampling chains sharing loaded models), stages each PNG as `uploads/<id>/assembled` and attaches it via `create_wyr_image_attachment` (upload + attachment + link in one transaction, so the media queue can never claim an attachment with no home). Signed URLs, renditions, quota and delete/wipe erasure are all inherited. A generator failure or a missing `WIXY_COMFY_URL` leaves a text-only round; the game never 5xxs for it.
+- **Model**: Krea 2 Turbo NVFP4 on ComfyUI (Hall topic 00072's everyday pick), 8 steps, 1024x1024; Boogu Turbo selectable via `WIXY_WYR_IMAGE_MODEL`. Measured live 2026-10-16: a pair rendered in ~46 s including cold model load on the shared card.
+- **Release notes**: the game's commits carry `Release-note: General bug fixes and improvements.` (R14a-style discretion in a hidden chat).
+
+# Why not
+- A `messages` column / `ALTER` or a new event type: forces the events-table rebuild the drawings design deliberately avoided.
+- Pre-generating pictures: the operator wants them painted when the round is shown; 2,352 x 2 pictures would also be pure storage cost.
+- Sending the full round to both clients and hiding client-side: a client cannot be trusted to hide what the server sent it.
+
+# Watch for
+- The image job holds a worker thread for the whole generation (up to the 300 s budget); a second round started meanwhile simply queues behind it on ComfyUI.
+- Staged PNGs live in `server/wyr-tmp/` during a run and are cleared at every app start (Inv 54) — they are chat content.
+- Bank ids are permanent: never renumber, only append.
