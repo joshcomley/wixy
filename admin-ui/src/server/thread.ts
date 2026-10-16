@@ -880,7 +880,6 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     // Sending never disables, blurs or resizes the input (operator report, round 2): the box is
     // cleared at once by `takeDraft()` and the draft comes back on a failed send.
     keepInputLive: true,
-    enterToSend: false,
     promoteToFullWidthOnMultiline: true,
     onTextInput: (text) => takeGifLinks(text),
     extraButtons: [recordButton, cancelRecordingButton, pauseRecordingButton, recordingStatus, viewOnceButton],

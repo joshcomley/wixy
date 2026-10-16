@@ -439,7 +439,7 @@ function mountConversationView(convId: string, deps: ChatPanelDeps): ChatPanel {
 
   const composer = mountChatComposer({
     mode: "composer",
-    placeholder: "Message the assistant… (Shift+Enter for a new line)",
+    placeholder: "Message the assistant… (Shift+Enter for a new line, Ctrl+Shift+Enter to send)",
     submitLabel: "Send",
     upload: (file) => api.uploadChatAttachment(convId, file),
     onSubmit: () => send(),

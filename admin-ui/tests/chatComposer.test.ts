@@ -60,22 +60,52 @@ describe("mountChatComposer", () => {
     composer.teardown();
   });
 
-  it("lets Server chat keep Enter for newlines and promotes a multiline draft until it clears", () => {
+  it("follows cmd's Enter rules: send a one-liner, newline once there is one, Ctrl+Shift+Enter sends", () => {
+    const onSubmit = vi.fn();
+    const composer = mountChatComposer(makeOptions({ onSubmit }));
+    const textarea = composer.element.querySelector<HTMLTextAreaElement>("textarea")!;
+    const press = (init: KeyboardEventInit): KeyboardEvent => {
+      const evt = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true, ...init });
+      textarea.dispatchEvent(evt);
+      return evt;
+    };
+
+    textarea.value = "hello";
+    // Ctrl+Enter inserts a newline (the browser does not), and does not send.
+    textarea.setSelectionRange(5, 5);
+    expect(press({ ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(textarea.value).toBe("hello\n");
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    // The draft now has a newline: plain Enter is left to the browser (a newline), never a send.
+    expect(press({}).defaultPrevented).toBe(false);
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    // Ctrl+Shift+Enter sends regardless.
+    expect(press({ ctrlKey: true, shiftKey: true }).defaultPrevented).toBe(true);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    composer.teardown();
+  });
+
+  it("on a touch device Enter is always a newline", () => {
     const onSubmit = vi.fn();
     const composer = mountChatComposer(makeOptions({
       onSubmit,
-      enterToSend: false,
-      promoteToFullWidthOnMultiline: true,
+      win: fakeWindow({ matchMedia: () => ({ matches: true }) }),
     }));
     const textarea = composer.element.querySelector<HTMLTextAreaElement>("textarea")!;
-    const inputRow = composer.element.querySelector<HTMLElement>(".wx-chatc-input-row")!;
-
-    const enter = new KeyboardEvent("keydown", {
-      key: "Enter", shiftKey: false, bubbles: true, cancelable: true,
-    });
-    textarea.dispatchEvent(enter);
-    expect(enter.defaultPrevented).toBe(false);
+    textarea.value = "hello";
+    const evt = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    textarea.dispatchEvent(evt);
+    expect(evt.defaultPrevented).toBe(false);
     expect(onSubmit).not.toHaveBeenCalled();
+    composer.teardown();
+  });
+
+  it("promotes a multiline Server chat draft until it clears", () => {
+    const composer = mountChatComposer(makeOptions({ promoteToFullWidthOnMultiline: true }));
+    const textarea = composer.element.querySelector<HTMLTextAreaElement>("textarea")!;
+    const inputRow = composer.element.querySelector<HTMLElement>(".wx-chatc-input-row")!;
 
     textarea.value = "first line\nsecond line";
     textarea.dispatchEvent(new Event("input"));
@@ -93,7 +123,6 @@ describe("mountChatComposer", () => {
 
   it("promotes the Server chat input when a long line soft-wraps", () => {
     const composer = mountChatComposer(makeOptions({
-      enterToSend: false,
       promoteToFullWidthOnMultiline: true,
     }));
     const textarea = composer.element.querySelector<HTMLTextAreaElement>("textarea")!;
@@ -114,7 +143,6 @@ describe("mountChatComposer", () => {
   it("takes the full-width line on focus and gives it back after blur once no gesture is in progress, unless the draft grew past one line", () => {
     vi.useFakeTimers();
     const composer = mountChatComposer(makeOptions({
-      enterToSend: false,
       promoteToFullWidthOnMultiline: true,
     }));
     const textarea = composer.element.querySelector<HTMLTextAreaElement>("textarea")!;
@@ -165,7 +193,7 @@ describe("mountChatComposer", () => {
   });
 
   it("never promotes on focus unless the option is on", () => {
-    const composer = mountChatComposer(makeOptions({ enterToSend: false }));
+    const composer = mountChatComposer(makeOptions());
     const textarea = composer.element.querySelector<HTMLTextAreaElement>("textarea")!;
     textarea.dispatchEvent(new Event("focus"));
     expect(composer.element.querySelector(".wx-chatc-multiline")).toBeNull();
