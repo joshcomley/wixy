@@ -785,10 +785,13 @@ the microphone. A new recorder is created on the next attach because a detached 
 terminal. Recordings shorter than one second are discarded with a “Too short” hint and never
 uploaded.
 
-The Server-chat composer inserts a newline on Enter (sending is the Send button). When the draft
-contains a newline or soft-wraps in the inline row, the textarea moves above the controls at full
-width and keeps that layout until the draft clears; it grows to 180px, then scrolls internally.
-The shared AI chat composer keeps its Enter-to-send default. While a voice note uploads/sends, the
+The Server-chat composer and the AI chat composer share cmd's key rules (`chatComposer.ts`): on a
+keyboard device Enter sends while the draft is a single line; Shift+Enter or Ctrl/Cmd+Enter inserts
+a newline; once the draft holds a newline Enter only inserts newlines and Ctrl/Cmd+Shift+Enter (or
+the Send button) sends. On a touch device (`pointer: coarse`) Enter is always a newline. When the
+draft contains a newline or soft-wraps in the inline row, the textarea moves above the controls at
+full width and keeps that layout until the draft clears; it grows to 180px, then scrolls
+internally. While a voice note uploads/sends, the
 recording row stays in place with disabled controls and a centered throbber; the in-flight state
 has an accessible status label.
 

@@ -57,17 +57,39 @@ for (const viewport of VIEWPORTS) {
   test.describe(`composer focus after Send (${viewport.label})`, () => {
     test.use({ viewport: { width: viewport.width, height: viewport.height } });
 
-    test("pressing Enter inserts a newline without sending", async ({ page }) => {
+    test("pressing Shift+Enter inserts a newline without sending", async ({ page }) => {
       await unlockServer(page, "Focus");
       const marker = `enter-${viewport.label}-${Date.now()}`;
       const input = page.locator(COMPOSER_TEXTAREA);
       await input.click();
       await input.fill(marker);
-      await input.press("Enter");
+      await input.press("Shift+Enter");
       await expect(input).toHaveValue(`${marker}\n`);
       await expect(input).toBeFocused();
       await expect(page.locator(".wx-chatc-input-row")).toHaveClass(/wx-chatc-multiline/);
       await expect(confirmedBubble(page, marker)).toHaveCount(0);
+    });
+
+    test("Enter sends a one-line draft; once a newline is added Enter only adds lines and Ctrl+Shift+Enter sends", async ({ page }) => {
+      await unlockServer(page, "Focus");
+      const input = page.locator(COMPOSER_TEXTAREA);
+      const single = `single-${viewport.label}-${Date.now()}`;
+      await input.click();
+      await input.fill(single);
+      await input.press("Enter");
+      await expect(confirmedBubble(page, single)).toHaveCount(1);
+      await expect(input).toHaveValue("");
+
+      const multi = `multi-${viewport.label}-${Date.now()}`;
+      await input.fill(multi);
+      await input.press("Control+Enter");
+      await expect(input).toHaveValue(`${multi}\n`);
+      await input.press("Enter");
+      await expect(input).toHaveValue(`${multi}\n\n`);
+      await expect(confirmedBubble(page, multi)).toHaveCount(0);
+      await input.press("Control+Shift+Enter");
+      await expect(confirmedBubble(page, multi)).toHaveCount(1);
+      await expect(input).toHaveValue("");
     });
 
     test("clicking Send keeps the caret in the input", async ({ page }) => {

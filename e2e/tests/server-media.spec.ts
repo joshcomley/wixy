@@ -187,7 +187,7 @@ test.describe("server-media.spec.ts (P6b)", () => {
     await audioNode!.dispose();
   });
 
-  test("Server chat jumps to a full-width line on focus without moving the buttons, and Enter makes newlines", async ({ page }) => {
+  test("Server chat jumps to a full-width line on focus without moving the buttons, and Shift+Enter makes newlines", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await unlockServer(page, `Multiline ${Date.now()}`);
     const draft = page.locator(".wx-chat-composer-input");
@@ -215,7 +215,7 @@ test.describe("server-media.spec.ts (P6b)", () => {
     }
 
     await draft.fill("first line");
-    await draft.press("Enter");
+    await draft.press("Shift+Enter");
     await draft.type("second line");
     await expect(draft).toHaveValue("first line\nsecond line");
     await expect(inputRow).toHaveClass(/wx-chatc-multiline/);

@@ -13,7 +13,9 @@
 //   uploads BEFORE submit, with a spinner per chip and a ✕ to remove;
 // - submit disabled while any upload is in flight (a failed upload drops its
 //   chip with a real error — never silently sends without the image);
-// - Enter submits by default; callers can opt into Enter inserting newlines.
+// - cmd-style keys: Enter sends a one-line draft on a keyboard device, Shift/Ctrl+Enter adds a
+//   newline, Enter only adds newlines once the draft has one, Ctrl+Shift+Enter always sends;
+//   on touch devices Enter is always a newline.
 //
 // Legacy class hooks are kept deliberately: the e2e suite and the unit tests
 // select `.wx-chat-compose-box`, `.wx-chat-compose-input`,
@@ -61,7 +63,7 @@ export interface ChatComposerOptions {
    * that remains valid (JS/TS both allow a callback to declare fewer
    * parameters than the type it's assigned to expects). */
   upload: (file: File, ctx: ChatComposerUploadContext) => Promise<ChatAttachment>;
-  /** Fired by Enter when `enterToSend` is enabled, or the submit button, only when
+  /** Fired by the Enter-key send gestures (see the file header), or the submit button, only when
    * submittable (non-empty or attachments staged, no upload in flight). The caller performs
    * the actual send, then calls `reset()` on success or `setError()` + `setBusy(false)` on failure. */
   onSubmit: () => void;
@@ -107,9 +109,6 @@ export interface ChatComposerOptions {
    * with `takeDraft()` (clear the box at once) and `restoreDraft()` (put the draft back if the
    * send fails). The AI chat omits this and keeps its disabled-while-busy input. */
   keepInputLive?: boolean | undefined;
-  /** Defaults to true (Enter submits, Shift+Enter inserts a newline). Server chat sets false
-   * so Enter always creates a newline and sending remains an explicit button action. */
-  enterToSend?: boolean | undefined;
   /** Promote a server-chat textarea above its controls once it contains an explicit newline or
    * soft-wraps in the narrow inline row. The promoted state lasts until the draft is cleared. */
   promoteToFullWidthOnMultiline?: boolean | undefined;
@@ -619,11 +618,38 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
     // still fires. Touch taps reach here too, as the browser's compatibility mousedown.
     submitButton.addEventListener("mousedown", (evt) => evt.preventDefault());
   }
+  // Enter behaves as it does in cmd. On a keyboard device: Enter sends while the draft is still a
+  // single line; Shift+Enter or Ctrl+Enter inserts a newline; once the draft holds a newline,
+  // Enter only inserts newlines and Ctrl+Shift+Enter (or the Send button) sends. On a touch
+  // device Enter is always a newline and the Send button sends.
+  const isTouchPrimary = (): boolean => {
+    try {
+      return win.matchMedia?.("(pointer: coarse)").matches === true;
+    } catch {
+      return false;
+    }
+  };
+  function insertNewline(): void {
+    textarea.setRangeText("\n", textarea.selectionStart, textarea.selectionEnd, "end");
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  }
   textarea.addEventListener("keydown", (evt) => {
-    if (options.enterToSend !== false && evt.key === "Enter" && !evt.shiftKey) {
+    if (evt.key !== "Enter" || evt.isComposing || evt.altKey) return;
+    const primary = evt.ctrlKey || evt.metaKey;
+    if (primary && evt.shiftKey) {
       evt.preventDefault();
       trySubmit();
+      return;
     }
+    if (primary) {
+      // A bare Ctrl/Cmd+Enter inserts nothing by default, so add the newline ourselves.
+      evt.preventDefault();
+      insertNewline();
+      return;
+    }
+    if (evt.shiftKey || isTouchPrimary() || textarea.value.includes("\n")) return;
+    evt.preventDefault();
+    trySubmit();
   });
 
   function setError(message: string | null): void {

@@ -281,7 +281,7 @@ the Pages list (generalising the original decisions/00097 always-to-pages note).
 box and the open conversation's composer (a `mode` switch keeps every legacy class hook the
 tests/e2e select): a FLAT row — 📎 | input | Send, no outer card (00113) — with an
 auto-growing textarea, 📎/paste/drag-drop image staging with spinner chips, submit gated on
-no-upload-in-flight, Enter/Shift+Enter, and `allowEmptySubmit` for the list view's "start
+no-upload-in-flight, cmd-style Enter rules (see livechat.md), and `allowEmptySubmit` for the list view's "start
 with nothing" case. The list view stages uploads session-lessly (`api.stageChatUpload`) and
 passes the ids to `createConversation`. The auto-grow is the classic scrollHeight dance
 **unconditionally** (00113 — `field-sizing: content` gives this engine generation an
