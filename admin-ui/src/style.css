@@ -421,11 +421,24 @@ html, body {
 /* The unlocked Server chat uses the whole screen (workspace 00045): the status bar, top bar and
    navigation all step aside, so `.wx-main` — and the chat inside it — gets the full dynamic
    viewport height. Locking (or leaving the route) removes the class and the bars return. */
-.wx-shell-srv-full .wx-statusbar,
 .wx-shell-srv-full .wx-topbar,
 .wx-shell-srv-full .wx-navrow,
 .wx-shell-srv-full .wx-edit-bar-host,
 .wx-shell-srv-full .wx-nav {
+  display: none;
+}
+
+/* ...except the version badge (workspace 00046): the status bar stays as a slim, plain strip
+   holding only the badge at the top left, so the owner can still see the version and tap to
+   update. The draft chip and Publish button step aside with the other chrome. The doubled
+   class beats `.wx-statusbar-pending` / `:not(.wx-statusbar-pending)` padding and borders. */
+.wx-shell-srv-full .wx-statusbar.wx-statusbar {
+  padding: 2px 8px;
+  background: none;
+  border-bottom: none;
+}
+
+.wx-shell-srv-full .wx-statusbar > :not(.wx-version-badge) {
   display: none;
 }
 

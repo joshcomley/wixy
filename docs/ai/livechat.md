@@ -1821,8 +1821,8 @@ the answers filter keeps the game fun but the chat has no per-person secrecy (In
 ## 20. The would-you-rather game tab and the full-screen chat (client; workspace 00045, decisions/00184)
 
 - **Full screen.** While the chat is unlocked (`panel.ts` state `chat`/`fading`) it reports `onFullscreenChange(true)`;
-  `shell.ts` adds `wx-shell-srv-full` to the shell root and `style.css` hides the status bar, top bar, nav row, side nav
-  and edit-bar host. Locking, or leaving `/admin/server`, removes it. The header's panic ✕ is the exit.
+  `shell.ts` adds `wx-shell-srv-full` to the shell root and `style.css` hides the top bar, nav row, side nav
+  and edit-bar host; the status bar stays as a slim strip showing only the version badge at the top left (workspace 00046). Locking, or leaving `/admin/server`, removes it. The header's panic ✕ is the exit.
 - **Tabs.** `wyrGame.ts` (`createWyrGame`) owns the tab bar (`.wx-srv-tabs`, under the composer; hidden unless a game is
   open — one tab means no bar), the game pane (`.wx-srv-game`, in the thread's place while the WYR tab shows) and the
   pop-up (`.wx-srv-gamepop`). `thread.ts` creates it after the composer and implements its callbacks
