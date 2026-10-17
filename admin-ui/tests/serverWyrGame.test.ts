@@ -803,6 +803,28 @@ describe("thread wiring", () => {
     thread.teardown();
   });
 
+  it("a game-chat voice note whose round was deleted before it sent is kept and goes to the main chat", async () => {
+    createWyrRound.mockResolvedValue({ ok: true, message: message(9) });
+    getWyrRound.mockResolvedValue({ ok: true, view: view({ seq: 9 }) });
+    const upload = deferred<typeof VOICE_ATTACHMENT>();
+    uploadServerAttachment.mockReturnValue(upload.promise);
+    sendMessage
+      .mockResolvedValueOnce({ ok: false, kind: "rejected", status: 404 } satisfies SendMessageResult) // the round is gone
+      .mockResolvedValueOnce({ ok: true, message: chatMessage(32, null, "", "Josh") } satisfies SendMessageResult);
+    const thread = await mount();
+    startRoundFromMenu(thread);
+    await flush();
+    await recordVoiceNote(thread); // recorded under the WYR tab
+    upload.resolve(VOICE_ATTACHMENT);
+    await flush();
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(sendMessage.mock.calls[0]![1]).toMatchObject({ attachmentIds: ["voice-id"], wyrSeq: 9 });
+    expect(sendMessage.mock.calls[1]![1]).toMatchObject({ attachmentIds: ["voice-id"], clientId: sendMessage.mock.calls[0]![1].clientId });
+    expect(sendMessage.mock.calls[1]![1]).not.toHaveProperty("wyrSeq");
+    expect(thread.element.querySelector(".wx-chat-composer-error")?.textContent ?? "").not.toContain("discarded");
+    thread.teardown();
+  });
+
   // -- F4: view-once is a main-chat feature ---------------------------------------------------------
 
   async function stagePhoto(thread: Awaited<ReturnType<typeof mount>>): Promise<File> {

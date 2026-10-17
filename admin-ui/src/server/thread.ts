@@ -430,8 +430,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         readonly replyTo: PendingReplyTarget | null;
         /** The game chat this note was recorded for (a round's anchor seq), fixed when recording
          * stopped — like its reply target — so an upload, a retry or a re-send after an unlock
-         * can never move it to the other chat. */
-        readonly wyrSeq: number | null;
+         * can never move it to the other chat. The ONE exception: if that round has been deleted
+         * (the server answers 404) the recording is kept and goes to the main chat instead. */
+        wyrSeq: number | null;
       }
     | null = null;
   let voiceSendBusy = false;
@@ -1480,18 +1481,29 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       }
       const sendSession = currentSession;
       if (sendSession === null) return;
-      const result = await sendMessage(sendSession, {
-        clientId: pending.clientId,
-        sender: identity.getName() ?? "",
-        deviceId: identity.getDeviceId(),
-        text: null,
-        attachmentIds: [pending.attachmentId],
-        // §(4): "Its retries keep it (same clientId)" — the reply target
-        // captured when recording stopped, independent of whatever the
-        // composer bar shows now.
-        ...(pending.replyTo !== null ? { replyToSeq: pending.replyTo.seq } : {}),
-        ...(pending.wyrSeq !== null ? { wyrSeq: pending.wyrSeq } : {}),
-      });
+      const attachmentId = pending.attachmentId;
+      const post = (): ReturnType<typeof sendMessage> =>
+        sendMessage(sendSession, {
+          clientId: pending.clientId,
+          sender: identity.getName() ?? "",
+          deviceId: identity.getDeviceId(),
+          text: null,
+          attachmentIds: [attachmentId],
+          // §(4): "Its retries keep it (same clientId)" — the reply target
+          // captured when recording stopped, independent of whatever the
+          // composer bar shows now.
+          ...(pending.replyTo !== null ? { replyToSeq: pending.replyTo.seq } : {}),
+          ...(pending.wyrSeq !== null ? { wyrSeq: pending.wyrSeq } : {}),
+        });
+      let result = await post();
+      if (!result.ok && result.kind === "rejected" && result.status === 404 && pending.wyrSeq !== null) {
+        // The round this note was recorded for no longer exists (deleted or wiped while the note
+        // uploaded, or before a retry). The 404 means nothing was created, and the recording is the
+        // person's own: keep it and send it to the main chat rather than throwing it away (a text
+        // message in the same race is simply restored). Same clientId — nothing was stored.
+        pending.wyrSeq = null;
+        result = await post();
+      }
       if (!result.ok) {
         if (result.kind === "invalid" || result.kind === "rejected") {
           // The server judged this exact note (the attachment failed processing, or was
