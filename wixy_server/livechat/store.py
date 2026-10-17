@@ -280,7 +280,21 @@ CREATE TABLE IF NOT EXISTS wyr_rounds(
   created_at REAL NOT NULL, updated_at REAL NOT NULL);
 """
 
-_LATEST_SCHEMA_VERSION = 15
+# The game chat (workspace 00045 follow-on): a message sent from inside a round's game tab is an
+# ORDINARY message (it stays in the main chat) plus one row here naming the round it belongs to.
+# Table-as-marker, no `messages` column, so no ALTER and no `events` rebuild (the drawings and
+# `wyr_rounds` precedent). Both FKs cascade and BOTH are load-bearing for Inv 46's erasure
+# guarantee: deleting a message removes its association (an older blue/green-overlap process that
+# has never heard of this table still cascades it away), and deleting the round's anchor removes
+# the associations while the messages themselves stay in the main chat. No dates are stored.
+_SCHEMA_V16_WYR_CHAT = """
+CREATE TABLE IF NOT EXISTS wyr_chat(
+  message_seq INTEGER PRIMARY KEY REFERENCES messages(seq) ON DELETE CASCADE,
+  anchor_seq INTEGER NOT NULL REFERENCES messages(seq) ON DELETE CASCADE);
+CREATE INDEX IF NOT EXISTS idx_wyr_chat_anchor ON wyr_chat(anchor_seq);
+"""
+
+_LATEST_SCHEMA_VERSION = 16
 _UNKNOWN_GRANT_HASH = "0" * 64
 _LOGGER = logging.getLogger(__name__)
 
@@ -449,6 +463,7 @@ def _row_to_message(
     *,
     reply_to: MessageRow | None = None,
     wyr: WyrSummary | None = None,
+    wyr_ref: int | None = None,
 ) -> MessageRow:
     return MessageRow(
         seq=row["seq"],
@@ -470,6 +485,7 @@ def _row_to_message(
         view_claim_email=row["view_claim_email"],
         canvas=row["canvas"],
         wyr=wyr,
+        wyr_ref=wyr_ref,
     )
 
 
@@ -656,6 +672,19 @@ def _load_wyr_summaries_for(
     }
 
 
+def _load_wyr_refs_for(conn: sqlite3.Connection, message_seqs: Sequence[int]) -> dict[int, int]:
+    """The round (anchor seq) each message was sent in the game chat of — the `Message` wire
+    shape's `wyrRef`. Absent for an ordinary message."""
+    if not message_seqs:
+        return {}
+    placeholders = ",".join("?" for _ in message_seqs)
+    rows = conn.execute(
+        f"SELECT message_seq, anchor_seq FROM wyr_chat WHERE message_seq IN ({placeholders})",
+        tuple(message_seqs),
+    ).fetchall()
+    return {int(row["message_seq"]): int(row["anchor_seq"]) for row in rows}
+
+
 def _load_reply_targets(
     conn: sqlite3.Connection, reply_to_seqs: Sequence[int | None]
 ) -> dict[int, MessageRow]:
@@ -685,10 +714,13 @@ def _load_message(conn: sqlite3.Connection, seq: int) -> MessageRow:
     reactions = _load_reactions_for(conn, [seq])[seq]
     drawings = _load_drawing_summaries_for(conn, [seq])[seq]
     wyr = _load_wyr_summaries_for(conn, [seq]).get(seq)
+    wyr_ref = _load_wyr_refs_for(conn, [seq]).get(seq)
     reply_to_seq = row["reply_to_seq"]
     reply_targets = _load_reply_targets(conn, [reply_to_seq])
     reply_to = reply_targets.get(reply_to_seq) if reply_to_seq is not None else None
-    return _row_to_message(row, tuple(attachments), reactions, drawings, reply_to=reply_to, wyr=wyr)
+    return _row_to_message(
+        row, tuple(attachments), reactions, drawings, reply_to=reply_to, wyr=wyr, wyr_ref=wyr_ref
+    )
 
 
 def _load_drawing(conn: sqlite3.Connection, drawing_id: int) -> DrawingRow:
@@ -893,6 +925,13 @@ class LiveChatStore:
                         conn.execute(statement)
                 conn.execute("PRAGMA user_version = 15")
                 current = 15
+
+            if current < 16:
+                for statement in _SCHEMA_V16_WYR_CHAT.split(";"):
+                    if statement.strip():
+                        conn.execute(statement)
+                conn.execute("PRAGMA user_version = 16")
+                current = 16
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
@@ -988,14 +1027,27 @@ class LiveChatStore:
         text: str | None,
         attachment_ids: Sequence[str],
         reply_to_seq: int | None = None,
+        wyr_anchor_seq: int | None = None,
         now: float,
     ) -> tuple[MessageRow, bool]:
+        """Create an ordinary message. `wyr_anchor_seq` marks it as sent in a would-you-rather
+        round's game chat: the round must exist (`WyrRoundNotFoundError` otherwise, checked in
+        this same transaction so a concurrent delete cannot slip between check and insert) and
+        the association row is written in the same transaction as the message."""
         with self._write_txn() as conn:
             existing = conn.execute(
                 "SELECT seq FROM messages WHERE client_id = ?", (client_id,)
             ).fetchone()
             if existing is not None:
                 return _load_message(conn, existing["seq"]), False
+
+            if wyr_anchor_seq is not None and (
+                conn.execute(
+                    "SELECT 1 FROM wyr_rounds WHERE anchor_message_seq = ?", (wyr_anchor_seq,)
+                ).fetchone()
+                is None
+            ):
+                raise WyrRoundNotFoundError(wyr_anchor_seq)
 
             # §(3): resolved inside this IMMEDIATE transaction, so there is no
             # race with a concurrent delete between the check and the insert.
@@ -1040,6 +1092,11 @@ class LiveChatStore:
                 conn.execute(
                     "UPDATE attachments SET message_seq = ?, ordinal = ? WHERE id = ?",
                     (seq, ordinal, att_id),
+                )
+            if wyr_anchor_seq is not None:
+                conn.execute(
+                    "INSERT INTO wyr_chat (message_seq, anchor_seq) VALUES (?, ?)",
+                    (seq, wyr_anchor_seq),
                 )
             conn.execute(
                 "INSERT INTO events (type, message_seq, created_at) VALUES ('message', ?, ?)",
@@ -1309,6 +1366,7 @@ class LiveChatStore:
             reactions_by_seq = _load_reactions_for(conn, seqs)
             drawings_by_seq = _load_drawing_summaries_for(conn, seqs)
             wyr_by_seq = _load_wyr_summaries_for(conn, seqs)
+            wyr_ref_by_seq = _load_wyr_refs_for(conn, seqs)
             # §(2): targets are resolved by seq, including ones OUTSIDE this
             # page — a reply near the top of a page may quote a message that
             # paged off already.
@@ -1323,6 +1381,7 @@ class LiveChatStore:
                     drawings_by_seq[row["seq"]],
                     reply_to=reply_targets.get(row["reply_to_seq"]),
                     wyr=wyr_by_seq.get(row["seq"]),
+                    wyr_ref=wyr_ref_by_seq.get(row["seq"]),
                 )
                 for row in ascending_rows
             ]
@@ -1343,6 +1402,7 @@ class LiveChatStore:
             reactions_by_seq = _load_reactions_for(conn, list(by_seq.keys()))
             drawings_by_seq = _load_drawing_summaries_for(conn, list(by_seq.keys()))
             wyr_by_seq = _load_wyr_summaries_for(conn, list(by_seq.keys()))
+            wyr_ref_by_seq = _load_wyr_refs_for(conn, list(by_seq.keys()))
             reply_targets = _load_reply_targets(
                 conn, [row["reply_to_seq"] for row in by_seq.values()]
             )
@@ -1359,6 +1419,7 @@ class LiveChatStore:
                         drawings_by_seq[seq],
                         reply_to=reply_targets.get(row["reply_to_seq"]),
                         wyr=wyr_by_seq.get(seq),
+                        wyr_ref=wyr_ref_by_seq.get(seq),
                     )
                 )
             return result
@@ -2101,6 +2162,7 @@ class LiveChatStore:
             # Same doctrine for the game (schema v15): the cascade on
             # `wyr_rounds.anchor_message_seq` already carries rounds away with their
             # messages; explicit here so wipe's intent is never left implicit.
+            conn.execute("DELETE FROM wyr_chat")
             conn.execute("DELETE FROM wyr_rounds")
             conn.execute("DELETE FROM messages")
             conn.execute("DELETE FROM uploads")

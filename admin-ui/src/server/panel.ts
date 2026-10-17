@@ -79,6 +79,9 @@ export interface ServerPanelDeps {
    * swaps in the real factory (and a real assembled `ServerApi`) once it
    * exists; nothing else about this module needs to change for that. */
   createServerChatView?: CreateServerChatView;
+  /** The chat is open (unlocked, or fading back to the decoy): the host gives it the whole
+   * screen — no status bar, top bar or navigation — and takes it back when the chat closes. */
+  onFullscreenChange?: (fullscreen: boolean) => void;
 }
 
 export interface ServerPanel {
@@ -229,6 +232,8 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
     chatAttached = false;
   }
 
+  let fullscreen = false;
+
   function render(): void {
     const kind = state.kind;
     affordanceButton.hidden = kind !== "revealed";
@@ -264,6 +269,10 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
     }
     chatMountEl.hidden = !showChat;
     chatMountEl.classList.toggle("wx-srv-fading", kind === "fading");
+    if (showChat !== fullscreen) {
+      fullscreen = showChat;
+      deps.onFullscreenChange?.(fullscreen);
+    }
   }
 
   // -- Idle / fade / expiry timers ---------------------------------------------
@@ -1135,6 +1144,10 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
       win.removeEventListener("pageshow", onPageShow);
       decoy.teardown();
       pinPad.teardown();
+      if (fullscreen) {
+        fullscreen = false;
+        deps.onFullscreenChange?.(false);
+      }
     },
   };
 }

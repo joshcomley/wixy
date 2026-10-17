@@ -59,6 +59,13 @@ from wixy_server.tests.test_livechat_view_once import (  # noqa: F401 - fixtures
 BASE = "/api/admin/server"
 
 
+@pytest.fixture(autouse=True)
+def _pool_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The picture pool paints ahead in the background; these tests want exactly the pictures a
+    round asks for, so the pool is off unless a test (test_livechat_wyr_pool.py) turns it on."""
+    monkeypatch.setenv("WIXY_WYR_POOL_SIZE", "0")
+
+
 @pytest.fixture
 def store(tmp_path: Path) -> LiveChatStore:
     return LiveChatStore(tmp_path / "server" / "server.db")

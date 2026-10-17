@@ -1056,7 +1056,13 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
     }
 
     if (route.kind === "server") {
-      const panel = createServerPanel({ api, win, createServerChatView });
+      const panel = createServerPanel({
+        api,
+        win,
+        createServerChatView,
+        // The unlocked chat owns the whole screen: the shell's own bars step aside (CSS).
+        onFullscreenChange: (fullscreen) => container.classList.toggle("wx-shell-srv-full", fullscreen),
+      });
       main.appendChild(panel.element);
       activePanelTeardown = () => panel.teardown();
       return;

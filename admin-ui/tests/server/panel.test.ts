@@ -884,6 +884,37 @@ describe("mountServerPanel", () => {
     panel.teardown();
   });
 
+  // -- The unlocked chat owns the whole screen (workspace 00045) ------------------
+
+  it("tells the host to give the chat the whole screen while it is open, and takes it back on lock", async () => {
+    const chatFactory = trackedChatViewFactory();
+    const onFullscreenChange = vi.fn();
+    fetchMock.mockResolvedValueOnce(jsonResponse({ token: "tok", expiresAt: expiresIn(3600) }));
+    const panel = mount({ createServerChatView: chatFactory.createServerChatView, onFullscreenChange });
+    expect(onFullscreenChange).not.toHaveBeenCalled(); // the decoy is an ordinary admin page
+    await openPinPad(panel.element);
+    await enterAndSubmitPin(panel.element, "1234");
+    expect(onFullscreenChange).toHaveBeenLastCalledWith(true);
+    expect(onFullscreenChange).toHaveBeenCalledTimes(1); // not once per re-render
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await vi.advanceTimersByTimeAsync(FADE_MS + 100);
+    expect(onFullscreenChange).toHaveBeenLastCalledWith(false);
+    panel.teardown();
+  });
+
+  it("leaving the page while the chat is open also gives the screen back", async () => {
+    const chatFactory = trackedChatViewFactory();
+    const onFullscreenChange = vi.fn();
+    fetchMock.mockResolvedValueOnce(jsonResponse({ token: "tok", expiresAt: expiresIn(3600) }));
+    const panel = mount({ createServerChatView: chatFactory.createServerChatView, onFullscreenChange });
+    await openPinPad(panel.element);
+    await enterAndSubmitPin(panel.element, "1234");
+    expect(onFullscreenChange).toHaveBeenLastCalledWith(true);
+    panel.teardown();
+    expect(onFullscreenChange).toHaveBeenLastCalledWith(false);
+  });
+
   // -- Instance survival across lock/unlock, and real teardown -------------------
 
   it("the chat view instance is created once and REUSED across lock/unlock cycles", async () => {

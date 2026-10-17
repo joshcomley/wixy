@@ -55,8 +55,15 @@ from wixy_server.livechat.transcription import (
     SlidingWindowRateLimiter,
     TranscriptionRuntime,
 )
-from wixy_server.livechat.wyr_game import clear_wyr_scratch, run_wyr_sweep_forever
+from wixy_server.livechat.wyr_game import (
+    WyrDemand,
+    clear_wyr_scratch,
+    run_wyr_pool_forever,
+    run_wyr_sweep_forever,
+    wyr_image_limiter,
+)
 from wixy_server.livechat.wyr_images import ComfyImageGenerator
+from wixy_server.livechat.wyr_pool import WyrPool
 from wixy_server.livechat.wyr_questions import load_questions as load_wyr_questions
 from wixy_server.publisher import PublishJob
 from wixy_server.redirects import load_redirects
@@ -293,6 +300,14 @@ def create_app(
             resolved_image_generator = None
     else:
         resolved_image_generator = None
+    # The picture pool (pictures painted ahead for upcoming questions) only exists beside a
+    # generator and only when its size is non-zero; switched off, any stale pool is removed.
+    wyr_pool: WyrPool | None = (
+        WyrPool(paths.server_dir / "wyr-pool")
+        if resolved_image_generator is not None and settings.wyr_pool_size > 0
+        else None
+    )
+    wyr_demand = WyrDemand()
     livechat_transcription = TranscriptionRuntime(
         store=livechat_store,
         paths=paths,
@@ -336,6 +351,8 @@ def create_app(
         # A game image run that died with the previous process leaves its PNGs in the
         # scratch dir; they are chat content, so they must not outlive it (Inv 54).
         await anyio.to_thread.run_sync(lambda: clear_wyr_scratch(paths))
+        if wyr_pool is None:
+            await anyio.to_thread.run_sync(WyrPool(paths.server_dir / "wyr-pool").clear)
         await anyio.to_thread.run_sync(
             lambda: livechat_store.fail_stale_wyr_images(now=time.time())
         )
@@ -367,6 +384,20 @@ def create_app(
             assert resolved_image_generator is not None
             await run_wyr_sweep_forever(resolved_image_generator)
 
+        async def _run_wyr_pool() -> None:
+            assert resolved_image_generator is not None and wyr_pool is not None
+            await run_wyr_pool_forever(
+                store=livechat_store,
+                paths=paths,
+                generator=resolved_image_generator,
+                pool=wyr_pool,
+                questions=wyr_questions,
+                target=settings.wyr_pool_size,
+                demand=wyr_demand,
+                limiter=lambda: wyr_image_limiter(_app.state),
+                min_free_bytes=settings.server_min_free_bytes,
+            )
+
         async def _run_view_once_backstop() -> None:
             await livechat_janitor.run_view_once_backstop_forever(
                 store=livechat_store, paths=paths, notifier=livechat_notifier
@@ -391,6 +422,8 @@ def create_app(
                 background.supervise("livechat-janitor", _run_janitor)
                 if resolved_image_generator is not None:
                     background.supervise("livechat-wyr-sweep", _run_wyr_sweep)
+                if wyr_pool is not None:
+                    background.supervise("livechat-wyr-pool", _run_wyr_pool)
                 yield
                 tg.cancel_scope.cancel()
         finally:
@@ -442,6 +475,8 @@ def create_app(
     app.state.livechat_drawing_broker = livechat_drawing_broker
     app.state.livechat_wyr_questions = wyr_questions
     app.state.livechat_wyr_image_generator = resolved_image_generator
+    app.state.livechat_wyr_pool = wyr_pool
+    app.state.livechat_wyr_demand = wyr_demand
     app.state.livechat_drawing_live_limiter = livechat_drawing_live_limiter
 
     @app.exception_handler(FastAPIHTTPException)

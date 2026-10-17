@@ -16,6 +16,7 @@ import hashlib
 import json
 import logging
 import math
+import random
 import re
 import time
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
@@ -105,11 +106,15 @@ from wixy_server.livechat.transcription import (
     TranscriptionRuntime,
 )
 from wixy_server.livechat.wyr_game import (
-    choose_question,
+    WyrDemand,
+    attach_pooled_images,
     generate_round_images,
+    pick_round,
+    wyr_image_limiter,
     wyr_view_json,
 )
 from wixy_server.livechat.wyr_images import ComfyImageGenerator
+from wixy_server.livechat.wyr_pool import WyrPool
 from wixy_server.livechat.wyr_questions import WyrQuestion
 from wixy_server.routes_livechat_media import _MEDIA_TYPE_BY_SUFFIX, _resolve_rendition_path
 from wixy_server.settings import Settings
@@ -514,6 +519,9 @@ class SendMessageIn(BaseModel):
     # every real check by hand, exactly like every other business rule in this
     # handler (`_invalid(...)`, not FastAPI's generic per-field 422).
     replyToSeq: Any = None
+    # Typed loosely for the same bool-coercion reason as `replyToSeq`; checked by hand below.
+    # Set when the message is sent from inside a would-you-rather round's game chat.
+    wyrSeq: Any = None
 
 
 class WipeChatIn(BaseModel):
@@ -563,6 +571,15 @@ async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
             # the same range this file's own set_reaction route already guards.
             return _invalid("replyToSeq must be an integer >= 1")
         reply_to_seq = body.replyToSeq
+    wyr_seq: int | None = None
+    if body.wyrSeq is not None:
+        if (
+            isinstance(body.wyrSeq, bool)
+            or not isinstance(body.wyrSeq, int)
+            or not (1 <= body.wyrSeq <= _SQLITE_MAX_INTEGER)
+        ):
+            return _invalid("wyrSeq must be an integer >= 1")
+        wyr_seq = body.wyrSeq
 
     store: LiveChatStore = request.app.state.livechat_store
     notifier: LiveChatNotifier = request.app.state.livechat_notifier
@@ -580,6 +597,7 @@ async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
             text=text,
             attachment_ids=body.attachmentIds,
             reply_to_seq=reply_to_seq,
+            wyr_anchor_seq=wyr_seq,
             now=now,
         )
 
@@ -587,6 +605,8 @@ async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
         message, created = await anyio.to_thread.run_sync(_create)
     except UnusableAttachmentError as exc:
         return _invalid(f"attachment {exc.attachment_id} is unknown, already used, or failed")
+    except WyrRoundNotFoundError:
+        return JSONResponse(status_code=404, content={"error": "not_found"})
 
     if created:
         notifier.publish()
@@ -1262,21 +1282,12 @@ async def _wyr_view_response(
     )
 
 
-def _wyr_image_limiter(request: Request) -> anyio.CapacityLimiter:
-    """The single-flight gate for picture jobs, created on first use inside the event loop."""
-    limiter: anyio.CapacityLimiter | None = getattr(
-        request.app.state, "livechat_wyr_image_limiter", None
-    )
-    if limiter is None:
-        limiter = anyio.CapacityLimiter(1)
-        request.app.state.livechat_wyr_image_limiter = limiter
-    return limiter
-
-
 @router.post("/wyr", response_model=None)
 async def create_wyr_round(body: CreateWyrIn, request: Request) -> JSONResponse:
-    """Start a round (the header's ... menu): picks a random unplayed question, supersedes any
-    still-open round, and paints the two pictures in the background (never ahead of time)."""
+    """Start a round (the header's ... menu): picks a random unplayed question (preferring one
+    whose pictures the pool already holds), supersedes any still-open round, and attaches the
+    pictures — instantly from the pool, or by painting them in the background when the pool has
+    none."""
     auth = await require_server_token(request)
 
     if not (8 <= len(body.clientId) <= 64):
@@ -1295,23 +1306,51 @@ async def create_wyr_round(body: CreateWyrIn, request: Request) -> JSONResponse:
     paths: ProjectPaths = request.app.state.paths
     questions: tuple[WyrQuestion, ...] = request.app.state.livechat_wyr_questions
     generator: ComfyImageGenerator | None = request.app.state.livechat_wyr_image_generator
-
-    question = await anyio.to_thread.run_sync(lambda: choose_question(store, questions))
-    if question is None:
-        return JSONResponse(status_code=503, content={"error": "game_unavailable"})
+    pool: WyrPool | None = request.app.state.livechat_wyr_pool
+    demand: WyrDemand = request.app.state.livechat_wyr_demand
     now = time.time()
 
-    message, created = await anyio.to_thread.run_sync(
-        lambda: store.create_wyr_round(
-            client_id=body.clientId,
-            sender=sender,
-            device_id=body.deviceId,
-            by_email=auth.email or None,
-            question_id=question.id,
-            images_pending=generator is not None,
-            now=now,
-        )
-    )
+    def _start() -> tuple[MessageRow, bool, WyrQuestion] | None:
+        question, pooled = pick_round(store, questions, pool, random.Random())
+        if question is None:
+            return None
+        try:
+            message, created = store.create_wyr_round(
+                client_id=body.clientId,
+                sender=sender,
+                device_id=body.deviceId,
+                by_email=auth.email or None,
+                question_id=question.id,
+                images_pending=generator is not None,
+                now=now,
+            )
+        except BaseException:
+            # The round was never created (a busy database, a cancelled request): the reserved
+            # pair is still good — give it back rather than strand it until the next sweep.
+            if pooled is not None:
+                assert pool is not None
+                pool.restore(pooled)
+            raise
+        if pooled is not None:
+            if not created:
+                assert pool is not None
+                pool.restore(pooled)  # a replayed request: nothing was consumed
+            elif attach_pooled_images(
+                store=store,
+                paths=paths,
+                pooled=pooled,
+                anchor_seq=message.seq,
+                by_email=auth.email or None,
+            ):
+                # The pictures are already attached: answer with the fresh message and no job.
+                [message] = store.get_messages([message.seq])
+                return message, created, question
+        return message, created, question
+
+    started = await anyio.to_thread.run_sync(_start)
+    if started is None:
+        return JSONResponse(status_code=503, content={"error": "game_unavailable"})
+    message, created, question = started
 
     if created:
         notifier.publish()
@@ -1321,10 +1360,12 @@ async def create_wyr_round(body: CreateWyrIn, request: Request) -> JSONResponse:
                 await h(message)
 
             background.spawn("livechat-push-dispatch", _dispatch)
-        if generator is not None:
+        # Pictures still owed (no pool pair was attached): the on-demand job paints them.
+        if generator is not None and not message.attachments:
             by_email = auth.email or None
 
-            limiter = _wyr_image_limiter(request)
+            limiter = wyr_image_limiter(request.app.state)
+            demand.count += 1
 
             async def _paint() -> None:
                 def _run() -> bool:
@@ -1340,7 +1381,10 @@ async def create_wyr_round(body: CreateWyrIn, request: Request) -> JSONResponse:
 
                 # One picture job at a time: ComfyUI renders serially anyway, and a waiting
                 # job is a parked coroutine, not a held thread of the shared worker pool.
-                await anyio.to_thread.run_sync(_run, limiter=limiter)
+                try:
+                    await anyio.to_thread.run_sync(_run, limiter=limiter)
+                finally:
+                    demand.count -= 1
 
             background.spawn("livechat-wyr-images", _paint)
 
