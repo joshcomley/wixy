@@ -1061,7 +1061,18 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
         win,
         createServerChatView,
         // The unlocked chat owns the whole screen: the shell's own bars step aside (CSS).
-        onFullscreenChange: (fullscreen) => container.classList.toggle("wx-shell-srv-full", fullscreen),
+        onFullscreenChange: (fullscreen) => {
+          container.classList.toggle("wx-shell-srv-full", fullscreen);
+          // Full screen: the version badge takes the place of the chat header's "Server" title and
+          // name chip (CSS hides those); otherwise it lives at the far left of the status bar.
+          const header = fullscreen ? main.querySelector(".wx-srv-thread-header") : null;
+          if (header !== null) {
+            header.insertBefore(versionBadge.element, header.firstChild);
+          } else if (versionBadge.element.parentElement !== statusBar) {
+            statusBar.insertBefore(versionBadge.element, statusBar.firstChild);
+          }
+          container.classList.toggle("wx-shell-srv-badge-in-header", header !== null);
+        },
       });
       main.appendChild(panel.element);
       activePanelTeardown = () => panel.teardown();
