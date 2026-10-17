@@ -1314,15 +1314,23 @@ async def create_wyr_round(body: CreateWyrIn, request: Request) -> JSONResponse:
         question, pooled = pick_round(store, questions, pool, random.Random())
         if question is None:
             return None
-        message, created = store.create_wyr_round(
-            client_id=body.clientId,
-            sender=sender,
-            device_id=body.deviceId,
-            by_email=auth.email or None,
-            question_id=question.id,
-            images_pending=generator is not None,
-            now=now,
-        )
+        try:
+            message, created = store.create_wyr_round(
+                client_id=body.clientId,
+                sender=sender,
+                device_id=body.deviceId,
+                by_email=auth.email or None,
+                question_id=question.id,
+                images_pending=generator is not None,
+                now=now,
+            )
+        except BaseException:
+            # The round was never created (a busy database, a cancelled request): the reserved
+            # pair is still good — give it back rather than strand it until the next sweep.
+            if pooled is not None:
+                assert pool is not None
+                pool.restore(pooled)
+            raise
         if pooled is not None:
             if not created:
                 assert pool is not None

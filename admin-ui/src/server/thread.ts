@@ -396,6 +396,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   }
   // The game tab (`wyrGame.ts`) is created once the composer exists (it re-parents it).
   let game: WyrGame;
+  let gameMounted = false;
   const wyrControls: WyrControls = createWyrControls({
     model: wyrModel,
     document: documentRef,
@@ -427,6 +428,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         readonly clientId: string;
         attachmentId: string | null;
         readonly replyTo: PendingReplyTarget | null;
+        /** The game chat this note was recorded for (a round's anchor seq), fixed when recording
+         * stopped — like its reply target — so an upload, a retry or a re-send after an unlock
+         * can never move it to the other chat. */
+        readonly wyrSeq: number | null;
       }
     | null = null;
   let voiceSendBusy = false;
@@ -599,8 +604,15 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     }
     // Condition #2: always visible so its position never jumps; disabled (never hidden) when
     // there is nothing staged to apply it to.
-    viewOnceButton.disabled = target === null;
+    viewOnceButton.disabled = target === null || !viewOnceAllowed();
     updateViewOnceButtonLabel();
+  }
+
+  /** View-once is a private, one-shot photo mechanic of the MAIN chat: it has no game-chat form
+   * (the card's chat would show a caption with no picture), so it is not offered while the game
+   * chat is the target — and `send()` refuses a view-once draft there (see below). */
+  function viewOnceAllowed(): boolean {
+    return !gameMounted || game.chatTarget() === null;
   }
 
   function openViewOncePicker(): void {
@@ -885,6 +897,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           clientId: cryptoRandomId(win),
           attachmentId: null,
           replyTo: capturedReplyTo,
+          wyrSeq: game.chatTarget(),
         };
         void sendVoiceNote();
         updateRecorderUi();
@@ -1052,6 +1065,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   let savedThreadScrollTop = 0;
   let threadHiddenForGame = false;
   function applyGameLayout(): void {
+    recomputeViewOnceTarget(composer.stagedAttachments().map((a) => a.file));
     const inGame = game.activeTab() === "wyr" && game.gameSeq() !== null;
     element.classList.toggle("wx-srv-in-game", inGame);
     if (inGame && !threadHiddenForGame) {
@@ -1092,6 +1106,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     afterChange: () => threadScroll.afterContentChange(false),
     openLightbox: (src, alt) => lightbox.open(src, alt),
   });
+  gameMounted = true;
   threadWrap.after(game.pane);
   element.appendChild(game.tabBar);
   element.appendChild(game.popup);
@@ -1475,7 +1490,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         // captured when recording stopped, independent of whatever the
         // composer bar shows now.
         ...(pending.replyTo !== null ? { replyToSeq: pending.replyTo.seq } : {}),
-        ...wyrSendFields(),
+        ...(pending.wyrSeq !== null ? { wyrSeq: pending.wyrSeq } : {}),
       });
       if (!result.ok) {
         if (result.kind === "invalid" || result.kind === "rejected") {
@@ -2776,6 +2791,11 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     const text = draft.base.text;
 
     const voIndex = draft.base.staged.findIndex((s) => fileViewOnceSettings.get(s.file)?.enabled);
+    if (voIndex !== -1 && !viewOnceAllowed()) {
+      restoreServerDraft(draft);
+      composer.setError("View-once photos can only be sent in the main chat. Switch to the Chat tab, or turn view-once off.");
+      return;
+    }
     if (voIndex !== -1) {
       sendViewOnceDraft(session, draft, voIndex, requestGeneration);
       return;

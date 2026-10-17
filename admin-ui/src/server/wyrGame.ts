@@ -269,6 +269,9 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
     chatDot = false;
     clearPopList();
     syncTabs();
+    // The thread may be hidden for the game tab: a lock or a wipe must give it back, or the
+    // chat is blank after the next unlock.
+    deps.onLayoutChange();
   }
 
   // -- Drawing ------------------------------------------------------------------------------

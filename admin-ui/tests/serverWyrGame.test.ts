@@ -9,22 +9,59 @@ import { createWyrControls, wyrStatusLine } from "../src/server/wyrControls";
 import { createWyrGame, type WyrGameDeps } from "../src/server/wyrGame";
 import { createWyrModel, type WyrModel } from "../src/server/wyrModel";
 
-const { getHistory, getUsage, sendMessage, createWyrRound, getWyrRound, voteWyr, answerWyr, revealWyr } =
-  vi.hoisted(() => ({
-    getHistory: vi.fn(),
-    getUsage: vi.fn(),
-    sendMessage: vi.fn(),
-    createWyrRound: vi.fn(),
-    getWyrRound: vi.fn(),
-    voteWyr: vi.fn(),
-    answerWyr: vi.fn(),
-    revealWyr: vi.fn(),
-  }));
+const {
+  getHistory,
+  getUsage,
+  sendMessage,
+  sendViewOnceMessage,
+  uploadServerAttachment,
+  createVoiceRecorder,
+  createWyrRound,
+  getWyrRound,
+  voteWyr,
+  answerWyr,
+  revealWyr,
+} = vi.hoisted(() => ({
+  getHistory: vi.fn(),
+  getUsage: vi.fn(),
+  sendMessage: vi.fn(),
+  sendViewOnceMessage: vi.fn(),
+  uploadServerAttachment: vi.fn(),
+  createVoiceRecorder: vi.fn((options: { onStop?: (r: { blob: Blob; durationMs: number; mimeType: string }) => void }) => {
+    let state: "idle" | "recording" = "idle";
+    return {
+      get state() { return state; },
+      elapsedMs: 2000,
+      supportsPause: true,
+      start: vi.fn(async () => { state = "recording"; }),
+      pause: vi.fn(),
+      resume: vi.fn(),
+      stop: vi.fn(() => {
+        state = "idle";
+        options.onStop?.({ blob: new Blob(["voice"]), durationMs: 2000, mimeType: "audio/webm;codecs=opus" });
+      }),
+      cancel: vi.fn(),
+      toggle: vi.fn(async () => {}),
+      detach: vi.fn(),
+    };
+  }),
+  createWyrRound: vi.fn(),
+  getWyrRound: vi.fn(),
+  voteWyr: vi.fn(),
+  answerWyr: vi.fn(),
+  revealWyr: vi.fn(),
+}));
+vi.mock("../src/server/recorder", () => ({ createVoiceRecorder }));
+vi.mock("../src/server/api/uploads", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/server/api/uploads")>()),
+  uploadServerAttachment,
+}));
 vi.mock("../src/server/api/messages", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/server/api/messages")>()),
   getHistory,
   getUsage,
   sendMessage,
+  sendViewOnceMessage,
 }));
 vi.mock("../src/server/api/wyr", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/server/api/wyr")>()),
@@ -540,10 +577,19 @@ describe("thread wiring", () => {
       navigator: window.navigator,
     } as unknown as Window;
   }
-  async function mount(messages: Message[] = []) {
+  async function mount(
+    messages: Message[] = [],
+    viewOnce?: WeakMap<File, { enabled: boolean; durationS: 2 | 5 | 30 | null; tease: boolean }>,
+  ) {
     getHistory.mockResolvedValue({ messages, hasMore: false, cursor: 0 });
     const h = hooks();
-    const thread = mountServerThread({ identity: identity(), hooks: h, win: win(), onSettings: vi.fn() });
+    const thread = mountServerThread({
+      identity: identity(),
+      hooks: h,
+      win: win(),
+      onSettings: vi.fn(),
+      ...(viewOnce === undefined ? {} : { fileViewOnceSettings: viewOnce }),
+    });
     document.body.appendChild(thread.element);
     await thread.attach(SESSION);
     await flush();
@@ -563,6 +609,9 @@ describe("thread wiring", () => {
     getHistory.mockReset();
     getUsage.mockReset().mockResolvedValue({ mediaAvailable: true, usedBytes: 0, quotaBytes: 10, freeBytes: 10, erasurePending: false });
     sendMessage.mockReset();
+    sendViewOnceMessage.mockReset();
+    uploadServerAttachment.mockReset();
+    createVoiceRecorder.mockClear();
     createWyrRound.mockReset();
     getWyrRound.mockReset();
   });
@@ -658,6 +707,146 @@ describe("thread wiring", () => {
     await flush();
     expect(thread.element.textContent).toContain("Couldn't start a round");
     expect(thread.element.querySelector(".wx-srv-tabs")!.hasAttribute("hidden")).toBe(true);
+    thread.teardown();
+  });
+
+  // -- Audit round 3 (F3): a lock or a wipe while the WYR tab shows must give the chat back ------
+
+  it("a lock while the WYR tab shows leaves the chat visible after the next unlock", async () => {
+    createWyrRound.mockResolvedValue({ ok: true, message: message(9) });
+    getWyrRound.mockResolvedValue({ ok: true, view: view({ seq: 9 }) });
+    const thread = await mount();
+    startRoundFromMenu(thread);
+    await flush();
+    const wrap = thread.element.querySelector<HTMLElement>(".wx-srv-thread-wrap")!;
+    expect(wrap.hidden).toBe(true);
+    thread.detach(); // the panic lock
+    expect(wrap.hidden).toBe(false);
+    expect(thread.element.classList.contains("wx-srv-in-game")).toBe(false);
+    expect(thread.element.querySelector(".wx-srv-tabs")!.hasAttribute("hidden")).toBe(true);
+    // ...and after the unlock, with a history whose only round is already finished (no tab offered):
+    getWyrRound.mockResolvedValue({ ok: true, view: view({ seq: 9, state: "skipped", rev: 3 }) });
+    getHistory.mockResolvedValue({ messages: [message(9, { wyr: { state: "skipped", rev: 3 } })], hasMore: false, cursor: 0 });
+    await thread.attach(SESSION);
+    await flush();
+    expect(wrap.hidden).toBe(false);
+    expect(thread.element.querySelector<HTMLElement>(".wx-srv-game")!.hidden).toBe(true);
+    thread.teardown();
+  });
+
+  it("a wipe while the WYR tab shows leaves the chat visible and drops the tab", async () => {
+    createWyrRound.mockResolvedValue({ ok: true, message: message(9) });
+    getWyrRound.mockResolvedValue({ ok: true, view: view({ seq: 9 }) });
+    const thread = await mount();
+    startRoundFromMenu(thread);
+    await flush();
+    const wrap = thread.element.querySelector<HTMLElement>(".wx-srv-thread-wrap")!;
+    expect(wrap.hidden).toBe(true);
+    thread.handleStreamEvent({ type: "wiped" } as Parameters<typeof thread.handleStreamEvent>[0]);
+    await flush();
+    expect(wrap.hidden).toBe(false);
+    expect(thread.element.classList.contains("wx-srv-in-game")).toBe(false);
+    expect(thread.element.querySelector(".wx-srv-tabs")!.hasAttribute("hidden")).toBe(true);
+    thread.teardown();
+  });
+
+  // -- F1: a voice note's chat is fixed when recording stops ----------------------------------------
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((r) => { resolve = r; });
+    return { promise, resolve };
+  }
+  const VOICE_ATTACHMENT = { id: "voice-id", kind: "voice", status: "processing", width: null, height: null, durationS: 2, peaks: null, urls: {} } as const;
+
+  async function recordVoiceNote(thread: Awaited<ReturnType<typeof mount>>): Promise<void> {
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-record-button")!.click();
+    await flush();
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-record-button")!.click();
+    await flush();
+  }
+
+  it("a voice note recorded in the game chat stays in it even if the tab changes during the upload", async () => {
+    createWyrRound.mockResolvedValue({ ok: true, message: message(9) });
+    getWyrRound.mockResolvedValue({ ok: true, view: view({ seq: 9 }) });
+    const upload = deferred<typeof VOICE_ATTACHMENT>();
+    uploadServerAttachment.mockReturnValue(upload.promise);
+    sendMessage.mockResolvedValue({ ok: true, message: chatMessage(30, 9, "", "Josh") } satisfies SendMessageResult);
+    const thread = await mount();
+    startRoundFromMenu(thread);
+    await flush();
+    await recordVoiceNote(thread); // recorded under the WYR tab
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-tab-chat")!.click(); // switch while it uploads
+    upload.resolve(VOICE_ATTACHMENT);
+    await flush();
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage.mock.calls[0]![1]).toMatchObject({ attachmentIds: ["voice-id"], wyrSeq: 9 });
+    thread.teardown();
+  });
+
+  it("a voice note recorded in the main chat is not pulled into the game chat by a tab switch", async () => {
+    createWyrRound.mockResolvedValue({ ok: true, message: message(9) });
+    getWyrRound.mockResolvedValue({ ok: true, view: view({ seq: 9 }) });
+    const upload = deferred<typeof VOICE_ATTACHMENT>();
+    uploadServerAttachment.mockReturnValue(upload.promise);
+    sendMessage.mockResolvedValue({ ok: true, message: chatMessage(31, null, "", "Josh") } satisfies SendMessageResult);
+    const thread = await mount();
+    startRoundFromMenu(thread);
+    await flush();
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-tab-chat")!.click();
+    await recordVoiceNote(thread); // recorded in the main chat
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-tab-wyr")!.click(); // switch while it uploads
+    upload.resolve(VOICE_ATTACHMENT);
+    await flush();
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage.mock.calls[0]![1]).not.toHaveProperty("wyrSeq");
+    thread.teardown();
+  });
+
+  // -- F4: view-once is a main-chat feature ---------------------------------------------------------
+
+  async function stagePhoto(thread: Awaited<ReturnType<typeof mount>>): Promise<File> {
+    uploadServerAttachment.mockResolvedValue({ id: "photo-id", kind: "photo", status: "processing", width: 10, height: 10, durationS: null, peaks: null, urls: {} });
+    const input = thread.element.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const photo = new File(["photo"], "photo.jpg", { type: "image/jpeg" });
+    Object.defineProperty(input, "files", { value: [photo], configurable: true });
+    input.dispatchEvent(new Event("change"));
+    await flush();
+    return photo;
+  }
+
+  it("the view-once control is offered in the Chat tab and not in the game chat", async () => {
+    createWyrRound.mockResolvedValue({ ok: true, message: message(9) });
+    getWyrRound.mockResolvedValue({ ok: true, view: view({ seq: 9 }) });
+    const thread = await mount();
+    startRoundFromMenu(thread);
+    await flush();
+    await stagePhoto(thread);
+    const button = thread.element.querySelector<HTMLButtonElement>(".wx-srv-view-once-toggle-button")!;
+    expect(button.disabled).toBe(true); // game chat
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-tab-chat")!.click();
+    expect(button.disabled).toBe(false);
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-tab-wyr")!.click();
+    expect(button.disabled).toBe(true);
+    thread.teardown();
+  });
+
+  it("a view-once draft is refused in the game chat — nothing is sent and the draft stays", async () => {
+    createWyrRound.mockResolvedValue({ ok: true, message: message(9) });
+    getWyrRound.mockResolvedValue({ ok: true, view: view({ seq: 9 }) });
+    const settings = new WeakMap<File, { enabled: boolean; durationS: 2 | 5 | 30 | null; tease: boolean }>();
+    const thread = await mount([], settings);
+    startRoundFromMenu(thread);
+    await flush();
+    const photo = await stagePhoto(thread);
+    settings.set(photo, { enabled: true, durationS: 5, tease: false }); // chosen earlier, in the main chat
+    thread.element.querySelector<HTMLTextAreaElement>("textarea")!.value = "a caption";
+    thread.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")!.click();
+    await flush();
+    expect(sendViewOnceMessage).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(thread.element.querySelector(".wx-chat-composer-error")!.textContent).toContain("main chat");
+    expect(thread.element.querySelector<HTMLTextAreaElement>("textarea")!.value).toBe("a caption"); // draft restored
     thread.teardown();
   });
 });

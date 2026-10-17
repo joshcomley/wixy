@@ -478,13 +478,21 @@ async def run_wyr_pool_forever(
     limiter: Callable[[], anyio.CapacityLimiter],
     min_free_bytes: int,
     sleep: Callable[[float], Awaitable[None]] = anyio.sleep,
+    cleanup_interval_s: float = 600.0,
+    clock: Callable[[], float] = time.monotonic,
 ) -> None:
     """Contained loop (`livechat-wyr-pool`): keep `target` pictures-pairs ready. Startup first
-    removes stale scratch and pairs for questions that have been played. Each iteration runs one
-    `pool_step` in a worker thread under the SAME single-flight gate as on-demand rounds."""
+    removes stale scratch and pairs for questions that have been played, and the same sweep runs
+    again every `cleanup_interval_s` (a pair for a question played mid-session, or a reservation
+    stranded by a failed take, never outlives that). Each iteration runs one `pool_step` in a
+    worker thread under the SAME single-flight gate as on-demand rounds."""
     await anyio.to_thread.run_sync(lambda: pool.cleanup(pool_played_ids(store, questions)))
+    last_cleanup = clock()
     pacing = PoolPacing()
     while True:
+        if clock() - last_cleanup >= cleanup_interval_s:
+            await anyio.to_thread.run_sync(lambda: pool.cleanup(pool_played_ids(store, questions)))
+            last_cleanup = clock()
         outcome = await anyio.to_thread.run_sync(
             lambda: pool_step(
                 store=store,

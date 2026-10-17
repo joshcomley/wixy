@@ -456,6 +456,65 @@ class TestLoop:
         assert pool.ids() == set() and not stale.exists()
 
 
+class TestReservationHygiene:
+    def test_a_reservation_is_stamped_when_taken_not_when_painted(self, pool: WyrPool) -> None:
+        # The pair was painted long ago, but it was only just reserved: a sweep running now must
+        # leave the in-flight take alone (the stale clock starts at the reservation).
+        _fill(pool, "q0001")
+        old = time.time() - STALE_AFTER_S - 600
+        os.utime(pool._root / "q0001", (old, old))
+        taken = pool.take({"q0001"}, random.Random(1))
+        assert taken is not None
+        assert pool.cleanup(set()) == 0
+        assert taken.directory.exists()
+        # ...but once the reservation itself is stale, it goes.
+        os.utime(taken.directory, (old, old))
+        assert pool.cleanup(set()) == 1
+        assert not taken.directory.exists()
+
+    def test_the_loop_sweeps_again_periodically(
+        self,
+        store: LiveChatStore,
+        paths: ProjectPaths,
+        pool: WyrPool,
+        questions: tuple[WyrQuestion, ...],
+    ) -> None:
+        ticks = {"now": 0.0}
+        stranded: dict[str, Path] = {}
+
+        async def fake_sleep(seconds: float) -> None:
+            ticks["now"] += 400.0
+            if len(stranded) == 0:
+                # a reservation stranded by a failed take, long since stale
+                leftover = pool.begin("q9998")
+                old = time.time() - STALE_AFTER_S - 60
+                os.utime(leftover, (old, old))
+                stranded["x"] = leftover
+            elif ticks["now"] >= 1600.0:
+                raise _Stop
+
+        async def main() -> None:
+            limiter = anyio.CapacityLimiter(1)
+            await run_wyr_pool_forever(
+                store=store,
+                paths=paths,
+                generator=FakeGenerator(up=False),
+                pool=pool,
+                questions=questions,
+                target=3,
+                demand=WyrDemand(),
+                limiter=lambda: limiter,
+                min_free_bytes=0,
+                sleep=fake_sleep,
+                cleanup_interval_s=600.0,
+                clock=lambda: ticks["now"],
+            )
+
+        with pytest.raises(_Stop):
+            anyio.run(main)
+        assert not stranded["x"].exists()  # removed by a LATER sweep, not the startup one
+
+
 class TestPickAndAttach:
     def test_a_pooled_question_is_preferred_and_reserved(
         self,
@@ -569,6 +628,35 @@ class TestRoutes:
             assert view["images"] == "done"
             assert pool.ids() == set()  # consumed
             assert generator.calls == []  # no picture job ran
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_a_failed_round_creation_gives_the_reserved_pair_back(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("WIXY_WYR_POOL_SIZE", "1")
+        questions = load_questions(BANK_PATH)
+        pool = _app_pool(storage_root)
+        _fill(pool, questions[2].id)
+        client, h = _client(
+            storage_root, wixy_repo_root, pin_verifier, FakeGenerator(up=False), "a@example.com"
+        )
+        try:
+            store: LiveChatStore = client.app.state.livechat_store  # type: ignore[attr-defined]
+
+            def boom(**_kwargs: Any) -> Any:
+                raise RuntimeError("database is locked")
+
+            monkeypatch.setattr(store, "create_wyr_round", boom)
+            with pytest.raises(RuntimeError):
+                _create(client, h, "wyr-pool-route-fail")
+            # nothing was stranded as a reservation: the pair is back in the pool, intact
+            assert pool.ids() == {questions[2].id}
+            assert [p.name for p in pool._root.iterdir()] == [questions[2].id]
         finally:
             client.__exit__(None, None, None)
 

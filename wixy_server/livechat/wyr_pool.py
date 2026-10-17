@@ -22,6 +22,7 @@ the GPU gate with; this module is only the on-disk store.
 from __future__ import annotations
 
 import logging
+import os
 import random
 import shutil
 import time
@@ -123,6 +124,13 @@ class WyrPool:
                 source.rename(reserved)
             except OSError:
                 continue  # lost a race for this one; try the next
+            try:
+                # A rename does not touch the directory's own mtime, which is when the PAIR was
+                # painted: stamp the reservation so the stale sweep measures how long it has been
+                # held, never how old the pictures are.
+                os.utime(reserved, None)
+            except OSError:
+                _LOGGER.warning("wyr pool: could not stamp reservation %s", reserved)
             return PooledPictures(
                 question_id=question_id,
                 directory=reserved,

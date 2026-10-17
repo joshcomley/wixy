@@ -18,3 +18,8 @@ Operator follow-on to decisions/00182: "generate the next 20 in advance ... migh
 - Pool files are plain `unlink`/`rmtree` removals of bank-derived pictures; only consumed pictures are chat content.
 - A long play session can outrun the GPU (~25-45 s per pair); a round then falls back to on-demand painting exactly as before.
 - `wyr_used_ids()` is derived from `wyr_rounds`; the pool's played-question pruning uses it, so it inherits the "wipe forgets everything" property.
+
+# Audit round 3 follow-ups (pool hygiene)
+- A reservation (`<id>.taken-<token>`) is stamped (`os.utime`) when it is taken: a directory rename does not touch the directory's own mtime, so the stale sweep used to measure the pair's PAINT age and could remove a reservation an in-flight `POST /wyr` was mid-move on.
+- If `store.create_wyr_round` raises after a pair was reserved (busy database, cancelled request) the pair is restored to the pool instead of stranded.
+- The pool loop re-runs the cleanup sweep every 10 minutes (it used to run only at startup despite its "periodic" docstring), so a pair for a question played mid-session or a reservation stranded by a failed take is removed within that window.

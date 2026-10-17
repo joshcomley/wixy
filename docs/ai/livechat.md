@@ -1835,8 +1835,9 @@ the answers filter keeps the game fun but the chat has no per-person secrecy (In
   (this card's last two messages + echoes, attachments as 28 px thumbnails, tap → pop-up) and — below, as always — the
   one composer, which now sends into the card.
 - **Game chat routing.** Messages are ordinary; `game.chatTarget()` (the open round's seq while the WYR tab or the
-  pop-up is in use) is spread into every `sendMessage` as `wyrSeq` (`wyrSendFields()` in `thread.ts`), and optimistic
-  echoes carry it so the mini chat shows them at once. A message carrying `wyrRef` gets a small "WYR" tag in the main
+  pop-up is in use) is spread into every text `sendMessage` as `wyrSeq` (`wyrSendFields()` in `thread.ts`), and optimistic
+  echoes carry it so the mini chat shows them at once. A voice note captures its target when recording stops. View-once
+  is main-chat only: its button is disabled in the game chat and a view-once draft is refused there. A message carrying `wyrRef` gets a small "WYR" tag in the main
   chat and is the card's chat in the tab and pop-up.
 - **The pop-up** is the same chat larger: the card's whole history (the thread's embedded bubble renderer, updated
   incrementally) with the ONE composer re-parented into it (`mountComposer(host)`), so voice notes, attachments and the
