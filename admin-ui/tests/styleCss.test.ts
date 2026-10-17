@@ -101,3 +101,15 @@ describe("server/lock.css: a hidden overlay must actually stop intercepting clic
     }
   });
 });
+
+describe("full-screen Server chat keeps the version badge (workspace 00046)", () => {
+  it("does not hide the whole status bar, only its non-badge children", () => {
+    const stripped = styleCss.replace(/\/\*[\s\S]*?\*\//g, "");
+    const hideRule = /([^{}]*)\{\s*display:\s*none;\s*\}/g;
+    for (const m of stripped.matchAll(hideRule)) {
+      const selectors = (m[1] ?? "").split(",").map((s) => s.trim());
+      expect(selectors).not.toContain(".wx-shell-srv-full .wx-statusbar");
+    }
+    expect(stripped).toContain(".wx-shell-srv-full .wx-statusbar > :not(.wx-version-badge)");
+  });
+});
