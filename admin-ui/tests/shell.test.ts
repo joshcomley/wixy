@@ -1002,17 +1002,28 @@ describe("mountShell", () => {
       mountEditView: fakeMountEditView().fn,
       mountServerPanel: (deps) => {
         panelDeps = deps;
-        return { element: document.createElement("div"), teardown: () => {} };
+        const element = document.createElement("div");
+        const header = document.createElement("div");
+        header.className = "wx-srv-thread-header";
+        element.append(header);
+        return { element, teardown: () => {} };
       },
     });
     await flushState(api);
     goTo(win, "/admin/server");
     expect(container.classList.contains("wx-shell-srv-full")).toBe(false);
+    const badge = container.querySelector(".wx-version-badge");
+    expect(badge?.parentElement?.classList.contains("wx-statusbar")).toBe(true);
 
     panelDeps!.onFullscreenChange!(true);
     expect(container.classList.contains("wx-shell-srv-full")).toBe(true);
+    // The version badge replaces the header's title: it moves into the chat header.
+    expect(badge?.parentElement?.classList.contains("wx-srv-thread-header")).toBe(true);
+    expect(container.classList.contains("wx-shell-srv-badge-in-header")).toBe(true);
     panelDeps!.onFullscreenChange!(false);
     expect(container.classList.contains("wx-shell-srv-full")).toBe(false);
+    expect(badge?.parentElement?.classList.contains("wx-statusbar")).toBe(true);
+    expect(container.classList.contains("wx-shell-srv-badge-in-header")).toBe(false);
   });
 
   it("the History route renders the real history panel, not a stub", async () => {
