@@ -18816,6 +18816,966 @@
 "b": "A perfect day on a quiet island",
 "image_a": "A photorealistic scene of a perfect day in a cosy treehouse in a picturesque British countryside setting with flowers, warm light and inviting details, beneath a wide blue sky with gentle clouds.",
 "image_b": "A photorealistic scene of a perfect day on a quiet island in a picturesque British countryside setting with flowers, warm light and inviting details, beneath a wide blue sky with gentle clouds."
+},
+{
+"id": "q2353",
+"category": "nature-wildlife",
+"a": "Watch puffins nest on a sea cliff",
+"b": "Track elephants across a savannah",
+"image_a": "Editorial photograph of watch puffins nest on a sea cliff, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of track elephants across a savannah, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2354",
+"category": "nature-wildlife",
+"a": "See a coral reef at sunrise",
+"b": "Walk among ancient redwoods",
+"image_a": "Editorial photograph of see a coral reef at sunrise, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of walk among ancient redwoods, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2355",
+"category": "nature-wildlife",
+"a": "Help release rescued sea turtles",
+"b": "Observe wolves from a forest hide",
+"image_a": "Editorial photograph of help release rescued sea turtles, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of observe wolves from a forest hide, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2356",
+"category": "nature-wildlife",
+"a": "Find wild orchids in a rainforest",
+"b": "Spot otters along a quiet river",
+"image_a": "Editorial photograph of find wild orchids in a rainforest, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of spot otters along a quiet river, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2357",
+"category": "nature-wildlife",
+"a": "Camp beneath a sky full of fireflies",
+"b": "Listen to whales from a small boat",
+"image_a": "Editorial photograph of camp beneath a sky full of fireflies, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of listen to whales from a small boat, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2358",
+"category": "nature-wildlife",
+"a": "Explore tide pools with a marine biologist",
+"b": "Follow cranes across a wetland",
+"image_a": "Editorial photograph of explore tide pools with a marine biologist, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of follow cranes across a wetland, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2359",
+"category": "nature-wildlife",
+"a": "See penguins gather on Antarctic ice",
+"b": "Watch orangutans in a protected canopy",
+"image_a": "Editorial photograph of see penguins gather on antarctic ice, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of watch orangutans in a protected canopy, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2360",
+"category": "nature-wildlife",
+"a": "Plant a meadow for butterflies",
+"b": "Restore a stream for wild salmon",
+"image_a": "Editorial photograph of plant a meadow for butterflies, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of restore a stream for wild salmon, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2361",
+"category": "science-space",
+"a": "Look through a giant telescope at Saturn",
+"b": "Touch a meteorite older than Earth",
+"image_a": "Editorial photograph of look through a giant telescope at saturn, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of touch a meteorite older than earth, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2362",
+"category": "science-space",
+"a": "Watch a rocket launch from the coast",
+"b": "Visit a laboratory growing tiny organs",
+"image_a": "Editorial photograph of watch a rocket launch from the coast, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of visit a laboratory growing tiny organs, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2363",
+"category": "science-space",
+"a": "Dive beside a research submarine",
+"b": "Explore a cave with a geologist",
+"image_a": "Editorial photograph of dive beside a research submarine, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of explore a cave with a geologist, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2364",
+"category": "science-space",
+"a": "See the Northern Lights from orbit",
+"b": "Walk through a museum of dinosaur fossils",
+"image_a": "Editorial photograph of see the northern lights from orbit, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of walk through a museum of dinosaur fossils, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2365",
+"category": "science-space",
+"a": "Help decode a signal from deep space",
+"b": "Discover a new species in a rainforest",
+"image_a": "Editorial photograph of help decode a signal from deep space, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of discover a new species in a rainforest, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2366",
+"category": "science-space",
+"a": "Study glowing plankton after dark",
+"b": "Watch crystals form in a science lab",
+"image_a": "Editorial photograph of study glowing plankton after dark, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of watch crystals form in a science lab, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2367",
+"category": "science-space",
+"a": "Spend a night at a remote observatory",
+"b": "Join a team mapping the ocean floor",
+"image_a": "Editorial photograph of spend a night at a remote observatory, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of join a team mapping the ocean floor, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2368",
+"category": "science-space",
+"a": "Visit a planetarium during a meteor shower",
+"b": "See a giant particle detector underground",
+"image_a": "Editorial photograph of visit a planetarium during a meteor shower, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of see a giant particle detector underground, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2369",
+"category": "technology",
+"a": "Build a helpful home robot",
+"b": "Design a tiny electric aircraft",
+"image_a": "Editorial photograph of build a helpful home robot, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of design a tiny electric aircraft, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2370",
+"category": "technology",
+"a": "Restore a vintage arcade machine",
+"b": "Create an app that teaches sign language",
+"image_a": "Editorial photograph of restore a vintage arcade machine, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of create an app that teaches sign language, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2371",
+"category": "technology",
+"a": "Try a virtual-reality history tour",
+"b": "Ride in a self-driving mountain shuttle",
+"image_a": "Editorial photograph of try a virtual-reality history tour, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of ride in a self-driving mountain shuttle, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2372",
+"category": "technology",
+"a": "Program a rover to cross a garden",
+"b": "Make music with a pocket synthesizer",
+"image_a": "Editorial photograph of program a rover to cross a garden, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of make music with a pocket synthesizer, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2373",
+"category": "technology",
+"a": "Use a 3D printer to make a violin",
+"b": "Help test a solar-powered boat",
+"image_a": "Editorial photograph of use a 3d printer to make a violin, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of help test a solar-powered boat, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2374",
+"category": "technology",
+"a": "Design a clever board-game gadget",
+"b": "Build a weather station for a school",
+"image_a": "Editorial photograph of design a clever board-game gadget, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of build a weather station for a school, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2375",
+"category": "technology",
+"a": "Explore a digital model of an ancient city",
+"b": "Try a kitchen that grows its own herbs",
+"image_a": "Editorial photograph of explore a digital model of an ancient city, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of try a kitchen that grows its own herbs, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2376",
+"category": "technology",
+"a": "Invent a better bicycle light",
+"b": "Teach a computer to recognise bird calls",
+"image_a": "Editorial photograph of invent a better bicycle light, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of teach a computer to recognise bird calls, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2377",
+"category": "arts-crafts",
+"a": "Paint a mural on a village wall",
+"b": "Make a tiny sculpture from driftwood",
+"image_a": "Editorial photograph of paint a mural on a village wall, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of make a tiny sculpture from driftwood, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2378",
+"category": "arts-crafts",
+"a": "Learn to throw pots on a wheel",
+"b": "Print colourful patterns with carved blocks",
+"image_a": "Editorial photograph of learn to throw pots on a wheel, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of print colourful patterns with carved blocks, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2379",
+"category": "arts-crafts",
+"a": "Design costumes for a fantasy play",
+"b": "Restore a faded theatre curtain",
+"image_a": "Editorial photograph of design costumes for a fantasy play, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of restore a faded theatre curtain, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2380",
+"category": "arts-crafts",
+"a": "Create a stained-glass sun catcher",
+"b": "Bind a handmade notebook in leather",
+"image_a": "Editorial photograph of create a stained-glass sun catcher, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of bind a handmade notebook in leather, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2381",
+"category": "arts-crafts",
+"a": "Draw portraits in a busy market",
+"b": "Build a cardboard model of a castle",
+"image_a": "Editorial photograph of draw portraits in a busy market, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of build a cardboard model of a castle, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2382",
+"category": "arts-crafts",
+"a": "Weave a bright wall hanging",
+"b": "Carve a spoon from fallen apple wood",
+"image_a": "Editorial photograph of weave a bright wall hanging, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of carve a spoon from fallen apple wood, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2383",
+"category": "arts-crafts",
+"a": "Make a stop-motion film with toys",
+"b": "Paint a landscape on a long train ride",
+"image_a": "Editorial photograph of make a stop-motion film with toys, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of paint a landscape on a long train ride, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2384",
+"category": "arts-crafts",
+"a": "Join a community sculpture garden",
+"b": "Design a beautiful book cover",
+"image_a": "Editorial photograph of join a community sculpture garden, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of design a beautiful book cover, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2385",
+"category": "music-performance",
+"a": "Play bass in a lively jazz band",
+"b": "Sing harmony in a small folk choir",
+"image_a": "Editorial photograph of play bass in a lively jazz band, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of sing harmony in a small folk choir, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2386",
+"category": "music-performance",
+"a": "Conduct an orchestra for one evening",
+"b": "Play drums at a seaside festival",
+"image_a": "Editorial photograph of conduct an orchestra for one evening, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of play drums at a seaside festival, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2387",
+"category": "music-performance",
+"a": "Learn a tune on the bagpipes",
+"b": "Write a song with a street busker",
+"image_a": "Editorial photograph of learn a tune on the bagpipes, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of write a song with a street busker, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2388",
+"category": "music-performance",
+"a": "Watch opera from behind the scenes",
+"b": "Dance in a lantern-lit ceilidh",
+"image_a": "Editorial photograph of watch opera from behind the scenes, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of dance in a lantern-lit ceilidh, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2389",
+"category": "music-performance",
+"a": "Hear a symphony in an open-air bowl",
+"b": "Join a brass band on parade day",
+"image_a": "Editorial photograph of hear a symphony in an open-air bowl, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of join a brass band on parade day, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2390",
+"category": "music-performance",
+"a": "Record sounds from a rainforest",
+"b": "Make a music video with your friends",
+"image_a": "Editorial photograph of record sounds from a rainforest, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of make a music video with your friends, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2391",
+"category": "music-performance",
+"a": "Learn the harp from a patient teacher",
+"b": "DJ a silent disco in a museum",
+"image_a": "Editorial photograph of learn the harp from a patient teacher, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of dj a silent disco in a museum, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2392",
+"category": "music-performance",
+"a": "See a legendary singer in a tiny venue",
+"b": "Perform in a musical comedy",
+"image_a": "Editorial photograph of see a legendary singer in a tiny venue, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of perform in a musical comedy, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2393",
+"category": "sport-outdoors",
+"a": "Paddle a canoe through a quiet gorge",
+"b": "Cycle a scenic railway trail",
+"image_a": "Editorial photograph of paddle a canoe through a quiet gorge, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of cycle a scenic railway trail, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2394",
+"category": "sport-outdoors",
+"a": "Try archery in a woodland clearing",
+"b": "Learn to surf on gentle waves",
+"image_a": "Editorial photograph of try archery in a woodland clearing, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of learn to surf on gentle waves, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2395",
+"category": "sport-outdoors",
+"a": "Climb an indoor wall with a guide",
+"b": "Sail a dinghy across a lake",
+"image_a": "Editorial photograph of climb an indoor wall with a guide, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of sail a dinghy across a lake, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2396",
+"category": "sport-outdoors",
+"a": "Play bowls on a village green",
+"b": "Join a friendly five-a-side team",
+"image_a": "Editorial photograph of play bowls on a village green, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of join a friendly five-a-side team, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2397",
+"category": "sport-outdoors",
+"a": "Snowshoe through a pine forest",
+"b": "Horse-ride along a wide beach",
+"image_a": "Editorial photograph of snowshoe through a pine forest, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of horse-ride along a wide beach, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2398",
+"category": "sport-outdoors",
+"a": "Take a hot-air balloon flight",
+"b": "Walk a long-distance trail with friends",
+"image_a": "Editorial photograph of take a hot-air balloon flight, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of walk a long-distance trail with friends, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2399",
+"category": "sport-outdoors",
+"a": "Try fencing with a proper foil",
+"b": "Learn to skateboard at a quiet park",
+"image_a": "Editorial photograph of try fencing with a proper foil, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of learn to skateboard at a quiet park, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2400",
+"category": "sport-outdoors",
+"a": "Watch a thrilling tennis final",
+"b": "Sit beside the track at a cycle race",
+"image_a": "Editorial photograph of watch a thrilling tennis final, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of sit beside the track at a cycle race, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2401",
+"category": "history-culture",
+"a": "Explore an Egyptian temple at dawn",
+"b": "Tour a medieval castle after closing",
+"image_a": "Editorial photograph of explore an egyptian temple at dawn, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of tour a medieval castle after closing, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2402",
+"category": "history-culture",
+"a": "Learn traditional weaving in Peru",
+"b": "Join a lantern festival in Taiwan",
+"image_a": "Editorial photograph of learn traditional weaving in peru, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of join a lantern festival in taiwan, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2403",
+"category": "history-culture",
+"a": "See an old ship restored by hand",
+"b": "Walk an archaeological dig with a guide",
+"image_a": "Editorial photograph of see an old ship restored by hand, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of walk an archaeological dig with a guide, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2404",
+"category": "history-culture",
+"a": "Visit a samurai armour workshop",
+"b": "Hear stories in an Irish island pub",
+"image_a": "Editorial photograph of visit a samurai armour workshop, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of hear stories in an irish island pub, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2405",
+"category": "history-culture",
+"a": "Discover a hidden Roman bathhouse",
+"b": "Watch a Māori carving demonstration",
+"image_a": "Editorial photograph of discover a hidden roman bathhouse, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of watch a māori carving demonstration, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2406",
+"category": "history-culture",
+"a": "Ride a historic steam train",
+"b": "See ancient cave paintings with an expert",
+"image_a": "Editorial photograph of ride a historic steam train, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of see ancient cave paintings with an expert, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2407",
+"category": "history-culture",
+"a": "Visit a palace built into a cliff",
+"b": "Explore a lively night market in Morocco",
+"image_a": "Editorial photograph of visit a palace built into a cliff, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of explore a lively night market in morocco, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2408",
+"category": "history-culture",
+"a": "Spend a day at a living history farm",
+"b": "See a traditional shadow-puppet show",
+"image_a": "Editorial photograph of spend a day at a living history farm, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of see a traditional shadow-puppet show, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2409",
+"category": "books-stories",
+"a": "Step into a detective story in London",
+"b": "Explore a fantasy library in the clouds",
+"image_a": "Editorial photograph of step into a detective story in london, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of explore a fantasy library in the clouds, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2410",
+"category": "books-stories",
+"a": "Read a new novel before anyone else",
+"b": "Hear an author tell stories by a fire",
+"image_a": "Editorial photograph of read a new novel before anyone else, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of hear an author tell stories by a fire, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2411",
+"category": "books-stories",
+"a": "Write a mystery set on a sleeper train",
+"b": "Illustrate a picture book about a fox",
+"image_a": "Editorial photograph of write a mystery set on a sleeper train, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of illustrate a picture book about a fox, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2412",
+"category": "books-stories",
+"a": "Visit the home of a favourite poet",
+"b": "Browse a bookshop hidden in an old station",
+"image_a": "Editorial photograph of visit the home of a favourite poet, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of browse a bookshop hidden in an old station, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2413",
+"category": "books-stories",
+"a": "Join a live radio drama",
+"b": "Create a comic about a space gardener",
+"image_a": "Editorial photograph of join a live radio drama, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of create a comic about a space gardener, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2414",
+"category": "books-stories",
+"a": "Read letters from a famous explorer",
+"b": "Find a story inside an antique map",
+"image_a": "Editorial photograph of read letters from a famous explorer, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of find a story inside an antique map, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2415",
+"category": "books-stories",
+"a": "Spend a day at a book festival",
+"b": "Listen to myths beneath a planetarium sky",
+"image_a": "Editorial photograph of spend a day at a book festival, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of listen to myths beneath a planetarium sky, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2416",
+"category": "books-stories",
+"a": "Invent a new ending to a classic tale",
+"b": "Write postcards from an imaginary island",
+"image_a": "Editorial photograph of invent a new ending to a classic tale, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of write postcards from an imaginary island, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2417",
+"category": "games-puzzles",
+"a": "Solve a puzzle in an old lighthouse",
+"b": "Win a strategy game in a cosy cafe",
+"image_a": "Editorial photograph of solve a puzzle in an old lighthouse, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of win a strategy game in a cosy cafe, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2418",
+"category": "games-puzzles",
+"a": "Take part in a village treasure hunt",
+"b": "Escape a pretend haunted library",
+"image_a": "Editorial photograph of take part in a village treasure hunt, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of escape a pretend haunted library, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2419",
+"category": "games-puzzles",
+"a": "Build a huge tabletop railway",
+"b": "Design a puzzle box with a secret drawer",
+"image_a": "Editorial photograph of build a huge tabletop railway, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of design a puzzle box with a secret drawer, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2420",
+"category": "games-puzzles",
+"a": "Play a co-op adventure with friends",
+"b": "Compete in a friendly chess tournament",
+"image_a": "Editorial photograph of play a co-op adventure with friends, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of compete in a friendly chess tournament, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2421",
+"category": "games-puzzles",
+"a": "Find clues in a historic train station",
+"b": "Race tiny robots around a course",
+"image_a": "Editorial photograph of find clues in a historic train station, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of race tiny robots around a course, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2422",
+"category": "games-puzzles",
+"a": "Try a giant outdoor maze",
+"b": "Invent a card game about deep-sea explorers",
+"image_a": "Editorial photograph of try a giant outdoor maze, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of invent a card game about deep-sea explorers, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2423",
+"category": "games-puzzles",
+"a": "Join a quiz night on a canal boat",
+"b": "Play a classic arcade game on its first machine",
+"image_a": "Editorial photograph of join a quiz night on a canal boat, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of play a classic arcade game on its first machine, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2424",
+"category": "games-puzzles",
+"a": "Solve a mystery using a city map",
+"b": "Build the tallest tower from wooden blocks",
+"image_a": "Editorial photograph of solve a mystery using a city map, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of build the tallest tower from wooden blocks, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2425",
+"category": "fashion-style",
+"a": "Design a coat from recycled sailcloth",
+"b": "Choose hats for a theatre costume room",
+"image_a": "Editorial photograph of design a coat from recycled sailcloth, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of choose hats for a theatre costume room, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2426",
+"category": "fashion-style",
+"a": "Learn embroidery from a family heirloom",
+"b": "Make a bright scarf on a loom",
+"image_a": "Editorial photograph of learn embroidery from a family heirloom, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of make a bright scarf on a loom, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2427",
+"category": "fashion-style",
+"a": "Browse a vintage fashion archive",
+"b": "Create a bold outfit from charity-shop finds",
+"image_a": "Editorial photograph of browse a vintage fashion archive, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of create a bold outfit from charity-shop finds, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2428",
+"category": "fashion-style",
+"a": "Visit a workshop making leather shoes",
+"b": "Choose colours for a handmade festival dress",
+"image_a": "Editorial photograph of visit a workshop making leather shoes, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of choose colours for a handmade festival dress, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2429",
+"category": "fashion-style",
+"a": "Restore a classic denim jacket",
+"b": "Try a dramatic outfit from another century",
+"image_a": "Editorial photograph of restore a classic denim jacket, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of try a dramatic outfit from another century, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2430",
+"category": "fashion-style",
+"a": "Design a bag inspired by sea glass",
+"b": "Watch a milliner shape a feathered hat",
+"image_a": "Editorial photograph of design a bag inspired by sea glass, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of watch a milliner shape a feathered hat, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2431",
+"category": "fashion-style",
+"a": "Learn to mend clothes with visible stitches",
+"b": "Walk through a gallery of royal gowns",
+"image_a": "Editorial photograph of learn to mend clothes with visible stitches, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of walk through a gallery of royal gowns, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2432",
+"category": "fashion-style",
+"a": "Create matching prints for a band",
+"b": "Pick a signature look for a stage magician",
+"image_a": "Editorial photograph of create matching prints for a band, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of pick a signature look for a stage magician, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2433",
+"category": "transport-engineering",
+"a": "Drive a vintage tram through town",
+"b": "Ride a ferry between tiny islands",
+"image_a": "Editorial photograph of drive a vintage tram through town, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of ride a ferry between tiny islands, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2434",
+"category": "transport-engineering",
+"a": "Visit a shipyard building an icebreaker",
+"b": "Tour a factory assembling electric buses",
+"image_a": "Editorial photograph of visit a shipyard building an icebreaker, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of tour a factory assembling electric buses, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2435",
+"category": "transport-engineering",
+"a": "Cross a mountain pass by cable car",
+"b": "Take a sleeper train through the Alps",
+"image_a": "Editorial photograph of cross a mountain pass by cable car, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of take a sleeper train through the alps, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2436",
+"category": "transport-engineering",
+"a": "Restore a classic motorbike",
+"b": "Pilot a small sailplane with an instructor",
+"image_a": "Editorial photograph of restore a classic motorbike, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of pilot a small sailplane with an instructor, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2437",
+"category": "transport-engineering",
+"a": "See a drawbridge lift for a tall ship",
+"b": "Ride a steam locomotive through the moors",
+"image_a": "Editorial photograph of see a drawbridge lift for a tall ship, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of ride a steam locomotive through the moors, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2438",
+"category": "transport-engineering",
+"a": "Explore a tunnel boring machine",
+"b": "Cycle across a spectacular suspension bridge",
+"image_a": "Editorial photograph of explore a tunnel boring machine, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of cycle across a spectacular suspension bridge, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2439",
+"category": "transport-engineering",
+"a": "Navigate a narrow canal in a houseboat",
+"b": "Travel by horse-drawn carriage through a park",
+"image_a": "Editorial photograph of navigate a narrow canal in a houseboat, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of travel by horse-drawn carriage through a park, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2440",
+"category": "transport-engineering",
+"a": "Board a research vessel at the harbour",
+"b": "Ride a funicular up a steep hillside",
+"image_a": "Editorial photograph of board a research vessel at the harbour, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of ride a funicular up a steep hillside, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2441",
+"category": "community-helping",
+"a": "Serve lunch at a neighbourhood kitchen",
+"b": "Help build a playground with local families",
+"image_a": "Editorial photograph of serve lunch at a neighbourhood kitchen, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of help build a playground with local families, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2442",
+"category": "community-helping",
+"a": "Read stories at a children's hospital",
+"b": "Deliver groceries to an isolated village",
+"image_a": "Editorial photograph of read stories at a children's hospital, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of deliver groceries to an isolated village, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2443",
+"category": "community-helping",
+"a": "Plant trees along a new footpath",
+"b": "Help rescue pets after a storm",
+"image_a": "Editorial photograph of plant trees along a new footpath, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of help rescue pets after a storm, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2444",
+"category": "community-helping",
+"a": "Teach a free class at a community hall",
+"b": "Restore a garden for a care home",
+"image_a": "Editorial photograph of teach a free class at a community hall, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of restore a garden for a care home, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2445",
+"category": "community-helping",
+"a": "Organise a street party for the whole block",
+"b": "Help a library start a tool-lending shelf",
+"image_a": "Editorial photograph of organise a street party for the whole block, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of help a library start a tool-lending shelf, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2446",
+"category": "community-helping",
+"a": "Support a beach clean-up by kayak",
+"b": "Welcome newcomers at a community festival",
+"image_a": "Editorial photograph of support a beach clean-up by kayak, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of welcome newcomers at a community festival, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2447",
+"category": "community-helping",
+"a": "Build bird boxes with a youth group",
+"b": "Help repair bicycles for school children",
+"image_a": "Editorial photograph of build bird boxes with a youth group, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of help repair bicycles for school children, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2448",
+"category": "community-helping",
+"a": "Cook a feast for volunteer firefighters",
+"b": "Collect stories for a local history archive",
+"image_a": "Editorial photograph of cook a feast for volunteer firefighters, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of collect stories for a local history archive, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2449",
+"category": "learning-discovery",
+"a": "Learn to identify clouds with a meteorologist",
+"b": "Take a beginner sign-language class",
+"image_a": "Editorial photograph of learn to identify clouds with a meteorologist, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of take a beginner sign-language class, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2450",
+"category": "learning-discovery",
+"a": "Study fossils with a museum curator",
+"b": "Learn to navigate by stars",
+"image_a": "Editorial photograph of study fossils with a museum curator, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of learn to navigate by stars, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2451",
+"category": "learning-discovery",
+"a": "Try blacksmithing in a village forge",
+"b": "Learn to bake sourdough from a miller",
+"image_a": "Editorial photograph of try blacksmithing in a village forge, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of learn to bake sourdough from a miller, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2452",
+"category": "learning-discovery",
+"a": "Speak a new language on a market day",
+"b": "Learn to repair a radio with an engineer",
+"image_a": "Editorial photograph of speak a new language on a market day, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of learn to repair a radio with an engineer, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2453",
+"category": "learning-discovery",
+"a": "Take a wildlife photography lesson",
+"b": "Learn to read old handwritten letters",
+"image_a": "Editorial photograph of take a wildlife photography lesson, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of learn to read old handwritten letters, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2454",
+"category": "learning-discovery",
+"a": "Discover how bridges are designed",
+"b": "Try a day of beekeeping with an expert",
+"image_a": "Editorial photograph of discover how bridges are designed, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of try a day of beekeeping with an expert, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2455",
+"category": "learning-discovery",
+"a": "Learn to make a short documentary",
+"b": "Study sea creatures in a touch-free lab",
+"image_a": "Editorial photograph of learn to make a short documentary, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of study sea creatures in a touch-free lab, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2456",
+"category": "learning-discovery",
+"a": "Join an astronomy class on a hilltop",
+"b": "Learn to grow herbs in a tiny space",
+"image_a": "Editorial photograph of join an astronomy class on a hilltop, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of learn to grow herbs in a tiny space, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2457",
+"category": "weather-seasons",
+"a": "Watch a summer storm from a glass observatory",
+"b": "See the first snow from a mountain lodge",
+"image_a": "Editorial photograph of watch a summer storm from a glass observatory, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of see the first snow from a mountain lodge, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2458",
+"category": "weather-seasons",
+"a": "Walk through a bluebell wood in spring",
+"b": "Pick apples on a crisp autumn morning",
+"image_a": "Editorial photograph of walk through a bluebell wood in spring, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of pick apples on a crisp autumn morning, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2459",
+"category": "weather-seasons",
+"a": "Chase a rainbow across the countryside",
+"b": "Watch sea mist roll over a harbour",
+"image_a": "Editorial photograph of chase a rainbow across the countryside, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of watch sea mist roll over a harbour, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2460",
+"category": "weather-seasons",
+"a": "See a frozen waterfall sparkle at dawn",
+"b": "Listen to warm rain on a forest canopy",
+"image_a": "Editorial photograph of see a frozen waterfall sparkle at dawn, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of listen to warm rain on a forest canopy, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2461",
+"category": "weather-seasons",
+"a": "Experience the midnight sun in Norway",
+"b": "Watch a desert sky fill with stars",
+"image_a": "Editorial photograph of experience the midnight sun in norway, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of watch a desert sky fill with stars, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2462",
+"category": "weather-seasons",
+"a": "See cherry blossoms beside a canal",
+"b": "Walk through golden leaves after a shower",
+"image_a": "Editorial photograph of see cherry blossoms beside a canal, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of walk through golden leaves after a shower, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2463",
+"category": "weather-seasons",
+"a": "Watch lightning far out over the sea",
+"b": "Wake to frost patterns on a cottage window",
+"image_a": "Editorial photograph of watch lightning far out over the sea, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of wake to frost patterns on a cottage window, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2464",
+"category": "weather-seasons",
+"a": "See a mountain meadow after fresh rain",
+"b": "Watch the tide return beneath a full moon",
+"image_a": "Editorial photograph of see a mountain meadow after fresh rain, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of watch the tide return beneath a full moon, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2465",
+"category": "architecture-design",
+"a": "Explore a house carved into a hillside",
+"b": "Visit a glass library above a river",
+"image_a": "Editorial photograph of explore a house carved into a hillside, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of visit a glass library above a river, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2466",
+"category": "architecture-design",
+"a": "Stay in a converted railway signal box",
+"b": "See a timber pavilion in a bamboo grove",
+"image_a": "Editorial photograph of stay in a converted railway signal box, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of see a timber pavilion in a bamboo grove, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2467",
+"category": "architecture-design",
+"a": "Walk through a colourful art-deco hotel",
+"b": "Tour a modern home built around a tree",
+"image_a": "Editorial photograph of walk through a colourful art-deco hotel, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of tour a modern home built around a tree, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2468",
+"category": "architecture-design",
+"a": "Visit a floating village on stilts",
+"b": "Explore a stone bridge with tiny shops",
+"image_a": "Editorial photograph of visit a floating village on stilts, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of explore a stone bridge with tiny shops, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2469",
+"category": "architecture-design",
+"a": "See a desert museum shaped like a dune",
+"b": "Climb a spiral stair inside a lighthouse",
+"image_a": "Editorial photograph of see a desert museum shaped like a dune, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of climb a spiral stair inside a lighthouse, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2470",
+"category": "architecture-design",
+"a": "Discover a hidden courtyard behind a facade",
+"b": "Visit a greenhouse designed like a cathedral",
+"image_a": "Editorial photograph of discover a hidden courtyard behind a facade, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of visit a greenhouse designed like a cathedral, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2471",
+"category": "architecture-design",
+"a": "Walk through a futuristic garden pavilion",
+"b": "Explore an underground home lit by skylights",
+"image_a": "Editorial photograph of walk through a futuristic garden pavilion, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of explore an underground home lit by skylights, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
+},
+{
+"id": "q2472",
+"category": "architecture-design",
+"a": "See a wooden observatory on a cliff",
+"b": "Tour a colourful train station from the 1920s",
+"image_a": "Editorial photograph of see a wooden observatory on a cliff, captured in an authentic setting with clear natural detail, balanced composition and inviting light.",
+"image_b": "Editorial photograph of tour a colourful train station from the 1920s, captured in an authentic setting with clear natural detail, balanced composition and inviting light."
 }
 ]
 }
