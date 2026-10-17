@@ -211,6 +211,14 @@ async function settle(): Promise<void> {
   for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+/** A download run is over once its Stop button is hidden again. Polls for that rather than
+ * guessing a number of ticks, which a slow CI machine would outrun. */
+async function runFinished(h: Harness): Promise<void> {
+  const stop = q<HTMLElement>(h.gallery.element, ".wx-srv-gallery-cancel");
+  for (let i = 0; i < 1000 && !stop.hidden; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+  await settle();
+}
+
 function q<T extends Element>(root: ParentNode, selector: string): T {
   const found = root.querySelector<T>(selector);
   if (found === null) throw new Error(`missing ${selector}`);
@@ -372,7 +380,7 @@ describe("gallery screen", () => {
       expect(downloadAll(h).textContent).toBe("Download Any Undownloaded (3)");
 
       downloadAll(h).click();
-      await settle();
+      await runFinished(h);
 
       expect(h.fetched).toEqual(["/d/1?dl=1", "/d/2?dl=1", "/d/3?dl=1"]);
       expect(clicks.map((c) => c.download)).toEqual(["wixy-1.jpg", "wixy-2.mp4", "wixy-3.jpg"]);
@@ -394,7 +402,7 @@ describe("gallery screen", () => {
       expect(downloadAll(h).textContent).toBe("Download Any Undownloaded (2)");
 
       downloadAll(h).click();
-      await settle();
+      await runFinished(h);
 
       expect(h.fetched).toEqual(["/d/5?dl=1", "/d/6?dl=1"]);
       expect(h.mark.value).toEqual({ seq: 6, ordinal: 0, at: 4242 });
@@ -436,7 +444,7 @@ describe("gallery screen", () => {
       await settle();
 
       downloadAll(h).click();
-      await settle();
+      await runFinished(h);
 
       expect(h.fetched).toEqual(["/d/1?dl=1", "/d/2?dl=1"]);
       expect(h.mark.value).toEqual({ seq: 1, ordinal: 0, at: 4242 });
@@ -463,7 +471,7 @@ describe("gallery screen", () => {
       expect(stop.hidden).toBe(false);
       stop.click();
       release();
-      await settle();
+      await runFinished(h);
 
       expect(h.fetched).toEqual(["/d/1?dl=1"]);
       expect(h.mark.value).toBeNull();
@@ -479,7 +487,7 @@ describe("gallery screen", () => {
       await settle();
 
       downloadAll(h).click();
-      await settle();
+      await runFinished(h);
 
       expect(h.suspend).toHaveBeenCalledWith("mediaPlaying");
       expect(h.release).toHaveBeenCalledTimes(1);
@@ -503,7 +511,7 @@ describe("gallery screen", () => {
 
       h.gallery.close();
       release();
-      await settle();
+      await runFinished(h);
 
       expect(h.fetched).toEqual(["/d/1?dl=1"]);
       expect(clicks).toHaveLength(0);
