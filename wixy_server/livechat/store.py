@@ -2528,6 +2528,63 @@ class LiveChatStore:
             row = conn.execute(f"{_SELECT_ATTACHMENT} WHERE a.id = ?", (att_id,)).fetchone()
             return _row_to_attachment(row) if row is not None else None
 
+    def list_gallery(
+        self, *, before: tuple[int, int] | None, limit: int
+    ) -> tuple[list[AttachmentRow], bool]:
+        """The gallery's page of the media history, NEWEST first: every `ready` photo and video
+        that belongs to a sent message and is not view-once (a view-once picture is never kept
+        anywhere a second look could reach it — Inv 52). The would-you-rather round's own
+        generated pictures are game furniture, not sent media, so they are left out. Ordered by
+        `(message_seq, ordinal)`; `before` is the last `(seq, ordinal)` of the previous page.
+        Returns `(rows, has_more)`."""
+        sql = (
+            f"{_SELECT_ATTACHMENT} JOIN messages AS m ON m.seq = a.message_seq "
+            "WHERE a.status = 'ready' AND a.kind IN ('photo', 'video') "
+            "AND a.view_once_renditions IS NULL AND m.view_once_s IS NULL "
+            "AND a.renditions != '[]' "
+            "AND a.message_seq NOT IN (SELECT anchor_message_seq FROM wyr_rounds)"
+        )
+        args: list[int] = []
+        if before is not None:
+            sql += " AND (a.message_seq < ? OR (a.message_seq = ? AND a.ordinal < ?))"
+            args += [before[0], before[0], before[1]]
+        sql += " ORDER BY a.message_seq DESC, a.ordinal DESC LIMIT ?"
+        args.append(limit + 1)
+        with self._read_txn() as conn:
+            rows = conn.execute(sql, tuple(args)).fetchall()
+            return [_row_to_attachment(row) for row in rows[:limit]], len(rows) > limit
+
+    def thumbless_attachments(self) -> list[AttachmentRow]:
+        """Ready, kept photos and videos whose rendition list has no `thumb` — media sent before
+        every video got a grid thumbnail. View-once media (renditions moved aside, Inv 52) and
+        anything still processing are never in this list."""
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                f"{_SELECT_ATTACHMENT} WHERE a.status = 'ready' "
+                "AND a.kind IN ('photo', 'video') AND a.view_once_renditions IS NULL "
+                "AND a.renditions != '[]' AND a.renditions NOT LIKE '%\"thumb\"%'"
+            ).fetchall()
+            return [_row_to_attachment(row) for row in rows]
+
+    def add_thumb_rendition(self, *, att: AttachmentRow, thumb_bytes: int, now: float) -> bool:
+        """Append `thumb` to `att`'s rendition list. Compare-and-set on the exact list the caller
+        read, so an attachment that went view-once (list cleared) or was deleted in the meantime
+        is left untouched — the caller then removes the file it wrote. Raises the quota figure
+        by the thumbnail's size. No event: nothing on screen depends on a thumb appearing."""
+        with self._write_txn() as conn:
+            cursor = conn.execute(
+                "UPDATE attachments SET renditions = ?, bytes_on_disk = bytes_on_disk + ?, "
+                "updated_at = ? WHERE id = ? AND renditions = ? AND view_once_renditions IS NULL",
+                (
+                    json.dumps([*att.renditions, "thumb"]),
+                    thumb_bytes,
+                    now,
+                    att.id,
+                    json.dumps(list(att.renditions)),
+                ),
+            )
+            return cursor.rowcount > 0
+
     def media_bytes_used(self) -> int:
         with self._read_txn() as conn:
             row = conn.execute(

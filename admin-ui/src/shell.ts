@@ -1071,7 +1071,7 @@ export function mountShell(container: HTMLElement, deps: ShellDeps = {}): Shell 
           } else if (versionBadge.element.parentElement !== statusBar) {
             statusBar.insertBefore(versionBadge.element, statusBar.firstChild);
           }
-          container.classList.toggle("wx-shell-srv-badge-in-header", header !== null);
+          container.classList.toggle("wx-shell-srv-version-in-header", header !== null);
         },
       });
       main.appendChild(panel.element);

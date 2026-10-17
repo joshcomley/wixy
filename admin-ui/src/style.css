@@ -445,14 +445,16 @@ html, body {
 /* Normally the badge is moved into the chat header, in place of the "Server" title and name
    chip, so the whole status bar goes (the strip above is only the fallback if the header
    wasn't there to receive it). */
-.wx-shell-srv-badge-in-header .wx-statusbar,
-.wx-shell-srv-badge-in-header .wx-srv-thread-title,
-.wx-shell-srv-badge-in-header .wx-srv-name-chip {
+.wx-shell-srv-version-in-header .wx-statusbar,
+.wx-shell-srv-version-in-header .wx-srv-thread-title,
+.wx-shell-srv-version-in-header .wx-srv-name-chip {
   display: none;
 }
 
-.wx-shell-srv-badge-in-header .wx-srv-thread-header .wx-version-badge {
-  margin-right: auto;
+/* The title and name chip used to push the buttons to the right edge; with them gone (and the
+   badge possibly empty), the first button does it. */
+.wx-shell-srv-version-in-header .wx-srv-more-button {
+  margin-left: auto;
 }
 
 .wx-shell-chrome-revealed .wx-topbar {

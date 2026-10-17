@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -17,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
+from builder.jsontypes import JsonObject
 from wixy_server.livechat import uploads
 from wixy_server.livechat.grants import GRANT_ID_RE, GRANT_IDLE_EXPIRY_S
 from wixy_server.livechat.models import AttachmentRow, UploadRow, attachment_json
@@ -244,9 +246,40 @@ def _resolve_rendition_path(paths: ProjectPaths, att_id: str, rendition: str) ->
     return None
 
 
+_DOWNLOAD_EXTENSION_BY_MIME: dict[str, str] = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "video/mp4": ".mp4",
+}
+
+
+def download_filename(att: AttachmentRow, rendition: str) -> str:
+    """The name a saved copy gets: `wixy-<UTC date>-<UTC time>-<first 8 of the id>[-<rendition>]
+    .<ext>` — sortable, unique, and carrying nothing but what the file already is (the sender's
+    original filename is never stored). ASCII only, so it is safe in a header as-is."""
+    stamp = datetime.fromtimestamp(att.created_at, tz=UTC).strftime("%Y%m%d-%H%M%S")
+    extension = _DOWNLOAD_EXTENSION_BY_MIME.get(
+        att.mime or "", ".jpg" if att.kind == "photo" else ".mp4"
+    )
+    # A still rendition (thumb/poster) is always a JPEG or PNG, never the original's container.
+    if rendition in ("thumb", "poster"):
+        suffix = f"-{rendition}"
+        extension = ".jpg" if att.mime != "image/png" or rendition == "poster" else ".png"
+    else:
+        suffix = ""
+    return f"wixy-{stamp}-{att.id[:8]}{suffix}{extension}"
+
+
 @router.get("/media/{att_id}/{rendition}", response_model=None)
 async def get_media(
-    att_id: str, rendition: str, request: Request, exp: int, sig: str, g: str | None = None
+    att_id: str,
+    rendition: str,
+    request: Request,
+    exp: int,
+    sig: str,
+    g: str | None = None,
+    dl: int = 0,
 ) -> Response:
     # §2: "IDs are validated as 32 hex characters" — checked before the
     # signature math even runs, as cheap defense in depth (a forged/tampered id
@@ -307,12 +340,68 @@ async def get_media(
     if path is None:
         raise HTTPException(status_code=404)
 
+    # `dl=1` (the gallery's save links) only changes how the browser treats the bytes — save,
+    # not show — so it is deliberately NOT part of the signature: it grants nothing `inline`
+    # does not already.
+    disposition = "inline"
+    if dl == 1:
+        disposition = f'attachment; filename="{download_filename(attachment, rendition)}"'
     return FileResponse(
         path,
         media_type=_MEDIA_TYPE_BY_SUFFIX.get(path.suffix, "application/octet-stream"),
         headers={
             "Cache-Control": "private, no-cache",
             "X-Content-Type-Options": "nosniff",
-            "Content-Disposition": "inline",
+            "Content-Disposition": disposition,
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /gallery — the media history (workspace 00046).
+# ---------------------------------------------------------------------------
+
+_GALLERY_CURSOR_RE = re.compile(r"^(\d+)\.(\d+)$")
+_GALLERY_MAX_LIMIT = 200
+
+
+def gallery_item_json(att: AttachmentRow, signer: MediaSigner) -> JsonObject:
+    """One gallery tile: the ordinary attachment wire shape (`urls` carries the freshly signed
+    renditions) plus its place in history (`seq`/`ordinal` — also the cursor and the device's
+    "last downloaded" mark), when it was sent, and the one link that saves the original: the
+    photo's `full` or the video's `play`, with `dl=1` and the name it will be saved under."""
+    item = attachment_json(att, signer)
+    original = "full" if att.kind == "photo" else "play"
+    download_url: str | None = None
+    if original in att.renditions:
+        download_url = signer.url_for(att.id, original) + "&dl=1"
+    item["seq"] = att.message_seq
+    item["ordinal"] = att.ordinal
+    item["createdAt"] = att.created_at
+    item["downloadUrl"] = download_url
+    item["filename"] = download_filename(att, original)
+    return item
+
+
+@router.get("/gallery", response_model=None)
+async def get_gallery(request: Request, before: str | None = None, limit: int = 100) -> JsonObject:
+    """Every photo and video in the chat, newest first, a page at a time. `before` is the
+    previous page's last `"<seq>.<ordinal>"`. View-once media and the would-you-rather
+    round's generated pictures never appear (`LiveChatStore.list_gallery`)."""
+    auth = await require_server_token(request)
+    if not (1 <= limit <= _GALLERY_MAX_LIMIT):
+        raise HTTPException(
+            status_code=422, detail=f"limit must be between 1 and {_GALLERY_MAX_LIMIT}"
+        )
+    cursor: tuple[int, int] | None = None
+    if before is not None:
+        match = _GALLERY_CURSOR_RE.match(before)
+        if match is None:
+            raise HTTPException(status_code=422, detail="before must look like 12.0")
+        cursor = (int(match.group(1)), int(match.group(2)))
+    store: LiveChatStore = request.app.state.livechat_store
+    signer = MediaSigner.for_auth(request.app.state.livechat_secret, auth)
+    rows, has_more = await anyio.to_thread.run_sync(
+        lambda: store.list_gallery(before=cursor, limit=limit)
+    )
+    return {"items": [gallery_item_json(att, signer) for att in rows], "hasMore": has_more}

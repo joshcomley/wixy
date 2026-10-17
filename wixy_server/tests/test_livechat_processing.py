@@ -861,6 +861,23 @@ class TestProcessVideoMisc:
         assert max(poster.size) <= 960
         assert poster.format == "JPEG"
 
+    def test_grid_thumbnail_rendition_is_a_480px_jpeg_and_counted(
+        self, tmp_path: Path, ffmpeg_bin: str, ffprobe_bin: str
+    ) -> None:
+        # The gallery's tile (workspace 00046): every fresh video gets a small thumb, cut
+        # from the poster, listed after `play`/`poster` and included in the on-disk total.
+        src = _make_video(
+            ffmpeg_bin, tmp_path / "in.mp4", width=2000, height=1000, audio_codec=None, duration=0.5
+        )
+        result = processing.process_video(
+            src, output_dir=tmp_path / "out", ffmpeg=ffmpeg_bin, ffprobe=ffprobe_bin
+        )
+        assert list(result.renditions) == ["play", "poster", "thumb"]
+        thumb = Image.open(result.renditions["thumb"])
+        assert thumb.format == "JPEG"
+        assert thumb.size == (480, 240)
+        assert result.bytes_on_disk == sum(p.stat().st_size for p in result.renditions.values())
+
     def test_kind_mismatch_when_no_video_stream(
         self, tmp_path: Path, ffmpeg_bin: str, ffprobe_bin: str
     ) -> None:

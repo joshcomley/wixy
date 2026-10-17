@@ -434,7 +434,10 @@ function takes explicit input/output paths and (for voice/video) explicit `ffmpe
    — the display-matrix rotation side data survives untouched (`-map_metadata -1` strips
    metadata *tags*, not stream side data). Otherwise transcode (libx264 veryfast crf23, same
    caps), relying on ffmpeg's default autorotate to bake rotation into the pixels. A poster
-   frame at `-ss min(1, dur/2)`, long edge ≤960.
+   frame at `-ss min(1, dur/2)`, long edge ≤960, and then a grid `thumb.jpg` (long edge ≤480)
+   cut from that poster by `processing.make_thumbnail` — the gallery's tile (workspace 00046).
+   The video's renditions are therefore `play`, `poster`, `thumb`. Media sent before this
+   existed is caught up by `livechat/thumbnails.py` (see §21).
 5. **Subprocess hygiene**: Windows `BELOW_NORMAL_PRIORITY_CLASS|CREATE_NO_WINDOW`, POSIX
    `nice -n 10`; hard timeouts (30min video / 5min else) with kill-on-timeout; every
    ffprobe/ffmpeg call pins `-f <demuxer> -protocol_whitelist file`; every rendition write is
@@ -543,6 +546,9 @@ exists per attachment and rendition.
 An explicit MIME map (not `FileResponse`'s extension-guessing) sets `Content-Type`, because
 `X-Content-Type-Options: nosniff` plus a wrong/generic content type would silently break
 playback in the browser. Served via Starlette `FileResponse` (200/206, Range-aware).
+`dl=1` (the gallery's save links) changes only the disposition to `attachment; filename="wixy-<UTC
+date>-<UTC time>-<id8>[-thumb|-poster].<ext>"`; it is not part of the signature because it grants
+nothing `inline` does not already.
 
 ## 9. Settings (`WIXY_SERVER_*`, `WIXY_FFMPEG`/`WIXY_FFPROBE`)
 
@@ -1822,7 +1828,7 @@ the answers filter keeps the game fun but the chat has no per-person secrecy (In
 
 - **Full screen.** While the chat is unlocked (`panel.ts` state `chat`/`fading`) it reports `onFullscreenChange(true)`;
   `shell.ts` adds `wx-shell-srv-full` to the shell root and `style.css` hides the top bar, nav row, side nav
-  and edit-bar host; the version badge moves into the chat header's left, replacing the "Server" title and name chip (`wx-shell-srv-badge-in-header`; workspace 00046; it returns to the status bar on exit, and if no header exists the status bar stays as a slim badge-only strip). Locking, or leaving `/admin/server`, removes it. The header's panic ✕ is the exit.
+  and edit-bar host; the version badge moves into the chat header's left, replacing the "Server" title and name chip (`wx-shell-srv-version-in-header`; workspace 00046; it returns to the status bar on exit, and if no header exists the status bar stays as a slim badge-only strip). Locking, or leaving `/admin/server`, removes it. The header's panic ✕ is the exit.
 - **Tabs.** `wyrGame.ts` (`createWyrGame`) owns the tab bar (`.wx-srv-tabs`, under the composer; hidden unless a game is
   open — one tab means no bar), the game pane (`.wx-srv-game`, in the thread's place while the WYR tab shows) and the
   pop-up (`.wx-srv-gamepop`). `thread.ts` creates it after the composer and implements its callbacks
@@ -1847,3 +1853,41 @@ the answers filter keeps the game fun but the chat has no per-person secrecy (In
 - **Files.** `admin-ui/src/server/{wyrGame,wyrControls,wyrCard,wyrModel}.ts`, `api/wyr.ts`; tests
   `admin-ui/tests/{serverWyr,serverWyrGame,serverChatCss}.test.ts`, panel/shell tests for full screen, and
   `e2e/tests/server-wyr.spec.ts` (two people, tabs, picture flip, full screen, 360 px phone).
+
+## 21. The gallery (workspace 00046, decisions/00185)
+
+The ⋯ menu's first entry, **Gallery**, opens a full-height screen over the thread (under the header, so the
+panic ✕ stays reachable; `thread.ts` creates it next to the unread-voice-notes view) showing every photo and
+video ever sent as a grid of small thumbnails.
+
+- **Server.** `GET /api/admin/server/gallery?before=<seq>.<ordinal>&limit=1..200` (token-gated, in
+  `routes_livechat_media.py`) returns `{items, hasMore}` newest first via `LiveChatStore.list_gallery`: `ready`
+  photos and videos on sent messages, **never** view-once media (Inv 52: `view_once_renditions IS NULL`, message
+  `view_once_s IS NULL`) and never the would-you-rather round's generated pictures (`wyr_rounds` anchors — game
+  furniture, not sent media). Each item is the ordinary attachment wire shape plus `seq`, `ordinal`, `createdAt`,
+  `downloadUrl` (the photo's `full` / video's `play`, with `&dl=1`) and `filename`.
+- **Thumbnails.** Every photo has had a 480px `thumb`; every video now gets one too (`thumb.jpg` from the poster).
+  `thumbnails.backfill_thumbnails` runs once at start-up from the janitor task (idempotent, pure Pillow): it adds
+  `thumb` to every kept, ready photo/video lacking it, via `LiveChatStore.add_thumb_rendition` — a compare-and-set
+  on the exact rendition list read, so an attachment that went view-once or was deleted mid-write is untouched
+  (the orphan file is removed) — and adds the file's size to `bytes_on_disk` (quota).
+- **Client** (`admin-ui/src/server/`): `gallery.ts` (`createGallery`), `api/gallery.ts` (typed, defensive page
+  parser), `galleryMark.ts` (the per-device memory). The first 60 items render at once; the rest of the history is
+  paged in behind (metadata only; thumbnails are `loading="lazy"`), so the button can count what is new.
+  Tapping a tile opens a pop-up viewer — the full photo, or a `<video controls>` (idle auto-lock suspended while it
+  plays, like any chat video) — with previous/next and a save link. Every tile has its own **Download** link.
+- **Download Any Undownloaded.** Saves, oldest first and strictly one file at a time, everything after this
+  device's mark (`localStorage` key `wixy.server.gallery.downloaded` = `{seq, ordinal, at}`): each file is
+  fetched in full, handed to the browser through a blob link, and only THEN does the mark move — so an
+  interrupted or failed run resumes at the first file not fully saved, and a visit days later fetches only what
+  was sent since. The idle auto-lock is suspended for the run (`suspend("mediaPlaying")`); panic, backgrounding
+  or any other lock stops it (`close()` aborts the fetch). Browsers may ask once to allow multiple downloads.
+- **Gesture boundaries.** Every gallery control carries `data-srv-gesture-boundary`, so flicking through photos
+  or tapping a run of Download links can't read as the lock double-tap (a boundary chain needs a third rapid tap).
+  `Escape` is NOT intercepted: it still locks the chat, as everywhere in Server chat.
+- **Honest limits.** The mark is per browser (clearing site data re-offers everything); individual Download
+  links never move it; a video playing while its signed URL expires (12 h token) will stop — a renewed session
+  re-mints every link in place (`gallery.refreshSession()`), but never reloads the playing media.
+- **Tests.** `test_livechat_gallery.py` (query, thumbnails, backfill, route, disposition),
+  `admin-ui/tests/server/gallery.test.ts`, `admin-ui/tests/serverGallery.test.ts` (menu/lock wiring),
+  `e2e/tests/server-gallery.spec.ts` (real photo + video, desktop and 360 px phone, real downloads).
