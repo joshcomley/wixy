@@ -86,22 +86,32 @@ def wyr_view_json(
     question: WyrQuestion | None,
     viewer: str | None,
     viewer_email: str | None = None,
+    *,
+    now: float | None = None,
 ) -> JsonObject:
     """The per-viewer view of a round (`GET /wyr/{seq}?as=<sender>`).
 
     Public always: the question, state, rev, who the players are and what each has DONE
-    (voted / answered / pressed Reveal) — never WHAT they answered. The viewer's own pick and
-    guess are echoed back (so a refetch restores their toggles). The other player's pick and
-    guess appear only once `state == "revealed"` (both pressed Reveal). `images` is the picture
-    job's state (`none`/`pending`/`done`/`failed`): a card waits for pictures only while
+    (voted / answered / started the Reveal countdown) — never WHAT they answered. The viewer's
+    own pick and guess are echoed back (so a refetch restores their toggles). The other player's
+    pick and guess appear only once `state == "revealed"` (both pressed Reveal). `images` is
+    the picture job's state (`none`/`pending`/`done`/`failed`): a card waits for pictures only while
     `pending`."""
     viewer_key = reactor_key(viewer) if viewer is not None else None
     slot = _slot_of(round_, viewer_key, viewer_email)
     revealed = round_.state == "revealed"
+    now_s = time.time() if now is None else now
+    reveal_pending = revealed or (
+        round_.state == "revealing"
+        and round_.reveal_deadline is not None
+        and now_s < round_.reveal_deadline
+    )
 
     players: list[JsonValue] = []
     for s in (1, 2):
         player = _player_json(round_, s)
+        if player is not None and not reveal_pending:
+            player["revealed"] = False
         if player is not None:
             players.append(player)
 
@@ -112,7 +122,7 @@ def wyr_view_json(
             "vote": round_.vote1 if slot == 1 else round_.vote2,
             "choice": round_.choice1 if slot == 1 else round_.choice2,
             "guess": round_.guess1 if slot == 1 else round_.guess2,
-            "revealed": round_.reveal1 if slot == 1 else round_.reveal2,
+            "revealed": (round_.reveal1 if slot == 1 else round_.reveal2) and reveal_pending,
         }
 
     result: JsonObject | None = None
@@ -142,6 +152,7 @@ def wyr_view_json(
         "seq": round_.anchor_message_seq,
         "state": round_.state,
         "rev": round_.rev,
+        "revealDeadline": round_.reveal_deadline if reveal_pending and not revealed else None,
         "question": _question_json(question),
         "images": round_.images,
         "players": players,

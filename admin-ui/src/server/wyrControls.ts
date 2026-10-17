@@ -5,6 +5,7 @@
 
 import type { WyrChoice, WyrOutcome, WyrVote, WyrView } from "./api/wyr";
 import type { WyrModel } from "./wyrModel";
+import { createWyrCountdown } from "./wyrCountdown";
 
 export interface WyrControlsDeps {
   readonly model: WyrModel;
@@ -200,8 +201,36 @@ export function createWyrControls(deps: WyrControlsDeps): WyrControls {
     } else if (view.state === "revealing") {
       if (you === null) {
         container.appendChild(el("p", "wx-srv-wyr-status", "Both have answered — waiting for the reveal."));
+        if (view.revealDeadline !== null && view.revealDeadline > Date.now() / 1000) {
+          container.appendChild(
+            createWyrCountdown(doc, view.revealDeadline, "Reveal countdown"),
+          );
+        }
+      } else if (view.revealDeadline !== null && view.revealDeadline > Date.now() / 1000) {
+        const deadline = view.revealDeadline;
+        container.appendChild(
+          createWyrCountdown(
+            doc,
+            deadline,
+            you.revealed ? `Waiting for ${otherName(view)}` : "Tap to reveal together",
+            you.revealed
+              ? undefined
+              : () => run(seq, () => deps.reveal(seq)),
+            () => deps.redraw(seq),
+          ),
+        );
+        if (you.revealed) {
+          container.appendChild(
+            el("p", "wx-srv-wyr-status", `Waiting for ${otherName(view)} to press Reveal…`),
+          );
+        }
       } else if (you.revealed) {
-        container.appendChild(el("p", "wx-srv-wyr-status", `Waiting for ${otherName(view)} to press Reveal…`));
+        container.appendChild(
+          el("p", "wx-srv-wyr-status", "The countdown expired. Press Reveal to start again."),
+        );
+        container.appendChild(
+          button("Reveal", "wx-srv-wyr-primary", () => run(seq, () => deps.reveal(seq)), busyNow),
+        );
       } else {
         container.appendChild(
           el("p", "wx-srv-wyr-status", "Both answered! Press Reveal — the answers show once you've both pressed it."),

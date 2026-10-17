@@ -16,6 +16,7 @@ function view(overrides: Partial<WyrView> = {}): WyrView {
     seq: 7,
     state: "voting",
     rev: 1,
+    revealDeadline: null,
     question: { id: "q0001", category: "food-meals", a: "A classic cheeseburger", b: "A spicy pizza" },
     images: "pending",
     players: [{ name: "Josh", vote: "play", answered: false, revealed: false }],
@@ -56,6 +57,7 @@ describe("wyr api parsing", () => {
       seq: 7,
       state: "answering",
       rev: 2,
+      revealDeadline: 123.5,
       question: { id: "q1", category: "x", a: "A", b: "B" },
       players: [{ name: "Josh", vote: "play", answered: true, revealed: false }],
       you: { slot: 1, vote: "play", choice: "a", guess: "b", revealed: false },
@@ -71,6 +73,7 @@ describe("wyr api parsing", () => {
     const parsed = parseWyrView(raw);
     expect(parsed?.result).toBeNull();
     expect(parsed?.you?.choice).toBe("a");
+    expect(parsed?.revealDeadline).toBe(123.5);
   });
 
   it("rejects a revealed view with no readable result", () => {

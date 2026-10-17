@@ -294,7 +294,9 @@ CREATE TABLE IF NOT EXISTS wyr_chat(
 CREATE INDEX IF NOT EXISTS idx_wyr_chat_anchor ON wyr_chat(anchor_seq);
 """
 
-_LATEST_SCHEMA_VERSION = 16
+_SCHEMA_V17_WYR_REVEAL_DEADLINE = "ALTER TABLE wyr_rounds ADD COLUMN reveal_deadline REAL"
+_LATEST_SCHEMA_VERSION = 17
+WYR_REVEAL_WINDOW_S = 30.0
 _UNKNOWN_GRANT_HASH = "0" * 64
 _LOGGER = logging.getLogger(__name__)
 
@@ -640,6 +642,7 @@ def _row_to_wyr_round(row: sqlite3.Row) -> WyrRoundRow:
         choice1=row["choice1"],
         guess1=row["guess1"],
         reveal1=bool(row["reveal1"]),
+        reveal_deadline=row["reveal_deadline"],
         player2_key=row["player2_key"],
         player2_name=row["player2_name"],
         player2_email=row["player2_email"],
@@ -932,6 +935,15 @@ class LiveChatStore:
                         conn.execute(statement)
                 conn.execute("PRAGMA user_version = 16")
                 current = 16
+
+            if current < 17:
+                existing_wyr_cols = {
+                    row[1] for row in conn.execute("PRAGMA table_info(wyr_rounds)")
+                }
+                if existing_wyr_cols and "reveal_deadline" not in existing_wyr_cols:
+                    conn.execute(_SCHEMA_V17_WYR_REVEAL_DEADLINE)
+                conn.execute("PRAGMA user_version = 17")
+                current = 17
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
@@ -1910,9 +1922,12 @@ class LiveChatStore:
     def reveal_wyr(
         self, *, anchor_seq: int, player_key: str, player_email: str | None, now: float
     ) -> tuple[WyrRoundRow, bool]:
-        """Record one player's Reveal press; when both have pressed, the round becomes
-        `revealed` and the answers become visible to everyone (`wyr_view_json` gates
-        on this state, not on the press). Re-pressing is an idempotent no-op."""
+        """Start or join the 30-second two-player Reveal window atomically.
+
+        A repeated press by the first player is an idempotent no-op and never extends the
+        deadline. An expired or legacy request is reset before this press starts a fresh
+        window. Only the other player joining strictly before the deadline reveals answers.
+        """
         with self._write_txn() as conn:
             row = conn.execute(
                 "SELECT * FROM wyr_rounds WHERE anchor_message_seq = ?", (anchor_seq,)
@@ -1930,21 +1945,41 @@ class LiveChatStore:
                 raise WyrBadStateError(
                     f"round on message {anchor_seq} is {round_.state}, not revealing"
                 )
-            if already:
+            if round_.state == "revealed":
                 return round_, False
 
-            conn.execute(
-                f"UPDATE wyr_rounds SET reveal{slot} = 1, rev = rev + 1, updated_at = ? "
-                f"WHERE anchor_message_seq = ?",
-                (now, anchor_seq),
-            )
-            other_revealed = round_.reveal2 if slot == 1 else round_.reveal1
-            if other_revealed:
+            deadline = round_.reveal_deadline
+            if deadline is None or now >= deadline:
+                # Includes old schema-v16 presses, which have no trustworthy deadline.
                 conn.execute(
-                    "UPDATE wyr_rounds SET state = 'revealed', rev = rev + 1, "
-                    "updated_at = ? WHERE anchor_message_seq = ?",
-                    (now, anchor_seq),
+                    "UPDATE wyr_rounds SET reveal1 = ?, reveal2 = ?, reveal_deadline = ?, "
+                    "rev = rev + 1, updated_at = ? WHERE anchor_message_seq = ?",
+                    (int(slot == 1), int(slot == 2), now + WYR_REVEAL_WINDOW_S, now, anchor_seq),
                 )
+            elif already:
+                return round_, False
+            else:
+                other_requested = round_.reveal2 if slot == 1 else round_.reveal1
+                if other_requested:
+                    conn.execute(
+                        "UPDATE wyr_rounds SET state = 'revealed', reveal1 = 1, reveal2 = 1, "
+                        "reveal_deadline = NULL, rev = rev + 1, updated_at = ? "
+                        "WHERE anchor_message_seq = ?",
+                        (now, anchor_seq),
+                    )
+                else:
+                    # Defensive repair if the deadline survived but its requester flag did not.
+                    conn.execute(
+                        "UPDATE wyr_rounds SET reveal1 = ?, reveal2 = ?, reveal_deadline = ?, "
+                        "rev = rev + 1, updated_at = ? WHERE anchor_message_seq = ?",
+                        (
+                            int(slot == 1),
+                            int(slot == 2),
+                            now + WYR_REVEAL_WINDOW_S,
+                            now,
+                            anchor_seq,
+                        ),
+                    )
             conn.execute(
                 "INSERT INTO events (type, message_seq, created_at) "
                 "VALUES ('message_updated', ?, ?)",
