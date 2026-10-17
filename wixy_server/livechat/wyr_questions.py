@@ -112,9 +112,14 @@ def pick_question(
 ) -> WyrQuestion | None:
     """Pick a random question the couple has not played yet. Once the whole bank has
     been played, start over with the full bank (`used_ids` is derived from the rounds that
-    still exist, so there is nothing to clear)."""
+    still exist, so there is nothing to clear). Categories with remaining questions are equally
+    likely, then questions within the chosen category are equally likely."""
     if not questions:
         return None
     fresh = [q for q in questions if q.id not in used_ids]
     pool = fresh if fresh else list(questions)
-    return rng.choice(pool)
+    by_category: dict[str, list[WyrQuestion]] = {}
+    for question in pool:
+        by_category.setdefault(question.category, []).append(question)
+    category = rng.choice(tuple(by_category))
+    return rng.choice(by_category[category])

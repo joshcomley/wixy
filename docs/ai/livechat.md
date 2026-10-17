@@ -1769,9 +1769,12 @@ answered, each presses **Reveal**, and only when both have does anyone see the a
 - **Wire**: `Message.wyr = {state, rev} | null`; routes `POST /wyr`, `GET /wyr/{seq}?as=`,
   `POST /wyr/{seq}/vote|answer|reveal` (contracts.md). The viewer-filtered view
   (`wyr_game.wyr_view_json`) is the only path answers leave the store.
-- **Questions**: `wyr_questions.json` (2,352, ten categories; ids permanent, append-only) loaded
-  once at `create_app` into `app.state.livechat_wyr_questions`; `wyr_questions.pick_question` draws
-  a random unplayed one. Each carries a scene description per option; a per-category style
+- **Questions**: `wyr_questions.json` (2,472 questions across 25 categories; ids permanent,
+  append-only) loaded once at `create_app` into `app.state.livechat_wyr_questions`;
+  `wyr_questions.pick_question` chooses an eligible category uniformly at random, then an
+  unplayed question uniformly within it. This keeps every topic category equally likely even
+  when category sizes differ. Questions are not repeated until all bank entries have been used;
+  then the cycle restarts. Each carries a scene description per option; a per-category style
   suffix is appended before painting.
 - **Pictures**: attached to the round when it is created — instantly from the picture pool, or painted on demand when the pool has none. `wyr_images.ComfyImageGenerator`
   drives ComfyUI (`/prompt` -> `/history` -> `/view`) with both options in one submission and then

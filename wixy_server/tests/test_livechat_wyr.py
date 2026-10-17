@@ -39,6 +39,7 @@ from wixy_server.livechat.wyr_game import (
 from wixy_server.livechat.wyr_images import ComfyImageGenerator, ImageGenerationError
 from wixy_server.livechat.wyr_questions import (
     BANK_PATH,
+    WyrQuestion,
     load_questions,
     pick_question,
     style_suffix,
@@ -116,8 +117,32 @@ class TestBank:
 
     def test_the_bank_spans_many_categories(self) -> None:
         categories = {q.category for q in load_questions(BANK_PATH)}
-        assert len(categories) >= 8
+        assert len(categories) >= 20
         assert all(style_suffix(c).startswith(",") for c in categories)
+
+    def test_question_selection_gives_small_and_large_categories_equal_chance(self) -> None:
+        questions = (
+            WyrQuestion(
+                "small", "small-topic", "A small topic", "Another small topic", "A" * 30, "B" * 30
+            ),
+            *(
+                WyrQuestion(
+                    f"large-{i}",
+                    "large-topic",
+                    f"Large topic {i}",
+                    f"Other large topic {i}",
+                    "A" * 30,
+                    "B" * 30,
+                )
+                for i in range(9)
+            ),
+        )
+        rng = random.Random(42)
+        small_topic_picks = sum(
+            pick_question(questions, set(), rng).category == "small-topic"  # type: ignore[union-attr]
+            for _ in range(4000)
+        )
+        assert 1800 <= small_topic_picks <= 2200
 
     def test_a_missing_or_malformed_bank_loads_empty_instead_of_crashing(
         self, tmp_path: Path
