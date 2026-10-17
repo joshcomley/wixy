@@ -57,6 +57,15 @@ const HIDDEN_TOGGLED_CLASSES = [
   "wx-srv-game-controls",
   "wx-srv-gamepop",
   "wx-srv-gamepop-empty",
+  // The media gallery (gallery.ts; workspace 00046).
+  "wx-srv-gallery-view",
+  "wx-srv-gallery-cancel",
+  "wx-srv-gallery-retry",
+  "wx-srv-gallery-status",
+  "wx-srv-gallery-save",
+  "wx-srv-gallery-viewer-save",
+  "wx-srv-gallery-empty",
+  "wx-srv-gallery-error",
 ] as const;
 
 function escapeRegExp(text: string): string {

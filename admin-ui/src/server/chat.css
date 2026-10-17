@@ -3550,3 +3550,317 @@ button.wx-srv-quote:focus-visible {
 .wx-srv-game-caption-text[hidden] {
   display: none;
 }
+
+/* -- Gallery (workspace 00046) ----------------------------------------------------
+   The ⋯ menu's "Gallery": a full-height screen over the thread (top set from the header's
+   height in JS, like the unread voice-notes list), a grid of small thumbnails, and a pop-up
+   viewer. Built for a phone first: three columns at 360px, more as the screen widens. */
+
+.wx-srv-gallery-view {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  background: var(--wx-canvas);
+}
+
+.wx-srv-gallery-view[hidden] {
+  display: none;
+}
+
+.wx-srv-gallery-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.wx-srv-gallery-title {
+  font-weight: 600;
+  font-size: 0.9375rem;
+}
+
+.wx-srv-gallery-count {
+  flex: 1;
+  min-width: 0;
+  color: var(--wx-muted);
+  font-size: 0.8125rem;
+}
+
+.wx-srv-gallery-close {
+  flex: none;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  cursor: pointer;
+}
+
+.wx-srv-gallery-actions {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 0 0 8px;
+}
+
+.wx-srv-gallery-download-all {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-brand-blue);
+  background: var(--wx-brand-blue);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.wx-srv-gallery-download-all:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.wx-srv-gallery-cancel {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  cursor: pointer;
+}
+
+.wx-srv-gallery-retry {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  cursor: pointer;
+}
+
+.wx-srv-gallery-cancel[hidden] {
+  display: none;
+}
+
+.wx-srv-gallery-retry[hidden] {
+  display: none;
+}
+
+.wx-srv-gallery-status {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--wx-muted);
+  font-size: 0.8125rem;
+}
+
+.wx-srv-gallery-status[hidden] {
+  display: none;
+}
+
+.wx-srv-gallery-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 12px;
+}
+
+.wx-srv-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 8px;
+}
+
+.wx-srv-gallery-tile {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wx-srv-gallery-open {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  overflow: hidden;
+  background: var(--wx-surface);
+  cursor: pointer;
+}
+
+.wx-srv-gallery-thumb {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.wx-srv-gallery-badge {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 0.6875rem;
+  line-height: 1.5;
+}
+
+.wx-srv-gallery-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  min-width: 0;
+}
+
+.wx-srv-gallery-date {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--wx-muted);
+  font-size: 0.6875rem;
+}
+
+.wx-srv-gallery-save {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 4px;
+  color: var(--wx-brand-blue-text);
+  font-size: 0.75rem;
+  text-decoration: underline;
+}
+
+.wx-srv-gallery-viewer-save {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 8px;
+  color: #fff;
+  font-size: 0.8125rem;
+  text-decoration: underline;
+}
+
+.wx-srv-gallery-save[hidden] {
+  display: none;
+}
+
+.wx-srv-gallery-viewer-save[hidden] {
+  display: none;
+}
+
+.wx-srv-gallery-empty {
+  margin: 24px 0;
+  text-align: center;
+  color: var(--wx-muted);
+}
+
+.wx-srv-gallery-error {
+  margin: 24px 0;
+  text-align: center;
+  color: var(--wx-muted);
+}
+
+.wx-srv-gallery-empty[hidden] {
+  display: none;
+}
+
+.wx-srv-gallery-error[hidden] {
+  display: none;
+}
+
+/* The pop-up viewer: fills the gallery, picture or player centred on black. */
+.wx-srv-gallery-viewer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  background: #000;
+}
+
+.wx-srv-gallery-stage {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wx-srv-gallery-media {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* A video fills the stage (its own intrinsic size can be tiny); a photo keeps its own. */
+video.wx-srv-gallery-media {
+  width: 100%;
+  height: 100%;
+}
+
+.wx-srv-gallery-viewer-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px;
+  background: linear-gradient(rgba(0, 0, 0, 0.6), transparent);
+  color: #fff;
+}
+
+.wx-srv-gallery-position {
+  flex: 1;
+  font-size: 0.8125rem;
+}
+
+.wx-srv-gallery-viewer-close,
+.wx-srv-gallery-prev,
+.wx-srv-gallery-next {
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-size: 1.25rem;
+  cursor: pointer;
+}
+
+.wx-srv-gallery-prev,
+.wx-srv-gallery-next {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.wx-srv-gallery-prev {
+  left: 8px;
+}
+
+.wx-srv-gallery-next {
+  right: 8px;
+}
+
+.wx-srv-gallery-prev:disabled,
+.wx-srv-gallery-next:disabled {
+  opacity: 0.25;
+  cursor: default;
+}

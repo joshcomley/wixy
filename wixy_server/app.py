@@ -37,6 +37,7 @@ from wixy_server.github import GitHubClient
 from wixy_server.livechat import janitor as livechat_janitor
 from wixy_server.livechat import media_queue as livechat_media_queue
 from wixy_server.livechat import processing as livechat_processing
+from wixy_server.livechat import thumbnails as livechat_thumbnails
 from wixy_server.livechat.drawing_broker import DrawingBroker
 from wixy_server.livechat.drawings import MAX_LIVE_BATCHES_PER_SECOND
 from wixy_server.livechat.grants import GrantFailureLimiter
@@ -375,6 +376,17 @@ def create_app(
             )
 
         async def _run_janitor() -> None:
+            # Catch up grid thumbnails for media sent before every video had one (workspace
+            # 00046). Idempotent, so a supervised restart of the janitor repeats it harmlessly;
+            # a failure must never keep the janitor itself from running.
+            try:
+                await anyio.to_thread.run_sync(
+                    lambda: livechat_thumbnails.backfill_thumbnails(
+                        store=livechat_store, paths=paths
+                    )
+                )
+            except Exception:
+                logging.getLogger(__name__).exception("server-chat thumbnail backfill failed")
             await livechat_janitor.run_forever(store=livechat_store, paths=paths)
 
         async def _run_scrubber() -> None:

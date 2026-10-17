@@ -40,6 +40,8 @@ import { mountDrawingLayer, type DrawingLayer } from "./drawingLayer";
 import { answerWyr, createWyrRound, getWyrRound, revealWyr, voteWyr } from "./api/wyr";
 import { createWyrCards, type WyrCards } from "./wyrCard";
 import { createWyrControls, type WyrControls } from "./wyrControls";
+import { createGallery, type GalleryView } from "./gallery";
+import { createDownloadMarkStore } from "./galleryMark";
 import { createWyrGame, type WyrGame } from "./wyrGame";
 import { createWyrModel, type WyrModel } from "./wyrModel";
 import type { ServerIdentity } from "./identity";
@@ -233,6 +235,19 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   moreMenu.className = "wx-srv-more-menu";
   moreMenu.setAttribute("role", "menu");
   moreMenu.hidden = true;
+  const galleryItem = documentRef.createElement("button");
+  galleryItem.type = "button";
+  galleryItem.className = "wx-srv-more-item wx-srv-more-gallery";
+  galleryItem.setAttribute("role", "menuitem");
+  galleryItem.setAttribute("data-srv-gesture-boundary", "");
+  const galleryItemTitle = documentRef.createElement("span");
+  galleryItemTitle.className = "wx-srv-more-item-title";
+  galleryItemTitle.textContent = "Gallery";
+  const galleryItemHint = documentRef.createElement("span");
+  galleryItemHint.className = "wx-srv-more-item-hint";
+  galleryItemHint.textContent = "Every photo and video, with downloads";
+  galleryItem.append(galleryItemTitle, galleryItemHint);
+  moreMenu.appendChild(galleryItem);
   const canvasItem = documentRef.createElement("button");
   canvasItem.type = "button";
   canvasItem.className = "wx-srv-more-item wx-srv-more-canvas";
@@ -291,6 +306,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     documentRef.addEventListener("pointerdown", onPointerOutsideMore, true);
   }
   moreButton.addEventListener("click", () => (moreMenu.hidden ? openMoreMenu() : closeMoreMenu()));
+  galleryItem.addEventListener("click", () => {
+    closeMoreMenu();
+    gallery.open(header.offsetHeight);
+  });
   canvasItem.addEventListener("click", () => {
     closeMoreMenu();
     void addCanvas();
@@ -1212,6 +1231,18 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   unheardView.append(unheardBar, unheardList, unheardEmpty);
   // Under the header, so the panic ✕ and the lock gestures stay reachable.
   element.appendChild(unheardView);
+
+  // The media gallery (workspace 00046) opens from the ⋯ menu over the thread, like the unread
+  // voice-notes list: under the header, closed by every lock (`detach`/`teardown` below).
+  const gallery: GalleryView = createGallery({
+    document: documentRef,
+    win,
+    hooks,
+    getSession: () => currentSession,
+    mark: createDownloadMarkStore(win),
+    fetch: fetchImpl,
+  });
+  element.appendChild(gallery.element);
   element.appendChild(moreMenu);
 
   /** Notes shown in the open view. A note you finish listening to stays until the view closes
@@ -2881,6 +2912,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
 
   async function attach(session: ServerSession): Promise<number | null> {
     currentSession = session;
+    // A renewed token: an open gallery swaps in freshly signed media URLs, no visible change.
+    gallery.refreshSession();
     // Strokes a lock left waiting to be stored resume with this unlock's token.
     drawingLayer.attach(session);
     if (voiceRecorder === null) voiceRecorder = createRecorder();
@@ -2977,6 +3010,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       game.reset();
       closeUnheardView();
       closeMoreMenu();
+      gallery.close();
       currentSession = null;
       endWipeReconcile("abandoned");
       // §(4): a lock aborts an in-flight scroll-to-original, but the pending
@@ -3070,6 +3104,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       voiceRecorder = null;
       closeUnheardView();
       closeMoreMenu();
+      gallery.close();
       disposeAttachmentMedia(messageList);
       observer?.disconnect();
       lightbox.teardown();

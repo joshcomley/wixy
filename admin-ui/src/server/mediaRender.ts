@@ -456,7 +456,7 @@ function renderWaveform(peaks: readonly number[], documentRef: Document): HTMLEl
   return waveform;
 }
 
-function wireMediaSuspension(element: HTMLMediaElement, hooks: MediaRenderHooks): void {
+export function wireMediaSuspension(element: HTMLMediaElement, hooks: MediaRenderHooks): void {
   let release: (() => void) | null = null;
   const releaseMedia = () => {
     release?.();

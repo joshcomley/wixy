@@ -1019,11 +1019,11 @@ describe("mountShell", () => {
     expect(container.classList.contains("wx-shell-srv-full")).toBe(true);
     // The version badge replaces the header's title: it moves into the chat header.
     expect(badge?.parentElement?.classList.contains("wx-srv-thread-header")).toBe(true);
-    expect(container.classList.contains("wx-shell-srv-badge-in-header")).toBe(true);
+    expect(container.classList.contains("wx-shell-srv-version-in-header")).toBe(true);
     panelDeps!.onFullscreenChange!(false);
     expect(container.classList.contains("wx-shell-srv-full")).toBe(false);
     expect(badge?.parentElement?.classList.contains("wx-statusbar")).toBe(true);
-    expect(container.classList.contains("wx-shell-srv-badge-in-header")).toBe(false);
+    expect(container.classList.contains("wx-shell-srv-version-in-header")).toBe(false);
   });
 
   it("the History route renders the real history panel, not a stub", async () => {

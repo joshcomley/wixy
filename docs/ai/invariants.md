@@ -996,6 +996,9 @@ write transaction that creates the message, the store copies the attachment's `r
    ordinary hard-delete path (Inv 46: `delete_message_for_scrub` + `_finish_committed_erasure`).
 5. A backstop janitor loop running at least every 30s erases any view-once message whose claim is older
    than 600s, covering incomplete downloads.
+6. The gallery (`GET /gallery`, workspace 00046) lists no view-once media: `LiveChatStore.list_gallery` requires
+   `view_once_renditions IS NULL` and a message with `view_once_s IS NULL`, and the thumbnail backfill
+   (`thumbnails.py`) skips the same rows, so neither can resurrect a view-once picture's renditions.
 *Enforced by:* `wixy_server/tests/test_livechat_view_once.py` (schema migration v11, validation matrix,
 atomic single-winner claim race, streaming download, post-delivery erasure, broken download retry safety,
 backstop cleanup, and fail-closed linklessness), `admin-ui/tests/server/viewOnce.test.ts` (lifecycle triggers,

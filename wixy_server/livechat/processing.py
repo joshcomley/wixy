@@ -17,7 +17,7 @@ depth against ffmpeg's own format auto-detection.
 
 Storage layout (§4) this module's outputs are named for:
     media/<id[:2]>/<id>/  full.{jpg|png|gif}  thumb.{jpg|png}   (photo)
-                          play.mp4  poster.jpg             (video)
+                          play.mp4  poster.jpg  thumb.jpg  (video)
                           play.m4a                         (voice)
 """
 
@@ -601,6 +601,32 @@ def process_voice(src: Path, *, output_dir: Path, ffmpeg: str, ffprobe: str) -> 
     )
 
 
+def make_thumbnail(src: Path, *, output_dir: Path) -> Path:
+    """Write the gallery-sized `thumb.{jpg|png}` (long edge `_THUMB_LONG_EDGE`) for an
+    already-processed picture: a photo's `full.*` or a video's `poster.jpg`. The one code
+    path for both a fresh video (`process_video`) and the backfill of media sent before
+    video thumbnails existed (`livechat/thumbnails.py`), so the two can never drift. Pure
+    Pillow — no ffmpeg — and it only ever reads renditions this module already wrote (the
+    metadata was stripped then). PNG when the picture has alpha, else JPEG, matching the
+    photo pipeline's own thumb. Raises `MediaProcessingError("corrupt")` on an unreadable
+    source."""
+    try:
+        with Image.open(src) as probe:
+            probe.seek(0)
+            has_alpha = _image_has_alpha(probe)
+            normalized = _normalize_photo_mode(probe, has_alpha=has_alpha)
+            thumb = _clamp_long_edge(_strip_image_metadata(normalized), _THUMB_LONG_EDGE)
+        if has_alpha:
+            thumb_path = output_dir / "thumb.png"
+            _atomic_save_image(thumb, thumb_path, format="PNG", optimize=True)
+        else:
+            thumb_path = output_dir / "thumb.jpg"
+            _atomic_save_image(thumb, thumb_path, format="JPEG", quality=80, optimize=True)
+    except Exception as exc:
+        raise MediaProcessingError("corrupt", str(exc)) from exc
+    return thumb_path
+
+
 # ---------------------------------------------------------------------------
 # Video (§7)
 # ---------------------------------------------------------------------------
@@ -782,7 +808,15 @@ def process_video(src: Path, *, output_dir: Path, ffmpeg: str, ffprobe: str) -> 
         raise MediaProcessingError("corrupt", poster_proc.stderr.decode("utf-8", "replace")[:500])
     os.replace(tmp_poster, poster_path)
 
-    renditions = {"play": play_path, "poster": poster_path}
+    # The grid thumbnail the gallery shows (the 960px poster is the player's still, too large
+    # to load a screenful of). Made from the poster, so a failure here is only ever a bad frame.
+    try:
+        thumb_path = make_thumbnail(poster_path, output_dir=output_dir)
+    except MediaProcessingError:
+        _unlink_quietly(play_path, poster_path)
+        raise
+
+    renditions = {"play": play_path, "poster": poster_path, "thumb": thumb_path}
     bytes_on_disk = sum(p.stat().st_size for p in renditions.values())
     return VideoResult(
         mime="video/mp4",
