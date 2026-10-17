@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from wixy_server.app import create_app
+from wixy_server.livechat import store as wyr_store_module
 from wixy_server.livechat.pinclient import CmdPinVerifier
 from wixy_server.livechat.store import (
     _LATEST_SCHEMA_VERSION,
@@ -331,6 +332,43 @@ class TestStateMachine:
             thread.join()
         round_ = store.get_wyr_round(anchor_seq=seq)
         assert round_ is not None and round_.state == "revealed"
+
+    def test_reveal_deadline_starts_after_waiting_for_the_database_write_lock(
+        self, store: LiveChatStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seq = _to_revealing(store)
+        conn = sqlite3.connect(str(store._db_path), timeout=5.0, isolation_level=None)
+        conn.execute("BEGIN IMMEDIATE")
+        clock = [20.0]
+        monkeypatch.setattr(wyr_store_module.time, "time", lambda: clock[0])
+        result: list[tuple[Any, bool]] = []
+        errors: list[Exception] = []
+
+        def press() -> None:
+            try:
+                result.append(
+                    store.reveal_wyr(player_email=None, anchor_seq=seq, player_key="josh")
+                )
+            except Exception as exc:  # surfaced in the assertion below
+                errors.append(exc)
+
+        worker = threading.Thread(target=press)
+        try:
+            worker.start()
+            time.sleep(0.05)  # the worker is queued behind the held IMMEDIATE lock
+            clock[0] = 25.0
+            conn.execute("COMMIT")
+            worker.join(timeout=5.0)
+        finally:
+            if worker.is_alive():
+                conn.execute("ROLLBACK")
+                worker.join(timeout=5.0)
+            conn.close()
+
+        assert not worker.is_alive()
+        assert errors == []
+        assert len(result) == 1
+        assert result[0][0].reveal_deadline == 55.0
 
     def test_expired_deadline_is_hidden_from_view_without_a_background_worker(
         self, store: LiveChatStore

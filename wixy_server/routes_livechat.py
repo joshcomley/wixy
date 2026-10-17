@@ -1412,7 +1412,9 @@ async def _wyr_mutation(
     request: Request,
     seq: int,
     sender_raw: str,
-    action: Callable[[LiveChatStore, str, str, str | None, float], object],
+    action: Callable[..., object],
+    *,
+    store_clock_after_lock: bool = False,
 ) -> JSONResponse:
     auth = await require_server_token(request)
     sender = sender_raw.strip()
@@ -1424,9 +1426,12 @@ async def _wyr_mutation(
     notifier: LiveChatNotifier = request.app.state.livechat_notifier
     key = reactor_key(sender)
     email = auth.email or None
-    now = time.time()
     try:
-        await anyio.to_thread.run_sync(lambda: action(store, key, sender, email, now))
+        if store_clock_after_lock:
+            await anyio.to_thread.run_sync(lambda: action(store, key, sender, email))
+        else:
+            now = time.time()
+            await anyio.to_thread.run_sync(lambda: action(store, key, sender, email, now))
     except (
         WyrRoundNotFoundError,
         WyrRoundFullError,
@@ -1478,9 +1483,10 @@ async def reveal_wyr_round(seq: int, body: WyrRevealIn, request: Request) -> JSO
         request,
         seq,
         body.sender,
-        lambda store, key, name, email, now: store.reveal_wyr(
-            anchor_seq=seq, player_key=key, player_email=email, now=now
+        lambda store, key, name, email: store.reveal_wyr(
+            anchor_seq=seq, player_key=key, player_email=email
         ),
+        store_clock_after_lock=True,
     )
 
 

@@ -528,23 +528,31 @@ describe("wyr game tab", () => {
     h.game.open(7);
     const maximize = h.game.pane.querySelector<HTMLButtonElement>(".wx-srv-game-maximize")!;
     expect(maximize.hidden).toBe(false);
-    maximize.click();
 
-    const dialog = h.game.pane.querySelector<HTMLElement>(".wx-srv-game-pictures")!;
-    expect(dialog.hidden).toBe(false);
+    const dialog = h.game.pane.querySelector<HTMLDialogElement>(".wx-srv-game-pictures")!;
+    const showModal = vi.fn(() => dialog.setAttribute("open", ""));
+    Object.defineProperty(dialog, "showModal", { configurable: true, value: showModal });
+    Object.defineProperty(dialog, "close", {
+      configurable: true,
+      value: () => dialog.removeAttribute("open"),
+    });
+    expect(dialog.open).toBe(false);
+    maximize.click();
+    expect(showModal).toHaveBeenCalledOnce();
+    expect(dialog.open).toBe(true);
     expect(dialog.querySelectorAll(".wx-srv-game-pictures-image:not([hidden])")).toHaveLength(2);
     expect(dialog.textContent).toContain("Option A: A classic cheeseburger");
     expect(dialog.textContent).toContain("Option B: A spicy pizza");
 
     dialog.querySelector<HTMLButtonElement>(".wx-srv-game-pictures-close")!.click();
-    expect(dialog.hidden).toBe(true);
+    expect(dialog.open).toBe(false);
     expect(maximize.ownerDocument.activeElement).toBe(maximize);
     expect(h.game.pane.querySelector(".wx-srv-game-controls .wx-srv-wyr-group")).not.toBeNull();
 
     maximize.click();
-    expect(dialog.hidden).toBe(false);
+    expect(dialog.open).toBe(true);
     h.game.showTab("chat");
-    expect(dialog.hidden).toBe(true);
+    expect(dialog.open).toBe(false);
   });
 
   it("hides maximize pictures while the round has no ready image", () => {

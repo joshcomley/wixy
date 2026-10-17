@@ -1065,8 +1065,9 @@ their message (Inv 46); an unconsumed pair for a question that has since been pl
 The pool's one observable trace — which questions are pooled — is a subset of the static bank and says nothing about
 what was played. Pool generation obeys the same ComfyUI cleanup as on-demand runs (above).
 **The other player's pick and guess are served only when `state == "revealed"`** (both players
-pressed Reveal within the same server-owned 30-second window): the first press sets its existing
-player flag and an absolute `reveal_deadline`; only a distinct player's tap strictly before that
+pressed Reveal within the same server-owned 30-second window): after the `BEGIN IMMEDIATE` write
+lock is acquired, the first press samples server time and sets its existing player flag and an
+absolute `reveal_deadline`; only a distinct player's tap strictly before that
 deadline changes the state to `revealed`. A repeated first-player tap does not extend the window.
 After expiry, reads present the request as inactive, and the next Reveal mutation clears the old
 flag/deadline and starts a fresh window atomically; correctness does not depend on a background

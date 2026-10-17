@@ -175,13 +175,17 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
 
   const controlsHost = el("div", "wx-srv-game-controls");
   const mini = el("div", "wx-srv-game-mini");
-  const picturesOverlay = el("div", "wx-srv-game-pictures");
-  picturesOverlay.hidden = true;
+  const picturesOverlay = doc.createElement("dialog");
+  picturesOverlay.className = "wx-srv-game-pictures";
   picturesOverlay.setAttribute("role", "dialog");
   picturesOverlay.setAttribute("aria-modal", "true");
   picturesOverlay.setAttribute("aria-label", "Compare the Would You Rather pictures");
+  picturesOverlay.addEventListener("cancel", (event) => event.preventDefault());
   const picturesHead = el("div", "wx-srv-game-pictures-head");
-  picturesHead.appendChild(el("span", "wx-srv-game-pictures-title", "Compare both pictures"));
+  const picturesTitle = el("span", "wx-srv-game-pictures-title", "Compare both pictures");
+  picturesTitle.id = "wx-srv-game-pictures-title";
+  picturesOverlay.setAttribute("aria-labelledby", picturesTitle.id);
+  picturesHead.appendChild(picturesTitle);
   const picturesClose = button(
     "wx-srv-game-pictures-close",
     "Return to the answer choices",
@@ -348,7 +352,7 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
     const message = deps.roundMessage(seq);
     if (view === undefined || message === undefined) return;
     picturesOpen = true;
-    picturesOverlay.hidden = false;
+    picturesOverlay.showModal();
     renderPictures(view, message);
     picturesClose.focus();
     deps.afterChange();
@@ -357,7 +361,7 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
   function closePictures(restoreFocus = true): void {
     if (!picturesOpen) return;
     picturesOpen = false;
-    picturesOverlay.hidden = true;
+    if (picturesOverlay.open) picturesOverlay.close();
     if (restoreFocus && !maximizePicturesButton.hidden) maximizePicturesButton.focus();
     deps.afterChange();
   }

@@ -17,7 +17,7 @@ The game stage gives images whatever space remains after the answer controls and
 
 ## How to continue + acceptance
 1. Add a visible “Maximize pictures” control when image attachments are available.
-2. Open both pictures at a substantially larger size with both option labels readable; do not cover or mutate answers. Provide an obvious close/return action so players can tap their choice controls afterward.
+2. Open both pictures in a native modal dialog at a substantially larger size with both option labels readable; the browser must contain keyboard focus and inert the covered page. Do not cover or mutate answers. Provide an obvious close/return action so players can tap their choice controls afterward.
 3. Keep the existing two-option stage, chat, reveal countdown, and lock/round-close teardown behavior intact. Handle missing or still-painting pictures without showing a broken modal.
 4. Add a UI regression test for opening/closing and labels, update the livechat guide, rebuild the committed admin bundle, and run the full relevant checks.
 

@@ -19,7 +19,7 @@ The current Reveal can be pressed once by each player at any later time. The ope
 - `docs/ai/contracts.md`, `docs/ai/livechat.md`, `docs/ai/invariants.md`
 
 ## How to continue + acceptance
-1. Persist an absolute 30-second deadline atomically with the first Reveal flag. A second distinct player tap strictly before the deadline changes the round to `revealed`; the deadline is never extended by refresh or repeated taps.
+1. Persist an absolute 30-second deadline atomically with the first Reveal flag, sampling server time only after SQLite's write lock is acquired. A second distinct player tap strictly before the deadline changes the round to `revealed`; the deadline is never extended by refresh or repeated taps.
 2. When expired, clear the pending Reveal flag/deadline atomically before a new request can start. No background timer is needed. Simultaneous and late taps cannot expose answers. Existing player identity checks and erasure cascades remain intact.
 3. Return only the countdown deadline/status in each player's round view. Render a live shrinking progress bar and seconds; expire it locally at the deadline. Add a clickable prompt to the ordinary chat round card that opens the correct round's WYR tab.
 4. Regression tests cover timely second tap, exact/late expiry, restart after expiry, concurrent taps, viewer privacy, countdown rendering, and round-card navigation. Update docs and run focused verification.

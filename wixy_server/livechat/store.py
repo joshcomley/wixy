@@ -1920,7 +1920,12 @@ class LiveChatStore:
             return _row_to_wyr_round(updated), True
 
     def reveal_wyr(
-        self, *, anchor_seq: int, player_key: str, player_email: str | None, now: float
+        self,
+        *,
+        anchor_seq: int,
+        player_key: str,
+        player_email: str | None,
+        now: float | None = None,
     ) -> tuple[WyrRoundRow, bool]:
         """Start or join the 30-second two-player Reveal window atomically.
 
@@ -1929,6 +1934,10 @@ class LiveChatStore:
         window. Only the other player joining strictly before the deadline reveals answers.
         """
         with self._write_txn() as conn:
+            # If now is omitted, sample only after BEGIN IMMEDIATE has acquired SQLite's
+            # cross-connection/process write lock. Queueing behind a competing write must not
+            # consume part of the other player's 30-second window.
+            now_s = time.time() if now is None else now
             row = conn.execute(
                 "SELECT * FROM wyr_rounds WHERE anchor_message_seq = ?", (anchor_seq,)
             ).fetchone()
@@ -1949,12 +1958,18 @@ class LiveChatStore:
                 return round_, False
 
             deadline = round_.reveal_deadline
-            if deadline is None or now >= deadline:
+            if deadline is None or now_s >= deadline:
                 # Includes old schema-v16 presses, which have no trustworthy deadline.
                 conn.execute(
                     "UPDATE wyr_rounds SET reveal1 = ?, reveal2 = ?, reveal_deadline = ?, "
                     "rev = rev + 1, updated_at = ? WHERE anchor_message_seq = ?",
-                    (int(slot == 1), int(slot == 2), now + WYR_REVEAL_WINDOW_S, now, anchor_seq),
+                    (
+                        int(slot == 1),
+                        int(slot == 2),
+                        now_s + WYR_REVEAL_WINDOW_S,
+                        now_s,
+                        anchor_seq,
+                    ),
                 )
             elif already:
                 return round_, False
@@ -1965,7 +1980,7 @@ class LiveChatStore:
                         "UPDATE wyr_rounds SET state = 'revealed', reveal1 = 1, reveal2 = 1, "
                         "reveal_deadline = NULL, rev = rev + 1, updated_at = ? "
                         "WHERE anchor_message_seq = ?",
-                        (now, anchor_seq),
+                        (now_s, anchor_seq),
                     )
                 else:
                     # Defensive repair if the deadline survived but its requester flag did not.
@@ -1975,15 +1990,15 @@ class LiveChatStore:
                         (
                             int(slot == 1),
                             int(slot == 2),
-                            now + WYR_REVEAL_WINDOW_S,
-                            now,
+                            now_s + WYR_REVEAL_WINDOW_S,
+                            now_s,
                             anchor_seq,
                         ),
                     )
             conn.execute(
                 "INSERT INTO events (type, message_seq, created_at) "
                 "VALUES ('message_updated', ?, ?)",
-                (anchor_seq, now),
+                (anchor_seq, now_s),
             )
             updated = conn.execute(
                 "SELECT * FROM wyr_rounds WHERE anchor_message_seq = ?", (anchor_seq,)
