@@ -1822,7 +1822,9 @@ answered, each presses **Reveal**, and only when both have does anyone see the a
   A per-round history view is future work; the association is what it will read.
 - **Client**: `admin-ui/src/server/api/wyr.ts` (defensive parsers), `wyrModel.ts` (per-round
   viewer-filtered view + unsent picks; the summary only triggers a fetch), `wyrCard.ts` (the
-  in-bubble card), wired in `thread.ts` (menu item `.wx-srv-more-wyr`, `.wx-srv-bubble-wyr`).
+  in-bubble card), `wyrGame.ts` (WYR tab, including the maximize-pictures comparison view), wired
+  in `thread.ts` (menu item `.wx-srv-more-wyr`, `.wx-srv-bubble-wyr`). The maximize view shows both
+  ready pictures and their option labels on a full-screen overlay; close it to return to the choices.
 - **Fleet ops** (not in this repo): the Devfleet child `ComfyUi` (127.0.0.1:8199, pinned to the
   RTX 5060 Ti by UUID, `--output-directory E:\ImageGenLab\out-wyr`) and `WIXY_COMFY_URL` +
   `WIXY_COMFY_OUTPUT_DIR` (the same folder) in `D:\Servers\Wixy\.env`.

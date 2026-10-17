@@ -514,6 +514,45 @@ describe("wyr game tab", () => {
     expect(caption()).toBe("A classic cheeseburger");
   });
 
+  it("maximizes both pictures with their option labels and returns to the answer controls", () => {
+    const answering = view({
+      state: "answering",
+      rev: 2,
+      players: [
+        { name: "Josh", vote: "play", answered: false, revealed: false },
+        { name: "Rose", vote: "play", answered: false, revealed: false },
+      ],
+      you: { slot: 1, vote: "play", choice: null, guess: null, revealed: false },
+    });
+    const h = make(answering, message(7, { attachments: photos() }));
+    h.game.open(7);
+    const maximize = h.game.pane.querySelector<HTMLButtonElement>(".wx-srv-game-maximize")!;
+    expect(maximize.hidden).toBe(false);
+    maximize.click();
+
+    const dialog = h.game.pane.querySelector<HTMLElement>(".wx-srv-game-pictures")!;
+    expect(dialog.hidden).toBe(false);
+    expect(dialog.querySelectorAll(".wx-srv-game-pictures-image:not([hidden])")).toHaveLength(2);
+    expect(dialog.textContent).toContain("Option A: A classic cheeseburger");
+    expect(dialog.textContent).toContain("Option B: A spicy pizza");
+
+    dialog.querySelector<HTMLButtonElement>(".wx-srv-game-pictures-close")!.click();
+    expect(dialog.hidden).toBe(true);
+    expect(maximize.ownerDocument.activeElement).toBe(maximize);
+    expect(h.game.pane.querySelector(".wx-srv-game-controls .wx-srv-wyr-group")).not.toBeNull();
+
+    maximize.click();
+    expect(dialog.hidden).toBe(false);
+    h.game.showTab("chat");
+    expect(dialog.hidden).toBe(true);
+  });
+
+  it("hides maximize pictures while the round has no ready image", () => {
+    const h = make(view({ images: "pending" }), message(7));
+    h.game.open(7);
+    expect(h.game.pane.querySelector<HTMLButtonElement>(".wx-srv-game-maximize")?.hidden).toBe(true);
+  });
+
   it("a round without pictures shows the option as text, and 'Painting…' while they are coming", () => {
     const text = make(view({ images: "none" }), message(7));
     text.game.open(7);

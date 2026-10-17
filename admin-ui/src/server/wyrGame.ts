@@ -139,10 +139,17 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
   pane.hidden = true;
   const head = el("div", "wx-srv-game-head");
   const title = el("span", "wx-srv-game-title", "Would you rather…?");
+  const maximizePicturesButton = button(
+    "wx-srv-game-maximize",
+    "Maximize pictures",
+    "Maximize pictures",
+    () => openPictures(),
+  );
+  maximizePicturesButton.hidden = true;
   const nextButton = button("wx-srv-game-next", "Start the next round", "Next ▸", () => deps.startNextRound());
   nextButton.hidden = true;
   const closeButton = button("wx-srv-game-close", "Close the game", "✕", () => close());
-  head.append(title, nextButton, closeButton);
+  head.append(title, maximizePicturesButton, nextButton, closeButton);
 
   const stage = el("button", "wx-srv-game-stage");
   stage.type = "button";
@@ -168,7 +175,34 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
 
   const controlsHost = el("div", "wx-srv-game-controls");
   const mini = el("div", "wx-srv-game-mini");
-  pane.append(head, stage, controlsHost, mini);
+  const picturesOverlay = el("div", "wx-srv-game-pictures");
+  picturesOverlay.hidden = true;
+  picturesOverlay.setAttribute("role", "dialog");
+  picturesOverlay.setAttribute("aria-modal", "true");
+  picturesOverlay.setAttribute("aria-label", "Compare the Would You Rather pictures");
+  const picturesHead = el("div", "wx-srv-game-pictures-head");
+  picturesHead.appendChild(el("span", "wx-srv-game-pictures-title", "Compare both pictures"));
+  const picturesClose = button(
+    "wx-srv-game-pictures-close",
+    "Return to the answer choices",
+    "Back to choices",
+    () => closePictures(),
+  );
+  picturesHead.appendChild(picturesClose);
+  const picturesPair = el("div", "wx-srv-game-pictures-pair");
+  const pictureOptions = (["a", "b"] as const).map((which) => {
+    const option = el("figure", "wx-srv-game-pictures-option");
+    const image = doc.createElement("img");
+    image.className = "wx-srv-game-pictures-image";
+    const fallback = el("div", "wx-srv-game-pictures-fallback", "Picture not available");
+    const label = el("figcaption", "wx-srv-game-pictures-label");
+    option.append(image, fallback, label);
+    picturesPair.appendChild(option);
+    return { which, image, fallback, label };
+  });
+  picturesOverlay.append(picturesHead, picturesPair);
+  pane.append(head, stage, controlsHost, mini, picturesOverlay);
+  let picturesOpen = false;
 
   // -- Pop-up game chat ---------------------------------------------------------------------
 
@@ -213,6 +247,7 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
 
   function showTab(next: WyrTab): void {
     if (seq === null) next = "chat";
+    if (next !== "wyr") closePictures(false);
     if (next === "chat" && popupOpen) closePopup();
     tab = next;
     if (tab === "wyr") wyrDot = false;
@@ -224,6 +259,7 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
 
   function setSeq(next: number): void {
     if (seq !== next) {
+      closePictures(false);
       if (popupOpen) closePopup();
       seq = next;
       shown = "a";
@@ -249,6 +285,7 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
   }
 
   function close(): void {
+    closePictures(false);
     if (popupOpen) closePopup();
     if (seq !== null) dismissedSeq = seq;
     seq = null;
@@ -261,6 +298,7 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
   }
 
   function reset(): void {
+    closePictures(false);
     if (popupOpen) closePopup();
     seq = null;
     tab = "chat";
@@ -280,11 +318,56 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
     return which === "a" ? view.question.a : view.question.b;
   }
 
+  function renderPictures(view: WyrView, message: Message): void {
+    const [urlA, urlB] = wyrPictureUrls(message, "full");
+    const urls = { a: urlA ?? null, b: urlB ?? null };
+    const hasPicture = Object.values(urls).some((url) => url !== null);
+    maximizePicturesButton.hidden = !hasPicture || view.state === "skipped";
+    if (!picturesOpen) return;
+    if (!hasPicture || view.state === "skipped") {
+      closePictures(false);
+      return;
+    }
+    for (const option of pictureOptions) {
+      const url = urls[option.which];
+      option.image.hidden = url === null;
+      option.fallback.hidden = url !== null;
+      option.label.textContent = `Option ${option.which.toUpperCase()}: ${optionText(view, option.which)}`;
+      if (url !== null) {
+        if (option.image.getAttribute("src") !== url) option.image.src = url;
+        option.image.alt = optionText(view, option.which);
+      } else if (option.image.hasAttribute("src")) {
+        option.image.removeAttribute("src");
+      }
+    }
+  }
+
+  function openPictures(): void {
+    if (seq === null) return;
+    const view = deps.model.view(seq);
+    const message = deps.roundMessage(seq);
+    if (view === undefined || message === undefined) return;
+    picturesOpen = true;
+    picturesOverlay.hidden = false;
+    renderPictures(view, message);
+    picturesClose.focus();
+    deps.afterChange();
+  }
+
+  function closePictures(restoreFocus = true): void {
+    if (!picturesOpen) return;
+    picturesOpen = false;
+    picturesOverlay.hidden = true;
+    if (restoreFocus && !maximizePicturesButton.hidden) maximizePicturesButton.focus();
+    deps.afterChange();
+  }
+
   function drawStage(): void {
     if (seq === null) return;
     const view = deps.model.view(seq);
     const message = deps.roundMessage(seq);
     if (view === undefined || message === undefined) return;
+    renderPictures(view, message);
     const [urlA, urlB] = wyrPictureUrls(message, "full");
     const url = shown === "a" ? urlA : urlB;
     for (const [img, src] of [[imgA, urlA], [imgB, urlB]] as const) {
