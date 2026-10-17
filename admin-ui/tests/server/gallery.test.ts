@@ -190,7 +190,7 @@ function harness(pages: readonly GalleryPage[], options: { session?: ServerSessi
   const fetched: string[] = [];
   const fileFetch = vi.fn(async (url: string) => {
     fetched.push(url);
-    return new Response(new Blob([url]), { status: 200 });
+    return new Response(url, { status: 200 });
   });
   const gallery = createGallery({
     document,
@@ -438,7 +438,7 @@ describe("gallery screen", () => {
       const h = harness([{ items: [item(3), item(2), item(1)], hasMore: false }]);
       h.fileFetch.mockImplementation(async (url: string) => {
         h.fetched.push(url);
-        return url.includes("/d/2") ? new Response("", { status: 403 }) : new Response(new Blob([url]));
+        return url.includes("/d/2") ? new Response("", { status: 403 }) : new Response(url);
       });
       h.gallery.open(0);
       await settle();
@@ -460,7 +460,7 @@ describe("gallery screen", () => {
       h.fileFetch.mockImplementation(async (url: string) => {
         h.fetched.push(url);
         if (url.includes("/d/1")) await new Promise<void>((resolve) => (release = resolve));
-        return new Response(new Blob([url]));
+        return new Response(url);
       });
       h.gallery.open(0);
       await settle();
@@ -502,7 +502,7 @@ describe("gallery screen", () => {
           await new Promise<void>((resolve) => (release = resolve));
           if (init?.signal?.aborted) throw new DOMException("aborted", "AbortError");
         }
-        return new Response(new Blob([url]));
+        return new Response(url);
       });
       h.gallery.open(0);
       await settle();
