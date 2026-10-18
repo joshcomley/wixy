@@ -6,6 +6,43 @@ Add two-person live audio calling to the unlocked Server panel, coordinated thro
 
 ## Context + current state
 
+CURRENT FINAL REPAIR: BOTH permission MERGE reports complete/read; mechanisms
+converge. Parent implemented immediate release/pagehide/before-visible cached
+policy completion with tri-state exemption outcome and original hide timestamp,
+using existing restore marker. Read voice-permission-ruling.md.284 affected
+tests+strict TS+LF build pass; full1724 chat frontend tests pass before final
+one-line defensive helper invocation, affected284+types pass again after it.
+Real Chromium cache/draft/presence-only recovery passes before final invocation.
+Parent next freezes exact corrected head and dispatches NEW focused senior audit
+per voice-permission-audit-packet.md. Backend/media unchanged from b2c01b6;
+reuse still-applicable62-test/duplex proof. No PR/merge or physical acceptance.
+Parent owns exact-head review, live gates and confirmed final delivery merge SHA.
+All older paragraphs below are history, including the previous proposal waits.
+
+CURRENT OVERRIDE: round3 audit completed PASS C0/H0/M0/L0 at b2c01b6, but did
+NOT execute the late micPermission/order concern. Parent then reproduced it
+with REAL panel + REAL call controller and pending prepare: panel-first2fails,
+controller-first2passes, each with/without a later hidden notification. Audio
+stops once; default hidden-lock policy is skipped only in panel-first order.
+No clean delivery clearance yet. Browser repair reopened. One-issue bounded
+Group Therapy PROPOSE sent Astra finder bf81fcb6 (routes successor fdd6f26b)
+and Gemini c2ee5b92; brief `voice-lifecycle-permission-repair-brief.md`.
+Outputs parent voice-permission-proposal-astra.md and sibling workspace50
+voice-permission-proposal-gemini.md. Parent sends BOTH to EACH for narrow MERGE,
+then implements/proves with four-cell discriminator and affected regressions.
+No broad redesign; source runtime still b2c01b6, new test only so far. Parent
+retains physical/tunnel/quality/Slots gates and confirmed merge-SHA ownership.
+
+Permission proposals BOTH read; narrow MERGE dispatched to EACH with BOTH paths
+in `voice-permission-merge-brief.md`, equal-standing and provenance requirements.
+Astra proposes tri-state/before-restore recheck preserving original hide timestamp;
+Gemini measures282 affected tests green with immediate suspension-release recheck
+and additional pending flag. Resolve timing, reentrant teardown and original
+causal evidence; parent then IMPLEMENTS. Outputs parent voice-permission-merge-astra.md
+and siblingworkspace50 voice-permission-merge-gemini.md. Deadline3min, follow-up
+sw_4d47f8eded8645328dd9e9d05f036e68; no broad review. Parent added4 green genuine
+exemption controls, keeping the4-cell bug discriminator2red/2green before repair.
+
 CURRENT: round2 all-proposal convergence implemented and parent-locally proven.
 Read `spec/server-chat/voice-repair-round2-ruling.md`. Selected shared cached
 pair gate/immediate removal, unconditional caller terminal correlation, panel-owned

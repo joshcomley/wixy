@@ -24,6 +24,11 @@ persisted-page Chromium scenario uses actual panel/chatView/thread and asserts d
 preservation and presence-only restoration; injected events do not certify physical
 BFCache eligibility or mobile background behavior. On Windows set `WIXY_E2E_PYTHON`
 to the installed Python interpreter, since bare `python3` may be the Store alias.
+The pending-permission cache regression combines the real panel and real call
+controller, permutes both pagehide listener orders and hidden-event presence, and
+asserts lock before visible return, one audio stop and socket close. Companion
+controls retain genuine picker/permission exemptions, cover permission ending before
+persisted pagehide and verify shield decisions against the original hide timestamp.
 
 The test matrix, fixtures, and how to run everything. Spec:
 [`spec/08-testing-acceptance.md`](../../spec/08-testing-acceptance.md). CI is

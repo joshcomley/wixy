@@ -29,6 +29,9 @@ lifetime without waiting for a monitor tick. Ineligible endpoints are removed;
 operational refresh expiry still does not imply credential revocation. Persisted-page
 restoration runs through the panel's lock/expiry policy before fresh presence opens;
 actual detach/dispose prevents restoration, and no prior audio or consent is restored.
+A temporary picker/permission exemption does not complete cached hidden policy: when
+that exemption ends, the panel applies policy before restoration, retaining original
+hide evidence. Call teardown cannot waive configured locking through listener order.
 
 *Enforced by:* `livechat/call_broker.py`, `routes_livechat_calls.py`, `server/call/*`,
 `test_livechat_calls.py`, `call*.test.ts`, panel suspension tests and

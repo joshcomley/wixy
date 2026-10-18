@@ -59,6 +59,12 @@ restore marker. Constructor failure on Answer declines immediately; microphone
 ownership disables starting Call/Answer while presence-only reconnection stays usable.
 Persisted pagehide itself runs the existing hidden policy in case visibilitychange
 is missing; the following hidden notification is idempotent until a visible return.
+The owner distinguishes an unseen, temporarily exempt and handled hide. If call
+teardown releases the final picker/permission exemption during a pending cache hide,
+`completeCachedHiddenPolicy` finishes policy immediately, before presence can reopen.
+It also runs when an earlier exempt visibility hide reaches persisted pagehide after
+permission ended. Rechecks retain the original hide timestamp for screen-lock evidence.
+Still-held exemptions and ordinary non-cache chooser returns keep their existing rules.
 
 A hidden human↔human live chat for admin users, disguised as a **"Server"** nav tab inside
 the already CF-Access-gated `/admin`. Not the AI assistant, not visitor-facing — its own

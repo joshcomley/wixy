@@ -13,6 +13,7 @@ import {
   PICKER_SUSPEND_MAX_MS,
 } from "../../src/server/constants";
 import { createServerChatView as createRealServerChatView } from "../../src/server/chatView";
+import { createCallController } from "../../src/server/call/controller";
 import { IDLE_EXTENDED_KEY, setIdleLockExtended } from "../../src/server/idlePreference";
 import { setLockSettings } from "../../src/server/lockSettings";
 import { mountServerPanel, type ServerPanelDeps } from "../../src/server/panel";
@@ -557,6 +558,127 @@ describe("mountServerPanel", () => {
     window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
     expect(tracked.attachCalls).toHaveLength(1);
     expect(tracked.detachCalls).toBe(1);
+    panel.teardown();
+  });
+
+  it.each([
+    [false, false], [false, true], [true, false], [true, true],
+  ])("pending call permission cannot waive cache lock (controller first=%s, hidden event=%s)", async (controllerFirst, hiddenEvent) => {
+    setHidden(false);
+    const registration = vi.spyOn(window, "addEventListener");
+    class CallSocket {
+      readyState = 1;
+      bufferedAmount = 0;
+      binaryType = "";
+      onopen: (() => void) | null = null;
+      onmessage: ((event: { data: unknown }) => void) | null = null;
+      onclose: ((event: { code: number }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      send = vi.fn();
+      close = vi.fn();
+      receive(message: unknown): void { this.onmessage?.({ data: JSON.stringify(message) }); }
+    }
+    const sockets: CallSocket[] = [];
+    const controllers: ReturnType<typeof createCallController>[] = [];
+    const prepare = vi.fn(() => new Promise<void>(() => {}));
+    const stop = vi.fn();
+    let attaches = 0;
+    let detaches = 0;
+    const createServerChatView: CreateServerChatView = ({ win, hooks }) => {
+      const calls = createCallController({ win, hooks, isMicBusy: () => false, onBusy: vi.fn(),
+        socketFactory: () => {
+          const socket = new CallSocket();
+          sockets.push(socket);
+          return socket as unknown as WebSocket;
+        },
+        audioFactory: () => ({ prepare, stop, start: vi.fn(), setMuted: vi.fn(),
+          pulse: vi.fn(), play: vi.fn(), captureLease: vi.fn() }),
+      });
+      controllers.push(calls);
+      const element = document.createElement("div");
+      element.className = "wx-srv-thread";
+      element.append(calls.element);
+      return { element,
+        attach: (session) => { attaches++; calls.attach(session, "A"); },
+        detach: () => { detaches++; calls.detach(); },
+        dispose: () => calls.dispose(),
+      };
+    };
+    const { panel } = await unlockedChat({ createServerChatView });
+    try {
+      const hides = registration.mock.calls.filter(([type]) => type === "pagehide").map(([, handler]) => handler);
+      expect(hides).toHaveLength(2); // Real panel and real controller, no surrogate release.
+      if (controllerFirst) {
+        for (const handler of hides) window.removeEventListener("pagehide", handler);
+        for (const handler of [...hides].reverse()) window.addEventListener("pagehide", handler);
+      }
+      const socket = sockets[0]!;
+      const calls = controllers[0]!;
+      const callId = "a".repeat(32);
+      socket.onopen?.();
+      socket.receive({ type: "welcome", deadline: expiresIn(3600) });
+      socket.receive({ type: "incoming", callId, peer: "B" });
+      [...calls.element.querySelectorAll("button")].find((button) => button.textContent === "Answer")!.click();
+      socket.receive({ type: "prepare", callId });
+      expect(prepare).toHaveBeenCalledTimes(1); // Its await holds the real panel micPermission.
+      window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+      expect(detaches).toBe(1); // Complete policy in this dispatch, before visible return.
+      expect(socket.close).toHaveBeenCalledTimes(1);
+      if (hiddenEvent) {
+        setHidden(true);
+        document.dispatchEvent(new Event("visibilitychange"));
+      }
+      setHidden(false);
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(detaches).toBe(1);
+      expect(attaches).toBe(1);
+      expect(sockets).toHaveLength(1);
+    } finally { panel.teardown(); registration.mockRestore(); }
+  });
+
+  it.each(["filePicker", "micPermission"] as const)("cache restoration honors a genuinely held %s exemption", async (reason) => {
+    setHidden(false);
+    const tracked = trackedChatViewFactory();
+    const { panel } = await unlockedChat({ createServerChatView: tracked.createServerChatView });
+    const release = tracked.hooks!.suspend(reason);
+    try {
+      window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+      expect(tracked.detachCalls).toBe(0);
+      expect(tracked.attachCalls).toHaveLength(2);
+    } finally { release(); panel.teardown(); }
+  });
+
+  it.each(["filePicker", "micPermission"] as const)("ordinary non-cache %s return retains its existing exemption", async (reason) => {
+    setHidden(false);
+    const tracked = trackedChatViewFactory();
+    const { panel } = await unlockedChat({ createServerChatView: tracked.createServerChatView });
+    const release = tracked.hooks!.suspend(reason);
+    setHidden(true);
+    document.dispatchEvent(new Event("visibilitychange"));
+    release();
+    setHidden(false);
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(tracked.detachCalls).toBe(0);
+    expect(tracked.attachCalls).toHaveLength(1);
+    panel.teardown();
+  });
+
+  it("completes an exempt visibility hide when permission ended before persisted pagehide", async () => {
+    setHidden(false);
+    const tracked = trackedChatViewFactory();
+    const { panel } = await unlockedChat({ createServerChatView: tracked.createServerChatView });
+    const release = tracked.hooks!.suspend("micPermission");
+    setHidden(true);
+    document.dispatchEvent(new Event("visibilitychange"));
+    release();
+    expect(tracked.detachCalls).toBe(0); // Ordinary chooser return is still exempt.
+    window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+    expect(tracked.detachCalls).toBe(1);
+    setHidden(false);
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    expect(tracked.attachCalls).toHaveLength(1);
     panel.teardown();
   });
 

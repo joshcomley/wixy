@@ -1302,6 +1302,25 @@ describe("mountServerPanel with a device grant and the lock checkboxes", () => {
   });
 
   describe("the shield", () => {
+    it("finishes cached permission exemption immediately while preserving the original screen-lock cause", async () => {
+      window.localStorage.setItem(LOCK_ON_SCREEN_KEY, "0");
+      rig = installIdleDetector("granted");
+      const { panel, chat } = await mountUnlockedByPin();
+      const release = chat.hooks!.suspend("micPermission");
+      hide();
+      window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+      rig.lockScreen(); // Causal for the ORIGINAL hide; screen locking is allowed here.
+      await vi.advanceTimersByTimeAsync(4_000);
+      release();
+      expect(chatOpen(panel)).toBe(false); // Shield policy completed before returning.
+      show();
+      await vi.advanceTimersByTimeAsync(SHIELD_WAIT_MS + 1);
+      // Restamping hide at release would lose the old evidence, infer a tab switch,
+      // and leave this lock-on-tab device locked instead of restoring it.
+      expect(chatOpen(panel)).toBe(true);
+      expect(chat.attachCalls).toHaveLength(2);
+    });
+
     it("detaches the chat at once and puts the decoy up, keeping the session until it resolves", async () => {
       window.localStorage.setItem(LOCK_ON_TAB_KEY, "0");
       window.localStorage.setItem(SCREENLOCK_PROVEN_KEY, "1");
