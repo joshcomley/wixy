@@ -16,6 +16,14 @@ and playback, even if permission resolves later. Existing tab/screen policies re
 authoritative. Reconnection and token replacement never resume a call without consent.
 Remote stop across a network partition is bounded by leases/liveness, not instantaneous.
 
+Actual future completion owns native worker capacity (admission <=4, refresh <=8),
+even if its awaiter is cancelled. Operational failure is not credential revocation:
+stop audio without an unauthorized lock. Overflow evictions run after the outer
+synchronous broker transition, removing stale phase controls before a writer runs.
+Capture provenance is bound at production, never refreshed at receipt. One coalesced
+graph control may be unacknowledged; only an actual render ack authorizes a receiver
+lease using the original wall/audio expiry, never a new window on late receipt.
+
 *Enforced by:* `livechat/call_broker.py`, `routes_livechat_calls.py`, `server/call/*`,
 `test_livechat_calls.py`, `call*.test.ts`, panel suspension tests and
 `e2e/tests/server-calls.spec.ts`. Protocol/acceptance:

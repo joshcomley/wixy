@@ -7,9 +7,14 @@ the route's bounded workers, never inside these state transitions.
 from __future__ import annotations
 
 import asyncio
+import functools
+import threading
 import time
 from collections import deque
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from typing import Concatenate
 from uuid import uuid4
 
 from builder.jsontypes import JsonObject
@@ -26,6 +31,71 @@ from wixy_server.livechat.call_protocol import (
     unpack_frame,
 )
 from wixy_server.livechat.tokens import ServerAuth
+
+
+class CallCapacityError(RuntimeError):
+    """Synchronous auth/grant work is at its fixed cap; fail closed without locking."""
+
+
+class CallWork:
+    """Fixed-capacity synchronous jobs whose permits are released by the job itself.
+
+    A cancelled or timed-out awaiter never frees a permit while its thread still runs;
+    a job cancelled before it starts frees it through the same done-callback. Its own
+    executor keeps blocked call work off AnyIO's shared default thread limiter.
+    """
+
+    def __init__(self, capacity: int, name: str) -> None:
+        self.capacity = capacity
+        self.work = 0
+        self.closed = False
+        self.lock = threading.Lock()
+        self.executor = ThreadPoolExecutor(capacity, thread_name_prefix=name)
+
+    async def run[T](self, job: Callable[[], T]) -> T:
+        with self.lock:
+            if self.closed or self.work >= self.capacity:
+                raise CallCapacityError("call work capacity")
+            self.work += 1
+        try:
+            future = self.executor.submit(job)
+        except BaseException:
+            self.finished(None)
+            raise
+        future.add_done_callback(self.finished)
+        return await asyncio.wrap_future(future)
+
+    def finished(self, _future: object) -> None:
+        with self.lock:
+            self.work -= 1
+
+    def close(self) -> None:
+        """Queued jobs are cancelled; running synchronous calls cannot be interrupted
+        and keep their permits (and the process's exit) until they return."""
+        with self.lock:
+            self.closed = True
+        self.executor.shutdown(wait=False, cancel_futures=True)
+
+
+def transition[**P, R](
+    method: Callable[Concatenate[CallBroker, P], R],
+) -> Callable[Concatenate[CallBroker, P], R]:
+    """Queue overflow only marks a peer; membership changes after the outermost step."""
+
+    @functools.wraps(method)
+    def wrapper(self: CallBroker, /, *args: P.args, **kwargs: P.kwargs) -> R:
+        self.depth += 1
+        try:
+            return method(self, *args, **kwargs)
+        finally:
+            try:
+                if self.depth == 1:
+                    while self.evicting:
+                        self._drop(self.evicting.popleft())
+            finally:
+                self.depth -= 1
+
+    return wrapper
 
 
 @dataclass
@@ -71,6 +141,7 @@ class Peer:
     sample: int = -480
     muted: bool = False
     fresh_at: float = field(default_factory=time.monotonic)
+    last_terminal: str | None = None
 
 
 @dataclass
@@ -97,16 +168,28 @@ class CallBroker:
         self.connections = 0
         # Bounded identity table; do not evict live rate limits under a flood.
         self.admissions: dict[str, Budget] = {}
+        self.depth = 0
+        self.evicting: deque[Peer] = deque()
+        # Separate owners: a slow Access/JWKS verifier cannot starve live calls' grant
+        # refresh, and orphaned refreshes cannot block new admissions. Nominal 4 + 8.
+        self.admission_work = CallWork(4, "wixy-call-admission")
+        self.refresh_work = CallWork(8, "wixy-call-refresh")
 
+    @transition
     def emit(self, peer: Peer, message: JsonObject) -> None:
         if peer.closed:
             return
         if len(peer.controls) >= 16:
-            self.remove(peer)
+            # Fail this socket now; unlink it once the enclosing transition completes.
+            peer.closed = True
+            peer.controls.clear()
+            peer.wake.set()
+            self.evicting.append(peer)
             return
         peer.controls.append(message)
         peer.wake.set()
 
+    @transition
     def add(self, peer: Peer) -> bool:
         now = time.monotonic()
         if self.closed or len(self.peers) >= 8:
@@ -124,8 +207,9 @@ class CallBroker:
         self.peers[peer.id] = peer
         self.emit(peer, {"type": "welcome", "connectionId": peer.id, "deadline": peer.deadline})
         self.presence()
-        return True
+        return not peer.closed
 
+    @transition
     def presence(self) -> None:
         busy = (self.call.caller, self.call.callee) if self.call else ()
         for peer in list(self.peers.values()):
@@ -149,6 +233,7 @@ class CallBroker:
             and time.monotonic() < peer.grant_until
         )
 
+    @transition
     def finish(self, reason: str) -> None:
         call, self.call = self.call, None
         if call is None:
@@ -156,6 +241,7 @@ class CallBroker:
         for key in (call.caller, call.callee):
             peer = self.peers.get(key)
             if peer:
+                peer.last_terminal = call.id
                 peer.media.clear()
                 peer.outstanding.clear()
                 peer.capture_leases.clear()
@@ -166,7 +252,11 @@ class CallBroker:
                 self.emit(peer, {"type": "ended", "callId": call.id, "reason": reason})
         self.presence()
 
+    @transition
     def remove(self, peer: Peer) -> None:
+        self._drop(peer)
+
+    def _drop(self, peer: Peer) -> None:
         if self.peers.get(peer.id) is not peer:
             peer.closed = True
             peer.wake.set()
@@ -176,16 +266,24 @@ class CallBroker:
         if self.call and self.call.contains(peer):
             self.finish("disconnected")
         peer.media.clear()
+        peer.outstanding.clear()
+        peer.capture_leases.clear()
+        peer.playout = (0, 0)
+        peer.last_terminal = None
         peer.controls.clear()
         peer.wake.set()
         self.presence()
 
+    @transition
     def shutdown(self) -> None:
         self.closed = True
         self.finish("unavailable")
         for peer in list(self.peers.values()):
             self.remove(peer)
+        self.admission_work.close()
+        self.refresh_work.close()
 
+    @transition
     def command(self, peer: Peer, command: Command) -> None:
         now = time.monotonic()
         if not self.permitted(peer) or not peer.controls_budget.take(now):
@@ -208,17 +306,33 @@ class CallBroker:
                 or not self.permitted(target_peer)
                 or not peer.invites_budget.take(now)
             ):
-                self.emit(peer, {"type": "unavailable"})
+                # Correlated, so a crossing caller's loss never erases its incoming call.
+                self.emit(peer, {"type": "unavailable", "requestId": command.requestId})
                 return
             invited = self.call = Call(peer.id, target_peer.id)
-            self.emit(peer, {"type": "outgoing", "callId": invited.id, "peer": target_peer.label})
+            self.emit(
+                peer,
+                {
+                    "type": "outgoing",
+                    "callId": invited.id,
+                    "peer": target_peer.label,
+                    "requestId": command.requestId,
+                },
+            )
             self.emit(target_peer, {"type": "incoming", "callId": invited.id, "peer": peer.label})
             self.presence()
             return
         call = self.call
         if call is not None and now >= call.until:
             self.finish("timeout")
-            raise ValueError("call expired")
+            call = None
+        # Terminal controls may already be in flight when the other side ends.
+        # Only this socket's last former pair epoch is eligible; no new authority.
+        harmless_terminal = isinstance(command, (Ack, Lease, Mute)) or (
+            isinstance(command, CallAction) and command.type in ("end", "decline", "failed")
+        )
+        if harmless_terminal and command.callId == peer.last_terminal:
+            return
         if call is None or command.callId != call.id or not call.contains(peer):
             raise ValueError("call ownership")
         if isinstance(command, CallAction):
@@ -264,9 +378,14 @@ class CallBroker:
         assert self.call and self.call.contains(peer)
         return self.peers[self.call.callee if peer.id == self.call.caller else self.call.caller]
 
+    @transition
     def frame(self, peer: Peer, data: bytes) -> None:
         now = time.monotonic()
         epoch, seq, sample, lease = unpack_frame(data)
+        if not self.permitted(peer) or not peer.media_budget.take(now):
+            raise ValueError("media permission")
+        if epoch == peer.last_terminal:
+            return  # Former-pair in-flight audio is discarded, never rerouted.
         call = self.call
         if (
             not self.permitted(peer)
@@ -275,7 +394,6 @@ class CallBroker:
             or call.state != "connected"
             or epoch != call.id
             or peer.muted
-            or not peer.media_budget.take(now)
         ):
             raise ValueError("media permission")
         if seq <= peer.sequence or sample <= peer.sample or sample != seq * 480:
@@ -308,6 +426,7 @@ class CallBroker:
             return data
         return None
 
+    @transition
     def tick(self, peer: Peer) -> None:
         now = time.monotonic()
         if not self.permitted(peer) or now - peer.pong_at > 6:

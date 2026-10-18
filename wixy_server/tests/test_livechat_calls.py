@@ -215,8 +215,8 @@ def test_real_uvicorn_rejects_oversized_fragmented_message(
             subprotocols=[Subprotocol("wixy-call-v1")],
             additional_headers={"cf-access-jwt-assertion": access(key)},
         ) as ws:
-            ws.send(["x" * 3000, "x" * 3000])
             with pytest.raises(ConnectionClosedError) as closed:
+                ws.send(["x" * 3000, "x" * 3000])
                 ws.recv(timeout=2)
             assert closed.value.rcvd and closed.value.rcvd.code == 1009
     finally:
@@ -304,6 +304,40 @@ def test_expiry_during_silence_and_shutdown() -> None:
     assert a.closed and broker.call is None
     broker.shutdown()
     assert not broker.peers and b.closed
+
+
+def test_disconnect_erases_the_removed_receivers_credits_and_leases() -> None:
+    broker, a, b, _ = peers()
+    epoch = connect(broker, a, b)
+    broker.tick(b)
+    broker.command(b, Lease(type="lease", callId=epoch, lease=1))
+    broker.frame(a, frame(epoch, 0, a.lease_counter))
+    assert broker.next_media(b) and b.outstanding and b.capture_leases
+    broker.remove(b)
+    assert b.closed and not b.outstanding and not b.capture_leases
+    assert not b.media and not b.controls and b.playout == (0, 0)
+
+
+def test_late_terminal_controls_only_ignore_the_former_pair_epoch() -> None:
+    broker, a, b, c = peers()
+    old = connect(broker, a, b)
+    broker.finish("connection_slow")
+    broker.command(a, CallAction(type="end", callId=old))
+    broker.command(b, Ack(type="ack", callId=old, sequence=0))
+    broker.command(a, Lease(type="lease", callId=old, lease=1))
+    broker.frame(a, frame(old, 0, 1))
+    assert not a.closed and not b.closed and broker.call is None and not b.media
+    with pytest.raises(ValueError, match="ownership"):
+        broker.command(c, CallAction(type="end", callId=old))
+    broker.command(b, Invite(type="invite", requestId="fresh", targetConnectionId=a.id))
+    assert broker.call
+    new = broker.call.id
+    broker.command(a, CallAction(type="end", callId=old))
+    broker.frame(a, frame(old, 1, 1))
+    with pytest.raises(ValueError):
+        broker.frame(c, frame(old, 0, 1))
+    assert broker.call and broker.call.id == new
+    assert not a.media and not b.media and not c.media
 
 
 def test_glare_and_delayed_accept_cannot_transfer_pair() -> None:

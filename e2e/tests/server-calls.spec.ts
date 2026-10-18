@@ -26,12 +26,22 @@ interface Probe {
   analyser: AnalyserNode | null;
   context: AudioContext | null;
   failures: string[];
+  closes: number[];
+  visibility: string[];
 }
 async function probe(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const w = window as Window & { __voiceProbe?: Probe };
-    const state: Probe = { streams: [], analyser: null, context: null, failures: [] };
+    const state: Probe = { streams: [], analyser: null, context: null, failures: [], closes: [], visibility: [] };
     w.__voiceProbe = state;
+    document.addEventListener("visibilitychange", () => state.visibility.push(document.visibilityState));
+    const NativeSocket = WebSocket;
+    window.WebSocket = class extends NativeSocket {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        super(url, protocols);
+        this.addEventListener("close", (event) => state.closes.push(event.code));
+      }
+    };
     const getMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
     navigator.mediaDevices.getUserMedia = async (constraints) => {
       const stream = await getMedia(constraints).catch((error: unknown) => {
@@ -79,16 +89,22 @@ async function tracks(page: Page): Promise<string[]> {
 test("duplex sound, muted idle pause, panic stop and fresh idle countdown", async ({ browser }) => {
   const a = await browser.newContext({ permissions: ["microphone"] });
   const b = await browser.newContext({ permissions: ["microphone"] });
+  const c = await browser.newContext({ permissions: ["microphone"] });
+  let observerActivity: ReturnType<typeof setInterval> | null = null;
+  let stage = "unlock devices";
   try {
     const pa = await a.newPage();
     const pb = await b.newPage();
+    const pc = await c.newPage();
     await probe(pa);
     await probe(pb);
+    await probe(pc);
     const errorsA = trackConsoleErrors(pa);
     const errorsB = trackConsoleErrors(pb);
-    const received = [0, 0];
-    const peaks = [0, 0];
-    for (const [i, page] of [pa, pb].entries()) page.on("websocket", (ws) => {
+    const errorsC = trackConsoleErrors(pc);
+    const received = [0, 0, 0];
+    const peaks = [0, 0, 0];
+    for (const [i, page] of [pa, pb, pc].entries()) page.on("websocket", (ws) => {
       expect(new URL(ws.url()).search).toBe("");
       ws.on("framereceived", (frame) => {
         if (typeof frame.payload !== "string") {
@@ -99,7 +115,24 @@ test("duplex sound, muted idle pause, panic stop and fresh idle countdown", asyn
     });
     await unlock(pa, "Caller");
     await unlock(pb, "Receiver");
-    await expect(pa.getByLabel("Person to call").locator("option")).toHaveCount(1);
+    await unlock(pc, "Observer");
+    const observerBox = await pc.locator(".wx-srv-thread").boundingBox();
+    if (!observerBox) throw new Error("Observer chat did not open");
+    // Keep the unrelated unlocked view active. Neither call endpoint gets activity,
+    // so the muted-call idle test still discriminates a real countdown suspension.
+    observerActivity = setInterval(() => {
+      void pc.mouse.move(observerBox.x + observerBox.width / 2 + Math.random() * 3,
+        observerBox.y + observerBox.height / 2).catch((error: unknown) => errorsC.push(String(error)));
+    }, 1000);
+    stage = "load worklet and choose receiver";
+    const asset = await pa.request.get("/admin/static/admin/call-worklet.js");
+    expect(asset.status()).toBe(200);
+    expect(asset.headers()["content-type"]).toMatch(/javascript|ecmascript/);
+    await expect(pa.getByLabel("Person to call").locator("option")).toHaveCount(2);
+    const receiverId = await pa.getByLabel("Person to call").locator("option").filter({ hasText: "Receiver" }).getAttribute("value");
+    if (!receiverId) throw new Error("Receiver missing");
+    await pa.getByLabel("Person to call").selectOption(receiverId);
+    stage = "connect and render duplex audio";
     await pa.locator(".wx-srv-call").getByRole("button", { name: "Call", exact: true }).click();
     await expect(pb.locator(".wx-srv-call")).toContainText("Incoming call");
     expect(await tracks(pa)).toEqual([]); // Consent before mic capture.
@@ -115,23 +148,45 @@ test("duplex sound, muted idle pause, panic stop and fresh idle countdown", asyn
         status: await pa.locator(".wx-srv-call").textContent() });
     }, { timeout: 6000, intervals: [50] }).toBe("audible");
     await expect.poll(() => rms(pb), { timeout: 6000, intervals: [50] }).toBeGreaterThan(0.001);
-    expect(received.every((n) => n > 10)).toBe(true);
+    expect(received[0]).toBeGreaterThan(10);
+    expect(received[1]).toBeGreaterThan(10);
+    expect(received[2]).toBe(0);
+    await expect(pc.locator(".wx-srv-call").getByRole("button", { name: "Answer", exact: true })).toBeHidden();
+    expect(await tracks(pc)).toEqual([]);
+    await expect(pa.locator(".wx-srv-call")).toContainText("On a voice call");
+    await expect(pb.locator(".wx-srv-call")).toContainText("On a voice call");
     // A stalled main thread must not release accumulated audio on return.
+    stage = "force stall and obtain fresh consent";
     await pa.evaluate(() => { const until = performance.now() + 450; while (performance.now() < until) { /* forced stall */ } });
     await expect(pb.locator(".wx-srv-call")).toContainText("Call ended");
     expect((await tracks(pa)).every((x) => x === "ended")).toBe(true);
     expect((await tracks(pb)).every((x) => x === "ended")).toBe(true);
-    await pa.locator(".wx-srv-call").getByRole("button", { name: "Call", exact: true }).click();
+    for (const [name, page] of [["caller", pa], ["receiver", pb]] as const) {
+      const lifecycle = await page.evaluate(() => {
+        const p = (window as Window & { __voiceProbe?: Probe }).__voiceProbe;
+        return { call: document.querySelector(".wx-srv-call")?.textContent, closes: p?.closes,
+          visibility: p?.visibility, context: p?.context?.state };
+      });
+      console.log(`After forced stall ${name}: ${JSON.stringify(lifecycle)}`);
+      await expect(page.locator(".wx-srv-thread")).toBeVisible();
+    }
+    await pa.locator(".wx-srv-call").getByRole("button", { name: "Call", exact: true }).click({ timeout: 5000 });
     await pb.locator(".wx-srv-call").getByRole("button", { name: "Answer", exact: true }).click();
     for (const page of [pa, pb]) await expect(page.locator(".wx-srv-call")).toContainText("On a voice call");
     await pa.locator(".wx-srv-call").getByRole("button", { name: "Mute", exact: true }).click();
     await pb.locator(".wx-srv-call").getByRole("button", { name: "Mute", exact: true }).click();
+    stage = "muted idle and third-device isolation";
     await pa.waitForTimeout(11_000); // Beyond default idle, without fake clock/network interference.
     for (const page of [pa, pb]) {
       await expect(page.locator(".wx-srv-call")).toContainText("On a voice call");
       await expect(page.locator(".wx-srv-thread")).toBeVisible();
     }
+    await expect(pc.locator(".wx-srv-thread")).toBeVisible();
+    await expect(pc.locator(".wx-srv-call")).not.toContainText("Incoming call");
+    expect(received[2]).toBe(0);
+    expect(await tracks(pc)).toEqual([]);
     await pa.keyboard.press("Escape");
+    stage = "panic teardown and fresh remote countdown";
     await expect(pa.locator(".wx-srv-thread")).toHaveCount(0);
     await expect(pb.locator(".wx-srv-call")).toContainText("Call ended");
     expect((await tracks(pa)).every((x) => x === "ended")).toBe(true);
@@ -142,5 +197,12 @@ test("duplex sound, muted idle pause, panic stop and fresh idle countdown", asyn
     await expect(pb.locator(".wx-srv-thread")).toHaveCount(0);
     expect(errorsA).toEqual([]);
     expect(errorsB).toEqual([]);
-  } finally { await a.close(); await b.close(); }
+    expect(errorsC).toEqual([]);
+  } catch (error) {
+    console.error(`Voice test failed at ${stage}: ${String(error)}`);
+    throw error;
+  } finally {
+    if (observerActivity !== null) clearInterval(observerActivity);
+    await Promise.all([a.close(), b.close(), c.close()]);
+  }
 });

@@ -6,6 +6,32 @@ Add two-person live audio calling to the unlocked Server panel, coordinated thro
 
 ## Context + current state
 
+LATEST: two-family MERGE is complete and parent integration is locally proven.
+Read `spec/server-chat/voice-repair-round1-ruling.md` and both merge reports. Parent
+adopted futures with separate 4/8 executors, deferred eviction, production-bound capture,
+render-quantum acknowledgements/original expiry and correlated invitation ownership.
+Five extra parent discriminators failed red then passed: repeated Answer, delayed ack
+with frozen audio clock, recycle-on-callback-error, admitted-route cancellation close
+code and nested transition cleanup. The real-browser loop then exposed late former-pair
+messages disconnecting presence and target-selection failover to the observer; both
+have red/green discriminators and repairs. Removed-peer credit/lease erasure also fixed.
+
+Current proof: 43 server call/repair tests pass with four workers; 1,702 frontend chat
+regressions pass with four workers; strict TS, full mypy (244 files), ruff/format and
+rebuilt LF assets pass. Real three-context Chromium synthetic duplex test PASSED
+(28.4 s test, 35.2 s total): rendered sound, 450 ms stall, fresh consent, muted idle
+pause, panic cleanup/fresh countdown, zero PCM/no prompt/no microphone on an unrelated
+unlocked third browser. After stall both call contexts closed but sockets stayed open;
+no unexpected visibility changes. This is local privacy proof, not physical-device,
+production-tunnel, latency/loss/15-minute speakerphone or Slots acceptance.
+
+Next owner/action: parent freezes repair candidate and dispatches a NEW senior auditor,
+not either proposer. Keep implementation unchanged during that audit. Then parent owns
+private live test exposure, physical gates and final PR/checks/one confirmed merge.
+No PR or delivery merge exists. Device decision 1867 is answered in chat; Answers 2957
+has the verified local third-browser result and the ordinary-message-sync distinction.
+The older paragraphs below are historical progress, not current completion claims.
+
 First implementation audit is complete and blocks delivery: C0/H1/M4/L0 at
 `4829f606fcfbf53f05f1dc955bce35abb4ce3695`; report
 `spec/server-chat/voice-call-implementation-audit.md`. Reopen relay/browser repair work.

@@ -7,7 +7,8 @@ export interface CallAudioHandle {
   start(): void;
   stop(): void;
   setMuted(muted: boolean): void;
-  lease(): number;
+  pulse(): void;
+  captureLease(lease: number): void;
   play(pcm: ArrayBuffer, sequence: number, until: number): void;
 }
 export interface CallDeps {
@@ -16,8 +17,8 @@ export interface CallDeps {
   isMicBusy: () => boolean;
   onBusy: (busy: boolean) => void;
   socketFactory?: (url: string, protocol: string) => WebSocket;
-  audioFactory?: (capture: (pcm: ArrayBuffer) => void, admitted: (sequence: number) => void,
-    failed: () => void) => CallAudioHandle;
+  audioFactory?: (capture: (pcm: ArrayBuffer, lease: number) => void, admitted: (sequence: number) => void,
+    failed: () => void, leaseReady: (until: number, remainingMs: number) => void) => CallAudioHandle;
 }
 
 /** One attachment's presence and one explicit call attempt; never auto-resumes audio. */
@@ -31,23 +32,25 @@ export function createCallController(deps: CallDeps) {
   const targets = win.document.createElement("select");
   targets.setAttribute("aria-label", "Person to call");
   targets.dataset["srvGestureBoundary"] = "";
+  targets.addEventListener("change", () => { selectedTarget = targets.value || null; render(); });
   const callButton = button("Call", () => {
     if (!socket || socket.readyState !== 1) { if (session) open(session, label); return; }
     if (!targets.value || deps.isMicBusy() || callId) return;
     if (!activateAudio()) return;
     deps.onBusy(true);
-    pendingInvite = true;
-    if (!send({ type: "invite", requestId: crypto.randomUUID(), targetConnectionId: targets.value })) {
+    outgoingRequest = crypto.randomUUID();
+    if (!send({ type: "invite", requestId: outgoingRequest, targetConnectionId: targets.value })) {
       end("Calls unavailable");
       return;
     }
     callButton.disabled = true;
   });
   const acceptButton = button("Answer", () => {
-    if (!callId || state !== "incoming" || deps.isMicBusy()) return;
+    if (!callId || state !== "incoming" || answerPending || deps.isMicBusy()) return;
     if (!activateAudio()) return;
+    answerPending = true;
     deps.onBusy(true);
-    send({ type: "accept", callId });
+    if (!send({ type: "accept", callId })) { end("Calls unavailable"); return; }
     acceptButton.disabled = true;
   });
   const endButton = button("End call", () => { end("Call ended"); });
@@ -75,14 +78,15 @@ export function createCallController(deps: CallDeps) {
   let lastPulse = win.performance.now();
   let lastMessage = lastPulse;
   let sequence = 0;
-  let captureLease = 0;
-  let captureLeaseAt = 0;
   let playoutId = 0;
   let leases = new Map<number, { at: number; until: number }>();
   let muted = false;
   let backlogAt: number | null = null;
   let deadline = 0;
-  let pendingInvite = false;
+  // The one unanswered invite this tab sent; busy replies are matched to it.
+  let outgoingRequest: string | null = null;
+  let answerPending = false;
+  let selectedTarget: string | null = null;
   let callUntil = 0;
 
   function button(text: string, action: () => void): HTMLButtonElement {
@@ -96,9 +100,9 @@ export function createCallController(deps: CallDeps) {
     const inCall = callId !== null;
     targets.hidden = inCall;
     callButton.hidden = inCall;
-    callButton.disabled = pendingInvite || (socket?.readyState === 1 && targets.options.length === 0);
+    callButton.disabled = outgoingRequest !== null || (socket?.readyState === 1 && targets.value === "");
     acceptButton.hidden = state !== "incoming";
-    acceptButton.disabled = deps.isMicBusy();
+    acceptButton.disabled = answerPending || deps.isMicBusy();
     muteButton.hidden = state !== "connected";
     endButton.hidden = !inCall;
     endButton.textContent = state === "incoming" ? "Decline" : state === "outgoing" ? "Cancel call" : "End call";
@@ -117,22 +121,23 @@ export function createCallController(deps: CallDeps) {
     releaseCall?.();
     releaseCall = null;
     callId = null;
-    pendingInvite = false;
+    outgoingRequest = null;
+    answerPending = false;
     callUntil = 0;
     state = "idle";
     muted = false;
-    captureLease = 0;
     sequence = 0;
     playoutId = 0;
     leases.clear();
     deps.onBusy(false);
     status.textContent = message;
     muteButton.textContent = "Mute";
+    muteButton.setAttribute("aria-pressed", "false");
     render();
   }
   function end(message: string): void {
     const endedId = callId;
-    const wasPending = pendingInvite;
+    const wasPending = outgoingRequest !== null;
     const action = state === "incoming" ? "decline" : "end";
     teardownCall(message); // Stop locally before best-effort network activity.
     if (endedId) send({ type: action, callId: endedId });
@@ -141,30 +146,43 @@ export function createCallController(deps: CallDeps) {
   function activateAudio(): boolean {
     if (deps.isMicBusy()) return false;
     const attemptEpoch = ++callEpoch;
+    const old = audio;
+    audio = null;
+    old?.stop(); // Invalidate old callbacks before touching the old graph.
     try {
-      audio = (deps.audioFactory ?? ((capture, ack, fail) => new CallAudio(capture, ack, fail)))(
-        (pcm) => {
+      audio = (deps.audioFactory ?? ((capture, ack, fail, ready) => new CallAudio(capture, ack, fail, ready)))(
+        (pcm, lease) => {
           if (attemptEpoch !== callEpoch) return;
           if (state !== "connected" || !callId || muted || !socket || socket.readyState !== 1) return;
           const now = win.performance.now();
           if (now - lastPulse > LEASE_MS) { end("Call interrupted"); return; }
-          if (!captureLease || now - captureLeaseAt > LEASE_MS) return;
           if (socket.bufferedAmount > 8192) {
             backlogAt ??= now;
             if (now - backlogAt > 250) end("Connection too slow");
             return;
           }
           backlogAt = null;
-          socket.send(encodeFrame(callId, sequence++, captureLease, pcm));
+          socket.send(encodeFrame(callId, sequence++, lease, pcm));
         },
         (seq) => { if (attemptEpoch === callEpoch && state === "connected" && callId) send({ type: "ack", callId, sequence: seq }); },
         () => { if (attemptEpoch === callEpoch) end("Audio unavailable"); },
+        (until, remainingMs) => {
+          // A receiver playout lease is issued only after the graph proved it rendered.
+          if (attemptEpoch !== callEpoch || state !== "connected" || !callId) return;
+          if (!(remainingMs > 0 && remainingMs <= LEASE_MS)) { end("Audio unavailable"); return; }
+          const now = win.performance.now();
+          const id = ++playoutId;
+          leases.set(id, { at: now + remainingMs, until });
+          for (const [key, lease] of leases) if (lease.at <= now) leases.delete(key);
+          if (leases.size > 4) leases.delete(leases.keys().next().value as number);
+          if (!send({ type: "lease", callId, lease: id })) end("Connection too slow");
+        },
       );
       return true;
     } catch { teardownCall("Calls unavailable in this browser"); return false; }
   }
   function pulse(): void {
-    if (state === "incoming") acceptButton.disabled = deps.isMicBusy();
+    if (state === "incoming") acceptButton.disabled = answerPending || deps.isMicBusy();
     const now = win.performance.now();
     const stale = now - lastPulse > LEASE_MS;
     lastPulse = now;
@@ -176,11 +194,7 @@ export function createCallController(deps: CallDeps) {
     }
     if (state === "connected" && callId && audio) {
       if (stale) { end("Call interrupted"); return; }
-      const id = ++playoutId;
-      leases.set(id, { at: now + LEASE_MS, until: audio.lease() });
-      for (const [key, lease] of leases) if (lease.at <= now) leases.delete(key);
-      if (leases.size > 4) leases.delete(leases.keys().next().value as number);
-      send({ type: "lease", callId, lease: id });
+      audio.pulse();
     }
   }
   async function prepare(id: string): Promise<void> {
@@ -224,7 +238,7 @@ export function createCallController(deps: CallDeps) {
       status.textContent = "Voice calls";
       callButton.textContent = "Call";
     } else if (m["type"] === "presence" && Array.isArray(m["peers"])) {
-      const selected = targets.value;
+      const selected = selectedTarget ?? targets.value;
       targets.replaceChildren();
       for (const candidate of m["peers"].slice(0, 8) as Record<string, unknown>[]) {
         if (candidate["available"] !== true || typeof candidate["id"] !== "string" || typeof candidate["label"] !== "string") continue;
@@ -233,16 +247,31 @@ export function createCallController(deps: CallDeps) {
         option.textContent = `${candidate["label"].slice(0, 32)} · ${option.value.slice(0, 4)}`;
         targets.appendChild(option);
       }
-      if (Array.from(targets.options).some((o) => o.value === selected)) targets.value = selected;
+      if (selected) {
+        selectedTarget = selected;
+        if (Array.from(targets.options).some((o) => o.value === selected)) targets.value = selected;
+        else targets.selectedIndex = -1; // No silent failover to another person's device.
+      } else selectedTarget = targets.value || null;
     } else if (m["type"] === "incoming" || m["type"] === "outgoing") {
+      // An outgoing reply must answer this tab's own pending request.
+      if (m["type"] === "outgoing" && (outgoingRequest === null || m["requestId"] !== outgoingRequest)) return;
       if (callId || typeof m["callId"] !== "string") throw new Error("Invalid invite");
+      if (m["type"] === "incoming" && outgoingRequest !== null) {
+        // A crossing invite lost to this one. Release only that attempt's audio; keep the
+        // request id so its busy reply is recognised. Answer still needs its own gesture.
+        callEpoch++;
+        audio?.stop();
+        audio = null;
+        deps.onBusy(false);
+      } else outgoingRequest = null;
       callId = m["callId"];
-      pendingInvite = false;
       state = m["type"];
       callUntil = win.performance.now() + 30_000;
       status.textContent = state === "incoming" ? `Incoming call from ${String(m["peer"]).slice(0, 32)}` : "Calling…";
     } else if (m["type"] === "unavailable") {
-      teardownCall("That person is unavailable");
+      if (outgoingRequest === null || m["requestId"] !== outgoingRequest) return;
+      outgoingRequest = null;
+      if (callId === null) teardownCall("That person is unavailable");
     } else if (m["callId"] !== callId || !callId) {
       return; // Late terminal/readiness messages cannot revive a canceled attempt.
     } else if (m["type"] === "prepare" && (state === "outgoing" || state === "incoming")) {
@@ -254,9 +283,8 @@ export function createCallController(deps: CallDeps) {
       releaseCall = hooks.suspend("voiceCall");
       status.textContent = "On a voice call";
       pulse();
-    } else if (m["type"] === "capture" && typeof m["lease"] === "number") {
-      captureLease = m["lease"];
-      captureLeaseAt = win.performance.now();
+    } else if (m["type"] === "capture" && typeof m["lease"] === "number" && state === "connected") {
+      audio?.captureLease(m["lease"]);
     } else if (m["type"] === "ended") {
       teardownCall("Call ended");
     }

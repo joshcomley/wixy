@@ -14,14 +14,29 @@ Client controls: `invite {requestId,targetConnectionId}`, `accept|decline|ready|
 {callId}`, `mute {callId,muted}`, `lease {callId,lease}`, `ack {callId,sequence}`, `pong {}`.
 All carry `type`; schemas forbid extra fields. Server sends `incoming|outgoing
 {callId,peer}`, `prepare|connected {callId}`, `capture {callId,lease}`, `muted {callId,muted}`,
-`ended {callId,reason}`, `unavailable {}`, `ping {}`. Media is fixed 1008-byte binary,
+`ended {callId,reason}`, `unavailable {requestId}`, `ping {}`. `outgoing` also echoes
+its originating `requestId`; only a matching outgoing attempt may adopt it. Media is fixed 1008-byte binary,
 never JSON/base64. Canonical offsets, state/ownership, limits and gates:
 [`spec/server-chat/04-voice-calls.md`](../../spec/server-chat/04-voice-calls.md).
 
 Pre-upgrade denial closes with 4403 (the HTTP upgrade is rejected); after upgrade,
-4401 means locked/expired, 4403 invalid protocol, 4429 admission unavailable, 1009
-transport oversize. Normal disconnect/shutdown uses 1000. Clients must not assume
+4401 means actual credential refusal/expiry/confirmed revocation, 4403 invalid protocol,
+4429 socket/work capacity unavailable, 4408 verification/refresh/write deadline missed,
+and 1009 transport oversize. Normal disconnect uses 1000; cancellation/shutdown uses
+1001. Operational failure ends audio without locking the owner. Clients must not assume
 browser JS can read a rejected upgrade's response body. No call state is persisted.
+
+Each socket remembers only its last terminal epoch in memory: late end/decline/failure,
+mute, lease and ack from that former pair, and in-flight old PCM, are discarded without
+disconnecting presence or affecting a newer call. Invalid/missing membership, stale
+accept/ready and third-socket actions remain rejected. This grants no join/resume authority.
+
+Internal main-thread/worklet control is one coalesced `state` snapshot in flight:
+`{type:"state",seq,playUntil,captureLease,captureUntil,enabled,revision}`. The worklet
+acknowledges `{type:"state",seq}` only in an actual render quantum. A timely render
+ack issues one receiver lease using its original wall/audio expiry. Capture returns
+`{type:"capture",pcm,lease,revision,at}` with provenance latched at the first sample;
+main thread and relay cannot relabel it with a newer capture lease.
 
 The literal wire shapes wixy programs against: the HTTP route table, response
 envelopes, error conventions, the two SSE streams, the browser↔iframe postMessage

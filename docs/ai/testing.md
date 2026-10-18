@@ -8,6 +8,14 @@ in `e2e`, `npx playwright test tests/server-calls.spec.ts --workers=1` after reb
 admin assets. Synthetic duplex is distinct from the physical-device listening and
 actual-tunnel gate in [the review](../../spec/server-chat/voice-call-architecture-review.md#acceptance-and-real-audio-validation).
 
+Repair discriminators additionally live in `test_livechat_call_repairs.py` and
+`admin-ui/tests/server/callRepairs.test.ts`: actual native-work accounting under
+cancel/timeout, pre-start cancel and separate quotas; overflow transitions; crossing
+invites; immutable capture tags; rendered acknowledgements and preserved expiry.
+The real browser scenario includes a third unlocked same-login browser: it must see
+no incoming prompt, receive zero audio frames and never acquire a microphone. Device
+selection must not silently move to that observer while the chosen peer is busy.
+
 The test matrix, fixtures, and how to run everything. Spec:
 [`spec/08-testing-acceptance.md`](../../spec/08-testing-acceptance.md). CI is
 `.github/workflows/ci.yml` (see [runbook.md](runbook.md) §CI).

@@ -1,5 +1,7 @@
 /** Owns one attempt's audio resources, including resources returned after cancellation. */
 declare const WIXY_CALL_WORKLET_URL: string;
+const LEASE_S = 0.3;
+interface GraphState { playUntil: number; captureLease: number; captureUntil: number; enabled: boolean; revision: number }
 export class CallAudio {
   private context: AudioContext;
   private stream: MediaStream | null = null;
@@ -9,9 +11,16 @@ export class CallAudio {
   private running = false;
   private muted = false;
   private activation: Promise<void>;
+  // One coalesced main-to-worklet control in flight. The worklet acknowledges it from
+  // process(), so an ack proves a render quantum ran, not merely that the port was read.
+  private desired: GraphState = { playUntil: 0, captureLease: 0, captureUntil: 0, enabled: false, revision: 0 };
+  private posted: GraphState | null = null;
+  private flight: { seq: number; at: number; state: GraphState } | null = null;
+  private seq = 0;
+  private issuedUntil = 0;
 
-  constructor(private onCapture: (pcm: ArrayBuffer) => void, private onAdmitted: (sequence: number) => void,
-    private onFailure: () => void) {
+  constructor(private onCapture: (pcm: ArrayBuffer, lease: number) => void, private onAdmitted: (sequence: number) => void,
+    private onFailure: () => void, private onLeaseReady: (until: number, remainingMs: number) => void = () => {}) {
     this.context = new AudioContext();
     // Called synchronously from Call/Accept user gestures, before any server await.
     this.activation = this.context.resume();
@@ -43,8 +52,32 @@ export class CallAudio {
         if (this.stopped) return;
         if (data["type"] === "capture" && data["pcm"] instanceof ArrayBuffer) {
           const pcm = data["pcm"];
-          if (this.running && !this.muted) this.onCapture(pcm);
-          if (!this.stopped) this.node?.port.postMessage({ type: "buffer", pcm }, [pcm]);
+          // Lease, mute revision and first-sample time were bound by the worklet; never relabel.
+          const at = data["at"];
+          const now = this.context.currentTime;
+          try {
+            if (pcm.byteLength === 960 && this.running && !this.muted
+              && typeof data["lease"] === "number" && Number.isSafeInteger(data["lease"])
+              && data["lease"] > 0 && data["lease"] <= 0xffffffff
+              && data["revision"] === this.desired.revision && typeof at === "number"
+              && Number.isFinite(at) && at <= now && now - at <= LEASE_S) this.onCapture(pcm, data["lease"]);
+          } finally {
+            // Forwarded, rejected and throwing callbacks return valid owned storage.
+            if (!this.stopped && pcm.byteLength === 960) this.node?.port.postMessage({ type: "buffer", pcm }, [pcm]);
+          }
+        } else if (data["type"] === "state" && this.flight !== null && data["seq"] === this.flight.seq) {
+          const flight = this.flight;
+          this.flight = null;
+          const remainingWallMs = LEASE_S * 1000 - (performance.now() - flight.at);
+          if (remainingWallMs <= 0) { this.onFailure(); return; }
+          const until = flight.state.playUntil;
+          if (this.running && until > this.issuedUntil) {
+            const remainingMs = Math.min(remainingWallMs, (until - this.context.currentTime) * 1000);
+            if (remainingMs <= 0) { this.onFailure(); return; }
+            this.issuedUntil = until;
+            this.onLeaseReady(until, remainingMs); // Receiver lease only for a rendering graph.
+          }
+          this.sync();
         } else if (data["type"] === "admitted" && typeof data["sequence"] === "number") {
           this.onAdmitted(data["sequence"]);
         }
@@ -66,16 +99,44 @@ export class CallAudio {
     }
   }
 
-  start(): void { this.running = true; this.setMuted(false); }
+  /** Never posts or fails synchronously: the controller acquires its call suspension, then pulses. */
+  start(): void {
+    this.running = true;
+    this.muted = false;
+    for (const track of this.stream?.getAudioTracks() ?? []) track.enabled = true;
+    this.desired = { ...this.desired, enabled: true, revision: this.desired.revision + 1 };
+  }
   setMuted(muted: boolean): void {
+    if (muted !== this.muted) this.desired = { ...this.desired, revision: this.desired.revision + 1 };
     this.muted = muted;
     for (const track of this.stream?.getAudioTracks() ?? []) track.enabled = !muted;
-    this.node?.port.postMessage({ type: "enabled", enabled: this.running && !muted });
+    // A new revision invalidates every capture buffer produced before this change.
+    this.desired = { ...this.desired, enabled: this.running && !muted };
+    this.sync();
   }
-  lease(): number {
-    const until = this.context.currentTime + 0.3;
-    this.node?.port.postMessage({ type: "lease", until });
-    return until;
+  /** 100 ms cadence while connected, including muted/silent calls. */
+  pulse(): void {
+    this.desired = { ...this.desired, playUntil: this.context.currentTime + LEASE_S };
+    this.sync();
+  }
+  captureLease(lease: number): void {
+    if (!Number.isSafeInteger(lease) || lease <= this.desired.captureLease) return;
+    // Pushed as soon as the slot is free, not held for the next pulse: every 100 ms of
+    // delay here is 100 ms less network budget before the relay's 300 ms expiry.
+    this.desired = { ...this.desired, captureLease: lease, captureUntil: this.context.currentTime + LEASE_S };
+    this.sync();
+  }
+  private sync(): void {
+    if (this.stopped || !this.node || !this.running) return;
+    if (this.flight !== null) {
+      // Coalesce while unacknowledged; a graph that stops rendering fails the call.
+      if (performance.now() - this.flight.at >= LEASE_S * 1000) this.onFailure();
+      return;
+    }
+    if (this.posted === this.desired) return;
+    this.posted = this.desired;
+    this.flight = { seq: ++this.seq, at: performance.now(), state: this.desired };
+    this.node.port.postMessage({ type: "state", seq: this.seq, ...this.desired });
   }
   play(pcm: ArrayBuffer, sequence: number, until: number): void {
     if (!this.stopped && this.running && until > this.context.currentTime) {
@@ -86,6 +147,7 @@ export class CallAudio {
     if (this.stopped) return;
     this.stopped = true;
     this.running = false;
+    this.flight = null;
     for (const track of this.stream?.getTracks() ?? []) track.stop();
     this.stream = null;
     this.source?.disconnect();

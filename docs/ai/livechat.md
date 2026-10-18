@@ -31,6 +31,18 @@ on interruption/redeploy and never reconnect automatically. One process per site
 Local Chromium synthetic duplex is proven; physical-device listening, phone behavior,
 actual-tunnel latency/loss and the 15-minute duplex gate remain unproven until recorded.
 
+Repair ownership: broker `CallWork` uses dedicated executor futures, admission <=4
+and refresh <=8. Actual future completion or pre-start cancellation returns the slot;
+cancelling its awaiting route does not. `@transition` defers overflow eviction until
+the outer synchronous mutation exits, so terminal cleanup removes stale controls.
+4401 is reserved for actual credential refusal/expiry/confirmed revocation; unavailable
+capacity or overdue verification ends audio without revoking the owner's session.
+
+Capture buffers carry immutable production-time lease/revision/time and recycle owned
+storage in finally. One coalesced graph state is acknowledged only by rendering;
+receiver leases are issued only after a timely render ack, preserving original expiry.
+An explicit Answer-pending guard prevents replacing the preparation graph on repeats.
+
 A hidden human↔human live chat for admin users, disguised as a **"Server"** nav tab inside
 the already CF-Access-gated `/admin`. Not the AI assistant, not visitor-facing — its own
 storage, routes, and second auth gate, entirely separate from `chats.py`/`cmdchat.py`/

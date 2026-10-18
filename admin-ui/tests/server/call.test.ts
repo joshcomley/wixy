@@ -23,7 +23,7 @@ function setup(prepare: () => Promise<void> = async () => {}) {
   const releases: { reason: string; release: ReturnType<typeof vi.fn> }[] = [];
   const audio: CallAudioHandle = {
     prepare: vi.fn(prepare), start: vi.fn(), stop: vi.fn(), setMuted: vi.fn(),
-    lease: () => 0.3, play: vi.fn(),
+    pulse: vi.fn(), play: vi.fn(), captureLease: vi.fn(),
   };
   const lock = vi.fn();
   const controller = createCallController({ win: window, isMicBusy: () => false, onBusy: vi.fn(),
@@ -60,7 +60,7 @@ describe("live-call consent and lifetime", () => {
     const f = setup();
     f.click("Call");
     expect(f.audio.prepare).not.toHaveBeenCalled();
-    f.socket.receive({ type: "outgoing", callId: ID, peer: "B" });
+    f.socket.receive({ type: "outgoing", callId: ID, peer: "B", requestId: f.controls().find((m) => m["type"] === "invite")?.["requestId"] });
     expect(f.releases).toHaveLength(0);
     f.socket.receive({ type: "prepare", callId: ID });
     await Promise.resolve();
@@ -72,6 +72,7 @@ describe("live-call consent and lifetime", () => {
     expect(pause).toBeDefined();
     expect(pause?.release).not.toHaveBeenCalled();
     f.click("End call");
+    expect([...f.controller.element.querySelectorAll("button")].find((b) => b.textContent === "Mute")?.getAttribute("aria-pressed")).toBe("false");
     expect(pause?.release).toHaveBeenCalledTimes(1);
     expect(f.audio.stop).toHaveBeenCalledTimes(1);
     f.controller.detach();
@@ -83,7 +84,7 @@ describe("live-call consent and lifetime", () => {
     let resolve!: () => void;
     const f = setup(() => new Promise<void>((done) => { resolve = done; }));
     f.click("Call");
-    f.socket.receive({ type: "outgoing", callId: ID, peer: "B" });
+    f.socket.receive({ type: "outgoing", callId: ID, peer: "B", requestId: f.controls().find((m) => m["type"] === "invite")?.["requestId"] });
     f.socket.receive({ type: "prepare", callId: ID });
     f.controller.detach();
     expect(f.audio.stop).toHaveBeenCalledTimes(1);
@@ -111,6 +112,15 @@ describe("live-call consent and lifetime", () => {
     expect(f.audio.stop).toHaveBeenCalled();
     expect(f.lock).toHaveBeenCalledWith("unauthorized");
     expect(vi.mocked(f.audio.stop).mock.invocationCallOrder[0]).toBeLessThan(f.lock.mock.invocationCallOrder[0]!);
+    f.controller.dispose();
+  });
+
+  it.each([1001, 4408, 4429])("operational close %s ends audio without locking the owner", (code) => {
+    const f = setup();
+    f.click("Call");
+    f.socket.onclose?.({ code });
+    expect(f.audio.stop).toHaveBeenCalledTimes(1);
+    expect(f.lock).not.toHaveBeenCalled();
     f.controller.dispose();
   });
 });

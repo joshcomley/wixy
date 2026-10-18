@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import math
+import sqlite3
 import time
 from typing import Any
 
-import anyio
 import httpx
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
 from wixy_server.auth import AccessVerificationError
-from wixy_server.livechat.call_broker import CallBroker, Peer
+from wixy_server.livechat.call_broker import CallBroker, CallCapacityError, Peer
 from wixy_server.livechat.call_protocol import COMMAND, PROTOCOL, Authenticate
 from wixy_server.livechat.grants import GRANT_IDLE_EXPIRY_S
 from wixy_server.livechat.store import LiveChatStore
@@ -34,7 +34,9 @@ def upgrade_allowed(ws: WebSocket, origins: frozenset[str]) -> bool:
     )
 
 
-async def access_identity(ws: WebSocket, settings: Settings) -> tuple[str, float]:
+async def access_identity(
+    ws: WebSocket, settings: Settings, broker: CallBroker
+) -> tuple[str, float]:
     if settings.dev_no_auth:
         # Same explicit development-only bypass as HTTP; never enabled in production.
         return ws.headers.get("cf-access-authenticated-user-email", ""), time.time() + 43200
@@ -42,7 +44,10 @@ async def access_identity(ws: WebSocket, settings: Settings) -> tuple[str, float
     if not token:
         raise ValueError("access")
     verify = ws.app.state.call_access_verifier
-    claims: dict[str, Any] = await anyio.to_thread.run_sync(lambda: verify(token))
+    # Bounded wait so a hung JWKS fetch cannot hold a pre-accept socket forever; the
+    # job itself keeps its admission permit until it actually returns.
+    async with asyncio.timeout(10):
+        claims: dict[str, Any] = await broker.admission_work.run(lambda: verify(token))
     email, exp = claims.get("email"), claims.get("exp")
     if (
         not isinstance(email, str)
@@ -103,7 +108,7 @@ async def run_peer(ws: WebSocket, broker: CallBroker, peer: Peer, store: LiveCha
         if peer.auth.grant_id is None:
             await asyncio.Future[None]()
         while not peer.closed:
-            live = await anyio.to_thread.run_sync(
+            live = await broker.refresh_work.run(
                 lambda: store.is_device_grant_live(
                     grant_id=peer.auth.grant_id or "",
                     email=peer.auth.email,
@@ -147,12 +152,14 @@ async def calls_socket(ws: WebSocket) -> None:
     peer: Peer | None = None
     accepted = False
     connection_slot = False
-    close_code = 4401
+    # 4401 tells the browser to lock: only a refused/revoked/expired credential earns it.
+    # Cancellation/shutdown is 1001; a missed deadline is 4408; capacity is 4429.
+    close_code = 1001
     try:
         settings: Settings = ws.app.state.settings
-        # The pending admission cap is held until off-thread verification finishes,
-        # including cancellation; do not abandon threads and silently free the cap.
-        email, access_exp = await access_identity(ws, settings)
+        # Socket slots bound sockets; broker's CallWork owners separately bound the
+        # synchronous verifier/grant jobs, which outlive a cancelled or timed-out awaiter.
+        email, access_exp = await access_identity(ws, settings, broker)
         await ws.accept(subprotocol=PROTOCOL)
         accepted = True
         async with asyncio.timeout(5):
@@ -167,12 +174,13 @@ async def calls_socket(ws: WebSocket) -> None:
                 email=email,
                 secret=ws.app.state.livechat_secret,
                 store=store,
+                offload=broker.admission_work.run,
             )
         peer = Peer(auth, auth_frame.label.strip() or "Device", min(auth.exp, access_exp))
         del auth_frame, packet, text
         if auth.grant_id is not None:
             peer.grant_until = time.monotonic() + 2.5
-        if broker.connections >= 8 or not broker.add(peer):
+        if broker.connections >= 8 or not broker.add(peer) or not broker.permitted(peer):
             close_code = 4429
             return
         broker.pending -= 1
@@ -181,23 +189,33 @@ async def calls_socket(ws: WebSocket) -> None:
         connection_slot = True
         close_code = 4403
         await run_peer(ws, broker, peer, store)
-        close_code = (
-            4401 if time.time() >= peer.deadline or time.monotonic() >= peer.grant_until else 1000
-        )
+        if time.time() >= peer.deadline or peer.grant_until == 0:
+            close_code = 4401  # Expired session or a store-confirmed revoked grant.
+        elif time.monotonic() >= peer.grant_until:
+            close_code = 4408  # Refresh too slow: fail closed, but unproven revocation.
+        else:
+            close_code = 1000
+    except CallCapacityError:
+        close_code = 4429  # Server busy, not an authorization failure: never lock.
+    except HTTPException:
+        close_code = 4401  # The shared token/grant validator refused the credential.
+    except TimeoutError:
+        close_code = 4408
+    except asyncio.CancelledError:
+        close_code = 1001
+        raise
+    except httpx.HTTPError, OSError, sqlite3.Error:
+        close_code = 4408
     except (
         AccessVerificationError,
-        HTTPException,
         ValueError,
         TypeError,
         RuntimeError,
-        httpx.HTTPError,
         ValidationError,
-        TimeoutError,
         WebSocketDisconnect,
-        OSError,
     ):
         # Fixed reason/code only. Never log auth JSON, PCM, labels or validation payloads.
-        pass
+        close_code = 4403
     finally:
         if pending:
             broker.pending -= 1
@@ -205,10 +223,13 @@ async def calls_socket(ws: WebSocket) -> None:
             broker.connections -= 1
         if peer:
             broker.remove(peer)
+            if close_code != 1001 and (time.time() >= peer.deadline or peer.grant_until == 0):
+                close_code = 4401
         if accepted:
             try:
-                await ws.close(code=close_code)
-            except RuntimeError, OSError, WebSocketDisconnect:
+                async with asyncio.timeout(0.25):
+                    await ws.close(code=close_code)
+            except RuntimeError, OSError, WebSocketDisconnect, TimeoutError:
                 pass
         else:
             await ws.close(code=4403)

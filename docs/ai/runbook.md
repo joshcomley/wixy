@@ -15,6 +15,14 @@ must drain/close when the old service stops; participants must reconnect and cal
 Do not interpret a temporary absence across instances as shared call state. Verify
 Slots' actual drain and the production hostname upgrade before claiming live acceptance.
 
+Call work has dedicated four-job admission and eight-job refresh executors. A route
+timeout/cancel ends audio promptly but cannot kill an already-running synchronous
+job. That job keeps its permit until return. Non-daemon jobs can delay interpreter
+exit beyond Uvicorn's two-second grace despite `shutdown(wait=False)`. The source
+`slots.wixy.yaml` specifies `force_kill_host: true`; verify the actual hard-stop/drain
+with a blocked-worker probe before live acceptance. Cancellation alone is not proof
+that a database or JWKS thread stopped.
+
 Local proof: `e2e/tests/server-calls.spec.ts` uses two Chromium contexts with synthetic
 microphones and real worklets/sockets; checks rendered audio, muted idle pause, forced
 main-thread stall, fresh consent, panic teardown and fresh idle countdown. This does not

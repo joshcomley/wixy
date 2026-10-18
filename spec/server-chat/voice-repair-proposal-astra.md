@@ -127,9 +127,7 @@ Exact integration changes:
    ```python
    call_admission_work.close()
    call_grant_work.close()
-   await asyncio.gather(
-       call_admission_work.drain(0.25), call_grant_work.drain(0.25)
-   )
+   await asyncio.gather(call_admission_work.drain(0.25), call_grant_work.drain(0.25))
    ```
 
    Add `import asyncio` if absent. A timed-out drain does **not** clear jobs or
@@ -148,7 +146,11 @@ Exact integration changes:
 
    ```python
    async def validate_server_token(
-       token: str, *, email: str, secret: bytes, store: LiveChatStore,
+       token: str,
+       *,
+       email: str,
+       secret: bytes,
+       store: LiveChatStore,
        offload_grant: Callable[[Callable[[], bool]], Awaitable[bool]] | None = None,
    ) -> ServerAuth:
        try:
@@ -157,14 +159,17 @@ Exact integration changes:
            raise _locked_401() from None
        grant_id = auth.grant_id
        if grant_id is not None:
+
            def check() -> bool:
                return store.is_device_grant_live(
-                   grant_id=grant_id, email=auth.email, now=time.time(),
+                   grant_id=grant_id,
+                   email=auth.email,
+                   now=time.time(),
                    max_idle_s=GRANT_IDLE_EXPIRY_S,
                )
+
            live = await (
-               offload_grant(check) if offload_grant is not None
-               else anyio.to_thread.run_sync(check)
+               offload_grant(check) if offload_grant is not None else anyio.to_thread.run_sync(check)
            )
            if not live:
                raise _locked_401()
@@ -552,11 +557,18 @@ Replace the invitation's two emits and following presence call with this combine
 M2/M3 version (the M2 scratch test omits only the new requestId field):
 
 ```python
-if not self.emit_pair(invited, (
-    {"type": "outgoing", "callId": invited.id, "peer": target_peer.label,
-     "requestId": command.requestId},
-    {"type": "incoming", "callId": invited.id, "peer": peer.label},
-)):
+if not self.emit_pair(
+    invited,
+    (
+        {
+            "type": "outgoing",
+            "callId": invited.id,
+            "peer": target_peer.label,
+            "requestId": command.requestId,
+        },
+        {"type": "incoming", "callId": invited.id, "peer": peer.label},
+    ),
+):
     return
 self.presence()
 ```
@@ -564,10 +576,13 @@ self.presence()
 Replace the accept `for key` emission loop with:
 
 ```python
-self.emit_pair(call, (
-    {"type": "prepare", "callId": call.id},
-    {"type": "prepare", "callId": call.id},
-))
+self.emit_pair(
+    call,
+    (
+        {"type": "prepare", "callId": call.id},
+        {"type": "prepare", "callId": call.id},
+    ),
+)
 ```
 
 Replace second-ready's combined timestamp/emission loop with:
@@ -575,10 +590,13 @@ Replace second-ready's combined timestamp/emission loop with:
 ```python
 for participant in (peer, self.other(peer)):
     participant.fresh_at = now
-self.emit_pair(call, (
-    {"type": "connected", "callId": call.id},
-    {"type": "connected", "callId": call.id},
-))
+self.emit_pair(
+    call,
+    (
+        {"type": "connected", "callId": call.id},
+        {"type": "connected", "callId": call.id},
+    ),
+)
 ```
 
 The timestamp assignments complete before any emitting call can mutate membership.
