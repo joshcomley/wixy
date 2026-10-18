@@ -1,5 +1,16 @@
 # Voice repair round 1 — MERGE instructions (only on parent's explicit start)
 
+Selected round-1 panel: Astra + Opus, two independent model families. Gemini did
+advance native steps but did not deliver an artifact within the bounded proposal
+pass; stop is requested and its unreported work is NOT counted as evidence. This
+is a panel-size decision, not a claim that Gemini is dead. A later complete report
+can supply additional evidence before final acceptance, without inventing agreement.
+
+Read BOTH actual artifacts in full (never their relayed summaries):
+
+- `D:/Servers/Cmd/Storage/clones/wixy__worktrees/00048__wixy_implement-voip-voice-over-ip-for-wixy-ch/spec/server-chat/voice-repair-proposal-astra.md`
+- `D:/Servers/Cmd/Storage/clones/wixy__worktrees/00048__wixy_implement-voip-voice-over-ip-for-wixy-ch/spec/server-chat/voice-repair-proposal-opus.md`
+
 Read every complete proposal at the exact paths the parent supplies. Do not begin
 this phase while still writing an independent proposal.
 

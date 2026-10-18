@@ -44,6 +44,15 @@ Parent next: take Gemini reply/artifact or repair a demonstrated infrastructure 
 then send ALL actual proposals together for MERGE. Existing 900-second parent wake
 `sw_06ddcbcde1cf4c818615294894ca46e5` and per-seat watchdogs remain the follow-up.
 
+At the scheduled proposal follow-up, parent selected the two completed independent
+families (Astra + Opus) for MERGE rather than waiting indefinitely for Gemini's missing
+artifact. Stop is requested from Gemini; do NOT call it dead or count its work as a
+third result. Both selected reviewers receive BOTH actual proposal paths and the
+merge brief with equal standing. Outputs: parent
+`spec/server-chat/voice-repair-merge-astra.md` and Opus workspace 49
+`spec/server-chat/voice-repair-merge-opus.md`. Parent owns convergence adjudication,
+local repair implementation and fresh audit; neither proposer can certify launch.
+
 Operator device answer banked in decision 1867: Android Chrome; another participant
 uses iPhone with browser not yet confirmed; iPad and spare Android available. No
 participant names in repo artifacts. Call audio is pair-only; ordinary messages can
