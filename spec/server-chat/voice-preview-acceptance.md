@@ -1,5 +1,35 @@
 # Private voice-call preview and remaining acceptance
 
+## Current deployment (supersedes the Grid plan below)
+
+The operator requested direct deployment and testing. Grid was an unnecessary
+dependency for hosting this preview; two hours was an arbitrary shutdown limit,
+not an acceptance duration. Decision1869 is withdrawn; hub's worker stays stopped.
+
+The candidate is now deployed at
+**https://wixy-call-test.cinnamons.uk/admin/server**, under Devfleet service
+`WixyCallPreview`, with no two-hour cutoff. It serves an immutable archive of
+`177e0a91a154b33ec0e5cd6647bf4053638f7d5a` (same audited product runtime as
+`a2030d5`). Archive SHA256:
+`8d621b05449eab6ed4cabe77880f2bf88ecd30d3a4f84818260d1f693bffc12a`.
+The snapshot and isolated data are separate descendants of the registered runtime
+directory. The source launcher is `tooling/voice_preview_service.py --runtime
+<workspace>/e2e/test-results/voice-preview-runtime`.
+
+Observed: origin health200, unauthenticated admin API401, public Access redirect,
+and Access login HTML200. DNS route and ingress were added with a validated
+candidate config and backup; elevated gate request
+`req-4a01ec86-2f97-4646-910c-9ab2574c6256` completed exit0, Cloudflared Running.
+No production chat storage or production Wixy service was changed.
+
+Interactive login, authenticated call upgrade and physical acceptance are still
+unobserved. The 15-minute duplex/speaker test is a minimum acceptance exercise,
+not a hosting timeout. The service can be stopped via Devfleet's existing stop
+action for `WixyCallPreview`; stop it before retiring its registered source/data.
+
+The sections below preserve the original preparation evidence and superseded
+Grid dependency. They are historical where they conflict with this section.
+
 Checked 2026-10-18, continuation session `18da6fbb-bcd2-44d3-9c7a-4caab2a13051`.
 Runtime candidate `a2030d5410042b60ebfb0b4c0543c1ef9e1edd7f`; subsequent
 `3564bb0` only banks its focused audit and task records. No PR or delivery merge.

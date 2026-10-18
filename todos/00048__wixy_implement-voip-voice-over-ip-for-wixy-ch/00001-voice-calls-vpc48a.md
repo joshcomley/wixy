@@ -6,6 +6,13 @@ Add two-person live audio calling to the unlocked Server panel, coordinated thro
 
 ## Context + current state
 
+LATEST OVERRIDE: private preview deployed directly under Devfleet WixyCallPreview,
+immutable177e0a9 source, real Access/PIN, separate data. Public URL is
+https://wixy-call-test.cinnamons.uk/admin/server . Local health200/API401 and
+public Access login200 verified. Grid plan withdrawn (decision1869 obsolete),
+hub worker unchanged, no2hour cutoff. Physical login/audio and remaining gates
+still need observed results. See voice-preview-acceptance.md current deployment.
+
 LATEST: preview preparation and measured local origin preflight recorded in
 spec/server-chat/voice-preview-acceptance.md. Full-host operator-only Access app
 exists; fresh local fixture/storage, port9488, real auth/PIN verifier. Persistent
