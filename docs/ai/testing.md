@@ -1,5 +1,15 @@
 # Testing
 
+The loopback E2E server's `FixtureSocketIdentity` carries a supplied fake HTTP
+identity into WebSocket upgrades through an HttpOnly test cookie. Chromium omits
+Playwright's context extraHTTPHeaders on those upgrades; without the fixture hop,
+the call socket correctly rejects an email-bound token and locks those tests.
+Production never imports this middleware. The call browser scenario checks the
+phone icon right of ⋯, no header select, an in-viewport recipient picker and a
+separate confirmation before invitation/audio, then the existing duplex/cleanup
+gates. CI's image proof falls back from a failed ECR pull to the same official
+Python tag on Docker Hub before building; it never ignores build/boot failures.
+
 Live-call focused loop: `pytest wixy_server/tests/test_livechat_calls.py -n 0` (signed
 JWT dual-gate tests, immutable pair/state/credit/lease tests, real Uvicorn fragmented
 oversize proof); in `admin-ui`, `npm test -- tests/server/call.test.ts

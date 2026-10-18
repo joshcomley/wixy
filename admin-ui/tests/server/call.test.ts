@@ -38,6 +38,10 @@ function setup(prepare: () => Promise<void> = async () => {}) {
     const button = [...controller.element.querySelectorAll("button")].find((b) => b.textContent === text);
     if (!button) throw new Error(`Missing ${text}`);
     button.click();
+    const dialog = controller.element.querySelector<HTMLElement>(".wx-srv-call-dialog");
+    if (text === "Call" && dialog && !dialog.hidden) {
+      dialog.querySelector<HTMLButtonElement>(".wx-srv-call-confirm")?.click();
+    }
   };
   const controls = () => socket.sent.map((s) => JSON.parse(s) as Record<string, unknown>);
   return { controller, socket, audio, releases, lock, click, controls };
@@ -47,6 +51,34 @@ beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 describe("live-call consent and lifetime", () => {
+  it("requires a separate confirmation and allows cancellation without calling or audio", () => {
+    const f = setup();
+    const call = f.controller.element.querySelector<HTMLButtonElement>('button[aria-label="Call"]')!;
+    const dialog = f.controller.element.querySelector<HTMLElement>(".wx-srv-call-dialog")!;
+    call.click();
+    expect(dialog.hidden).toBe(false);
+    expect(f.controls().some((m) => m["type"] === "invite")).toBe(false);
+    expect(f.audio.prepare).not.toHaveBeenCalled();
+    [...dialog.querySelectorAll("button")].find((b) => b.textContent === "Cancel")!.click();
+    expect(dialog.hidden).toBe(true);
+    expect(f.controls().some((m) => m["type"] === "invite")).toBe(false);
+    call.click();
+    dialog.querySelector<HTMLButtonElement>(".wx-srv-call-confirm")!.click();
+    expect(f.controls().filter((m) => m["type"] === "invite")).toEqual([
+      expect.objectContaining({ targetConnectionId: TARGET }),
+    ]);
+    expect(dialog.hidden).toBe(true);
+    expect(f.controller.element.querySelector("select")).toBeNull();
+    f.controller.dispose();
+  });
+  it("closes an unconfirmed call picker on detach and cannot confirm afterwards", () => {
+    const f = setup();
+    f.controller.element.querySelector<HTMLButtonElement>('button[aria-label="Call"]')!.click();
+    f.controller.detach();
+    f.controller.element.querySelector<HTMLButtonElement>(".wx-srv-call-confirm")!.click();
+    expect(f.controls().some((m) => m["type"] === "invite")).toBe(false);
+    f.controller.dispose();
+  });
   it("declines a targeted invitation without acquiring audio", () => {
     const f = setup();
     f.socket.receive({ type: "incoming", callId: ID, peer: "B" });

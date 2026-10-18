@@ -30,21 +30,55 @@ export function createCallController(deps: CallDeps) {
   const status = win.document.createElement("span");
   status.className = "wx-srv-call-status";
   status.setAttribute("role", "status");
-  const targets = win.document.createElement("select");
-  targets.setAttribute("aria-label", "Person to call");
-  targets.dataset["srvGestureBoundary"] = "";
-  targets.addEventListener("change", () => { selectedTarget = targets.value || null; render(); });
   const callButton = button("Call", () => {
     if (!socket || socket.readyState !== 1) { if (session) open(session, label); return; }
-    if (!targets.value || deps.isMicBusy() || callId || outgoingRequest !== null) return;
+    if (deps.isMicBusy() || callId || outgoingRequest !== null) return;
+    dialog.hidden = false;
+    renderChoices();
+    render();
+    choices.querySelector<HTMLInputElement>("input:checked")?.focus();
+  });
+  const dialog = win.document.createElement("div");
+  callButton.dataset["srvGestureBoundary"] = "";
+  dialog.className = "wx-srv-call-dialog";
+  dialog.hidden = true;
+  dialog.setAttribute("role", "dialog");
+  dialog.setAttribute("aria-label", "Start a call");
+  dialog.dataset["srvGestureBoundary"] = "";
+  const heading = win.document.createElement("strong");
+  heading.textContent = "Call this device?";
+  const choices = win.document.createElement("div");
+  choices.className = "wx-srv-call-choices";
+  choices.setAttribute("role", "radiogroup");
+  choices.setAttribute("aria-label", "Person to call");
+  const cancel = win.document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", closeDialog);
+  const confirm = win.document.createElement("button");
+  confirm.type = "button";
+  confirm.className = "wx-srv-call-confirm";
+  confirm.textContent = "Call";
+  confirm.setAttribute("aria-label", "Confirm call");
+  confirm.addEventListener("click", () => {
+    if (dialog.hidden || !socket || socket.readyState !== 1 || !availablePeers.some((peer) => peer.id === selectedTarget)
+      || deps.isMicBusy() || callId || outgoingRequest !== null) return;
+    dialog.hidden = true;
     if (!activateAudio()) return;
     deps.onBusy(true);
     outgoingRequest = crypto.randomUUID();
-    if (!send({ type: "invite", requestId: outgoingRequest, targetConnectionId: targets.value })) {
+    if (!send({ type: "invite", requestId: outgoingRequest, targetConnectionId: selectedTarget })) {
       end("Calls unavailable");
       return;
     }
-    callButton.disabled = true;
+    render();
+  });
+  const actions = win.document.createElement("div");
+  actions.className = "wx-srv-call-dialog-actions";
+  actions.append(cancel, confirm);
+  dialog.append(heading, choices, actions);
+  dialog.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeDialog();
   });
   const acceptButton = button("Answer", () => {
     if (!callId || state !== "incoming" || answerPending || deps.isMicBusy()) return;
@@ -63,7 +97,7 @@ export function createCallController(deps: CallDeps) {
     labelButton(muteButton, muted ? "Unmute" : "Mute", muted ? "mic-off" : "mic");
     muteButton.setAttribute("aria-pressed", String(muted));
   });
-  element.append(status, targets, callButton, acceptButton, muteButton, endButton);
+  element.append(status, callButton, acceptButton, muteButton, endButton, dialog);
 
   let session: ServerSession | null = null;
   let label = "Device";
@@ -88,13 +122,34 @@ export function createCallController(deps: CallDeps) {
   let outgoingRequest: string | null = null;
   let answerPending = false;
   let selectedTarget: string | null = null;
+  let availablePeers: { id: string; label: string }[] = [];
   let callUntil = 0;
+
+  function closeDialog(): void {
+    dialog.hidden = true;
+    render();
+    if (!element.hidden) callButton.focus();
+  }
+  function renderChoices(): void {
+    choices.replaceChildren();
+    for (const peer of availablePeers) {
+      const row = win.document.createElement("label");
+      const radio = win.document.createElement("input");
+      radio.type = "radio";
+      radio.name = "voice-call-device";
+      radio.value = peer.id;
+      radio.checked = peer.id === selectedTarget;
+      radio.addEventListener("change", () => { selectedTarget = radio.value; render(); });
+      row.append(radio, win.document.createTextNode(peer.label));
+      choices.append(row);
+    }
+    if (availablePeers.length === 0) choices.textContent = "No other devices are available.";
+  }
 
   function button(text: string, action: () => void): HTMLButtonElement {
     const result = win.document.createElement("button");
     result.type = "button";
     labelButton(result, text, text === "Mute" ? "mic" : text === "End call" ? "end" : "phone");
-    result.dataset["srvGestureBoundary"] = "";
     result.addEventListener("click", action);
     return result;
   }
@@ -128,9 +183,13 @@ export function createCallController(deps: CallDeps) {
   function render(): void {
     element.dataset["state"] = state;
     const inCall = callId !== null;
-    targets.hidden = inCall;
+    if (inCall || outgoingRequest !== null) dialog.hidden = true;
+    callButton.setAttribute("aria-expanded", String(!dialog.hidden));
+    callButton.setAttribute("aria-haspopup", "dialog");
     callButton.hidden = inCall;
-    callButton.disabled = outgoingRequest !== null || (socket?.readyState === 1 && (targets.value === "" || deps.isMicBusy()));
+    const targetAvailable = availablePeers.some((peer) => peer.id === selectedTarget);
+    callButton.disabled = outgoingRequest !== null || (socket?.readyState === 1 && (availablePeers.length === 0 || deps.isMicBusy()));
+    confirm.disabled = !targetAvailable || socket?.readyState !== 1 || deps.isMicBusy() || outgoingRequest !== null;
     acceptButton.hidden = state !== "incoming";
     acceptButton.disabled = answerPending || deps.isMicBusy();
     muteButton.hidden = state !== "connected";
@@ -143,6 +202,7 @@ export function createCallController(deps: CallDeps) {
     return true;
   }
   function teardownCall(message: string): void {
+    dialog.hidden = true;
     callEpoch++;
     audio?.stop();
     audio = null;
@@ -268,20 +328,14 @@ export function createCallController(deps: CallDeps) {
       status.textContent = "Voice calls";
       labelButton(callButton, "Call", "phone");
     } else if (m["type"] === "presence" && Array.isArray(m["peers"])) {
-      const selected = selectedTarget ?? targets.value;
-      targets.replaceChildren();
+      availablePeers = [];
       for (const candidate of m["peers"].slice(0, 8) as Record<string, unknown>[]) {
         if (candidate["available"] !== true || typeof candidate["id"] !== "string" || typeof candidate["label"] !== "string") continue;
-        const option = win.document.createElement("option");
-        option.value = candidate["id"];
-        option.textContent = `${candidate["label"].slice(0, 32)} · ${option.value.slice(0, 4)}`;
-        targets.appendChild(option);
+        availablePeers.push({ id: candidate["id"], label: `${candidate["label"].slice(0, 32)} · ${candidate["id"].slice(0, 4)}` });
       }
-      if (selected) {
-        selectedTarget = selected;
-        if (Array.from(targets.options).some((o) => o.value === selected)) targets.value = selected;
-        else targets.selectedIndex = -1; // No silent failover to another person's device.
-      } else selectedTarget = targets.value || null;
+      // Preserve an unavailable selection rather than silently calling another device.
+      if (selectedTarget === null) selectedTarget = availablePeers[0]?.id ?? null;
+      if (!dialog.hidden) renderChoices();
     } else if (m["type"] === "incoming" || m["type"] === "outgoing") {
       // An outgoing reply must answer this tab's own pending request.
       if (m["type"] === "outgoing" && (outgoingRequest === null || m["requestId"] !== outgoingRequest)) return;
@@ -372,7 +426,14 @@ export function createCallController(deps: CallDeps) {
     render();
   }
   function pagehide(): void { detach(); }
+  function outside(event: PointerEvent): void {
+    if (!dialog.hidden && event.target instanceof Node && !element.contains(event.target)) {
+      dialog.hidden = true;
+      render();
+    }
+  }
   win.addEventListener("pagehide", pagehide);
+  win.document.addEventListener("pointerdown", outside);
   function detach(): void { disconnect(); session = null; element.hidden = true; }
   return {
     element,
@@ -382,6 +443,10 @@ export function createCallController(deps: CallDeps) {
       open(next, name);
     },
     detach,
-    dispose(): void { detach(); win.removeEventListener("pagehide", pagehide); },
+    dispose(): void {
+      detach();
+      win.removeEventListener("pagehide", pagehide);
+      win.document.removeEventListener("pointerdown", outside);
+    },
   };
 }

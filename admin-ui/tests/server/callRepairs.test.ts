@@ -48,6 +48,10 @@ function setup(isMicBusy: () => boolean = () => false, failAudio = false) {
     const found = button(text);
     if (!found || found.hidden) throw new Error(`Missing ${text}`);
     found.click();
+    const dialog = controller.element.querySelector<HTMLElement>(".wx-srv-call-dialog");
+    if (text === "Call" && dialog && !dialog.hidden) {
+      dialog.querySelector<HTMLButtonElement>(".wx-srv-call-confirm")?.click();
+    }
   };
   const controls = () => socket.sent.filter((s): s is string => typeof s === "string")
     .map((s) => JSON.parse(s) as Record<string, unknown>);
@@ -138,17 +142,21 @@ describe("round 2 terminal and microphone boundaries", () => {
 describe("M3 crossing invitations", () => {
   it("preserves the explicitly selected device while it is busy, never silently selects the observer", () => {
     const f = setup();
-    const select = f.controller.element.querySelector("select")!;
-    expect(select.value).toBe(TARGET);
+    f.button("Call")!.click();
+    const selected = () => f.controller.element.querySelector<HTMLInputElement>("input:checked")?.value;
+    expect(selected()).toBe(TARGET);
     f.socket.receive({ type: "presence", peers: [
       { id: TARGET, label: "B", available: false }, { id: "c".repeat(32), label: "Observer", available: true },
     ] });
-    expect(select.value).toBe("");
-    expect(f.button("Call")?.disabled).toBe(true);
+    expect(selected()).toBeUndefined();
+    const confirm = f.controller.element.querySelector<HTMLButtonElement>(".wx-srv-call-confirm")!;
+    expect(confirm.disabled).toBe(true);
+    confirm.click();
+    expect(f.controls().some((m) => m["type"] === "invite")).toBe(false);
     f.socket.receive({ type: "presence", peers: [
       { id: TARGET, label: "B", available: true }, { id: "c".repeat(32), label: "Observer", available: true },
     ] });
-    expect(select.value).toBe(TARGET);
+    expect(selected()).toBe(TARGET);
     f.controller.dispose();
   });
   it("keeps Answer pending across pulses until preparation arrives", () => {

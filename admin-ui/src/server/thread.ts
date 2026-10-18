@@ -3004,7 +3004,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   });
 
   return {
-    mountCallControls(controls) { header.insertBefore(controls, moreButton); },
+    mountCallControls(controls) { header.insertBefore(controls, moreButton.nextSibling); },
     element,
     isMicBusy: () => voiceRecorder !== null && voiceRecorder.state !== "idle",
     setCallBusy(busy: boolean): void { callBusy = busy; updateRecorderUi(); },

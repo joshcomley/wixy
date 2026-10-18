@@ -1,5 +1,45 @@
 # Final candidate validation
 
+## Final operator correction
+
+The operator subsequently requested a separate Call confirmation, removal of the
+header drop-down and the phone icon immediately **right** of ⋯. This supersedes
+the placement description below. The phone now opens a nonmodal device list with
+Cancel and Call buttons. No invitation or microphone activation occurs until
+confirmation. Escape, Cancel, outside click and teardown dismiss the picker.
+Unavailable recipients remain unselected rather than silently changing the target.
+
+Strict TypeScript and all2617 frontend tests passed, including explicit
+confirmation/cancel/detach and unavailable-selection checks. The browser scenario
+now checks phone-width right-hand placement, zero header selects, no incoming
+call or microphone before confirmation and picker containment within the viewport.
+Its first local visual assertion caught a60px off-screen picker; anchoring the
+picker to the header corrected that before publication. The existing duplex,
+isolation, stall and mute/lock checks continue through the explicit confirmation.
+
+The extra confirmation exposed a rapid-tap classification error: marking Mute as
+an overlay boundary made Call→Confirm→Mute three boundary taps and locked chat.
+Only the popup opener and its popup retain boundary semantics; Mute/End/Answer
+are ordinary controls. Escape still reaches the panel's panic handler.
+The corrected actual Chromium scenario passed in27.2s (31.6s total), including
+phone-width placement/picker containment and no invitation/audio before the
+confirmation, then duplex/stall/fresh-consent/muted-idle/isolation/panic checks.
+
+Final CI also found seven existing view-once scenarios locking unexpectedly.
+An actual Chromium handshake probe reproduced omitted context extraHTTPHeaders
+on WebSockets: HTTP identityalice, WS identityempty, close4401. The loopback-only
+E2E fixture now carries that fake identity through an HttpOnly cookie into the
+fixture's WS scope, matching Access's per-request identity behavior. The actual
+product socket token/identity validation is unchanged. The probe turned green
+(no close, thread remains open), and all7 view-once scenarios passed locally.
+
+The container job's ECR pull returned429 before any source build. CI now pulls
+the same official Python3.14-slim tag from Docker Hub if the ECR mirror is
+unavailable, then builds once. The official fallback manifest probe returned200;
+actual container build/boot remains a final CI gate.
+
+## Earlier candidate evidence
+
 Product candidate: `baa0b5855f955f7bc60a0e5f82fa706160ac56c8`.
 The product runtime through `a2030d5` has the whole-capability audit at `b2c01b6`
 and the focused lifecycle audit at `a2030d5`, both PASS C0/H0/M0/L0. Later product

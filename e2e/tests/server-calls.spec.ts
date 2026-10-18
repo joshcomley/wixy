@@ -116,6 +116,10 @@ test("duplex sound, muted idle pause, panic stop and fresh idle countdown", asyn
     await unlock(pa, "Caller");
     await unlock(pb, "Receiver");
     await unlock(pc, "Observer");
+    await pa.setViewportSize({ width: 390, height: 844 });
+    await expect(pa.locator(".wx-srv-call select")).toHaveCount(0);
+    expect(await pa.evaluate(() => document.querySelector(".wx-srv-more-button")?.nextElementSibling
+      === document.querySelector(".wx-srv-call"))).toBe(true);
     const observerBox = await pc.locator(".wx-srv-thread").boundingBox();
     if (!observerBox) throw new Error("Observer chat did not open");
     // Keep the unrelated unlocked view active. Neither call endpoint gets activity,
@@ -128,12 +132,17 @@ test("duplex sound, muted idle pause, panic stop and fresh idle countdown", asyn
     const asset = await pa.request.get("/admin/static/admin/call-worklet.js");
     expect(asset.status()).toBe(200);
     expect(asset.headers()["content-type"]).toMatch(/javascript|ecmascript/);
-    await expect(pa.getByLabel("Person to call").locator("option")).toHaveCount(2);
-    const receiverId = await pa.getByLabel("Person to call").locator("option").filter({ hasText: "Receiver" }).getAttribute("value");
-    if (!receiverId) throw new Error("Receiver missing");
-    await pa.getByLabel("Person to call").selectOption(receiverId);
-    stage = "connect and render duplex audio";
     await pa.locator(".wx-srv-call").getByRole("button", { name: "Call", exact: true }).click();
+    await expect(pa.getByRole("radio")).toHaveCount(2);
+    await expect(pb.locator(".wx-srv-call").getByRole("button", { name: "Answer", exact: true })).toBeHidden();
+    expect(await tracks(pa)).toEqual([]);
+    const confirmationBox = await pa.getByRole("dialog", { name: "Start a call" }).boundingBox();
+    expect(confirmationBox?.x).toBeGreaterThanOrEqual(0);
+    expect((confirmationBox?.x ?? 0) + (confirmationBox?.width ?? 0)).toBeLessThanOrEqual(390);
+    await pa.screenshot({ path: test.info().outputPath("call-confirmation-phone.png") });
+    await pa.getByRole("radio", { name: /Receiver/ }).check();
+    stage = "connect and render duplex audio";
+    await pa.getByRole("button", { name: "Confirm call", exact: true }).click();
     await expect(pb.locator(".wx-srv-call")).toContainText("Incoming call");
     expect(await tracks(pa)).toEqual([]); // Consent before mic capture.
     expect(await tracks(pb)).toEqual([]);
@@ -171,6 +180,7 @@ test("duplex sound, muted idle pause, panic stop and fresh idle countdown", asyn
       await expect(page.locator(".wx-srv-thread")).toBeVisible();
     }
     await pa.locator(".wx-srv-call").getByRole("button", { name: "Call", exact: true }).click({ timeout: 5000 });
+    await pa.getByRole("button", { name: "Confirm call", exact: true }).click();
     await pb.locator(".wx-srv-call").getByRole("button", { name: "Answer", exact: true }).click();
     for (const page of [pa, pb]) await expect(page.locator(".wx-srv-call")).toContainText("On a voice call");
     await pa.locator(".wx-srv-call").getByRole("button", { name: "Mute", exact: true }).click();

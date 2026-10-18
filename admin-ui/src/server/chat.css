@@ -16,7 +16,7 @@
 
 .wx-srv-call {
   display: inline-flex;
-  flex: 0 1 180px;
+  flex: none;
   min-width: 0;
   align-items: center;
   justify-content: flex-end;
@@ -31,7 +31,7 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
-.wx-srv-call button, .wx-srv-call select {
+.wx-srv-call button {
   height: 36px;
   border: 1px solid var(--wx-border);
   border-radius: var(--wx-radius);
@@ -50,31 +50,47 @@
 }
 .wx-srv-call button svg { width: 20px; height: 20px; }
 .wx-srv-call button:disabled { opacity: 0.45; cursor: default; }
-.wx-srv-call button:focus-visible, .wx-srv-call select:focus-visible {
+.wx-srv-call button:focus-visible {
   outline: 2px solid var(--wx-brand-blue-text);
   outline-offset: 2px;
 }
 .wx-srv-call button[data-call-action="end"] { color: var(--wx-error, #e76e78); }
 .wx-srv-call[data-state="incoming"] button[data-call-action="phone"] {
-  color: var(--wx-success, #26865d);
+  color: var(--wx-success-text);
 }
 .wx-srv-call button[aria-pressed="true"] {
   background: var(--wx-brand-blue-tint);
   color: var(--wx-brand-blue-text);
 }
-.wx-srv-call select {
-  flex: 1 1 100px;
-  min-width: 0;
-  width: 100px;
-  max-width: 140px;
-  padding: 4px;
-  font-size: 12px;
-  text-overflow: ellipsis;
+.wx-srv-call-dialog {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 8;
+  width: min(300px, calc(100vw - 24px));
+  padding: 14px;
+  box-sizing: border-box;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  box-shadow: var(--wx-shadow);
 }
-.wx-srv-call[data-state="connected"],
-.wx-srv-call[data-state="incoming"],
-.wx-srv-call[data-state="outgoing"] { flex: none; }
-.wx-srv-call + .wx-srv-more-button { margin-left: 0; }
+.wx-srv-call-choices { margin: 12px 0; font-size: 14px; }
+.wx-srv-call-choices label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.wx-srv-call-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.wx-srv-call .wx-srv-call-dialog button { width: auto; min-width: 72px; padding: 6px 12px; }
+.wx-srv-call .wx-srv-call-dialog .wx-srv-call-confirm {
+  background: var(--wx-brand-blue);
+  color: #fff;
+}
 
 @media (max-width: 420px) {
   .wx-srv-thread-header { gap: 6px; }
@@ -114,6 +130,7 @@
 /* -- Header ------------------------------------------------------------- */
 
 .wx-srv-thread-header {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
