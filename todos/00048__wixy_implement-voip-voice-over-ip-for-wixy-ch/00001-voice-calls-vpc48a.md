@@ -6,6 +6,13 @@ Add two-person live audio calling to the unlocked Server panel, coordinated thro
 
 ## Context + current state
 
+LATEST: preview preparation and measured local origin preflight recorded in
+spec/server-chat/voice-preview-acceptance.md. Full-host operator-only Access app
+exists; fresh local fixture/storage, port9488, real auth/PIN verifier. Persistent
+origin not started: hub Grid worker explicitly stopped (user_requested_stop=true).
+Decision1869 asks whether it may restart; pending task t-1d5830f7a029 cancelled
+without starting. No DNS/ingress changes. Physical/performance/Slots gates open.
+
 Continuation verified HEAD a2030d5410042b60ebfb0b4c0543c1ef9e1edd7f.
 Focused independent Astra audit complete: PASS C0/H0/M0/L0 for the exact
 cached-permission lifecycle delta, report voice-permission-implementation-audit.md.
