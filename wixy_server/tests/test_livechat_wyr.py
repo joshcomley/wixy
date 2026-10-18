@@ -21,7 +21,6 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from wixy_server.app import create_app
-from wixy_server.livechat import store as wyr_store_module
 from wixy_server.livechat.pinclient import CmdPinVerifier
 from wixy_server.livechat.store import (
     _LATEST_SCHEMA_VERSION,
@@ -340,7 +339,7 @@ class TestStateMachine:
         conn = sqlite3.connect(str(store._db_path), timeout=5.0, isolation_level=None)
         conn.execute("BEGIN IMMEDIATE")
         clock = [20.0]
-        monkeypatch.setattr(wyr_store_module.time, "time", lambda: clock[0])
+        monkeypatch.setattr(time, "time", lambda: clock[0])
         result: list[tuple[Any, bool]] = []
         errors: list[Exception] = []
 
@@ -379,8 +378,12 @@ class TestStateMachine:
         assert round_ is not None
         view = wyr_view_json(round_, None, "Josh", now=50.0)
         assert view["revealDeadline"] is None
-        assert view["you"]["revealed"] is False  # type: ignore[index]
-        assert all(player["revealed"] is False for player in view["players"])
+        you = view["you"]
+        players = view["players"]
+        assert isinstance(you, dict)
+        assert you["revealed"] is False
+        assert isinstance(players, list)
+        assert all(isinstance(player, dict) and player["revealed"] is False for player in players)
 
     def test_any_skip_vote_skips_the_round(self, store: LiveChatStore) -> None:
         seq = _new_round(store)
