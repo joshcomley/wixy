@@ -11,6 +11,10 @@ Final local checks:
 
 - Strict TypeScript (including service worker) passed.
 - Call, call-repair and thread/drawing controls: 37 tests passed.
+- Final CI identified an obsolete `serverChatView` thread mock missing the new
+  header-mount method. Reproduced locally (5 failures), updated that fixture,
+  and reran the affected42 tests plus the full frontend suite: all2615 tests
+  across101 files passed. This correction changes only the test double.
 - LF frontend assets rebuilt and committed; diff whitespace check passed.
 - Real Chromium existing duplex scenario passed in26.7s (42.5s total): two-way
   synthetic audio, third-browser isolation, forced stall and fresh consent,
