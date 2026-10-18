@@ -21,10 +21,11 @@ type Factory = NonNullable<Parameters<typeof createCallController>[0]["audioFact
 type Capture = (pcm: ArrayBuffer, lease: number) => void;
 type Ready = (until: number, remainingMs: number) => void;
 
-function setup() {
+function setup(isMicBusy: () => boolean = () => false, failAudio = false) {
   const socket = new Socket();
   const graphs: { audio: CallAudioHandle; capture: Capture; ready: Ready }[] = [];
   const factory = vi.fn((capture: Capture, _ack: unknown, _fail: unknown, ready: Ready) => {
+    if (failAudio) throw new Error("AudioContext refused");
     const audio = {
       prepare: vi.fn(async () => {}), start: vi.fn(), stop: vi.fn(), setMuted: vi.fn(),
       pulse: vi.fn(), play: vi.fn(), captureLease: vi.fn(),
@@ -32,7 +33,8 @@ function setup() {
     graphs.push({ audio, capture, ready });
     return audio;
   });
-  const controller = createCallController({ win: window, isMicBusy: () => false, onBusy: vi.fn(),
+  const busy = vi.fn();
+  const controller = createCallController({ win: window, isMicBusy, onBusy: busy,
     hooks: { suspend: () => vi.fn(), lockNow: vi.fn() },
     socketFactory: () => socket as unknown as WebSocket,
     audioFactory: factory as unknown as Factory,
@@ -50,7 +52,7 @@ function setup() {
   const controls = () => socket.sent.filter((s): s is string => typeof s === "string")
     .map((s) => JSON.parse(s) as Record<string, unknown>);
   const requestId = () => controls().find((m) => m["type"] === "invite")?.["requestId"];
-  return { controller, socket, graphs, click, button, controls, requestId };
+  return { controller, socket, graphs, click, button, controls, requestId, busy };
 }
 
 async function connected() {
@@ -65,6 +67,73 @@ async function connected() {
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+describe("round 2 terminal and microphone boundaries", () => {
+  it("retires only the matching pending request when terminal precedes outgoing", () => {
+    const f = setup();
+    try {
+      f.click("Call");
+      const requestId = f.requestId();
+      f.socket.receive({ type: "ended", callId: ID, requestId: "wrong" });
+      expect(f.graphs[0]?.audio.stop).not.toHaveBeenCalled();
+      f.socket.receive({ type: "ended", callId: ID, requestId });
+      expect(f.graphs[0]?.audio.stop).toHaveBeenCalledTimes(1);
+      expect(f.busy).toHaveBeenLastCalledWith(false);
+      expect(f.button("Call")?.disabled).toBe(false);
+      f.socket.receive({ type: "outgoing", callId: ID, requestId });
+      expect(f.button("End call")?.hidden).toBe(true);
+    } finally { f.controller.dispose(); }
+  });
+  it("a losing request terminal preserves a newer Answer graph", () => {
+    const f = setup();
+    try {
+      f.click("Call");
+      const requestId = f.requestId();
+      f.socket.receive({ type: "incoming", callId: TARGET, peer: "B" });
+      f.click("Answer");
+      f.socket.receive({ type: "ended", callId: ID, requestId });
+      f.socket.receive({ type: "prepare", callId: TARGET });
+      expect(f.graphs[1]?.audio.stop).not.toHaveBeenCalled();
+      expect(f.graphs[1]?.audio.prepare).toHaveBeenCalledTimes(1);
+    } finally { f.controller.dispose(); }
+  });
+  it("construction failure declines Answer but fabricates no action before invite", () => {
+    const f = setup(() => false, true);
+    try {
+      f.click("Call");
+      expect(f.controls().map((m) => m["type"])).toEqual(["auth"]);
+      f.socket.receive({ type: "incoming", callId: ID, peer: "B" });
+      f.click("Answer");
+      expect(f.controls().at(-1)).toEqual({ type: "decline", callId: ID });
+    } finally { f.controller.dispose(); }
+  });
+  it("updates recorder ownership without presence events", () => {
+    let recording = true;
+    const f = setup(() => recording);
+    try {
+      expect(f.button("Call")?.disabled).toBe(true);
+      recording = false;
+      vi.advanceTimersByTime(100);
+      expect(f.button("Call")?.disabled).toBe(false);
+      recording = true;
+      vi.advanceTimersByTime(100);
+      expect(f.button("Call")?.disabled).toBe(true);
+    } finally { f.controller.dispose(); }
+  });
+  it.each(["onerror", "onclose"] as const)("%s leaves presence reconnection usable during recording", (event) => {
+    const f = setup(() => true);
+    try {
+      // Even a still-OPEN fake socket must be cleared before final UI rendering.
+      f.socket.receive({ type: "presence", peers: [] });
+      if (event === "onerror") f.socket.onerror?.();
+      else f.socket.onclose?.({ code: 1006 });
+      const reconnect = event === "onclose" ? "Reconnect calls" : "Call";
+      expect(f.button(reconnect)?.disabled).toBe(false);
+      f.click(reconnect);
+      expect(f.graphs).toHaveLength(0);
+    } finally { f.controller.dispose(); }
+  });
+});
 
 describe("M3 crossing invitations", () => {
   it("preserves the explicitly selected device while it is busy, never silently selects the observer", () => {

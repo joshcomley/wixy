@@ -43,6 +43,23 @@ storage in finally. One coalesced graph state is acknowledged only by rendering;
 receiver leases are issued only after a timely render ack, preserving original expiry.
 An explicit Answer-pending guard prevents replacing the preparation graph on repeats.
 
+Every caller terminal echoes the originating request ID so early decline/overflow
+cannot strand an invite whose `outgoing` was purged before delivery. Broker
+`_media_other` gates admission/dequeue with both cached authorities and call lifetime;
+expired endpoints are unlinked immediately, retaining the 4401/4408 distinction.
+`_drop` and failed invitation setup avoid redundant presence broadcasts; the
+16-control overflow contract is unchanged.
+
+On persisted pagehide the controller detaches unconditionally. The panel records an
+eligible cache restore and runs its ordinary visible/shield/idle/expiry policy before
+calling `chatView.attach` again. This ordinary reattach refreshes thread history,
+signed media and SSE as well as fresh call presence; drafts must survive. It restores
+no call ID, microphone, audio graph or idle suspension. A real lock/dispose clears the
+restore marker. Constructor failure on Answer declines immediately; microphone
+ownership disables starting Call/Answer while presence-only reconnection stays usable.
+Persisted pagehide itself runs the existing hidden policy in case visibilitychange
+is missing; the following hidden notification is idempotent until a visible return.
+
 A hidden human↔human live chat for admin users, disguised as a **"Server"** nav tab inside
 the already CF-Access-gated `/admin`. Not the AI assistant, not visitor-facing — its own
 storage, routes, and second auth gate, entirely separate from `chats.py`/`cmdchat.py`/

@@ -24,6 +24,12 @@ Capture provenance is bound at production, never refreshed at receipt. One coale
 graph control may be unacknowledged; only an actual render ack authorizes a receiver
 lease using the original wall/audio expiry, never a new window on late receipt.
 
+Media admission and dequeue check both members' cached authority and connected
+lifetime without waiting for a monitor tick. Ineligible endpoints are removed;
+operational refresh expiry still does not imply credential revocation. Persisted-page
+restoration runs through the panel's lock/expiry policy before fresh presence opens;
+actual detach/dispose prevents restoration, and no prior audio or consent is restored.
+
 *Enforced by:* `livechat/call_broker.py`, `routes_livechat_calls.py`, `server/call/*`,
 `test_livechat_calls.py`, `call*.test.ts`, panel suspension tests and
 `e2e/tests/server-calls.spec.ts`. Protocol/acceptance:

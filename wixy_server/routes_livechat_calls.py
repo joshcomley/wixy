@@ -223,8 +223,11 @@ async def calls_socket(ws: WebSocket) -> None:
             broker.connections -= 1
         if peer:
             broker.remove(peer)
-            if close_code != 1001 and (time.time() >= peer.deadline or peer.grant_until == 0):
-                close_code = 4401
+            if close_code != 1001:
+                if time.time() >= peer.deadline or peer.grant_until == 0:
+                    close_code = 4401
+                elif time.monotonic() >= peer.grant_until:
+                    close_code = 4408
         if accepted:
             try:
                 async with asyncio.timeout(0.25):

@@ -6,6 +6,69 @@ Add two-person live audio calling to the unlocked Server panel, coordinated thro
 
 ## Context + current state
 
+CURRENT: round2 all-proposal convergence implemented and parent-locally proven.
+Read `spec/server-chat/voice-repair-round2-ruling.md`. Selected shared cached
+pair gate/immediate removal, unconditional caller terminal correlation, panel-owned
+cache recovery, immediate constructor-failure decline, microphone-aware affordance
+with usable reconnect/final render, source-level duplicate-presence suppression.
+Parent additionally reproduced/fixed missing-hidden-event lock-policy bypass on
+persisted pagehide using idempotent existing onHidden handling.62 server call
+tests,1,714 frontend chat tests, full strict types/lint/format and LF build pass.
+Real Grid scoped browser job t-0e00986d0993 DONE exit0:2 tests pass30.9s, duplex/
+stall/muted-idle/panic/third-browser isolation and real-view draft-preserving
+presence-only cache recovery. Generic hub Grid submissions were cancelled while
+queued; supported requirements.task_class=ci-scoped ran immediately.
+Parent next freezes this locally proven candidate and dispatches a NEW independent
+senior audit against `voice-repair-round3-audit-packet.md`; no audited edits while
+open. Physical/tunnel/quality/Slots gates remain open; no PR or merge exists.
+Parent retains delivery through confirmed merge SHA. All older paragraphs are history.
+
+LATEST ROUND 2: fresh independent audit at 4983cc6 returned CHANGES REQUIRED,
+C0/H0/M3/L2. Report: `spec/server-chat/voice-call-implementation-audit-round2.md`.
+Reopen relay/browser tasks. Five repairs: request-correlated early terminal,
+both-member/lifetime media gates, owner-validated cached-page presence restore,
+Answer construction failure terminal notification, recorder-busy Call state.
+Parent owns Group Therapy round 2, local implementation and fresh verification;
+brief: `spec/server-chat/voice-repair-round2-brief.md`. Selected available families
+Astra + Gemini (Claude quota-walled). Independent proposals first, then every
+proposal to every reviewer, parent adjudication. No PR, merge or live acceptance.
+Angel quota incident acknowledged; parent owns monitoring with recovery wake.
+Gemini round-1 late proposal/stop acknowledged; not counted as third MERGE vote.
+Older status below is historical, including the previous pending-audit claim.
+
+Round2 PROPOSE: Astra artifact complete/read at
+`spec/server-chat/voice-repair-round2-proposal-astra.md`, exact four-file patch,
+in-memory red/greens all five; strict types/real integration explicitly unexecuted.
+Gemini artifact absent at first check, but native step183 versus translated135
+and recent source-store activity establish ongoing work, not failure. Parent
+next: read its actual proposal, then send BOTH complete artifacts to EACH seat
+for equal-standing MERGE. Existing parent wake sw_c0739fa218914279b82398c823bc7d66
+and per-seat watchdogs own follow-up. No implementation edits yet.
+
+Round2 MERGE dispatched: BOTH complete proposal artifacts read; Gemini artifact
+exists in workspace50 at `spec/server-chat/voice-repair-round2-proposal-gemini.md`.
+Both reviewers received `spec/server-chat/voice-repair-round2-merge-brief.md`
+with both paths and equal-standing/provenance requirements. Await parent Astra
+`voice-repair-round2-merge-astra.md` and sibling Gemini
+`voice-repair-round2-merge-gemini.md`. Main split is panel-owned cached-page
+recovery versus autonomous controller recovery. Also resolve unconditional
+request correlation, shared media gate/expired endpoint cleanup, and disconnected
+recorder/reconnect affordance. Parent next reads both, rules mechanisms, builds
+locally and verifies; no implementation changed during this design comparison.
+
+Round2 local RED baseline added while comparison runs: 14 focused backend cases
+fail (early-terminal correlation in3 queue states, both-member admission/dequeue
+deadline matrix, bounded presence replacement). Frontend exposes terminal,
+constructor failure, mic affordance and disconnect render failures; cache owner
+tests2fail/3negative-controls-pass. Actual Chromium persisted-page test also
+fails at hidden call bar after pageshow, using full panel/chatView/thread. First
+browser attempt failed before app startup due Python Store alias; rerun with
+WIXY_E2E_PYTHON real3.14 reached the real defect. Runtime source remains4983cc6;
+only regression tests/report/task files changed. Astra combined report read;
+Gemini missing at due follow-up but native steps214/306 advancing, not dead.
+Neutral status query sent; bounded wake sw_7e8d478523ce4321931b8b56b03291ea
+owns next action. Parent integrates after concrete comparison/adjudication.
+
 LATEST: two-family MERGE is complete and parent integration is locally proven.
 Read `spec/server-chat/voice-repair-round1-ruling.md` and both merge reports. Parent
 adopted futures with separate 4/8 executors, deferred eviction, production-bound capture,

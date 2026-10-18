@@ -148,6 +148,7 @@ class Peer:
 class Call:
     caller: str
     callee: str
+    request_id: str
     id: str = field(default_factory=lambda: uuid4().hex)
     state: str = "ringing"
     until: float = field(default_factory=lambda: time.monotonic() + 30)
@@ -249,7 +250,10 @@ class CallBroker:
                 peer.sequence, peer.sample, peer.muted = -1, -480, False
                 # Invalidate already queued prepare/connected/lease controls too.
                 peer.controls = deque(m for m in peer.controls if m.get("callId") != call.id)
-                self.emit(peer, {"type": "ended", "callId": call.id, "reason": reason})
+                terminal: JsonObject = {"type": "ended", "callId": call.id, "reason": reason}
+                if key == call.caller:
+                    terminal["requestId"] = call.request_id
+                self.emit(peer, terminal)
         self.presence()
 
     @transition
@@ -263,7 +267,8 @@ class CallBroker:
             return
         peer.closed = True
         del self.peers[peer.id]
-        if self.call and self.call.contains(peer):
+        had_call = bool(self.call and self.call.contains(peer))
+        if had_call:
             self.finish("disconnected")
         peer.media.clear()
         peer.outstanding.clear()
@@ -272,7 +277,8 @@ class CallBroker:
         peer.last_terminal = None
         peer.controls.clear()
         peer.wake.set()
-        self.presence()
+        if not had_call:
+            self.presence()
 
     @transition
     def shutdown(self) -> None:
@@ -309,7 +315,7 @@ class CallBroker:
                 # Correlated, so a crossing caller's loss never erases its incoming call.
                 self.emit(peer, {"type": "unavailable", "requestId": command.requestId})
                 return
-            invited = self.call = Call(peer.id, target_peer.id)
+            invited = self.call = Call(peer.id, target_peer.id, request_id=command.requestId)
             self.emit(
                 peer,
                 {
@@ -320,7 +326,8 @@ class CallBroker:
                 },
             )
             self.emit(target_peer, {"type": "incoming", "callId": invited.id, "peer": peer.label})
-            self.presence()
+            if not peer.closed and not target_peer.closed:
+                self.presence()
             return
         call = self.call
         if call is not None and now >= call.until:
@@ -378,11 +385,35 @@ class CallBroker:
         assert self.call and self.call.contains(peer)
         return self.peers[self.call.callee if peer.id == self.call.caller else self.call.caller]
 
+    def _media_other(self, peer: Peer, now: float) -> Peer | None:
+        """One cached authority gate inside admission/dequeue's synchronous transition."""
+        if not self.permitted(peer):
+            self.remove(peer)
+            return None
+        call = self.call
+        if call is None or call.state != "connected" or not call.contains(peer):
+            return None
+        other_id = call.callee if peer.id == call.caller else call.caller
+        other = self.peers.get(other_id)
+        if other is None:
+            self.finish("disconnected")
+            return None
+        if not self.permitted(other):
+            self.remove(other)
+            return None
+        if now >= call.until:
+            self.finish("timeout")
+            return None
+        return other
+
     @transition
     def frame(self, peer: Peer, data: bytes) -> None:
         now = time.monotonic()
         epoch, seq, sample, lease = unpack_frame(data)
-        if not self.permitted(peer) or not peer.media_budget.take(now):
+        if not self.permitted(peer):
+            self.remove(peer)
+            raise ValueError("media permission")
+        if not peer.media_budget.take(now):
             raise ValueError("media permission")
         if epoch == peer.last_terminal:
             return  # Former-pair in-flight audio is discarded, never rerouted.
@@ -396,6 +427,9 @@ class CallBroker:
             or peer.muted
         ):
             raise ValueError("media permission")
+        receiver = self._media_other(peer, now)
+        if receiver is None:
+            return
         if seq <= peer.sequence or sample <= peer.sample or sample != seq * 480:
             raise ValueError("sample sequence")
         if seq - peer.sequence > 1000:
@@ -403,20 +437,21 @@ class CallBroker:
         peer.sequence, peer.sample = seq, sample
         if not any(n == lease and until > now for n, until in peer.capture_leases):
             return  # Stale TCP audio is discarded, never made fresh by receipt.
-        receiver = self.other(peer)
-        if not self.permitted(receiver) or receiver.playout[1] <= now:
+        if receiver.playout[1] <= now:
             return
         receiver.media.append((epoch, forward_frame(data, receiver.playout[0])))
         receiver.wake.set()
 
+    @transition
     def next_media(self, peer: Peer) -> bytes | None:
+        now = time.monotonic()
         call = self.call
-        if not self.permitted(peer) or not call or call.state != "connected":
+        if self._media_other(peer, now) is None:
             peer.media.clear()
             return None
+        assert call is not None
         if len(peer.outstanding) >= 5:
             return None
-        now = time.monotonic()
         while peer.media:
             epoch, data = peer.media.popleft()
             if epoch != call.id or peer.playout[1] <= now:

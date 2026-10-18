@@ -14,10 +14,15 @@ Client controls: `invite {requestId,targetConnectionId}`, `accept|decline|ready|
 {callId}`, `mute {callId,muted}`, `lease {callId,lease}`, `ack {callId,sequence}`, `pong {}`.
 All carry `type`; schemas forbid extra fields. Server sends `incoming|outgoing
 {callId,peer}`, `prepare|connected {callId}`, `capture {callId,lease}`, `muted {callId,muted}`,
-`ended {callId,reason}`, `unavailable {requestId}`, `ping {}`. `outgoing` also echoes
+`ended {callId,reason,requestId?}`, `unavailable {requestId}`, `ping {}`. `outgoing` also echoes
 its originating `requestId`; only a matching outgoing attempt may adopt it. Media is fixed 1008-byte binary,
 never JSON/base64. Canonical offsets, state/ownership, limits and gates:
 [`spec/server-chat/04-voice-calls.md`](../../spec/server-chat/04-voice-calls.md).
+
+The caller's `ended` always includes its original `requestId`, even when the writer
+has not delivered `outgoing`. With no adopted call ID, only a matching pending request
+may be retired. A terminal for an old outgoing request cannot stop a newer incoming
+or accepted call; callee terminal envelopes omit `requestId`.
 
 Pre-upgrade denial closes with 4403 (the HTTP upgrade is rejected); after upgrade,
 4401 means actual credential refusal/expiry/confirmed revocation, 4403 invalid protocol,

@@ -35,7 +35,7 @@ export function createCallController(deps: CallDeps) {
   targets.addEventListener("change", () => { selectedTarget = targets.value || null; render(); });
   const callButton = button("Call", () => {
     if (!socket || socket.readyState !== 1) { if (session) open(session, label); return; }
-    if (!targets.value || deps.isMicBusy() || callId) return;
+    if (!targets.value || deps.isMicBusy() || callId || outgoingRequest !== null) return;
     if (!activateAudio()) return;
     deps.onBusy(true);
     outgoingRequest = crypto.randomUUID();
@@ -100,7 +100,7 @@ export function createCallController(deps: CallDeps) {
     const inCall = callId !== null;
     targets.hidden = inCall;
     callButton.hidden = inCall;
-    callButton.disabled = outgoingRequest !== null || (socket?.readyState === 1 && targets.value === "");
+    callButton.disabled = outgoingRequest !== null || (socket?.readyState === 1 && (targets.value === "" || deps.isMicBusy()));
     acceptButton.hidden = state !== "incoming";
     acceptButton.disabled = answerPending || deps.isMicBusy();
     muteButton.hidden = state !== "connected";
@@ -179,10 +179,10 @@ export function createCallController(deps: CallDeps) {
         },
       );
       return true;
-    } catch { teardownCall("Calls unavailable in this browser"); return false; }
+    } catch { end("Calls unavailable in this browser"); return false; }
   }
   function pulse(): void {
-    if (state === "incoming") acceptButton.disabled = answerPending || deps.isMicBusy();
+    render(); // Recorder ownership can change without a presence event.
     const now = win.performance.now();
     const stale = now - lastPulse > LEASE_MS;
     lastPulse = now;
@@ -272,6 +272,12 @@ export function createCallController(deps: CallDeps) {
       if (outgoingRequest === null || m["requestId"] !== outgoingRequest) return;
       outgoingRequest = null;
       if (callId === null) teardownCall("That person is unavailable");
+    } else if (m["type"] === "ended" && m["callId"] !== callId) {
+      if (outgoingRequest !== null && m["requestId"] === outgoingRequest) {
+        outgoingRequest = null;
+        if (callId === null) teardownCall("Call ended");
+      }
+      return;
     } else if (m["callId"] !== callId || !callId) {
       return; // Late terminal/readiness messages cannot revive a canceled attempt.
     } else if (m["type"] === "prepare" && (state === "outgoing" || state === "incoming")) {
@@ -298,6 +304,7 @@ export function createCallController(deps: CallDeps) {
     if (timer !== null) win.clearInterval(timer);
     timer = null;
     if (old) { old.onopen = old.onmessage = old.onerror = old.onclose = null; old.close(1000); }
+    render(); // The final affordance must use the cleared socket, with no pulse left.
   }
   function open(next: ServerSession, name: string): void {
     disconnect();

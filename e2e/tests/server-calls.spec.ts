@@ -206,3 +206,36 @@ test("duplex sound, muted idle pause, panic stop and fresh idle countdown", asyn
     await Promise.all([a.close(), b.close(), c.close()]);
   }
 });
+
+// Run after the sustained scenario: its shared fixture's admission bucket has
+// replenished, so this case measures lifecycle rather than repeated-login throttling.
+test("persisted page recovery preserves draft and restores presence without audio", async ({ page }) => {
+  await probe(page);
+  let sockets = 0;
+  page.on("websocket", (socket) => {
+    if (new URL(socket.url()).pathname === "/api/admin/server/calls/ws") sockets++;
+  });
+  await unlock(page, "Cache test");
+  const draft = page.locator(".wx-srv-thread-view textarea");
+  await draft.fill("Unsent draft survives page recovery");
+  await expect.poll(() => sockets).toBe(1);
+  await page.evaluate(() => {
+    localStorage.setItem("wx-srv-lock-on-tab", "0");
+    localStorage.setItem("wx-srv-lock-on-screen", "0");
+    window.dispatchEvent(new Event("wx-srv-lock-prefs-changed"));
+    window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+  });
+  await expect(page.locator(".wx-srv-call")).toBeHidden();
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
+  await expect(page.locator(".wx-srv-call")).toBeVisible({ timeout: 2000 });
+  await expect(draft).toHaveValue("Unsent draft survives page recovery");
+  await expect.poll(() => sockets).toBe(2);
+  expect(await tracks(page)).toEqual([]);
+  expect(await page.evaluate(() => (window as Window & { __voiceProbe?: Probe }).__voiceProbe?.context)).toBeNull();
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
+  expect(sockets).toBe(2);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".wx-srv-thread")).toHaveCount(0);
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
+  expect(sockets).toBe(2);
+});

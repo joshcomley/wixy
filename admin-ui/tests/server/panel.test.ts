@@ -14,6 +14,7 @@ import {
 } from "../../src/server/constants";
 import { createServerChatView as createRealServerChatView } from "../../src/server/chatView";
 import { IDLE_EXTENDED_KEY, setIdleLockExtended } from "../../src/server/idlePreference";
+import { setLockSettings } from "../../src/server/lockSettings";
 import { mountServerPanel, type ServerPanelDeps } from "../../src/server/panel";
 import type { CreateServerChatView, LockHooks, ServerChatView, ServerSession } from "../../src/server/types";
 
@@ -513,6 +514,51 @@ describe("mountServerPanel", () => {
   function isFading(chatHost: HTMLElement): boolean {
     return chatHost.classList.contains("wx-srv-fading");
   }
+
+  it.each([false, true])("cache restore reattaches a valid owner exactly once (pageshow hidden=%s)", async (hiddenFirst) => {
+    setHidden(false);
+    setLockSettings(window, { lockOnTab: false, lockOnScreen: false });
+    const tracked = trackedChatViewFactory();
+    const { panel } = await unlockedChat({ createServerChatView: tracked.createServerChatView });
+    expect(tracked.attachCalls).toHaveLength(1);
+    setHidden(true);
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+    if (!hiddenFirst) setHidden(false);
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    if (hiddenFirst) expect(tracked.attachCalls).toHaveLength(1);
+    setHidden(false);
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    expect(tracked.attachCalls).toHaveLength(2);
+    expect(tracked.attachCalls[1]).toBe(tracked.attachCalls[0]);
+    panel.teardown();
+  });
+
+  it.each(["locked", "expired", "disposed"])("cache restore never reattaches a %s owner", async (reason) => {
+    setHidden(false);
+    setLockSettings(window, { lockOnTab: false, lockOnScreen: false });
+    const tracked = trackedChatViewFactory();
+    const { panel } = await unlockedChat({ createServerChatView: tracked.createServerChatView });
+    window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+    if (reason === "disposed") panel.teardown();
+    else if (reason === "locked") document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    else vi.setSystemTime(Date.now() + 3_601_000);
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    expect(tracked.attachCalls).toHaveLength(1);
+    if (reason !== "disposed") panel.teardown();
+  });
+
+  it("persisted pagehide respects default hidden-lock policy even without a visibility event", async () => {
+    setHidden(false);
+    const tracked = trackedChatViewFactory();
+    const { panel } = await unlockedChat({ createServerChatView: tracked.createServerChatView });
+    window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    expect(tracked.attachCalls).toHaveLength(1);
+    expect(tracked.detachCalls).toBe(1);
+    panel.teardown();
+  });
 
   it("default (box unticked): fades at exactly 10s and detaches at 10.8s", async () => {
     const { panel, chatHost } = await unlockedChat();

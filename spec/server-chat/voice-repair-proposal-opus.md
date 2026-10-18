@@ -281,7 +281,7 @@ index a55afb8..849c01f 100644
 +  private sentSeq = 0;
 +  private ackedSeq = 0;
 +  private sentAt = 0;
- 
+
 -  constructor(private onCapture: (pcm: ArrayBuffer) => void, private onAdmitted: (sequence: number) => void,
 +  constructor(private onCapture: (pcm: ArrayBuffer, lease: number) => void, private onAdmitted: (sequence: number) => void,
      private onFailure: () => void) {
@@ -360,7 +360,7 @@ index 56c733e..e515bf7 100644
 +  audioFactory?: (capture: (pcm: ArrayBuffer, lease: number) => void, admitted: (sequence: number) => void,
      failed: () => void) => CallAudioHandle;
  }
- 
+
 @@ -36,8 +37,8 @@ export function createCallController(deps: CallDeps) {
      if (!targets.value || deps.isMicBusy() || callId) return;
      if (!activateAudio()) return;
@@ -387,7 +387,7 @@ index 56c733e..e515bf7 100644
 +  // The one unanswered invite this tab sent; busy replies are matched to it.
 +  let outgoingRequest: string | null = null;
    let callUntil = 0;
- 
+
    function button(text: string, action: () => void): HTMLButtonElement {
 @@ -96,7 +96,7 @@ export function createCallController(deps: CallDeps) {
      const inCall = callId !== null;
@@ -529,7 +529,7 @@ index be73a72..5e21738 100644
          this.port.close();
        }
 @@ -60,7 +71,7 @@ class CallAudioProcessor extends AudioWorkletProcessor {
- 
+
    process(inputs: Float32Array[][], outputs: Float32Array[][]): boolean {
      const input = inputs[0]?.[0];
 -    if (input !== undefined && this.enabled && currentTime < this.leaseUntil) {
@@ -559,7 +559,7 @@ index ca8993f..96507e4 100644
 +++ b/wixy_server/livechat/call_broker.py
 @@ -7,9 +7,14 @@ the route's bounded workers, never inside these state transitions.
  from __future__ import annotations
- 
+
  import asyncio
 +import functools
 +import threading
@@ -570,12 +570,12 @@ index ca8993f..96507e4 100644
  from dataclasses import dataclass, field
 +from typing import Concatenate
  from uuid import uuid4
- 
+
  from builder.jsontypes import JsonObject
 @@ -27,6 +32,32 @@ from wixy_server.livechat.call_protocol import (
  )
  from wixy_server.livechat.tokens import ServerAuth
- 
+
 +# 4 pending auth sockets + 8 connections, each awaiting at most one synchronous job.
 +WORK_CAP = 12
 +
@@ -602,7 +602,7 @@ index ca8993f..96507e4 100644
 +
 +    return wrapper
 +
- 
+
  @dataclass
  class Budget:
 @@ -97,16 +128,48 @@ class CallBroker:
@@ -616,7 +616,7 @@ index ca8993f..96507e4 100644
 +        self.work = 0
 +        self.work_lock = threading.Lock()
 +        self.executor = ThreadPoolExecutor(WORK_CAP, thread_name_prefix="wixy-call")
- 
+
 +    async def offload[T](self, job: Callable[[], T]) -> T:
 +        with self.work_lock:
 +            if self.closed or self.work >= WORK_CAP:
@@ -650,7 +650,7 @@ index ca8993f..96507e4 100644
              return
          peer.controls.append(message)
          peer.wake.set()
- 
+
 +    @transition
      def add(self, peer: Peer) -> bool:
          now = time.monotonic()
@@ -658,7 +658,7 @@ index ca8993f..96507e4 100644
 @@ -126,6 +189,7 @@ class CallBroker:
          self.presence()
          return True
- 
+
 +    @transition
      def presence(self) -> None:
          busy = (self.call.caller, self.call.callee) if self.call else ()
@@ -666,7 +666,7 @@ index ca8993f..96507e4 100644
 @@ -149,6 +213,7 @@ class CallBroker:
              and time.monotonic() < peer.grant_until
          )
- 
+
 +    @transition
      def finish(self, reason: str) -> None:
          call, self.call = self.call, None
@@ -674,7 +674,7 @@ index ca8993f..96507e4 100644
 @@ -166,7 +231,11 @@ class CallBroker:
                  self.emit(peer, {"type": "ended", "callId": call.id, "reason": reason})
          self.presence()
- 
+
 +    @transition
      def remove(self, peer: Peer) -> None:
 +        self.drop(peer)
@@ -686,7 +686,7 @@ index ca8993f..96507e4 100644
 @@ -180,12 +249,17 @@ class CallBroker:
          peer.wake.set()
          self.presence()
- 
+
 +    @transition
      def shutdown(self) -> None:
          self.closed = True
@@ -696,7 +696,7 @@ index ca8993f..96507e4 100644
 +        # Queued jobs are cancelled; running synchronous calls cannot be interrupted
 +        # and keep their permits until they return.
 +        self.executor.shutdown(wait=False, cancel_futures=True)
- 
+
 +    @transition
      def command(self, peer: Peer, command: Command) -> None:
          now = time.monotonic()
@@ -714,7 +714,7 @@ index ca8993f..96507e4 100644
 @@ -264,6 +339,7 @@ class CallBroker:
          assert self.call and self.call.contains(peer)
          return self.peers[self.call.callee if peer.id == self.call.caller else self.call.caller]
- 
+
 +    @transition
      def frame(self, peer: Peer, data: bytes) -> None:
          now = time.monotonic()
@@ -722,7 +722,7 @@ index ca8993f..96507e4 100644
 @@ -308,6 +384,7 @@ class CallBroker:
              return data
          return None
- 
+
 +    @transition
      def tick(self, peer: Peer) -> None:
          now = time.monotonic()
@@ -740,8 +740,8 @@ index 7472140..44cbee7 100644
  from pathlib import Path
  from typing import TYPE_CHECKING, NamedTuple
 @@ -231,16 +232,24 @@ async def require_server_token(request: Request) -> ServerAuth:
- 
- 
+
+
  async def validate_server_token(
 -    token: str, *, email: str, secret: bytes, store: LiveChatStore
 +    token: str,
@@ -774,12 +774,12 @@ index 5cd146f..26236b1 100644
 @@ -7,13 +7,12 @@ import math
  import time
  from typing import Any
- 
+
 -import anyio
  import httpx
  from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
  from pydantic import ValidationError
- 
+
  from wixy_server.auth import AccessVerificationError
 -from wixy_server.livechat.call_broker import CallBroker, Peer
 +from wixy_server.livechat.call_broker import CallBroker, CallCapacityError, Peer
@@ -788,8 +788,8 @@ index 5cd146f..26236b1 100644
  from wixy_server.livechat.store import LiveChatStore
 @@ -34,7 +33,9 @@ def upgrade_allowed(ws: WebSocket, origins: frozenset[str]) -> bool:
      )
- 
- 
+
+
 -async def access_identity(ws: WebSocket, settings: Settings) -> tuple[str, float]:
 +async def access_identity(
 +    ws: WebSocket, settings: Settings, broker: CallBroker
@@ -1050,7 +1050,7 @@ index ad5b583..124f6d3 100644
      node.process([[input]], [[new Float32Array(128)]]);
      const frames = sent.filter((m) => m["type"] === "capture");
 @@ -42,7 +41,7 @@ describe("bounded call audio worklet", () => {
- 
+
    it("silences expired playout when the main thread never sends stop", async () => {
      const { node, message } = await processor(48_000);
 -    message({ type: "lease", until: 0.3 });

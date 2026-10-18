@@ -16,6 +16,15 @@ The real browser scenario includes a third unlocked same-login browser: it must 
 no incoming prompt, receive zero audio frames and never acquire a microphone. Device
 selection must not silently move to that observer while the chosen peer is busy.
 
+Round-2 regressions cover terminal-before-outgoing (including a dequeued outgoing),
+both-member admission/dequeue authorization and lifetime boundaries without a tick,
+constructor-failure decline, recorder-busy affordances and disconnected reconnection.
+Panel tests cover cache restore ordering plus lock/expiry/disposal negatives. The
+persisted-page Chromium scenario uses actual panel/chatView/thread and asserts draft
+preservation and presence-only restoration; injected events do not certify physical
+BFCache eligibility or mobile background behavior. On Windows set `WIXY_E2E_PYTHON`
+to the installed Python interpreter, since bare `python3` may be the Store alias.
+
 The test matrix, fixtures, and how to run everything. Spec:
 [`spec/08-testing-acceptance.md`](../../spec/08-testing-acceptance.md). CI is
 `.github/workflows/ci.yml` (see [runbook.md](runbook.md) §CI).

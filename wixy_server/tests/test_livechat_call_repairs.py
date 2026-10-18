@@ -8,11 +8,12 @@ import threading
 import time
 from types import SimpleNamespace
 from typing import Any
+from uuid import UUID
 
 import pytest
 
 from wixy_server.livechat.call_broker import CallBroker, CallCapacityError, CallWork, Peer
-from wixy_server.livechat.call_protocol import PROTOCOL, CallAction, Invite
+from wixy_server.livechat.call_protocol import HEADER, PROTOCOL, CallAction, Invite, Lease
 from wixy_server.livechat.tokens import ServerAuth, mint_unlock_token
 from wixy_server.routes_livechat_calls import calls_socket
 
@@ -325,7 +326,7 @@ def test_invite_overflow_is_a_clean_transition(fill_a: int, fill_b: int) -> None
             assert not [m for m in survivor.controls if m["type"] in ("incoming", "outgoing")]
 
 
-@pytest.mark.parametrize(("fill_a", "fill_b"), [(16, 14), (16, 0), (0, 16)])
+@pytest.mark.parametrize(("fill_a", "fill_b"), [(16, 15), (16, 14), (16, 0), (0, 16)])
 def test_accept_overflow_is_a_clean_transition(fill_a: int, fill_b: int) -> None:
     broker, (a, b) = _peers()
     broker.command(a, Invite(type="invite", requestId="r", targetConnectionId=b.id))
@@ -335,12 +336,14 @@ def test_accept_overflow_is_a_clean_transition(fill_a: int, fill_b: int) -> None
     _fill(b, fill_b)
     broker.command(b, CallAction(type="accept", callId=epoch))
     assert broker.call is None
-    assert a.closed is (fill_a == 16) and b.closed is (fill_b >= 14)
+    assert a.closed is (fill_a == 16) and b.closed is (fill_b >= 15)
     for peer in (a, b):
         stale = [m for m in peer.controls if m.get("callId") == epoch and m["type"] != "ended"]
         assert not stale
         if not peer.closed:
             ended = {"type": "ended", "callId": epoch, "reason": "disconnected"}
+            if peer is a:
+                ended["requestId"] = "r"
             assert ended in peer.controls
 
 
@@ -382,3 +385,116 @@ def test_crossing_invites_correlate_every_reply_and_keep_third_device_out(winner
     assert {m["type"] for m in c.controls} <= {"presence"}
     broker.command(second, CallAction(type="accept", callId=broker.call.id))
     assert broker.call.state == "preparing"
+
+
+@pytest.mark.parametrize("reason", ["overflow", "decline", "dequeued"])
+def test_early_terminal_always_correlates_originating_request(reason: str) -> None:
+    broker, (a, b) = _peers()
+    if reason == "overflow":
+        _fill(b, 16)
+    broker.command(a, Invite(type="invite", requestId="original", targetConnectionId=b.id))
+    if reason != "overflow":
+        assert broker.call
+        epoch = broker.call.id
+        if reason == "dequeued":
+            # A writer may have popped outgoing without completing send/adoption.
+            a.controls.clear()
+        broker.command(b, CallAction(type="decline", callId=epoch))
+    assert broker.call is None and not a.closed
+    terminals = [m for m in a.controls if m["type"] == "ended"]
+    assert len(terminals) == 1 and terminals[0].get("requestId") == "original"
+    assert not [m for m in a.controls if m["type"] == "outgoing"]
+    broker.shutdown()
+
+
+def _media_pair() -> tuple[CallBroker, Peer, Peer, bytes]:
+    broker, (a, b) = _peers()
+    broker.command(a, Invite(type="invite", requestId="r", targetConnectionId=b.id))
+    assert broker.call
+    epoch = broker.call.id
+    broker.command(b, CallAction(type="accept", callId=epoch))
+    for peer in (a, b):
+        broker.command(peer, CallAction(type="ready", callId=epoch))
+    broker.tick(a)
+    broker.command(b, Lease(type="lease", callId=epoch, lease=1))
+    frame = HEADER.pack(1, 1, 0, UUID(hex=epoch).bytes, 0, 0, a.lease_counter, 0, bytes(8))
+    return broker, a, b, frame + bytes(960)
+
+
+@pytest.mark.parametrize("boundary", ["sender", "receiver", "revoked", "refresh", "lifetime"])
+@pytest.mark.parametrize("stage", ["admission", "dequeue"])
+def test_media_enforces_pair_boundaries_without_monitor_tick(boundary: str, stage: str) -> None:
+    broker, a, b, frame = _media_pair()
+    if stage == "dequeue":
+        broker.frame(a, frame)
+        assert len(b.media) == 1
+    if boundary == "sender":
+        a.deadline = time.time() - 1
+    elif boundary == "receiver":
+        b.deadline = time.time() - 1
+    elif boundary == "revoked":
+        a.grant_until = 0
+    elif boundary == "refresh":
+        a.grant_until = time.monotonic() - 1
+    else:
+        assert broker.call
+        broker.call.until = time.monotonic() - 1
+    if stage == "admission":
+        try:
+            broker.frame(a, frame)
+        except ValueError as exc:
+            assert str(exc) == "media permission"
+    else:
+        assert broker.next_media(b) is None
+    assert broker.call is None
+    assert not a.media and not b.media and not a.outstanding and not b.outstanding
+    if boundary == "lifetime":
+        assert not a.closed and not b.closed
+    else:
+        assert (b if boundary == "receiver" else a).closed
+    broker.shutdown()
+
+
+def test_partner_disconnect_emits_one_final_presence_with_original_control_cap() -> None:
+    broker, (a, b) = _peers()
+    broker.command(a, Invite(type="invite", requestId="r", targetConnectionId=b.id))
+    _fill(a, 14)
+    broker.remove(b)
+    assert not a.closed and len(a.controls) == 16
+    assert sum(m["type"] == "presence" for m in a.controls) == 1
+    assert sum(m["type"] == "ping" for m in a.controls) == 14
+    _fill(a, 16)
+    broker.emit(a, {"type": "ping"})
+    assert a.closed
+    broker.shutdown()
+
+
+@pytest.mark.parametrize(
+    ("boundary", "expected"),
+    [("expired", 4401), ("revoked", 4401), ("refresh", 4408), ("protocol", 4403)],
+)
+def test_exceptional_media_exit_preserves_close_cause(
+    monkeypatch: pytest.MonkeyPatch, boundary: str, expected: int
+) -> None:
+    # Exercise the real route's exception/finally boundary with cached authority
+    # changed after admission, independently of the normal monitor completion path.
+    store, broker = BlockedStore(free=100), CallBroker()
+    socket = FakeSocket(_app(store, broker), _token())
+
+    async def media_exit(_ws: Any, _broker: CallBroker, peer: Peer, _store: Any) -> None:
+        if boundary == "expired":
+            peer.deadline = time.time() - 1
+        elif boundary == "revoked":
+            peer.grant_until = 0
+        elif boundary == "refresh":
+            peer.grant_until = time.monotonic() - 1
+        raise ValueError("media permission")
+
+    monkeypatch.setattr("wixy_server.routes_livechat_calls.run_peer", media_exit)
+    try:
+        asyncio.run(calls_socket(socket))  # type: ignore[arg-type]
+        assert socket.closed == expected
+        assert not broker.peers and broker.connections == 0
+    finally:
+        _drain(store, broker)
+        broker.shutdown()
