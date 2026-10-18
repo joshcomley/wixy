@@ -1,5 +1,13 @@
 # Architecture
 
+Private live calls extend only the unlocked Server panel: the in-memory
+`livechat/call_broker.py`, typed `call_protocol.py` and `routes_livechat_calls.py` relay
+one two-socket audio pair through the existing HTTPS tunnel. Browser ownership and
+bounded AudioWorklet capture/playout live in `admin-ui/src/server/call/`. No call state
+or audio enters the SQLite chat store, persistent SSE, AI or transcription. See
+[livechat.md](livechat.md#live-voice-calls-workspace-48) and Inv 55. One app process per
+site is required; calls end during disconnect, token replacement and deployment.
+
 The mental model, data flow, and module map for the wixy engine. Read this first, then
 follow the links into the per-subsystem deep-dives. The full, decided design is in
 [`spec/`](../../spec/README.md) (start at `spec/01-architecture.md`); this file is the

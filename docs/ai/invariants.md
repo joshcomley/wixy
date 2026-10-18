@@ -1,5 +1,43 @@
 # Invariants
 
+### Inv 55 — Live calls are ephemeral private pairs, and idle suspension never overrides locking
+
+Call audio is relayed only between the two immutable authenticated socket IDs that
+explicitly consented and became ready. Access and unlock/grant gates both apply; a
+third tab with the same email or token has no authority over the pair. No audio,
+transcripts, presence or call history is written to persistent state or the SSE store.
+Leases, credits, frame/rate limits and bounded queues prevent delayed catch-up audio.
+TLS does not make this end-to-end encrypted: the trusted relay sees live PCM.
+
+Connected calls, including silence/mute, hold one `voiceCall` idle suspension. Ending
+releases it exactly once and restarts the full idle countdown. Ringing does not hold
+it. Manual/actual lock, shield detach and disposal synchronously stop local capture
+and playback, even if permission resolves later. Existing tab/screen policies remain
+authoritative. Reconnection and token replacement never resume a call without consent.
+Remote stop across a network partition is bounded by leases/liveness, not instantaneous.
+
+Actual future completion owns native worker capacity (admission <=4, refresh <=8),
+even if its awaiter is cancelled. Operational failure is not credential revocation:
+stop audio without an unauthorized lock. Overflow evictions run after the outer
+synchronous broker transition, removing stale phase controls before a writer runs.
+Capture provenance is bound at production, never refreshed at receipt. One coalesced
+graph control may be unacknowledged; only an actual render ack authorizes a receiver
+lease using the original wall/audio expiry, never a new window on late receipt.
+
+Media admission and dequeue check both members' cached authority and connected
+lifetime without waiting for a monitor tick. Ineligible endpoints are removed;
+operational refresh expiry still does not imply credential revocation. Persisted-page
+restoration runs through the panel's lock/expiry policy before fresh presence opens;
+actual detach/dispose prevents restoration, and no prior audio or consent is restored.
+A temporary picker/permission exemption does not complete cached hidden policy: when
+that exemption ends, the panel applies policy before restoration, retaining original
+hide evidence. Call teardown cannot waive configured locking through listener order.
+
+*Enforced by:* `livechat/call_broker.py`, `routes_livechat_calls.py`, `server/call/*`,
+`test_livechat_calls.py`, `call*.test.ts`, panel suspension tests and
+`e2e/tests/server-calls.spec.ts`. Protocol/acceptance:
+[`04-voice-calls.md`](../../spec/server-chat/04-voice-calls.md).
+
 Numbered, load-bearing rules the engine depends on. **Known exceptions are listed next to
 the invariant** — there are no silent carve-outs. Cross-referenced from
 [CLAUDE.md](../../CLAUDE.md) and the deep-dives. When you add or change one of these, update

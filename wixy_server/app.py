@@ -26,7 +26,7 @@ from fastapi.staticfiles import StaticFiles
 
 from wixy_server.ai.anthropic_backend import AnthropicAIBackend
 from wixy_server.ai.backend import AIBackend, CmdAIBackend
-from wixy_server.auth import JwksCache, build_admin_auth_middleware, jwks_url
+from wixy_server.auth import JwksCache, build_admin_auth_middleware, jwks_url, verify_access_jwt
 from wixy_server.background import BackgroundTaskHealth, ContainedTaskGroup
 from wixy_server.bootstrap import bootstrap_if_needed
 from wixy_server.chat_sends import ChatSendsCache
@@ -38,6 +38,7 @@ from wixy_server.livechat import janitor as livechat_janitor
 from wixy_server.livechat import media_queue as livechat_media_queue
 from wixy_server.livechat import processing as livechat_processing
 from wixy_server.livechat import thumbnails as livechat_thumbnails
+from wixy_server.livechat.call_broker import CallBroker
 from wixy_server.livechat.drawing_broker import DrawingBroker
 from wixy_server.livechat.drawings import MAX_LIVE_BATCHES_PER_SECOND
 from wixy_server.livechat.grants import GrantFailureLimiter
@@ -78,6 +79,7 @@ from wixy_server.routes_engine import EngineStatusCache
 from wixy_server.routes_engine import router as engine_router
 from wixy_server.routes_internal import router as internal_router
 from wixy_server.routes_livechat import router as livechat_router
+from wixy_server.routes_livechat_calls import router as livechat_calls_router
 from wixy_server.routes_livechat_media import router as livechat_media_router
 from wixy_server.routes_preview import DEFAULT_PREVIEW_STALENESS_THRESHOLD_S
 from wixy_server.routes_preview import router as preview_router
@@ -439,6 +441,7 @@ def create_app(
                 yield
                 tg.cancel_scope.cancel()
         finally:
+            livechat_call_broker.shutdown()
             await livechat_push_client.aclose()
             await chat_client.aclose()
             await gh_client.aclose()
@@ -456,6 +459,19 @@ def create_app(
                 await resolved_ai_backend.aclose()
 
     app = FastAPI(lifespan=lifespan)
+    livechat_call_broker = CallBroker()
+    app.state.livechat_call_broker = livechat_call_broker
+    app.state.call_access_verifier = functools.partial(
+        verify_access_jwt,
+        jwks=jwks,
+        audience=settings.cf_access_aud,
+        team_domain=settings.cf_access_team_domain,
+    )
+    app.state.call_origins = frozenset(
+        {f"http://127.0.0.1:{settings.port}", f"http://localhost:{settings.port}"}
+        if settings.dev_no_auth
+        else {f"https://{project.domain}"}
+    )
     app.state.project = project
     app.state.paths = paths
     app.state.settings = settings
@@ -519,6 +535,7 @@ def create_app(
     app.include_router(system_router)
     app.include_router(versions_router)
     app.include_router(livechat_router)
+    app.include_router(livechat_calls_router)
     app.include_router(livechat_media_router)
 
     @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)

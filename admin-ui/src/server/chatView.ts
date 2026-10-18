@@ -6,6 +6,7 @@
 // (thread.ts) and its live stream (stream.ts), plus the settings sheet.
 
 import { ServerLockedError } from "./api/http";
+import { createCallController } from "./call/controller";
 import { createServerIdentity } from "./identity";
 import { mountServerSettingsSheet } from "./settingsSheet";
 import { openServerStream, type ServerStreamHandle } from "./stream";
@@ -64,6 +65,10 @@ export const createServerChatView: CreateServerChatView = (deps) => {
     win,
     onSettings: () => settingsSheet.open(),
   });
+  const calls = createCallController({
+    win, hooks, isMicBusy: () => thread.isMicBusy(), onBusy: (busy) => thread.setCallBusy(busy),
+  });
+  thread.mountCallControls(calls.element);
   thread.element.hidden = true; // shown once a name exists and attach() runs
   element.appendChild(thread.element);
 
@@ -112,6 +117,7 @@ export const createServerChatView: CreateServerChatView = (deps) => {
   }
 
   function showThreadAndConnect(session: ServerSession): void {
+    calls.attach(session, identity.getName() ?? "Device");
     const epoch = ++attachEpoch;
     closeStream();
     thread.element.hidden = false;
@@ -148,6 +154,7 @@ export const createServerChatView: CreateServerChatView = (deps) => {
       showThreadAndConnect(session);
     },
     detach(): void {
+      calls.detach();
       currentSession = null;
       attachEpoch += 1;
       pendingSessionForNamePrompt = null;
@@ -158,6 +165,7 @@ export const createServerChatView: CreateServerChatView = (deps) => {
       settingsSheet.close();
     },
     dispose(): void {
+      calls.dispose();
       currentSession = null;
       attachEpoch += 1;
       closeStream();

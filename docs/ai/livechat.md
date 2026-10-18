@@ -1,5 +1,81 @@
 # Subsystem: server chat (the "Server" panel)
 
+## Live voice calls (workspace 48)
+
+The compact call controls mount in the thread header immediately after the ⋯
+menu (`thread.mountCallControls`). Call/Answer use a phone icon; Decline/Cancel/End
+use a hang-up icon; Mute/Unmute use microphone icons with pressed state. Each has
+an accessible name and tooltip. There is no header drop-down: the phone icon opens
+a device list and a separate Call confirmation. Opening/cancelling that list sends
+no invite and acquires no audio; only the confirmation enters the existing call
+path. Missing devices cannot silently change the selected recipient. Controls use
+the shared surface/ink/border theme tokens. Status remains a
+live screen-reader announcement. This placement changes no call ownership or consent.
+
+`routes_livechat_calls.py` serves the ephemeral `/api/admin/server/calls/ws` WebSocket.
+`livechat/call_broker.py` owns at most one immutable pair of socket IDs; it never writes
+the store, SSE, audio, transcripts or notifications. Same-email tabs remain distinct.
+Access JWT verification precedes upgrade; a strict same-origin first-frame unlock token
+uses `tokens.validate_server_token`, including device-grant revocation. The effective
+expiry is the earlier Access/unlock expiry. Origins come from the configured project
+domain (HTTPS); explicit development loopback origins are permitted only with dev auth.
+
+`server/call/controller.ts` owns presence, consent and teardown. `audio.ts` owns tracks,
+context and the self-hosted fingerprinted `call-worklet.js`. Both accept before capture;
+both ready before media. A connected **or muted** call holds exactly one `voiceCall`
+idle suspension. End releases it, restarting a fresh countdown; actual lock, shield
+detach, pagehide, disposal, grant failure or connection failure stops audio immediately.
+Ringing does not suspend idle. A renewed unlock token ends the call and reconnects only
+presence; it never resumes audio. Recording a voice note and a call cannot own the mic
+together. Existing tab/screen-lock policies are unchanged. See **Inv 55**.
+
+The wire format, bounds and validation gates are canonical in
+[`04-voice-calls.md`](../../spec/server-chat/04-voice-calls.md) and its linked review.
+`call_protocol.SERVER_OPTIONS` is used by the production entry point and E2E fixture:
+4096-byte WS messages, receive queue 4, compression off. Audio is mono 24 kHz int16,
+20 ms frames. At most five receiver credits and five capture transfer buffers; bounded
+100 ms relay queues, 200 ms playout ring and 300 ms freshness leases. Controls use an
+80/s bucket (50 acknowledgements + ten leases/s plus UI/heartbeats), burst 100.
+TLS is transport protection, **not E2EE**; hub and Cloudflare can see live PCM. Calls end
+on interruption/redeploy and never reconnect automatically. One process per site only.
+Local Chromium synthetic duplex is proven; physical-device listening, phone behavior,
+actual-tunnel latency/loss and the 15-minute duplex gate remain unproven until recorded.
+
+Repair ownership: broker `CallWork` uses dedicated executor futures, admission <=4
+and refresh <=8. Actual future completion or pre-start cancellation returns the slot;
+cancelling its awaiting route does not. `@transition` defers overflow eviction until
+the outer synchronous mutation exits, so terminal cleanup removes stale controls.
+4401 is reserved for actual credential refusal/expiry/confirmed revocation; unavailable
+capacity or overdue verification ends audio without revoking the owner's session.
+
+Capture buffers carry immutable production-time lease/revision/time and recycle owned
+storage in finally. One coalesced graph state is acknowledged only by rendering;
+receiver leases are issued only after a timely render ack, preserving original expiry.
+An explicit Answer-pending guard prevents replacing the preparation graph on repeats.
+
+Every caller terminal echoes the originating request ID so early decline/overflow
+cannot strand an invite whose `outgoing` was purged before delivery. Broker
+`_media_other` gates admission/dequeue with both cached authorities and call lifetime;
+expired endpoints are unlinked immediately, retaining the 4401/4408 distinction.
+`_drop` and failed invitation setup avoid redundant presence broadcasts; the
+16-control overflow contract is unchanged.
+
+On persisted pagehide the controller detaches unconditionally. The panel records an
+eligible cache restore and runs its ordinary visible/shield/idle/expiry policy before
+calling `chatView.attach` again. This ordinary reattach refreshes thread history,
+signed media and SSE as well as fresh call presence; drafts must survive. It restores
+no call ID, microphone, audio graph or idle suspension. A real lock/dispose clears the
+restore marker. Constructor failure on Answer declines immediately; microphone
+ownership disables starting Call/Answer while presence-only reconnection stays usable.
+Persisted pagehide itself runs the existing hidden policy in case visibilitychange
+is missing; the following hidden notification is idempotent until a visible return.
+The owner distinguishes an unseen, temporarily exempt and handled hide. If call
+teardown releases the final picker/permission exemption during a pending cache hide,
+`completeCachedHiddenPolicy` finishes policy immediately, before presence can reopen.
+It also runs when an earlier exempt visibility hide reaches persisted pagehide after
+permission ended. Rechecks retain the original hide timestamp for screen-lock evidence.
+Still-held exemptions and ordinary non-cache chooser returns keep their existing rules.
+
 A hidden human↔human live chat for admin users, disguised as a **"Server"** nav tab inside
 the already CF-Access-gated `/admin`. Not the AI assistant, not visitor-facing — its own
 storage, routes, and second auth gate, entirely separate from `chats.py`/`cmdchat.py`/

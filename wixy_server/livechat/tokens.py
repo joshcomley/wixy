@@ -24,6 +24,7 @@ import json
 import os
 import secrets
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
@@ -226,14 +227,29 @@ async def require_server_token(request: Request) -> ServerAuth:
         raise _locked_401()
     secret: bytes = request.app.state.livechat_secret
     email = getattr(request.state, "access_email", None) or ""
+    store: LiveChatStore = request.app.state.livechat_store
+    return await validate_server_token(token, email=email, secret=secret, store=store)
+
+
+async def validate_server_token(
+    token: str,
+    *,
+    email: str,
+    secret: bytes,
+    store: LiveChatStore,
+    offload: Callable[[Callable[[], bool]], Awaitable[bool]] = anyio.to_thread.run_sync,
+) -> ServerAuth:
+    """Shared HTTP/WS gate, including revocation of device-bound credentials.
+
+    Calls pass the broker's job-owned `offload`, so a cancelled awaiter cannot free
+    accounting while the synchronous grant lookup still runs."""
     try:
         auth = verify_unlock_token(secret, token, email=email, now=time.time())
     except InvalidTokenError:
         raise _locked_401() from None
     grant_id = auth.grant_id
     if grant_id is not None:
-        store: LiveChatStore = request.app.state.livechat_store
-        live = await anyio.to_thread.run_sync(
+        live = await offload(
             lambda: store.is_device_grant_live(
                 grant_id=grant_id,
                 email=auth.email,

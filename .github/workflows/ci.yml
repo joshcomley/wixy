@@ -148,10 +148,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build image
         run: |
-          # Base image via AWS's public mirror of the official image: anonymous Docker Hub
-          # pulls from shared runners hit 429 Too Many Requests.
+          # Either public registry can rate-limit a shared runner. Pull the mirror first,
+          # then the same official tag from Docker Hub if the mirror is unavailable.
+          base_image=public.ecr.aws/docker/library/python:3.14-slim
+          if ! docker pull "$base_image"; then
+            base_image=python:3.14-slim
+            docker pull "$base_image"
+          fi
           docker build -f deploy/standalone/Dockerfile \
-            --build-arg PYTHON_IMAGE=public.ecr.aws/docker/library/python:3.14-slim \
+            --build-arg PYTHON_IMAGE="$base_image" \
             --build-arg WIXY_ENGINE_SHA=${{ github.sha }} \
             -t wixy:ci .
       - uses: actions/setup-python@v5

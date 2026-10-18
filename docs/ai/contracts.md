@@ -1,5 +1,48 @@
 # Contracts
 
+## Private live-call WebSocket
+
+`/api/admin/server/calls/ws` uses subprotocol `wixy-call-v1`, no query parameters,
+one configured same-origin Origin and a verified Access assertion. It independently
+enforces Access because HTTP middleware does not cover WS. After upgrade, within 5 s:
+`{"type":"auth","v":1,"token":"<in-memory unlock token>","label":"Device"}`.
+Success sends `{"type":"welcome","connectionId":"<32 hex>","deadline":<epoch seconds>}`
+and `{"type":"presence","peers":[{"id":"<32 hex>","label":"Device","available":true}]}`.
+No credentials enter URLs, cookies, subprotocols or storage.
+
+Client controls: `invite {requestId,targetConnectionId}`, `accept|decline|ready|failed|end
+{callId}`, `mute {callId,muted}`, `lease {callId,lease}`, `ack {callId,sequence}`, `pong {}`.
+All carry `type`; schemas forbid extra fields. Server sends `incoming|outgoing
+{callId,peer}`, `prepare|connected {callId}`, `capture {callId,lease}`, `muted {callId,muted}`,
+`ended {callId,reason,requestId?}`, `unavailable {requestId}`, `ping {}`. `outgoing` also echoes
+its originating `requestId`; only a matching outgoing attempt may adopt it. Media is fixed 1008-byte binary,
+never JSON/base64. Canonical offsets, state/ownership, limits and gates:
+[`spec/server-chat/04-voice-calls.md`](../../spec/server-chat/04-voice-calls.md).
+
+The caller's `ended` always includes its original `requestId`, even when the writer
+has not delivered `outgoing`. With no adopted call ID, only a matching pending request
+may be retired. A terminal for an old outgoing request cannot stop a newer incoming
+or accepted call; callee terminal envelopes omit `requestId`.
+
+Pre-upgrade denial closes with 4403 (the HTTP upgrade is rejected); after upgrade,
+4401 means actual credential refusal/expiry/confirmed revocation, 4403 invalid protocol,
+4429 socket/work capacity unavailable, 4408 verification/refresh/write deadline missed,
+and 1009 transport oversize. Normal disconnect uses 1000; cancellation/shutdown uses
+1001. Operational failure ends audio without locking the owner. Clients must not assume
+browser JS can read a rejected upgrade's response body. No call state is persisted.
+
+Each socket remembers only its last terminal epoch in memory: late end/decline/failure,
+mute, lease and ack from that former pair, and in-flight old PCM, are discarded without
+disconnecting presence or affecting a newer call. Invalid/missing membership, stale
+accept/ready and third-socket actions remain rejected. This grants no join/resume authority.
+
+Internal main-thread/worklet control is one coalesced `state` snapshot in flight:
+`{type:"state",seq,playUntil,captureLease,captureUntil,enabled,revision}`. The worklet
+acknowledges `{type:"state",seq}` only in an actual render quantum. A timely render
+ack issues one receiver lease using its original wall/audio expiry. Capture returns
+`{type:"capture",pcm,lease,revision,at}` with provenance latched at the first sample;
+main thread and relay cannot relabel it with a newer capture lease.
+
 The literal wire shapes wixy programs against: the HTTP route table, response
 envelopes, error conventions, the two SSE streams, the browser↔iframe postMessage
 protocol, and the named fixtures/entrypoints tests bind to. This documents **code

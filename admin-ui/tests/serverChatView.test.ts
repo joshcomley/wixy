@@ -43,6 +43,9 @@ function createHarness(attach: (session: ServerSession) => Promise<number | null
 
   const thread = {
     element: document.createElement("div"),
+    mountCallControls: vi.fn(),
+    isMicBusy: vi.fn(() => false),
+    setCallBusy: vi.fn(),
     attach: vi.fn(attach),
     detach: vi.fn(),
     handleStreamEvent: vi.fn(),

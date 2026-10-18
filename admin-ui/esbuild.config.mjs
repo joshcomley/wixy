@@ -1,7 +1,16 @@
 import * as esbuild from "esbuild";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+
+await esbuild.build({
+  entryPoints: ["src/server/call/worklet.ts"], bundle: true, minify: true,
+  outfile: "../wixy_server/static/admin/call-worklet.js", format: "iife", target: ["es2022"],
+});
+const workletHash = createHash("sha256").update(await readFile("../wixy_server/static/admin/call-worklet.js")).digest("hex").slice(0, 10);
 
 await esbuild.build({
   entryPoints: ["src/index.ts"],
+  define: { WIXY_CALL_WORKLET_URL: JSON.stringify(`/admin/static/admin/call-worklet.js?v=${workletHash}`) },
   bundle: true,
   minify: true,
   sourcemap: true,

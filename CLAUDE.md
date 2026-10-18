@@ -1,5 +1,12 @@
 # wixy — engine repo
 
+Private live calls: [`spec/server-chat/04-voice-calls.md`](spec/server-chat/04-voice-calls.md),
+[`docs/ai/livechat.md`](docs/ai/livechat.md), Inv 55. Route
+`/api/admin/server/calls/ws` independently enforces Access + unlock/grant authorization.
+`livechat/call_broker.py`/`call_protocol.py` and `routes_livechat_calls.py` are memory-only;
+`admin-ui/src/server/call/` owns bounded AudioWorklet audio. A connected/muted call pauses
+idle lock; every actual lock/detach ends it. No recording, transcription or call history.
+
 Self-hosted CMS engine for `ca.cinnamons.uk` (Cottage Aesthetics), deployed and serving
 production. The full build spec lives in `spec/` (read `spec/README.md` first) — it is
 authoritative and decided; this file is quick orientation, not a substitute. The

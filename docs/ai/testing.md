@@ -1,5 +1,45 @@
 # Testing
 
+The loopback E2E server's `FixtureSocketIdentity` carries a supplied fake HTTP
+identity into WebSocket upgrades through an HttpOnly test cookie. Chromium omits
+Playwright's context extraHTTPHeaders on those upgrades; without the fixture hop,
+the call socket correctly rejects an email-bound token and locks those tests.
+Production never imports this middleware. The call browser scenario checks the
+phone icon right of ⋯, no header select, an in-viewport recipient picker and a
+separate confirmation before invitation/audio, then the existing duplex/cleanup
+gates. CI's image proof falls back from a failed ECR pull to the same official
+Python tag on Docker Hub before building; it never ignores build/boot failures.
+
+Live-call focused loop: `pytest wixy_server/tests/test_livechat_calls.py -n 0` (signed
+JWT dual-gate tests, immutable pair/state/credit/lease tests, real Uvicorn fragmented
+oversize proof); in `admin-ui`, `npm test -- tests/server/call.test.ts
+tests/server/callAudio.test.ts tests/server/callWorklet.test.ts tests/server/panel.test.ts`;
+in `e2e`, `npx playwright test tests/server-calls.spec.ts --workers=1` after rebuilding
+admin assets. Synthetic duplex is distinct from the physical-device listening and
+actual-tunnel gate in [the review](../../spec/server-chat/voice-call-architecture-review.md#acceptance-and-real-audio-validation).
+
+Repair discriminators additionally live in `test_livechat_call_repairs.py` and
+`admin-ui/tests/server/callRepairs.test.ts`: actual native-work accounting under
+cancel/timeout, pre-start cancel and separate quotas; overflow transitions; crossing
+invites; immutable capture tags; rendered acknowledgements and preserved expiry.
+The real browser scenario includes a third unlocked same-login browser: it must see
+no incoming prompt, receive zero audio frames and never acquire a microphone. Device
+selection must not silently move to that observer while the chosen peer is busy.
+
+Round-2 regressions cover terminal-before-outgoing (including a dequeued outgoing),
+both-member admission/dequeue authorization and lifetime boundaries without a tick,
+constructor-failure decline, recorder-busy affordances and disconnected reconnection.
+Panel tests cover cache restore ordering plus lock/expiry/disposal negatives. The
+persisted-page Chromium scenario uses actual panel/chatView/thread and asserts draft
+preservation and presence-only restoration; injected events do not certify physical
+BFCache eligibility or mobile background behavior. On Windows set `WIXY_E2E_PYTHON`
+to the installed Python interpreter, since bare `python3` may be the Store alias.
+The pending-permission cache regression combines the real panel and real call
+controller, permutes both pagehide listener orders and hidden-event presence, and
+asserts lock before visible return, one audio stop and socket close. Companion
+controls retain genuine picker/permission exemptions, cover permission ending before
+persisted pagehide and verify shield decisions against the original hide timestamp.
+
 The test matrix, fixtures, and how to run everything. Spec:
 [`spec/08-testing-acceptance.md`](../../spec/08-testing-acceptance.md). CI is
 `.github/workflows/ci.yml` (see [runbook.md](runbook.md) §CI).

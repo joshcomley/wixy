@@ -210,6 +210,7 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
   let boundGrantId: string | null = null;
   let chatView: ServerChatView | null = null;
   let chatAttached = false;
+  let restorePresencePending = false;
   let verifyRequestSeq = 0;
   /** Stale-response filter for the grant unlock a mount starts, like `verifyRequestSeq`. */
   let grantRequestSeq = 0;
@@ -226,6 +227,7 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
   }
 
   function detachChatView(): void {
+    restorePresencePending = false;
     if (!chatAttached) return;
     chatView?.detach();
     chatView?.element.remove();
@@ -711,6 +713,7 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
         if (safetyTimer !== null) win.clearTimeout(safetyTimer);
         decrementSuspension(reason);
         if (totalSuspensionCount === 0 && idleTimerArmed) armIdleTimer();
+        completeCachedHiddenPolicy();
       }
       return release;
     },
@@ -1015,23 +1018,52 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
    * chat's memory is about to be discarded anyway. A page that goes into the back/forward
    * cache (`persisted`) can be restored open, so it stays an ordinary background switch. */
   let unloading = false;
+  let hiddenTransition: "none" | "exempt" | "handled" = "none";
 
   function onPageHide(event: PageTransitionEvent): void {
     unloading = !event.persisted;
+    restorePresencePending = event.persisted && chatAttached && state.kind === "chat";
+    if (event.persisted) {
+      // Permission may have ended after visibility-hidden but before pagehide.
+      completeCachedHiddenPolicy();
+      onHidden();
+    }
   }
 
-  function onPageShow(): void {
+  function onPageShow(event: PageTransitionEvent): void {
     unloading = false;
+    if (event.persisted && !disposed && win.document.visibilityState !== "hidden") onVisible();
   }
 
-  function onHidden(): void {
-    if (unloading) return;
-    lastHideAtMs = win.performance.now();
+  function restoreCachedPresence(): void {
+    if (!restorePresencePending || disposed || !chatAttached || state.kind !== "chat"
+      || session === null || win.document.visibilityState === "hidden") return;
+    restorePresencePending = false;
+    if (msUntilExpiry() <= 0) { onExpiry(); return; }
+    // Ordinary reattach refreshes thread/SSE and fresh call presence, never audio.
+    chatView?.attach(session);
+  }
+
+  function completeCachedHiddenPolicy(): void {
+    if (!restorePresencePending || hiddenTransition !== "exempt" || isPickerOrMicOpen()) return;
+    hiddenTransition = "none";
+    onHidden(true);
+  }
+
+  function onHidden(recheckPolicy = false): void {
+    if (unloading || hiddenTransition !== "none") return;
+    hiddenTransition = "handled";
     // A lock event reported up to a second BEFORE the page hid belongs to this hide, and proves
     // the device delivers them as they happen.
-    proveIfCausal();
+    if (!recheckPolicy) {
+      lastHideAtMs = win.performance.now();
+      proveIfCausal();
+    }
     // R7: an open file picker or a pending mic-permission prompt never lock, nor shield.
-    if (isPickerOrMicOpen()) return;
+    if (isPickerOrMicOpen()) {
+      hiddenTransition = "exempt";
+      return;
+    }
     if (state.kind === "shielded") {
       // Away again before the last switch resolved. That is a second switch in one absence, so
       // the cause can no longer be read: keep the decoy up, drop any pending restore, and lock
@@ -1060,6 +1092,8 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
   }
 
   function onVisible(): void {
+    completeCachedHiddenPolicy();
+    hiddenTransition = "none";
     if (state.kind === "shielded") {
       cancelShieldResolve();
       // A switch that can no longer be read, or a lock event already seen (causal, or late and
@@ -1084,7 +1118,11 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
     // Timers can stall while a page is in the background: if the idle period ran out while
     // away, lock NOW — instantly, with no fade a touch could cancel — instead of waiting for a
     // timer that may never have fired.
-    if (state.kind === "chat" && idleRanOutWhileAway()) dispatch({ type: "lock", cause: "idleAway" });
+    if (state.kind === "chat" && idleRanOutWhileAway()) {
+      dispatch({ type: "lock", cause: "idleAway" });
+      return;
+    }
+    restoreCachedPresence();
   }
 
   function onVisibilityChange(): void {
@@ -1113,6 +1151,7 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
     element: root,
     teardown(): void {
       disposed = true;
+      restorePresencePending = false;
       // Routing away from `/admin/server` is itself one of R6's lock causes
       // — run it through the reducer (rather than skipping straight to
       // cleanup) so a mid-chat departure still detaches/aborts/pauses

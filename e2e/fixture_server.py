@@ -36,6 +36,56 @@ from pathlib import Path
 
 import anyio
 import httpx
+from starlette.requests import HTTPConnection
+from starlette.responses import Response
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+
+class FixtureSocketIdentity:
+    """Mimic Access's same identity on HTTP and WS in this loopback-only fixture.
+
+    Chromium omits Playwright context extraHTTPHeaders on WebSocket upgrades.
+    A test-only HttpOnly cookie carries the fake HTTP identity into that upgrade;
+    the real socket route still validates its unlock token against that identity.
+    This middleware is never imported or installed by the product server.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+        connection = HTTPConnection(scope)
+        email = connection.headers.get("cf-access-authenticated-user-email")
+        if scope["type"] == "websocket":
+            carried = connection.cookies.get("wixy_e2e_identity")
+            if carried and email is None:
+                scope = dict(scope)
+                scope["headers"] = [
+                    *scope.get("headers", []),
+                    (b"cf-access-authenticated-user-email", carried.encode("latin-1")),
+                ]
+            await self.app(scope, receive, send)
+        elif email:
+            cookie = Response()
+            cookie.set_cookie("wixy_e2e_identity", email, httponly=True, samesite="lax")
+            cookie_header = next(value for key, value in cookie.raw_headers if key == b"set-cookie")
+
+            async def send_with_identity(message: Message) -> None:
+                if message["type"] == "http.response.start":
+                    message = dict(message)
+                    message["headers"] = [
+                        *message.get("headers", []),
+                        (b"set-cookie", cookie_header),
+                    ]
+                await send(message)
+
+            await self.app(scope, receive, send_with_identity)
+        else:
+            await self.app(scope, receive, send)
+
 
 E2E_DIR = Path(__file__).resolve().parent
 WIXY_REPO_ROOT = E2E_DIR.parent
@@ -332,7 +382,6 @@ def main() -> None:
     import uvicorn
     from starlette.middleware.base import RequestResponseEndpoint
     from starlette.requests import Request
-    from starlette.responses import Response
 
     from wixy_server.app import create_app
 
@@ -409,6 +458,7 @@ def main() -> None:
         watcher_interval_s=3600.0,
         cmdchat_client=cmdchat_client,
     )
+    app.add_middleware(FixtureSocketIdentity)
 
     def _fake_push_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(201)
@@ -848,7 +898,10 @@ def main() -> None:
         await anyio.to_thread.run_sync(fake_cmd_server.stop)
         return {"ok": True}
 
-    uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
+    app.state.call_origins = frozenset({f"http://127.0.0.1:{PORT}"})
+    from wixy_server.livechat.call_protocol import SERVER_OPTIONS
+
+    uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning", **SERVER_OPTIONS)
 
 
 if __name__ == "__main__":
