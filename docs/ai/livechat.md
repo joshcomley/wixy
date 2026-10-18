@@ -2,6 +2,42 @@
 
 ## Live voice calls (workspace 48)
 
+Setup recovery (workspace48 follow-up): after capture returns, `CallAudio.prepare`
+may resume a non-running/non-closed context once, with a stopped guard after the
+await; it never auto-resumes an interrupted connected call. The first valid
+`connected` transition starts a fresh controller liveness clock, because a
+permission chooser may have paused timers before any media was active. The
+existing connected-call freshness/lease/stall budgets remain unchanged.
+
+`call/diagnostics.ts` holds at most32 technical stage entries for the current
+attempt. Failure UI offers **Copy call details** (or selectable text if clipboard
+access fails), a Dismiss call details button, and one browser-console diagnostic
+per failed attempt. Dismissing also invalidates pending clipboard fallback UI.
+Only stage names, relative timings, allowlisted audio states/error names, numeric
+sample rates/socket close codes and extracted browser/OS version numbers are
+included. Audio, messages, transcripts, device/peer labels, socket/call IDs,
+credentials, URLs, full user agents and exception text/stacks are excluded.
+No diagnostics are automatically uploaded or written to app persistence. A new
+explicit attempt, incoming invite, connection opening or detach/lock resets the
+trace. Idle transport failures start their own trace and use the existing status
+instead of overlaying the thread. Technical failures use the
+existing `failed {callId}` action; the pair receives the existing
+`ended {reason:"audio_unavailable"}` and displays a visible explanation. That
+legacy reason covers several technical failures, so peer wording does not infer
+a microphone-permission problem. Both pulse and socket-message stall checks take
+the same visible failure path; an expired socket message is discarded.
+
+Transcription availability recovery uses only `GET /usage`: while unavailable,
+the attached thread rechecks after15 seconds, with a5-second abortable HTTP
+budget. Attachment generation, abort, timer cancellation and late-response guards
+prevent an old result/401 from changing a new attachment, including the same
+session object. Silent renewal replaces probe ownership while retaining known
+availability; its GET starts independently of history success or wipe generation.
+Detach/teardown cancels the owner and resets availability. An affirmative server flag
+restores Transcribe and clears the obsolete unavailable notice; recovery never
+automatically requests a transcript or sends audio. The server's fresh private
+capability check before transcription remains authoritative (Inv50).
+
 The compact call controls mount in the thread header immediately after the ⋯
 menu (`thread.mountCallControls`). Call/Answer use a phone icon; Decline/Cancel/End
 use a hang-up icon; Mute/Unmute use microphone icons with pressed state. Each has

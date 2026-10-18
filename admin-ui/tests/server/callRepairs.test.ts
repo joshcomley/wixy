@@ -101,14 +101,14 @@ describe("round 2 terminal and microphone boundaries", () => {
       expect(f.graphs[1]?.audio.prepare).toHaveBeenCalledTimes(1);
     } finally { f.controller.dispose(); }
   });
-  it("construction failure declines Answer but fabricates no action before invite", () => {
+  it("construction failure reports failed audio on Answer but fabricates no action before invite", () => {
     const f = setup(() => false, true);
     try {
       f.click("Call");
       expect(f.controls().map((m) => m["type"])).toEqual(["auth"]);
       f.socket.receive({ type: "incoming", callId: ID, peer: "B" });
       f.click("Answer");
-      expect(f.controls().at(-1)).toEqual({ type: "decline", callId: ID });
+      expect(f.controls().at(-1)).toEqual({ type: "failed", callId: ID });
     } finally { f.controller.dispose(); }
   });
   it("updates recorder ownership without presence events", () => {
@@ -257,7 +257,7 @@ describe("M1 capture provenance and M4 lease issuance at the controller", () => 
     f.graphs[0]?.ready(0.3, 250);
     expect(f.controls().filter((m) => m["type"] === "lease")).toHaveLength(1);
     f.graphs[0]?.ready(0.4, 0);
-    expect(f.controller.element.textContent).toContain("Audio unavailable");
+    expect(f.controller.element.textContent).toContain("Audio playback didn't start in time");
     f.controller.dispose();
   });
 });

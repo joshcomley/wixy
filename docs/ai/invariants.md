@@ -9,6 +9,12 @@ transcripts, presence or call history is written to persistent state or the SSE 
 Leases, credits, frame/rate limits and bounded queues prevent delayed catch-up audio.
 TLS does not make this end-to-end encrypted: the trusted relay sees live PCM.
 
+Operator-requested troubleshooting may keep a bounded current-attempt technical
+trace in browser memory and print one technical console entry on failure. It
+contains no audio/content, identities, labels, connection/call IDs, credentials,
+URLs or exception messages/stacks, is never automatically uploaded/persisted by
+the app, and resets on new consent or detach. This is not a call-history store.
+
 Connected calls, including silence/mute, hold one `voiceCall` idle suspension. Ending
 releases it exactly once and restarts the full idle countdown. Ringing does not hold
 it. Manual/actual lock, shield detach and disposal synchronously stop local capture

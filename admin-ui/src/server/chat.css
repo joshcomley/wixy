@@ -91,6 +91,29 @@
   background: var(--wx-brand-blue);
   color: #fff;
 }
+.wx-srv-call-notice {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  z-index: 8;
+  padding: 12px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  box-shadow: var(--wx-shadow);
+  font-size: 14px;
+}
+.wx-srv-call-notice p { margin: 0 0 8px; }
+.wx-srv-call .wx-srv-call-notice button { width: auto; padding: 6px 12px; }
+.wx-srv-call-notice pre {
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
 
 @media (max-width: 420px) {
   .wx-srv-thread-header { gap: 6px; }

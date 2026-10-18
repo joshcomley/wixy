@@ -1364,13 +1364,17 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   // Transcribe control is hidden until the server says so. Hide/Show is a per-device choice
   // kept in memory only.
   let transcriptionAvailable = false;
+  let transcriptionProbe: AbortController | null = null;
+  let transcriptionTimeout: number | null = null;
+  let transcriptionRetry: number | null = null;
+  let transcriptionOwner = 0;
   const hiddenTranscripts = new Set<string>();
   const transcription: TranscriptionContext = {
     available: () => transcriptionAvailable,
     request: requestTranscription,
     markUnavailable(): void {
-      transcriptionAvailable = false;
-      refreshTranscriptBlocks(messageList);
+      stopTranscriptionProbe();
+      if (currentSession !== null) void refreshTranscriptionAvailability(currentSession, transcriptionOwner);
     },
     isHidden: (attachmentId) => hiddenTranscripts.has(attachmentId),
     setHidden(attachmentId, hidden): void {
@@ -1397,16 +1401,49 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     }
   }
 
-  async function refreshTranscriptionAvailability(session: ServerSession): Promise<void> {
+  function stopTranscriptionProbe(resetAvailability = true): void {
+    transcriptionOwner++;
+    transcriptionProbe?.abort();
+    transcriptionProbe = null;
+    if (transcriptionTimeout !== null) win.clearTimeout(transcriptionTimeout);
+    transcriptionTimeout = null;
+    if (transcriptionRetry !== null) win.clearTimeout(transcriptionRetry);
+    transcriptionRetry = null;
+    if (resetAvailability) {
+      transcriptionAvailable = false;
+      refreshTranscriptBlocks(messageList);
+    }
+  }
+  function retryTranscriptionProbe(session: ServerSession, owner: number): void {
+    if (currentSession !== session || owner !== transcriptionOwner || transcriptionRetry !== null) return;
+    transcriptionRetry = win.setTimeout(() => {
+      transcriptionRetry = null;
+      void refreshTranscriptionAvailability(session, owner);
+    }, 15_000);
+  }
+  async function refreshTranscriptionAvailability(session: ServerSession, owner: number): Promise<void> {
+    if (currentSession !== session || owner !== transcriptionOwner || transcriptionProbe !== null) return;
+    const controller = new AbortController();
+    transcriptionProbe = controller;
+    const timeout = win.setTimeout(() => controller.abort(), 5_000);
+    transcriptionTimeout = timeout;
     try {
-      const usage = await getUsage(session);
+      const usage = await getUsage(session, controller.signal);
       const available = usage.transcriptionAvailable === true;
-      if (currentSession !== session || available === transcriptionAvailable) return;
+      if (currentSession !== session || owner !== transcriptionOwner || controller.signal.aborted) return;
       transcriptionAvailable = available;
       refreshTranscriptBlocks(messageList);
     } catch (error) {
-      // Not being able to read the flag only leaves the control hidden.
-      if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+      if (currentSession === session && owner === transcriptionOwner && error instanceof ServerLockedError) {
+        hooks.lockNow("unauthorized");
+      }
+    } finally {
+      win.clearTimeout(timeout);
+      if (transcriptionTimeout === timeout) transcriptionTimeout = null;
+      if (transcriptionProbe === controller) transcriptionProbe = null;
+      if (currentSession === session && owner === transcriptionOwner && !transcriptionAvailable) {
+        retryTranscriptionProbe(session, owner);
+      }
     }
   }
   const daySeparators = new Map<number, HTMLElement>();
@@ -2916,7 +2953,12 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   // -- attach / detach / stream events -----------------------------------------
 
   async function attach(session: ServerSession): Promise<number | null> {
+    // Renewal replaces request ownership without hiding an already available control.
+    stopTranscriptionProbe(false);
+    const availabilityOwner = transcriptionOwner;
     currentSession = session;
+    // Capability recovery belongs to the attachment, independently of history or wipe.
+    void refreshTranscriptionAvailability(session, availabilityOwner);
     // A renewed token: an open gallery swaps in freshly signed media URLs, no visible change.
     gallery.refreshSession();
     // Strokes a lock left waiting to be stored resume with this unlock's token.
@@ -2986,7 +3028,6 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       historyLoaded = true;
       renderThreadList();
       ensureObserver();
-      void refreshTranscriptionAvailability(session);
       if (pendingVoiceNote !== null) void sendVoiceNote();
       return cursor;
     } catch (error) {
@@ -3010,6 +3051,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     setCallBusy(busy: boolean): void { callBusy = busy; updateRecorderUi(); },
     attach,
     detach(): void {
+      stopTranscriptionProbe();
       // First, while this unlock's token is still in hand: the pen turns off, a stroke in
       // progress is withdrawn with a live cancel, and the surface, live previews and every
       // drawing timer go (spec 07 §5).
@@ -3095,6 +3137,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     wipe,
     refreshNameChip,
     teardown(): void {
+      stopTranscriptionProbe();
       drawingLayer.teardown();
       wyrModel.reset();
       game.reset();

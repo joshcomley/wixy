@@ -1,4 +1,5 @@
 /** Owns one attempt's audio resources, including resources returned after cancellation. */
+import { type AudioDiagnostic } from "./diagnostics";
 declare const WIXY_CALL_WORKLET_URL: string;
 const LEASE_S = 0.3;
 interface GraphState { playUntil: number; captureLease: number; captureUntil: number; enabled: boolean; revision: number }
@@ -20,29 +21,44 @@ export class CallAudio {
   private issuedUntil = 0;
 
   constructor(private onCapture: (pcm: ArrayBuffer, lease: number) => void, private onAdmitted: (sequence: number) => void,
-    private onFailure: () => void, private onLeaseReady: (until: number, remainingMs: number) => void = () => {}) {
+    private onFailure: () => void, private onLeaseReady: (until: number, remainingMs: number) => void = () => {},
+    private onDiagnostic: (event: AudioDiagnostic) => void = () => {}) {
     this.context = new AudioContext();
+    this.report("context-created");
     // Called synchronously from Call/Accept user gestures, before any server await.
     this.activation = this.context.resume();
-    void this.activation.catch(() => { if (!this.stopped) this.onFailure(); });
+    void this.activation.catch((error: unknown) => {
+      if (!this.stopped) { this.report("setup-failed", error); this.onFailure(); }
+    });
   }
 
   async prepare(): Promise<void> {
     try {
       await this.activation;
       if (this.stopped) return;
+      this.report("activation-ready");
+      this.report("loading-worklet");
       await this.context.audioWorklet.addModule(
         typeof WIXY_CALL_WORKLET_URL === "string" ? WIXY_CALL_WORKLET_URL : "/admin/static/admin/call-worklet.js",
       );
       if (this.stopped) return;
+      this.report("requesting-microphone");
       const stream = await navigator.mediaDevices.getUserMedia({ audio: {
         channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true,
       } });
       if (this.stopped) { for (const track of stream.getTracks()) track.stop(); return; }
       this.stream = stream;
+      this.report("microphone-ready");
       for (const track of stream.getTracks()) track.addEventListener("ended", () => {
         if (!this.stopped) this.onFailure();
       }, { once: true });
+      // Starting capture can suspend an already-activated iPhone audio session.
+      // Resume only during this explicitly accepted setup, never during a live call.
+      if (this.context.state !== "running" && this.context.state !== "closed") {
+        this.report("resuming-capture");
+        await this.context.resume();
+        if (this.stopped) return;
+      }
       if (this.context.state !== "running" || !stream.getAudioTracks().some((t) => t.readyState === "live")) {
         throw new Error("Audio unavailable");
       }
@@ -69,7 +85,7 @@ export class CallAudio {
           const flight = this.flight;
           this.flight = null;
           const remainingWallMs = LEASE_S * 1000 - (performance.now() - flight.at);
-          if (remainingWallMs <= 0) { this.onFailure(); return; }
+          if (remainingWallMs <= 0) { this.report("render-stalled"); this.onFailure(); return; }
           const until = flight.state.playUntil;
           if (this.running && until > this.issuedUntil) {
             const remainingMs = Math.min(remainingWallMs, (until - this.context.currentTime) * 1000);
@@ -91,12 +107,24 @@ export class CallAudio {
       this.source.connect(this.node);
       this.node.connect(this.context.destination);
       this.context.onstatechange = () => {
-        if (!this.stopped && this.context.state !== "running") this.onFailure();
+        if (!this.stopped && this.context.state !== "running") {
+          this.report("context-state");
+          this.onFailure();
+        }
       };
+      this.report("graph-ready");
     } catch (error) {
+      if (!this.stopped) this.report("setup-failed", error);
       this.stop();
       throw error;
     }
+  }
+
+  private report(step: AudioDiagnostic["step"], error?: unknown): void {
+    try {
+      this.onDiagnostic({ step, state: this.context.state, sampleRate: this.context.sampleRate,
+        ...(error !== undefined ? { error } : {}) });
+    } catch { /* A diagnostic sink cannot interrupt audio ownership or cleanup. */ }
   }
 
   /** Never posts or fails synchronously: the controller acquires its call suspension, then pulses. */
@@ -130,7 +158,7 @@ export class CallAudio {
     if (this.stopped || !this.node || !this.running) return;
     if (this.flight !== null) {
       // Coalesce while unacknowledged; a graph that stops rendering fails the call.
-      if (performance.now() - this.flight.at >= LEASE_S * 1000) this.onFailure();
+      if (performance.now() - this.flight.at >= LEASE_S * 1000) { this.report("render-stalled"); this.onFailure(); }
       return;
     }
     if (this.posted === this.desired) return;
@@ -146,6 +174,7 @@ export class CallAudio {
   stop(): void {
     if (this.stopped) return;
     this.stopped = true;
+    this.report("stopped");
     this.running = false;
     this.flight = null;
     for (const track of this.stream?.getTracks() ?? []) track.stop();

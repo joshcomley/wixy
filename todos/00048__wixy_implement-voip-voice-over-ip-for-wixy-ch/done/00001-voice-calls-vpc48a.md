@@ -1,5 +1,26 @@
 # 00001 [vpc48a] Live voice calls through hub
 
+## Completed delivery
+
+Published via https://github.com/joshcomley/wixy/pull/328, confirmed merge
+`22571a22efe72ebb975702b0539c8a5e41bade0c`. Final candidate `6df9f8a` passed
+all release checks (including the full browser rerun after an unrelated photo
+alignment timeout, also passed twice locally). Production origin and public
+`/api/version` return the exact merge; blue slot, internal `/healthz`200.
+The operator reported the phone call works, requested the final phone icon right
+of⋯, no drop-down and separate Call confirmation, then authorized publication.
+All four delivery tasks are done; cmd's delivery record recovered the externally
+confirmed PR merge and marks this delivery complete.
+
+The required independent capability and permission-delta audits passed; final UI
+and consent changes were locally proven with2617 frontend tests, strict types,
+LF bundles, actual Chromium confirmation/duplex/privacy/stall/mute/panic flow and
+cached-page recovery. Formal15-minute speakerphone, latency/jitter/loss, all mobile
+platforms and blocked-native-worker measurements are not claimed; see
+`spec/server-chat/voice-delivery-validation.md`. Historical progress below is
+retained for provenance. The source-only probe inherited untracked at handover
+is preserved at `.scratch/inherited-voice_preview_probe.py`.
+
 ## What / Why
 
 Add two-person live audio calling to the unlocked Server panel, coordinated through hub and the operator's internet connection.

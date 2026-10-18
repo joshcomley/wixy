@@ -1,5 +1,15 @@
 # Final candidate validation
 
+## Confirmed publication
+
+PR328 merged as `22571a22efe72ebb975702b0539c8a5e41bade0c` after all final
+release checks passed at `6df9f8a`. The full browser job passed on retry; its
+isolated photo-align timeout also passed twice locally without source changes.
+Production origin and public `/api/version` both return the exact merge; internal
+health200 and blue slot verified. Public health probes intentionally return404.
+The operator's requested controls and confirmation are published. This receipt
+does not expand the physical/performance measurement claims below.
+
 ## Final operator correction
 
 The operator subsequently requested a separate Call confirmation, removal of the

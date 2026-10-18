@@ -249,3 +249,35 @@ test("persisted page recovery preserves draft and restores presence without audi
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
   expect(sockets).toBe(2);
 });
+
+test("microphone rejection explains setup failure on both devices with safe copyable details", async ({ browser }) => {
+  const caller = await browser.newContext({ permissions: ["microphone"] });
+  const callee = await browser.newContext({ viewport: { width: 390, height: 844 }, permissions: ["microphone"] });
+  try {
+    const a = await caller.newPage();
+    const b = await callee.newPage();
+    await b.addInitScript(() => {
+      navigator.mediaDevices.getUserMedia = async () => { throw new DOMException("private-error-content", "NotAllowedError"); };
+      Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
+    });
+    await unlock(a, "Caller");
+    await unlock(b, "Receiver");
+    await a.getByRole("button", { name: "Call", exact: true }).click();
+    await a.getByRole("button", { name: "Confirm call", exact: true }).click();
+    await b.getByRole("button", { name: "Answer", exact: true }).click();
+    const local = b.locator(".wx-srv-call-notice");
+    await expect(local).toBeVisible();
+    await expect(local).toContainText("permission was denied");
+    await expect(a.locator(".wx-srv-call-notice")).toContainText("other device couldn't connect the call");
+    await local.getByRole("button", { name: "Copy call details" }).click();
+    await expect(local.locator("pre")).toBeVisible();
+    await expect(local.locator("pre")).toContainText("NotAllowedError");
+    await expect(local.locator("pre")).not.toContainText("private-error-content");
+    const box = await local.boundingBox();
+    expect(box?.x).toBeGreaterThanOrEqual(0);
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(390);
+    await b.screenshot({ path: test.info().outputPath("call-setup-diagnostics-phone.png") });
+    await b.getByRole("button", { name: "Dismiss call details" }).click();
+    await expect(b.locator(".wx-srv-call-notice")).toBeHidden();
+  } finally { await Promise.all([caller.close(), callee.close()]); }
+});
