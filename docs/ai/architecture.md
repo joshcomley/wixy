@@ -1,5 +1,11 @@
 # Architecture
 
+Call troubleshooting is client-local: `server/call/diagnostics.ts` keeps a bounded
+current-attempt technical trace, never audio/content/identity or app persistence.
+Failure UI exposes copyable details; the existing failed-call control carries no
+diagnostic payload. `thread.ts` separately owns cancellable GET-only recovery of
+voice-note transcription availability. See [livechat.md](livechat.md).
+
 Private live calls extend only the unlocked Server panel: the in-memory
 `livechat/call_broker.py`, typed `call_protocol.py` and `routes_livechat_calls.py` relay
 one two-socket audio pair through the existing HTTPS tunnel. Browser ownership and

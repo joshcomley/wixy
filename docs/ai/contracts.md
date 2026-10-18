@@ -24,6 +24,11 @@ has not delivered `outgoing`. With no adopted call ID, only a matching pending r
 may be retired. A terminal for an old outgoing request cannot stop a newer incoming
 or accepted call; callee terminal envelopes omit `requestId`.
 
+Client audio/setup failures use the existing `failed {callId}` control and receive
+the existing pair terminal reason `audio_unavailable`. Human-readable failure
+notices and bounded technical diagnostics are local UI state; no diagnostic
+payload or additional fields are forwarded over the call socket.
+
 Pre-upgrade denial closes with 4403 (the HTTP upgrade is rejected); after upgrade,
 4401 means actual credential refusal/expiry/confirmed revocation, 4403 invalid protocol,
 4429 socket/work capacity unavailable, 4408 verification/refresh/write deadline missed,

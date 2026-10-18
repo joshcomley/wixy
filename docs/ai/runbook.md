@@ -2,6 +2,21 @@
 
 ## Live calls
 
+For an Answer→Call-button reset, refresh/unlock both browsers after a diagnostic
+release, read the visible failure notice on each device, and use **Copy call
+details**. It copies only the current attempt's bounded technical stages, not
+audio/chat data or credentials; clipboard failure shows selectable text instead.
+No diagnostic upload is automatic. Safari/iPhone setup candidates resume a
+capture-induced suspension only during explicit setup; background/active-call
+interruptions still end the call. A controlled reproduction is not affected-device
+acceptance: retain the observed phone/browser and actual result separately.
+
+A vanished Transcribe control after temporary unavailability now triggers bounded
+GET-only capability rechecks while chat remains attached. Recovery does not retry
+or send the note automatically. Private ASR must still advertise `private:true`
+immediately before any audio request; never use non-private transcription to
+troubleshoot this feature.
+
 Run `python -m wixy_server` with one process; it uses `call_protocol.SERVER_OPTIONS`
 to bound WS messages/queues, disable compression and limit graceful shutdown to 2 s.
 Alternative launchers must use those same options; plain Uvicorn defaults do not enforce

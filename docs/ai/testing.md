@@ -1,5 +1,15 @@
 # Testing
 
+Answer/setup regressions cover capture-induced suspended/interrupted contexts,
+one setup-only resume, rejection/still-suspended failure, stop during pending
+resume, and a permission-dialog timer pause before the initial connected pulse.
+Connected stalls still terminate normally. Diagnostic tests check visible local
+and peer failures, a32-entry cap and exclusion of exception content/IDs. The real
+browser scenario exercises denied microphone permission and phone-width copy
+details. Transcribe recovery tests cover no automatic POST, temporary flag
+recovery, abort deadlines, detach cancellation and old-owner denial. These are
+controlled tests, not proof of the reported physical iPhone pair.
+
 The loopback E2E server's `FixtureSocketIdentity` carries a supplied fake HTTP
 identity into WebSocket upgrades through an HttpOnly test cookie. Chromium omits
 Playwright's context extraHTTPHeaders on those upgrades; without the fixture hop,

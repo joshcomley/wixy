@@ -281,7 +281,10 @@ export function renderTranscriptBlock(
       if (transcript !== null) notice = null;
       paint();
     },
-    refresh: paint,
+    refresh(): void {
+      if (context.available() && notice === MESSAGES.unavailable) notice = null;
+      paint();
+    },
   });
   paint();
   return root;

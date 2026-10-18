@@ -292,8 +292,8 @@ export interface UsageInfo {
   readonly transcriptionAvailable?: boolean;
 }
 
-export async function getUsage(session: ServerSession): Promise<UsageInfo> {
-  const response = await serverFetch("/usage", { method: "GET" }, session);
+export async function getUsage(session: ServerSession, signal?: AbortSignal): Promise<UsageInfo> {
+  const response = await serverFetch("/usage", { method: "GET", ...(signal ? { signal } : {}) }, session);
   if (!response.ok) throw new Error(`Couldn't load storage usage (${response.status}).`);
   return (await response.json()) as UsageInfo;
 }
@@ -537,4 +537,3 @@ export async function fetchViewOnceContent(
   if (response.status === 410) return { ok: false, kind: "expired" };
   return { ok: false, kind: "unavailable" };
 }
-

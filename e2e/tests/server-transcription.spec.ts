@@ -99,6 +99,36 @@ test.afterEach(async ({ page }) => {
   }
 });
 
+test("recovers a temporarily unavailable Transcribe button without automatically sending audio", async ({ page }) => {
+  await configure(page, { private: true, reset: true });
+  let available = true;
+  let posts = 0;
+  await page.route("**/api/admin/server/usage", async (route) => {
+    const response = await route.fetch();
+    const usage = await response.json() as Record<string, unknown>;
+    await route.fulfill({ response, json: { ...usage, transcriptionAvailable: available } });
+  });
+  await page.route("**/api/admin/server/attachments/*/transcribe", async (route) => {
+    posts++;
+    await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "not_configured" }) });
+  });
+  const seq = await seedVoice(page, "Recovery test", 2);
+  await unlock(page, "Watcher");
+  const control = note(page, seq).getByRole("button", { name: "Transcribe this voice note" });
+  await expect(control).toBeVisible();
+  const activity = setInterval(() => { void keepAwake(page).catch(() => {}); }, 1000);
+  try {
+    available = false;
+    await control.click();
+    await expect(control).toBeHidden();
+    available = true;
+    await expect(control).toBeVisible({ timeout: 20_000 });
+    await expect(note(page, seq)).not.toContainText("Transcription isn't available right now");
+    expect(posts).toBe(1);
+    expect(await stats(page)).toMatchObject({ requests: 0, retained: 0 });
+  } finally { clearInterval(activity); }
+});
+
 for (const [label, viewport] of [
   ["desktop", DESKTOP],
   ["phone", PHONE],

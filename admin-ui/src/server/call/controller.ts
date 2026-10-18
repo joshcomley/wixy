@@ -1,5 +1,6 @@
 import type { LockHooks, ServerSession } from "../types";
 import { CallAudio } from "./audio";
+import { type AudioDiagnostic, createCallDiagnostics, safeAudioError } from "./diagnostics";
 import { CALL_PROTOCOL, decodeFrame, encodeFrame, LEASE_MS } from "./protocol";
 
 export interface CallAudioHandle {
@@ -18,7 +19,8 @@ export interface CallDeps {
   onBusy: (busy: boolean) => void;
   socketFactory?: (url: string, protocol: string) => WebSocket;
   audioFactory?: (capture: (pcm: ArrayBuffer, lease: number) => void, admitted: (sequence: number) => void,
-    failed: () => void, leaseReady: (until: number, remainingMs: number) => void) => CallAudioHandle;
+    failed: () => void, leaseReady: (until: number, remainingMs: number) => void,
+    diagnostic: (event: AudioDiagnostic) => void) => CallAudioHandle;
 }
 
 /** One attachment's presence and one explicit call attempt; never auto-resumes audio. */
@@ -30,6 +32,28 @@ export function createCallController(deps: CallDeps) {
   const status = win.document.createElement("span");
   status.className = "wx-srv-call-status";
   status.setAttribute("role", "status");
+  const diagnostics = createCallDiagnostics(win);
+  const notice = win.document.createElement("div");
+  notice.className = "wx-srv-call-notice";
+  notice.setAttribute("role", "status");
+  notice.hidden = true;
+  const noticeText = win.document.createElement("p");
+  const copyDetails = win.document.createElement("button");
+  copyDetails.type = "button";
+  copyDetails.textContent = "Copy call details";
+  const details = win.document.createElement("pre");
+  details.hidden = true;
+  copyDetails.addEventListener("click", () => {
+    const text = diagnostics.text();
+    void (async () => {
+      try {
+        if (!win.navigator.clipboard) throw new Error("clipboard unavailable");
+        await win.navigator.clipboard.writeText(text);
+        copyDetails.textContent = "Copied";
+      } catch { details.textContent = text; details.hidden = false; }
+    })();
+  });
+  notice.append(noticeText, copyDetails, details);
   const callButton = button("Call", () => {
     if (!socket || socket.readyState !== 1) { if (session) open(session, label); return; }
     if (deps.isMicBusy() || callId || outgoingRequest !== null) return;
@@ -63,12 +87,15 @@ export function createCallController(deps: CallDeps) {
   confirm.addEventListener("click", () => {
     if (dialog.hidden || !socket || socket.readyState !== 1 || !availablePeers.some((peer) => peer.id === selectedTarget)
       || deps.isMicBusy() || callId || outgoingRequest !== null) return;
+    diagnostics.reset();
+    diagnostics.record({ step: "confirm" });
+    clearFailure();
     dialog.hidden = true;
     if (!activateAudio()) return;
     deps.onBusy(true);
     outgoingRequest = crypto.randomUUID();
     if (!send({ type: "invite", requestId: outgoingRequest, targetConnectionId: selectedTarget })) {
-      end("Calls unavailable");
+      end("The call couldn't be sent. Please try again.", true);
       return;
     }
     render();
@@ -82,10 +109,13 @@ export function createCallController(deps: CallDeps) {
   });
   const acceptButton = button("Answer", () => {
     if (!callId || state !== "incoming" || answerPending || deps.isMicBusy()) return;
+    diagnostics.reset();
+    diagnostics.record({ step: "answer" });
+    clearFailure();
     if (!activateAudio()) return;
     answerPending = true;
     deps.onBusy(true);
-    if (!send({ type: "accept", callId })) { end("Calls unavailable"); return; }
+    if (!send({ type: "accept", callId })) { end("The call couldn't be answered. Please try again.", true); return; }
     acceptButton.disabled = true;
   });
   const endButton = button("End call", () => { end("Call ended"); });
@@ -97,7 +127,7 @@ export function createCallController(deps: CallDeps) {
     labelButton(muteButton, muted ? "Unmute" : "Mute", muted ? "mic-off" : "mic");
     muteButton.setAttribute("aria-pressed", String(muted));
   });
-  element.append(status, callButton, acceptButton, muteButton, endButton, dialog);
+  element.append(status, callButton, acceptButton, muteButton, endButton, dialog, notice);
 
   let session: ServerSession | null = null;
   let label = "Device";
@@ -124,6 +154,30 @@ export function createCallController(deps: CallDeps) {
   let selectedTarget: string | null = null;
   let availablePeers: { id: string; label: string }[] = [];
   let callUntil = 0;
+
+  function clearFailure(): void {
+    noticeText.textContent = "";
+    notice.hidden = true;
+    details.hidden = true;
+    details.textContent = "";
+    copyDetails.textContent = "Copy call details";
+  }
+  function showFailure(message: string): void {
+    noticeText.textContent = message;
+    notice.hidden = false;
+    diagnostics.printOnce();
+  }
+  function remoteEnd(reason: unknown): void {
+    const wasConnected = state === "connected";
+    diagnostics.record({ step: "remote-ended" });
+    teardownCall("Call ended");
+    if (reason === "audio_unavailable") showFailure(wasConnected
+      ? "The other device's audio stopped. Please try again."
+      : "The other device couldn't start its audio. Check its microphone permission.");
+    else if (reason === "timeout") showFailure("Call setup timed out. Please try again.");
+    else if (reason === "connection_slow") showFailure("The connection couldn't keep up, so the call stopped.");
+    else if (reason === "disconnected" || reason === "unavailable") showFailure("The other device disconnected from the call.");
+  }
 
   function closeDialog(): void {
     dialog.hidden = true;
@@ -183,6 +237,7 @@ export function createCallController(deps: CallDeps) {
   function render(): void {
     element.dataset["state"] = state;
     const inCall = callId !== null;
+    notice.hidden = !noticeText.textContent || !dialog.hidden || inCall;
     if (inCall || outgoingRequest !== null) dialog.hidden = true;
     callButton.setAttribute("aria-expanded", String(!dialog.hidden));
     callButton.setAttribute("aria-haspopup", "dialog");
@@ -202,6 +257,7 @@ export function createCallController(deps: CallDeps) {
     return true;
   }
   function teardownCall(message: string): void {
+    clearFailure();
     dialog.hidden = true;
     callEpoch++;
     audio?.stop();
@@ -225,13 +281,14 @@ export function createCallController(deps: CallDeps) {
     muteButton.setAttribute("aria-pressed", "false");
     render();
   }
-  function end(message: string): void {
+  function end(message: string, failure = false): void {
     const endedId = callId;
     const wasPending = outgoingRequest !== null;
-    const action = state === "incoming" ? "decline" : "end";
+    const action = failure ? "failed" : state === "incoming" ? "decline" : "end";
     teardownCall(message); // Stop locally before best-effort network activity.
     if (endedId) send({ type: action, callId: endedId });
     else if (wasPending) disconnect();
+    if (failure) showFailure(message);
   }
   function activateAudio(): boolean {
     if (deps.isMicBusy()) return false;
@@ -240,58 +297,93 @@ export function createCallController(deps: CallDeps) {
     audio = null;
     old?.stop(); // Invalidate old callbacks before touching the old graph.
     try {
-      audio = (deps.audioFactory ?? ((capture, ack, fail, ready) => new CallAudio(capture, ack, fail, ready)))(
+      audio = (deps.audioFactory ?? ((capture, ack, fail, ready, diagnostic) => new CallAudio(capture, ack, fail, ready, diagnostic)))(
         (pcm, lease) => {
           if (attemptEpoch !== callEpoch) return;
           if (state !== "connected" || !callId || muted || !socket || socket.readyState !== 1) return;
           const now = win.performance.now();
-          if (now - lastPulse > LEASE_MS) { end("Call interrupted"); return; }
+          if (now - lastPulse > LEASE_MS) {
+            diagnostics.record({ step: "main-thread-stalled" });
+            end("The browser paused, so the call stopped. Please try again.", true);
+            return;
+          }
           if (socket.bufferedAmount > 8192) {
             backlogAt ??= now;
-            if (now - backlogAt > 250) end("Connection too slow");
+            if (now - backlogAt > 250) {
+              diagnostics.record({ step: "connection-slow" });
+              end("The connection couldn't keep up, so the call stopped.", true);
+            }
             return;
           }
           backlogAt = null;
           socket.send(encodeFrame(callId, sequence++, lease, pcm));
         },
         (seq) => { if (attemptEpoch === callEpoch && state === "connected" && callId) send({ type: "ack", callId, sequence: seq }); },
-        () => { if (attemptEpoch === callEpoch) end("Audio unavailable"); },
+        () => {
+          if (attemptEpoch === callEpoch) {
+            diagnostics.record({ step: "audio-failed" });
+            end("Audio stopped. Please check microphone permission and try again.", true);
+          }
+        },
         (until, remainingMs) => {
           // A receiver playout lease is issued only after the graph proved it rendered.
           if (attemptEpoch !== callEpoch || state !== "connected" || !callId) return;
-          if (!(remainingMs > 0 && remainingMs <= LEASE_MS)) { end("Audio unavailable"); return; }
+          if (!(remainingMs > 0 && remainingMs <= LEASE_MS)) {
+            diagnostics.record({ step: "render-stalled" });
+            end("Audio playback didn't start in time. Please try again.", true);
+            return;
+          }
           const now = win.performance.now();
           const id = ++playoutId;
           leases.set(id, { at: now + remainingMs, until });
           for (const [key, lease] of leases) if (lease.at <= now) leases.delete(key);
           if (leases.size > 4) leases.delete(leases.keys().next().value as number);
-          if (!send({ type: "lease", callId, lease: id })) end("Connection too slow");
+          if (!send({ type: "lease", callId, lease: id })) {
+            diagnostics.record({ step: "connection-slow" });
+            end("The connection couldn't keep up, so the call stopped.", true);
+          }
         },
+        (event) => { if (attemptEpoch === callEpoch) diagnostics.record(event); },
       );
       return true;
-    } catch { end("Calls unavailable in this browser"); return false; }
+    } catch (error) {
+      diagnostics.record({ step: "setup-failed", error });
+      end("This browser couldn't start call audio. Check microphone permission and try again.", true);
+      return false;
+    }
   }
   function pulse(): void {
     render(); // Recorder ownership can change without a presence event.
     const now = win.performance.now();
     const stale = now - lastPulse > LEASE_MS;
     lastPulse = now;
-    if (callUntil && now >= callUntil) { end("Call timed out"); return; }
+    if (callUntil && now >= callUntil) {
+      diagnostics.record({ step: "setup-timeout" });
+      end("Call timed out. Please try again.", true);
+      return;
+    }
     if (now - lastMessage > 6000 || Date.now() / 1000 >= deadline) {
+      diagnostics.record({ step: "connection-timeout" });
       disconnect();
       status.textContent = "Calls disconnected. Reconnect to try again.";
+      showFailure("The call connection timed out. Tap the phone icon to reconnect.");
       return;
     }
     if (state === "connected" && callId && audio) {
-      if (stale) { end("Call interrupted"); return; }
+      if (stale) {
+        diagnostics.record({ step: "main-thread-stalled" });
+        end("The browser paused, so the call stopped. Please try again.", true);
+        return;
+      }
       audio.pulse();
     }
   }
   async function prepare(id: string): Promise<void> {
-    if (id !== callId || !audio || deps.isMicBusy()) { end("Audio unavailable"); return; }
+    if (id !== callId || !audio || deps.isMicBusy()) { end("The microphone is unavailable or already in use.", true); return; }
     const epoch = callEpoch;
     const attempt = audio;
     state = "preparing";
+    diagnostics.record({ step: "preparing" });
     callUntil = win.performance.now() + 20_000;
     status.textContent = "Connecting audio…";
     deps.onBusy(true);
@@ -303,9 +395,15 @@ export function createCallController(deps: CallDeps) {
       if (epoch !== callEpoch || attempt !== audio || callId !== id) return;
       releasePermission?.();
       releasePermission = null;
+      diagnostics.record({ step: "ready" });
       send({ type: "ready", callId: id });
-    } catch {
-      if (epoch === callEpoch && attempt === audio) end("Microphone unavailable. Check browser permissions.");
+    } catch (error) {
+      if (epoch === callEpoch && attempt === audio) {
+        diagnostics.record({ step: "setup-failed", error });
+        const denied = safeAudioError(error) === "NotAllowedError";
+        end(denied ? "Microphone permission was denied. Allow microphone access in this browser, then try again."
+          : "Microphone or audio setup failed. Please try again, or copy the call details.", true);
+      }
     }
   }
   function receive(data: unknown): void {
@@ -350,6 +448,8 @@ export function createCallController(deps: CallDeps) {
       } else outgoingRequest = null;
       callId = m["callId"];
       state = m["type"];
+      clearFailure();
+      diagnostics.record({ step: state === "incoming" ? "incoming" : "outgoing" });
       callUntil = win.performance.now() + 30_000;
       status.textContent = state === "incoming" ? `Incoming call from ${String(m["peer"]).slice(0, 32)}` : "Calling…";
     } else if (m["type"] === "unavailable") {
@@ -359,7 +459,7 @@ export function createCallController(deps: CallDeps) {
     } else if (m["type"] === "ended" && m["callId"] !== callId) {
       if (outgoingRequest !== null && m["requestId"] === outgoingRequest) {
         outgoingRequest = null;
-        if (callId === null) teardownCall("Call ended");
+        if (callId === null) remoteEnd(m["reason"]);
       }
       return;
     } else if (m["callId"] !== callId || !callId) {
@@ -368,6 +468,10 @@ export function createCallController(deps: CallDeps) {
       void prepare(callId);
     } else if (m["type"] === "connected" && state === "preparing" && audio) {
       state = "connected";
+      diagnostics.record({ step: "connected" });
+      // No media was active during setup; a permission chooser may have paused timers.
+      // Connected stalls still use the unchanged freshness/liveness budget from here.
+      lastPulse = win.performance.now();
       callUntil = win.performance.now() + 7_200_000;
       audio.start();
       releaseCall = hooks.suspend("voiceCall");
@@ -376,7 +480,7 @@ export function createCallController(deps: CallDeps) {
     } else if (m["type"] === "capture" && typeof m["lease"] === "number" && state === "connected") {
       audio?.captureLease(m["lease"]);
     } else if (m["type"] === "ended") {
-      teardownCall("Call ended");
+      remoteEnd(m["reason"]);
     }
     render();
   }
@@ -398,7 +502,12 @@ export function createCallController(deps: CallDeps) {
     const url = new URL("/api/admin/server/calls/ws", win.location.href);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     try { socket = (deps.socketFactory ?? ((u, p) => new WebSocket(u, p)))(url.href, CALL_PROTOCOL); }
-    catch { status.textContent = "Calls unavailable"; return; }
+    catch (error) {
+      diagnostics.record({ step: "socket-error", error });
+      status.textContent = "Calls unavailable";
+      showFailure("The browser couldn't open the call connection. Please try again.");
+      return;
+    }
     socket.binaryType = "arraybuffer";
     deadline = next.expiresAt;
     lastMessage = lastPulse = win.performance.now();
@@ -412,16 +521,30 @@ export function createCallController(deps: CallDeps) {
       try {
         if (state === "connected" && win.performance.now() - lastPulse > LEASE_MS) end("Call interrupted");
         receive(event.data);
-      } catch { disconnect(); status.textContent = "Calls disconnected"; }
+      } catch (error) {
+        diagnostics.record({ step: "protocol-error", error });
+        disconnect();
+        status.textContent = "Calls disconnected";
+        showFailure("The call connection couldn't be read. Please copy the call details.");
+      }
     };
     socket.onclose = (event) => {
       if (epoch !== socketEpoch) return;
+      diagnostics.record({ step: "socket-closed", code: event.code });
       disconnect();
+      showFailure("The call connection closed. Tap the phone icon to reconnect.");
       status.textContent = "Calls disconnected. Reconnect to try again.";
       labelButton(callButton, "Reconnect calls", "phone");
       if (event.code === 4401) hooks.lockNow("unauthorized");
     };
-    socket.onerror = () => { if (epoch === socketEpoch) { disconnect(); status.textContent = "Calls unavailable"; } };
+    socket.onerror = () => {
+      if (epoch === socketEpoch) {
+        diagnostics.record({ step: "socket-error" });
+        disconnect();
+        status.textContent = "Calls unavailable";
+        showFailure("The call connection failed. Please try again.");
+      }
+    };
     timer = win.setInterval(pulse, 100);
     render();
   }
@@ -434,7 +557,7 @@ export function createCallController(deps: CallDeps) {
   }
   win.addEventListener("pagehide", pagehide);
   win.document.addEventListener("pointerdown", outside);
-  function detach(): void { disconnect(); session = null; element.hidden = true; }
+  function detach(): void { disconnect(); diagnostics.reset(); session = null; element.hidden = true; }
   return {
     element,
     attach(next: ServerSession, name: string): void {

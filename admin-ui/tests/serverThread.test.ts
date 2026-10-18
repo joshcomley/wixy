@@ -1989,6 +1989,79 @@ describe("mountServerThread", () => {
       view.teardown();
     });
 
+    it("restores Transcribe after temporary unavailability without retrying the audio request", async () => {
+      vi.useFakeTimers();
+      usage(true);
+      transcribeAttachment.mockResolvedValue({ kind: "unavailable" });
+      getHistory.mockResolvedValue(emptyHistory({ messages: [voiceMessage()] }));
+      const view = mount();
+      try {
+        await view.attach(SESSION);
+        await flush();
+        usage(false);
+        view.element.querySelector<HTMLButtonElement>(".wx-srv-transcript-start")!.click();
+        await flush();
+        expect(view.element.querySelector(".wx-srv-transcript-start")).toBeNull();
+        usage(true);
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(view.element.querySelector(".wx-srv-transcript-start")).not.toBeNull();
+        expect(view.element.textContent).not.toContain("Transcription isn't available right now");
+        expect(transcribeAttachment).toHaveBeenCalledTimes(1);
+      } finally { view.teardown(); }
+    });
+
+    it("stops unavailable capability checks on detach and ignores a late old-owner denial", async () => {
+      vi.useFakeTimers();
+      let rejectOld!: (error: unknown) => void;
+      getUsage.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectOld = reject; }));
+      usage(true);
+      getHistory.mockResolvedValue(emptyHistory({ messages: [voiceMessage()] }));
+      const hooks = fakeHooks();
+      const view = mount(hooks);
+      try {
+        await view.attach(SESSION);
+        await flush();
+        view.detach();
+        await view.attach(SESSION); // Same token/object, but a different attachment lifetime.
+        await flush();
+        expect(view.element.querySelector(".wx-srv-transcript-start")).not.toBeNull();
+        rejectOld(new ServerLockedError());
+        await flush();
+        expect(hooks.lockNow).not.toHaveBeenCalled();
+        expect(view.element.querySelector(".wx-srv-transcript-start")).not.toBeNull();
+        view.detach();
+        const count = getUsage.mock.calls.length;
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(getUsage).toHaveBeenCalledTimes(count);
+      } finally { view.teardown(); }
+    });
+
+    it("bounds an unresponsive capability request and cancels retries when the thread closes", async () => {
+      vi.useFakeTimers();
+      const signals: AbortSignal[] = [];
+      getUsage.mockImplementation((_session: ServerSession, signal: AbortSignal) => {
+        signals.push(signal);
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+        });
+      });
+      getHistory.mockResolvedValue(emptyHistory({ messages: [voiceMessage()] }));
+      const view = mount();
+      try {
+        await view.attach(SESSION);
+        await flush();
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(signals[0]?.aborted).toBe(true);
+        expect(transcribeAttachment).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(getUsage).toHaveBeenCalledTimes(2);
+        view.detach();
+        expect(signals[1]?.aborted).toBe(true);
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(getUsage).toHaveBeenCalledTimes(2);
+      } finally { view.teardown(); }
+    });
+
     it.each([
       ["says it is not", false],
       ["does not say", undefined],
@@ -4168,4 +4241,3 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     view.teardown();
   });
 });
-
