@@ -6,6 +6,16 @@ Add two-person live audio calling to the unlocked Server panel, coordinated thro
 
 ## Context + current state
 
+Continuation verified HEAD a2030d5410042b60ebfb0b4c0543c1ef9e1edd7f.
+Focused independent Astra audit complete: PASS C0/H0/M0/L0 for the exact
+cached-permission lifecycle delta, report voice-permission-implementation-audit.md.
+Reviewer independently ran 293 affected tests and strict TypeScript; checked
+actual owner composition, LF and embedded source-map consistency. This is code
+evidence only. Preview commissioning, physical Android/iPad/iPhone, real Access
+and tunnel across networks, sustained duplex/performance and actual Slots
+shutdown remain open. No PR or delivery merge. No Job Master for wixy.
+Earlier CURRENT paragraphs below are historical.
+
 CURRENT FINAL REPAIR: BOTH permission MERGE reports complete/read; mechanisms
 converge. Parent implemented immediate release/pagehide/before-visible cached
 policy completion with tri-state exemption outcome and original hide timestamp,
