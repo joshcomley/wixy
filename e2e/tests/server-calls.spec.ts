@@ -268,7 +268,7 @@ test("microphone rejection explains setup failure on both devices with safe copy
     const local = b.locator(".wx-srv-call-notice");
     await expect(local).toBeVisible();
     await expect(local).toContainText("permission was denied");
-    await expect(a.locator(".wx-srv-call-notice")).toContainText("other device couldn't start its audio");
+    await expect(a.locator(".wx-srv-call-notice")).toContainText("other device couldn't connect the call");
     await local.getByRole("button", { name: "Copy call details" }).click();
     await expect(local.locator("pre")).toBeVisible();
     await expect(local.locator("pre")).toContainText("NotAllowedError");
@@ -277,5 +277,7 @@ test("microphone rejection explains setup failure on both devices with safe copy
     expect(box?.x).toBeGreaterThanOrEqual(0);
     expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(390);
     await b.screenshot({ path: test.info().outputPath("call-setup-diagnostics-phone.png") });
+    await b.getByRole("button", { name: "Dismiss call details" }).click();
+    await expect(b.locator(".wx-srv-call-notice")).toBeHidden();
   } finally { await Promise.all([caller.close(), callee.close()]); }
 });

@@ -80,3 +80,41 @@ are not evidence of this particular device's failure or its installed OS version
 
 Do not run blanket CI or dispatch children. Run focused controls as useful;
 return C/H/M/L findings with reproducible defects and a bounded verdict.
+
+## Senior round 3 repair response
+
+The first candidate69c071d received C0/H0/M2/L3. All five findings are repaired,
+with no dismissals. The original evidence above remains historical for that head.
+
+- F5 (medium): socket-first connected stall now records main-thread-stalled,
+  takes the existing failed-control/visible-notice path, and returns before
+  parsing the expired message. The discriminator drives the real controller's
+  socket callback before the pulse timer and verifies failed, stopped media,
+  no capture lease, and copyable failure details.
+- F2 (medium): attach invalidates probe ownership/aborts timers without clearing
+  known availability. It starts the replacement GET before the independent
+  history operation, so a history failure or wipe-generation return cannot
+  strand recovery. Detach/teardown/markUnavailable still reset availability.
+  Tests cover visible Transcribe during silent renewal, failed history and wipe,
+  with no automatic audio POST. Existing old-owner denial/abort controls pass.
+- F6 (low): incoming invites and connection openings reset diagnostics. Idle
+  transport errors start a separate trace before logging; active failures retain
+  their current attempt. A consecutive outgoing-failure/incoming-close/idle-close
+  test verifies fresh traces and one console event for each failure.
+- F3 (low): the existing wire reason audio_unavailable remains unchanged, but
+  peer wording now describes a call connection/continuation failure without
+  guessing microphone permission. Local exact causes retain their own wording.
+- F4 (low): the notice has Dismiss call details; clear invalidates pending
+  clipboard UI so a late rejection cannot recreate its fallback. Idle transport
+  failure uses existing status and a separate technical console entry, without
+  displaying the thread overlay. Real phone-width browser proof covers dismiss.
+
+Five new targeted cases were RED at69c071d and GREEN after these repairs.
+Full frontend2635/102 files, strictTS and LF build pass on the repaired source.
+Four real Chromium scenarios pass38.2s total: duplex/privacy/stall/muted-idle/
+panic26.6s; cached recovery1.0s; denied microphone, safe phone-width copy and
+dismiss2.3s; Transcribe recovery without audio resend1.9s. Parent inspected the
+phone-width screenshot: notice, copy fallback and Dismiss fit without covering
+header controls. Browser diagnostic platform is desktop under viewport emulation,
+not an actual iPhone. No backend or wire contract changed in this delta.
+The affected physical Android/iPhone pair still needs a post-release retest.

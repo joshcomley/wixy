@@ -35,6 +35,14 @@ actual time-to-failure remain unknown. No Job Master exists for wixy.
 
 ## Relevant files + commits
 
+Audit follow-up:69c071d received senior round3 C0/H0/M2/L3. All five repaired
+directly in the local loop; see voice-answer-repair-audit-packet.md response for
+finding-to-fix mapping. New five discriminator cells reproduced RED then GREEN.
+Full2635 tests/102files, strictTS and LF rebuild pass. Four browser scenarios pass
+38.2s, including phone-width dismissal. Commit the corrected exact head and submit
+the same audit relation's next round; source remains frozen while it reviews.
+No repair PR or deployment yet; affected physical pair remains unproven.
+
 `admin-ui/src/server/call/{audio,controller,worklet}.ts`, the call tests,
 `wixy_server/livechat/{call_protocol,call_broker}.py`, and the voice-call spec.
 Existing failed control/terminal reason may provide error propagation without

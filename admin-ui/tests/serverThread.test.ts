@@ -2010,6 +2010,52 @@ describe("mountServerThread", () => {
       } finally { view.teardown(); }
     });
 
+    it("keeps Transcribe visible during silent renewal even if history fails", async () => {
+      usage(true);
+      getHistory.mockResolvedValue(emptyHistory({ messages: [voiceMessage()] }));
+      const view = mount();
+      try {
+        await view.attach(SESSION);
+        await flush();
+        let rejectHistory!: (error: Error) => void;
+        getHistory.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectHistory = reject; }));
+        const renewal = view.attach({ ...SESSION, token: "renewed" });
+        expect(view.element.querySelector(".wx-srv-transcript-start")).not.toBeNull();
+        rejectHistory(new Error("offline"));
+        await renewal;
+        await flush();
+        expect(view.element.querySelector(".wx-srv-transcript-start")).not.toBeNull();
+        expect(getUsage).toHaveBeenCalledTimes(2);
+      } finally { view.teardown(); }
+    });
+
+    it.each(["history failure", "wipe"])("recovers capability independently of %s during attach", async (outcome) => {
+      vi.useFakeTimers();
+      usage(false);
+      getHistory.mockResolvedValueOnce(emptyHistory({ messages: [voiceMessage()] }));
+      const view = mount();
+      try {
+        await view.attach(SESSION);
+        await flush();
+        let finish!: (value: HistoryPage) => void;
+        let fail!: (error: Error) => void;
+        getHistory.mockReturnValueOnce(new Promise((resolve, reject) => { finish = resolve; fail = reject; }));
+        const renewal = view.attach({ ...SESSION, token: "renewed" });
+        await flush();
+        if (outcome === "wipe") {
+          view.handleStreamEvent({ type: "wiped", cursor: 8 } as ServerStreamEvent);
+          finish(emptyHistory());
+        } else fail(new Error("offline"));
+        await renewal;
+        usage(true);
+        await vi.advanceTimersByTimeAsync(15_000);
+        // The probe survives history's error/obsolete-generation return and sends no audio.
+        expect(getUsage).toHaveBeenCalledTimes(3);
+        expect(transcribeAttachment).not.toHaveBeenCalled();
+        if (outcome === "history failure") expect(view.element.querySelector(".wx-srv-transcript-start")).not.toBeNull();
+      } finally { view.teardown(); }
+    });
+
     it("stops unavailable capability checks on detach and ignores a late old-owner denial", async () => {
       vi.useFakeTimers();
       let rejectOld!: (error: unknown) => void;

@@ -1401,7 +1401,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     }
   }
 
-  function stopTranscriptionProbe(): void {
+  function stopTranscriptionProbe(resetAvailability = true): void {
     transcriptionOwner++;
     transcriptionProbe?.abort();
     transcriptionProbe = null;
@@ -1409,8 +1409,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     transcriptionTimeout = null;
     if (transcriptionRetry !== null) win.clearTimeout(transcriptionRetry);
     transcriptionRetry = null;
-    transcriptionAvailable = false;
-    refreshTranscriptBlocks(messageList);
+    if (resetAvailability) {
+      transcriptionAvailable = false;
+      refreshTranscriptBlocks(messageList);
+    }
   }
   function retryTranscriptionProbe(session: ServerSession, owner: number): void {
     if (currentSession !== session || owner !== transcriptionOwner || transcriptionRetry !== null) return;
@@ -2951,9 +2953,12 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   // -- attach / detach / stream events -----------------------------------------
 
   async function attach(session: ServerSession): Promise<number | null> {
-    stopTranscriptionProbe();
+    // Renewal replaces request ownership without hiding an already available control.
+    stopTranscriptionProbe(false);
     const availabilityOwner = transcriptionOwner;
     currentSession = session;
+    // Capability recovery belongs to the attachment, independently of history or wipe.
+    void refreshTranscriptionAvailability(session, availabilityOwner);
     // A renewed token: an open gallery swaps in freshly signed media URLs, no visible change.
     gallery.refreshSession();
     // Strokes a lock left waiting to be stored resume with this unlock's token.
@@ -3023,7 +3028,6 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       historyLoaded = true;
       renderThreadList();
       ensureObserver();
-      void refreshTranscriptionAvailability(session, availabilityOwner);
       if (pendingVoiceNote !== null) void sendVoiceNote();
       return cursor;
     } catch (error) {

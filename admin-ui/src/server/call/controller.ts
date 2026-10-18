@@ -43,17 +43,23 @@ export function createCallController(deps: CallDeps) {
   copyDetails.textContent = "Copy call details";
   const details = win.document.createElement("pre");
   details.hidden = true;
+  let noticeEpoch = 0;
   copyDetails.addEventListener("click", () => {
     const text = diagnostics.text();
+    const epoch = noticeEpoch;
     void (async () => {
       try {
         if (!win.navigator.clipboard) throw new Error("clipboard unavailable");
         await win.navigator.clipboard.writeText(text);
-        copyDetails.textContent = "Copied";
-      } catch { details.textContent = text; details.hidden = false; }
+        if (epoch === noticeEpoch) copyDetails.textContent = "Copied";
+      } catch { if (epoch === noticeEpoch) { details.textContent = text; details.hidden = false; } }
     })();
   });
-  notice.append(noticeText, copyDetails, details);
+  const dismissDetails = win.document.createElement("button");
+  dismissDetails.type = "button";
+  dismissDetails.textContent = "Dismiss call details";
+  dismissDetails.addEventListener("click", clearFailure);
+  notice.append(noticeText, copyDetails, dismissDetails, details);
   const callButton = button("Call", () => {
     if (!socket || socket.readyState !== 1) { if (session) open(session, label); return; }
     if (deps.isMicBusy() || callId || outgoingRequest !== null) return;
@@ -156,6 +162,7 @@ export function createCallController(deps: CallDeps) {
   let callUntil = 0;
 
   function clearFailure(): void {
+    noticeEpoch++;
     noticeText.textContent = "";
     notice.hidden = true;
     details.hidden = true;
@@ -172,8 +179,8 @@ export function createCallController(deps: CallDeps) {
     diagnostics.record({ step: "remote-ended" });
     teardownCall("Call ended");
     if (reason === "audio_unavailable") showFailure(wasConnected
-      ? "The other device's audio stopped. Please try again."
-      : "The other device couldn't start its audio. Check its microphone permission.");
+      ? "The other device couldn't continue the call. Please try again."
+      : "The other device couldn't connect the call. Please try again, or ask it to check its call details.");
     else if (reason === "timeout") showFailure("Call setup timed out. Please try again.");
     else if (reason === "connection_slow") showFailure("The connection couldn't keep up, so the call stopped.");
     else if (reason === "disconnected" || reason === "unavailable") showFailure("The other device disconnected from the call.");
@@ -363,10 +370,8 @@ export function createCallController(deps: CallDeps) {
       return;
     }
     if (now - lastMessage > 6000 || Date.now() / 1000 >= deadline) {
-      diagnostics.record({ step: "connection-timeout" });
-      disconnect();
+      connectionFailure({ step: "connection-timeout" }, "The call connection timed out. Tap the phone icon to reconnect.");
       status.textContent = "Calls disconnected. Reconnect to try again.";
-      showFailure("The call connection timed out. Tap the phone icon to reconnect.");
       return;
     }
     if (state === "connected" && callId && audio) {
@@ -449,6 +454,7 @@ export function createCallController(deps: CallDeps) {
       callId = m["callId"];
       state = m["type"];
       clearFailure();
+      if (state === "incoming") diagnostics.reset();
       diagnostics.record({ step: state === "incoming" ? "incoming" : "outgoing" });
       callUntil = win.performance.now() + 30_000;
       status.textContent = state === "incoming" ? `Incoming call from ${String(m["peer"]).slice(0, 32)}` : "Calling…";
@@ -494,8 +500,18 @@ export function createCallController(deps: CallDeps) {
     if (old) { old.onopen = old.onmessage = old.onerror = old.onclose = null; old.close(1000); }
     render(); // The final affordance must use the cleared socket, with no pulse left.
   }
+  function connectionFailure(event: AudioDiagnostic, message: string): void {
+    const active = callId !== null || outgoingRequest !== null;
+    // An idle transport failure is a separate diagnostic, not part of the last call.
+    if (!active) diagnostics.reset();
+    diagnostics.record(event);
+    disconnect();
+    if (active) showFailure(message);
+    else diagnostics.printOnce();
+  }
   function open(next: ServerSession, name: string): void {
     disconnect();
+    diagnostics.reset();
     session = next;
     label = name;
     const epoch = socketEpoch;
@@ -503,9 +519,8 @@ export function createCallController(deps: CallDeps) {
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     try { socket = (deps.socketFactory ?? ((u, p) => new WebSocket(u, p)))(url.href, CALL_PROTOCOL); }
     catch (error) {
-      diagnostics.record({ step: "socket-error", error });
+      connectionFailure({ step: "socket-error", error }, "The browser couldn't open the call connection. Please try again.");
       status.textContent = "Calls unavailable";
-      showFailure("The browser couldn't open the call connection. Please try again.");
       return;
     }
     socket.binaryType = "arraybuffer";
@@ -519,30 +534,28 @@ export function createCallController(deps: CallDeps) {
     socket.onmessage = (event) => {
       if (epoch !== socketEpoch) return;
       try {
-        if (state === "connected" && win.performance.now() - lastPulse > LEASE_MS) end("Call interrupted");
+        if (state === "connected" && win.performance.now() - lastPulse > LEASE_MS) {
+          diagnostics.record({ step: "main-thread-stalled" });
+          end("The browser paused, so the call stopped. Please try again.", true);
+          return; // The expired message cannot update media or a newer call.
+        }
         receive(event.data);
       } catch (error) {
-        diagnostics.record({ step: "protocol-error", error });
-        disconnect();
+        connectionFailure({ step: "protocol-error", error }, "The call connection couldn't be read. Please copy the call details.");
         status.textContent = "Calls disconnected";
-        showFailure("The call connection couldn't be read. Please copy the call details.");
       }
     };
     socket.onclose = (event) => {
       if (epoch !== socketEpoch) return;
-      diagnostics.record({ step: "socket-closed", code: event.code });
-      disconnect();
-      showFailure("The call connection closed. Tap the phone icon to reconnect.");
+      connectionFailure({ step: "socket-closed", code: event.code }, "The call connection closed. Tap the phone icon to reconnect.");
       status.textContent = "Calls disconnected. Reconnect to try again.";
       labelButton(callButton, "Reconnect calls", "phone");
       if (event.code === 4401) hooks.lockNow("unauthorized");
     };
     socket.onerror = () => {
       if (epoch === socketEpoch) {
-        diagnostics.record({ step: "socket-error" });
-        disconnect();
+        connectionFailure({ step: "socket-error" }, "The call connection failed. Please try again.");
         status.textContent = "Calls unavailable";
-        showFailure("The call connection failed. Please try again.");
       }
     };
     timer = win.setInterval(pulse, 100);

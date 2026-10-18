@@ -51,6 +51,48 @@ beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 describe("live-call consent and lifetime", () => {
+  it("reports a connected stall first observed by a socket message and drops that message", async () => {
+    const f = setup();
+    f.click("Call");
+    f.socket.receive({ type: "outgoing", callId: ID, requestId: f.controls().find((m) => m["type"] === "invite")?.["requestId"] });
+    f.socket.receive({ type: "prepare", callId: ID });
+    await Promise.resolve();
+    f.socket.receive({ type: "connected", callId: ID });
+    const clock = vi.spyOn(window.performance, "now").mockReturnValue(window.performance.now() + 1000);
+    try {
+      f.socket.receive({ type: "capture", callId: ID, lease: 99 });
+      expect(f.audio.captureLease).not.toHaveBeenCalled();
+      expect(f.controls().at(-1)).toEqual({ type: "failed", callId: ID });
+      const notice = f.controller.element.querySelector<HTMLElement>(".wx-srv-call-notice")!;
+      expect(notice.hidden).toBe(false);
+      expect(notice.textContent).toContain("browser paused");
+      notice.querySelector<HTMLButtonElement>("button")!.click();
+      await Promise.resolve();
+      expect(notice.querySelector("pre")?.textContent).toContain("main-thread-stalled");
+      f.click("Dismiss call details");
+      expect(notice.hidden).toBe(true);
+    } finally { f.controller.dispose(); clock.mockRestore(); }
+  });
+  it("starts an incoming failure trace fresh and leaves idle connection failures out of the thread overlay", () => {
+    const log = vi.spyOn(console, "info").mockImplementation(() => {});
+    const f = setup();
+    try {
+      f.click("Call");
+      f.socket.receive({ type: "outgoing", callId: ID, requestId: f.controls().find((m) => m["type"] === "invite")?.["requestId"] });
+      f.socket.receive({ type: "ended", callId: ID, reason: "audio_unavailable" });
+      f.socket.receive({ type: "incoming", callId: TARGET, peer: "B" });
+      f.socket.onclose?.({ code: 1006 });
+      expect(log).toHaveBeenCalledTimes(2);
+      const trace = String(log.mock.calls[1]?.[1]);
+      expect(trace).toContain("incoming");
+      expect(trace).not.toContain("confirm");
+      f.click("Reconnect calls");
+      f.socket.onclose?.({ code: 1006 });
+      expect(f.controller.element.querySelector<HTMLElement>(".wx-srv-call-notice")!.hidden).toBe(true);
+      expect(log).toHaveBeenCalledTimes(3);
+      expect(String(log.mock.calls[2]?.[1])).not.toContain("incoming");
+    } finally { f.controller.dispose(); log.mockRestore(); }
+  });
   it("starts a fresh liveness clock after a permission-dialog stall during setup", async () => {
     const f = setup();
     f.click("Call");
@@ -95,7 +137,8 @@ describe("live-call consent and lifetime", () => {
     f.socket.receive({ type: "ended", callId: ID, reason: "audio_unavailable" });
     const notice = f.controller.element.querySelector<HTMLElement>(".wx-srv-call-notice")!;
     expect(notice.hidden).toBe(false);
-    expect(notice.textContent).toContain("other device couldn't start its audio");
+    expect(notice.textContent).toContain("other device couldn't connect the call");
+    expect(notice.textContent).not.toContain("microphone permission");
     f.controller.dispose();
   });
   it("requires a separate confirmation and allows cancellation without calling or audio", () => {
