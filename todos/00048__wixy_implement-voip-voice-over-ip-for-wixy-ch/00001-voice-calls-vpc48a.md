@@ -6,6 +6,21 @@ Add two-person live audio calling to the unlocked Server panel, coordinated thro
 
 ## Context + current state
 
+First implementation audit is complete and blocks delivery: C0/H1/M4/L0 at
+`4829f606fcfbf53f05f1dc955bce35abb4ce3695`; report
+`spec/server-chat/voice-call-implementation-audit.md`. Reopen relay/browser repair work.
+Five demonstrated defects: real worker lifetime under cancellation, capture freshness
+relabelling, reentrant overflow, crossed-invite UI ownership and unbounded worklet
+lease controls. Use Group Therapy independent proposals -> all-proposal merge ->
+parent ruling/local repairs -> fresh audit. Round brief:
+`spec/server-chat/voice-repair-round1-brief.md`. No launch approval; no third-party
+audio disclosure found by that audit. Add live third-browser negative control.
+
+Operator device answer banked in decision 1867: Android Chrome; another participant
+uses iPhone with browser not yet confirmed; iPad and spare Android available. No
+participant names in repo artifacts. Call audio is pair-only; ordinary messages can
+appear on other unlocked chat views. Privacy answer recorded separately in Answers.
+
 Implementation is now locally proven (not delivered). Frozen brief is
 `spec/server-chat/04-voice-calls.md`. New modules: Python call protocol/broker/socket route,
 shared token validator, bounded Uvicorn options; TS controller/audio/worklet/protocol,
