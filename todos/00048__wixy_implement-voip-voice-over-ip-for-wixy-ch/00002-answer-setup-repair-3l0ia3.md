@@ -58,3 +58,7 @@ a diagnostic release so the affected pair can retest and expose the real cause. 
 checks, required senior review for lifecycle/audio changes, then final PR/checks/
 merge and production SHA verification. Do not report the actual iPhone problem
 fixed from synthetic Chromium alone.
+
+## Senior clearance
+
+Opus round4 independently cleared exact514b133 (C0/H0/M0/L0), all five findings fixed. Report: spec/server-chat/voice-answer-repair-audit.md. Independently ran214 focused/1744 wider tests, strictTS and byte-identical in-memory asset rebuild. Diagnostic release only; actual affected pair still requires retest. Bank report with documentation-only commit, then final PR/CI/merge and actual deployed SHA verification.
