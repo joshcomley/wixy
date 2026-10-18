@@ -859,6 +859,53 @@ button.wx-srv-quote:focus-visible {
   font-weight: 600;
 }
 
+.wx-srv-wyr-countdown {
+  position: relative;
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  min-height: 42px;
+  padding: 7px 10px 10px;
+  overflow: hidden;
+  border: 1px solid var(--wx-brand-blue);
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font: inherit;
+  text-align: left;
+}
+
+button.wx-srv-wyr-countdown {
+  cursor: pointer;
+}
+
+.wx-srv-wyr-countdown-label {
+  position: relative;
+  z-index: 1;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.wx-srv-wyr-countdown-track {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 4px;
+  overflow: hidden;
+  background: var(--wx-border);
+}
+
+.wx-srv-wyr-countdown-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: scaleX(1);
+  transform-origin: left center;
+  background: var(--wx-brand-blue);
+  transition: transform 100ms linear;
+}
+
 .wx-srv-wyr-row,
 .wx-srv-wyr-group {
   display: flex;
@@ -1059,6 +1106,128 @@ button.wx-srv-quote:focus-visible {
 
 .wx-srv-game-next[hidden] {
   display: none;
+}
+
+.wx-srv-game-maximize {
+  min-height: var(--wx-srv-control-h);
+  padding: 0 10px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.wx-srv-game-maximize[hidden] {
+  display: none;
+}
+
+.wx-srv-game-pictures {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  box-sizing: border-box;
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  flex-direction: column;
+  gap: 12px;
+  padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
+  background: var(--wx-canvas);
+  color: var(--wx-ink);
+}
+
+dialog.wx-srv-game-pictures:not([open]) {
+  display: none;
+}
+
+dialog.wx-srv-game-pictures[open] {
+  display: flex;
+}
+
+.wx-srv-game-pictures-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+}
+
+.wx-srv-game-pictures-title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 700;
+}
+
+.wx-srv-game-pictures-close {
+  min-height: var(--wx-srv-control-h);
+  padding: 0 12px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.wx-srv-game-pictures-pair {
+  flex: 1 1 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.wx-srv-game-pictures-option {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+}
+
+.wx-srv-game-pictures-image {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  object-fit: contain;
+  background: #111;
+}
+
+.wx-srv-game-pictures-image[hidden],
+.wx-srv-game-pictures-fallback[hidden] {
+  display: none;
+}
+
+.wx-srv-game-pictures-fallback {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: 16px;
+  color: var(--wx-muted);
+}
+
+.wx-srv-game-pictures-label {
+  padding: 10px 12px;
+  border-top: 1px solid var(--wx-border);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .wx-srv-game-pictures-pair {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
 }
 
 /* The picture takes whatever height the rest leaves; tapping it flips between the options. */

@@ -1039,7 +1039,7 @@ the table row count and the events table are unchanged by a live post).
 
 
 ### Inv 54 — A would-you-rather round is chat content: the other player's answers never leave the server before both reveal, and the round is erased with its message or a wipe
-The game (`wyr_rounds` schema v15 and the game-chat association `wyr_chat` schema v16, workspace 00045) is chat content. `wyr_rounds` is keyed by
+The game (`wyr_rounds` schema v15, game-chat association `wyr_chat` schema v16, and timed Reveal deadline schema v17, workspace 00045/00047) is chat content. `wyr_rounds` is keyed by
 its anchor message (`anchor_message_seq REFERENCES messages(seq) ON DELETE CASCADE`, the Inv 53
 pattern: an older blue/green-overlap process that never heard of the table still cascades a round
 away with its message), and a wipe issues `DELETE FROM wyr_rounds` explicitly in the same
@@ -1065,8 +1065,14 @@ their message (Inv 46); an unconsumed pair for a question that has since been pl
 The pool's one observable trace — which questions are pooled — is a subset of the static bank and says nothing about
 what was played. Pool generation obeys the same ComfyUI cleanup as on-demand runs (above).
 **The other player's pick and guess are served only when `state == "revealed"`** (both players
-pressed Reveal): `wyr_view_json` is the one place answers leave the store, `Message.wyr` carries
-only `{state, rev}`, and the client parser ignores a `result` on any unrevealed view. This is a
+pressed Reveal within the same server-owned 30-second window): after the `BEGIN IMMEDIATE` write
+lock is acquired, the first press samples server time and sets its existing player flag and an
+absolute `reveal_deadline`; only a distinct player's tap strictly before that
+deadline changes the state to `revealed`. A repeated first-player tap does not extend the window.
+After expiry, reads present the request as inactive, and the next Reveal mutation clears the old
+flag/deadline and starts a fresh window atomically; correctness does not depend on a background
+timer. `wyr_view_json` is the one place answers leave the store, `Message.wyr` carries only
+`{state, rev}`, and the client parser ignores a `result` on any unrevealed view. This is a
 game rule, not a secrecy boundary — anyone unlocked can read anything in this chat (Inv 40) —
 but it does not rest on a typed name alone: the sign-in (CF Access email) that took a player slot
 is recorded, and a request that names that player under a DIFFERENT verified sign-in is treated as

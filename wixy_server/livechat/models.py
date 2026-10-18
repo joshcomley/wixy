@@ -160,6 +160,7 @@ class WyrRoundRow:
     choice1: Literal["a", "b"] | None
     guess1: Literal["a", "b"] | None
     reveal1: bool
+    reveal_deadline: float | None
     player2_key: str | None
     player2_name: str | None
     player2_email: str | None

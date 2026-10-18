@@ -23,3 +23,6 @@ The picker in `wixy_server/livechat/wyr_questions.py` selects from all unplayed 
 
 ## Links
 - Delivery record: `a544f055-fdaf-4246-8de6-f04cb0337e9d`
+
+## Outcome
+Merged pull request 325 at `241baf6e7f63e2840af432acf740e1462d8e10b3`. The question bank contains 2,472 questions across 25 categories; the picker samples a category uniformly, then an unplayed question within it.

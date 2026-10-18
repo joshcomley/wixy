@@ -179,12 +179,15 @@ test.describe("Would you rather", () => {
     // One reveal is not enough.
     await press(pageA, controls(pageA), "Reveal");
     await expect(controls(pageA)).toContainText("Waiting for Bob to press Reveal");
-    await eventually([pageA, pageB], async () => (await controls(pageB).getByRole("button", { name: "Reveal", exact: true }).count()) === 1, "Bob still can reveal");
+    const bobReveal = controls(pageB).getByRole("button", { name: /^Tap to reveal together/ });
+    await expect(bobReveal).toBeVisible();
+    await expect(bobReveal).toContainText("Tap to reveal together");
     await expect(controls(pageB).locator(".wx-srv-wyr-result")).toHaveCount(0);
     await expect(controls(pageA).locator(".wx-srv-wyr-result")).toHaveCount(0);
 
     // Both revealed: everyone sees both people's picks and guesses.
-    await press(pageB, controls(pageB), "Reveal");
+    await bobReveal.click();
+    await humanPause(pageB);
     await eventually([pageA, pageB], async () => (await controls(pageA).locator(".wx-srv-wyr-result").count()) === 2, "Alice sees the result");
     await eventually([pageA, pageB], async () => (await controls(pageB).locator(".wx-srv-wyr-result").count()) === 2, "Bob sees the result");
     await expect(controls(pageA).locator(".wx-srv-wyr-headline")).toBeVisible();

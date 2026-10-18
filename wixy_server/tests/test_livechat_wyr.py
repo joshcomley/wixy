@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from wixy_server.app import create_app
+from wixy_server.livechat import store as wyr_store_module
 from wixy_server.livechat.pinclient import CmdPinVerifier
 from wixy_server.livechat.store import (
     _LATEST_SCHEMA_VERSION,
@@ -103,6 +104,17 @@ def _to_answering(store: LiveChatStore) -> int:
     return seq
 
 
+def _to_revealing(store: LiveChatStore) -> int:
+    seq = _to_answering(store)
+    store.answer_wyr(
+        player_email=None, anchor_seq=seq, player_key="josh", choice="a", guess="b", now=12.0
+    )
+    store.answer_wyr(
+        player_email=None, anchor_seq=seq, player_key="rose", choice="b", guess="a", now=13.0
+    )
+    return seq
+
+
 class TestBank:
     def test_the_shipped_bank_is_large_valid_and_unique(self) -> None:
         questions = load_questions(BANK_PATH)
@@ -170,7 +182,11 @@ class TestSchema:
     def test_v15_creates_the_tables_and_cascade_removes_a_round_with_its_message(
         self, store: LiveChatStore, tmp_path: Path
     ) -> None:
-        seq = _new_round(store)
+        seq = _to_revealing(store)
+        pending, _ = store.reveal_wyr(
+            player_email=None, anchor_seq=seq, player_key="josh", now=20.0
+        )
+        assert pending.reveal_deadline == 50.0
         assert _LATEST_SCHEMA_VERSION >= 15
         assert store.get_wyr_round(anchor_seq=seq) is not None
         assert "q0001" in store.wyr_used_ids()
@@ -195,6 +211,20 @@ class TestSchema:
         migrated = LiveChatStore(db)
         seq = _new_round(migrated)
         assert migrated.get_wyr_round(anchor_seq=seq) is not None
+
+    def test_a_v16_database_gains_the_reveal_deadline_column(self, store: LiveChatStore) -> None:
+        seq = _new_round(store)
+        conn = sqlite3.connect(str(store._db_path))
+        try:
+            conn.execute("ALTER TABLE wyr_rounds DROP COLUMN reveal_deadline")
+            conn.execute("PRAGMA user_version = 16")
+            conn.commit()
+        finally:
+            conn.close()
+        migrated = LiveChatStore(store._db_path)
+        assert _LATEST_SCHEMA_VERSION == 17
+        round_ = migrated.get_wyr_round(anchor_seq=seq)
+        assert round_ is not None and round_.reveal_deadline is None
 
 
 class TestStateMachine:
@@ -238,6 +268,119 @@ class TestStateMachine:
             player_email=None, anchor_seq=seq, player_key="rose", now=15.0
         )
         assert changed is True and done.state == "revealed"
+
+    def test_reveal_requires_the_other_player_within_thirty_seconds(
+        self, store: LiveChatStore
+    ) -> None:
+        seq = _to_revealing(store)
+        first, changed = store.reveal_wyr(
+            player_email=None, anchor_seq=seq, player_key="josh", now=20.0
+        )
+        assert changed and first.reveal1 and not first.reveal2
+        assert first.reveal_deadline == 50.0
+
+        second, changed = store.reveal_wyr(
+            player_email=None, anchor_seq=seq, player_key="rose", now=49.999
+        )
+        assert changed and second.state == "revealed"
+        assert second.reveal_deadline is None
+
+    def test_expired_reveal_resets_and_late_partner_starts_a_new_window(
+        self, store: LiveChatStore
+    ) -> None:
+        seq = _to_revealing(store)
+        store.reveal_wyr(player_email=None, anchor_seq=seq, player_key="josh", now=20.0)
+
+        late, changed = store.reveal_wyr(
+            player_email=None, anchor_seq=seq, player_key="rose", now=50.0
+        )
+        assert changed and late.state == "revealing"
+        assert not late.reveal1 and late.reveal2 and late.reveal_deadline == 80.0
+
+        complete, changed = store.reveal_wyr(
+            player_email=None, anchor_seq=seq, player_key="josh", now=79.999
+        )
+        assert changed and complete.state == "revealed"
+
+    def test_requester_repress_does_not_extend_the_reveal_deadline(
+        self, store: LiveChatStore
+    ) -> None:
+        seq = _to_revealing(store)
+        first, _ = store.reveal_wyr(player_email=None, anchor_seq=seq, player_key="josh", now=20.0)
+        repeated, changed = store.reveal_wyr(
+            player_email=None, anchor_seq=seq, player_key="josh", now=35.0
+        )
+        assert not changed and repeated.reveal_deadline == first.reveal_deadline == 50.0
+
+    def test_simultaneous_reveal_taps_serialize_to_one_completed_round(
+        self, store: LiveChatStore
+    ) -> None:
+        seq = _to_revealing(store)
+        barrier = threading.Barrier(2)
+
+        def press(player: str) -> None:
+            barrier.wait()
+            store.reveal_wyr(player_email=None, anchor_seq=seq, player_key=player, now=20.0)
+
+        threads = [
+            threading.Thread(target=press, args=("josh",)),
+            threading.Thread(target=press, args=("rose",)),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        round_ = store.get_wyr_round(anchor_seq=seq)
+        assert round_ is not None and round_.state == "revealed"
+
+    def test_reveal_deadline_starts_after_waiting_for_the_database_write_lock(
+        self, store: LiveChatStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seq = _to_revealing(store)
+        conn = sqlite3.connect(str(store._db_path), timeout=5.0, isolation_level=None)
+        conn.execute("BEGIN IMMEDIATE")
+        clock = [20.0]
+        monkeypatch.setattr(wyr_store_module.time, "time", lambda: clock[0])
+        result: list[tuple[Any, bool]] = []
+        errors: list[Exception] = []
+
+        def press() -> None:
+            try:
+                result.append(
+                    store.reveal_wyr(player_email=None, anchor_seq=seq, player_key="josh")
+                )
+            except Exception as exc:  # surfaced in the assertion below
+                errors.append(exc)
+
+        worker = threading.Thread(target=press)
+        try:
+            worker.start()
+            time.sleep(0.05)  # the worker is queued behind the held IMMEDIATE lock
+            clock[0] = 25.0
+            conn.execute("COMMIT")
+            worker.join(timeout=5.0)
+        finally:
+            if worker.is_alive():
+                conn.execute("ROLLBACK")
+                worker.join(timeout=5.0)
+            conn.close()
+
+        assert not worker.is_alive()
+        assert errors == []
+        assert len(result) == 1
+        assert result[0][0].reveal_deadline == 55.0
+
+    def test_expired_deadline_is_hidden_from_view_without_a_background_worker(
+        self, store: LiveChatStore
+    ) -> None:
+        seq = _to_revealing(store)
+        store.reveal_wyr(player_email=None, anchor_seq=seq, player_key="josh", now=20.0)
+        round_ = store.get_wyr_round(anchor_seq=seq)
+        assert round_ is not None
+        view = wyr_view_json(round_, None, "Josh", now=50.0)
+        assert view["revealDeadline"] is None
+        assert view["you"]["revealed"] is False  # type: ignore[index]
+        assert all(player["revealed"] is False for player in view["players"])
 
     def test_any_skip_vote_skips_the_round(self, store: LiveChatStore) -> None:
         seq = _new_round(store)
@@ -617,9 +760,11 @@ class TestRoutes:
 
             first = _post(client, h, f"/wyr/{seq}/reveal", sender="Josh")
             assert first.json()["state"] == "revealing" and first.json()["result"] is None
+            assert first.json()["revealDeadline"] is not None
             second = _post(client, h, f"/wyr/{seq}/reveal", sender="Rose")
             body = second.json()
             assert body["state"] == "revealed"
+            assert body["revealDeadline"] is None
             assert body["result"]["guessed"] == [True, True]
 
             history = client.get(f"{BASE}/messages?limit=10", headers=h).json()["messages"]

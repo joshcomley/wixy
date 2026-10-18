@@ -79,6 +79,7 @@ function view(overrides: Partial<WyrView> = {}): WyrView {
     seq: 7,
     state: "voting",
     rev: 1,
+    revealDeadline: null,
     question: { id: "q0001", category: "food-meals", a: "A classic cheeseburger", b: "A spicy pizza" },
     images: "none",
     players: [{ name: "Josh", vote: "play", answered: false, revealed: false }],
@@ -171,6 +172,61 @@ describe("wyr controls", () => {
     return { host, model, vote, answer, reveal };
   }
   afterEach(() => document.body.replaceChildren());
+
+  it("lets the second player join the active Reveal countdown", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-17T12:00:00Z"));
+    const revealDeadline = Date.now() / 1000 + 30;
+    const { host, reveal } = make(
+      view({
+        state: "revealing",
+        rev: 4,
+        revealDeadline,
+        players: [
+          { name: "Josh", vote: "play", answered: true, revealed: true },
+          { name: "Rose", vote: "play", answered: true, revealed: false },
+        ],
+        you: { slot: 2, vote: "play", choice: "a", guess: "b", revealed: false },
+      }),
+    );
+    reveal.mockResolvedValue({ ok: true, view: view({ state: "revealed", rev: 5 }) });
+    const countdown = host.querySelector<HTMLButtonElement>("button.wx-srv-wyr-countdown");
+    expect(countdown?.textContent).toContain("Tap to reveal together · 30s");
+    expect(host.querySelector<HTMLElement>(".wx-srv-wyr-countdown-fill")?.style.transform).toBe(
+      "scaleX(1)",
+    );
+    vi.advanceTimersByTime(15_000);
+    expect(host.querySelector<HTMLElement>(".wx-srv-wyr-countdown-fill")?.style.transform).toBe(
+      "scaleX(0.5)",
+    );
+    countdown?.click();
+    expect(reveal).toHaveBeenCalledWith(7);
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it("returns the requester to a fresh Reveal action after the countdown expires", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-17T12:00:00Z"));
+    const { host } = make(
+      view({
+        state: "revealing",
+        rev: 4,
+        revealDeadline: Date.now() / 1000 + 30,
+        players: [
+          { name: "Josh", vote: "play", answered: true, revealed: true },
+          { name: "Rose", vote: "play", answered: true, revealed: false },
+        ],
+        you: { slot: 1, vote: "play", choice: "a", guess: "b", revealed: true },
+      }),
+    );
+    expect(host.querySelector(".wx-srv-wyr-countdown")).not.toBeNull();
+    vi.advanceTimersByTime(30_000);
+    expect(host.querySelector(".wx-srv-wyr-countdown")).toBeNull();
+    expect(host.querySelector<HTMLButtonElement>(".wx-srv-wyr-primary")?.textContent).toBe("Reveal");
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
 
   it("lets the second person Play or Skip", async () => {
     const { host, vote } = make(
@@ -274,6 +330,53 @@ describe("wyr preview card", () => {
     expect(el.querySelector(".wx-srv-wyr-open")).not.toBeNull();
     el.querySelector<HTMLButtonElement>(".wx-srv-wyr-open")!.click();
     expect(openGame).toHaveBeenCalledWith(7);
+  });
+
+  it("shows a tappable Reveal countdown in the chat card and opens that round", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-17T12:00:00Z"));
+    const { el, openGame } = make(
+      view({
+        state: "revealing",
+        rev: 4,
+        revealDeadline: Date.now() / 1000 + 30,
+        players: [
+          { name: "Josh", vote: "play", answered: true, revealed: true },
+          { name: "Rose", vote: "play", answered: true, revealed: false },
+        ],
+      }),
+      message(7, { wyr: { state: "revealing", rev: 4 } }),
+    );
+    const countdown = el.querySelector<HTMLButtonElement>("button.wx-srv-wyr-countdown");
+    expect(countdown?.textContent).toContain("Reveal together · 30s");
+    expect(el.querySelector(".wx-srv-wyr-open")).toBeNull();
+    countdown?.click();
+    expect(openGame).toHaveBeenCalledWith(7);
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it("restores the ordinary game shortcut when the chat countdown expires", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-17T12:00:00Z"));
+    const { el } = make(
+      view({
+        state: "revealing",
+        rev: 4,
+        revealDeadline: Date.now() / 1000 + 30,
+        players: [
+          { name: "Josh", vote: "play", answered: true, revealed: true },
+          { name: "Rose", vote: "play", answered: true, revealed: false },
+        ],
+      }),
+      message(7, { wyr: { state: "revealing", rev: 4 } }),
+    );
+    expect(el.querySelector(".wx-srv-wyr-countdown")).not.toBeNull();
+    vi.advanceTimersByTime(30_000);
+    expect(el.querySelector(".wx-srv-wyr-countdown")).toBeNull();
+    expect(el.querySelector(".wx-srv-wyr-open")).not.toBeNull();
+    vi.clearAllTimers();
+    vi.useRealTimers();
   });
 
   it("waits with a placeholder only while the pictures are being painted", () => {
@@ -409,6 +512,53 @@ describe("wyr game tab", () => {
     expect(on()).toEqual(["https://example.invalid/full1.jpg"]);
     h.game.pane.querySelector<HTMLButtonElement>(".wx-srv-game-stage")!.click();
     expect(caption()).toBe("A classic cheeseburger");
+  });
+
+  it("maximizes both pictures with their option labels and returns to the answer controls", () => {
+    const answering = view({
+      state: "answering",
+      rev: 2,
+      players: [
+        { name: "Josh", vote: "play", answered: false, revealed: false },
+        { name: "Rose", vote: "play", answered: false, revealed: false },
+      ],
+      you: { slot: 1, vote: "play", choice: null, guess: null, revealed: false },
+    });
+    const h = make(answering, message(7, { attachments: photos() }));
+    h.game.open(7);
+    const maximize = h.game.pane.querySelector<HTMLButtonElement>(".wx-srv-game-maximize")!;
+    expect(maximize.hidden).toBe(false);
+
+    const dialog = h.game.pane.querySelector<HTMLDialogElement>(".wx-srv-game-pictures")!;
+    const showModal = vi.fn(() => dialog.setAttribute("open", ""));
+    Object.defineProperty(dialog, "showModal", { configurable: true, value: showModal });
+    Object.defineProperty(dialog, "close", {
+      configurable: true,
+      value: () => dialog.removeAttribute("open"),
+    });
+    expect(dialog.open).toBe(false);
+    maximize.click();
+    expect(showModal).toHaveBeenCalledOnce();
+    expect(dialog.open).toBe(true);
+    expect(dialog.querySelectorAll(".wx-srv-game-pictures-image:not([hidden])")).toHaveLength(2);
+    expect(dialog.textContent).toContain("Option A: A classic cheeseburger");
+    expect(dialog.textContent).toContain("Option B: A spicy pizza");
+
+    dialog.querySelector<HTMLButtonElement>(".wx-srv-game-pictures-close")!.click();
+    expect(dialog.open).toBe(false);
+    expect(maximize.ownerDocument.activeElement).toBe(maximize);
+    expect(h.game.pane.querySelector(".wx-srv-game-controls .wx-srv-wyr-group")).not.toBeNull();
+
+    maximize.click();
+    expect(dialog.open).toBe(true);
+    h.game.showTab("chat");
+    expect(dialog.open).toBe(false);
+  });
+
+  it("hides maximize pictures while the round has no ready image", () => {
+    const h = make(view({ images: "pending" }), message(7));
+    h.game.open(7);
+    expect(h.game.pane.querySelector<HTMLButtonElement>(".wx-srv-game-maximize")?.hidden).toBe(true);
   });
 
   it("a round without pictures shows the option as text, and 'Painting…' while they are coming", () => {

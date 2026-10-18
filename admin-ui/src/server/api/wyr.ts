@@ -60,6 +60,8 @@ export interface WyrView {
   readonly seq: number;
   readonly state: WyrState;
   readonly rev: number;
+  /** Unix timestamp in seconds for the active 30-second two-player Reveal window. */
+  readonly revealDeadline: number | null;
   readonly question: WyrQuestionView;
   readonly images: WyrImages;
   readonly players: readonly WyrPlayerView[];
@@ -98,6 +100,10 @@ function asImages(value: unknown): WyrImages {
 
 function asPosInt(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
+function asFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function asState(value: unknown): WyrState | null {
@@ -194,6 +200,7 @@ export function parseWyrView(value: unknown): WyrView | null {
     seq,
     state,
     rev,
+    revealDeadline: asFiniteNumber(record["revealDeadline"]),
     question: {
       id: question["id"],
       category: typeof question["category"] === "string" ? question["category"] : "",

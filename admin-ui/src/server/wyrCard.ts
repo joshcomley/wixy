@@ -9,6 +9,7 @@ import type { Attachment, Message } from "./api/messages";
 import type { WyrChoice, WyrView } from "./api/wyr";
 import type { WyrModel } from "./wyrModel";
 import { wyrStatusLine } from "./wyrControls";
+import { createWyrCountdown } from "./wyrCountdown";
 
 export interface WyrCardDeps {
   readonly model: WyrModel;
@@ -121,8 +122,21 @@ export function createWyrCards(deps: WyrCardDeps): WyrCards {
       pair.appendChild(t);
     }
     container.appendChild(pair);
-    container.appendChild(el("p", "wx-srv-wyr-status", wyrStatusLine(view)));
-    if (view.state !== "skipped") {
+    const revealActive =
+      view.state === "revealing" &&
+      view.revealDeadline !== null &&
+      view.revealDeadline > Date.now() / 1000;
+    const status =
+      view.state === "revealing" && view.revealDeadline !== null && !revealActive
+        ? "The reveal countdown expired. Tap to start again."
+        : wyrStatusLine(view);
+    container.appendChild(el("p", "wx-srv-wyr-status", status));
+    if (revealActive && view.revealDeadline !== null) {
+      const label = view.you?.revealed ? "Waiting for your partner" : "Reveal together";
+      container.appendChild(
+        createWyrCountdown(doc, view.revealDeadline, label, () => deps.openGame(seq), () => render(container, message)),
+      );
+    } else if (view.state !== "skipped") {
       const open = el("button", "wx-srv-wyr-primary wx-srv-wyr-open", view.state === "revealed" ? "Open" : "Play");
       open.type = "button";
       open.setAttribute("data-srv-gesture-boundary", "");

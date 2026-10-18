@@ -1758,15 +1758,18 @@ showing a question with two options, each with a picture. Both people vote Play/
 play, each privately answers *which would I rather* and *which will the other pick*; once both
 answered, each presses **Reveal**, and only when both have does anyone see the answers.
 
-- **Storage** (schema v15): `wyr_rounds` (one row per anchor message — state, `images` job state
+- **Storage** (schema v17): `wyr_rounds` (one row per anchor message — state, `images` job state
   `none|pending|done|failed`, the two player slots with name/sign-in email and
-  `vote`/`choice`/`guess`/`reveal`, `rev`). Played questions are derived from the existing rounds
+  `vote`/`choice`/`guess`/`reveal`, and nullable `reveal_deadline` for the server-owned 30-second
+  two-player Reveal window, `rev`). A stale deadline is inactive in reads and is reset atomically
+  by the next Reveal mutation; no timer worker is required. Played questions are derived from the existing rounds
   (no separate table). Store methods: `create_wyr_round`, `vote_wyr`, `answer_wyr`, `reveal_wyr`,
   `get_wyr_round`, `wyr_used_ids`, `wyr_round_is_paintable`, `create_wyr_image_attachments`
   (both pictures, one transaction), `fail_wyr_images`, `fail_stale_wyr_images` (startup); errors `WyrRoundNotFoundError`/`WyrRoundFullError`/
   `WyrBadStateError`/`WyrNotPlayerError`. States: `voting -> answering -> revealing -> revealed`,
   or `skipped`. Starting a round supersedes any open one.
-- **Wire**: `Message.wyr = {state, rev} | null`; routes `POST /wyr`, `GET /wyr/{seq}?as=`,
+- **Wire**: `Message.wyr = {state, rev} | null`; `GET /wyr/{seq}?as=` also returns
+  `revealDeadline` (Unix seconds or `null`); routes `POST /wyr`, `GET /wyr/{seq}?as=`,
   `POST /wyr/{seq}/vote|answer|reveal` (contracts.md). The viewer-filtered view
   (`wyr_game.wyr_view_json`) is the only path answers leave the store.
 - **Questions**: `wyr_questions.json` (2,472 questions across 25 categories; ids permanent,
@@ -1819,7 +1822,10 @@ answered, each presses **Reveal**, and only when both have does anyone see the a
   A per-round history view is future work; the association is what it will read.
 - **Client**: `admin-ui/src/server/api/wyr.ts` (defensive parsers), `wyrModel.ts` (per-round
   viewer-filtered view + unsent picks; the summary only triggers a fetch), `wyrCard.ts` (the
-  in-bubble card), wired in `thread.ts` (menu item `.wx-srv-more-wyr`, `.wx-srv-bubble-wyr`).
+  in-bubble card), `wyrGame.ts` (WYR tab, including the native modal maximize-pictures comparison
+  view), wired in `thread.ts` (menu item `.wx-srv-more-wyr`, `.wx-srv-bubble-wyr`). The maximize
+  view shows both ready pictures and their option labels; native `showModal()` contains keyboard
+  focus and makes the covered page inert. Close it to return to the choices.
 - **Fleet ops** (not in this repo): the Devfleet child `ComfyUi` (127.0.0.1:8199, pinned to the
   RTX 5060 Ti by UUID, `--output-directory E:\ImageGenLab\out-wyr`) and `WIXY_COMFY_URL` +
   `WIXY_COMFY_OUTPUT_DIR` (the same folder) in `D:\Servers\Wixy\.env`.
