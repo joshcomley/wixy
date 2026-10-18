@@ -53,6 +53,21 @@ merge brief with equal standing. Outputs: parent
 `spec/server-chat/voice-repair-merge-opus.md`. Parent owns convergence adjudication,
 local repair implementation and fresh audit; neither proposer can certify launch.
 
+Astra MERGE complete and banked at `spec/server-chat/voice-repair-merge-astra.md`:
+actual executor futures with separate 4/8 work quotas, deferred overflow eviction,
+immutable production-time capture, render-quantum acknowledgements tied to receiver
+leases, and correlated incoming/outgoing ownership. It explicitly finds Opus's
+"never 4401" claim stronger than its test and code establish; repair operational
+termination mapping and test absence of unauthorized-lock callbacks. Opus MERGE
+remains next input; do not treat one merge recommendation as both-family convergence.
+The parent MERGE wake `sw_ae2aae9f070a497ba54ea7e106e336e6` remains active.
+
+Gemini stop was requested via peer and discovered documented
+`POST /api/session/{id}/interrupt`; response was `ok:false, via:provider-kill`.
+Subsequent diagnosis still showed a live driver/native unread store, so stop is NOT
+confirmed. Do not claim stopped/dead and do not count its absent result. Its work is
+outside the selected two-family panel and cannot hold delivery progression hostage.
+
 Operator device answer banked in decision 1867: Android Chrome; another participant
 uses iPhone with browser not yet confirmed; iPad and spare Android available. No
 participant names in repo artifacts. Call audio is pair-only; ordinary messages can
