@@ -32,6 +32,18 @@ then rule on mechanism convergence, implement locally and obtain a fresh indepen
 audit. Each lane has a 1200-second watchdog; parent follow-up is armed separately.
 Do not wait in a foreground loop. No PR is open and no launch/live acceptance exists.
 
+PROPOSE progress: Opus's complete artifact is copied intact into this checkout at
+`spec/server-chat/voice-repair-proposal-opus.md`; its own isolated trial reports all
+five reds/greens, 340 Python and 1,223 focused TS checks, strict types. Astra's complete
+`spec/server-chat/voice-repair-proposal-astra.md` has component greens and explicitly
+unexecuted M1/M4 integration greens; do not inflate that evidence. Gemini proposal not
+yet present at its expected path. Diagnosis shows native `max_step_idx=37` while
+translated-reader `last_step_idx=-1`; this is not proof of death or a never-started
+worker. Sent a neutral status query (working/finished/blocked), not a restart command.
+Parent next: take Gemini reply/artifact or repair a demonstrated infrastructure block;
+then send ALL actual proposals together for MERGE. Existing 900-second parent wake
+`sw_06ddcbcde1cf4c818615294894ca46e5` and per-seat watchdogs remain the follow-up.
+
 Operator device answer banked in decision 1867: Android Chrome; another participant
 uses iPhone with browser not yet confirmed; iPad and spare Android available. No
 participant names in repo artifacts. Call audio is pair-only; ordinary messages can
