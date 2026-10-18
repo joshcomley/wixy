@@ -28,6 +28,7 @@ export function createCallController(deps: CallDeps) {
   element.className = "wx-srv-call";
   element.hidden = true;
   const status = win.document.createElement("span");
+  status.className = "wx-srv-call-status";
   status.setAttribute("role", "status");
   const targets = win.document.createElement("select");
   targets.setAttribute("aria-label", "Person to call");
@@ -59,7 +60,7 @@ export function createCallController(deps: CallDeps) {
     muted = !muted;
     audio?.setMuted(muted);
     send({ type: "mute", callId, muted });
-    muteButton.textContent = muted ? "Unmute" : "Mute";
+    labelButton(muteButton, muted ? "Unmute" : "Mute", muted ? "mic-off" : "mic");
     muteButton.setAttribute("aria-pressed", String(muted));
   });
   element.append(status, targets, callButton, acceptButton, muteButton, endButton);
@@ -92,11 +93,40 @@ export function createCallController(deps: CallDeps) {
   function button(text: string, action: () => void): HTMLButtonElement {
     const result = win.document.createElement("button");
     result.type = "button";
-    result.textContent = text;
+    labelButton(result, text, text === "Mute" ? "mic" : text === "End call" ? "end" : "phone");
+    result.dataset["srvGestureBoundary"] = "";
     result.addEventListener("click", action);
     return result;
   }
+  function labelButton(target: HTMLButtonElement, text: string, icon: "phone" | "end" | "mic" | "mic-off"): void {
+    if (target.getAttribute("aria-label") === text && target.dataset["callAction"] === icon) return;
+    const svg = win.document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "1.8");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    const paths = {
+      phone: "M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.8 2.1Z",
+      end: "M3 15v3h4v-4m10 0v4h4v-3c0-5-18-5-18 0 M8 13a12 12 0 0 1 8 0",
+      mic: "M9 5a3 3 0 0 1 6 0v7a3 3 0 0 1-6 0Z M5 10v2a7 7 0 0 0 14 0v-2 M12 19v3 M8 22h8",
+      "mic-off": "m2 2 20 20 M9 9v3a3 3 0 0 0 5.1 2.1 M15 9V5a3 3 0 0 0-5.7-1.3 M5 10v2a7 7 0 0 0 12 4.9 M19 10v2 M12 19v3 M8 22h8",
+    };
+    const path = win.document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", paths[icon]);
+    svg.append(path);
+    const caption = win.document.createElement("span");
+    caption.className = "wx-srv-call-caption";
+    caption.textContent = text;
+    target.replaceChildren(svg, caption);
+    target.title = text;
+    target.setAttribute("aria-label", text);
+    target.dataset["callAction"] = icon;
+  }
   function render(): void {
+    element.dataset["state"] = state;
     const inCall = callId !== null;
     targets.hidden = inCall;
     callButton.hidden = inCall;
@@ -105,7 +135,7 @@ export function createCallController(deps: CallDeps) {
     acceptButton.disabled = answerPending || deps.isMicBusy();
     muteButton.hidden = state !== "connected";
     endButton.hidden = !inCall;
-    endButton.textContent = state === "incoming" ? "Decline" : state === "outgoing" ? "Cancel call" : "End call";
+    labelButton(endButton, state === "incoming" ? "Decline" : state === "outgoing" ? "Cancel call" : "End call", "end");
   }
   function send(message: Record<string, unknown>): boolean {
     if (!socket || socket.readyState !== 1 || socket.bufferedAmount > 8192) return false;
@@ -131,7 +161,7 @@ export function createCallController(deps: CallDeps) {
     leases.clear();
     deps.onBusy(false);
     status.textContent = message;
-    muteButton.textContent = "Mute";
+    labelButton(muteButton, "Mute", "mic");
     muteButton.setAttribute("aria-pressed", "false");
     render();
   }
@@ -236,7 +266,7 @@ export function createCallController(deps: CallDeps) {
       if (typeof m["deadline"] !== "number") throw new Error("Invalid deadline");
       deadline = Math.min(m["deadline"], session?.expiresAt ?? 0);
       status.textContent = "Voice calls";
-      callButton.textContent = "Call";
+      labelButton(callButton, "Call", "phone");
     } else if (m["type"] === "presence" && Array.isArray(m["peers"])) {
       const selected = selectedTarget ?? targets.value;
       targets.replaceChildren();
@@ -334,7 +364,7 @@ export function createCallController(deps: CallDeps) {
       if (epoch !== socketEpoch) return;
       disconnect();
       status.textContent = "Calls disconnected. Reconnect to try again.";
-      callButton.textContent = "Reconnect calls";
+      labelButton(callButton, "Reconnect calls", "phone");
       if (event.code === 4401) hooks.lockNow("unauthorized");
     };
     socket.onerror = () => { if (epoch === socketEpoch) { disconnect(); status.textContent = "Calls unavailable"; } };

@@ -453,7 +453,7 @@ html, body {
 
 /* The title and name chip used to push the buttons to the right edge; with them gone (and the
    badge possibly empty), the first button does it. */
-.wx-shell-srv-version-in-header .wx-srv-more-button {
+.wx-shell-srv-version-in-header .wx-srv-call {
   margin-left: auto;
 }
 

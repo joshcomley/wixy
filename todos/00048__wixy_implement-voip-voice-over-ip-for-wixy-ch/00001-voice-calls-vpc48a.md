@@ -6,6 +6,16 @@ Add two-person live audio calling to the unlocked Server panel, coordinated thro
 
 ## Context + current state
 
+LATEST: operator reports actual phone call works, requests compact phone/hang-up
+icons next to⋯, and says "Once that's done, please publish it!" UI source+LF
+bundles updated; strictTS/37 affected tests pass, idle320/360/390/768 and incoming
+visual checks fit themed header. Final actual synthetic duplex run submitted,
+then PR/checks/merge. No new runtime transport/auth/lifecycle change. Preview's
+runtime moved from Playwright's cleared test-results into registered workspace
+.scratch/voice-preview-runtime; retained SQLite moved intact, configuration and
+fixture reconstructed. Launcher refuses test-results placement. No production
+storage touched. Formal sustained/performance/blocked-worker evidence not supplied.
+
 LATEST OVERRIDE: private preview deployed directly under Devfleet WixyCallPreview,
 immutable177e0a9 source, real Access/PIN, separate data. Public URL is
 https://wixy-call-test.cinnamons.uk/admin/server . Local health200/API401 and

@@ -14,7 +14,18 @@ The candidate is now deployed at
 `8d621b05449eab6ed4cabe77880f2bf88ecd30d3a4f84818260d1f693bffc12a`.
 The snapshot and isolated data are separate descendants of the registered runtime
 directory. The source launcher is `tooling/voice_preview_service.py --runtime
-<workspace>/e2e/test-results/voice-preview-runtime`.
+<workspace>/.scratch/voice-preview-runtime`.
+
+The operator subsequently reported "It works!" from Android Chrome and requested
+phone/hang-up icons beside the ⋯ menu, then explicitly requested publication.
+This establishes reported real-device login and call success; it does not supply
+latency samples, a documented 15-minute speaker test or blocked-worker shutdown
+measurements. Those limits remain disclosed rather than inferred from the report.
+
+The runtime was relocated out of `e2e/test-results` after discovering Playwright
+clears that directory. The preview's retained SQLite database was moved intact;
+deleted preview settings and local fixture are reconstructed. Production storage
+was never involved. The launcher now rejects runtime paths under `test-results`.
 
 Observed: origin health200, unauthenticated admin API401, public Access redirect,
 and Access login HTML200. DNS route and ingress were added with a validated
@@ -22,8 +33,8 @@ candidate config and backup; elevated gate request
 `req-4a01ec86-2f97-4646-910c-9ab2574c6256` completed exit0, Cloudflared Running.
 No production chat storage or production Wixy service was changed.
 
-Interactive login, authenticated call upgrade and physical acceptance are still
-unobserved. The 15-minute duplex/speaker test is a minimum acceptance exercise,
+Interactive login and a working phone call are now operator-reported. The full
+15-minute duplex/speaker test has not been documented; it is an acceptance exercise,
 not a hosting timeout. The service can be stopped via Devfleet's existing stop
 action for `WixyCallPreview`; stop it before retiring its registered source/data.
 

@@ -2,6 +2,13 @@
 
 ## Live voice calls (workspace 48)
 
+The compact call controls mount in the thread header immediately before the ⋯
+menu (`thread.mountCallControls`). Call/Answer use a phone icon; Decline/Cancel/End
+use a hang-up icon; Mute/Unmute use microphone icons with pressed state. Each has
+an accessible name and tooltip. The device selector shrinks within the header on
+phones; controls use the shared surface/ink/border theme tokens. Status remains a
+live screen-reader announcement. This placement changes no call ownership or consent.
+
 `routes_livechat_calls.py` serves the ephemeral `/api/admin/server/calls/ws` WebSocket.
 `livechat/call_broker.py` owns at most one immutable pair of socket IDs; it never writes
 the store, SSE, audio, transcripts or notifications. Same-email tabs remain distinct.

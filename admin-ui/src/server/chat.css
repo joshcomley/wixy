@@ -15,25 +15,70 @@
 }
 
 .wx-srv-call {
-  display: flex;
-  flex-wrap: wrap;
+  display: inline-flex;
+  flex: 0 1 180px;
+  min-width: 0;
   align-items: center;
-  gap: 8px;
-  padding: 8px 0;
-  flex-shrink: 0;
+  justify-content: flex-end;
+  gap: 6px;
 }
 .wx-srv-call[hidden], .wx-srv-call [hidden] { display: none; }
-.wx-srv-call span { flex: 1 1 150px; font-size: 13px; }
-.wx-srv-call button, .wx-srv-call select {
-  min-height: 40px;
-  border: 1px solid var(--wx-border, #ccc);
-  border-radius: 8px;
-  padding: 6px 10px;
-  font: inherit;
-  background: var(--wx-bg, #fff);
-  color: inherit;
+.wx-srv-call-status, .wx-srv-call-caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
-.wx-srv-call select { max-width: 200px; }
+.wx-srv-call button, .wx-srv-call select {
+  height: 36px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  font: inherit;
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+}
+.wx-srv-call button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 36px;
+  padding: 7px;
+  cursor: pointer;
+}
+.wx-srv-call button svg { width: 20px; height: 20px; }
+.wx-srv-call button:disabled { opacity: 0.45; cursor: default; }
+.wx-srv-call button:focus-visible, .wx-srv-call select:focus-visible {
+  outline: 2px solid var(--wx-brand-blue-text);
+  outline-offset: 2px;
+}
+.wx-srv-call button[data-call-action="end"] { color: var(--wx-error, #e76e78); }
+.wx-srv-call[data-state="incoming"] button[data-call-action="phone"] {
+  color: var(--wx-success, #26865d);
+}
+.wx-srv-call button[aria-pressed="true"] {
+  background: var(--wx-brand-blue-tint);
+  color: var(--wx-brand-blue-text);
+}
+.wx-srv-call select {
+  flex: 1 1 100px;
+  min-width: 0;
+  width: 100px;
+  max-width: 140px;
+  padding: 4px;
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+.wx-srv-call[data-state="connected"],
+.wx-srv-call[data-state="incoming"],
+.wx-srv-call[data-state="outgoing"] { flex: none; }
+.wx-srv-call + .wx-srv-more-button { margin-left: 0; }
+
+@media (max-width: 420px) {
+  .wx-srv-thread-header { gap: 6px; }
+}
 
 .wx-srv-thread-view {
   /* ONE height for every control in the composer row (attach, mic, input,

@@ -104,6 +104,7 @@ export interface ServerThreadDeps {
 
 export interface ServerThreadView {
   readonly element: HTMLElement;
+  mountCallControls(controls: HTMLElement): void;
   isMicBusy(): boolean;
   setCallBusy(busy: boolean): void;
   /** Loads the newest history page, and on reattach refreshes every loaded
@@ -3003,6 +3004,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   });
 
   return {
+    mountCallControls(controls) { header.insertBefore(controls, moreButton); },
     element,
     isMicBusy: () => voiceRecorder !== null && voiceRecorder.state !== "idle",
     setCallBusy(busy: boolean): void { callBusy = busy; updateRecorderUi(); },

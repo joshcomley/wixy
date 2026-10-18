@@ -13,6 +13,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime", type=Path, required=True)
     runtime = parser.parse_args().runtime.resolve()
+    if "test-results" in runtime.parts:
+        raise RuntimeError("Preview runtime cannot live in a test runner's output directory")
     deployment = json.loads((runtime / "deployment.json").read_text(encoding="utf-8"))
     candidate = Path(deployment["candidate"]).resolve()
     settings = json.loads((runtime / "settings.json").read_text(encoding="utf-8"))
