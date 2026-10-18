@@ -16,6 +16,22 @@ parent ruling/local repairs -> fresh audit. Round brief:
 `spec/server-chat/voice-repair-round1-brief.md`. No launch approval; no third-party
 audio disclosure found by that audit. Add live third-browser negative control.
 
+Repair PROPOSE seats (no implementation delegation): Astra finder
+`300d1225-5c81-4261-801b-bbdc484df0ea` writes
+`spec/server-chat/voice-repair-proposal-astra.md` in this checkout; Opus
+`a6f2f9cc-cb23-44cc-b306-b8e87c785495` owns isolated workspace 49
+`D:/Servers/Cmd/Storage/clones/wixy__worktrees/00049__wixy_group-therapy-propose-reviewer-opus-for`
+and writes `spec/server-chat/voice-repair-proposal-opus.md` there; Gemini
+`c2ee5b92-d84b-443e-9508-f1d56a9cae84` owns isolated workspace
+`14bddc5b-fda4-45d5-a4b4-70ea322a38b7` and writes its own
+`spec/server-chat/voice-repair-proposal-gemini.md` (resolve actual cwd from reply/diagnose).
+All receive the same brief at source commit 74c9578; do not read each other's proposals
+before phase MERGE. Parent owns next action on completion: read every actual artifact,
+send ALL proposal paths to EVERY reviewer with equal standing and provenance labels,
+then rule on mechanism convergence, implement locally and obtain a fresh independent
+audit. Each lane has a 1200-second watchdog; parent follow-up is armed separately.
+Do not wait in a foreground loop. No PR is open and no launch/live acceptance exists.
+
 Operator device answer banked in decision 1867: Android Chrome; another participant
 uses iPhone with browser not yet confirmed; iPad and spare Android available. No
 participant names in repo artifacts. Call audio is pair-only; ordinary messages can
