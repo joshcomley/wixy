@@ -1,5 +1,13 @@
 # Testing
 
+Live-call focused loop: `pytest wixy_server/tests/test_livechat_calls.py -n 0` (signed
+JWT dual-gate tests, immutable pair/state/credit/lease tests, real Uvicorn fragmented
+oversize proof); in `admin-ui`, `npm test -- tests/server/call.test.ts
+tests/server/callAudio.test.ts tests/server/callWorklet.test.ts tests/server/panel.test.ts`;
+in `e2e`, `npx playwright test tests/server-calls.spec.ts --workers=1` after rebuilding
+admin assets. Synthetic duplex is distinct from the physical-device listening and
+actual-tunnel gate in [the review](../../spec/server-chat/voice-call-architecture-review.md#acceptance-and-real-audio-validation).
+
 The test matrix, fixtures, and how to run everything. Spec:
 [`spec/08-testing-acceptance.md`](../../spec/08-testing-acceptance.md). CI is
 `.github/workflows/ci.yml` (see [runbook.md](runbook.md) §CI).

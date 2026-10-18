@@ -1,5 +1,28 @@
 # Contracts
 
+## Private live-call WebSocket
+
+`/api/admin/server/calls/ws` uses subprotocol `wixy-call-v1`, no query parameters,
+one configured same-origin Origin and a verified Access assertion. It independently
+enforces Access because HTTP middleware does not cover WS. After upgrade, within 5 s:
+`{"type":"auth","v":1,"token":"<in-memory unlock token>","label":"Device"}`.
+Success sends `{"type":"welcome","connectionId":"<32 hex>","deadline":<epoch seconds>}`
+and `{"type":"presence","peers":[{"id":"<32 hex>","label":"Device","available":true}]}`.
+No credentials enter URLs, cookies, subprotocols or storage.
+
+Client controls: `invite {requestId,targetConnectionId}`, `accept|decline|ready|failed|end
+{callId}`, `mute {callId,muted}`, `lease {callId,lease}`, `ack {callId,sequence}`, `pong {}`.
+All carry `type`; schemas forbid extra fields. Server sends `incoming|outgoing
+{callId,peer}`, `prepare|connected {callId}`, `capture {callId,lease}`, `muted {callId,muted}`,
+`ended {callId,reason}`, `unavailable {}`, `ping {}`. Media is fixed 1008-byte binary,
+never JSON/base64. Canonical offsets, state/ownership, limits and gates:
+[`spec/server-chat/04-voice-calls.md`](../../spec/server-chat/04-voice-calls.md).
+
+Pre-upgrade denial closes with 4403 (the HTTP upgrade is rejected); after upgrade,
+4401 means locked/expired, 4403 invalid protocol, 4429 admission unavailable, 1009
+transport oversize. Normal disconnect/shutdown uses 1000. Clients must not assume
+browser JS can read a rejected upgrade's response body. No call state is persisted.
+
 The literal wire shapes wixy programs against: the HTTP route table, response
 envelopes, error conventions, the two SSE streams, the browser↔iframe postMessage
 protocol, and the named fixtures/entrypoints tests bind to. This documents **code

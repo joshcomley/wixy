@@ -13,6 +13,7 @@ from pathlib import Path
 import uvicorn
 
 from wixy_server.app import create_app
+from wixy_server.livechat.call_protocol import SERVER_OPTIONS
 from wixy_server.settings import load_settings, resolve_storage_root
 
 _WIXY_REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -31,7 +32,7 @@ def main() -> None:
     # bind — the gate exists so a bare-metal/non-compose run can never accidentally
     # bind a routable interface.
     host = "0.0.0.0" if settings.containerized else "127.0.0.1"
-    uvicorn.run(app, host=host, port=settings.port)
+    uvicorn.run(app, host=host, port=settings.port, **SERVER_OPTIONS)
 
 
 if __name__ == "__main__":

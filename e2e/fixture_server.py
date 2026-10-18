@@ -848,7 +848,10 @@ def main() -> None:
         await anyio.to_thread.run_sync(fake_cmd_server.stop)
         return {"ok": True}
 
-    uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
+    app.state.call_origins = frozenset({f"http://127.0.0.1:{PORT}"})
+    from wixy_server.livechat.call_protocol import SERVER_OPTIONS
+
+    uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning", **SERVER_OPTIONS)
 
 
 if __name__ == "__main__":

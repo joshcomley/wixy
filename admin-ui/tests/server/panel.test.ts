@@ -782,7 +782,7 @@ describe("mountServerPanel", () => {
 
   // -- R7 suspension accounting (fake clock) -------------------------------------
 
-  it("a suspension pauses the idle timer entirely, then restarts it with a FRESH 10s on release", async () => {
+  it.each(["recording", "voiceCall"] as const)("%s pauses idle entirely, then restarts a FRESH 10s on release", async (reason) => {
     const chatFactory = trackedChatViewFactory();
     fetchMock.mockResolvedValueOnce(jsonResponse({ token: "tok", expiresAt: expiresIn(3600) }));
     const panel = mount({ createServerChatView: chatFactory.createServerChatView });
@@ -792,7 +792,7 @@ describe("mountServerPanel", () => {
     const hooks = chatFactory.hooks;
     if (hooks === null) throw new Error("hooks not captured");
 
-    const release = hooks.suspend("recording");
+    const release = hooks.suspend(reason);
     await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS * 3); // way past — must not fire while suspended
     expect(chatHost.classList.contains("wx-srv-fading")).toBe(false);
     expect(panel.element.querySelector(".wx-srv-thread")).not.toBeNull();

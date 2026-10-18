@@ -1,5 +1,36 @@
 # Subsystem: server chat (the "Server" panel)
 
+## Live voice calls (workspace 48)
+
+`routes_livechat_calls.py` serves the ephemeral `/api/admin/server/calls/ws` WebSocket.
+`livechat/call_broker.py` owns at most one immutable pair of socket IDs; it never writes
+the store, SSE, audio, transcripts or notifications. Same-email tabs remain distinct.
+Access JWT verification precedes upgrade; a strict same-origin first-frame unlock token
+uses `tokens.validate_server_token`, including device-grant revocation. The effective
+expiry is the earlier Access/unlock expiry. Origins come from the configured project
+domain (HTTPS); explicit development loopback origins are permitted only with dev auth.
+
+`server/call/controller.ts` owns presence, consent and teardown. `audio.ts` owns tracks,
+context and the self-hosted fingerprinted `call-worklet.js`. Both accept before capture;
+both ready before media. A connected **or muted** call holds exactly one `voiceCall`
+idle suspension. End releases it, restarting a fresh countdown; actual lock, shield
+detach, pagehide, disposal, grant failure or connection failure stops audio immediately.
+Ringing does not suspend idle. A renewed unlock token ends the call and reconnects only
+presence; it never resumes audio. Recording a voice note and a call cannot own the mic
+together. Existing tab/screen-lock policies are unchanged. See **Inv 55**.
+
+The wire format, bounds and validation gates are canonical in
+[`04-voice-calls.md`](../../spec/server-chat/04-voice-calls.md) and its linked review.
+`call_protocol.SERVER_OPTIONS` is used by the production entry point and E2E fixture:
+4096-byte WS messages, receive queue 4, compression off. Audio is mono 24 kHz int16,
+20 ms frames. At most five receiver credits and five capture transfer buffers; bounded
+100 ms relay queues, 200 ms playout ring and 300 ms freshness leases. Controls use an
+80/s bucket (50 acknowledgements + ten leases/s plus UI/heartbeats), burst 100.
+TLS is transport protection, **not E2EE**; hub and Cloudflare can see live PCM. Calls end
+on interruption/redeploy and never reconnect automatically. One process per site only.
+Local Chromium synthetic duplex is proven; physical-device listening, phone behavior,
+actual-tunnel latency/loss and the 15-minute duplex gate remain unproven until recorded.
+
 A hidden human↔human live chat for admin users, disguised as a **"Server"** nav tab inside
 the already CF-Access-gated `/admin`. Not the AI assistant, not visitor-facing — its own
 storage, routes, and second auth gate, entirely separate from `chats.py`/`cmdchat.py`/

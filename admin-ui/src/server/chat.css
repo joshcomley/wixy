@@ -14,6 +14,27 @@
   min-height: 0;
 }
 
+.wx-srv-call {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  flex-shrink: 0;
+}
+.wx-srv-call[hidden], .wx-srv-call [hidden] { display: none; }
+.wx-srv-call span { flex: 1 1 150px; font-size: 13px; }
+.wx-srv-call button, .wx-srv-call select {
+  min-height: 40px;
+  border: 1px solid var(--wx-border, #ccc);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font: inherit;
+  background: var(--wx-bg, #fff);
+  color: inherit;
+}
+.wx-srv-call select { max-width: 200px; }
+
 .wx-srv-thread-view {
   /* ONE height for every control in the composer row (attach, mic, input,
      Send): 44px on a phone (a proper tap target), 36px on desktop. The

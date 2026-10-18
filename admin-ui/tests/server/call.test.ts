@@ -1,0 +1,125 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createCallController, type CallAudioHandle } from "../../src/server/call/controller";
+import { decodeFrame, encodeFrame } from "../../src/server/call/protocol";
+
+class Socket {
+  readyState = 1;
+  bufferedAmount = 0;
+  binaryType = "";
+  onopen: (() => void) | null = null;
+  onmessage: ((event: { data: unknown }) => void) | null = null;
+  onclose: ((event: { code: number }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  sent: string[] = [];
+  send(data: string) { this.sent.push(data); }
+  close = vi.fn();
+  receive(message: unknown) { this.onmessage?.({ data: JSON.stringify(message) }); }
+}
+const ID = "a".repeat(32);
+const TARGET = "b".repeat(32);
+
+function setup(prepare: () => Promise<void> = async () => {}) {
+  const socket = new Socket();
+  const releases: { reason: string; release: ReturnType<typeof vi.fn> }[] = [];
+  const audio: CallAudioHandle = {
+    prepare: vi.fn(prepare), start: vi.fn(), stop: vi.fn(), setMuted: vi.fn(),
+    lease: () => 0.3, play: vi.fn(),
+  };
+  const lock = vi.fn();
+  const controller = createCallController({ win: window, isMicBusy: () => false, onBusy: vi.fn(),
+    hooks: { suspend: (reason) => { const release = vi.fn(); releases.push({ reason, release }); return release; }, lockNow: lock },
+    socketFactory: () => socket as unknown as WebSocket, audioFactory: () => audio,
+  });
+  controller.attach({ token: "secret", expiresAt: Date.now() / 1000 + 3600 }, "A");
+  socket.onopen?.();
+  socket.receive({ type: "welcome", deadline: Date.now() / 1000 + 3600 });
+  socket.receive({ type: "presence", peers: [{ id: TARGET, label: "B", available: true }] });
+  const click = (text: string) => {
+    const button = [...controller.element.querySelectorAll("button")].find((b) => b.textContent === text);
+    if (!button) throw new Error(`Missing ${text}`);
+    button.click();
+  };
+  const controls = () => socket.sent.map((s) => JSON.parse(s) as Record<string, unknown>);
+  return { controller, socket, audio, releases, lock, click, controls };
+}
+
+beforeEach(() => vi.useFakeTimers());
+afterEach(() => vi.useRealTimers());
+
+describe("live-call consent and lifetime", () => {
+  it("declines a targeted invitation without acquiring audio", () => {
+    const f = setup();
+    f.socket.receive({ type: "incoming", callId: ID, peer: "B" });
+    f.click("Decline");
+    expect(f.controls().at(-1)).toEqual({ type: "decline", callId: ID });
+    expect(f.audio.prepare).not.toHaveBeenCalled();
+    expect(f.releases).toHaveLength(0);
+    f.controller.dispose();
+  });
+  it("waits for acceptance before preparing mic; connected/muted owns one idle pause", async () => {
+    const f = setup();
+    f.click("Call");
+    expect(f.audio.prepare).not.toHaveBeenCalled();
+    f.socket.receive({ type: "outgoing", callId: ID, peer: "B" });
+    expect(f.releases).toHaveLength(0);
+    f.socket.receive({ type: "prepare", callId: ID });
+    await Promise.resolve();
+    expect(f.controls().some((m) => m["type"] === "ready")).toBe(true);
+    f.socket.receive({ type: "connected", callId: ID });
+    f.click("Mute");
+    expect(f.audio.setMuted).toHaveBeenCalledWith(true);
+    const pause = f.releases.find((r) => r.reason === "voiceCall");
+    expect(pause).toBeDefined();
+    expect(pause?.release).not.toHaveBeenCalled();
+    f.click("End call");
+    expect(pause?.release).toHaveBeenCalledTimes(1);
+    expect(f.audio.stop).toHaveBeenCalledTimes(1);
+    f.controller.detach();
+    expect(pause?.release).toHaveBeenCalledTimes(1);
+    f.controller.dispose();
+  });
+
+  it("detach during permission stops immediately and late readiness cannot revive it", async () => {
+    let resolve!: () => void;
+    const f = setup(() => new Promise<void>((done) => { resolve = done; }));
+    f.click("Call");
+    f.socket.receive({ type: "outgoing", callId: ID, peer: "B" });
+    f.socket.receive({ type: "prepare", callId: ID });
+    f.controller.detach();
+    expect(f.audio.stop).toHaveBeenCalledTimes(1);
+    expect(f.releases[0]?.release).toHaveBeenCalledTimes(1);
+    resolve();
+    await Promise.resolve();
+    expect(f.controls().some((m) => m["type"] === "ready")).toBe(false);
+    expect(f.releases.some((r) => r.reason === "voiceCall")).toBe(false);
+    f.controller.dispose();
+  });
+
+  it("same-token attach is idempotent, replacement closes the old authorization", () => {
+    const f = setup();
+    f.controller.attach({ token: "secret", expiresAt: Date.now() / 1000 + 3600 }, "A");
+    expect(f.socket.close).not.toHaveBeenCalled();
+    f.controller.attach({ token: "new", expiresAt: Date.now() / 1000 + 3600 }, "A");
+    expect(f.socket.close).toHaveBeenCalledTimes(1);
+    f.controller.dispose();
+  });
+
+  it("authorization failure tears down before invoking the lock hook", () => {
+    const f = setup();
+    f.click("Call");
+    f.socket.onclose?.({ code: 4401 });
+    expect(f.audio.stop).toHaveBeenCalled();
+    expect(f.lock).toHaveBeenCalledWith("unauthorized");
+    expect(vi.mocked(f.audio.stop).mock.invocationCallOrder[0]).toBeLessThan(f.lock.mock.invocationCallOrder[0]!);
+    f.controller.dispose();
+  });
+});
+
+it("media envelope preserves call identity, sample clock and PCM without URL credentials", () => {
+  const packet = encodeFrame(ID, 5, 7, new ArrayBuffer(960));
+  new DataView(packet).setUint32(36, 9);
+  const frame = decodeFrame(packet);
+  expect(frame).toMatchObject({ callId: ID, sequence: 5, lease: 9 });
+  expect(frame.pcm.byteLength).toBe(960);
+  expect(new DataView(packet).getBigUint64(24)).toBe(2400n);
+});

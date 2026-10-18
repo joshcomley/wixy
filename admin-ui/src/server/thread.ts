@@ -104,6 +104,8 @@ export interface ServerThreadDeps {
 
 export interface ServerThreadView {
   readonly element: HTMLElement;
+  isMicBusy(): boolean;
+  setCallBusy(busy: boolean): void;
   /** Loads the newest history page, and on reattach refreshes every loaded
    * page so signed media URLs use the new session's expiry. Returns the
    * newest cursor. Throws `ServerLockedError` on a 401, letting the caller
@@ -437,6 +439,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     openLightbox: (src, alt) => lightbox.open(src, alt),
   });
   let voiceRecorder: VoiceRecorder | null = null;
+  let callBusy = false;
   let composer: ChatComposer;
   const voiceDurations = new WeakMap<File, number>();
   const fileViewOnceSettings = deps.fileViewOnceSettings ?? new WeakMap<File, ViewOnceDraftSettings>();
@@ -815,7 +818,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     cancelRecordingButton.hidden = !recordingRowActive;
     cancelRecordingButton.disabled = voiceSendBusy;
     pauseRecordingButton.disabled = voiceSendBusy;
-    recordButton.disabled = voiceSendBusy || pendingVoiceNote !== null
+    recordButton.disabled = callBusy || voiceSendBusy || pendingVoiceNote !== null
       || state === "starting" || state === "stopping";
 
     const textarea = composer?.element?.querySelector<HTMLTextAreaElement>(".wx-chat-composer-input");
@@ -936,6 +939,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   }
 
   recordButton.addEventListener("click", () => {
+    if (callBusy) return;
     if (currentSession === null) return;
     const recorder = activeRecorder();
     if (recorder.state === "idle") {
@@ -3000,6 +3004,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
 
   return {
     element,
+    isMicBusy: () => voiceRecorder !== null && voiceRecorder.state !== "idle",
+    setCallBusy(busy: boolean): void { callBusy = busy; updateRecorderUi(); },
     attach,
     detach(): void {
       // First, while this unlock's token is still in hand: the pen turns off, a stroke in
