@@ -9,6 +9,18 @@ this affected pair's setup behavior.
 
 ## Context + current state
 
+LATEST: diagnostic repair published in PR329, merge
+`d2fdc2662fd02686d5e31eea481b143b5f180956`. All six final checks passed at
+`0ef1a3e22921ede8dc174b5d998c6d480d4b0070` (reviewed source514b133 plus
+audit/task documentation). Origin9380 and publicca `/api/version` both match
+the merge, internal `/healthz` ready200, green slot, checked2026-10-18T20:21:56Z.
+Senior Opus round4 C0/H0/M0/L0. Decision1874 requests affected Android/iPhone
+Safari refresh/unlock/retry, Transcribe check and safe copied call details if
+failure. Actual affected-pair success remains unproven: keep this task OPEN.
+The three diagnostic-release delivery tasks are done; the remaining step is
+affected-device evidence and any repair that evidence requires. Earlier context
+below is historical.
+
 CURRENT: three discriminators reproduced red and now green: capture-induced
 suspended/interrupted audio, permission-time timer stall before initial connected
 pulse, and permanently hidden Transcribe after unavailable. Setup-only resume has
