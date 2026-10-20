@@ -359,6 +359,96 @@ test.describe("Would you rather", () => {
     await context.close();
   });
 
+  test("a finished round with chat stays tidy on a phone: nothing overlaps, the mini chat is a neat strip", async ({ browser }) => {
+    // Operator report (2026-10-20): after a reveal, with two chat messages and the composer
+    // focused, the mini chat rows overlapped the composer and its expand button floated loose.
+    const phone = { viewport: { width: 362, height: 740 }, hasTouch: true, isMobile: true };
+    const contextA = await browser.newContext(phone);
+    const contextB = await browser.newContext(phone);
+    const pageA = await contextA.newPage();
+    const pageB = await contextB.newPage();
+    await unlockServer(pageA, "Cupcake");
+    await unlockServer(pageB, "Bubble");
+
+    const seq = await startRound(pageA);
+    await eventually([pageA, pageB], async () => await pageB.locator(`.wx-srv-bubble-wyr[data-message-seq="${seq}"]`).isVisible(), "Bubble sees the round");
+    await pageB.locator(`.wx-srv-bubble-wyr[data-message-seq="${seq}"]`).getByRole("button", { name: "Play", exact: true }).click();
+    await humanPause(pageB);
+    await expect(game(pageB)).toBeVisible();
+    await press(pageB, controls(pageB), "Play");
+    await eventually([pageA, pageB], async () => (await controls(pageA).locator(".wx-srv-wyr-group").count()) === 2, "Cupcake can answer");
+    for (const page of [pageA, pageB]) {
+      const groups = controls(page).locator(".wx-srv-wyr-group");
+      await groups.nth(0).locator("button").nth(1).click();
+      await humanPause(page);
+      await groups.nth(1).locator("button").nth(1).click();
+      await humanPause(page);
+      await press(page, controls(page), "Send my answer");
+    }
+    await eventually([pageA, pageB], async () => await controls(pageA).getByRole("button", { name: "Reveal", exact: true }).isVisible(), "reveal offered");
+    await press(pageA, controls(pageA), "Reveal");
+    const bobReveal = controls(pageB).getByRole("button", { name: /^Tap to reveal together/ });
+    await eventually([pageA, pageB], async () => await bobReveal.isVisible(), "Bubble can reveal");
+    await bobReveal.click();
+    await humanPause(pageB);
+    await eventually([pageA, pageB], async () => (await controls(pageA).locator(".wx-srv-wyr-result").count()) === 2, "result shown");
+
+    for (const text of ["Yay!", "Forttttttt — and a much longer second message that has to wrap or be cut neatly"]) {
+      await pageA.locator(".wx-chat-composer-input").fill(text);
+      await pageA.locator(".wx-chat-send-button").click();
+      await humanPause(pageA);
+    }
+    await eventually([pageA], async () => (await pageA.locator(".wx-srv-game-mini-msg").count()) === 2, "two mini rows");
+    // The composer focused (it jumps to its own full-width line), exactly as in the report.
+    await pageA.locator(".wx-chat-composer-input").focus();
+    await pageA.waitForTimeout(300);
+    await pageA.screenshot({ path: test.info().outputPath("phone-revealed-chat.png") });
+
+    const boxOf = async (selector: string) => (await pageA.locator(selector).first().boundingBox())!;
+    const order = [
+      ".wx-srv-game-head",
+      ".wx-srv-game-stage",
+      ".wx-srv-game-controls",
+      ".wx-srv-game-mini",
+      ".wx-chat-composer",
+      ".wx-srv-tabs",
+    ];
+    const boxes = [];
+    for (const selector of order) {
+      const box = await boxOf(selector);
+      expect(box, selector).not.toBeNull();
+      expect(box.x, `${selector} left`).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width, `${selector} right`).toBeLessThanOrEqual(362.5);
+      expect(box.y + box.height, `${selector} bottom`).toBeLessThanOrEqual(740.5);
+      boxes.push({ selector, box });
+    }
+    for (let i = 1; i < boxes.length; i += 1) {
+      const above = boxes[i - 1]!;
+      const below = boxes[i]!;
+      expect(below.box.y, `${below.selector} starts below ${above.selector}`).toBeGreaterThanOrEqual(above.box.y + above.box.height - 0.5);
+    }
+    // The picture keeps real room.
+    expect((await boxOf(".wx-srv-game-stage")).height).toBeGreaterThanOrEqual(120);
+    // Every mini-chat row sits inside the strip, and the rows are one height each.
+    const strip = await boxOf(".wx-srv-game-mini");
+    const rows = await pageA.locator(".wx-srv-game-mini-msg").evaluateAll((els) => els.map((el) => {
+      const r = el.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom, height: r.height };
+    }));
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.top).toBeGreaterThanOrEqual(strip.y - 0.5);
+      expect(row.bottom).toBeLessThanOrEqual(strip.y + strip.height + 0.5);
+    }
+    expect(Math.abs(rows[0]!.height - rows[1]!.height)).toBeLessThanOrEqual(1);
+    // The way into the full game chat is a real tap target inside the strip.
+    const open = await boxOf(".wx-srv-game-mini-expand");
+    expect(open.height).toBeGreaterThanOrEqual(43.5);
+    expect(open.y).toBeGreaterThanOrEqual(strip.y - 0.5);
+    expect(open.y + open.height).toBeLessThanOrEqual(strip.y + strip.height + 0.5);
+    await closeAll(contextA, contextB);
+  });
+
   test("topics: pick only some, start a round, and the screen fits a 360 px phone", async ({ browser }) => {
     const context = await browser.newContext({
       viewport: { width: 360, height: 780 },

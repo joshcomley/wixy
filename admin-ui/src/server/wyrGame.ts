@@ -409,7 +409,9 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
   }
 
   function miniItem(text: string | null, sender: string | null, attachments: readonly Message["attachments"][number][]): HTMLElement {
-    const row = el("button", "wx-srv-game-mini-msg");
+    // One fixed-height line per message (cut with an ellipsis, never wrapped), so the strip is
+    // the same size whatever was said; the pop-up is where whole messages are read.
+    const row = el("button", sender === null ? "wx-srv-game-mini-msg wx-srv-game-mini-mine" : "wx-srv-game-mini-msg");
     (row as HTMLButtonElement).type = "button";
     row.setAttribute("data-srv-gesture-boundary", "");
     row.addEventListener("click", () => openPopup());
@@ -437,6 +439,9 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
   function drawMini(): void {
     mini.replaceChildren();
     if (seq === null) return;
+    // The strip: [ up to two one-line messages | Open chat ] — always the same height, so the
+    // picture and the controls above never shift and nothing can spill onto the composer.
+    const lines = el("div", "wx-srv-game-mini-lines");
     const items: HTMLElement[] = [];
     const confirmed = deps.gameMessages(seq);
     const echoes = deps.gameEchoes(seq);
@@ -450,12 +455,15 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
       (empty as HTMLButtonElement).type = "button";
       empty.setAttribute("data-srv-gesture-boundary", "");
       empty.addEventListener("click", () => openPopup());
-      mini.appendChild(empty);
+      lines.appendChild(empty);
     } else {
-      for (const item of last) mini.appendChild(item);
+      for (const item of last) lines.appendChild(item);
     }
-    const expand = button("wx-srv-game-mini-expand", "Open the game chat", "⤢", () => openPopup());
-    mini.appendChild(expand);
+    const total = confirmed.length + echoes.length;
+    const expand = button("wx-srv-game-mini-expand", "Open the game chat", "", () => openPopup());
+    expand.append(el("span", "wx-srv-game-mini-expand-label", "Chat"));
+    if (total > 0) expand.append(el("span", "wx-srv-game-mini-count", String(total)));
+    mini.append(lines, expand);
   }
 
   function clearPopList(): void {
