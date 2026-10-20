@@ -181,7 +181,9 @@ def save_sheet(sprite: Sprite, path: str | Path, scale: int = 1) -> Path:
         sheet.paste(to_image(sprite, name, scale), (i * fw, 0))
     sheet.save(path, format="PNG")
     sidecar = path.with_suffix(".json")
-    sidecar.write_text(json.dumps(sheet_layout(sprite, scale), indent=2) + "\n", encoding="utf-8")
+    sidecar.write_text(
+        json.dumps(sheet_layout(sprite, scale), indent=2) + "\n", encoding="utf-8", newline="\n"
+    )
     return sidecar
 
 

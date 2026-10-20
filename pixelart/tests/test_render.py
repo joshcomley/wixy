@@ -186,3 +186,9 @@ def test_gif_keeps_near_identical_colours_distinct(tmp_path: Path, rows: list[st
         for i, name in enumerate(["f0", "f1"]):
             im.seek(i)
             assert im.convert("RGB").tobytes() == to_image(sp, name, 2).convert("RGB").tobytes()
+
+
+def test_sheet_sidecar_uses_lf(tmp_path: Path) -> None:
+    sp = make({"a": rect(4, 4, 1, 1, 2, 2)})
+    save_sheet(sp, tmp_path / "s.png")
+    assert b"\r\n" not in (tmp_path / "s.json").read_bytes()

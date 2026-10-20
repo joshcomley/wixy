@@ -115,7 +115,7 @@ def _cmd_pixelize(a: argparse.Namespace) -> int:
     except ValueError as e:
         raise _Fail(str(e)) from e
     out = Path(a.output)
-    out.write_text(dump(sp), encoding="utf-8")
+    out.write_text(dump(sp), encoding="utf-8", newline="\n")
     print(f"wrote {out} ({sp.w}x{sp.h}, {len(sp.palette.opaque_keys())} colours)")
     return EXIT_OK
 
@@ -157,7 +157,7 @@ def _cmd_new(a: argparse.Namespace) -> int:
     out = Path(a.output) if a.output else Path(f"{a.name}.pxl")
     if out.exists() and not a.force:
         raise _Fail(f"{out} already exists (use --force)", EXIT_USAGE)
-    out.write_text(dump(sp), encoding="utf-8")
+    out.write_text(dump(sp), encoding="utf-8", newline="\n")
     print(f"wrote {out}")
     return EXIT_OK
 
