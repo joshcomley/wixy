@@ -4139,3 +4139,106 @@ video.wx-srv-gallery-media {
   opacity: 0.25;
   cursor: default;
 }
+
+/* -- Links view -------------------------------------------------------------
+   The ⋯ menu's "Links": a full-height screen over the thread (top set from the header's height
+   in JS, like the gallery and the unread voice-notes list) listing only the messages that
+   contain a web link, newest first, older ones loaded as it is scrolled. */
+
+.wx-srv-links-view {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  background: var(--wx-canvas);
+}
+
+.wx-srv-links-view[hidden],
+.wx-srv-links-empty[hidden],
+.wx-srv-links-loading[hidden],
+.wx-srv-links-error[hidden],
+.wx-srv-links-more[hidden] {
+  display: none;
+}
+
+.wx-srv-links-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.wx-srv-links-title {
+  min-width: 0;
+  font-weight: 600;
+  font-size: 0.9375rem;
+}
+
+.wx-srv-links-close {
+  flex: none;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  cursor: pointer;
+}
+
+.wx-srv-links-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-bottom: 12px;
+}
+
+.wx-srv-links-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.wx-srv-links-item .wx-srv-bubble {
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-links-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.wx-srv-links-empty,
+.wx-srv-links-loading {
+  margin: 24px 0;
+  text-align: center;
+  color: var(--wx-muted);
+}
+
+.wx-srv-links-error {
+  margin: 8px 0;
+  text-align: center;
+  color: var(--wx-danger, var(--wx-ink));
+}
+
+.wx-srv-links-more {
+  min-height: 44px;
+  padding: 0 20px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  cursor: pointer;
+}

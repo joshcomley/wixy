@@ -13,6 +13,16 @@ const URL_RE = /\bhttps?:\/\/[^\s<>"']+/gi;
  * peeled back into plain text after the link. */
 const TRAILING_PUNCTUATION_RE = /[).,!?;:'"\]]$/;
 
+/** True when `text` holds at least one link `linkifyInto` would draw — the same rule the server
+ * uses to index a message for the Links view (`wixy_server/livechat/links.py`). */
+export function textHasLink(text: string | null | undefined): boolean {
+  if (typeof text !== "string" || text === "") return false;
+  URL_RE.lastIndex = 0;
+  const found = URL_RE.test(text);
+  URL_RE.lastIndex = 0;
+  return found;
+}
+
 /** Appends `text`'s content into `container` as a mix of plain `Text` nodes
  * and `<a>` elements for every `http(s)://` run found. Non-URL text (which,
  * for a hostile message, may itself look like markup) is never parsed as

@@ -221,7 +221,7 @@ class TestSchema:
         finally:
             conn.close()
         migrated = LiveChatStore(store._db_path)
-        assert _LATEST_SCHEMA_VERSION == 17
+        assert _LATEST_SCHEMA_VERSION >= 17
         round_ = migrated.get_wyr_round(anchor_seq=seq)
         assert round_ is not None and round_.reveal_deadline is None
 

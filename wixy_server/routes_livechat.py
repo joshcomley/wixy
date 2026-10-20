@@ -502,6 +502,30 @@ async def get_history(request: Request, before: int | None = None, limit: int = 
 
 
 # ---------------------------------------------------------------------------
+# GET /messages/links — the "Links" view (workspace 00052): only messages whose text holds a
+# web link, newest page first, paged with `before` (the lowest seq already held).
+# ---------------------------------------------------------------------------
+
+
+@router.get("/messages/links", response_model=None)
+async def get_link_messages(
+    request: Request, before: int | None = None, limit: int = 50
+) -> JsonObject:
+    auth = await require_server_token(request)
+    if not (1 <= limit <= 100):
+        raise HTTPException(status_code=422, detail="limit must be between 1 and 100")
+
+    store: LiveChatStore = request.app.state.livechat_store
+    secret: bytes = request.app.state.livechat_secret
+    signer = MediaSigner.for_auth(secret, auth)
+
+    messages, has_more = await anyio.to_thread.run_sync(
+        lambda: store.list_link_messages(before=before, limit=limit)
+    )
+    return {"messages": [message_json(m, signer) for m in messages], "hasMore": has_more}
+
+
+# ---------------------------------------------------------------------------
 # POST /messages (§5.3) — send.
 # ---------------------------------------------------------------------------
 

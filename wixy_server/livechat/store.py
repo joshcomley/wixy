@@ -46,6 +46,7 @@ from wixy_server.livechat.drawings import (
     MAX_POINT_X_PAD,
     MAX_STROKES_PER_DRAWING,
 )
+from wixy_server.livechat.links import text_has_link
 from wixy_server.livechat.models import (
     AttachmentKind,
     AttachmentResult,
@@ -295,7 +296,20 @@ CREATE INDEX IF NOT EXISTS idx_wyr_chat_anchor ON wyr_chat(anchor_seq);
 """
 
 _SCHEMA_V17_WYR_REVEAL_DEADLINE = "ALTER TABLE wyr_rounds ADD COLUMN reveal_deadline REAL"
-_LATEST_SCHEMA_VERSION = 17
+# The "Links" view (workspace 00052): `messages.has_link` is the stored answer to "does this
+# message's text contain a web link?" (`links.text_has_link`). It is nullable on purpose — NULL
+# means "not indexed yet": a process older than this schema (blue/green overlap) inserts messages
+# without setting it, and `index_pending_links` settles those rows before every listing. The
+# partial indexes keep both the listing (`= 1`) and the settle pass (`IS NULL`) proportional to
+# what they touch, however long the chat grows. Nothing here outlives the message row, so a
+# delete or wipe leaves no trace (Inv 46).
+_SCHEMA_V18_HAS_LINK_COLUMN = "ALTER TABLE messages ADD COLUMN has_link INTEGER"
+_SCHEMA_V18_HAS_LINK_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_messages_has_link ON messages(seq) WHERE has_link = 1;
+CREATE INDEX IF NOT EXISTS idx_messages_link_pending ON messages(seq) WHERE has_link IS NULL;
+"""
+_LINK_INDEX_BATCH = 500
+_LATEST_SCHEMA_VERSION = 18
 WYR_REVEAL_WINDOW_S = 30.0
 _UNKNOWN_GRANT_HASH = "0" * 64
 _LOGGER = logging.getLogger(__name__)
@@ -726,6 +740,34 @@ def _load_message(conn: sqlite3.Connection, seq: int) -> MessageRow:
     )
 
 
+def _hydrate_messages(
+    conn: sqlite3.Connection, ascending_rows: list[sqlite3.Row]
+) -> list[MessageRow]:
+    """Message rows (already ascending by seq) -> full `MessageRow`s with their attachments,
+    reactions, drawings, game summaries and quoted reply targets."""
+    seqs = [row["seq"] for row in ascending_rows]
+    attachments_by_seq = _load_attachments_for(conn, seqs)
+    reactions_by_seq = _load_reactions_for(conn, seqs)
+    drawings_by_seq = _load_drawing_summaries_for(conn, seqs)
+    wyr_by_seq = _load_wyr_summaries_for(conn, seqs)
+    wyr_ref_by_seq = _load_wyr_refs_for(conn, seqs)
+    # §(2): targets are resolved by seq, including ones OUTSIDE this page — a reply near the top
+    # of a page may quote a message that paged off already.
+    reply_targets = _load_reply_targets(conn, [row["reply_to_seq"] for row in ascending_rows])
+    return [
+        _row_to_message(
+            row,
+            tuple(attachments_by_seq[row["seq"]]),
+            reactions_by_seq[row["seq"]],
+            drawings_by_seq[row["seq"]],
+            reply_to=reply_targets.get(row["reply_to_seq"]),
+            wyr=wyr_by_seq.get(row["seq"]),
+            wyr_ref=wyr_ref_by_seq.get(row["seq"]),
+        )
+        for row in ascending_rows
+    ]
+
+
 def _load_drawing(conn: sqlite3.Connection, drawing_id: int) -> DrawingRow:
     row = conn.execute("SELECT * FROM drawings WHERE id = ?", (drawing_id,)).fetchone()
     if row is None:
@@ -944,11 +986,42 @@ class LiveChatStore:
                     conn.execute(_SCHEMA_V17_WYR_REVEAL_DEADLINE)
                 conn.execute("PRAGMA user_version = 17")
                 current = 17
+
+            if current < 18:
+                existing_msg_cols = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
+                if existing_msg_cols:
+                    if "has_link" not in existing_msg_cols:
+                        conn.execute(_SCHEMA_V18_HAS_LINK_COLUMN)
+                    for statement in _SCHEMA_V18_HAS_LINK_INDEX.split(";"):
+                        if statement.strip():
+                            conn.execute(statement)
+                    # The one-off backfill: settle every existing message.
+                    self._index_pending_links(conn)
+                conn.execute("PRAGMA user_version = 18")
+                current = 18
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
             raise
         self._ensure_attachment_transcripts_table(conn)
+
+    @staticmethod
+    def _index_pending_links(conn: sqlite3.Connection) -> int:
+        """Settle `has_link` for every message that has none yet (NULL), in bounded batches.
+        Returns how many rows were settled. Runs inside the caller's write transaction."""
+        settled = 0
+        while True:
+            rows = conn.execute(
+                "SELECT seq, text FROM messages WHERE has_link IS NULL ORDER BY seq LIMIT ?",
+                (_LINK_INDEX_BATCH,),
+            ).fetchall()
+            if not rows:
+                return settled
+            conn.executemany(
+                "UPDATE messages SET has_link = ? WHERE seq = ?",
+                [(1 if text_has_link(row["text"]) else 0, row["seq"]) for row in rows],
+            )
+            settled += len(rows)
 
     @staticmethod
     def _ensure_attachment_transcripts_table(conn: sqlite3.Connection) -> None:
@@ -1094,9 +1167,19 @@ class LiveChatStore:
 
             cursor = conn.execute(
                 "INSERT INTO messages "
-                "(client_id, sender, device_id, by_email, text, created_at, reply_to_seq) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (client_id, sender, device_id, by_email, text, now, stored_reply_to_seq),
+                "(client_id, sender, device_id, by_email, text, created_at, reply_to_seq, "
+                "has_link) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    client_id,
+                    sender,
+                    device_id,
+                    by_email,
+                    text,
+                    now,
+                    stored_reply_to_seq,
+                    1 if text_has_link(text) else 0,
+                ),
             )
             seq = cursor.lastrowid
             assert seq is not None
@@ -1372,34 +1455,45 @@ class LiveChatStore:
                     (before, limit + 1),
                 ).fetchall()
             has_more = len(rows) > limit
-            ascending_rows = list(reversed(rows[:limit]))
-            seqs = [row["seq"] for row in ascending_rows]
-            attachments_by_seq = _load_attachments_for(conn, seqs)
-            reactions_by_seq = _load_reactions_for(conn, seqs)
-            drawings_by_seq = _load_drawing_summaries_for(conn, seqs)
-            wyr_by_seq = _load_wyr_summaries_for(conn, seqs)
-            wyr_ref_by_seq = _load_wyr_refs_for(conn, seqs)
-            # §(2): targets are resolved by seq, including ones OUTSIDE this
-            # page — a reply near the top of a page may quote a message that
-            # paged off already.
-            reply_targets = _load_reply_targets(
-                conn, [row["reply_to_seq"] for row in ascending_rows]
-            )
-            messages = [
-                _row_to_message(
-                    row,
-                    tuple(attachments_by_seq[row["seq"]]),
-                    reactions_by_seq[row["seq"]],
-                    drawings_by_seq[row["seq"]],
-                    reply_to=reply_targets.get(row["reply_to_seq"]),
-                    wyr=wyr_by_seq.get(row["seq"]),
-                    wyr_ref=wyr_ref_by_seq.get(row["seq"]),
-                )
-                for row in ascending_rows
-            ]
+            messages = _hydrate_messages(conn, list(reversed(rows[:limit])))
             cursor_row = conn.execute("SELECT MAX(event_seq) AS m FROM events").fetchone()
             cursor = cursor_row["m"] if cursor_row["m"] is not None else 0
             return messages, has_more, cursor
+
+    def index_pending_links(self) -> int:
+        """Settle `has_link` for messages inserted without it (a process older than schema 18
+        during a blue/green overlap). Cheap when there is nothing to do: one probe of the
+        `has_link IS NULL` partial index, no write transaction."""
+        with self._read_txn() as conn:
+            pending = conn.execute(
+                "SELECT 1 FROM messages WHERE has_link IS NULL LIMIT 1"
+            ).fetchone()
+        if pending is None:
+            return 0
+        with self._write_txn() as conn:
+            return self._index_pending_links(conn)
+
+    def list_link_messages(
+        self, *, before: int | None, limit: int
+    ) -> tuple[list[MessageRow], bool]:
+        """The "Links" view's page: the messages whose text contains a web link, NEWEST page
+        first (`before` is the lowest seq of the page already held), each page ascending like
+        history. Returns `(messages, has_more)`."""
+        self.index_pending_links()
+        with self._read_txn() as conn:
+            if before is None:
+                rows = conn.execute(
+                    "SELECT * FROM messages WHERE has_link = 1 ORDER BY seq DESC LIMIT ?",
+                    (limit + 1,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM messages WHERE has_link = 1 AND seq < ? "
+                    "ORDER BY seq DESC LIMIT ?",
+                    (before, limit + 1),
+                ).fetchall()
+            has_more = len(rows) > limit
+            return _hydrate_messages(conn, list(reversed(rows[:limit]))), has_more
 
     def get_messages(self, seqs: Sequence[int]) -> list[MessageRow]:
         if not seqs:

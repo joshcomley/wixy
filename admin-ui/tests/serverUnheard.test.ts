@@ -170,7 +170,7 @@ describe("unheard voice notes", () => {
     view.teardown();
   });
 
-  it("counts a note as listened at 90% of the way through, and keeps it in the open list", async () => {
+  it("counts a note as listened at 90% of the way through", async () => {
     stubLayout(new Set(["1"]));
     const { view } = await mount([voiceMessage(1, "Cupcake", "a1")]);
     const thread = view.element.querySelector<HTMLElement>(".wx-srv-message-list")!;
@@ -183,6 +183,27 @@ describe("unheard voice notes", () => {
     audio.currentTime = 91;
     audio.dispatchEvent(new Event("timeupdate"));
     expect(view.element.querySelector<HTMLButtonElement>(".wx-srv-unheard-tab")!.hidden).toBe(true);
+    view.teardown();
+  });
+
+  it("drops a listened note from the open list live, once it stops playing", async () => {
+    stubLayout(new Set(["1", "2"]));
+    const { view } = await mount([voiceMessage(1, "Cupcake", "a1"), voiceMessage(2, "Cupcake", "a2")]);
+    view.element.querySelector<HTMLButtonElement>(".wx-srv-unheard-tab")!.click();
+    const overlay = view.element.querySelector<HTMLElement>(".wx-srv-unheard-view")!;
+    expect(overlay.querySelectorAll(".wx-srv-unheard-item")).toHaveLength(2);
+    const audio = overlay.querySelector<HTMLAudioElement>(".wx-srv-unheard-item audio")!;
+    Object.defineProperty(audio, "duration", { value: 100, configurable: true });
+    let paused = false;
+    Object.defineProperty(audio, "paused", { get: () => paused, configurable: true });
+    audio.currentTime = 95;
+    audio.dispatchEvent(new Event("timeupdate"));
+    // Still playing: it must not vanish from under the listener.
+    expect(overlay.querySelectorAll(".wx-srv-unheard-item")).toHaveLength(2);
+    paused = true;
+    audio.dispatchEvent(new Event("ended"));
+    expect(overlay.querySelectorAll(".wx-srv-unheard-item")).toHaveLength(1);
+    expect(overlay.querySelector<HTMLElement>(".wx-srv-unheard-item")!.dataset["messageSeq"]).toBe("2");
     view.teardown();
   });
 
