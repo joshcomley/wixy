@@ -3,7 +3,7 @@
 The in-app scene (spec/server-chat/goodnight-scene.md) follows the same timeline; this
 preview is how the art and timing were judged before wiring it into the chat.
 
-    python pixelart/examples/goodnight/make_scene.py
+    python -m pixelart.examples.goodnight.make_scene
     python -m pixelart compose pixelart/examples/goodnight/scene.json -o goodnight.gif
 """
 
@@ -14,6 +14,8 @@ import math
 import random
 from pathlib import Path
 
+from pixelart.model import anim_sequence, parse
+
 W, H, TICK = 120, 214, 50  # scene pixels (portrait phone), 50 ms per tick
 HERE = Path(__file__).parent
 
@@ -23,6 +25,24 @@ Layer = dict[str, object]
 
 def tick(ms: int) -> int:
     return ms // TICK
+
+
+def anim_ms(sprite_file: str, anim: str) -> int:
+    """Total duration of one pass through an animation, from the sprite itself."""
+    sp = parse((HERE / sprite_file).read_text(encoding="utf-8"), str(HERE / sprite_file))
+    return sum(sp.frames[f].ms for f in anim_sequence(sp.anims[anim]))
+
+
+# The timeline (ms from the trigger). The in-app scene mirrors these numbers.
+APPEAR = 1500  # branch + owl start dithering in
+SETTLED = 2300  # fully visible; the owl's intro starts
+INTRO_END = SETTLED + anim_ms("owl.pxl", "intro")  # eyes, head turn, back to front
+BUBBLE_IN = INTRO_END - 1200  # bubble rises into view as the owl settles after the turn
+CAPTURE = BUBBLE_IN + 9000  # a slow drift in
+LIFT = CAPTURE + 2200  # glances, then the smile, then it starts to float
+GONE = LIFT + 11000  # a slow float up and away
+CHAT_BACK = GONE + 1000
+SWAY_PERIOD_MS = 3400
 
 
 def place_stars(rnd: random.Random, count: int) -> list[tuple[int, int]]:
@@ -49,7 +69,7 @@ def drift(
         f = k / n
         e = f * f * (3 - 2 * f)
         weight = f if grow else 1 - f
-        sway = amp * math.sin(2 * math.pi * k * TICK / 2400) * weight
+        sway = amp * math.sin(2 * math.pi * k * TICK / SWAY_PERIOD_MS) * weight
         keys.append(
             {
                 "t": t0 + k,
@@ -111,7 +131,7 @@ def build() -> dict[str, object]:
             "frame": "still",
             "x": 14,
             "y": 18,
-            "keyframes": fade((800, 0.0), (1800, 1.0), (13000, 1.0), (14000, 0.0)),
+            "keyframes": fade((800, 0.0), (1800, 1.0), (GONE - 1000, 1.0), (GONE, 0.0)),
         }
     )
     bx, by = 32, 150
@@ -122,44 +142,52 @@ def build() -> dict[str, object]:
             "frame": "still",
             "x": bx,
             "y": by,
-            "keyframes": fade((1500, 0.0), (2300, 1.0), (13000, 1.0), (14000, 0.0)),
+            "keyframes": fade((APPEAR, 0.0), (SETTLED, 1.0), (GONE - 1000, 1.0), (GONE, 0.0)),
         }
     )
 
-    capture, lift, gone = tick(9000), tick(9500), tick(14000)
+    capture, lift, gone = tick(CAPTURE), tick(LIFT), tick(GONE)
     held = (ox - 5, oy - 5)  # the 42x42 bubble centred on the 32x32 owl
     bubble = (
-        drift(tick(6000), capture, (-46, H + 4), held, 6, grow=False)
+        drift(tick(BUBBLE_IN), capture, (-46, H + 4), held, 8, grow=False)
         + [{"t": lift, "x": held[0], "y": held[1]}]
-        + drift(lift, gone, held, (W + 10, -60), 5, grow=True)
+        + drift(lift, gone, held, (W + 10, -60), 7, grow=True)
     )
     inside = [{"t": k["t"], "x": k["x"] + 5, "y": k["y"] + 5} for k in bubble if k["t"] >= capture]
 
+    intro_end = tick(INTRO_END)
     layers.append(
         {
             "sprite": "owl.pxl",
-            "anim": "idle",
+            "anim": "intro",
             "x": ox,
             "y": oy,
-            "start_tick": tick(2300),
-            "keyframes": fade((1500, 0.0), (2300, 1.0))
-            + [{"t": capture, "opacity": 1.0}, {"t": capture + 1, "opacity": 0.0}],
+            "start_tick": tick(SETTLED),
+            "keyframes": fade((APPEAR, 0.0), (SETTLED, 1.0))
+            + [{"t": intro_end, "opacity": 1.0}, {"t": intro_end + 1, "opacity": 0.0}],
         }
     )
     layers.append(
         {
             "sprite": "owl.pxl",
-            "anim": "surprised",
+            "anim": "watch",
+            "x": ox,
+            "y": oy,
+            "start_tick": intro_end + 1,
+            "keyframes": [
+                {"t": intro_end, "opacity": 0.0},
+                {"t": intro_end + 1, "opacity": 1.0},
+                {"t": capture, "opacity": 1.0},
+                {"t": capture + 1, "opacity": 0.0},
+            ],
+        }
+    )
+    layers.append(
+        {
+            "sprite": "owl.pxl",
+            "anim": "bubble-happy",
             "start_tick": capture + 1,
-            "keyframes": shown_between(capture + 1, lift + 2, inside),
-        }
-    )
-    layers.append(
-        {
-            "sprite": "owl.pxl",
-            "anim": "doze",
-            "start_tick": lift + 3,
-            "keyframes": shown_between(lift + 3, gone + 10, inside),
+            "keyframes": shown_between(capture + 1, gone + 10, inside),
         }
     )
     layers.append({"sprite": "bubble.pxl", "anim": "wobble", "keyframes": bubble})
@@ -169,7 +197,7 @@ def build() -> dict[str, object]:
         "height": H,
         "background": "#05060d",
         "tick_ms": TICK,
-        "ticks": tick(15500),
+        "ticks": tick(CHAT_BACK + 500),
         "loop": True,
         "scale": 3,
         "layers": layers,

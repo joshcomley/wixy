@@ -38,18 +38,25 @@ background.
 
 ## Timeline (ms from trigger)
 
-| t | Event |
+The numbers are owned by `pixelart/examples/goodnight/make_scene.py` (constants
+`APPEAR`, `SETTLED`, `INTRO_END`, `BUBBLE_IN`, `CAPTURE`, `LIFT`, `GONE`, `CHAT_BACK`;
+`INTRO_END` is derived from the owl's `intro` animation length). The app mirrors them in
+one constants table. Operator revision 1 (2026-10-20): much slower bubble; the owl turns
+its eyes, then its head nearly all the way round and back, before the bubble appears; a
+gentle smile in the bubble; blue eyes.
+
+| t (ms) | Event |
 |---|---|
 | 0–900 | `.wx-srv-message-list` (and composer) fade to opacity 0 (CSS); sky dithers in to `#05060d` |
-| 400–2400 | stars appear one by one (random positions, density ≈ 1 per 180 scene px², none under the moon), each then twinkles on its own random 2–6 s cycle |
-| 800–1800 | moon dithers in, upper-left third |
-| 1500–2300 | branch + owl dither in, lower-middle (owl's feet on the branch top) |
-| 2300–7000 | owl `idle` animation: front hold, blink, look-left, front, look-right, front, blink |
-| 6000–9000 | bubble enters from bottom-left off-screen, rising on a gentle sine sway (amplitude 6 px, period 2.4 s), `wobble` animation, ending centred on the owl |
-| 9000–9500 | capture: bubble's centre locks to the owl; owl plays `look-left`/`look-right` quickly (surprised); branch stays |
-| 9500–14000 | bubble + owl rise and drift up-right off the top with sway; owl plays `blink` then holds `blink-closed` (asleep) |
-| 13000–14000 | branch and moon dither out |
-| 14000–15000 | message list fades back in; the canvas moves to **background mode** |
+| 400–2400 | stars appear one by one (random positions, none under the moon), each then twinkles on its own cycle |
+| 800–1800 | moon dithers in, upper-left |
+| 1500–2300 | branch + owl dither in (`APPEAR`→`SETTLED`), lower-middle, feet on the branch top |
+| 2300–10680 | owl `intro` (once): eyes look left, then right; blink; head turns three-quarters → profile → back → far profile (held) → back → profile → front; blink; hold |
+| 9480–18480 | bubble (`wobble`) rises from off-screen bottom-left on a slow eased path with a fading sideways sway (amplitude 8 px, period 3.4 s), ending centred on the owl (`BUBBLE_IN`→`CAPTURE`); the owl plays `watch` (looking left toward it, blinking) from `INTRO_END` |
+| 18480 | capture: the bubble's centre locks to the owl; the owl plays `bubble-happy` (quick glances, then `smile-open`, then holds `smile-closed`) |
+| 20680–31680 | bubble + owl float up and off to the top-right on a slow eased path with a growing sway (`LIFT`→`GONE`) |
+| 30680–31680 | branch and moon dither out |
+| 31680–32680 | message list fades back in; the canvas moves to **background mode** |
 
 Background mode: the canvas leaves `document.body` and becomes a non-interactive
 starfield layer behind the thread (inside `.wx-srv-thread-wrap`, below messages,
