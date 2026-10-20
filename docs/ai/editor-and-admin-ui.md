@@ -233,7 +233,12 @@ own auth gate, not an editor/admin-UI feature — its pen tool (drawing live on 
 the one piece of it in shared admin code is `chatThreadScroll.ts`'s `hold()`, which keeps a
 thread exactly where it is until released (the pen holds it for one stroke, so a message
 arriving mid-stroke shows the jump pill instead of moving the chat under the finger; the AI
-chat never calls it)); `pagesPanel.ts` + `pageSettingsDrawer.ts` (`meta.*` editing);
+chat never calls it). The same module keeps a thread's BOTTOM edge in place when the thread itself changes height
+(a `ResizeObserver`): on a phone the keyboard opening shrinks the page (`interactive-widget=resizes-content`),
+so the newest message stays just above the composer instead of going under the keyboard; a
+reader stuck to the bottom stays at the bottom, one reading history is shifted by the change.
+A caller that compensates a height change itself (the drawing toolbar) calls `adoptPosition()`
+so it is not counted twice. Pinned by `e2e/tests/server-layout.spec.ts` "the keyboard pushes the chat up"); `pagesPanel.ts` + `pageSettingsDrawer.ts` (`meta.*` editing);
 `socialImagesPanel.ts` (`/admin/social`, decisions/00134) — the bulk, one-screen twin of
 `pageSettingsDrawer.ts`'s per-page "Social image" field: every page in one table (thumbnail,
 label falling back to slug, a per-row "Choose image" button), plus a "Use one image for all

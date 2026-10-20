@@ -423,6 +423,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     anchors: () => drawingAnchors(),
     anchorElement: (seq) => drawingAnchorElement(seq),
     holdScroll: () => threadScroll.hold(),
+    adoptScrollPosition: () => threadScroll.adoptPosition(),
     onRemoteContent: () => threadScroll.afterContentChange(false),
     onPenChange: (penOn) => {
       settingsButton.hidden = penOn;
