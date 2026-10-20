@@ -825,8 +825,8 @@ above the thread viewport, `.wx-srv-unheard-tab` ("N unread voice notes", bottom
 is bottom-right) appears. It opens `.wx-srv-unheard-view`, a full-screen overlay below the header
 (panic ✕ and lock gestures stay reachable) listing the same `renderBubble(…, embedded)` bubbles —
 same player, skip buttons and transcript block, minus the message-action menu — each with a Dismiss
-button. A note finished while the view is open stays until the view closes; transcript updates patch
-in place. `detach()`/`teardown()` close it.
+button. A note finished while the view is open leaves the list live the moment it stops playing (never
+cut off mid-playback: it waits for `ended`/`pause`); transcript updates patch in place. `detach()`/`teardown()` close it.
 
 **Composer focus + the header ... menu.** With `promoteToFullWidthOnMultiline` (Server chat only) the
 text box takes its own full-width line the moment it is focused (`chatComposer.ts`
@@ -2012,3 +2012,25 @@ video ever sent as a grid of small thumbnails.
 - **Tests.** `test_livechat_gallery.py` (query, thumbnails, backfill, route, disposition),
   `admin-ui/tests/server/gallery.test.ts`, `admin-ui/tests/serverGallery.test.ts` (menu/lock wiring),
   `e2e/tests/server-gallery.spec.ts` (real photo + video, desktop and 360 px phone, real downloads).
+
+### Links view (workspace 00052)
+
+The ⋯ menu's **Links** entry opens a full-height screen (`linksView.ts`, created next to the gallery in
+`thread.ts`, closed by every lock/wipe) listing ONLY the messages whose text holds a web link, newest first, older
+ones loaded as it scrolls (and by a "Show earlier ones" button). The bubbles are the thread's own (embedded form).
+
+- **Detection** is one rule shared by both ends: an `http://`/`https://` run (`links.text_has_link` ⇄ `textHasLink`
+  in `linkify.ts`), i.e. exactly what the thread draws as a clickable link.
+- **Index** (schema v18): `messages.has_link INTEGER` — `1`/`0` set in the `create_message` INSERT, `NULL` = not indexed
+  yet. Partial indexes `idx_messages_has_link (seq) WHERE has_link = 1` and `idx_messages_link_pending (seq) WHERE
+  has_link IS NULL` keep listing and settling proportional to what they touch however long the chat grows. The v18
+  migration adds the column and **backfills every existing message** (`_index_pending_links`, batches of 500, inside the
+  migration transaction). A process older than v18 (blue/green overlap) inserts rows with `NULL`;
+  `list_link_messages` settles those first (`index_pending_links`: one indexed probe, no write when clean), so a
+  message is never missed. The flag lives on the message row only, so a delete or wipe leaves no trace (Inv 46).
+- **Server.** `GET /api/admin/server/messages/links?before=<seq>&limit=1..100` (token-gated) → `{messages, hasMore}`;
+  `messages` is one page ascending (like history), pages walk backwards with `before` = the lowest seq held.
+- **Live.** While open, a link message arriving/changing over the stream is slotted in (an arrival older than the
+  oldest shown, with more still to load, waits for its page); a delete drops it. Closing drops everything.
+- **Tests.** `test_livechat_links.py` (detector, insert, v17→v18 backfill, overlap settle, paging, delete, route),
+  `admin-ui/tests/serverLinks.test.ts` (view + menu wiring).

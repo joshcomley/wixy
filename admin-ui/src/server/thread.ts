@@ -41,6 +41,7 @@ import { answerWyr, createWyrRound, getWyrRound, revealWyr, voteWyr } from "./ap
 import { createWyrCards, type WyrCards } from "./wyrCard";
 import { createWyrControls, type WyrControls } from "./wyrControls";
 import { createGallery, type GalleryView } from "./gallery";
+import { createLinksView, type LinksView } from "./linksView";
 import { createDownloadMarkStore } from "./galleryMark";
 import { createWyrGame, type WyrGame } from "./wyrGame";
 import { createWyrModel, type WyrModel } from "./wyrModel";
@@ -251,6 +252,19 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   galleryItemHint.textContent = "Every photo and video, with downloads";
   galleryItem.append(galleryItemTitle, galleryItemHint);
   moreMenu.appendChild(galleryItem);
+  const linksItem = documentRef.createElement("button");
+  linksItem.type = "button";
+  linksItem.className = "wx-srv-more-item wx-srv-more-links";
+  linksItem.setAttribute("role", "menuitem");
+  linksItem.setAttribute("data-srv-gesture-boundary", "");
+  const linksItemTitle = documentRef.createElement("span");
+  linksItemTitle.className = "wx-srv-more-item-title";
+  linksItemTitle.textContent = "Links";
+  const linksItemHint = documentRef.createElement("span");
+  linksItemHint.className = "wx-srv-more-item-hint";
+  linksItemHint.textContent = "Only the messages with web links in";
+  linksItem.append(linksItemTitle, linksItemHint);
+  moreMenu.appendChild(linksItem);
   const canvasItem = documentRef.createElement("button");
   canvasItem.type = "button";
   canvasItem.className = "wx-srv-more-item wx-srv-more-canvas";
@@ -312,6 +326,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   galleryItem.addEventListener("click", () => {
     closeMoreMenu();
     gallery.open(header.offsetHeight);
+  });
+  linksItem.addEventListener("click", () => {
+    closeMoreMenu();
+    links.open(header.offsetHeight);
   });
   canvasItem.addEventListener("click", () => {
     closeMoreMenu();
@@ -1248,10 +1266,21 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     fetch: fetchImpl,
   });
   element.appendChild(gallery.element);
+
+  // The Links view (workspace 00052): only the messages with web links in, from the server's
+  // stored link index. Same bubbles as the thread (embedded form), same lock behaviour.
+  const links: LinksView = createLinksView({
+    document: documentRef,
+    hooks,
+    getSession: () => currentSession,
+    renderBubble: (message) => renderBubble(message, identity.isMine(message.sender), true),
+    disposeMedia: (root) => disposeAttachmentMedia(root),
+  });
+  element.appendChild(links.element);
   element.appendChild(moreMenu);
 
-  /** Notes shown in the open view. A note you finish listening to stays until the view closes
-   * (it must not vanish from under you mid-playback); only Dismiss removes one at once. */
+  /** Notes shown in the open view. A note you finish listening to leaves the list as soon as it
+   * stops playing (it must not vanish from under you mid-playback); Dismiss removes one at once. */
   const unheardItems = new Map<number, { message: Message; element: HTMLElement }>();
   let unheardOpen = false;
 
@@ -1307,6 +1336,20 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       const current = confirmedBySeq.get(seq);
       if (current === undefined) {
         removeUnheardItem(seq);
+      } else if (!messageIsUnheard(current)) {
+        // Listened to (or transcribed): leave the list live, but never cut a note off while it is
+        // still playing — wait for it to stop, then re-run this sync.
+        const playing = Array.from(item.element.querySelectorAll("audio")).some((audio) => !audio.paused);
+        if (!playing) {
+          removeUnheardItem(seq);
+        } else if (!item.element.hasAttribute("data-leaving")) {
+          item.element.setAttribute("data-leaving", "");
+          const leave = (): void => updateUnheard();
+          for (const audio of Array.from(item.element.querySelectorAll("audio"))) {
+            audio.addEventListener("ended", leave, { once: true });
+            audio.addEventListener("pause", leave, { once: true });
+          }
+        }
       } else if (current !== item.message) {
         if (differOnlyInTranscripts(item.message, current)) {
           patchTranscriptBlocks(item.element, current.attachments);
@@ -2251,6 +2294,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     deletedSeqs.add(message.seq);
     inFlightDeletes.add(message.seq);
     confirmedBySeq.delete(message.seq);
+    links.messageDeleted(message.seq);
     // spec 07 §6: its drawings go with it at once, in place (a failed delete restores the
     // message, and its summary brings them back).
     drawingLayer.messageDeleted(message.seq);
@@ -2319,6 +2363,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     reactionErrorTimers.clear();
     reactionErrors.clear();
     confirmedBySeq.clear();
+    links.close();
     deletedSeqs.clear();
     confirmedClientIds.clear();
     pendingEchoes = [];
@@ -3061,6 +3106,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       closeUnheardView();
       closeMoreMenu();
       gallery.close();
+      links.close();
       currentSession = null;
       endWipeReconcile("abandoned");
       // §(4): a lock aborts an in-flight scroll-to-original, but the pending
@@ -3092,6 +3138,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           // arrival, so it never raises the "New messages" pill.
           const isArrival = !confirmedBySeq.has(event.message.seq);
           addConfirmed(event.message);
+          links.messageChanged(event.message);
           renderThreadList(
             isArrival && event.message.sender !== "" && !identity.isMine(event.message.sender),
           );
@@ -3104,6 +3151,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           deletedSeqs.add(event.seq);
           contentRevision += 1;
           confirmedBySeq.delete(event.seq);
+          links.messageDeleted(event.seq);
           // spec 07 §6: the cascade took its drawings; remove them in place, no tombstone.
           drawingLayer.messageDeleted(event.seq);
           // §(2)'s client mechanism: this seq's quote vanishes everywhere it
@@ -3156,6 +3204,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       closeUnheardView();
       closeMoreMenu();
       gallery.close();
+      links.close();
       disposeAttachmentMedia(messageList);
       observer?.disconnect();
       lightbox.teardown();
