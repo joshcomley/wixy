@@ -1,0 +1,43 @@
+pxl 1
+name ui-panel
+size 24x24
+tag ui
+tag nine-slice-4
+# A 9-slice card: 4 px corners stay fixed, edges and centre repeat (rows 4..19 and
+# columns 4..19 are uniform). Light from the upper left, like the icons.
+palette
+  k #1a1c2c outline
+  E #7fa6d6 rim-light
+  e #4a6a96 rim
+  N #2a4a62 fill-light
+  n #243553 fill
+  m #1e2242 fill-dark
+  y #ffcd4a star-accent
+  ramp fill = m n N
+  ramp rim = e E
+end
+frame panel ms=500
+..kkkkkkkkkkkkkkkkkkkk..
+.kEEEEEEEEEEEEEEEEEEEEk.
+kEyNNNNNNNNNNNNNNNNNNyek
+kENNNNNNNNNNNNNNNNNNNNek
+kENnnnnnnnnnnnnnnnnnnmek
+kENnnnnnnnnnnnnnnnnnnmek
+kENnnnnnnnnnnnnnnnnnnmek
+kENnnnnnnnnnnnnnnnnnnmek
+kENnnnnnnnnnnnnnnnnnnmek
+kENnnnnnnnnnnnnnnnnnnmek
+kENnnnnnnnnnnnnnnnnnnmek
+kENnnnnnnnnnnnnnnnnnnmek
+kENnnnnnnnnnnnnnnnnnnmek
+kENnnnnnnnnnnnnnnnnnnmek
+kENnnnnnnnnnnnnnnnnnnmek
+kENnnnnnnnnnnnnnnnnnnmek
+kENnnnnnnnnnnnnnnnnnnmek
+kENnnnnnnnnnnnnnnnnnnmek
+kENnnnnnnnnnnnnnnnnnnmek
+kENnnnnnnnnnnnnnnnnnnmek
+kENmmmmmmmmmmmmmmmmmmmek
+kEymmmmmmmmmmmmmmmmmmyek
+.keeeeeeeeeeeeeeeeeeeek.
+..kkkkkkkkkkkkkkkkkkkk..

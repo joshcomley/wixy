@@ -1,0 +1,28 @@
+pxl 1
+name ui-night-tile
+size 16x16
+tag ui
+tag tile
+# Tileable night sky for game backgrounds: lower contrast than the sprites in front.
+palette
+  n #121a2e sky
+  s #2c3c5e star-dim
+  w #5d76a3 star-twinkle
+end
+frame tile ms=500
+nnnnnnnnnnnnnnnn
+nnnnnnnnnnnsnnnn
+nnnsnnnnnnnnnnnn
+nnnnnnnnnnnnnnnn
+nnnnnnnnnnnnnnnn
+nnnnnnnwnnnnnnnn
+nnnnnnswsnnnnnnn
+nnnnnnnwnnnnnnnn
+nnnnnnnnnnnnnnsn
+nnnnnnnnnnnnnnnn
+nsnnnnnnnnnnnnnn
+nnnnnnnnnnnnnnnn
+nnnnnnnnnnsnnnnn
+nnnnnnnnnnnnnnnn
+nnnnsnnnnnnnnnnn
+nnnnnnnnnnnnnnnn

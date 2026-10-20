@@ -2060,3 +2060,35 @@ ones loaded as it scrolls (and by a "Show earlier ones" button). The bubbles are
   oldest shown, with more still to load, waits for its page); a delete drops it. Closing drops everything.
 - **Tests.** `test_livechat_links.py` (detector, insert, v17→v18 backfill, overlap settle, paging, delete, route),
   `admin-ui/tests/serverLinks.test.ts` (view + menu wiring).
+
+## 22. The good-night scene (workspace 00053; spec `spec/server-chat/goodnight-scene.md`)
+
+A purely local effect: when Bubble says good night, the chat fades to a pixel-art night (stars, moon,
+an owl on a branch, a bubble that carries the owl away), then keeps the twinkling stars as its background — on her
+screen as she sends it and on the other person's as it arrives. Nothing is sent or stored.
+
+- **Trigger.** Two live paths only: `thread.ts` `handleStreamEvent`, `message` case (never `message_updated`,
+  never history load, never a system row `sender === ""`), and `send()`'s confirmed result. Both call
+  `goodnight/index.ts` `createGoodnightController().noteMessage`, which requires the sender to be in
+  `GOODNIGHT_SENDERS` (`["bubble"]`, trimmed, case-insensitive — operator decision #1919: never when Cupcake says
+  it), `isGoodNight(text)` (`goodnight/match.ts`), `createdAt` no
+  more than 120 s old, no scene or starfield already up, and at most one scene per 10 minutes per tab (module scope).
+- **Rendering.** `goodnight/scene.ts`: one `<canvas>` (viewport, `position: fixed`, on `document.body`) drawn at
+  `scale = max(2, floor(min(innerWidth / 120, innerHeight / 200)))` scene pixels, `image-rendering: pixelated`, smoothing off. Sprites are
+  pre-rendered once per frame to offscreen canvases and blitted with `drawImage(canvas, x, y)` at whole pixels only.
+  Fades are a Bayer 4x4 dither (`goodnight/dither.ts`, the rule in `pixelart/FORMAT.md` "Scenes"), never alpha; the
+  chat UI behind fades with CSS opacity (`wx-srv-gn-*` classes on the thread view, `chat.css`).
+- **Timeline.** `goodnight/timeline.ts` is pure and deterministic: `sceneAt(elapsedMs, size, seed)` returns the sky
+  dither level and the draw ops. It ports `pixelart/examples/goodnight/make_scene.py` (a test compares every
+  non-star layer with `scene.json` tick by tick). The timing and anim names live in ONE table, `TIMELINE`; the
+  intro length is derived from the generated `intro` anim. Stars use a seeded generator and the reference density.
+- **Art.** `goodnight/sprites.gen.ts` is generated: `python -m pixelart export-ts <the five .pxl files> -o ...`
+  (the exact command is in its header; `pixelart/tests/test_export.py` fails when it drifts). Edit the `.pxl`
+  files, regenerate, update `TIMELINE` if `make_scene.py` changed.
+- **Lifecycle.** `playing` (idle lock suspended via `hooks.suspend("goodnight")`; click/tap or Escape skips) ->
+  `background` (the canvas moves into `.wx-srv-goodnight-bg`, first child of `.wx-srv-thread-wrap`, under the
+  thread, `pointer-events: none`, thread background transparent; stars only, ~15 fps, redrawn only when a frame
+  changes) -> closed. `detach()` (lock), `teardown()` and a wipe call `goodnight.stop()`: canvas, layer, classes,
+  rAF, listeners and the suspension are all removed. Escape is also the chat's panic key; the scene does not
+  swallow it, so the lock still happens. `prefers-reduced-motion: reduce` skips the scene for a static starfield.
+- **Tests.** `admin-ui/tests/server/goodnight{Match,Dither,Timeline,Scene}.test.ts`, `threadGoodnight.test.ts`.

@@ -1,0 +1,24 @@
+# Night Owl: moody teal / slate / navy night palette with warm amber accents.
+# Generated with pixelart.palette.ramp() (hue-shifted, even OKLab lightness).
+# void
+0b0d1a
+# navy ramp (dark -> light)
+140f33
+2a2963
+364e87
+537598
+# slate ramp
+343a4a
+586c85
+8ea1af
+# teal ramp
+00343e
+00646c
+439692
+92c3b8
+# amber ramp (eyes, lanterns, warm light)
+b06d4e
+ec9e33
+f8e59a
+# starlight
+f4ecd0

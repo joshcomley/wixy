@@ -1,0 +1,19 @@
+pxl 1
+name dot
+size 4x4
+palette
+  .  transparent
+  r  #ff0000
+  b  #0000ff
+end
+frame a ms=100
+rrrr
+rrrr
+rrrr
+rrrr
+frame b ms=100
+bbbb
+bbbb
+bbbb
+bbbb
+anim blink = a b loop

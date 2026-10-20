@@ -1,0 +1,19 @@
+{
+  "width": 16,
+  "height": 8,
+  "background": "#101020",
+  "tick_ms": 100,
+  "ticks": 5,
+  "loop": true,
+  "scale": 2,
+  "layers": [
+    {
+      "sprite": "dot.pxl",
+      "anim": "blink",
+      "keyframes": [
+        { "t": 0, "x": 0, "y": 2, "opacity": 0.0 },
+        { "t": 4, "x": 12, "y": 2, "opacity": 1.0 }
+      ]
+    }
+  ]
+}
