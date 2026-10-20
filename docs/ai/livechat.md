@@ -1956,10 +1956,12 @@ the answers filter keeps the game fun but the chat has no per-person secrecy (In
   (`applyGameLayout` hides/restores the thread wrapper, saves its scroll, abandons the pen).
   `open(seq)` (starter / tapping a card's Play) shows the tab; `offer(seq)` (a round someone else started, or the newest
   unfinished round at load) adds it with a dot without switching; `close()` removes it and remembers the dismissal.
-- **The game pane**, top to bottom: header (title, Next ▸ once a round is revealed/skipped, ✕), the picture stage (tap
+- **The game pane**, top to bottom: header (title, Topics, Next ▸ once a round is revealed/skipped, ✕), the picture stage (tap
   flips A/B; both images are preloaded; a text-only round shows the option as large text, a `pending` job shows
   "Painting…"), the controls (`wyrControls.ts`: Play/Skip, a pick row and a guess row, Reveal, results), the mini chat
-  (this card's last two messages + echoes, attachments as 28 px thumbnails, tap → pop-up) and — below, as always — the
+  (a FIXED 60 px strip: this card's last two messages + echoes, one line each cut with an ellipsis, attachments as
+  20 px thumbnails, and a "Chat N" button on the right; it never changes height, so the stage and controls never shift
+  and nothing spills onto the composer — pinned by the "stays tidy on a phone" e2e; tap → pop-up) and — below, as always — the
   one composer, which now sends into the card.
 - **Game chat routing.** Messages are ordinary; `game.chatTarget()` (the open round's seq while the WYR tab or the
   pop-up is in use) is spread into every text `sendMessage` as `wyrSeq` (`wyrSendFields()` in `thread.ts`), and optimistic
