@@ -205,4 +205,6 @@ def build() -> dict[str, object]:
 
 
 if __name__ == "__main__":
-    (HERE / "scene.json").write_text(json.dumps(build(), indent=1) + "\n", encoding="utf-8")
+    (HERE / "scene.json").write_text(
+        json.dumps(build(), indent=1) + "\n", encoding="utf-8", newline="\n"
+    )
