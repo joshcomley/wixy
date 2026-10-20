@@ -103,8 +103,13 @@ test("phone layout: one shared gutter, one control height, tight top spacing", a
   const send = await box(page, ".wx-chat-send-button");
   const closeButton = await box(page, ".wx-srv-panic-button");
 
-  expect.soft(Math.abs(card.left - composer.left)).toBeLessThanOrEqual(1);
-  expect.soft(Math.abs(viewportWidth - card.right - (viewportWidth - composer.right))).toBeLessThanOrEqual(1);
+  // The chat area is a full-width band (no card, no inset of its own); its MESSAGES carry the
+  // gutter, so a bubble's edge lines up with the buttons above and below.
+  expect.soft(card.left).toBeLessThanOrEqual(1);
+  expect.soft(Math.abs(viewportWidth - card.right)).toBeLessThanOrEqual(1);
+  const bubble = await box(page, ".wx-srv-thread .wx-srv-bubble");
+  const bubbleEdgeInset = Math.min(bubble.left, viewportWidth - bubble.right);
+  expect.soft(Math.abs(bubbleEdgeInset - composer.left)).toBeLessThanOrEqual(1);
   expect.soft(Math.abs(header.left - composer.left)).toBeLessThanOrEqual(1);
   expect.soft(Math.abs(header.right - composer.right)).toBeLessThanOrEqual(1);
   // The header's own controls reach the same right edge as Send.

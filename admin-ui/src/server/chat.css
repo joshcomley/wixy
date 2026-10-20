@@ -126,6 +126,10 @@
      `.wx-main` padding is the single shared gutter (12px phone, 20px
      desktop), so all three edges line up. */
   --wx-srv-control-h: 36px;
+  /* `.wx-main`'s padding (20px desktop, 12px phone): the thread bleeds out to the screen edges
+     by this much and pads its own messages by it, so bubbles line up with the header and
+     composer buttons instead of being indented twice (card padding + shell padding). */
+  --wx-srv-gutter: 20px;
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -136,6 +140,7 @@
 @media (max-width: 720px) {
   .wx-srv-thread-view {
     --wx-srv-control-h: 44px;
+    --wx-srv-gutter: 12px;
   }
 }
 
@@ -663,7 +668,8 @@ button.wx-srv-quote:focus-visible {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  margin: 0 0 8px;
+  /* Full width of the screen: cancel `.wx-main`'s side padding. */
+  margin: 0 calc(-1 * var(--wx-srv-gutter)) 8px;
 }
 
 .wx-srv-thread-wrap[hidden] {
@@ -681,10 +687,12 @@ button.wx-srv-quote:focus-visible {
      message (26px of dead space above the first day chip). Spacing between
      the rows that can show is set on the rows themselves. */
   gap: 0;
-  padding: 8px 12px;
+  padding: 8px var(--wx-srv-gutter);
   background: var(--wx-surface);
-  border: 1px solid var(--wx-border);
-  border-radius: var(--wx-radius);
+  /* A full-width band, not a card: only a top and bottom rule separate it from the buttons. */
+  border: 0 solid var(--wx-border);
+  border-width: 1px 0;
+  border-radius: 0;
 }
 
 .wx-srv-thread-sentinel {
