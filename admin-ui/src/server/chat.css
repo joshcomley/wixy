@@ -4250,3 +4250,60 @@ video.wx-srv-gallery-media {
   color: var(--wx-ink);
   cursor: pointer;
 }
+
+/* -- Good-night scene (goodnight/scene.ts, spec/server-chat/goodnight-scene.md) ---------------- */
+
+/* The scene's canvas covers the viewport while it plays: crisp pixels, no touch scrolling. */
+.wx-srv-goodnight-canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1000;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  touch-action: none;
+  cursor: pointer;
+}
+
+/* The chat UI fades with ordinary CSS opacity; `--wx-gn-ms` is the fade length. */
+.wx-srv-gn-fading .wx-srv-message-list,
+.wx-srv-gn-fading .wx-chat-composer {
+  opacity: 1;
+  transition: opacity var(--wx-gn-ms, 900ms) linear;
+}
+
+.wx-srv-gn-fading.wx-srv-gn-hidden .wx-srv-message-list,
+.wx-srv-gn-fading.wx-srv-gn-hidden .wx-chat-composer {
+  opacity: 0;
+}
+
+/* Background mode: the starfield sits under the thread, which turns transparent. */
+.wx-srv-thread-wrap.wx-srv-gn-bg {
+  isolation: isolate;
+}
+
+.wx-srv-goodnight-bg {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.wx-srv-goodnight-canvas-bg {
+  position: absolute;
+  z-index: auto;
+  pointer-events: none;
+  cursor: auto;
+}
+
+.wx-srv-thread-wrap.wx-srv-gn-bg .wx-srv-thread {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wx-srv-gn-fading .wx-srv-message-list,
+  .wx-srv-gn-fading .wx-chat-composer {
+    transition: none;
+  }
+}
