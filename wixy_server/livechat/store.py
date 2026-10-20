@@ -309,7 +309,14 @@ CREATE INDEX IF NOT EXISTS idx_messages_has_link ON messages(seq) WHERE has_link
 CREATE INDEX IF NOT EXISTS idx_messages_link_pending ON messages(seq) WHERE has_link IS NULL;
 """
 _LINK_INDEX_BATCH = 500
-_LATEST_SCHEMA_VERSION = 18
+# The would-you-rather TOPICS the couple has chosen to play (workspace 00052): one row per chosen
+# bank category; NO rows = every topic. It is a shared preference (either player's Next uses it),
+# not chat content — it names bank categories only, so nothing here can reveal anything about
+# the chat and a wipe leaves it alone (the questions themselves are static repo content).
+_SCHEMA_V19_WYR_TOPICS = """
+CREATE TABLE IF NOT EXISTS wyr_topics(category TEXT PRIMARY KEY);
+"""
+_LATEST_SCHEMA_VERSION = 19
 WYR_REVEAL_WINDOW_S = 30.0
 _UNKNOWN_GRANT_HASH = "0" * 64
 _LOGGER = logging.getLogger(__name__)
@@ -999,6 +1006,13 @@ class LiveChatStore:
                     self._index_pending_links(conn)
                 conn.execute("PRAGMA user_version = 18")
                 current = 18
+
+            if current < 19:
+                for statement in _SCHEMA_V19_WYR_TOPICS.split(";"):
+                    if statement.strip():
+                        conn.execute(statement)
+                conn.execute("PRAGMA user_version = 19")
+                current = 19
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
@@ -1864,6 +1878,21 @@ class LiveChatStore:
         with self._read_txn() as conn:
             rows = conn.execute("SELECT DISTINCT question_id FROM wyr_rounds").fetchall()
             return {str(row["question_id"]) for row in rows}
+
+    def wyr_selected_topics(self) -> frozenset[str] | None:
+        """The bank categories the couple chose to play, or `None` for every topic."""
+        with self._read_txn() as conn:
+            rows = conn.execute("SELECT category FROM wyr_topics").fetchall()
+        return frozenset(str(row["category"]) for row in rows) or None
+
+    def set_wyr_topics(self, topics: Sequence[str] | None) -> None:
+        """Replace the chosen topics (`None`/empty = every topic). The caller validates the ids."""
+        with self._write_txn() as conn:
+            conn.execute("DELETE FROM wyr_topics")
+            conn.executemany(
+                "INSERT INTO wyr_topics (category) VALUES (?)",
+                [(topic,) for topic in dict.fromkeys(topics or ())],
+            )
 
     @staticmethod
     def _wyr_slot(round_: WyrRoundRow, key: str, email: str | None) -> int | None:

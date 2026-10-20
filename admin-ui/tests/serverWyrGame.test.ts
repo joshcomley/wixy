@@ -445,6 +445,7 @@ describe("wyr game tab", () => {
         else thread.appendChild(composer);
       },
       startNextRound: next,
+      openTopics: vi.fn(),
       onLayoutChange: layout,
       afterChange: () => {},
     };

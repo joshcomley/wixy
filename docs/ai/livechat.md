@@ -2018,6 +2018,25 @@ side padding with `--wx-srv-gutter` (20px desktop, 12px at ≤720px, set on `.wx
 pads its own messages by the same amount, so bubbles line up with the header and composer buttons (only a top and
 bottom rule separate it). Pinned by `e2e/tests/server-layout.spec.ts`.
 
+### Would-you-rather topics (workspace 00052)
+
+"Game topics" in the ⋯ menu, and **Topics** on the game tab's header, open `wyrTopics.ts`: a tick-list of the
+question bank's categories (25 today, each with its question count), **Select all** / **Unselect all**, and **Save**
+(disabled until at least one topic is ticked). Rounds then draw only from the ticked topics, for BOTH players.
+
+- **Stored choice** (schema v19): `wyr_topics(category)` — one row per chosen category, NO rows = every topic. It is a
+  shared preference naming bank categories only (never chat content), so a wipe leaves it alone.
+- **Routes.** `GET /api/admin/server/wyr/topics` → `{topics:[{id,label,count,selected}], all}`; `PUT` with
+  `{topics:[ids]|null}` (422 `invalid` for an empty list or an unknown id; choosing every topic stores "all"). They are
+  declared before `/wyr/{seq}` so the literal path wins. Labels come from `wyr_questions.TOPIC_LABELS`.
+- **Picking.** `create_wyr_round` filters the bank with `questions_in_topics` (a choice matching nothing in the bank
+  — a retired topic — means the whole bank, never an empty game) before `pick_round`; once every question of the
+  chosen topics is played the repeat guard restarts WITHIN them.
+- **Picture pool.** `pool_step` paints the chosen topics' questions first and judges "full" by the pairs held FOR those
+  topics (the whole pool capped at 3x target), so an hour of one topic is not left painting on demand.
+- **Tests.** `test_livechat_wyr_topics.py`, `admin-ui/tests/serverWyrTopics.test.ts`, `e2e/tests/server-wyr.spec.ts`
+  (topics at 360 px).
+
 ### Links view (workspace 00052)
 
 The ⋯ menu's **Links** entry opens a full-height screen (`linksView.ts`, created next to the gallery in

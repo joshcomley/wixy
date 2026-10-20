@@ -350,6 +350,65 @@ test.describe("Would you rather", () => {
       return top !== null && (top === el || el.contains(top));
     });
     expect(hit).toBe(true);
+    // The game header (title, Topics, close; Next appears later) stays inside the phone.
+    for (const selector of [".wx-srv-game-topics", ".wx-srv-game-close"]) {
+      const box = (await page.locator(selector).boundingBox())!;
+      expect(box.x + box.width, `${selector} right`).toBeLessThanOrEqual(360.5);
+      expect(box.height, `${selector} height`).toBeGreaterThanOrEqual(43.5);
+    }
+    await context.close();
+  });
+
+  test("topics: pick only some, start a round, and the screen fits a 360 px phone", async ({ browser }) => {
+    const context = await browser.newContext({
+      viewport: { width: 360, height: 780 },
+      hasTouch: true,
+      isMobile: true,
+    });
+    const page = await context.newPage();
+    await unlockServer(page, "Alice");
+
+    await page.locator(".wx-srv-more-button").click();
+    await humanPause(page);
+    await page.locator(".wx-srv-more-topics").click();
+    const topics = page.locator(".wx-srv-topics-view");
+    await expect(topics).toBeVisible();
+    await expect(page.locator(".wx-srv-topics-box")).not.toHaveCount(0);
+
+    // Unselect all: nothing can be saved until at least one topic is ticked.
+    await page.locator(".wx-srv-topics-none").click();
+    await humanPause(page);
+    await expect(page.locator(".wx-srv-topics-save")).toBeDisabled();
+    const food = page.locator(".wx-srv-topics-row", { hasText: "Food: meals" });
+    await food.locator(".wx-srv-topics-box").check();
+    await humanPause(page);
+    await expect(page.locator(".wx-srv-topics-save")).toBeEnabled();
+    await page.locator(".wx-srv-topics-save").click();
+    await expect(page.locator(".wx-srv-topics-status")).toContainText("Saved");
+
+    // Nothing overflows sideways and every row is a real tap target.
+    const fit = await topics.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+    expect(fit.scroll).toBeLessThanOrEqual(fit.client + 1);
+    const row = (await food.boundingBox())!;
+    expect(row.height).toBeGreaterThanOrEqual(43.5);
+    expect(row.x + row.width).toBeLessThanOrEqual(360.5);
+    await page.screenshot({ path: test.info().outputPath("phone-topics.png") });
+
+    // A round still starts with a topic chosen (which topic each round draws from is pytest's job).
+    await page.locator(".wx-srv-topics-close").click();
+    await expect(topics).toBeHidden();
+    await humanPause(page);
+    await startRound(page);
+    await expect(game(page)).toBeVisible();
+
+    // Reset to every topic so later specs on this shared fixture server are unaffected.
+    await page.locator(".wx-srv-game-topics").click();
+    await expect(page.locator(".wx-srv-topics-box")).not.toHaveCount(0);
+    await humanPause(page);
+    await page.locator(".wx-srv-topics-all").click();
+    await humanPause(page);
+    await page.locator(".wx-srv-topics-save").click();
+    await expect(page.locator(".wx-srv-topics-status")).toContainText("Saved");
     await context.close();
   });
 });

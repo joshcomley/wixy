@@ -47,6 +47,8 @@ export interface WyrGameDeps {
   mountComposer(host: HTMLElement | null): void;
   /** Starts the next round (the ⋯ menu's action). */
   startNextRound(): void;
+  /** Opens the topics screen (which topics the questions come from). */
+  openTopics(): void;
   /** The visible tab, or whether a game exists, changed: the thread adjusts its own layout. */
   onLayoutChange(): void;
   /** Call after any change that may have altered the layout's height. */
@@ -148,8 +150,9 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
   maximizePicturesButton.hidden = true;
   const nextButton = button("wx-srv-game-next", "Start the next round", "Next ▸", () => deps.startNextRound());
   nextButton.hidden = true;
+  const topicsButton = button("wx-srv-game-topics", "Choose the game topics", "Topics", () => deps.openTopics());
   const closeButton = button("wx-srv-game-close", "Close the game", "✕", () => close());
-  head.append(title, maximizePicturesButton, nextButton, closeButton);
+  head.append(title, maximizePicturesButton, topicsButton, nextButton, closeButton);
 
   const stage = el("button", "wx-srv-game-stage");
   stage.type = "button";

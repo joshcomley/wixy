@@ -316,3 +316,59 @@ export function revealWyr(
 ): Promise<WyrOutcome> {
   return call(session, `/wyr/${encodeURIComponent(String(seq))}/reveal`, postInit(input));
 }
+
+/** One topic of the question bank: how many questions it holds and whether it is being played. */
+export interface WyrTopic {
+  readonly id: string;
+  readonly label: string;
+  readonly count: number;
+  readonly selected: boolean;
+}
+
+export type WyrTopicsResult =
+  | { readonly ok: true; readonly topics: readonly WyrTopic[] }
+  | { readonly ok: false; readonly kind: "unavailable" };
+
+function parseTopics(raw: unknown): readonly WyrTopic[] | null {
+  const body = asRecord(raw);
+  const list = body?.["topics"];
+  if (!Array.isArray(list)) return null;
+  const topics: WyrTopic[] = [];
+  for (const entry of list) {
+    const r = asRecord(entry);
+    if (r === null) continue;
+    const id = r["id"];
+    const label = r["label"];
+    const count = r["count"];
+    if (typeof id !== "string" || typeof label !== "string" || typeof count !== "number") continue;
+    topics.push({ id, label, count, selected: r["selected"] === true });
+  }
+  return topics.length > 0 ? topics : null;
+}
+
+async function topicsCall(session: ServerSession, init: RequestInit): Promise<WyrTopicsResult> {
+  let response: Response;
+  try {
+    response = await serverFetch("/wyr/topics", init, session);
+  } catch (error) {
+    if (error instanceof ServerLockedError) throw error;
+    return { ok: false, kind: "unavailable" };
+  }
+  if (!response.ok) return { ok: false, kind: "unavailable" };
+  const topics = parseTopics(await readJson(response));
+  return topics === null ? { ok: false, kind: "unavailable" } : { ok: true, topics };
+}
+
+/** `GET /wyr/topics` — every topic with its question count and whether it is being played. */
+export function getWyrTopics(session: ServerSession): Promise<WyrTopicsResult> {
+  return topicsCall(session, { method: "GET" });
+}
+
+/** `PUT /wyr/topics` — choose the topics the next rounds come from (at least one). */
+export function putWyrTopics(session: ServerSession, topics: readonly string[]): Promise<WyrTopicsResult> {
+  return topicsCall(session, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ topics }),
+  });
+}

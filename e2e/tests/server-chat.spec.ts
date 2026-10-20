@@ -372,8 +372,9 @@ test.describe("server-chat.spec.ts (P5b)", () => {
       expect(composerBox.y).toBeGreaterThanOrEqual(0);
     }
 
-    // No horizontal overflow anywhere in the panel.
-    const hasHorizontalOverflow = await page.locator(".wx-srv-panel").evaluate((el) => {
+    // No horizontal overflow anywhere in the page (the thread bleeds out to the screen edges, so
+    // the panel box itself is narrower than its band; .wx-main is what must never scroll sideways).
+    const hasHorizontalOverflow = await page.locator(".wx-main").evaluate((el) => {
       return el.scrollWidth > el.clientWidth + 1;
     });
     expect(hasHorizontalOverflow).toBe(false);
