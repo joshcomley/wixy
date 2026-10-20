@@ -291,3 +291,61 @@ test("message actions menu on the newest message of a full thread is fully on-sc
     await expect(items.nth(i)).toBeInViewport({ ratio: 1 });
   }
 });
+
+// Operator report (2026-10-20): on a phone, opening the keyboard to reply covered the newest
+// messages instead of pushing them up. With `interactive-widget=resizes-content` the page
+// shrinks when the keyboard opens, so the thread shrinks too; the thread must keep its BOTTOM
+// edge where it was (the message being replied to stays just above the composer). Playwright
+// has no on-screen keyboard, so the keyboard is the viewport getting shorter — exactly what
+// resizes-content does to the layout.
+test.describe("the keyboard pushes the chat up", () => {
+  test.use({ viewport: { width: 402, height: 870 }, isMobile: true, hasTouch: true });
+
+  async function lastBubbleBottomVsComposer(page: Page): Promise<{ bubbleBottom: number; composerTop: number }> {
+    return page.evaluate(() => {
+      const bubbles = document.querySelectorAll(".wx-srv-thread .wx-srv-bubble");
+      const last = bubbles[bubbles.length - 1]!.getBoundingClientRect();
+      const thread = document.querySelector(".wx-srv-thread")!.getBoundingClientRect();
+      return { bubbleBottom: last.bottom, composerTop: thread.bottom };
+    });
+  }
+
+  test("at the bottom: the newest message stays visible above the composer", async ({ page }) => {
+    await page.request.post("/test/server/seed-messages", {
+      data: { count: 30, label: "Keyboard probe", sender: "Fixture", spreadS: 30 },
+    });
+    await unlockServer(page, "Cupcake");
+    await expect(page.locator(".wx-srv-bubble-text").filter({ hasText: "Keyboard probe #30" })).toBeVisible();
+    const before = await lastBubbleBottomVsComposer(page);
+    expect(before.bubbleBottom).toBeLessThanOrEqual(before.composerTop + 1);
+
+    await page.setViewportSize({ width: 402, height: 520 }); // the keyboard opens
+    await page.waitForTimeout(300);
+    const after = await lastBubbleBottomVsComposer(page);
+    expect(after.bubbleBottom).toBeLessThanOrEqual(after.composerTop + 1);
+    expect(after.composerTop - after.bubbleBottom).toBeLessThanOrEqual(before.composerTop - before.bubbleBottom + 2);
+
+    await page.setViewportSize({ width: 402, height: 870 }); // and closes
+    await page.waitForTimeout(300);
+    const closed = await lastBubbleBottomVsComposer(page);
+    expect(closed.bubbleBottom).toBeLessThanOrEqual(closed.composerTop + 1);
+  });
+
+  test("scrolled up reading: what was at the bottom of the screen stays at the bottom", async ({ page }) => {
+    await page.request.post("/test/server/seed-messages", {
+      data: { count: 30, label: "Keyboard read", sender: "Fixture", spreadS: 30 },
+    });
+    await unlockServer(page, "Cupcake");
+    await expect(page.locator(".wx-srv-bubble-text").filter({ hasText: "Keyboard read #30" })).toBeVisible();
+    await page.locator(".wx-srv-thread").evaluate((el) => {
+      el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight - 600);
+    });
+    await page.waitForTimeout(200);
+    const distanceFromBottom = () =>
+      page.locator(".wx-srv-thread").evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
+    const before = await distanceFromBottom();
+    await page.setViewportSize({ width: 402, height: 520 });
+    await page.waitForTimeout(300);
+    expect(Math.abs((await distanceFromBottom()) - before)).toBeLessThanOrEqual(2);
+  });
+});

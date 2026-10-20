@@ -31,7 +31,12 @@ from wixy_server.livechat.reactions import reactor_key
 from wixy_server.livechat.store import LiveChatStore
 from wixy_server.livechat.wyr_images import ComfyImageGenerator
 from wixy_server.livechat.wyr_pool import POOL_FILES, PooledPictures, WyrPool
-from wixy_server.livechat.wyr_questions import WyrQuestion, pick_question, style_suffix
+from wixy_server.livechat.wyr_questions import (
+    WyrQuestion,
+    pick_question,
+    questions_in_topics,
+    style_suffix,
+)
 from wixy_server.storage import ProjectPaths
 
 _LOGGER = logging.getLogger(__name__)
@@ -393,6 +398,10 @@ class PoolOutcome(enum.Enum):
 _POOL_DISK_HEADROOM_BYTES = 1024 * 1024 * 1024
 
 
+# How far past `target` the pool may grow while topics are chosen (their pairs are wanted first).
+_POOL_TOPIC_CAP_FACTOR = 3
+
+
 def pool_step(
     *,
     store: LiveChatStore,
@@ -411,7 +420,14 @@ def pool_step(
     target, nothing is waiting for a round's pictures, the disk has room and the generator is
     up. Every outcome is reported, never raised — the loop decides how long to wait."""
     pooled_ids = pool.ids()
-    if len(pooled_ids) >= target:
+    topics = store.wyr_selected_topics()
+    wanted = {q.id for q in questions_in_topics(questions, topics)}
+    # With topics chosen the pool is judged by the pairs it holds for THOSE topics (so an hour of
+    # food-only rounds is never left painting on demand); the whole pool is still capped.
+    if topics is not None and wanted != {q.id for q in questions}:
+        if len(pooled_ids & wanted) >= target or len(pooled_ids) >= target * _POOL_TOPIC_CAP_FACTOR:
+            return PoolOutcome.FULL
+    elif len(pooled_ids) >= target:
         return PoolOutcome.FULL
     if demand.count > 0:
         return PoolOutcome.YIELDED
@@ -422,6 +438,12 @@ def pool_step(
         return PoolOutcome.UNAVAILABLE
     used = pool_played_ids(store, questions)
     candidates = [q for q in questions if q.id not in used and q.id not in pooled_ids]
+    in_topic = [q for q in candidates if q.id in wanted]
+    if in_topic:
+        candidates = in_topic
+    elif len(pooled_ids) >= target:
+        # The chosen topics have nothing left to paint; do not fill the pool with other topics.
+        return PoolOutcome.NO_CANDIDATES
     if not candidates:
         return PoolOutcome.NO_CANDIDATES
     chooser = rng or random.SystemRandom()

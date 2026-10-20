@@ -24,3 +24,11 @@ playing — it waits for `ended`/`pause` so a note is never cut off under the li
 
 **Watch for:** keep `links.text_has_link` and `linkify.ts` `textHasLink` in step; any new INSERT into `messages`
 that carries text must set `has_link` (otherwise it is settled lazily, which is correct but costs a write).
+
+## Follow-ups in the same workspace
+- **Full-width thread:** `.wx-srv-thread-wrap` cancels `.wx-main`'s side padding (`--wx-srv-gutter`) and the thread
+  pads its own messages by it. The layout invariant "no horizontal overflow" is now asserted on `.wx-main` (the
+  panel box is narrower than the full-bleed band by design).
+- **Would-you-rather topics:** shared server-side choice (`wyr_topics`, schema v19) rather than per-device, because either
+  player's Next starts the next round; the pool filler follows it. Rejected: a per-device preference sent with each
+  create (two players would draw from different topics).
