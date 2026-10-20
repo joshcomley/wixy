@@ -123,3 +123,60 @@ def pick_question(
         by_category.setdefault(question.category, []).append(question)
     category = rng.choice(tuple(by_category))
     return rng.choice(by_category[category])
+
+
+# The topic picker's names for the bank's categories. A category missing here still works (it is
+# shown as its id, tidied) so a new bank category never breaks the menu.
+TOPIC_LABELS = {
+    "architecture-design": "Architecture & design",
+    "arts-crafts": "Arts & crafts",
+    "books-stories": "Books & stories",
+    "community-helping": "Community & helping",
+    "date-nights": "Date nights",
+    "entertainment": "Entertainment",
+    "experiences": "Experiences",
+    "fashion-style": "Fashion & style",
+    "food-meals": "Food: meals",
+    "food-sweet": "Food: sweet treats",
+    "games-puzzles": "Games & puzzles",
+    "history-culture": "History & culture",
+    "home-garden": "Home: garden",
+    "home-interior": "Home: interiors",
+    "learning-discovery": "Learning & discovery",
+    "lifestyle-habits": "Lifestyle & habits",
+    "music-performance": "Music & performance",
+    "nature-wildlife": "Nature & wildlife",
+    "science-space": "Science & space",
+    "sport-outdoors": "Sport & outdoors",
+    "technology": "Technology",
+    "transport-engineering": "Transport & engineering",
+    "travel-destinations": "Travel: destinations",
+    "travel-styles": "Travel: styles",
+    "weather-seasons": "Weather & seasons",
+}
+
+
+def topic_label(category: str) -> str:
+    return TOPIC_LABELS.get(category) or category.replace("-", " ").capitalize()
+
+
+def topic_summary(questions: tuple[WyrQuestion, ...]) -> list[tuple[str, str, int]]:
+    """`(category id, label, question count)` for every category in the bank, by label."""
+    counts: dict[str, int] = {}
+    for question in questions:
+        counts[question.category] = counts.get(question.category, 0) + 1
+    return sorted(
+        ((category, topic_label(category), count) for category, count in counts.items()),
+        key=lambda row: row[1].lower(),
+    )
+
+
+def questions_in_topics(
+    questions: tuple[WyrQuestion, ...], topics: frozenset[str] | None
+) -> tuple[WyrQuestion, ...]:
+    """The part of the bank the chosen topics allow. No choice — or a choice that matches nothing
+    in the bank (a topic since retired) — means the whole bank, never an empty game."""
+    if not topics:
+        return questions
+    chosen = tuple(q for q in questions if q.category in topics)
+    return chosen or questions

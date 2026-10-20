@@ -1199,6 +1199,7 @@ button.wx-srv-wyr-countdown {
   color: var(--wx-ink);
 }
 
+.wx-srv-game-topics,
 .wx-srv-game-next,
 .wx-srv-game-close {
   min-height: var(--wx-srv-control-h);
@@ -4248,5 +4249,151 @@ video.wx-srv-gallery-media {
   border: 1px solid var(--wx-border);
   background: var(--wx-btn-bg);
   color: var(--wx-ink);
+  cursor: pointer;
+}
+
+/* -- Game topics ------------------------------------------------------------
+   The Would-you-rather topic picker: a full-height screen under the header (top set from the
+   header's height in JS) with a tick-list of the bank's topics, Select all / Unselect all, and a
+   Save bar pinned at the bottom. */
+
+.wx-srv-topics-view {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  background: var(--wx-canvas);
+}
+
+.wx-srv-topics-view[hidden],
+.wx-srv-topics-status[hidden] {
+  display: none;
+}
+
+.wx-srv-topics-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.wx-srv-topics-title {
+  min-width: 0;
+  font-weight: 600;
+  font-size: 0.9375rem;
+}
+
+.wx-srv-topics-close,
+.wx-srv-topics-all,
+.wx-srv-topics-none {
+  flex: none;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  cursor: pointer;
+}
+
+.wx-srv-topics-close:disabled,
+.wx-srv-topics-all:disabled,
+.wx-srv-topics-none:disabled,
+.wx-srv-topics-save:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.wx-srv-topics-intro {
+  flex: none;
+  margin: 0 0 8px;
+  color: var(--wx-muted);
+  font-size: 0.8125rem;
+}
+
+.wx-srv-topics-quick {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+
+.wx-srv-topics-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--wx-border);
+}
+
+.wx-srv-topics-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--wx-border);
+  cursor: pointer;
+}
+
+.wx-srv-topics-box {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--wx-brand-blue);
+}
+
+.wx-srv-topics-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-topics-count {
+  flex: none;
+  color: var(--wx-muted);
+  font-size: 0.8125rem;
+}
+
+.wx-srv-topics-status {
+  flex: none;
+  margin: 8px 0 0;
+  text-align: center;
+  color: var(--wx-muted);
+  font-size: 0.8125rem;
+}
+
+.wx-srv-topics-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0 12px;
+}
+
+.wx-srv-topics-summary {
+  min-width: 0;
+  color: var(--wx-muted);
+  font-size: 0.8125rem;
+}
+
+.wx-srv-topics-save {
+  flex: none;
+  min-height: 44px;
+  padding: 0 24px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-brand-blue);
+  background: var(--wx-brand-blue);
+  color: #fff;
+  font-weight: 700;
   cursor: pointer;
 }

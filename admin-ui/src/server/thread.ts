@@ -45,6 +45,7 @@ import { createLinksView, type LinksView } from "./linksView";
 import { createDownloadMarkStore } from "./galleryMark";
 import { createWyrGame, type WyrGame } from "./wyrGame";
 import { createWyrModel, type WyrModel } from "./wyrModel";
+import { createWyrTopics, type WyrTopicsView } from "./wyrTopics";
 import type { ServerIdentity } from "./identity";
 import { linkifyInto } from "./linkify";
 import { mountMessageActions, type MessageActionsController } from "./messageActions";
@@ -291,6 +292,19 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   wyrItemHint.textContent = "Pick one, guess theirs, reveal together";
   wyrItem.append(wyrItemTitle, wyrItemHint);
   moreMenu.appendChild(wyrItem);
+  const topicsItem = documentRef.createElement("button");
+  topicsItem.type = "button";
+  topicsItem.className = "wx-srv-more-item wx-srv-more-topics";
+  topicsItem.setAttribute("role", "menuitem");
+  topicsItem.setAttribute("data-srv-gesture-boundary", "");
+  const topicsItemTitle = documentRef.createElement("span");
+  topicsItemTitle.className = "wx-srv-more-item-title";
+  topicsItemTitle.textContent = "Game topics";
+  const topicsItemHint = documentRef.createElement("span");
+  topicsItemHint.className = "wx-srv-more-item-hint";
+  topicsItemHint.textContent = "Choose what Would you rather asks about";
+  topicsItem.append(topicsItemTitle, topicsItemHint);
+  moreMenu.appendChild(topicsItem);
   const fryItem = documentRef.createElement("button");
   fryItem.type = "button";
   fryItem.className = "wx-srv-more-item wx-srv-more-fry";
@@ -334,6 +348,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   canvasItem.addEventListener("click", () => {
     closeMoreMenu();
     void addCanvas();
+  });
+  topicsItem.addEventListener("click", () => {
+    closeMoreMenu();
+    wyrTopics.open(header.offsetHeight);
   });
   wyrItem.addEventListener("click", () => {
     closeMoreMenu();
@@ -1145,6 +1163,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       else element.insertBefore(composer.element, game.tabBar);
     },
     startNextRound: () => void addWyrRound(),
+    openTopics: () => wyrTopics.open(header.offsetHeight),
     onLayoutChange: applyGameLayout,
     afterChange: () => threadScroll.afterContentChange(false),
     openLightbox: (src, alt) => lightbox.open(src, alt),
@@ -1277,6 +1296,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     disposeMedia: (root) => disposeAttachmentMedia(root),
   });
   element.appendChild(links.element);
+
+  // The game's topic picker (workspace 00052): opened from the ⋯ menu and from the game tab.
+  const wyrTopics: WyrTopicsView = createWyrTopics({
+    document: documentRef,
+    hooks,
+    getSession: () => currentSession,
+  });
+  element.appendChild(wyrTopics.element);
   element.appendChild(moreMenu);
 
   /** Notes shown in the open view. A note you finish listening to leaves the list as soon as it
@@ -2364,6 +2391,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     reactionErrors.clear();
     confirmedBySeq.clear();
     links.close();
+    wyrTopics.close();
     deletedSeqs.clear();
     confirmedClientIds.clear();
     pendingEchoes = [];
@@ -3107,6 +3135,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       closeMoreMenu();
       gallery.close();
       links.close();
+      wyrTopics.close();
       currentSession = null;
       endWipeReconcile("abandoned");
       // §(4): a lock aborts an in-flight scroll-to-original, but the pending
@@ -3205,6 +3234,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       closeMoreMenu();
       gallery.close();
       links.close();
+      wyrTopics.close();
       disposeAttachmentMedia(messageList);
       observer?.disconnect();
       lightbox.teardown();

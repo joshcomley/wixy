@@ -115,7 +115,11 @@ from wixy_server.livechat.wyr_game import (
 )
 from wixy_server.livechat.wyr_images import ComfyImageGenerator
 from wixy_server.livechat.wyr_pool import WyrPool
-from wixy_server.livechat.wyr_questions import WyrQuestion
+from wixy_server.livechat.wyr_questions import (
+    WyrQuestion,
+    questions_in_topics,
+    topic_summary,
+)
 from wixy_server.routes_livechat_media import _MEDIA_TYPE_BY_SUFFIX, _resolve_rendition_path
 from wixy_server.settings import Settings
 from wixy_server.storage import ProjectPaths
@@ -1306,6 +1310,64 @@ async def _wyr_view_response(
     )
 
 
+class WyrTopicsIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # The categories to play; `null` means every topic. An empty list is refused (no questions).
+    topics: list[str] | None
+
+
+def _wyr_topics_json(
+    questions: tuple[WyrQuestion, ...], selected: frozenset[str] | None
+) -> JsonObject:
+    summary = topic_summary(questions)
+    known = {category for category, _label, _count in summary}
+    chosen = None if selected is None or not (selected & known) else selected & known
+    return {
+        "topics": [
+            {
+                "id": category,
+                "label": label,
+                "count": count,
+                "selected": chosen is None or category in chosen,
+            }
+            for category, label, count in summary
+        ],
+        "all": chosen is None or len(chosen) == len(known),
+    }
+
+
+@router.get("/wyr/topics", response_model=None)
+async def get_wyr_topics(request: Request) -> JsonObject:
+    """The game's topics with how many questions each holds and which are being played. Declared
+    before `/wyr/{seq}` so the literal path wins."""
+    await require_server_token(request)
+    store: LiveChatStore = request.app.state.livechat_store
+    questions: tuple[WyrQuestion, ...] = request.app.state.livechat_wyr_questions
+    selected = await anyio.to_thread.run_sync(store.wyr_selected_topics)
+    return _wyr_topics_json(questions, selected)
+
+
+@router.put("/wyr/topics", response_model=None)
+async def put_wyr_topics(body: WyrTopicsIn, request: Request) -> JSONResponse:
+    """Choose which topics the next rounds come from (either player's Next uses it)."""
+    await require_server_token(request)
+    store: LiveChatStore = request.app.state.livechat_store
+    questions: tuple[WyrQuestion, ...] = request.app.state.livechat_wyr_questions
+    known = {category for category, _label, _count in topic_summary(questions)}
+    topics = body.topics
+    if topics is not None:
+        if not topics:
+            return _invalid("choose at least one topic")
+        if any(topic not in known for topic in topics):
+            return _invalid("unknown topic")
+        if set(topics) == known:
+            topics = None
+    await anyio.to_thread.run_sync(lambda: store.set_wyr_topics(topics))
+    selected = await anyio.to_thread.run_sync(store.wyr_selected_topics)
+    return JSONResponse(status_code=200, content=_wyr_topics_json(questions, selected))
+
+
 @router.post("/wyr", response_model=None)
 async def create_wyr_round(body: CreateWyrIn, request: Request) -> JSONResponse:
     """Start a round (the header's ... menu): picks a random unplayed question (preferring one
@@ -1335,7 +1397,8 @@ async def create_wyr_round(body: CreateWyrIn, request: Request) -> JSONResponse:
     now = time.time()
 
     def _start() -> tuple[MessageRow, bool, WyrQuestion] | None:
-        question, pooled = pick_round(store, questions, pool, random.Random())
+        playable = questions_in_topics(questions, store.wyr_selected_topics())
+        question, pooled = pick_round(store, playable, pool, random.Random())
         if question is None:
             return None
         try:
