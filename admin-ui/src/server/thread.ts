@@ -34,6 +34,7 @@ import {
   type TranscribeAnswer,
 } from "./api/messages";
 import { mountTeasePreview, type TeasePreviewHandle } from "./teasePreview";
+import { createGoodnightController, type GoodnightController } from "./goodnight";
 import { mountViewOnceViewer, type ViewOnceViewerHandle } from "./viewOnceViewer";
 import { uploadServerAttachment } from "./api/uploads";
 import { mountDrawingLayer, type DrawingLayer } from "./drawingLayer";
@@ -388,6 +389,16 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   jumpPill.hidden = true;
   threadWrap.append(thread, jumpPill);
   element.appendChild(threadWrap);
+
+  // The good-night scene: a live arrival from the other person saying good night (decided in
+  // handleStreamEvent below) fades the chat to a pixel-art night; see spec/server-chat/goodnight-scene.md.
+  const goodnight: GoodnightController = createGoodnightController({
+    win,
+    document: documentRef,
+    hooks,
+    view: element,
+    threadWrap,
+  });
 
   const threadScroll: ChatThreadScroll = mountChatThreadScroll(thread, jumpPill);
 
@@ -2346,6 +2357,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   }
 
   function clearAfterWipe(): void {
+    goodnight.stop();
     if (activeViewOnceViewer !== null) {
       activeViewOnceViewer.close();
       activeViewOnceViewer = null;
@@ -3119,6 +3131,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       updateRecorderUi();
       disposeAttachmentMedia(messageList);
       lightbox.teardown();
+      goodnight.stop();
       if (activeViewOnceViewer !== null) {
         activeViewOnceViewer.close();
         activeViewOnceViewer = null;
@@ -3144,6 +3157,16 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           );
           if (isArrival && !identity.isMine(event.message.sender) && event.message.wyrRef == null) {
             game.noteChatActivity();
+          }
+          // Good night from the other person, live (never a history load, an update, an own send,
+          // or a system row): the pixel-art night scene. It decides freshness and cool-down itself.
+          if (
+            event.type === "message" &&
+            isArrival &&
+            event.message.sender !== "" &&
+            !identity.isMine(event.message.sender)
+          ) {
+            goodnight.noteArrival({ text: event.message.text, createdAt: event.message.createdAt });
           }
           return;
         }
@@ -3208,6 +3231,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       disposeAttachmentMedia(messageList);
       observer?.disconnect();
       lightbox.teardown();
+      goodnight.stop();
       if (activeViewOnceViewer !== null) {
         activeViewOnceViewer.close();
         activeViewOnceViewer = null;

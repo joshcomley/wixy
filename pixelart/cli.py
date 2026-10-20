@@ -11,6 +11,7 @@ from PIL import Image
 
 from . import palette as pal
 from .compose import load_scene, save_scene_gif
+from .export import export_ts
 from .lint import lint
 from .model import Frame, Palette, PaletteEntry, PxlError, Sprite, dump, parse
 from .pixelize import KEY_CHARS, pixelize
@@ -174,6 +175,18 @@ def _cmd_compose(a: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _cmd_export_ts(a: argparse.Namespace) -> int:
+    out = Path(a.output)
+    files = sorted(a.files)
+    names = " ".join(Path(f).as_posix() for f in files)
+    command = f"python -m pixelart export-ts {names} -o {out.as_posix()}"
+    text = export_ts(files, command)
+    with out.open("w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
+    print(f"wrote {out} ({len(files)} sprites)")
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="python -m pixelart", description="Palette-locked pixel art authored as data (.pxl)."
@@ -237,6 +250,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("scene")
     p.add_argument("-o", "--output")
     p.set_defaults(fn=_cmd_compose)
+
+    p = sub.add_parser("export-ts", help="emit sprites as a strict-TypeScript module")
+    p.add_argument("files", nargs="+")
+    p.add_argument("-o", "--output", required=True)
+    p.set_defaults(fn=_cmd_export_ts)
     return ap
 
 
