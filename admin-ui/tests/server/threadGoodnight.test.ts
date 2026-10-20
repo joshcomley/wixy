@@ -1,5 +1,6 @@
 // How the Server chat thread triggers the good-night scene (spec/server-chat/goodnight-scene.md,
-// "Trigger"): a LIVE arrival from the OTHER person only - never an own send, a system row, an
+// "Trigger"): only when Bubble says good night - on her own screen as she sends it and on the
+// other person's as it arrives live. Never when anyone else says it, and never a system row, an
 // update, a history load, a stale message (reconnect catch-up) or inside the 10-minute cool-down.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,15 +11,17 @@ import { mountServerThread, type ServerThreadView } from "../../src/server/threa
 import type { LockHooks, ServerSession } from "../../src/server/types";
 import { stubCanvas, type CanvasStub } from "./goodnightHelpers";
 
-const { getHistory, getUsage, getDrawings } = vi.hoisted(() => ({
+const { getHistory, getUsage, getDrawings, sendMessage } = vi.hoisted(() => ({
   getHistory: vi.fn(),
   getUsage: vi.fn(),
   getDrawings: vi.fn(),
+  sendMessage: vi.fn(),
 }));
 vi.mock("../../src/server/api/messages", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/server/api/messages")>()),
   getHistory,
   getUsage,
+  sendMessage,
 }));
 vi.mock("../../src/server/api/drawings", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/server/api/drawings")>()),
@@ -27,12 +30,12 @@ vi.mock("../../src/server/api/drawings", async (importOriginal) => ({
 
 const SESSION: ServerSession = { token: "tok", expiresAt: 9_999_999_999 };
 
-function identity(): ServerIdentity {
+function identity(name: string): ServerIdentity {
   return {
-    getName: () => "Alice",
+    getName: () => name,
     setName: vi.fn(),
     getDeviceId: () => "device-1",
-    isMine: (sender) => sender.toLowerCase() === "alice",
+    isMine: (sender) => sender.toLowerCase() === name.toLowerCase(),
   };
 }
 
@@ -55,7 +58,7 @@ function win(): Window {
   } as unknown as Window;
 }
 
-function message(seq: number, text: string | null, sender = "Bob", ageS = 0): Message {
+function message(seq: number, text: string | null, sender = "Bubble", ageS = 0): Message {
   return {
     seq,
     clientId: `c${seq}`,
@@ -82,10 +85,11 @@ let view: ServerThreadView;
 
 const scene = (): HTMLCanvasElement | null => document.body.querySelector(":scope > canvas.wx-srv-goodnight-canvas");
 
-async function mount(history: Message[] = []): Promise<void> {
+/** Mounted as Cupcake (the other person) unless told otherwise. */
+async function mount(history: Message[] = [], me = "Cupcake"): Promise<void> {
   getHistory.mockResolvedValue(page(history));
   hooks = makeHooks();
-  view = mountServerThread({ identity: identity(), hooks, win: win(), onSettings: vi.fn() });
+  view = mountServerThread({ identity: identity(me), hooks, win: win(), onSettings: vi.fn() });
   document.body.appendChild(view.element);
   await view.attach(SESSION);
   await flush();
@@ -99,7 +103,16 @@ beforeEach(() => {
   getHistory.mockReset();
   getUsage.mockReset().mockResolvedValue({ mediaAvailable: true, usedBytes: 0, quotaBytes: 1, freeBytes: 1, erasurePending: false });
   getDrawings.mockReset().mockResolvedValue([]);
+  sendMessage.mockReset();
 });
+
+async function sendAs(me: string, text: string): Promise<void> {
+  sendMessage.mockResolvedValue({ ok: true, message: message(50, text, me) });
+  const textarea = view.element.querySelector<HTMLTextAreaElement>("textarea")!;
+  textarea.value = text;
+  view.element.querySelector<HTMLButtonElement>(".wx-chat-send-button")?.click();
+  await flush();
+}
 
 afterEach(() => {
   view.teardown();
@@ -108,7 +121,7 @@ afterEach(() => {
 });
 
 describe("good-night trigger", () => {
-  it("fires on a live arrival from the other person, and suspends the idle lock", async () => {
+  it("fires when Bubble's good night arrives live, and suspends the idle lock", async () => {
     await mount();
     view.handleStreamEvent({ type: "message", message: message(1, "ok good night x") });
     expect(scene()).not.toBeNull();
@@ -123,9 +136,40 @@ describe("good-night trigger", () => {
     expect(scene()).toBeNull();
   });
 
-  it("does not fire on my own message", async () => {
+  it("fires on Bubble's own screen when she sends good night", async () => {
+    await mount([], "Bubble");
+    await sendAs("Bubble", "night night x");
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(scene()).not.toBeNull();
+  });
+
+  it("plays once when her own good night also comes back over the stream", async () => {
+    await mount([], "Bubble");
+    await sendAs("Bubble", "good night");
+    view.handleStreamEvent({ type: "message", message: message(50, "good night", "Bubble") });
+    expect(document.querySelectorAll("canvas.wx-srv-goodnight-canvas")).toHaveLength(1);
+  });
+
+  it("matches her name case-insensitively", async () => {
     await mount();
-    view.handleStreamEvent({ type: "message", message: message(1, "good night", "Alice") });
+    view.handleStreamEvent({ type: "message", message: message(1, "good night", " bubble ") });
+    expect(scene()).not.toBeNull();
+  });
+
+  it("never fires when Cupcake says good night, on either screen", async () => {
+    await mount([], "Bubble"); // her screen, his message arriving
+    view.handleStreamEvent({ type: "message", message: message(1, "good night", "Cupcake") });
+    expect(scene()).toBeNull();
+    view.teardown();
+    await mount([], "Cupcake"); // his own screen, as he sends it
+    await sendAs("Cupcake", "good night");
+    view.handleStreamEvent({ type: "message", message: message(50, "good night", "Cupcake") });
+    expect(scene()).toBeNull();
+  });
+
+  it("never fires for anyone else's good night", async () => {
+    await mount();
+    view.handleStreamEvent({ type: "message", message: message(1, "good night", "Somebody") });
     expect(scene()).toBeNull();
   });
 
@@ -152,9 +196,9 @@ describe("good-night trigger", () => {
 
   it("does not fire on an old message (a reconnect catching up)", async () => {
     await mount();
-    view.handleStreamEvent({ type: "message", message: message(1, "good night", "Bob", 121) });
+    view.handleStreamEvent({ type: "message", message: message(1, "good night", "Bubble", 121) });
     expect(scene()).toBeNull();
-    view.handleStreamEvent({ type: "message", message: message(2, "good night", "Bob", 100) });
+    view.handleStreamEvent({ type: "message", message: message(2, "good night", "Bubble", 100) });
     expect(scene()).not.toBeNull();
   });
 

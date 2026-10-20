@@ -1,6 +1,6 @@
 # Server chat — the good-night scene
 
-Operator request (workspace #53): when the other person says good night, the chat
+Operator request (workspace #53): when she (Bubble) says good night, the chat
 fades to a pixel-art night: black sky, twinkling stars, an owl on a branch that
 blinks and looks left and right. A blown bubble floats in, captures the owl and
 floats off with it. The chat comes back, keeping the twinkling stars as its
@@ -8,9 +8,14 @@ background.
 
 ## Trigger
 
-- Fires on a **live arrival from the other person** only: `thread.handleStreamEvent`
-  `message` case where `isArrival` is true, `sender !== ""`, and
-  `!identity.isMine(sender)`. Never on history load, `message_updated`, own sends,
+- Fires only when **Bubble** says good night (operator decision #1919, 2026-10-20: "it
+  should only be when she says goodnight ... I want it to be a surprise for her"; she uses
+  the chat name Bubble, he uses Cupcake; play on both screens). The sender's display name
+  must be in `GOODNIGHT_SENDERS` (`["bubble"]`, trimmed, case-insensitive). It plays on her
+  screen when her own send is confirmed (`send()` success) and on the other person's screen
+  when it arrives live (`handleStreamEvent` `message` with `isArrival`, `sender !== ""`);
+  her own message echoed back over the stream cannot play it twice (one scene at a time).
+  Never when Cupcake (or anyone else) says it, never on history load, `message_updated`,
   or a message older than 120 s by `createdAt` (reconnect catch-up).
 - Text match (`goodnight.ts`, exported `isGoodNight(text)`): case-insensitive,
   whole-word, punctuation/emoji tolerant: `good night`, `goodnight`, `good nite`,

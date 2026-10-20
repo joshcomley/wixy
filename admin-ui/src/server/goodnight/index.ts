@@ -1,14 +1,20 @@
 // The good-night scene's wiring API for `thread.ts` (spec/server-chat/goodnight-scene.md).
 //
-// thread.ts decides WHO sent it (a live arrival from the other person); this decides WHETHER it
-// fires: the text says good night, the message is fresh (not a reconnect catch-up), the tab is
-// out of its cool-down, and no scene or starfield is already up. Purely local - nothing is sent.
+// thread.ts reports every live message (an arrival over the stream, or this device's own send once
+// the server confirms it); this decides WHETHER it fires: the sender is one of GOODNIGHT_SENDERS,
+// the text says good night, the message is fresh (not a reconnect catch-up), the tab is out of its
+// cool-down, and no scene or starfield is already up. So the scene plays on her screen as she sends
+// it and on the other person's as it arrives - never for anyone else's good night (operator
+// decision #1919). Purely local - nothing is sent.
 
 import { isGoodNight } from "./match";
 import { startScene, type SceneDeps, type SceneHandle } from "./scene";
 
 export { isGoodNight } from "./match";
 export type { SceneHandle } from "./scene";
+
+/** The chat display names whose good night plays the scene (matched trimmed, case-insensitively). */
+export const GOODNIGHT_SENDERS: readonly string[] = ["bubble"];
 
 /** Ignore a message older than this by `createdAt` (a reconnect replaying the backlog). */
 export const MAX_MESSAGE_AGE_MS = 120_000;
@@ -23,7 +29,9 @@ export function resetGoodnightCooldown(): void {
   lastFiredAt = null;
 }
 
-export interface GoodnightArrival {
+export interface GoodnightMessage {
+  /** The sender's display name, as on `Message.sender`. */
+  readonly sender: string;
   readonly text: string | null;
   /** Epoch SECONDS, as on `Message.createdAt`. */
   readonly createdAt: number;
@@ -37,9 +45,9 @@ export interface GoodnightDeps extends Omit<SceneDeps, "now"> {
 }
 
 export interface GoodnightController {
-  /** The caller has already established this is a live arrival from the other person. Returns
+  /** A live message: an arrival over the stream, or this device's own confirmed send. Returns
    * whether a scene started. */
-  noteArrival(message: GoodnightArrival): boolean;
+  noteMessage(message: GoodnightMessage): boolean;
   /** Remove the scene / starfield (lock, detach, wipe, teardown). Idempotent. */
   stop(): void;
 }
@@ -55,7 +63,8 @@ export function createGoodnightController(deps: GoodnightDeps): GoodnightControl
   }
 
   return {
-    noteArrival(message: GoodnightArrival): boolean {
+    noteMessage(message: GoodnightMessage): boolean {
+      if (!GOODNIGHT_SENDERS.includes(message.sender.trim().toLowerCase())) return false;
       if (!isGoodNight(message.text)) return false;
       const t = now();
       if (t - message.createdAt * 1000 > MAX_MESSAGE_AGE_MS) return false;
