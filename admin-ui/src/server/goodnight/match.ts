@@ -15,6 +15,7 @@ const PATTERN = new RegExp(`(?:^| )(?:${GOOD_NIGHT}|${G_NIGHT}|${NIGHT_NIGHT})(?
 function letters(text: string): string {
   return text
     .toLowerCase()
+    .replace(/['’‘`]s\b/g, "") // night's -> night
     .replace(/['’‘`]/g, "")
     .replace(/[^a-z]+/g, " ")
     .trim();

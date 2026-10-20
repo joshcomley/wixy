@@ -299,11 +299,14 @@ export function startScene(deps: SceneDeps): SceneHandle {
 
   function close(): void {
     if (phase === "closed") return;
+    const wasPlaying = phase === "playing" && !reduced;
     phase = "closed";
     cancelFrame();
     releaseIdle();
-    canvas.removeEventListener("click", onClick);
-    doc.removeEventListener("keydown", onKeyDown);
+    if (wasPlaying) {
+      canvas.removeEventListener("click", onClick);
+      doc.removeEventListener("keydown", onKeyDown);
+    }
     win.removeEventListener?.("resize", onResize);
     canvas.remove();
     bgContainer?.remove();

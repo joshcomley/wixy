@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { startScene, GN_BACKGROUND, GN_FADING, GN_HIDDEN, type SceneHandle } from "../../src/server/goodnight/scene";
 import { MESSAGES_BACK_FROM_MS, SCENE_END_MS } from "../../src/server/goodnight/timeline";
 import { fakeWin, stubCanvas, trackDocumentListeners, type CanvasStub, type FakeWin } from "./goodnightHelpers";
@@ -7,8 +7,8 @@ let canvasStub: CanvasStub;
 let clock = 0;
 let view: HTMLElement;
 let wrap: HTMLElement;
-let release: ReturnType<typeof vi.fn>;
-let suspend: ReturnType<typeof vi.fn>;
+let release: Mock<() => void>;
+let suspend: Mock<(reason: "goodnight") => () => void>;
 let handle: SceneHandle | null;
 
 function start(fw: FakeWin): SceneHandle {
@@ -40,8 +40,8 @@ beforeEach(() => {
   wrap.appendChild(document.createElement("div"));
   view.appendChild(wrap);
   document.body.appendChild(view);
-  release = vi.fn();
-  suspend = vi.fn(() => release);
+  release = vi.fn<() => void>();
+  suspend = vi.fn<(reason: "goodnight") => () => void>(() => release);
   handle = null;
 });
 
@@ -84,8 +84,9 @@ describe("scene lifecycle", () => {
       for (const call of [...c.fillRect.mock.calls, ...c.clearRect.mock.calls]) {
         for (const n of call) expect(Number.isInteger(n)).toBe(true);
       }
-      expect(c.imageSmoothingEnabled).toBe(false);
     }
+    // the scene canvas is the first context created; smoothing is off on it
+    expect(canvasStub.contexts[0]!.imageSmoothingEnabled).toBe(false);
   });
 
   it("brings the chat back at the hand-over and moves to background mode when it ends", () => {

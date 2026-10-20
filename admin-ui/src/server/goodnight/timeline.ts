@@ -32,6 +32,27 @@ export const TICK_MS = 50;
 /** The sky colour (make_scene.py `background`). */
 export const SKY_COLOUR = "#05060d";
 
+/** Total duration of one pass through an anim of a sprite, from the generated data. */
+function animTotalMs(sprite: SpriteData, anim: string): number {
+  const a = sprite.anims[anim];
+  if (a === undefined) throw new Error(`goodnight: sprite has no anim ${anim}`);
+  const seq =
+    a.mode === "pingpong" && a.frames.length > 2 ? a.frames.concat(a.frames.slice(1, -1).reverse()) : [...a.frames];
+  return seq.reduce((sum, f) => sum + (sprite.frames.find((fr) => fr.name === f)?.ms ?? 100), 0);
+}
+
+type Fade = readonly (readonly [number, number])[];
+
+// make_scene.py's constants, in the same order. Everything below derives from these.
+const APPEAR = 1500; // branch + owl start dithering in
+const SETTLED = 2300; // fully visible; the owl's intro starts
+const INTRO_END = SETTLED + animTotalMs(OWL_PERCHED_SPRITE, "intro");
+const BUBBLE_IN = INTRO_END - 1200; // bubble rises into view as the owl settles after the turn
+const CAPTURE = BUBBLE_IN + 9000; // a slow drift in
+const LIFT = CAPTURE + 2200; // glances, then the smile, then it starts to float
+const GONE = LIFT + 11000; // a slow float up and away
+const CHAT_BACK = GONE + 1000;
+
 /**
  * THE ONE PLACE the timing and animation names live. It mirrors make_scene.py; when that file's
  * timeline or the owl's anims change, change this table (and regenerate sprites.gen.ts) and
@@ -45,27 +66,29 @@ export const TIMELINE = {
   /** A star's own fade-in, in ticks. */
   starFadeTicks: 6,
   /** [ms, opacity] fade points. */
-  moonFade: [[800, 0], [1800, 1], [13000, 1], [14000, 0]] as readonly (readonly [number, number])[],
-  branchFade: [[1500, 0], [2300, 1], [13000, 1], [14000, 0]] as readonly (readonly [number, number])[],
-  owlFadeIn: [[1500, 0], [2300, 1]] as readonly (readonly [number, number])[],
-  /** The owl's perched anim starts here. */
-  owlStartMs: 2300,
-  bubbleStartMs: 6000,
-  /** Bubble reaches the owl; the owl layer hands over to its carried-away anim. */
-  captureMs: 9000,
-  liftMs: 9500,
+  moonFade: [[800, 0], [1800, 1], [GONE - 1000, 1], [GONE, 0]] as Fade,
+  branchFade: [[APPEAR, 0], [SETTLED, 1], [GONE - 1000, 1], [GONE, 0]] as Fade,
+  owlFadeIn: [[APPEAR, 0], [SETTLED, 1]] as Fade,
+  /** The owl's `intro` anim runs SETTLED..introEndMs, then `watch` until capture. */
+  owlStartMs: SETTLED,
+  introEndMs: INTRO_END,
+  bubbleStartMs: BUBBLE_IN,
+  /** Bubble reaches the owl; the owl layer hands over to `bubble-happy`, riding the bubble. */
+  captureMs: CAPTURE,
+  liftMs: LIFT,
   /** Bubble (with the owl) has left the top of the scene. */
-  goneMs: 14000,
-  bubbleArriveSwayPx: 6,
-  bubbleLeaveSwayPx: 5,
-  /** The chat comes back and the canvas hands over to background mode. */
-  messagesBackFromMs: 14_000,
-  endMs: 15_000,
+  goneMs: GONE,
+  bubbleSwayPeriodMs: 3400,
+  bubbleArriveSwayPx: 8,
+  bubbleLeaveSwayPx: 7,
+  /** The chat fades back in over the last second and the canvas hands over to background mode. */
+  messagesBackFromMs: GONE,
+  endMs: CHAT_BACK,
   /** Anim names per layer, as authored in the .pxl files. */
   anims: {
-    owlPerched: "idle",
-    owlCaptured: "surprised",
-    owlCarried: "doze",
+    owlIntro: "intro",
+    owlWatch: "watch",
+    owlCarried: "bubble-happy",
     bubble: "wobble",
     star: "twinkle",
   },
@@ -73,6 +96,7 @@ export const TIMELINE = {
 
 export const MESSAGES_BACK_FROM_MS = TIMELINE.messagesBackFromMs;
 export const SCENE_END_MS = TIMELINE.endMs;
+
 
 /** The reference scene the art was drawn for (portrait phone, scene pixels). */
 const REF_W = 120;
@@ -309,7 +333,7 @@ function drift(
     const f = k / n;
     const e = f * f * (3 - 2 * f);
     const weight = grow ? f : 1 - f;
-    const sway = amp * Math.sin((2 * Math.PI * k * TICK_MS) / 2400) * weight;
+    const sway = amp * Math.sin((2 * Math.PI * k * TICK_MS) / TIMELINE.bubbleSwayPeriodMs) * weight;
     keys.push({
       t: t0 + k,
       x: pyRound(p0[0] + (p1[0] - p0[0]) * e + sway),
@@ -422,24 +446,32 @@ export function buildTimeline(size: SceneSize, seed: number): Timeline {
   const inside = bubble.filter((k) => k.t >= capture).map((k) => ({ t: k.t, x: k.x + 5, y: k.y + 5 }));
 
   const origin = { x: 0, y: 0, opacity: 1 };
+  const introEnd = tick(TIMELINE.introEndMs);
   layers.push(
     layer(
       "owl",
-      { anim: TIMELINE.anims.owlPerched },
+      { anim: TIMELINE.anims.owlIntro },
       { x: ox, y: oy, opacity: 1 },
-      [
-        ...fade(...TIMELINE.owlFadeIn),
-        { t: capture, opacity: 1 },
-        { t: capture + 1, opacity: 0 },
-      ],
+      [...fade(...TIMELINE.owlFadeIn), { t: introEnd, opacity: 1 }, { t: introEnd + 1, opacity: 0 }],
       tick(TIMELINE.owlStartMs),
     ),
   );
   layers.push(
-    layer("owl", { anim: TIMELINE.anims.owlCaptured }, origin, shownBetween(capture + 1, lift + 2, inside), capture + 1),
+    layer(
+      "owl",
+      { anim: TIMELINE.anims.owlWatch },
+      { x: ox, y: oy, opacity: 1 },
+      [
+        { t: introEnd, opacity: 0 },
+        { t: introEnd + 1, opacity: 1 },
+        { t: capture, opacity: 1 },
+        { t: capture + 1, opacity: 0 },
+      ],
+      introEnd + 1,
+    ),
   );
   layers.push(
-    layer("owl", { anim: TIMELINE.anims.owlCarried }, origin, shownBetween(lift + 3, gone + 10, inside), lift + 3),
+    layer("owl", { anim: TIMELINE.anims.owlCarried }, origin, shownBetween(capture + 1, gone + 10, inside), capture + 1),
   );
   layers.push(layer("bubble", { anim: TIMELINE.anims.bubble }, origin, bubble));
 

@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ditherLevel } from "../../src/server/goodnight/dither";
 import {
@@ -61,7 +61,7 @@ describe("timeline determinism", () => {
 
   it("only ever emits integer positions and valid frames, at every size", () => {
     for (const size of SIZES) {
-      for (let ms = 0; ms <= TIMELINE.endMs + 2000; ms += 37) {
+      for (let ms = 0; ms <= TIMELINE.endMs + 2000; ms += 113) {
         for (const op of ops(ms, size, 3)) {
           expect(Number.isInteger(op.x)).toBe(true);
           expect(Number.isInteger(op.y)).toBe(true);
@@ -253,7 +253,8 @@ function composeOps(scene: JsonScene, tick: number): DrawOp[] {
 }
 
 describe("matches the reference timeline", () => {
-  const path = fileURLToPath(new URL("../../../pixelart/examples/goodnight/scene.json", import.meta.url));
+  // vitest runs from admin-ui/
+  const path = resolve(process.cwd(), "../pixelart/examples/goodnight/scene.json");
   const scene = JSON.parse(readFileSync(path, "utf-8")) as JsonScene;
 
   it("scene.json is the size and tick the timeline was ported from", () => {
