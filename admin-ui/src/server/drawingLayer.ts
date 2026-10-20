@@ -114,6 +114,9 @@ export interface DrawingLayerDeps {
   anchorElement(seq: number): HTMLElement | null;
   /** Holds the thread where it is (no stick-to-bottom) until the returned release runs. */
   holdScroll(): () => void;
+  /** The toolbar just changed the thread's height and this layer already kept the content in
+   * place: the thread's own scroll keeper adopts that position instead of compensating again. */
+  adoptScrollPosition?(): void;
   /** Drawings changed the thread's height from outside this screen's own pen. */
   onRemoteContent(): void;
   /** Injectable for tests; the real HTTP client by default. */
@@ -510,7 +513,10 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
       const before = toolbarHeight();
       change();
       const delta = toolbarHeight() - before;
-      if (delta !== 0) thread.scrollTop += delta;
+      if (delta !== 0) {
+        thread.scrollTop += delta;
+        deps.adoptScrollPosition?.();
+      }
     } finally {
       keepingInPlace = false;
     }
