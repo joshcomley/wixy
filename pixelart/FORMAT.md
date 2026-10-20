@@ -103,3 +103,74 @@ against the model's `require` rules.
   minimum 2) and binary transparency.
 - Sprite sheet: frames left→right in file order, with a JSON sidecar
   `{name, w, h, frames:[{name, x, y, ms}], anims:{name:{frames:[…], mode}}}`.
+
+## Parsing details (resolved ambiguities)
+
+- A `name` is `[a-z0-9-]+`, optionally followed by `.model` (so `wixie.model` is valid).
+- Inline comments: whitespace, `#`, whitespace, text (`tag icon   # note`). A `#` directly
+  followed by a non-space (a hex colour) or ending the line (the `#` key in a `ramp` list) is
+  never a comment. In a `palette` block a line whose first token is `#` followed by a colour
+  is the entry for the key `#`.
+- Rows of a full frame are consumed raw (the next H non-blank lines), so a row may begin with
+  `#`. Rows have no spaces.
+- A derived frame inherits its parent's *per-frame* anchors, moved by its `shift=`; default
+  anchors are never shifted. Anchor coordinates must lie inside the canvas.
+- Default `anchor` lines must precede the first `frame`; an `anchor` after an `anim` line, or
+  after any frame, belongs to the most recent frame until the next `anim`.
+- `uses` must precede the `palette` block. With `uses`, a plain `palette` block may only
+  repeat model entries unchanged; new colours need `palette extend`; redefining a model key to
+  another colour is always an error. Ramps are inherited.
+- `require` directives are checked by lint as **errors** (`model-anchor-missing`,
+  `model-height`, `model-width`) for every frame, both the used model's and the sprite's own.
+- A `pingpong` anim plays `a b c b` (end frames are not repeated).
+
+## Lint conventions
+
+- Role names with special meaning: `outline*` (outline checks), `highlight*`, `eye*`,
+  `glint*`, `spark*`, `star*` (exempt from the orphan check).
+- Animation drift is declared with tags: `tag drift-ok` (any), `tag drift-<anim>` (one anim),
+  `tag drift-<anchor>` (one anchor). Anchors starting `foot`, `hand`, `arm`, `leg`, `tail`,
+  `tip`, `wing`, `paw`, `tool`, `weapon` are treated as limbs and may move; other anchors may
+  move at most 1 px, and the lowest opaque row ("baseline") may not move.
+
+## Scenes
+
+`python -m pixelart compose scene.json [-o out.gif]` renders several sprites on a timeline to
+an animated GIF. A scene is a JSON object:
+
+```jsonc
+{
+  "width": 64, "height": 48,          // canvas, 1..1024 (required)
+  "background": "#101020",            // "#rrggbb" or "transparent" (default)
+  "tick_ms": 100,                     // duration of one tick, 10..10000 (default 100)
+  "ticks": 20,                        // number of ticks rendered (required, 1..2000)
+  "loop": true,                       // GIF loops forever (default true)
+  "scale": 4,                         // integer nearest-neighbour output scale (default 1)
+  "layers": [                         // drawn first-to-last, later layers on top
+    {
+      "sprite": "mascot.pxl",         // path relative to the scene file
+      "anim": "walk",                 // exactly one of "anim" (plays by elapsed time) ...
+      "frame": "idle-0",              // ... or "frame" (a fixed frame)
+      "x": 0, "y": 10,                // base position (default 0,0)
+      "opacity": 1.0,                 // base opacity 0..1 (default 1)
+      "start_tick": 0,                // anim phase offset (default 0)
+      "keyframes": [                  // optional; t in ticks, x/y/opacity default to the base
+        { "t": 0,  "x": 0,  "y": 10, "opacity": 0.0 },
+        { "t": 10, "x": 40, "y": 10, "opacity": 1.0 }
+      ]
+    }
+  ]
+}
+```
+
+- Keyframe values are interpolated linearly per tick (the first/last key is held outside the
+  range), then `x` and `y` are **rounded half up to whole pixels** for that tick.
+- Opacity is never alpha blending. A sprite pixel at canvas position `(x, y)` is drawn only if
+  `BAYER4[y % 4][x % 4] < round_half_up(opacity * 16)`, with the ordered 4x4 Bayer matrix
+  `[[0,8,2,10],[12,4,14,6],[3,11,1,9],[15,7,13,5]]`. Opacity 0 draws nothing, 1 draws
+  everything, and each step of 1/16 adds one cell of every 4x4 block (sets are nested, so a
+  fade-in only ever adds pixels). The pattern is anchored to the canvas, not the sprite, so it
+  does not swim as a layer moves.
+- An `anim` layer shows the frame whose cumulative `ms` interval contains
+  `(tick - start_tick) * tick_ms` (looping, `once` holding the last frame, `pingpong` expanded).
+- Every output pixel is an exact palette or background colour, so the GIF keeps the palette lock.

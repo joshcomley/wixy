@@ -1,0 +1,21 @@
+pxl 1
+name hero.model
+size 6x6
+palette
+  .  transparent
+  k  #101820  outline
+  s  #c08040  skin
+  l  #f0d090  skin-light
+  ramp skin = k s l
+end
+require anchors eye-l eye-r
+require height 2..4
+anchor eye-l 1,1
+anchor eye-r 4,1
+frame front
+......
+.kkkk.
+ksllsk
+ksllsk
+.kkkk.
+......
