@@ -286,7 +286,16 @@ reference for how the loop goes in practice:
 - `make_scene.py` → `scene.json` → `previews/goodnight-scene.gif`: the whole timeline
   (`python -m pixelart.examples.goodnight.make_scene`, then `compose`).
 
-What the review loop caught, in order — expect the same kinds of mistakes in your own
+`examples/ui/` is the interface-art counterpart: `icons.pxl` (eight 16×16 icons —
+heart, star, moon, chat, lock, camera, microphone, dice — drawn as one file so they share
+outline, light and weight), `panel.pxl` (a 9-slice card with 4 px corners), and
+`night-tile.pxl` (a seamless background tile). `python -m pixelart.examples.ui.make_previews`
+renders the icon board, the card stretched to three sizes and the tile repeated 3×3.
+Geometric shapes (the star's five points, the moon's crescent) were laid out from a true
+polygon / two circles first, then outlined and shaded by hand — a fine use of code, as long
+as a person-style pass fixes the result.
+
+What the review loop caught on the owl, in order — expect the same kinds of mistakes in your own
 first drafts:
 
 1. Symmetric shading (pillow-like, no light direction) — fixed by darkening the side

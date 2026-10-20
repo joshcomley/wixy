@@ -79,6 +79,9 @@ Authored BY an agent following GUIDE.md alone, rendered and linted clean:
    happy/react (4–6f) animations, consistent across all.
 2. Interface/game art: 16×16 icon set (≥6), a 9-slice card/panel frame, a small
    tileable background.
-3. A side-by-side "before" (raw image-gen output) vs "after" (this pipeline).
-The operator judges style against his reference (to be supplied in chat); the
-guide is then tuned to that reference.
+3. ~~A side-by-side "before" (raw image-gen output) vs "after"~~ — dropped: the image
+   generator is a paid API (spend gate) and the operator's own earlier attempts are the
+   "before". `pixelize` is covered by tests on a known upscaled sprite.
+Delivered: the good-night owl scene (examples/goodnight, wired into Server chat) and the
+interface set (examples/ui). Operator feedback on the owl: "I love it" — revision 1 (slow
+bubble, head turn, smile, blue eyes) applied.
