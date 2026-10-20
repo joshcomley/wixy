@@ -4259,8 +4259,10 @@ video.wx-srv-gallery-media {
   top: 0;
   left: 0;
   z-index: 1000;
-  image-rendering: pixelated;
+  /* crisp-edges first as the old-browser fallback; pixelated (nearest-neighbour in every
+     current browser) must come last so it wins wherever it is supported */
   image-rendering: crisp-edges;
+  image-rendering: pixelated;
   touch-action: none;
   cursor: pointer;
 }
