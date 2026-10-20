@@ -189,9 +189,9 @@ describe("scene lifecycle", () => {
     fw.innerHeight = 400;
     fw.fire("resize");
     const canvas = visibleCanvas()!;
-    expect([canvas.width, canvas.height]).toEqual([120, 67]); // scale 6
+    expect([canvas.width, canvas.height]).toEqual([360, 200]); // scale 2 (the 400px height bounds it)
     expect(canvas.style.width).toBe("720px");
-    expect(canvas.style.height).toBe(`${67 * 6}px`);
+    expect(canvas.style.height).toBe("400px");
   });
 
   it("does nothing when there is no 2D canvas", () => {

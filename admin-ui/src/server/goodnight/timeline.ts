@@ -112,10 +112,12 @@ export interface SceneGeometry extends SceneSize {
   readonly scale: number;
 }
 
-/** spec "Rendering rules": scale = max(2, floor(innerWidth / 120)); the scene is as many whole
+/** spec "Rendering rules": scale = max(2, floor(min(innerWidth / 120, innerHeight / 200))); the scene is as many whole
  * scene pixels as cover the viewport. */
 export function sceneGeometry(innerWidth: number, innerHeight: number): SceneGeometry {
-  const scale = Math.max(2, Math.floor(innerWidth / 120));
+  // At least ~120 scene pixels across and ~200 down: on a phone the width decides, on a wide
+  // screen the height does, so the owl stays a sensible size on every window.
+  const scale = Math.max(2, Math.floor(Math.min(innerWidth / 120, innerHeight / 200)));
   return {
     scale,
     w: Math.max(1, Math.ceil(innerWidth / scale)),

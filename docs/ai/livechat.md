@@ -2051,7 +2051,7 @@ Nothing is sent or stored.
   `createGoodnightController().noteArrival` then requires `isGoodNight(text)` (`goodnight/match.ts`), `createdAt` no
   more than 120 s old, no scene or starfield already up, and at most one scene per 10 minutes per tab (module scope).
 - **Rendering.** `goodnight/scene.ts`: one `<canvas>` (viewport, `position: fixed`, on `document.body`) drawn at
-  `scale = max(2, floor(innerWidth / 120))` scene pixels, `image-rendering: pixelated`, smoothing off. Sprites are
+  `scale = max(2, floor(min(innerWidth / 120, innerHeight / 200)))` scene pixels, `image-rendering: pixelated`, smoothing off. Sprites are
   pre-rendered once per frame to offscreen canvases and blitted with `drawImage(canvas, x, y)` at whole pixels only.
   Fades are a Bayer 4x4 dither (`goodnight/dither.ts`, the rule in `pixelart/FORMAT.md` "Scenes"), never alpha; the
   chat UI behind fades with CSS opacity (`wx-srv-gn-*` classes on the thread view, `chat.css`).

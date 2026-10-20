@@ -25,7 +25,7 @@ background.
 
 - One `<canvas>` covering the viewport (`position: fixed; inset: 0`, mounted on
   `document.body` like the view-once overlay), drawn at a low scene resolution:
-  `scale = max(2, floor(innerWidth / 120))`, scene W×H = `ceil(innerWidth/scale)` ×
+  `scale = max(2, floor(min(innerWidth / 120, innerHeight / 200)))` (the height bounds it on wide screens), scene W×H = `ceil(innerWidth/scale)` ×
   `ceil(innerHeight/scale)`; CSS size = viewport; `image-rendering: pixelated`;
   `imageSmoothingEnabled = false`. Every sprite position is rounded to a whole scene
   pixel each frame. Re-layout on resize.

@@ -25,10 +25,12 @@ function ops(ms: number, size: SceneSize = REF, seed = 7): readonly DrawOp[] {
 }
 
 describe("sceneGeometry", () => {
-  it("scales by max(2, floor(width / 120)) and covers the viewport", () => {
+  it("scales by max(2, floor(min(width / 120, height / 200))) and covers the viewport", () => {
     expect(sceneGeometry(360, 640)).toEqual({ scale: 3, w: 120, h: 214 });
     expect(sceneGeometry(100, 100)).toEqual({ scale: 2, w: 50, h: 50 });
-    expect(sceneGeometry(1920, 1080)).toEqual({ scale: 16, w: 120, h: 68 });
+    // wide screens: the height bounds the pixel size, so the owl never fills the window
+    expect(sceneGeometry(1920, 1080)).toEqual({ scale: 5, w: 384, h: 216 });
+    expect(sceneGeometry(1280, 800)).toEqual({ scale: 4, w: 320, h: 200 });
     expect(sceneGeometry(375, 667)).toEqual({ scale: 3, w: 125, h: 223 });
   });
 });
