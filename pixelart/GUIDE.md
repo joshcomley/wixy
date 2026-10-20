@@ -276,11 +276,15 @@ When pixel art moves on screen (the good-night owl scene, game effects):
 `examples/goodnight/` is a complete piece made by following this guide, kept as a
 reference for how the loop goes in practice:
 
-- `owl.pxl` — 32×32 mascot-style owl, 10 colours, moonlight from the upper left, with
-  `blink`, `idle` (blink + look left/right), `surprised` and `doze` animations built
-  from one base frame plus override rows.
+- `owl.pxl` — 32×32 mascot-style owl, 14 colours, moonlight from the upper left, blue
+  eyes. Written by `make_owl.py`: every frame except `front` rewrites only the face band,
+  so the body can never drift. Animations: `intro` (eyes left/right, then the head turns
+  through three-quarters, profile and the back of the head to the far side and back),
+  `watch`, `bubble-happy` (glances, then a gentle smile with blushing cheeks), `blink`,
+  `turn`, `smile`.
 - `bubble.pxl`, `star.pxl` (tagged `effect`), `moon.pxl`, `branch.pxl`.
-- `make_scene.py` → `scene.json` → `previews/goodnight-scene.gif`: the whole timeline.
+- `make_scene.py` → `scene.json` → `previews/goodnight-scene.gif`: the whole timeline
+  (`python -m pixelart.examples.goodnight.make_scene`, then `compose`).
 
 What the review loop caught, in order — expect the same kinds of mistakes in your own
 first drafts:
@@ -297,3 +301,6 @@ first drafts:
    redrawn by hand with lighter bark and smooth edge run lengths.
 6. `check` then found a gap in the outline under the body, a lopsided bottom curve, an
    L-corner on each ear tuft, a stray outline pixel and parallel shading bands on the belly.
+7. Mirroring the right-profile head to make the left one also mirrored the lighting and
+   flung the beak to the wrong edge — a mirrored frame must keep the light where it was.
+8. A new pupil colour was a near-duplicate of a body shade (`near-duplicate-colours`).

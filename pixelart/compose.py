@@ -179,27 +179,46 @@ def layer_frame(layer: Layer, tick: int, tick_ms: int) -> str:
     return seq[-1]
 
 
-def render_tick(scene: Scene, tick: int) -> Image.Image:
+# One frame's opaque pixels as (sx, sy, rgb). Building these once per sprite instead of
+# re-resolving every frame for every layer on every tick is what keeps long timelines fast.
+_Pixels = list[tuple[int, int, tuple[int, int, int]]]
+
+
+def _frame_pixels(sp: Sprite) -> dict[str, _Pixels]:
+    out: dict[str, _Pixels] = {}
+    for name, grid in resolve_frames(sp).items():
+        pts: _Pixels = []
+        for sy, row in enumerate(grid):
+            for sx, ch in enumerate(row):
+                r, g, b, a = sp.palette.rgba(ch)
+                if a:
+                    pts.append((sx, sy, (r, g, b)))
+        out[name] = pts
+    return out
+
+
+def render_tick(
+    scene: Scene, tick: int, cache: dict[int, dict[str, _Pixels]] | None = None
+) -> Image.Image:
+    cache = {} if cache is None else cache
     bg = (*scene.background, 255) if scene.background else (0, 0, 0, 0)
     canvas = Image.new("RGBA", (scene.width, scene.height), bg)
     px = canvas.load()
     assert px is not None
     for layer in scene.layers:
         x, y, opacity = interpolate(layer.keys, tick)
+        level = round_half_up(opacity * 16)
+        if level <= 0:
+            continue
         ox, oy = round_half_up(x), round_half_up(y)
         sp = layer.sprite
-        grid = resolve_frames(sp)[layer_frame(layer, tick, scene.tick_ms)]
-        for sy, row in enumerate(grid):
-            cy = oy + sy
-            if not 0 <= cy < scene.height:
-                continue
-            for sx, ch in enumerate(row):
-                cx = ox + sx
-                if not 0 <= cx < scene.width:
-                    continue
-                r, g, b, a = sp.palette.rgba(ch)
-                if a and dither_visible(cx, cy, opacity):
-                    px[cx, cy] = (r, g, b, 255)
+        frames = cache.get(id(sp))
+        if frames is None:
+            frames = cache[id(sp)] = _frame_pixels(sp)
+        for sx, sy, (r, g, b) in frames[layer_frame(layer, tick, scene.tick_ms)]:
+            cx, cy = ox + sx, oy + sy
+            if 0 <= cx < scene.width and 0 <= cy < scene.height and BAYER4[cy % 4][cx % 4] < level:
+                px[cx, cy] = (r, g, b, 255)
     if scene.scale != 1:
         canvas = canvas.resize(
             (scene.width * scene.scale, scene.height * scene.scale), Image.Resampling.NEAREST
@@ -208,7 +227,8 @@ def render_tick(scene: Scene, tick: int) -> Image.Image:
 
 
 def render_scene(scene: Scene) -> list[Image.Image]:
-    return [render_tick(scene, t) for t in range(scene.ticks)]
+    cache: dict[int, dict[str, _Pixels]] = {}
+    return [render_tick(scene, t, cache) for t in range(scene.ticks)]
 
 
 def save_scene_gif(scene: Scene, path: str | Path) -> None:
