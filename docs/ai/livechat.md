@@ -2013,6 +2013,11 @@ video ever sent as a grid of small thumbnails.
   `admin-ui/tests/server/gallery.test.ts`, `admin-ui/tests/serverGallery.test.ts` (menu/lock wiring),
   `e2e/tests/server-gallery.spec.ts` (real photo + video, desktop and 360 px phone, real downloads).
 
+**Full-width thread.** The message area is a full-width band, not a card: `.wx-srv-thread-wrap` cancels `.wx-main`'s
+side padding with `--wx-srv-gutter` (20px desktop, 12px at ≤720px, set on `.wx-srv-thread-view`) and `.wx-srv-thread`
+pads its own messages by the same amount, so bubbles line up with the header and composer buttons (only a top and
+bottom rule separate it). Pinned by `e2e/tests/server-layout.spec.ts`.
+
 ### Links view (workspace 00052)
 
 The ⋯ menu's **Links** entry opens a full-height screen (`linksView.ts`, created next to the gallery in
