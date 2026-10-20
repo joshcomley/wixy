@@ -6,7 +6,7 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 from .model import Sprite, anim_sequence, resolve_frames
 
@@ -67,16 +67,18 @@ def save_gif_images(
     if not images:
         raise ValueError("no frames to write")
     size = images[0].size
+    rgbas: list[Image.Image] = []
     colours: dict[tuple[int, int, int], int] = {}
     has_transparent = False
-    raw: list[list[tuple[int, int, int, int]]] = []
     for im in images:
         if im.size != size:
             raise ValueError("all GIF frames must be the same size")
-        data = im.convert("RGBA").tobytes()
-        px = [(data[i], data[i + 1], data[i + 2], data[i + 3]) for i in range(0, len(data), 4)]
-        raw.append(px)
-        for r, g, b, a in px:
+        rgba = im.convert("RGBA")
+        rgbas.append(rgba)
+        # getcolors() is a C-side histogram: far cheaper than a per-pixel Python scan
+        for _count, px in rgba.getcolors(size[0] * size[1]) or []:
+            assert isinstance(px, tuple)
+            r, g, b, a = px
             if a < 128:
                 has_transparent = True
             elif (r, g, b) not in colours:
@@ -84,14 +86,26 @@ def save_gif_images(
     offset = 1 if has_transparent else 0
     if len(colours) + offset > 256:
         raise ValueError("more than 255 colours; GIF cannot hold this animation exactly")
-    flat: list[int] = [0, 0, 0] if has_transparent else []
-    for rgb in colours:
-        flat.extend(rgb)
+    # The transparent slot and the unused tail of the 256-entry palette get a colour that
+    # is not in the image, so quantize()'s exact matches can never land on them.
+    # A spare slot is only needed when fewer than 256 entries are real colours, and then
+    # some grey is always free.
+    spare = next(((v, v, v) for v in range(256) if (v, v, v) not in colours), (0, 0, 0))
+    entries = ([spare] if has_transparent else []) + list(colours)
+    entries += [spare] * (256 - len(entries))
+    palimg = Image.new("P", (1, 1))
+    palimg.putpalette([c for rgb in entries for c in rgb])
     frames: list[Image.Image] = []
-    for px in raw:
-        p = Image.new("P", size)
-        p.putpalette(flat)
-        p.putdata([0 if a < 128 else colours[(r, g, b)] + offset for r, g, b, a in px])
+    for rgba in rgbas:
+        rgb = rgba.convert("RGB")
+        # quantize() is a fast C-side mapping, but its colour cache is approximate: two
+        # near-identical palette colours can swap. Verify against the source and repair the
+        # few mismatched pixels exactly, so the palette lock holds.
+        p = rgb.quantize(palette=palimg, dither=Image.Dither.NONE)
+        _repair_exact(p, rgb, colours, offset)
+        if has_transparent:
+            clear = rgba.getchannel("A").point(lambda a: 255 if a < 128 else 0)
+            p.paste(0, mask=clear)
         frames.append(p)
     kwargs: dict[str, object] = {
         "save_all": True,
@@ -105,6 +119,27 @@ def save_gif_images(
     if loop:
         kwargs["loop"] = 0
     frames[0].save(path, format="GIF", **kwargs)  # type: ignore[arg-type]
+
+
+def _repair_exact(
+    p: Image.Image, rgb: Image.Image, colours: dict[tuple[int, int, int], int], offset: int
+) -> None:
+    diff = ImageChops.difference(p.convert("RGB"), rgb)
+    r, g, b = diff.split()
+    wrong = ImageChops.lighter(ImageChops.lighter(r, g), b).point(lambda v: 255 if v else 0)
+    box = wrong.getbbox()
+    if box is None:
+        return
+    src = rgb.load()
+    dst = p.load()
+    bad = wrong.load()
+    assert src is not None and dst is not None and bad is not None
+    for y in range(box[1], box[3]):
+        for x in range(box[0], box[2]):
+            if bad[x, y]:
+                px = src[x, y]
+                assert isinstance(px, tuple)
+                dst[x, y] = colours[(px[0], px[1], px[2])] + offset
 
 
 def anim_images(sprite: Sprite, anim: str, scale: int = 1) -> tuple[list[Image.Image], list[int]]:

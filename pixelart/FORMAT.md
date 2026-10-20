@@ -128,6 +128,8 @@ against the model's `require` rules.
 
 - Role names with special meaning: `outline*` (outline checks), `highlight*`, `eye*`,
   `glint*`, `spark*`, `star*` (exempt from the orphan check).
+- `tag effect` / `tag effect-<anim>` marks an animation as an effect (twinkle, wobble, pulse)
+  rather than a body: it may change size and position, so drift and volume checks skip it.
 - Animation drift is declared with tags: `tag drift-ok` (any), `tag drift-<anim>` (one anim),
   `tag drift-<anchor>` (one anchor). Anchors starting `foot`, `hand`, `arm`, `leg`, `tail`,
   `tip`, `wing`, `paw`, `tool`, `weapon` are treated as limbs and may move; other anchors may

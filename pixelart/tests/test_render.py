@@ -172,3 +172,17 @@ def test_preview_board_shows_grid_and_onion(tmp_path: Path) -> None:
     assert any(b > 200 and r < 130 for r, g, b in colours)  # onion: current (blue)
     board.save(tmp_path / "b.png")
     assert (tmp_path / "b.png").stat().st_size > 0
+
+
+@pytest.mark.parametrize("rows", [["ab" * 3] * 2, ["ba" * 3] * 2, ["aaaaab"] * 2, ["abbbbb"] * 2])
+def test_gif_keeps_near_identical_colours_distinct(tmp_path: Path, rows: list[str]) -> None:
+    # #fff6d8 and #fff4d6 collide in Pillow's approximate quantize cache (which one wins
+    # depends on palette order); the writer must still emit each exactly (palette lock).
+    pal = "  a  #fff6d8\n  b  #fff4d6\n"
+    sp = make({"f0": rows, "f1": [r[::-1] for r in rows]}, palette=pal, tail="anim x = f0 f1 loop")
+    out = tmp_path / "x.gif"
+    save_gif(sp, "x", out, scale=2)
+    with Image.open(out) as im:
+        for i, name in enumerate(["f0", "f1"]):
+            im.seek(i)
+            assert im.convert("RGB").tobytes() == to_image(sp, name, 2).convert("RGB").tobytes()

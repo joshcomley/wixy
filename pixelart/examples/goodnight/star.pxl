@@ -1,0 +1,28 @@
+pxl 1
+name star
+size 5x5
+tag effect
+palette
+  s #7f97c4 star-dim
+  Y #ffd56b spark
+  w #fff6d8 spark-core
+end
+frame dot ms=900
+.....
+.....
+..s..
+.....
+.....
+frame small ms=90
+.....
+..s..
+.sYs.
+..s..
+.....
+frame big ms=140
+..s..
+..Y..
+sYwYs
+..Y..
+..s..
+anim twinkle = dot small big small loop

@@ -268,3 +268,32 @@ When pixel art moves on screen (the good-night owl scene, game effects):
   faint tint, mostly transparent), animate with a 2–3 frame wobble.
 - `python -m pixelart compose scene.json` previews a multi-sprite timeline as a GIF
   with exactly these rules, before you wire it into the app.
+
+---
+
+## 12. Worked example: the good-night owl
+
+`examples/goodnight/` is a complete piece made by following this guide, kept as a
+reference for how the loop goes in practice:
+
+- `owl.pxl` — 32×32 mascot-style owl, 10 colours, moonlight from the upper left, with
+  `blink`, `idle` (blink + look left/right), `surprised` and `doze` animations built
+  from one base frame plus override rows.
+- `bubble.pxl`, `star.pxl` (tagged `effect`), `moon.pxl`, `branch.pxl`.
+- `make_scene.py` → `scene.json` → `previews/goodnight-scene.gif`: the whole timeline.
+
+What the review loop caught, in order — expect the same kinds of mistakes in your own
+first drafts:
+
+1. Symmetric shading (pillow-like, no light direction) — fixed by darkening the side
+   away from the moon.
+2. Mirrored eye highlights made the owl look cross-eyed — highlights must sit on the
+   same side in both eyes.
+3. Chest marks drawn as dots read as buttons — replaced with short vertical feather
+   streaks.
+4. Closed eyes drawn inside the eye ring read as goggles — removed the ring and used a
+   gentle downward curve.
+5. A first procedural branch was too dark to read against the night sky and too blocky —
+   redrawn by hand with lighter bark and smooth edge run lengths.
+6. `check` then found a gap in the outline under the body, a lopsided bottom curve, an
+   L-corner on each ear tuft, a stray outline pixel and parallel shading bands on the belly.

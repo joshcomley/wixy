@@ -418,3 +418,29 @@ def test_clean_sprite_has_no_findings_at_all() -> None:
         palette="  .  transparent\n  k  #101820  outline\n  s  #c08040\n  l  #f0d090\n",
     )
     assert lint(sp) == []
+
+
+def test_effect_tag_exempts_volume_and_drift() -> None:
+    small = rect(8, 8, 1, 1, 1, 1)
+    assert not found(
+        make({"a": BASE_A, "b": small}, extra_header="tag effect-w", tail="anim w = a b loop"),
+        "anim-volume-jump",
+    )
+    assert not found(
+        make({"a": BASE_A, "b": small}, extra_header="tag effect", tail="anim w = a b loop"),
+        "anim-baseline-drift",
+    )
+
+
+def test_derived_frame_does_not_repeat_parent_findings() -> None:
+    orphaned = put(BASE_A, {(0, 0): "l"})
+    text = (
+        "pxl 1\nname t\nsize 8x8\npalette\n" + PALETTE + "end\n"
+        "frame a ms=100\n" + "\n".join(orphaned) + "\n"
+        "frame b ms=100 like=a\n"
+        f" 7| {orphaned[7][:6]}l{orphaned[7][7]}\n"
+    )
+    hits = found(parse(text, None), "orphan")
+    assert [(f.frame, f.x, f.y) for f in hits if (f.x, f.y) == (0, 0)] == [("a", 0, 0)]
+    # the new orphan the derived frame introduced is still reported, on that frame
+    assert ("b", 6, 7) in {(f.frame, f.x, f.y) for f in hits}

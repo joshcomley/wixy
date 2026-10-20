@@ -592,7 +592,9 @@ def _check_anims(ctx: _Ctx) -> list[Finding]:
     for aname, anim in sp.anims.items():
         seq = anim_sequence(anim)
         grids = [ctx.grids[f] for f in seq]
-        exempt_all = "drift-ok" in tags or f"drift-{aname}" in tags
+        # an effect (twinkle, wobble, pulse) changes size and position on purpose
+        effect = "effect" in tags or f"effect-{aname}" in tags
+        exempt_all = effect or "drift-ok" in tags or f"drift-{aname}" in tags
         looped = anim.mode == "loop" and len(seq) > 1
 
         if len(set(map(tuple, grids))) < 2:
@@ -678,7 +680,7 @@ def _check_anims(ctx: _Ctx) -> list[Finding]:
             pairs.append((len(seq) - 1, 0))
         for a, b in pairs:
             hi = max(counts[a], counts[b])
-            if hi >= 8 and abs(counts[a] - counts[b]) / hi > VOLUME_JUMP_RATIO:
+            if not effect and hi >= 8 and abs(counts[a] - counts[b]) / hi > VOLUME_JUMP_RATIO:
                 out.append(
                     _warn(
                         "anim-volume-jump",
@@ -688,7 +690,8 @@ def _check_anims(ctx: _Ctx) -> list[Finding]:
                         f"silhouette area jumps {counts[a]} -> {counts[b]} pixels from "
                         f"{seq[a]} to {seq[b]}",
                         "keep the character's mass roughly constant between frames "
-                        "(squash and stretch preserve area)",
+                        "(squash and stretch preserve area), or add 'tag effect-"
+                        f"{aname}' if it is an effect (twinkle, pulse) rather than a body",
                     )
                 )
 
@@ -733,14 +736,47 @@ def lint(sprite: Sprite) -> list[Finding]:
     out: list[Finding] = []
     out += _check_palette(ctx)
     out += _check_model(ctx)
+    per_frame: dict[str, list[Finding]] = {}
     for fname, grid in ctx.grids.items():
-        out += _check_orphans(ctx, fname, grid)
+        found = _check_orphans(ctx, fname, grid)
         outline = _outline_set(ctx, grid)
         if outline:
-            out += _check_outline_doubles(ctx, fname, outline)
-            out += _check_outline_gaps(ctx, fname, grid)
-            out += _check_jaggies(ctx, fname, outline)
-        out += _check_pillow(ctx, fname, grid)
-        out += _check_banding(ctx, fname, grid)
+            found += _check_outline_doubles(ctx, fname, outline)
+            found += _check_outline_gaps(ctx, fname, grid)
+            found += _check_jaggies(ctx, fname, outline)
+        found += _check_pillow(ctx, fname, grid)
+        found += _check_banding(ctx, fname, grid)
+        per_frame[fname] = found
+        out += _drop_inherited(ctx, fname, found, per_frame)
     out += _check_anims(ctx)
     return out
+
+
+def _drop_inherited(
+    ctx: _Ctx, fname: str, found: list[Finding], per_frame: dict[str, list[Finding]]
+) -> list[Finding]:
+    """A derived frame (`like=` with no shift) re-reports every pixel it copied from its
+    parent; keep only findings whose surroundings the derived frame actually changed, so
+    the agent sees each problem once, at its source frame."""
+    frame = ctx.sprite.frames[fname]
+    parent = frame.like
+    if parent is None or frame.shift != (0, 0) or parent not in per_frame:
+        return found
+    pgrid, grid = ctx.grids[parent], ctx.grids[fname]
+    seen = {(f.code, f.x, f.y, f.message) for f in per_frame[parent]}
+
+    def same_around(x: int, y: int) -> bool:
+        return all(
+            pgrid[yy][xx] == grid[yy][xx]
+            for yy in range(max(0, y - 2), min(ctx.sprite.h, y + 3))
+            for xx in range(max(0, x - 2), min(ctx.sprite.w, x + 3))
+        )
+
+    return [
+        f
+        for f in found
+        if f.x is None
+        or f.y is None
+        or (f.code, f.x, f.y, f.message) not in seen
+        or not same_around(f.x, f.y)
+    ]
