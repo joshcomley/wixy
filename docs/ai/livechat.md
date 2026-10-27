@@ -1950,31 +1950,59 @@ the answers filter keeps the game fun but the chat has no per-person secrecy (In
 - **Full screen.** While the chat is unlocked (`panel.ts` state `chat`/`fading`) it reports `onFullscreenChange(true)`;
   `shell.ts` adds `wx-shell-srv-full` to the shell root and `style.css` hides the top bar, nav row, side nav
   and edit-bar host; the version badge moves into the chat header's left, replacing the "Server" title and name chip (`wx-shell-srv-version-in-header`; workspace 00046; it returns to the status bar on exit, and if no header exists the status bar stays as a slim badge-only strip). Locking, or leaving `/admin/server`, removes it. The header's panic ✕ is the exit.
-- **Tabs.** `wyrGame.ts` (`createWyrGame`) owns the tab bar (`.wx-srv-tabs`, under the composer; hidden unless a game is
-  open — one tab means no bar), the game pane (`.wx-srv-game`, in the thread's place while the WYR tab shows) and the
-  pop-up (`.wx-srv-gamepop`). `thread.ts` creates it after the composer and implements its callbacks
-  (`applyGameLayout` hides/restores the thread wrapper, saves its scroll, abandons the pen).
-  `open(seq)` (starter / tapping a card's Play) shows the tab; `offer(seq)` (a round someone else started, or the newest
-  unfinished round at load) adds it with a dot without switching; `close()` removes it and remembers the dismissal.
+- **The shared game frame** (spec `spec/server-chat/08-adventure-time.md` §5.1). Every game — would-you-rather today,
+  Adventure Time next — plugs into the same two modules, so an improvement to the per-item chat reaches every game:
+  - `gameTabs.ts` (`createGameTabs`) is the **tab bar** (`.wx-srv-tabs`, under the composer): "Chat" plus one tab per OPEN
+    registered game (`.wx-srv-tab.wx-srv-tab-game.wx-srv-tab-<key>`, `data-game="<key>"`, in registration order, each with
+    its own dot); with no game open there is one tab and the bar is hidden. A game registers a `GameRegistration` (`key`,
+    `tabLabel`, `tabAriaLabel`, its `pane`, `exists(seq)`, `refresh(seq)`, optional `onShow`/`onHide`, `reset()`); the frame
+    shows only the active game's pane and calls `refresh(seq)` only for it. API: `register`, `open(key, seq)` (starter /
+    tapping a card's Play: shows the tab and clears that game's dismissal), `offer(key, seq)` (an item someone else
+    started, or the newest unfinished one at load: adds the tab with a dot without switching; a `seq` the person closed is
+    not offered again), `close(key)` (removes the tab, remembers the dismissal per game and `seq`, shows Chat if it was
+    active, closes the pop-up if it belonged to that game, resets the game's view), `showTab`, `activeTab`, `seqOf(key)`,
+    `chatTarget()` (the active game's item while a game tab shows, else the pop-up's item while the pop-up is open, else
+    `null` = the main chat), `noteChatActivity()` (dots Chat while a game tab shows), `refresh()` (closes any game whose item
+    vanished, refreshes the active pane, then the item chat), `reset()` (lock/wipe: forgets everything AND runs
+    `onLayoutChange` so a hidden thread comes back). Two games can be open at once (both tabs present).
+  - `itemChat.ts` (`createItemChat`) is the **per-item chat**: `createStrip()` returns a `MiniStrip {element, draw(seq|null)}`
+    (the fixed 60 px mini chat strip — each game embeds its own in its own pane) and `openPopup(seq, title)` /
+    `closePopup()` / `isPopupOpen()` / `popupSeq()` drive the ONE pop-up (`.wx-srv-gamepop`) all games share; `refresh()`
+    redraws every strip and the pop-up, `reset()` closes the pop-up and unbinds the strips. It takes the thread's data and
+    the composer through its deps (`gameMessages`, `gameEchoes`, `isMine`, `renderBubble`, `disposeBubble`,
+    `mountComposer`, `onLayoutChange`, `afterChange`).
+  - `thread.ts` creates `itemChat` and `gameTabs` once after the composer and implements their callbacks
+    (`applyGameLayout` hides/restores the thread wrapper whenever ANY game tab is active, saves its scroll, abandons the
+    pen); `resetGames()` (`itemChat.reset()` then `gameTabs.reset()`) runs on lock, wipe and teardown. `gameLabelFor(anchorSeq)`
+    names the game an anchor message belongs to for the main-chat tag (a new game adds its branch there).
+  - `wyrGame.ts` (`createWyrGame`) is now ONLY the would-you-rather pane (header, picture stage, controls host, the
+    maximize-pictures dialog and its own `MiniStrip`); it registers itself as `"wyr"` (tab "WYR", aria "Would you rather
+    game") and exposes `pane`, `open/offer/close/gameSeq` for its own round. A new game copies that shape: build a pane,
+    `createStrip()`, `tabs.register(...)`.
 - **The game pane**, top to bottom: header (title, Topics, Next ▸ once a round is revealed/skipped, ✕), the picture stage (tap
   flips A/B; both images are preloaded; a text-only round shows the option as large text, a `pending` job shows
   "Painting…"), the controls (`wyrControls.ts`: Play/Skip, a pick row and a guess row, Reveal, results), the mini chat
-  (a FIXED 60 px strip: this card's last two messages + echoes, one line each cut with an ellipsis, attachments as
+  (the shared `itemChat.ts` strip, a FIXED 60 px: this card's last two messages + echoes, one line each cut with an ellipsis, attachments as
   20 px thumbnails, and a "Chat N" button on the right; it never changes height, so the stage and controls never shift
   and nothing spills onto the composer — pinned by the "stays tidy on a phone" e2e; tap → pop-up) and — below, as always — the
   one composer, which now sends into the card.
-- **Game chat routing.** Messages are ordinary; `game.chatTarget()` (the open round's seq while the WYR tab or the
+- **Game chat routing.** Messages are ordinary; `gameTabs.chatTarget()` (the open item's seq while a game tab or the
   pop-up is in use) is spread into every text `sendMessage` as `wyrSeq` (`wyrSendFields()` in `thread.ts`), and optimistic
   echoes carry it so the mini chat shows them at once. A voice note captures its target when recording stops. View-once
-  is main-chat only: its button is disabled in the game chat and a view-once draft is refused there. A message carrying `wyrRef` gets a small "WYR" tag in the main
-  chat and is the card's chat in the tab and pop-up.
-- **The pop-up** is the same chat larger: the card's whole history (the thread's embedded bubble renderer, updated
-  incrementally) with the ONE composer re-parented into it (`mountComposer(host)`), so voice notes, attachments and the
+  is main-chat only: its button is disabled in the game chat and a view-once draft is refused there. A message carrying
+  `wyrRef` gets a small tag naming its game in the main chat (`.wx-srv-bubble-gametag`; the WYR one also keeps the
+  original `.wx-srv-bubble-wyrtag`; the label comes from `gameLabelFor(anchorSeq)`: "WYR" when the anchor message has
+  `wyr`, and also for an anchor outside the loaded history, since would-you-rather was the only game when the tag began)
+  and is the item's chat in the tab and pop-up.
+- **The pop-up** (`itemChat.ts`) is the same chat larger: the item's whole history (the thread's embedded bubble renderer,
+  updated incrementally so an unchanged bubble keeps its node and a playing voice note is never cut off) with the ONE
+  composer re-parented into it (`mountComposer(host)`), so voice notes, attachments and the
   draft all work and survive the move. Its ✕ or the backdrop closes it and returns the composer (not Escape: Escape is the chat's panic key and locks everything).
+  It closes when the person leaves its game's tab, when its game closes or points at another item, and on lock/wipe.
 - **The main-chat card** (`wyrCard.ts`) is now a preview: the question, both pictures side by side, one status line and
   a Play/Open button that opens the tab. It has no answer controls.
-- **Files.** `admin-ui/src/server/{wyrGame,wyrControls,wyrCard,wyrModel}.ts`, `api/wyr.ts`; tests
-  `admin-ui/tests/{serverWyr,serverWyrGame,serverChatCss}.test.ts`, panel/shell tests for full screen, and
+- **Files.** `admin-ui/src/server/{gameTabs,itemChat,wyrGame,wyrControls,wyrCard,wyrModel}.ts`, `api/wyr.ts`; tests
+  `admin-ui/tests/{serverGameTabs,serverItemChat,serverWyr,serverWyrGame,serverChatCss}.test.ts`, panel/shell tests for full screen, and
   `e2e/tests/server-wyr.spec.ts` (two people, tabs, picture flip, full screen, 360 px phone).
 
 ## 21. The gallery (workspace 00046, decisions/00185)

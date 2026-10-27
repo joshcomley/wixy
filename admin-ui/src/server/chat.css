@@ -1107,7 +1107,9 @@ button.wx-srv-wyr-countdown {
   font-size: 0.9rem;
 }
 
-/* A message sent in a round's game chat keeps a small tag in the main chat. */
+/* A message sent in a game item's chat keeps a small tag in the main chat, naming the game
+   (`.wx-srv-bubble-gametag` on every tag; the WYR one also keeps `.wx-srv-bubble-wyrtag`). */
+.wx-srv-bubble-gametag,
 .wx-srv-bubble-wyrtag {
   align-self: flex-start;
   font-size: 0.625rem;
@@ -1119,7 +1121,7 @@ button.wx-srv-wyr-countdown {
   padding: 0 6px;
 }
 
-/* -- Would-you-rather: the tab bar --------------------------------------------- */
+/* -- Games: the tab bar (gameTabs.ts; "Chat" + one `.wx-srv-tab-game` per open game) ---- */
 
 .wx-srv-tabs {
   display: flex;
@@ -1143,6 +1145,11 @@ button.wx-srv-wyr-countdown {
   font: inherit;
   font-weight: 700;
   cursor: pointer;
+}
+
+/* A game's tab sits in the bar from registration but shows only while the game is open. */
+.wx-srv-tab[hidden] {
+  display: none;
 }
 
 .wx-srv-tab-on {
@@ -1171,7 +1178,8 @@ button.wx-srv-wyr-countdown {
   display: none;
 }
 
-/* -- Would-you-rather: the game tab -------------------------------------------- */
+/* -- Games: the game pane (`.wx-srv-game` is every game's pane; `.wx-srv-game-head` onward is
+   the would-you-rather pane's own parts) ------------------------------------------------ */
 
 .wx-srv-game {
   flex: 1 1 0;
@@ -1578,7 +1586,7 @@ dialog.wx-srv-game-pictures[open] {
   text-align: center;
 }
 
-/* -- Would-you-rather: the pop-up game chat ------------------------------------- */
+/* -- Games: the pop-up item chat (itemChat.ts; the mini strip's rules are above) -------- */
 
 .wx-srv-gamepop {
   position: absolute;
@@ -1665,6 +1673,7 @@ dialog.wx-srv-game-pictures[open] {
 }
 
 /* The pop-up is already the game chat: the tag would say the same thing on every message. */
+.wx-srv-gamepop .wx-srv-bubble-gametag,
 .wx-srv-gamepop .wx-srv-bubble-wyrtag {
   display: none;
 }
