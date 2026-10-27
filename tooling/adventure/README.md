@@ -94,9 +94,9 @@ focused negative cases, the world map's own invariants, and (once it exists) the
 **Schema** (spec 2.2, exactly; an unknown key anywhere is a problem): top level
 `{version: 1, generated: YYYY-MM-DD, countries}`; `countries` keys are known unit ids; each unit
 `{name, advice, destinations}` with `name` non-empty <= 60, `advice` `null` or
-`{level: "against_all_travel", checked: YYYY-MM-DD}`; **1-10 destinations, at least 3 unless the
+`{level: "against_all_travel", checked: YYYY-MM-DD}`; **1-10 destinations, at least 2 unless the
 unit is small** (land area under 1,000 km2 on the `detail` map: Vatican City, Monaco, Malta,
-Singapore, the Maldives... may have 1-2); each destination
+Singapore, the Maldives... may have 1); each destination
 `{id, name, region, lat, lng, kind, blurb}`: `id` = `<unitId>.<ascii-lowercase-kebab-slug>` with the
 unit id of the entry it sits in and unique bank-wide, `name` and `region` non-empty <= 60, names
 unique within a unit, `lat`/`lng` in range, `kind` one of

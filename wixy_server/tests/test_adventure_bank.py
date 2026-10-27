@@ -300,7 +300,7 @@ def test_too_many_destinations(world: Any, bank: dict[str, Any]) -> None:
         {**template, "id": f"PRX.spot-{i}", "name": f"Spot {i}", "lat": 38.70 + 0.01 * i}
         for i in range(11)
     ]
-    assert any("11 destination(s); need 3-10" in p for p in _problems(bank, world))
+    assert any("11 destination(s); need 2-10" in p for p in _problems(bank, world))
     bank["countries"]["PRX"]["destinations"] = bank["countries"]["PRX"]["destinations"][:10]
     assert _problems(bank, world) == []
 
@@ -310,9 +310,9 @@ def test_empty_destinations_fail_even_for_a_small_unit(world: Any, bank: dict[st
     assert any("0 destination(s); need 1-10" in p for p in _problems(bank, world))
 
 
-def test_three_destinations_unless_the_unit_is_small(world: Any, bank: dict[str, Any]) -> None:
-    bank["countries"]["PRX"]["destinations"] = bank["countries"]["PRX"]["destinations"][:2]
-    assert any("2 destination(s); need 3-10 for" in p for p in _problems(bank, world))
+def test_two_destinations_unless_the_unit_is_small(world: Any, bank: dict[str, Any]) -> None:
+    bank["countries"]["PRX"]["destinations"] = bank["countries"]["PRX"]["destinations"][:1]
+    assert any("1 destination(s); need 2-10 for" in p for p in _problems(bank, world))
     # The Maldives (about 60 km2 on the map) is under the 1,000 km2 line: one destination is fine.
     bank["countries"]["PRX"]["destinations"] = copy.deepcopy(
         json.loads(FIXTURE.read_text(encoding="utf-8"))["countries"]["PRX"]["destinations"]
@@ -552,10 +552,7 @@ def test_units_json_matches_the_map(world: Any) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
-# INTEGRATION: the destination bank (wixy_server/livechat/adventure_destinations.json) is written
-# by another builder. This test is skipped only while that file does not exist yet; the integrator
-# removes the skipif so a missing or invalid bank becomes a failure from then on.
-@pytest.mark.skipif(not REAL_BANK.exists(), reason="adventure_destinations.json is not written yet")
+# The committed bank can never drift from the committed map: a missing or invalid bank fails here.
 def test_committed_bank_is_valid_against_the_map() -> None:
     problems = vb.validate(REAL_BANK, WORLD)
     assert problems == [], "\n".join(problems[:60])

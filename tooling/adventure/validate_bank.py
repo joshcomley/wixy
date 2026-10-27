@@ -18,7 +18,7 @@ Bank schema (spec 2.2, exactly; any unknown key is a problem):
 * ``countries`` keys are unit ids that exist in the world map;
 * each unit ``{name, advice, destinations}``: ``name`` non-empty string <= 60 chars; ``advice`` is
   ``null`` or ``{level: "against_all_travel", checked: "YYYY-MM-DD"}``; 1-10 destinations, and at
-  least 3 unless the unit is *small* (see ``SMALL_UNIT_KM2``);
+  least 2 unless the unit is *small* (see ``SMALL_UNIT_KM2``);
 * each destination ``{id, name, region, lat, lng, kind, blurb}``: ``id`` is
   ``<unitId>.<ascii lowercase kebab slug>`` with the unit id of the entry it sits in and is unique
   bank-wide; ``name`` and ``region`` non-empty <= 60 chars; names are unique within a unit;
@@ -96,13 +96,15 @@ ADVICE_LEVEL: Final = "against_all_travel"
 MAX_NAME: Final = 60
 MAX_REGION: Final = 60
 MAX_BLURB: Final = 120
-MIN_DESTINATIONS: Final = 3
+MIN_DESTINATIONS: Final = 2
 MAX_DESTINATIONS: Final = 10
-#: A unit whose land area (on the ``detail`` map) is below this may have 1-2 destinations instead
-#: of 3 or more. 1,000 km2 is Malta-and-smaller: Vatican City, Monaco, San Marino, Liechtenstein,
-#: Malta, Singapore, Bahrain, Andorra, Nauru, Tuvalu, the Maldives, Seychelles, Barbados, Antigua,
-#: St Kitts, Grenada, St Lucia, St Vincent, Dominica... Luxembourg (2,586 km2) already has the
-#: city, Vianden and the Moselle, so it is held to 3.
+#: A unit whose land area (on the ``detail`` map) is below this may have a single destination
+#: instead of 2 or more. (The floor is 2, not 3: a big country whose UK travel advice rules out most
+#: of it - DR Congo, Chad - or a small one with few real holiday places - Kuwait - gets two honest
+#: picks rather than padding; the writer brief says never pad with weak picks.) 1,000 km2 is
+#: Malta-and-smaller: Vatican City, Monaco, San Marino, Liechtenstein, Malta, Singapore, Bahrain,
+#: Andorra, Nauru, Tuvalu, the Maldives, Seychelles, Barbados, Antigua, St Kitts, Grenada,
+#: St Lucia, St Vincent, Dominica... Luxembourg (2,586 km2) is held to 2.
 SMALL_UNIT_KM2: Final = 1000.0
 #: A destination may sit up to this far outside its unit's simplified boundary.
 TOLERANCE_KM: Final = 25.0

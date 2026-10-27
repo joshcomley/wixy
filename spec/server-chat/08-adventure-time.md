@@ -94,7 +94,7 @@ bundle's dependencies are untouched) from **Natural Earth 1:50m** (public domain
 ```
 
 - Keys are §2.1 unit ids. Destinations are in **rank order** ("top" = most loved by UK
-  holidaymakers); 3–10 per unit where the unit genuinely has that many (micro-states may have 1–2).
+  holidaymakers); 2–10 per unit where the unit genuinely has that many (tiny units may have 1; never padded with weak picks).
 - `id` = `<unitId>.<ascii-kebab-slug>`, permanent and append-only (never renumber or reuse).
   `kind` ∈ `city|beach|island|mountains|countryside|lakes|nature|historic|resort|wine`.
   `blurb` ≤ 120 chars, plain text.
