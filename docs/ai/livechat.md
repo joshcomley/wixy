@@ -1112,11 +1112,14 @@ retains the audio and transcript (a rolling `dictation-audio/` buffer, the ASR s
 delete and wipe cannot reach them, so wixy uses it only through cmd's **private mode**: form fields
 `private=1` and `cleanup=0` (no LLM sees the text), multipart `audio`, and **no `session_id`, no
 `context`**. It first calls `GET /api/transcribe/capabilities` and needs a literal
-`{"private": true}` (cached 60 s both ways; the cache is dropped on a transport failure or any
-unexpected status — 404, 401, a 5xx other than `asr_warming` — but not on a timeout, a rejection or
-`warming`; the probe has a whole-call time limit). False, missing, malformed or unreachable ⇒
-unavailable. `available(fresh=True)` skips the cache: a job uses it immediately before any audio
-leaves. Response mapping: 200 with `text` (or `raw`) → ok (an empty
+`{"private": true}` (a definitive answer is cached 60 s; a NON-answer — timeout, transport error,
+5xx — is cached 5 s and the cheap questions keep answering yes for 10 min after cmd's last definitive
+yes; the cache is also dropped on a transport failure or unexpected status from the transcribe call;
+the probe has a whole-call time limit). A definitive false or missing/malformed answer ⇒ unavailable.
+`available(fresh=True)` skips the cache and memory: a job uses it immediately before any audio
+leaves, retries a non-answer 3 × (8 s timeout, 1 s apart) and sends nothing if cmd still cannot
+answer (decisions/00190). The client never hides Transcribe/Retry/Re-transcribe on the availability
+flag: a tap answered "unavailable" shows the red line AND a fresh pop-up each time. Response mapping: 200 with `text` (or `raw`) → ok (an empty
 string is a valid "nothing said"; more than 200,000 characters is refused as invalid); 503
 `asr_warming` → `warming`; other 503/5xx/transport → `unavailable`; 400/413/415/422 → `rejected`;
 budget exceeded → `timeout`. No retries. `create_app(..., transcriber=)` is the injection seam
