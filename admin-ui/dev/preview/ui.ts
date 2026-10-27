@@ -141,7 +141,7 @@ export function buildUi(memory: Memory, systemReducedMotion: boolean, handlers: 
   const no = h("button", { class: "big no", type: "button" }, "No thanks ✕");
   const decideRow = h("div", { class: "dock-row dock-decide-row" }, yes, no);
   const askText = h("div", { class: "ask" });
-  const neverYes = h("button", { class: "big no", type: "button" }, "Never show it again");
+  const neverYes = h("button", { class: "big no", type: "button" }, "Never show again");
   const neverNo = h("button", { class: "big keep", type: "button" }, "Keep it");
   const askRow = h("div", { class: "dock-row dock-ask-row" }, neverYes, neverNo);
   const dockDecide = h("div", { class: "dock-block dock-decide" }, askText, decideRow, askRow);
@@ -171,7 +171,7 @@ export function buildUi(memory: Memory, systemReducedMotion: boolean, handlers: 
   const header = h(
     "header",
     { class: "bar" },
-    h("div", { class: "title" }, h("span", { class: "title-globe", "aria-hidden": "true" }, "🌍"), "Adventure Time"),
+    h("div", { class: "title" }, h("span", { class: "title-globe", "aria-hidden": "true" }, "🌍"), h("span", { class: "title-text" }, "Adventure Time")),
     h("div", { class: "bar-actions" }, bankBtn, newBtn, optionsBtn),
   );
 

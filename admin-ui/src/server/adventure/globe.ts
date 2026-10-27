@@ -110,6 +110,12 @@ export interface GlobeFrame {
   readonly trail?: Trail | null;
   /** `prefers-reduced-motion`: no glow pulse, no pin bob, and the trail is not drawn. */
   readonly reducedMotion?: boolean;
+  /**
+   * The view changes every frame (a spin, a camera flight): paint straight to the canvas with the cheap
+   * coarse geometry whatever the zoom, and skip the still-map cache. Set it false the moment the view
+   * rests and the renderer snaps to detail and caches the map.
+   */
+  readonly moving?: boolean;
 }
 
 export interface GlobeRenderer {
@@ -150,12 +156,19 @@ const COLOUR = {
   chosenGlow: "82, 220, 174",
   candidateRing: "rgba(255, 255, 255, 0.92)",
   graticule: "rgba(255, 255, 255, 0.10)",
+  graticuleOverLand: "rgba(120, 165, 215, 0.30)",
   pin: "#ff4d6a",
   pinDark: "#d92a4b",
 } as const;
 
 /** Cached graticule geometry. */
-const GRATICULE_COARSE: MultiLineString = geoGraticule10();
+let graticuleChunks: readonly LineChunk[] | null = null;
+
+/** The 10-degree graticule, cut into culling chunks once. */
+function coarseGraticule(): readonly LineChunk[] {
+  if (graticuleChunks === null) graticuleChunks = chunkLines(geoGraticule10());
+  return graticuleChunks;
+}
 
 interface GraticuleCache {
   key: string;
@@ -300,6 +313,26 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
   let lastLevel: "coarse" | "detail" = "coarse";
   let lastProjection: GeoProjection | null = null;
   let graticuleFine: GraticuleCache | null = null;
+  let mapLayer: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; key: string } | null = null;
+  let mapLayerFailed = false;
+  const scratchGrid: MultiLineString = { type: "MultiLineString", coordinates: [] };
+
+  /** The offscreen canvas the still map is painted into (null where a second canvas is unavailable). */
+  function mapCache(): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; key: string } | null {
+    if (mapLayerFailed) return null;
+    if (mapLayer === null) {
+      const el = canvas.ownerDocument.createElement("canvas");
+      el.width = canvas.width;
+      el.height = canvas.height;
+      const layerCtx = el.getContext("2d");
+      if (layerCtx === null) {
+        mapLayerFailed = true;
+        return null;
+      }
+      mapLayer = { canvas: el, ctx: layerCtx, key: "" };
+    }
+    return mapLayer;
+  }
   const levels: { coarse: LevelData | null; detail: LevelData | null } = { coarse: null, detail: null };
 
   function levelData(level: "coarse" | "detail"): LevelData {
@@ -360,7 +393,7 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
 
   function levelFor(frame: GlobeFrame, viewRadiusDeg: number): "coarse" | "detail" {
     if (frame.level === "coarse" || frame.level === "detail") return frame.level;
-    return viewRadiusDeg >= DETAIL_BELOW_DEG ? "coarse" : "detail";
+    return viewRadiusDeg >= DETAIL_BELOW_DEG || frame.moving === true ? "coarse" : "detail";
   }
 
   function unitShape(id: string, level: "coarse" | "detail"): UnitFeature | null {
@@ -414,20 +447,23 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
     c.fill();
   }
 
+  function muteFor(emphasis: GlobeEmphasis | null): boolean {
+    if (emphasis === null) return false;
+    const hasCandidates = (emphasis.candidateUnits?.length ?? 0) > 0;
+    return emphasis.muteOthers ?? (hasCandidates || (emphasis.litUnit ?? null) !== null || (emphasis.chosenUnit ?? null) !== null);
+  }
+
   function drawLand(
     c: CanvasRenderingContext2D,
     level: "coarse" | "detail",
     data: LevelData,
     clipRad: number,
     emphasis: GlobeEmphasis | null,
-    nowMs: number,
-    reduced: boolean,
   ): void {
     const candidates = emphasis?.candidateUnits ?? null;
     const hasCandidates = candidates !== null && candidates.length > 0;
-    const lit = emphasis?.litUnit ?? null;
     const chosen = emphasis?.chosenUnit ?? null;
-    const mute = emphasis === null ? false : (emphasis.muteOthers ?? (hasCandidates || lit !== null || chosen !== null));
+    const mute = muteFor(emphasis);
 
     const edgeScale = level === "coarse" ? 0.8 : 1;
     // Everything in view in one fill.
@@ -465,18 +501,20 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
         strokeLines(c, unitOutline(shape), "rgba(255, 255, 255, 0.95)", 1.8);
       }
     }
-    if (lit !== null) {
-      const shape = unitShape(lit, level);
-      if (shape !== null) {
-        const pulse = reduced ? 0.75 : 0.65 + 0.35 * (0.5 + 0.5 * Math.sin(nowMs / 90));
-        const outline = unitOutline(shape);
-        for (const [width, alpha] of [[16, 0.08], [10, 0.16], [5, 0.3]] as const) {
-          strokeLines(c, outline, `rgba(${COLOUR.litGlow}, ${(alpha * pulse).toFixed(3)})`, width);
-        }
-        fillShape(c, shape, COLOUR.lit);
-        strokeLines(c, outline, "rgba(255, 255, 255, 0.95)", 2);
-      }
+  }
+
+  /** The roulette's lit unit: the one thing in the land layer that changes while the camera is still. */
+  function drawLit(c: CanvasRenderingContext2D, level: "coarse" | "detail", lit: string | null, nowMs: number, reduced: boolean): void {
+    if (lit === null) return;
+    const shape = unitShape(lit, level);
+    if (shape === null) return;
+    const pulse = reduced ? 0.75 : 0.65 + 0.35 * (0.5 + 0.5 * Math.sin(nowMs / 90));
+    const outline = unitOutline(shape);
+    for (const [width, alpha] of [[16, 0.08], [10, 0.16], [5, 0.3]] as const) {
+      strokeLines(c, outline, `rgba(${COLOUR.litGlow}, ${(alpha * pulse).toFixed(3)})`, width);
     }
+    fillShape(c, shape, COLOUR.lit);
+    strokeLines(c, outline, "rgba(255, 255, 255, 0.95)", 2);
   }
 
   function drawShading(c: CanvasRenderingContext2D, cx: number, cy: number, scale: number): void {
@@ -512,6 +550,15 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
     c.shadowBlur = 4 * dpr;
     strokeLines(c, { type: "MultiLineString", coordinates: [coordinates] }, "rgba(255, 255, 255, 0.95)", 3.4);
     c.restore();
+    // Where the globe came to rest: a ring the dotted line leaves from.
+    const origin = projection(glide.from as [number, number]);
+    if (origin !== null && facing(glide.from[0], glide.from[1]) > 0) {
+      c.beginPath();
+      c.arc(origin[0], origin[1], 6, 0, Math.PI * 2);
+      c.lineWidth = 2;
+      c.strokeStyle = "rgba(255, 255, 255, 0.9)";
+      c.stroke();
+    }
     const head = projection(interpolate(eased));
     const [lng, lat] = interpolate(eased);
     if (head !== null && facing(lng, lat) > 0) {
@@ -711,27 +758,52 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
     const limbVisible = scale < halfDiagonal;
     // Clip to just beyond the corners of the canvas (a hemisphere when the whole globe shows).
     const clipDeg = limbVisible ? 90 : Math.min(90, (Math.asin(Math.min(1, halfDiagonal / scale)) * 180) / Math.PI + 2);
-    projection.rotate(rotation).scale(scale).translate([cx, cy]).clipAngle(clipDeg);
+    projection.rotate(rotation).scale(scale).translate([cx, cy]).clipAngle(clipDeg).precision(frame.moving === true ? 2 : 0.6);
     lastProjection = projection;
     setCentreVec(centre);
 
     const level = levelFor(frame, viewRadius);
     lastLevel = level;
     const data = levelData(level);
+    const emphasis = frame.emphasis ?? null;
 
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
     c.clearRect(0, 0, cssW, cssH);
     c.lineJoin = "round";
     c.lineCap = "round";
 
-    drawOcean(c, cx, cy, scale, limbVisible);
-
-    // Graticule.
-    const fine = fineGraticule(centre, viewRadius);
-    strokeLines(c, fine ?? GRATICULE_COARSE, COLOUR.graticule, 0.6);
-
-    drawLand(c, level, data, (clipDeg * Math.PI) / 180, frame.emphasis ?? null, nowMs, reduced);
-    if (limbVisible) drawShading(c, cx, cy, scale);
+    // The map itself (ocean, graticule, land, borders, shading) only changes when the view or the set of
+    // emphasised units does. While the camera rests — the whole roulette — it is painted once into an
+    // offscreen canvas and blitted, so a flickering lit unit costs one drawImage plus its own outline.
+    const clipRad = (clipDeg * Math.PI) / 180;
+    const paintMap = (target: CanvasRenderingContext2D): void => {
+      drawOcean(target, cx, cy, scale, limbVisible);
+      // Graticule: under the land while the whole globe shows; over it once zoomed in, where it is the
+      // only thing that tells a pan or a zoom apart on a big flat country.
+      const grid = fineGraticule(centre, viewRadius) ?? gather(coarseGraticule(), centreVec, clipRad, scratchGrid);
+      if (limbVisible) strokeLines(target, grid, COLOUR.graticule, 0.6);
+      drawLand(target, level, data, clipRad, emphasis);
+      if (!limbVisible) strokeLines(target, grid, COLOUR.graticuleOverLand, 0.7);
+      if (limbVisible) drawShading(target, cx, cy, scale);
+    };
+    const cache = frame.moving === true ? null : mapCache();
+    if (cache === null) {
+      paintMap(c);
+    } else {
+      const key = `${rotation[0]}|${rotation[1]}|${rotation[2]}|${scale}|${level}|${dpr}|${muteFor(emphasis)}|${emphasis?.candidateUnits?.join(",") ?? ""}|${emphasis?.chosenUnit ?? ""}`;
+      if (key !== cache.key) {
+        cache.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        cache.ctx.clearRect(0, 0, cssW, cssH);
+        cache.ctx.lineJoin = "round";
+        cache.ctx.lineCap = "round";
+        path.context(cache.ctx);
+        paintMap(cache.ctx);
+        path.context(c);
+        cache.key = key;
+      }
+      c.drawImage(cache.canvas, 0, 0, cssW, cssH);
+    }
+    drawLit(c, level, emphasis?.litUnit ?? null, nowMs, reduced);
 
     if (frame.glide !== undefined && frame.glide !== null) drawGlide(c, frame.glide);
 
@@ -791,6 +863,7 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
       canvas.style.width = `${cssW}px`;
       canvas.style.height = `${cssH}px`;
       graticuleFine = null;
+      mapLayer = null;
     },
     project(lng, lat) {
       if (lastProjection === null || facing(lng, lat) <= 0) return null;
@@ -810,6 +883,7 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
       ctx = null;
       lastProjection = null;
       graticuleFine = null;
+      mapLayer = null;
     },
   };
 }

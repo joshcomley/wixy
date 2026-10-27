@@ -596,10 +596,12 @@ export class Game {
       ripple?: GlobeFrame["ripple"];
       glide?: GlobeFrame["glide"];
       trail?: GlobeFrame["trail"];
+      moving?: boolean;
       reducedMotion: boolean;
     } = {
       view: spinning ? { rotation: [this.lambda, this.phi], viewRadiusDeg: 90 } : (this.cam as Camera),
       reducedMotion: reduced,
+      moving: this.camFrom !== null || this.remote !== null || this.drag !== null || this.phase === "spin1" || this.phase === "spin2" || (this.phase === "idle" && !reduced),
     };
 
     const landing = this.landing;
@@ -613,7 +615,8 @@ export class Game {
         base.trail = this.trail;
         break;
       case "landing":
-        base.pin = { kind: "centre" };
+        // While the dotted glide runs the glide itself is the marker (a pin would hide its start).
+        if (!(landing?.sea === true && this.cam === null && t >= GLIDE_START_S)) base.pin = { kind: "centre" };
         if (landing !== null) {
           if (t < RIPPLE_S) base.ripple = { progress: t / RIPPLE_S };
           if (landing.sea && t >= GLIDE_START_S && t < GLIDE_START_S + GLIDE_S + 0.5) {
@@ -653,8 +656,13 @@ export class Game {
       case "arriving":
       case "chosen":
       case "decided": {
-        base.emphasis = { chosenUnit: this.chosenCountry };
+        // The place itself: no country tint any more, the unit's other bank places as small dots.
         const dest = this.chosenDest;
+        if (dest !== null && this.chosenCountry !== null) {
+          base.dots = (this.deps.bank.countries[this.chosenCountry]?.destinations ?? [])
+            .filter((d) => d.id !== dest.id && !this.deps.memory.isTaken(d.id))
+            .map<GlobeDot>((d) => ({ id: d.id, lng: d.lng, lat: d.lat, label: d.name }));
+        }
         if (dest !== null) {
           const sinceArrival = now - this.arriveStart - ARRIVE_ZOOM_MS;
           const drop = reduced ? 1 : Math.max(0, Math.min(1, sinceArrival / PIN_DROP_MS));
@@ -704,7 +712,7 @@ export class Game {
       case "country":
         if (landing !== null) {
           if (landing.sea) {
-            nearest = t >= GLIDE_START_S ? `Nearest land: ${this.unitName(landing.landUnit)}` : null;
+            nearest = t >= GLIDE_START_S && this.cam === null ? `Nearest land: ${this.unitName(landing.landUnit)}` : null;
             hint = t < GLIDE_START_S ? "Splash! Landed in the sea" : "Heading for land...";
           } else {
             hint = `Landed in ${this.unitName(landing.landUnit)}`;

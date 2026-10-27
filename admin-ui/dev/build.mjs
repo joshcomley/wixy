@@ -8,7 +8,7 @@
 //
 // Inputs (all read at build time, none committed):
 //   data/adventure-world.json              the real map (committed by the world-data builder)
-//   dev/inputs/draft_bank.json             the destination bank (spec 2.2 shape)     env ADV_BANK
+//   ../wixy_server/livechat/adventure_destinations.json  the committed destination bank (spec 2.2)  env ADV_BANK
 //   dev/inputs/sample_pack.json            a sample holiday pack (spec 4.3 shape)     env ADV_PACK
 //                                          (optional: a built-in example is used when absent)
 
@@ -46,8 +46,8 @@ export async function build() {
   const started = performance.now();
   const world = await readOptional(path.join(root, "data", "adventure-world.json"));
   if (world === null) throw new Error("data/adventure-world.json is missing (merge origin/adv/world-data).");
-  const bank = await readOptional(process.env.ADV_BANK ?? path.join(here, "inputs", "draft_bank.json"));
-  if (bank === null) throw new Error("No destination bank: put it at admin-ui/dev/inputs/draft_bank.json or set ADV_BANK.");
+  const bank = await readOptional(process.env.ADV_BANK ?? path.join(root, "..", "wixy_server", "livechat", "adventure_destinations.json"));
+  if (bank === null) throw new Error("No destination bank: expected wixy_server/livechat/adventure_destinations.json (or set ADV_BANK).");
   const pack = await readOptional(process.env.ADV_PACK ?? path.join(here, "inputs", "sample_pack.json"));
 
   const bundle = await esbuild.build({
@@ -56,7 +56,7 @@ export async function build() {
     minify: true,
     write: false,
     format: "iife",
-    target: ["es2020", "safari14"],
+    target: ["es2020"],
     legalComments: "none",
     logLevel: "warning",
     tsconfig: path.join(root, "tsconfig.json"),
