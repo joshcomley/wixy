@@ -38,6 +38,15 @@ from wixy_server.livechat import janitor as livechat_janitor
 from wixy_server.livechat import media_queue as livechat_media_queue
 from wixy_server.livechat import processing as livechat_processing
 from wixy_server.livechat import thumbnails as livechat_thumbnails
+from wixy_server.livechat.adventure_bank import AdventureBank, load_bank_or_empty
+from wixy_server.livechat.adventure_game import ADVENTURE_LIVE_BATCHES_PER_SECOND
+from wixy_server.livechat.adventure_pack import (
+    RESEARCH_DIRNAME,
+    AdventurePackRunner,
+    AdventureResearcher,
+    CmdAdventureResearcher,
+    PackTiming,
+)
 from wixy_server.livechat.call_broker import CallBroker
 from wixy_server.livechat.drawing_broker import DrawingBroker
 from wixy_server.livechat.drawings import MAX_LIVE_BATCHES_PER_SECOND
@@ -79,6 +88,7 @@ from wixy_server.routes_engine import EngineStatusCache
 from wixy_server.routes_engine import router as engine_router
 from wixy_server.routes_internal import router as internal_router
 from wixy_server.routes_livechat import router as livechat_router
+from wixy_server.routes_livechat_adventure import router as livechat_adventure_router
 from wixy_server.routes_livechat_calls import router as livechat_calls_router
 from wixy_server.routes_livechat_media import router as livechat_media_router
 from wixy_server.routes_preview import DEFAULT_PREVIEW_STALENESS_THRESHOLD_S
@@ -146,6 +156,9 @@ def create_app(
     pin_verifier: PinVerifier | None = None,
     transcriber: Transcriber | None = None,
     image_generator: ComfyImageGenerator | None = None,
+    adventure_bank: AdventureBank | None = None,
+    adventure_researcher: AdventureResearcher | None = None,
+    adventure_pack_timing: PackTiming | None = None,
 ) -> FastAPI:
     """Build the Wixy FastAPI app for one project.
 
@@ -191,6 +204,14 @@ def create_app(
     `image_generator` (workspace 00045): the would-you-rather game's on-demand image painter
     (a `ComfyImageGenerator`). Defaults to one built from `WIXY_COMFY_URL` on the fleet edition
     and `None` when that is unset or on standalone — rounds are then text-only.
+    `adventure_bank` (workspace 00056): the Adventure Time destination bank. Defaults to the
+    shipped `adventure_destinations.json`, validated strictly at start (a broken file is logged
+    and the game then answers 503 `game_unavailable`); tests pass a small fixture bank.
+    `adventure_researcher`: what researches a chosen destination's holiday pack. Defaults to a
+    `CmdAdventureResearcher` over `chat_client` on the fleet edition when the AI backend is cmd,
+    and `None` otherwise (standalone: every pack is `unavailable` at once; Bank/Reject still
+    work) — overridable so tests and the e2e fixture inject a fake. `adventure_pack_timing` shortens
+    the job's pacing (poll interval, spawn gap, give-up) for tests and the fixture.
     """
     settings = load_settings(storage_root)
     registry = load_registry(wixy_repo_root)
@@ -311,6 +332,26 @@ def create_app(
         else None
     )
     wyr_demand = WyrDemand()
+    # Adventure Time (workspace 00056): the destination bank loads once; the holiday-pack runner
+    # needs a researcher — cmd-backed on the fleet when the AI backend is cmd, none otherwise.
+    resolved_adventure_bank = adventure_bank if adventure_bank is not None else load_bank_or_empty()
+    if adventure_researcher is not None:
+        resolved_adventure_researcher: AdventureResearcher | None = adventure_researcher
+    elif settings.edition != "standalone" and isinstance(resolved_ai_backend, CmdAIBackend):
+        resolved_adventure_researcher = CmdAdventureResearcher(chat_client)
+    else:
+        resolved_adventure_researcher = None
+    livechat_adventure_runner = AdventurePackRunner(
+        store=livechat_store,
+        bank=resolved_adventure_bank,
+        researcher=resolved_adventure_researcher,
+        notifier=livechat_notifier,
+        cwd=paths.server_dir / RESEARCH_DIRNAME,
+        timing=adventure_pack_timing,
+    )
+    livechat_adventure_live_limiter = SlidingWindowRateLimiter(
+        max_events=ADVENTURE_LIVE_BATCHES_PER_SECOND, window_s=1.0
+    )
     livechat_transcription = TranscriptionRuntime(
         store=livechat_store,
         paths=paths,
@@ -362,6 +403,10 @@ def create_app(
         await anyio.to_thread.run_sync(
             lambda: livechat_store.fail_stale_pending_transcripts(now=time.time())
         )
+        if resolved_adventure_researcher is not None:
+            # The empty, non-git folder cmd runs the holiday-pack research in (it must exist
+            # before cmd is asked to use it as a working directory).
+            await anyio.to_thread.run_sync(livechat_adventure_runner.prepare_directory)
 
         async def _run_watcher() -> None:
             await watch_upstream(
@@ -438,6 +483,9 @@ def create_app(
                     background.supervise("livechat-wyr-sweep", _run_wyr_sweep)
                 if wyr_pool is not None:
                     background.supervise("livechat-wyr-pool", _run_wyr_pool)
+                # A holiday pack still `pending` belongs to a job that died with the previous
+                # process: resume polling its run, or start one if it never got that far.
+                await livechat_adventure_runner.resume(background)
                 yield
                 tg.cancel_scope.cancel()
         finally:
@@ -506,6 +554,9 @@ def create_app(
     app.state.livechat_wyr_pool = wyr_pool
     app.state.livechat_wyr_demand = wyr_demand
     app.state.livechat_drawing_live_limiter = livechat_drawing_live_limiter
+    app.state.livechat_adventure_bank = resolved_adventure_bank
+    app.state.livechat_adventure_runner = livechat_adventure_runner
+    app.state.livechat_adventure_live_limiter = livechat_adventure_live_limiter
 
     @app.exception_handler(FastAPIHTTPException)
     async def _http_exception_handler(_request: Request, exc: FastAPIHTTPException) -> JSONResponse:
@@ -535,6 +586,7 @@ def create_app(
     app.include_router(system_router)
     app.include_router(versions_router)
     app.include_router(livechat_router)
+    app.include_router(livechat_adventure_router)
     app.include_router(livechat_calls_router)
     app.include_router(livechat_media_router)
 

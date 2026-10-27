@@ -1737,8 +1737,8 @@ async def _stream_events(
         # Live frames go out only AFTER the expiry and grant checks above (audit F6): spec 07 §4
         # says the grant check, token expiry and `locked` apply unchanged to the relay, and the
         # persisted path below also checks before it emits.
-        for frame in queue.drain():
-            yield _format_sse("drawing_live", frame)
+        for live_frame in queue.drain_frames():
+            yield _format_sse(live_frame.event, live_frame.data)
 
         if anyio.current_time() - last_ping >= _PING_INTERVAL_S:
             last_ping = anyio.current_time()

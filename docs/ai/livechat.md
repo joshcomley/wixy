@@ -701,7 +701,10 @@ unarchived failed original after seven days, and prunes completed cleanup rows a
 It never ages out pending work. The view-once backstop (`livechat-view-once-backstop`, spec 06) runs
 once at startup and then every 30 seconds: it sweeps claimed view-once messages older than 600
 seconds where the claimant disconnected or abandoned the download, permanently deleting their
-database rows and storage.
+database rows and storage. The Adventure Time holiday-pack job (`livechat-adventure-pack`, §23) is a
+`spawn`ed one-shot per round (started by the route that chose the place, and resumed for every
+`pending` pack by `AdventurePackRunner.resume` at startup); it contains its own failures by marking the
+pack `failed`, and shutdown cancels it without marking anything so the next start resumes it.
 
 If `/api/admin/server/usage` reports `erasurePending: true`, delete/wipe has committed and the
 worker still owes WAL or file cleanup. Check server logs for filesystem errors, restore access,
@@ -2120,3 +2123,96 @@ screen as she sends it and on the other person's as it arrives. Nothing is sent 
   rAF, listeners and the suspension are all removed. Escape is also the chat's panic key; the scene does not
   swallow it, so the lock still happens. `prefers-reduced-motion: reduce` skips the scene for a static starfield.
 - **Tests.** `admin-ui/tests/server/goodnight{Match,Dither,Timeline,Scene}.test.ts`, `threadGoodnight.test.ts`.
+
+## 23. Adventure Time: the globe holiday game, server half (workspace 00056; spec `spec/server-chat/08-adventure-time.md`, decisions/00190, Inv 56)
+
+The header's ... menu has **Adventure Time**: one person spins a globe sideways, the other sees the finger as a
+fading trail, the globe lands (the second spin is up/down), the camera zooms 30 % inland and countries light up at
+random until someone presses **Stop**, then the same over that country's top places; Stop zooms to the place and an
+AI researches a **holiday pack**. **Let's go there** banks it; **No** puts it on a never-again list. This section is the
+SERVER half (the client half — world map, geometry, renderer, pane, card, Holiday bank — is the spec's §3/§5). The
+server's job is consistency, not anti-cheating: the client that makes a move computes its consequence and posts it, the
+server validates the SHAPE and BOUNDS and stores it once, and every other client replays the stored values (one
+geometry implementation, in TypeScript; the pair are trusted, Inv 40).
+
+- **Modules.** `livechat/adventure_bank.py` (the static destination bank: strict loader, exclusion, top-five
+  spacing), `livechat/adventure_destinations.json` (the bank), `livechat/adventure_game.py` (validation of a move +
+  the wire shapes), `livechat/adventure_pack.py` (the holiday-pack job and its prompt/parse/sanitise),
+  `routes_livechat_adventure.py` (the routes), the store methods in `livechat/store.py`, and the chat-spawn run calls
+  in `cmdchat.py` (the ONE chokepoint to cmd, Inv 13).
+- **Storage** (schema v20, additive; v19 is deployed and untouched): `adv_rounds` (one row per anchor message,
+  `ON DELETE CASCADE`, explicit `DELETE` in wipe — the Inv 54 pattern) holds `state`, both spins
+  (`{by, from, delta, durationMs, at}` JSON), the landing (`{point, sea, land, centre, landUnit}`), each roulette's
+  candidates / `seed` / `roulette_at`, the chosen country and place with who chose them, the pack
+  (`pack` state, `pack_run_id`, `pack_json`, `pack_error`), `decided_by`, `rev`; `adv_rejected(destination_id)` is the
+  never-again list (ids only, no FK, survives a message delete, cleared by a wipe); `adv_settings(id=1,
+  include_advised)` is the shared "include places the UK says not to travel to" preference (default off, no row =
+  default, a wipe leaves it alone). Banked trips are derived from `state = 'banked'`. The game chat reuses `wyr_chat`
+  (`create_message(wyr_anchor_seq=)` accepts an adventure anchor; `WyrRoundNotFoundError` is the one not-found error);
+  the wire keeps `wyrSeq`/`wyrRef` ("the game-chat anchor of ANY game") and adds `wyrRefKind` (`"wyr"`/`"adventure"`,
+  resolved at read time in the same query). `Message.adventure = {state, pack, rev}` is joined at read time like `wyr`.
+- **State machine.** `spin_lng -spin(lng)-> spin_lat -spin(lat, result)-> country -stop(country)-> destination
+  -stop(destination)-> chosen -decide-> banked | rejected`; a country with exactly one place left goes straight to
+  `chosen`; a new adventure abandons every round in `spin_lng|spin_lat|country|destination` (never `chosen`). Anyone
+  unlocked may make any move; `by` records who. Every mutation runs under `BEGIN IMMEDIATE`, samples the clock only
+  AFTER the write lock (decisions/00186), bumps `rev`/`updated_at` and appends one `message_updated` event. **Every
+  mutation is idempotent**: the SAME move replayed (same axis+from+delta, same stage+choice, same decision) answers
+  200 with the unchanged view and appends nothing; a DIFFERENT move after the state advanced is 409 `bad_state`; of two
+  racing writers the first wins.
+- **Spin validation** (`adventure_game.parse_spin`): `|from| <= 1e6`, `720 <= |delta| <= 3600`,
+  `3500 <= durationMs <= 7000`, all finite; the `lat` spin REQUIRES `result` (`point`, `land`, `centre` as `[lng, lat]`
+  in degrees, `sea`, `landUnit`, 1-10 unique `candidates`), the `lng` spin REFUSES it; `landUnit` and every candidate
+  must be playable bank units (a whole-country-advised unit only while the preference is on). The `lat` spin stores the
+  landing and candidates, draws `country_seed` (a random uint32) and sets `country_roulette_at = now + durationMs/1000
+  + 5 s`. Wire details and error codes: [contracts.md](contracts.md).
+- **Roulettes.** Stop posts the id the presser SAW lit; it must be one of the stage's candidates (422) and the roulette
+  must have started (`409 too_early`, 1 s tolerance). The country stop reads the exclusion state INSIDE the
+  transaction (`remaining = bank - rejected - banked`) and takes the unit's **top five** with
+  `AdventureBank.top_destinations`: walk the remaining places in rank order, take one only if it is at least 40 km
+  (great-circle) from every one already taken (so the dots never overlap — Peru's Machu Picchu, Cusco and the Sacred
+  Valley sit within ~75 km), then fill any shortfall from the skipped ones in rank order; skipped places are held
+  back, never consumed. None left (or an advised unit while the preference is off) is `409 exhausted` and the round
+  stays on `country`; exactly one left skips to `chosen`; otherwise `destination` with a fresh seed and
+  `dest_roulette_at = now + 3.5 s`.
+- **Decide.** Only from `chosen`. Reject inserts the place into `adv_rejected` in the same transaction and, if the
+  research is still running, ends it (`pack -> failed`, so the job's compare-and-set finds nothing waiting and cancels its
+  run). Bank keeps the trip and removes the place from later draws; a pack still `pending` when banked still lands.
+- **The view** (`GET /adventure/{seq}`, `adventure_view_json`) carries `serverNow` (the client keeps the smallest-
+  round-trip offset and drives every animation from server time), `eligible` only while spinning (computed at READ time,
+  so the preference reaches open rounds), names resolved from the bank, and `pack: {state, data, error, canRetry}`.
+- **The live trail.** `POST /adventure/live` validates a frame (ids 8-64 chars, `anchorSeq` 1..2^53-1, a bounded frame
+  counter, finite rotation, at most 32 `[x, y, t]` points with `|x|,|y| <= 3` and `0 <= t <= 600000`, axis enum),
+  rate-limits it at 30 a second with its OWN `SlidingWindowRateLimiter` on the same authenticated identity key as drawing
+  live, and relays it as the id-less SSE event `adventure_live` through the generalised `DrawingBroker`
+  (`publish(frame, event)`; a frame carries its event name, drawing frames default to `drawing_live`, unchanged).
+  Never stored, never logged (Inv 56).
+- **The holiday pack** (`adventure_pack.py`). Entering `chosen` sets `pack = pending` (or `unavailable` when no
+  researcher is configured) in the same transaction; the route then spawns `AdventurePackRunner.run_job` on the contained
+  group (Inv 47). The job starts a hidden, unparented cmd chat-spawn run
+  (`POST /api/chat-spawn/runs`: `caller: wixy-adventure-pack`, `claude-sonnet-5-5`, `effort: medium`, `bucket:
+  subscription`, `timeout_secs: 1200`, `build_space: primary`, no `tag`, every file/shell/agent tool disallowed, `cwd` the
+  empty non-git folder `<server storage dir>/adventure-research`, forward slashes), polls it every 10 s (the response
+  NESTS the row under `run`; statuses `queued|running|completed|error|timeout|cancelled`) and reads `run.response_text`.
+  The prompt names ONLY the bank destination (name, region, unit, coordinates) and demands one final JSON object in
+  the pinned shape, in a warm friend-to-the-couple voice that never mentions its searches, with `travelAdvice` taken
+  from the country's gov.uk page. `parse_pack` takes the last usable JSON object in the text and `sanitise_pack` validates
+  and clips every string, keeps only `http(s)` URLs with a dotted host (at most 500 characters, no credentials), drops unknown
+  keys and fails a pack with no sections; the canonical JSON is stored in `pack_json`. Limits: `CapacityLimiter(2)` runs
+  in flight, spawns at least 5 s apart (cmd's parallel-spawn gotcha), give up after 25 minutes (cancelling the run), one
+  retry for a cmd `error` in the first 150 s of a run; a spawn is never repeated once its answer might have been lost
+  (`cmdchat._request(connect_errors_only=True)`). Failure text is short and generic ("The research didn't finish -
+  try again"); cmd unreachable at the start is `unavailable`. Writes are compare-and-set on
+  `(pack = 'pending' AND pack_run_id = <this run>)`, so a blue/green overlap stores a result once and a rejected or deleted
+  round is left alone. **At startup** `AdventurePackRunner.resume` restarts the job for every `pending` round: with a run
+  id it resumes polling that run, without one it starts a new run; with no researcher those rounds become `unavailable`.
+- **Edition.** `create_app(adventure_researcher=...)` is the seam (plus `adventure_bank=` and `adventure_pack_timing=`).
+  The default is a `CmdAdventureResearcher` over the app's `CmdChatClient` on the fleet edition when the AI backend is
+  cmd; otherwise none (standalone: `pack = unavailable` at once, Bank/Reject still work). The e2e fixture server wires
+  one at the fake cmd, which answers every run with `fake_cmd.CANNED_ADVENTURE_PACK` after ~2 s.
+- **Honest limits.** cmd keeps its own copy of each research run (the prompt — the bank destination — and the final
+  answer) in its hidden ledger and transcript, which delete/wipe cannot reach (Inv 56, operator decision #2113). Live
+  frames reach only streams on the same blue/green process (like live drawing). A pack still researching when its
+  message is deleted costs the research it already spent (the job notices and cancels the run on its next poll).
+- **Tests.** `test_livechat_adventure.py`, `test_routes_livechat_adventure.py`, `test_livechat_adventure_live.py`,
+  `test_livechat_adventure_pack.py`, `test_adventure_bank_loader.py` + `test_adventure_bank.py` (+ the shared helpers in `adventure_testkit.py` and the
+  chat-spawn endpoints in `fake_cmd.py`) — see [testing.md](testing.md).
