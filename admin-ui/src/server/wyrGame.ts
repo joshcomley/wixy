@@ -1,56 +1,45 @@
-// The would-you-rather GAME TAB (workspace 00045): when a round is opened the chat gets a tab bar
-// at the bottom — "Chat" and "WYR" — and the WYR tab shows the round full-height:
+// The would-you-rather GAME PANE (workspace 00045): when a round is opened its tab shows the round
+// full-height:
 //
-//   [ title                              Next ▸  × ]
+//   [ title                  Maximize  Topics  Next ▸  × ]
 //   [ the picture — tap it to flip between option A and option B ]
 //   [ the controls: Play/Skip, pick + guess, Reveal, results ]
 //   [ mini chat: this card's last two messages ]      <- tap a message (or a thumbnail) to open
 //   [ the chat composer — the ordinary one, now sending into this card ]
 //
 // The card's chat is kept WITH the card (messages carry `wyrRef`, `wyrSeq` on send) and also lives
-// in the main chat. Tapping a mini-chat message opens a pop-up: the same card chat, larger, with
-// that card's whole history and the ordinary composer moved into it (voice notes, attachments and
-// all). Closing the game closes the tab; with one tab left the bar disappears.
+// in the main chat. Closing the game closes the tab; with one tab left the bar disappears.
 //
-// This module owns only the game's own DOM and state; the thread supplies the data and the
-// composer through `WyrGameDeps` (so nothing here knows how messages are stored or sent).
+// This module is only the WYR-specific part — the header, the picture stage, the controls host and
+// the maximize-pictures dialog. The FRAME is shared with every game (spec/server-chat/
+// 08-adventure-time.md §5.1): the tab bar, which pane shows, dots, dismissal and where a message
+// goes live in `gameTabs.ts`; the mini chat strip and the pop-up item chat (with the ONE composer
+// re-parented into it) live in `itemChat.ts`. The thread supplies the data and the composer through
+// those two modules (so nothing here knows how messages are stored or sent), and this pane
+// registers itself with `gameTabs` under the key "wyr".
 
 import type { Message } from "./api/messages";
 import type { WyrView } from "./api/wyr";
+import type { GameTabs } from "./gameTabs";
+import type { ItemChat } from "./itemChat";
 import type { WyrControls } from "./wyrControls";
 import { wyrPictureUrls } from "./wyrCard";
 import type { WyrModel } from "./wyrModel";
-
-export type WyrTab = "chat" | "wyr";
-
-export interface WyrEcho {
-  readonly clientId: string;
-  readonly text: string | null;
-}
 
 export interface WyrGameDeps {
   readonly document: Document;
   readonly model: WyrModel;
   readonly controls: WyrControls;
-  isMine(sender: string): boolean;
+  /** The shared tab bar: this pane registers itself as the game "wyr". */
+  readonly tabs: GameTabs;
+  /** The shared item chat: this pane embeds one mini chat strip. */
+  readonly itemChat: ItemChat;
   /** The round's anchor message, or undefined once it is gone (deleted, wiped). */
   roundMessage(seq: number): Message | undefined;
-  /** This card's chat: confirmed messages with `wyrRef === seq`, oldest first. */
-  gameMessages(seq: number): readonly Message[];
-  /** This card's messages still being sent (optimistic echoes). */
-  gameEchoes(seq: number): readonly WyrEcho[];
-  /** A full message bubble (the thread's own renderer, embedded variant) for the pop-up. */
-  renderBubble(message: Message): HTMLElement;
-  /** Releases a bubble's media before it leaves the DOM. */
-  disposeBubble(element: HTMLElement): void;
-  /** Puts the ordinary composer into `host` (the pop-up) — `null` returns it to the thread. */
-  mountComposer(host: HTMLElement | null): void;
   /** Starts the next round (the ⋯ menu's action). */
   startNextRound(): void;
   /** Opens the topics screen (which topics the questions come from). */
   openTopics(): void;
-  /** The visible tab, or whether a game exists, changed: the thread adjusts its own layout. */
-  onLayoutChange(): void;
   /** Call after any change that may have altered the layout's height. */
   afterChange(): void;
   openLightbox?(source: string, alt: string): void;
@@ -59,34 +48,15 @@ export interface WyrGameDeps {
 export interface WyrGame {
   /** The game tab's content — sits in the thread view where the message thread is. */
   readonly pane: HTMLElement;
-  /** The bottom tab bar (hidden unless a game is open). */
-  readonly tabBar: HTMLElement;
-  /** The pop-up game chat overlay. */
-  readonly popup: HTMLElement;
   /** Opens the game tab for `seq` and shows it. */
   open(seq: number): void;
   /** A round started elsewhere: the tab appears (with a dot) without taking over the screen. */
   offer(seq: number): void;
   /** Closes the game: the tab goes, the chat is shown. */
   close(): void;
-  showTab(tab: WyrTab): void;
-  activeTab(): WyrTab;
   /** The open game's round, or null. */
   gameSeq(): number | null;
-  /** The round a message sent right now belongs to (the game chat), or null (the main chat). */
-  chatTarget(): number | null;
-  /** The main chat got a message while the game tab is showing: dot the Chat tab. */
-  noteChatActivity(): void;
-  /** Data changed: redraw whatever is visible (and close if the round is gone). */
-  refresh(): void;
-  isPopupOpen(): boolean;
-  closePopup(): void;
-  /** Lock / wipe: forget everything. */
-  reset(): void;
 }
-
-const MINI_COUNT = 2;
-const STICK_PX = 40;
 
 export function createWyrGame(deps: WyrGameDeps): WyrGame {
   const doc = deps.document;
@@ -111,33 +81,14 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
     return b;
   }
 
-  let seq: number | null = null;
-  let tab: WyrTab = "chat";
-  let dismissedSeq: number | null = null;
   let shown: "a" | "b" = "a";
-  let wyrDot = false;
-  let chatDot = false;
-  let popupOpen = false;
-
-  // -- Tab bar ------------------------------------------------------------------------------
-
-  const tabBar = el("div", "wx-srv-tabs");
-  tabBar.setAttribute("role", "tablist");
-  tabBar.hidden = true;
-  const chatTabButton = button("wx-srv-tab wx-srv-tab-chat", "Chat", "Chat", () => showTab("chat"));
-  const wyrTabButton = button("wx-srv-tab wx-srv-tab-wyr", "Would you rather game", "WYR", () => showTab("wyr"));
-  for (const b of [chatTabButton, wyrTabButton]) b.setAttribute("role", "tab");
-  const chatDotEl = el("span", "wx-srv-tab-dot");
-  const wyrDotEl = el("span", "wx-srv-tab-dot");
-  chatDotEl.hidden = true;
-  wyrDotEl.hidden = true;
-  chatTabButton.appendChild(chatDotEl);
-  wyrTabButton.appendChild(wyrDotEl);
-  tabBar.append(chatTabButton, wyrTabButton);
+  /** The round the pane was last drawn for: a different one starts again at option A. */
+  let drawnSeq: number | null = null;
 
   // -- Game pane ----------------------------------------------------------------------------
 
   const pane = el("div", "wx-srv-game");
+  pane.setAttribute("data-game", "wyr");
   pane.hidden = true;
   const head = el("div", "wx-srv-game-head");
   const title = el("span", "wx-srv-game-title", "Would you rather…?");
@@ -173,11 +124,12 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
   stage.append(imgA, imgB, placeholder, chips, caption);
   stage.addEventListener("click", () => {
     shown = shown === "a" ? "b" : "a";
-    drawStage();
+    const seq = deps.tabs.seqOf("wyr");
+    if (seq !== null) drawStage(seq);
   });
 
   const controlsHost = el("div", "wx-srv-game-controls");
-  const mini = el("div", "wx-srv-game-mini");
+  const strip = deps.itemChat.createStrip();
   const picturesOverlay = doc.createElement("dialog");
   picturesOverlay.className = "wx-srv-game-pictures";
   picturesOverlay.setAttribute("role", "dialog");
@@ -208,116 +160,8 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
     return { which, image, fallback, label };
   });
   picturesOverlay.append(picturesHead, picturesPair);
-  pane.append(head, stage, controlsHost, mini, picturesOverlay);
+  pane.append(head, stage, controlsHost, strip.element, picturesOverlay);
   let picturesOpen = false;
-
-  // -- Pop-up game chat ---------------------------------------------------------------------
-
-  const popup = el("div", "wx-srv-gamepop");
-  popup.hidden = true;
-  popup.setAttribute("role", "dialog");
-  popup.setAttribute("aria-label", "Game chat");
-  const backdrop = el("button", "wx-srv-gamepop-backdrop");
-  backdrop.type = "button";
-  backdrop.setAttribute("aria-label", "Close the game chat");
-  backdrop.addEventListener("click", () => closePopup());
-  const sheet = el("div", "wx-srv-gamepop-sheet");
-  const popHead = el("div", "wx-srv-gamepop-head");
-  const popTitle = el("span", "wx-srv-gamepop-title", "Game chat");
-  const popClose = button("wx-srv-gamepop-close", "Close the game chat", "✕", () => closePopup());
-  popHead.append(popTitle, popClose);
-  const popList = el("div", "wx-srv-gamepop-list");
-  const popEmpty = el("p", "wx-srv-gamepop-empty", "No messages about this one yet.");
-  const composerSlot = el("div", "wx-srv-gamepop-composer");
-  sheet.append(popHead, popList, composerSlot);
-  popup.append(backdrop, sheet);
-  popList.appendChild(popEmpty);
-  const popBubbles = new Map<number, { readonly key: string; readonly element: HTMLElement }>();
-  const popEchoes = new Map<string, HTMLElement>();
-
-  // Escape is deliberately NOT a way to close the pop-up: in this chat Escape is the panic key
-  // (it locks everything at once, R6), so the pop-up closes by its ✕ or by tapping the backdrop.
-
-  // -- State changes ------------------------------------------------------------------------
-
-  function syncTabs(): void {
-    const open = seq !== null;
-    tabBar.hidden = !open;
-    chatTabButton.classList.toggle("wx-srv-tab-on", tab === "chat");
-    wyrTabButton.classList.toggle("wx-srv-tab-on", tab === "wyr");
-    chatTabButton.setAttribute("aria-selected", tab === "chat" ? "true" : "false");
-    wyrTabButton.setAttribute("aria-selected", tab === "wyr" ? "true" : "false");
-    chatDotEl.hidden = !chatDot;
-    wyrDotEl.hidden = !wyrDot;
-    pane.hidden = !(open && tab === "wyr");
-  }
-
-  function showTab(next: WyrTab): void {
-    if (seq === null) next = "chat";
-    if (next !== "wyr") closePictures(false);
-    if (next === "chat" && popupOpen) closePopup();
-    tab = next;
-    if (tab === "wyr") wyrDot = false;
-    if (tab === "chat") chatDot = false;
-    syncTabs();
-    refresh();
-    deps.onLayoutChange();
-  }
-
-  function setSeq(next: number): void {
-    if (seq !== next) {
-      closePictures(false);
-      if (popupOpen) closePopup();
-      seq = next;
-      shown = "a";
-      clearPopList();
-    }
-  }
-
-  function open(next: number): void {
-    dismissedSeq = null;
-    setSeq(next);
-    showTab("wyr");
-  }
-
-  function offer(next: number): void {
-    if (dismissedSeq === next || seq === next) return;
-    const wasOpen = seq !== null;
-    setSeq(next);
-    if (!wasOpen) tab = "chat";
-    if (tab !== "wyr") wyrDot = true;
-    syncTabs();
-    refresh();
-    deps.onLayoutChange();
-  }
-
-  function close(): void {
-    closePictures(false);
-    if (popupOpen) closePopup();
-    if (seq !== null) dismissedSeq = seq;
-    seq = null;
-    tab = "chat";
-    wyrDot = false;
-    chatDot = false;
-    clearPopList();
-    syncTabs();
-    deps.onLayoutChange();
-  }
-
-  function reset(): void {
-    closePictures(false);
-    if (popupOpen) closePopup();
-    seq = null;
-    tab = "chat";
-    dismissedSeq = null;
-    wyrDot = false;
-    chatDot = false;
-    clearPopList();
-    syncTabs();
-    // The thread may be hidden for the game tab: a lock or a wipe must give it back, or the
-    // chat is blank after the next unlock.
-    deps.onLayoutChange();
-  }
 
   // -- Drawing ------------------------------------------------------------------------------
 
@@ -350,6 +194,7 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
   }
 
   function openPictures(): void {
+    const seq = deps.tabs.seqOf("wyr");
     if (seq === null) return;
     const view = deps.model.view(seq);
     const message = deps.roundMessage(seq);
@@ -369,8 +214,7 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
     deps.afterChange();
   }
 
-  function drawStage(): void {
-    if (seq === null) return;
+  function drawStage(seq: number): void {
     const view = deps.model.view(seq);
     const message = deps.roundMessage(seq);
     if (view === undefined || message === undefined) return;
@@ -408,196 +252,57 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
     stage.setAttribute("aria-label", `Option ${shown.toUpperCase()}: ${optionText(view, shown)}. Tap to see the other one.`);
   }
 
-  function miniItem(text: string | null, sender: string | null, attachments: readonly Message["attachments"][number][]): HTMLElement {
-    // One fixed-height line per message (cut with an ellipsis, never wrapped), so the strip is
-    // the same size whatever was said; the pop-up is where whole messages are read.
-    const row = el("button", sender === null ? "wx-srv-game-mini-msg wx-srv-game-mini-mine" : "wx-srv-game-mini-msg");
-    (row as HTMLButtonElement).type = "button";
-    row.setAttribute("data-srv-gesture-boundary", "");
-    row.addEventListener("click", () => openPopup());
-    if (sender !== null) row.appendChild(el("span", "wx-srv-game-mini-sender", `${sender}: `));
-    if (text !== null && text !== "") row.appendChild(el("span", "wx-srv-game-mini-text", text));
-    for (const attachment of attachments) {
-      if (attachment.kind === "photo" && attachment.status === "ready") {
-        const src = attachment.urls.thumb ?? attachment.urls.full;
-        if (src !== undefined) {
-          const img = doc.createElement("img");
-          img.className = "wx-srv-game-mini-thumb";
-          img.src = src;
-          img.alt = "";
-          row.appendChild(img);
-          continue;
-        }
-      }
-      row.appendChild(
-        el("span", "wx-srv-game-mini-icon", attachment.kind === "voice" ? "🎤" : attachment.kind === "video" ? "🎞" : "🖼"),
-      );
-    }
-    return row;
-  }
-
-  function drawMini(): void {
-    mini.replaceChildren();
-    if (seq === null) return;
-    // The strip: [ up to two one-line messages | Open chat ] — always the same height, so the
-    // picture and the controls above never shift and nothing can spill onto the composer.
-    const lines = el("div", "wx-srv-game-mini-lines");
-    const items: HTMLElement[] = [];
-    const confirmed = deps.gameMessages(seq);
-    const echoes = deps.gameEchoes(seq);
-    for (const message of confirmed.slice(-MINI_COUNT)) {
-      items.push(miniItem(message.text, deps.isMine(message.sender) ? null : message.sender, message.attachments));
-    }
-    for (const echo of echoes) items.push(miniItem(echo.text, null, []));
-    const last = items.slice(-MINI_COUNT);
-    if (last.length === 0) {
-      const empty = el("button", "wx-srv-game-mini-msg wx-srv-game-mini-empty", "Chat about this one…");
-      (empty as HTMLButtonElement).type = "button";
-      empty.setAttribute("data-srv-gesture-boundary", "");
-      empty.addEventListener("click", () => openPopup());
-      lines.appendChild(empty);
-    } else {
-      for (const item of last) lines.appendChild(item);
-    }
-    const total = confirmed.length + echoes.length;
-    const expand = button("wx-srv-game-mini-expand", "Open the game chat", "", () => openPopup());
-    expand.append(el("span", "wx-srv-game-mini-expand-label", "Chat"));
-    if (total > 0) expand.append(el("span", "wx-srv-game-mini-count", String(total)));
-    mini.append(lines, expand);
-  }
-
-  function clearPopList(): void {
-    for (const { element } of popBubbles.values()) {
-      deps.disposeBubble(element);
-      element.remove();
-    }
-    popBubbles.clear();
-    for (const element of popEchoes.values()) element.remove();
-    popEchoes.clear();
-    popEmpty.hidden = false;
-  }
-
-  function bubbleKey(message: Message): string {
-    return JSON.stringify([message.text, message.attachments, message.reactions]);
-  }
-
-  function drawPopup(): void {
-    if (seq === null || !popupOpen) return;
-    const messages = deps.gameMessages(seq);
-    const echoes = deps.gameEchoes(seq);
-    const wasNearBottom = popList.scrollHeight - popList.scrollTop - popList.clientHeight <= STICK_PX;
-    const wanted = new Set(messages.map((m) => m.seq));
-    for (const [id, entry] of popBubbles) {
-      if (!wanted.has(id)) {
-        deps.disposeBubble(entry.element);
-        entry.element.remove();
-        popBubbles.delete(id);
-      }
-    }
-    let previous: Element | null = null;
-    for (const message of messages) {
-      let entry = popBubbles.get(message.seq);
-      const key = bubbleKey(message);
-      if (entry === undefined || entry.key !== key) {
-        // A message whose body changed (a picture finishing, a reaction) is rebuilt; an unchanged
-        // one is left alone so a voice note that is playing is never cut off.
-        if (entry !== undefined) {
-          deps.disposeBubble(entry.element);
-          entry.element.remove();
-        }
-        entry = { key, element: deps.renderBubble(message) };
-        popBubbles.set(message.seq, entry);
-      }
-      const after: ChildNode | null = previous === null ? popList.firstChild : previous.nextSibling;
-      if (entry.element !== after) popList.insertBefore(entry.element, after);
-      previous = entry.element;
-    }
-    const echoIds = new Set(echoes.map((e) => e.clientId));
-    for (const [id, node] of popEchoes) {
-      if (!echoIds.has(id)) {
-        node.remove();
-        popEchoes.delete(id);
-      }
-    }
-    for (const echo of echoes) {
-      let node = popEchoes.get(echo.clientId);
-      if (node === undefined) {
-        node = el("div", "wx-srv-bubble wx-srv-bubble-mine wx-srv-echo");
-        if (echo.text !== null && echo.text !== "") node.appendChild(el("div", "wx-srv-bubble-text", echo.text));
-        popEchoes.set(echo.clientId, node);
-      }
-      popList.appendChild(node);
-    }
-    popEmpty.hidden = messages.length > 0 || echoes.length > 0;
-    if (popEmpty.parentElement !== popList) popList.appendChild(popEmpty);
-    if (wasNearBottom) popList.scrollTop = popList.scrollHeight;
-  }
-
-  function openPopup(): void {
-    if (seq === null || popupOpen) return;
-    popupOpen = true;
-    popup.hidden = false;
-    deps.mountComposer(composerSlot);
-    drawPopup();
-    popList.scrollTop = popList.scrollHeight;
-    deps.onLayoutChange();
-  }
-
-  function closePopup(): void {
-    if (!popupOpen) return;
-    popupOpen = false;
-    popup.hidden = true;
-    deps.mountComposer(null);
-    clearPopList();
-    deps.onLayoutChange();
-  }
-
-  function refresh(): void {
-    if (seq === null) return;
-    if (deps.roundMessage(seq) === undefined) {
-      close();
-      return;
+  /** Redraws the pane for round `seq` (the frame calls this only while the WYR tab shows; the
+   * mini chat strip and the pop-up are redrawn by the shared item chat right after). */
+  function refreshPane(seq: number): void {
+    if (drawnSeq !== seq) {
+      // A different round starts again at option A, and its pictures are not the ones on screen.
+      closePictures(false);
+      shown = "a";
+      drawnSeq = seq;
+      strip.draw(seq);
     }
     const view = deps.model.view(seq);
     if (view !== undefined) {
-      popTitle.textContent = "Game chat";
       nextButton.hidden = !(view.state === "revealed" || view.state === "skipped");
       title.textContent = "Would you rather…?";
+      deps.controls.render(controlsHost, seq, view);
+      controlsHost.hidden = false;
+    } else {
+      controlsHost.replaceChildren(el("p", "wx-srv-wyr-status", "Loading…"));
     }
-    if (tab === "wyr") {
-      if (view !== undefined) {
-        deps.controls.render(controlsHost, seq, view);
-        controlsHost.hidden = false;
-      } else {
-        controlsHost.replaceChildren(el("p", "wx-srv-wyr-status", "Loading…"));
-      }
-      drawStage();
-      drawMini();
-    }
-    drawPopup();
-    deps.afterChange();
+    drawStage(seq);
   }
+
+  /** The game closed, or the chat locked / was wiped: forget the round on screen. */
+  function forget(): void {
+    closePictures(false);
+    shown = "a";
+    drawnSeq = null;
+    strip.draw(null);
+  }
+
+  function close(): void {
+    deps.tabs.close("wyr");
+  }
+
+  deps.tabs.register({
+    key: "wyr",
+    tabLabel: "WYR",
+    tabAriaLabel: "Would you rather game",
+    pane,
+    exists: (seq) => deps.roundMessage(seq) !== undefined,
+    refresh: refreshPane,
+    // The comparison view is modal and covers the page: it never outlives the tab.
+    onHide: () => closePictures(false),
+    reset: forget,
+  });
 
   return {
     pane,
-    tabBar,
-    popup,
-    open,
-    offer,
+    open: (seq) => deps.tabs.open("wyr", seq),
+    offer: (seq) => deps.tabs.offer("wyr", seq),
     close,
-    showTab,
-    activeTab: () => tab,
-    gameSeq: () => seq,
-    chatTarget: () => (seq !== null && (tab === "wyr" || popupOpen) ? seq : null),
-    noteChatActivity() {
-      if (seq !== null && tab === "wyr") {
-        chatDot = true;
-        syncTabs();
-      }
-    },
-    refresh,
-    isPopupOpen: () => popupOpen,
-    closePopup,
-    reset,
+    gameSeq: () => deps.tabs.seqOf("wyr"),
   };
 }

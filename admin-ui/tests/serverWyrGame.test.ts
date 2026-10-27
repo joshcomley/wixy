@@ -6,6 +6,8 @@ import { mountServerThread } from "../src/server/thread";
 import type { LockHooks, ServerSession } from "../src/server/types";
 import { createWyrCards } from "../src/server/wyrCard";
 import { createWyrControls, wyrStatusLine } from "../src/server/wyrControls";
+import { createGameTabs, type GameTabs } from "../src/server/gameTabs";
+import { createItemChat, type ItemChat } from "../src/server/itemChat";
 import { createWyrGame, type WyrGameDeps } from "../src/server/wyrGame";
 import { createWyrModel, type WyrModel } from "../src/server/wyrModel";
 
@@ -399,6 +401,9 @@ describe("wyr preview card", () => {
 describe("wyr game tab", () => {
   interface Harness {
     game: ReturnType<typeof createWyrGame>;
+    /** The shared frame the pane plugs into (gameTabs.ts / itemChat.ts). */
+    tabs: GameTabs;
+    itemChat: ItemChat;
     deps: WyrGameDeps;
     composer: HTMLElement;
     thread: HTMLElement;
@@ -427,14 +432,9 @@ describe("wyr game tab", () => {
     const layout = vi.fn();
     const next = vi.fn();
     let controls: ReturnType<typeof createWyrControls>;
-    const deps: WyrGameDeps = {
+    const itemChat = createItemChat({
       document,
-      model,
-      controls: {
-        render: (container, seq, vw) => controls.render(container, seq, vw),
-      },
       isMine: (sender) => sender === "Josh",
-      roundMessage: () => state.round,
       gameMessages: (seq) => state.messages.filter((m) => m.wyrRef === seq),
       gameEchoes: () => state.echoes,
       renderBubble,
@@ -444,9 +444,21 @@ describe("wyr game tab", () => {
         if (host !== null) host.appendChild(composer);
         else thread.appendChild(composer);
       },
+      onLayoutChange: layout,
+      afterChange: () => {},
+    });
+    const tabs = createGameTabs({ document, itemChat, onLayoutChange: layout });
+    const deps: WyrGameDeps = {
+      document,
+      model,
+      controls: {
+        render: (container, seq, vw) => controls.render(container, seq, vw),
+      },
+      tabs,
+      itemChat,
+      roundMessage: () => state.round,
       startNextRound: next,
       openTopics: vi.fn(),
-      onLayoutChange: layout,
       afterChange: () => {},
     };
     const game = createWyrGame(deps);
@@ -457,30 +469,30 @@ describe("wyr game tab", () => {
       vote: async () => ({ ok: true, view: v }),
       answer: async () => ({ ok: true, view: v }),
       reveal: async () => ({ ok: true, view: v }),
-      redraw: () => game.refresh(),
+      redraw: () => tabs.refresh(),
       afterChange: () => {},
     });
-    thread.append(game.pane, game.tabBar, game.popup);
-    return { game, deps, composer, thread, state, renderBubble, mounts, layout, next };
+    thread.append(game.pane, tabs.tabBar, itemChat.popup);
+    return { game, tabs, itemChat, deps, composer, thread, state, renderBubble, mounts, layout, next };
   }
 
   afterEach(() => document.body.replaceChildren());
 
   it("has no tabs until a game is opened; opening shows the WYR tab, closing removes both", () => {
     const h = make();
-    expect(h.game.tabBar.hidden).toBe(true);
+    expect(h.tabs.tabBar.hidden).toBe(true);
     expect(h.game.pane.hidden).toBe(true);
     h.game.open(7);
-    expect(h.game.tabBar.hidden).toBe(false);
-    expect(h.game.tabBar.textContent).toContain("Chat");
-    expect(h.game.tabBar.textContent).toContain("WYR");
+    expect(h.tabs.tabBar.hidden).toBe(false);
+    expect(h.tabs.tabBar.textContent).toContain("Chat");
+    expect(h.tabs.tabBar.textContent).toContain("WYR");
     expect(h.game.pane.hidden).toBe(false);
-    expect(h.game.activeTab()).toBe("wyr");
-    h.game.showTab("chat");
+    expect(h.tabs.activeTab()).toBe("wyr");
+    h.tabs.showTab("chat");
     expect(h.game.pane.hidden).toBe(true);
-    expect(h.game.tabBar.hidden).toBe(false);
+    expect(h.tabs.tabBar.hidden).toBe(false);
     h.game.close();
-    expect(h.game.tabBar.hidden).toBe(true);
+    expect(h.tabs.tabBar.hidden).toBe(true);
     expect(h.game.gameSeq()).toBeNull();
     expect(h.layout).toHaveBeenCalled();
   });
@@ -488,15 +500,15 @@ describe("wyr game tab", () => {
   it("an offered round adds the tab with a dot but leaves the chat showing; a closed one is not re-offered", () => {
     const h = make();
     h.game.offer(7);
-    expect(h.game.tabBar.hidden).toBe(false);
-    expect(h.game.activeTab()).toBe("chat");
+    expect(h.tabs.tabBar.hidden).toBe(false);
+    expect(h.tabs.activeTab()).toBe("chat");
     expect(h.game.pane.hidden).toBe(true);
-    expect(h.game.tabBar.querySelector(".wx-srv-tab-wyr .wx-srv-tab-dot:not([hidden])")).not.toBeNull();
-    h.game.showTab("wyr");
-    expect(h.game.tabBar.querySelector(".wx-srv-tab-dot:not([hidden])")).toBeNull();
+    expect(h.tabs.tabBar.querySelector(".wx-srv-tab-wyr .wx-srv-tab-dot:not([hidden])")).not.toBeNull();
+    h.tabs.showTab("wyr");
+    expect(h.tabs.tabBar.querySelector(".wx-srv-tab-dot:not([hidden])")).toBeNull();
     h.game.close();
     h.game.offer(7);
-    expect(h.game.tabBar.hidden).toBe(true);
+    expect(h.tabs.tabBar.hidden).toBe(true);
     h.game.open(7); // tapping the card always reopens it
     expect(h.game.gameSeq()).toBe(7);
   });
@@ -552,7 +564,7 @@ describe("wyr game tab", () => {
 
     maximize.click();
     expect(dialog.open).toBe(true);
-    h.game.showTab("chat");
+    h.tabs.showTab("chat");
     expect(dialog.open).toBe(false);
   });
 
@@ -589,7 +601,7 @@ describe("wyr game tab", () => {
     expect(rows[1]).toContain("Rose: third about the card");
     expect(h.game.pane.textContent).not.toContain("main chat, not this card");
     h.state.echoes = [{ clientId: "e1", text: "sending this" }];
-    h.game.refresh();
+    h.tabs.refresh();
     const after = [...h.game.pane.querySelectorAll(".wx-srv-game-mini-msg")].map((r) => r.textContent);
     expect(after).toHaveLength(2);
     expect(after[1]).toContain("sending this");
@@ -600,27 +612,27 @@ describe("wyr game tab", () => {
     h.game.open(7);
     expect(h.game.pane.querySelector(".wx-srv-game-mini-empty")!.textContent).toContain("Chat about this one");
     h.state.messages = [{ ...chatMessage(11, 7, "look"), attachments: [photos()[0]!] }];
-    h.game.refresh();
+    h.tabs.refresh();
     const thumb = h.game.pane.querySelector<HTMLImageElement>(".wx-srv-game-mini-thumb")!;
     expect(thumb.getAttribute("src")).toBe("https://example.invalid/thumb0.jpg");
     thumb.parentElement!.click(); // tapping the message (or its thumbnail) opens the pop-up
-    expect(h.game.isPopupOpen()).toBe(true);
+    expect(h.itemChat.isPopupOpen()).toBe(true);
   });
 
   it("the pop-up borrows the one composer and returns it; it shows the card's whole history", () => {
     const h = make();
     h.state.messages = [chatMessage(11, 7, "one"), chatMessage(12, 7, "two"), chatMessage(13, 7, "three")];
     h.game.open(7);
-    expect(h.game.popup.hidden).toBe(true);
+    expect(h.itemChat.popup.hidden).toBe(true);
     h.game.pane.querySelector<HTMLButtonElement>(".wx-srv-game-mini-msg")!.click();
-    expect(h.game.popup.hidden).toBe(false);
-    expect(h.game.popup.querySelector(".wx-srv-gamepop-composer")!.contains(h.composer)).toBe(true);
-    expect(h.game.popup.querySelectorAll(".wx-srv-bubble")).toHaveLength(3);
-    expect(h.game.chatTarget()).toBe(7);
-    h.game.closePopup();
-    expect(h.game.popup.hidden).toBe(true);
+    expect(h.itemChat.popup.hidden).toBe(false);
+    expect(h.itemChat.popup.querySelector(".wx-srv-gamepop-composer")!.contains(h.composer)).toBe(true);
+    expect(h.itemChat.popup.querySelectorAll(".wx-srv-bubble")).toHaveLength(3);
+    expect(h.tabs.chatTarget()).toBe(7);
+    h.itemChat.closePopup();
+    expect(h.itemChat.popup.hidden).toBe(true);
     expect(h.thread.contains(h.composer)).toBe(true);
-    expect(h.game.popup.contains(h.composer)).toBe(false);
+    expect(h.itemChat.popup.contains(h.composer)).toBe(false);
     expect(h.mounts[h.mounts.length - 1]).toBeNull();
   });
 
@@ -631,34 +643,34 @@ describe("wyr game tab", () => {
     h.game.pane.querySelector<HTMLButtonElement>(".wx-srv-game-mini-msg")!.click();
     expect(h.renderBubble).toHaveBeenCalledTimes(1);
     h.state.messages = [chatMessage(11, 7, "one"), chatMessage(12, 7, "two")];
-    h.game.refresh();
+    h.tabs.refresh();
     expect(h.renderBubble).toHaveBeenCalledTimes(2); // only the new one
-    expect(h.game.popup.querySelectorAll(".wx-srv-bubble")).toHaveLength(2);
+    expect(h.itemChat.popup.querySelectorAll(".wx-srv-bubble")).toHaveLength(2);
   });
 
   it("the close button and the backdrop close the pop-up; Escape is left to the panic lock", () => {
     const h = make();
     h.game.open(7);
     h.game.pane.querySelector<HTMLButtonElement>(".wx-srv-game-mini-expand")!.click();
-    expect(h.game.isPopupOpen()).toBe(true);
+    expect(h.itemChat.isPopupOpen()).toBe(true);
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-    expect(h.game.isPopupOpen()).toBe(true); // not ours: the panel's panic key handles Escape
-    h.game.popup.querySelector<HTMLButtonElement>(".wx-srv-gamepop-close")!.click();
-    expect(h.game.isPopupOpen()).toBe(false);
+    expect(h.itemChat.isPopupOpen()).toBe(true); // not ours: the panel's panic key handles Escape
+    h.itemChat.popup.querySelector<HTMLButtonElement>(".wx-srv-gamepop-close")!.click();
+    expect(h.itemChat.isPopupOpen()).toBe(false);
     h.game.pane.querySelector<HTMLButtonElement>(".wx-srv-game-mini-expand")!.click();
-    h.game.popup.querySelector<HTMLButtonElement>(".wx-srv-gamepop-backdrop")!.click();
-    expect(h.game.isPopupOpen()).toBe(false);
+    h.itemChat.popup.querySelector<HTMLButtonElement>(".wx-srv-gamepop-backdrop")!.click();
+    expect(h.itemChat.isPopupOpen()).toBe(false);
   });
 
   it("sends go to the game chat only while the WYR tab (or its pop-up) is the one in use", () => {
     const h = make();
-    expect(h.game.chatTarget()).toBeNull();
+    expect(h.tabs.chatTarget()).toBeNull();
     h.game.open(7);
-    expect(h.game.chatTarget()).toBe(7);
-    h.game.showTab("chat");
-    expect(h.game.chatTarget()).toBeNull();
+    expect(h.tabs.chatTarget()).toBe(7);
+    h.tabs.showTab("chat");
+    expect(h.tabs.chatTarget()).toBeNull();
     h.game.close();
-    expect(h.game.chatTarget()).toBeNull();
+    expect(h.tabs.chatTarget()).toBeNull();
   });
 
   it("closing the game while the pop-up is open returns the composer", () => {
@@ -667,16 +679,16 @@ describe("wyr game tab", () => {
     h.game.pane.querySelector<HTMLButtonElement>(".wx-srv-game-mini-expand")!.click();
     h.game.close();
     expect(h.thread.contains(h.composer)).toBe(true);
-    expect(h.game.popup.hidden).toBe(true);
+    expect(h.itemChat.popup.hidden).toBe(true);
   });
 
   it("closes itself when its round vanishes (deleted or wiped)", () => {
     const h = make();
     h.game.open(7);
     h.state.round = undefined;
-    h.game.refresh();
+    h.tabs.refresh();
     expect(h.game.gameSeq()).toBeNull();
-    expect(h.game.tabBar.hidden).toBe(true);
+    expect(h.tabs.tabBar.hidden).toBe(true);
   });
 
   it("a finished round offers the next one; Chat gets a dot for main-chat activity while playing", () => {
@@ -686,17 +698,17 @@ describe("wyr game tab", () => {
     expect(next.hidden).toBe(false);
     next.click();
     expect(h.next).toHaveBeenCalledTimes(1);
-    h.game.noteChatActivity();
-    expect(h.game.tabBar.querySelector(".wx-srv-tab-chat .wx-srv-tab-dot:not([hidden])")).not.toBeNull();
-    h.game.showTab("chat");
-    expect(h.game.tabBar.querySelector(".wx-srv-tab-chat .wx-srv-tab-dot:not([hidden])")).toBeNull();
+    h.tabs.noteChatActivity();
+    expect(h.tabs.tabBar.querySelector(".wx-srv-tab-chat .wx-srv-tab-dot:not([hidden])")).not.toBeNull();
+    h.tabs.showTab("chat");
+    expect(h.tabs.tabBar.querySelector(".wx-srv-tab-chat .wx-srv-tab-dot:not([hidden])")).toBeNull();
   });
 
   it("reset forgets the game and the dismissal", () => {
     const h = make();
     h.game.open(7);
     h.game.close();
-    h.game.reset();
+    h.tabs.reset();
     h.game.offer(7);
     expect(h.game.gameSeq()).toBe(7);
   });
@@ -828,6 +840,23 @@ describe("thread wiring", () => {
     expect(sendMessage.mock.calls[0]![1]).not.toHaveProperty("wyrSeq");
     expect(thread.element.querySelector('.wx-srv-thread [data-message-seq="20"] .wx-srv-bubble-wyrtag')).not.toBeNull();
     expect(thread.element.querySelector('.wx-srv-thread [data-message-seq="21"] .wx-srv-bubble-wyrtag')).toBeNull();
+    thread.teardown();
+  });
+
+  it("the main-chat tag names the game of the anchor; an anchor older than the loaded history still reads WYR", async () => {
+    // Round 5's card is not in the loaded page (older), only a message sent in its game chat.
+    const thread = await mount([chatMessage(20, 5, "about an old round", "Rose")]);
+    const tag = thread.element.querySelector('.wx-srv-thread [data-message-seq="20"] .wx-srv-bubble-gametag');
+    expect(tag?.textContent).toBe("WYR");
+    expect(tag?.classList.contains("wx-srv-bubble-wyrtag")).toBe(true);
+    thread.teardown();
+  });
+
+  it("a game-chat reference to an anchor that is loaded but not a would-you-rather round wears no WYR tag", async () => {
+    const plain = message(4, { wyr: null, text: "just a message" });
+    const thread = await mount([plain, chatMessage(20, 4, "refers to it", "Rose")]);
+    expect(thread.element.querySelector('.wx-srv-thread [data-message-seq="20"]')).not.toBeNull();
+    expect(thread.element.querySelector('.wx-srv-thread [data-message-seq="20"] .wx-srv-bubble-gametag')).toBeNull();
     thread.teardown();
   });
 
