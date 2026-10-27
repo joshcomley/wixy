@@ -15,7 +15,7 @@ zooms into the country that was lit. Then it takes that country's **top five hol
 destinations** and does the same again; Stop zooms into the destination and lets you explore. An
 AI then says **"Preparing holiday pack"**, researches the place live on the internet (a couple of
 minutes) and comes back with the food, a couple of nice villas or places to stay, the culture
-(theatre, things to see), the sights and what to do. **"Let's go there"** banks it (saved);
+(theatre, things to see), the sights and what to do. **"Bank this"** (the operator's wording, 2026-10-28; originally "Let's go there") banks it (saved);
 **"No"** rejects it and it **never appears again** in the destination draws. Every destination has
 its own **mini chat** at the bottom (expandable), exactly like the would-you-rather game, and it
 must SHARE that code: improving the per-item mini chat improves every game.
@@ -336,6 +336,59 @@ CREATE TABLE IF NOT EXISTS adv_settings(
 - Parsing is defensive: take the last JSON object in `response_text`; validate and clip every
   string; keep only `http(s)` URLs with a host (≤ 500 chars); drop unknown keys; a pack with no
   sections is a failure. Stored as canonical JSON in `pack_json`.
+
+### 4.3a Pictures in the pack (operator request 2026-10-28: "make the holiday pack … include pictures")
+
+- (Superseded by the measured design below: the AI names things, the server finds the pictures.) The first draft had the JSON gain `hero: [{url, caption ≤120, credit ≤120, page}] ≤ 6` (photos of the place) and,
+  per item, `image: {url, credit ≤120, page} | null`. The prompt asks for real PHOTOGRAPHS (no
+  logos/maps/icons), DIRECT image-file URLs it actually saw (Wikimedia Commons `upload.wikimedia.org`
+  files, the venue's or tourist board's own images), with credit and source page.
+- **Fetched by this server, never by the browser.** A viewer's device must not contact third-party
+  image hosts from a private chat (it would reveal the viewer's address to them), so after the
+  text pack is stored (`pack = ready`, the pack shows at once) a second step fetches the pictures
+  server-side and stores them as the round's private media; the client shows placeholders until
+  each arrives. Wire: `pack.images: 'pending' | 'done'` and each picture slot carries a signed
+  media URL set (`thumb`, `full`) once stored, or nothing.
+- **Fetch safety (security-sensitive; audited before merge):** `http(s)` only, port 80/443 only;
+  resolve the host and refuse any loopback / private / link-local / multicast / reserved address
+  (IPv4 and IPv6, including IPv4-mapped), connecting to the vetted address itself (no second DNS
+  lookup — rebinding); every redirect re-vetted, at most 3; 15 s per fetch, ≤ 8 MB body
+  (streamed, aborted beyond); `Content-Type` image/* AND the bytes sniffed as JPEG/PNG/WebP;
+  decoded with Pillow under the existing decompression-bomb limit; refused if the short side is
+  < 480 px or the aspect ratio is beyond 3:1 (icons, banners); re-encoded to JPEG (metadata
+  stripped, Inv 16/44) at ≤ 1600 px plus a 480 px thumb; at most 16 pictures per pack, 4 fetches
+  in parallel; no cookies, a plain descriptive User-Agent.
+- **Measured 2026-10-28 on real Kotor runs** (why the sources below): asked to find pictures
+  itself, the AI supplied only 9 picture URLs for 24 items AND dropped almost every item link
+  (vs. a link on every item without the picture ask); its URLs were Wikimedia originals up to
+  5,750 px / 4.9 MB, 8 of 9 plain fetches got `429`; the same files through the Commons API's
+  1,600 px thumbnails all loaded (1.4–2.6 s each). Fetching each item's linked page for its
+  `og:image` gave a usable photo for only 6 of 19 (travel/booking sites answer 403/429 to
+  automated fetches, and article images are generic banners — gov.uk's is its logo).
+- **So the AI names things; this server finds the pictures from open sources.** The prompt asks
+  for NO image URLs. Instead every item carries `url` (a venue's OWN official site where it has
+  one, never a listing/aggregator page if an official site exists) and an optional
+  `wikipedia: "<English Wikipedia article title>"` for anything with an article (the place,
+  sights, museums, festivals, famous DISHES); the pack adds `wikipedia` for the destination.
+  Picture sources per slot, in order: (1) the Wikipedia REST summary
+  (`en.wikipedia.org/api/rest_v1/page/summary/<title>`) lead image, fetched as its Commons
+  1,600 px thumbnail; (2) for a venue with an official site, that page's `og:image` (HTML ≤ 1 MB,
+  same safety rules; skipped silently on 403/429); (3) hero and sights only: a Commons
+  file-namespace search (below). Credit from the Commons file's `extmetadata` (artist + licence)
+  or the venue's site name. Politeness: a Wikimedia-policy User-Agent naming this engine and a
+  contact URL, ONE request at a time per host (4 hosts in parallel at most), a `429`/`503`
+  honours `Retry-After` (≤ 10 s, once) then gives up on that slot. Never fetch an
+  `upload.wikimedia.org` original — always the API's thumbnail.
+- **Fallback for the hero**: if fewer than 3 hero photos survive, query Wikimedia Commons'
+  public API (`commons.wikimedia.org/w/api.php`, file-namespace search for "<destination>
+  <unit>", `prop=imageinfo` with a 1600 px thumb URL, photographs only — `mime` image/jpeg) and
+  take the best until 3–6. Credit = the file's artist + licence from `extmetadata`.
+- **Storage and erasure**: pictures are the round's chat content — stored like the WYR round
+  pictures (ordinary private photo attachments on the anchor message, signed URLs, quota,
+  erased with the anchor or a wipe — Inv 46/56), excluded from the Gallery like WYR's, and
+  never fetched again after storing. `pack_json` maps each slot (hero i / section key + item i)
+  to its attachment ordinal.
+- **Credits** show small under each picture ("Photo: <credit>"), linking to `page`.
 - Job: on entering `chosen` → `pack = pending` → start the run, store `pack_run_id` → poll every
   10 s (bounded) until terminal or 25 min → store `ready`/`failed` (error text short and generic:
   "The research didn't finish — try again") → bump `rev`, publish. Spawn is single-file: at most 2
@@ -365,9 +418,14 @@ so two screens agree and a late joiner lands mid-flight.
 
 ### 5.1 Shared game frame (refactor of the WYR tab — no WYR behaviour change)
 
-- `gameTabs.ts`: the bottom tab bar = **Chat** + one tab per OPEN game (`WYR`, `Adventure`), the
-  game pane slot, `chatTarget()` (the active game tab's anchor seq, or the pop-up's), dots,
-  offer/open/close per game, reset; one tab left → no bar (decisions/00184 unchanged).
+- `gameTabs.ts`: the bottom tab bar = **Chat** + the ONE open game's tab (`WYR` or `Adventure`),
+  the game pane slot, `chatTarget()` (the active game tab's anchor seq, or the pop-up's), dots,
+  offer/open/close, reset; one tab left → no bar (decisions/00184 unchanged). **One game at a
+  time** (operator, 2026-10-28: "it would replace the Would You Rather tab… there's only ever two
+  tabs at the bottom"): opening or offering a game while ANOTHER game is open closes that other
+  game first (its pop-up closes, its pane hides, its `reset()` runs, its dismissal is NOT
+  recorded), so the second tab simply becomes the new game. The registry still holds both games;
+  only one is ever open.
 - `itemChat.ts`: the mini chat strip (fixed 60 px; last two messages + echoes; 20 px thumbnails;
   "Chat N") and the pop-up item chat (the thread's embedded bubble renderer, incremental, the ONE
   composer re-parented in). Extracted verbatim from `wyrGame.ts`; both games use it; game-chat
@@ -410,12 +468,12 @@ explanation; the `wyrTopics.ts` sheet precedent) →
 the **stage** (canvas; takes all spare height; the pin; overlay labels: big lit name, "Nearest
 land: …", step hints "Swipe sideways to spin — Bubble's turn") →
 the **action bar** (one row: `Stop` during a roulette, `Try again` on a failed pack,
-`Let's go there ✓` / `No thanks ✕` in `chosen`; the reject asks once: "Never show <name>
+`Bank this ✓` / `No thanks ✕` in `chosen`; the reject asks once: "Never show <name>
 again?") →
 in `chosen`: the **pack panel** (scrolls; the stage shrinks to ~38 % height with an `Explore map`
 toggle that gives the map the full height): "Preparing holiday pack…" with an elapsed timer and
 "this can take a couple of minutes", then headline, summary, sections as cards with links
-(`target=_blank rel="noopener noreferrer"`, never images — no third-party loads), best time,
+(`target=_blank rel="noopener noreferrer"`) and PICTURES (§4.3a: a swipeable hero carousel at the top, a photo on each item card where one exists, tap → full-screen viewer with credit; every picture is served by this server — the browser never loads a third-party image), best time,
 getting there, travel advice, sources →
 the **mini chat strip** (shared) → the composer (shared, as WYR).
 
