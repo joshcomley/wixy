@@ -2001,7 +2001,9 @@ describe("mountServerThread", () => {
         usage(false);
         view.element.querySelector<HTMLButtonElement>(".wx-srv-transcript-start")!.click();
         await flush();
-        expect(view.element.querySelector(".wx-srv-transcript-start")).toBeNull();
+        // The button never goes away; the block just says so.
+        expect(view.element.querySelector(".wx-srv-transcript-start")).not.toBeNull();
+        expect(view.element.textContent).toContain("Transcription isn't available right now");
         usage(true);
         await vi.advanceTimersByTimeAsync(15_000);
         expect(view.element.querySelector(".wx-srv-transcript-start")).not.toBeNull();
@@ -2111,30 +2113,24 @@ describe("mountServerThread", () => {
     it.each([
       ["says it is not", false],
       ["does not say", undefined],
-    ])("shows no control while the server %s available", async (_name, flag) => {
+    ])("still shows the control while the server %s available", async (_name, flag) => {
       usage(flag);
       getHistory.mockResolvedValue(emptyHistory({ messages: [voiceMessage()] }));
       const view = mount();
       await view.attach(SESSION);
       await flush();
-      expect(view.element.querySelector(".wx-srv-transcript-start")).toBeNull();
-      // The transcript container remains visible because it now houses the timestamp.
-      const transcript = view.element.querySelector<HTMLElement>(".wx-srv-transcript");
-      expect(transcript?.hidden).toBe(false);
-      // It should only contain the timestamp element.
-      expect(transcript?.children.length).toBe(1);
-      expect(transcript?.firstElementChild?.className).toBe("wx-srv-bubble-time");
+      expect(view.element.querySelector(".wx-srv-transcript-start")).not.toBeNull();
       view.teardown();
     });
 
-    it("a failing usage read leaves the control hidden and never breaks the thread", async () => {
+    it("a failing usage read still shows the control and never breaks the thread", async () => {
       getUsage.mockRejectedValue(new Error("offline"));
       getHistory.mockResolvedValue(emptyHistory({ messages: [voiceMessage()] }));
       const hooks = fakeHooks();
       const view = mount(hooks);
       await view.attach(SESSION);
       await flush();
-      expect(view.element.querySelector(".wx-srv-transcript-start")).toBeNull();
+      expect(view.element.querySelector(".wx-srv-transcript-start")).not.toBeNull();
       expect(view.element.querySelector(".wx-srv-voice")).not.toBeNull();
       expect(hooks.lockNow).not.toHaveBeenCalled();
       view.teardown();

@@ -78,13 +78,13 @@ describe("transcript block", () => {
     expect(button?.getAttribute("aria-label")).toBe("Transcribe this voice note");
   });
 
-  it("shows nothing at all while transcription is unavailable", () => {
+  it("still offers Transcribe while transcription is reported unavailable", () => {
     const h = harness();
     h.available = false;
     const el = block(h);
-    expect(el.hidden).toBe(true);
-    expect(el.children).toHaveLength(0);
-    expect(el.dataset["state"]).toBe("none");
+    expect(el.hidden).toBe(false);
+    expect(el.querySelector(".wx-srv-transcript-start")).not.toBeNull();
+    expect(el.dataset["state"]).toBe("idle");
   });
 
   it("never asks the server until the button is clicked", () => {
@@ -175,12 +175,12 @@ describe("transcript block", () => {
     await settle();
   });
 
-  it("a failed transcript offers no Retry while transcription is unavailable", () => {
+  it("a failed transcript keeps its Retry even while transcription is unavailable", () => {
     const h = harness();
     h.available = false;
     const el = block(h, { ...voice, transcript: { status: "failed" } });
     expect(el.querySelector(".wx-srv-transcript-error")).not.toBeNull();
-    expect(el.querySelector("button")).toBeNull();
+    expect(el.querySelector(".wx-srv-transcript-retry")).not.toBeNull();
   });
 
   it("a finished transcript stays readable even when transcription is unavailable", () => {
@@ -205,7 +205,7 @@ describe("transcript block", () => {
     expect(el.querySelector(".wx-srv-transcript-error")?.textContent).toBe(message);
   });
 
-  it("an unavailable answer hides the control for every note", async () => {
+  it("an unavailable answer says so but keeps the button on every note", async () => {
     const h = harness({ kind: "unavailable" });
     const host = wrap(block(h));
     const other = renderTranscriptBlock({ ...voice, id: "b".repeat(32) }, h.ctx, document);
@@ -214,8 +214,26 @@ describe("transcript block", () => {
     await settle();
     expect(h.markUnavailable).toHaveBeenCalledTimes(1);
     refreshTranscriptBlocks(host);
-    expect(other.hidden).toBe(true);
-    expect(other.querySelector("button")).toBeNull();
+    expect(other.querySelector(".wx-srv-transcript-start")).not.toBeNull();
+    expect(host.querySelector(".wx-srv-transcript-start")).not.toBeNull();
+    expect(host.querySelector(".wx-srv-transcript-error")?.textContent).toContain("isn't available");
+  });
+
+  it("every tap that is told 'unavailable' raises a fresh pop-up, and the button stays", async () => {
+    const h = harness({ kind: "unavailable" });
+    const el = block(h);
+    wrap(el);
+    for (let tap = 1; tap <= 2; tap++) {
+      const before = document.querySelector(".wx-srv-transcript-popup");
+      el.querySelector<HTMLButtonElement>(".wx-srv-transcript-start")!.click();
+      await settle();
+      const popups = document.querySelectorAll(".wx-srv-transcript-popup");
+      expect(popups).toHaveLength(1);
+      expect(popups[0]?.textContent).toBe("Transcription isn't available right now.");
+      expect(popups[0]).not.toBe(before); // a new one each time, so the tap is visibly answered
+      expect(el.querySelector(".wx-srv-transcript-start")).not.toBeNull();
+    }
+    document.querySelector(".wx-srv-transcript-popup")?.remove();
   });
 
   it("a notice clears when a real state arrives, and the button returns after a notice", async () => {
@@ -309,12 +327,7 @@ describe("transcript block", () => {
     expect(el.dataset["state"]).toBe("pending");
   });
 
-  it("omits Re-transcribe button when transcription is unavailable or transcript is hidden", () => {
-    const h = harness();
-    h.available = false;
-    const elUnavailable = block(h, { ...voice, transcript: { status: "done", text: "visible text" } });
-    expect(elUnavailable.querySelector(".wx-srv-transcript-retranscribe")).toBeNull();
-
+  it("omits Re-transcribe button when the transcript is hidden", () => {
     const h2 = harness();
     const elHidden = block(h2, { ...voice, transcript: { status: "done", text: "secret text" } });
     elHidden.querySelector<HTMLButtonElement>(".wx-srv-transcript-toggle")!.click();
