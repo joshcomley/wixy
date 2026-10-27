@@ -24,7 +24,7 @@ import {
   type Camera,
   type LngLat,
 } from "../../src/server/adventure/camera";
-import type { GlobeDot, GlobeFrame } from "../../src/server/adventure/globe";
+import type { AvoidRect, GlobeDot, GlobeFrame } from "../../src/server/adventure/globe";
 import {
   cameraForUnit,
   computeLanding,
@@ -139,6 +139,7 @@ export class Game {
   private remote: RemoteSwipe | null = null;
   private remoteAt = 0;
   private toast: { text: string; until: number } | null = null;
+  private avoid: AvoidRect[] = [];
 
   // Camera
   private cam: Camera | null = null;
@@ -215,6 +216,11 @@ export class Game {
       (id) => this.deps.world.units.has(id),
       this.deps.memory.settings.includeAdvised,
     );
+  }
+
+  /** The page overlays (banner, buttons, cards) the globe must keep its dot labels clear of. */
+  setAvoid(rects: AvoidRect[]): void {
+    this.avoid = rects;
   }
 
   resize(w: number, h: number): void {
@@ -597,10 +603,12 @@ export class Game {
       glide?: GlobeFrame["glide"];
       trail?: GlobeFrame["trail"];
       moving?: boolean;
+      avoid?: GlobeFrame["avoid"];
       reducedMotion: boolean;
     } = {
       view: spinning ? { rotation: [this.lambda, this.phi], viewRadiusDeg: 90 } : (this.cam as Camera),
       reducedMotion: reduced,
+      avoid: this.avoid,
       moving: this.camFrom !== null || this.remote !== null || this.drag !== null || this.phase === "spin1" || this.phase === "spin2" || (this.phase === "idle" && !reduced),
     };
 
@@ -661,7 +669,7 @@ export class Game {
         if (dest !== null && this.chosenCountry !== null) {
           base.dots = (this.deps.bank.countries[this.chosenCountry]?.destinations ?? [])
             .filter((d) => d.id !== dest.id && !this.deps.memory.isTaken(d.id))
-            .map<GlobeDot>((d) => ({ id: d.id, lng: d.lng, lat: d.lat, label: d.name }));
+            .map<GlobeDot>((d) => ({ id: d.id, lng: d.lng, lat: d.lat }));
         }
         if (dest !== null) {
           const sinceArrival = now - this.arriveStart - ARRIVE_ZOOM_MS;

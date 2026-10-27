@@ -156,12 +156,31 @@ function boot(): void {
   const samples: number[] = [];
   let rendered = "";
   let lastDebug = 0;
+  let lastAvoid = -1000;
   let previous = performance.now();
+
+  /** The page's own overlays on the stage, in canvas coordinates: no dot label is drawn over one. */
+  const measureAvoid = (): void => {
+    const stage = ui.stage.getBoundingClientRect();
+    const rects: Array<{ x: number; y: number; w: number; h: number }> = [];
+    for (const el of ui.stage.querySelectorAll<HTMLElement>(".hint, .toast, .nearest, .lit, .back, .debug")) {
+      if (el.hidden || el.getAttribute("data-show") === "0") continue;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) continue;
+      const pad = 6;
+      rects.push({ x: r.left - stage.left - pad, y: r.top - stage.top - pad, w: r.width + pad * 2, h: r.height + pad * 2 });
+    }
+    game.setAvoid(rects);
+  };
 
   const tick = (now: number): void => {
     const dt = Math.min(64, Math.max(0, now - previous));
     previous = now;
     lastNow = now;
+    if (now - lastAvoid > 120) {
+      lastAvoid = now;
+      measureAvoid();
+    }
     const { frame, hud } = game.update(now, dt);
     lastFrame = frame;
     const t0 = performance.now();

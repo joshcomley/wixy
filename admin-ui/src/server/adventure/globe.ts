@@ -41,6 +41,7 @@ import {
   type LngLat,
   type Rotation,
 } from "./camera";
+import { HIDDEN, FRONT, buildFastRings, classify, emitFeature, emitLine, rotationMatrix, vectorsOf, type FastRings } from "./fastmap";
 import { easeOutCubic } from "./physics";
 import { drawTrail, type Trail } from "./trail";
 import { unitOutline, type UnitCollection, type UnitFeature, type World, type WorldMeshes } from "./world";
@@ -98,6 +99,15 @@ export interface GlobeGlide {
   readonly progress: number;
 }
 
+export interface AvoidRect {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+}
+
+const NO_AVOID: readonly AvoidRect[] = [];
+
 export interface GlobeFrame {
   readonly view: GlobeView;
   /** `auto` (default): coarse while the view radius is >= 60 degrees, else detail. */
@@ -110,6 +120,11 @@ export interface GlobeFrame {
   readonly trail?: Trail | null;
   /** `prefers-reduced-motion`: no glow pulse, no pin bob, and the trail is not drawn. */
   readonly reducedMotion?: boolean;
+  /**
+   * Rectangles (CSS pixels, canvas coordinates) the page covers with its own overlays: the banner, a
+   * button, a card. No dot label is drawn over one: it moves to a free spot beside its dot or is left out.
+   */
+  readonly avoid?: readonly AvoidRect[];
   /**
    * The view changes every frame (a spin, a camera flight): paint straight to the canvas with the cheap
    * coarse geometry whatever the zoom, and skip the still-map cache. Set it false the moment the view
@@ -136,6 +151,8 @@ export interface GlobeRenderer {
 // -- Look --------------------------------------------------------------------------------------------
 
 const MAX_DPR = 2;
+/** Above this globe radius (pixels) a straight chord between vertices no longer follows the arc: use d3. */
+const FAST_MAX_SCALE_PX = 1600;
 const FONT = '"SF Pro Rounded", ui-rounded, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
 const COLOUR = {
@@ -201,6 +218,8 @@ interface Cap {
 
 interface LineChunk extends Cap {
   readonly coordinates: number[][];
+  /** The same points as unit vectors (long edges densified) for the fast path. */
+  readonly vec: Float64Array;
 }
 
 interface LevelData {
@@ -212,6 +231,8 @@ interface LevelData {
   readonly visible: Uint8Array;
   readonly scratchBorders: MultiLineString;
   readonly scratchCoast: MultiLineString;
+  /** The unit shapes as flat vectors for the fast path. */
+  readonly rings: FastRings;
 }
 
 function unitVector(lng: number, lat: number): [number, number, number] {
@@ -262,7 +283,7 @@ function chunkLines(lines: MultiLineString): LineChunk[] {
     for (let from = 0; from < line.length - 1; from += CHUNK_POINTS - 1) {
       const coordinates = line.slice(from, Math.min(line.length, from + CHUNK_POINTS));
       if (coordinates.length < 2) continue;
-      out.push({ coordinates, ...capOfPoints(coordinates) });
+      out.push({ coordinates, vec: vectorsOf(coordinates), ...capOfPoints(coordinates) });
     }
   }
   return out;
@@ -282,6 +303,7 @@ function buildLevel(world: World, collection: UnitCollection, meshes: WorldMeshe
     visible: new Uint8Array(features.length),
     scratchBorders: { type: "MultiLineString", coordinates: [] },
     scratchCoast: { type: "MultiLineString", coordinates: [] },
+    rings: buildFastRings(features),
   };
 }
 
@@ -316,6 +338,13 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
   let mapLayer: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; key: string } | null = null;
   let mapLayerFailed = false;
   const scratchGrid: MultiLineString = { type: "MultiLineString", coordinates: [] };
+  // Per-frame state of the fast path (see fastmap.ts): the rotation matrix, the globe centre and radius,
+  // and whether the scale is small enough for straight chords to follow the great-circle arcs.
+  const matrix = new Float64Array(9);
+  let vcx = 0;
+  let vcy = 0;
+  let vscale = 1;
+  let fastOn = false;
 
   /** The offscreen canvas the still map is painted into (null where a second canvas is unavailable). */
   function mapCache(): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; key: string } | null {
@@ -440,6 +469,26 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
     c.stroke();
   }
 
+  /** Strokes the line chunks in view: through the fast path where it applies, else through d3. */
+  function strokeChunks(
+    c: CanvasRenderingContext2D,
+    chunks: readonly LineChunk[],
+    clipRad: number,
+    scratch: MultiLineString,
+    style: string,
+    width: number,
+  ): void {
+    if (!fastOn) {
+      strokeLines(c, gather(chunks, centreVec, clipRad, scratch), style, width);
+      return;
+    }
+    c.beginPath();
+    for (const chunk of chunks) if (inView(chunk, centreVec, clipRad)) emitLine(c, chunk.vec, matrix, vcx, vcy, vscale);
+    c.strokeStyle = style;
+    c.lineWidth = width;
+    c.stroke();
+  }
+
   function fillShape(c: CanvasRenderingContext2D, shape: UnitFeature, style: string | CanvasGradient): void {
     c.beginPath();
     path(shape);
@@ -466,10 +515,20 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
     const mute = muteFor(emphasis);
 
     const edgeScale = level === "coarse" ? 0.8 : 1;
-    // Everything in view in one fill.
+    // Everything in view in one fill: units wholly in front of the globe go through the fast path, units
+    // across the horizon through d3 (which clips them properly), units behind it are skipped.
     c.beginPath();
     for (let i = 0; i < data.features.length; i += 1) {
-      if (inView(data.caps[i] as Cap, centreVec, clipRad)) path(data.features[i] as UnitFeature);
+      if (!inView(data.caps[i] as Cap, centreVec, clipRad)) continue;
+      if (fastOn) {
+        const where = classify(data.rings, i, matrix);
+        if (where === HIDDEN) continue;
+        if (where === FRONT) {
+          emitFeature(c, data.rings, i, matrix, vcx, vcy, vscale);
+          continue;
+        }
+      }
+      path(data.features[i] as UnitFeature);
     }
     c.fillStyle = mute ? COLOUR.mutedLand : COLOUR.land;
     c.fill();
@@ -482,8 +541,8 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
       }
     }
     // Hairline borders, then coasts.
-    strokeLines(c, gather(data.borders, centreVec, clipRad, data.scratchBorders), mute ? COLOUR.mutedEdge : COLOUR.landEdge, 0.7 * edgeScale);
-    strokeLines(c, gather(data.coast, centreVec, clipRad, data.scratchCoast), mute ? COLOUR.mutedCoast : COLOUR.coast, 0.9 * edgeScale);
+    strokeChunks(c, data.borders, clipRad, data.scratchBorders, mute ? COLOUR.mutedEdge : COLOUR.landEdge, 0.7 * edgeScale);
+    strokeChunks(c, data.coast, clipRad, data.scratchCoast, mute ? COLOUR.mutedCoast : COLOUR.coast, 0.9 * edgeScale);
 
     if (hasCandidates) {
       for (const id of candidates) {
@@ -633,9 +692,13 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
     return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
   }
 
-  function drawDotLabels(c: CanvasRenderingContext2D, placed: Array<{ dot: GlobeDot; x: number; y: number; alpha: number }>, reduced: boolean): void {
-    void reduced;
-    const boxes: Box[] = [];
+  function drawDotLabels(
+    c: CanvasRenderingContext2D,
+    placed: Array<{ dot: GlobeDot; x: number; y: number; alpha: number }>,
+    avoid: readonly AvoidRect[],
+  ): void {
+    // Boxes already taken: the page's own overlays (banner, buttons) first, then each label as it is placed.
+    const boxes: Box[] = avoid.map((r) => ({ x: r.x, y: r.y, w: r.w, h: r.h }));
     // Lit and chosen first so they get the best spot.
     const order = placed.slice().sort((a, b) => weight(b.dot) - weight(a.dot));
     for (const { dot, x, y, alpha } of order) {
@@ -650,6 +713,10 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
         [x - gap - w, y - h / 2],
         [x - w / 2, y - gap - h],
         [x - w / 2, y + gap],
+        [x + gap, y - h - 2],
+        [x + gap, y + 2],
+        [x - gap - w, y - h - 2],
+        [x - gap - w, y + 2],
       ];
       let chosen: Box | null = null;
       for (const [bx, by] of spots) {
@@ -660,15 +727,8 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
           break;
         }
       }
-      if (chosen === null) {
-        const fallback = spots[0] as [number, number];
-        chosen = {
-          x: Math.max(2, Math.min(cssW - w - 2, fallback[0])),
-          y: Math.max(2, Math.min(cssH - h - 2, fallback[1])),
-          w,
-          h,
-        };
-      }
+      // No free spot: the label is left out (a dot without a name beats text over a button or banner).
+      if (chosen === null) continue;
       boxes.push(chosen);
       c.globalAlpha = alpha;
       c.textBaseline = "middle";
@@ -761,6 +821,11 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
     projection.rotate(rotation).scale(scale).translate([cx, cy]).clipAngle(clipDeg).precision(frame.moving === true ? 2 : 0.6);
     lastProjection = projection;
     setCentreVec(centre);
+    rotationMatrix(rotation, matrix);
+    vcx = cx;
+    vcy = cy;
+    vscale = scale;
+    fastOn = scale <= FAST_MAX_SCALE_PX;
 
     const level = levelFor(frame, viewRadius);
     lastLevel = level;
@@ -780,10 +845,14 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
       drawOcean(target, cx, cy, scale, limbVisible);
       // Graticule: under the land while the whole globe shows; over it once zoomed in, where it is the
       // only thing that tells a pan or a zoom apart on a big flat country.
-      const grid = fineGraticule(centre, viewRadius) ?? gather(coarseGraticule(), centreVec, clipRad, scratchGrid);
-      if (limbVisible) strokeLines(target, grid, COLOUR.graticule, 0.6);
+      const fineGrid = fineGraticule(centre, viewRadius);
+      const drawGrid = (style: string, width: number): void => {
+        if (fineGrid !== null) strokeLines(target, fineGrid, style, width);
+        else strokeChunks(target, coarseGraticule(), clipRad, scratchGrid, style, width);
+      };
+      if (limbVisible) drawGrid(COLOUR.graticule, 0.6);
       drawLand(target, level, data, clipRad, emphasis);
-      if (!limbVisible) strokeLines(target, grid, COLOUR.graticuleOverLand, 0.7);
+      if (!limbVisible) drawGrid(COLOUR.graticuleOverLand, 0.7);
       if (limbVisible) drawShading(target, cx, cy, scale);
     };
     const cache = frame.moving === true ? null : mapCache();
@@ -832,7 +901,7 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
       }
       placed.sort((a, b) => weight(a.dot) - weight(b.dot));
       for (const { dot, x, y, alpha } of placed) drawDot(c, x, y, dot, alpha, nowMs, reduced);
-      drawDotLabels(c, placed, reduced);
+      drawDotLabels(c, placed, frame.avoid ?? NO_AVOID);
     }
 
     // Pin.
