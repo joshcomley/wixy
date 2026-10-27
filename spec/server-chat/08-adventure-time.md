@@ -339,7 +339,7 @@ CREATE TABLE IF NOT EXISTS adv_settings(
 
 ### 4.3a Pictures in the pack (operator request 2026-10-28: "make the holiday pack … include pictures")
 
-- The JSON gains `hero: [{url, caption ≤120, credit ≤120, page}] ≤ 6` (photos of the place) and,
+- (Superseded by the measured design below: the AI names things, the server finds the pictures.) The first draft had the JSON gain `hero: [{url, caption ≤120, credit ≤120, page}] ≤ 6` (photos of the place) and,
   per item, `image: {url, credit ≤120, page} | null`. The prompt asks for real PHOTOGRAPHS (no
   logos/maps/icons), DIRECT image-file URLs it actually saw (Wikimedia Commons `upload.wikimedia.org`
   files, the venue's or tourist board's own images), with credit and source page.
@@ -358,16 +358,27 @@ CREATE TABLE IF NOT EXISTS adv_settings(
   < 480 px or the aspect ratio is beyond 3:1 (icons, banners); re-encoded to JPEG (metadata
   stripped, Inv 16/44) at ≤ 1600 px plus a 480 px thumb; at most 16 pictures per pack, 4 fetches
   in parallel; no cookies, a plain descriptive User-Agent.
-- **Sources per picture slot, in order** (measured 2026-10-28 on a real Kotor run: the AI supplied
-  only 9 picture URLs for 24 items, all Wikimedia originals of up to 5,750 px / 4.9 MB, and 8 of 9
-  plain fetches got `429 Too many requests` from `upload.wikimedia.org`): (1) the AI's direct
-  image URL — an `upload.wikimedia.org` original is never fetched as-is: resolve its file name
-  through the Commons API (`prop=imageinfo&iiurlwidth=1600`) and fetch that thumbnail; (2) else
-  the item's own page `url`: fetch the HTML (≤ 1 MB, same safety rules) and take its
-  `og:image` / `twitter:image`; (3) else, for hero and `sights` items, a Commons file search
-  (below). Politeness: a Wikimedia-policy User-Agent naming this engine and a contact URL, ONE
-  request at a time per host (4 hosts in parallel at most), a `429`/`503` honours `Retry-After`
-  (≤ 10 s, once) then gives up on that slot.
+- **Measured 2026-10-28 on real Kotor runs** (why the sources below): asked to find pictures
+  itself, the AI supplied only 9 picture URLs for 24 items AND dropped almost every item link
+  (vs. a link on every item without the picture ask); its URLs were Wikimedia originals up to
+  5,750 px / 4.9 MB, 8 of 9 plain fetches got `429`; the same files through the Commons API's
+  1,600 px thumbnails all loaded (1.4–2.6 s each). Fetching each item's linked page for its
+  `og:image` gave a usable photo for only 6 of 19 (travel/booking sites answer 403/429 to
+  automated fetches, and article images are generic banners — gov.uk's is its logo).
+- **So the AI names things; this server finds the pictures from open sources.** The prompt asks
+  for NO image URLs. Instead every item carries `url` (a venue's OWN official site where it has
+  one, never a listing/aggregator page if an official site exists) and an optional
+  `wikipedia: "<English Wikipedia article title>"` for anything with an article (the place,
+  sights, museums, festivals, famous DISHES); the pack adds `wikipedia` for the destination.
+  Picture sources per slot, in order: (1) the Wikipedia REST summary
+  (`en.wikipedia.org/api/rest_v1/page/summary/<title>`) lead image, fetched as its Commons
+  1,600 px thumbnail; (2) for a venue with an official site, that page's `og:image` (HTML ≤ 1 MB,
+  same safety rules; skipped silently on 403/429); (3) hero and sights only: a Commons
+  file-namespace search (below). Credit from the Commons file's `extmetadata` (artist + licence)
+  or the venue's site name. Politeness: a Wikimedia-policy User-Agent naming this engine and a
+  contact URL, ONE request at a time per host (4 hosts in parallel at most), a `429`/`503`
+  honours `Retry-After` (≤ 10 s, once) then gives up on that slot. Never fetch an
+  `upload.wikimedia.org` original — always the API's thumbnail.
 - **Fallback for the hero**: if fewer than 3 hero photos survive, query Wikimedia Commons'
   public API (`commons.wikimedia.org/w/api.php`, file-namespace search for "<destination>
   <unit>", `prop=imageinfo` with a 1600 px thumb URL, photographs only — `mime` image/jpeg) and
