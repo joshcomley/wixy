@@ -14,11 +14,22 @@ await mkdir("../wixy_server/static/admin", { recursive: true });
 await copyFile("data/adventure-world.json", "../wixy_server/static/admin/adventure-world.json");
 const worldHash = createHash("sha256").update(await readFile("../wixy_server/static/admin/adventure-world.json")).digest("hex").slice(0, 10);
 
+// The globe's map imagery (satellite and atlas, 8192x4096 WebP, public domain: NASA Blue Marble NG with
+// topography and bathymetry; Natural Earth II shaded relief) is fetched lazily by the renderer, after the
+// vector globe is up, with the same content-hash scheme.
+const imageryDefines = {};
+for (const [style, constant] of [["satellite", "WIXY_ADVENTURE_SATELLITE_URL"], ["atlas", "WIXY_ADVENTURE_ATLAS_URL"]]) {
+  await copyFile(`data/adventure-${style}.webp`, `../wixy_server/static/admin/adventure-${style}.webp`);
+  const hash = createHash("sha256").update(await readFile(`../wixy_server/static/admin/adventure-${style}.webp`)).digest("hex").slice(0, 10);
+  imageryDefines[constant] = JSON.stringify(`/admin/static/admin/adventure-${style}.webp?v=${hash}`);
+}
+
 await esbuild.build({
   entryPoints: ["src/index.ts"],
   define: {
     WIXY_CALL_WORKLET_URL: JSON.stringify(`/admin/static/admin/call-worklet.js?v=${workletHash}`),
     WIXY_ADVENTURE_WORLD_URL: JSON.stringify(`/admin/static/admin/adventure-world.json?v=${worldHash}`),
+    ...imageryDefines,
   },
   bundle: true,
   minify: true,

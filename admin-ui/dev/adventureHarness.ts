@@ -6,13 +6,16 @@
 //
 // Test hooks for Playwright live on `window.__adv` (not used by the page itself).
 
+import { inlineLoader, type TextureLoader } from "../src/server/adventure/imagery";
+import { MIN_VIEW_RADIUS_DEG, MIN_VIEW_RADIUS_TEXTURED_DEG } from "../src/server/adventure/camera";
 import { prepareLanding } from "../src/server/adventure/land";
 import { createGlobeRenderer, type GlobeFrame } from "../src/server/adventure/globe";
 import { mulberry32 } from "../src/server/adventure/roulette";
 import { parseWorld } from "../src/server/adventure/world";
 import { Memory, loadBank, loadSamplePack, loadWorldJson } from "./preview/data";
 import { Game } from "./preview/game";
-import { buildUi, renderPack } from "./preview/ui";
+import { renderPack } from "./preview/pack";
+import { buildUi } from "./preview/ui";
 
 function boot(): void {
   const params = new URLSearchParams(window.location.search);
@@ -65,6 +68,9 @@ function boot(): void {
       if (what === "advised") game.refreshEligible();
       if (what === "other" && (game.phase === "idle" || game.phase === "idle2")) game.startRound(performance.now());
     },
+    getMapStyle: () => renderer.mapStyle,
+    imageryAvailable: () => renderer.imageryAvailable,
+    onMapStyle: (style) => renderer.setMapStyle(style),
     onForget: () => {
       memory.forgetAll();
       game.refreshEligible();
@@ -73,7 +79,19 @@ function boot(): void {
   });
   document.body.append(ui.root);
 
-  const renderer = createGlobeRenderer(ui.canvas, world);
+  // The map imagery is managed by the engine (lazy, WebGL 2, falls back to Classic). This single-file page
+  // carries the two pictures inline as base64, so it supplies its own loader instead of fetching them.
+  const inline = (style: "satellite" | "atlas"): { base64: string; mime: string } | undefined => {
+    const el = document.getElementById(`adv-tex-${style}`);
+    const base64 = el?.textContent?.trim() ?? "";
+    return base64 === "" ? undefined : { base64, mime: el?.getAttribute("data-mime") ?? "image/webp" };
+  };
+  const loader: TextureLoader = (style, maxSide) => {
+    const source = inline(style);
+    return source === undefined ? Promise.reject(new Error("no inline picture")) : inlineLoader({ [style]: source })(style, maxSide);
+  };
+  const renderer = createGlobeRenderer(ui.canvas, world, { imagery: { loader } });
+
 
   // -- Sizing ---------------------------------------------------------------------------------------
 
@@ -181,6 +199,7 @@ function boot(): void {
       lastAvoid = now;
       measureAvoid();
     }
+    game.minViewRadius = renderer.textured ? MIN_VIEW_RADIUS_TEXTURED_DEG : MIN_VIEW_RADIUS_DEG;
     const { frame, hud } = game.update(now, dt);
     lastFrame = frame;
     const t0 = performance.now();

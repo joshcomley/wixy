@@ -10,6 +10,8 @@
 //   data/adventure-world.json              the real map (committed by the world-data builder)
 //   ../wixy_server/livechat/adventure_destinations.json  the committed destination bank (spec 2.2)  env ADV_BANK
 //   dev/inputs/sample_pack.json            a sample holiday pack (spec 4.3 shape)     env ADV_PACK
+//   dev/inputs/textures/satellite.webp     8192x4096 NASA Blue Marble NG (topo + bathymetry), public domain
+//   dev/inputs/textures/atlas.webp         8192x4096 Natural Earth II shaded relief with water, public domain
 //                                          (optional: a built-in example is used when absent)
 
 import * as esbuild from "esbuild";
@@ -22,7 +24,7 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
 const outDir = path.join(here, "out");
-const outFile = path.join(outDir, "adventure-preview.html");
+const outFile = process.env.ADV_OUT ?? path.join(outDir, "adventure-preview.html");
 
 async function readOptional(file) {
   try {
@@ -30,6 +32,39 @@ async function readOptional(file) {
   } catch {
     return null;
   }
+}
+
+const IMAGE_MIME = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml", ".avif": "image/avif" };
+
+/**
+ * Replaces every string in `node` that names a local image file (relative to the pack's folder, or its
+ * `images/` subfolder) with a base64 data: URI, so the page never fetches a photo. http(s) and data:
+ * URLs are left alone.
+ */
+async function inlineImages(node, baseDir, counter) {
+  if (Array.isArray(node)) {
+    for (let i = 0; i < node.length; i += 1) node[i] = await inlineImages(node[i], baseDir, counter);
+    return node;
+  }
+  if (node !== null && typeof node === "object") {
+    for (const key of Object.keys(node)) node[key] = await inlineImages(node[key], baseDir, counter);
+    return node;
+  }
+  if (typeof node !== "string" || /^(https?:|data:)/i.test(node)) return node;
+  const mime = IMAGE_MIME[path.extname(node).toLowerCase()];
+  if (mime === undefined) return node;
+  const base = path.basename(node);
+  for (const candidate of [path.join(baseDir, node), path.join(baseDir, "images", node), path.join(baseDir, base), path.join(baseDir, "images", base)]) {
+    try {
+      const bytes = await readFile(candidate);
+      counter.bytes += bytes.length;
+      return `data:${mime};base64,${bytes.toString("base64")}`;
+    } catch {
+      // try the next place
+    }
+  }
+  console.warn(`image not found for the pack: ${node}`);
+  return node;
 }
 
 /** JSON for a <script type="application/json"> block: no "<" can open a tag or a comment. */
@@ -48,7 +83,31 @@ export async function build() {
   if (world === null) throw new Error("data/adventure-world.json is missing (merge origin/adv/world-data).");
   const bank = await readOptional(process.env.ADV_BANK ?? path.join(root, "..", "wixy_server", "livechat", "adventure_destinations.json"));
   if (bank === null) throw new Error("No destination bank: expected wixy_server/livechat/adventure_destinations.json (or set ADV_BANK).");
-  const pack = await readOptional(process.env.ADV_PACK ?? path.join(here, "inputs", "sample_pack.json"));
+  const packPath = process.env.ADV_PACK ?? path.join(here, "inputs", "sample_pack.json");
+  const packRaw = await readOptional(packPath);
+  let pack = null;
+  let inlinedBytes = 0;
+  if (packRaw !== null) {
+    const parsed = JSON.parse(packRaw);
+    const counter = { bytes: 0 };
+    await inlineImages(parsed, path.dirname(packPath), counter);
+    inlinedBytes = counter.bytes;
+    pack = JSON.stringify(parsed);
+  }
+
+  // Map imagery, base64, from dev/inputs/textures/<name>.webp (not committed; see the header). A missing
+  // file just leaves that style out: the page then offers Classic only.
+  const textures = { satellite: "", atlas: "" };
+  const textureBytes = {};
+  for (const name of Object.keys(textures)) {
+    try {
+      const bytes = await readFile(path.join(here, "inputs", "textures", `${name}.webp`));
+      textures[name] = bytes.toString("base64");
+      textureBytes[name] = bytes.length;
+    } catch {
+      console.warn(`no texture for the ${name} style (dev/inputs/textures/${name}.webp)`);
+    }
+  }
 
   const bundle = await esbuild.build({
     entryPoints: [path.join(here, "adventureHarness.ts")],
@@ -62,7 +121,7 @@ export async function build() {
     tsconfig: path.join(root, "tsconfig.json"),
   });
   const js = bundle.outputFiles[0].text;
-  const css = await readFile(path.join(here, "adventure-harness.css"), "utf8");
+  const css = (await readFile(path.join(here, "adventure-harness.css"), "utf8")) + "\n" + (await readFile(path.join(here, "adventure-pack.css"), "utf8"));
   const template = await readFile(path.join(here, "adventure-harness.html"), "utf8");
 
   const html = template
@@ -70,12 +129,14 @@ export async function build() {
     .replace("/*@@WORLD@@*/", () => jsonBlock(world))
     .replace("/*@@BANK@@*/", () => jsonBlock(bank))
     .replace("/*@@PACK@@*/", () => (pack === null ? "null" : jsonBlock(pack)))
+    .replace("/*@@TEX_SATELLITE@@*/", () => textures.satellite)
+    .replace("/*@@TEX_ATLAS@@*/", () => textures.atlas)
     .replace("/*@@JS@@*/", () => scriptBlock(js));
 
   await mkdir(outDir, { recursive: true });
   await writeFile(outFile, html, "utf8");
   const kb = (Buffer.byteLength(html) / 1024).toFixed(0);
-  console.log(`built ${outFile} (${kb} KB, ${(performance.now() - started).toFixed(0)} ms; sample pack ${pack === null ? "built-in" : "from file"})`);
+  console.log(`built ${outFile} (${kb} KB, ${(performance.now() - started).toFixed(0)} ms; sample pack ${pack === null ? "built-in" : `from file, ${(inlinedBytes / 1024).toFixed(0)} KB of photos inlined`})`);
   return outFile;
 }
 

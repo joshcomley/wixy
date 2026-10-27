@@ -37,6 +37,12 @@ export interface Camera {
 
 export const MIN_VIEW_RADIUS_DEG = 0.3;
 export const MAX_VIEW_RADIUS_DEG = 90;
+/**
+ * Over satellite or atlas imagery (8192 px across the globe, ~23 px per degree) a view tighter than this is
+ * enlarged more than ~7x and turns soft: an explorable map should not zoom past it while imagery shows.
+ * The vector borders stay crisp at any zoom; this is a taste limit, not a technical one.
+ */
+export const MIN_VIEW_RADIUS_TEXTURED_DEG = 0.8;
 /** At a view radius of 90° the globe's radius is this fraction of the shorter canvas side. */
 export const GLOBE_FILL = 0.45;
 /** The view radius at which drawing switches from the coarse to the detail geometry. */

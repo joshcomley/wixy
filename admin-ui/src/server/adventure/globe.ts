@@ -26,6 +26,7 @@ import {
   geoInterpolate,
   geoOrthographic,
   geoPath,
+  type GeoContext,
   type GeoPath,
   type GeoProjection,
 } from "d3-geo";
@@ -42,6 +43,8 @@ import {
   type Rotation,
 } from "./camera";
 import { HIDDEN, FRONT, buildFastRings, classify, emitFeature, emitLine, rotationMatrix, vectorsOf, type FastRings } from "./fastmap";
+import { createBaseLayer, type BaseLayer } from "./basemap";
+import { fetchTexture, readMapStyle, textureSide, writeMapStyle, type ImageryStyle, type MapStyle, type TextureLoader } from "./imagery";
 import { easeOutCubic } from "./physics";
 import { drawTrail, type Trail } from "./trail";
 import { unitOutline, type UnitCollection, type UnitFeature, type World, type WorldMeshes } from "./world";
@@ -144,8 +147,34 @@ export interface GlobeRenderer {
   invert(x: number, y: number): LngLat | null;
   /** Which geometry the last frame used. */
   readonly lastLevel: "coarse" | "detail";
+  /** The map style in use: imagery ("satellite" / "atlas") or the flat illustrated "classic" map. */
+  readonly mapStyle: MapStyle;
+  /**
+   * Switches the style and remembers it on this device. Imagery loads lazily; until it has arrived (or if
+   * it cannot — no WebGL 2, a failed download) the classic map is drawn.
+   */
+  setMapStyle(style: MapStyle): void;
+  /** False when this browser cannot show imagery at all (no WebGL 2): the style switch can be disabled. */
+  readonly imageryAvailable: boolean;
+  /** True when the last frame was drawn over imagery. */
+  readonly textured: boolean;
   /** Releases the context; further calls do nothing. */
   destroy(): void;
+}
+
+export interface GlobeOptions {
+  /**
+   * The imagery under the vector overlay. Omit for the defaults (this device's saved style, satellite
+   * unless chosen otherwise; pictures fetched from the static files); `false` keeps the renderer flat.
+   */
+  readonly imagery?:
+    | false
+    | {
+        /** The starting style; default: this device's saved choice. */
+        readonly style?: MapStyle;
+        /** Where the pictures come from; default: the hashed static files. */
+        readonly loader?: TextureLoader;
+      };
 }
 
 // -- Look --------------------------------------------------------------------------------------------
@@ -174,6 +203,9 @@ const COLOUR = {
   candidateRing: "rgba(255, 255, 255, 0.92)",
   graticule: "rgba(255, 255, 255, 0.10)",
   graticuleOverLand: "rgba(120, 165, 215, 0.30)",
+  veil: "rgba(3, 12, 28, 0.50)",
+  texBorder: "rgba(255, 255, 255, 0.55)",
+  texCoast: "rgba(255, 255, 255, 0.30)",
   pin: "#ff4d6a",
   pinDark: "#d92a4b",
 } as const;
@@ -321,7 +353,7 @@ function gather(chunks: readonly LineChunk[], centre: readonly [number, number, 
 
 // -- The renderer ------------------------------------------------------------------------------------
 
-export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): GlobeRenderer {
+export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World, options: GlobeOptions = {}): GlobeRenderer {
   let ctx: CanvasRenderingContext2D | null = null;
   try {
     ctx = canvas.getContext("2d");
@@ -345,6 +377,78 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
   let vcy = 0;
   let vscale = 1;
   let fastOn = false;
+  let vLimb = false;
+  let wasTextured = false;
+
+  // -- Imagery (see imagery.ts and basemap.ts) -------------------------------------------------------
+  const imageryOn = options.imagery !== false;
+  const imageryOptions = options.imagery === false ? undefined : options.imagery;
+  const loader: TextureLoader = imageryOptions?.loader ?? fetchTexture;
+  let style: MapStyle = imageryOn ? (imageryOptions?.style ?? readMapStyle()) : "classic";
+  let layer: BaseLayer | null = null;
+  let layerEl: HTMLCanvasElement | null = null;
+  let layerTried = false;
+  let loadedStyle: ImageryStyle | null = null;
+  let loadToken = 0;
+  let loadScheduled = false;
+
+  /** Creates the imagery canvas (once, as soon as the 2D canvas has a parent) directly under the 2D canvas. */
+  function ensureLayer(): void {
+    if (!imageryOn || layerTried || destroyed) return;
+    const parent = canvas.parentElement;
+    if (parent === null) return; // not attached yet: try again on the next resize / draw
+    layerTried = true;
+    const el = canvas.ownerDocument.createElement("canvas");
+    el.setAttribute("aria-hidden", "true");
+    el.className = "wx-adv-imagery";
+    el.style.position = "absolute";
+    el.style.pointerEvents = "none";
+    parent.insertBefore(el, canvas);
+    const made = createBaseLayer(el);
+    if (made === null) {
+      el.remove(); // no WebGL 2: the classic style, silently
+      return;
+    }
+    layer = made;
+    layerEl = el;
+    made.onContextLost = () => {
+      loadedStyle = null;
+    };
+    made.onContextRestored = () => {
+      void requestImagery();
+    };
+    made.resize(cssW, cssH, dpr);
+    placeLayer();
+  }
+
+  /** Keeps the imagery canvas exactly over the 2D canvas, wherever the host's layout put it. */
+  function placeLayer(): void {
+    if (layerEl === null) return;
+    layerEl.style.left = `${canvas.offsetLeft}px`;
+    layerEl.style.top = `${canvas.offsetTop}px`;
+  }
+
+  /** Loads the picture for the current style, if it is not the one on the GPU already. Never throws. */
+  async function requestImagery(): Promise<void> {
+    const wanted = style;
+    const target = layer;
+    if (wanted === "classic" || target === null || destroyed || loadedStyle === wanted) return;
+    const token = (loadToken += 1);
+    try {
+      const memory = (globalThis.navigator as { deviceMemory?: number } | undefined)?.deviceMemory;
+      const bitmap = await loader(wanted, textureSide(target.maxTextureSize, memory));
+      if (token !== loadToken || destroyed) {
+        bitmap.close();
+        return; // the choice changed while this was loading
+      }
+      target.setTexture(bitmap);
+      loadedStyle = wanted;
+    } catch {
+      // Download or decode failed: stay on the classic map. A later style change tries again.
+    }
+  }
+
+  ensureLayer();
 
   /** The offscreen canvas the still map is painted into (null where a second canvas is unavailable). */
   function mapCache(): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; key: string } | null {
@@ -508,6 +612,7 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
     data: LevelData,
     clipRad: number,
     emphasis: GlobeEmphasis | null,
+    textured: boolean,
   ): void {
     const candidates = emphasis?.candidateUnits ?? null;
     const hasCandidates = candidates !== null && candidates.length > 0;
@@ -515,6 +620,42 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
     const mute = muteFor(emphasis);
 
     const edgeScale = level === "coarse" ? 0.8 : 1;
+
+    if (textured) {
+      // Over imagery the land is not painted: a veil dims everything except the units in play (holes cut
+      // with the even-odd rule, so those stay at full brightness), then thin light borders, then outlines.
+      if (mute) {
+        c.beginPath();
+        if (vLimb) c.arc(vcx, vcy, vscale, 0, Math.PI * 2);
+        else c.rect(0, 0, cssW, cssH);
+        const inPlay = [...(candidates ?? []), ...(chosen === null ? [] : [chosen])];
+        for (const id of new Set(inPlay)) {
+          const shape = unitShape(id, level);
+          if (shape !== null) path(shape);
+        }
+        c.fillStyle = COLOUR.veil;
+        c.fill("evenodd");
+      }
+      strokeChunks(c, data.borders, clipRad, data.scratchBorders, COLOUR.texBorder, 0.8 * edgeScale);
+      strokeChunks(c, data.coast, clipRad, data.scratchCoast, COLOUR.texCoast, 0.7 * edgeScale);
+      if (hasCandidates) {
+        for (const id of candidates) {
+          const shape = unitShape(id, level);
+          if (shape !== null) strokeLines(c, unitOutline(shape), COLOUR.candidateRing, 1.6);
+        }
+      }
+      if (chosen !== null) {
+        const shape = unitShape(chosen, level);
+        if (shape !== null) {
+          for (const [width, alpha] of [[10, 0.12], [6, 0.2], [3, 0.34]] as const) {
+            strokeLines(c, unitOutline(shape), `rgba(${COLOUR.chosenGlow}, ${alpha})`, width);
+          }
+          fillShape(c, shape, `rgba(${COLOUR.chosenGlow}, 0.26)`);
+          strokeLines(c, unitOutline(shape), "rgba(255, 255, 255, 0.95)", 1.8);
+        }
+      }
+      return;
+    }
     // Everything in view in one fill: units wholly in front of the globe go through the fast path, units
     // across the horizon through d3 (which clips them properly), units behind it are skipped.
     c.beginPath();
@@ -563,17 +704,65 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
   }
 
   /** The roulette's lit unit: the one thing in the land layer that changes while the camera is still. */
-  function drawLit(c: CanvasRenderingContext2D, level: "coarse" | "detail", lit: string | null, nowMs: number, reduced: boolean): void {
+  // The lit unit changes four times a second while the camera rests, and a big country's outline costs
+  // several milliseconds through d3 (five passes: three glow strokes, the fill, the rim). Its projected
+  // shape is built ONCE per (view, unit) into Path2D objects, which every later frame just replays.
+  const litPaths = new Map<string, { fill: Path2D; outline: Path2D }>();
+  let litPathsView = "";
+
+  function litPathsFor(c: CanvasRenderingContext2D, id: string, shape: UnitFeature, viewKey: string): { fill: Path2D; outline: Path2D } | null {
+    if (typeof Path2D === "undefined") return null; // no Path2D (jsdom, very old browsers): draw directly
+    if (litPathsView !== viewKey) {
+      litPaths.clear();
+      litPathsView = viewKey;
+    }
+    let paths = litPaths.get(id);
+    if (paths === undefined) {
+      paths = { fill: new Path2D(), outline: new Path2D() };
+      path.context(paths.fill as unknown as GeoContext);
+      path(shape);
+      path.context(paths.outline as unknown as GeoContext);
+      path(unitOutline(shape));
+      path.context(c);
+      litPaths.set(id, paths);
+    }
+    return paths;
+  }
+
+  function drawLit(
+    c: CanvasRenderingContext2D,
+    level: "coarse" | "detail",
+    lit: string | null,
+    nowMs: number,
+    reduced: boolean,
+    textured: boolean,
+    viewKey: string,
+  ): void {
     if (lit === null) return;
     const shape = unitShape(lit, level);
     if (shape === null) return;
     const pulse = reduced ? 0.75 : 0.65 + 0.35 * (0.5 + 0.5 * Math.sin(nowMs / 90));
-    const outline = unitOutline(shape);
+    const paths = litPathsFor(c, lit, shape, viewKey);
+    const stroke = (style: string, width: number): void => {
+      if (paths === null) {
+        strokeLines(c, unitOutline(shape), style, width);
+        return;
+      }
+      c.strokeStyle = style;
+      c.lineWidth = width;
+      c.stroke(paths.outline);
+    };
     for (const [width, alpha] of [[16, 0.08], [10, 0.16], [5, 0.3]] as const) {
-      strokeLines(c, outline, `rgba(${COLOUR.litGlow}, ${(alpha * pulse).toFixed(3)})`, width);
+      stroke(`rgba(${COLOUR.litGlow}, ${(alpha * pulse).toFixed(3)})`, width);
     }
-    fillShape(c, shape, COLOUR.lit);
-    strokeLines(c, outline, "rgba(255, 255, 255, 0.95)", 2);
+    // Over imagery the lit unit is a translucent gold tint (the land stays visible through it).
+    const fillStyle = textured ? `rgba(${COLOUR.litGlow}, ${(0.34 + 0.12 * pulse).toFixed(3)})` : COLOUR.lit;
+    if (paths === null) fillShape(c, shape, fillStyle);
+    else {
+      c.fillStyle = fillStyle;
+      c.fill(paths.fill);
+    }
+    stroke("rgba(255, 255, 255, 0.95)", 2);
   }
 
   function drawShading(c: CanvasRenderingContext2D, cx: number, cy: number, scale: number): void {
@@ -825,7 +1014,29 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
     vcx = cx;
     vcy = cy;
     vscale = scale;
+    vLimb = limbVisible;
     fastOn = scale <= FAST_MAX_SCALE_PX;
+
+    // Imagery underneath (WebGL), when a layer is attached and its picture has arrived.
+    if (layer === null) ensureLayer();
+    const base = layer;
+    const textured = base !== null && style !== "classic" && base.ready;
+    if (textured) {
+      base.draw({ matrix, cx, cy, scale });
+      wasTextured = true;
+    } else if (wasTextured && base !== null) {
+      base.clear();
+      wasTextured = false;
+    }
+    if (!loadScheduled && imageryOn) {
+      // After the first vector frame is up, fetch the picture: the globe never waits for it.
+      loadScheduled = true;
+      globalThis.setTimeout(() => void requestImagery(), 0);
+      // Build the detail geometry's indexes while the globe idles, so the first zoom does not pay for them.
+      globalThis.setTimeout(() => {
+        if (!destroyed) levelData("detail");
+      }, 400);
+    }
 
     const level = levelFor(frame, viewRadius);
     lastLevel = level;
@@ -842,6 +1053,11 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
     // offscreen canvas and blitted, so a flickering lit unit costs one drawImage plus its own outline.
     const clipRad = (clipDeg * Math.PI) / 180;
     const paintMap = (target: CanvasRenderingContext2D): void => {
+      if (textured) {
+        // The imagery supplies ocean, land, shading and glow: only the vector overlay is painted here.
+        drawLand(target, level, data, clipRad, emphasis, true);
+        return;
+      }
       drawOcean(target, cx, cy, scale, limbVisible);
       // Graticule: under the land while the whole globe shows; over it once zoomed in, where it is the
       // only thing that tells a pan or a zoom apart on a big flat country.
@@ -851,7 +1067,7 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
         else strokeChunks(target, coarseGraticule(), clipRad, scratchGrid, style, width);
       };
       if (limbVisible) drawGrid(COLOUR.graticule, 0.6);
-      drawLand(target, level, data, clipRad, emphasis);
+      drawLand(target, level, data, clipRad, emphasis, false);
       if (!limbVisible) drawGrid(COLOUR.graticuleOverLand, 0.7);
       if (limbVisible) drawShading(target, cx, cy, scale);
     };
@@ -859,7 +1075,7 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
     if (cache === null) {
       paintMap(c);
     } else {
-      const key = `${rotation[0]}|${rotation[1]}|${rotation[2]}|${scale}|${level}|${dpr}|${muteFor(emphasis)}|${emphasis?.candidateUnits?.join(",") ?? ""}|${emphasis?.chosenUnit ?? ""}`;
+      const key = `${rotation[0]}|${rotation[1]}|${rotation[2]}|${scale}|${level}|${dpr}|${textured}|${muteFor(emphasis)}|${emphasis?.candidateUnits?.join(",") ?? ""}|${emphasis?.chosenUnit ?? ""}`;
       if (key !== cache.key) {
         cache.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         cache.ctx.clearRect(0, 0, cssW, cssH);
@@ -872,7 +1088,7 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
       }
       c.drawImage(cache.canvas, 0, 0, cssW, cssH);
     }
-    drawLit(c, level, emphasis?.litUnit ?? null, nowMs, reduced);
+    drawLit(c, level, emphasis?.litUnit ?? null, nowMs, reduced, textured, `${rotation[0]}|${rotation[1]}|${rotation[2]}|${scale}|${dpr}|${level}`);
 
     if (frame.glide !== undefined && frame.glide !== null) drawGlide(c, frame.glide);
 
@@ -933,6 +1149,9 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
       canvas.style.height = `${cssH}px`;
       graticuleFine = null;
       mapLayer = null;
+      ensureLayer();
+      layer?.resize(cssW, cssH, dpr);
+      placeLayer();
     },
     project(lng, lat) {
       if (lastProjection === null || facing(lng, lat) <= 0) return null;
@@ -944,6 +1163,26 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
       const p = lastProjection.invert([x, y]);
       return p === null || !Number.isFinite(p[0]) || !Number.isFinite(p[1]) ? null : [p[0], p[1]];
     },
+    get mapStyle() {
+      return style;
+    },
+    setMapStyle(next) {
+      if (!imageryOn || next === style) return;
+      style = next;
+      writeMapStyle(next);
+      if (next === "classic" && layer !== null) {
+        layer.clear();
+        wasTextured = false;
+      } else {
+        void requestImagery();
+      }
+    },
+    get imageryAvailable() {
+      return imageryOn && (layer !== null || !layerTried);
+    },
+    get textured() {
+      return wasTextured;
+    },
     get lastLevel() {
       return lastLevel;
     },
@@ -953,6 +1192,11 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World): Gl
       lastProjection = null;
       graticuleFine = null;
       mapLayer = null;
+      loadToken += 1; // a picture still loading is dropped on arrival
+      layer?.destroy();
+      layerEl?.remove();
+      layer = null;
+      layerEl = null;
     },
   };
 }

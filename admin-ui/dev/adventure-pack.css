@@ -1,0 +1,58 @@
+/* The holiday pack as a magazine page: hero carousel, photo cards, full-screen viewer. Loaded after
+   adventure-harness.css (the build concatenates the two). */
+
+.pk-body { padding: 2px 2px 0; }
+.pk-headline { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif; font-size: 25px; line-height: 1.16; letter-spacing: -0.005em; font-weight: 700; margin: 4px 0 10px; }
+.pk-summary { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif; font-size: 16.5px; line-height: 1.58; color: rgba(236, 244, 255, 0.86); margin: 0 0 16px; }
+.pk-icon { margin-right: 8px; font-size: 15px; }
+.pk-card h3 { display: flex; align-items: center; }
+
+.hero { position: relative; margin: 0 -12px 14px; border-radius: 0 0 22px 22px; overflow: hidden; background: #0c2744; box-shadow: 0 10px 30px rgba(0, 0, 0, .35); }
+.hero-track { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+.hero-track::-webkit-scrollbar { display: none; }
+.hero-slide { position: relative; flex: 0 0 100%; scroll-snap-align: center; scroll-snap-stop: always; aspect-ratio: 16 / 10; max-height: 46vh; width: 100%; padding: 0; border: 0; background: #0c2744; overflow: hidden; cursor: zoom-in; }
+.hero-slide img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.hero-slide.pk-photo-failed { display: none; }
+.hero-title { position: absolute; left: 0; right: 0; bottom: 0; padding: 44px 16px 14px; pointer-events: none; background: linear-gradient(to top, rgba(2, 10, 24, .86), rgba(2, 10, 24, .45) 55%, transparent); }
+.hero-name { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; font-size: 26px; line-height: 1.1; font-weight: 700; text-shadow: 0 2px 10px rgba(0, 0, 0, .55); }
+.hero-where { margin-top: 3px; font-size: 12.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--teal); }
+.hero-dots { position: absolute; top: 12px; right: 12px; display: flex; gap: 5px; padding: 5px 8px; border-radius: 10px; background: rgba(2, 10, 24, .45); pointer-events: none; }
+.hero-dot { width: 6px; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .45); transition: width .2s, background .2s; }
+.hero-dot.on { width: 16px; background: #fff; }
+.reduce .hero-dot { transition: none; }
+.hero .pk-credit { top: 12px; bottom: auto; left: 12px; max-width: calc(100% - 110px); }
+
+.pk-credit { position: absolute; left: 8px; bottom: 8px; max-width: calc(100% - 16px); padding: 3px 8px; border-radius: 10px; background: rgba(2, 10, 24, .62); color: rgba(255, 255, 255, .92); font-size: 10.5px; font-weight: 600; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); pointer-events: none; }
+.pk-photo { position: relative; display: block; width: 100%; aspect-ratio: 16 / 10; padding: 0; border: 0; border-radius: 14px; overflow: hidden; background: #0c2744; cursor: zoom-in; margin: 0 0 10px; }
+.pk-photo img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.pk-photo.pk-photo-failed { display: none; }
+.pk-item.has-photo { padding-top: 12px; }
+.pk-item.has-photo:first-child { padding-top: 0; }
+.pk-item.has-photo .pk-item-body { padding: 0 2px; }
+@media (min-width: 640px) {
+  .pk-item.has-photo { display: grid; grid-template-columns: minmax(0, 40%) minmax(0, 1fr); gap: 16px; align-items: start; }
+  .pk-item.has-photo .pk-photo { margin: 0; }
+  .hero { margin: 0 0 16px; border-radius: 22px; }
+}
+
+.viewer { position: fixed; inset: 0; z-index: 30; display: flex; flex-direction: column; background: #04070d; }
+.viewer[hidden] { display: none; }
+.viewer-track { display: flex; flex: 1 1 auto; min-height: 0; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.viewer-track::-webkit-scrollbar { display: none; }
+.viewer-slide { flex: 0 0 100%; scroll-snap-align: center; scroll-snap-stop: always; display: flex; align-items: center; justify-content: center; margin: 0; padding: calc(56px + var(--safe-t)) 8px 8px; }
+.viewer-slide img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; user-select: none; -webkit-user-select: none; }
+.viewer-close { position: absolute; top: calc(10px + var(--safe-t)); right: calc(10px + var(--safe-r)); width: 44px; height: 44px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, .25); background: rgba(20, 30, 46, .72); color: #fff; font-size: 18px; font-weight: 800; }
+.viewer-bar { flex: 0 0 auto; display: flex; align-items: baseline; gap: 12px; padding: 10px 16px calc(14px + var(--safe-b)); font-size: 13px; color: rgba(255, 255, 255, .85); }
+.viewer-count { flex: 0 0 auto; font-weight: 800; font-variant-numeric: tabular-nums; }
+.viewer-credit { min-width: 0; line-height: 1.35; }
+.viewer-link { color: #9ad6ff; }
+
+/* The WebGL imagery layer sits directly under the 2D overlay canvas, same box. */
+.globe-gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+
+/* Map style switch (Options sheet). */
+.opt-style { flex-direction: column; align-items: stretch; cursor: default; }
+.seg { display: flex; padding: 3px; gap: 3px; border-radius: 14px; background: rgba(255, 255, 255, .08); }
+.seg-btn { flex: 1 1 0; min-height: 40px; border: 0; border-radius: 11px; background: transparent; color: var(--ink-dim); font-weight: 800; font-size: 14.5px; }
+.seg-btn[aria-checked="true"] { background: var(--teal); color: #052a1d; box-shadow: 0 2px 8px rgba(0, 0, 0, .3); }
+.seg-btn:disabled { opacity: .35; }
