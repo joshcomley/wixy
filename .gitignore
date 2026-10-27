@@ -55,3 +55,8 @@ handover/
 # Uxer's own integration-guide convention: "Add Uxer/ to your .gitignore so
 # the Uxer source is not committed into your repo").
 Uxer/
+
+# Adventure Time dev harness output + scratch experiments (not shipped)
+/admin-ui/dev/out/
+/admin-ui/.scratch/
+/admin-ui/dev/inputs/
