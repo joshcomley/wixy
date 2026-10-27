@@ -1063,7 +1063,7 @@ describe("mountServerThread", () => {
 
     it("a failed send removes the echo, keeps the draft, and surfaces the error", async () => {
       getHistory.mockResolvedValue(emptyHistory());
-      sendMessage.mockResolvedValue({ ok: false, kind: "invalid", detail: "text must be at most 4000 characters" } satisfies SendMessageResult);
+      sendMessage.mockResolvedValue({ ok: false, kind: "invalid", detail: "text must be at most 200000 characters" } satisfies SendMessageResult);
       const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
       await view.attach(SESSION);
 
@@ -1075,7 +1075,7 @@ describe("mountServerThread", () => {
       expect(view.element.querySelector(".wx-srv-echo")).toBeNull();
       expect(textarea.value).toBe("too long");
       expect(view.element.querySelector(".wx-chat-composer-error")?.textContent).toBe(
-        "text must be at most 4000 characters",
+        "text must be at most 200000 characters",
       );
       view.teardown();
     });

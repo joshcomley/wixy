@@ -935,7 +935,7 @@ class TestSendHistoryUsage:
         finally:
             client.__exit__(None, None, None)
 
-    @pytest.mark.parametrize(("text_length", "expected_status"), [(4000, 201), (4001, 422)])
+    @pytest.mark.parametrize(("text_length", "expected_status"), [(200_000, 201), (200_001, 422)])
     def test_text_length_boundary(
         self,
         text_length: int,

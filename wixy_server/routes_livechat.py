@@ -567,6 +567,7 @@ class SetReactionIn(BaseModel):
 
 
 _SQLITE_MAX_INTEGER = 2**63 - 1
+MAX_MESSAGE_TEXT_CHARS = 200_000
 
 
 @router.post("/messages", response_model=None)
@@ -581,8 +582,8 @@ async def send_message(body: SendMessageIn, request: Request) -> JSONResponse:
     if not _valid_sender(sender):
         return _invalid("sender must be 1-32 characters with no control characters")
     text = body.text
-    if text is not None and len(text) > 4000:
-        return _invalid("text must be at most 4000 characters")
+    if text is not None and len(text) > MAX_MESSAGE_TEXT_CHARS:
+        return _invalid(f"text must be at most {MAX_MESSAGE_TEXT_CHARS} characters")
     if not text and not body.attachmentIds:
         return _invalid("a message needs text or at least one attachment")
     if len(body.attachmentIds) > 10:
