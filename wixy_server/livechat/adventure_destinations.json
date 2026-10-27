@@ -1,0 +1,145 @@
+{
+  "version": 1,
+  "generated": "2026-10-28",
+  "countries": {
+    "PRX": {
+      "name": "Portugal",
+      "advice": null,
+      "destinations": [
+        {"id": "PRX.lisbon", "name": "Lisbon", "region": "Lisbon", "lat": 38.7223, "lng": -9.1393, "kind": "city", "blurb": "Hilltop city of trams, tiled facades and custard tarts."},
+        {"id": "PRX.algarve-lagos", "name": "Lagos", "region": "Algarve", "lat": 37.1028, "lng": -8.673, "kind": "beach", "blurb": "Golden cliffs, hidden coves and a lively old town."},
+        {"id": "PRX.porto", "name": "Porto", "region": "Porto", "lat": 41.1579, "lng": -8.6291, "kind": "city", "blurb": "River city of port lodges, azulejos and steep cobbled lanes."},
+        {"id": "PRX.sintra", "name": "Sintra", "region": "Lisbon", "lat": 38.7971, "lng": -9.3906, "kind": "historic", "blurb": "Fairytale palaces tucked into misty green hills."},
+        {"id": "PRX.douro-valley", "name": "Douro Valley", "region": "Norte", "lat": 41.19, "lng": -7.545, "kind": "wine", "blurb": "Terraced vineyards and slow river cruises."}
+      ]
+    },
+    "ESP": {
+      "name": "Spain",
+      "advice": null,
+      "destinations": [
+        {"id": "ESP.barcelona", "name": "Barcelona", "region": "Catalonia", "lat": 41.3874, "lng": 2.1686, "kind": "city", "blurb": "Gaudi, beaches and tapas in one lively city."},
+        {"id": "ESP.mallorca-palma", "name": "Palma de Mallorca", "region": "Balearic Islands", "lat": 39.5696, "lng": 2.6502, "kind": "island", "blurb": "Sunny island of coves, mountains and a grand cathedral."},
+        {"id": "ESP.seville", "name": "Seville", "region": "Andalusia", "lat": 37.3891, "lng": -5.9845, "kind": "historic", "blurb": "Orange trees, flamenco and the Alcazar."},
+        {"id": "ESP.madrid", "name": "Madrid", "region": "Madrid", "lat": 40.4168, "lng": -3.7038, "kind": "city", "blurb": "Grand boulevards, world-class art and late-night food."},
+        {"id": "ESP.granada", "name": "Granada", "region": "Andalusia", "lat": 37.1773, "lng": -3.5986, "kind": "historic", "blurb": "The Alhambra beneath the snowy Sierra Nevada."}
+      ]
+    },
+    "ITA": {
+      "name": "Italy",
+      "advice": null,
+      "destinations": [
+        {"id": "ITA.rome", "name": "Rome", "region": "Lazio", "lat": 41.9028, "lng": 12.4964, "kind": "historic", "blurb": "Ancient ruins, piazzas and the best gelato."},
+        {"id": "ITA.florence", "name": "Florence", "region": "Tuscany", "lat": 43.7696, "lng": 11.2558, "kind": "city", "blurb": "Renaissance art in a walkable city of domes and bridges."},
+        {"id": "ITA.venice", "name": "Venice", "region": "Veneto", "lat": 45.4408, "lng": 12.3155, "kind": "historic", "blurb": "A city of canals, bridges and hidden squares."},
+        {"id": "ITA.amalfi-coast", "name": "Amalfi Coast", "region": "Campania", "lat": 40.634, "lng": 14.6027, "kind": "beach", "blurb": "Cliffside villages above a glittering blue sea."},
+        {"id": "ITA.lake-como", "name": "Lake Como", "region": "Lombardy", "lat": 45.987, "lng": 9.261, "kind": "lakes", "blurb": "Elegant villas and ferries on an alpine lake."}
+      ]
+    },
+    "GRC": {
+      "name": "Greece",
+      "advice": null,
+      "destinations": [
+        {"id": "GRC.santorini", "name": "Santorini", "region": "Cyclades", "lat": 36.4167, "lng": 25.4333, "kind": "island", "blurb": "White villages on a volcanic cliff above the Aegean."},
+        {"id": "GRC.crete-chania", "name": "Chania", "region": "Crete", "lat": 35.5138, "lng": 24.018, "kind": "island", "blurb": "A Venetian harbour town on the biggest Greek island."},
+        {"id": "GRC.athens", "name": "Athens", "region": "Attica", "lat": 37.9838, "lng": 23.7275, "kind": "historic", "blurb": "The Acropolis above a busy, tasty modern city."},
+        {"id": "GRC.corfu", "name": "Corfu", "region": "Ionian Islands", "lat": 39.6243, "lng": 19.9217, "kind": "island", "blurb": "Green hills, olive groves and an elegant old town."},
+        {"id": "GRC.rhodes", "name": "Rhodes", "region": "Dodecanese", "lat": 36.4349, "lng": 28.2176, "kind": "resort", "blurb": "Medieval walls and long sunny beaches."}
+      ]
+    },
+    "MCO": {
+      "name": "Monaco",
+      "advice": null,
+      "destinations": [
+        {"id": "MCO.monte-carlo", "name": "Monte Carlo", "region": "Monaco", "lat": 43.7384, "lng": 7.4246, "kind": "city", "blurb": "Casino, harbour and glamour on the French Riviera."}
+      ]
+    },
+    "ISL": {
+      "name": "Iceland",
+      "advice": null,
+      "destinations": [
+        {"id": "ISL.reykjavik", "name": "Reykjavik", "region": "Capital Region", "lat": 64.1466, "lng": -21.9426, "kind": "city", "blurb": "Colourful rooftops, hot pools and northern lights nearby."},
+        {"id": "ISL.golden-circle", "name": "Thingvellir", "region": "Golden Circle", "lat": 64.2559, "lng": -21.1299, "kind": "nature", "blurb": "Geysers, waterfalls and a rift valley in one day trip."},
+        {"id": "ISL.vik", "name": "Vik", "region": "South Coast", "lat": 63.4186, "lng": -19.006, "kind": "nature", "blurb": "Black sand beaches and sea stacks on the south coast."},
+        {"id": "ISL.akureyri", "name": "Akureyri", "region": "North Iceland", "lat": 65.6885, "lng": -18.1262, "kind": "nature", "blurb": "Whale watching from a fjord town in the north."},
+        {"id": "ISL.blue-lagoon", "name": "Blue Lagoon", "region": "Reykjanes", "lat": 63.8804, "lng": -22.4495, "kind": "resort", "blurb": "Milky-blue geothermal waters in a lava field."}
+      ]
+    },
+    "USA": {
+      "name": "United States",
+      "advice": null,
+      "destinations": [
+        {"id": "USA.new-york", "name": "New York City", "region": "New York", "lat": 40.7128, "lng": -74.006, "kind": "city", "blurb": "Skyscrapers, Broadway and Central Park."},
+        {"id": "USA.orlando", "name": "Orlando", "region": "Florida", "lat": 28.5383, "lng": -81.3792, "kind": "resort", "blurb": "Theme parks and sunshine for all the family."},
+        {"id": "USA.los-angeles", "name": "Los Angeles", "region": "California", "lat": 34.0522, "lng": -118.2437, "kind": "city", "blurb": "Beaches, film studios and the Hollywood hills."},
+        {"id": "USA.las-vegas", "name": "Las Vegas", "region": "Nevada", "lat": 36.1699, "lng": -115.1398, "kind": "city", "blurb": "Neon lights, shows and desert on the doorstep."},
+        {"id": "USA.san-francisco", "name": "San Francisco", "region": "California", "lat": 37.7749, "lng": -122.4194, "kind": "city", "blurb": "Cable cars, fog and the Golden Gate Bridge."}
+      ]
+    },
+    "PER": {
+      "name": "Peru",
+      "advice": null,
+      "destinations": [
+        {"id": "PER.machu-picchu", "name": "Machu Picchu", "region": "Cusco", "lat": -13.1631, "lng": -72.545, "kind": "historic", "blurb": "The Inca citadel high above the cloud forest."},
+        {"id": "PER.cusco", "name": "Cusco", "region": "Cusco", "lat": -13.532, "lng": -71.9675, "kind": "historic", "blurb": "The old Inca capital of stone lanes and markets."},
+        {"id": "PER.lima", "name": "Lima", "region": "Lima", "lat": -12.0464, "lng": -77.0428, "kind": "city", "blurb": "Clifftop seafront and some of the world's best food."},
+        {"id": "PER.arequipa", "name": "Arequipa", "region": "Arequipa", "lat": -16.409, "lng": -71.5375, "kind": "historic", "blurb": "The white city beneath a snow-capped volcano."},
+        {"id": "PER.puno", "name": "Puno", "region": "Puno", "lat": -15.8402, "lng": -70.0219, "kind": "lakes", "blurb": "Floating reed islands on Lake Titicaca."}
+      ]
+    },
+    "JPN": {
+      "name": "Japan",
+      "advice": null,
+      "destinations": [
+        {"id": "JPN.kyoto", "name": "Kyoto", "region": "Kansai", "lat": 35.0116, "lng": 135.7681, "kind": "historic", "blurb": "Temples, tea houses and lantern-lit lanes."},
+        {"id": "JPN.tokyo", "name": "Tokyo", "region": "Kanto", "lat": 35.6762, "lng": 139.6503, "kind": "city", "blurb": "Neon streets, tiny bars and endless things to eat."},
+        {"id": "JPN.osaka", "name": "Osaka", "region": "Kansai", "lat": 34.6937, "lng": 135.5023, "kind": "city", "blurb": "Japan's street food capital."},
+        {"id": "JPN.hakone", "name": "Hakone", "region": "Kanagawa", "lat": 35.2323, "lng": 139.1069, "kind": "mountains", "blurb": "Hot-spring inns with a view of Mount Fuji."},
+        {"id": "JPN.sapporo", "name": "Sapporo", "region": "Hokkaido", "lat": 43.0618, "lng": 141.3545, "kind": "city", "blurb": "Snowy winters, ramen and beer in the far north."}
+      ]
+    },
+    "AUS": {
+      "name": "Australia",
+      "advice": null,
+      "destinations": [
+        {"id": "AUS.sydney", "name": "Sydney", "region": "New South Wales", "lat": -33.8688, "lng": 151.2093, "kind": "city", "blurb": "Harbour, Opera House and surf beaches."},
+        {"id": "AUS.great-barrier-reef", "name": "Cairns and the Reef", "region": "Queensland", "lat": -16.9186, "lng": 145.7781, "kind": "nature", "blurb": "Snorkelling the world's biggest coral reef."},
+        {"id": "AUS.melbourne", "name": "Melbourne", "region": "Victoria", "lat": -37.8136, "lng": 144.9631, "kind": "city", "blurb": "Laneway cafes, street art and coastal road trips."},
+        {"id": "AUS.uluru", "name": "Uluru", "region": "Northern Territory", "lat": -25.3444, "lng": 131.0369, "kind": "nature", "blurb": "The great red rock at the heart of the outback."},
+        {"id": "AUS.perth", "name": "Perth", "region": "Western Australia", "lat": -31.9505, "lng": 115.8605, "kind": "city", "blurb": "Sunny beaches and Swan Valley wineries."}
+      ]
+    },
+    "MAR": {
+      "name": "Morocco",
+      "advice": null,
+      "destinations": [
+        {"id": "MAR.marrakech", "name": "Marrakech", "region": "Marrakech-Safi", "lat": 31.6295, "lng": -7.9811, "kind": "city", "blurb": "Souks, riads and the buzz of Jemaa el-Fnaa."},
+        {"id": "MAR.fes", "name": "Fes", "region": "Fes-Meknes", "lat": 34.0181, "lng": -5.0078, "kind": "historic", "blurb": "A maze-like medieval medina."},
+        {"id": "MAR.chefchaouen", "name": "Chefchaouen", "region": "Tangier-Tetouan", "lat": 35.1688, "lng": -5.2636, "kind": "mountains", "blurb": "The blue-washed town in the Rif mountains."},
+        {"id": "MAR.essaouira", "name": "Essaouira", "region": "Marrakech-Safi", "lat": 31.5085, "lng": -9.7595, "kind": "beach", "blurb": "Breezy fishing port with ramparts and seafood grills."},
+        {"id": "MAR.merzouga", "name": "Merzouga", "region": "Draa-Tafilalet", "lat": 31.0802, "lng": -4.0133, "kind": "nature", "blurb": "Camel treks and starry nights among Saharan dunes."}
+      ]
+    },
+    "THA": {
+      "name": "Thailand",
+      "advice": null,
+      "destinations": [
+        {"id": "THA.phuket", "name": "Phuket", "region": "Phuket", "lat": 7.8804, "lng": 98.3923, "kind": "island", "blurb": "Beaches, island hopping and sunset bars."},
+        {"id": "THA.bangkok", "name": "Bangkok", "region": "Bangkok", "lat": 13.7563, "lng": 100.5018, "kind": "city", "blurb": "Gilded temples, river boats and street food."},
+        {"id": "THA.chiang-mai", "name": "Chiang Mai", "region": "Chiang Mai", "lat": 18.7883, "lng": 98.9853, "kind": "historic", "blurb": "Old city temples and elephant sanctuaries in the hills."},
+        {"id": "THA.koh-samui", "name": "Koh Samui", "region": "Surat Thani", "lat": 9.512, "lng": 100.0136, "kind": "island", "blurb": "Palm-fringed beaches in the Gulf of Thailand."},
+        {"id": "THA.krabi", "name": "Krabi", "region": "Krabi", "lat": 8.0863, "lng": 98.9063, "kind": "beach", "blurb": "Limestone cliffs, longtail boats and clear water."}
+      ]
+    },
+    "ENG": {
+      "name": "England",
+      "advice": null,
+      "destinations": [
+        {"id": "ENG.london", "name": "London", "region": "Greater London", "lat": 51.5072, "lng": -0.1276, "kind": "city", "blurb": "Palaces, theatres, museums and markets."},
+        {"id": "ENG.cornwall-st-ives", "name": "St Ives", "region": "Cornwall", "lat": 50.211, "lng": -5.48, "kind": "beach", "blurb": "Harbour town with golden sands and artists' galleries."},
+        {"id": "ENG.lake-district", "name": "Windermere", "region": "Lake District", "lat": 54.38, "lng": -2.907, "kind": "lakes", "blurb": "Fells, lakes and cosy pubs."},
+        {"id": "ENG.york", "name": "York", "region": "North Yorkshire", "lat": 53.959, "lng": -1.0815, "kind": "historic", "blurb": "Medieval walls, a great minster and crooked lanes."},
+        {"id": "ENG.cotswolds", "name": "Bourton-on-the-Water", "region": "Cotswolds", "lat": 51.8856, "lng": -1.7599, "kind": "countryside", "blurb": "Honey-coloured villages and rolling green hills."}
+      ]
+    }
+  }
+}

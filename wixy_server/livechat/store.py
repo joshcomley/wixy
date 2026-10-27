@@ -31,6 +31,7 @@ from __future__ import annotations
 import hmac
 import json
 import logging
+import secrets
 import sqlite3
 import threading
 import time
@@ -41,6 +42,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from wixy_server.livechat.adventure_bank import TOP_DESTINATIONS, AdventureBank
 from wixy_server.livechat.drawings import (
     MAX_DRAWINGS_PER_ANCHOR,
     MAX_POINT_X_PAD,
@@ -48,6 +50,11 @@ from wixy_server.livechat.drawings import (
 )
 from wixy_server.livechat.links import text_has_link
 from wixy_server.livechat.models import (
+    AdventureLanding,
+    AdventureRoundRow,
+    AdventureSpin,
+    AdventureState,
+    AdventureSummary,
     AttachmentKind,
     AttachmentResult,
     AttachmentRow,
@@ -316,8 +323,47 @@ _LINK_INDEX_BATCH = 500
 _SCHEMA_V19_WYR_TOPICS = """
 CREATE TABLE IF NOT EXISTS wyr_topics(category TEXT PRIMARY KEY);
 """
-_LATEST_SCHEMA_VERSION = 19
+# Adventure Time (workspace 00056, spec/server-chat/08-adventure-time.md §4.1). `adv_rounds` follows
+# `wyr_rounds` exactly (Inv 54's pattern): keyed by its anchor message, `ON DELETE CASCADE` so an
+# older blue/green-overlap process that has never heard of the table still erases a round with its
+# message, and an explicit `DELETE` in wipe. The spin/landing/pack columns hold JSON text exactly as
+# the model sent/produced it ({by, from, delta, durationMs, at} per spin). `adv_rejected` is the
+# NEVER-AGAIN LIST: destination ids only, no dates, no FK, so it survives deleting the round's
+# message (that is what "never appears again" means) while a wipe clears it. Banked destinations are
+# derived from `adv_rounds.state = 'banked'` — no second table, so deleting a trip's message removes
+# it from the bank. The game chat reuses `wyr_chat` (a generic message -> anchor association).
+_SCHEMA_V20_ADVENTURE = """
+CREATE TABLE IF NOT EXISTS adv_rounds(
+  anchor_message_seq INTEGER PRIMARY KEY REFERENCES messages(seq) ON DELETE CASCADE,
+  state TEXT NOT NULL CHECK(state IN ('spin_lng','spin_lat','country','destination','chosen',
+                                      'banked','rejected','abandoned')),
+  started_by TEXT NOT NULL,
+  spin_lng TEXT, spin_lat TEXT,
+  landing TEXT,
+  country_candidates TEXT, country_seed INTEGER, country_roulette_at REAL,
+  country_id TEXT, country_by TEXT,
+  dest_candidates TEXT, dest_seed INTEGER, dest_roulette_at REAL,
+  destination_id TEXT, destination_by TEXT,
+  pack TEXT NOT NULL DEFAULT 'none'
+    CHECK(pack IN ('none','pending','ready','failed','unavailable')),
+  pack_run_id TEXT, pack_json TEXT, pack_error TEXT,
+  decided_by TEXT,
+  rev INTEGER NOT NULL DEFAULT 1,
+  created_at REAL NOT NULL, updated_at REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_adv_rounds_state ON adv_rounds(state);
+CREATE TABLE IF NOT EXISTS adv_rejected(destination_id TEXT PRIMARY KEY);
+"""
+_LATEST_SCHEMA_VERSION = 20
 WYR_REVEAL_WINDOW_S = 30.0
+ADVENTURE_ROULETTE_SETTLE_S = 5.0
+"""Spec §3.4: the country roulette starts this long after the second spin stops (glide + zoom)."""
+ADVENTURE_DESTINATION_SETTLE_S = 3.5
+"""Spec §3.4: the destination roulette starts this long after the country stop (settle + zoom)."""
+ADVENTURE_STOP_TOLERANCE_S = 1.0
+"""A stop up to this much before `rouletteAt` is still accepted (clock-sync slack, spec §3.4)."""
+ADVENTURE_PACK_FAILED_TEXT = "The research didn't finish — try again"
+ADVENTURE_PACK_UNAVAILABLE_TEXT = "Holiday packs aren't available right now"
+ADVENTURE_PACK_STOPPED_TEXT = "The research was stopped"
 _UNKNOWN_GRANT_HASH = "0" * 64
 _LOGGER = logging.getLogger(__name__)
 
@@ -392,12 +438,44 @@ class DrawingPointsOutOfBoundsError(LiveChatStoreError):
 
 
 class WyrRoundNotFoundError(LiveChatStoreError):
-    """The would-you-rather round a request targets does not exist (never did, or
-    cascaded away with its anchor message). `routes_livechat.py` maps this to 404."""
+    """The game round a request targets does not exist (never did, or cascaded away with its
+    anchor message). `routes_livechat.py` maps this to 404. Despite the name it covers EVERY game
+    anchor: `create_message(wyr_anchor_seq=)` accepts a would-you-rather round OR an Adventure Time
+    round and raises this one error type when it is neither (the wire names `wyrSeq`/`wyrRef` are
+    historical — they mean "the game-chat anchor of any game")."""
 
     def __init__(self, anchor_seq: int) -> None:
-        super().__init__(f"no would-you-rather round on message {anchor_seq}")
+        super().__init__(f"no game round on message {anchor_seq}")
         self.anchor_seq = anchor_seq
+
+
+class AdventureRoundNotFoundError(LiveChatStoreError):
+    """The Adventure Time round a request targets does not exist (never did, or cascaded away with
+    its anchor message). `routes_livechat_adventure.py` maps this to 404 `not_found`."""
+
+    def __init__(self, anchor_seq: int) -> None:
+        super().__init__(f"no Adventure Time round on message {anchor_seq}")
+        self.anchor_seq = anchor_seq
+
+
+class AdventureBadStateError(LiveChatStoreError):
+    """The round is not in the state this move needs, or a DIFFERENT move was already made
+    (replaying the SAME move is an idempotent success instead). Mapped to 409 `bad_state`."""
+
+
+class AdventureTooEarlyError(LiveChatStoreError):
+    """A roulette Stop arrived before the roulette started (more than the 1 s clock-sync
+    tolerance early). Mapped to 409 `too_early`."""
+
+
+class AdventureExhaustedError(LiveChatStoreError):
+    """The chosen country has no destination left in play (all rejected or banked). Mapped to
+    409 `exhausted`; the round stays in `country` so the roulette can be stopped on another."""
+
+
+class AdventureInvalidError(LiveChatStoreError):
+    """The move is well formed but names something the round does not offer (a roulette choice
+    outside its candidates). Mapped to 422 `invalid`."""
 
 
 class WyrRoundFullError(LiveChatStoreError):
@@ -487,6 +565,7 @@ def _row_to_message(
     reply_to: MessageRow | None = None,
     wyr: WyrSummary | None = None,
     wyr_ref: int | None = None,
+    adventure: AdventureSummary | None = None,
 ) -> MessageRow:
     return MessageRow(
         seq=row["seq"],
@@ -509,6 +588,7 @@ def _row_to_message(
         canvas=row["canvas"],
         wyr=wyr,
         wyr_ref=wyr_ref,
+        adventure=adventure,
     )
 
 
@@ -696,6 +776,88 @@ def _load_wyr_summaries_for(
     }
 
 
+def _spin_from_json(text: str | None) -> AdventureSpin | None:
+    if text is None:
+        return None
+    data = json.loads(text)
+    return AdventureSpin(
+        by=data["by"],
+        from_deg=data["from"],
+        delta_deg=data["delta"],
+        duration_ms=data["durationMs"],
+        at=data["at"],
+    )
+
+
+def _landing_from_json(text: str | None) -> AdventureLanding | None:
+    if text is None:
+        return None
+    data = json.loads(text)
+    return AdventureLanding(
+        point=(data["point"][0], data["point"][1]),
+        sea=bool(data["sea"]),
+        land=(data["land"][0], data["land"][1]),
+        centre=(data["centre"][0], data["centre"][1]),
+        land_unit=data["landUnit"],
+    )
+
+
+def _ids_from_json(text: str | None) -> tuple[str, ...] | None:
+    if text is None:
+        return None
+    return tuple(str(item) for item in json.loads(text))
+
+
+def _row_to_adv_round(row: sqlite3.Row) -> AdventureRoundRow:
+    return AdventureRoundRow(
+        anchor_message_seq=row["anchor_message_seq"],
+        state=row["state"],
+        started_by=row["started_by"],
+        spin_lng=_spin_from_json(row["spin_lng"]),
+        spin_lat=_spin_from_json(row["spin_lat"]),
+        landing=_landing_from_json(row["landing"]),
+        country_candidates=_ids_from_json(row["country_candidates"]),
+        country_seed=row["country_seed"],
+        country_roulette_at=row["country_roulette_at"],
+        country_id=row["country_id"],
+        country_by=row["country_by"],
+        dest_candidates=_ids_from_json(row["dest_candidates"]),
+        dest_seed=row["dest_seed"],
+        dest_roulette_at=row["dest_roulette_at"],
+        destination_id=row["destination_id"],
+        destination_by=row["destination_by"],
+        pack=row["pack"],
+        pack_run_id=row["pack_run_id"],
+        pack_json=row["pack_json"],
+        pack_error=row["pack_error"],
+        decided_by=row["decided_by"],
+        rev=row["rev"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _load_adventure_summaries_for(
+    conn: sqlite3.Connection, message_seqs: Sequence[int]
+) -> dict[int, AdventureSummary]:
+    """Round summary per anchor message — the `Message` wire shape's `adventure` member (the
+    `_load_wyr_summaries_for` precedent). At most one round per message."""
+    if not message_seqs:
+        return {}
+    placeholders = ",".join("?" for _ in message_seqs)
+    rows = conn.execute(
+        "SELECT anchor_message_seq, state, pack, rev FROM adv_rounds "
+        f"WHERE anchor_message_seq IN ({placeholders})",
+        tuple(message_seqs),
+    ).fetchall()
+    return {
+        row["anchor_message_seq"]: AdventureSummary(
+            state=row["state"], pack=row["pack"], rev=row["rev"]
+        )
+        for row in rows
+    }
+
+
 def _load_wyr_refs_for(conn: sqlite3.Connection, message_seqs: Sequence[int]) -> dict[int, int]:
     """The round (anchor seq) each message was sent in the game chat of — the `Message` wire
     shape's `wyrRef`. Absent for an ordinary message."""
@@ -739,11 +901,19 @@ def _load_message(conn: sqlite3.Connection, seq: int) -> MessageRow:
     drawings = _load_drawing_summaries_for(conn, [seq])[seq]
     wyr = _load_wyr_summaries_for(conn, [seq]).get(seq)
     wyr_ref = _load_wyr_refs_for(conn, [seq]).get(seq)
+    adventure = _load_adventure_summaries_for(conn, [seq]).get(seq)
     reply_to_seq = row["reply_to_seq"]
     reply_targets = _load_reply_targets(conn, [reply_to_seq])
     reply_to = reply_targets.get(reply_to_seq) if reply_to_seq is not None else None
     return _row_to_message(
-        row, tuple(attachments), reactions, drawings, reply_to=reply_to, wyr=wyr, wyr_ref=wyr_ref
+        row,
+        tuple(attachments),
+        reactions,
+        drawings,
+        reply_to=reply_to,
+        wyr=wyr,
+        wyr_ref=wyr_ref,
+        adventure=adventure,
     )
 
 
@@ -758,6 +928,7 @@ def _hydrate_messages(
     drawings_by_seq = _load_drawing_summaries_for(conn, seqs)
     wyr_by_seq = _load_wyr_summaries_for(conn, seqs)
     wyr_ref_by_seq = _load_wyr_refs_for(conn, seqs)
+    adventure_by_seq = _load_adventure_summaries_for(conn, seqs)
     # §(2): targets are resolved by seq, including ones OUTSIDE this page — a reply near the top
     # of a page may quote a message that paged off already.
     reply_targets = _load_reply_targets(conn, [row["reply_to_seq"] for row in ascending_rows])
@@ -770,6 +941,7 @@ def _hydrate_messages(
             reply_to=reply_targets.get(row["reply_to_seq"]),
             wyr=wyr_by_seq.get(row["seq"]),
             wyr_ref=wyr_ref_by_seq.get(row["seq"]),
+            adventure=adventure_by_seq.get(row["seq"]),
         )
         for row in ascending_rows
     ]
@@ -1013,6 +1185,13 @@ class LiveChatStore:
                         conn.execute(statement)
                 conn.execute("PRAGMA user_version = 19")
                 current = 19
+
+            if current < 20:
+                for statement in _SCHEMA_V20_ADVENTURE.split(";"):
+                    if statement.strip():
+                        conn.execute(statement)
+                conn.execute("PRAGMA user_version = 20")
+                current = 20
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
@@ -1129,10 +1308,11 @@ class LiveChatStore:
         wyr_anchor_seq: int | None = None,
         now: float,
     ) -> tuple[MessageRow, bool]:
-        """Create an ordinary message. `wyr_anchor_seq` marks it as sent in a would-you-rather
-        round's game chat: the round must exist (`WyrRoundNotFoundError` otherwise, checked in
-        this same transaction so a concurrent delete cannot slip between check and insert) and
-        the association row is written in the same transaction as the message."""
+        """Create an ordinary message. `wyr_anchor_seq` marks it as sent in a game's chat — the
+        anchor of a would-you-rather round OR an Adventure Time round: the round must exist
+        (`WyrRoundNotFoundError` otherwise, checked in this same transaction so a concurrent delete
+        cannot slip between check and insert) and the association row is written in the same
+        transaction as the message."""
         with self._write_txn() as conn:
             existing = conn.execute(
                 "SELECT seq FROM messages WHERE client_id = ?", (client_id,)
@@ -1142,7 +1322,9 @@ class LiveChatStore:
 
             if wyr_anchor_seq is not None and (
                 conn.execute(
-                    "SELECT 1 FROM wyr_rounds WHERE anchor_message_seq = ?", (wyr_anchor_seq,)
+                    "SELECT 1 FROM wyr_rounds WHERE anchor_message_seq = ? "
+                    "UNION ALL SELECT 1 FROM adv_rounds WHERE anchor_message_seq = ?",
+                    (wyr_anchor_seq, wyr_anchor_seq),
                 ).fetchone()
                 is None
             ):
@@ -1523,6 +1705,7 @@ class LiveChatStore:
             drawings_by_seq = _load_drawing_summaries_for(conn, list(by_seq.keys()))
             wyr_by_seq = _load_wyr_summaries_for(conn, list(by_seq.keys()))
             wyr_ref_by_seq = _load_wyr_refs_for(conn, list(by_seq.keys()))
+            adventure_by_seq = _load_adventure_summaries_for(conn, list(by_seq.keys()))
             reply_targets = _load_reply_targets(
                 conn, [row["reply_to_seq"] for row in by_seq.values()]
             )
@@ -1540,6 +1723,7 @@ class LiveChatStore:
                         reply_to=reply_targets.get(row["reply_to_seq"]),
                         wyr=wyr_by_seq.get(seq),
                         wyr_ref=wyr_ref_by_seq.get(seq),
+                        adventure=adventure_by_seq.get(seq),
                     )
                 )
             return result
@@ -2231,6 +2415,429 @@ class LiveChatStore:
                 )
             return len(rows)
 
+    # -- Adventure Time (schema v20, workspace 00056) --------------------------------------------
+    #
+    # Every mutation runs under `BEGIN IMMEDIATE` and, when `now` is omitted, samples the server
+    # clock only AFTER that write lock is held (decisions/00186: queueing behind a competing
+    # writer must not eat into a timed window — here, a roulette's `rouletteAt`). Every mutation is
+    # idempotent: the SAME move replayed returns the current round unchanged (`False` = nothing
+    # changed, no event appended); a DIFFERENT move after the state advanced is
+    # `AdventureBadStateError`. A real change bumps `rev` + `updated_at` and appends one
+    # `message_updated` event for the anchor (no new event type).
+
+    @staticmethod
+    def _adv_load(conn: sqlite3.Connection, anchor_seq: int) -> AdventureRoundRow:
+        row = conn.execute(
+            "SELECT * FROM adv_rounds WHERE anchor_message_seq = ?", (anchor_seq,)
+        ).fetchone()
+        if row is None:
+            raise AdventureRoundNotFoundError(anchor_seq)
+        return _row_to_adv_round(row)
+
+    @staticmethod
+    def _adv_excluded(conn: sqlite3.Connection) -> frozenset[str]:
+        """Destinations out of play: the never-again list plus every banked trip (bank minus
+        rejected minus banked is what a draw may land on)."""
+        rows = conn.execute(
+            "SELECT destination_id FROM adv_rejected "
+            "UNION SELECT destination_id FROM adv_rounds "
+            "WHERE state = 'banked' AND destination_id IS NOT NULL"
+        ).fetchall()
+        return frozenset(str(row["destination_id"]) for row in rows)
+
+    def _adv_update(
+        self,
+        conn: sqlite3.Connection,
+        anchor_seq: int,
+        now: float,
+        assignments: dict[str, object],
+    ) -> AdventureRoundRow:
+        """Apply `assignments` (column -> value; column names are internal literals, never user
+        input), bump `rev`/`updated_at`, append the `message_updated` event, return the new row."""
+        columns = ", ".join(f"{column} = ?" for column in assignments)
+        conn.execute(
+            f"UPDATE adv_rounds SET {columns}, rev = rev + 1, updated_at = ? "
+            "WHERE anchor_message_seq = ?",
+            (*assignments.values(), now, anchor_seq),
+        )
+        conn.execute(
+            "INSERT INTO events (type, message_seq, created_at) VALUES ('message_updated', ?, ?)",
+            (anchor_seq, now),
+        )
+        return self._adv_load(conn, anchor_seq)
+
+    def create_adventure_round(
+        self,
+        *,
+        client_id: str,
+        sender: str,
+        device_id: str,
+        by_email: str | None,
+        now: float | None = None,
+    ) -> tuple[MessageRow, bool]:
+        """Create a round: a text-less anchor message + an `adv_rounds` row in `spin_lng`. Every
+        round still in `spin_lng|spin_lat|country|destination` is abandoned in the same
+        transaction (a `chosen` round never is — it is a real place waiting for a decision).
+        Idempotent on `client_id` like every other send."""
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            existing = conn.execute(
+                "SELECT seq FROM messages WHERE client_id = ?", (client_id,)
+            ).fetchone()
+            if existing is not None:
+                return _load_message(conn, existing["seq"]), False
+
+            open_rounds = conn.execute(
+                "SELECT anchor_message_seq FROM adv_rounds "
+                "WHERE state IN ('spin_lng','spin_lat','country','destination')"
+            ).fetchall()
+            for old in open_rounds:
+                self._adv_update(conn, old["anchor_message_seq"], now_s, {"state": "abandoned"})
+
+            cursor = conn.execute(
+                "INSERT INTO messages "
+                "(client_id, sender, device_id, by_email, text, created_at) "
+                "VALUES (?, ?, ?, ?, NULL, ?)",
+                (client_id, sender, device_id, by_email, now_s),
+            )
+            seq = cursor.lastrowid
+            assert seq is not None
+            conn.execute(
+                "INSERT INTO adv_rounds "
+                "(anchor_message_seq, state, started_by, pack, rev, created_at, updated_at) "
+                "VALUES (?, 'spin_lng', ?, 'none', 1, ?, ?)",
+                (seq, sender, now_s, now_s),
+            )
+            conn.execute(
+                "INSERT INTO events (type, message_seq, created_at) VALUES ('message', ?, ?)",
+                (seq, now_s),
+            )
+            return _load_message(conn, seq), True
+
+    def get_adventure_round(self, *, anchor_seq: int) -> AdventureRoundRow | None:
+        with self._read_txn() as conn:
+            row = conn.execute(
+                "SELECT * FROM adv_rounds WHERE anchor_message_seq = ?", (anchor_seq,)
+            ).fetchone()
+            return _row_to_adv_round(row) if row is not None else None
+
+    def adventure_excluded_ids(self) -> frozenset[str]:
+        """The destinations out of play right now: rejected and banked ids."""
+        with self._read_txn() as conn:
+            return self._adv_excluded(conn)
+
+    def adventure_view_state(
+        self, *, anchor_seq: int
+    ) -> tuple[AdventureRoundRow, frozenset[str]] | None:
+        """One consistent read for the round view: the round, and — only while it is still in a
+        spin state, the one place the view lists `eligible` — the ids out of play."""
+        with self._read_txn() as conn:
+            row = conn.execute(
+                "SELECT * FROM adv_rounds WHERE anchor_message_seq = ?", (anchor_seq,)
+            ).fetchone()
+            if row is None:
+                return None
+            round_ = _row_to_adv_round(row)
+            excluded = (
+                self._adv_excluded(conn)
+                if round_.state in ("spin_lng", "spin_lat")
+                else frozenset[str]()
+            )
+            return round_, excluded
+
+    def spin_adventure(
+        self,
+        *,
+        anchor_seq: int,
+        sender: str,
+        axis: Literal["lng", "lat"],
+        from_deg: float,
+        delta_deg: float,
+        duration_ms: float,
+        landing: AdventureLanding | None = None,
+        candidates: Sequence[str] | None = None,
+        now: float | None = None,
+    ) -> tuple[AdventureRoundRow, bool]:
+        """Store one committed spin. `lng` is valid in `spin_lng` and moves to `spin_lat`; `lat` is
+        valid in `spin_lat`, carries the landing + country candidates (the caller has validated
+        them against the bank and the §3.1/§3.2 bounds) and moves to `country`, drawing the
+        roulette `seed` and setting `country_roulette_at = now + duration + 5 s`. The SAME spin
+        (same axis, `from`, `delta`) replayed after the state moved is an idempotent success."""
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            round_ = self._adv_load(conn, anchor_seq)
+            needed: AdventureState = "spin_lng" if axis == "lng" else "spin_lat"
+            if round_.state != needed:
+                stored = round_.spin_lng if axis == "lng" else round_.spin_lat
+                if (
+                    stored is not None
+                    and stored.from_deg == from_deg
+                    and stored.delta_deg == delta_deg
+                ):
+                    return round_, False
+                raise AdventureBadStateError(
+                    f"round on message {anchor_seq} is {round_.state}, not {needed}"
+                )
+            spin = AdventureSpin(
+                by=sender,
+                from_deg=from_deg,
+                delta_deg=delta_deg,
+                duration_ms=duration_ms,
+                at=now_s,
+            )
+            if axis == "lng":
+                assignments: dict[str, object] = {
+                    "spin_lng": json.dumps(spin.to_json()),
+                    "state": "spin_lat",
+                }
+            else:
+                assert landing is not None and candidates
+                assignments = {
+                    "spin_lat": json.dumps(spin.to_json()),
+                    "landing": json.dumps(landing.to_json()),
+                    "country_candidates": json.dumps(list(candidates)),
+                    "country_seed": secrets.randbits(32),
+                    "country_roulette_at": now_s
+                    + duration_ms / 1000.0
+                    + ADVENTURE_ROULETTE_SETTLE_S,
+                    "state": "country",
+                }
+            return self._adv_update(conn, anchor_seq, now_s, assignments), True
+
+    @staticmethod
+    def _adv_pack_start(pack_available: bool) -> dict[str, object]:
+        """The pack columns for a round entering `chosen`: `pending` (a job will start the run) when
+        a researcher exists, else `unavailable` at once."""
+        if pack_available:
+            return {"pack": "pending", "pack_run_id": None}
+        return {"pack": "unavailable", "pack_error": ADVENTURE_PACK_UNAVAILABLE_TEXT}
+
+    def stop_adventure(
+        self,
+        *,
+        anchor_seq: int,
+        sender: str,
+        stage: Literal["country", "destination"],
+        choice: str,
+        bank: AdventureBank,
+        pack_available: bool,
+        now: float | None = None,
+    ) -> tuple[AdventureRoundRow, bool]:
+        """Press Stop on a roulette: `choice` is the candidate the presser SAW lit (what you see is
+        what you get). A stop before the roulette's `rouletteAt` (less the 1 s tolerance) is
+        `AdventureTooEarlyError`; a choice outside the stage's candidates is
+        `AdventureInvalidError`.
+
+        `country`: the chosen unit's top 5 remaining destinations in rank order become the next
+        roulette — none left is `AdventureExhaustedError` (the round stays in `country`), exactly
+        one skips straight to `chosen`, else `destination` with a fresh seed and
+        `dest_roulette_at = now + 3.5 s`. `destination`: the round is `chosen`. Entering `chosen`
+        sets `pack` to `pending` (or `unavailable` without a researcher) in the same transaction —
+        the caller starts the job when the returned round is `pending` with no run id."""
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            round_ = self._adv_load(conn, anchor_seq)
+            if stage == "country":
+                if round_.state != "country":
+                    if round_.country_id is not None and round_.country_id == choice:
+                        return round_, False
+                    raise AdventureBadStateError(
+                        f"round on message {anchor_seq} is {round_.state}, not country"
+                    )
+                if choice not in (round_.country_candidates or ()):
+                    raise AdventureInvalidError("choice is not one of the country candidates")
+                self._adv_require_started(
+                    now_s, round_.country_roulette_at, "the country roulette has not started"
+                )
+                top = bank.top_destinations(choice, self._adv_excluded(conn), TOP_DESTINATIONS)
+                if not top:
+                    raise AdventureExhaustedError(f"{choice} has no destination left in play")
+                assignments: dict[str, object] = {
+                    "country_id": choice,
+                    "country_by": sender,
+                    "dest_candidates": json.dumps([destination.id for destination in top]),
+                }
+                if len(top) == 1:
+                    assignments.update(
+                        {
+                            "destination_id": top[0].id,
+                            "destination_by": sender,
+                            "state": "chosen",
+                            **self._adv_pack_start(pack_available),
+                        }
+                    )
+                else:
+                    assignments.update(
+                        {
+                            "dest_seed": secrets.randbits(32),
+                            "dest_roulette_at": now_s + ADVENTURE_DESTINATION_SETTLE_S,
+                            "state": "destination",
+                        }
+                    )
+                return self._adv_update(conn, anchor_seq, now_s, assignments), True
+
+            if round_.state != "destination":
+                if round_.destination_id is not None and round_.destination_id == choice:
+                    return round_, False
+                raise AdventureBadStateError(
+                    f"round on message {anchor_seq} is {round_.state}, not destination"
+                )
+            if choice not in (round_.dest_candidates or ()):
+                raise AdventureInvalidError("choice is not one of the destination candidates")
+            self._adv_require_started(
+                now_s, round_.dest_roulette_at, "the destination roulette has not started"
+            )
+            assignments = {
+                "destination_id": choice,
+                "destination_by": sender,
+                "state": "chosen",
+                **self._adv_pack_start(pack_available),
+            }
+            return self._adv_update(conn, anchor_seq, now_s, assignments), True
+
+    @staticmethod
+    def _adv_require_started(now: float, roulette_at: float | None, detail: str) -> None:
+        if roulette_at is not None and now < roulette_at - ADVENTURE_STOP_TOLERANCE_S:
+            raise AdventureTooEarlyError(detail)
+
+    def decide_adventure(
+        self,
+        *,
+        anchor_seq: int,
+        sender: str,
+        decision: Literal["bank", "reject"],
+        now: float | None = None,
+    ) -> tuple[AdventureRoundRow, bool]:
+        """Bank or reject a `chosen` destination. Reject also adds the destination to the
+        never-again list in the same transaction, and ends a still-running research (`pending` ->
+        `failed`, so the job's compare-and-set finds nothing to land on and cancels its run).
+        Replaying the same decision is an idempotent success."""
+        target: AdventureState = "banked" if decision == "bank" else "rejected"
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            round_ = self._adv_load(conn, anchor_seq)
+            if round_.state != "chosen":
+                if round_.state == target:
+                    return round_, False
+                raise AdventureBadStateError(
+                    f"round on message {anchor_seq} is {round_.state}, not chosen"
+                )
+            assignments: dict[str, object] = {"state": target, "decided_by": sender}
+            if decision == "reject":
+                assert round_.destination_id is not None
+                conn.execute(
+                    "INSERT OR IGNORE INTO adv_rejected (destination_id) VALUES (?)",
+                    (round_.destination_id,),
+                )
+                if round_.pack == "pending":
+                    assignments["pack"] = "failed"
+                    assignments["pack_error"] = ADVENTURE_PACK_STOPPED_TEXT
+            return self._adv_update(conn, anchor_seq, now_s, assignments), True
+
+    def retry_adventure_pack(
+        self,
+        *,
+        anchor_seq: int,
+        researcher_available: bool,
+        now: float | None = None,
+    ) -> tuple[AdventureRoundRow, bool]:
+        """Try the holiday pack again: valid for a `chosen` or `banked` round whose pack is
+        `failed` or `unavailable`, while a researcher exists. It goes back to `pending` with no
+        run, no data and no error — the returned flag says a job must start. A pack already
+        `pending` is an idempotent success (a double tap); anything else is `bad_state`."""
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            round_ = self._adv_load(conn, anchor_seq)
+            if round_.state not in ("chosen", "banked"):
+                raise AdventureBadStateError(
+                    f"round on message {anchor_seq} is {round_.state}, not chosen or banked"
+                )
+            if round_.pack == "pending":
+                return round_, False
+            if round_.pack in ("failed", "unavailable") and researcher_available:
+                updated = self._adv_update(
+                    conn,
+                    anchor_seq,
+                    now_s,
+                    {"pack": "pending", "pack_run_id": None, "pack_json": None, "pack_error": None},
+                )
+                return updated, True
+            raise AdventureBadStateError(
+                f"the holiday pack on message {anchor_seq} is {round_.pack}, not failed"
+            )
+
+    def set_adventure_pack_run(
+        self,
+        *,
+        anchor_seq: int,
+        run_id: str,
+        expected_run_id: str | None = None,
+        now: float | None = None,
+    ) -> bool:
+        """Record the research run a `pending` pack is waiting on — a compare-and-set on
+        `(pack = 'pending' AND pack_run_id = expected_run_id)` (NULL for the first run, the dead
+        run's id for the single early retry). `False` means the round moved on (deleted, rejected,
+        or another process already started a run): the caller cancels its run."""
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            cursor = conn.execute(
+                "UPDATE adv_rounds SET pack_run_id = ?, updated_at = ? "
+                "WHERE anchor_message_seq = ? AND pack = 'pending' AND pack_run_id IS ?",
+                (run_id, now_s, anchor_seq, expected_run_id),
+            )
+            return cursor.rowcount == 1
+
+    def finish_adventure_pack(
+        self,
+        *,
+        anchor_seq: int,
+        run_id: str | None,
+        state: Literal["ready", "failed", "unavailable"],
+        pack_json: str | None = None,
+        error: str | None = None,
+        now: float | None = None,
+    ) -> bool:
+        """Land the research outcome on the round — a compare-and-set on
+        `(pack = 'pending' AND pack_run_id = run_id)`, so a blue/green overlap where two processes
+        poll the same run stores it once, and a round rejected or deleted meanwhile is untouched.
+        `False` = nothing was waiting for this run. A pack landing on a round already `banked`
+        still lands (the trip's pack arrives after the couple saved it)."""
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            cursor = conn.execute(
+                "UPDATE adv_rounds SET pack = ?, pack_json = ?, pack_error = ?, "
+                "rev = rev + 1, updated_at = ? "
+                "WHERE anchor_message_seq = ? AND pack = 'pending' AND pack_run_id IS ?",
+                (state, pack_json, error, now_s, anchor_seq, run_id),
+            )
+            if cursor.rowcount != 1:
+                return False
+            conn.execute(
+                "INSERT INTO events (type, message_seq, created_at) "
+                "VALUES ('message_updated', ?, ?)",
+                (anchor_seq, now_s),
+            )
+            return True
+
+    def adventure_pending_packs(self) -> list[tuple[int, str | None]]:
+        """Startup recovery: every round whose pack is `pending`, as `(anchor seq, run id or
+        None)` — a run id resumes polling that run; none means the process died before the spawn,
+        so a new run starts."""
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT anchor_message_seq, pack_run_id FROM adv_rounds "
+                "WHERE pack = 'pending' ORDER BY anchor_message_seq"
+            ).fetchall()
+            return [(int(row["anchor_message_seq"]), row["pack_run_id"]) for row in rows]
+
+    def list_adventure_bank(self) -> list[AdventureRoundRow]:
+        """The banked trips, newest first (by anchor seq)."""
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM adv_rounds WHERE state = 'banked' ORDER BY anchor_message_seq DESC"
+            ).fetchall()
+            return [_row_to_adv_round(row) for row in rows]
+
     def events_after(self, cursor: int, limit: int = 200) -> list[EventRow]:
         with self._read_txn() as conn:
             rows = conn.execute(
@@ -2337,6 +2944,10 @@ class LiveChatStore:
             # messages; explicit here so wipe's intent is never left implicit.
             conn.execute("DELETE FROM wyr_chat")
             conn.execute("DELETE FROM wyr_rounds")
+            # And for Adventure Time (schema v20): the rounds, plus the never-again list — a wipe
+            # forgets everything about the two of you (Inv 56), the turned-down places included.
+            conn.execute("DELETE FROM adv_rounds")
+            conn.execute("DELETE FROM adv_rejected")
             conn.execute("DELETE FROM messages")
             conn.execute("DELETE FROM uploads")
             conn.execute("DELETE FROM events")

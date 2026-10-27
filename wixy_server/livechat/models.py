@@ -25,6 +25,26 @@ WyrState = Literal["voting", "answering", "revealing", "revealed", "skipped"]
 both answer privately (`answering`), both press Reveal (`revealing`), results
 visible (`revealed`), or the round was skipped/superseded (`skipped`)."""
 
+AdventureState = Literal[
+    "spin_lng",
+    "spin_lat",
+    "country",
+    "destination",
+    "chosen",
+    "banked",
+    "rejected",
+    "abandoned",
+]
+"""The Adventure Time round's states (spec/server-chat/08-adventure-time.md §1): the sideways spin,
+the up/down spin, the country roulette, the destination roulette, a destination waiting for the
+couple's decision (`chosen`), then `banked` / `rejected`; or `abandoned` when a newer adventure
+started before this one reached `chosen`."""
+
+AdventurePackState = Literal["none", "pending", "ready", "failed", "unavailable"]
+"""The holiday pack's state: `none` until a destination is chosen, `pending` while the research
+runs, then `ready` / `failed`; `unavailable` when no researcher is configured (or cmd could not be
+reached to start one)."""
+
 
 MessageHook = Callable[["MessageRow"], Awaitable[None]]
 """`app.state.livechat_message_hooks`'s element type (§4 "App state"): run on the
@@ -111,6 +131,17 @@ class WyrSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class AdventureSummary:
+    """What a `Message` carries about its Adventure Time round — the `WyrSummary` precedent: enough
+    for a client to notice the round exists or moved and fetch the body with
+    `GET /adventure/{seq}`."""
+
+    state: AdventureState
+    pack: AdventurePackState
+    rev: int
+
+
+@dataclass(frozen=True, slots=True)
 class DrawingStrokeRow:
     stroke_id: str
     ord: int
@@ -177,6 +208,84 @@ class WyrRoundRow:
 
 
 @dataclass(frozen=True, slots=True)
+class AdventureSpin:
+    """One committed spin (`{by, from, delta, durationMs, at}`): the dragger's consequence, stored
+    once so every screen replays the same motion. `from_deg`/`delta_deg` are degrees of rotation
+    about the spin's own axis; `at` is the server's clock when it was accepted."""
+
+    by: str
+    from_deg: float
+    delta_deg: float
+    duration_ms: float
+    at: float
+
+    def to_json(self) -> JsonObject:
+        return {
+            "by": self.by,
+            "from": self.from_deg,
+            "delta": self.delta_deg,
+            "durationMs": self.duration_ms,
+            "at": self.at,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AdventureLanding:
+    """Where the second spin landed (spec §3.2). Every point is `[lng, lat]` in degrees (the d3-geo
+    convention); `sea` is true when `point` was open water and `land` is the nearest land, and
+    `centre` is the point the roulette camera zooms to."""
+
+    point: tuple[float, float]
+    sea: bool
+    land: tuple[float, float]
+    centre: tuple[float, float]
+    land_unit: str
+
+    def to_json(self) -> JsonObject:
+        return {
+            "point": list(self.point),
+            "sea": self.sea,
+            "land": list(self.land),
+            "centre": list(self.centre),
+            "landUnit": self.land_unit,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AdventureRoundRow:
+    """One Adventure Time round, anchored to its message (`anchor_message_seq`, schema v20). The
+    whole round is chat content (Inv 56): it is erased with its anchor message or a wipe."""
+
+    anchor_message_seq: int
+    state: AdventureState
+    started_by: str
+    spin_lng: AdventureSpin | None
+    spin_lat: AdventureSpin | None
+    landing: AdventureLanding | None
+    country_candidates: tuple[str, ...] | None
+    country_seed: int | None
+    country_roulette_at: float | None
+    country_id: str | None
+    country_by: str | None
+    dest_candidates: tuple[str, ...] | None
+    dest_seed: int | None
+    dest_roulette_at: float | None
+    destination_id: str | None
+    destination_by: str | None
+    pack: AdventurePackState
+    pack_run_id: str | None
+    pack_json: str | None
+    pack_error: str | None
+    decided_by: str | None
+    rev: int
+    created_at: float
+    updated_at: float
+
+    def summary(self) -> AdventureSummary:
+        return AdventureSummary(state=self.state, pack=self.pack, rev=self.rev)
+
+
+@dataclass(frozen=True, slots=True)
 class MessageRow:
     seq: int
     client_id: str
@@ -210,6 +319,9 @@ class MessageRow:
     else None — joined from `wyr_chat` at read time. The message itself stays in the main chat."""
     """The round summary when this message anchors a would-you-rather round, else
     None — joined from `wyr_rounds` at read time, exactly like `drawings`."""
+    adventure: AdventureSummary | None = None
+    """The round summary when this message anchors an Adventure Time round, else None — joined from
+    `adv_rounds` at read time, exactly like `wyr`."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -416,6 +528,11 @@ def message_json(row: MessageRow, signer: MediaUrlSigner) -> JsonObject:
         "drawings": [{"id": d.id, "rev": d.rev} for d in row.drawings],
         "wyr": ({"state": row.wyr.state, "rev": row.wyr.rev} if row.wyr is not None else None),
         "wyrRef": row.wyr_ref,
+        "adventure": (
+            {"state": row.adventure.state, "pack": row.adventure.pack, "rev": row.adventure.rev}
+            if row.adventure is not None
+            else None
+        ),
     }
 
 
