@@ -358,6 +358,16 @@ CREATE TABLE IF NOT EXISTS adv_settings(
   < 480 px or the aspect ratio is beyond 3:1 (icons, banners); re-encoded to JPEG (metadata
   stripped, Inv 16/44) at ≤ 1600 px plus a 480 px thumb; at most 16 pictures per pack, 4 fetches
   in parallel; no cookies, a plain descriptive User-Agent.
+- **Sources per picture slot, in order** (measured 2026-10-28 on a real Kotor run: the AI supplied
+  only 9 picture URLs for 24 items, all Wikimedia originals of up to 5,750 px / 4.9 MB, and 8 of 9
+  plain fetches got `429 Too many requests` from `upload.wikimedia.org`): (1) the AI's direct
+  image URL — an `upload.wikimedia.org` original is never fetched as-is: resolve its file name
+  through the Commons API (`prop=imageinfo&iiurlwidth=1600`) and fetch that thumbnail; (2) else
+  the item's own page `url`: fetch the HTML (≤ 1 MB, same safety rules) and take its
+  `og:image` / `twitter:image`; (3) else, for hero and `sights` items, a Commons file search
+  (below). Politeness: a Wikimedia-policy User-Agent naming this engine and a contact URL, ONE
+  request at a time per host (4 hosts in parallel at most), a `429`/`503` honours `Retry-After`
+  (≤ 10 s, once) then gives up on that slot.
 - **Fallback for the hero**: if fewer than 3 hero photos survive, query Wikimedia Commons'
   public API (`commons.wikimedia.org/w/api.php`, file-namespace search for "<destination>
   <unit>", `prop=imageinfo` with a 1600 px thumb URL, photographs only — `mime` image/jpeg) and
@@ -397,9 +407,14 @@ so two screens agree and a late joiner lands mid-flight.
 
 ### 5.1 Shared game frame (refactor of the WYR tab — no WYR behaviour change)
 
-- `gameTabs.ts`: the bottom tab bar = **Chat** + one tab per OPEN game (`WYR`, `Adventure`), the
-  game pane slot, `chatTarget()` (the active game tab's anchor seq, or the pop-up's), dots,
-  offer/open/close per game, reset; one tab left → no bar (decisions/00184 unchanged).
+- `gameTabs.ts`: the bottom tab bar = **Chat** + the ONE open game's tab (`WYR` or `Adventure`),
+  the game pane slot, `chatTarget()` (the active game tab's anchor seq, or the pop-up's), dots,
+  offer/open/close, reset; one tab left → no bar (decisions/00184 unchanged). **One game at a
+  time** (operator, 2026-10-28: "it would replace the Would You Rather tab… there's only ever two
+  tabs at the bottom"): opening or offering a game while ANOTHER game is open closes that other
+  game first (its pop-up closes, its pane hides, its `reset()` runs, its dismissal is NOT
+  recorded), so the second tab simply becomes the new game. The registry still holds both games;
+  only one is ever open.
 - `itemChat.ts`: the mini chat strip (fixed 60 px; last two messages + echoes; 20 px thumbnails;
   "Chat N") and the pop-up item chat (the thread's embedded bubble renderer, incremental, the ONE
   composer re-parented in). Extracted verbatim from `wyrGame.ts`; both games use it; game-chat
