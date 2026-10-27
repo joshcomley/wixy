@@ -63,8 +63,11 @@ so improving the per-item mini chat improves every game. Brief: `spec/server-cha
   that must agree to the metre with the client — all risk, no capability.
 - Pre-generating holiday packs: the operator explicitly wants a live lookup ("we won't index all
   of this ahead of time").
-- Images in the pack: third-party image loads from a private chat leak the viewer's address to
-  those sites; links (opened on purpose) are fine.
+- Images loaded by the BROWSER from third-party sites: from a private chat that would reveal the
+  viewer's address to those sites. The operator asked for pictures (2026-10-28), so this server
+  fetches them itself (SSRF-safe: public addresses only, vetted redirects, size/type/dimension
+  checks, re-encoded without metadata) and stores them as the round's private photo attachments —
+  erased with the trip or a wipe (spec §4.3a).
 - Strict turn-taking: it would make the game unplayable alone; the UI shows whose turn it is
   instead (operator decision #2113 confirmed: either person may do any step).
 

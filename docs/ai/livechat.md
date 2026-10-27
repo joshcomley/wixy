@@ -2214,5 +2214,5 @@ geometry implementation, in TypeScript; the pair are trusted, Inv 40).
   frames reach only streams on the same blue/green process (like live drawing). A pack still researching when its
   message is deleted costs the research it already spent (the job notices and cancels the run on its next poll).
 - **Tests.** `test_livechat_adventure.py`, `test_routes_livechat_adventure.py`, `test_livechat_adventure_live.py`,
-  `test_livechat_adventure_pack.py`, `test_adventure_bank.py` (+ the shared helpers in `adventure_testkit.py` and the
+  `test_livechat_adventure_pack.py`, `test_adventure_bank_loader.py` + `test_adventure_bank.py` (+ the shared helpers in `adventure_testkit.py` and the
   chat-spawn endpoints in `fake_cmd.py`) — see [testing.md](testing.md).

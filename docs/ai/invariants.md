@@ -54,7 +54,7 @@ concurrency), `test_routes_livechat_adventure.py` (auth, every validation bound,
 HTTP, erasure through the routes with sentinel bytes), `test_livechat_adventure_live.py` (bounds, its
 own rate limit, the `adventure_live` event name, never stored), `test_livechat_adventure_pack.py`
 (parse/sanitise, the prompt names only the destination, the chat-spawn calls against the fake cmd,
-every job outcome, restart resume, the overlap compare-and-set) and `test_adventure_bank.py`.
+every job outcome, restart resume, the overlap compare-and-set) and `test_adventure_bank_loader.py` (+ `test_adventure_bank.py` for the bank against the map).
 Decision: [00190](../../decisions/00190-server-chat-adventure-time/decision.md).
 
 ### Inv 55 — Live calls are ephemeral private pairs, and idle suspension never overrides locking

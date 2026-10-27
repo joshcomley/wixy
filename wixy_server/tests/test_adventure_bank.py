@@ -1,349 +1,558 @@
-"""The Adventure Time destination bank (workspace 00056, spec/server-chat/08-adventure-time §2.2):
-the strict loader, the committed bank's validity, the exclusion maths (rejected, banked, advised),
-and the top-five selection with its 40 km spacing.
+"""Adventure Time destination bank: the validator, the world map it measures against, and the
+committed bank (spec/server-chat/08-adventure-time.md sections 2.1 and 2.2).
 
-The committed bank is also checked against the world MAP (every destination point inside its unit's
-geometry or within 25 km) by `tooling/adventure/validate_bank.py`; this file keeps the SERVER's own
-view of the bank honest — the loader refuses anything the §2.2 schema does not allow."""
-
-from __future__ import annotations
+The validator lives in ``tooling/adventure/validate_bank.py`` (stdlib only, no package) and is
+loaded here by path. These tests run entirely offline: ``admin-ui/data/adventure-world.json`` is
+the committed output of ``tooling/adventure/build_world.mjs``.
+"""
 
 import copy
+import importlib.util
 import json
+import re
+import sys
+from collections.abc import Callable
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pytest
 
-from wixy_server.livechat import adventure_bank
-from wixy_server.livechat.adventure_bank import (
-    BANK_PATH,
-    KINDS,
-    MIN_SPACING_KM,
-    AdventureBank,
-    AdventureBankError,
-    distance_km,
-    load_bank,
-    load_bank_or_empty,
-    parse_bank,
+REPO = Path(__file__).resolve().parents[2]
+VALIDATOR = REPO / "tooling" / "adventure" / "validate_bank.py"
+WORLD = REPO / "admin-ui" / "data" / "adventure-world.json"
+UNITS = REPO / "tooling" / "adventure" / "units.json"
+FIXTURE = Path(__file__).parent / "fixtures" / "adventure_bank_fixture.json"
+REAL_BANK = REPO / "wixy_server" / "livechat" / "adventure_destinations.json"
+
+# spec 2.1: the six countries replaced by their map-unit pieces, and the ids those pieces carry.
+SPLIT_UNIT_IDS = {
+    "FXX", "MTQ", "GLP", "GUF", "REU", "MYT", "PRX", "PMD", "PAZ", "NOR",
+    "NSV", "NJM", "NLD", "NLY", "TZA", "TZZ", "ENG", "SCT", "WLS", "NIR",
+}  # fmt: skip
+MICRO_STATES = ["VAT", "MCO", "SMR", "LIE", "MLT", "SGP", "BHR", "MDV", "NRU", "TUV"]
+
+
+def _load_validator() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("adventure_validate_bank", VALIDATOR)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclasses look their defining module up here
+    spec.loader.exec_module(module)
+    return module
+
+
+vb = _load_validator()
+
+
+@pytest.fixture(scope="module")
+def world() -> Any:
+    return vb.load_world(WORLD)
+
+
+@pytest.fixture
+def bank() -> dict[str, Any]:
+    data: dict[str, Any] = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    return data
+
+
+def _problems(data: object, world: Any) -> list[str]:
+    result: list[str] = vb.validate_data(data, world)
+    return result
+
+
+def _single(unit: str, name: str, lat: float, lng: float) -> tuple[dict[str, Any], str]:
+    """A one-destination bank, and the destination id (the unit-size rule is not its subject)."""
+    dest_id = f"{unit}.{name.lower().replace(' ', '-')}"
+    bank = {
+        "version": 1,
+        "generated": "2026-10-27",
+        "countries": {
+            unit: {
+                "name": unit,
+                "advice": None,
+                "destinations": [
+                    {
+                        "id": dest_id,
+                        "name": name,
+                        "region": "Somewhere",
+                        "lat": lat,
+                        "lng": lng,
+                        "kind": "island",
+                        "blurb": "A test place.",
+                    }
+                ],
+            }
+        },
+    }
+    return bank, dest_id
+
+
+def _position_problems(world: Any, unit: str, name: str, lat: float, lng: float) -> list[str]:
+    data, dest_id = _single(unit, name, lat, lng)
+    return [p for p in _problems(data, world) if dest_id in p]
+
+
+# ---------------------------------------------------------------------------------------------
+# The fixture bank and the happy path
+# ---------------------------------------------------------------------------------------------
+
+
+def test_fixture_bank_is_valid(world: Any) -> None:
+    assert vb.validate(FIXTURE, WORLD) == []
+    assert _problems(json.loads(FIXTURE.read_text(encoding="utf-8")), world) == []
+
+
+def test_fixture_exercises_every_geography_rule(world: Any) -> None:
+    inside = world.distance_km("GRC", 25.4318, 36.4167)  # Santorini
+    assert inside == 0.0
+    lisbon = world.distance_km("PRX", -9.1393, 38.7223)  # a coastal city just off the 1:50m coast
+    assert 0.5 < lisbon <= 25.0 and world.locate(-9.1393, 38.7223) is None
+    maafushi = world.distance_km("MDV", 73.4903, 3.9417)  # an atoll resort 10-25 km out
+    assert 10.0 < maafushi <= 25.0
+    aitutaki = world.distance_km("COK", -159.7833, -18.8567)  # an island the map omits entirely
+    assert 100.0 < aitutaki <= 400.0
+    assert world.nearest_units(-159.7833, -18.8567, 1)[0][0] == "COK"
+
+
+def test_cli_ok_and_failure(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path, bank: dict[str, Any]
+) -> None:
+    assert vb.main([str(FIXTURE), str(WORLD)]) == 0
+    assert "OK: 5 units, 15 destinations" in capsys.readouterr().out
+
+    bank["countries"]["PRX"]["destinations"][0]["kind"] = "spa"
+    broken = tmp_path / "broken.json"
+    broken.write_text(json.dumps(bank), encoding="utf-8")
+    assert vb.main([str(broken), str(WORLD)]) == 1
+    captured = capsys.readouterr()
+    assert "kind 'spa'" in captured.out and "1 problem(s)" in captured.err
+
+
+def test_cli_nearest(capsys: pytest.CaptureFixture[str]) -> None:
+    assert vb.main(["--nearest", "38.7223", "-9.1393", str(WORLD), "-k", "2"]) == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert len(lines) == 2 and lines[0].startswith("PRX") and lines[1].startswith("ESP")
+
+
+def test_unreadable_bank_is_a_problem_not_a_crash(tmp_path: Path) -> None:
+    missing = vb.validate(tmp_path / "nope.json", WORLD)
+    assert len(missing) == 1 and "cannot read" in missing[0]
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json", encoding="utf-8")
+    assert "cannot read" in vb.validate(bad, WORLD)[0]
+
+
+# ---------------------------------------------------------------------------------------------
+# Schema negatives
+# ---------------------------------------------------------------------------------------------
+
+
+def _set(path: str, value: Any) -> Callable[[dict[str, Any]], None]:
+    """Set ``path`` in the bank: dotted, integers index lists (``countries.PRX.destinations.0``)."""
+
+    def apply(bank: dict[str, Any]) -> None:
+        node: Any = bank
+        *head, last = path.split(".")
+        for part in head:
+            node = node[int(part)] if isinstance(node, list) else node[part]
+        if isinstance(node, list):
+            node[int(last)] = value
+        else:
+            node[last] = value
+
+    return apply
+
+
+def _drop(path: str) -> Callable[[dict[str, Any]], None]:
+    def apply(bank: dict[str, Any]) -> None:
+        node: Any = bank
+        *head, last = path.split(".")
+        for part in head:
+            node = node[int(part)] if isinstance(node, list) else node[part]
+        del node[last]
+
+    return apply
+
+
+PRX0 = "countries.PRX.destinations.0"
+
+SCHEMA_CASES: list[tuple[str, Callable[[dict[str, Any]], None], str]] = [
+    ("version", _set("version", 2), "version must be 1"),
+    ("version-bool", _set("version", True), "version must be 1"),
+    ("generated-format", _set("generated", "27/10/2026"), "generated must be a YYYY-MM-DD"),
+    ("generated-impossible", _set("generated", "2026-13-01"), "generated must be a YYYY-MM-DD"),
+    ("generated-compact", _set("generated", "20261027"), "generated must be a YYYY-MM-DD"),
+    ("top-level-unknown", _set("extra", 1), "unknown top-level key(s) 'extra'"),
+    ("top-level-missing", _drop("generated"), "missing top-level key(s) 'generated'"),
+    ("countries-not-object", _set("countries", []), "countries must be an object"),
+    (
+        "unknown-unit-id",
+        _set("countries.XYZ", {"name": "X", "advice": None, "destinations": []}),
+        "'XYZ' is not a unit id in the world map",
+    ),
+    (
+        "lowercase-unit-id",
+        _set("countries.prx", {"name": "X", "advice": None, "destinations": []}),
+        "'prx' is not a unit id",
+    ),
+    (
+        "unit-unknown-key",
+        _set("countries.PRX.capital", "Lisbon"),
+        "countries.PRX: unknown key(s) 'capital'",
+    ),
+    ("unit-missing-key", _drop("countries.PRX.advice"), "countries.PRX: missing key(s) 'advice'"),
+    ("unit-name-empty", _set("countries.PRX.name", "  "), "name must be a non-empty string"),
+    ("unit-name-long", _set("countries.PRX.name", "x" * 61), "name is 61 characters (max 60)"),
+    ("advice-not-object", _set("countries.PRX.advice", "yes"), "advice must be null or an object"),
+    (
+        "advice-level",
+        _set("countries.GRC.advice", {"level": "some", "checked": "2026-10-01"}),
+        "advice.level must be 'against_all_travel'",
+    ),
+    (
+        "advice-date",
+        _set("countries.AFG.advice.checked", "yesterday"),
+        "advice.checked must be a YYYY-MM-DD",
+    ),
+    (
+        "advice-unknown-key",
+        _set("countries.AFG.advice.note", "x"),
+        "advice has unknown key(s) 'note'",
+    ),
+    (
+        "destinations-not-list",
+        _set("countries.PRX.destinations", {}),
+        "destinations must be an array",
+    ),
+    ("destination-not-object", _set(PRX0, "Lisbon"), "must be an object"),
+    ("destination-unknown-key", _set(f"{PRX0}.rating", 5), "unknown key(s) 'rating'"),
+    ("destination-missing-key", _drop(f"{PRX0}.blurb"), "missing key(s) 'blurb'"),
+    ("bad-kind", _set(f"{PRX0}.kind", "spa"), "kind 'spa' is not one of"),
+    ("kind-not-string", _set(f"{PRX0}.kind", ["city"]), "is not one of"),
+    ("name-empty", _set(f"{PRX0}.name", ""), "name must be a non-empty string"),
+    ("name-long", _set(f"{PRX0}.name", "L" * 61), "name is 61 characters (max 60)"),
+    ("region-empty", _set(f"{PRX0}.region", ""), "region must be a non-empty string"),
+    ("region-long", _set(f"{PRX0}.region", "R" * 61), "region is 61 characters (max 60)"),
+    ("blurb-long", _set(f"{PRX0}.blurb", "b" * 121), "blurb is 121 characters (max 120)"),
+    ("blurb-markup", _set(f"{PRX0}.blurb", "A <b>bold</b> claim."), "blurb must be plain text"),
+    ("blurb-newline", _set(f"{PRX0}.blurb", "Two\nlines."), "blurb must be plain text"),
+    ("blurb-edge-space", _set(f"{PRX0}.blurb", " padded"), "blurb must be plain text"),
+    ("lat-range", _set(f"{PRX0}.lat", 91), "lat must be a number in [-90, 90]"),
+    ("lng-range", _set(f"{PRX0}.lng", -181), "lng must be a number in [-180, 180]"),
+    ("lat-string", _set(f"{PRX0}.lat", "38.7"), "lat must be a number"),
+    ("lat-bool", _set(f"{PRX0}.lat", True), "lat must be a number"),
+    ("lng-nan", _set(f"{PRX0}.lng", float("nan")), "lng must be a number"),
+    ("id-not-string", _set(f"{PRX0}.id", 7), "id must be a string"),
+    (
+        "slug-uppercase",
+        _set(f"{PRX0}.id", "PRX.Lisbon"),
+        "id must be <unitId>.<lowercase-kebab-slug>",
+    ),
+    ("slug-space", _set(f"{PRX0}.id", "PRX.lis bon"), "id must be <unitId>.<lowercase-kebab-slug>"),
+    ("slug-double-hyphen", _set(f"{PRX0}.id", "PRX.lis--bon"), "id must be <unitId>"),
+    ("slug-trailing-hyphen", _set(f"{PRX0}.id", "PRX.lisbon-"), "id must be <unitId>"),
+    ("slug-non-ascii", _set(f"{PRX0}.id", "PRX.lisbão"), "id must be <unitId>"),
+    ("slug-empty", _set(f"{PRX0}.id", "PRX."), "id must be <unitId>"),
+    ("slug-no-dot", _set(f"{PRX0}.id", "lisbon"), "id must be <unitId>"),
+    (
+        "id-wrong-unit-prefix",
+        _set(f"{PRX0}.id", "GRC.lisbon"),
+        "id prefix 'GRC' does not match its unit 'PRX'",
+    ),
+    ("duplicate-id-in-unit", _set("countries.PRX.destinations.1.id", "PRX.lisbon"), "duplicate id"),
+    (
+        "duplicate-id-across-units",
+        _set("countries.GRC.destinations.0.id", "PRX.lisbon"),
+        "duplicate id",
+    ),
+    ("duplicate-name", _set("countries.PRX.destinations.1.name", "LISBON"), "already used in PRX"),
+    (
+        "duplicate-coordinates",
+        lambda b: b["countries"]["PRX"]["destinations"][1].update(lat=38.7223, lng=-9.1393),
+        "same coordinates as PRX.lisbon",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("label", "mutate", "expected"), SCHEMA_CASES, ids=[c[0] for c in SCHEMA_CASES]
 )
-from wixy_server.tests.adventure_testkit import FIXTURE_BANK_PATH, fixture_bank
+def test_schema_negative(
+    world: Any,
+    bank: dict[str, Any],
+    label: str,
+    mutate: Callable[[dict[str, Any]], None],
+    expected: str,
+) -> None:
+    mutate(bank)
+    problems = _problems(bank, world)
+    assert any(expected in p for p in problems), (label, problems)
 
 
-def _dest(unit: str, slug: str, lat: float, lng: float, /, **over: Any) -> dict[str, Any]:
-    dest = {
-        "id": f"{unit}.{slug}",
-        "name": slug.title(),
-        "region": "Region",
-        "lat": lat,
-        "lng": lng,
-        "kind": "city",
-        "blurb": f"About {slug}.",
-    }
-    dest.update(over)
-    return dest
+def test_bank_must_be_an_object(world: Any) -> None:
+    assert _problems([], world) == ["bank: top level must be an object"]
 
 
-def _doc(destinations: list[dict[str, Any]] | None = None, **unit_over: Any) -> dict[str, Any]:
-    unit: dict[str, Any] = {
-        "name": "Testland",
-        "advice": None,
-        "destinations": destinations
-        if destinations is not None
-        else [_dest("TST", "one", 10.0, 10.0)],
-    }
-    unit.update(unit_over)
-    return {"version": 1, "generated": "2026-10-28", "countries": {"TST": unit}}
+def test_too_many_destinations(world: Any, bank: dict[str, Any]) -> None:
+    template = bank["countries"]["PRX"]["destinations"][0]
+    bank["countries"]["PRX"]["destinations"] = [
+        {**template, "id": f"PRX.spot-{i}", "name": f"Spot {i}", "lat": 38.70 + 0.01 * i}
+        for i in range(11)
+    ]
+    assert any("11 destination(s); need 2-10" in p for p in _problems(bank, world))
+    bank["countries"]["PRX"]["destinations"] = bank["countries"]["PRX"]["destinations"][:10]
+    assert _problems(bank, world) == []
 
 
-class TestCommittedBank:
-    def test_the_shipped_bank_loads_and_satisfies_the_schema(self) -> None:
-        bank = load_bank(BANK_PATH)
-        assert bank.units, "the bank must hold at least one unit"
-        seen: set[str] = set()
-        for unit_id, unit in bank.units.items():
-            assert unit.id == unit_id and unit.name
-            assert 1 <= len(unit.destinations) <= 10
-            assert (unit.advice_level is None) == (unit.advice_checked is None)
-            for destination in unit.destinations:
-                assert destination.id.startswith(f"{unit_id}.")
-                assert destination.id not in seen
-                seen.add(destination.id)
-                assert destination.kind in KINDS
-                assert -90.0 <= destination.lat <= 90.0 and -180.0 <= destination.lng <= 180.0
-                assert 0 < len(destination.blurb) <= 120
-
-    def test_the_shipped_bank_is_playable(self) -> None:
-        assert load_bank(BANK_PATH).eligible_units()
-
-    def test_the_fixture_bank_loads(self) -> None:
-        bank = fixture_bank()
-        assert set(bank.units) == {"AAA", "BBB", "CCC", "DDD", "EEE"}
-        assert bank.unit("DDD") is not None and bank.unit("DDD").advised  # type: ignore[union-attr]
-        assert bank.unit("AAA") is not None and not bank.unit("AAA").advised  # type: ignore[union-attr]
+def test_empty_destinations_fail_even_for_a_small_unit(world: Any, bank: dict[str, Any]) -> None:
+    bank["countries"]["MDV"]["destinations"] = []
+    assert any("0 destination(s); need 1-10" in p for p in _problems(bank, world))
 
 
-class TestStrictLoader:
-    def test_a_minimal_document_is_valid(self) -> None:
-        bank = parse_bank(_doc())
-        assert bank.version == 1 and bank.generated == "2026-10-28"
-        assert bank.destination("TST.one") is not None
-
-    @pytest.mark.parametrize(
-        "mutate",
-        [
-            lambda d: d.update(version=2),
-            lambda d: d.update(version=True),
-            lambda d: d.update(extra="nope"),
-            lambda d: d.update(generated="28/10/2026"),
-            lambda d: d.update(generated="2026-13-45"),
-            lambda d: d.update(countries={}),
-            lambda d: d.update(countries=[]),
-            lambda d: d["countries"].update(tst=d["countries"].pop("TST")),
-            lambda d: d["countries"].update(TSTX=d["countries"].pop("TST")),
-            lambda d: d["countries"]["TST"].update(extra=1),
-            lambda d: d["countries"]["TST"].pop("advice"),
-            lambda d: d["countries"]["TST"].update(name=""),
-            lambda d: d["countries"]["TST"].update(name=" padded "),
-            lambda d: d["countries"]["TST"].update(name="x" * 81),
-            lambda d: d["countries"]["TST"].update(advice={"level": "against_all_travel"}),
-            lambda d: d["countries"]["TST"].update(
-                advice={"level": "against_some_travel", "checked": "2026-10-01"}
-            ),
-            lambda d: d["countries"]["TST"].update(
-                advice={"level": "against_all_travel", "checked": "yesterday"}
-            ),
-            lambda d: d["countries"]["TST"].update(
-                advice={"level": "against_all_travel", "checked": "2026-10-01", "x": 1}
-            ),
-            lambda d: d["countries"]["TST"].update(destinations=[]),
-            lambda d: d["countries"]["TST"].update(destinations={}),
-            lambda d: d["countries"]["TST"].update(
-                destinations=[_dest("TST", f"p{n}", 1.0, 1.0) for n in range(11)]
-            ),
-        ],
+def test_two_destinations_unless_the_unit_is_small(world: Any, bank: dict[str, Any]) -> None:
+    bank["countries"]["PRX"]["destinations"] = bank["countries"]["PRX"]["destinations"][:1]
+    assert any("1 destination(s); need 2-10 for" in p for p in _problems(bank, world))
+    # The Maldives (about 60 km2 on the map) is under the 1,000 km2 line: one destination is fine.
+    bank["countries"]["PRX"]["destinations"] = copy.deepcopy(
+        json.loads(FIXTURE.read_text(encoding="utf-8"))["countries"]["PRX"]["destinations"]
     )
-    def test_bad_documents_are_refused(self, mutate: Any) -> None:
-        doc = _doc()
-        mutate(doc)
-        with pytest.raises(AdventureBankError):
-            parse_bank(doc)
-
-    @pytest.mark.parametrize(
-        "over",
-        [
-            {"id": "XXX.one"},  # another unit's prefix
-            {"id": "TST.One"},  # not lower-case kebab
-            {"id": "TST.two words"},
-            {"id": "TST."},
-            {"id": "TST.-bad"},
-            {"id": "TST.bad-"},
-            {"id": "TST.a--b"},
-            {"id": "TST.café"},
-            {"id": "TST." + "a" * 61},
-            {"name": ""},
-            {"region": ""},
-            {"kind": "spa"},
-            {"lat": 91.0},
-            {"lat": -90.5},
-            {"lng": 180.5},
-            {"lng": "10"},
-            {"lat": True},
-            {"lat": float("nan")},
-            {"blurb": ""},
-            {"blurb": "x" * 121},
-            {"blurb": "two\nlines"},
-            {"extra": "x"},
-        ],
-    )
-    def test_bad_destinations_are_refused(self, over: dict[str, Any]) -> None:
-        with pytest.raises(AdventureBankError):
-            parse_bank(_doc([_dest("TST", "one", 10.0, 10.0, **over)]))
-
-    def test_a_missing_destination_key_is_refused(self) -> None:
-        broken = _dest("TST", "one", 10.0, 10.0)
-        broken.pop("blurb")
-        with pytest.raises(AdventureBankError):
-            parse_bank(_doc([broken]))
-
-    def test_destination_ids_are_unique_across_the_whole_bank(self) -> None:
-        doc = _doc([_dest("TST", "one", 10.0, 10.0), _dest("TST", "one", 20.0, 20.0)])
-        with pytest.raises(AdventureBankError):
-            parse_bank(doc)
-
-    def test_the_boundary_values_are_accepted(self) -> None:
-        doc = _doc(
-            [
-                _dest("TST", "pole", -90.0, 180.0, blurb="x" * 120, name="n" * 80),
-                _dest("TST", "other", 90.0, -180.0, kind="wine"),
-            ],
-            advice={"level": "against_all_travel", "checked": "2026-02-28"},
-        )
-        bank = parse_bank(doc)
-        assert bank.unit("TST") is not None and bank.unit("TST").advised  # type: ignore[union-attr]
-
-    def test_missing_or_broken_files_raise_but_the_app_loader_degrades_to_empty(
-        self, tmp_path: Path
-    ) -> None:
-        with pytest.raises(AdventureBankError):
-            load_bank(tmp_path / "nope.json")
-        broken = tmp_path / "broken.json"
-        broken.write_text("{not json", encoding="utf-8")
-        with pytest.raises(AdventureBankError):
-            load_bank(broken)
-        assert load_bank_or_empty(tmp_path / "nope.json").units == {}
-        assert load_bank_or_empty(broken).eligible_units() == ()
-        good = tmp_path / "good.json"
-        good.write_text(json.dumps(_doc()), encoding="utf-8")
-        assert load_bank_or_empty(good).eligible_units() == ("TST",)
+    bank["countries"]["MDV"]["destinations"] = bank["countries"]["MDV"]["destinations"][:1]
+    assert _problems(bank, world) == []
+    assert world.units["MDV"].area_km2 < vb.SMALL_UNIT_KM2 < world.units["PRX"].area_km2
 
 
-class TestExclusion:
-    def test_eligible_units_need_a_remaining_destination_and_no_advice(self) -> None:
-        bank = fixture_bank()
-        assert bank.eligible_units() == ("AAA", "BBB", "CCC", "EEE")  # DDD is advised
-        gone = {"CCC.only"}
-        assert "CCC" not in bank.eligible_units(gone)
-        assert "BBB" in bank.eligible_units({"BBB.one"})
-        assert "BBB" not in bank.eligible_units({"BBB.one", "BBB.two"})
-
-    def test_advised_units_are_left_out_unless_the_shared_preference_switches_them_in(
-        self,
-    ) -> None:
-        bank = fixture_bank()
-        assert not bank.is_playable("DDD") and bank.is_playable("DDD", include_advised=True)
-        assert "DDD" not in bank.eligible_units()
-        assert "DDD" in bank.eligible_units(include_advised=True)
-        # The data never changes: only the argument does, and exclusion still applies on top.
-        assert "DDD" not in bank.eligible_units({"DDD.one", "DDD.two"}, include_advised=True)
-        assert bank.is_playable("AAA") and bank.is_playable("AAA", include_advised=True)
-        assert not bank.is_playable("ZZZ", include_advised=True)
-
-    def test_the_units_the_switch_governs_are_listed_by_name(self) -> None:
-        assert [(u.id, u.name) for u in fixture_bank().advised_units()] == [("DDD", "Dangerland")]
-        assert not hasattr(adventure_bank, "EXCLUDE_ADVISED_UNITS")
-
-    def test_unknown_units_are_not_playable_and_have_nothing_remaining(self) -> None:
-        bank = fixture_bank()
-        assert not bank.is_playable("ZZZ") and bank.remaining("ZZZ") == ()
-        assert bank.top_destinations("ZZZ") == ()
-
-    def test_remaining_keeps_rank_order_minus_the_excluded(self) -> None:
-        bank = fixture_bank()
-        ids = [d.id for d in bank.remaining("AAA", {"AAA.two", "AAA.four"})]
-        assert ids == ["AAA.one", "AAA.three", "AAA.five", "AAA.six"]
-
-    def test_lookups_resolve_destinations_and_their_unit(self) -> None:
-        bank = fixture_bank()
-        destination = bank.destination("EEE.two")
-        assert destination is not None and destination.name == "Echo Two"
-        unit = bank.unit_of("EEE.two")
-        assert unit is not None and unit.id == "EEE" and bank.unit_name("EEE") == "Echoland"
-        assert bank.destination("EEE.nine") is None and bank.unit_of("EEE.nine") is None
-        assert bank.unit_name("ZZZ") == "ZZZ"
-        assert destination.to_json() == {
-            "id": "EEE.two",
-            "name": "Echo Two",
-            "region": "Bay",
-            "lat": -41.0,
-            "lng": 101.0,
-            "kind": "nature",
-            "blurb": "Rank two of Echoland.",
-        }
+# ---------------------------------------------------------------------------------------------
+# Geography
+# ---------------------------------------------------------------------------------------------
 
 
-class TestDistance:
-    def test_known_distances(self) -> None:
-        assert distance_km(10.0, 20.0, 10.0, 20.0) == 0.0
-        london_paris = distance_km(51.5072, -0.1276, 48.8566, 2.3522)
-        assert 340.0 < london_paris < 348.0
-        assert 20_000.0 < distance_km(0.0, 0.0, 0.0, 180.0) < 20_030.0
-
-    def test_it_is_symmetric_and_wraps_the_antimeridian(self) -> None:
-        a = distance_km(10.0, 179.5, 10.0, -179.5)
-        assert a == distance_km(10.0, -179.5, 10.0, 179.5)
-        assert a < 120.0  # one degree of longitude at 10 degrees north, not 359
+def test_point_inside_a_different_unit_fails(world: Any) -> None:
+    """Madrid is 244 km from Portugal, inside Spain: filed under Portugal it must fail."""
+    assert 100.0 < world.distance_km("PRX", -3.7038, 40.4168) < vb.OFFSHORE_KM
+    problems = _position_problems(world, "PRX", "Madrid", 40.4168, -3.7038)
+    assert len(problems) == 1 and "ESP inside" in problems[0]
+    assert _position_problems(world, "ESP", "Madrid", 40.4168, -3.7038) == []
 
 
-def _cluster_bank(points: list[tuple[float, float]]) -> AdventureBank:
-    return parse_bank(
-        _doc([_dest("TST", f"p{n}", lat, lng) for n, (lat, lng) in enumerate(points)])
-    )
+def test_point_nearer_to_another_unit_fails(world: Any) -> None:
+    """Open sea south of Malta: 160 km off Italy but 58 km off Malta, so it is not Italy's."""
+    lat, lng = 35.30, 14.40
+    to_italy = world.distance_km("ITA", lng, lat)
+    assert 100.0 < to_italy < vb.OFFSHORE_KM
+    assert world.nearest_units(lng, lat, 1)[0][0] == "MLT"
+    problems = _position_problems(world, "ITA", "Sea South Of Malta", lat, lng)
+    assert len(problems) == 1 and "MLT 58 km" in problems[0]
+    # ... while the unit that IS nearest accepts it (the offshore rule).
+    assert _position_problems(world, "MLT", "Sea South Of Malta", lat, lng) == []
 
 
-def _ids(destinations: Any) -> list[str]:
-    return [d.id.split(".")[1] for d in destinations]
+@pytest.mark.parametrize(
+    ("unit", "name", "lat", "lng", "min_km"),
+    [
+        ("SYC", "Praslin", -4.3167, 55.7333, 25.0),
+        ("TCA", "Grand Turk", 21.4675, -71.1389, 25.0),
+        ("PMD", "Porto Santo", 33.0728, -16.3415, 25.0),
+        ("VEN", "Los Roques", 11.85, -66.75, 100.0),
+        ("COK", "Aitutaki", -18.8567, -159.7833, 200.0),
+        ("BRA", "Fernando de Noronha", -3.8547, -32.4244, 300.0),
+    ],
+)
+def test_offshore_island_whose_own_unit_is_nearest_passes(
+    world: Any, unit: str, name: str, lat: float, lng: float, min_km: float
+) -> None:
+    km = world.distance_km(unit, lng, lat)
+    assert min_km <= km <= vb.OFFSHORE_KM, "the point must sit beyond the 25 km tolerance"
+    assert world.nearest_units(lng, lat, 1)[0][0] == unit
+    assert _position_problems(world, unit, name, lat, lng) == []
 
 
-class TestTopFive:
-    def test_without_clusters_it_is_the_first_five_in_rank_order(self) -> None:
-        bank = fixture_bank()
-        assert _ids(bank.top_destinations("AAA")) == ["one", "two", "three", "four", "five"]
-        assert _ids(bank.top_destinations("BBB")) == ["one", "two"]
-        assert _ids(bank.top_destinations("CCC")) == ["only"]
-        assert bank.top_destinations("AAA", n=2)[-1].id == "AAA.two"
+@pytest.mark.parametrize(
+    ("unit", "lat", "lng"),
+    [
+        ("BRA", 0.0, -30.0),  # mid-Atlantic, 837 km from Brazil and nobody else nearer
+        ("MDV", -0.6, 73.15),  # Addu atoll: Maldivian, but 427 km from the map's Maldives
+    ],
+)
+def test_beyond_400_km_fails_even_when_the_unit_is_nearest(
+    world: Any, unit: str, lat: float, lng: float
+) -> None:
+    assert world.nearest_units(lng, lat, 1)[0][0] == unit
+    assert world.distance_km(unit, lng, lat) > vb.OFFSHORE_KM
+    problems = _position_problems(world, unit, "Far Away", lat, lng)
+    assert len(problems) == 1 and "within 400 km when" in problems[0]
 
-    def test_a_pick_within_40_km_of_one_already_taken_is_held_back(self) -> None:
-        # Peru in miniature: p1 and p6 sit on top of p0; the rest are well apart.
-        bank = _cluster_bank(
-            [(0.0, 0.0), (0.1, 0.1), (1.0, 1.0), (2.0, 2.0), (3.0, 3.0), (4.0, 4.0), (0.2, 0.2)]
-        )
-        assert _ids(bank.top_destinations("TST")) == ["p0", "p2", "p3", "p4", "p5"]
 
-    def test_held_back_destinations_stay_in_reserve_and_come_round_again(self) -> None:
-        bank = _cluster_bank(
-            [(0.0, 0.0), (0.1, 0.1), (1.0, 1.0), (2.0, 2.0), (3.0, 3.0), (4.0, 4.0), (0.2, 0.2)]
-        )
-        # p0 rejected: p1 is now the nearest-to-the-top and nothing else crowds it.
-        assert _ids(bank.top_destinations("TST", {"TST.p0"})) == ["p1", "p2", "p3", "p4", "p5"]
-        # They were never consumed: still remaining in rank order.
-        assert _ids(bank.remaining("TST")) == [f"p{n}" for n in range(7)]
-        # p0, p2 and p3 gone: p1 first, then p4, p5; p6 (on top of p1) is held back, then used
-        # as the filler because only three spaced ones exist.
-        assert _ids(bank.top_destinations("TST", {"TST.p0", "TST.p2", "TST.p3"})) == [
-            "p1",
-            "p4",
-            "p5",
-            "p6",
-        ]
+def test_rule_constants() -> None:
+    assert vb.TOLERANCE_KM == 25.0
+    assert vb.OFFSHORE_KM == 400.0
 
-    def test_when_too_few_qualify_the_rest_is_filled_from_the_skipped_in_rank_order(
-        self,
-    ) -> None:
-        # Seven points: three spaced (p0, p3, p5) and four crowding p0 or p3.
-        bank = _cluster_bank(
-            [
-                (0.0, 0.0),
-                (0.05, 0.05),  # p1: crowds p0
-                (0.1, 0.1),  # p2: crowds p0
-                (3.0, 3.0),  # p3
-                (3.05, 3.05),  # p4: crowds p3
-                (6.0, 6.0),  # p5
-                (6.05, 6.05),  # p6: crowds p5
-            ]
-        )
-        # Spaced first (p0, p3, p5), then the skipped in rank order (p1, p2); returned by rank.
-        assert _ids(bank.top_destinations("TST")) == ["p0", "p1", "p2", "p3", "p5"]
 
-    def test_an_entirely_clustered_unit_still_offers_five(self) -> None:
-        bank = _cluster_bank([(0.0 + n * 0.01, 0.0) for n in range(8)])
-        assert _ids(bank.top_destinations("TST")) == ["p0", "p1", "p2", "p3", "p4"]
+def test_a_unit_that_touches_a_pole_is_never_accepted(world: Any) -> None:
+    assert world.units["ATA"].polar
+    assert [u for u, unit in world.units.items() if unit.polar] == ["ATA"]
+    # Its coast winds round the pole: the polar cap is inside, the sea off the coast is not.
+    assert world.contains("ATA", 0.0, -80.0) and world.contains("ATA", 100.0, -89.5)
+    assert not world.contains("ATA", 0.0, -55.0)
+    assert world.nearest_units(100.0, -89.5, 1) == [("ATA", 0.0)]
+    assert 11e6 < world.units["ATA"].area_km2 < 15e6
+    problems = _position_problems(world, "ATA", "South Pole Station", -80.0, 0.0)
+    assert len(problems) == 1 and "touches a pole" in problems[0]
 
-    def test_the_count_is_never_reduced_by_the_spacing(self) -> None:
-        for count in range(1, 9):
-            bank = _cluster_bank([(0.0 + n * 0.01, 0.0) for n in range(count)])
-            assert len(bank.top_destinations("TST")) == min(5, count)
 
-    def test_forty_kilometres_is_the_line(self) -> None:
-        near, far = (0.35, 0.0), (0.37, 0.0)
-        assert distance_km(0.0, 0.0, *near) < MIN_SPACING_KM <= distance_km(0.0, 0.0, *far)
-        crowded = _cluster_bank([(0.0, 0.0), near, (5.0, 5.0), (6.0, 6.0), (7.0, 7.0), (8.0, 8.0)])
-        assert _ids(crowded.top_destinations("TST")) == ["p0", "p2", "p3", "p4", "p5"]
-        spaced = _cluster_bank([(0.0, 0.0), far, (5.0, 5.0), (6.0, 6.0), (7.0, 7.0), (8.0, 8.0)])
-        assert _ids(spaced.top_destinations("TST")) == ["p0", "p1", "p2", "p3", "p4"]
+def test_micro_state_enclave_is_accepted_by_the_tolerance(world: Any) -> None:
+    """The map draws the real Vatican inside Italy, about a kilometre from its own polygon."""
+    assert world.locate(12.4539, 41.9022) == "ITA"
+    assert 0.0 < world.distance_km("VAT", 12.4539, 41.9022) <= vb.TOLERANCE_KM
+    assert _position_problems(world, "VAT", "Vatican City", 41.9022, 12.4539) == []
 
-    def test_the_fixture_documents_are_not_mutated_by_any_of_this(self) -> None:
-        raw = json.loads(FIXTURE_BANK_PATH.read_text(encoding="utf-8"))
-        before = copy.deepcopy(raw)
-        parse_bank(raw)
-        assert raw == before
+
+# ---------------------------------------------------------------------------------------------
+# World helpers
+# ---------------------------------------------------------------------------------------------
+
+
+def test_nearest_units_default_world_and_ordering() -> None:
+    near = vb.nearest_units(-9.1393, 38.7223, 3)  # Lisbon, against the committed map
+    assert [u for u, _ in near] == ["PRX", "ESP", "MAR"]
+    assert 0.5 < near[0][1] < 5.0 and near[0][1] < near[1][1] < near[2][1]
+    assert vb.nearest_units(23.7275, 37.9838, 1) == [("GRC", 0.0)]
+    assert vb.nearest_units(0.0, 0.0, 0) == []
+
+
+def test_nearest_units_of_a_point_inside_comes_first(world: Any) -> None:
+    result = world.nearest_units(-3.7038, 40.4168, 2)  # Madrid
+    assert result[0] == ("ESP", 0.0) and result[1][0] == "PRX"
+    assert 200.0 < result[1][1] < 300.0
+
+
+def test_locate_resolves_the_split_units(world: Any) -> None:
+    assert world.locate(2.35, 48.85) == "FXX"  # Paris
+    assert world.locate(-0.12, 51.5) == "ENG"  # London
+    assert world.locate(-3.19, 55.95) == "SCT"  # Edinburgh
+    assert world.locate(-3.18, 51.48) == "WLS"  # Cardiff
+    assert world.locate(-5.93, 54.6) == "NIR"  # Belfast
+    assert world.locate(-16.92, 32.67) == "PMD"  # Funchal
+    assert world.locate(55.45, -21.1) == "REU"  # Saint-Denis area
+    assert world.locate(39.2, -6.16) == "TZZ"  # Zanzibar
+    assert world.locate(15.63, 78.22) == "NSV"  # Longyearbyen
+    assert world.locate(-30.0, 0.0) is None  # mid-Atlantic
+
+
+def test_distance_wraps_around_the_antimeridian(world: Any) -> None:
+    # Taveuni, Fiji lies at 179.99E; a point just east of 180 must still measure to Fiji.
+    west = world.distance_km("FJI", 179.9, -16.9)
+    east = world.distance_km("FJI", -179.9, -16.9)
+    assert west < 25.0 and east < 25.0
+
+
+# ---------------------------------------------------------------------------------------------
+# The committed world map (build_world.mjs output)
+# ---------------------------------------------------------------------------------------------
+
+
+def _ring_area(ring: tuple[tuple[float, float], ...]) -> float:
+    s = 0.0
+    for (x0, y0), (x1, y1) in zip(ring, ring[1:], strict=False):
+        s += x0 * y1 - x1 * y0
+    return s / 2
+
+
+def _arc_vertices(topo: dict[str, Any], obj: str) -> int:
+    used: set[int] = set()
+
+    def visit(node: Any) -> None:
+        if isinstance(node, int):
+            used.add(~node if node < 0 else node)
+        else:
+            for child in node:
+                visit(child)
+
+    for geom in topo["objects"][obj]["geometries"]:
+        visit(geom["arcs"])
+    return sum(len(topo["arcs"][i]) for i in used)
+
+
+def test_world_file_size_and_vertex_budgets() -> None:
+    assert WORLD.stat().st_size <= 600 * 1000
+    topo = json.loads(WORLD.read_text(encoding="utf-8"))
+    assert set(topo["objects"]) == {"detail", "coarse"}
+    coarse, detail = _arc_vertices(topo, "coarse"), _arc_vertices(topo, "detail")
+    assert coarse <= 12_000 and detail > 3 * coarse
+
+
+def test_world_has_256_units_with_the_same_ids_in_both_objects(world: Any) -> None:
+    coarse = vb.load_world(WORLD, "coarse")
+    assert len(world.units) == len(coarse.units) == 256
+    assert sorted(world.units) == sorted(coarse.units)
+    assert all(re.fullmatch(r"[A-Z0-9]{3}", uid) for uid in world.units)
+    assert SPLIT_UNIT_IDS <= set(world.units)
+    # the pieces that replaced their parents: no FRA / GBR; PRX is mainland Portugal
+    assert {"FRA", "PRT", "GBR"}.isdisjoint(world.units)
+    assert all(world.units[uid].name for uid in world.units)
+
+
+@pytest.mark.parametrize("obj", ["detail", "coarse"])
+def test_every_unit_keeps_a_real_polygon_in_both_objects(obj: str) -> None:
+    loaded = vb.load_world(WORLD, obj)
+    for uid, unit in loaded.units.items():
+        assert unit.polygons, uid
+        real = 0
+        for poly in unit.polygons:
+            for ring in poly.rings:
+                assert ring[0] == ring[-1] and len(ring) >= 4, (obj, uid)
+            exterior = poly.rings[0]
+            if len({p for p in exterior[:-1]}) >= 3 and _ring_area(exterior) != 0:
+                real += 1
+        assert real >= 1, (obj, uid)
+    for uid in MICRO_STATES:
+        assert uid in loaded.units
+
+
+@pytest.mark.parametrize("obj", ["detail", "coarse"])
+def test_rings_follow_the_d3_winding(obj: str) -> None:
+    """Exterior rings clockwise, holes anticlockwise (lng/lat, y up): what d3-geo needs."""
+    loaded = vb.load_world(WORLD, obj)
+    for uid, unit in loaded.units.items():
+        for poly in unit.polygons:
+            for i, ring in enumerate(poly.rings):
+                area = _ring_area(ring)
+                assert (area < 0) == (i == 0) and area != 0, (obj, uid, i)
+
+
+def test_detail_keeps_every_natural_earth_polygon(world: Any) -> None:
+    """1,622 parts in Natural Earth 1:50m; the map the validator measures against drops none."""
+    assert sum(len(u.polygons) for u in world.units.values()) == 1622
+    assert len(world.units["GRC"].polygons) >= 38  # the Aegean islands are there
+    assert len(world.units["MDV"].polygons) == 2
+
+
+def test_centres_are_aligned_with_parts_and_lie_inside_them(world: Any) -> None:
+    assert sorted(world.centres) == sorted(world.units)
+    for uid, unit in world.units.items():
+        centres = world.centres[uid]
+        assert len(centres) == len(unit.polygons), uid
+        for (lng, lat), poly in zip(centres, unit.polygons, strict=True):
+            assert poly.contains(lng, lat), (uid, lng, lat)
+            assert round(lng, 4) == lng and round(lat, 4) == lat
+
+
+def test_units_json_matches_the_map(world: Any) -> None:
+    rows = json.loads(UNITS.read_text(encoding="utf-8"))
+    assert [r["id"] for r in rows] == sorted(world.units)
+    assert all(set(r) == {"id", "name", "sovereign", "subregion"} for r in rows)
+    by_id = {r["id"]: r for r in rows}
+    assert by_id["PRX"]["name"] == world.units["PRX"].name == "Portugal"
+    assert by_id["ENG"]["sovereign"] == "United Kingdom"
+    assert all(r["name"] and r["sovereign"] and r["subregion"] for r in rows)
+
+
+# ---------------------------------------------------------------------------------------------
+# The committed destination bank
+# ---------------------------------------------------------------------------------------------
+
+
+# The committed bank can never drift from the committed map: a missing or invalid bank fails here.
+def test_committed_bank_is_valid_against_the_map() -> None:
+    problems = vb.validate(REAL_BANK, WORLD)
+    assert problems == [], "\n".join(problems[:60])
