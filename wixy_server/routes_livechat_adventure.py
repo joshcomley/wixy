@@ -38,6 +38,7 @@ from wixy_server.livechat.adventure_game import (
     bank_trip_json,
     parse_live_frame,
     parse_spin,
+    settings_json,
 )
 from wixy_server.livechat.adventure_pack import AdventurePackRunner
 from wixy_server.livechat.drawing_broker import DrawingBroker
@@ -109,6 +110,12 @@ class AdventureRetryIn(BaseModel):
     sender: str
 
 
+class AdventureSettingsIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    includeAdvised: StrictBool
+
+
 class AdventureLiveIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -159,13 +166,14 @@ async def _view_response(request: Request, seq: int) -> JSONResponse:
     state = await anyio.to_thread.run_sync(lambda: store.adventure_view_state(anchor_seq=seq))
     if state is None:
         return _not_found()
-    round_, excluded = state
+    round_, excluded, include_advised = state
     content = adventure_view_json(
         round_,
         _bank(request),
         excluded,
         now=time.time(),
         researcher_available=_runner(request).available,
+        include_advised=include_advised,
     )
     return JSONResponse(status_code=200, content=content)
 
@@ -192,7 +200,8 @@ async def create_adventure(body: CreateAdventureIn, request: Request) -> JSONRes
     bank = _bank(request)
 
     excluded = await anyio.to_thread.run_sync(store.adventure_excluded_ids)
-    if not bank.eligible_units(excluded):
+    include_advised = await anyio.to_thread.run_sync(store.adventure_include_advised)
+    if not bank.eligible_units(excluded, include_advised=include_advised):
         # An empty/unusable bank, or every destination rejected or banked: nothing to land on.
         return JSONResponse(status_code=503, content={"error": "game_unavailable"})
 
@@ -231,6 +240,37 @@ async def get_adventure_bank(request: Request) -> JSONResponse:
     rows = await anyio.to_thread.run_sync(store.list_adventure_bank)
     trips = [trip for row in rows if (trip := bank_trip_json(row, bank)) is not None]
     return JSONResponse(status_code=200, content={"trips": trips})
+
+
+async def _settings_response(request: Request) -> JSONResponse:
+    store: LiveChatStore = request.app.state.livechat_store
+    include_advised = await anyio.to_thread.run_sync(store.adventure_include_advised)
+    return JSONResponse(status_code=200, content=settings_json(include_advised, _bank(request)))
+
+
+@router.get("/adventure/settings", response_model=None)
+async def get_adventure_settings(request: Request) -> JSONResponse:
+    """The game's shared preference (operator decision #2113): `includeAdvised` — whether places
+    under a whole-country UK "advise against all travel" are in the draw (off by default) — and
+    `advisedUnits`, the units it governs. Declared BEFORE `/adventure/{seq}` so the literal path
+    wins."""
+    await require_server_token(request)
+    return await _settings_response(request)
+
+
+@router.put("/adventure/settings", response_model=None)
+async def put_adventure_settings(body: AdventureSettingsIn, request: Request) -> JSONResponse:
+    """Switch the shared preference for both people. A change reaches rounds still spinning (their
+    view's `eligible` is computed at read time) and is announced so both screens re-read."""
+    await require_server_token(request)
+    store: LiveChatStore = request.app.state.livechat_store
+    notifier: LiveChatNotifier = request.app.state.livechat_notifier
+    changed = await anyio.to_thread.run_sync(
+        lambda: store.set_adventure_include_advised(body.includeAdvised)
+    )
+    if changed:
+        notifier.publish()
+    return await _settings_response(request)
 
 
 @router.get("/adventure/{seq}", response_model=None)
@@ -321,6 +361,10 @@ async def post_adventure_live(body: AdventureLiveIn, request: Request) -> JSONRe
 @router.post("/adventure/{seq}/spin", response_model=None)
 async def spin_adventure(seq: int, body: AdventureSpinIn, request: Request) -> JSONResponse:
     """Commit a spin: `lng` (the sideways spin) then `lat` (up/down, with the landing result)."""
+    # Auth first: an invalid body must not reveal anything to a locked client.
+    await require_server_token(request)
+    store: LiveChatStore = request.app.state.livechat_store
+    include_advised = await anyio.to_thread.run_sync(store.adventure_include_advised)
     parsed = parse_spin(
         axis=body.axis,
         from_deg=body.from_,
@@ -328,10 +372,9 @@ async def spin_adventure(seq: int, body: AdventureSpinIn, request: Request) -> J
         duration_ms=body.durationMs,
         result=body.result,
         bank=_bank(request),
+        include_advised=include_advised,
     )
     if isinstance(parsed, str):
-        # Auth first: an invalid body must not reveal anything to a locked client.
-        await require_server_token(request)
         return _invalid(parsed)
     return await _adventure_mutation(
         request,

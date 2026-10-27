@@ -103,7 +103,11 @@ class TestSchema:
         try:
             assert conn.execute("PRAGMA user_version").fetchone()[0] == 20
             names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
-            assert {"adv_rounds", "idx_adv_rounds_state", "adv_rejected"} <= names
+            assert {"adv_rounds", "idx_adv_rounds_state", "adv_rejected", "adv_settings"} <= names
+            assert [r[1] for r in conn.execute("PRAGMA table_info(adv_settings)")] == [
+                "id",
+                "include_advised",
+            ]
             columns = {r[1] for r in conn.execute("PRAGMA table_info(adv_rounds)")}
             assert columns == {
                 "anchor_message_seq",
@@ -151,9 +155,7 @@ class TestSchema:
             conn.close()
         assert store.get_adventure_round(anchor_seq=seq) is not None
 
-    def test_a_real_v19_database_gains_the_tables_and_keeps_everything(
-        self, db_path: Path
-    ) -> None:
+    def test_a_real_v19_database_gains_the_tables_and_keeps_everything(self, db_path: Path) -> None:
         old = LiveChatStore(db_path)
         old.list_messages(before=None, limit=1)
         message, _ = old.create_message(
@@ -181,6 +183,7 @@ class TestSchema:
             conn.execute("DROP INDEX idx_adv_rounds_state")
             conn.execute("DROP TABLE adv_rounds")
             conn.execute("DROP TABLE adv_rejected")
+            conn.execute("DROP TABLE adv_settings")
             conn.execute("PRAGMA user_version = 19")
             conn.commit()
         finally:
@@ -194,7 +197,13 @@ class TestSchema:
         try:
             assert conn.execute("PRAGMA user_version").fetchone()[0] == 20
             names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
-            assert {"adv_rounds", "idx_adv_rounds_state", "adv_rejected", "wyr_chat"} <= names
+            assert {
+                "adv_rounds",
+                "idx_adv_rounds_state",
+                "adv_rejected",
+                "adv_settings",
+                "wyr_chat",
+            } <= names
             # v19 is deployed and is never edited.
             assert [r[1] for r in conn.execute("PRAGMA table_info(wyr_rounds)")] == (
                 wyr_columns_before
@@ -507,7 +516,13 @@ class TestCountryStop:
         assert changed is True and stopped.state == "destination"
         assert stopped.country_id == "AAA" and stopped.country_by == "Rose"
         # Alphaland has six destinations; the top five, in rank order.
-        assert stopped.dest_candidates == ("AAA.one", "AAA.two", "AAA.three", "AAA.four", "AAA.five")
+        assert stopped.dest_candidates == (
+            "AAA.one",
+            "AAA.two",
+            "AAA.three",
+            "AAA.four",
+            "AAA.five",
+        )
         assert stopped.dest_roulette_at == now + 3.5
         assert stopped.dest_seed is not None and 0 <= stopped.dest_seed < 2**32
         assert stopped.destination_id is None and stopped.pack == "none"
@@ -667,9 +682,109 @@ class TestCountryStop:
                 now=roulette_open(row),
             )
 
-    def test_the_advised_unit_is_never_a_playable_landing(self, bank: AdventureBank) -> None:
-        assert bank.is_playable("AAA") and not bank.is_playable("DDD")
-        assert "DDD" not in bank.eligible_units()
+    def test_an_advised_country_has_nothing_in_play_until_the_preference_is_on(
+        self, store: LiveChatStore, bank: AdventureBank
+    ) -> None:
+        # A client (or a stale view) offered the advised country as a candidate.
+        seq = start_round(store)
+        row = to_country(store, seq, unit="DDD")
+        with pytest.raises(AdventureExhaustedError):
+            store.stop_adventure(
+                anchor_seq=seq,
+                sender="Josh",
+                stage="country",
+                choice="DDD",
+                bank=bank,
+                pack_available=True,
+                now=roulette_open(row),
+            )
+        assert store.get_adventure_round(anchor_seq=seq).state == "country"  # type: ignore[union-attr]
+        # Switched back in, the same stop now draws that country's destinations.
+        store.set_adventure_include_advised(True)
+        stopped = stop_country(store, bank, seq, "DDD", row)
+        assert stopped.state == "destination"
+        assert stopped.dest_candidates == ("DDD.one", "DDD.two")
+
+
+class TestAdvisedPreference:
+    def test_the_default_is_off_with_no_row(self, store: LiveChatStore, db_path: Path) -> None:
+        assert store.adventure_include_advised() is False
+        assert _count(db_path, "adv_settings") == 0
+
+    def test_it_round_trips_and_reports_whether_it_changed(
+        self, store: LiveChatStore, db_path: Path
+    ) -> None:
+        assert store.set_adventure_include_advised(False) is False  # already the default
+        assert _count(db_path, "adv_settings") == 0
+        assert store.set_adventure_include_advised(True) is True
+        assert store.adventure_include_advised() is True
+        assert store.set_adventure_include_advised(True) is False
+        assert store.set_adventure_include_advised(False) is True
+        assert store.adventure_include_advised() is False
+        assert _count(db_path, "adv_settings") == 1
+
+    def test_the_table_only_allows_the_one_row_and_a_boolean(
+        self, store: LiveChatStore, db_path: Path
+    ) -> None:
+        store.set_adventure_include_advised(True)
+        conn = sqlite3.connect(str(db_path))
+        try:
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute("INSERT INTO adv_settings (id, include_advised) VALUES (2, 0)")
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute("UPDATE adv_settings SET include_advised = 2")
+        finally:
+            conn.close()
+
+    def test_switching_it_re_announces_only_the_rounds_that_are_still_spinning(
+        self, store: LiveChatStore, bank: AdventureBank, db_path: Path
+    ) -> None:
+        done = start_round(store, "adv-pref-done-001")
+        to_chosen(store, bank, done)
+        spinning = start_round(store, "adv-pref-spin-001")
+        done_row = store.get_adventure_round(anchor_seq=done)
+        spin_row = store.get_adventure_round(anchor_seq=spinning)
+        assert done_row is not None and spin_row is not None
+        done_events = _events(db_path, done)
+        store.set_adventure_include_advised(True)
+        after_spin = store.get_adventure_round(anchor_seq=spinning)
+        assert after_spin is not None and after_spin.rev == spin_row.rev + 1
+        assert _events(db_path, spinning)[-1] == "message_updated"
+        after_done = store.get_adventure_round(anchor_seq=done)
+        assert after_done == done_row and _events(db_path, done) == done_events
+
+    def test_view_state_carries_the_preference_and_the_excluded_ids_only_while_spinning(
+        self, store: LiveChatStore, bank: AdventureBank
+    ) -> None:
+        seq = start_round(store)
+        state = store.adventure_view_state(anchor_seq=seq)
+        assert state is not None and state[1] == frozenset() and state[2] is False
+        store.set_adventure_include_advised(True)
+        state = store.adventure_view_state(anchor_seq=seq)
+        assert state is not None and state[2] is True
+        assert store.adventure_view_state(anchor_seq=999) is None
+
+    def test_a_v19_database_gains_the_settings_table_and_a_wipe_leaves_it_alone(
+        self, db_path: Path
+    ) -> None:
+        old = LiveChatStore(db_path)
+        old.list_messages(before=None, limit=1)
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.execute("DROP INDEX idx_adv_rounds_state")
+            conn.execute("DROP TABLE adv_rounds")
+            conn.execute("DROP TABLE adv_rejected")
+            conn.execute("DROP TABLE adv_settings")
+            conn.execute("PRAGMA user_version = 19")
+            conn.commit()
+        finally:
+            conn.close()
+        migrated = LiveChatStore(db_path)
+        assert migrated.adventure_include_advised() is False
+        migrated.set_adventure_include_advised(True)
+        migrated.wipe(now=1.0)
+        assert migrated.adventure_include_advised() is True
+        assert _count(db_path, "adv_settings") == 1
 
 
 class TestDestinationStop:
@@ -815,7 +930,7 @@ class TestDecide:
                 store.decide_adventure(
                     anchor_seq=seq,
                     sender="Josh",
-                    decision=decision,  # type: ignore[arg-type]
+                    decision=decision,
                 )
 
     def test_rejecting_while_the_research_runs_ends_the_pack(
@@ -1082,7 +1197,7 @@ class TestGameChat:
         ordinary, _ = self._say(store, "adv-kind-plain-001", None)
 
         def kinds(rows: list[Any]) -> dict[int, tuple[Any, Any]]:
-            wire = [message_json(m, _Signer()) for m in rows]
+            wire: list[Any] = [message_json(m, _Signer()) for m in rows]
             return {m["seq"]: (m["wyrRef"], m["wyrRefKind"]) for m in wire}
 
         expected = {

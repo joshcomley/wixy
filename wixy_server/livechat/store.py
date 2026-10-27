@@ -352,7 +352,14 @@ CREATE TABLE IF NOT EXISTS adv_rounds(
   created_at REAL NOT NULL, updated_at REAL NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_adv_rounds_state ON adv_rounds(state);
 CREATE TABLE IF NOT EXISTS adv_rejected(destination_id TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS adv_settings(
+  id INTEGER PRIMARY KEY CHECK(id = 1),
+  include_advised INTEGER NOT NULL DEFAULT 0 CHECK(include_advised IN (0, 1)));
 """
+# `adv_settings` is the game's SHARED PREFERENCE (operator decision #2113): one row, no row =
+# defaults (`include_advised` off: places under a whole-country UK "advise against all travel" are
+# left out of the draw until the pair switch them back in). Like `wyr_topics` it names no place and
+# no person, so a wipe leaves it alone.
 _LATEST_SCHEMA_VERSION = 20
 WYR_REVEAL_WINDOW_S = 30.0
 ADVENTURE_ROULETTE_SETTLE_S = 5.0
@@ -2539,11 +2546,47 @@ class LiveChatStore:
         with self._read_txn() as conn:
             return self._adv_excluded(conn)
 
+    @staticmethod
+    def _adv_include_advised(conn: sqlite3.Connection) -> bool:
+        row = conn.execute("SELECT include_advised FROM adv_settings WHERE id = 1").fetchone()
+        return bool(row["include_advised"]) if row is not None else False
+
+    def adventure_include_advised(self) -> bool:
+        """The shared preference: whether places under a whole-country UK "advise against all
+        travel" are in the draw (default off — no settings row)."""
+        with self._read_txn() as conn:
+            return self._adv_include_advised(conn)
+
+    def set_adventure_include_advised(self, include: bool, *, now: float | None = None) -> bool:
+        """Switch the shared preference. Returns whether it CHANGED. A real change also bumps
+        every round still in `spin_lng|spin_lat` (and appends their `message_updated` events),
+        because their view's `eligible` is computed at read time from this setting — both screens
+        must re-read it. The preference names no place and no person, so a wipe leaves it alone."""
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            if self._adv_include_advised(conn) == include:
+                return False
+            conn.execute(
+                "INSERT INTO adv_settings (id, include_advised) VALUES (1, ?) "
+                "ON CONFLICT(id) DO UPDATE SET include_advised = excluded.include_advised",
+                (int(include),),
+            )
+            spinning = conn.execute(
+                "SELECT anchor_message_seq, state FROM adv_rounds "
+                "WHERE state IN ('spin_lng','spin_lat')"
+            ).fetchall()
+            for round_ in spinning:
+                self._adv_update(
+                    conn, round_["anchor_message_seq"], now_s, {"state": round_["state"]}
+                )
+            return True
+
     def adventure_view_state(
         self, *, anchor_seq: int
-    ) -> tuple[AdventureRoundRow, frozenset[str]] | None:
+    ) -> tuple[AdventureRoundRow, frozenset[str], bool] | None:
         """One consistent read for the round view: the round, and — only while it is still in a
-        spin state, the one place the view lists `eligible` — the ids out of play."""
+        spin state, the one place the view lists `eligible` — the ids out of play, plus the
+        shared `include_advised` preference."""
         with self._read_txn() as conn:
             row = conn.execute(
                 "SELECT * FROM adv_rounds WHERE anchor_message_seq = ?", (anchor_seq,)
@@ -2556,7 +2599,7 @@ class LiveChatStore:
                 if round_.state in ("spin_lng", "spin_lat")
                 else frozenset[str]()
             )
-            return round_, excluded
+            return round_, excluded, self._adv_include_advised(conn)
 
     def spin_adventure(
         self,
@@ -2643,11 +2686,13 @@ class LiveChatStore:
 
         `country`: the chosen unit's top 5 remaining destinations (`AdventureBank.top_destinations`:
         rank order, spaced at least 40 km apart where the unit allows) become the next roulette —
-        none left is `AdventureExhaustedError` (the round stays in `country`), exactly one skips
-        straight to `chosen`, else `destination` with a fresh seed and
-        `dest_roulette_at = now + 3.5 s`. `destination`: the round is `chosen`. Entering `chosen`
-        sets `pack` to `pending` (or `unavailable` without a researcher) in the same transaction —
-        the caller starts the job when the returned round is `pending` with no run id."""
+        none left (or the unit is under a whole-country "advise against all travel" while the
+        shared `include_advised` preference is off) is `AdventureExhaustedError` (the round stays
+        in `country`), exactly one skips straight to `chosen`, else `destination` with a fresh
+        seed and `dest_roulette_at = now + 3.5 s`. `destination`: the round is `chosen`.
+        Entering `chosen` sets `pack` to `pending` (or `unavailable` without a researcher) in the
+        same transaction — the caller starts the job when the returned round is `pending` with no
+        run id."""
         with self._write_txn() as conn:
             now_s = time.time() if now is None else now
             round_ = self._adv_load(conn, anchor_seq)
@@ -2663,7 +2708,14 @@ class LiveChatStore:
                 self._adv_require_started(
                     now_s, round_.country_roulette_at, "the country roulette has not started"
                 )
-                top = bank.top_destinations(choice, self._adv_excluded(conn), TOP_DESTINATIONS)
+                # The shared preference is honoured NOW, at the stop: a country under a
+                # whole-country "advise against all travel" has nothing in play unless the pair
+                # have switched those back in (it can change between the spin and the stop).
+                top = (
+                    bank.top_destinations(choice, self._adv_excluded(conn), TOP_DESTINATIONS)
+                    if bank.is_playable(choice, include_advised=self._adv_include_advised(conn))
+                    else ()
+                )
                 if not top:
                     raise AdventureExhaustedError(f"{choice} has no destination left in play")
                 assignments: dict[str, object] = {
@@ -2962,6 +3014,8 @@ class LiveChatStore:
             # forgets everything about the two of you (Inv 56), the turned-down places included.
             conn.execute("DELETE FROM adv_rounds")
             conn.execute("DELETE FROM adv_rejected")
+            # `adv_settings` (the shared include-advised preference) names no place and no person,
+            # so — like `wyr_topics` — a wipe deliberately leaves it alone.
             conn.execute("DELETE FROM messages")
             conn.execute("DELETE FROM uploads")
             conn.execute("DELETE FROM events")

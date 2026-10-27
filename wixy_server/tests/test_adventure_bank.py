@@ -1,4 +1,4 @@
-"""The Adventure Time destination bank (workspace 00056, spec/server-chat/08-adventure-time.md §2.2):
+"""The Adventure Time destination bank (workspace 00056, spec/server-chat/08-adventure-time §2.2):
 the strict loader, the committed bank's validity, the exclusion maths (rejected, banked, advised),
 and the top-five selection with its 40 km spacing.
 
@@ -30,7 +30,7 @@ from wixy_server.livechat.adventure_bank import (
 from wixy_server.tests.adventure_testkit import FIXTURE_BANK_PATH, fixture_bank
 
 
-def _dest(unit: str, slug: str, lat: float, lng: float, **over: Any) -> dict[str, Any]:
+def _dest(unit: str, slug: str, lat: float, lng: float, /, **over: Any) -> dict[str, Any]:
     dest = {
         "id": f"{unit}.{slug}",
         "name": slug.title(),
@@ -207,11 +207,21 @@ class TestExclusion:
         assert "BBB" in bank.eligible_units({"BBB.one"})
         assert "BBB" not in bank.eligible_units({"BBB.one", "BBB.two"})
 
-    def test_the_policy_is_one_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_advised_units_are_left_out_unless_the_shared_preference_switches_them_in(
+        self,
+    ) -> None:
         bank = fixture_bank()
-        assert not bank.is_playable("DDD")
-        monkeypatch.setattr(adventure_bank, "EXCLUDE_ADVISED_UNITS", False)
-        assert bank.is_playable("DDD") and "DDD" in bank.eligible_units()
+        assert not bank.is_playable("DDD") and bank.is_playable("DDD", include_advised=True)
+        assert "DDD" not in bank.eligible_units()
+        assert "DDD" in bank.eligible_units(include_advised=True)
+        # The data never changes: only the argument does, and exclusion still applies on top.
+        assert "DDD" not in bank.eligible_units({"DDD.one", "DDD.two"}, include_advised=True)
+        assert bank.is_playable("AAA") and bank.is_playable("AAA", include_advised=True)
+        assert not bank.is_playable("ZZZ", include_advised=True)
+
+    def test_the_units_the_switch_governs_are_listed_by_name(self) -> None:
+        assert [(u.id, u.name) for u in fixture_bank().advised_units()] == [("DDD", "Dangerland")]
+        assert not hasattr(adventure_bank, "EXCLUDE_ADVISED_UNITS")
 
     def test_unknown_units_are_not_playable_and_have_nothing_remaining(self) -> None:
         bank = fixture_bank()
@@ -312,7 +322,7 @@ class TestTopFive:
                 (6.05, 6.05),  # p6: crowds p5
             ]
         )
-        # Spaced first (p0, p3, p5), then the skipped in rank order (p1, p2) — returned in rank order.
+        # Spaced first (p0, p3, p5), then the skipped in rank order (p1, p2); returned by rank.
         assert _ids(bank.top_destinations("TST")) == ["p0", "p1", "p2", "p3", "p5"]
 
     def test_an_entirely_clustered_unit_still_offers_five(self) -> None:

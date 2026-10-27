@@ -14,8 +14,10 @@ the reason and returns an empty bank (`POST /adventure` then answers 503 `game_u
 `test_adventure_bank.py` keeps the shipped file honest.
 
 Data and policy are kept apart: a unit under a UK FCDO "advise against all travel" for the whole
-country carries `advice` in the data, and `EXCLUDE_ADVISED_UNITS` (the operator's answer to the open
-question, decision #2113) decides whether such a unit may be drawn at all.
+country carries `advice` in the data, and the couple's shared preference
+`adv_settings.include_advised` (operator decision #2113: left out by default, and switchable)
+decides whether such a unit may be drawn at all — the bank takes it as an `include_advised`
+argument, so nothing here holds that policy.
 """
 
 from __future__ import annotations
@@ -35,10 +37,6 @@ _LOGGER = logging.getLogger(__name__)
 
 BANK_PATH = Path(__file__).with_name("adventure_destinations.json")
 BANK_VERSION = 1
-
-EXCLUDE_ADVISED_UNITS = True
-"""Policy (decision #2113): a unit carrying an `advice` mark is left out of every draw. Flip this
-one line to allow them; the data itself never changes."""
 
 ADVICE_LEVEL = "against_all_travel"
 KINDS = frozenset(
@@ -159,10 +157,19 @@ class AdventureBank:
         found = self._destinations.get(destination_id)
         return found[0] if found is not None else None
 
-    def is_playable(self, unit_id: str) -> bool:
-        """A unit the game may land on at all: in the bank and not left out by policy."""
+    def is_playable(self, unit_id: str, *, include_advised: bool = False) -> bool:
+        """A unit the game may land on at all: in the bank, and either not under a whole-country
+        "advise against all travel" or the couple have switched those back in
+        (`include_advised`, the shared preference — off by default)."""
         unit = self.units.get(unit_id)
-        return unit is not None and not (EXCLUDE_ADVISED_UNITS and unit.advised)
+        return unit is not None and (include_advised or not unit.advised)
+
+    def advised_units(self) -> tuple[AdventureUnit, ...]:
+        """The units carrying a whole-country "advise against all travel" mark, by name — what the
+        Options sheet explains the switch with."""
+        return tuple(
+            sorted((u for u in self.units.values() if u.advised), key=lambda u: (u.name, u.id))
+        )
 
     def remaining(
         self, unit_id: str, excluded: Collection[str] = ()
@@ -204,13 +211,16 @@ class AdventureBank:
             taken.append(index)
         return tuple(remaining[index] for index in sorted(taken))
 
-    def eligible_units(self, excluded: Collection[str] = ()) -> tuple[str, ...]:
+    def eligible_units(
+        self, excluded: Collection[str] = (), *, include_advised: bool = False
+    ) -> tuple[str, ...]:
         """Playable units with at least one remaining destination, by id (stable)."""
         return tuple(
             sorted(
                 unit_id
                 for unit_id in self.units
-                if self.is_playable(unit_id) and self.remaining(unit_id, excluded)
+                if self.is_playable(unit_id, include_advised=include_advised)
+                and self.remaining(unit_id, excluded)
             )
         )
 

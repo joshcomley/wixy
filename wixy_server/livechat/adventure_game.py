@@ -87,6 +87,7 @@ def parse_spin(
     duration_ms: object,
     result: object,
     bank: AdventureBank,
+    include_advised: bool = False,
 ) -> ParsedSpin | str:
     """Validate a spin request (`POST /adventure/{seq}/spin`). Returns the typed spin or the 422
     `detail` string.
@@ -94,8 +95,9 @@ def parse_spin(
     §3.1: `720 <= |delta| <= 3600`, `3500 <= durationMs <= 7000`, `from` finite with
     `|from| <= 1e6`. `result` is REQUIRED for the `lat` spin and REFUSED for `lng`; it carries
     `{point, sea, land, centre, landUnit, candidates}` (§3.2): each point `[lng, lat]` in range,
-    `sea` a boolean, `landUnit` and 1-10 unique `candidates` all playable bank units, and
-    `landUnit` among the candidates."""
+    `sea` a boolean, `landUnit` and 1-10 unique `candidates` all playable bank units (a unit
+    under a whole-country "advise against all travel" is playable only while the couple's shared
+    `include_advised` preference is on), and `landUnit` among the candidates."""
     if axis not in ("lng", "lat"):
         return "axis must be lng or lat"
     parsed_from = _num(from_deg)
@@ -134,7 +136,9 @@ def parse_spin(
         return "result.sea must be a boolean"
     land_unit = result.get("landUnit")
     candidates_raw = result.get("candidates")
-    if not isinstance(land_unit, str) or not bank.is_playable(land_unit):
+    if not isinstance(land_unit, str) or not bank.is_playable(
+        land_unit, include_advised=include_advised
+    ):
         return "result.landUnit is not a unit in the destination bank"
     if (
         not isinstance(candidates_raw, list)
@@ -145,7 +149,7 @@ def parse_spin(
     candidates = tuple(candidates_raw)
     if len(set(candidates)) != len(candidates):
         return "result.candidates must be unique"
-    if not all(bank.is_playable(c) for c in candidates):
+    if not all(bank.is_playable(c, include_advised=include_advised) for c in candidates):
         return "result.candidates must all be units in the destination bank"
     if land_unit not in candidates:
         return "result.landUnit must be one of the candidates"
@@ -238,6 +242,15 @@ def _destination_json(bank: AdventureBank, dest_id: str | None) -> JsonObject | 
     return destination.to_json() if destination is not None else None
 
 
+def settings_json(include_advised: bool, bank: AdventureBank) -> JsonObject:
+    """`GET|PUT /adventure/settings` (operator decision #2113): the shared preference and the units
+    it governs — those under a whole-country "advise against all travel", by name."""
+    return {
+        "includeAdvised": include_advised,
+        "advisedUnits": [{"id": unit.id, "name": unit.name} for unit in bank.advised_units()],
+    }
+
+
 def pack_data(round_: AdventureRoundRow) -> JsonObject | None:
     """The stored holiday pack as a JSON object, or `None` (not ready, or unreadable)."""
     if round_.pack != "ready" or round_.pack_json is None:
@@ -267,10 +280,12 @@ def adventure_view_json(
     *,
     now: float,
     researcher_available: bool,
+    include_advised: bool = False,
 ) -> JsonObject:
     """The `GET /adventure/{seq}` body (spec §4.2). `eligible` (the units with at least one
-    destination still in play) is listed only while the round is still spinning — afterwards the
-    round's own candidates are what matter. `landing.landUnitName`, the candidate names and the
+    destination still in play, honouring the couple's shared `include_advised` preference at
+    READ time) is listed only while the round is still spinning — afterwards the round's own
+    candidates are what matter. `landing.landUnitName`, the candidate names and the
     destinations are resolved from the bank. Everything time-based is absolute epoch seconds on the
     server's clock; `serverNow` lets a client work out its offset."""
     landing: JsonObject | None = None
@@ -310,7 +325,11 @@ def adventure_view_json(
         "rev": round_.rev,
         "serverNow": now,
         "startedBy": round_.started_by,
-        "eligible": list(bank.eligible_units(excluded)) if spinning else None,
+        "eligible": (
+            list(bank.eligible_units(excluded, include_advised=include_advised))
+            if spinning
+            else None
+        ),
         "spins": {"lng": _spin_json(round_.spin_lng), "lat": _spin_json(round_.spin_lat)},
         "landing": landing,
         "country": country,
