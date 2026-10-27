@@ -1,0 +1,49 @@
+{
+  "type": "Topology",
+  "arcs": [
+    [[0, 0], [0, 10], [10, 10]],
+    [[10, 10], [10, 0]],
+    [[10, 0], [0, 0]],
+    [[10, 10], [20, 10], [20, 0], [10, 0]],
+    [[30, 0], [30, 5], [35, 5], [35, 0], [30, 0]],
+    [[40, 0], [40, 5], [45, 5], [45, 0], [40, 0]],
+    [[100, -1], [100, 1], [102, 1], [102, -1], [100, -1]],
+    [[-50, -80], [-50, -70], [-40, -70], [-40, -80], [-50, -80]],
+    [[-30, 20], [-30, 40], [-10, 40], [-10, 20], [-30, 20]],
+    [[-24, 27], [-16, 27], [-16, 33], [-24, 33], [-24, 27]]
+  ],
+  "objects": {
+    "detail": {
+      "type": "GeometryCollection",
+      "geometries": [
+        { "type": "Polygon", "id": "AAA", "properties": { "name": "Alpha" }, "arcs": [[0, 1, 2]] },
+        { "type": "Polygon", "id": "BBB", "properties": { "name": "Beta" }, "arcs": [[-2, 3]] },
+        { "type": "MultiPolygon", "id": "CCC", "properties": { "name": "Gamma" }, "arcs": [[[4]], [[5]]] },
+        { "type": "Polygon", "id": "DDD", "properties": { "name": "Delta" }, "arcs": [[6]] },
+        { "type": "Polygon", "id": "EEE", "properties": { "name": "Epsilon" }, "arcs": [[7]] },
+        { "type": "Polygon", "id": "FFF", "properties": { "name": "Foxtrot" }, "arcs": [[8], [9]] },
+        { "type": "Polygon", "id": "GGG", "properties": { "name": "Golf" }, "arcs": [[-10]] }
+      ]
+    },
+    "coarse": {
+      "type": "GeometryCollection",
+      "geometries": [
+        { "type": "Polygon", "id": "AAA", "properties": { "name": "Alpha" }, "arcs": [[0, 1, 2]] },
+        { "type": "Polygon", "id": "BBB", "properties": { "name": "Beta" }, "arcs": [[-2, 3]] },
+        { "type": "MultiPolygon", "id": "CCC", "properties": { "name": "Gamma" }, "arcs": [[[4]], [[5]]] },
+        { "type": "Polygon", "id": "EEE", "properties": { "name": "Epsilon" }, "arcs": [[7]] },
+        { "type": "Polygon", "id": "FFF", "properties": { "name": "Foxtrot" }, "arcs": [[8], [9]] },
+        { "type": "Polygon", "id": "GGG", "properties": { "name": "Golf" }, "arcs": [[-10]] }
+      ]
+    }
+  },
+  "centres": {
+    "AAA": [[5, 5]],
+    "BBB": [[15, 5]],
+    "CCC": [[32.5, 2.5], [42.5, 2.5]],
+    "DDD": [[101, 0]],
+    "EEE": [[-45, -75]],
+    "FFF": [[-20, 36.5]],
+    "GGG": [[-20, 30]]
+  }
+}
