@@ -47,9 +47,11 @@ const HIDDEN_TOGGLED_CLASSES = [
   "wx-srv-pen-confirm",
   "wx-srv-pen-status",
   "wx-srv-drawing-selection",
-  // The would-you-rather game tab (wyrGame.ts; thread.ts hides the thread while it shows).
+  // The game frame (gameTabs.ts / itemChat.ts) and the would-you-rather pane (wyrGame.ts);
+  // thread.ts hides the thread while a game tab shows.
   "wx-srv-thread-wrap",
   "wx-srv-tabs",
+  "wx-srv-tab",
   "wx-srv-tab-dot",
   "wx-srv-game",
   "wx-srv-game-next",

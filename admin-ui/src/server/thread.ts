@@ -44,6 +44,8 @@ import { createWyrControls, type WyrControls } from "./wyrControls";
 import { createGallery, type GalleryView } from "./gallery";
 import { createLinksView, type LinksView } from "./linksView";
 import { createDownloadMarkStore } from "./galleryMark";
+import { createGameTabs, type GameTabs } from "./gameTabs";
+import { createItemChat, type ItemChat } from "./itemChat";
 import { createWyrGame, type WyrGame } from "./wyrGame";
 import { createWyrModel, type WyrModel } from "./wyrModel";
 import { createWyrTopics, type WyrTopicsView } from "./wyrTopics";
@@ -455,7 +457,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     fetchRound: (session, seq, viewer) => getWyrRound(session, seq, viewer),
     onChange: (seq) => {
       patchWyr(seq);
-      game.refresh();
+      gameTabs.refresh();
     },
     setTimeout: (fn, ms) => win.setTimeout(fn, ms),
     clearTimeout: (id) => win.clearTimeout(id),
@@ -464,8 +466,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     if (currentSession === null) throw new ServerLockedError();
     return currentSession;
   }
-  // The game tab (`wyrGame.ts`) is created once the composer exists (it re-parents it).
-  let game: WyrGame;
+  // The shared game frame — the tab bar (`gameTabs.ts`) and the per-item chat (`itemChat.ts`) —
+  // and the WYR pane that plugs into it (`wyrGame.ts`) are created once the composer exists
+  // (the pop-up item chat re-parents it). Earlier code only calls into the tabs after that.
+  let gameTabs: GameTabs;
   let gameMounted = false;
   const wyrControls: WyrControls = createWyrControls({
     model: wyrModel,
@@ -477,14 +481,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     reveal: (seq) => revealWyr(wyrSession(), seq, { sender: identity.getName() ?? "" }),
     redraw: (seq) => {
       patchWyr(seq);
-      game.refresh();
+      gameTabs.refresh();
     },
     afterChange: () => threadScroll.afterContentChange(false),
   });
   const wyrCards: WyrCards = createWyrCards({
     model: wyrModel,
     document: documentRef,
-    openGame: (seq) => game.open(seq),
+    openGame: (seq) => gameTabs.open("wyr", seq),
     openLightbox: (src, alt) => lightbox.open(src, alt),
   });
   let voiceRecorder: VoiceRecorder | null = null;
@@ -684,7 +688,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
    * (the card's chat would show a caption with no picture), so it is not offered while the game
    * chat is the target — and `send()` refuses a view-once draft there (see below). */
   function viewOnceAllowed(): boolean {
-    return !gameMounted || game.chatTarget() === null;
+    return !gameMounted || gameTabs.chatTarget() === null;
   }
 
   function openViewOncePicker(): void {
@@ -969,7 +973,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           clientId: cryptoRandomId(win),
           attachmentId: null,
           replyTo: capturedReplyTo,
-          wyrSeq: game.chatTarget(),
+          wyrSeq: gameTabs.chatTarget(),
         };
         void sendVoiceNote();
         updateRecorderUi();
@@ -1132,14 +1136,16 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   element.appendChild(replyBar);
   element.appendChild(composer.element);
 
-  // -- Would-you-rather game tab (workspace 00045) ---------------------------------------------
-  // The tab bar sits under the composer; the game pane takes the thread's place while the WYR tab
-  // shows; the pop-up game chat borrows the ONE composer (voice notes, attachments and all).
+  // -- The game frame: tabs + per-item chat, and the would-you-rather pane (workspace 00045) ----
+  // The tab bar sits under the composer; the active game's pane takes the thread's place; the
+  // pop-up item chat borrows the ONE composer (voice notes, attachments and all). Every game
+  // registers with the same `gameTabs` and embeds a strip of the same `itemChat`, so an
+  // improvement to the per-item chat reaches every game (spec/server-chat/08-adventure-time.md §5.1).
   let savedThreadScrollTop = 0;
   let threadHiddenForGame = false;
   function applyGameLayout(): void {
     recomputeViewOnceTarget(composer.stagedAttachments().map((a) => a.file));
-    const inGame = game.activeTab() === "wyr" && game.gameSeq() !== null;
+    const inGame = gameTabs.activeTab() !== "chat";
     element.classList.toggle("wx-srv-in-game", inGame);
     if (inGame && !threadHiddenForGame) {
       if (drawingLayer.isPenOn()) drawingLayer.abandon();
@@ -1154,12 +1160,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       drawingLayer.relayout();
     }
   }
-  game = createWyrGame({
+  const itemChat: ItemChat = createItemChat({
     document: documentRef,
-    model: wyrModel,
-    controls: wyrControls,
     isMine: (sender) => identity.isMine(sender),
-    roundMessage: (seq) => confirmedBySeq.get(seq),
     gameMessages: (seq) =>
       Array.from(confirmedBySeq.values())
         .filter((m) => m.wyrRef === seq)
@@ -1172,22 +1175,40 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     disposeBubble: (bubble) => disposeAttachmentMedia(bubble),
     mountComposer: (host) => {
       if (host !== null) host.appendChild(composer.element);
-      else element.insertBefore(composer.element, game.tabBar);
+      else element.insertBefore(composer.element, gameTabs.tabBar);
     },
+    onLayoutChange: applyGameLayout,
+    afterChange: () => threadScroll.afterContentChange(false),
+  });
+  gameTabs = createGameTabs({ document: documentRef, itemChat, onLayoutChange: applyGameLayout });
+  const game: WyrGame = createWyrGame({
+    document: documentRef,
+    model: wyrModel,
+    controls: wyrControls,
+    tabs: gameTabs,
+    itemChat,
+    roundMessage: (seq) => confirmedBySeq.get(seq),
     startNextRound: () => void addWyrRound(),
     openTopics: () => wyrTopics.open(header.offsetHeight),
-    onLayoutChange: applyGameLayout,
     afterChange: () => threadScroll.afterContentChange(false),
     openLightbox: (src, alt) => lightbox.open(src, alt),
   });
   gameMounted = true;
   threadWrap.after(game.pane);
-  element.appendChild(game.tabBar);
-  element.appendChild(game.popup);
+  element.appendChild(gameTabs.tabBar);
+  element.appendChild(itemChat.popup);
+
+  /** Lock / wipe / teardown: forget every game and close the pop-up chat. The pop-up goes first
+   * (the composer is back in the thread); the tabs go last because their reset tells the thread
+   * to give itself back — a hidden thread must return (decisions/00184, audit round 3 F3). */
+  function resetGames(): void {
+    itemChat.reset();
+    gameTabs.reset();
+  }
 
   /** The game chat a message sent now belongs to — `{}` for the main chat. */
   function wyrSendFields(): { wyrSeq?: number } {
-    const target = game.chatTarget();
+    const target = gameTabs.chatTarget();
     return target === null ? {} : { wyrSeq: target };
   }
 
@@ -1993,22 +2014,37 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     renderThreadList();
     threadScroll.scrollToBottom();
     // The game opens in its own tab (and pops the next round's card into the main chat).
-    game.open(result.message.seq);
+    gameTabs.open("wyr", result.message.seq);
   }
 
-  /** Keeps the game tab in step with the thread: a round someone ELSE started (or the newest
+  /** Keeps the game tabs in step with the thread: a round someone ELSE started (or the newest
    * unfinished one at load) offers its tab; a closed or vanished round leaves it. */
   function syncWyrGame(messages: readonly Message[]): void {
     let newest: Message | undefined;
     for (const m of messages) if (m.wyr !== undefined && m.wyr !== null) newest = m;
     if (newest !== undefined && newest.wyr !== undefined && newest.wyr !== null) {
       const active = newest.wyr.state !== "revealed" && newest.wyr.state !== "skipped";
-      const current = game.gameSeq();
+      const current = gameTabs.seqOf("wyr");
       if (newest.seq !== current && (active || (current !== null && newest.seq > current))) {
-        game.offer(newest.seq);
+        gameTabs.offer("wyr", newest.seq);
       }
     }
-    game.refresh();
+    gameTabs.refresh();
+  }
+
+  /** The tag a game-chat message wears in the main chat — the name of the game its anchor
+   * message (`wyrRef`) belongs to — or null when it is not a game's chat. This is the one place
+   * that knows which kind of item an anchor is; a new game adds its branch here (its anchor
+   * message carries its own summary field, like `wyr`). */
+  function gameLabelFor(anchorSeq: number): string | null {
+    const anchor = confirmedBySeq.get(anchorSeq);
+    if (anchor === undefined) {
+      // The anchor is older than the loaded history (or already gone): no game other than
+      // would-you-rather existed when this tag was introduced, so keep its answer.
+      return "WYR";
+    }
+    if (anchor.wyr !== undefined && anchor.wyr !== null) return "WYR";
+    return null;
   }
 
   /** Redraws one round's card in place (no bubble rebuild). */
@@ -2035,11 +2071,16 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       bubble.appendChild(sender);
     }
     if (typeof message.wyrRef === "number") {
-      // Sent in a would-you-rather round's game chat: a small tag keeps the context in the thread.
-      const tag = documentRef.createElement("span");
-      tag.className = "wx-srv-bubble-wyrtag";
-      tag.textContent = "WYR";
-      bubble.appendChild(tag);
+      // Sent in a game item's chat (a would-you-rather round, ...): a small tag names the game and
+      // keeps the context in the thread.
+      const label = gameLabelFor(message.wyrRef);
+      if (label !== null) {
+        const tag = documentRef.createElement("span");
+        // The WYR tag keeps its original class too: styles and e2e select on it.
+        tag.className = label === "WYR" ? "wx-srv-bubble-gametag wx-srv-bubble-wyrtag" : "wx-srv-bubble-gametag";
+        tag.textContent = label;
+        bubble.appendChild(tag);
+      }
     }
     const time = documentRef.createElement("span");
     time.className = "wx-srv-bubble-time";
@@ -2393,7 +2434,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     // spec 07 §5/§6: a wipe ends any drawing session and takes every drawing with it.
     drawingLayer.wiped();
     wyrModel.reset();
-    game.reset();
+    resetGames();
     contentGeneration += 1;
     contentRevision += 1;
     scrollToOriginalGeneration += 1; // §(4): a wipe aborts any in-flight scroll-to-original
@@ -3149,7 +3190,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       // drawing timer go (spec 07 §5).
       drawingLayer.detach();
       wyrModel.reset();
-      game.reset();
+      resetGames();
       closeUnheardView();
       closeMoreMenu();
       gallery.close();
@@ -3192,7 +3233,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
             isArrival && event.message.sender !== "" && !identity.isMine(event.message.sender),
           );
           if (isArrival && !identity.isMine(event.message.sender) && event.message.wyrRef == null) {
-            game.noteChatActivity();
+            gameTabs.noteChatActivity();
           }
           // A live good night (never a history load, an update or a system row): the pixel-art
           // night scene. The controller decides whose good night counts, freshness and cool-down.
@@ -3246,7 +3287,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       stopTranscriptionProbe();
       drawingLayer.teardown();
       wyrModel.reset();
-      game.reset();
+      resetGames();
       currentSession = null;
       endWipeReconcile("abandoned");
       for (const controller of messageActionControllers.values()) controller.teardown();
