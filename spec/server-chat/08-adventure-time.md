@@ -269,7 +269,9 @@ CREATE TABLE IF NOT EXISTS adv_rejected(destination_id TEXT PRIMARY KEY);
   `country_seed = random uint32`, `country_roulette_at = now + durationMs/1000 + 5.0`.
 - `POST /adventure/{seq}/stop` `{sender, stage: "country"|"destination", choice}` — `choice` ∈ that
   stage's candidates. Country stop: picks the top ≤ 5 remaining destinations of the unit in rank
-  order; 0 remaining → `409 exhausted`; exactly 1 → state `chosen` directly (destination stage
+  order, taking one only if it is ≥ 40 km from every one already taken (so roulette dots never sit
+  on top of each other), then filling any shortfall from the skipped ones in rank order; skipped
+  ones stay in reserve; 0 remaining → `409 exhausted`; exactly 1 → state `chosen` directly (destination stage
   skipped); else state `destination`, `dest_seed`, `dest_roulette_at = now + 3.5`.
   Destination stop → `chosen` and the pack job starts (§4.3).
 - `POST /adventure/{seq}/decide` `{sender, decision: "bank"|"reject"}` — only from `chosen`.
@@ -313,7 +315,11 @@ CREATE TABLE IF NOT EXISTS adv_rejected(destination_id TEXT PRIMARY KEY);
   ```
   `stay` asks for 2–4 specific villas or characterful places with links; `food` for the dishes the
   area is known for plus 2–4 specific places; `culture` theatre/music/festivals/museums/customs;
-  `sights`; `do`; `practical` costs/currency/language. `travelAdvice` = the current FCDO headline.
+  `sights`; `do`; `practical` costs/currency/language. `travelAdvice` = the current FCDO headline,
+  fetched from the country's gov.uk page itself. Voice: a warm, knowledgeable friend talking to
+  the couple ("you"); never mention itself, its searches or its sources in the text; leave out
+  what it could not confirm. Measured 2026-10-28 (Kotor trial run): completed in 61 s, one JSON
+  object within every limit.
 - Parsing is defensive: take the last JSON object in `response_text`; validate and clip every
   string; keep only `http(s)` URLs with a host (≤ 500 chars); drop unknown keys; a pack with no
   sections is a failure. Stored as canonical JSON in `pack_json`.
