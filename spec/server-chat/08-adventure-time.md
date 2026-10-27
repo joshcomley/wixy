@@ -20,10 +20,10 @@ minutes) and comes back with the food, a couple of nice villas or places to stay
 its own **mini chat** at the bottom (expandable), exactly like the would-you-rather game, and it
 must SHARE that code: improving the per-item mini chat improves every game.
 
-Open operator questions (decision #2113) — the first option of each is the built default:
-second spin is up/down; either person may do any step (the UI shows whose turn it is but never
-blocks); cmd's retained copy of each research job is acceptable; countries under a UK "advise
-against all travel" for the whole country are left out of the bank.
+Operator decision #2113 (answered 2026-10-28): the second spin is up/down; either person may do
+any step (the UI shows whose turn it is but never blocks); cmd's retained copy of each research
+job is fine; places under a UK "advise against all travel" for the whole country are left out —
+**and that must be toggleable** (§2.2, §4.1 `adv_settings`, §5.3 Options).
 
 ## 1. Flow and states
 
@@ -103,9 +103,10 @@ bundle's dependencies are untouched) from **Natural Earth 1:50m** (public domain
   Ocean Territory…) is simply ABSENT — that is what makes it "sea" for landing purposes.
 - **Advice exclusion** (decision #2113 default): every inhabited unit is written, and a unit
   under a current UK FCDO "advise against all travel" to the WHOLE country carries
-  `"advice": {"level": "against_all_travel", "checked": "YYYY-MM-DD"}` (else `null`). The server's
-  `EXCLUDE_ADVISED_UNITS = True` (in `adventure_bank.py`) leaves those units out of `eligible` —
-  data and policy kept apart so the operator's answer is a one-line change.
+  `"advice": {"level": "against_all_travel", "checked": "YYYY-MM-DD"}` (else `null`). Operator
+  decision #2113: **left out by default, and toggleable** — the shared preference
+  `adv_settings.include_advised` (§4.1, default off) decides whether those units are in
+  `eligible`. Data and policy stay apart.
 - Written by AI writers per region, then machine-checked by `tooling/adventure/validate_bank.py`:
   schema, id/slug rules, uniqueness, rank count, and that every destination point lies inside its
   unit's `detail` geometry or within 25 km of it (islands, coastal resorts). The validator runs in
@@ -231,7 +232,15 @@ CREATE TABLE IF NOT EXISTS adv_rounds(
   created_at REAL NOT NULL, updated_at REAL NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_adv_rounds_state ON adv_rounds(state);
 CREATE TABLE IF NOT EXISTS adv_rejected(destination_id TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS adv_settings(
+  id INTEGER PRIMARY KEY CHECK(id = 1),
+  include_advised INTEGER NOT NULL DEFAULT 0 CHECK(include_advised IN (0, 1)));
 ```
+
+- `adv_settings` is the game's shared preference (one row; no row = defaults): today only
+  `include_advised` (operator decision #2113 — places under a whole-country "advise against all
+  travel" are left out unless this is on). It is a preference naming no place and no person, so —
+  like `wyr_topics` — a wipe leaves it alone.
 
 - `adv_rounds` follows `wyr_rounds` exactly (Inv 54 pattern): keyed by the anchor message, cascade
   on delete (an older blue/green process still erases it), explicit `DELETE` in wipe.
@@ -280,6 +289,10 @@ CREATE TABLE IF NOT EXISTS adv_rejected(destination_id TEXT PRIMARY KEY);
   and a researcher now exists).
 - `GET /adventure/bank` → `{trips: [{seq, unitId, unitName, destination: Dest, headline|null,
   pack}]}` newest first (declared BEFORE `/adventure/{seq}`).
+- `GET /adventure/settings` → `{includeAdvised: bool, advisedUnits: [{id, name}]}`;
+  `PUT /adventure/settings` `{includeAdvised: bool}` → the same (declared BEFORE `/adventure/{seq}`).
+  A change takes effect for rounds still in `spin_lng`/`spin_lat` (their view's `eligible` is
+  computed at read time) and publishes so both screens re-read.
 - `POST /adventure/live` — §3.5; validated like `/drawings/live` (ids 8–64 chars, anchor a real
   seq, frame counter bounded, ≤ 32 points, bounded coordinates, axis enum, finite rotation);
   rate-limited 30/s on the same authenticated identity key as drawing live (its own limiter);
@@ -391,7 +404,9 @@ screen).
 
 ### 5.3 The pane (top to bottom, phone first)
 
-`[ 🌍 Adventure Time      Bank   New   ✕ ]` →
+`[ 🌍 Adventure Time   Options   Bank   New   ✕ ]` (Options opens a small sheet with one
+switch, "Include places the UK says not to travel to", off by default, with a one-line
+explanation; the `wyrTopics.ts` sheet precedent) →
 the **stage** (canvas; takes all spare height; the pin; overlay labels: big lit name, "Nearest
 land: …", step hints "Swipe sideways to spin — Bubble's turn") →
 the **action bar** (one row: `Stop` during a roulette, `Try again` on a failed pack,

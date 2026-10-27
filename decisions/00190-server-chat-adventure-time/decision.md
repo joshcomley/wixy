@@ -66,7 +66,14 @@ so improving the per-item mini chat improves every game. Brief: `spec/server-cha
 - Images in the pack: third-party image loads from a private chat leak the viewer's address to
   those sites; links (opened on purpose) are fine.
 - Strict turn-taking: it would make the game unplayable alone; the UI shows whose turn it is
-  instead (operator decision #2113 may flip this).
+  instead (operator decision #2113 confirmed: either person may do any step).
+
+# Operator decision #2113 (2026-10-28)
+Second spin up/down; either person does any step; cmd's retained research copy is fine; places
+under a whole-country "advise against all travel" are left out BY DEFAULT and the pair can switch
+them back in (`adv_settings.include_advised`, a shared preference like `wyr_topics`: it names no
+place or person, so a wipe leaves it alone). The bank records the advice per unit with the date it
+was checked; the switch only decides eligibility.
 
 # Honest limits
 - cmd keeps its own copy of each research run (prompt = the destination; answer = the pack) in its
