@@ -1,5 +1,62 @@
 # Invariants
 
+### Inv 56 — An Adventure Time round is chat content: erased with its message or a wipe; the never-again list is destination ids only; live frames are never stored; cmd keeps its own research copy
+
+The globe holiday game (`adv_rounds` schema v20, workspace 00056) is chat content, the Inv 54
+pattern. `adv_rounds` is keyed by its anchor message (`anchor_message_seq REFERENCES
+messages(seq) ON DELETE CASCADE`: an older blue/green-overlap process that never heard of the
+table still cascades a round away with its message), and a wipe issues `DELETE FROM adv_rounds`
+explicitly in the same transaction as every other table. The round holds everything the pair did —
+both spins, the landing, the roulette seeds and times, the chosen place, who decided and the
+researched holiday pack — so deleting the message erases all of it (`pack_json` included; the
+raw-bytes tests prove it through the routes). Banked trips are DERIVED from `state = 'banked'`: there is no second
+"trips" table, so deleting a trip's message removes it from the bank and returns the place to the
+draw. The game chat reuses `wyr_chat` (Inv 54), so its association rows and cascade rules are
+that invariant's.
+
+**The never-again list** (`adv_rejected(destination_id)`) holds destination ids only — ids of
+STATIC bank entries, no dates, no foreign key, no round reference. It must outlive deleting the
+round's message (that is what "never appears again" means) and it is cleared by a wipe (a wipe
+forgets everything about the two of you, the turned-down places included). Its one observable
+trace is "this bank place was turned down", a subset of the static bank; it says nothing about who,
+when or what was said. Draws exclude rejected AND banked ids (`remaining = bank - rejected -
+banked`). `adv_settings` (the shared "include places the UK says not to travel to" switch, operator
+decision #2113) names no place and no person, so — like `wyr_topics` — a wipe leaves it alone.
+
+**Live trail frames are never stored.** The dragger's finger trail travels only through the
+in-memory broker as an id-less `adventure_live` SSE frame (the live-drawing relay, Inv 53,
+generalised to carry the event name): a bounded 64-frame queue per connection, oldest dropped,
+nothing in `server.db`, its WAL, a file or a log line. A frame is cosmetic and lossy; the committed
+spin (stored once) decides the outcome.
+
+**The holiday pack is researched through cmd only** (Inv 13) and what leaves this server is the
+BANK DESTINATION only (name, region, unit name, coordinates): never a person, a message, a sign-in
+or anything from the chat. The research runs as a hidden, unparented chat-spawn run with every
+file/shell/agent tool denied, in an empty non-git folder under the server's private storage. Its
+answer is parsed defensively and sanitised before it is stored (string limits, `http(s)` URLs with
+a host only, unknown keys dropped); the client never loads third-party images for it. **Honest
+limit:** cmd keeps its own copy of each research run — the prompt (a function of the bank
+destination alone) and the final answer — in its hidden chat-spawn ledger and transcript, which
+this server cannot erase. It names no one and says nothing the static bank does not, but its
+timestamp records that a pack was researched then. The operator accepted this (decision #2113).
+
+Every mutation is idempotent (the SAME move replayed is a 200 with the unchanged view; a DIFFERENT
+move after the state advanced is 409 `bad_state`) and is announced only through the existing
+`message_updated` event. The holiday-pack writes are compare-and-set on
+`(pack = 'pending' AND pack_run_id = <this run>)`, so a blue/green overlap where two processes poll
+one run stores it once, and a round rejected or deleted meanwhile is left alone (the job notices
+and cancels its run).
+
+*Enforced by:* `wixy_server/tests/test_livechat_adventure.py` (migration from a real v19 database,
+the state machine and every replay, exclusion maths, the never-again list surviving an anchor
+delete and a wipe, cascade from a connection that never imported the store, raw-byte erasure,
+concurrency), `test_routes_livechat_adventure.py` (auth, every validation bound, the whole game over
+HTTP, erasure through the routes with sentinel bytes), `test_livechat_adventure_live.py` (bounds, its
+own rate limit, the `adventure_live` event name, never stored), `test_livechat_adventure_pack.py`
+(parse/sanitise, the prompt names only the destination, the chat-spawn calls against the fake cmd,
+every job outcome, restart resume, the overlap compare-and-set) and `test_adventure_bank.py`.
+Decision: [00190](../../decisions/00190-server-chat-adventure-time/decision.md).
+
 ### Inv 55 — Live calls are ephemeral private pairs, and idle suspension never overrides locking
 
 Call audio is relayed only between the two immutable authenticated socket IDs that

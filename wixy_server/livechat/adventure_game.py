@@ -20,7 +20,7 @@ from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 
 from builder.jsontypes import JsonObject, JsonValue
-from wixy_server.livechat.adventure_bank import AdventureBank, AdventureDestination
+from wixy_server.livechat.adventure_bank import AdventureBank
 from wixy_server.livechat.models import AdventureLanding, AdventureRoundRow, AdventureSpin
 
 # §3.1: a spin's committed consequence.
@@ -361,10 +361,3 @@ def bank_trip_json(round_: AdventureRoundRow, bank: AdventureBank) -> JsonObject
         "headline": headline if isinstance(headline, str) and headline else None,
         "pack": round_.pack,
     }
-
-
-def destination_of(round_: AdventureRoundRow, bank: AdventureBank) -> AdventureDestination | None:
-    """The round's chosen destination from the bank, if there is one."""
-    if round_.destination_id is None:
-        return None
-    return bank.destination(round_.destination_id)

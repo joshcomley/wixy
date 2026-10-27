@@ -1198,6 +1198,48 @@ class TestAppStartup:
             view = get_view(client, h, seq)
             assert view["pack"]["state"] == "unavailable"
 
+    def test_the_default_researcher_really_goes_through_cmdchat_and_a_refusal_fails_the_pack(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        """No researcher injected: the fleet default (`CmdAdventureResearcher` over a
+        `CmdChatClient`) runs for real. The suite's conftest points that client at a transport
+        that answers 404, so cmd "refuses" the run and nothing leaves the process."""
+        from unittest.mock import AsyncMock
+
+        from fastapi.testclient import TestClient
+
+        from wixy_server.app import create_app
+        from wixy_server.tests.adventure_testkit import (
+            BASE,
+            create_round,
+            route_to_chosen,
+        )
+        from wixy_server.tests.test_livechat_view_once import (
+            TEST_PIN,
+            UNLOCK_GUARD_HEADERS,
+            _form_style_json,
+        )
+
+        app = create_app(
+            storage_root=storage_root,
+            wixy_repo_root=wixy_repo_root,
+            pin_verifier=pin_verifier,
+            transcriber=AsyncMock(),
+            adventure_bank=fixture_bank(),
+            adventure_pack_timing=FAST,
+        )
+        with TestClient(app, cookies={"CF_Authorization": "dummy"}) as client:
+            token = client.post(
+                f"{BASE}/unlock",
+                content=_form_style_json(TEST_PIN),
+                headers={**UNLOCK_GUARD_HEADERS, "Sec-Fetch-Site": "same-origin"},
+            ).json()["token"]
+            headers = {"X-Wixy-Server-Token": token}
+            seq = create_round(client, headers).json()["message"]["seq"]
+            route_to_chosen(client, headers, seq)
+            failed = wait_for_pack(client, headers, seq, "failed")
+            assert failed["pack"]["canRetry"] is True
+
     def test_the_default_researcher_is_cmd_backed_on_the_fleet_and_absent_on_standalone(
         self,
         storage_root: Path,

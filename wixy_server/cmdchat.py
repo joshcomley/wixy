@@ -10,6 +10,11 @@ Two cmd surfaces, both localhost-only:
   - **Cmd-Chats** introspection (default `http://127.0.0.1:9321`) — decoded
     messages + status for an existing session.
 
+Besides the chat calls it also carries the headless one-shot **chat-spawn runs** (`spawn_run` /
+`get_run` / `cancel_run`: `POST /api/chat-spawn/runs`, `GET …/{run_id}`, `POST …/{run_id}/cancel`)
+that the Adventure Time holiday pack is researched with (`livechat/adventure_pack.py`, Inv 56) —
+still the ONE chokepoint to cmd (Inv 13).
+
 `CmdChatClient` is written against an interface (spec/06 §4: "tests run against a
 fake cmd server") — `wixy_server/tests/fake_cmd.py` implements both surfaces as one
 combined FastAPI app for hermetic unit tests (via `httpx.ASGITransport` for the pure
