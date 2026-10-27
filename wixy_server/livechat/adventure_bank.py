@@ -57,6 +57,11 @@ KINDS = frozenset(
 )
 TOP_DESTINATIONS = 5
 MAX_DESTINATIONS_PER_UNIT = 10
+MIN_SPACING_KM = 40.0
+"""Two destinations in one unit's top picks are at least this far apart (great-circle), or the
+destination roulette would light overlapping dots (Peru: Machu Picchu, Cusco and the Sacred Valley
+sit within ~75 km of each other)."""
+_EARTH_RADIUS_KM = 6371.0088
 
 _UNIT_ID_RE = re.compile(r"^[A-Z0-9]{3}$")
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -65,6 +70,15 @@ _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 _MAX_NAME = 80
 _MAX_BLURB = 120
 _MAX_SLUG = 60
+
+
+def distance_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Great-circle (haversine) distance in kilometres between two points in degrees."""
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    d_phi = phi2 - phi1
+    d_lambda = math.radians(lng2 - lng1)
+    a = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
+    return 2 * _EARTH_RADIUS_KM * math.asin(min(1.0, math.sqrt(a)))
 
 
 class AdventureBankError(ValueError):
@@ -163,8 +177,32 @@ class AdventureBank:
     def top_destinations(
         self, unit_id: str, excluded: Collection[str] = (), n: int = TOP_DESTINATIONS
     ) -> tuple[AdventureDestination, ...]:
-        """The unit's top `n` remaining destinations in rank order — what a country draws from."""
-        return self.remaining(unit_id, excluded)[:n]
+        """The unit's top `n` remaining destinations — what a country's destination roulette draws
+        from — spaced so the roulette's dots never overlap: walk the remaining destinations in
+        rank order and take one only if it is at least `MIN_SPACING_KM` (great-circle) from every
+        one already taken, until `n`. When fewer than `n` qualify, the rest is filled from the
+        skipped ones in rank order. A skipped destination is merely held back, never consumed: it
+        is still remaining, so it comes round again once a pick is rejected or banked. The result
+        is returned in rank order and always has `min(n, len(remaining))` entries."""
+        remaining = self.remaining(unit_id, excluded)
+        taken: list[int] = []
+        skipped: list[int] = []
+        for index, candidate in enumerate(remaining):
+            if len(taken) == n:
+                break
+            if all(
+                distance_km(candidate.lat, candidate.lng, remaining[t].lat, remaining[t].lng)
+                >= MIN_SPACING_KM
+                for t in taken
+            ):
+                taken.append(index)
+            else:
+                skipped.append(index)
+        for index in skipped:
+            if len(taken) == n:
+                break
+            taken.append(index)
+        return tuple(remaining[index] for index in sorted(taken))
 
     def eligible_units(self, excluded: Collection[str] = ()) -> tuple[str, ...]:
         """Playable units with at least one remaining destination, by id (stable)."""

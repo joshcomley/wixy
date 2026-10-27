@@ -564,7 +564,7 @@ def _row_to_message(
     *,
     reply_to: MessageRow | None = None,
     wyr: WyrSummary | None = None,
-    wyr_ref: int | None = None,
+    wyr_ref: tuple[int, Literal["wyr", "adventure"]] | None = None,
     adventure: AdventureSummary | None = None,
 ) -> MessageRow:
     return MessageRow(
@@ -587,7 +587,8 @@ def _row_to_message(
         view_claim_email=row["view_claim_email"],
         canvas=row["canvas"],
         wyr=wyr,
-        wyr_ref=wyr_ref,
+        wyr_ref=wyr_ref[0] if wyr_ref is not None else None,
+        wyr_ref_kind=wyr_ref[1] if wyr_ref is not None else None,
         adventure=adventure,
     )
 
@@ -858,17 +859,29 @@ def _load_adventure_summaries_for(
     }
 
 
-def _load_wyr_refs_for(conn: sqlite3.Connection, message_seqs: Sequence[int]) -> dict[int, int]:
-    """The round (anchor seq) each message was sent in the game chat of — the `Message` wire
-    shape's `wyrRef`. Absent for an ordinary message."""
+def _load_wyr_refs_for(
+    conn: sqlite3.Connection, message_seqs: Sequence[int]
+) -> dict[int, tuple[int, Literal["wyr", "adventure"]]]:
+    """The game round (anchor seq) each message was sent in the game chat of, and which game it is
+    — the `Message` wire shape's `wyrRef` and `wyrRefKind`. Absent for an ordinary message. The kind
+    is resolved here, in the same query, because a client paging history may not have the anchor
+    message loaded: an anchor present in `adv_rounds` is `adventure`, any other is `wyr`."""
     if not message_seqs:
         return {}
     placeholders = ",".join("?" for _ in message_seqs)
     rows = conn.execute(
-        f"SELECT message_seq, anchor_seq FROM wyr_chat WHERE message_seq IN ({placeholders})",
+        "SELECT c.message_seq, c.anchor_seq, "
+        "EXISTS (SELECT 1 FROM adv_rounds a WHERE a.anchor_message_seq = c.anchor_seq) AS is_adv "
+        f"FROM wyr_chat c WHERE c.message_seq IN ({placeholders})",
         tuple(message_seqs),
     ).fetchall()
-    return {int(row["message_seq"]): int(row["anchor_seq"]) for row in rows}
+    return {
+        int(row["message_seq"]): (
+            int(row["anchor_seq"]),
+            "adventure" if row["is_adv"] else "wyr",
+        )
+        for row in rows
+    }
 
 
 def _load_reply_targets(
@@ -2628,9 +2641,10 @@ class LiveChatStore:
         `AdventureTooEarlyError`; a choice outside the stage's candidates is
         `AdventureInvalidError`.
 
-        `country`: the chosen unit's top 5 remaining destinations in rank order become the next
-        roulette — none left is `AdventureExhaustedError` (the round stays in `country`), exactly
-        one skips straight to `chosen`, else `destination` with a fresh seed and
+        `country`: the chosen unit's top 5 remaining destinations (`AdventureBank.top_destinations`:
+        rank order, spaced at least 40 km apart where the unit allows) become the next roulette —
+        none left is `AdventureExhaustedError` (the round stays in `country`), exactly one skips
+        straight to `chosen`, else `destination` with a fresh seed and
         `dest_roulette_at = now + 3.5 s`. `destination`: the round is `chosen`. Entering `chosen`
         sets `pack` to `pending` (or `unavailable` without a researcher) in the same transaction —
         the caller starts the job when the returned round is `pending` with no run id."""

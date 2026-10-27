@@ -108,6 +108,7 @@ from builder.config import ProjectConfig  # noqa: E402
 from wixy_server.chats import find_chat  # noqa: E402
 from wixy_server.checkout import current_sha, ensure_checkout  # noqa: E402
 from wixy_server.cmdchat import CmdChatClient  # noqa: E402
+from wixy_server.livechat.adventure_pack import CmdAdventureResearcher, PackTiming  # noqa: E402
 from wixy_server.livechat.pinclient import CmdPinVerifier  # noqa: E402
 from wixy_server.livechat.store import LiveChatStore  # noqa: E402
 from wixy_server.livechat.transcribe import CmdTranscriber  # noqa: E402
@@ -436,11 +437,26 @@ def main() -> None:
     fake_cmd_state.transcribe_private_supported = False
     transcriber = CmdTranscriber(base_url=f"http://127.0.0.1:{fake_pin_port}")
 
+    # workspace 00056 (Adventure Time): the holiday-pack researcher is pointed at the SAME
+    # independent fake cmd instance as the PIN service (the first instance is stopped, one-way, by
+    # chat-ux.spec.ts's offline-banner test), and the fake answers every research run with the
+    # canned, valid pack after ~2 s. The job's pacing is shortened so the pack lands within the
+    # specs' timeouts (the shipped defaults poll every 10 s and space spawns 5 s apart).
+    fake_cmd_state.chat_spawn_delay_s = 2.0
+    adventure_researcher = CmdAdventureResearcher(
+        CmdChatClient(
+            portal_base_url=f"http://127.0.0.1:{fake_pin_port}",
+            chats_base_url=f"http://127.0.0.1:{fake_pin_port}",
+        )
+    )
+
     app = create_app(
         storage_root=storage_root,
         wixy_repo_root=wixy_repo_root,
         pin_verifier=pin_verifier,
         transcriber=transcriber,
+        adventure_researcher=adventure_researcher,
+        adventure_pack_timing=PackTiming(poll_interval_s=0.5, spawn_gap_s=0.2),
         # No E2E flow depends on the PERIODIC watcher tick (spec/04 §7) — E2E 6's
         # own simulated upstream commit fetches directly (this file's
         # `/test/simulate-upstream-commit`, decisions/00030), never waiting on

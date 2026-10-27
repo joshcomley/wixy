@@ -506,6 +506,9 @@ class CmdChatClient:
             "effort": effort,
             "spawned_by_session_id": UNPARENTED_SPAWNED_BY,
             "cwd": cwd,
+            # Keep our own cwd (an empty, non-git folder): "primary" means no cmd build space is
+            # provisioned for this read-only research seat. Harmless for an unparented spawn.
+            "build_space": "primary",
             "bucket": "subscription",
             "timeout_secs": timeout_secs,
             "disallowed_tools": list(disallowed_tools),

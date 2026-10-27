@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "generated": "2026-10-28",
+  "countries": {
+    "AAA": {
+      "name": "Alphaland",
+      "advice": null,
+      "destinations": [
+        {"id": "AAA.one", "name": "Alpha One", "region": "North", "lat": 10.0, "lng": 20.0, "kind": "city", "blurb": "Rank one of Alphaland."},
+        {"id": "AAA.two", "name": "Alpha Two", "region": "North", "lat": 11.0, "lng": 21.0, "kind": "beach", "blurb": "Rank two of Alphaland."},
+        {"id": "AAA.three", "name": "Alpha Three", "region": "South", "lat": 12.0, "lng": 22.0, "kind": "island", "blurb": "Rank three of Alphaland."},
+        {"id": "AAA.four", "name": "Alpha Four", "region": "South", "lat": 13.0, "lng": 23.0, "kind": "mountains", "blurb": "Rank four of Alphaland."},
+        {"id": "AAA.five", "name": "Alpha Five", "region": "East", "lat": 14.0, "lng": 24.0, "kind": "lakes", "blurb": "Rank five of Alphaland."},
+        {"id": "AAA.six", "name": "Alpha Six", "region": "East", "lat": 15.0, "lng": 25.0, "kind": "wine", "blurb": "Rank six of Alphaland."}
+      ]
+    },
+    "BBB": {
+      "name": "Betaland",
+      "advice": null,
+      "destinations": [
+        {"id": "BBB.one", "name": "Beta One", "region": "Coast", "lat": -10.0, "lng": 30.0, "kind": "resort", "blurb": "Rank one of Betaland."},
+        {"id": "BBB.two", "name": "Beta Two", "region": "Hills", "lat": -11.0, "lng": 31.0, "kind": "countryside", "blurb": "Rank two of Betaland."}
+      ]
+    },
+    "CCC": {
+      "name": "Singleton",
+      "advice": null,
+      "destinations": [
+        {"id": "CCC.only", "name": "The Only Place", "region": "Centre", "lat": 40.0, "lng": -40.0, "kind": "historic", "blurb": "The one destination of Singleton."}
+      ]
+    },
+    "DDD": {
+      "name": "Dangerland",
+      "advice": {"level": "against_all_travel", "checked": "2026-10-01"},
+      "destinations": [
+        {"id": "DDD.one", "name": "Danger One", "region": "Capital", "lat": 50.0, "lng": 50.0, "kind": "city", "blurb": "Not drawn while advised units are excluded."},
+        {"id": "DDD.two", "name": "Danger Two", "region": "Hills", "lat": 51.0, "lng": 51.0, "kind": "nature", "blurb": "Not drawn while advised units are excluded."}
+      ]
+    },
+    "EEE": {
+      "name": "Echoland",
+      "advice": null,
+      "destinations": [
+        {"id": "EEE.one", "name": "Echo One", "region": "Bay", "lat": -40.0, "lng": 100.0, "kind": "beach", "blurb": "Rank one of Echoland."},
+        {"id": "EEE.two", "name": "Echo Two", "region": "Bay", "lat": -41.0, "lng": 101.0, "kind": "nature", "blurb": "Rank two of Echoland."},
+        {"id": "EEE.three", "name": "Echo Three", "region": "Peak", "lat": -42.0, "lng": 102.0, "kind": "mountains", "blurb": "Rank three of Echoland."}
+      ]
+    }
+  }
+}

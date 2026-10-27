@@ -291,6 +291,10 @@ Position: latitude {destination.lat:.4f}, longitude {destination.lng:.4f}
 Use ONLY your WebSearch and WebFetch tools (you have no other tools). Read real, current pages; do \
 not rely on memory for names, prices or opening details, and never invent a place or a link.
 
+Voice: write as a warm, knowledgeable friend talking to the couple ("you"). Never mention \
+yourself, your searches or your sources in the text; if you could not confirm something, leave it \
+out.
+
 Cover:
 - food: the dishes and drinks the area is known for, plus 2-4 specific places to eat or drink.
 - stay: 2-4 specific villas, or characterful places to stay, each with a link to its page.
@@ -316,9 +320,9 @@ and no markdown fences. Use exactly these keys and respect these limits (charact
 {MAX_SOURCES})}}
 
 Rules: every "url" is a full https:// link to the specific page you read (or null when you have \
-none); "travelAdvice" is the current UK Foreign, Commonwealth and Development Office (FCDO) \
-headline for the country in one sentence; write plain text (no markdown, no HTML); British \
-English.
+none); for "travelAdvice", fetch the country's page on https://www.gov.uk/foreign-travel-advice/ \
+itself and give its current headline in one or two sentences; write plain text (no markdown, no \
+HTML); British English.
 """
 
 

@@ -315,8 +315,13 @@ class MessageRow:
     """1 for a canvas message (a blank drawing surface, no text/attachments), else 0."""
     wyr: WyrSummary | None = None
     wyr_ref: int | None = None
-    """The anchor seq of the would-you-rather round this message was sent in the game chat of,
-    else None — joined from `wyr_chat` at read time. The message itself stays in the main chat."""
+    """The anchor seq of the game round (would-you-rather OR Adventure Time) this message was sent
+    in the game chat of, else None — joined from `wyr_chat` at read time. The message itself stays
+    in the main chat."""
+    wyr_ref_kind: Literal["wyr", "adventure"] | None = None
+    """Which game `wyr_ref` points at, resolved at read time beside it (the anchor is present in
+    `adv_rounds` -> "adventure", else "wyr"); None exactly when `wyr_ref` is None. A client paging
+    history may not have the anchor message loaded, so it cannot tell by itself."""
     """The round summary when this message anchors a would-you-rather round, else
     None — joined from `wyr_rounds` at read time, exactly like `drawings`."""
     adventure: AdventureSummary | None = None
@@ -528,6 +533,7 @@ def message_json(row: MessageRow, signer: MediaUrlSigner) -> JsonObject:
         "drawings": [{"id": d.id, "rev": d.rev} for d in row.drawings],
         "wyr": ({"state": row.wyr.state, "rev": row.wyr.rev} if row.wyr is not None else None),
         "wyrRef": row.wyr_ref,
+        "wyrRefKind": (row.wyr_ref_kind or "wyr") if row.wyr_ref is not None else None,
         "adventure": (
             {"state": row.adventure.state, "pack": row.adventure.pack, "rev": row.adventure.rev}
             if row.adventure is not None
