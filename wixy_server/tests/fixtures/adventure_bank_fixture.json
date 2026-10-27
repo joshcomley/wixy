@@ -1,0 +1,171 @@
+{
+  "version": 1,
+  "generated": "2026-10-27",
+  "countries": {
+    "AFG": {
+      "name": "Afghanistan",
+      "advice": { "level": "against_all_travel", "checked": "2026-10-01" },
+      "destinations": [
+        {
+          "id": "AFG.kabul",
+          "name": "Kabul",
+          "region": "Kabul",
+          "lat": 34.5553,
+          "lng": 69.2075,
+          "kind": "city",
+          "blurb": "Mountain-ringed capital of old gardens, bazaars and Mughal tombs."
+        },
+        {
+          "id": "AFG.bamiyan",
+          "name": "Bamiyan",
+          "region": "Bamiyan",
+          "lat": 34.821,
+          "lng": 67.521,
+          "kind": "historic",
+          "blurb": "Cliff-side valley where giant Buddhas once stood above the Silk Road."
+        },
+        {
+          "id": "AFG.band-e-amir",
+          "name": "Band-e Amir",
+          "region": "Bamiyan",
+          "lat": 34.8333,
+          "lng": 67.2333,
+          "kind": "lakes",
+          "blurb": "Deep blue lakes held back by natural travertine dams."
+        }
+      ]
+    },
+    "COK": {
+      "name": "Cook Islands",
+      "advice": null,
+      "destinations": [
+        {
+          "id": "COK.rarotonga",
+          "name": "Rarotonga",
+          "region": "Southern Group",
+          "lat": -21.2292,
+          "lng": -159.7767,
+          "kind": "island",
+          "blurb": "Volcanic island ringed by a lagoon, with a road all the way round."
+        },
+        {
+          "id": "COK.aitutaki",
+          "name": "Aitutaki",
+          "region": "Southern Group",
+          "lat": -18.8567,
+          "lng": -159.7833,
+          "kind": "island",
+          "blurb": "A vast turquoise lagoon dotted with white-sand motus."
+        }
+      ]
+    },
+    "GRC": {
+      "name": "Greece",
+      "advice": null,
+      "destinations": [
+        {
+          "id": "GRC.santorini",
+          "name": "Santorini",
+          "region": "Cyclades",
+          "lat": 36.4167,
+          "lng": 25.4318,
+          "kind": "island",
+          "blurb": "Whitewashed villages on the rim of a flooded volcano."
+        },
+        {
+          "id": "GRC.athens",
+          "name": "Athens",
+          "region": "Attica",
+          "lat": 37.9838,
+          "lng": 23.7275,
+          "kind": "historic",
+          "blurb": "The Acropolis above a sprawl of tavernas, markets and street art."
+        },
+        {
+          "id": "GRC.mykonos",
+          "name": "Mykonos",
+          "region": "Cyclades",
+          "lat": 37.4467,
+          "lng": 25.3289,
+          "kind": "island",
+          "blurb": "Windmills, sugar-cube lanes and long, lively beaches."
+        },
+        {
+          "id": "GRC.chania",
+          "name": "Chania",
+          "region": "Crete",
+          "lat": 35.5138,
+          "lng": 24.018,
+          "kind": "city",
+          "blurb": "A Venetian harbour town with a lighthouse and gorge walks inland."
+        }
+      ]
+    },
+    "MDV": {
+      "name": "Maldives",
+      "advice": null,
+      "destinations": [
+        {
+          "id": "MDV.male",
+          "name": "Malé",
+          "region": "Kaafu Atoll",
+          "lat": 4.1755,
+          "lng": 73.5093,
+          "kind": "city",
+          "blurb": "A tiny, crowded capital island and the gateway to the atolls."
+        },
+        {
+          "id": "MDV.maafushi",
+          "name": "Maafushi",
+          "region": "Kaafu Atoll",
+          "lat": 3.9417,
+          "lng": 73.4903,
+          "kind": "island",
+          "blurb": "A local island with guesthouses, snorkelling and a bikini beach."
+        }
+      ]
+    },
+    "PRX": {
+      "name": "Portugal",
+      "advice": null,
+      "destinations": [
+        {
+          "id": "PRX.lisbon",
+          "name": "Lisbon",
+          "region": "Lisbon",
+          "lat": 38.7223,
+          "lng": -9.1393,
+          "kind": "city",
+          "blurb": "Hilltop city of trams, tiled facades and custard tarts."
+        },
+        {
+          "id": "PRX.porto",
+          "name": "Porto",
+          "region": "Porto",
+          "lat": 41.1579,
+          "lng": -8.6291,
+          "kind": "wine",
+          "blurb": "River city of port lodges, steep lanes and blue-tiled churches."
+        },
+        {
+          "id": "PRX.lagos",
+          "name": "Lagos",
+          "region": "Algarve",
+          "lat": 37.1028,
+          "lng": -8.673,
+          "kind": "beach",
+          "blurb": "Golden cliffs, sea caves and sheltered coves on the Algarve."
+        },
+        {
+          "id": "PRX.sintra",
+          "name": "Sintra",
+          "region": "Lisbon",
+          "lat": 38.7978,
+          "lng": -9.3817,
+          "kind": "historic",
+          "blurb": "Fairy-tale palaces tucked into misty, forested hills."
+        }
+      ]
+    }
+  }
+}
