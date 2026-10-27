@@ -277,7 +277,7 @@ in-flight uploads survive in memory and resume on unlock. **Nothing new starts w
   count as theirs.
 - The server stores the CF email per message for audit only and never returns it.
 
-**R9 — Message model.** Optional text (≤4000 chars) plus 0–10 attachments (photo/video/voice)
+**R9 — Message model.** Optional text (≤200000 chars) plus 0–10 attachments (photo/video/voice)
 per message, like the AI composer's staged chips.
 - A voice note sends immediately when recording stops, as its own message.
 - No editing, deleting, typing indicators, read receipts or unread badges in v1 (§16).
@@ -661,7 +661,7 @@ the stream with `after=cursor`.
 
 `POST /messages` with body
 `{"clientId":str(8..64), "sender":str(1..32, trimmed, no control chars), "deviceId":str(8..64),
-"text":str|null(≤4000), "attachmentIds":[hex32](0..10)}`:
+"text":str|null(≤200000), "attachmentIds":[hex32](0..10)}`:
 - 201 `{"message":Message}`, or 200 with the same message when a `clientId` is replayed.
 - 422 `{"error":"invalid","detail":str}` for: empty text with no attachments, an
   unknown/used/failed attachment, too long, or a bad sender.
