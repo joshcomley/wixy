@@ -72,13 +72,14 @@ test.describe("E2E 4: collection", () => {
     const newItemToolbar = frame.locator(
       '.wx-item-toolbar[data-wx-toolbar-list="showcase.items"][data-wx-toolbar-index="2"]',
     );
-    // If the preview shifted under the pointer after the hover, hover again until the toolbar
-    // on screen is the new item's own.
+    // The toolbar only exists while the pointer is over its item and is rebuilt whenever the
+    // preview re-renders under the pointer, which also detaches a button Playwright is about to
+    // press. Hovering is one-shot, so retry hover + press together until the press lands on the
+    // new item's own toolbar; the PATCH wait below proves what the press actually did.
     await expect(async () => {
       await newItem.hover();
-      await expect(newItemToolbar).toBeVisible({ timeout: 1_000 });
-    }).toPass({ timeout: 15_000 });
-    await newItemToolbar.locator('button[data-wx-toolbar-action="moveUp"]').click();
+      await newItemToolbar.locator('button[data-wx-toolbar-action="moveUp"]').click({ timeout: 2_000 });
+    }).toPass({ timeout: 20_000 });
     await reorderPatch;
     await expect(items.nth(1).locator('[data-wx=".title"]')).toHaveText("New Treatment Card");
 
