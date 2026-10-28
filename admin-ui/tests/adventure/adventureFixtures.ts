@@ -66,6 +66,34 @@ export function readyPack(): PackView {
   };
 }
 
+/** A ready pack whose FIRST section is "Local food to try" (five dishes, indexes 0-4) and whose `food` section is the places. */
+export function dishesPack(over: Partial<PackView> = {}): PackView {
+  const base = readyPack();
+  const data = base.data;
+  if (data === null) throw new Error("readyPack has data");
+  return {
+    ...base,
+    data: {
+      ...data,
+      sections: [
+        {
+          key: "dishes",
+          title: "Local food to try",
+          items: [
+            { index: 0, name: "Pastel de nata", detail: "A custard tart with a blistered top, best warm with cinnamon.", url: null },
+            { index: 1, name: "Caldo verde", detail: "Kale and potato soup with a slice of chorizo.", url: null },
+            { index: 2, name: "Bacalhau com natas", detail: "Salt cod baked in a creamy sauce.", url: null },
+            { index: 3, name: "Ginjinha", detail: "A sour-cherry liqueur sipped from a tiny cup in the street.", url: null },
+            { index: 4, name: "Bifana", detail: "A garlicky pork sandwich eaten standing at the counter.", url: null },
+          ],
+        },
+        ...data.sections,
+      ],
+    },
+    ...over,
+  };
+}
+
 export interface ViewParts {
   seq?: number;
   rev?: number;

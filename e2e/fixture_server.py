@@ -469,10 +469,27 @@ def main() -> None:
     open_web = FakeOpenWeb(fake_web)
     lead = open_web.add_file(FakeFile("Fixture Skyline.jpg", 4000, 2667, seed=1))
     open_web.add_article("Lisbon", lead, description="Capital of Portugal")
-    for seed, (title, file_name) in enumerate(
-        (("Pastel de nata", "Fixture Pastel.jpg"), ("Belém Tower", "Fixture Tower.jpg")), start=2
+    open_web.add_article(
+        "Belém Tower",
+        open_web.add_file(FakeFile("Fixture Tower.jpg", 3000, 2000, seed=3)),
+    )
+    # "Local food to try" (spec 08 §4.3b): the dishes the canned pack names. Four have an article
+    # whose description reads as food (the lead-image path); Bifana has NO article, so it stays
+    # text-only (a wrong photo being worse than none).
+    for seed, (title, file_name, description) in enumerate(
+        (
+            ("Pastel de nata", "Fixture Pastel.jpg", "Portuguese egg custard tart pastry"),
+            ("Caldo verde", "Fixture Caldo.jpg", "Portuguese soup of kale and potato"),
+            ("Bacalhau com natas", "Fixture Bacalhau.jpg", "Portuguese dish of salt cod"),
+            ("Ginjinha", "Fixture Ginjinha.jpg", "Portuguese sour cherry liqueur drink"),
+        ),
+        start=20,
     ):
-        open_web.add_article(title, open_web.add_file(FakeFile(file_name, 3000, 2000, seed=seed)))
+        open_web.add_article(
+            title,
+            open_web.add_file(FakeFile(file_name, 3000, 2000, seed=seed)),
+            description=description,
+        )
     open_web.add_search(
         "",
         [
@@ -484,7 +501,43 @@ def main() -> None:
         "alfama.fake.test", "/stay", og_image="/img/hero.jpg", site_name="Casa Alfama"
     )
     fixture_pack = json.loads(json.dumps(CANNED_ADVENTURE_PACK))
-    fixture_pack["sections"][1]["items"][0]["url"] = f"http://alfama.fake.test:{fake_web_port}/stay"
+    for section in fixture_pack["sections"]:
+        if section["key"] == "stay":
+            section["items"][0]["url"] = f"http://alfama.fake.test:{fake_web_port}/stay"
+    fixture_pack["sections"].insert(
+        0,
+        {
+            "key": "dishes",
+            "title": "Local food to try",
+            "items": [
+                {
+                    "name": "Pastel de nata",
+                    "detail": "A custard tart with a blistered top, best eaten warm with cinnamon.",
+                    "wikipedia": "Pastel de nata",
+                },
+                {
+                    "name": "Caldo verde",
+                    "detail": "Kale and potato soup with a slice of chorizo.",
+                    "wikipedia": "Caldo verde",
+                },
+                {
+                    "name": "Bacalhau com natas",
+                    "detail": "Salt cod baked in a creamy sauce.",
+                    "wikipedia": "Bacalhau com natas",
+                },
+                {
+                    "name": "Ginjinha",
+                    "detail": "A sour-cherry liqueur sipped from a tiny cup in the street.",
+                    "wikipedia": "Ginjinha",
+                },
+                {
+                    "name": "Bifana",
+                    "detail": "A garlicky pork sandwich eaten standing at the counter.",
+                    "wikipedia": None,
+                },
+            ],
+        },
+    )
     fake_cmd_state.chat_spawn_response_text = json.dumps(fixture_pack)
     adventure_picture_finder = WebPictureFinder(
         local_fetcher(fake_web_port), endpoints=open_web.endpoints

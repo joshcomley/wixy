@@ -444,6 +444,26 @@ export function pictureKey(section: PackSection, item: PackItem): string {
   return `${section.key}:${item.index}`;
 }
 
+/** The section key of "Local food to try" (spec §4.3b): its items are dishes, pictured as `dishes:0`…`dishes:5`. */
+export const DISHES_SECTION = "dishes";
+
+/**
+ * The first dish of the pack that has a photo, for the main-chat card (the dishes are the first thing the
+ * operator wants to see): the lowest-indexed dish with a picture, or null when the pack has no dishes, no
+ * pictures yet, or no dish photo. Never reads a hero or another section's picture.
+ */
+export function firstDishPicture(pack: PackView): PackPicture | null {
+  const pictures = pack.pictures;
+  if (pack.data === null || pictures === null) return null;
+  const section = pack.data.sections.find((s) => s.key === DISHES_SECTION);
+  if (section === undefined) return null;
+  for (const item of section.items) {
+    const picture = pictures.items.get(pictureKey(section, item));
+    if (picture !== undefined) return picture;
+  }
+  return null;
+}
+
 const MAX_PICTURES = 24;
 const PICTURE_KEY = /^[a-z]{1,16}:\d{1,2}$/;
 

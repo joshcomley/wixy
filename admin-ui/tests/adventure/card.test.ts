@@ -5,7 +5,7 @@ import { prepareLanding } from "../../src/server/adventure/land";
 import { createAdventureModel, type AdventureModel } from "../../src/server/adventure/model";
 import type { World } from "../../src/server/adventure/world";
 import { recordingContext } from "../fixtures/stubContext";
-import { DEST_A, NOW, readyPack, spin, testWorld, view } from "./adventureFixtures";
+import { DEST_A, NOW, dishesPack, readyPack, spin, testWorld, view } from "./adventureFixtures";
 
 let world: World;
 beforeAll(() => {
@@ -135,6 +135,57 @@ describe("the main-chat card", () => {
     expect(first.querySelector<HTMLCanvasElement>(".wx-srv-adv-mcard-map")?.hidden).toBe(true);
     cards.create(message());
     expect(loadWorld).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("the card's dish photo", () => {
+  const landed = spin("Bea", -15, 900, 4000, NOW - 60);
+  const withDishPhotos = (items: Record<string, string>, state: "chosen" | "banked" = "chosen") =>
+    view(state, {
+      lat: landed,
+      pack: dishesPack({
+        images: "done",
+        pictures: {
+          hero: [{ thumbUrl: "/m/hero-t.jpg", fullUrl: "/m/hero.jpg", credit: "", page: null, caption: "" }],
+          items: new Map(Object.entries(items).map(([key, name]) => [key, { thumbUrl: `/m/${name}-t.jpg`, fullUrl: `/m/${name}.jpg`, credit: "", page: null, caption: "" }])),
+        },
+      }),
+    });
+  function make(v: ReturnType<typeof view>) {
+    const cards = createAdventureCards({ model: modelWith(v), document, openGame: vi.fn(), loadWorld: () => Promise.resolve(world) });
+    return cards.create(message(7, { state: v.state, pack: "ready", rev: 3 }));
+  }
+
+  it("shows the first dish photo once the pack has one, above the little map", () => {
+    const card = make(withDishPhotos({ "dishes:2": "bacalhau", "dishes:1": "caldo" }));
+    const media = card.querySelector(".wx-srv-adv-mcard-media")!;
+    const img = media.querySelector<HTMLImageElement>("img.wx-srv-adv-mcard-dish")!;
+    expect(img.getAttribute("src")).toBe("/m/caldo-t.jpg"); // the lowest-indexed dish with a photo, the small rendition
+    expect(img.alt).toBe("A dish to try");
+    expect(media.firstElementChild).toBe(img);
+    expect(media.querySelector("canvas.wx-srv-adv-mcard-map")).not.toBeNull();
+    expect(card.firstElementChild).toBe(media); // the pictures are in front of the words
+  });
+
+  it("shows no dish photo before the pack is ready, when no dish has one, or for a hero or other section's photo", () => {
+    const pending = make(view("chosen", { lat: landed }));
+    expect(pending.querySelector(".wx-srv-adv-mcard-dish")).toBeNull();
+    const none = make(withDishPhotos({}));
+    expect(none.querySelector(".wx-srv-adv-mcard-dish")).toBeNull();
+    const other = make(withDishPhotos({ "food:0": "tarts" }));
+    expect(other.querySelector(".wx-srv-adv-mcard-dish")).toBeNull();
+    // The map still shows, as before.
+    expect(other.querySelector("canvas.wx-srv-adv-mcard-map")).not.toBeNull();
+  });
+
+  it("keeps it on a banked trip, and a photo that will not load leaves the card as it was", () => {
+    const card = make(withDishPhotos({ "dishes:0": "pastel" }, "banked"));
+    const img = card.querySelector<HTMLImageElement>(".wx-srv-adv-mcard-dish")!;
+    expect(img).not.toBeNull();
+    img.dispatchEvent(new Event("error"));
+    expect(card.querySelector(".wx-srv-adv-mcard-dish")).toBeNull();
+    expect(card.querySelector(".wx-srv-adv-mcard-map")).not.toBeNull();
+    expect(card.querySelector(".wx-srv-adv-mcard-status")).not.toBeNull();
   });
 });
 

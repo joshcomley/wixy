@@ -9,6 +9,7 @@ vi.mock("../../src/server/api/http", async (importOriginal) => ({
 import {
   createAdventure,
   decideAdventure,
+  firstDishPicture,
   getAdventure,
   getAdventureBank,
   getAdventureSettings,
@@ -28,7 +29,7 @@ import {
 } from "../../src/server/adventure/api";
 import { ServerLockedError } from "../../src/server/api/http";
 import { mapSseEvent } from "../../src/server/stream";
-import { NOW, readyPack, spin, view, wire } from "./adventureFixtures";
+import { NOW, dishesPack, readyPack, spin, view, wire } from "./adventureFixtures";
 
 const SESSION = { token: "tok", expiresAt: 9_999_999_999 };
 
@@ -366,5 +367,58 @@ describe("the live swipe frame", () => {
     serverFetch.mockResolvedValueOnce(json({ ok: true }));
     await postAdventureLive(SESSION, { ...live, end: false });
     expect(Object.keys(JSON.parse(String((serverFetch.mock.calls[5]?.[1] as RequestInit).body)) as object)).not.toContain("end");
+  });
+});
+
+describe("the dishes section (spec 4.3b)", () => {
+  const wireDishes = (): Record<string, unknown> => {
+    const w = wire(view("chosen", { pack: dishesPack() }));
+    return w;
+  };
+
+  it("reads a pack whose first section is the dishes, with their indexes, and tolerates the `wikipedia` key and unknown keys", () => {
+    const w = wireDishes();
+    const data = (w["pack"] as Record<string, Record<string, unknown>>)["data"]!;
+    const sections = data["sections"] as Array<Record<string, unknown>>;
+    sections[0]!["items"] = (sections[0]!["items"] as Array<Record<string, unknown>>).map((item, i) => ({ ...item, wikipedia: i === 0 ? "Pastel de nata" : null, futureKey: { x: 1 } }));
+    data["futureTopLevel"] = true;
+    const pack = parseAdventureView(w)?.pack;
+    expect(pack?.data?.sections[0]?.key).toBe("dishes");
+    expect(pack?.data?.sections[0]?.title).toBe("Local food to try");
+    expect(pack?.data?.sections[0]?.items.map((i) => [i.index, i.name])).toEqual([[0, "Pastel de nata"], [1, "Caldo verde"], [2, "Bacalhau com natas"], [3, "Ginjinha"], [4, "Bifana"]]);
+    expect(pack?.data?.sections[1]?.key).toBe("food");
+  });
+
+  it("reads the dish pictures keyed dishes:0..dishes:5, only from this origin", () => {
+    const w = wireDishes();
+    (w["pack"] as Record<string, unknown>)["images"] = "pending";
+    (w["pack"] as Record<string, unknown>)["pictures"] = {
+      hero: [],
+      items: {
+        "dishes:0": { thumbUrl: "/m/d0-t.jpg", fullUrl: "/m/d0.jpg", credit: "Ann, CC BY-SA 4.0", page: "https://commons.example/d0", caption: "Pastel de nata" },
+        "dishes:5": { thumbUrl: "/m/d5-t.jpg", fullUrl: "/m/d5.jpg", credit: "Bob" },
+        "dishes:2": { thumbUrl: "https://evil.example/d2.jpg", fullUrl: "https://evil.example/d2.jpg", credit: "x" },
+      },
+    };
+    const pack = parseAdventureView(w)?.pack;
+    expect([...(pack?.pictures?.items.keys() ?? [])]).toEqual(["dishes:0", "dishes:5"]);
+    expect(pack?.pictures?.items.get("dishes:0")).toMatchObject({ thumbUrl: "/m/d0-t.jpg", credit: "Ann, CC BY-SA 4.0" });
+  });
+
+  it("the first dish photo is the lowest-indexed dish that has one, and nothing else's", () => {
+    const base = dishesPack();
+    const withPictures = (items: Record<string, string>): typeof base => ({
+      ...base,
+      pictures: {
+        hero: [{ thumbUrl: "/m/hero-t.jpg", fullUrl: "/m/hero.jpg", credit: "", page: null, caption: "" }],
+        items: new Map(Object.entries(items).map(([key, name]) => [key, { thumbUrl: `/m/${name}-t.jpg`, fullUrl: `/m/${name}.jpg`, credit: "", page: null, caption: "" }])),
+      },
+    });
+    expect(firstDishPicture(withPictures({ "dishes:3": "gin", "dishes:1": "caldo" }))?.thumbUrl).toBe("/m/caldo-t.jpg");
+    expect(firstDishPicture(withPictures({ "food:0": "tarts", "sights:0": "tower" }))).toBeNull(); // another section's photo is not a dish
+    expect(firstDishPicture(withPictures({}))).toBeNull(); // the hero is not a dish
+    expect(firstDishPicture({ ...base, pictures: null })).toBeNull();
+    expect(firstDishPicture(readyPack())).toBeNull(); // no dishes section
+    expect(firstDishPicture({ ...base, data: null })).toBeNull();
   });
 });

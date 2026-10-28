@@ -5207,8 +5207,8 @@ video.wx-srv-gallery-media {
   inset: 0;
   z-index: 6;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column; /* the photo above, its words below (a dish's description can be long) */
+  align-items: stretch;
   background: #02080f; /* opaque: the pane's own controls must not show through the photo */
   border-radius: var(--wx-radius);
   color: #fff;
@@ -5219,8 +5219,9 @@ video.wx-srv-gallery-media {
 }
 
 .wx-srv-adv-viewer-stage {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -5232,6 +5233,31 @@ video.wx-srv-gallery-media {
   max-height: 100%;
   object-fit: contain;
   -webkit-user-drag: none;
+}
+
+.wx-srv-adv-viewer-img[hidden] {
+  display: none;
+}
+
+/* A dish with no photo opens on a tile in the pane's own colours instead. */
+.wx-srv-adv-viewer-tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: min(62%, 240px);
+  aspect-ratio: 1 / 1;
+  border-radius: 22px;
+  background: linear-gradient(145deg, #1d3b63, #2a2150 60%, #4a2a3f);
+  border: 1px solid rgba(190, 220, 255, 0.18);
+}
+
+.wx-srv-adv-viewer-tile[hidden] {
+  display: none;
+}
+
+.wx-srv-adv-viewer-tile-glyph {
+  font-size: 64px;
+  opacity: 0.9;
 }
 
 .wx-srv-adv-viewer-close,
@@ -5257,13 +5283,13 @@ video.wx-srv-gallery-media {
 }
 
 .wx-srv-adv-viewer-prev {
-  top: 50%;
+  top: 36%;
   left: 8px;
   transform: translateY(-50%);
 }
 
 .wx-srv-adv-viewer-next {
-  top: 50%;
+  top: 36%;
   right: 8px;
   transform: translateY(-50%);
 }
@@ -5283,14 +5309,22 @@ video.wx-srv-gallery-media {
 }
 
 .wx-srv-adv-viewer-credit {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  padding: 18px 14px 12px;
+  flex: none;
+  max-height: 46%;
+  overflow-y: auto;
+  padding: 12px 16px 14px;
   text-align: center;
   font-size: 12.5px;
-  background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.wx-srv-adv-viewer-detail {
+  margin: 4px auto 8px;
+  max-width: 520px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.88);
+  overflow-wrap: anywhere;
 }
 
 .wx-srv-adv-viewer-caption {
@@ -5904,4 +5938,136 @@ video.wx-srv-gallery-media {
   background: var(--wx-btn-bg);
   color: var(--wx-ink);
   cursor: pointer;
+}
+
+/* -- Local food to try: the dishes as a photo-forward grid (adventure/packView.ts, spec §4.3b) ----------
+   Two columns on a phone, three from a desktop width; every dish is a square photo (or a text tile when the
+   server found no qualifying photo), its name, and one line of what it is. */
+
+.wx-srv-adv-dishes {
+  margin: 0 0 14px;
+}
+
+.wx-srv-adv-dish-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 10px;
+}
+
+@media (min-width: 720px) {
+  .wx-srv-adv-dish-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.wx-srv-adv-dish {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wx-srv-adv-dish:active .wx-srv-adv-dish-frame {
+  transform: scale(0.97);
+}
+
+.wx-srv-adv-dish-frame {
+  position: relative;
+  display: block;
+  aspect-ratio: 1 / 1;
+  border-radius: 16px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  transition: transform 0.12s;
+}
+
+.wx-srv-adv-dish-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* No photo: a tasteful tile in the pane's own colours, with the dish's description on it. */
+.wx-srv-adv-dish-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px;
+  background: linear-gradient(145deg, #1d3b63, #2a2150 60%, #4a2a3f);
+  border: 1px solid rgba(190, 220, 255, 0.18);
+  box-sizing: border-box;
+  text-align: center;
+}
+
+.wx-srv-adv-dish-glyph {
+  font-size: 30px;
+  line-height: 1;
+}
+
+.wx-srv-adv-dish-blurb {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: rgba(245, 248, 255, 0.86);
+}
+
+.wx-srv-adv-dish-name {
+  font-weight: 800;
+  font-size: 15px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-adv-dish-detail {
+  font-size: 12.5px;
+  color: rgba(232, 241, 255, 0.72);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The description is already on the tile of a dish with no photo. */
+.wx-srv-adv-dish-nophoto .wx-srv-adv-dish-detail {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wx-srv-adv-dish-frame {
+    transition: none;
+  }
+}
+
+/* The main-chat card's pictures: the first dish photo (once the pack has one) above the little map. */
+.wx-srv-adv-mcard-media {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wx-srv-adv-mcard-media:empty {
+  display: none;
+}
+
+.wx-srv-adv-mcard-dish {
+  display: block;
+  width: 96px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 1px solid var(--wx-border);
 }
