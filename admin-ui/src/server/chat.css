@@ -1107,7 +1107,9 @@ button.wx-srv-wyr-countdown {
   font-size: 0.9rem;
 }
 
-/* A message sent in a round's game chat keeps a small tag in the main chat. */
+/* A message sent in a game item's chat keeps a small tag in the main chat, naming the game
+   (`.wx-srv-bubble-gametag` on every tag; the WYR one also keeps `.wx-srv-bubble-wyrtag`). */
+.wx-srv-bubble-gametag,
 .wx-srv-bubble-wyrtag {
   align-self: flex-start;
   font-size: 0.625rem;
@@ -1119,7 +1121,7 @@ button.wx-srv-wyr-countdown {
   padding: 0 6px;
 }
 
-/* -- Would-you-rather: the tab bar --------------------------------------------- */
+/* -- Games: the tab bar (gameTabs.ts; "Chat" + one `.wx-srv-tab-game` per open game) ---- */
 
 .wx-srv-tabs {
   display: flex;
@@ -1143,6 +1145,11 @@ button.wx-srv-wyr-countdown {
   font: inherit;
   font-weight: 700;
   cursor: pointer;
+}
+
+/* A game's tab sits in the bar from registration but shows only while the game is open. */
+.wx-srv-tab[hidden] {
+  display: none;
 }
 
 .wx-srv-tab-on {
@@ -1171,7 +1178,8 @@ button.wx-srv-wyr-countdown {
   display: none;
 }
 
-/* -- Would-you-rather: the game tab -------------------------------------------- */
+/* -- Games: the game pane (`.wx-srv-game` is every game's pane; `.wx-srv-game-head` onward is
+   the would-you-rather pane's own parts) ------------------------------------------------ */
 
 .wx-srv-game {
   flex: 1 1 0;
@@ -1578,7 +1586,7 @@ dialog.wx-srv-game-pictures[open] {
   text-align: center;
 }
 
-/* -- Would-you-rather: the pop-up game chat ------------------------------------- */
+/* -- Games: the pop-up item chat (itemChat.ts; the mini strip's rules are above) -------- */
 
 .wx-srv-gamepop {
   position: absolute;
@@ -1665,6 +1673,7 @@ dialog.wx-srv-game-pictures[open] {
 }
 
 /* The pop-up is already the game chat: the tag would say the same thing on every message. */
+.wx-srv-gamepop .wx-srv-bubble-gametag,
 .wx-srv-gamepop .wx-srv-bubble-wyrtag {
   display: none;
 }
@@ -4527,4 +4536,1538 @@ video.wx-srv-gallery-media {
   color: #fff;
   font-weight: 700;
   cursor: pointer;
+}
+
+/* -- Adventure Time (workspace 00056; spec/server-chat/08-adventure-time.md §5.3) -----------------
+   The game pane (`adventure/adventureGame.ts`): a deep-blue "space" card holding the globe, the
+   holiday pack and the action dock, with the shared mini chat strip underneath. The card is dark on
+   both chat themes (the globe's own colours do not follow the theme), so it carries its own palette in
+   custom properties. The look is the approved preview's (admin-ui/dev/adventure-harness.css). */
+
+.wx-srv-adv {
+  position: relative;
+}
+
+.wx-srv-adv-card {
+  --adv-ink: #f5f8ff;
+  --adv-ink-dim: rgba(232, 241, 255, 0.72);
+  --adv-bg0: #040f20;
+  --adv-bg1: #0a2342;
+  --adv-glass: rgba(8, 24, 48, 0.62);
+  --adv-glass-edge: rgba(190, 220, 255, 0.18);
+  --adv-coral: #ff4d6a;
+  --adv-coral2: #ff7a59;
+  --adv-gold: #ffc933;
+  --adv-teal: #52dcae;
+  --adv-radius: 18px;
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--wx-radius);
+  overflow: hidden;
+  color: var(--adv-ink);
+  font-family: "SF Pro Rounded", ui-rounded, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background:
+    radial-gradient(1.2px 1.2px at 12% 18%, rgba(255, 255, 255, 0.7), transparent 60%),
+    radial-gradient(1px 1px at 78% 12%, rgba(255, 255, 255, 0.6), transparent 60%),
+    radial-gradient(1.4px 1.4px at 88% 64%, rgba(255, 255, 255, 0.55), transparent 60%),
+    radial-gradient(1px 1px at 24% 82%, rgba(255, 255, 255, 0.5), transparent 60%),
+    radial-gradient(1.2px 1.2px at 52% 40%, rgba(255, 255, 255, 0.35), transparent 60%),
+    radial-gradient(120% 90% at 50% 38%, var(--adv-bg1), var(--adv-bg0) 72%);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.wx-srv-adv-card button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  touch-action: manipulation;
+}
+
+/* Top bar */
+.wx-srv-adv-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px 8px 12px;
+}
+
+.wx-srv-adv-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 800;
+  font-size: 17px;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.wx-srv-adv-title-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wx-srv-adv-title-globe {
+  font-size: 20px;
+}
+
+.wx-srv-adv-bar-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.wx-srv-adv-chip {
+  border: 1px solid var(--adv-glass-edge);
+  background: var(--adv-glass);
+  color: var(--adv-ink);
+  border-radius: 999px;
+  padding: 7px 13px;
+  font-weight: 700;
+  font-size: 14px;
+  min-height: 36px;
+  white-space: nowrap;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+.wx-srv-adv-chip:active {
+  transform: scale(0.96);
+}
+
+/* Stage (positioned: the renderer inserts its imagery canvas as a sibling under the 2D canvas) */
+.wx-srv-adv-stage {
+  position: relative;
+  flex: 0 1 100%;
+  min-height: 0;
+  overflow: hidden;
+  transition: flex-basis 0.45s cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+
+.wx-srv-adv-globe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  cursor: grab;
+}
+
+.wx-srv-adv-stage[data-interactive="none"] .wx-srv-adv-globe {
+  cursor: default;
+}
+
+.wx-srv-adv-stage[data-interactive="explore"] .wx-srv-adv-globe {
+  cursor: move;
+}
+
+.wx-srv-adv-hint {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 24px);
+  box-sizing: border-box;
+  padding: 9px 18px 10px;
+  border-radius: 22px;
+  text-align: center;
+  pointer-events: none;
+  background: var(--adv-glass);
+  border: 1px solid var(--adv-glass-edge);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28);
+  transition: opacity 0.25s;
+}
+
+.wx-srv-adv-hint[data-show="0"] {
+  opacity: 0;
+}
+
+.wx-srv-adv-hint-main {
+  font-weight: 800;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.wx-srv-adv-hint-sub {
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--adv-ink-dim);
+  font-weight: 600;
+}
+
+.wx-srv-adv-toast {
+  position: absolute;
+  top: 74px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 24px);
+  box-sizing: border-box;
+  padding: 8px 16px;
+  border-radius: 16px;
+  background: var(--adv-coral);
+  color: #fff;
+  font-weight: 800;
+  font-size: 15px;
+  text-align: center;
+  box-shadow: 0 6px 20px rgba(255, 77, 106, 0.4);
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+.wx-srv-adv-toast[data-show="0"] {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-6px);
+}
+
+.wx-srv-adv-nearest {
+  position: absolute;
+  top: 78px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 24px);
+  box-sizing: border-box;
+  padding: 7px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #14304f;
+  font-weight: 800;
+  font-size: 14px;
+  pointer-events: none;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+  transition: opacity 0.25s;
+  white-space: nowrap;
+}
+
+.wx-srv-adv-nearest[data-show="0"] {
+  opacity: 0;
+}
+
+.wx-srv-adv-lit {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 12px;
+  text-align: center;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
+.wx-srv-adv-lit[data-show="0"] {
+  opacity: 0;
+}
+
+.wx-srv-adv-lit-name {
+  display: inline-block;
+  max-width: 100%;
+  font-weight: 900;
+  line-height: 1.1;
+  font-size: clamp(28px, 9vw, 46px);
+  color: #fff;
+  text-shadow: 0 2px 0 rgba(4, 20, 40, 0.9), 0 0 18px rgba(255, 201, 51, 0.55), 0 3px 14px rgba(0, 0, 0, 0.6);
+  -webkit-text-stroke: 1px rgba(4, 20, 40, 0.55);
+  paint-order: stroke fill;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-adv-lit-sub {
+  margin: 8px auto 0;
+  max-width: 460px;
+  padding: 8px 14px;
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 1.35;
+  font-weight: 600;
+  background: var(--adv-glass);
+  border: 1px solid var(--adv-glass-edge);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+.wx-srv-adv-lit-sub[hidden] {
+  display: none;
+}
+
+.wx-srv-adv-back {
+  position: absolute;
+  right: 10px;
+  bottom: 12px;
+}
+
+.wx-srv-adv-back[hidden] {
+  display: none;
+}
+
+.wx-srv-adv-note {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  text-align: center;
+  font-weight: 700;
+  color: var(--adv-ink-dim);
+}
+
+.wx-srv-adv-note[hidden] {
+  display: none;
+}
+
+/* The holiday pack */
+.wx-srv-adv-pack {
+  flex: 0 0 auto;
+  display: none;
+  min-height: 0;
+}
+
+.wx-srv-adv-card[data-pack="pending"] .wx-srv-adv-pack,
+.wx-srv-adv-card[data-pack="panel"] .wx-srv-adv-pack {
+  display: flex;
+  flex-direction: column;
+}
+
+.wx-srv-adv-pk-pending {
+  display: none;
+  align-items: center;
+  gap: 12px;
+  margin: 0 12px 6px;
+  padding: 10px 14px;
+  border-radius: var(--adv-radius);
+  background: var(--adv-glass);
+  border: 1px solid var(--adv-glass-edge);
+}
+
+.wx-srv-adv-card[data-pack="pending"] .wx-srv-adv-pk-pending {
+  display: flex;
+}
+
+.wx-srv-adv-pk-pending-text {
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.wx-srv-adv-pk-pending-sub {
+  color: var(--adv-ink-dim);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.wx-srv-adv-pk-timer {
+  font-variant-numeric: tabular-nums;
+  color: var(--adv-gold);
+  font-weight: 800;
+}
+
+.wx-srv-adv-spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.2);
+  border-top-color: var(--adv-gold);
+  animation: wx-srv-adv-spin 0.9s linear infinite;
+  flex: 0 0 auto;
+}
+
+@keyframes wx-srv-adv-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.wx-srv-adv-pk-bar {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+}
+
+.wx-srv-adv-card[data-pack="panel"] .wx-srv-adv-pk-bar {
+  display: flex;
+}
+
+.wx-srv-adv-pk-bar-title {
+  font-weight: 800;
+  font-size: 15px;
+  color: var(--adv-ink-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.wx-srv-adv-pk-host {
+  display: none;
+}
+
+.wx-srv-adv-card[data-pack="panel"] .wx-srv-adv-pk-host {
+  display: block;
+}
+
+.wx-srv-adv-card[data-pack="panel"][data-explore="0"] .wx-srv-adv-stage {
+  flex: 0 0 38%;
+}
+
+.wx-srv-adv-card[data-pack="panel"][data-explore="0"] .wx-srv-adv-pack {
+  flex: 1 1 0;
+}
+
+.wx-srv-adv-card[data-pack="panel"][data-explore="0"] .wx-srv-adv-pk-host {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 12px 14px;
+}
+
+.wx-srv-adv-card[data-pack="panel"][data-explore="1"] .wx-srv-adv-pk-host {
+  display: none;
+}
+
+.wx-srv-adv-pk {
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.wx-srv-adv-pk-place {
+  font-size: 12.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--adv-teal);
+  font-weight: 800;
+}
+
+.wx-srv-adv-pk-headline {
+  margin: 4px 0 8px;
+  font-size: 21px;
+  line-height: 1.22;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-adv-pk-summary {
+  margin: 0 0 12px;
+  color: var(--adv-ink-dim);
+  line-height: 1.5;
+  font-size: 15px;
+}
+
+.wx-srv-adv-pk-card {
+  margin: 0 0 10px;
+  padding: 12px 14px;
+  border-radius: var(--adv-radius);
+  background: var(--adv-glass);
+  border: 1px solid var(--adv-glass-edge);
+}
+
+.wx-srv-adv-pk-title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--adv-gold);
+  font-weight: 800;
+}
+
+.wx-srv-adv-pk-fact-text,
+.wx-srv-adv-pk-message-text {
+  margin: 0;
+  line-height: 1.45;
+  font-size: 15px;
+}
+
+.wx-srv-adv-pk-message .wx-srv-adv-pk-retry {
+  margin-top: 10px;
+  width: 100%;
+}
+
+.wx-srv-adv-pk-items,
+.wx-srv-adv-pk-source-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.wx-srv-adv-pk-item {
+  padding: 8px 0;
+  border-top: 1px solid rgba(190, 220, 255, 0.12);
+}
+
+.wx-srv-adv-pk-item:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.wx-srv-adv-pk-item-pic {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.wx-srv-adv-pk-item-pic:has(> .wx-srv-adv-pic-broken) {
+  display: block;
+}
+
+.wx-srv-adv-pk-item-name {
+  font-weight: 800;
+  font-size: 15.5px;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-adv-pk-item-detail {
+  margin-top: 2px;
+  line-height: 1.42;
+  font-size: 14.5px;
+  color: var(--adv-ink-dim);
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-adv-pk-link {
+  display: inline-block;
+  margin-top: 5px;
+  color: #8fd0ff;
+  font-weight: 700;
+  font-size: 13.5px;
+  text-decoration: none;
+  padding: 3px 0;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-adv-pk-link::after {
+  content: " \2197";
+}
+
+.wx-srv-adv-pk-source {
+  padding: 3px 0;
+  font-size: 13.5px;
+}
+
+.wx-srv-adv-pk-source .wx-srv-adv-pk-link {
+  margin: 0;
+}
+
+.wx-srv-adv-pk-credit {
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: var(--adv-ink-dim);
+}
+
+.wx-srv-adv-pk-credit .wx-srv-adv-pk-link {
+  margin: 0;
+  padding: 0;
+  font-size: 11.5px;
+}
+
+.wx-srv-adv-pk-thumb {
+  display: block;
+  width: 72px;
+  height: 72px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+  cursor: zoom-in;
+}
+
+.wx-srv-adv-pk-thumb[hidden] {
+  display: none;
+}
+
+.wx-srv-adv-pk-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Pictures still being found hold their places with a soft shimmer. */
+.wx-srv-adv-pic-pending {
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0.06) 30%, rgba(255, 255, 255, 0.16) 50%, rgba(255, 255, 255, 0.06) 70%);
+  background-size: 220% 100%;
+  animation: wx-srv-adv-shimmer 1.6s linear infinite;
+}
+
+@keyframes wx-srv-adv-shimmer {
+  to {
+    background-position: -220% 0;
+  }
+}
+
+.wx-srv-adv-pic-note {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--adv-ink-dim);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+/* The hero carousel: one photo per swipe, snapping. */
+.wx-srv-adv-hero {
+  margin: 0 0 12px;
+}
+
+.wx-srv-adv-hero-track {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  border-radius: 14px;
+}
+
+.wx-srv-adv-hero-track::-webkit-scrollbar {
+  display: none;
+}
+
+.wx-srv-adv-hero-slide {
+  position: relative;
+  flex: 0 0 100%;
+  margin: 0;
+  aspect-ratio: 16 / 10;
+  border-radius: 14px;
+  overflow: hidden;
+  scroll-snap-align: center;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.wx-srv-adv-hero-pic {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+
+.wx-srv-adv-hero-pic[hidden] {
+  display: none;
+}
+
+.wx-srv-adv-hero-pic img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.wx-srv-adv-hero-credit {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 16px 10px 6px;
+  font-size: 11.5px;
+  color: #fff;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.6));
+  pointer-events: none;
+}
+
+.wx-srv-adv-hero-credit a {
+  pointer-events: auto;
+  color: #cfe9ff;
+}
+
+.wx-srv-adv-hero-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.wx-srv-adv-hero-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.wx-srv-adv-hero-dot-on {
+  background: var(--adv-gold);
+}
+
+/* The full-screen photo viewer, over the pane (the header and its panic ✕ stay reachable). */
+.wx-srv-adv-viewer {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column; /* the photo above, its words below (a dish's description can be long) */
+  align-items: stretch;
+  background: #02080f; /* opaque: the pane's own controls must not show through the photo */
+  border-radius: var(--wx-radius);
+  color: #fff;
+}
+
+.wx-srv-adv-viewer[hidden] {
+  display: none;
+}
+
+.wx-srv-adv-viewer-stage {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: pan-y;
+}
+
+.wx-srv-adv-viewer-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  -webkit-user-drag: none;
+}
+
+.wx-srv-adv-viewer-img[hidden] {
+  display: none;
+}
+
+/* A dish with no photo opens on a tile in the pane's own colours instead. */
+.wx-srv-adv-viewer-tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: min(62%, 240px);
+  aspect-ratio: 1 / 1;
+  border-radius: 22px;
+  background: linear-gradient(145deg, #1d3b63, #2a2150 60%, #4a2a3f);
+  border: 1px solid rgba(190, 220, 255, 0.18);
+}
+
+.wx-srv-adv-viewer-tile[hidden] {
+  display: none;
+}
+
+.wx-srv-adv-viewer-tile-glyph {
+  font-size: 64px;
+  opacity: 0.9;
+}
+
+.wx-srv-adv-viewer-close,
+.wx-srv-adv-viewer-prev,
+.wx-srv-adv-viewer-next {
+  position: absolute;
+  z-index: 1;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 50%;
+  background: rgba(8, 24, 48, 0.72);
+  color: #fff;
+  font: inherit;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.wx-srv-adv-viewer-close {
+  top: 10px;
+  right: 10px;
+}
+
+.wx-srv-adv-viewer-prev {
+  top: 36%;
+  left: 8px;
+  transform: translateY(-50%);
+}
+
+.wx-srv-adv-viewer-next {
+  top: 36%;
+  right: 8px;
+  transform: translateY(-50%);
+}
+
+.wx-srv-adv-viewer-prev[hidden],
+.wx-srv-adv-viewer-next[hidden] {
+  display: none;
+}
+
+.wx-srv-adv-viewer-count {
+  position: absolute;
+  top: 18px;
+  left: 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.wx-srv-adv-viewer-credit {
+  flex: none;
+  max-height: 46%;
+  overflow-y: auto;
+  padding: 12px 16px 14px;
+  text-align: center;
+  font-size: 12.5px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.wx-srv-adv-viewer-detail {
+  margin: 4px auto 8px;
+  max-width: 520px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.88);
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-adv-viewer-caption {
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.wx-srv-adv-viewer-source {
+  color: #cfe9ff;
+}
+
+/* The action dock */
+.wx-srv-adv-dock {
+  flex: 0 0 auto;
+  padding: 8px 12px 10px;
+  min-height: 8px;
+}
+
+.wx-srv-adv-dock-row,
+.wx-srv-adv-dock-block {
+  display: none;
+}
+
+.wx-srv-adv-card[data-action="stop"] .wx-srv-adv-dock-stop {
+  display: flex;
+  justify-content: center;
+}
+
+.wx-srv-adv-card[data-action="decide"] .wx-srv-adv-dock-decide,
+.wx-srv-adv-card[data-action="ask"] .wx-srv-adv-dock-decide {
+  display: block;
+}
+
+.wx-srv-adv-card[data-action="decide"] .wx-srv-adv-dock-decide-row {
+  display: flex;
+  gap: 10px;
+}
+
+.wx-srv-adv-card[data-action="ask"] .wx-srv-adv-dock-ask-row {
+  display: flex;
+  gap: 10px;
+}
+
+.wx-srv-adv-card[data-action="again"] .wx-srv-adv-dock-again {
+  display: block;
+}
+
+.wx-srv-adv-ask {
+  text-align: center;
+  font-weight: 800;
+  font-size: 16px;
+  margin: 0 0 8px;
+}
+
+.wx-srv-adv-ask:empty {
+  display: none;
+}
+
+.wx-srv-adv-outcome {
+  text-align: center;
+  font-weight: 700;
+  font-size: 15px;
+  margin: 0 0 8px;
+  color: var(--adv-ink-dim);
+}
+
+.wx-srv-adv-outcome:empty {
+  display: none;
+}
+
+.wx-srv-adv-stop {
+  width: 100%;
+  max-width: 560px;
+  min-height: 76px;
+  border: 0;
+  border-radius: 40px;
+  color: #fff;
+  font-weight: 900;
+  font-size: 28px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, var(--adv-coral2), var(--adv-coral) 60%, #e0264f);
+  box-shadow: 0 10px 28px rgba(255, 77, 106, 0.5), inset 0 2px 0 rgba(255, 255, 255, 0.35), inset 0 -4px 0 rgba(120, 0, 30, 0.28);
+  text-shadow: 0 2px 0 rgba(120, 0, 30, 0.45);
+  transition: transform 0.08s, filter 0.2s, opacity 0.2s;
+  animation: wx-srv-adv-stop-pulse 1.1s ease-in-out infinite;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.wx-srv-adv-stop:active {
+  transform: translateY(3px) scale(0.985);
+  box-shadow: 0 5px 16px rgba(255, 77, 106, 0.4), inset 0 2px 0 rgba(255, 255, 255, 0.3);
+}
+
+.wx-srv-adv-stop[data-live="0"] {
+  filter: grayscale(0.85) brightness(0.75);
+  animation: none;
+  box-shadow: none;
+  letter-spacing: 0.04em;
+  font-size: 22px;
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+@keyframes wx-srv-adv-stop-pulse {
+  0%,
+  100% {
+    box-shadow: 0 10px 28px rgba(255, 77, 106, 0.45), inset 0 2px 0 rgba(255, 255, 255, 0.35), inset 0 -4px 0 rgba(120, 0, 30, 0.28);
+  }
+  50% {
+    box-shadow: 0 10px 40px rgba(255, 77, 106, 0.8), inset 0 2px 0 rgba(255, 255, 255, 0.35), inset 0 -4px 0 rgba(120, 0, 30, 0.28);
+  }
+}
+
+.wx-srv-adv-big {
+  flex: 1 1 0;
+  min-height: 56px;
+  border-radius: 28px;
+  border: 1px solid var(--adv-glass-edge);
+  font-weight: 800;
+  font-size: 17px;
+  padding: 10px 14px;
+  background: var(--adv-glass);
+}
+
+.wx-srv-adv-big:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.wx-srv-adv-big:active {
+  transform: scale(0.97);
+}
+
+.wx-srv-adv-big-yes,
+.wx-srv-adv-big-keep {
+  background: linear-gradient(180deg, #6ff0c4, #2fc896);
+  color: #052a1d;
+  border: 0;
+  box-shadow: 0 8px 22px rgba(82, 220, 174, 0.35);
+}
+
+.wx-srv-adv-big-no {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.wx-srv-adv-big-again {
+  width: 100%;
+  background: linear-gradient(180deg, #ffd95e, #ffb21e);
+  color: #3b2800;
+  border: 0;
+  box-shadow: 0 8px 22px rgba(255, 201, 51, 0.35);
+}
+
+/* The options sheet */
+.wx-srv-adv-sheet {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(2, 8, 18, 0.6);
+  border-radius: var(--wx-radius);
+}
+
+.wx-srv-adv-sheet[hidden] {
+  display: none;
+}
+
+.wx-srv-adv-sheet-card {
+  width: 100%;
+  max-width: 560px;
+  max-height: 88%;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 16px 16px 18px;
+  color: #f5f8ff;
+  background: linear-gradient(180deg, #112c4d, #0a1f3a);
+  border: 1px solid rgba(190, 220, 255, 0.18);
+  border-radius: 24px 24px 0 0;
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.45);
+}
+
+.wx-srv-adv-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.wx-srv-adv-sheet-title {
+  margin: 0;
+  font-size: 20px;
+}
+
+.wx-srv-adv-sheet .wx-srv-adv-chip {
+  border: 1px solid rgba(190, 220, 255, 0.18);
+  background: rgba(8, 24, 48, 0.62);
+  color: #f5f8ff;
+  border-radius: 999px;
+  padding: 7px 13px;
+  font: inherit;
+  font-weight: 700;
+  min-height: 36px;
+  cursor: pointer;
+}
+
+.wx-srv-adv-opt,
+.wx-srv-adv-opt-block {
+  padding: 12px 0;
+  border-top: 1px solid rgba(190, 220, 255, 0.12);
+}
+
+.wx-srv-adv-opt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  cursor: pointer;
+}
+
+.wx-srv-adv-opt-title {
+  font-weight: 800;
+  font-size: 16px;
+}
+
+.wx-srv-adv-opt-help,
+.wx-srv-adv-opt-list,
+.wx-srv-adv-opt-status,
+.wx-srv-adv-opt-credit {
+  margin-top: 2px;
+  font-size: 13.5px;
+  line-height: 1.35;
+  color: rgba(232, 241, 255, 0.72);
+}
+
+.wx-srv-adv-opt-list,
+.wx-srv-adv-opt-status,
+.wx-srv-adv-opt-credit {
+  margin: 4px 0 0;
+}
+
+.wx-srv-adv-opt-credit {
+  font-size: 12px;
+  border-top: 1px solid rgba(190, 220, 255, 0.12);
+  padding-top: 10px;
+}
+
+.wx-srv-adv-opt-list:empty,
+.wx-srv-adv-opt-status:empty {
+  display: none;
+}
+
+/* The three-way map style switch: Satellite / Atlas / Classic. */
+.wx-srv-adv-seg {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.wx-srv-adv-seg-button {
+  flex: 1 1 0;
+  min-height: 44px;
+  padding: 0 8px;
+  border-radius: 14px;
+  border: 1px solid rgba(190, 220, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: #f5f8ff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.wx-srv-adv-seg-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.wx-srv-adv-seg-on {
+  border-color: #52dcae;
+  background: rgba(82, 220, 174, 0.22);
+  box-shadow: inset 0 0 0 1px #52dcae;
+}
+
+.wx-srv-adv-switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 52px;
+  height: 32px;
+}
+
+.wx-srv-adv-switch-input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: pointer;
+}
+
+.wx-srv-adv-switch-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.18);
+  transition: background 0.2s;
+  pointer-events: none;
+}
+
+.wx-srv-adv-switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  transition: transform 0.2s;
+}
+
+.wx-srv-adv-switch-input:checked + .wx-srv-adv-switch-track {
+  background: #52dcae;
+}
+
+.wx-srv-adv-switch-input:checked + .wx-srv-adv-switch-track .wx-srv-adv-switch-knob {
+  transform: translateX(20px);
+}
+
+.wx-srv-adv-switch-input:focus-visible + .wx-srv-adv-switch-track {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wx-srv-adv-stage,
+  .wx-srv-adv-switch-track,
+  .wx-srv-adv-switch-knob {
+    transition: none;
+  }
+  .wx-srv-adv-stop,
+  .wx-srv-adv-pic-pending {
+    animation: none;
+  }
+  .wx-srv-adv-spinner {
+    animation-duration: 3s;
+  }
+}
+
+/* Phones */
+@media (max-width: 440px) {
+  .wx-srv-adv-bar {
+    gap: 4px;
+    padding-left: 10px;
+    padding-right: 6px;
+  }
+  .wx-srv-adv-title {
+    font-size: 14.5px;
+    gap: 5px;
+  }
+  .wx-srv-adv-title-globe {
+    font-size: 16px;
+  }
+  .wx-srv-adv-bar-actions {
+    gap: 3px;
+  }
+  .wx-srv-adv-chip {
+    padding: 6px 8px;
+    font-size: 12.5px;
+    min-height: 34px;
+  }
+}
+
+@media (max-width: 380px) {
+  .wx-srv-adv-title-globe {
+    display: none;
+  }
+  .wx-srv-adv-bar-actions {
+    gap: 3px;
+  }
+  .wx-srv-adv-chip {
+    padding: 6px 7px;
+    font-size: 12px;
+  }
+  .wx-srv-adv-hint-main {
+    font-size: 16.5px;
+  }
+  .wx-srv-adv-big {
+    font-size: 15.5px;
+    padding: 8px 10px;
+  }
+  .wx-srv-adv-card[data-action="decide"] .wx-srv-adv-dock-decide-row,
+  .wx-srv-adv-card[data-action="ask"] .wx-srv-adv-dock-ask-row {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-height: 520px) and (orientation: landscape) {
+  .wx-srv-adv-bar {
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+  .wx-srv-adv-stop {
+    min-height: 56px;
+    font-size: 22px;
+  }
+  .wx-srv-adv-hint {
+    top: 4px;
+    padding: 5px 14px 6px;
+  }
+  .wx-srv-adv-hint-main {
+    font-size: 15px;
+  }
+  .wx-srv-adv-toast,
+  .wx-srv-adv-nearest {
+    top: 56px;
+  }
+}
+
+/* The main-chat card: a small map of the country, one line of status, a button that opens the tab. */
+.wx-srv-bubble.wx-srv-bubble-adv {
+  align-self: stretch;
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px;
+  background: var(--wx-surface);
+  border: 1px solid var(--wx-border);
+}
+
+.wx-srv-adv-mcard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.wx-srv-adv-mcard-map {
+  display: block;
+  flex: none;
+  border-radius: 12px;
+  border: 1px solid var(--wx-border);
+}
+
+.wx-srv-adv-mcard-map[hidden] {
+  display: none;
+}
+
+.wx-srv-adv-mcard-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.wx-srv-adv-mcard-title {
+  font-weight: 700;
+  color: var(--wx-ink);
+}
+
+.wx-srv-adv-mcard-status {
+  margin: 0;
+  color: var(--wx-muted);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-adv-mcard-open {
+  min-height: var(--wx-srv-control-h);
+  padding: 0 18px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-brand-blue);
+  background: var(--wx-brand-blue);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* -- The Holiday bank (adventure/holidayBank.ts): a full-height screen like Links and the Gallery ---- */
+
+.wx-srv-bank-view {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  background: var(--wx-canvas);
+}
+
+.wx-srv-bank-view[hidden] {
+  display: none;
+}
+
+.wx-srv-bank-empty[hidden],
+.wx-srv-bank-loading[hidden],
+.wx-srv-bank-error[hidden],
+.wx-srv-bank-retry[hidden] {
+  display: none;
+}
+
+.wx-srv-bank-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.wx-srv-bank-title {
+  min-width: 0;
+  font-weight: 600;
+  font-size: 0.9375rem;
+}
+
+.wx-srv-bank-close {
+  flex: none;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  cursor: pointer;
+}
+
+.wx-srv-bank-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 12px;
+}
+
+.wx-srv-bank-trips {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wx-srv-bank-trip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wx-srv-bank-trip:hover,
+.wx-srv-bank-trip:focus-visible {
+  border-color: var(--wx-brand-blue);
+}
+
+.wx-srv-bank-trip-name {
+  font-weight: 700;
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-bank-trip-where {
+  color: var(--wx-brand-blue-text);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.wx-srv-bank-trip-headline {
+  color: var(--wx-muted);
+  font-size: 0.875rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-bank-empty,
+.wx-srv-bank-loading {
+  margin: 24px 0;
+  text-align: center;
+  color: var(--wx-muted);
+}
+
+.wx-srv-bank-error {
+  margin: 8px 0;
+  text-align: center;
+  color: var(--wx-danger, var(--wx-ink));
+}
+
+.wx-srv-bank-retry {
+  align-self: center;
+  min-height: 44px;
+  padding: 0 20px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  cursor: pointer;
+}
+
+/* -- Local food to try: the dishes as a photo-forward grid (adventure/packView.ts, spec §4.3b) ----------
+   Two columns on a phone, three from a desktop width; every dish is a square photo (or a text tile when the
+   server found no qualifying photo), its name, and one line of what it is. */
+
+.wx-srv-adv-dishes {
+  margin: 0 0 14px;
+}
+
+.wx-srv-adv-dish-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 10px;
+}
+
+@media (min-width: 720px) {
+  .wx-srv-adv-dish-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.wx-srv-adv-dish {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wx-srv-adv-dish:active .wx-srv-adv-dish-frame {
+  transform: scale(0.97);
+}
+
+.wx-srv-adv-dish-frame {
+  position: relative;
+  display: block;
+  aspect-ratio: 1 / 1;
+  border-radius: 16px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  transition: transform 0.12s;
+}
+
+.wx-srv-adv-dish-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* No photo: a tasteful tile in the pane's own colours, with the dish's description on it. */
+.wx-srv-adv-dish-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px;
+  background: linear-gradient(145deg, #1d3b63, #2a2150 60%, #4a2a3f);
+  border: 1px solid rgba(190, 220, 255, 0.18);
+  box-sizing: border-box;
+  text-align: center;
+}
+
+.wx-srv-adv-dish-glyph {
+  font-size: 30px;
+  line-height: 1;
+}
+
+.wx-srv-adv-dish-blurb {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: rgba(245, 248, 255, 0.86);
+}
+
+.wx-srv-adv-dish-name {
+  font-weight: 800;
+  font-size: 15px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-adv-dish-detail {
+  font-size: 12.5px;
+  color: rgba(232, 241, 255, 0.72);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The description is already on the tile of a dish with no photo. */
+.wx-srv-adv-dish-nophoto .wx-srv-adv-dish-detail {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wx-srv-adv-dish-frame {
+    transition: none;
+  }
+}
+
+/* The main-chat card's pictures: the first dish photo (once the pack has one) above the little map. */
+.wx-srv-adv-mcard-media {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wx-srv-adv-mcard-media:empty {
+  display: none;
+}
+
+.wx-srv-adv-mcard-dish {
+  display: block;
+  width: 96px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 1px solid var(--wx-border);
 }

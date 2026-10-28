@@ -701,7 +701,10 @@ unarchived failed original after seven days, and prunes completed cleanup rows a
 It never ages out pending work. The view-once backstop (`livechat-view-once-backstop`, spec 06) runs
 once at startup and then every 30 seconds: it sweeps claimed view-once messages older than 600
 seconds where the claimant disconnected or abandoned the download, permanently deleting their
-database rows and storage.
+database rows and storage. The Adventure Time holiday-pack job (`livechat-adventure-pack`, §23) is a
+`spawn`ed one-shot per round (started by the route that chose the place, and resumed for every
+`pending` pack by `AdventurePackRunner.resume` at startup); it contains its own failures by marking the
+pack `failed`, and shutdown cancels it without marking anything so the next start resumes it.
 
 If `/api/admin/server/usage` reports `erasurePending: true`, delete/wipe has committed and the
 worker still owes WAL or file cleanup. Check server logs for filesystem errors, restore access,
@@ -1953,31 +1956,67 @@ the answers filter keeps the game fun but the chat has no per-person secrecy (In
 - **Full screen.** While the chat is unlocked (`panel.ts` state `chat`/`fading`) it reports `onFullscreenChange(true)`;
   `shell.ts` adds `wx-shell-srv-full` to the shell root and `style.css` hides the top bar, nav row, side nav
   and edit-bar host; the version badge moves into the chat header's left, replacing the "Server" title and name chip (`wx-shell-srv-version-in-header`; workspace 00046; it returns to the status bar on exit, and if no header exists the status bar stays as a slim badge-only strip). Locking, or leaving `/admin/server`, removes it. The header's panic ✕ is the exit.
-- **Tabs.** `wyrGame.ts` (`createWyrGame`) owns the tab bar (`.wx-srv-tabs`, under the composer; hidden unless a game is
-  open — one tab means no bar), the game pane (`.wx-srv-game`, in the thread's place while the WYR tab shows) and the
-  pop-up (`.wx-srv-gamepop`). `thread.ts` creates it after the composer and implements its callbacks
-  (`applyGameLayout` hides/restores the thread wrapper, saves its scroll, abandons the pen).
-  `open(seq)` (starter / tapping a card's Play) shows the tab; `offer(seq)` (a round someone else started, or the newest
-  unfinished round at load) adds it with a dot without switching; `close()` removes it and remembers the dismissal.
+- **The shared game frame** (spec `spec/server-chat/08-adventure-time.md` §5.1). Every game — would-you-rather today,
+  Adventure Time next — plugs into the same two modules, so an improvement to the per-item chat reaches every game:
+  - `gameTabs.ts` (`createGameTabs`) is the **tab bar** (`.wx-srv-tabs`, under the composer): "Chat" plus one tab per OPEN
+    registered game (`.wx-srv-tab.wx-srv-tab-game.wx-srv-tab-<key>`, `data-game="<key>"`, in registration order, each with
+    its own dot); with no game open there is one tab and the bar is hidden. A game registers a `GameRegistration` (`key`,
+    `tabLabel`, `tabAriaLabel`, its `pane`, `exists(seq)`, `refresh(seq)`, optional `onShow`/`onHide`, `reset()`); the frame
+    shows only the active game's pane and calls `refresh(seq)` only for it. API: `register`, `open(key, seq)` (starter /
+    tapping a card's Play: shows the tab and clears that game's dismissal), `offer(key, seq)` (an item someone else
+    started, or the newest unfinished one at load: adds the tab with a dot without switching; a `seq` the person closed is
+    not offered again), `close(key)` (removes the tab, remembers the dismissal per game and `seq`, shows Chat if it was
+    active, closes the pop-up if it belonged to that game, resets the game's view), `showTab`, `activeTab`, `seqOf(key)`,
+    `chatTarget()` (the active game's item while a game tab shows, else the pop-up's item while the pop-up is open, else
+    `null` = the main chat), `noteChatActivity()` (dots Chat while a game tab shows), `refresh()` (closes any game whose item
+    vanished, refreshes the active pane, then the item chat), `reset()` (lock/wipe: forgets everything AND runs
+    `onLayoutChange` so a hidden thread comes back). **One game at a time** (operator, 2026-10-28: "there's only ever two tabs at
+    the bottom"): `open(key, seq)` and `offer(key, seq)` first RETIRE every other open game (`replaceOthers`): its pop-up chat
+    closes, its pane hides, its `reset()` runs (so a spin animation, a live relay or an idle-lock suspension it holds stops), its
+    tab goes and the screen falls back to Chat if it was showing — and, unlike `close`, **no dismissal is recorded** (the person
+    did not turn it away; a newer game took its place, and its card in the chat still opens it again). `onHide` is not called on
+    a retired game (`reset` stands for it). The bar therefore only ever holds Chat plus one game tab. `thread.ts`'s `syncGames`
+    offers a game tab once per NEW anchor (`seenAnchor`, reset by a lock/wipe), choosing the newer anchor when a first load has an
+    unfinished round of both games, so an older unfinished round of one game never keeps pushing the other game's tab out on every
+    redraw.
+  - `itemChat.ts` (`createItemChat`) is the **per-item chat**: `createStrip()` returns a `MiniStrip {element, draw(seq|null)}`
+    (the fixed 60 px mini chat strip — each game embeds its own in its own pane) and `openPopup(seq, title)` /
+    `closePopup()` / `isPopupOpen()` / `popupSeq()` drive the ONE pop-up (`.wx-srv-gamepop`) all games share; `refresh()`
+    redraws every strip and the pop-up, `reset()` closes the pop-up and unbinds the strips. It takes the thread's data and
+    the composer through its deps (`gameMessages`, `gameEchoes`, `isMine`, `renderBubble`, `disposeBubble`,
+    `mountComposer`, `onLayoutChange`, `afterChange`).
+  - `thread.ts` creates `itemChat` and `gameTabs` once after the composer and implements their callbacks
+    (`applyGameLayout` hides/restores the thread wrapper whenever ANY game tab is active, saves its scroll, abandons the
+    pen); `resetGames()` (`itemChat.reset()` then `gameTabs.reset()`) runs on lock, wipe and teardown. `gameLabelFor(anchorSeq)`
+    names the game an anchor message belongs to for the main-chat tag (a new game adds its branch there).
+  - `wyrGame.ts` (`createWyrGame`) is now ONLY the would-you-rather pane (header, picture stage, controls host, the
+    maximize-pictures dialog and its own `MiniStrip`); it registers itself as `"wyr"` (tab "WYR", aria "Would you rather
+    game") and exposes `pane`, `open/offer/close/gameSeq` for its own round. A new game copies that shape: build a pane,
+    `createStrip()`, `tabs.register(...)`.
 - **The game pane**, top to bottom: header (title, Topics, Next ▸ once a round is revealed/skipped, ✕), the picture stage (tap
   flips A/B; both images are preloaded; a text-only round shows the option as large text, a `pending` job shows
   "Painting…"), the controls (`wyrControls.ts`: Play/Skip, a pick row and a guess row, Reveal, results), the mini chat
-  (a FIXED 60 px strip: this card's last two messages + echoes, one line each cut with an ellipsis, attachments as
+  (the shared `itemChat.ts` strip, a FIXED 60 px: this card's last two messages + echoes, one line each cut with an ellipsis, attachments as
   20 px thumbnails, and a "Chat N" button on the right; it never changes height, so the stage and controls never shift
   and nothing spills onto the composer — pinned by the "stays tidy on a phone" e2e; tap → pop-up) and — below, as always — the
   one composer, which now sends into the card.
-- **Game chat routing.** Messages are ordinary; `game.chatTarget()` (the open round's seq while the WYR tab or the
+- **Game chat routing.** Messages are ordinary; `gameTabs.chatTarget()` (the open item's seq while a game tab or the
   pop-up is in use) is spread into every text `sendMessage` as `wyrSeq` (`wyrSendFields()` in `thread.ts`), and optimistic
   echoes carry it so the mini chat shows them at once. A voice note captures its target when recording stops. View-once
-  is main-chat only: its button is disabled in the game chat and a view-once draft is refused there. A message carrying `wyrRef` gets a small "WYR" tag in the main
-  chat and is the card's chat in the tab and pop-up.
-- **The pop-up** is the same chat larger: the card's whole history (the thread's embedded bubble renderer, updated
-  incrementally) with the ONE composer re-parented into it (`mountComposer(host)`), so voice notes, attachments and the
+  is main-chat only: its button is disabled in the game chat and a view-once draft is refused there. A message carrying
+  `wyrRef` gets a small tag naming its game in the main chat (`.wx-srv-bubble-gametag`; the WYR one also keeps the
+  original `.wx-srv-bubble-wyrtag`; the label comes from `gameLabelFor(anchorSeq)`: "WYR" when the anchor message has
+  `wyr`, and also for an anchor outside the loaded history, since would-you-rather was the only game when the tag began)
+  and is the item's chat in the tab and pop-up.
+- **The pop-up** (`itemChat.ts`) is the same chat larger: the item's whole history (the thread's embedded bubble renderer,
+  updated incrementally so an unchanged bubble keeps its node and a playing voice note is never cut off) with the ONE
+  composer re-parented into it (`mountComposer(host)`), so voice notes, attachments and the
   draft all work and survive the move. Its ✕ or the backdrop closes it and returns the composer (not Escape: Escape is the chat's panic key and locks everything).
+  It closes when the person leaves its game's tab, when its game closes or points at another item, and on lock/wipe.
 - **The main-chat card** (`wyrCard.ts`) is now a preview: the question, both pictures side by side, one status line and
   a Play/Open button that opens the tab. It has no answer controls.
-- **Files.** `admin-ui/src/server/{wyrGame,wyrControls,wyrCard,wyrModel}.ts`, `api/wyr.ts`; tests
-  `admin-ui/tests/{serverWyr,serverWyrGame,serverChatCss}.test.ts`, panel/shell tests for full screen, and
+- **Files.** `admin-ui/src/server/{gameTabs,itemChat,wyrGame,wyrControls,wyrCard,wyrModel}.ts`, `api/wyr.ts`; tests
+  `admin-ui/tests/{serverGameTabs,serverItemChat,serverWyr,serverWyrGame,serverChatCss}.test.ts`, panel/shell tests for full screen, and
   `e2e/tests/server-wyr.spec.ts` (two people, tabs, picture flip, full screen, 360 px phone).
 
 ## 21. The gallery (workspace 00046, decisions/00185)
@@ -2095,3 +2134,265 @@ screen as she sends it and on the other person's as it arrives. Nothing is sent 
   rAF, listeners and the suspension are all removed. Escape is also the chat's panic key; the scene does not
   swallow it, so the lock still happens. `prefers-reduced-motion: reduce` skips the scene for a static starfield.
 - **Tests.** `admin-ui/tests/server/goodnight{Match,Dither,Timeline,Scene}.test.ts`, `threadGoodnight.test.ts`.
+
+## 23. Adventure Time: the globe holiday game, server half (workspace 00056; spec `spec/server-chat/08-adventure-time.md`, decisions/00192, Inv 56)
+
+The header's ... menu has **Adventure Time**: one person spins a globe sideways, the other sees the finger as a
+fading trail, the globe lands (the second spin is up/down), the camera zooms 30 % inland and countries light up at
+random until someone presses **Stop**, then the same over that country's top places; Stop zooms to the place and an
+AI researches a **holiday pack**. **Let's go there** banks it; **No** puts it on a never-again list. This section is the
+SERVER half (the client half — world map, geometry, renderer, pane, card, Holiday bank — is the spec's §3/§5). The
+server's job is consistency, not anti-cheating: the client that makes a move computes its consequence and posts it, the
+server validates the SHAPE and BOUNDS and stores it once, and every other client replays the stored values (one
+geometry implementation, in TypeScript; the pair are trusted, Inv 40).
+
+- **Modules.** `livechat/adventure_bank.py` (the static destination bank: strict loader, exclusion, top-five
+  spacing), `livechat/adventure_destinations.json` (the bank), `livechat/adventure_game.py` (validation of a move +
+  the wire shapes), `livechat/adventure_pack.py` (the holiday-pack job and its prompt/parse/sanitise),
+  `routes_livechat_adventure.py` (the routes), the store methods in `livechat/store.py`, the chat-spawn run calls
+  in `cmdchat.py` (the ONE chokepoint to cmd, Inv 13), and for the pack's pictures `livechat/adventure_pictures.py`
+  (the plan, the sources, the image check, the job) over `livechat/safe_fetch.py` (the SSRF-safe GET).
+- **Storage** (schema v20, additive; v19 is deployed and untouched): `adv_rounds` (one row per anchor message,
+  `ON DELETE CASCADE`, explicit `DELETE` in wipe — the Inv 54 pattern) holds `state`, both spins
+  (`{by, from, delta, durationMs, at}` JSON), the landing (`{point, sea, land, centre, landUnit}`), each roulette's
+  candidates / `seed` / `roulette_at`, the chosen country and place with who chose them, the pack
+  (`pack` state, `pack_run_id`, `pack_json`, `pack_error`), `decided_by`, `rev`; `adv_rejected(destination_id)` is the
+  never-again list (ids only, no FK, survives a message delete, cleared by a wipe); `adv_settings(id=1,
+  include_advised)` is the shared "include places the UK says not to travel to" preference (default off, no row =
+  default, a wipe leaves it alone). Banked trips are derived from `state = 'banked'`. The game chat reuses `wyr_chat`
+  (`create_message(wyr_anchor_seq=)` accepts an adventure anchor; `WyrRoundNotFoundError` is the one not-found error);
+  the wire keeps `wyrSeq`/`wyrRef` ("the game-chat anchor of ANY game") and adds `wyrRefKind` (`"wyr"`/`"adventure"`,
+  resolved at read time in the same query). `Message.adventure = {state, pack, rev}` is joined at read time like `wyr`.
+- **State machine.** `spin_lng -spin(lng)-> spin_lat -spin(lat, result)-> country -stop(country)-> destination
+  -stop(destination)-> chosen -decide-> banked | rejected`; a country with exactly one place left goes straight to
+  `chosen`; a new adventure abandons every round in `spin_lng|spin_lat|country|destination` (never `chosen`). Anyone
+  unlocked may make any move; `by` records who. Every mutation runs under `BEGIN IMMEDIATE`, samples the clock only
+  AFTER the write lock (decisions/00186), bumps `rev`/`updated_at` and appends one `message_updated` event. **Every
+  mutation is idempotent**: the SAME move replayed (same axis+from+delta, same stage+choice, same decision) answers
+  200 with the unchanged view and appends nothing; a DIFFERENT move after the state advanced is 409 `bad_state`; of two
+  racing writers the first wins.
+- **Spin validation** (`adventure_game.parse_spin`): `|from| <= 1e6`, `720 <= |delta| <= 3600`,
+  `3500 <= durationMs <= 7000`, all finite; the `lat` spin REQUIRES `result` (`point`, `land`, `centre` as `[lng, lat]`
+  in degrees, `sea`, `landUnit`, 1-10 unique `candidates`), the `lng` spin REFUSES it; `landUnit` and every candidate
+  must be playable bank units (a whole-country-advised unit only while the preference is on). The `lat` spin stores the
+  landing and candidates, draws `country_seed` (a random uint32) and sets `country_roulette_at = now + durationMs/1000
+  + 5 s`. Wire details and error codes: [contracts.md](contracts.md).
+- **Roulettes.** Stop posts the id the presser SAW lit; it must be one of the stage's candidates (422) and the roulette
+  must have started (`409 too_early`, 1 s tolerance). The country stop reads the exclusion state INSIDE the
+  transaction (`remaining = bank - rejected - banked`) and takes the unit's **top five** with
+  `AdventureBank.top_destinations`: walk the remaining places in rank order, take one only if it is at least 40 km
+  (great-circle) from every one already taken (so the dots never overlap — Peru's Machu Picchu, Cusco and the Sacred
+  Valley sit within ~75 km), then fill any shortfall from the skipped ones in rank order; skipped places are held
+  back, never consumed. None left (or an advised unit while the preference is off) is `409 exhausted` and the round
+  stays on `country`; exactly one left skips to `chosen`; otherwise `destination` with a fresh seed and
+  `dest_roulette_at = now + 3.5 s`.
+- **Decide.** Only from `chosen`. Reject inserts the place into `adv_rejected` in the same transaction and, if the
+  research is still running, ends it (`pack -> failed`, so the job's compare-and-set finds nothing waiting and cancels its
+  run). Bank keeps the trip and removes the place from later draws; a pack still `pending` when banked still lands.
+- **The view** (`GET /adventure/{seq}`, `adventure_view_json`) carries `serverNow` (the client keeps the smallest-
+  round-trip offset and drives every animation from server time), `eligible` only while spinning (computed at READ time,
+  so the preference reaches open rounds), names resolved from the bank, and `pack: {state, data, error, canRetry}`.
+- **The live trail.** `POST /adventure/live` validates a frame (ids 8-64 chars, `anchorSeq` 1..2^53-1, a bounded frame
+  counter, finite rotation, at most 32 `[x, y, t]` points with `|x|,|y| <= 3` and `0 <= t <= 600000`, axis enum),
+  rate-limits it at 30 a second with its OWN `SlidingWindowRateLimiter` on the same authenticated identity key as drawing
+  live, and relays it as the id-less SSE event `adventure_live` through the generalised `DrawingBroker`
+  (`publish(frame, event)`; a frame carries its event name, drawing frames default to `drawing_live`, unchanged).
+  Never stored, never logged (Inv 56).
+- **The holiday pack** (`adventure_pack.py`). Entering `chosen` sets `pack = pending` (or `unavailable` when no
+  researcher is configured) in the same transaction; the route then spawns `AdventurePackRunner.run_job` on the contained
+  group (Inv 47). The job starts a hidden, unparented cmd chat-spawn run
+  (`POST /api/chat-spawn/runs`: `caller: wixy-adventure-pack`, `claude-sonnet-5-5`, `effort: medium`, `bucket:
+  subscription`, `timeout_secs: 1200`, `build_space: primary`, no `tag`, every file/shell/agent tool disallowed, `cwd` the
+  empty non-git folder `<server storage dir>/adventure-research`, forward slashes), polls it every 10 s (the response
+  NESTS the row under `run`; statuses `queued|running|completed|error|timeout|cancelled`) and reads `run.response_text`.
+  The prompt names ONLY the bank destination (name, region, unit, coordinates) and demands one final JSON object in
+  the pinned shape, in a warm friend-to-the-couple voice that never mentions its searches, with `travelAdvice` taken
+  from the country's gov.uk page. `parse_pack` takes the last usable JSON object in the text and `sanitise_pack` validates
+  and clips every string, keeps only `http(s)` URLs with a dotted host (at most 500 characters, no credentials), drops unknown
+  keys and fails a pack with no sections; the canonical JSON is stored in `pack_json`. Limits: `CapacityLimiter(2)` runs
+  in flight, spawns at least 5 s apart (cmd's parallel-spawn gotcha), give up after 25 minutes (cancelling the run), one
+  retry for a cmd `error` in the first 150 s of a run; a spawn is never repeated once its answer might have been lost
+  (`cmdchat._request(connect_errors_only=True)`). Failure text is short and generic ("The research didn't finish -
+  try again"); cmd unreachable at the start is `unavailable`. Writes are compare-and-set on
+  `(pack = 'pending' AND pack_run_id = <this run>)`, so a blue/green overlap stores a result once and a rejected or deleted
+  round is left alone. **At startup** `AdventurePackRunner.resume` restarts the job for every `pending` round: with a run
+  id it resumes polling that run, without one it starts a new run; with no researcher those rounds become `unavailable`.
+- **Pictures in the pack** (spec §4.3a, decisions/00191). The research NAMES things and supplies no image
+  link: every item keeps `url` (the venue's own site where it has one) and gains an optional `wikipedia`
+  (an English Wikipedia article title, `clean_wikipedia_title`), and the pack gains `wikipedia` for the
+  destination. Once the text pack lands `ready` (published at once), the SERVER finds and fetches the
+  pictures — a viewer's device never contacts a third-party image host from a private chat. In the same
+  write that stores a `ready` pack `finish_adventure_pack(pictures_pending=True)` sets `images = pending`;
+  `AdventurePackRunner.run_job` then runs `AdventurePictureJob.run` (still a contained task, Inv 47,
+  OUTSIDE the research slot), which plans the slots from the pack (`plan_pictures`: round-robin across
+  dishes, sights, food, stay, culture, do by item position, the local dishes first; at most 6 dishes and
+  20 other items), hunts through the finder
+  (`WebPictureFinder`; `create_app(adventure_picture_finder=...)` is the seam), stages each JPEG at
+  `uploads/<id>/assembled` and attaches them all in ONE transaction
+  (`create_adventure_picture_attachments`, modelled on `create_wyr_image_attachments`) as ordinary private
+  `photo` attachments on the ANCHOR message (ordinal = slot order), so renditions, signed URLs, quota and
+  delete/wipe erasure (Inv 46) are the attachment machinery's. The attach is a compare-and-set on the
+  round still being `chosen`/`banked` with its pack `ready` and `images = pending`: a rejected, deleted or
+  already-finished round attaches nothing (the ids are journaled for cleanup, the staged files removed).
+  `list_gallery` leaves them out like the would-you-rather pictures. `adv_rounds.images`
+  (`none|pending|done|failed`) and `adv_rounds.pictures` (the slot map JSON) are part of the v20 DDL (amended
+  in place — v20 was never deployed — and added by `_ensure_adventure_picture_columns` to a database that ran
+  the earlier text). Sources per slot, in order: (1) the Wikipedia REST summary's lead image taken as its
+  Commons file — the name is parsed from the thumb URL's path AFTER the two hash directories (never the last
+  segment; a local enwiki upload is skipped) — and fetched as the Commons API's 1600 px THUMBNAIL (never an
+  `upload.wikimedia.org` original: a file smaller than the thumbnail step is asked for again at the next
+  standard step down), credited from `extmetadata` (Artist HTML stripped + licence); (2) the venue page's
+  `og:image` / `twitter:image` (HTML <= 1 MB, 403/429 skipped quietly), credited to `og:site_name` or the host;
+  (3) hero and sights only: a Commons file-namespace search (`filemime:image/jpeg`, short side >= 900, no
+  map/flag/logo titles, landscape first). The hero is the destination article's lead plus search photos up to
+  5 (cap 6); at most 22 pictures per pack — hero 6, local dishes 6, every other item 10; a file found twice (Commons title or content digest) is kept once —
+  the destination's lead first, then the items in plan order — and a slot that lost it tries its own
+  fallbacks. Every picture is checked (`prepare_picture`: `image/*` content type before the body is read,
+  JPEG/PNG/WebP magic bytes, then the size the FILE'S OWN HEADER declares — PNG IHDR, the JPEG start-of-frame
+  (two refused), the WebP VP8X canvas / VP8 / VP8L frame header — is read from the bytes and checked BEFORE
+  `Image.open` (<= 16 MP, short side >= 480, aspect <= 3:1; libwebp allocates canvas buffers inside `open`),
+  Pillow must agree with the header, one frame) and rebuilt, shrink-first, as a metadata-free sRGB JPEG of
+  <= 1600 px (`processing.reencode_still_as_jpeg`: a JPEG decodes at reduced scale, everything is resized
+  before the orientation / colour / flatten / metadata copies; the chat-upload `process_photo` is untouched).
+  Decodes run ONE at a time; the measured worst case is ~280 MB transient (decisions/00191, Inv 44).
+  The whole hunt gives up after 240 s and keeps what it has. **Fetching** is `livechat/safe_fetch.py`
+  (`SafeFetcher`, Inv 56's SSRF rules) — nothing else fetches a URL the engine did not build. The view's
+  `pack.images` is `"pending"` while the hunt runs or a stored picture is still processing, else `"done"`;
+  `pack.pictures` is `{hero, items}` of `{thumbUrl, fullUrl, credit, page, caption}` built from the anchor's
+  READY attachments (contracts.md). The round's `rev` moves as each picture becomes ready
+  (`finish_attachment`), and the view reads the round and its attachments in one transaction. **Restarts and
+  self-healing**: `AdventurePackRunner.resume` redoes the hunt for every round still `images = pending` (the
+  attach is all-or-nothing); a shutdown mid-hunt leaves it pending; rejecting ends the wait (`failed`). A
+  pending wait is never startup-only: `adv_rounds.images_started_at` / `images_tries` record the current hunt
+  and a supervised loop (`livechat-adventure-pictures-watch`, Inv 47) re-claims, by compare-and-set
+  (`claim_adventure_pictures`), any wait older than `JOB_BUDGET_S + 120 s` and hunts it again — the old side of
+  a blue/green hand-off being stopped mid-hunt, or `fail_adventure_pictures` itself failing — and ends a round
+  whose hunts keep dying after three tries. Third-party text (page `<meta>`, JSON, credits) is parsed in a
+  thread, the page's bytes cut to 200 KB and decoded only with a web charset (`punycode`, `idna`, ... are read
+  as UTF-8). A venue image tag on Wikimedia goes through the Commons thumbnail or is skipped.
+- **Local food to try** (spec §4.3b, decisions/00191 addendum). The first section of a pack is `dishes` ("Local
+  food to try": 4-6 signature dishes and drinks, each with `wikipedia` = the English article title OF THE DISH and
+  no link); `food` is "Where to eat"; the sanitiser puts `dishes` first and a pack without it is valid. A dish's
+  picture (`WebPictureFinder.wikipedia_picture(require_food=True)`, `dish_search_picture`, rules in
+  `livechat/adventure_dishes.py`) is its article's lead image ONLY when the summary's description or first
+  sentence reads as food, else a Commons search for `"<dish>"` then `<dish> <unit>` accepted ONLY when the file's
+  title contains a significant accent-folded token of the dish (>= 4 letters) AND its Commons categories or
+  description mention food (JPEG, short side >= 480, <= 3 downloads per dish); never an article's other images —
+  "Buzara" is a genus of moths on English Wikipedia, and both checks reject its photos. A dish with no
+  qualifying photo stays text-only. Keyed `dishes:<i>` in `pack.pictures.items`. Measured (Kotor, real services):
+  9 of 12 dishes pictured, all correct.
+  No picture finder (standalone, no researcher, no media pipeline, or a test that injected a researcher
+  without a finder) means a pack has no pictures and `images` stays `none`.
+- **Edition.** `create_app(adventure_researcher=...)` is the seam (plus `adventure_bank=`, `adventure_pack_timing=`
+  and `adventure_picture_finder=`).
+  The default is a `CmdAdventureResearcher` over the app's `CmdChatClient` on the fleet edition when the AI backend is
+  cmd; otherwise none (standalone: `pack = unavailable` at once, Bank/Reject still work). The e2e fixture server wires
+  one at the fake cmd, which answers every run with `fake_cmd.CANNED_ADVENTURE_PACK` after ~2 s.
+- **Honest limits.** cmd keeps its own copy of each research run (the prompt — the bank destination — and the final
+  answer) in its hidden ledger and transcript, which delete/wipe cannot reach (Inv 56, operator decision #2113). Live
+  frames reach only streams on the same blue/green process (like live drawing). A pack still researching when its
+  message is deleted costs the research it already spent (the job notices and cancels the run on its next poll).
+### 23.1 The client half (`admin-ui/src/server/adventure/`; spec §3, §4.4, §5)
+
+The pane, the card and the Holiday bank sit on the globe ENGINE (`world/land/physics/roulette/trail/camera/fastmap/imagery/
+basemap/globe.ts`, spec §3) and the shared game frame (§20).
+
+- **Modules.** `api.ts` (every call and every parser: nothing in the game trusts a shape; a pack link is kept only when it is
+  http(s), a PICTURE only when its URL is on THIS origin), `model.ts` (the per-round view cache and the server clock), `live.ts`
+  (the finger-trail sender and receiver), `scene.ts` (the picture and the words, derived from the view and the clock),
+  `packView.ts` (the holiday-pack panel and the photo viewer), `adventureGame.ts` (the pane: DOM, frame loop, pointer input,
+  calls), `adventureCard.ts` (the main-chat card), `holidayBank.ts` (the Holiday bank screen). `stream.ts` maps the
+  `adventure_live` SSE event; `types.ts` gained the idle-lock reason `"adventureAnimating"`.
+- **The model** (`createAdventureModel`). A message's `adventure` summary (`{state, pack, rev}`) only TRIGGERS a read of
+  `GET /adventure/{seq}`; a mutation answers with the fresh view (`model.run` times it and applies it). A view is never replaced
+  by an older one. A server that answers with something OLDER than its own summary is asked again on the retry ladder (2, 5, 15,
+  30 s), never in a tight loop (a regression test pins it). A renewed unlock token re-reads every held view (the pack's picture
+  URLs are signed). **The clock** (spec §4.4): every view carries `serverNow`; the model keeps `offset = serverNow − localNow`
+  from the response with the SMALLEST round trip (a round trip over 5 s says nothing; an old best sample is let go after 10
+  minutes so drift is followed) and `serverNowS()` is local time plus that offset.
+- **The scene** (`AdventureScene`: no DOM, no timers; `update(nowMs)` returns the `GlobeFrame` and the `Hud`). Everything timed
+  comes from stored SERVER timestamps, so two screens agree and a screen that opens the tab late jumps to the right point: a spin
+  is `from + delta · easeOutCubic((now − at) / duration)`; the ripple, the dotted glide ("Nearest land: X") and the zoom to the
+  candidate countries run from the end of the second spin; the country roulette from `country.rouletteAt`; the Stop that picked
+  the country happened at `destination.rouletteAt − 3.5 s`, so the settle pulse and the flight to the places are timed from there.
+  The one thing the server never stores is when the LAST Stop happened: the zoom to the place starts when this screen sees
+  `chosen` (or when the person pressed Stop); a screen that opens later shows the place at once. Local state: the finger (the
+  globe follows it, axis-locked), the spin THIS screen just made (it animates from the release, before the server answers; the
+  lat spin's POST carries the landing `computeLanding` made at release), the Stop just pressed (the settle shows at once and the
+  roulette freezes on the choice until the server answers), and the explorable map (drag, pinch/wheel, "Back to the place"; zoom-in
+  floor `MIN_VIEW_RADIUS_DEG`, or `MIN_VIEW_RADIUS_TEXTURED_DEG` while imagery shows). Where a local timeline hands over to the
+  server's (a watcher's live drag becoming the committed spin; a spin that lost a race) the displayed angle is BLENDED over
+  `CATCHUP_MS` (400 ms), never jumped; the first sight of a round is not blended. Reduced motion: a spin shows at its end at once,
+  camera moves cut, no ripple/glide, no trail. Whose turn: the starter spins sideways, then the other person than whoever moved
+  last ("Your turn" / "<Name>'s turn"); nothing is ever refused for being the "wrong" person.
+- **The pane** (`createAdventureGame`; tab "Adventure", `data-game="adventure"`, registered as `"adventure"`). Header 🌍 Adventure
+  Time · Options · Bank · New · ✕; the stage (canvas, hint pill, toast, "Nearest land", the big lit name, "Back to the place"); the
+  pack area (the stage shrinks to 38 % when the pack is ready or has failed; "Preparing holiday pack…" with an elapsed timer and the
+  stage at full size while it is pending; the Explore map toggle); the action dock (the big coral **Stop**, **Bank this ✓** /
+  **No thanks ✕** — the reject asks once, "Never show <name> again?" with *Never show again* / *Keep it* —, Play again); the shared
+  mini chat strip. **Stop fires on the press** (what you saw lit is what you get; a click that follows a press within 700 ms is
+  ignored). A spin POST is retried up to 3 times on a network failure (the same move is idempotent on the server), then taken back
+  with a message and a re-read; a 409 says "Somebody else got there first." and re-reads; `exhausted` names the country; a 401 locks
+  the chat. The Options sheet holds the shared "Include places the UK says not to travel to" switch (`GET/PUT /adventure/settings`,
+  off by default, lists the units it governs) and the per-DEVICE **Map style** (Satellite / Atlas / Classic, `imagery.ts`, default
+  Satellite; disabled with a plain note where there is no WebGL 2) with the imagery credit line. The sheet closes by Done or its
+  backdrop, NEVER by Escape (the panic key; nothing in the game listens for it).
+- **Where the pane lives.** `thread.ts` inserts the pane into the chat only while the game is open and removes it when it closes
+  (`syncAdventurePane`, called from `applyGameLayout`): a chat that is not playing carries no canvas, WebGL layer or hidden
+  controls (and `.wx-srv-game` stays one element, which the would-you-rather specs rely on). The canvas joins the stage when the
+  pane is first shown; `reset()` (the game closing, a lock, a wipe) DESTROYS the renderer (its WebGL context and imagery texture)
+  and the next opening builds a new one over the cached world.
+- **The idle lock** (R7). `hooks.suspend("adventureAnimating")` is held ONLY while something moves on screen (a finger on the
+  globe, a spin, the landing, a roulette, a settle, the arrival zoom) — never during the pack wait, which is minutes long — and a
+  roulette left flickering holds it for at most `ROULETTE_SUSPEND_CAP_MS` (90 s): the lock is a privacy feature, a phone put down
+  mid-roulette must still lock. It is released on another tab, on close, and on every lock/wipe. Every control and the stage carry
+  `data-srv-gesture-boundary`.
+- **The live trail** (`live.ts`, spec §3.5). The sender is `drawingLive.ts`'s pacing: one request in flight, at most one frame
+  every 50 ms (20/s), at most 32 points a frame (each point travels with the rotation it was made at), a 429's Retry-After is
+  waited out, a still finger re-sends every 2 s, every drag has its OWN id (`clientId`) and frame counter, and a drag ends with an
+  `end` frame (a cancel sends one only if something already went out; a lock posts the owed `end` before the session goes). The
+  receiver ignores its own ids, frames for another round or axis, frames for a spin the round no longer waits for
+  (`waitingForSpin`), and stale frames; it keeps a 160 ms JITTER BUFFER (it shows the dragger's state as it was 160 ms ago,
+  interpolating the rotation between frames and moving each finger point onto the fading stroke when the buffer reaches it,
+  back-dated), so ~20 Hz unevenly arriving frames drive a smooth globe and a stroke that keeps the finger's own pace. A finished
+  drag's last rotation is held (8 s) for the committed spin to take over; a silent finger is dropped after 5 s.
+- **Local food to try** (spec §4.3b, operator 2026-10-28: "food is essential"; `packView.ts`). The pack's `dishes` section (items
+  `{name, detail, wikipedia}`; pictures `pack.pictures.items["dishes:0".."dishes:5"]`) is drawn straight after the hero carousel and
+  the summary as a photo-forward grid, wherever the section sits in the list and exactly once: two columns on a phone, three from
+  720 px; each dish is a square photo (the `thumbUrl`), its name and one line of detail. A dish with no photo — the server leaves a
+  dish text-only when nothing qualifies, a wrong photo being worse than none — is a text tile in the same grid (🍽 and its description
+  on the pane's own gradient); while `images` is `pending` a dish without a photo shimmers instead; a photo that will not load
+  becomes the text tile. A tap opens the SAME full-screen viewer as the other photos, on that dish: the photo (the `fullUrl`) or, for a
+  dish with none, a tile, then the dish's name, its WHOLE description and the photo's credit + source link, with Next/Previous/swipe
+  walking every dish of the pack (photo or not) and wrapping. The viewer's layout is a column (photo above, words below in a
+  scrolling area), so a 400-character description never pushes the controls off a 360 px phone. The `food` section is now "Where to
+  eat" (the client retitles it whatever the pack calls it). A pack with no `dishes` section is still valid and shows none of this.
+  `api.ts`'s `firstDishPicture(pack)` (the lowest-indexed dish with a photo — never a hero or another section's picture) feeds the
+  card.
+- **The card** (`adventureCard.ts`): a column of pictures beside the words — the first dish photo (96×72, once the pack has one; the
+  food is the first thing to see), then a 96×72 map of the country (d3 orthographic over the unit's `detail` shape, widened to hold a
+  far destination) with the destination dot once known — one line of status per state (text first; the pictures appear when
+  they have loaded; a dish photo that will not load simply disappears), and Play / Open. **The Holiday bank** (`holidayBank.ts`, `GET /adventure/bank`): a full-height screen like Links/Gallery
+  (under the header, closed by every lock and wipe), newest first; a tap closes it and opens that trip — `thread.ts`
+  `openAdventureTrip` first pages older history in until the trip's message is loaded (a trip may be months back), so its card and
+  its whole chat are there.
+- **Wiring** (`thread.ts`): the ⋯ menu's *Adventure Time — Spin the globe, find your next holiday* (after Would you rather?) and
+  *Holiday bank — Places you've saved*; `addAdventure` (the starter lands in the tab; `syncGames` OFFERS the other person a dot);
+  `message_updated` with `adventure` patches the card in place and re-reads the view; `adventure_live` frames go to the pane;
+  `gameLabelFor(anchorSeq, wyrRefKind)` tags a game-chat message "Adventure" or "WYR" in the main chat (`.wx-srv-bubble-gametag`,
+  `data-game`; the server's `wyrRefKind` wins, the loaded anchor is the fallback, "WYR" the last resort); every send path still
+  spreads `gameTabs.chatTarget()` as `wyrSeq`. Facts the pane keeps in step with what it draws (a canvas has no DOM to assert on, so
+  e2e reads them): `data-state`, `data-phase`, `data-lit`, `data-landing-unit`, `data-country`, `data-place`, `data-pack-state`,
+  `data-remote`, `data-map`.
+- **Files.** `admin-ui/src/server/adventure/{api,model,live,scene,packView,adventureGame,adventureCard,holidayBank}.ts`; tests
+  `admin-ui/tests/adventure/{api,model,live,scene,packView,card,bank,pane}.test.ts` (+ `adventureFixtures.ts`),
+  `admin-ui/tests/serverAdventureThread.test.ts`, `serverGameTabs.test.ts` (the one-game rule) and
+  `e2e/tests/server-adventure.spec.ts`.
+
+### 23.2 The server half's tests
+
+- **Tests.** `test_livechat_adventure.py`, `test_routes_livechat_adventure.py`, `test_livechat_adventure_live.py`,
+  `test_livechat_adventure_pack.py`, `test_adventure_bank_loader.py` + `test_adventure_bank.py` (+ the shared helpers in `adventure_testkit.py` and the
+  chat-spawn endpoints in `fake_cmd.py`), and for the pictures `test_livechat_safe_fetch.py`,
+  `test_livechat_adventure_pictures.py`, `test_livechat_adventure_pictures_job.py` (+ `fake_web.py`,
+  `fake_open_web.py`) — see [testing.md](testing.md).

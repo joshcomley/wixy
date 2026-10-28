@@ -190,3 +190,47 @@ real provisioning failure (decisions/00031).
   (`wx-srv-screenlock-proven`). Only such a device may read "no event, causal or batched" as "a tab
   switch". The proof is cleared on mount whenever there is no detector left able to have earned it
   (permission revoked, or no Idle Detection API at all).
+
+## Adventure Time (the globe holiday game, workspace 00056, Inv 56)
+
+- **Game-chat anchor** — the message a game's mini chat hangs off. The wire names `wyrSeq` (request)
+  and `wyrRef` (message) are historical: they mean the game-chat anchor of ANY game — a
+  would-you-rather round or an Adventure Time round — and `wyrRefKind` (`"wyr"` or `"adventure"`)
+  says which. Renaming them would break cached clients mid-deploy.
+- **Round state** (`adv_rounds.state`, `AdventureState`) — `spin_lng` (waiting for the sideways spin)
+  -> `spin_lat` (waiting for the up/down spin, which lands) -> `country` (the country roulette is
+  flickering; Stop picks one) -> `destination` (the roulette over that country's top places; Stop
+  picks one — skipped when only one place is left) -> `chosen` (a place waiting for a decision) ->
+  `banked` ("Let's go there") or `rejected` ("No"). `abandoned` = a newer adventure started before
+  this one reached `chosen`. A `chosen` round is never abandoned.
+- **Pack state** (`adv_rounds.pack`, `AdventurePackState`) — the researched holiday pack: `none`
+  (before `chosen`) -> `pending` (the research is running) -> `ready` | `failed`; `unavailable` = no
+  researcher is configured (the standalone edition) or cmd could not be reached to start one.
+  `failed` (or `unavailable` once a researcher exists) -> retry -> `pending`. Bank and Reject work in
+  every pack state.
+- **Landing / candidates** — where the up/down spin ended (`point`), the nearest land if that was
+  sea (`land`), the point the camera zooms to (`centre`, 30 % inland), and the 1-10 map units lit
+  by the country roulette (`candidates`). Computed by the client, validated and stored once by the
+  server.
+- **Roulette** — the shared flicker: the server stores a `seed` and a `rouletteAt` start time; both
+  screens derive the lit item from server time (four a second). Stop posts the id the presser saw
+  lit; a Stop before `rouletteAt` (less 1 s) is `too_early`.
+- **Never-again list** (`adv_rejected`) — destination ids the pair turned down. Survives deleting the
+  round's message; a wipe clears it. **Bank minus rejected minus banked** = what a draw may land on.
+- **Advised unit** — a map unit under a UK FCDO "advise against all travel" to the WHOLE country
+  (`advice` in the bank). Left out of draws unless the shared preference
+  (`adv_settings.include_advised`, off by default, operator decision #2113) switches them in.
+- **Holiday pack** — the food / places to stay / culture / sights / things to do / practical
+  write-up of a chosen place, researched live through a hidden cmd chat-spawn run
+  (`adventure_pack.py`), sanitised and stored on the round.
+- **Images state** (`adv_rounds.images`, `AdventureImagesState`) — the pack's PICTURE job: `none`
+  (the text pack is not in yet, or this server fetches no pictures) -> `pending` (set in the same
+  write that stores a `ready` pack; the server is finding and fetching pictures) -> `done` | `failed`.
+  The wire's `pack.images` is `"pending"` or `"done"` only. Pictures are ordinary photo attachments on
+  the anchor message plus a slot map (`adv_rounds.pictures`: slot -> attachment ordinal, credit, source
+  page, caption); a slot is `hero:<n>` or `<section key>:<item index>`.
+- **Dishes section** (`dishes`, "Local food to try") — the pack's first section: 4-6 signature local dishes and drinks (the dish itself, not a restaurant; `food` is "Where to eat"). A dish's photo must pass two checks (`livechat/adventure_dishes.py`): its title names the dish and its categories/description mention food.
+- **Safe fetch** (`livechat/safe_fetch.py`) — the one SSRF-safe GET behind every picture and page fetch
+  (public addresses only, vetted at connect time, bounded, polite); see Inv 56.
+- **Live trail** — the dragger's finger trail, relayed id-less as `adventure_live` SSE frames and
+  never stored.

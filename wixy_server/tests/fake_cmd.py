@@ -17,6 +17,7 @@ convention).
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 import time
 from dataclasses import dataclass, field
@@ -119,6 +120,98 @@ class FakeTranscribeRequest:
     `cleanup=0` and never a `session_id` or `context`."""
 
 
+CANNED_ADVENTURE_PACK: JsonObject = {
+    "headline": "Sun, tiles and custard tarts on the Atlantic edge of Europe",
+    "summary": "A hilly, walkable capital with trams, viewpoints and a famous food scene, "
+    "close to beaches and fairytale palaces.",
+    "wikipedia": "Lisbon",
+    "sections": [
+        {
+            "key": "food",
+            "title": "Food",
+            "items": [
+                {
+                    "name": "Pasteis de nata",
+                    "detail": "The custard tart every bakery sells; eat one warm with cinnamon.",
+                    "url": "https://example.com/food/pasteis",
+                    "wikipedia": "Pastel de nata",
+                },
+                {
+                    "name": "Grilled sardines",
+                    "detail": "A summer street-party classic.",
+                    "url": None,
+                    "wikipedia": None,
+                },
+            ],
+        },
+        {
+            "key": "stay",
+            "title": "Where to stay",
+            "items": [
+                {
+                    "name": "A tiled townhouse in Alfama",
+                    "detail": "Quiet rooms under the castle walls.",
+                    "url": "https://example.com/stay/alfama",
+                    "wikipedia": None,
+                }
+            ],
+        },
+        {
+            "key": "sights",
+            "title": "Sights",
+            "items": [
+                {
+                    "name": "Belem Tower",
+                    "detail": "A riverside fortress.",
+                    "url": None,
+                    "wikipedia": "Belém Tower",
+                }
+            ],
+        },
+    ],
+    "bestTime": "April to June and September to October.",
+    "gettingThere": "Direct flights from most UK airports, about two and a half hours.",
+    "travelAdvice": "The UK government advises no restrictions for Portugal.",
+    "sources": [{"title": "Visit Portugal", "url": "https://example.com/visit"}],
+}
+"""A valid holiday pack as the research model would return it (spec/server-chat/08 §4.3) — the
+default final answer of the fake chat-spawn runs, and what the e2e fixture serves."""
+
+
+@dataclass
+class FakeSpawnPlan:
+    """How ONE fake chat-spawn run behaves: it reports `running` for `running_polls` polls and until
+    `delay_s` seconds have passed, then settles on `final_status` with `response_text`."""
+
+    final_status: str = "completed"
+    response_text: str | None = None
+    running_polls: int = 0
+    delay_s: float = 0.0
+    error_text: str | None = None
+
+
+@dataclass
+class FakeSpawnRun:
+    run_id: str
+    session_id: str
+    body: JsonObject
+    plan: FakeSpawnPlan
+    created_at: float = field(default_factory=time.monotonic)
+    polls: int = 0
+    cancelled: bool = False
+    cancel_requests: int = 0
+
+    def status(self) -> str:
+        if self.cancelled:
+            return "cancelled"
+        if (
+            self.polls <= self.plan.running_polls
+            or time.monotonic() - self.created_at < self.plan.delay_s
+        ):
+            return "running" if self.polls > 0 else "queued"
+        return self.plan.final_status
+
+
 @dataclass
 class FakeCmdState:
     sessions: dict[str, FakeSession] = field(default_factory=dict)
@@ -176,6 +269,22 @@ class FakeCmdState:
     """The clips a RETAINING cmd would have persisted (a request without an honoured
     `private=1`) — the privacy tests assert this stays empty."""
 
+    chat_spawn_status_code: int = 201
+    """A non-201 makes `POST /api/chat-spawn/runs` refuse with that status (cmd refusing a run)."""
+    chat_spawn_final_status: str = "completed"
+    chat_spawn_response_text: str | None = None
+    """The final assistant message a run settles with; `None` = `CANNED_ADVENTURE_PACK` as JSON."""
+    chat_spawn_running_polls: int = 0
+    chat_spawn_delay_s: float = 0.0
+    chat_spawn_plans: list[FakeSpawnPlan] = field(default_factory=list)
+    """Per-run plans consumed IN ORDER by successive spawns (a run with no plan left behaves per
+    the four defaults above) — e.g. `[error, completed]` for the early-retry test."""
+    chat_spawn_runs: dict[str, FakeSpawnRun] = field(default_factory=dict)
+    chat_spawn_spawn_times: list[float] = field(default_factory=list)
+    """`time.monotonic()` of every accepted spawn (the >= 5 s spacing is asserted against it)."""
+    chat_spawn_in_flight_max: int = 0
+    next_run_n: int = 1
+
     def register_pin_app(
         self, app_key: str, pin: str, *, lockout_after: int = 5, lockout_seconds: float = 60.0
     ) -> FakePinApp:
@@ -199,6 +308,27 @@ class FakeCmdState:
         else:
             pin_app.attempts.pop(subject, None)
             pin_app.locked_until.pop(subject, None)
+
+    def create_spawn_run(self, body: JsonObject) -> FakeSpawnRun:
+        """Accept one `POST /api/chat-spawn/runs` body: pick its plan (the next queued one, else
+        the state defaults) and record the run."""
+        n = self.next_run_n
+        self.next_run_n += 1
+        if self.chat_spawn_plans:
+            plan = self.chat_spawn_plans.pop(0)
+        else:
+            plan = FakeSpawnPlan(
+                final_status=self.chat_spawn_final_status,
+                response_text=self.chat_spawn_response_text,
+                running_polls=self.chat_spawn_running_polls,
+                delay_s=self.chat_spawn_delay_s,
+            )
+        run = FakeSpawnRun(
+            run_id=f"run-{n:04d}", session_id=f"spawn-sess-{n}", body=body, plan=plan
+        )
+        self.chat_spawn_runs[run.run_id] = run
+        self.chat_spawn_spawn_times.append(time.monotonic())
+        return run
 
     def create_session(
         self,
@@ -423,6 +553,81 @@ def create_fake_cmd_app(state: FakeCmdState | None = None) -> FastAPI:
         if state.transcribe_engine is not None:
             body["engine"] = state.transcribe_engine
         return JSONResponse(body)
+
+    def _run_row(run: FakeSpawnRun) -> JsonObject:
+        """cmd's `chat_spawn_runs` row (the fields wixy reads, in cmd's names)."""
+        status = run.status()
+        row: JsonObject = {
+            "run_id": run.run_id,
+            "session_id": run.session_id,
+            "caller": run.body.get("caller"),
+            "model": run.body.get("model"),
+            "status": status,
+            "bucket": run.body.get("bucket"),
+            "response_text": None,
+            "error_text": None,
+        }
+        if status == "completed":
+            text = run.plan.response_text
+            row["response_text"] = (
+                text
+                if text is not None
+                else (
+                    state.chat_spawn_response_text
+                    if state.chat_spawn_response_text is not None
+                    else json.dumps(CANNED_ADVENTURE_PACK)
+                )
+            )
+        elif status in ("error", "timeout"):
+            row["error_text"] = run.plan.error_text or "process exited before end_turn"
+        return row
+
+    @app.post("/api/chat-spawn/runs")
+    async def chat_spawn_create(request: Request) -> Response:
+        """cmd's headless one-shot chat run: validate the body like cmd (a missing required field
+        is a 400, `spawned_by_session_id` must be present — `""` is the deliberate unparented
+        sentinel), record exactly what arrived, answer 201 with the row NESTED under `run`."""
+        if state.chat_spawn_status_code != 201:
+            return JSONResponse(
+                status_code=state.chat_spawn_status_code, content={"detail": "refused"}
+            )
+        body = await request.json()
+        if not isinstance(body, dict):
+            return JSONResponse(status_code=400, content={"detail": "body must be an object"})
+        missing = [k for k in ("caller", "prompt", "model", "cwd") if not body.get(k)]
+        if missing:
+            return JSONResponse(
+                status_code=400,
+                content={"detail": f"missing required field(s): {', '.join(missing)}"},
+            )
+        if body.get("spawned_by_session_id") is None:
+            return JSONResponse(
+                status_code=400, content={"detail": "spawned_by_session_id is required"}
+            )
+        run = state.create_spawn_run(body)
+        in_flight = sum(
+            1 for r in state.chat_spawn_runs.values() if r.status() in ("queued", "running")
+        )
+        state.chat_spawn_in_flight_max = max(state.chat_spawn_in_flight_max, in_flight)
+        return JSONResponse(status_code=201, content={"run": _run_row(run)})
+
+    @app.get("/api/chat-spawn/runs/{run_id}")
+    async def chat_spawn_get(run_id: str) -> Response:
+        run = state.chat_spawn_runs.get(run_id)
+        if run is None:
+            return JSONResponse(status_code=404, content={"detail": "unknown run"})
+        run.polls += 1
+        return JSONResponse({"run": _run_row(run)})
+
+    @app.post("/api/chat-spawn/runs/{run_id}/cancel")
+    async def chat_spawn_cancel(run_id: str) -> Response:
+        run = state.chat_spawn_runs.get(run_id)
+        if run is None:
+            return JSONResponse(status_code=404, content={"detail": "unknown run"})
+        run.cancel_requests += 1
+        if run.status() in ("queued", "running"):
+            run.cancelled = True
+        return JSONResponse({"run": _run_row(run)})
 
     @app.post("/api/project/{project}/new-chat")
     async def new_chat(project: str, request: Request) -> Response:

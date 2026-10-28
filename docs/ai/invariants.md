@@ -1,5 +1,117 @@
 # Invariants
 
+### Inv 56 — An Adventure Time round is chat content: erased with its message or a wipe; the never-again list is destination ids only; live frames are never stored; cmd keeps its own research copy
+
+The globe holiday game (`adv_rounds` schema v20, workspace 00056) is chat content, the Inv 54
+pattern. `adv_rounds` is keyed by its anchor message (`anchor_message_seq REFERENCES
+messages(seq) ON DELETE CASCADE`: an older blue/green-overlap process that never heard of the
+table still cascades a round away with its message), and a wipe issues `DELETE FROM adv_rounds`
+explicitly in the same transaction as every other table. The round holds everything the pair did —
+both spins, the landing, the roulette seeds and times, the chosen place, who decided and the
+researched holiday pack — so deleting the message erases all of it (`pack_json` included; the
+raw-bytes tests prove it through the routes). Banked trips are DERIVED from `state = 'banked'`: there is no second
+"trips" table, so deleting a trip's message removes it from the bank and returns the place to the
+draw. The game chat reuses `wyr_chat` (Inv 54), so its association rows and cascade rules are
+that invariant's.
+
+**The never-again list** (`adv_rejected(destination_id)`) holds destination ids only — ids of
+STATIC bank entries, no dates, no foreign key, no round reference. It must outlive deleting the
+round's message (that is what "never appears again" means) and it is cleared by a wipe (a wipe
+forgets everything about the two of you, the turned-down places included). Its one observable
+trace is "this bank place was turned down", a subset of the static bank; it says nothing about who,
+when or what was said. Draws exclude rejected AND banked ids (`remaining = bank - rejected -
+banked`). `adv_settings` (the shared "include places the UK says not to travel to" switch, operator
+decision #2113) names no place and no person, so — like `wyr_topics` — a wipe leaves it alone.
+
+**Live trail frames are never stored.** The dragger's finger trail travels only through the
+in-memory broker as an id-less `adventure_live` SSE frame (the live-drawing relay, Inv 53,
+generalised to carry the event name): a bounded 64-frame queue per connection, oldest dropped,
+nothing in `server.db`, its WAL, a file or a log line. A frame is cosmetic and lossy; the committed
+spin (stored once) decides the outcome.
+
+**The holiday pack is researched through cmd only** (Inv 13) and what leaves this server is the
+BANK DESTINATION only (name, region, unit name, coordinates): never a person, a message, a sign-in
+or anything from the chat. The research runs as a hidden, unparented chat-spawn run with every
+file/shell/agent tool denied, in an empty non-git folder under the server's private storage. Its
+answer is parsed defensively and sanitised before it is stored (string limits, `http(s)` URLs with
+a host only, unknown keys dropped); the client never loads third-party images for it. **Honest
+limit:** cmd keeps its own copy of each research run — the prompt (a function of the bank
+destination alone) and the final answer — in its hidden chat-spawn ledger and transcript, which
+this server cannot erase. It names no one and says nothing the static bank does not, but its
+timestamp records that a pack was researched then. The operator accepted this (decision #2113).
+
+**The holiday pack's pictures are chat content too, fetched by this server only, through one
+SSRF-safe fetcher.** The research names things (a venue's own site, an English Wikipedia article
+title) and supplies no image link; after the text pack is stored the server finds the pictures
+(Wikipedia lead image -> its Commons thumbnail; the venue's `og:image`; for the hero and sights a Commons
+search) and stores them as ordinary private photo attachments on the round's ANCHOR message, attached with
+their slot map in one compare-and-set transaction (`adv_rounds.images`/`pictures`; only while the round is
+`chosen`/`banked`, its pack `ready` and `images = pending`). They are erased with the anchor or a wipe by
+Inv 46's machinery (credits and source pages live on the round row, so they go with it), are excluded from
+the Gallery like the would-you-rather pictures, and are never fetched again after storing. A viewer's
+device never contacts a third-party image host. **Every fetch of a URL the engine did not build goes
+through `livechat/safe_fetch.py` (`SafeFetcher`), and its rules are an invariant**: `http(s)` only, ports
+80/443 only; the URL is parsed once and the request is built from the parsed parts; userinfo, backslashes,
+control characters, single-label hosts and IP-literal hosts in any spelling are refused; the host is
+resolved exactly once, inside the network backend's `connect_tcp`, EVERY resolved address must be a public
+address (IPv4 globally routable and outside every special-purpose block; IPv6 only inside `2000::/3`, which
+refuses loopback, unique-local, link-local, multicast, IPv4-mapped / compatible, NAT64, 6to4 and Teredo
+whatever IPv4 they embed) and the socket is dialled to that vetted address literal — no second lookup, so no
+DNS-rebinding window — while TLS verifies the certificate against, and sends the SNI of, the HOSTNAME;
+redirects are followed by hand, each re-parsed and re-vetted, at most 3, never from https down to http;
+15 s from the request's start; bodies streamed under a hard cap (8 MB image, 1 MB HTML, 2 MB JSON),
+`Accept-Encoding: identity` and any other `Content-Encoding` refused, the content type checked before the
+body is read; no cookies, auth, proxies from the environment or connection reuse (httpcore is driven
+directly: it reads no environment); one request at a time per host, at most four hosts at once, one honoured
+`Retry-After` (<= 10 s), a descriptive User-Agent naming the engine and its repo. The resolver, the address
+policy, the allowed ports and the TLS context are constructor arguments used ONLY by tests to reach a local
+fake server; **there is no environment variable, setting or module-level switch that relaxes any of it**, and
+production builds `SafeFetcher()` with the defaults. A fetched image must have an `image/*` content type AND
+sniff as JPEG/PNG/WebP, declare in their OWN HEADER (read from the bytes, BEFORE `Image.open` is called — libwebp
+allocates canvas buffers inside it) at most 16 MP, a short side >= 480 px and an aspect <= 3:1, open in Pillow as that
+format and size, be a
+single frame with a short side >= 480 px and aspect <= 3:1, and is rebuilt as a metadata-free JPEG of <=
+1600 px by a shrink-first path, decoded ONE at a time. **Measured worst case** (audit round 3; peak over a 61 MB
+baseline): ~280 MB working set / commit for the largest accepted input (a 16 MP lossless or alpha WebP, 0.31 s),
++158 MB for a 16 MP RGBA PNG, +53 MB for a JPEG — against +654 MB per decode, +1.3 GB for two, and a 140-byte
+WebP declaring a 16384 x 16384 canvas committing +2.05 GB, before the change; the bound does not grow with the
+number of pictures. A page's `<meta>` text is cut to 200 KB of BYTES, decoded only with an allow-listed web
+charset (`punycode` took 15.6 s per MB) and, like every other third-party parse, run off the event loop; Wikimedia
+is only ever asked for API thumbnails, even through a venue page's image tag. A pending picture wait is
+self-healing (`images_started_at`/`images_tries`, a supervised sweep, three tries) rather than startup-only.
+A local DISH's picture is accepted only when two independent signals agree — its title names the dish and its
+Commons categories/description (or, for an article's lead image, the article's description / first sentence)
+mention food — and never comes from an article's other images ("Buzara" is a genus of moths there). What the picture hunt sends to third parties is only names and URLs from
+the pack (the destination, item names, article titles, the venues' own URLs) plus the engine's User-Agent:
+nothing from the chat, and no sign-in, cookie or identity of either person.
+
+Every mutation is idempotent (the SAME move replayed is a 200 with the unchanged view; a DIFFERENT
+move after the state advanced is 409 `bad_state`) and is announced only through the existing
+`message_updated` event. The holiday-pack writes are compare-and-set on
+`(pack = 'pending' AND pack_run_id = <this run>)`, so a blue/green overlap where two processes poll
+one run stores it once, and a round rejected or deleted meanwhile is left alone (the job notices
+and cancels its run).
+
+*Enforced by:* `wixy_server/tests/test_livechat_adventure.py` (migration from a real v19 database,
+the state machine and every replay, exclusion maths, the never-again list surviving an anchor
+delete and a wipe, cascade from a connection that never imported the store, raw-byte erasure,
+concurrency), `test_routes_livechat_adventure.py` (auth, every validation bound, the whole game over
+HTTP, erasure through the routes with sentinel bytes), `test_livechat_adventure_live.py` (bounds, its
+own rate limit, the `adventure_live` event name, never stored), `test_livechat_adventure_pack.py`
+(parse/sanitise, the prompt names only the destination, the chat-spawn calls against the fake cmd,
+every job outcome, restart resume, the overlap compare-and-set), `test_livechat_safe_fetch.py` (every
+refused address class incl. IPv6 / mapped / NAT64 / 6to4 / Teredo, URL-parsing refusals, a name resolving
+to a private address, mixed records, rebinding, redirects to private hosts / schemes / ports, the redirect
+cap, byte / time / content-type / encoding bounds, Retry-After once, per-host serialisation and the
+four-host cap, no cookies / proxies, TLS name and SNI, non-ASCII-digit `Retry-After`, a malformed redirect `Location`, `refuse_host_suffixes`), `test_livechat_adventure_pictures.py` (the plan,
+the file-name parsing of the real thumb URL shape, never an original, source order, credits, de-duplication,
+the budget caps, the image check incl. bombs / banners / animation / metadata stripping, the header-declared size refused WITHOUT calling `Image.open` for PNG / JPEG / every WebP header kind, the lean shrink-first re-encode for every mode, hostile page charsets (a 1 MB `punycode` page), parsing off the event loop, Wikimedia originals never fetched through a venue page, no fetch ever targeting
+a private address even by redirect, politeness and budget), `test_livechat_adventure_dishes.py` (the food-term / title-token rules, the `dishes` section and its sources, a moth-named dish rejected by both checks), `test_livechat_adventure_pictures_job.py`
+(the compare-and-set attach, the Gallery exclusion, the job's outcomes incl. rejected / deleted mid-hunt, a
+blue/green overlap and restart, the self-healing sweep incl. the old side of a hand-off stopped mid-hunt, a failing `fail_adventure_pictures` and the try limit, the view shape and signed URLs, erasure of pictures and credits by delete and
+wipe, and the whole chain with the production finder over a fake Wikipedia / Commons / venue) and `test_adventure_bank_loader.py` (+ `test_adventure_bank.py` for the bank against the map).
+Decision: [00192](../../decisions/00192-server-chat-adventure-time/decision.md).
+
 ### Inv 55 — Live calls are ephemeral private pairs, and idle suspension never overrides locking
 
 Call audio is relayed only between the two immutable authenticated socket IDs that

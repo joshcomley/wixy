@@ -1,0 +1,16 @@
+{
+  "name": "wixy-adventure-tooling",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Build tooling for the Adventure Time world map (admin-ui/data/adventure-world.json). Not part of the admin bundle.",
+  "type": "module",
+  "scripts": {
+    "build:world": "node build_world.mjs"
+  },
+  "devDependencies": {
+    "polylabel": "2.1.0",
+    "topojson-client": "3.1.0",
+    "topojson-server": "3.0.1",
+    "topojson-simplify": "3.0.3"
+  }
+}

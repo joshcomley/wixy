@@ -465,6 +465,70 @@ def process_photo(src: Path, *, output_dir: Path) -> PhotoResult:
     )
 
 
+PHOTO_PIXEL_CAP = _PHOTO_PIXEL_CAP
+"""The decompression-bomb limit for a photo (declared width x height), exported for the holiday-pack
+picture check, which applies it BEFORE decoding a fetched image (Inv 44)."""
+
+
+_ORIENTATION_TAG = 0x0112
+_ORIENTATION_TRANSPOSE = {
+    2: Image.Transpose.FLIP_LEFT_RIGHT,
+    3: Image.Transpose.ROTATE_180,
+    4: Image.Transpose.FLIP_TOP_BOTTOM,
+    5: Image.Transpose.TRANSPOSE,
+    6: Image.Transpose.ROTATE_270,
+    7: Image.Transpose.TRANSVERSE,
+    8: Image.Transpose.ROTATE_90,
+}
+
+
+def reencode_still_as_jpeg(image: Image.Image, *, long_edge: int, quality: int) -> bytes:
+    """The LEAN path for pictures fetched from the internet (the holiday pack, Inv 56): a still
+    image already opened (and size-checked) by the caller, as clean JPEG bytes. The result is the
+    same as the chat upload pipeline's (upright from the EXIF orientation, colour-managed to sRGB,
+    flattened onto white if it has transparency, rebuilt from raw 8-bit RGB pixels so no EXIF, ICC
+    or text chunk survives, at most `long_edge`) but it is reached by SHRINKING FIRST, so the
+    working memory is set by the output size and not by the (unchosen) input:
+
+    - a JPEG is decoded at 1/2, 1/4 or 1/8 scale by libjpeg (`draft`) when the output is that much
+      smaller;
+    - every other format is decoded once and shrunk straight away (`resize` with a reducing gap),
+      so the transpose, colour conversion, flatten and metadata rebuild all run on the small image
+      — never on a second or third full-size copy;
+    - a palette or 16-bit image is the one case converted at full size first (to RGB(A) / 8-bit
+      grey: one extra copy), because it cannot be resampled in its own mode.
+
+    `process_photo`, the chat-upload pipeline, is untouched."""
+    orientation = image.getexif().get(_ORIENTATION_TAG, 1)
+    has_alpha = _image_has_alpha(image)
+    width, height = image.size
+    scale = min(1.0, long_edge / max(width, height))
+    target = (max(1, round(width * scale)), max(1, round(height * scale)))
+    if image.format == "JPEG" and target != image.size:
+        image.draft("RGB", target)  # before any pixel is loaded; keeps the aspect ratio
+    work: Image.Image = image
+    if work.mode in ("P", "PA"):
+        work = work.convert("RGBA" if has_alpha else "RGB")
+    elif work.mode == "1":
+        work = work.convert("L")
+    elif work.mode == "I" or work.mode.startswith("I;16"):
+        work = _scale_16bit_gray_to_l(work)
+    if work.size != target:
+        work = work.resize(target, Image.Resampling.LANCZOS, reducing_gap=2.0)
+    transpose = _ORIENTATION_TRANSPOSE.get(orientation) if isinstance(orientation, int) else None
+    if transpose is not None:
+        work = work.transpose(transpose)
+    colour_managed = _convert_to_srgb(work, has_alpha=has_alpha)
+    normalized = _normalize_photo_mode(colour_managed, has_alpha=has_alpha)
+    if has_alpha:
+        flat = Image.new("RGB", normalized.size, (255, 255, 255))
+        flat.paste(normalized, mask=normalized.getchannel("A"))
+        normalized = flat
+    out = io.BytesIO()
+    _strip_image_metadata(normalized).save(out, format="JPEG", quality=quality, optimize=True)
+    return out.getvalue()
+
+
 # ---------------------------------------------------------------------------
 # Voice (§7)
 # ---------------------------------------------------------------------------

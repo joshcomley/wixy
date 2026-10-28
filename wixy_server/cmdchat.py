@@ -10,6 +10,11 @@ Two cmd surfaces, both localhost-only:
   - **Cmd-Chats** introspection (default `http://127.0.0.1:9321`) — decoded
     messages + status for an existing session.
 
+Besides the chat calls it also carries the headless one-shot **chat-spawn runs** (`spawn_run` /
+`get_run` / `cancel_run`: `POST /api/chat-spawn/runs`, `GET …/{run_id}`, `POST …/{run_id}/cancel`)
+that the Adventure Time holiday pack is researched with (`livechat/adventure_pack.py`, Inv 56) —
+still the ONE chokepoint to cmd (Inv 13).
+
 `CmdChatClient` is written against an interface (spec/06 §4: "tests run against a
 fake cmd server") — `wixy_server/tests/fake_cmd.py` implements both surfaces as one
 combined FastAPI app for hermetic unit tests (via `httpx.ASGITransport` for the pure
@@ -54,6 +59,10 @@ DEFAULT_TIMEOUT_S = 10.0
 DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_READINESS_TIMEOUT_S = 120.0
 DEFAULT_READINESS_POLL_INTERVAL_S = 2.0
+_SPAWN_TIMEOUT_S = 30.0
+"""cmd validates a chat-spawn body, starts the run and answers at once, but it may be busy
+injecting another prompt; a spawn gets a longer budget than the 10 s default (and is never
+retried past a refused connection)."""
 
 UNPARENTED_SPAWNED_BY = ""
 """cmd's documented "deliberately unparented, top-level chat" sentinel for
@@ -92,6 +101,12 @@ class CmdChatError(Exception):
     error surfaced to the UI (spec/06 §1 preamble), never a silent hang."""
 
 
+class CmdChatUnreachableError(CmdChatError):
+    """cmd could not be reached at all (connection refused, or a transport failure that is not safe
+    to repeat) — as opposed to cmd answering with a refusal. A caller that has a graceful "not
+    available right now" state (the Adventure Time holiday pack) keys on this subclass."""
+
+
 class CmdChatStatusError(CmdChatError):
     """A cmdchat call that cmd itself answered with a non-success STATUS — carries
     the status code so a caller can mirror a genuine upstream 404/410 as the same
@@ -114,6 +129,27 @@ class NewChatResult:
 class SendResult:
     buffered: bool
     pending_state: str | None
+
+
+CHAT_SPAWN_TERMINAL_STATUSES = frozenset({"completed", "error", "timeout", "cancelled"})
+"""cmd's `chat_spawn_runs.status` values that are final (`queued` and `running` are not)."""
+
+
+@dataclass(frozen=True, slots=True)
+class ChatSpawnRun:
+    """One `POST /api/chat-spawn/runs` row (cmd's headless, one-shot chat run): the handle to poll
+    (`run_id`), its `status` (`queued|running|completed|error|timeout|cancelled`; an unknown value
+    is passed through verbatim, never coerced), the run's final assistant message once it
+    `completed` (`response_text`) and cmd's short failure note (`error_text`)."""
+
+    run_id: str
+    status: str
+    response_text: str | None
+    error_text: str | None
+
+    @property
+    def terminal(self) -> bool:
+        return self.status in CHAT_SPAWN_TERMINAL_STATUSES
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,6 +254,31 @@ def _json_object(response: httpx.Response) -> JsonObject:
             f"expected a JSON object from {response.request.url}, got {type(data).__name__}"
         )
     return data
+
+
+def _run_from_response(response: httpx.Response, what: str) -> ChatSpawnRun:
+    """A chat-spawn run from a 2xx body. cmd NESTS the row under `run` on the spawn (201) and on a
+    poll/cancel alike; a body that is itself the row is accepted too. Anything else is a hard
+    error — a defaulting lookup would return the same empty value for a missing key and a null
+    one, and a malformed answer must never look like a run that simply has no status yet."""
+    body = _json_object(response)
+    row = body.get("run")
+    if row is None and isinstance(body.get("run_id"), str):
+        row = body
+    if not isinstance(row, dict):
+        raise CmdChatError(f"{what}: response has no run object: {str(body)[:300]}")
+    run_id = row.get("run_id")
+    status = row.get("status")
+    if not isinstance(run_id, str) or not run_id or not isinstance(status, str):
+        raise CmdChatError(f"{what}: run object missing run_id/status: {str(row)[:300]}")
+    response_text = row.get("response_text")
+    error_text = row.get("error_text")
+    return ChatSpawnRun(
+        run_id=run_id,
+        status=status,
+        response_text=response_text if isinstance(response_text, str) else None,
+        error_text=error_text if isinstance(error_text, str) else None,
+    )
 
 
 def _message_from_dict(data: object) -> ChatMessage | None:
@@ -341,15 +402,32 @@ class CmdChatClient:
         *,
         json_body: JsonObject | None = None,
         params: dict[str, str] | None = None,
+        timeout_s: float | None = None,
+        connect_errors_only: bool = False,
     ) -> httpx.Response:
+        """One cmd call with retries on transport errors. `connect_errors_only` limits the retry to
+        errors where the request provably never reached cmd (connect refused / connect timeout) —
+        for a call that is NOT idempotent (a spawn: repeating one whose response was merely lost
+        would start a second run and spend a second allowance); any other transport error then
+        fails at once."""
         retry = _RetryState()
         for attempt in range(1, self._max_attempts + 1):
             try:
                 return await self._client.request(
-                    method, url, json=json_body, params=params, timeout=self._timeout_s
+                    method,
+                    url,
+                    json=json_body,
+                    params=params,
+                    timeout=self._timeout_s if timeout_s is None else timeout_s,
                 )
             except httpx.TransportError as exc:
                 retry.last_error = exc
+                if connect_errors_only and not isinstance(
+                    exc, (httpx.ConnectError, httpx.ConnectTimeout)
+                ):
+                    raise CmdChatUnreachableError(
+                        f"{method} {url} failed and is not safe to repeat: {exc}"
+                    ) from exc
                 logger.warning(
                     "cmdchat: %s %s attempt %d/%d failed: %s",
                     method,
@@ -358,7 +436,7 @@ class CmdChatClient:
                     self._max_attempts,
                     exc,
                 )
-        raise CmdChatError(
+        raise CmdChatUnreachableError(
             f"{method} {url} failed after {self._max_attempts} attempts: {retry.last_error}"
         ) from retry.last_error
 
@@ -406,6 +484,71 @@ class CmdChatClient:
             workspace_id=workspace_id if isinstance(workspace_id, str) else None,
             pending_state=pending_state if isinstance(pending_state, str) else "queued",
         )
+
+    # -- Portal (9320): headless one-shot runs (the Adventure Time holiday pack) ---------------
+
+    async def spawn_run(
+        self,
+        *,
+        caller: str,
+        prompt: str,
+        model: str,
+        effort: str,
+        cwd: str,
+        timeout_secs: int,
+        disallowed_tools: list[str],
+    ) -> ChatSpawnRun:
+        """`POST /api/chat-spawn/runs`: start a hidden, one-shot cmd chat run on the subscription
+        and return its row at once (`queued|running`); poll it with `get_run`. The chat is
+        deliberately unparented (`spawned_by_session_id=""` — Wixy is a server, not a chat) and
+        carries no `tag`, so cmd keeps it a hidden system chat. `cwd` is sent with forward
+        slashes. Not retried past a refused connection: a spawn whose answer was merely lost must
+        not start a second run."""
+        body: JsonObject = {
+            "caller": caller,
+            "prompt": prompt,
+            "model": model,
+            "effort": effort,
+            "spawned_by_session_id": UNPARENTED_SPAWNED_BY,
+            "cwd": cwd,
+            # Keep our own cwd (an empty, non-git folder): "primary" means no cmd build space is
+            # provisioned for this read-only research seat. Harmless for an unparented spawn.
+            "build_space": "primary",
+            "bucket": "subscription",
+            "timeout_secs": timeout_secs,
+            "disallowed_tools": list(disallowed_tools),
+        }
+        url = f"{self._portal_base_url}/api/chat-spawn/runs"
+        response = await self._request(
+            "POST", url, json_body=body, timeout_s=_SPAWN_TIMEOUT_S, connect_errors_only=True
+        )
+        if response.status_code != 201:
+            raise CmdChatError(
+                f"chat-spawn run returned {response.status_code}: {response.text[:500]}"
+            )
+        return _run_from_response(response, "chat-spawn run")
+
+    async def get_run(self, run_id: str) -> ChatSpawnRun:
+        """`GET /api/chat-spawn/runs/{run_id}`: the run's current row."""
+        url = f"{self._portal_base_url}/api/chat-spawn/runs/{run_id}"
+        response = await self._request("GET", url)
+        if response.status_code != 200:
+            raise CmdChatError(
+                f"GET chat-spawn run {run_id} returned {response.status_code}: "
+                f"{response.text[:500]}"
+            )
+        return _run_from_response(response, f"chat-spawn run {run_id}")
+
+    async def cancel_run(self, run_id: str) -> None:
+        """`POST /api/chat-spawn/runs/{run_id}/cancel`: best-effort, idempotent terminate. An
+        unknown run (404) is already gone, which is what a caller wants."""
+        url = f"{self._portal_base_url}/api/chat-spawn/runs/{run_id}/cancel"
+        response = await self._request("POST", url)
+        if response.status_code not in (200, 202, 404):
+            raise CmdChatError(
+                f"cancel chat-spawn run {run_id} returned {response.status_code}: "
+                f"{response.text[:500]}"
+            )
 
     async def _session_ready(self, session_id: str) -> bool:
         url = f"{self._portal_base_url}/api/session/{session_id}"
