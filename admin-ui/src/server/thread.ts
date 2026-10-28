@@ -1293,8 +1293,18 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     if (open && adventureGame.pane.parentElement === null) game.pane.after(adventureGame.pane);
     else if (!open && adventureGame.pane.parentElement !== null) adventureGame.pane.remove();
   }
+  /** The Cookout pane follows the same rule: in the chat only while its game is open, so a chat that is
+   * not cooking carries no hidden second game pane (and `.wx-srv-game` still means the one open game). */
+  function syncCookoutPane(): void {
+    const open = gameTabs.seqOf("cookout") !== null;
+    if (open && cookoutGame.pane.parentElement === null) game.pane.after(cookoutGame.pane);
+    else if (!open && cookoutGame.pane.parentElement !== null) cookoutGame.pane.remove();
+  }
   function applyGameLayout(): void {
-    if (gameMounted) syncAdventurePane();
+    if (gameMounted) {
+      syncAdventurePane();
+      syncCookoutPane();
+    }
     recomputeViewOnceTarget(composer.stagedAttachments().map((a) => a.file));
     const inGame = gameTabs.activeTab() !== "chat";
     element.classList.toggle("wx-srv-in-game", inGame);
@@ -1418,7 +1428,6 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   });
   gameMounted = true;
   threadWrap.after(game.pane);
-  game.pane.after(cookoutGame.pane);
   element.appendChild(gameTabs.tabBar);
   element.appendChild(itemChat.popup);
 

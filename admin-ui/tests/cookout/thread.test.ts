@@ -197,6 +197,18 @@ describe("cookout: starting a round", () => {
     thread.teardown();
   });
 
+  it("the pane is in the chat only while its game is open: never a hidden second game pane", async () => {
+    createCookout.mockResolvedValue({ ok: true, message: cookoutMessage(9) });
+    const { thread } = await mount();
+    expect(thread.element.querySelector(".wx-srv-ck")).toBeNull();
+    expect(thread.element.querySelectorAll(".wx-srv-game")).toHaveLength(1); // the WYR pane only
+    await startCookout(thread);
+    expect(thread.element.querySelector(".wx-srv-ck")).not.toBeNull();
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-ck-close")!.click();
+    expect(thread.element.querySelector(".wx-srv-ck")).toBeNull();
+    thread.teardown();
+  });
+
   it("explains in the sheet when the server cannot start one, and opens no tab", async () => {
     createCookout.mockResolvedValue({ ok: false, kind: "unsupported" });
     const { thread } = await mount();
