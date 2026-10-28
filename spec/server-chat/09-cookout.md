@@ -438,6 +438,17 @@ Validation runs deterministically in Python (`parse_concepts` / `parse_recipe`):
         concept/recipe's `pickedIngredientIds` nor in its declared `stapleIds`): **any**
         word-boundary occurrence in consumption prose is rejected, enforcing both the ≤ 4
         non-seasoning staple cap and the frozen recipe manifest.
+     3. **Longest span first, then judge (both passes):** tokenise each field once and recognise the
+        longest whole-token-boundary span matching ANY bank `name`/`alias` or Pass-2 short form
+        **before** applying the allowed/forbidden rules; a span consumes its tokens, so the words
+        inside a recognised span are never re-read as a shorter, different food. A span that is an
+        allowed (used picked / declared) compound protects only its own interior words, at that
+        position — it never suppresses a later independent occurrence. Examples (all required
+        tests): with `peanut-butter` picked and plain `butter` undeclared, "Peanut butter chicken"
+        passes but "peanut butter with extra butter" fails; with `coconut-milk` picked and `milk`
+        undeclared, "Coconut milk curry" passes but "coconut milk plus milk" fails; case and alias
+        variants behave the same; an independently mentioned omitted item or a fifth undeclared
+        staple is still rejected.
    - **One repair run on failure:** If structural validation or either lexical pass fails, the
      runner spawns **at most one repair run** under the same job deadline, feeding back the exact
      violation messages (including any contraband or undeclared/omitted food words detected). If the
