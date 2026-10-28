@@ -95,6 +95,7 @@ class TestSanitise:
         assert set(pack) == {
             "headline",
             "summary",
+            "wikipedia",
             "sections",
             "bestTime",
             "gettingThere",
@@ -102,12 +103,14 @@ class TestSanitise:
             "sources",
         }
         assert pack["headline"] == CANNED_ADVENTURE_PACK["headline"]
+        assert pack["wikipedia"] == CANNED_ADVENTURE_PACK["wikipedia"]
         sections: Any = pack["sections"]
         assert [s["key"] for s in sections] == ["food", "stay", "sights"]
         assert sections[0]["items"][0] == {
             "name": "Pasteis de nata",
             "detail": "The custard tart every bakery sells; eat one warm with cinnamon.",
             "url": "https://example.com/food/pasteis",
+            "wikipedia": "Pastel de nata",
         }
         assert sections[0]["items"][1]["url"] is None
         assert pack["sources"] == [{"title": "Visit Portugal", "url": "https://example.com/visit"}]
@@ -174,7 +177,7 @@ class TestSanitise:
         assert pack is not None and "extra" not in pack and "secret" not in pack
         section = pack["sections"][0]
         assert set(section) == {"key", "title", "items"}
-        assert set(section["items"][0]) == {"name", "detail", "url"}
+        assert set(section["items"][0]) == {"name", "detail", "url", "wikipedia"}
         assert set(pack["sources"][0]) == {"title", "url"}
 
     @pytest.mark.parametrize(
@@ -241,6 +244,7 @@ class TestSanitise:
             "name": "A villa",
             "detail": "Nice.",
             "url": None,
+            "wikipedia": None,
         }
 
     def test_sources_need_a_good_url_and_get_a_host_title_when_blank(self) -> None:
@@ -301,7 +305,13 @@ class TestSanitise:
         pack: Any = sanitise_pack(raw)
         assert pack is not None
         assert pack["headline"] == "" and pack["summary"] == "" and pack["sources"] == []
-        assert pack["sections"][0]["items"][0] == {"name": "n", "detail": "", "url": None}
+        assert pack["wikipedia"] is None
+        assert pack["sections"][0]["items"][0] == {
+            "name": "n",
+            "detail": "",
+            "url": None,
+            "wikipedia": None,
+        }
 
     def test_whitespace_and_control_characters_are_tidied(self) -> None:
         raw = _valid(

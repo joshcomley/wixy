@@ -230,7 +230,14 @@ class TestView:
             assert view["spins"] == {"lng": None, "lat": None}
             assert view["landing"] is None
             assert view["country"] is None and view["destination"] is None
-            assert view["pack"] == {"state": "none", "data": None, "error": None, "canRetry": False}
+            assert view["pack"] == {
+                "state": "none",
+                "data": None,
+                "error": None,
+                "canRetry": False,
+                "images": "done",
+                "pictures": {"hero": [], "items": {}},
+            }
             assert isinstance(view["serverNow"], float)
 
     def test_the_view_through_the_whole_game(

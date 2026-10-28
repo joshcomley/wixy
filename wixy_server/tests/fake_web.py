@@ -17,13 +17,19 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import datetime
+import ipaddress
 import ssl
 import threading
 import weakref
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from typing import Any
+from urllib.parse import parse_qs, unquote, urlsplit
+
+import anyio
+
+from wixy_server.livechat.safe_fetch import SafeFetcher
 
 
 @dataclass
@@ -179,7 +185,7 @@ class FakeWeb:
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
             head = await reader.readuntil(b"\r\n\r\n")
-        except (asyncio.IncompleteReadError, asyncio.LimitOverrunError, ConnectionError):
+        except asyncio.IncompleteReadError, asyncio.LimitOverrunError, ConnectionError:
             writer.close()
             return
         lines = head.decode("latin-1").split("\r\n")
@@ -212,6 +218,8 @@ class FakeWeb:
         self.max_in_flight_by_host[host] = max(self.max_in_flight_by_host.get(host, 0), by_host)
         try:
             route = self._routes.get((host, parts.path))
+            if route is None:  # routes are registered readably; requests arrive percent-encoded
+                route = self._routes.get((host, unquote(parts.path)))
             if route is None:
                 reply = Reply(status=404, body=b"not found", content_type="text/plain")
             elif isinstance(route, Reply):
@@ -222,7 +230,7 @@ class FakeWeb:
             if method != "GET":
                 reply = Reply(status=405, body=b"", content_type=None)
             await self._send(writer, reply)
-        except (ConnectionError, asyncio.CancelledError):
+        except ConnectionError, asyncio.CancelledError:
             pass
         finally:
             request.done_at = loop.time()
@@ -276,12 +284,76 @@ class FakeWeb:
             await writer.drain()
 
 
+# -- helpers shared by the fetch and picture tests -----------------------------------------------
+
+
+def loopback_only(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """The TEST address policy: only 127.0.0.1 (the fake server). Production's refuses it."""
+    return ip == ipaddress.ip_address("127.0.0.1")
+
+
+def resolve_to(
+    *addresses: str, calls: list[str] | None = None
+) -> Callable[[str, int], Awaitable[Sequence[str]]]:
+    """A test resolver answering the same addresses for every name (recording the names asked)."""
+
+    async def resolver(host: str, port: int) -> Sequence[str]:
+        if calls is not None:
+            calls.append(host)
+        return list(addresses)
+
+    return resolver
+
+
+def local_fetcher(port: int, **options: Any) -> SafeFetcher:
+    """A `SafeFetcher` aimed at a `FakeWeb` on `port`: every name resolves to 127.0.0.1, loopback
+    passes the address policy and `port` is allowed — all injected through the constructor, as the
+    fetcher's design requires (there is no other way to relax it)."""
+    settings: dict[str, Any] = {
+        "resolver": resolve_to("127.0.0.1"),
+        "address_policy": loopback_only,
+        "allowed_ports": {port},
+    }
+    settings.update(options)
+    return SafeFetcher(**settings)
+
+
+def with_web[T](
+    body: Callable[[FakeWeb, SafeFetcher], Awaitable[T]],
+    *,
+    setup: Callable[[FakeWeb], None] | None = None,
+    **fetcher_options: Any,
+) -> T:
+    """Start a fake web server on a free port, build a fetcher aimed at it, run `body`, clean up."""
+
+    async def go() -> T:
+        web = FakeWeb()
+        port = await web.start()
+        try:
+            if setup is not None:
+                setup(web)
+            fetcher = local_fetcher(port, **fetcher_options)
+            try:
+                return await body(web, fetcher)
+            finally:
+                await fetcher.aclose()
+        finally:
+            await web.stop()
+
+    return anyio.run(go)
+
+
+def url(web: FakeWeb, host: str, path: str, scheme: str = "http") -> str:
+    """A URL for `host` that the fake server answers (`host` is routed on the Host header)."""
+    return f"{scheme}://{host}:{web.port}{path}"
+
+
 # -- a throwaway certificate authority, for the TLS tests ------------------------------------------
 
 
 @dataclass(frozen=True)
 class TestCertificates:
-    """A throwaway CA and a server certificate for `names`, as files, plus client/server contexts."""
+    """A throwaway CA and a server certificate for `names`, as files, with ready contexts."""
 
     __test__ = False  # not a pytest class
 
@@ -337,7 +409,9 @@ def make_test_certificates(directory: Path, names: list[str]) -> TestCertificate
             ),
             critical=True,
         )
-        .add_extension(x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()), critical=False)
+        .add_extension(
+            x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()), critical=False
+        )
         .sign(ca_key, hashes.SHA256())
     )
     leaf_key = ec.generate_private_key(ec.SECP256R1())

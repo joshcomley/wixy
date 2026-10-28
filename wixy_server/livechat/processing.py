@@ -472,9 +472,10 @@ picture check, which applies it BEFORE decoding a fetched image (Inv 44)."""
 
 def reencode_still_as_jpeg(image: Image.Image, *, long_edge: int, quality: int) -> bytes:
     """A still image already opened (and size-checked) by the caller, as clean JPEG bytes: upright
-    (EXIF orientation applied), colour-managed to sRGB, flattened onto white if it has transparency,
-    rebuilt from raw 8-bit RGB pixels so no EXIF, ICC or text chunk survives (Inv 16/44), scaled down
-    to `long_edge` and encoded. The same normalisation `process_photo` applies to every upload."""
+    (EXIF orientation applied), colour-managed to sRGB, flattened onto white if it has
+    transparency, rebuilt from raw 8-bit RGB pixels so no EXIF, ICC or text chunk survives (Inv
+    16/44), scaled down to `long_edge` and encoded. The same normalisation `process_photo` applies
+    to every upload."""
     upright = ImageOps.exif_transpose(image) or image
     has_alpha = _image_has_alpha(upright)
     colour_managed = _convert_to_srgb(upright, has_alpha=has_alpha)

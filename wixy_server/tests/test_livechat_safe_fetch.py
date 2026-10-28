@@ -8,11 +8,12 @@ and prove two things: the fetch is refused, and the fake server never saw a conn
 
 from __future__ import annotations
 
+import functools
 import ipaddress
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any
 
 import anyio
 import pytest
@@ -24,8 +25,8 @@ from wixy_server.livechat.safe_fetch import (
     USER_AGENT,
     FetchFailure,
     FetchResponse,
-    SafeFetchError,
     SafeFetcher,
+    SafeFetchError,
     is_public_address,
     parse_fetch_url,
     parse_retry_after,
@@ -35,67 +36,18 @@ from wixy_server.tests.fake_web import (
     FakeWeb,
     Reply,
     SeenRequest,
+    loopback_only,
     make_test_certificates,
+    resolve_to,
+    url,
+    with_web,
 )
-
-T = TypeVar("T")
 
 IMAGE = ("image/",)
 HTML = ("text/html",)
 
 
-def loopback_only(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    """The TEST policy: only 127.0.0.1 (the fake server). Production's refuses it."""
-    return ip == ipaddress.ip_address("127.0.0.1")
-
-
-def resolve_to(
-    *addresses: str, calls: list[str] | None = None
-) -> Callable[[str, int], Awaitable[Sequence[str]]]:
-    async def resolver(host: str, port: int) -> Sequence[str]:
-        if calls is not None:
-            calls.append(host)
-        return list(addresses)
-
-    return resolver
-
-
-def with_web(
-    body: Callable[[FakeWeb, SafeFetcher], Awaitable[T]],
-    *,
-    setup: Callable[[FakeWeb], None] | None = None,
-    **fetcher_options: Any,
-) -> T:
-    """Start a fake web server on a free port, build a fetcher aimed at it, run `body`, clean up."""
-
-    async def go() -> T:
-        web = FakeWeb()
-        port = await web.start()
-        try:
-            if setup is not None:
-                setup(web)
-            options: dict[str, Any] = {
-                "resolver": resolve_to("127.0.0.1"),
-                "address_policy": loopback_only,
-                "allowed_ports": {port},
-            }
-            options.update(fetcher_options)
-            fetcher = SafeFetcher(**options)
-            try:
-                return await body(web, fetcher)
-            finally:
-                await fetcher.aclose()
-        finally:
-            await web.stop()
-
-    return anyio.run(go)
-
-
-def url(web: FakeWeb, host: str, path: str, scheme: str = "http") -> str:
-    return f"{scheme}://{host}:{web.port}{path}"
-
-
-# -- the address policy ----------------------------------------------------------------------------
+# -- the address policy --------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -190,7 +142,7 @@ def test_policy_allows_public_addresses(text: str) -> None:
     assert is_public_address(ipaddress.ip_address(text)) is True
 
 
-# -- parsing a URL once --------------------------------------------------------------------------------
+# -- parsing a URL once --------------------------------------------------------------------------
 
 
 class TestParseUrl:
@@ -283,7 +235,7 @@ def test_system_resolver_resolves_a_literal_without_the_network() -> None:
     assert caught.value.reason == FetchFailure.DNS
 
 
-# -- refusals: nothing connects ------------------------------------------------------------------------
+# -- refusals: nothing connects ------------------------------------------------------------------
 
 
 HOSTILE = [
@@ -418,7 +370,9 @@ class TestNothingHostileIsEverReached:
 
         with_web(
             body,
-            setup=lambda web: web.add("once.test", "/x", Reply(body=b"ok", content_type="image/png")),
+            setup=lambda web: web.add(
+                "once.test", "/x", Reply(body=b"ok", content_type="image/png")
+            ),
             resolver=resolve_to("127.0.0.1", calls=resolved),
         )
 
@@ -441,12 +395,14 @@ class TestNothingHostileIsEverReached:
 
         with_web(
             body,
-            setup=lambda web: web.add("flip.test", "/x", Reply(body=b"ok", content_type="image/png")),
+            setup=lambda web: web.add(
+                "flip.test", "/x", Reply(body=b"ok", content_type="image/png")
+            ),
             resolver=resolver,
         )
 
 
-# -- redirects ---------------------------------------------------------------------------------------------
+# -- redirects -----------------------------------------------------------------------------------
 
 
 class TestRedirects:
@@ -459,7 +415,9 @@ class TestRedirects:
 
         def setup(web: FakeWeb) -> None:
             web.add(
-                "a.test", "/start", Reply(status=302, headers={"Location": url(web, "b.test", "/final")})
+                "a.test",
+                "/start",
+                Reply(status=302, headers={"Location": url(web, "b.test", "/final")}),
             )
             web.add("b.test", "/final", Reply(body=b"png", content_type="image/png"))
 
@@ -533,7 +491,9 @@ class TestRedirects:
 
         def setup(web: FakeWeb) -> None:
             web.add(
-                "ok.test", "/go", Reply(status=302, headers={"Location": url(web, "internal.test", "/s")})
+                "ok.test",
+                "/go",
+                Reply(status=302, headers={"Location": url(web, "internal.test", "/s")}),
             )
             web.add("internal.test", "/s", Reply(body=b"metadata", content_type="image/png"))
 
@@ -578,7 +538,7 @@ class TestRedirects:
         with_web(body, setup=lambda web: web.add("r.test", "/go", Reply(status=302)))
 
 
-# -- what comes back ---------------------------------------------------------------------------------------
+# -- what comes back -----------------------------------------------------------------------------
 
 
 class TestResponses:
@@ -598,7 +558,9 @@ class TestResponses:
 
         with_web(
             body,
-            setup=lambda web: web.add("polite.test", "/p", Reply(body=b"x", content_type="image/png")),
+            setup=lambda web: web.add(
+                "polite.test", "/p", Reply(body=b"x", content_type="image/png")
+            ),
         )
 
     def test_media_type_charset_and_body(self) -> None:
@@ -627,9 +589,7 @@ class TestResponses:
 
         with_web(
             body,
-            setup=lambda web: web.add(
-                "h.test", "/", Reply(body=b"x", content_type="text/html")
-            ),
+            setup=lambda web: web.add("h.test", "/", Reply(body=b"x", content_type="text/html")),
         )
 
     @pytest.mark.parametrize("content_type", ["text/html", "application/json", "text/plain", None])
@@ -684,7 +644,9 @@ class TestResponses:
 
         with_web(
             body,
-            setup=lambda web: web.add("end.test", "/", Reply(endless=True, content_type="image/png")),
+            setup=lambda web: web.add(
+                "end.test", "/", Reply(endless=True, content_type="image/png")
+            ),
         )
 
     def test_a_chunked_body_over_the_cap_is_aborted(self) -> None:
@@ -714,7 +676,9 @@ class TestResponses:
             setup=lambda web: web.add(
                 "gz.test",
                 "/",
-                Reply(body=b"\x1f\x8b", content_type="image/png", headers={"Content-Encoding": "gzip"}),
+                Reply(
+                    body=b"\x1f\x8b", content_type="image/png", headers={"Content-Encoding": "gzip"}
+                ),
             ),
         )
 
@@ -745,7 +709,9 @@ class TestResponses:
 
         with_web(
             body,
-            setup=lambda web: web.add("mute.test", "/", Reply(delay_s=10.0, content_type="image/png")),
+            setup=lambda web: web.add(
+                "mute.test", "/", Reply(delay_s=10.0, content_type="image/png")
+            ),
             timeout_s=0.5,
         )
 
@@ -795,7 +761,7 @@ class TestResponses:
         with_web(body, setup=setup)
 
 
-# -- politeness: Retry-After, one request per host, four hosts at a time --------------------------------------
+# -- politeness: Retry-After, one request per host, four hosts at a time -------------------------
 
 
 class TestPoliteness:
@@ -870,8 +836,8 @@ class TestPoliteness:
             async with anyio.create_task_group() as tg:
                 for i in range(4):
                     tg.start_soon(
-                        lambda i=i: fetcher.get(
-                            url(web, "one.test", f"/{i}"), max_bytes=100, accept=IMAGE
+                        functools.partial(
+                            fetcher.get, url(web, "one.test", f"/{i}"), max_bytes=100, accept=IMAGE
                         )
                     )
             assert web.max_in_flight_by_host["one.test"] == 1
@@ -879,7 +845,9 @@ class TestPoliteness:
 
         def setup(web: FakeWeb) -> None:
             for i in range(4):
-                web.add("one.test", f"/{i}", Reply(body=b"x", content_type="image/png", delay_s=0.2))
+                web.add(
+                    "one.test", f"/{i}", Reply(body=b"x", content_type="image/png", delay_s=0.2)
+                )
 
         with_web(body, setup=setup)
 
@@ -888,8 +856,8 @@ class TestPoliteness:
             async with anyio.create_task_group() as tg:
                 for i in range(8):
                     tg.start_soon(
-                        lambda i=i: fetcher.get(
-                            url(web, f"host{i}.test", "/"), max_bytes=100, accept=IMAGE
+                        functools.partial(
+                            fetcher.get, url(web, f"host{i}.test", "/"), max_bytes=100, accept=IMAGE
                         )
                     )
             assert web.max_in_flight == 4
@@ -916,7 +884,7 @@ class TestPoliteness:
         with_web(body, setup=setup)
 
 
-# -- TLS: the certificate and the server name are the HOSTNAME's -------------------------------------------
+# -- TLS: the certificate and the server name are the HOSTNAME's ---------------------------------
 
 
 class TestTls:

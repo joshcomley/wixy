@@ -35,7 +35,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Literal, Protocol
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 import anyio
 import anyio.to_thread
@@ -101,10 +101,30 @@ MAX_TRAVEL_ADVICE: Final = 400
 MAX_SOURCES: Final = 12
 MAX_SOURCE_TITLE: Final = 120
 MAX_URL: Final = 500
+MAX_WIKIPEDIA_TITLE: Final = 120
 
 _WHITESPACE_RE = re.compile(r"\s+")
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 _URL_BAD_RE = re.compile(r"[\s\x00-\x1f\x7f]")
+_WIKI_TITLE_BAD_RE = re.compile(r"[\x00-\x1f\x7f<>\[\]{}|\\]")
+_WIKI_NAMESPACES: Final = frozenset(
+    {
+        "file",
+        "image",
+        "category",
+        "special",
+        "template",
+        "user",
+        "talk",
+        "help",
+        "wikipedia",
+        "portal",
+        "draft",
+        "mediawiki",
+        "module",
+        "media",
+    }
+)
 
 
 def _clip(text: str, limit: int) -> str:
@@ -156,6 +176,34 @@ def clean_url(value: object) -> str | None:
     return url
 
 
+def clean_wikipedia_title(value: object) -> str | None:
+    """An English Wikipedia article TITLE (spec §4.3a), as plain text: whitespace collapsed,
+    underscores read as spaces, any `#section` dropped, clipped to 120. A full
+    `https://en.wikipedia.org/wiki/<Title>` link is reduced to its title; any other URL, a
+    non-article namespace (`File:`, `Category:`, ...) and characters a title cannot hold are
+    refused. The title is only ever percent-encoded into a request path the server builds itself
+    (`adventure_pictures.py`), never fetched as given."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if text.lower().startswith(("http://", "https://")):
+        parts = urlsplit(text)
+        host = (parts.hostname or "").lower()
+        if host not in ("en.wikipedia.org", "en.m.wikipedia.org") or not parts.path.startswith(
+            "/wiki/"
+        ):
+            return None
+        text = unquote(parts.path[len("/wiki/") :])
+    text = text.split("#", 1)[0].replace("_", " ")
+    text = _WHITESPACE_RE.sub(" ", text).strip().lstrip(":").strip()
+    if not text or _WIKI_TITLE_BAD_RE.search(text):
+        return None
+    prefix, colon, _ = text.partition(":")
+    if colon and prefix.strip().lower() in _WIKI_NAMESPACES:
+        return None
+    return _clip(text, MAX_WIKIPEDIA_TITLE)
+
+
 def _sanitise_item(raw: object) -> JsonObject | None:
     if not isinstance(raw, dict):
         return None
@@ -166,6 +214,7 @@ def _sanitise_item(raw: object) -> JsonObject | None:
         "name": name,
         "detail": _paragraph(raw.get("detail"), MAX_ITEM_DETAIL),
         "url": clean_url(raw.get("url")),
+        "wikipedia": clean_wikipedia_title(raw.get("wikipedia")),
     }
 
 
@@ -233,6 +282,7 @@ def sanitise_pack(raw: object) -> JsonObject | None:
     return {
         "headline": _line(raw.get("headline"), MAX_HEADLINE),
         "summary": _paragraph(raw.get("summary"), MAX_SUMMARY),
+        "wikipedia": clean_wikipedia_title(raw.get("wikipedia")),
         "sections": sections,
         "bestTime": _paragraph(raw.get("bestTime"), MAX_BEST_TIME),
         "gettingThere": _paragraph(raw.get("gettingThere"), MAX_GETTING_THERE),
@@ -308,21 +358,28 @@ and no markdown fences. Use exactly these keys and respect these limits (charact
 
 {{"headline": string (max {MAX_HEADLINE}),
  "summary": string (max {MAX_SUMMARY}),
+ "wikipedia": string | null,
  "sections": [ {{"key": "food" | "stay" | "culture" | "sights" | "do" | "practical",
                 "title": string (max {MAX_SECTION_TITLE}),
                 "items": [ {{"name": string (max {MAX_ITEM_NAME}), "detail": string \
-(max {MAX_ITEM_DETAIL}), "url": string | null}} ]  (at most {MAX_ITEMS})}} ]  (at most \
-{MAX_SECTIONS}),
+(max {MAX_ITEM_DETAIL}), "url": string | null, "wikipedia": string | null}} ]  (at most \
+{MAX_ITEMS})}} ]  (at most {MAX_SECTIONS}),
  "bestTime": string (max {MAX_BEST_TIME}),
  "gettingThere": string (max {MAX_GETTING_THERE}),
  "travelAdvice": string (max {MAX_TRAVEL_ADVICE}),
  "sources": [ {{"title": string (max {MAX_SOURCE_TITLE}), "url": string}} ]  (at most \
 {MAX_SOURCES})}}
 
-Rules: every "url" is a full https:// link to the specific page you read (or null when you have \
-none); for "travelAdvice", fetch the country's page on https://www.gov.uk/foreign-travel-advice/ \
-itself and give its current headline in one or two sentences; write plain text (no markdown, no \
-HTML); British English.
+Rules: every item "url" is a full https:// link to that place's OWN official website where it has \
+one (a restaurant's, villa's, hotel's, museum's or festival's own site), and only when it has none \
+a listing or tourist-board page about it, or null; never link a booking or review aggregator when \
+an official site exists. "wikipedia" is the exact title of the English Wikipedia article about \
+the thing, for the destination itself (top level) and for any item that has an article: places, \
+sights, museums, festivals, famous dishes; null when there is no such article (most restaurants \
+and villas). Do not supply image links or describe pictures: pictures are found separately. For \
+"travelAdvice", \
+fetch the country's page on https://www.gov.uk/foreign-travel-advice/ itself and give its current \
+headline in one or two sentences; write plain text (no markdown, no HTML); British English.
 """
 
 
@@ -420,10 +477,28 @@ class PackTiming:
     max_consecutive_poll_errors: int = 30
 
 
+class PictureJob(Protocol):
+    """The pack's second step (spec §4.3a), implemented by `adventure_pictures.AdventurePictureJob`:
+    once the text pack is stored `ready`, the server finds and fetches its pictures. A Protocol so
+    this module does not import the picture module (which imports this one)."""
+
+    async def run(self, anchor_seq: int) -> None:
+        """Find and attach the round's pictures; never raises for an ordinary failure."""
+        ...
+
+    async def resume(self, background: ContainedTaskGroup) -> int:
+        """Startup recovery: redo the hunt for every round whose pictures were still pending."""
+        ...
+
+
 class AdventurePackRunner:
     """Runs the holiday-pack job for rounds whose pack is `pending`. One instance per app; it
     keeps no per-round state in memory — the round row (and the compare-and-set writes against it)
-    is the truth, so a restart or an overlapping process cannot lose or double a result."""
+    is the truth, so a restart or an overlapping process cannot lose or double a result.
+
+    With a `pictures` job configured, a pack that lands `ready` starts its picture wait in the same
+    write (`images = pending`) and the job then runs, outside the research slot; without one the
+    pack simply has no pictures (the standalone edition, and a server with no media pipeline)."""
 
     def __init__(
         self,
@@ -435,12 +510,14 @@ class AdventurePackRunner:
         cwd: Path,
         timing: PackTiming | None = None,
         clock: Callable[[], float] = time.monotonic,
+        pictures: PictureJob | None = None,
     ) -> None:
         self._store = store
         self._bank = bank
         self._researcher = researcher
         self._notifier = notifier
         self._cwd = cwd
+        self._pictures = pictures
         self._timing = timing if timing is not None else PackTiming()
         self._clock = clock
         # Created on first use, inside the running event loop (anyio primitives bind to it).
@@ -474,19 +551,23 @@ class AdventurePackRunner:
                 )
             else:
                 background.spawn("livechat-adventure-pack", self.run_job, anchor_seq)
+        if self._pictures is not None:
+            await self._pictures.resume(background)
         return len(pending)
 
     async def run_job(self, anchor_seq: int) -> None:
-        """Research the round's destination and land the outcome on its row. Never raises for an
+        """Research the round's destination and land the outcome on its row; once the pack is
+        `ready` (and pictures are configured) go on to find its pictures. Never raises for an
         ordinary failure (it becomes `pack = failed`); only cancellation (shutdown) propagates, and
         the round stays `pending` for the next start to resume."""
         researcher = self._researcher
         if researcher is None:
             return
         limiter, spawn_lock = self._primitives()
+        pictures_due = False
         try:
             async with limiter:
-                await self._run(anchor_seq, researcher, spawn_lock)
+                pictures_due = await self._run(anchor_seq, researcher, spawn_lock)
         except Exception:
             _LOGGER.exception("adventure holiday pack job for round %s failed", anchor_seq)
             try:
@@ -502,6 +583,9 @@ class AdventurePackRunner:
                     )
             except Exception:
                 _LOGGER.exception("could not mark round %s's holiday pack failed", anchor_seq)
+        if pictures_due and self._pictures is not None:
+            # The text pack is already stored and published; the pictures follow when found.
+            await self._pictures.run(anchor_seq)
 
     def _primitives(self) -> tuple[CapacityLimiter, anyio.Lock]:
         if self._limiter is None:
@@ -518,6 +602,7 @@ class AdventurePackRunner:
         *,
         pack_json: str | None = None,
         error: str | None = None,
+        pictures_pending: bool = False,
     ) -> bool:
         changed = await anyio.to_thread.run_sync(
             lambda: self._store.finish_adventure_pack(
@@ -526,6 +611,7 @@ class AdventurePackRunner:
                 state=state,
                 pack_json=pack_json,
                 error=error,
+                pictures_pending=pictures_pending,
             )
         )
         if changed:
@@ -589,12 +675,14 @@ class AdventurePackRunner:
 
     async def _run(
         self, anchor_seq: int, researcher: AdventureResearcher, spawn_lock: anyio.Lock
-    ) -> None:
+    ) -> bool:
+        """Drive the research to its outcome. Returns True exactly when THIS call stored the pack
+        `ready` and its picture wait is pending (the caller then runs the picture job)."""
         row = await anyio.to_thread.run_sync(
             lambda: self._store.get_adventure_round(anchor_seq=anchor_seq)
         )
         if row is None or row.pack != "pending":
-            return
+            return False
         destination = (
             self._bank.destination(row.destination_id) if row.destination_id is not None else None
         )
@@ -602,7 +690,7 @@ class AdventurePackRunner:
             await self._finish(
                 anchor_seq, row.pack_run_id, "failed", error=ADVENTURE_PACK_FAILED_TEXT
             )
-            return
+            return False
         prompt = build_prompt(destination, self._bank.unit_name(row.country_id or ""))
 
         timing = self._timing
@@ -612,7 +700,7 @@ class AdventurePackRunner:
         if run_id is None:
             run_id = await self._start_run(researcher, spawn_lock, anchor_seq, prompt, None)
             if run_id is None:
-                return
+                return False
         started = self._clock()
         poll_errors = 0
 
@@ -620,7 +708,7 @@ class AdventurePackRunner:
             if not await self._still_waiting(anchor_seq, run_id):
                 # Rejected, deleted, retried or finished by another process meanwhile.
                 await researcher.cancel(run_id)
-                return
+                return False
             run: ResearchRun | None = None
             try:
                 run = await researcher.poll(run_id)
@@ -632,7 +720,7 @@ class AdventurePackRunner:
                     await self._finish(
                         anchor_seq, run_id, "failed", error=ADVENTURE_PACK_FAILED_TEXT
                     )
-                    return
+                    return False
 
             if run is not None:
                 if run.status == "completed":
@@ -642,11 +730,15 @@ class AdventurePackRunner:
                         await self._finish(
                             anchor_seq, run_id, "failed", error=ADVENTURE_PACK_FAILED_TEXT
                         )
-                    else:
-                        await self._finish(
-                            anchor_seq, run_id, "ready", pack_json=canonical_pack_json(pack)
-                        )
-                    return
+                        return False
+                    stored = await self._finish(
+                        anchor_seq,
+                        run_id,
+                        "ready",
+                        pack_json=canonical_pack_json(pack),
+                        pictures_pending=self._pictures is not None,
+                    )
+                    return stored and self._pictures is not None
                 if run.status in ("error", "timeout", "cancelled"):
                     early = self._clock() - started <= timing.early_retry_s
                     if run.status == "error" and may_retry and early:
@@ -655,7 +747,7 @@ class AdventurePackRunner:
                             researcher, spawn_lock, anchor_seq, prompt, run_id
                         )
                         if retried is None:
-                            return
+                            return False
                         run_id = retried
                         started = self._clock()
                         continue
@@ -663,11 +755,11 @@ class AdventurePackRunner:
                     await self._finish(
                         anchor_seq, run_id, "failed", error=ADVENTURE_PACK_FAILED_TEXT
                     )
-                    return
+                    return False
 
             if self._clock() >= deadline:
                 _LOGGER.warning("research run %s did not finish in time; giving up", run_id)
                 await researcher.cancel(run_id)
                 await self._finish(anchor_seq, run_id, "failed", error=ADVENTURE_PACK_FAILED_TEXT)
-                return
+                return False
             await anyio.sleep(timing.poll_interval_s)

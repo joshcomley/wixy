@@ -280,7 +280,7 @@ def _looks_like_address(name: str) -> bool:
     return True
 
 
-# -- the network backend: resolve, vet and connect in one step ----------------------------------
+# -- the network backend: resolve, vet and connect in one step -----------------------------------
 
 
 class _VettedBackend(httpcore.AsyncNetworkBackend):

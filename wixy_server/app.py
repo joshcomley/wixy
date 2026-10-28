@@ -11,6 +11,7 @@ from __future__ import annotations
 import functools
 import logging
 import re
+import shutil
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -47,6 +48,11 @@ from wixy_server.livechat.adventure_pack import (
     CmdAdventureResearcher,
     PackTiming,
 )
+from wixy_server.livechat.adventure_pictures import (
+    AdventurePictureFinder,
+    AdventurePictureJob,
+    WebPictureFinder,
+)
 from wixy_server.livechat.call_broker import CallBroker
 from wixy_server.livechat.drawing_broker import DrawingBroker
 from wixy_server.livechat.drawings import MAX_LIVE_BATCHES_PER_SECOND
@@ -58,6 +64,7 @@ from wixy_server.livechat.push import (
     dispatch_push_notifications,
     load_or_create_vapid_keys,
 )
+from wixy_server.livechat.safe_fetch import SafeFetcher
 from wixy_server.livechat.store import LiveChatStore
 from wixy_server.livechat.sw import server_sw_response
 from wixy_server.livechat.tokens import load_or_create_secret
@@ -159,6 +166,7 @@ def create_app(
     adventure_bank: AdventureBank | None = None,
     adventure_researcher: AdventureResearcher | None = None,
     adventure_pack_timing: PackTiming | None = None,
+    adventure_picture_finder: AdventurePictureFinder | None = None,
 ) -> FastAPI:
     """Build the Wixy FastAPI app for one project.
 
@@ -212,6 +220,11 @@ def create_app(
     and `None` otherwise (standalone: every pack is `unavailable` at once; Bank/Reject still
     work) — overridable so tests and the e2e fixture inject a fake. `adventure_pack_timing` shortens
     the job's pacing (poll interval, spawn gap, give-up) for tests and the fixture.
+    `adventure_picture_finder`: what finds a ready holiday pack's pictures (spec §4.3a). Defaults to
+    a `WebPictureFinder` over a production `SafeFetcher` ONLY on the same default path as the
+    researcher (fleet edition, cmd AI backend, no researcher injected) and only with the media
+    pipeline available; an injected researcher therefore never reaches the internet unless the test
+    also injects a finder. Standalone / no researcher / no media pipeline: a pack has no pictures.
     """
     settings = load_settings(storage_root)
     registry = load_registry(wixy_repo_root)
@@ -335,12 +348,42 @@ def create_app(
     # Adventure Time (workspace 00056): the destination bank loads once; the holiday-pack runner
     # needs a researcher — cmd-backed on the fleet when the AI backend is cmd, none otherwise.
     resolved_adventure_bank = adventure_bank if adventure_bank is not None else load_bank_or_empty()
+    owned_picture_finder: WebPictureFinder | None = None
     if adventure_researcher is not None:
         resolved_adventure_researcher: AdventureResearcher | None = adventure_researcher
     elif settings.edition != "standalone" and isinstance(resolved_ai_backend, CmdAIBackend):
         resolved_adventure_researcher = CmdAdventureResearcher(chat_client)
+        if adventure_picture_finder is None and livechat_media_available:
+            # The production picture sources: the one SSRF-safe fetcher with its default (strict)
+            # address policy, ports and certificate checks — nothing here relaxes any of it.
+            owned_picture_finder = WebPictureFinder(SafeFetcher())
     else:
         resolved_adventure_researcher = None
+    resolved_picture_finder: AdventurePictureFinder | None = (
+        adventure_picture_finder if adventure_picture_finder is not None else owned_picture_finder
+    )
+
+    def _picture_space_ok(size_bytes: int) -> bool:
+        """Room for a pack's pictures: under the chat-media quota and above the free-space floor
+        (the checks an upload makes at init)."""
+        used = livechat_store.media_bytes_used() + livechat_store.pending_upload_bytes()
+        if used + size_bytes > settings.server_media_quota_bytes:
+            return False
+        free = shutil.disk_usage(paths.root).free
+        return free - size_bytes >= settings.server_min_free_bytes
+
+    adventure_picture_job: AdventurePictureJob | None = (
+        AdventurePictureJob(
+            store=livechat_store,
+            paths=paths,
+            bank=resolved_adventure_bank,
+            finder=resolved_picture_finder,
+            notifier=livechat_notifier,
+            space_ok=_picture_space_ok,
+        )
+        if resolved_picture_finder is not None and resolved_adventure_researcher is not None
+        else None
+    )
     livechat_adventure_runner = AdventurePackRunner(
         store=livechat_store,
         bank=resolved_adventure_bank,
@@ -348,6 +391,7 @@ def create_app(
         notifier=livechat_notifier,
         cwd=paths.server_dir / RESEARCH_DIRNAME,
         timing=adventure_pack_timing,
+        pictures=adventure_picture_job,
     )
     livechat_adventure_live_limiter = SlidingWindowRateLimiter(
         max_events=ADVENTURE_LIVE_BATCHES_PER_SECOND, window_s=1.0
@@ -493,6 +537,8 @@ def create_app(
             await livechat_push_client.aclose()
             await chat_client.aclose()
             await gh_client.aclose()
+            if owned_picture_finder is not None:
+                await owned_picture_finder.aclose()
             if resolved_pin_verifier is not None:
                 await resolved_pin_verifier.aclose()
             if resolved_transcriber is not None:
