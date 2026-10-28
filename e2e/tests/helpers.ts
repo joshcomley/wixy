@@ -56,6 +56,43 @@ export function trackConsoleErrors(page: Page): string[] {
   return errors;
 }
 
+/** Freezes the page's fake clock (`page.clock.install()`) where it stands, so from here on page time
+ * moves ONLY on `runFor`/`fastForward`. `install()` alone does NOT do this: page time keeps flowing
+ * at real speed (measured 2026-10-28 on Playwright 1.61.1: 2016 ms of `performance.now()` across a
+ * 2000 ms real wait, and 0 ms once paused). A spec that counts idle time with `runFor` (lock at 10 s,
+ * "still open at 9 s") otherwise also counts however long the machine took between steps, and a
+ * busy machine runs out the one-second margin. Call it after the page has loaded: a frozen clock
+ * also stops the page's own timers, which its boot may need. `pauseAt` refuses a moment already
+ * past, so it aims 100 ms ahead and retries if the machine was slower than that. */
+export async function freezeClock(page: Page): Promise<void> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const now = await page.evaluate(() => Date.now());
+    try {
+      await page.clock.pauseAt(now + 100);
+      return;
+    } catch (error) {
+      if (!String(error).includes("Cannot fast-forward to the past")) throw error;
+    }
+  }
+  throw new Error("could not freeze the page clock: the machine kept outrunning the 100 ms aim");
+}
+
+/** Taps the Server chat's thread `times` times on a spot that is only ever the thread itself: 4 px
+ * into its own left padding (the gutter, 12 px on a phone and 20 px on a desktop, which no message
+ * occupies at any scroll position), half-way down. A plain `.click()` aims at the thread's CENTRE,
+ * and what sits there is whatever earlier tests left: the fixture server is one per worker, so its
+ * one chat accumulates every earlier test's messages. On CI (2026-10-28) a double-tap's first tap
+ * landed on an earlier Adventure Time round's card and pressed its Play button, which opened the
+ * game, so the thread was hidden before the second tap. The spot is measured once, so under
+ * `page.clock` the taps still read as 0 ms apart (R3's multi-tap). */
+export async function tapThreadGap(page: Page, times = 1): Promise<void> {
+  const thread = page.locator(".wx-srv-thread");
+  const box = await thread.boundingBox();
+  if (box === null) throw new Error("the chat thread is not on screen");
+  const position = { x: 4, y: Math.round(box.height / 2) };
+  for (let i = 0; i < times; i += 1) await thread.click({ position });
+}
+
 /** Waits for the NEXT `PATCH /api/admin/draft` this page makes to come back 200,
  * returning the new rev — the OpQueue's 300ms coalesce + network round trip is
  * real time a test must not race ahead of before checking server-side state (or,
