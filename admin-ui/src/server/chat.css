@@ -8336,6 +8336,11 @@ button.wx-srv-ck-twist-toggle {
   opacity: 0.7;
 }
 
+/* Locked after the reveal: an un-starred toggle fades right back so the basket reads as its ★s. */
+.wx-srv-ck-star:disabled:not(.wx-srv-ck-star-on) {
+  opacity: 0.25;
+}
+
 .wx-srv-ck-star-mark {
   flex: none;
   color: var(--ck-saffron);

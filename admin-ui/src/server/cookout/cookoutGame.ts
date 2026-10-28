@@ -1042,10 +1042,10 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     const out: HTMLElement[] = [];
     const role = roleLine(current.role);
     if (role !== "") out.push(el("p", "wx-srv-ck-role", role));
-    const partnerName = mine ? nameOf(view, current.player === 1 ? 2 : 1, partnerFallback() ?? "your partner") : "";
     if (mine && current.vetoed !== null) {
+      const sweeper = nameOf(view, current.player === 1 ? 2 : 1, partnerFallback() ?? "your partner");
       const swept = el("p", "wx-srv-ck-swept");
-      swept.append(emojiSpan("wx-srv-ck-swept-icon", "🧹"), doc.createTextNode(`${partnerName} swept `));
+      swept.append(emojiSpan("wx-srv-ck-swept-icon", "🧹"), doc.createTextNode(`${sweeper} swept `));
       swept.append(el("em", "wx-srv-ck-swept-name", current.vetoed.name), doc.createTextNode(" off your table"));
       out.push(swept);
     }
@@ -1945,6 +1945,11 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     }
     const you = view.you;
     const names = view.players.map((p) => p.name);
+    // A swap proposed (by either player) or done ends this screen's own basket chooser.
+    if (view.swap.state !== "none" || !view.swap.available) {
+      swapChoosing = false;
+      swapTarget = null;
+    }
     // A Blind round this screen watched being picked flips its basket open once. (The flag is not part of
     // the key: the very next refresh must not redraw the basket and cut the flip short.)
     section(
@@ -2087,7 +2092,8 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
   function drawRules(view: CookoutView): void {
     const setup = view.setup;
     const spin = setup.styleSpun && setup.style !== null && !wheelPlayed.has(view.seq);
-    const key = JSON.stringify([setup, spin]);
+    // `spin` is not part of the key: the very next refresh must not redraw the chip and cut the wheel short.
+    const key = JSON.stringify(setup);
     if (drawn.rules === key) return;
     drawn.rules = key;
     const chips: HTMLElement[] = [];

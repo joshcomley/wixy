@@ -20,6 +20,7 @@ function make(fetchBook: (s: ServerSession) => Promise<BookResult>, session: Ser
     hooks: { lockNow },
     getSession: () => session,
     openRecipe,
+    openEncore: vi.fn(),
     fetchBook,
     setTimeout: (cb) => timers.push(cb),
     clearTimeout: () => {},
@@ -60,7 +61,7 @@ describe("the Recipe book", () => {
     await flush();
     h.book.element.querySelectorAll<HTMLButtonElement>(".wx-srv-ck-book-entry")[1]?.click();
     expect(h.book.isOpen()).toBe(false);
-    expect(h.openRecipe).toHaveBeenCalledWith(30, "c");
+    expect(h.openRecipe).toHaveBeenCalledWith(30, "c", 1);
   });
 
   it("says when there is nothing yet, and offers Try again when the list will not load", async () => {

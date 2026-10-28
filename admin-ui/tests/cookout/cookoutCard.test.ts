@@ -9,7 +9,20 @@ import { finishedView, picture } from "./fixtures";
 // and an Open button; dish photos beside the words once the round has them.
 
 function summary(patch: Partial<CookoutSummary>): CookoutSummary {
-  return { state: "picking", blind: false, pickedCount: 0, concepts: "none", bankedCount: 0, rev: 1, ...patch };
+  return {
+    state: "picking",
+    blind: false,
+    pickedCount: 0,
+    concepts: "none",
+    bankedCount: 0,
+    rev: 1,
+    generation: 1,
+    waiting: [],
+    swap: "none",
+    dinnerDecided: false,
+    cookedCount: 0,
+    ...patch,
+  };
 }
 
 function message(seq: number, cookout: unknown): Message {
