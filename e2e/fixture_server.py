@@ -108,8 +108,11 @@ from builder.config import ProjectConfig  # noqa: E402
 from wixy_server.chats import find_chat  # noqa: E402
 from wixy_server.checkout import current_sha, ensure_checkout  # noqa: E402
 from wixy_server.cmdchat import CmdChatClient  # noqa: E402
+from wixy_server.livechat import janitor as livechat_janitor  # noqa: E402
 from wixy_server.livechat.adventure_pack import CmdAdventureResearcher, PackTiming  # noqa: E402
 from wixy_server.livechat.adventure_pictures import WebPictureFinder  # noqa: E402
+from wixy_server.livechat.call_broker import CallBroker  # noqa: E402
+from wixy_server.livechat.grants import GrantFailureLimiter  # noqa: E402
 from wixy_server.livechat.pinclient import CmdPinVerifier  # noqa: E402
 from wixy_server.livechat.store import LiveChatStore  # noqa: E402
 from wixy_server.livechat.transcribe import CmdTranscriber  # noqa: E402
@@ -442,6 +445,8 @@ def main() -> None:
     # care sees no Transcribe control; `server-transcription.spec.ts` flips it through
     # `/test/server/transcribe-config`.
     fake_cmd_state.transcribe_private_supported = False
+    transcribe_defaults_status = fake_cmd_state.transcribe_status_code
+    transcribe_defaults_text = fake_cmd_state.transcribe_text
     transcriber = CmdTranscriber(base_url=f"http://127.0.0.1:{fake_pin_port}")
 
     # workspace 00056 (Adventure Time): the holiday-pack researcher is pointed at the SAME
@@ -912,6 +917,95 @@ def main() -> None:
         state persists across specs — there's no per-test fixture restart)."""
         fake_cmd_state.reset_pin_lockout(TEST_SERVER_PIN_APP_KEY)
         return {"ok": True}
+
+    @app.post("/test/server/reset", include_in_schema=False)
+    async def _post_reset_server_chat() -> dict[str, object]:
+        """Return the Server chat to a pristine state, so every e2e test starts from a chat no
+        earlier test touched (fixtures.ts calls this before each test).
+
+        The fixture server is one per WORKER and so holds one chat that every test on that worker
+        shares in sequence. Messages, game rounds, grants and call state outlived their tests, and
+        which tests came first varied run to run, so a test could press an earlier test's
+        Adventure card or be offered its unfinished round as a tab. This undoes all of it:
+
+        * the product's own wipe (every message and everything hanging off one, the Adventure
+          never-again list and the transcripts) followed by the same storage sweep the real wipe
+          route runs, so attachment files go too;
+        * what a wipe deliberately keeps: device grants, push subscriptions, the Adventure
+          include-advised preference;
+        * the in-memory state: call sessions and their per-identity admission budgets, the
+          rate limiters, the fake cmd's transcription settings and the PIN lockout.
+
+        The database file is never replaced under its live connections.
+        """
+        store: LiveChatStore = app.state.livechat_store
+        paths: ProjectPaths = app.state.paths
+
+        def _reset_database() -> None:
+            attachment_ids, upload_ids, _scrub_token, _wipe_token = store.wipe_for_scrub(
+                now=time.time()
+            )
+            conn = store._connect()
+            try:
+                for table in ("device_grants", "push_subscriptions", "adv_settings"):
+                    conn.execute(f"DELETE FROM {table}")
+            finally:
+                conn.close()
+            items = {
+                item
+                for storage_id in attachment_ids
+                for item in (("attachment", storage_id), ("upload", storage_id))
+            }
+            items.update(("upload", storage_id) for storage_id in upload_ids)
+            livechat_janitor.cleanup_deleted_storage_once(
+                store=store, paths=paths, only_items=items
+            )
+            livechat_janitor.cleanup_unreferenced_storage_once(store=store, paths=paths)
+            scrub_token = store.scrub_pending_token()
+            if scrub_token is not None:
+                store.clear_scrub_pending(expected_token=scrub_token)
+
+        await anyio.to_thread.run_sync(_reset_database)
+
+        broker: CallBroker = app.state.livechat_call_broker
+        broker.finish("unavailable")
+        for peer in list(broker.peers.values()):
+            broker.remove(peer)
+        broker.admissions.clear()
+
+        grant_limiter = app.state.livechat_grant_limiter
+        app.state.livechat_grant_limiter = GrantFailureLimiter(
+            limit=grant_limiter._limit, window_s=grant_limiter._window_s
+        )
+        for name in (
+            "livechat_push_test_limiter",
+            "livechat_drawing_live_limiter",
+            "livechat_adventure_live_limiter",
+        ):
+            old = getattr(app.state, name, None)
+            if old is not None:
+                setattr(
+                    app.state,
+                    name,
+                    SlidingWindowRateLimiter(max_events=old._max_events, window_s=old._window_s),
+                )
+
+        nonlocal delete_response_delay_s
+        delete_response_delay_s = 0.0
+        if fake_cmd_state.transcribe_gate is not None:
+            fake_cmd_state.transcribe_gate.set()
+            fake_cmd_state.transcribe_gate = None
+        fake_cmd_state.transcribe_private_supported = False
+        fake_cmd_state.transcribe_status_code = transcribe_defaults_status
+        fake_cmd_state.transcribe_text = transcribe_defaults_text
+        fake_cmd_state.transcribe_requests.clear()
+        fake_cmd_state.transcribe_retained.clear()
+        fake_cmd_state.transcribe_max_in_flight = 0
+        app.state.livechat_transcription.rate_limiter = SlidingWindowRateLimiter()
+        transcriber.invalidate_probe()
+        fake_cmd_state.reset_pin_lockout(TEST_SERVER_PIN_APP_KEY)
+        app.state.livechat_notifier.publish()
+        return {"ok": True, "callPeers": len(broker.peers)}
 
     @app.post("/test/simulate-upstream-commit", include_in_schema=False)
     async def _post_simulate_upstream_commit(payload: dict[str, str]) -> dict[str, str]:
