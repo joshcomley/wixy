@@ -450,6 +450,112 @@ class TestGame:
             assert [len(p["picks"]) for p in final["players"]] == [5, 5]
             assert runner.concepts == [seq]
 
+    @staticmethod
+    def _assert_blind_json(body: dict[str, Any], viewer: str) -> None:
+        """The redaction invariants, asserted on the PARSED response body (never a substring): for
+        a viewer who is not the active player every turn field is null, the partner's picks are
+        null until finished, and history holds only the viewer's own turns."""
+        slot = {"Josh": 1, "Rose": 2}[viewer]
+        cur = body["current"]
+        if cur is not None and cur["player"] != slot:
+            for key in ("role", "options", "offerIndex", "skipsRemaining"):
+                assert cur[key] is None, (viewer, key, cur)
+        if body["state"] == "abandoned":
+            assert body["revealed"] is False and body["current"] is None
+        if body["state"] != "finished":
+            for player in body["players"]:
+                if player["slot"] != slot:
+                    assert player["picks"] is None, (viewer, player)
+        else:
+            assert body["revealed"] is True
+            assert [len(p["picks"]) for p in body["players"]] == [5, 5]
+        assert all(h["player"] == slot for h in body["history"]), (viewer, body["history"])
+        assert body["you"] == {"slot": slot}
+
+    def test_blind_redaction_holds_in_every_mutation_response_parsed(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        with cookout_client(storage_root, wixy_repo_root, pin_verifier) as (client, h, runner):
+            assert runner is not None
+            check = self._assert_blind_json
+            seq = create(client, h, blind=True)
+            check(post(client, h, f"/cookout/{seq}/join", sender="Rose").json(), "Rose")
+            for turn in range(1, 11):
+                who = "Josh" if turn % 2 == 1 else "Rose"
+                if turn in (2, 3):
+                    skipped = move_skip(client, h, seq, who)
+                    assert skipped.status_code == 200
+                    check(skipped.json(), who)
+                response = move_pick(client, h, seq, who)
+                assert response.status_code == 200
+                check(response.json(), who)
+                for viewer in ("Josh", "Rose"):
+                    check(view(client, h, seq, viewer), viewer)
+            finish_concepts(client, seq)
+            banked = post(client, h, f"/cookout/{seq}/concepts/a/bank", sender="Rose", moveId=mv())
+            check(banked.json(), "Rose")
+            for path in ("/concepts/retry", "/pictures/retry", "/concepts/a/recipe/retry"):
+                response = post(client, h, f"/cookout/{seq}{path}", sender="Josh")
+                if response.status_code == 200:
+                    check(response.json(), "Josh")
+            gone = create(client, h, "cookout-route-0009", blind=True)
+            post(client, h, f"/cookout/{gone}/join", sender="Rose")
+            move_pick(client, h, gone, "Josh")
+            move_pick(client, h, gone, "Rose")
+            ended = post(client, h, f"/cookout/{gone}/abandon", sender="Josh")
+            check(ended.json(), "Josh")
+            check(view(client, h, gone, "Rose"), "Rose")
+
+    def test_the_real_committed_bank_plays_a_full_round_through_the_app(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        """No injected bank: `create_app` loads the shipped ~3,000-item bank, which must satisfy
+        the game's `BankLike` seam for every create/join/skip/pick."""
+        from wixy_server.livechat.cookout_bank import CookoutBank
+
+        app = create_app(
+            storage_root=storage_root,
+            wixy_repo_root=wixy_repo_root,
+            pin_verifier=pin_verifier,
+            transcriber=AsyncMock(),
+            cookout_runner=FakeRunner(),
+        )
+        assert isinstance(app.state.livechat_cookout_bank, CookoutBank)
+        assert len(app.state.livechat_cookout_bank.ingredients) >= 2500
+        client = TestClient(app, cookies={"CF_Authorization": "dummy"})
+        client.__enter__()
+        try:
+            resp = client.post(
+                f"{BASE}/unlock",
+                content=_form_style_json(TEST_PIN),
+                headers={
+                    **UNLOCK_GUARD_HEADERS,
+                    "Sec-Fetch-Site": "same-origin",
+                    "CF-Access-Authenticated-User-Email": "a@example.com",
+                },
+            )
+            h = {
+                "X-Wixy-Server-Token": resp.json()["token"],
+                "CF-Access-Authenticated-User-Email": "a@example.com",
+            }
+            seq = create(client, h, blind=False)
+            post(client, h, f"/cookout/{seq}/join", sender="Rose")
+            seen: set[str] = set()
+            for turn in range(1, 11):
+                who = "Josh" if turn % 2 == 1 else "Rose"
+                assert move_skip(client, h, seq, who).status_code == 200
+                options = view(client, h, seq, who)["current"]["options"]
+                assert len(options) == 2 and options[0]["category"] != options[1]["category"]
+                response = move_pick(client, h, seq, who, index=1)
+                assert response.status_code == 200, response.text
+            final = view(client, h, seq, "Josh")
+            assert final["state"] == "finished" and final["concepts"]["state"] == "pending"
+            ids = [p["id"] for pl in final["players"] for p in pl["picks"]]
+            assert len(ids) == len(set(ids)) == 10 and not (seen & set(ids))
+            assert len(final["staples"]) == 8
+        finally:
+            client.__exit__(None, None, None)
+
     def test_409_codes(
         self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
     ) -> None:
