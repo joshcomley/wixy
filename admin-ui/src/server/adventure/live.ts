@@ -459,7 +459,8 @@ export function createLiveReceiver(deps: LiveReceiverDeps): LiveReceiver {
     sweep(nowMs) {
       const d = drag;
       if (d === null) return;
-      const idle = nowMs - d.updatedAt > LIVE_STROKE_TIMEOUT_MS;
+      // A finger still down that stopped reporting is gone; a finished drag is held (below) instead.
+      const idle = !d.ended && nowMs - d.updatedAt > LIVE_STROKE_TIMEOUT_MS;
       const held = d.ended && nowMs - d.endedAtLocal > HOLD_AFTER_END_MS;
       if (idle || held) {
         remember(d.clientId);

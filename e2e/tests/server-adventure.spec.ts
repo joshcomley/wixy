@@ -178,17 +178,19 @@ async function dragGlobe(page: Page, axis: "lng" | "lat", whileFingerDown?: () =
   const slow = [1, 2, 3, 4, 5, 6].map((i) => at((0.4 * i) / 6));
   const fast = [1, 2, 3, 4].map((i) => at(0.4 + (0.6 * i) / 4));
   if (shotsRun()) {
+    // In-page pointer events with EXPLICIT timestamps (a flick's speed comes from the time between its
+    // last samples, and software-GL frames would stretch real timing): the same finger, exactly timed.
     await page.evaluate(
       async ({ start, moves }) => {
         const canvas = document.querySelector(".wx-srv-adv-globe")!;
-        const fire = (type: string, p: { x: number; y: number }): void => {
-          canvas.dispatchEvent(
-            new PointerEvent(type, { pointerId: 7, pointerType: "mouse", isPrimary: true, button: 0, buttons: type === "pointerup" ? 0 : 1, clientX: p.x, clientY: p.y, bubbles: true, cancelable: true }),
-          );
+        const fire = (type: string, p: { x: number; y: number }, timeStamp: number): void => {
+          const event = new PointerEvent(type, { pointerId: 7, pointerType: "mouse", isPrimary: true, button: 0, buttons: type === "pointerup" ? 0 : 1, clientX: p.x, clientY: p.y, bubbles: true, cancelable: true });
+          Object.defineProperty(event, "timeStamp", { value: timeStamp });
+          canvas.dispatchEvent(event);
         };
-        fire("pointerdown", start);
+        fire("pointerdown", start, performance.now());
         for (const p of moves) {
-          fire("pointermove", p);
+          fire("pointermove", p, performance.now());
           await new Promise((resolve) => setTimeout(resolve, 90));
         }
       },
@@ -196,20 +198,16 @@ async function dragGlobe(page: Page, axis: "lng" | "lat", whileFingerDown?: () =
     );
     if (whileFingerDown !== undefined) await whileFingerDown();
     await page.evaluate(
-      async ({ moves }) => {
+      ({ moves }) => {
         const canvas = document.querySelector(".wx-srv-adv-globe")!;
-        const fire = (type: string, p: { x: number; y: number }): void => {
-          canvas.dispatchEvent(
-            new PointerEvent(type, { pointerId: 7, pointerType: "mouse", isPrimary: true, button: 0, buttons: type === "pointerup" ? 0 : 1, clientX: p.x, clientY: p.y, bubbles: true, cancelable: true }),
-          );
+        const fire = (type: string, p: { x: number; y: number }, timeStamp: number): void => {
+          const event = new PointerEvent(type, { pointerId: 7, pointerType: "mouse", isPrimary: true, button: 0, buttons: type === "pointerup" ? 0 : 1, clientX: p.x, clientY: p.y, bubbles: true, cancelable: true });
+          Object.defineProperty(event, "timeStamp", { value: timeStamp });
+          canvas.dispatchEvent(event);
         };
-        for (const p of moves) {
-          fire("pointermove", p);
-          await new Promise((resolve) => setTimeout(resolve, 14));
-        }
-        const last = moves[moves.length - 1]!;
-        fire("pointermove", last);
-        fire("pointerup", last);
+        const t0 = performance.now();
+        moves.forEach((p, i) => fire("pointermove", p, t0 + i * 14));
+        fire("pointerup", moves[moves.length - 1]!, t0 + (moves.length - 1) * 14 + 4);
       },
       { moves: fast },
     );
@@ -297,6 +295,8 @@ async function playToChosen(
 
   // The country roulette: Alice presses Stop on what she sees lit; both screens settle on exactly that.
   await waitFact(pages, "phase", "country", 40_000);
+  await eventually(pages, async () => (await a.locator('.wx-srv-adv-stop[data-live="1"]').count()) > 0, "Stop is live (countries)");
+  await a.waitForTimeout(400); // the Stop button's colour fades in
   if (options.shots === true) await shot(a, "03-country-roulette");
   const country = await pressStop(pages, a);
   expect(country).not.toBe("");

@@ -161,9 +161,14 @@ export function createAdventureModel(deps: AdventureModelDeps): AdventureModel {
       schedule(seq, entry);
       return;
     }
-    if (entry.again || isStale(seq)) {
+    if (entry.again) {
+      // A newer summary arrived while this read was out: read once more.
       entry.again = false;
       void fetchIfStale(seq);
+    } else if (isStale(seq)) {
+      // The server answered with something older than its own summary says exists (a lagging replica
+      // during a slot swap): look again after a pause, never in a tight loop.
+      schedule(seq, entry);
     }
   }
 
