@@ -155,10 +155,29 @@ describe("the round view", () => {
     expect(parseCookoutView(raw)?.images.pictures.a).toBeNull();
   });
 
-  it("reads 'banked' with no readable recipe as not finished, so the card offers Try again", () => {
+  it("keeps 'banked' with no readable recipe as banked, with no data", () => {
     const recipes = bankedRecipes("a");
     (recipes["a"] as Json)["data"] = { serves: 2 };
-    expect(parseCookoutView(finishedView({ recipes }))?.recipes.a.state).toBe("failed");
+    const slot = parseCookoutView(finishedView({ recipes }))?.recipes.a;
+    expect(slot?.state).toBe("banked");
+    expect(slot?.data).toBeNull();
+  });
+
+  it("enforces Blind redaction itself: a partner's pair, role and picks a buggy server sent are dropped", () => {
+    // Player 1 viewing Player 2's turn, but the server (wrongly) included everything.
+    const leaky = pickingView({ blind: true, you: 1, turn: 4, showOptions: true });
+    const view = parseCookoutView(leaky);
+    expect(view?.current).toMatchObject({ turn: 4, player: 2, role: null, options: null, offerIndex: null, skipsRemaining: null });
+    expect(view?.players[1].picks).toBeNull();
+    expect(view?.players[1].pickCount).toBe(1);
+    expect(view?.players[0].picks?.map((p) => p.id)).toEqual(["thick-white-toast", "flat-leaf-parsley"]);
+    // A non-player sees nobody's picks; the active player keeps their own pair.
+    expect(parseCookoutView(pickingView({ blind: true, you: null, turn: 3 }))?.players[0].picks).toBeNull();
+    expect(parseCookoutView(pickingView({ blind: true, you: 1, turn: 3 }))?.current?.options).not.toBeNull();
+    // An abandoned Blind round never reveals; a finished, revealed one shows all ten.
+    const abandoned = { ...pickingView({ blind: true, you: 1, turn: 5 }), state: "abandoned", current: null };
+    expect(parseCookoutView(abandoned)?.players[1].picks).toBeNull();
+    expect(parseCookoutView(finishedView({ blind: true }))?.players[1].picks).toHaveLength(5);
   });
 
   it("drops a malformed concept but keeps the good ones", () => {

@@ -141,6 +141,17 @@ describe("rev only moves forward", () => {
     expect(h.live()).toHaveLength(0);
   });
 
+  it("a mutation answered after a reset (lock, wipe, new viewer) is not applied", async () => {
+    const h = harness(async () => ({ ok: false, kind: "unavailable" }));
+    let answer: (o: CookoutOutcome) => void = () => {};
+    const pending = h.model.run(() => new Promise<CookoutOutcome>((r) => (answer = r)));
+    h.model.reset();
+    answer({ ok: true, view: v(pickingView({ rev: 9 })) });
+    await pending;
+    expect(h.model.view(41)).toBeUndefined();
+    expect(h.onChange).not.toHaveBeenCalled();
+  });
+
   it("a failed read is retried later, and reset() cancels everything", async () => {
     const h = harness(async () => ({ ok: false, kind: "unavailable" }));
     h.model.observe([message(41, 3)]);

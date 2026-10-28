@@ -1413,7 +1413,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   // The start sheet (Open / Blind, then Start Cookout): from the ... menu and the pane's New.
   const cookoutStart: CookoutStartSheet = createCookoutStartSheet({
     document: documentRef,
-    start: (blind) => addCookout(blind),
+    start: (blind, clientId) => addCookout(blind, clientId),
+    newId: () => cryptoRandomId(win),
   });
   gameMounted = true;
   threadWrap.after(game.pane);
@@ -2314,14 +2315,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
    * message appears at once; the starter lands in the Cookout tab and takes Turn 1 (the other person is
    * OFFERED it, with a dot, by `syncGames`). Throws with the words to show when it could not start, so the
    * sheet stays open with them; a lock closes everything instead. */
-  async function addCookout(blind: boolean): Promise<void> {
+  async function addCookout(blind: boolean, clientId: string): Promise<void> {
     const session = currentSession;
     if (session === null) return;
     const requestGeneration = contentGeneration;
     let result: Awaited<ReturnType<typeof createCookout>>;
     try {
       result = await createCookout(session, {
-        clientId: cryptoRandomId(win),
+        clientId,
         sender: identity.getName() ?? "",
         deviceId: identity.getDeviceId(),
         blind,

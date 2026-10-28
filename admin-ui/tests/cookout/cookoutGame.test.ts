@@ -168,6 +168,12 @@ function ok(raw: Json): CookoutOutcome {
 
 afterEach(() => document.body.replaceChildren());
 
+/** start-1, start-2, … */
+function ids(): () => string {
+  let n = 0;
+  return () => `start-${++n}`;
+}
+
 describe("words", () => {
   it("the skip button says how many skips are left, and the third pair is final", () => {
     expect(skipLabel(0)).toBe("Neither — deal 2 new options (2 skips left)");
@@ -200,7 +206,7 @@ describe("the start sheet", () => {
   it("defaults to Open, can choose Blind, and starts in the chosen mode, closing when it started", async () => {
     let resolve: () => void = () => {};
     const start = vi.fn(() => new Promise<void>((r) => (resolve = r)));
-    const sheet = createCookoutStartSheet({ document, start });
+    const sheet = createCookoutStartSheet({ document, start, newId: ids() });
     document.body.append(sheet.element);
     sheet.open();
     expect(sheet.element.hidden).toBe(false);
@@ -209,7 +215,7 @@ describe("the start sheet", () => {
     expect(q(sheet.element, '[data-mode="blind"]').getAttribute("aria-checked")).toBe("true");
     const go = q<HTMLButtonElement>(sheet.element, ".wx-srv-ck-start-go");
     go.click();
-    expect(start).toHaveBeenCalledWith(true);
+    expect(start).toHaveBeenCalledWith(true, "start-2");
     expect(go.disabled).toBe(true);
     expect(go.textContent).toBe("Starting…");
     resolve();
@@ -219,7 +225,7 @@ describe("the start sheet", () => {
   });
 
   it("opens with the given mode preselected (New in the pane), and Cancel closes it", () => {
-    const sheet = createCookoutStartSheet({ document, start: vi.fn(async () => {}) });
+    const sheet = createCookoutStartSheet({ document, start: vi.fn(async () => {}), newId: ids() });
     sheet.open(true);
     expect(q(sheet.element, '[data-mode="blind"]').getAttribute("aria-checked")).toBe("true");
     q<HTMLButtonElement>(sheet.element, ".wx-srv-ck-start-cancel").click();
@@ -232,6 +238,7 @@ describe("the start sheet", () => {
       start: vi.fn(async () => {
         throw new Error("Cookout isn't available on this server right now.");
       }),
+      newId: ids(),
     });
     sheet.open();
     q<HTMLButtonElement>(sheet.element, ".wx-srv-ck-start-go").click();
@@ -239,6 +246,42 @@ describe("the start sheet", () => {
     expect(sheet.isOpen()).toBe(true);
     expect(q(sheet.element, ".wx-srv-ck-start-error").textContent).toBe("Cookout isn't available on this server right now.");
     expect(q<HTMLButtonElement>(sheet.element, ".wx-srv-ck-start-go").disabled).toBe(false);
+  });
+
+  it("a retry after a failed start sends the SAME client id (no second round); a new mode or a new open does not", async () => {
+    const start = vi.fn(async () => {
+      throw new Error("Couldn't start a Cookout — try again.");
+    });
+    const sheet = createCookoutStartSheet({ document, start, newId: ids() });
+    sheet.open();
+    const go = q<HTMLButtonElement>(sheet.element, ".wx-srv-ck-start-go");
+    go.click();
+    await flush();
+    go.click();
+    await flush();
+    q<HTMLButtonElement>(sheet.element, '[data-mode="blind"]').click();
+    go.click();
+    await flush();
+    sheet.close();
+    sheet.open();
+    go.click();
+    await flush();
+    expect(start.mock.calls).toEqual([
+      [false, "start-1"],
+      [false, "start-1"],
+      [true, "start-2"],
+      [false, "start-3"],
+    ]);
+  });
+
+  it("opening again while a start is in flight changes nothing (no second Start beside it)", () => {
+    const start = vi.fn(() => new Promise<void>(() => {}));
+    const sheet = createCookoutStartSheet({ document, start, newId: ids() });
+    sheet.open(true);
+    q<HTMLButtonElement>(sheet.element, ".wx-srv-ck-start-go").click();
+    sheet.open(false);
+    expect(q<HTMLButtonElement>(sheet.element, ".wx-srv-ck-start-go").disabled).toBe(true);
+    expect(q(sheet.element, '[data-mode="blind"]').getAttribute("aria-checked")).toBe("true");
   });
 
   it("the pane's New opens the sheet with the round's own mode", () => {
@@ -481,6 +524,26 @@ describe("the chef", () => {
     h.api.retryRecipe.mockResolvedValue(ok(finishedView({ concepts: "ready", images: "done", rev: 13 })));
     retry.click();
     expect(h.api.retryRecipe).toHaveBeenCalledWith(41, "c");
+  });
+
+  it("a banked recipe the client cannot read says so instead of offering a retry the server would refuse", () => {
+    const h = make();
+    const recipes = bankedRecipes("a");
+    (recipes["a"] as Json)["data"] = { serves: 2 };
+    h.show(finishedView({ concepts: "ready", images: "done", recipes }));
+    const card = q(h.pane, '.wx-srv-ck-dish[data-concept="a"]');
+    expect(card.querySelector(".wx-srv-ck-recipe-retry")).toBeNull();
+    q<HTMLButtonElement>(card, ".wx-srv-ck-banked").click();
+    expect(q(h.pane, '.wx-srv-ck-dish[data-concept="a"] .wx-srv-ck-recipe-missing').textContent).toBe(
+      "This recipe is saved but can't be shown right now.",
+    );
+  });
+
+  it("a Recipe-book jump belongs to its round: another round drawn first is not expanded", () => {
+    const h = make();
+    h.game.openRecipe(77, "a"); // round 77's view has not arrived yet
+    h.show(finishedView({ seq: 41, concepts: "ready", images: "done", recipes: bankedRecipes("a") }));
+    expect(h.pane.querySelector(".wx-srv-ck-recipe")).toBeNull();
   });
 
   it("the Recipe book's tap opens the round straight at that dish's full recipe", () => {

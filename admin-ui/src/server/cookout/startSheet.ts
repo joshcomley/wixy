@@ -14,8 +14,13 @@
 export interface CookoutStartSheetDeps {
   readonly document: Document;
   /** Start a round in the chosen mode. Resolves once the request is settled (the sheet waits on it, then
-   * closes); rejects with the words to show when the round could not start (the sheet stays open). */
-  start(blind: boolean): Promise<void>;
+   * closes); rejects with the words to show when the round could not start (the sheet stays open).
+   * `clientId` is the same for every retry of one start (the server answers a replay with the round it
+   * already made, so a lost answer followed by "try again" never makes a second round); a different mode
+   * is a different start. */
+  start(blind: boolean, clientId: string): Promise<void>;
+  /** A fresh id for a start. */
+  newId(): string;
 }
 
 export interface CookoutStartSheet {
@@ -95,11 +100,14 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
   let opened = false;
   let blindChosen = false;
   let busy = false;
+  /** The id of the start this sheet is making: kept across retries, new for a new mode or a new open. */
+  let clientId = "";
   /** Bumped on open/close: a start that settles after the sheet went away does not touch it. */
   let generation = 0;
 
   function select(blind: boolean): void {
     if (busy) return;
+    if (blind !== blindChosen) clientId = deps.newId();
     blindChosen = blind;
     for (const [option, on] of [
       [openOption, !blind],
@@ -131,7 +139,7 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
     setBusy(true);
     error.hidden = true;
     try {
-      await deps.start(blindChosen);
+      await deps.start(blindChosen, clientId);
     } catch (thrown) {
       if (started === generation) {
         error.textContent =
@@ -153,7 +161,11 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
   return {
     element: root,
     open(blind = false, topOffsetPx = 0) {
+      // A start in flight finishes first (opening again must not allow a second Start beside it).
+      if (busy) return;
       generation += 1;
+      clientId = deps.newId();
+      blindChosen = blind;
       root.style.top = `${topOffsetPx}px`;
       opened = true;
       setBusy(false);

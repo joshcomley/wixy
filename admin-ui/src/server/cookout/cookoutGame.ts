@@ -121,7 +121,7 @@ const CATEGORY_NAMES: Readonly<Record<string, string>> = {
   "grains-bakery": "Bread, Pasta & Grains",
   "legumes-nuts-seeds": "Beans, Nuts & Seeds",
   "herbs-aromatics": "Fresh Herbs & Aromatics",
-  "spices-seasonings": "Spices & Chillies",
+  "spices-seasonings": "Spices & Chilis",
   "oils-fats-condiments": "Oils, Fats & Condiments",
   "sauces-stocks-fermented": "Sauces, Pastes & Pickles",
   "sweet-baking": "Sweet, Sugar & Baking",
@@ -301,7 +301,6 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
   const progress = el("section", "wx-srv-ck-progress");
   progress.setAttribute("aria-label", "Basket progress");
   const stage = el("section", "wx-srv-ck-stage");
-  stage.setAttribute("aria-live", "polite");
   const tray = el("section", "wx-srv-ck-tray");
   scroll.append(progress, stage, tray);
 
@@ -330,7 +329,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
   let trayOpen = true;
   let ending = false;
   /** A dish to open at once (the Recipe book's tap), consumed when its recipe is on screen. */
-  let focusConcept: ConceptId | null = null;
+  let focusConcept: { readonly seq: number; readonly id: ConceptId } | null = null;
   /** The round was seen being picked here: its Blind reveal plays when it finishes. */
   let sawPicking = false;
   let revealPlayed = false;
@@ -971,8 +970,12 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     }
     body.append(bankControls(view, concept));
     const slot = view.recipes[concept.id];
-    if (slot.state === "banked" && slot.data !== null && expanded.has(concept.id)) {
-      body.append(recipeView(concept, slot.data, nameLookup(view, concept), slot));
+    if (slot.state === "banked" && expanded.has(concept.id)) {
+      body.append(
+        slot.data !== null
+          ? recipeView(concept, slot.data, nameLookup(view, concept), slot)
+          : el("p", "wx-srv-ck-recipe-missing", "This recipe is saved but can't be shown right now."),
+      );
     }
     card.append(body);
     return card;
@@ -1128,8 +1131,10 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
   }
 
   function applyFocus(view: CookoutView): void {
-    if (focusConcept === null || view.state !== "finished" || view.concepts.state !== "ready") return;
-    const id = focusConcept;
+    if (focusConcept === null || focusConcept.seq !== view.seq || view.state !== "finished" || view.concepts.state !== "ready") {
+      return;
+    }
+    const id = focusConcept.id;
     const slot = view.recipes[id];
     if (slot.state === "banked" && !expanded.has(id)) {
       expanded.add(id);
@@ -1203,7 +1208,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     pane,
     open: (seq) => deps.tabs.open("cookout", seq),
     openRecipe(seq, conceptId) {
-      focusConcept = CONCEPT_IDS.includes(conceptId) ? conceptId : null;
+      focusConcept = CONCEPT_IDS.includes(conceptId) ? { seq, id: conceptId } : null;
       deps.tabs.open("cookout", seq);
       // Already on screen with the same round: the open redraws only when something changed.
       const view = deps.model.view(seq);

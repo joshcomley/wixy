@@ -241,8 +241,10 @@ export function createCookoutModel(deps: CookoutModelDeps): CookoutModel {
     view: (seq) => views.get(seq),
     apply,
     async run(call) {
+      const startedIn = generation;
       const outcome = await call();
-      if (outcome.ok) apply(outcome.view);
+      // A lock, wipe or change of viewer happened while the call was out: its view belongs to before.
+      if (outcome.ok && startedIn === generation) apply(outcome.view);
       return outcome;
     },
     observe(messages) {

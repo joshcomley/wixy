@@ -526,9 +526,9 @@ function parseRecipeSlot(value: unknown): RecipeSlot {
   const data = dataRaw === null || dataRaw === undefined ? null : parseFullRecipe(dataRaw);
   const bankedAt = asFinite(record["bankedAt"]);
   return {
-    // "Banked" with no readable recipe cannot show the recipe it promises: read it as not finished,
-    // so the card offers to try again rather than a "View full recipe" that opens nothing.
-    state: parsedState === "banked" && data === null ? "failed" : parsedState,
+    // "Banked" with no readable recipe stays banked (the server will not write it again): the pane says
+    // it cannot show it rather than offering a retry the server would refuse.
+    state: parsedState,
     requestedBy: asText(record["requestedBy"], 120),
     bankedAt,
     error: asText(record["error"], 600),
@@ -557,15 +557,28 @@ export function parseCookoutView(value: unknown): CookoutView | null {
   // A round being picked has a turn; a turn that would not parse cannot be played (not drawn at all).
   if (s === "picking" && current === null) return null;
   const recipes = asRecord(record["recipes"]);
+  const blind = record["blind"] === true;
+  const revealed = record["revealed"] === true;
+  let players: readonly [CookoutPlayer, CookoutPlayer] = [p1, p2];
+  let shownCurrent = s === "picking" ? current : null;
+  if (blind && !(s === "finished" && revealed)) {
+    // The server redacts a Blind round (spec §1.3); this is the second lock. Whatever a buggy server
+    // sent, only the viewer's own picks and — on their own turn — their own pair are kept, so the
+    // partner's secrets can never reach the DOM.
+    players = [youSlot === 1 ? p1 : { ...p1, picks: null }, youSlot === 2 ? p2 : { ...p2, picks: null }];
+    if (shownCurrent !== null && youSlot !== shownCurrent.player) {
+      shownCurrent = { ...shownCurrent, role: null, options: null, offerIndex: null, skipsRemaining: null };
+    }
+  }
   return {
     seq,
     state: s,
     rev,
-    blind: record["blind"] === true,
-    revealed: record["revealed"] === true,
-    players: [p1, p2],
+    blind,
+    revealed,
+    players,
     you: youSlot === null ? null : { slot: youSlot },
-    current: s === "picking" ? current : null,
+    current: shownCurrent,
     history: parseHistory(record["history"]),
     staples: parseStaples(record["staples"]),
     concepts: parseConcepts(record["concepts"]),
