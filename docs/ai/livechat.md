@@ -2135,7 +2135,7 @@ screen as she sends it and on the other person's as it arrives. Nothing is sent 
   swallow it, so the lock still happens. `prefers-reduced-motion: reduce` skips the scene for a static starfield.
 - **Tests.** `admin-ui/tests/server/goodnight{Match,Dither,Timeline,Scene}.test.ts`, `threadGoodnight.test.ts`.
 
-## 23. Adventure Time: the globe holiday game, server half (workspace 00056; spec `spec/server-chat/08-adventure-time.md`, decisions/00190, Inv 56)
+## 23. Adventure Time: the globe holiday game, server half (workspace 00056; spec `spec/server-chat/08-adventure-time.md`, decisions/00192, Inv 56)
 
 The header's ... menu has **Adventure Time**: one person spins a globe sideways, the other sees the finger as a
 fading trail, the globe lands (the second spin is up/down), the camera zooms 30 % inland and countries light up at

@@ -98,7 +98,7 @@ a private address even by redirect, politeness and budget), `test_livechat_adven
 (the compare-and-set attach, the Gallery exclusion, the job's outcomes incl. rejected / deleted mid-hunt, a
 blue/green overlap and restart, the view shape and signed URLs, erasure of pictures and credits by delete and
 wipe, and the whole chain with the production finder over a fake Wikipedia / Commons / venue) and `test_adventure_bank_loader.py` (+ `test_adventure_bank.py` for the bank against the map).
-Decision: [00190](../../decisions/00190-server-chat-adventure-time/decision.md).
+Decision: [00192](../../decisions/00192-server-chat-adventure-time/decision.md).
 
 ### Inv 55 — Live calls are ephemeral private pairs, and idle suspension never overrides locking
 

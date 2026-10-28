@@ -1,7 +1,7 @@
 # Server chat — Adventure Time (the globe holiday game)
 
 Workspace 00056. Decided brief: implement faithfully. Where reality contradicts a cited fact, prefer
-reality and record it in the decision entry (`decisions/00190-server-chat-adventure-time/`).
+reality and record it in the decision entry (`decisions/00192-server-chat-adventure-time/`).
 
 ## 0. The ask (operator, verbatim summary)
 
@@ -528,6 +528,6 @@ the panic key.
 `docs/ai/livechat.md` (new §23 + the generalised game frame), `contracts.md` (routes, SSE event,
 `Message.adventure`, `wyrSeq`/`wyrRef` meaning), `invariants.md` (**Inv 56** — an adventure round is
 chat content; the never-again list; cmd's retained research copy; live frames never stored),
-`glossary.md` (states), `testing.md`, `CLAUDE.md` store table, `decisions/00190-…`.
+`glossary.md` (states), `testing.md`, `CLAUDE.md` store table, `decisions/00192-…`.
 Commits carry `Release-note: General bug fixes and improvements.` (R14a: Server chat stays
 discreet).
