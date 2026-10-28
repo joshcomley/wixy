@@ -75,6 +75,13 @@ HERO_TARGET: Final = 5
 HERO_MAX: Final = 6
 ITEM_SLOT_ATTEMPTS: Final = 20
 """How many item slots are tried (the pack can name up to 36 items; only ~11 pictures fit)."""
+MAX_FETCHED_PIXELS: Final = min(processing.PHOTO_PIXEL_CAP, 36_000_000)
+"""A fetched picture may declare at most this many pixels (6000 x 6000), checked BEFORE it is
+decoded. Tighter than the chat's own 80 MP photo cap on purpose: an RGB decode costs 3 bytes a pixel
+and the clean-up makes a few copies, and this runs on pictures nobody here chose."""
+HEAD_SCAN_CHARS: Final = 200_000
+DECODE_PARALLELISM: Final = 2
+"""How many fetched images are decoded at once (each can be a hundred MB while it is)."""
 MIN_SHORT_SIDE: Final = 480
 SEARCH_MIN_SHORT_SIDE: Final = 900
 MAX_ASPECT: Final = 3.0
@@ -247,7 +254,7 @@ def prepare_picture(data: bytes, *, min_short_side: int = MIN_SHORT_SIDE) -> Pre
             if image.format != expected:
                 raise PictureRejected("format_mismatch")
             width, height = image.size
-            if width < 1 or height < 1 or width * height > processing.PHOTO_PIXEL_CAP:
+            if width < 1 or height < 1 or width * height > MAX_FETCHED_PIXELS:
                 raise PictureRejected("too_many_pixels")
             if int(getattr(image, "n_frames", 1)) > 1:
                 raise PictureRejected("animated")
@@ -317,11 +324,14 @@ class _MetaParser(HTMLParser):
 
 
 def page_meta(body: bytes, charset: str | None) -> dict[str, str]:
-    """The `<meta>` tags of an HTML page (at most 1 MB, already capped by the fetch)."""
+    """The `<meta>` tags of an HTML page (at most 1 MB, already capped by the fetch). Only the head
+    is parsed: the text up to the first `</head>`, else the first 200 KB."""
     try:
         text = body.decode(charset or "utf-8", errors="replace")
     except LookupError:
         text = body.decode("utf-8", errors="replace")
+    head_end = text.lower().find("</head")
+    text = text[:head_end] if head_end >= 0 else text[:HEAD_SCAN_CHARS]
     parser = _MetaParser()
     try:
         parser.feed(text)
@@ -458,7 +468,8 @@ def parse_commons_pages(data: object, thumb_hosts: frozenset[str]) -> list[Commo
 
 
 def _credit_line(file: CommonsFile) -> str:
-    parts = [part for part in (file.artist, file.licence) if part]
+    artist = file.artist.removeprefix("User:").strip()  # Commons links a user as "User:Name"
+    parts = [part for part in (artist, file.licence) if part]
     text = ", ".join(parts) if parts else "Wikimedia Commons"
     return text if len(text) <= MAX_CREDIT else text[: MAX_CREDIT - 1].rstrip() + "…"
 
@@ -489,6 +500,7 @@ class WebPictureFinder:
         self._fetcher = fetcher
         self._endpoints = endpoints if endpoints is not None else WikimediaEndpoints()
         self._budget_s = budget_s
+        self._decode_limiter: anyio.CapacityLimiter | None = None  # made inside the event loop
 
     async def aclose(self) -> None:
         await self._fetcher.aclose()
@@ -509,14 +521,20 @@ class WebPictureFinder:
         )
         try:
             return json.loads(response.body)
-        except ValueError as exc:
+        except (
+            ValueError,
+            RecursionError,
+        ) as exc:  # malformed, or nested deeper than Python allows
             raise PictureRejected("bad_json") from exc
 
     async def image_get(self, url: str, *, min_short_side: int) -> tuple[PreparedImage, str]:
         """Fetch and validate an image; returns it with the SHA-256 of the fetched bytes."""
         response = await self._fetcher.get(url, max_bytes=IMAGE_MAX_BYTES, accept=("image/",))
+        if self._decode_limiter is None:
+            self._decode_limiter = anyio.CapacityLimiter(DECODE_PARALLELISM)
         prepared = await anyio.to_thread.run_sync(
-            lambda: prepare_picture(response.body, min_short_side=min_short_side)
+            lambda: prepare_picture(response.body, min_short_side=min_short_side),
+            limiter=self._decode_limiter,
         )
         return prepared, hashlib.sha256(response.body).hexdigest()
 
@@ -698,8 +716,23 @@ class _Hunt:
                 tg.start_soon(self._slot_task, slot, limiter)
         if not await self._still_wanted():
             return
+        self._drop_duplicates()
         await self._fill_hero()
         await self._search_sights()
+
+    def _drop_duplicates(self) -> None:
+        """Settle which slot keeps a file two slots both found (the destination's lead image, then
+        the items in plan order), so a slot that lost it is free to try its own fallbacks and the
+        outcome does not depend on which request happened to finish first."""
+        seen: set[str] = set(self._lead.keys) if self._lead is not None else set()
+        for slot in self._plan.slots:
+            picture = self._slots.get(slot.key)
+            if picture is None:
+                continue
+            if picture.keys & seen:
+                del self._slots[slot.key]
+            else:
+                seen |= picture.keys
 
     # -- guarded attempts ------------------------------------------------------------------------
 

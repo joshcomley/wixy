@@ -389,6 +389,14 @@ CREATE TABLE IF NOT EXISTS adv_settings(
   never fetched again after storing. `pack_json` maps each slot (hero i / section key + item i)
   to its attachment ordinal.
 - **Credits** show small under each picture ("Photo: <credit>"), linking to `page`.
+- **As built** (decisions/00191, docs/ai/livechat.md §23, Inv 56): measured on 2026-10-28, the Commons
+  API's `thumburl` is on `thumb.wikimedia.org` (a request for 1600 px is snapped up to the 1920 px
+  standard step), a file narrower than the step comes back as its original, which is never fetched
+  (the next standard step down is asked for instead); the hero is the destination article's lead image
+  plus Commons-search photos up to 5 rather than only "if fewer than 3 survive"; a fetched picture may
+  declare at most 36 MP (tighter than the chat's 80 MP) and is decoded two at a time; the fetcher
+  drives `httpcore` directly. The wire is `pack.images` (`"pending"`/`"done"`) and `pack.pictures =
+  {hero:[Picture], items:{"<section>:<index>":Picture}}` (contracts.md).
 - Job: on entering `chosen` → `pack = pending` → start the run, store `pack_run_id` → poll every
   10 s (bounded) until terminal or 25 min → store `ready`/`failed` (error text short and generic:
   "The research didn't finish — try again") → bump `rev`, publish. Spawn is single-file: at most 2

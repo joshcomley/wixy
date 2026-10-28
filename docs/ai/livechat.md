@@ -2138,8 +2138,9 @@ geometry implementation, in TypeScript; the pair are trusted, Inv 40).
 - **Modules.** `livechat/adventure_bank.py` (the static destination bank: strict loader, exclusion, top-five
   spacing), `livechat/adventure_destinations.json` (the bank), `livechat/adventure_game.py` (validation of a move +
   the wire shapes), `livechat/adventure_pack.py` (the holiday-pack job and its prompt/parse/sanitise),
-  `routes_livechat_adventure.py` (the routes), the store methods in `livechat/store.py`, and the chat-spawn run calls
-  in `cmdchat.py` (the ONE chokepoint to cmd, Inv 13).
+  `routes_livechat_adventure.py` (the routes), the store methods in `livechat/store.py`, the chat-spawn run calls
+  in `cmdchat.py` (the ONE chokepoint to cmd, Inv 13), and for the pack's pictures `livechat/adventure_pictures.py`
+  (the plan, the sources, the image check, the job) over `livechat/safe_fetch.py` (the SSRF-safe GET).
 - **Storage** (schema v20, additive; v19 is deployed and untouched): `adv_rounds` (one row per anchor message,
   `ON DELETE CASCADE`, explicit `DELETE` in wipe — the Inv 54 pattern) holds `state`, both spins
   (`{by, from, delta, durationMs, at}` JSON), the landing (`{point, sea, land, centre, landUnit}`), each roulette's
@@ -2205,7 +2206,50 @@ geometry implementation, in TypeScript; the pair are trusted, Inv 40).
   `(pack = 'pending' AND pack_run_id = <this run>)`, so a blue/green overlap stores a result once and a rejected or deleted
   round is left alone. **At startup** `AdventurePackRunner.resume` restarts the job for every `pending` round: with a run
   id it resumes polling that run, without one it starts a new run; with no researcher those rounds become `unavailable`.
-- **Edition.** `create_app(adventure_researcher=...)` is the seam (plus `adventure_bank=` and `adventure_pack_timing=`).
+- **Pictures in the pack** (spec §4.3a, decisions/00191). The research NAMES things and supplies no image
+  link: every item keeps `url` (the venue's own site where it has one) and gains an optional `wikipedia`
+  (an English Wikipedia article title, `clean_wikipedia_title`), and the pack gains `wikipedia` for the
+  destination. Once the text pack lands `ready` (published at once), the SERVER finds and fetches the
+  pictures — a viewer's device never contacts a third-party image host from a private chat. In the same
+  write that stores a `ready` pack `finish_adventure_pack(pictures_pending=True)` sets `images = pending`;
+  `AdventurePackRunner.run_job` then runs `AdventurePictureJob.run` (still a contained task, Inv 47,
+  OUTSIDE the research slot), which plans the slots from the pack (`plan_pictures`: round-robin across
+  sights, food, stay, culture, do by item position, at most 20 attempts), hunts through the finder
+  (`WebPictureFinder`; `create_app(adventure_picture_finder=...)` is the seam), stages each JPEG at
+  `uploads/<id>/assembled` and attaches them all in ONE transaction
+  (`create_adventure_picture_attachments`, modelled on `create_wyr_image_attachments`) as ordinary private
+  `photo` attachments on the ANCHOR message (ordinal = slot order), so renditions, signed URLs, quota and
+  delete/wipe erasure (Inv 46) are the attachment machinery's. The attach is a compare-and-set on the
+  round still being `chosen`/`banked` with its pack `ready` and `images = pending`: a rejected, deleted or
+  already-finished round attaches nothing (the ids are journaled for cleanup, the staged files removed).
+  `list_gallery` leaves them out like the would-you-rather pictures. `adv_rounds.images`
+  (`none|pending|done|failed`) and `adv_rounds.pictures` (the slot map JSON) are part of the v20 DDL (amended
+  in place — v20 was never deployed — and added by `_ensure_adventure_picture_columns` to a database that ran
+  the earlier text). Sources per slot, in order: (1) the Wikipedia REST summary's lead image taken as its
+  Commons file — the name is parsed from the thumb URL's path AFTER the two hash directories (never the last
+  segment; a local enwiki upload is skipped) — and fetched as the Commons API's 1600 px THUMBNAIL (never an
+  `upload.wikimedia.org` original: a file smaller than the thumbnail step is asked for again at the next
+  standard step down), credited from `extmetadata` (Artist HTML stripped + licence); (2) the venue page's
+  `og:image` / `twitter:image` (HTML <= 1 MB, 403/429 skipped quietly), credited to `og:site_name` or the host;
+  (3) hero and sights only: a Commons file-namespace search (`filemime:image/jpeg`, short side >= 900, no
+  map/flag/logo titles, landscape first). The hero is the destination article's lead plus search photos up to
+  5 (cap 6); at most 16 pictures per pack; a file found twice (Commons title or content digest) is kept once —
+  the destination's lead first, then the items in plan order — and a slot that lost it tries its own
+  fallbacks. Every picture is checked (`prepare_picture`: `image/*` content type before the body is read,
+  JPEG/PNG/WebP magic bytes, Pillow opens it as that format, <= 36 MP declared, one frame, short side >= 480,
+  aspect <= 3:1) and rebuilt as a metadata-free sRGB JPEG of <= 1600 px (`processing.reencode_still_as_jpeg`).
+  The whole hunt gives up after 240 s and keeps what it has. **Fetching** is `livechat/safe_fetch.py`
+  (`SafeFetcher`, Inv 56's SSRF rules) — nothing else fetches a URL the engine did not build. The view's
+  `pack.images` is `"pending"` while the hunt runs or a stored picture is still processing, else `"done"`;
+  `pack.pictures` is `{hero, items}` of `{thumbUrl, fullUrl, credit, page, caption}` built from the anchor's
+  READY attachments (contracts.md). The round's `rev` moves as each picture becomes ready
+  (`finish_attachment`), and the view reads the round and its attachments in one transaction. **Restarts**:
+  `AdventurePackRunner.resume` also redoes the hunt for every round still `images = pending` (the attach is
+  all-or-nothing); a shutdown mid-hunt leaves it pending for that; rejecting ends the wait (`failed`).
+  No picture finder (standalone, no researcher, no media pipeline, or a test that injected a researcher
+  without a finder) means a pack has no pictures and `images` stays `none`.
+- **Edition.** `create_app(adventure_researcher=...)` is the seam (plus `adventure_bank=`, `adventure_pack_timing=`
+  and `adventure_picture_finder=`).
   The default is a `CmdAdventureResearcher` over the app's `CmdChatClient` on the fleet edition when the AI backend is
   cmd; otherwise none (standalone: `pack = unavailable` at once, Bank/Reject still work). The e2e fixture server wires
   one at the fake cmd, which answers every run with `fake_cmd.CANNED_ADVENTURE_PACK` after ~2 s.
@@ -2215,4 +2259,6 @@ geometry implementation, in TypeScript; the pair are trusted, Inv 40).
   message is deleted costs the research it already spent (the job notices and cancels the run on its next poll).
 - **Tests.** `test_livechat_adventure.py`, `test_routes_livechat_adventure.py`, `test_livechat_adventure_live.py`,
   `test_livechat_adventure_pack.py`, `test_adventure_bank_loader.py` + `test_adventure_bank.py` (+ the shared helpers in `adventure_testkit.py` and the
-  chat-spawn endpoints in `fake_cmd.py`) — see [testing.md](testing.md).
+  chat-spawn endpoints in `fake_cmd.py`), and for the pictures `test_livechat_safe_fetch.py`,
+  `test_livechat_adventure_pictures.py`, `test_livechat_adventure_pictures_job.py` (+ `fake_web.py`,
+  `fake_open_web.py`) — see [testing.md](testing.md).

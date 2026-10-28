@@ -1,0 +1,1 @@
+Server chat: the holiday pack's pictures are found and fetched by the SERVER (Wikipedia / Commons / the venue's own page) through one SSRF-safe fetcher and stored as the round's private photo attachments

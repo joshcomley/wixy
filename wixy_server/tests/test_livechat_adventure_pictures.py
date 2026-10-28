@@ -435,6 +435,15 @@ class TestPreparePicture:
         with pytest.raises(PictureRejected):
             prepare_picture(b"\xff\xd8\xff" + png[3:])
 
+    def test_a_picture_declaring_more_than_36_megapixels_is_refused_before_decoding(self) -> None:
+        # 7000 x 6000 = 42 MP: under the chat's own 80 MP cap, over the fetched-picture cap.
+        big = io.BytesIO()
+        Image.new("1", (7000, 6000)).save(big, format="PNG")
+        assert adventure_pictures.MAX_FETCHED_PIXELS == 36_000_000
+        with pytest.raises(PictureRejected) as caught:
+            prepare_picture(big.getvalue())
+        assert caught.value.reason == "too_many_pixels"
+
 
 # -- the sources ---------------------------------------------------------------------------------
 
@@ -707,6 +716,36 @@ class TestCommonsSearch:
         assert "Sea Gate Kotor filemime:image/jpeg" in open_web.search_queries
         assert by_slot(pictures)["sights:0"].page.endswith("File:Sea_Gate_Kotor.jpg")
 
+    def test_a_sight_that_shares_the_destinations_lead_image_gets_its_own_from_a_search(
+        self,
+    ) -> None:
+        """Real Kotor: the town's article and its old-town article have the same lead photo. The
+        hero keeps it, and the sight, having lost it, tries its own fallback."""
+
+        def configure(w: FakeOpenWeb) -> None:
+            shared = w.add_file(FakeFile("Kotor Shared Lead.jpg", 4256, 2832, seed=1))
+            w.add_article("Kotor", shared)
+            w.add_article("Old Town of Kotor", shared)
+            own = w.add_file(FakeFile("Kotor Old Town Walls.jpg", 4000, 2667, seed=2))
+            w.add_search("Old Town", [own.title])
+
+        plan = plan_of({"sights": [item("Old Town", wikipedia="Old Town of Kotor")]})
+        pictures, _, open_web = run_find(configure, plan)
+        got = by_slot(pictures)
+        assert got["hero:0"].page.endswith("File:Kotor_Shared_Lead.jpg")
+        assert got["sights:0"].page.endswith("File:Kotor_Old_Town_Walls.jpg")
+        assert "Old Town Kotor filemime:image/jpeg" in open_web.search_queries
+
+    def test_a_users_name_loses_its_user_prefix_in_the_credit(self) -> None:
+        def configure(w: FakeOpenWeb) -> None:
+            f = w.add_file(
+                FakeFile("Kotor Lead.jpg", 4000, 2667, artist_html='<a href="//u">User:Ggia</a>')
+            )
+            w.add_article("Kotor", f)
+
+        (hero,) = run_find(configure, plan_of({}))[0]
+        assert hero.credit == "Ggia, CC BY-SA 4.0"
+
     def test_a_non_sight_never_falls_back_to_a_search(self) -> None:
         plan = plan_of({"food": [item("Cevapi", wikipedia="No Such Page")]}, wikipedia=None)
         _, _, open_web = run_find(lambda w: None, plan)
@@ -885,6 +924,24 @@ class TestSafety:
             w.add_article("Kotor", liar)
 
         assert run_find(configure, plan_of({}))[0] == []
+
+    def test_deeply_nested_or_broken_api_json_is_just_no_picture(self) -> None:
+        def configure(w: FakeOpenWeb) -> None:
+            w.serve(
+                WIKI_HOST,
+                "/api/rest_v1/page/summary/Kotor",
+                Reply(body=b"[" * 400_000, content_type="application/json"),
+            )
+            w.serve(
+                WIKI_HOST,
+                "/api/rest_v1/page/summary/Dish",
+                Reply(
+                    body=b'{"type": "standard", "originalimage": ', content_type="application/json"
+                ),
+            )
+
+        plan = plan_of({"food": [item("Dish", wikipedia="Dish")]})
+        assert run_find(configure, plan)[0] == []
 
 
 class TestPoliteness:
