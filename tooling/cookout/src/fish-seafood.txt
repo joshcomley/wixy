@@ -13,7 +13,7 @@ Ling fillet |  | protein | ling | uncommon | Firm, meaty white fish that stands 
 Pouting | bib | protein | cod | uncommon | Small cod relative, sweet when fried whole and eaten fresh
 Monkfish tail | angler fish | protein | monkfish | everyday | Firm, lobster-like meat that roasts or skewers beautifully
 Monkfish cheeks |  | protein | monkfish | exotic | Tiny sweet medallions, a bargain treat sautéed in butter
-John Dory | St Peter's fish | protein | dory | exotic | Prized fillets with a fine sweet flavour, simply pan-fried in butter
+John Dory | St peter's fish | protein | dory | exotic | Prized fillets with a fine sweet flavour, simply pan-fried in butter
 Turbot |  | protein | turbot | exotic | The king of flatfish, rich and meaty, roasted whole on the bone
 Brill |  | protein | brill | uncommon | Delicate cousin of turbot, lovely with a buttery sauce
 Halibut fillet |  | protein | halibut | everyday | Dense, clean white flesh that sears and roasts without drying
@@ -184,14 +184,14 @@ North Atlantic prawns |  | protein | prawn | everyday | Small sweet cold-water p
 Brown shrimp |  | protein | shrimp | everyday | Tiny flavoursome shrimp, potted in nutmeg butter
 Pink shrimp |  | protein | shrimp | everyday | Tender sweet shrimp, good in salads and sauces
 Sweet shrimp | amaebi | protein | shrimp | exotic | Raw sushi shrimp that tastes naturally sweet
-Langoustine | Dublin Bay prawn; scampi | protein | langoustine | exotic | Sweet, delicate claws, grilled or served in a bisque
+Langoustine | Dublin bay prawn; scampi | protein | langoustine | exotic | Sweet, delicate claws, grilled or served in a bisque
 Crayfish |  | protein | crayfish | everyday | Small freshwater crustaceans boiled with dill or Cajun spices
 Yabby |  | protein | crayfish | uncommon | Australian freshwater crayfish, sweet and tender
 Lobster |  | protein | lobster | exotic | The luxury crustacean, steamed or grilled with butter
 Lobster tail |  | protein | lobster | exotic | Meaty tail meat, split and grilled with garlic butter
 Cooked lobster meat |  | protein | lobster | uncommon | Picked lobster for rolls and bisques
 Spiny lobster | rock lobster | protein | lobster | exotic | Clawless warm-water lobster with sweet tail meat
-Moreton Bay bug | slipper lobster | protein | lobster | exotic | Flat-headed crustacean with sweet, rich tail meat
+Moreton bay bug | slipper lobster | protein | lobster | exotic | Flat-headed crustacean with sweet, rich tail meat
 Brown crab |  | protein | crab | everyday | Rich brown meat and sweet white claw meat for dressed crab
 White crab meat |  | protein | crab | everyday | Sweet, delicate flakes for cakes and salads
 Brown crab meat |  | protein | crab | everyday | Intensely rich, creamy meat for sauces and pâtés
