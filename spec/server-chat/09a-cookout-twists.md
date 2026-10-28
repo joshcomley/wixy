@@ -1,7 +1,7 @@
 # Server chat — Cookout twists (addendum to `09-cookout.md`)
 
 Workspace 00058. Decided addendum: implement faithfully on top of the shipped core
-(`spec/server-chat/09-cookout.md`, schema v21). The operator accepted all twelve twists the panel
+(`spec/server-chat/09-cookout.md`; its schema v21 is not yet deployed, so the twist schema is folded into it, §2). The operator accepted all twelve twists the panel
 proposed (Triad round 2, `triad/cookout/round-2/{argon,kimi,astra}.md` section B; ruling
 `triad/cookout/ruling.md`). Where this file is silent the core spec governs. Where reality
 contradicts a cited fact, prefer reality and record it in `decisions/00194-server-chat-cookout-twists/`
@@ -202,16 +202,25 @@ gate_open(round) =
 
 - Enabled per round at creation. Each bound player stars **one ingredient from their own five turns**
   (starters on their turns included; the wildcard is no one's pick and cannot be starred).
+- **Reveal and lock are ONE transition.** Define
+  `stars_locked = state == 'finished' and star1_id is not None and star2_id is not None`. The moment
+  that predicate becomes true (the Turn-10 pick when both were starred during the draft, or the
+  second star submitted at the gate) both stars are revealed **and** committed in the same
+  transaction — independent of the cloche, which may still be unanswered. Reason: a revealed secret
+  that can still be changed is not a secret commitment (review finding: reveal and lock must never be
+  different moments).
 - `POST /cookout/{seq}/star {sender, ingredientId}` sets or changes the caller's star. It is
-  state-idempotent (the same id again → `200`, no event). Allowed while `picking` (once you have at
-  least one pick) and on a `finished` round while `concepts == 'none'`. Once concepts leave `'none'`
-  (gate cleared) the stars are **locked**: a change is `409 bad_state`. `abandoned` → `409 bad_state`.
-  An id that is not one of the caller's own picks → `422 invalid`.
-- **Secrecy (both modes):** the viewer always sees their own star. The partner's star is revealed only
-  when `starsRevealed = state == 'finished' and star1_id and star2_id are both set` (i.e. the moment
-  the stars lock). Before that the partner sees only `partnerChosen: bool` (needed for "waiting for
-  Cupcake to star one"). In Open mode picks are visible but stars are not; an abandoned round never
-  reveals stars.
+  state-idempotent (the same id again → `200`, no event — including after the lock). Allowed while
+  `picking` (once you have at least one pick) and on a `finished` round while `stars_locked` is false
+  and `concepts == 'none'`. Whenever `stars_locked` is true — even while concepts are still `'none'`
+  behind an unanswered cloche — or once concepts have left `'none'`, a **different** star is
+  `409 bad_state`. `abandoned` → `409 bad_state`. An id that is not one of the caller's own picks →
+  `422 invalid`. The ☆/★ toggles render disabled once `stars.revealed` is true.
+- **Secrecy (both modes):** the viewer always sees their own star. The partner's star is revealed
+  exactly when `stars_locked` becomes true (`stars.revealed`). Before that the partner sees only
+  `partnerChosen: bool` (needed for "waiting for Cupcake to star one"). In Open mode picks are visible
+  but stars are not; an abandoned round never reveals stars. Clearing the cloche afterwards starts
+  exactly one concepts job with the locked ids.
 - **Chef rule (§5.3):** both stars must appear in every concept's `pickedIngredientIds` and be named
   in each concept's `title` or `description`; recipes must use them (already required) and the prompt
   asks for them to be the heroes. Stars cannot be rescue-swapped (§1.6).
@@ -252,14 +261,27 @@ pictures stay tied to the dishes they were made from.
      timers reset) and the picture reset (`images = 'none'`, `pictures = NULL`, picture timers
      cleared, `images_generation = images_generation + 1` — the fence that defeats any late picture
      write of the old dishes, §5.4); bump `rev`, one `message_updated`. The route starts
-     `start_concepts`.
+     `start_concepts(background, seq, generation=<new generation>)`.
+  4. Bank move ids of the dropped rows stay in the round-level `bank_move_ids` ledger (§2.1), so a
+     replay of any earlier Bank never becomes a new generation-2 job (§1.10).
 - **Cancel / keep these dishes** — `POST /cookout/{seq}/swap/cancel {sender}`; either player while
   `proposed` → back to `'none'` (`swap_pair`, `swap_by`, `swap_out_id` cleared; `swap_seen` kept so a
   new proposal never re-deals the same items). The swap is not used up by a cancel. Already `'none'`
   → `200` no-op; `'done'` → `409 bad_state`.
-- **While proposed:** Bank this is refused (`409 bad_state`; the buttons render disabled with "Finish
-  or cancel the swap first") so no new recipe job can start against dishes about to be archived.
-  Votes, cooked marks, ratings and photos stay allowed.
+- **While proposed:** no new recipe job may start against dishes about to be archived. Both
+  `bank_cookout_concept` **and** `retry_cookout_recipe` check `swap_state == 'proposed'` inside their
+  own write transaction and refuse with `CookoutBadStateError` (`409 bad_state`) before touching the
+  recipe row; the route starts no runner on that refusal. The **Bank this** and recipe **Try again**
+  buttons render disabled with "Finish or cancel the swap first". (Without the retry guard a failed
+  recipe retried during a proposal would become `pending`, start a job and hold the swap hostage with
+  `409 recipe_pending`.) Votes, cooked marks, ratings and photos stay allowed.
+- **The swapped-out ingredient is forbidden in every later generation.** It is not merely "unpicked":
+  if it is one of the five pickable staples (butter, plain flour, cooking oil, granulated sugar,
+  milk) the core rules would otherwise let the chef declare it straight back as a cupboard staple.
+  The AI read carries it as `forbidden_ids` (§5.2) and §5.3 removes it from the prompt's staples,
+  rejects it in every manifest and runs an explicit forbidden-id lexical check that no staple, family
+  or omission allowance can override. The exclusion applies to generation 2 only; archived recipes
+  stay readable as they were.
 - **After the swap:** the generation-1 dishes appear in an **Earlier dishes** section: their cards,
   pictures, vote result and recipe states. Banked ones open their full recipe and keep T4. Unbanked
   ones are view-only (no Bank). Reason: banking an archived concept would need recipe jobs against a
@@ -271,7 +293,9 @@ pictures stay tied to the dishes they were made from.
 ### 1.7 Dinner vote (T2)
 
 - On a `finished` round with `concepts == 'ready'` (current generation), each player secretly taps
-  one concept: `POST /cookout/{seq}/vote {sender, conceptId}`. State-idempotent; a player may change
+  one concept: `POST /cookout/{seq}/vote {sender, generation, conceptId}` (`generation` = the
+  generation of the dish the player saw; a non-current generation → `409 bad_state`, §1.10).
+  State-idempotent; a player may change
   their vote until **both** have voted. When the second vote lands, both are revealed and locked (a
   different later vote → `409 bad_state`; the same → `200`).
 - **Secrecy (both modes):** before the reveal a viewer sees only their own vote and
@@ -279,6 +303,12 @@ pictures stay tied to the dishes they were made from.
   shows **"🎯 Tonight's dinner!"** on that card; a mismatch shows both voters' badges.
 - A vote never banks anything and never starts a job. A completed swap archives the votes with
   generation 1 and clears them for generation 2.
+- **Archived votes keep their secrecy forever.** The reveal predicate is applied independently to
+  every archived generation: its `votes` and `match` are non-null **only when both archived votes are
+  non-null**. A one-sided archived vote (a swap completed before the second player voted) can never
+  reach its reveal moment, so it is returned as `votes: null, match: null` to **every** viewer (the
+  voter included, for one simple rule) and is never serialised; `dinnerPick` is false unless both
+  archived votes exist and match.
 
 ### 1.8 We cooked it! (T4)
 
@@ -296,11 +326,15 @@ Applies to any **banked** recipe of any generation of the round.
   either player links (or with `null` unlinks) **an ordinary photo message from this round's mini
   chat**: the message must exist, be in `wyr_chat` with `anchor_seq = seq`, not be view-once
   (`view_once_s IS NULL`; Inv 52 — a view-once attachment is never linkable), and carry at least one
-  `photo` attachment; the lowest-ordinal photo is linked (`photo_message_seq`, `photo_attachment_id`).
-  Requires cooked. Otherwise `422 invalid`.
+  **ready** `photo` attachment. The linked attachment is the message's **lowest-ordinal ready photo**
+  (`photo_message_seq`, `photo_attachment_id`) — exactly the attachment the chooser showed for that
+  message. A message with no ready photo → `422 invalid`. Requires cooked.
 - **No new upload path.** "Add our photo" opens the round's mini-chat pop-up composer; the photo is
   sent as an ordinary mini-chat message (so it lives in the chat, the main thread and the Gallery like
-  any photo), then linked. `GET /cookout/{seq}/photos` lists the round's linkable mini-chat photos.
+  any photo), then linked. `GET /cookout/{seq}/photos` lists the round's linkable mini-chat photos,
+  **one entry per message**, showing that message's lowest-ordinal ready photo — the same selection
+  rule as the linker, so the thumbnail tapped is always the attachment stored (a multi-photo message
+  offers one choice; a failed-first/ready-second message offers and links the ready one).
 - **Deletion:** deleting the linked message removes the link (FK `ON DELETE SET NULL` as the backstop
   for older processes; the new `_delete_message` path also clears `photo_attachment_id` and bumps the
   round's `rev` with a `message_updated` for the anchor so both screens drop the photo). The view
@@ -317,78 +351,132 @@ Applies to any **banked** recipe of any generation of the round.
 | Swap and stars | Starred ingredients cannot be swapped; stars carry into generation 2 and the hero rule applies again. |
 | Swap and style/challenge | Generation 2 uses the same round style and challenge. |
 | Swap and dinner vote | Votes archive with generation 1; generation 2 starts unvoted. |
-| Swap and pending recipe | Propose/choose refused (`409 recipe_pending`); Bank refused while proposed. |
+| Swap and pending recipe | Propose/choose refused (`409 recipe_pending`); Bank **and recipe retry** refused while proposed. |
+| Swap of a pickable staple | Allowed; the removed staple is then forbidden in generation 2 even as a declared cupboard staple (§5.3). |
+| Swap after one vote | The single vote is archived but never revealed to anyone (§1.7). |
+| Stars + unanswered cloche | Stars reveal and lock as soon as both are set on a finished round; the cloche can still be answered afterwards. |
 | Swap of a starter | Allowed (a starter is a basket ingredient). |
 | Encore + fridge raid | Fridge seed is Turn 1, exactly one encore seed is Turn 2. |
 | Encore source in an archived generation | Allowed (`generation` names it); leftovers need not be banked, remix must be banked in that generation. |
-| Stars + wildcard gate | Both gates must clear, in any order; concepts start on the last answer. |
+| Stars + wildcard gate | Both gates must clear, in any order; concepts start on the last answer, with the already-locked stars. |
 | Stars + lucky/chaos/veto picks | Any of your own picks may be starred, however it was chosen. |
 | Style + challenge | Both directives in the prompt; only the challenge is validated; the picture uses the style's presentation phrase. |
 | Challenge + wildcard/stars | All rules apply together; the coverage rules (§5.3) still hold. |
 | Cooked + swap | T4 works on banked recipes of every generation. |
 | Vote + Bank | Independent; neither triggers the other. |
 
+### 1.10 Generation identity: requests and background jobs
+
+Concept ids `a`/`b`/`c` are reused by generation 2, so "whatever generation is current when the write
+runs" is never a stale-request guard. Two fences, both decided:
+
+- **Every chef-stage request names the generation the player saw.** Bank
+  (`/concepts/{conceptId}/bank`), vote, concepts retry, pictures retry and recipe retry carry
+  `generation: int` (the view's `generation`); the T4 routes already carry it in the path. Inside the
+  write transaction: `generation` ≠ the round's current generation → `409 bad_state` (no write, no
+  event, no job). A request **without** `generation` (a core-era client) is accepted only while the
+  round is still at generation 1; on a generation-2 round a missing `generation` is `409 bad_state` —
+  it can never select a generation-2 target. The updated client always sends it.
+- **Bank replays are recognised across all generations.** `cookout_rounds.bank_move_ids` is a
+  round-level ledger of `{"id": moveId, "generation": n, "conceptId": "a"|"b"|"c"}` written by every
+  bank that creates a row and never pruned (it survives the swap's deletion of failed/unavailable
+  generation-1 rows). `bank_cookout_concept` checks the ledger **first, by `moveId` alone**: a recorded
+  move is a `200` replay with the current view, no row change, no event and no job, whatever
+  generation it named. Only an unrecorded move proceeds to the generation check and the core rules.
+- **Background jobs carry a captured generation (`expected_generation`).** A concepts or recipe job
+  captures the round's `generation` when it starts (passed by the route through
+  `start_concepts(..., generation)` / `start_recipe(..., generation, concept_id)`, or read with the
+  pending row by the startup/sweep recovery, §5.2) and presents it to **every** claim and completion
+  write: `set_cookout_concepts_run`, `finish_cookout_concepts`, `set_cookout_recipe_run`,
+  `finish_cookout_recipe` add `AND generation = :expected_generation` to their compare-and-set
+  (recipe writes target the captured generation's row, never a subquery for the current one). The same
+  captured value is used on the polling, repair, unavailable, failure and crash (`_fail_after_crash`)
+  paths, in `still_waiting`, and in the runner's in-process `_running` key
+  (`("c", anchor, generation, "")`, `("r", anchor, generation, concept_id)`). A spawn whose
+  `set_*_run` claim returns `False` is **cancelled** (`cancel_run`) and abandoned. So a slow
+  generation-1 spawn returning after a swap can neither claim, finish nor fail generation 2's job
+  (review finding: an unchanged setter accepted exactly that late claim). The image job keeps its own
+  separate `images_generation` attempt fence.
+
 ---
 
-## 2. Schema v22 (`store.py`; additive from v21, which is deployed and never edited)
+## 2. Schema — folded into the undeployed v21 (`store.py`)
 
-Bump `_LATEST_SCHEMA_VERSION = 22` and add `_SCHEMA_V22_COOKOUT_TWISTS`, applied in `_migrate` after
-v21 (`if current < 22: ... PRAGMA user_version = 22`). Enumerated catalogue values (`style`,
-`challenge`) carry **no** CHECK, so the catalogue can grow without a table rebuild; code validates them
-against `cookout_twists.py`. State machines keep CHECKs.
+**Orchestrator ruling:** schema v21 has **never been deployed** — production runs schema v20 and the
+whole Cookout feature (core + twists) ships in one release. There is therefore **no v22 and no
+v21→v22 migration**: the X2 server builder edits the existing, undeployed `_SCHEMA_V21_COOKOUT`
+definitions in place so the single v20→v21 migration produces the final shape directly.
+`_LATEST_SCHEMA_VERSION` stays `21`. `cookout_recipes` is keyed with `generation` from the start, so
+there is **no table rebuild**. The genuine-v20 migration fixture test (a real v20 database migrated to
+v21) must still pass and must assert the final shape below.
 
-### 2.1 `cookout_rounds` — new columns
+**Blue/green overlap:** during a slot swap the *old* process is v20 code. It has no Cookout tables or
+routes at all, so it can neither advance a round nor run a Cookout job; its migration check reads
+`user_version = 21 >= 20` and leaves the schema alone. If it deletes a message, the `ON DELETE
+CASCADE` / `SET NULL` foreign keys below still erase or unlink the Cookout rows (SQLite enforces
+them, not Cookout code). No overlap honest limit remains.
+
+Enumerated catalogue values (`style`, `challenge`) carry **no** CHECK, so the catalogue can grow
+without a table rebuild; code validates them against `cookout_twists.py`. State machines keep CHECKs.
+
+### 2.1 `cookout_rounds` — the final v21 definition
+
+The core columns are unchanged; the twist columns are added to the same `CREATE TABLE`:
 
 ```sql
-ALTER TABLE cookout_rounds ADD COLUMN style TEXT;
-ALTER TABLE cookout_rounds ADD COLUMN style_spun INTEGER NOT NULL DEFAULT 0 CHECK(style_spun IN (0, 1));
-ALTER TABLE cookout_rounds ADD COLUMN challenge TEXT;
-ALTER TABLE cookout_rounds ADD COLUMN wildcard TEXT NOT NULL DEFAULT 'off'
-  CHECK(wildcard IN ('off','armed','offered','lifted','declined'));
-ALTER TABLE cookout_rounds ADD COLUMN wildcard_snap TEXT;
-ALTER TABLE cookout_rounds ADD COLUMN wildcard_move_id TEXT;
-ALTER TABLE cookout_rounds ADD COLUMN stars INTEGER NOT NULL DEFAULT 0 CHECK(stars IN (0, 1));
-ALTER TABLE cookout_rounds ADD COLUMN star1_id TEXT;
-ALTER TABLE cookout_rounds ADD COLUMN star2_id TEXT;
-ALTER TABLE cookout_rounds ADD COLUMN vote1 TEXT CHECK(vote1 IS NULL OR vote1 IN ('a','b','c'));
-ALTER TABLE cookout_rounds ADD COLUMN vote2 TEXT CHECK(vote2 IS NULL OR vote2 IN ('a','b','c'));
-ALTER TABLE cookout_rounds ADD COLUMN generation INTEGER NOT NULL DEFAULT 1 CHECK(generation >= 1);
-ALTER TABLE cookout_rounds ADD COLUMN swap_state TEXT NOT NULL DEFAULT 'none'
-  CHECK(swap_state IN ('none','proposed','done'));
-ALTER TABLE cookout_rounds ADD COLUMN swap_by INTEGER CHECK(swap_by IS NULL OR swap_by IN (1, 2));
-ALTER TABLE cookout_rounds ADD COLUMN swap_out_id TEXT;
-ALTER TABLE cookout_rounds ADD COLUMN swap_pair TEXT;
-ALTER TABLE cookout_rounds ADD COLUMN swap_seen TEXT NOT NULL DEFAULT '[]';
-ALTER TABLE cookout_rounds ADD COLUMN swap_in TEXT;
-ALTER TABLE cookout_rounds ADD COLUMN swap_move_ids TEXT NOT NULL DEFAULT '[]';
-ALTER TABLE cookout_rounds ADD COLUMN encore_kind TEXT
-  CHECK(encore_kind IS NULL OR encore_kind IN ('leftovers','remix'));
-ALTER TABLE cookout_rounds ADD COLUMN encore_from_seq INTEGER
-  REFERENCES cookout_rounds(anchor_message_seq) ON DELETE SET NULL;
-ALTER TABLE cookout_rounds ADD COLUMN encore_generation INTEGER;
-ALTER TABLE cookout_rounds ADD COLUMN encore_concept_id TEXT;
+CREATE TABLE IF NOT EXISTS cookout_rounds(
+  anchor_message_seq INTEGER PRIMARY KEY REFERENCES messages(seq) ON DELETE CASCADE,
+  -- ...every core column exactly as in 09-cookout.md §4.1...
+  style TEXT,
+  style_spun INTEGER NOT NULL DEFAULT 0 CHECK(style_spun IN (0, 1)),
+  challenge TEXT,
+  wildcard TEXT NOT NULL DEFAULT 'off'
+    CHECK(wildcard IN ('off','armed','offered','lifted','declined')),
+  wildcard_snap TEXT,
+  wildcard_move_id TEXT,
+  stars INTEGER NOT NULL DEFAULT 0 CHECK(stars IN (0, 1)),
+  star1_id TEXT,
+  star2_id TEXT,
+  vote1 TEXT CHECK(vote1 IS NULL OR vote1 IN ('a','b','c')),
+  vote2 TEXT CHECK(vote2 IS NULL OR vote2 IN ('a','b','c')),
+  generation INTEGER NOT NULL DEFAULT 1 CHECK(generation >= 1),
+  bank_move_ids TEXT NOT NULL DEFAULT '[]',
+  swap_state TEXT NOT NULL DEFAULT 'none' CHECK(swap_state IN ('none','proposed','done')),
+  swap_by INTEGER CHECK(swap_by IS NULL OR swap_by IN (1, 2)),
+  swap_out_id TEXT,
+  swap_pair TEXT,
+  swap_seen TEXT NOT NULL DEFAULT '[]',
+  swap_in TEXT,
+  swap_move_ids TEXT NOT NULL DEFAULT '[]',
+  encore_kind TEXT CHECK(encore_kind IS NULL OR encore_kind IN ('leftovers','remix')),
+  encore_from_seq INTEGER REFERENCES cookout_rounds(anchor_message_seq) ON DELETE SET NULL,
+  encore_generation INTEGER,
+  encore_concept_id TEXT,
+  rev INTEGER NOT NULL DEFAULT 1,
+  created_at REAL NOT NULL, updated_at REAL NOT NULL);
 ```
 
 - `wildcard_snap`, `swap_pair`, `swap_seen`, `swap_in` hold immutable ingredient snapshots
   (`{id, name, category, emoji, family, blurb}`), like `cookout_turns.offers`.
+- `bank_move_ids` is the never-pruned Bank replay ledger (§1.10).
 - `swap_move_ids` holds `{"id": moveId, "slot": 1|2, "kind": "propose"|"choose"}` objects.
 - Fridge raid needs no round column (it is the Turn-1 `seed_source = 'fridge'`).
-- SQLite permits `ADD COLUMN ... REFERENCES` because the default is NULL. The self-reference sets the
-  link to NULL when the source round goes (anchor delete cascades the source row).
+- The self-reference sets the encore link to NULL when the source round goes (anchor delete cascades
+  the source row).
 
-### 2.2 `cookout_turns` — new columns
+### 2.2 `cookout_turns` — the final v21 definition
 
 ```sql
-ALTER TABLE cookout_turns ADD COLUMN seed TEXT;
-ALTER TABLE cookout_turns ADD COLUMN seed_source TEXT
-  CHECK(seed_source IS NULL OR seed_source IN ('fridge','encore'));
-ALTER TABLE cookout_turns ADD COLUMN replaced TEXT NOT NULL DEFAULT '[]';
-ALTER TABLE cookout_turns ADD COLUMN chaos_offer INTEGER
-  CHECK(chaos_offer IS NULL OR chaos_offer BETWEEN 0 AND 2);
-ALTER TABLE cookout_turns ADD COLUMN veto_offer INTEGER
-  CHECK(veto_offer IS NULL OR veto_offer BETWEEN 0 AND 2);
-ALTER TABLE cookout_turns ADD COLUMN lucky INTEGER NOT NULL DEFAULT 0 CHECK(lucky IN (0, 1));
-ALTER TABLE cookout_turns ADD COLUMN twist_move_ids TEXT NOT NULL DEFAULT '[]';
+CREATE TABLE IF NOT EXISTS cookout_turns(
+  -- ...every core column exactly as in 09-cookout.md §4.1...
+  seed TEXT,
+  seed_source TEXT CHECK(seed_source IS NULL OR seed_source IN ('fridge','encore')),
+  replaced TEXT NOT NULL DEFAULT '[]',
+  chaos_offer INTEGER CHECK(chaos_offer IS NULL OR chaos_offer BETWEEN 0 AND 2),
+  veto_offer INTEGER CHECK(veto_offer IS NULL OR veto_offer BETWEEN 0 AND 2),
+  lucky INTEGER NOT NULL DEFAULT 0 CHECK(lucky IN (0, 1)),
+  twist_move_ids TEXT NOT NULL DEFAULT '[]',
+  PRIMARY KEY(anchor_message_seq, turn));
 ```
 
 - Seeded turn: `seed` = snapshot, `offers = '[]'`, `choice_id = seed id`.
@@ -396,15 +484,10 @@ ALTER TABLE cookout_turns ADD COLUMN twist_move_ids TEXT NOT NULL DEFAULT '[]';
 - `twist_move_ids` = list of `{"id": moveId, "slot": 1|2, "kind": "chaos"|"veto"}` (the veto's slot
   is the partner's, so replay checks match on `(id, slot)`). Lucky dip uses `pick_move_id`.
 
-### 2.3 `cookout_recipes` — rebuilt with `generation` in the key, plus T4 columns
-
-The primary key must become `(anchor_message_seq, generation, concept_id)` (generation 2 may bank
-concept `a` again while generation 1's banked `a` stays). SQLite cannot alter a primary key, so v22
-rebuilds this one table (precedent: the v2 `events` rebuild). Nothing references `cookout_recipes`,
-so the drop is safe with `foreign_keys = ON`.
+### 2.3 `cookout_recipes` — keyed with `generation` from the start, plus T4 columns
 
 ```sql
-CREATE TABLE cookout_recipes_v22(
+CREATE TABLE IF NOT EXISTS cookout_recipes(
   anchor_message_seq INTEGER NOT NULL
     REFERENCES cookout_rounds(anchor_message_seq) ON DELETE CASCADE,
   generation INTEGER NOT NULL DEFAULT 1 CHECK(generation >= 1),
@@ -420,31 +503,20 @@ CREATE TABLE cookout_recipes_v22(
   photo_message_seq INTEGER REFERENCES messages(seq) ON DELETE SET NULL,
   photo_attachment_id TEXT,
   PRIMARY KEY(anchor_message_seq, generation, concept_id));
-INSERT INTO cookout_recipes_v22 (anchor_message_seq, generation, concept_id, state, run_id,
-  recipe_json, error, requested_by, bank_move_id, started_at, tries, deadline_at, banked_at,
-  created_at, updated_at)
-  SELECT anchor_message_seq, 1, concept_id, state, run_id, recipe_json, error, requested_by,
-    bank_move_id, started_at, tries, deadline_at, banked_at, created_at, updated_at
-  FROM cookout_recipes;
-DROP TABLE cookout_recipes;
-ALTER TABLE cookout_recipes_v22 RENAME TO cookout_recipes;
 CREATE INDEX IF NOT EXISTS idx_cookout_recipes_banked
   ON cookout_recipes(state, banked_at DESC, anchor_message_seq DESC);
 CREATE INDEX IF NOT EXISTS idx_cookout_recipes_photo ON cookout_recipes(photo_message_seq);
 ```
 
-- Every store statement that addresses a recipe by `(anchor, concept_id)` — `bank_cookout_concept`,
-  `set_cookout_recipe_run`, `finish_cookout_recipe`, `retry_cookout_recipe`, `cookout_recipe_state`,
-  `get_cookout_round()['recipes']` — adds `AND generation = (SELECT generation FROM cookout_rounds
-  WHERE anchor_message_seq = ?)` (the current generation). Their **signatures do not change**, so the
-  AI runner is untouched. A `pending` row is always current-generation (a swap is refused while one
-  exists), so this is belt and braces, never a behaviour change.
-- **Blue/green honest limit:** an older v21 process still running during the slot-swap overlap inserts
-  recipes without naming `generation` (default `1`) and reads by `(anchor, concept_id)`. Only a round
-  already swapped by the new process could be mis-filed, and only for the seconds the old slot still
-  serves; recorded in the decision entry.
+- Generation 2 may bank concept `a` again while generation 1's banked `a` stays: the key says so.
+- Every recipe statement names the generation **explicitly**: route-driven writes
+  (`bank_cookout_concept`, `retry_cookout_recipe`, the T4 writes) use the request's generation after
+  checking it is current (§1.10); job-driven writes (`set_cookout_recipe_run`,
+  `finish_cookout_recipe`) use the job's captured `expected_generation`. No statement picks "the
+  current generation" by subquery on behalf of a caller that did not name one.
+- `get_cookout_round()['recipes']` is the current generation only.
 
-### 2.4 `cookout_generations` — new table (superseded dish sets)
+### 2.4 `cookout_generations` — new table in v21 (superseded dish sets)
 
 ```sql
 CREATE TABLE IF NOT EXISTS cookout_generations(
@@ -462,7 +534,8 @@ CREATE TABLE IF NOT EXISTS cookout_generations(
 
 - `basket` = JSON list of the ingredient ids that generation cooked from (10 or 11), resolved through
   the round's own snapshots (turn offers, seeds, wildcard, swap snapshots).
-- Only superseded generations are stored; the current one lives on `cookout_rounds` as today.
+- Only superseded generations are stored; the current one lives on `cookout_rounds`.
+- `vote1`/`vote2` are stored raw but serialised only under the archived-vote reveal rule (§1.7).
 
 **Effective basket** (pure helper `basket_snaps(round_, turns)` in `cookout_game.py`, used by the view,
 the AI read and the swap): the ten turn choices in turn order (the seed snapshot for a seeded turn),
@@ -477,8 +550,8 @@ appended when `wildcard == 'lifted'` (itself replaced if it was the swap target)
   for every `cookout_recipes` row with `photo_message_seq = seq` set `photo_message_seq = NULL,
   photo_attachment_id = NULL` and bump that round's `rev` + `message_updated`; for every round with
   `encore_from_seq = seq` set `encore_from_seq = NULL, encore_generation = NULL,
-  encore_concept_id = NULL, encore_kind = NULL` and bump its `rev` + `message_updated`. The FK
-  actions are the backstop for an older process.
+  encore_concept_id = NULL, encore_kind = NULL` and bump its `rev` + `message_updated`. The FK actions
+  are the backstop for a delete issued by the overlapping v20 process.
 - Generation-2 dish pictures attach to the anchor with `ordinal = (generation - 1) * 3 + index(slot)`
   (generation 1 keeps `0..2`). `list_gallery` already excludes every Cookout anchor's attachments; a
   linked T4 photo is an ordinary mini-chat photo and stays in the Gallery like any other.
@@ -490,7 +563,8 @@ appended when `wildcard == 'lifted'` (itself replaced if it was the swap target)
 - `CookoutRoundRow` gains: `style: str | None`, `style_spun: bool`, `challenge: str | None`,
   `wildcard: CookoutWildcardState`, `wildcard_snap: dict[str, str] | None`,
   `wildcard_move_id: str | None`, `stars: bool`, `star1_id: str | None`, `star2_id: str | None`,
-  `vote1: str | None`, `vote2: str | None`, `generation: int`, `swap_state: CookoutSwapState`,
+  `vote1: str | None`, `vote2: str | None`, `generation: int`,
+  `bank_move_ids: tuple[dict[str, object], ...]`, `swap_state: CookoutSwapState`,
   `swap_by: int | None`, `swap_out_id: str | None`, `swap_pair: tuple[dict[str, str], dict[str, str]]
   | None`, `swap_seen: tuple[dict[str, str], ...]`, `swap_in: dict[str, str] | None`,
   `swap_move_ids: tuple[dict[str, object], ...]`, `encore_kind: Literal["leftovers", "remix"] | None`,
@@ -754,7 +828,15 @@ current-generation recipe is being written). All others reuse the core set: `404
 - `POST /cookout/{seq}/star {sender, ingredientId}` → view (may start concepts).
 - `POST /cookout/{seq}/wildcard {sender, moveId, lift: bool}` → view (may start concepts;
   `409 exhausted` when no wildcard can be drawn — the cloche stays offered and Decline still works).
-- `POST /cookout/{seq}/vote {sender, conceptId}` → view.
+- `POST /cookout/{seq}/vote {sender, generation, conceptId}` → view.
+- **Generation on the core chef-stage routes (§1.10):** `POST /cookout/{seq}/concepts/{conceptId}/bank
+  {sender, moveId, generation?}`, `POST /cookout/{seq}/concepts/retry {sender, generation?}`,
+  `POST /cookout/{seq}/pictures/retry {sender, generation?}` and
+  `POST /cookout/{seq}/concepts/{conceptId}/recipe/retry {sender, generation?}` gain an optional
+  `generation: int` (the updated client always sends it). Mismatch with the round's current
+  generation, or absent on a generation-2 round → `409 bad_state` with no write, event or job. A Bank
+  whose `moveId` is already in `bank_move_ids` → `200` replay, no job, before any other check.
+  Recipe retry while a swap is proposed → `409 bad_state`, no job.
 - `POST /cookout/{seq}/swap/propose {sender, moveId, ingredientId}` → view.
 - `POST /cookout/{seq}/swap/choose {sender, moveId, ingredientId}` → view (starts concepts).
 - `POST /cookout/{seq}/swap/cancel {sender}` → view.
@@ -762,14 +844,15 @@ current-generation recipe is being written). All others reuse the core set: `404
 - `POST /cookout/{seq}/recipes/{generation}/{conceptId}/rating {sender, rating: int | null}` → view.
 - `POST /cookout/{seq}/recipes/{generation}/{conceptId}/photo {sender, messageSeq: int | null}` → view.
 - `GET /cookout/{seq}/photos?as=<sender>` →
-  `{photos: [{messageSeq, sender, createdAt, picture: Picture}]}` — ready photo attachments on
-  non-view-once messages in this round's mini chat, newest first, ≤ 50. Players only
-  (`409 not_player` otherwise).
+  `{photos: [{messageSeq, attachmentId, sender, createdAt, picture: Picture}]}` — **one entry per
+  message**: each non-view-once message in this round's mini chat that has at least one ready photo,
+  represented by its **lowest-ordinal ready** photo (the exact attachment `link_cookout_photo` will
+  store for that `messageSeq`), newest first, ≤ 50. Players only (`409 not_player` otherwise).
 
 Idempotency: `lucky` shares `pick_move_id`; `chaos`/`veto` use `twist_move_ids` matched on
 `(moveId, actor slot)`; `wildcard` uses `wildcard_move_id` (a replay → `200`; a different move after
 the cloche was answered → `200` when it asked for the same outcome, else `409 bad_state`); swap moves
-use `swap_move_ids`; `star`, `vote`, `cooked`, `rating`, `photo`, `swap/cancel` are state-idempotent
+use `swap_move_ids`; Bank uses the round-level `bank_move_ids` ledger across all generations; `star`, `vote`, `cooked`, `rating`, `photo`, `swap/cancel` are state-idempotent
 (setting the current value again → `200`, no event). Every real change bumps `rev` and appends one
 `message_updated` for the anchor.
 
@@ -800,7 +883,7 @@ use `swap_move_ids`; `star`, `vote`, `cooked`, `rating`, `photo`, `swap/cancel` 
   gate: { waitingFor: ("stars" | "wildcard")[] },
   wildcard: { state: "off"|"armed"|"offered"|"lifted"|"declined", ingredient: IngredientSnap | null },
   stars: { enabled: bool, mine: string | null, partnerChosen: bool,
-           revealed: bool, partner: string | null } ,
+           revealed: bool, partner: string | null },   // revealed == locked (§1.5)
   vote: { you: ConceptId | null, partnerVoted: bool, revealed: bool,
           votes: { "1": ConceptId, "2": ConceptId } | null, match: ConceptId | null } | null,
   swap: { state: "none" | "proposed" | "done", available: bool, by: 1 | 2 | null,
@@ -835,9 +918,13 @@ Redaction (in `cookout_view_json`, before serialisation):
 - `history` keeps the core rule (Blind: own turns only, forever); the new per-turn fields ride along.
 - `PickSnap.via` for a partner pick is visible only when the pick itself is visible.
 - `basket` is `null` until `revealed`; in Open mode it is filled while picking too (all picks visible).
-- `stars.partner` is non-null only when `revealed` per §1.5; `stars.mine` only for a bound viewer.
+- `stars.revealed` = `stars_locked` (§1.5: finished and both set — reveal and lock are one
+  transition); `stars.partner` is non-null only then; `stars.mine` only for a bound viewer.
 - `vote` is `null` unless `concepts == 'ready'`; `votes`/`match` only once both voted; `vote.you` is
   the viewer's own; a non-player sees only `revealed` and, once revealed, the result.
+- `generations[].vote.votes` / `.match` are non-null **only when both archived votes are non-null**;
+  an incomplete archived vote is `{votes: null, match: null}` for every viewer and the raw single slot
+  is never serialised (§1.7).
 - `swap.available` = finished, concepts ready, `swap_state == 'none'`, viewer is a player, no
   pending current recipe.
 - `setup.encore.fromTitle` = the source concept's title when `encore_from_seq` is non-null and the
@@ -854,7 +941,7 @@ ingredient, star, vote or recipe text.
 ### 4.5 Recipe book (`GET /cookout/bank`) additions
 
 Each entry gains `generation`, `cooked: {cookedAt, ratings: [{name, rating}], photo: Picture|null} |
-null`, `dinnerPick: bool` (that generation's revealed votes matched on this concept),
+null`, `dinnerPick: bool` (true only when both of that generation's votes exist and match on this concept),
 `style: {id, label, emoji} | null`, `challenge: {id, label, emoji} | null`,
 `ingredients: [IngredientSnap]` (the concept's used basket items) and `leftovers: [IngredientSnap]`
 (its `omitted` items) — the latter two feed the Remix / Leftovers encore buttons. Archived-generation
@@ -887,8 +974,11 @@ entries resolve their concept and picture from `cookout_generations`. Ordering u
   an ingredient matches when every query token is a prefix of some token of its `name` or one of its
   `aliases`; ranking: exact folded name, name-prefix, alias match, then rarity
   `everyday < uncommon < exotic`, then name; at most `limit`.
-- `mentions(text, ingredient_id) -> bool` (stars): `True` when the longest-first span recognition of
-  `text` (the same `_spans`) yields that ingredient's entity, or the bare family word of its family.
+- `mentions(text, ingredient_id) -> bool` (stars and the swap's forbidden-id check): `True` when the
+  longest-first span recognition of `text` (the same `_spans`) yields that ingredient's entity, the
+  bare family word of its family, or — for a pickable staple id — the staple entity / bare short form
+  (`butter`, `flour`, `oil`, `sugar`, `milk`) mapped to that id. No stop-word, family-exemption or
+  declared-staple allowance applies.
 - `food_free_tokens(text) -> tuple[str, ...]` (challenges): the folded tokens of `text` left after
   removing every recognised food span.
 - `shuffle_role_schedule(rng=None, *, first_role: RoleKey | None = None)`: when `first_role` is given,
@@ -906,8 +996,15 @@ entries resolve their concept and picture from `cookout_generations`. Ordering u
 `get_cookout_round(anchor_seq)` keeps every existing key and adds: `basket_ids` (effective basket of
 the **current** generation, §2.4; `[]` until the gate clears), `picked_ids` (now an alias of
 `basket_ids`, so its length is 10 or 11), `star_ids` (sorted list; `[]` when stars are off),
-`wildcard_id` (the lifted wildcard id, or `None` when off/declined or swapped out), `style`,
+`wildcard_id` (the lifted wildcard id, or `None` when off/declined or swapped out),
+`forbidden_ids` (sorted list: `[swap_out_id]` when the current generation was created by a completed
+swap, else `[]`; scoped to the current generation, so archived recipes are untouched), `style`,
 `challenge`, `generation`. `recipes` is the current generation only.
+
+The recovery reads also carry the generation, so a resumed job captures it with the row:
+`cookout_pending_concepts() -> list[tuple[int, int, str | None]]` (`(anchor, generation, run_id)`) and
+`cookout_pending_recipes() -> list[tuple[int, int, str, str | None]]`
+(`(anchor, generation, concept_id, run_id)`).
 
 ### 5.3 Prompts and deterministic validation (`cookout_ai.py`)
 
@@ -925,6 +1022,11 @@ the **current** generation, §2.4; `[]` until the gate clears), `picked_ids` (no
     each star in that concept's title or description.`
   - Wildcard: `The WILDCARD ingredient (id <w>) was a surprise neither friend chose: use it in at least
     two of the three concepts.`
+- **Forbidden ids (a completed swap):** `basket_payload` omits every `forbidden_ids` entry from
+  `"staples"` (so a swapped-out pickable staple is no longer on offer as a cupboard staple), and when
+  non-empty adds `"forbidden": [ids]` to the `"twists"` object with the concepts-prompt line
+  `NEVER use or mention these removed ingredients anywhere, not even as a cupboard staple: <names>.`
+  Only validated bank ids/names are added (privacy unchanged).
 - **`parse_concepts(response_text, *, bank, picked_ids, twists=ConceptTwists())`** — the core checks
   with the basket of size `N = len(picked_ids)` (10 or 11): ids ⊆ basket, `omitted` = exact complement
   against the basket, each concept ≥ `7`, best ≥ `8`, union = all `N`, distinct pairs, staples cap,
@@ -936,13 +1038,21 @@ the **current** generation, §2.4; `[]` until the gate clears), `picked_ids` (no
     passes; `thirty-minutes` → `totalMinutes` int 5–30; `no-oven` → `technique ∉ {roast, bake}`,
     `dishType ∉ {traybake, pie, bake}`, and no `NO_OVEN_WORDS` among `food_free_tokens` of
     `title`/`vibe`/`description`/`challengeNote`;
+  - forbidden ids: a `forbidden_ids` entry in `pickedIngredientIds`, `stapleIds` or `omitted` is a
+    violation, and an explicit forbidden-id lexical check runs over **every** prose field (`title`,
+    `vibe`, `description`, `challengeNote` and `omitted[].reason`): `bank.mentions(text, forbidden_id)`
+    must be false. This check is independent of both lexical passes and cannot be overridden by a
+    declared staple, a family exemption or the omitted-reason allowance;
   - the stored concept keeps `challengeNote` / `totalMinutes` when present.
   Violation messages name the rule exactly ("concept b must name star 'smoked-kippers' in its title or
   description") so the one repair run can fix it.
 - **The changed manifest:** the lexical scans take the effective basket as "the picks". The wildcard
   and a swapped-in item are ordinary basket members (allowed when used, Pass-2-forbidden when
-  omitted). The **swapped-out** ingredient is just an unpicked bank food (Pass 1 rejects any mention;
-  it is never treated as omitted, so it cannot even be named in `omitted[].reason`).
+  omitted). The **swapped-out** ingredient is never part of the manifest: it is excluded from the
+  offered staples and caught by the forbidden-id check above, which — unlike Pass 1 — also catches a
+  removed pickable staple (`butter`, `plain-flour`, `cooking-oil`, `granulated-sugar`, `milk`) that
+  the core rules would otherwise allow as a declared staple. It is never treated as omitted, so it
+  cannot be named even in `omitted[].reason`.
 - **Recipe prompt:** `build_recipe_prompt(concept, manifest, *, twists=RecipeTwists())` adds, only
   when set: `STYLE: <concept_directive>`, `<Challenge.recipe_directive>` with the schema addition
   `"cookware": [string (1-40 chars)] (1-4 cooking vessels and tools)`, the concept's `totalMinutes`
@@ -954,11 +1064,21 @@ the **current** generation, §2.4; `[]` until the gate clears), `picked_ids` (no
   `NO_OVEN_WORDS` in `food_free_tokens` of any step/tip/note/quantity/cookware; `thirty-minutes` →
   `prepMinutes + cookMinutes ≤ 30`; `six-steps` → `2 ≤ len(steps) ≤ 6`. Stars need no extra recipe
   check (the manifest already forces every used item into a step); "substantial" is prompted, not
-  validated (honest limit, §7). The stored recipe keeps `cookware` when present.
+  validated (honest limit, §7). The stored recipe keeps `cookware` when present. With
+  `forbidden_ids`: a forbidden id in `ingredients[]` is rejected, `concept_manifest` never lists it as
+  a staple, and the same forbidden-id lexical check runs over every `quantity`, `note`, step text,
+  tip and `cookware` entry.
 - **Runner wiring:** `_concepts_job` reads `basket_ids`, requires `len(set(ids)) in (10, 11)` and
-  builds `ConceptTwists(star_ids, wildcard_id, style, challenge)` from the row; `_recipe_job` builds
-  `RecipeTwists(star_ids, style, challenge)`. Model, effort, callers, tool bans, timeouts, pacing and
-  the one-repair rule are unchanged. Validation stays fully deterministic — no second model.
+  builds `ConceptTwists(star_ids, wildcard_id, style, challenge, forbidden_ids)` from the row;
+  `_recipe_job` builds `RecipeTwists(star_ids, style, challenge, forbidden_ids)`.
+- **Generation fence in the runner (§1.10):** `start_concepts(background, anchor_seq, generation)`
+  and `start_recipe(background, anchor_seq, generation, concept_id)` receive the captured generation
+  (recovery takes it from the pending tuples, §5.2). The job aborts at once if the first row read is
+  not that generation; passes `expected_generation` to every `set_*_run` / `finish_*` call on the
+  success, repair, unavailable, failure and crash paths; checks it in `still_waiting`; keys `_running`
+  by `(kind, anchor, generation, concept_id)`; and calls `cancel_run` on any run whose claim
+  (`set_*_run`) returns `False`. Model, effort, callers, tool bans, timeouts, pacing and the one-repair
+  rule are unchanged. Validation stays fully deterministic — no second model.
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -967,6 +1087,7 @@ class ConceptTwists:
     wildcard_id: str | None = None
     style: str | None = None
     challenge: str | None = None
+    forbidden_ids: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -974,6 +1095,7 @@ class RecipeTwists:
     star_ids: frozenset[str] = frozenset()
     style: str | None = None
     challenge: str | None = None
+    forbidden_ids: frozenset[str] = frozenset()
 ```
 
 ### 5.4 Pictures (`cookout_images.py`)
@@ -1014,8 +1136,9 @@ class RecipeTwists:
   only; starters are public; banked recipes and pictures stay tied to their generation; T4 photos are
   links to ordinary non-view-once mini-chat photos and unlink on delete; encore links null on source
   delete; prompts carry only fixed enum text beyond food), `docs/ai/glossary.md` (generation, gate,
-  starter, wildcard/swap states), `docs/ai/testing.md`, `CLAUDE.md` store table (schema v22:
-  `cookout_generations`, the `cookout_recipes` rebuild and new columns), and
+  starter, wildcard/swap states), `docs/ai/testing.md`, `CLAUDE.md` store table (schema v21, the one
+  Cookout schema: `cookout_generations`, `cookout_recipes` keyed by generation, and the twist
+  columns), and
   `decisions/00194-server-chat-cookout-twists/`. Commits carry
   `Release-note: General bug fixes and improvements.` (R14a).
 
@@ -1029,8 +1152,6 @@ class RecipeTwists:
   in the list could slip through.
 - The bank-dictionary food scan still cannot catch a food missing from the bank (core limit).
 - Blind-mode secrecy for stars and votes inherits the core's shared-sign-in name limit (Inv 57).
-- During a blue/green overlap an older process may file a recipe under generation 1 on an
-  already-swapped round (§2.3).
 
 ---
 
@@ -1044,14 +1165,36 @@ class RecipeTwists:
   `shuffle_role_schedule(first_role=...)` for every role; the extended validator simulation.
   **`test_cookout_twists_catalogue.py`**: ids unique, labels ≤ 30 chars, every directive and picture
   phrase food-free, `spin_style` uniform over ids with a seeded RNG.
-- **pytest `test_livechat_cookout_twists.py`** (server parcel): v21→v22 migration from a real v21 DB
-  holding rounds, turns and recipes (recipes copied as generation 1, new PK enforced, indexes present,
-  FKs of the rebuilt table active, re-running the migration a no-op); parametrized `401 locked` across
-  every new route; core-unchanged regression (a twist-free round's views and store calls identical to
-  v21 behaviour); each twist's happy path, every error code, replay idempotency per move kind;
+- **pytest `test_livechat_cookout_twists.py`** (server parcel): the existing **genuine-v20 migration
+  fixture** (`test_livechat_cookout.py`) still passes and now asserts the final v21 shape (every twist
+  column with its default/CHECK, `cookout_recipes` primary key `(anchor_message_seq, generation,
+  concept_id)`, `cookout_generations`, both recipe indexes, all FK actions; re-opening is a no-op); a
+  message deleted through raw SQL (as the overlapping v20 process would) cascades/unlinks every Cookout
+  row; parametrized `401 locked` across every new route; core-unchanged regression (a twist-free
+  round's views and store calls identical to the core behaviour); each twist's happy path, every error
+  code, replay idempotency per move kind;
   Blind redaction (partner stars, votes, chaos flags, chaos pairs, `via` tags, history never in a
   non-entitled response, including mutation responses; abandoned blind round reveals nothing new);
   gate ordering (stars then cloche, cloche then stars, stars set during picking → no gate);
+  **stars lock = reveal**, in Open and Blind: both stars chosen before Turn 10 with the cloche on, and
+  the second star chosen after Turn 10 with the cloche still unanswered — the stars reveal together at
+  that transition, every different later star is `409 bad_state` (same-id replay `200`), and answering
+  the cloche starts exactly one concepts job carrying the locked ids;
+  **generation identity**: a generation-1 vote, Bank and each retry held until generation 2 is ready
+  is `409 bad_state` (also with `generation` omitted) and changes no generation-2 vote, recipe, event
+  or job count; a completed generation-1 Bank replayed after generation 2 is ready (same `moveId`,
+  including one whose failed row the swap dropped) is a `200` no-job replay; a genuinely new
+  generation-2 Bank succeeds; generation-free requests still work on a generation-1 round;
+  **job fencing** with two workers: a generation-1 concepts spawn and a recipe spawn delayed across
+  completion, swap and generation-2 startup — neither its success, repair, unavailable nor failure
+  callback may claim, finish or fail the generation-2 job, and the losing spawn is cancelled;
+  **swap freezes**: `propose → recipe retry` leaves no pending row and starts no job; a
+  two-connection retry/choose race never leaves a pending recipe in an archived generation;
+  **archived votes**: a swap after only one vote — the partner's and a non-player's responses (and the
+  vitest DOM) contain no voted concept id; a both-voted archive reveals its result;
+  **photos**: a message with two ready photos and one with failed-first/ready-second — the chooser
+  entry's `attachmentId` equals the stored `photo_attachment_id`; a message with no ready photo is
+  `422`;
   starters (one and two, with fridge + encore; Turn-2 wait; Turn-3 drawn at once; role schedule
   head; draw exclusions; encore validation inside the txn after a `clientId` replay; deleted source);
   races with two store connections: veto/pick (swept → `409 bad_state`, stayed → success),
@@ -1066,7 +1209,13 @@ class RecipeTwists:
   prompts byte-identical to today; each twist's prompt lines appear only when set and carry only
   catalogue text and ids; `parse_concepts` with 11 items, stars (missing from a concept, unnamed,
   named by alias/family), wildcard in < 2 concepts, each challenge rule pass/fail, `challengeNote`
-  smuggling a food, swapped-out item mentioned anywhere (including `omitted[].reason`);
+  smuggling a food, swapped-out item mentioned anywhere (including `omitted[].reason`); for **each**
+  of `butter`, `plain-flour`, `cooking-oil`, `granulated-sugar`, `milk` swapped out: absent from the
+  prompt's staples, rejected when declared in `stapleIds`, listed in `pickedIngredientIds`/`omitted`,
+  named by name, alias or bare short form in any concept field or `omitted[].reason`, or used in any
+  recipe `ingredients[]`/quantity/note/step/tip/cookware — while generation-1 recipes stay readable;
+  runner: `expected_generation` passed on every claim/finish path, `_running` keyed by generation,
+  losing claims cancelled;
   `parse_recipe` cookware rules, `one-pan` second vessel, `no-oven` words versus "baking powder",
   thirty-minute total, six steps; repair feedback names the rule; the fake cmd answers valid output
   for every twist combination; image prompt per style; ordinal offset; fencing across a swap.
@@ -1077,7 +1226,8 @@ class RecipeTwists:
   starters pills, stars toggles and gate banner, cloche card, vote buttons and reveal, swap flow for
   proposer and partner, Earlier dishes section); Blind DOM leak tests (no partner star, vote or chaos
   pair string anywhere in the DOM before reveal); cooked sheet (hearts, own-only editing, unmark
-  confirm, photo chooser); recipe book (cooked badge, ratings, real photo, Remix/Leftovers buttons);
+  confirm, photo chooser — one entry per message); generation sent on vote/Bank/retries; Bank and
+recipe Try again disabled while a swap is proposed; star toggles disabled once revealed; recipe book (cooked badge, ratings, real photo, Remix/Leftovers buttons);
   card status lines; CSS selectors present in the rebuilt bundle.
 - **e2e `e2e/tests/server-cookout-twists.spec.ts`**: two contexts. Open game with spin style,
   `one-pan`, stars, cloche and a fridge seed found by search; Player 1 uses chaos, Player 2 vetoes one
@@ -1112,6 +1262,12 @@ class RecipeTwists:
   Revealed stars show ★ on both pills.
 - **Cloche gate:** a card "🛎️ Lift the cloche? One surprise 11th ingredient" with **Lift it!** and
   **No thanks — start cooking**; lifting plays a lid-lift reveal of the returned ingredient.
+- **Generation identity in the client:** every vote, Bank and concepts/pictures/recipe retry sends
+  the `generation` of the view the button was rendered from (never re-read at send time), so a
+  delayed tap after a swap is refused instead of landing on a different dish. Bank and recipe
+  **Try again** are disabled while a swap is proposed; star toggles are disabled once
+  `stars.revealed`; the cooked-photo chooser shows one entry per message (its `attachmentId` is what
+  gets linked).
 - **Chef stage:** each concept card gains **🍽️ I'd eat this tonight** (own vote, changeable until
   revealed), a vote banner, and on reveal voter badges plus **🎯 Tonight's dinner!** on a match; the
   `challengeNote` and `totalMinutes` show as a small rule badge. A **🔄 Rescue swap (once)** button
@@ -1141,13 +1297,16 @@ Exclusive file ownership (one owner per file; nobody edits another parcel's file
 | Parcel | Builder | Exclusive files | Depends on |
 |---|---|---|---|
 | **X1 — Bank, draw engine & twist catalogue** | Sonnet 5.5 | `wixy_server/livechat/cookout_bank.py`, `wixy_server/livechat/cookout_twists.py` (new), `tooling/cookout/validate_bank.py`, `wixy_server/tests/test_cookout_bank.py`, `wixy_server/tests/test_cookout_twists_catalogue.py` (new) | Nothing (A.1 and §3.3 frozen verbatim) |
-| **X2 — Store v22, game, routes** | Sonnet 5.5 | `wixy_server/livechat/store.py`, `wixy_server/livechat/models.py`, `wixy_server/livechat/cookout_game.py`, `wixy_server/routes_livechat_cookout.py`, `wixy_server/app.py`, `wixy_server/tests/test_livechat_cookout.py`, `wixy_server/tests/test_routes_livechat_cookout.py`, `wixy_server/tests/test_livechat_cookout_twists.py` (new) | A.1 bank and §3.3 catalogue (fakes until X1 lands) |
-| **X3 — AI & pictures** | Sonnet 5.5 | `wixy_server/livechat/cookout_ai.py`, `wixy_server/livechat/cookout_images.py`, `wixy_server/tests/fake_cmd.py`, `wixy_server/tests/test_livechat_cookout_ai.py`, `wixy_server/tests/test_livechat_cookout_images.py` | A.1 (`mentions`, `food_free_tokens`), §3.3, A.2 read keys |
+| **X2 — Store (undeployed v21 edited in place), game, routes** | Sonnet 5.5 | `wixy_server/livechat/store.py`, `wixy_server/livechat/models.py`, `wixy_server/livechat/cookout_game.py`, `wixy_server/routes_livechat_cookout.py`, `wixy_server/app.py`, `wixy_server/tests/test_livechat_cookout.py`, `wixy_server/tests/test_routes_livechat_cookout.py`, `wixy_server/tests/test_livechat_cookout_twists.py` (new) | A.1 bank and §3.3 catalogue (fakes until X1 lands) |
+| **X3 — AI & pictures** | Sonnet 5.5 | `wixy_server/livechat/cookout_ai.py`, `wixy_server/livechat/cookout_images.py`, `wixy_server/tests/fake_cmd.py`, `wixy_server/tests/test_livechat_cookout_ai.py`, `wixy_server/tests/test_livechat_cookout_images.py` | A.1 (`mentions`, `food_free_tokens`), §3.3, A.2 read keys, the changed claim/completion signatures and runner protocol (A.2) — X3 is **not** interface-unchanged |
 | **X4 — Admin UI** | **Opus 5.5** | `admin-ui/src/server/cookout/*` (incl. new `cookedSheet.ts`, `fridgeSearch.ts`), `admin-ui/src/server/{thread.ts, chat.css, api/messages.ts, itemChat.ts}`, `admin-ui/tests/cookout/*`, rebuilt `wixy_server/static/admin/*` | A.3 wire (builds against JSON fixtures) |
 | **X5 — Docs & e2e** | Sonnet 5.5 | `e2e/tests/server-cookout-twists.spec.ts`, `docs/ai/{livechat,contracts,invariants,glossary,testing}.md`, `CLAUDE.md` store table, `decisions/00194-server-chat-cookout-twists/` | Drafts in parallel; runs e2e after X1–X4 integrate |
 
 Order: X1 first (small, unblocks the others' real-bank tests); X2, X3 and X4 in parallel against the
-frozen interfaces; X5 last for e2e. The runner protocol (`CookoutRunner`) is unchanged.
+frozen interfaces; X5 last for e2e. X2 edits the existing undeployed `_SCHEMA_V21_COOKOUT` (no v22,
+no new migration step; the genuine-v20 fixture test must still pass). The runner protocol
+(`CookoutRunner`) and the AI-facing store methods **change** (generation fence, §1.10, A.2); X2 and
+X3 build against the frozen signatures below.
 
 ### A.1 Frozen Python interface — X1 (`cookout_bank.py`, additions)
 
@@ -1310,6 +1469,7 @@ def vote_cookout(
     anchor_seq: int,
     sender: str,
     email: str | None,
+    generation: int,
     concept_id: str,
     now: float | None = None,
 ) -> Moved: ...
@@ -1376,13 +1536,112 @@ def cookout_round_photos(self, *, anchor_seq: int) -> list[tuple[MessageRow, Att
 ```
 
 New store exceptions: `CookoutTokenUsedError` → `409 token_used`, `CookoutRecipePendingError` →
-`409 recipe_pending`. Existing method signatures (core Appendix A.2) are unchanged; their behaviour
-changes only as stated (current-generation scoping, gate-aware Turn 10, stale-vs-invalid pick,
-generalised Player-2 wait, ordinal offset).
+`409 recipe_pending`.
+
+**Changed core signatures (replace core Appendix A.2; generation identity, §1.10).** Route-driven
+methods take the generation the caller saw (`None` = a core-era request, accepted only on a
+generation-1 round); job-driven methods take the job's captured `expected_generation` and add
+`AND generation = ?` to their compare-and-set:
+
+```python
+# route-driven (X2 routes -> X2 store)
+def bank_cookout_concept(
+    self,
+    *,
+    anchor_seq: int,
+    sender: str,
+    email: str | None,
+    concept_id: str,
+    move_id: str,
+    generation: int | None,
+    runner_available: bool,
+    now: float | None = None,
+) -> Moved: ...  # checks bank_move_ids first; refuses while swap_state == 'proposed'
+def retry_cookout_concepts(
+    self, anchor_seq: int, *, generation: int | None, now: float | None = None
+) -> bool: ...
+def retry_cookout_pictures(
+    self, anchor_seq: int, *, generation: int | None, now: float | None = None
+) -> bool: ...
+def retry_cookout_recipe(
+    self,
+    anchor_seq: int,
+    concept_id: str,
+    *,
+    generation: int | None,
+    now: float | None = None,
+) -> bool: ...  # raises CookoutBadStateError while swap_state == 'proposed'
+
+
+# job-driven (X3 runner -> X2 store)
+def set_cookout_concepts_run(
+    self,
+    anchor_seq: int,
+    run_id: str,
+    *,
+    expected_run_id: str | None = None,
+    expected_generation: int,
+) -> bool: ...
+def finish_cookout_concepts(
+    self,
+    anchor_seq: int,
+    run_id: str | None,
+    state: Literal["ready", "failed", "unavailable"],
+    *,
+    expected_generation: int,
+    concepts_json: str | None = None,
+    error: str | None = None,
+    pictures_pending: bool = False,
+) -> bool: ...
+def cookout_pending_concepts(self) -> list[tuple[int, int, str | None]]: ...
+def set_cookout_recipe_run(
+    self,
+    anchor_seq: int,
+    concept_id: str,
+    run_id: str,
+    *,
+    expected_run_id: str | None = None,
+    expected_generation: int,
+) -> bool: ...
+def finish_cookout_recipe(
+    self,
+    anchor_seq: int,
+    concept_id: str,
+    run_id: str | None,
+    state: Literal["banked", "failed", "unavailable"],
+    *,
+    expected_generation: int,
+    recipe_json: str | None = None,
+    error: str | None = None,
+) -> bool: ...
+def cookout_pending_recipes(self) -> list[tuple[int, int, str, str | None]]: ...
+
+
+# runner protocol (X3 implements, X2 routes call)
+class CookoutRunner(Protocol):
+    @property
+    def available(self) -> bool: ...
+    @property
+    def images_available(self) -> bool: ...
+    def start_concepts(
+        self, background: ContainedTaskGroup, anchor_seq: int, generation: int
+    ) -> None: ...
+    def start_pictures(self, background: ContainedTaskGroup, anchor_seq: int) -> None: ...
+    def start_recipe(
+        self, background: ContainedTaskGroup, anchor_seq: int, generation: int, concept_id: str
+    ) -> None: ...
+    async def resume(self, background: ContainedTaskGroup) -> None: ...
+    def supervise(self, background: ContainedTaskGroup) -> None: ...
+```
+
+The picture methods keep their signatures (their `images_generation` fence already covers them).
+Every other core method keeps its signature; behaviour changes only as stated (gate-aware Turn 10,
+stale-vs-invalid pick, generalised Player-2 wait, ordinal offset, explicit-generation recipe SQL).
+`NullCookoutRunner` and the test fakes adopt the new protocol.
 
 **X2 ↔ X3 read contract:** `get_cookout_round()` adds `basket_ids: list[str]`, `picked_ids` (alias),
-`star_ids: list[str]`, `wildcard_id: str | None`, `style: str | None`, `challenge: str | None`,
-`generation: int` (§5.2); `recipes` is current-generation only.
+`star_ids: list[str]`, `wildcard_id: str | None`, `forbidden_ids: list[str]`, `style: str | None`,
+`challenge: str | None`, `generation: int` (§5.2); `recipes` is current-generation only.
 
 ### A.3 Frozen wire — X2 ↔ X4
 
@@ -1405,6 +1664,11 @@ interface CreateCookoutInput { clientId; deviceId; sender; blind?; style?: Style
                                           kind: "leftovers" | "remix"; seedIds: readonly string[] } | null }
 interface TwistMoveInput extends MoveInput { readonly optionIds: readonly [string, string] }   // lucky, chaos
 interface VetoInput extends MoveInput { readonly ingredientId: string }
+interface VoteInput { readonly sender: string; readonly generation: number; readonly conceptId: ConceptId }
+// bankCookoutConcept / retryCookoutConcepts / retryCookoutPictures / retryCookoutRecipe inputs gain
+// `readonly generation: number` (always sent from the view's generation)
+interface RoundPhoto { readonly messageSeq: number; readonly attachmentId: string; readonly sender: string;
+                       readonly createdAt: number; readonly picture: Picture }
 ```
 
 New `api.ts` calls: `getCookoutOptions`, `searchIngredients(q)`, `luckyCookout`, `chaosCookout`,
